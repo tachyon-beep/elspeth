@@ -330,17 +330,17 @@ allow_hits:
   safety: Crashes on type mismatch - no silent fallback
   expires: '2026-03-13'
 # ARCH-15: select merge trace-back in get_effective_producer_schema
-- key: core/dag/graph.py:R1:ExecutionGraph:get_effective_producer_schema:fp=325a69d2950c4941
+- key: core/dag/graph.py:R1:ExecutionGraph:get_effective_producer_schema:fp=5c55d56e9f1566f6
   owner: ARCH-15
   reason: Optional select_branch config lookup — not all coalesce nodes have select_branch
   safety: Falls through to return None if missing — conservative (skips type validation)
   expires: '2026-05-13'
-- key: core/dag/graph.py:R1:ExecutionGraph:get_effective_producer_schema:fp=d8b32ff273cc26f0
+- key: core/dag/graph.py:R1:ExecutionGraph:get_effective_producer_schema:fp=54611abcd9a72839
   owner: ARCH-15
   reason: Optional select_branch config lookup for select-merge schema trace-back
   safety: Falls through to return None if missing — conservative (skips type validation)
   expires: '2026-05-13'
-- key: core/dag/graph.py:R1:ExecutionGraph:get_effective_producer_schema:fp=c694d1a0eefa512f
+- key: core/dag/graph.py:R1:ExecutionGraph:get_effective_producer_schema:fp=7eab2f6f6ee63862
   owner: ARCH-15
   reason: Edge mode/label lookup to identify identity branch's COPY edge
   safety: Falls through to transform-branch trace if no match — no silent fallback
@@ -388,22 +388,22 @@ allow_hits:
   reason: Optional select_branch config access during coalesce select-merge population
   safety: Crashes with GraphValidationError if missing — explicit failure
   expires: '2026-05-13'
-- key: core/dag/graph.py:R1:ExecutionGraph:get_schema_config_from_node:fp=1b03f0b2e721c007
+- key: core/dag/graph.py:R1:ExecutionGraph:get_schema_config_from_node:fp=3c129a515e7d5f73
   owner: architecture
   reason: Optional schema access for mixed node types (source/sink/gate/coalesce)
   safety: Crashes on malformed schema payloads; None is an intentional non-schema state
   expires: '2026-03-10'
-- key: core/dag/graph.py:R5:ExecutionGraph:get_schema_config_from_node:fp=3786462ebea162fb
+- key: core/dag/graph.py:R5:ExecutionGraph:get_schema_config_from_node:fp=055b9d6159572b46
   owner: architecture
   reason: Runtime shape check before coercing schema dict to SchemaConfig
   safety: Non-dict payloads are rejected and converted to explicit validation failures
   expires: '2026-03-10'
-- key: core/dag/graph.py:R1:ExecutionGraph:get_required_fields:fp=278c202848087fbf
+- key: core/dag/graph.py:R1:ExecutionGraph:get_required_fields:fp=0494de4da2db8a87
   owner: architecture
   reason: Optional required_input_fields key supports transforms with implicit/no required field contract
   safety: Missing key yields empty set; downstream schema checks still enforce compatibility
   expires: '2026-03-10'
-- key: core/dag/graph.py:R5:ExecutionGraph:get_required_fields:fp=b55e79530607dc41
+- key: core/dag/graph.py:R5:ExecutionGraph:get_required_fields:fp=7fa4054cb8d4b234
   owner: architecture
   reason: Options payload shape check at config boundary before extracting nested required_input_fields
   safety: Non-dict options are treated as no declared requirements and never silently coerced

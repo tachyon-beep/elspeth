@@ -31,6 +31,7 @@ from elspeth.contracts.types import (
 from elspeth.core.canonical import canonical_json
 from elspeth.core.dag.models import (
     _NODE_ID_MAX_LENGTH,
+    BranchInfo,
     GraphValidationError,
     _GateEntry,
     _suggest_similar,
@@ -354,7 +355,7 @@ def build_execution_graph(
             )
 
         graph.set_coalesce_id_map(coalesce_ids)
-        graph.set_branch_to_coalesce(branch_to_coalesce)
+        # branch_to_coalesce is combined with branch_gate_map into BranchInfo below
     else:
         branch_to_coalesce = {}
 
@@ -764,7 +765,7 @@ def build_execution_graph(
             raise GraphValidationError("Pipeline contains a cycle") from None
     pipeline_nodes = [node_id for node_id in topo_order if node_id in processing_node_ids]
 
-    branch_gate_map: dict[BranchName, NodeID] = {}
+    branch_info: dict[BranchName, BranchInfo] = {}
     if coalesce_settings:
         for gate_entry in gate_entries:
             if gate_entry.fork_to is None:
@@ -772,8 +773,11 @@ def build_execution_graph(
             for branch_name in gate_entry.fork_to:
                 branch_key = BranchName(branch_name)
                 if branch_key in branch_to_coalesce:
-                    branch_gate_map[branch_key] = gate_entry.node_id
-    graph.set_branch_gate_map(branch_gate_map)
+                    branch_info[branch_key] = BranchInfo(
+                        coalesce_name=branch_to_coalesce[branch_key],
+                        gate_node_id=gate_entry.node_id,
+                    )
+    graph.set_branch_info(branch_info)
 
     # ===== POPULATE COALESCE SCHEMA CONFIG =====
     # Coalesce nodes are structural pass-throughs; record the upstream schema

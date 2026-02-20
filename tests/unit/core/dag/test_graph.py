@@ -15,8 +15,9 @@ from __future__ import annotations
 import pytest
 
 from elspeth.contracts.enums import NodeType, RoutingMode
+from elspeth.contracts.types import BranchName, CoalesceName, NodeID
 from elspeth.core.dag.graph import ExecutionGraph
-from elspeth.core.dag.models import GraphValidationError
+from elspeth.core.dag.models import BranchInfo, GraphValidationError
 
 
 class TestSelectMergeCoalesceRaisesOnBrokenBranch:
@@ -66,9 +67,16 @@ class TestSelectMergeCoalesceRaisesOnBrokenBranch:
         graph.add_edge("gate", "coalesce", label="branch_a", mode=RoutingMode.MOVE)
         graph.add_edge("coalesce", "sink", label="on_success")
 
-        # Set the branch_gate_map to point to a nonexistent gate for branch_a
+        # Set the branch_info to point to a nonexistent gate for branch_a
         # This simulates a graph construction bug
-        graph.set_branch_gate_map({"branch_a": "nonexistent_gate"})
+        graph.set_branch_info(
+            {
+                BranchName("branch_a"): BranchInfo(
+                    coalesce_name=CoalesceName("coalesce"),
+                    gate_node_id=NodeID("nonexistent_gate"),
+                ),
+            }
+        )
 
         # get_effective_producer_schema for coalesce with select-merge
         # should raise GraphValidationError, NOT return None
@@ -103,7 +111,14 @@ class TestSelectMergeCoalesceRaisesOnBrokenBranch:
         graph.add_edge("gate", "coalesce", label="branch_a", mode=RoutingMode.MOVE)
         graph.add_edge("coalesce", "sink", label="on_success")
 
-        graph.set_branch_gate_map({"branch_a": "gate"})
+        graph.set_branch_info(
+            {
+                BranchName("branch_a"): BranchInfo(
+                    coalesce_name=CoalesceName("coalesce"),
+                    gate_node_id=NodeID("gate"),
+                ),
+            }
+        )
 
         # Identity branch (COPY): should trace through to gate's schema
         # This should NOT raise

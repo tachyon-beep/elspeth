@@ -31,6 +31,7 @@ from elspeth.contracts.types import (
     SinkName,
 )
 from elspeth.core.dag.models import (
+    BranchInfo,
     GraphValidationError,
     GraphValidationWarning,
     NodeConfig,
@@ -65,10 +66,9 @@ class ExecutionGraph:
         self._config_gate_id_map: dict[GateName, NodeID] = {}  # gate_name -> node_id
         self._aggregation_id_map: dict[AggregationName, NodeID] = {}  # agg_name -> node_id
         self._coalesce_id_map: dict[CoalesceName, NodeID] = {}  # coalesce_name -> node_id
-        self._branch_to_coalesce: dict[BranchName, CoalesceName] = {}  # branch_name -> coalesce_name
+        self._branch_info: dict[BranchName, BranchInfo] = {}  # branch_name -> coalesce + gate info
         self._route_label_map: dict[tuple[NodeID, str], str] = {}  # (gate_node, sink_name) -> route_label
         self._route_resolution_map: dict[tuple[NodeID, str], RouteDestination] = {}
-        self._branch_gate_map: dict[BranchName, NodeID] = {}  # branch_name -> producing gate node ID
         self._pipeline_nodes: list[NodeID] | None = None  # Ordered processing nodes (no source/sinks); None = not yet populated
         self._node_step_map: dict[NodeID, int] = {}  # node_id -> audit step (source=0)
 
@@ -549,17 +549,13 @@ class ExecutionGraph:
         """Set the coalesce_name -> node_id mapping."""
         self._coalesce_id_map = dict(mapping)
 
-    def set_branch_to_coalesce(self, mapping: dict[BranchName, CoalesceName]) -> None:
-        """Set the branch_name -> coalesce_name mapping."""
-        self._branch_to_coalesce = dict(mapping)
+    def set_branch_info(self, mapping: dict[BranchName, BranchInfo]) -> None:
+        """Set the branch_name -> BranchInfo mapping (coalesce + gate)."""
+        self._branch_info = dict(mapping)
 
     def set_route_label_map(self, mapping: dict[tuple[NodeID, str], str]) -> None:
         """Set the (gate_node, sink_name) -> route_label mapping."""
         self._route_label_map = dict(mapping)
-
-    def set_branch_gate_map(self, mapping: dict[BranchName, NodeID]) -> None:
-        """Set the branch_name -> producing gate node ID mapping."""
-        self._branch_gate_map = dict(mapping)
 
     def set_pipeline_nodes(self, nodes: list[NodeID]) -> None:
         """Set the ordered processing node sequence."""
@@ -627,7 +623,7 @@ class ExecutionGraph:
             Dict mapping fork branch names to their coalesce destination.
             Branches not in this map route to the output sink.
         """
-        return dict(self._branch_to_coalesce)
+        return {name: info.coalesce_name for name, info in self._branch_info.items()}
 
     def get_branch_first_nodes(self) -> dict[str, NodeID]:
         """Get mapping of branch names to their first processing node.
@@ -647,8 +643,8 @@ class ExecutionGraph:
         """
         result: dict[str, NodeID] = {}
 
-        for branch_name, coalesce_name in self._branch_to_coalesce.items():
-            coalesce_nid = self._coalesce_id_map[coalesce_name]
+        for branch_name, branch_info in self._branch_info.items():
+            coalesce_nid = self._coalesce_id_map[branch_info.coalesce_name]
 
             # Check if this is an identity branch (direct COPY edge from gate to coalesce).
             # Identity branches have a COPY edge labelled with the branch name pointing
@@ -700,7 +696,7 @@ class ExecutionGraph:
             GraphValidationError: If the branch chain cannot be traced
         """
         # Resolve the fork gate that originates this specific branch.
-        fork_gate_nid = self._branch_gate_map[BranchName(branch_name)]
+        fork_gate_nid = self._branch_info[BranchName(branch_name)].gate_node_id
 
         visited: set[NodeID] = set()
         candidates: list[NodeID] = []
@@ -777,7 +773,7 @@ class ExecutionGraph:
             Dict mapping branch name to the node ID of its producing fork gate.
             Empty dict if no coalesce configured.
         """
-        return dict(self._branch_gate_map)  # Return copy to prevent mutation
+        return {name: info.gate_node_id for name, info in self._branch_info.items()}
 
     def get_terminal_sink_map(self) -> dict[NodeID, SinkName]:
         """Get mapping of terminal node IDs to their on_success sink names.

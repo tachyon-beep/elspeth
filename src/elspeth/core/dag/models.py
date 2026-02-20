@@ -12,7 +12,7 @@ from typing import TYPE_CHECKING, Any
 
 from elspeth.contracts.enums import NodeType
 from elspeth.contracts.schema import SchemaConfig
-from elspeth.contracts.types import NodeID
+from elspeth.contracts.types import CoalesceName, NodeID
 from elspeth.core.landscape.schema import NODE_ID_COLUMN_LENGTH
 
 if TYPE_CHECKING:
@@ -41,6 +41,19 @@ class GraphValidationWarning:
     code: str
     message: str
     node_ids: tuple[str, ...]
+
+
+@dataclass(frozen=True, slots=True)
+class BranchInfo:
+    """Properties of a fork branch that routes to a coalesce node.
+
+    Consolidates two parallel dicts that were both keyed by BranchName:
+    - branch_to_coalesce (BranchName -> CoalesceName)
+    - branch_gate_map (BranchName -> NodeID)
+    """
+
+    coalesce_name: CoalesceName
+    gate_node_id: NodeID
 
 
 _NODE_ID_MAX_LENGTH = NODE_ID_COLUMN_LENGTH
