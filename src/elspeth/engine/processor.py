@@ -24,6 +24,7 @@ from elspeth.contracts.types import BranchName, CoalesceName, NodeID, SinkName, 
 from elspeth.engine.dag_navigator import DAGNavigator, WorkItem
 
 if TYPE_CHECKING:
+    from elspeth.contracts.aggregation_checkpoint import AggregationCheckpointState
     from elspeth.contracts.events import TelemetryEvent
     from elspeth.contracts.payload_store import PayloadStore
     from elspeth.engine.clock import Clock
@@ -181,7 +182,7 @@ class RowProcessor:
         branch_to_sink: dict[BranchName, SinkName] | None = None,
         sink_names: frozenset[str] | None = None,
         coalesce_on_success_map: dict[CoalesceName, str] | None = None,
-        restored_aggregation_state: dict[NodeID, dict[str, Any]] | None = None,
+        restored_aggregation_state: dict[NodeID, AggregationCheckpointState] | None = None,
         payload_store: PayloadStore | None = None,
         clock: Clock | None = None,
         max_workers: int | None = None,
@@ -508,7 +509,7 @@ class RowProcessor:
         """
         return self._aggregation_executor.get_buffer_count(node_id)
 
-    def get_aggregation_checkpoint_state(self) -> dict[str, Any]:
+    def get_aggregation_checkpoint_state(self) -> AggregationCheckpointState:
         """Get checkpoint state for all aggregation buffers.
 
         Returns complete state of all aggregation nodes (buffers + triggers)
@@ -516,8 +517,7 @@ class RowProcessor:
         without losing buffered rows.
 
         Returns:
-            Checkpoint state dict suitable for passing to create_checkpoint().
-            Format matches AggregationExecutor.get_checkpoint_state().
+            Typed checkpoint state suitable for passing to create_checkpoint().
         """
         return self._aggregation_executor.get_checkpoint_state()
 

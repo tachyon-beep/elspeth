@@ -16,6 +16,11 @@ Import patterns:
     from elspeth.core.config import RetrySettings, ElspethSettings
 """
 
+from elspeth.contracts.aggregation_checkpoint import (
+    AggregationCheckpointState,
+    AggregationNodeCheckpoint,
+    AggregationTokenCheckpoint,
+)
 from elspeth.contracts.audit import (
     Artifact,
     Batch,
@@ -337,6 +342,9 @@ __all__ = [  # Grouped by category for readability
     # identity
     "TokenInfo",
     # checkpoint
+    "AggregationCheckpointState",
+    "AggregationNodeCheckpoint",
+    "AggregationTokenCheckpoint",
     "ResumeCheck",
     "ResumePoint",
     # coalesce metadata

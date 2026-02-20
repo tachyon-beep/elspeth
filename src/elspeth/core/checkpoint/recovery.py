@@ -7,6 +7,8 @@ Provides the API for determining if and how a failed run can be resumed:
 The actual resume logic (Orchestrator.resume()) is implemented separately.
 """
 
+from __future__ import annotations
+
 import json
 from typing import TYPE_CHECKING, Any
 
@@ -14,6 +16,7 @@ from sqlalchemy import select
 from sqlalchemy.engine import Row
 
 from elspeth.contracts import PayloadStore, PluginSchema, ResumeCheck, ResumePoint, RowOutcome, RunStatus, SchemaContract
+from elspeth.contracts.aggregation_checkpoint import AggregationCheckpointState
 from elspeth.core.checkpoint.compatibility import CheckpointCompatibilityValidator
 from elspeth.core.checkpoint.manager import CheckpointCorruptionError, CheckpointManager, IncompatibleCheckpointError
 from elspeth.core.checkpoint.serialization import checkpoint_loads
@@ -68,7 +71,7 @@ class RecoveryManager:
         self._db = db
         self._checkpoint_manager = checkpoint_manager
 
-    def can_resume(self, run_id: str, graph: "ExecutionGraph") -> ResumeCheck:
+    def can_resume(self, run_id: str, graph: ExecutionGraph) -> ResumeCheck:
         """Check if a run can be resumed.
 
         A run can be resumed if:
@@ -125,7 +128,7 @@ class RecoveryManager:
 
         return ResumeCheck(can_resume=True)
 
-    def get_resume_point(self, run_id: str, graph: "ExecutionGraph") -> ResumePoint | None:
+    def get_resume_point(self, run_id: str, graph: ExecutionGraph) -> ResumePoint | None:
         """Get the resume point for a failed run.
 
         Returns all information needed to resume processing:
@@ -153,7 +156,8 @@ class RecoveryManager:
         agg_state = None
         if checkpoint.aggregation_state_json:
             # Use checkpoint_loads for type restoration (datetime -> datetime, not string)
-            agg_state = checkpoint_loads(checkpoint.aggregation_state_json)
+            raw = checkpoint_loads(checkpoint.aggregation_state_json)
+            agg_state = AggregationCheckpointState.from_dict(raw)
 
         return ResumePoint(
             checkpoint=checkpoint,
@@ -298,16 +302,12 @@ class RecoveryManager:
         buffered_token_ids: set[str] = set()
         if checkpoint.aggregation_state_json:
             # Use checkpoint_loads for consistency (handles datetime type tags)
-            agg_state = checkpoint_loads(checkpoint.aggregation_state_json)
-            for node_id, node_state in agg_state.items():
-                # Skip metadata keys (e.g., "_version")
-                if node_id.startswith("_"):
-                    continue
-                # Extract token_id from each buffered token
-                # Format: {"node_id": {"tokens": [{"token_id": "...", ...}, ...]}}
-                # Tier 1: checkpoint data is ours — crash on corruption, don't mask with defaults
-                for token in node_state["tokens"]:
-                    buffered_token_ids.add(token["token_id"])
+            raw = checkpoint_loads(checkpoint.aggregation_state_json)
+            agg_state = AggregationCheckpointState.from_dict(raw)
+            # Typed iteration — no startswith("_") hack needed
+            for node_checkpoint in agg_state.nodes.values():
+                for token in node_checkpoint.tokens:
+                    buffered_token_ids.add(token.token_id)
 
         with self._db.engine.connect() as conn:
             # CORRECT SEMANTICS FOR FORK/AGGREGATION/COALESCE RECOVERY:

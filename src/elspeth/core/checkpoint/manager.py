@@ -1,8 +1,10 @@
 """CheckpointManager for creating and loading checkpoints."""
 
+from __future__ import annotations
+
 import uuid
 from datetime import UTC, datetime
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 
 from sqlalchemy import asc, delete, desc, select
 
@@ -13,6 +15,7 @@ from elspeth.core.landscape.database import LandscapeDB
 from elspeth.core.landscape.schema import checkpoints_table
 
 if TYPE_CHECKING:
+    from elspeth.contracts.aggregation_checkpoint import AggregationCheckpointState
     from elspeth.core.dag import ExecutionGraph
 
 
@@ -57,8 +60,8 @@ class CheckpointManager:
         token_id: str,
         node_id: str,
         sequence_number: int,
-        graph: "ExecutionGraph",
-        aggregation_state: dict[str, Any] | None = None,
+        graph: ExecutionGraph,
+        aggregation_state: AggregationCheckpointState | None = None,
     ) -> Checkpoint:
         """Create a checkpoint at current progress point.
 
@@ -94,7 +97,7 @@ class CheckpointManager:
             # - NaN/Infinity rejection per CLAUDE.md audit integrity requirements
             # Note: We don't use canonical_json because it normalizes floats to integers,
             # breaking round-trip for aggregation state
-            agg_json = checkpoint_dumps(aggregation_state) if aggregation_state is not None else None
+            agg_json = checkpoint_dumps(aggregation_state.to_dict()) if aggregation_state is not None else None
 
             # Compute topology hashes INSIDE transaction (Bug #1 fix)
             # This ensures hash matches graph state at exact moment of checkpoint creation

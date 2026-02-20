@@ -62,6 +62,7 @@ from elspeth.contracts import (
     TokenInfo,
     TransformResult,
 )
+from elspeth.contracts.aggregation_checkpoint import AggregationCheckpointState
 from elspeth.contracts.enums import (
     BatchStatus,
     NodeStateStatus,
@@ -2277,7 +2278,8 @@ class TestAggregationCheckpointVersion:
         """Old checkpoint version (2.1) is rejected — prevents silent state corruption."""
         executor, _recorder, _nid = TestAggregationExecutor._make_agg_executor(TestAggregationExecutor())
 
-        old_checkpoint = {"_version": "2.1", "agg_1": {"tokens": []}}
+        # Construct typed DTO with wrong version — restore_from_checkpoint checks value
+        old_checkpoint = AggregationCheckpointState(version="2.1", nodes={})
 
         with pytest.raises(ValueError, match="Incompatible checkpoint version"):
             executor.restore_from_checkpoint(old_checkpoint)
@@ -2287,17 +2289,17 @@ class TestAggregationCheckpointVersion:
         executor, _recorder, _nid = TestAggregationExecutor._make_agg_executor(TestAggregationExecutor())
 
         # Minimal valid v3.0 checkpoint with no buffered tokens
-        checkpoint = {"_version": AGGREGATION_CHECKPOINT_VERSION}
+        checkpoint = AggregationCheckpointState(version=AGGREGATION_CHECKPOINT_VERSION, nodes={})
 
         # Should not raise
         executor.restore_from_checkpoint(checkpoint)
 
     def test_missing_version_rejected(self) -> None:
-        """Checkpoint without _version key is rejected as corrupt."""
-        executor, _recorder, _nid = TestAggregationExecutor._make_agg_executor(TestAggregationExecutor())
-
+        """Checkpoint without _version key is rejected as corrupt by from_dict()."""
+        # Validation now happens in AggregationCheckpointState.from_dict(),
+        # not in restore_from_checkpoint() — the DTO enforces structure.
         with pytest.raises(ValueError, match="Corrupted checkpoint: missing '_version' key"):
-            executor.restore_from_checkpoint({"agg_1": {"tokens": []}})
+            AggregationCheckpointState.from_dict({"agg_1": {"tokens": []}})
 
 
 # =============================================================================

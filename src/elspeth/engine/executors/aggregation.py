@@ -14,6 +14,11 @@ from elspeth.contracts import (
     SchemaContract,
     TokenInfo,
 )
+from elspeth.contracts.aggregation_checkpoint import (
+    AggregationCheckpointState,
+    AggregationNodeCheckpoint,
+    AggregationTokenCheckpoint,
+)
 from elspeth.contracts.enums import (
     BatchStatus,
     NodeStateStatus,
@@ -92,7 +97,7 @@ class AggregationExecutor:
         self._batch_ids: dict[NodeID, str | None] = {}  # node_id -> current batch_id
         self._aggregation_settings: dict[NodeID, AggregationSettings] = aggregation_settings or {}
         self._trigger_evaluators: dict[NodeID, TriggerEvaluator] = {}
-        self._restored_states: dict[NodeID, dict[str, Any]] = {}  # node_id -> state
+        self._restored_states: dict[NodeID, AggregationCheckpointState] = {}  # node_id -> state
 
         # Engine-owned row buffers (node_id -> list of row dicts)
         self._buffers: dict[NodeID, list[dict[str, Any]]] = {}
@@ -596,31 +601,14 @@ class AggregationExecutor:
             )
         return len(self._buffers.get(node_id, []))
 
-    def get_checkpoint_state(self) -> dict[str, Any]:
+    def get_checkpoint_state(self) -> AggregationCheckpointState:
         """Return checkpoint state for persistence.
 
         Stores complete TokenInfo objects (not just IDs) to enable restoration
         without database queries. Validates size to prevent pathological growth.
 
         Returns:
-            dict[str, Any]: Checkpoint state with format:
-                {
-                    "node_id_1": {
-                        "tokens": [
-                            {
-                                "token_id": str,
-                                "row_id": str,
-                                "branch_name": str | None,
-                                "fork_group_id": str | None,
-                                "join_group_id": str | None,
-                                "expand_group_id": str | None,
-                                "row_data": dict[str, Any]
-                            },
-                            ...
-                        ]
-                    },
-                    ...
-                }
+            AggregationCheckpointState with all buffered aggregation data.
 
         Raises:
             RuntimeError: If checkpoint exceeds 10MB size limit
@@ -628,7 +616,7 @@ class AggregationExecutor:
         from elspeth.core.checkpoint.serialization import checkpoint_dumps
 
         # Build checkpoint state from all buffers
-        state: dict[str, Any] = {}
+        nodes: dict[str, AggregationNodeCheckpoint] = {}
         for node_id, tokens in self._buffer_tokens.items():
             if not tokens:  # Only include non-empty buffers
                 continue
@@ -649,8 +637,9 @@ class AggregationExecutor:
                 )
 
             batch_id = self._batch_ids[node_id]
+            assert batch_id is not None  # Validated above: RuntimeError raised if None
 
-            # Store full TokenInfo as dicts (not just IDs)
+            # Store full TokenInfo as typed checkpoints (not just IDs)
             # Include all lineage fields to preserve fork/join/expand metadata
             #
             # PipelineRow Migration (v2.0), hash-width bump (v2.1):
@@ -661,210 +650,125 @@ class AggregationExecutor:
             # Get contract from first token (all tokens in buffer share same contract)
             # Per CLAUDE.md Tier 1: tokens exist, so first token MUST exist
             first_token_contract = tokens[0].row_data.contract
-            state[node_id] = {
-                "tokens": [
-                    {
-                        "token_id": t.token_id,
-                        "row_id": t.row_id,
-                        "branch_name": t.branch_name,
-                        "fork_group_id": t.fork_group_id,
-                        "join_group_id": t.join_group_id,
-                        "expand_group_id": t.expand_group_id,
-                        "row_data": t.row_data.to_dict(),  # Extract dict for JSON serialization
-                        "contract_version": t.row_data.contract.version_hash(),
-                    }
-                    for t in tokens
-                ],
-                "batch_id": batch_id,
-                "elapsed_age_seconds": elapsed_age_seconds,  # Bug #6: Preserve timeout window
-                # P2-2026-02-01: Preserve trigger fire time offsets
-                "count_fire_offset": count_fire_offset,
-                "condition_fire_offset": condition_fire_offset,
-                # Store contract once per node (all buffered tokens share the same contract)
-                "contract": first_token_contract.to_checkpoint_format(),
-            }
+            token_checkpoints = tuple(
+                AggregationTokenCheckpoint(
+                    token_id=t.token_id,
+                    row_id=t.row_id,
+                    branch_name=t.branch_name,
+                    fork_group_id=t.fork_group_id,
+                    join_group_id=t.join_group_id,
+                    expand_group_id=t.expand_group_id,
+                    row_data=t.row_data.to_dict(),
+                    contract_version=t.row_data.contract.version_hash(),
+                )
+                for t in tokens
+            )
 
-        # Checkpoint format version
-        # v1.0: Initial format with elapsed_age_seconds
-        # v1.1: Added count_fire_offset/condition_fire_offset for trigger ordering (P2-2026-02-01)
-        # v2.0: PipelineRow migration - row_data will be PipelineRow with contract
-        # v2.1: Contract version_hash width changed (16 -> 32 hex chars)
-        # v3.0: Phase 2 traversal refactor checkpoint break (no backwards compatibility)
-        state["_version"] = AGGREGATION_CHECKPOINT_VERSION
+            nodes[node_id] = AggregationNodeCheckpoint(
+                tokens=token_checkpoints,
+                batch_id=batch_id,
+                elapsed_age_seconds=elapsed_age_seconds,
+                count_fire_offset=count_fire_offset,
+                condition_fire_offset=condition_fire_offset,
+                contract=first_token_contract.to_checkpoint_format(),
+            )
+
+        checkpoint = AggregationCheckpointState(
+            version=AGGREGATION_CHECKPOINT_VERSION,
+            nodes=nodes,
+        )
 
         # Size validation (on serialized checkpoint)
         # Use checkpoint_dumps to handle datetime (P1-2026-02-05 fix)
-        serialized = checkpoint_dumps(state)
+        serialized = checkpoint_dumps(checkpoint.to_dict())
         size_mb = len(serialized) / 1_000_000
         total_rows = sum(len(b) for b in self._buffer_tokens.values())
 
         if size_mb > 1:
-            logger.warning(f"Large checkpoint: {size_mb:.1f}MB for {total_rows} buffered rows across {len(state)} nodes")
+            logger.warning(f"Large checkpoint: {size_mb:.1f}MB for {total_rows} buffered rows across {len(nodes)} nodes")
 
         if size_mb > 10:
             raise RuntimeError(
                 f"Checkpoint size {size_mb:.1f}MB exceeds 10MB limit. "
-                f"Buffer contains {total_rows} total rows across {len(state)} nodes. "
+                f"Buffer contains {total_rows} total rows across {len(nodes)} nodes. "
                 f"Solutions: (1) Reduce aggregation count trigger to <5000 rows, "
                 f"(2) Reduce row_data payload size, or (3) Implement checkpoint retention "
                 f"policy"
             )
 
-        return state
+        return checkpoint
 
-    def restore_from_checkpoint(self, state: dict[str, Any]) -> None:
+    def restore_from_checkpoint(self, state: AggregationCheckpointState) -> None:
         """Restore executor state from checkpoint.
 
-        Reconstructs full TokenInfo objects from checkpoint data, eliminating
-        database queries during restoration. Expects format from get_checkpoint_state().
+        Reconstructs full TokenInfo objects from typed checkpoint data,
+        eliminating database queries during restoration.
 
         Args:
-            state: Checkpoint state with format:
-                {
-                    "_version": "3.0",
-                    "node_id": {
-                        "tokens": [{"token_id", "row_id", "branch_name", "row_data", ...}],
-                        "batch_id": str,
-                        "elapsed_age_seconds": float,
-                        "count_fire_offset": float | None,
-                        "condition_fire_offset": float | None
-                    }
-                }
+            state: Typed checkpoint state from ``AggregationCheckpointState.from_dict()``.
 
         Raises:
-            ValueError: If checkpoint format is invalid (per CLAUDE.md - our data, full trust)
+            ValueError: If checkpoint version is incompatible or data is invalid
+                (per CLAUDE.md — our data, full trust)
         """
         # Validate checkpoint version (Bug #12 fix)
-        # v1.1: Pre-PipelineRow migration format
-        # v2.0: PipelineRow migration - row_data will be PipelineRow with contract
-        # v2.1: Contract version_hash width changed (16 -> 32 hex chars)
-        # v3.0: Phase 2 traversal refactor checkpoint break (no backwards compatibility)
         checkpoint_version = AGGREGATION_CHECKPOINT_VERSION
 
-        if "_version" not in state:
-            raise ValueError(
-                "Corrupted checkpoint: missing '_version' key. "
-                f"Found keys: {sorted(state.keys())}. "
-                "This checkpoint is corrupt — use an older checkpoint or start fresh."
-            )
-
-        version = state["_version"]
-        if version != checkpoint_version:
+        if state.version != checkpoint_version:
             # Log checkpoint rejection for observability
             slog.warning(
                 "checkpoint_version_rejected",
-                found_version=version,
+                found_version=state.version,
                 expected_version=checkpoint_version,
                 reason="incompatible_checkpoint_version",
             )
             raise ValueError(
-                f"Incompatible checkpoint version: {version!r}. "
+                f"Incompatible checkpoint version: {state.version!r}. "
                 f"Expected: {checkpoint_version!r}. "
                 f"Cannot resume from incompatible checkpoint format. "
                 f"This checkpoint may be from a different ELSPETH version."
             )
 
-        for node_id_str, node_state in state.items():
-            # Skip version metadata field
-            if node_id_str == "_version":
-                continue
-            # Convert to typed NodeID for dictionary access
+        for node_id_str, node_checkpoint in state.nodes.items():
             node_id = NodeID(node_id_str)
-            # Validate checkpoint format (OUR DATA - crash on mismatch, don't hide with .get())
-            if "tokens" not in node_state:
-                raise ValueError(
-                    f"Invalid checkpoint format for node {node_id}: missing 'tokens' key. "
-                    f"Found keys: {list(node_state.keys())}. "
-                    f"Expected format: {{'tokens': [...], 'batch_id': str|None}}. "
-                    f"This checkpoint may be from an incompatible ELSPETH version."
-                )
-
-            tokens_data = node_state["tokens"]
-
-            # Validate tokens is a list
-            if not isinstance(tokens_data, list):
-                raise ValueError(f"Invalid checkpoint format for node {node_id}: 'tokens' must be a list, got {type(tokens_data).__name__}")
 
             # Restore contract from checkpoint (stored once per node)
             # Per CLAUDE.md Tier 1: contract MUST exist if tokens exist
-            if "contract" not in node_state:
-                raise ValueError(
-                    f"Invalid checkpoint format for node {node_id}: missing 'contract' key. "
-                    f"Checkpoint format {checkpoint_version} requires contract for PipelineRow restoration."
-                )
-            restored_contract = SchemaContract.from_checkpoint(node_state["contract"])
+            restored_contract = SchemaContract.from_checkpoint(node_checkpoint.contract)
 
-            # Reconstruct TokenInfo objects directly from checkpoint
+            # Reconstruct TokenInfo objects directly from typed checkpoint
             reconstructed_tokens = []
-            for t in tokens_data:
-                # Validate required fields (crash on missing - per CLAUDE.md)
-                # All these fields are required in current checkpoint format (values can be None)
-                required_fields = {
-                    "token_id",
-                    "row_id",
-                    "row_data",
-                    "branch_name",
-                    "fork_group_id",
-                    "join_group_id",
-                    "expand_group_id",
-                    "contract_version",  # v2.0: required for contract reference
-                }
-                missing = required_fields - set(t.keys())
-                if missing:
-                    raise ValueError(
-                        f"Checkpoint token missing required fields: {missing}. "
-                        f"Required in checkpoint format {checkpoint_version}: {required_fields}. Found: {set(t.keys())}"
-                    )
-
+            for t in node_checkpoint.tokens:
                 # Validate contract_version matches restored contract
                 # Per CLAUDE.md Tier 1: integrity check on our data
-                if t["contract_version"] != restored_contract.version_hash():
+                if t.contract_version != restored_contract.version_hash():
                     raise ValueError(
-                        f"Contract version mismatch for token {t['token_id']}: "
-                        f"expected {restored_contract.version_hash()}, got {t['contract_version']}. "
+                        f"Contract version mismatch for token {t.token_id}: "
+                        f"expected {restored_contract.version_hash()}, got {t.contract_version}. "
                         f"Checkpoint may be corrupted."
                     )
 
                 # Reconstruct PipelineRow from checkpoint data
-                row_data = PipelineRow(t["row_data"], restored_contract)
+                row_data = PipelineRow(t.row_data, restored_contract)
 
-                # Reconstruct TokenInfo from checkpoint data
-                # NOTE: These fields CAN be None (valid state for unforked tokens), but they
-                # are ALWAYS present in current checkpoint format - use direct access to detect
-                # corruption/missing fields. The difference between "field is None" and
-                # "field is missing" matters: the former is valid, the latter is corruption.
                 reconstructed_tokens.append(
                     TokenInfo(
-                        row_id=t["row_id"],
-                        token_id=t["token_id"],
-                        row_data=row_data,  # PipelineRow, not dict
-                        branch_name=t["branch_name"],
-                        fork_group_id=t["fork_group_id"],
-                        join_group_id=t["join_group_id"],
-                        expand_group_id=t["expand_group_id"],
+                        row_id=t.row_id,
+                        token_id=t.token_id,
+                        row_data=row_data,
+                        branch_name=t.branch_name,
+                        fork_group_id=t.fork_group_id,
+                        join_group_id=t.join_group_id,
+                        expand_group_id=t.expand_group_id,
                     )
                 )
 
             # Restore buffer state
-            # _buffer_tokens stores TokenInfo with PipelineRow
-            # _buffers stores dicts (JSON-serializable for future checkpoints)
             self._buffer_tokens[node_id] = reconstructed_tokens
             self._buffers[node_id] = [t.row_data.to_dict() for t in reconstructed_tokens]
 
-            if "batch_id" not in node_state:
-                raise ValueError(
-                    f"Invalid checkpoint format for node {node_id}: missing 'batch_id' key. "
-                    f"Found keys: {list(node_state.keys())}. "
-                    "Checkpoint entries with tokens must include batch_id."
-                )
-            batch_id = node_state["batch_id"]
-            if batch_id is None:
-                raise ValueError(
-                    f"Invalid checkpoint format for node {node_id}: 'batch_id' is None. "
-                    "Checkpoint entries with tokens must include a batch_id."
-                )
-            self._batch_ids[node_id] = batch_id
-            self._member_counts[batch_id] = len(reconstructed_tokens)
+            self._batch_ids[node_id] = node_checkpoint.batch_id
+            self._member_counts[node_checkpoint.batch_id] = len(reconstructed_tokens)
 
             # Restore trigger evaluator state (Bug #6 + P2-2026-02-01)
             # If tokens exist for a node, a trigger evaluator MUST exist (created in __init__)
@@ -872,18 +776,11 @@ class AggregationExecutor:
             evaluator = self._trigger_evaluators[node_id]
 
             # P2-2026-02-01: Use dedicated restore API that preserves fire time ordering
-            # The old approach called record_accept() which set fire times to current time,
-            # then rewound _first_accept_time, causing incorrect "first to fire wins" ordering.
-            # NOTE: All fields are required in current checkpoint format - no backwards compat
-            elapsed_seconds = node_state["elapsed_age_seconds"]
-            count_fire_offset = node_state["count_fire_offset"]
-            condition_fire_offset = node_state["condition_fire_offset"]
-
             evaluator.restore_from_checkpoint(
                 batch_count=len(reconstructed_tokens),
-                elapsed_age_seconds=elapsed_seconds,
-                count_fire_offset=count_fire_offset,
-                condition_fire_offset=condition_fire_offset,
+                elapsed_age_seconds=node_checkpoint.elapsed_age_seconds,
+                count_fire_offset=node_checkpoint.count_fire_offset,
+                condition_fire_offset=node_checkpoint.condition_fire_offset,
             )
 
             # Log successful checkpoint restoration for observability
@@ -982,7 +879,7 @@ class AggregationExecutor:
         trigger_type = evaluator.get_trigger_type() if should_flush else None
         return (should_flush, trigger_type)
 
-    def restore_state(self, node_id: NodeID, state: dict[str, Any]) -> None:
+    def restore_state(self, node_id: NodeID, state: AggregationCheckpointState) -> None:
         """Restore aggregation state from checkpoint.
 
         Called during recovery to restore plugin state. The state is stored
@@ -990,11 +887,11 @@ class AggregationExecutor:
 
         Args:
             node_id: Aggregation node ID
-            state: Deserialized aggregation_state from checkpoint
+            state: Typed aggregation checkpoint state
         """
         self._restored_states[node_id] = state
 
-    def get_restored_state(self, node_id: NodeID) -> dict[str, Any] | None:
+    def get_restored_state(self, node_id: NodeID) -> AggregationCheckpointState | None:
         """Get restored state for an aggregation node.
 
         Used by aggregation plugins during recovery to restore their
@@ -1010,7 +907,7 @@ class AggregationExecutor:
             node_id: Aggregation node ID
 
         Returns:
-            Restored state dict, or None if no state was restored
+            Typed checkpoint state, or None if no state was restored
         """
         return self._restored_states.get(node_id)
 

@@ -28,6 +28,11 @@ from elspeth.contracts import (
     RunStatus,
     SourceRow,
 )
+from elspeth.contracts.aggregation_checkpoint import (
+    AggregationCheckpointState,
+    AggregationNodeCheckpoint,
+    AggregationTokenCheckpoint,
+)
 from elspeth.contracts.config.runtime import RuntimeCheckpointConfig
 from elspeth.contracts.contract_records import ContractAuditRecord
 from elspeth.contracts.schema import SchemaConfig
@@ -825,13 +830,37 @@ class TestCheckpointRecovery:
             )
             conn.commit()
 
+        _agg_state = AggregationCheckpointState(
+            version="3.0",
+            nodes={
+                "test_agg": AggregationNodeCheckpoint(
+                    tokens=(
+                        AggregationTokenCheckpoint(
+                            token_id="tok-buf-001",
+                            row_id="row-buf-001",
+                            branch_name=None,
+                            fork_group_id=None,
+                            join_group_id=None,
+                            expand_group_id=None,
+                            row_data={"value": 6},
+                            contract_version="test",
+                        ),
+                    ),
+                    batch_id="batch-001",
+                    elapsed_age_seconds=0.0,
+                    count_fire_offset=None,
+                    condition_fire_offset=None,
+                    contract={"mode": "FLEXIBLE", "locked": False, "version_hash": "test", "fields": []},
+                ),
+            },
+        )
         original_checkpoint = checkpoint_mgr1.create_checkpoint(
             run_id=run_id,
             token_id="tok-000",
             node_id="transform",
             sequence_number=0,
             graph=mock_graph,
-            aggregation_state={"buffer": [1, 2, 3], "sum": 6},
+            aggregation_state=_agg_state,
         )
 
         # Close database (simulate process exit)
@@ -858,12 +887,14 @@ class TestCheckpointRecovery:
         check = recovery_mgr2.can_resume(run_id, mock_graph)
         assert check.can_resume is True, f"Cannot resume: {check.reason}"
 
-        # Verify resume point with aggregation state
+        # Verify resume point with aggregation state — now typed DTO
         resume_point = recovery_mgr2.get_resume_point(run_id, mock_graph)
         assert resume_point is not None
         assert resume_point.aggregation_state is not None
-        assert resume_point.aggregation_state["buffer"] == [1, 2, 3]
-        assert resume_point.aggregation_state["sum"] == 6
+        assert "test_agg" in resume_point.aggregation_state.nodes
+        node_ckpt = resume_point.aggregation_state.nodes["test_agg"]
+        assert len(node_ckpt.tokens) == 1
+        assert node_ckpt.tokens[0].row_data == {"value": 6}
 
         db2.close()
 
@@ -991,17 +1022,32 @@ class TestAggregationRecovery:
             token = recorder.create_token(row_id=row.row_id)
             tokens.append(token)
 
-        # Create aggregation state (buffer of 3 rows, sum=600)
-        agg_state = {
-            "buffer": [
-                {"id": 0, "value": 100},
-                {"id": 1, "value": 200},
-                {"id": 2, "value": 300},
-            ],
-            "count": 3,
-            "sum": 600,
-            "expected_trigger": 5,
-        }
+        # Create aggregation state (buffer of 3 rows) — typed DTO
+        agg_state = AggregationCheckpointState(
+            version="3.0",
+            nodes={
+                "aggregator": AggregationNodeCheckpoint(
+                    tokens=tuple(
+                        AggregationTokenCheckpoint(
+                            token_id=t.token_id,
+                            row_id=t.row_id,
+                            branch_name=None,
+                            fork_group_id=None,
+                            join_group_id=None,
+                            expand_group_id=None,
+                            row_data={"id": i, "value": (i + 1) * 100},
+                            contract_version="test",
+                        )
+                        for i, t in enumerate(tokens)
+                    ),
+                    batch_id="batch-001",
+                    elapsed_age_seconds=0.0,
+                    count_fire_offset=None,
+                    condition_fire_offset=None,
+                    contract={"mode": "FIXED", "locked": True, "version_hash": "test", "fields": []},
+                ),
+            },
+        )
 
         # Create checkpoint with aggregation state
         checkpoint_mgr.create_checkpoint(
@@ -1024,16 +1070,16 @@ class TestAggregationRecovery:
         resume_point = recovery_mgr.get_resume_point(run.run_id, mock_graph)
         assert resume_point is not None
 
-        # Verify aggregation state is restored exactly
+        # Verify aggregation state is restored exactly — typed DTO
         assert resume_point.aggregation_state is not None
         restored_state = resume_point.aggregation_state
 
-        assert restored_state["count"] == 3
-        assert restored_state["sum"] == 600
-        assert restored_state["expected_trigger"] == 5
-        assert len(restored_state["buffer"]) == 3
+        assert "aggregator" in restored_state.nodes
+        node_ckpt = restored_state.nodes["aggregator"]
+        assert len(node_ckpt.tokens) == 3
+        assert node_ckpt.batch_id == "batch-001"
 
-        # Verify buffer contents
-        assert restored_state["buffer"][0] == {"id": 0, "value": 100}
-        assert restored_state["buffer"][1] == {"id": 1, "value": 200}
-        assert restored_state["buffer"][2] == {"id": 2, "value": 300}
+        # Verify buffer contents (row_data on each token)
+        assert node_ckpt.tokens[0].row_data == {"id": 0, "value": 100}
+        assert node_ckpt.tokens[1].row_data == {"id": 1, "value": 200}
+        assert node_ckpt.tokens[2].row_data == {"id": 2, "value": 300}

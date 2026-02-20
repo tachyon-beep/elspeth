@@ -28,7 +28,6 @@ allowed_dict_patterns:
 
   # Engine - row data handling
   - "src/elspeth/engine/tokens.py:TokenManager.expand_token:expanded_rows (list)"
-  - "src/elspeth/engine/processor.py:RowProcessor.get_aggregation_checkpoint_state:return"
   - "src/elspeth/engine/expression_parser.py:_ExpressionEvaluator.__init__:row"
   - "src/elspeth/engine/expression_parser.py:ExpressionParser.evaluate:row"
   - "src/elspeth/engine/coalesce_executor.py:CoalesceExecutor._merge_data:return"
@@ -37,15 +36,8 @@ allowed_dict_patterns:
   - "src/elspeth/engine/executors/state_guard.py:NodeStateGuard.__init__:input_data"
   - "src/elspeth/engine/executors/state_guard.py:NodeStateGuard.complete:output_data"
 
-  # Aggregation executor - checkpoint and state methods
+  # Aggregation executor - row data handling (checkpoint state now typed via AggregationCheckpointState)
   - "src/elspeth/engine/executors/aggregation.py:AggregationExecutor.get_buffered_rows:return (list)"
-  - "src/elspeth/engine/executors/aggregation.py:AggregationExecutor.get_checkpoint_state:return"
-  - "src/elspeth/engine/executors/aggregation.py:AggregationExecutor.restore_from_checkpoint:state"
-  - "src/elspeth/engine/executors/aggregation.py:AggregationExecutor.restore_state:state"
-  - "src/elspeth/engine/executors/aggregation.py:AggregationExecutor.get_restored_state:return"
-
-  # Orchestrator - checkpoint state (refactored into orchestrator/core.py)
-  - "src/elspeth/engine/orchestrator/core.py:Orchestrator._maybe_checkpoint:aggregation_state"
 
   # Protocols - row data in plugin interface
   - "src/elspeth/plugins/protocols.py:SinkProtocol.write:rows (list)"
@@ -158,11 +150,9 @@ allowed_dict_patterns:
   # Schema reconstruction - deserializing schemas from landscape database (refactored into orchestrator/export.py)
 
   # ═══════════════════════════════════════════════════════════════════════════
-  # AGGREGATION STATE
-  # Aggregation plugins maintain arbitrary state between rows. The state format
-  # is plugin-specific and cannot be typed at the framework level.
+  # AGGREGATION STATE — Now typed via AggregationCheckpointState (elspeth-rapid-095ec6)
+  # Only row_data inside tokens remains dict[str, Any] (pipeline data, Tier 2)
   # ═══════════════════════════════════════════════════════════════════════════
-  - "src/elspeth/core/checkpoint/manager.py:CheckpointManager.create_checkpoint:aggregation_state"
 
   # ═══════════════════════════════════════════════════════════════════════════
   # PLUGIN CONTEXT - Recording and routing

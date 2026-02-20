@@ -1713,7 +1713,7 @@ def resume(
                 "token_id": resume_point.token_id,
                 "node_id": resume_point.node_id,
                 "sequence_number": resume_point.sequence_number,
-                "has_aggregation_state": bool(resume_point.aggregation_state),
+                "has_aggregation_state": resume_point.aggregation_state is not None,
             },
             "unprocessed_rows": len(unprocessed_row_ids),
         }
@@ -1731,7 +1731,7 @@ def resume(
             typer.echo(f"  Token ID: {resume_point.token_id}")
             typer.echo(f"  Node ID: {resume_point.node_id}")
             typer.echo(f"  Sequence number: {resume_point.sequence_number}")
-            if resume_point.aggregation_state:
+            if resume_point.aggregation_state is not None:
                 typer.echo("  Has aggregation state: Yes")
             else:
                 typer.echo("  Has aggregation state: No")

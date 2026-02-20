@@ -29,6 +29,7 @@ from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
+    from elspeth.contracts.aggregation_checkpoint import AggregationCheckpointState
     from elspeth.contracts.events import TelemetryEvent
     from elspeth.contracts.payload_store import PayloadStore
     from elspeth.core.events import EventBusProtocol
@@ -194,7 +195,7 @@ class Orchestrator:
         run_id: str,
         token_id: str,
         node_id: str,
-        aggregation_state: dict[str, Any] | None = None,
+        aggregation_state: AggregationCheckpointState | None = None,
     ) -> None:
         """Create checkpoint if configured.
 
@@ -210,7 +211,7 @@ class Orchestrator:
             run_id: Current run ID
             token_id: Token that was just written to sink
             node_id: Sink node that received the token
-            aggregation_state: Current aggregation buffer/trigger state for crash recovery
+            aggregation_state: Typed aggregation checkpoint state for crash recovery
         """
         if not self._checkpoint_config or not self._checkpoint_config.enabled:
             return
@@ -522,7 +523,7 @@ class Orchestrator:
         config_gate_id_map: dict[GateName, NodeID],
         coalesce_id_map: dict[CoalesceName, NodeID],
         payload_store: PayloadStore,
-        restored_aggregation_state: dict[NodeID, dict[str, Any]] | None = None,
+        restored_aggregation_state: dict[NodeID, AggregationCheckpointState] | None = None,
     ) -> tuple[RowProcessor, dict[CoalesceName, NodeID], CoalesceExecutor | None]:
         """Build a RowProcessor with all supporting infrastructure.
 
@@ -1848,7 +1849,7 @@ class Orchestrator:
         recorder.update_run_status(run_id, RunStatus.RUNNING)
 
         # 3. Build restored aggregation state map
-        restored_state: dict[str, dict[str, Any]] = {}
+        restored_state: dict[str, AggregationCheckpointState] = {}
         if resume_point.aggregation_state is not None:
             restored_state[resume_point.node_id] = resume_point.aggregation_state
 
@@ -2071,7 +2072,7 @@ class Orchestrator:
         config: PipelineConfig,
         graph: ExecutionGraph,
         unprocessed_rows: list[tuple[str, int, dict[str, Any]]],
-        restored_aggregation_state: dict[str, dict[str, Any]],
+        restored_aggregation_state: dict[str, AggregationCheckpointState],
         settings: ElspethSettings | None = None,
         *,
         payload_store: PayloadStore,

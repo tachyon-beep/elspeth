@@ -268,7 +268,7 @@ class TestAggregationCheckpointFixVerification:
         # Verify the aggregation state has expected structure
         for call in calls_with_agg_state:
             agg_state = call["aggregation_state"]
-            assert "_version" in agg_state, "Aggregation state should have version field"
+            assert hasattr(agg_state, "version"), "Aggregation state should have version field"
 
     def test_orchestrator_calls_get_aggregation_checkpoint_state(
         self,

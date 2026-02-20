@@ -4,9 +4,11 @@ These types are used for checkpoint validation and resume operations.
 They are NOT persisted to the audit trail (those are in audit.py).
 """
 
-from dataclasses import dataclass
-from typing import Any
+from __future__ import annotations
 
+from dataclasses import dataclass
+
+from elspeth.contracts.aggregation_checkpoint import AggregationCheckpointState
 from elspeth.contracts.audit import Checkpoint
 
 
@@ -40,16 +42,17 @@ class ResumePoint:
     token_id: str
     node_id: str
     sequence_number: int
-    aggregation_state: dict[str, Any] | None
+    aggregation_state: AggregationCheckpointState | None
 
     def __post_init__(self) -> None:
-        """Validate aggregation_state is dict or None - Tier 1 crash on invalid types.
+        """Validate aggregation_state type — Tier 1 crash on invalid types.
 
         Per CLAUDE.md Data Manifesto: Checkpoints are Tier 1 audit data.
-        If aggregation_state is not a dict (when present), this indicates
-        corrupted checkpoint data - crash immediately, no silent coercion.
+        If aggregation_state is not the expected typed DTO (when present),
+        this indicates corrupted checkpoint data — crash immediately.
         """
-        if self.aggregation_state is not None and not isinstance(self.aggregation_state, dict):
+        if self.aggregation_state is not None and not isinstance(self.aggregation_state, AggregationCheckpointState):
             raise ValueError(
-                f"aggregation_state must be dict or None, got {type(self.aggregation_state).__name__}: {self.aggregation_state!r}"
+                f"aggregation_state must be AggregationCheckpointState or None, "
+                f"got {type(self.aggregation_state).__name__}: {self.aggregation_state!r}"
             )

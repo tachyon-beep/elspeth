@@ -18,6 +18,11 @@ from elspeth.contracts import (
     RowOutcome,
     RunStatus,
 )
+from elspeth.contracts.aggregation_checkpoint import (
+    AggregationCheckpointState,
+    AggregationNodeCheckpoint,
+    AggregationTokenCheckpoint,
+)
 from elspeth.contracts.contract_records import ContractAuditRecord
 from elspeth.contracts.schema_contract import FieldContract, SchemaContract
 from elspeth.core.checkpoint import CheckpointCorruptionError, CheckpointManager, RecoveryManager
@@ -166,7 +171,7 @@ def _create_failed_run_with_checkpoint(
     *,
     checkpoint_node_id: str = "checkpoint-node",
     with_contract: bool = True,
-    aggregation_state: dict[str, Any] | None = None,
+    aggregation_state: AggregationCheckpointState | None = None,
     graph: ExecutionGraph | None = None,
 ) -> ExecutionGraph:
     active_graph = graph or _create_graph(node_id=checkpoint_node_id)
@@ -297,18 +302,30 @@ def test_get_resume_point_restores_aggregation_state(
         db,
         checkpoint_manager,
         run_id,
-        aggregation_state={
-            "_version": 1,
-            "agg-node": {
-                "tokens": [
-                    {
-                        "row_id": "row-buffered",
-                        "token_id": "tok-buffered",
-                        "row_data": {"id": 5},
-                    }
-                ]
+        aggregation_state=AggregationCheckpointState(
+            version="3.0",
+            nodes={
+                "agg-node": AggregationNodeCheckpoint(
+                    tokens=(
+                        AggregationTokenCheckpoint(
+                            token_id="tok-buffered",
+                            row_id="row-buffered",
+                            branch_name=None,
+                            fork_group_id=None,
+                            join_group_id=None,
+                            expand_group_id=None,
+                            row_data={"id": 5},
+                            contract_version="test",
+                        ),
+                    ),
+                    batch_id="batch-001",
+                    elapsed_age_seconds=0.0,
+                    count_fire_offset=None,
+                    condition_fire_offset=None,
+                    contract={"mode": "FLEXIBLE", "locked": False, "version_hash": "test", "fields": []},
+                ),
             },
-        },
+        ),
     )
 
     resume_point = recovery_manager.get_resume_point(run_id, graph)
@@ -317,7 +334,7 @@ def test_get_resume_point_restores_aggregation_state(
     assert resume_point.node_id == "checkpoint-node"
     assert resume_point.sequence_number == 1
     assert resume_point.aggregation_state is not None
-    assert "agg-node" in resume_point.aggregation_state
+    assert "agg-node" in resume_point.aggregation_state.nodes
 
 
 def test_get_unprocessed_rows_returns_empty_when_no_checkpoint(recovery_manager: RecoveryManager) -> None:
@@ -369,15 +386,40 @@ def test_get_unprocessed_rows_handles_fork_and_excludes_buffered_rows(
         node_id="checkpoint-node",
         sequence_number=10,
         graph=graph,
-        aggregation_state={
-            "_version": 1,
-            "agg-node": {
-                "tokens": [
-                    {"token_id": "tok-buffered", "row_id": "row-buffered"},
-                    {"token_id": "tok-mixed-buffered", "row_id": "row-mixed-buffering"},
-                ]
+        aggregation_state=AggregationCheckpointState(
+            version="3.0",
+            nodes={
+                "agg-node": AggregationNodeCheckpoint(
+                    tokens=(
+                        AggregationTokenCheckpoint(
+                            token_id="tok-buffered",
+                            row_id="row-buffered",
+                            branch_name=None,
+                            fork_group_id=None,
+                            join_group_id=None,
+                            expand_group_id=None,
+                            row_data={},
+                            contract_version="test",
+                        ),
+                        AggregationTokenCheckpoint(
+                            token_id="tok-mixed-buffered",
+                            row_id="row-mixed-buffering",
+                            branch_name=None,
+                            fork_group_id=None,
+                            join_group_id=None,
+                            expand_group_id=None,
+                            row_data={},
+                            contract_version="test",
+                        ),
+                    ),
+                    batch_id="batch-001",
+                    elapsed_age_seconds=0.0,
+                    count_fire_offset=None,
+                    condition_fire_offset=None,
+                    contract={"mode": "FLEXIBLE", "locked": False, "version_hash": "test", "fields": []},
+                ),
             },
-        },
+        ),
     )
 
     unprocessed = recovery_manager.get_unprocessed_rows(run_id)
@@ -423,15 +465,40 @@ def test_get_unprocessed_rows_chunks_buffered_token_query(
         node_id="checkpoint-node",
         sequence_number=1,
         graph=graph,
-        aggregation_state={
-            "_version": 1,
-            "agg-node": {
-                "tokens": [
-                    {"token_id": "tok-a", "row_id": "row-a"},
-                    {"token_id": "tok-c", "row_id": "row-c"},
-                ]
+        aggregation_state=AggregationCheckpointState(
+            version="3.0",
+            nodes={
+                "agg-node": AggregationNodeCheckpoint(
+                    tokens=(
+                        AggregationTokenCheckpoint(
+                            token_id="tok-a",
+                            row_id="row-a",
+                            branch_name=None,
+                            fork_group_id=None,
+                            join_group_id=None,
+                            expand_group_id=None,
+                            row_data={},
+                            contract_version="test",
+                        ),
+                        AggregationTokenCheckpoint(
+                            token_id="tok-c",
+                            row_id="row-c",
+                            branch_name=None,
+                            fork_group_id=None,
+                            join_group_id=None,
+                            expand_group_id=None,
+                            row_data={},
+                            contract_version="test",
+                        ),
+                    ),
+                    batch_id="batch-001",
+                    elapsed_age_seconds=0.0,
+                    count_fire_offset=None,
+                    condition_fire_offset=None,
+                    contract={"mode": "FLEXIBLE", "locked": False, "version_hash": "test", "fields": []},
+                ),
             },
-        },
+        ),
     )
 
     unprocessed = recovery_manager.get_unprocessed_rows(run_id)

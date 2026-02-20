@@ -23,6 +23,7 @@ import pytest
 
 # For node registration
 from elspeth.contracts import NodeType, RouteDestination, RowOutcome, SourceRow, TokenInfo, TransformResult
+from elspeth.contracts.aggregation_checkpoint import AggregationCheckpointState
 from elspeth.contracts.enums import (
     NodeStateStatus,
     RoutingKind,
@@ -114,7 +115,7 @@ def _make_processor(
     node_to_next: dict[NodeID, NodeID | None] | None = None,
     first_transform_node_id: NodeID | None = None,
     node_to_plugin: dict[NodeID, Any] | None = None,
-    restored_aggregation_state: dict[NodeID, dict[str, Any]] | None = None,
+    restored_aggregation_state: dict[NodeID, AggregationCheckpointState] | None = None,
     telemetry_manager: Any = None,
     sink_names: frozenset[str] | None = None,
 ) -> RowProcessor:
@@ -249,7 +250,10 @@ class TestConstructorErrorEdgeMap:
                 ),
             },
             restored_aggregation_state={
-                NodeID("agg-1"): {"buffer": [], "trigger_state": {}},
+                NodeID("agg-1"): AggregationCheckpointState(
+                    version="3.0",
+                    nodes={},
+                ),
             },
         )
         assert processor is not None

@@ -23,6 +23,11 @@ from typing import Any
 
 import pytest
 
+from elspeth.contracts.aggregation_checkpoint import (
+    AggregationCheckpointState,
+    AggregationNodeCheckpoint,
+    AggregationTokenCheckpoint,
+)
 from elspeth.contracts.enums import BatchStatus, Determinism, NodeType, RunStatus
 from elspeth.contracts.schema_contract import FieldContract, SchemaContract
 from elspeth.contracts.types import NodeID
@@ -133,8 +138,32 @@ class TestAggregationRecoveryIntegration:
         for i, token in enumerate(tokens):
             recorder.add_batch_member(batch.batch_id, token.token_id, ordinal=i)
 
-        # Simulate checkpoint before flush
-        agg_state = {"buffer": [0, 100, 200], "sum": 300, "count": 3}
+        # Simulate checkpoint before flush — construct typed DTO
+        agg_state = AggregationCheckpointState(
+            version="3.0",
+            nodes={
+                "sum_aggregator": AggregationNodeCheckpoint(
+                    tokens=tuple(
+                        AggregationTokenCheckpoint(
+                            token_id=t.token_id,
+                            row_id=t.row_id,
+                            branch_name=None,
+                            fork_group_id=None,
+                            join_group_id=None,
+                            expand_group_id=None,
+                            row_data={"id": i, "value": i * 100},
+                            contract_version="test",
+                        )
+                        for i, t in enumerate(tokens)
+                    ),
+                    batch_id=batch.batch_id,
+                    elapsed_age_seconds=0.0,
+                    count_fire_offset=None,
+                    condition_fire_offset=None,
+                    contract={"mode": "OBSERVED", "locked": True, "version_hash": "test", "fields": []},
+                ),
+            },
+        )
         checkpoint_mgr.create_checkpoint(
             run_id=run.run_id,
             token_id=tokens[-1].token_id,
@@ -155,7 +184,8 @@ class TestAggregationRecoveryIntegration:
 
         resume_point = recovery_mgr.get_resume_point(run.run_id, mock_graph)
         assert resume_point is not None
-        assert resume_point.aggregation_state == agg_state
+        assert resume_point.aggregation_state is not None
+        assert "sum_aggregator" in resume_point.aggregation_state.nodes
 
         # === PHASE 3: Execute recovery steps ===
 
@@ -244,13 +274,37 @@ class TestAggregationRecoveryIntegration:
             recorder.add_batch_member(count_batch.batch_id, token.token_id, ordinal=i)
         recorder.update_batch_status(count_batch.batch_id, BatchStatus.EXECUTING)
 
-        # Checkpoint at last processed token
+        # Checkpoint at last processed token — typed DTO
         checkpoint_mgr.create_checkpoint(
             run_id=run.run_id,
             token_id=tokens[3].token_id,
             node_id="count_aggregator",
             sequence_number=3,
-            aggregation_state={"count": 2},
+            aggregation_state=AggregationCheckpointState(
+                version="3.0",
+                nodes={
+                    "count_aggregator": AggregationNodeCheckpoint(
+                        tokens=tuple(
+                            AggregationTokenCheckpoint(
+                                token_id=t.token_id,
+                                row_id=t.row_id,
+                                branch_name=None,
+                                fork_group_id=None,
+                                join_group_id=None,
+                                expand_group_id=None,
+                                row_data={},
+                                contract_version="test",
+                            )
+                            for t in tokens[2:]
+                        ),
+                        batch_id=count_batch.batch_id,
+                        elapsed_age_seconds=0.0,
+                        count_fire_offset=None,
+                        condition_fire_offset=None,
+                        contract={"mode": "OBSERVED", "locked": True, "version_hash": "test", "fields": []},
+                    ),
+                },
+            ),
             graph=mock_graph,
         )
 
@@ -499,39 +553,37 @@ class TestAggregationRecoveryIntegration:
         # Should NOT trigger yet (need 60s total)
         assert evaluator.should_trigger() is False
 
-        # Create checkpoint with aggregation state
-        # Note: token format must match v2.0 checkpoint schema (includes contract)
-        # Create a contract for the checkpoint
+        # Create checkpoint with aggregation state — typed DTO
         contract = _make_contract({"id": 0, "value": 0})
         contract_version = contract.version_hash()
-        sum_agg_state: dict[str, Any] = {
-            "tokens": [
-                {
-                    "token_id": t.token_id,
-                    "row_id": t.row_id,
-                    "branch_name": None,
-                    "row_data": {},
-                    "fork_group_id": None,
-                    "join_group_id": None,
-                    "expand_group_id": None,
-                    "contract_version": contract_version,  # v2.0: required for contract reference
-                }
+        elapsed = evaluator.get_age_seconds()
+        sum_agg_node = AggregationNodeCheckpoint(
+            tokens=tuple(
+                AggregationTokenCheckpoint(
+                    token_id=t.token_id,
+                    row_id=t.row_id,
+                    branch_name=None,
+                    fork_group_id=None,
+                    join_group_id=None,
+                    expand_group_id=None,
+                    row_data={},
+                    contract_version=contract_version,
+                )
                 for t in tokens
-            ],
-            "batch_id": "batch-001",
-            "elapsed_age_seconds": evaluator.get_age_seconds(),  # Bug #6 fix: store elapsed time
-            "count_fire_offset": evaluator.get_count_fire_offset(),  # P2-2026-02-01
-            "condition_fire_offset": evaluator.get_condition_fire_offset(),  # P2-2026-02-01
-            "contract": contract.to_checkpoint_format(),  # v2.0: contract required for PipelineRow restoration
-        }
-        agg_state: dict[str, Any] = {
-            "_version": "3.0",  # Required checkpoint version
-            "sum_aggregator": sum_agg_state,
-        }
+            ),
+            batch_id="batch-001",
+            elapsed_age_seconds=elapsed,  # Bug #6 fix: store elapsed time
+            count_fire_offset=evaluator.get_count_fire_offset(),  # P2-2026-02-01
+            condition_fire_offset=evaluator.get_condition_fire_offset(),  # P2-2026-02-01
+            contract=contract.to_checkpoint_format(),
+        )
+        agg_state = AggregationCheckpointState(
+            version="3.0",
+            nodes={"sum_aggregator": sum_agg_node},
+        )
 
         # Verify elapsed time is stored in checkpoint state
-        assert "elapsed_age_seconds" in sum_agg_state
-        assert 29.0 <= sum_agg_state["elapsed_age_seconds"] <= 31.0
+        assert 29.0 <= elapsed <= 31.0
 
         checkpoint_mgr.create_checkpoint(
             run_id=run.run_id,
