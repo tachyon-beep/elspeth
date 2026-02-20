@@ -17,7 +17,7 @@ import pytest
 
 from elspeth.contracts import TokenInfo, TransformResult
 from elspeth.contracts.errors import OrchestrationInvariantError
-from elspeth.engine.batch_adapter import SharedBatchAdapter
+from elspeth.engine.batch_adapter import SharedBatchAdapter, _WaiterEntry
 from elspeth.testing import make_pipeline_row
 
 
@@ -169,32 +169,32 @@ class TestSharedBatchAdapter:
         with pytest.raises(TimeoutError, match="No result received"):
             waiter.wait(timeout=0.1)
 
-    def test_timeout_cleans_up_waiter_entry(self) -> None:
-        """Test that timeout cleans up waiter entry to prevent memory leak.
+    def test_timeout_cleans_up_entry(self) -> None:
+        """Test that timeout cleans up entry to prevent memory leak.
 
-        When wait() times out, the waiter entry must be removed from _waiters.
+        When wait() times out, the entry must be removed from _entries.
         Otherwise, late results arriving via emit() would still find the entry
-        and store results in _results that no one will ever retrieve.
+        and store results that no one will ever retrieve.
         """
         adapter = SharedBatchAdapter()
         waiter = adapter.register("token-timeout", "state-timeout")
 
-        # Waiter entry should exist before timeout
-        assert ("token-timeout", "state-timeout") in adapter._waiters
+        # Entry should exist before timeout
+        assert ("token-timeout", "state-timeout") in adapter._entries
 
         # Timeout
         with pytest.raises(TimeoutError):
             waiter.wait(timeout=0.05)
 
-        # After timeout, waiter entry must be cleaned up
-        assert ("token-timeout", "state-timeout") not in adapter._waiters
+        # After timeout, entry must be cleaned up
+        assert ("token-timeout", "state-timeout") not in adapter._entries
 
     def test_late_result_after_timeout_not_stored(self) -> None:
         """Test that late results after timeout are discarded, not stored.
 
         This is the core memory leak bug: if a waiter times out but the
         worker eventually completes and calls emit(), the result should
-        NOT be stored in _results (since no one will retrieve it).
+        NOT be stored (since no one will retrieve it).
 
         Scenario:
         1. Register waiter, wait times out
@@ -215,9 +215,9 @@ class TestSharedBatchAdapter:
             "state-late",
         )
 
-        # Result must NOT be stored (would be a memory leak)
-        assert ("token-late", "state-late") not in adapter._results
-        assert len(adapter._results) == 0
+        # Entry must NOT exist (would be a memory leak)
+        assert ("token-late", "state-late") not in adapter._entries
+        assert len(adapter._entries) == 0
 
     def test_error_result_propagated(self) -> None:
         """Test that error results are correctly propagated."""
@@ -302,8 +302,7 @@ class TestSharedBatchAdapter:
         adapter.clear()
 
         # Verify internal state is empty
-        assert len(adapter._waiters) == 0
-        assert len(adapter._results) == 0
+        assert len(adapter._entries) == 0
 
     def test_stale_result_not_delivered_to_retry(self) -> None:
         """Test that results from timed-out attempts don't interfere with retries.
@@ -351,7 +350,7 @@ class TestSharedBatchAdapter:
         assert result2.row.to_dict() == {"result": "fresh"}
 
     def test_timeout_race_cleans_up_late_result(self) -> None:
-        """Test that timeout path cleans up results stored during race window.
+        """Test that timeout path cleans up entries stored during race window.
 
         This tests the TOCTOU race between wait() timeout and emit():
 
@@ -360,19 +359,16 @@ class TestSharedBatchAdapter:
             -----------------                -----------------
             1. event.wait(timeout) -> False
                                              2. Acquires _lock
-                                             3. key in _waiters -> True
-                                             4. _results[key] = result
-                                             5. _waiters[key].set()
-                                             6. del _waiters[key]
-                                             7. Releases _lock
-            8. Acquires _lock
-            9. _waiters.pop() -> None (gone!)
-            10. Releases _lock
-            11. Raises TimeoutError
+                                             3. key in _entries -> True
+                                             4. entry.result = result
+                                             5. entry.event.set()
+                                             6. Releases _lock
+            7. Acquires _lock
+            8. _entries.pop() -> removes entry (including late result)
+            9. Releases _lock
+            10. Raises TimeoutError
 
-            Result: _results[key] is never cleaned up -> memory leak
-
-        The fix: timeout path must also clean up _results[key].
+            Result: entry is cleaned up, no memory leak.
 
         Since timing races are non-deterministic, we test the fix directly:
         simulate the post-race state and verify cleanup happens.
@@ -383,28 +379,24 @@ class TestSharedBatchAdapter:
         # Register waiter
         waiter = adapter.register(*key)
 
-        # Simulate the race: emit() wins, stores result and removes waiter
-        # This is what happens when emit() executes between event.wait() timeout
-        # and wait()'s lock acquisition
+        # Simulate the race: emit() wins — sets result and signals event
         with adapter._lock:
-            adapter._results[key] = TransformResult.success(make_pipeline_row({"race": "leaked"}), success_reason={"action": "test"})
-            adapter._waiters[key].set()  # Signal (even though we're about to timeout)
-            del adapter._waiters[key]  # emit() removes waiter entry
+            entry = adapter._entries[key]
+            entry.result = TransformResult.success(make_pipeline_row({"race": "leaked"}), success_reason={"action": "test"})
+            entry.event.set()
 
-        # Now the event IS set (by our simulated emit), but we want to test
-        # timeout behavior. Re-create the waiter without event being set:
-        adapter._waiters[key] = threading.Event()  # Fresh unset event
-        waiter._event = adapter._waiters[key]  # Update waiter's event reference
+        # Re-create with fresh unset event to simulate timeout path
+        adapter._entries[key] = _WaiterEntry()
+        waiter._event = adapter._entries[key].event
 
         # Now wait() will timeout because event is not set
-        # The timeout path should clean up both _waiters AND _results
+        # The timeout path should clean up the entry entirely
         with pytest.raises(TimeoutError):
             waiter.wait(timeout=0.05)
 
-        # Verify BOTH are cleaned up - no memory leak
-        assert key not in adapter._waiters, "Waiter entry should be removed"
-        assert key not in adapter._results, (
-            "Result entry should be removed to prevent memory leak. "
+        # Verify entry is cleaned up - no memory leak
+        assert key not in adapter._entries, (
+            "Entry should be removed to prevent memory leak. "
             "The race between timeout and emit can store a result that "
             "no one will ever retrieve."
         )

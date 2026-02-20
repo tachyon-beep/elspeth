@@ -33,9 +33,10 @@ Exception Propagation:
 
 from __future__ import annotations
 
-__all__ = ["ExceptionResult", "RowWaiter", "SharedBatchAdapter", "WaiterKey"]
+__all__ = ["ExceptionResult", "RowWaiter", "SharedBatchAdapter", "WaiterKey", "_WaiterEntry"]
 
 import threading
+from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
 from elspeth.contracts import ExceptionResult
@@ -49,6 +50,19 @@ if TYPE_CHECKING:
 WaiterKey = tuple[str, str]
 
 
+@dataclass
+class _WaiterEntry:
+    """Consolidated state for a single registered waiter.
+
+    Replaces two parallel dicts (_waiters + _results) that were
+    both keyed by WaiterKey. The event is set when a result arrives;
+    result starts as None and is populated by emit().
+    """
+
+    event: threading.Event = field(default_factory=threading.Event)
+    result: TransformResult | ExceptionResult | None = None
+
+
 class RowWaiter:
     """Waiter for a specific row's result.
 
@@ -59,24 +73,21 @@ class RowWaiter:
     def __init__(
         self,
         key: WaiterKey,
-        event: threading.Event,
-        results: dict[WaiterKey, TransformResult | ExceptionResult],
-        waiters: dict[WaiterKey, threading.Event],
+        entry: _WaiterEntry,
+        entries: dict[WaiterKey, _WaiterEntry],
         lock: threading.Lock,
     ):
         """Initialize waiter for a specific token and attempt.
 
         Args:
             key: (token_id, state_id) tuple identifying this waiter
-            event: Event that will be signaled when result arrives
-            results: Shared results dict (owned by SharedBatchAdapter)
-            waiters: Shared waiters dict (owned by SharedBatchAdapter)
+            entry: The waiter entry containing event and result slot
+            entries: Shared entries dict (owned by SharedBatchAdapter)
             lock: Shared lock for thread-safe access
         """
         self._key = key
-        self._event = event
-        self._results = results
-        self._waiters = waiters
+        self._event = entry.event
+        self._entries = entries
         self._lock = lock
 
     def wait(self, timeout: float = 300.0) -> TransformResult:
@@ -94,20 +105,10 @@ class RowWaiter:
         """
         token_id, state_id = self._key
         if not self._event.wait(timeout=timeout):
-            # Clean up waiter AND any late result on timeout to prevent memory leak.
-            #
-            # Race condition: emit() can execute between event.wait() timeout and
-            # this lock acquisition, storing a result that no one will retrieve:
-            #
-            #   wait(): event.wait() → False
-            #   emit(): acquires lock, stores _results[key], deletes _waiters[key]
-            #   wait(): acquires lock, removes from _waiters (gone), raises
-            #   Result: _results[key] leaked forever
-            #
-            # Fix: also clean up _results in the timeout path.
+            # Clean up entry on timeout to prevent memory leak.
+            # The consolidated _WaiterEntry means one pop cleans up everything.
             with self._lock:
-                self._waiters.pop(self._key, None)
-                self._results.pop(self._key, None)  # Clean up any late result from race
+                self._entries.pop(self._key, None)
             raise TimeoutError(
                 f"No result received for token {token_id} (state {state_id}) within {timeout}s. "
                 f"This may indicate a hung transform, rate limit exhaustion, or "
@@ -115,14 +116,16 @@ class RowWaiter:
             )
 
         with self._lock:
-            result = self._results.pop(self._key)
+            entry = self._entries.pop(self._key)
 
             # Check for wrapped exception from worker thread
             # Plugin bugs should crash - re-raise the original exception
-            if isinstance(result, ExceptionResult):
-                raise result.exception from None
+            if isinstance(entry.result, ExceptionResult):
+                raise entry.result.exception from None
 
-            return result
+            # result is guaranteed non-None here: emit() sets it before signaling event
+            assert entry.result is not None
+            return entry.result
 
 
 class SharedBatchAdapter:
@@ -163,8 +166,7 @@ class SharedBatchAdapter:
 
     def __init__(self) -> None:
         """Initialize adapter."""
-        self._waiters: dict[WaiterKey, threading.Event] = {}
-        self._results: dict[WaiterKey, TransformResult | ExceptionResult] = {}
+        self._entries: dict[WaiterKey, _WaiterEntry] = {}
         self._lock = threading.Lock()
 
     def register(self, token_id: str, state_id: str) -> RowWaiter:
@@ -182,9 +184,9 @@ class SharedBatchAdapter:
         """
         key: WaiterKey = (token_id, state_id)
         with self._lock:
-            event = threading.Event()
-            self._waiters[key] = event
-            return RowWaiter(key, event, self._results, self._waiters, self._lock)
+            entry = _WaiterEntry()
+            self._entries[key] = entry
+            return RowWaiter(key, entry, self._entries, self._lock)
 
     def emit(self, token: TokenInfo, result: TransformResult | ExceptionResult, state_id: str | None) -> None:
         """Receive result from batch transform's release thread.
@@ -192,7 +194,7 @@ class SharedBatchAdapter:
         Routes result to the correct waiter based on (token_id, state_id).
         Called by BatchTransformMixin._release_loop() via output port.
 
-        If no waiter exists for this (token_id, state_id), the result is
+        If no entry exists for this (token_id, state_id), the result is
         discarded. This happens when:
         - A timeout occurred and a retry is in progress (correct behavior)
         - A bug caused mismatched state_ids (should not happen)
@@ -223,35 +225,33 @@ class SharedBatchAdapter:
 
         key: WaiterKey = (token.token_id, state_id)
         with self._lock:
-            if key in self._waiters:
-                # Store result and wake the waiter
-                self._results[key] = result
-                self._waiters[key].set()
-                # Clean up waiter entry (result stays until wait() retrieves it)
-                del self._waiters[key]
-            # If no waiter exists, result is discarded (stale result from timed-out attempt)
-            # Note: We don't store the result - that would be a memory leak
+            if key in self._entries:
+                # Store result and wake the waiter.
+                # Entry stays until wait() pops it to retrieve the result.
+                entry = self._entries[key]
+                entry.result = result
+                entry.event.set()
+            # If no entry exists, result is discarded (stale result from timed-out attempt)
 
     def clear(self) -> None:
-        """Clear all pending waiters and results.
+        """Clear all pending entries.
 
         For testing and cleanup. In production, normal flow ensures
         all waiters receive results before shutdown.
         """
         with self._lock:
-            self._waiters.clear()
-            self._results.clear()
+            self._entries.clear()
 
     def _signal_waiters_by_token_id(self, token_id: str, error: Exception) -> None:
         """Signal all waiters for a token_id with an error when state_id is unknown.
 
         This handles the case where emit() is called with state_id=None (an
         executor bug). Without state_id we can't construct the exact WaiterKey,
-        so we scan all registered waiters for matching token_id and deliver
+        so we scan all registered entries for matching token_id and deliver
         the error as an ExceptionResult. This ensures waiters fail fast instead
         of hanging until batch_wait_timeout.
 
-        If no matching waiter is found, the error is raised (no recovery possible).
+        If no matching entry is found, the error is raised (no recovery possible).
         """
         import traceback as tb_mod
 
@@ -260,10 +260,11 @@ class SharedBatchAdapter:
             traceback="".join(tb_mod.format_exception(error)),
         )
         with self._lock:
-            matched_keys = [k for k in self._waiters if k[0] == token_id]
+            matched_keys = [k for k in self._entries if k[0] == token_id]
             if not matched_keys:
                 raise error
             for key in matched_keys:
-                self._results[key] = exception_result
-                self._waiters[key].set()
-                del self._waiters[key]
+                entry = self._entries[key]
+                entry.result = exception_result
+                entry.event.set()
+                # Entry stays until wait() pops it
