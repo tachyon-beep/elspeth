@@ -225,13 +225,15 @@ class SharedBatchAdapter:
 
         key: WaiterKey = (token.token_id, state_id)
         with self._lock:
-            if key in self._entries:
-                # Store result and wake the waiter.
+            if key in self._entries and not self._entries[key].event.is_set():
+                # First delivery: store result and wake the waiter.
                 # Entry stays until wait() pops it to retrieve the result.
                 entry = self._entries[key]
                 entry.result = result
                 entry.event.set()
-            # If no entry exists, result is discarded (stale result from timed-out attempt)
+            # If no entry exists or already signaled, result is discarded.
+            # No entry: stale result from timed-out attempt.
+            # Already signaled: duplicate emit — preserve first-result-wins.
 
     def clear(self) -> None:
         """Clear all pending entries.

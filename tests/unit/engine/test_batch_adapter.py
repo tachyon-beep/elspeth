@@ -401,6 +401,38 @@ class TestSharedBatchAdapter:
             "no one will ever retrieve."
         )
 
+    def test_duplicate_emit_preserves_first_result(self) -> None:
+        """Duplicate emit() for the same key must not overwrite the first result.
+
+        Regression: When _WaiterEntry stays in _entries until wait() pops it,
+        a second emit() for the same (token_id, state_id) could overwrite
+        entry.result. This test verifies first-result-wins semantics: once
+        an entry is signaled, subsequent emits for the same key are no-ops.
+        """
+        adapter = SharedBatchAdapter()
+        waiter = adapter.register("token-dup", "state-dup")
+
+        token = _make_token("token-dup", "row-1")
+
+        # First emit — should be delivered
+        first_result = TransformResult.success(
+            make_pipeline_row({"delivery": "first"}),
+            success_reason={"action": "test"},
+        )
+        adapter.emit(token, first_result, "state-dup")
+
+        # Second emit — should be discarded (first-result-wins)
+        second_result = TransformResult.success(
+            make_pipeline_row({"delivery": "second"}),
+            success_reason={"action": "test"},
+        )
+        adapter.emit(token, second_result, "state-dup")
+
+        # Waiter must get the first result, not the second
+        got = waiter.wait(timeout=1.0)
+        assert got.row is not None
+        assert got.row.to_dict() == {"delivery": "first"}
+
     def test_emit_with_none_state_id_raises_invariant_error(self) -> None:
         """emit() with state_id=None raises OrchestrationInvariantError.
 
