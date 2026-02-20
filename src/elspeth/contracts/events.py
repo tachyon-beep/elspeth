@@ -411,4 +411,6 @@ class ExternalCallCompleted(TelemetryEvent):
             d["request_payload"] = self.request_payload.to_dict()
         if self.response_payload is not None:
             d["response_payload"] = self.response_payload.to_dict()
+        if self.token_usage is not None:
+            d["token_usage"] = self.token_usage.to_dict()
         return d

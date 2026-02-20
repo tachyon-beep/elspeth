@@ -225,6 +225,97 @@ class TestExternalCallCompletedSerialization:
         assert d["request_payload"] is None
         assert d["response_payload"] is None
 
+    def test_to_dict_with_partial_token_usage_omits_none(self) -> None:
+        """Partial TokenUsage omits unknown fields via DTO serializer.
+
+        Bug: elspeth-rapid-359b31
+
+        When only prompt_tokens is known, to_dict() must emit
+        {"prompt_tokens": 42} — NOT {"prompt_tokens": 42, "completion_tokens": null}.
+        The generic _event_field_to_serializable path walks all dataclass fields
+        and includes None values; the override must call TokenUsage.to_dict().
+        """
+        from elspeth.contracts.enums import CallStatus, CallType
+        from elspeth.contracts.events import ExternalCallCompleted
+        from elspeth.contracts.token_usage import TokenUsage
+
+        event = ExternalCallCompleted(
+            timestamp=datetime.now(UTC),
+            run_id="run-1",
+            call_type=CallType.LLM,
+            provider="azure",
+            status=CallStatus.SUCCESS,
+            latency_ms=50.0,
+            state_id="state-1",
+            token_usage=TokenUsage(prompt_tokens=42, completion_tokens=None),
+        )
+
+        d = event.to_dict()
+        assert d["token_usage"] == {"prompt_tokens": 42}
+        assert "completion_tokens" not in d["token_usage"]
+
+    def test_to_dict_with_fully_unknown_token_usage_emits_empty(self) -> None:
+        """Fully-unknown TokenUsage emits {} not {prompt_tokens: null, ...}.
+
+        Bug: elspeth-rapid-359b31
+        """
+        from elspeth.contracts.enums import CallStatus, CallType
+        from elspeth.contracts.events import ExternalCallCompleted
+        from elspeth.contracts.token_usage import TokenUsage
+
+        event = ExternalCallCompleted(
+            timestamp=datetime.now(UTC),
+            run_id="run-1",
+            call_type=CallType.LLM,
+            provider="azure",
+            status=CallStatus.SUCCESS,
+            latency_ms=50.0,
+            state_id="state-1",
+            token_usage=TokenUsage.unknown(),
+        )
+
+        d = event.to_dict()
+        assert d["token_usage"] == {}
+
+    def test_to_dict_with_full_token_usage(self) -> None:
+        """Fully-known TokenUsage serializes both fields."""
+        from elspeth.contracts.enums import CallStatus, CallType
+        from elspeth.contracts.events import ExternalCallCompleted
+        from elspeth.contracts.token_usage import TokenUsage
+
+        event = ExternalCallCompleted(
+            timestamp=datetime.now(UTC),
+            run_id="run-1",
+            call_type=CallType.LLM,
+            provider="azure",
+            status=CallStatus.SUCCESS,
+            latency_ms=50.0,
+            state_id="state-1",
+            token_usage=TokenUsage.known(10, 5),
+        )
+
+        d = event.to_dict()
+        assert d["token_usage"] == {"prompt_tokens": 10, "completion_tokens": 5}
+
+    def test_to_dict_with_none_token_usage(self) -> None:
+        """None token_usage remains None in to_dict() output."""
+        from elspeth.contracts.enums import CallStatus, CallType
+        from elspeth.contracts.events import ExternalCallCompleted
+
+        event = ExternalCallCompleted(
+            timestamp=datetime.now(UTC),
+            run_id="run-1",
+            call_type=CallType.HTTP,
+            provider="example.com",
+            status=CallStatus.SUCCESS,
+            latency_ms=10.0,
+            state_id="state-1",
+            token_usage=None,
+        )
+
+        d = event.to_dict()
+        assert d["token_usage"] is None
+
     def test_to_dict_with_http_dto_omits_none_fields(self) -> None:
         """HTTPCallRequest.to_dict() conditionally omits None fields."""
         from elspeth.contracts.call_data import HTTPCallRequest
