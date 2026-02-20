@@ -229,11 +229,17 @@ class Orchestrator:
         # - N = every N rows
         frequency = self._checkpoint_config.frequency
         should_checkpoint = False
-        if frequency == 1:
+        if frequency == 0:
+            # aggregation_only: checkpoint unconditionally. In the post-sink
+            # architecture (elspeth-rapid-xtmo), _maybe_checkpoint is only
+            # called from checkpoint_after_sink — i.e., after sink durability.
+            # Aggregation already reduces cardinality (many rows → fewer
+            # aggregated results), so the I/O reduction is inherent.
+            should_checkpoint = True
+        elif frequency == 1:
             should_checkpoint = True  # every_row
         elif frequency > 1:
             should_checkpoint = (self._sequence_number % frequency) == 0  # every_n
-        # frequency == 0: aggregation_only - checkpointed separately in aggregation flush
 
         if should_checkpoint:
             self._checkpoint_manager.create_checkpoint(
