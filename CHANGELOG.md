@@ -4,7 +4,7 @@ All notable changes to ELSPETH are documented here.
 
 ---
 
-## [0.3.0] - 2026-02-20 (RC-3.1)
+## [0.3.0] - 2026-02-22 (RC-3.2)
 
 ### Highlights
 
@@ -58,5 +58,5 @@ All notable changes to ELSPETH are documented here.
 Initial release candidate. Core SDA pipeline engine with audit trail,
 plugin system, and CLI.
 
-[0.3.0]: https://github.com/tachyon-beep/elspeth/compare/v0.1.0-phase1...RC3.1-bug-hunt
+[0.3.0]: https://github.com/tachyon-beep/elspeth/compare/v0.1.0-phase1...main
 [0.1.0]: https://github.com/tachyon-beep/elspeth/releases/tag/v0.1.0-phase1
