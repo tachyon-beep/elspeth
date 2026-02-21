@@ -38,8 +38,9 @@ class TestCheckpointSerialization:
         dt = datetime(2026, 2, 5, 12, 30, 45, tzinfo=UTC)
         serialized = checkpoint_dumps({"created_at": dt})
 
-        # Should contain type tag
-        assert "__datetime__" in serialized
+        # Should contain collision-safe type envelope
+        assert "__elspeth_type__" in serialized
+        assert "__elspeth_value__" in serialized
         assert "2026-02-05T12:30:45" in serialized
 
     def test_datetime_round_trip(self) -> None:

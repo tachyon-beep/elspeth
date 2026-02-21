@@ -633,6 +633,10 @@ class ExpressionParser:
         if isinstance(node, ast.IfExp):
             return self._is_boolean_node(node.body) and self._is_boolean_node(node.orelse)
 
+        # Function calls: bool() always returns bool
+        if isinstance(node, ast.Call):
+            return isinstance(node.func, ast.Name) and node.func.id == "bool"
+
         # Everything else (field access, arithmetic, etc.) is not guaranteed boolean
         return False
 

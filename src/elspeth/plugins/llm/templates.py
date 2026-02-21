@@ -10,7 +10,7 @@ from typing import TYPE_CHECKING, Any
 
 from jinja2 import StrictUndefined, TemplateSyntaxError, UndefinedError
 from jinja2.exceptions import SecurityError
-from jinja2.sandbox import SandboxedEnvironment
+from jinja2.sandbox import ImmutableSandboxedEnvironment
 
 from elspeth.contracts.schema_contract import PipelineRow
 from elspeth.core.canonical import canonical_json
@@ -110,7 +110,7 @@ class PromptTemplate:
         self._lookup_hash = _sha256(canonical_json(lookup_snapshot)) if lookup_snapshot is not None else None
 
         # Use sandboxed environment for security
-        self._env = SandboxedEnvironment(
+        self._env = ImmutableSandboxedEnvironment(
             undefined=StrictUndefined,  # Raise on undefined variables
             autoescape=False,  # No HTML escaping for prompts
         )

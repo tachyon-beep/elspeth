@@ -19,6 +19,7 @@ Usage:
     # sanitized.fingerprint = "def456..." (HMAC of token value only)
 """
 
+import json as json_module
 from dataclasses import dataclass
 from urllib.parse import parse_qs, urlencode, urlparse, urlunparse
 
@@ -71,6 +72,14 @@ class SanitizedDatabaseUrl:
     sanitized_url: str
     fingerprint: str | None  # None if original had no password
 
+    def __post_init__(self) -> None:
+        """Enforce invariant: sanitized_url must not contain credentials."""
+        parsed = urlparse(self.sanitized_url)
+        if parsed.password:
+            raise ValueError(
+                "SanitizedDatabaseUrl cannot contain a password in the URL. Use SanitizedDatabaseUrl.from_raw_url() to sanitize first."
+            )
+
     @classmethod
     def from_raw_url(
         cls,
@@ -117,6 +126,33 @@ class SanitizedWebhookUrl:
 
     sanitized_url: str
     fingerprint: str | None  # None if original had no secrets
+
+    def __post_init__(self) -> None:
+        """Enforce invariant: sanitized_url must not contain credentials."""
+        parsed = urlparse(self.sanitized_url)
+        # Check for password in netloc (Basic Auth)
+        if parsed.password:
+            raise ValueError(
+                "SanitizedWebhookUrl cannot contain a password in the URL. Use SanitizedWebhookUrl.from_raw_url() to sanitize first."
+            )
+        # Check for sensitive query parameters
+        query_params = parse_qs(parsed.query, keep_blank_values=True)
+        sensitive_in_query = [k for k in query_params if k.lower() in SENSITIVE_PARAMS]
+        if sensitive_in_query:
+            raise ValueError(
+                f"SanitizedWebhookUrl cannot contain sensitive query parameters: "
+                f"{sensitive_in_query}. "
+                f"Use SanitizedWebhookUrl.from_raw_url() to sanitize first."
+            )
+        # Check for sensitive fragment parameters
+        fragment_params = parse_qs(parsed.fragment, keep_blank_values=True)
+        sensitive_in_fragment = [k for k in fragment_params if k.lower() in SENSITIVE_PARAMS]
+        if sensitive_in_fragment:
+            raise ValueError(
+                f"SanitizedWebhookUrl cannot contain sensitive fragment parameters: "
+                f"{sensitive_in_fragment}. "
+                f"Use SanitizedWebhookUrl.from_raw_url() to sanitize first."
+            )
 
     @classmethod
     def from_raw_url(
@@ -207,8 +243,11 @@ class SanitizedWebhookUrl:
                 have_key = False
 
             if have_key:
-                # Sort for deterministic fingerprint regardless of param order
-                combined = "|".join(sorted(sensitive_values))
+                # Use canonical JSON array encoding for unambiguous fingerprinting.
+                # Pipe-delimited join is collision-prone: "a|b" as one value
+                # collides with "a" and "b" as two values. JSON array encoding
+                # preserves structural boundaries between values.
+                combined = json_module.dumps(sorted(sensitive_values), separators=(",", ":"))
                 fingerprint = secret_fingerprint(combined)
             elif fail_if_no_key:
                 raise SecretFingerprintError(

@@ -28,6 +28,8 @@ class SchemaCompatibilityError(Exception):
 # Used by _validate_schema() to detect outdated SQLite databases.
 _REQUIRED_COLUMNS: list[tuple[str, str]] = [
     ("tokens", "expand_group_id"),
+    # Added for run ownership — prevents cross-run contamination of token-linked records
+    ("tokens", "run_id"),
     # Added for composite FK to nodes (node_id, run_id) - enables run-isolated queries
     ("node_states", "run_id"),
     # Field resolution audit trail - captures original→final header mapping
@@ -92,6 +94,7 @@ class LandscapeDB:
         self._passphrase = passphrase
         self._engine: Engine | None = None
         self._journal: LandscapeJournal | None = None
+        self._require_existing_schema = False
         if dump_to_jsonl:
             journal_path = dump_to_jsonl_path or self._derive_journal_path(connection_string)
             self._journal = LandscapeJournal(
@@ -291,6 +294,17 @@ class LandscapeDB:
 
         # If this looks like an existing Landscape database, all known tables must exist.
         # For brand-new DB files (no Landscape tables yet), creation happens in create_all().
+        #
+        # If _require_existing_schema is set (create_tables=False callers like MCP/CLI),
+        # we require at least some Landscape tables to be present. An empty/non-Landscape
+        # DB with create_tables=False would fail later with raw SQL errors — fail fast instead.
+        if self._require_existing_schema and not present_landscape_tables:
+            raise SchemaCompatibilityError(
+                "Database does not contain any Landscape tables.\n\n"
+                "This does not appear to be an ELSPETH audit database. "
+                "Verify the database path is correct.\n\n"
+                f"Database: {self.connection_string}"
+            )
         missing_tables = sorted(expected_tables - existing_tables) if present_landscape_tables else []
 
         missing_columns: list[tuple[str, str]] = []
@@ -385,8 +399,10 @@ class LandscapeDB:
         metadata.create_all(engine)
         instance = cls.__new__(cls)
         instance.connection_string = "sqlite:///:memory:"
+        instance._passphrase = None
         instance._engine = engine
         instance._journal = None
+        instance._require_existing_schema = False
         return instance
 
     @classmethod
@@ -443,6 +459,10 @@ class LandscapeDB:
                 payload_base_path=dump_to_jsonl_payload_base_path,
             )
             instance._journal.attach(engine)
+
+        # When create_tables=False, require existing Landscape schema.
+        # Otherwise a wrong/empty DB passes validation and fails on first query.
+        instance._require_existing_schema = not create_tables
 
         # Validate BEFORE create_all - catches old schema with missing columns
         # before we try to use it. For fresh DBs, validation passes (no tables yet).

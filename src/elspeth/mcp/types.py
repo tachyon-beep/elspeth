@@ -580,7 +580,7 @@ class ContractViolationRecord(TypedDict):
     error: str
     schema_mode: str
     destination: str
-    created_at: str | None
+    created_at: str
 
 
 class ContractViolationsReport(TypedDict):

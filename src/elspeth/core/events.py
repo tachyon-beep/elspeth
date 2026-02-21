@@ -80,7 +80,7 @@ class EventBus:
                 target="settings.yaml"
             ))
         """
-        handlers = self._subscribers.get(type(event), [])
+        handlers = tuple(self._subscribers.get(type(event), ()))
         for handler in handlers:
             handler(event)
 

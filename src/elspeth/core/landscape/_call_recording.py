@@ -16,6 +16,7 @@ from elspeth.contracts import (
     FrameworkBugError,
     Operation,
 )
+from elspeth.contracts.errors import AuditIntegrityError
 from elspeth.core.canonical import canonical_json, stable_hash
 from elspeth.core.landscape._helpers import generate_id, now
 from elspeth.core.landscape.schema import (
@@ -215,7 +216,7 @@ class CallRecordingMixin:
 
         input_ref = None
         input_hash = None
-        if input_data:
+        if input_data is not None:
             input_hash = stable_hash(input_data)
             if self._payload_store is not None:
                 input_bytes = canonical_json(input_data).encode("utf-8")
@@ -262,7 +263,7 @@ class CallRecordingMixin:
         # Payload storage is deferred until AFTER the status check succeeds
         # to avoid orphaned blobs on duplicate-completion races or invalid IDs.
         timestamp = now()
-        output_hash = stable_hash(output_data) if output_data else None
+        output_hash = stable_hash(output_data) if output_data is not None else None
         stmt = (
             operations_table.update()
             .where((operations_table.c.operation_id == operation_id) & (operations_table.c.status == "open"))
@@ -286,7 +287,7 @@ class CallRecordingMixin:
                 )
 
             # Store payload only after confirming the operation row was updated
-            if output_data and self._payload_store is not None:
+            if output_data is not None and self._payload_store is not None:
                 output_bytes = canonical_json(output_data).encode("utf-8")
                 output_ref = self._payload_store.store(output_bytes)
                 conn.execute(
@@ -590,8 +591,12 @@ class CallRecordingMixin:
 
         try:
             payload_bytes = self._payload_store.retrieve(row.response_ref)
-            data: dict[str, Any] = json.loads(payload_bytes.decode("utf-8"))
-            return data
+            decoded = json.loads(payload_bytes.decode("utf-8"))
+            if type(decoded) is not dict:
+                raise AuditIntegrityError(
+                    f"Corrupt call response payload (ref={row.response_ref}): expected JSON object, got {type(decoded).__name__}"
+                )
+            return decoded
         except KeyError:
             # Payload has been purged
             return None

@@ -453,6 +453,155 @@ class TestPublicAPI:
         assert isinstance(CANONICAL_VERSION, str)
 
 
+class TestSanitizeForCanonical:
+    """Regression: sanitize_for_canonical must handle tuples and numpy floats.
+
+    The sanitizer is used at Tier-3 quarantine boundaries to replace non-finite
+    floats with None so quarantined data can still be hashed.
+    """
+
+    def test_sanitize_tuple_with_nan(self) -> None:
+        """Tuples containing NaN are sanitized (NaN replaced with None)."""
+        from elspeth.core.canonical import sanitize_for_canonical
+
+        result = sanitize_for_canonical({"x": (1.0, float("nan"), 3.0)})
+        assert result == {"x": [1.0, None, 3.0]}
+
+    def test_sanitize_tuple_with_infinity(self) -> None:
+        """Tuples containing Infinity are sanitized."""
+        from elspeth.core.canonical import sanitize_for_canonical
+
+        result = sanitize_for_canonical({"x": (float("inf"),)})
+        assert result == {"x": [None]}
+
+    def test_sanitize_nested_tuple(self) -> None:
+        """Nested tuples are recursively sanitized."""
+        from elspeth.core.canonical import sanitize_for_canonical
+
+        result = sanitize_for_canonical({"outer": (1.0, (float("-inf"), 2.0))})
+        assert result == {"outer": [1.0, [None, 2.0]]}
+
+    def test_sanitize_numpy_float_nan(self) -> None:
+        """numpy float32/64 NaN values are replaced with None."""
+        from elspeth.core.canonical import sanitize_for_canonical
+
+        result = sanitize_for_canonical({"x": np.float32("nan")})
+        assert result == {"x": None}
+
+        result = sanitize_for_canonical({"x": np.float64("inf")})
+        assert result == {"x": None}
+
+    def test_sanitize_numpy_finite_unchanged(self) -> None:
+        """Finite numpy floats are NOT replaced."""
+        from elspeth.core.canonical import sanitize_for_canonical
+
+        result = sanitize_for_canonical({"x": np.float64(3.14)})
+        assert result == {"x": np.float64(3.14)}
+
+    def test_sanitize_dict_with_mixed_nan(self) -> None:
+        """Mixed dict values are sanitized correctly."""
+        from elspeth.core.canonical import sanitize_for_canonical
+
+        data = {"a": 1, "b": float("nan"), "c": "ok", "d": None}
+        result = sanitize_for_canonical(data)
+        assert result == {"a": 1, "b": None, "c": "ok", "d": None}
+
+    def test_sanitize_list_with_nan(self) -> None:
+        """Lists containing NaN are sanitized."""
+        from elspeth.core.canonical import sanitize_for_canonical
+
+        result = sanitize_for_canonical([1.0, float("nan"), 3.0])
+        assert result == [1.0, None, 3.0]
+
+    def test_sanitize_finite_floats_unchanged(self) -> None:
+        """Finite floats pass through unchanged."""
+        from elspeth.core.canonical import sanitize_for_canonical
+
+        result = sanitize_for_canonical({"x": 3.14, "y": 0.0, "z": -1.5})
+        assert result == {"x": 3.14, "y": 0.0, "z": -1.5}
+
+
+class TestNumpyDatetime64Normalization:
+    """np.datetime64 values must be normalized to ISO 8601 strings.
+
+    BUG FIX: P1-2026-02-14 — np.datetime64 could pass schema validation
+    (contract layer treats it as datetime) but crashed canonical hashing
+    because _normalize_value had no branch for it.
+    """
+
+    def test_np_datetime64_converts_to_iso_string(self) -> None:
+        """np.datetime64 with a valid date converts to UTC ISO 8601."""
+        from elspeth.core.canonical import _normalize_value
+
+        result = _normalize_value(np.datetime64("2024-01-01"))
+        assert isinstance(result, str)
+        assert "2024-01-01" in result
+        assert "+00:00" in result  # UTC timezone
+
+    def test_np_datetime64_with_time_converts_to_iso_string(self) -> None:
+        """np.datetime64 with datetime precision converts correctly."""
+        from elspeth.core.canonical import _normalize_value
+
+        result = _normalize_value(np.datetime64("2024-06-15T10:30:00"))
+        assert isinstance(result, str)
+        assert "2024-06-15" in result
+        assert "10:30:00" in result
+
+    def test_np_datetime64_nat_converts_to_none(self) -> None:
+        """np.datetime64('NaT') must convert to None (missing value)."""
+        from elspeth.core.canonical import _normalize_value
+
+        result = _normalize_value(np.datetime64("NaT"))
+        assert result is None
+
+    def test_np_datetime64_stable_hash_deterministic(self) -> None:
+        """np.datetime64 values must produce stable hashes."""
+        from elspeth.core.canonical import stable_hash
+
+        data1 = {"event_time": np.datetime64("2024-01-01")}
+        data2 = {"event_time": np.datetime64("2024-01-01")}
+
+        assert stable_hash(data1) == stable_hash(data2)
+
+    def test_np_datetime64_matches_pd_timestamp_hash(self) -> None:
+        """np.datetime64 and pd.Timestamp for same date produce same hash."""
+        from elspeth.core.canonical import stable_hash
+
+        np_data = {"event_time": np.datetime64("2024-01-01")}
+        pd_data = {"event_time": pd.Timestamp("2024-01-01")}
+
+        assert stable_hash(np_data) == stable_hash(pd_data)
+
+    def test_np_datetime64_canonical_json_succeeds(self) -> None:
+        """canonical_json should handle np.datetime64 without error."""
+        from elspeth.core.canonical import canonical_json
+
+        result = canonical_json({"ts": np.datetime64("2024-03-15T08:00:00")})
+        assert isinstance(result, str)
+        assert "2024-03-15" in result
+
+    def test_np_datetime64_nat_in_nested_structure(self) -> None:
+        """NaT in nested structures normalizes to null in canonical JSON."""
+        from elspeth.core.canonical import canonical_json
+
+        result = canonical_json({"values": [np.datetime64("2024-01-01"), np.datetime64("NaT")]})
+        assert "null" in result
+
+    def test_np_datetime64_in_dict_with_other_types(self) -> None:
+        """np.datetime64 works alongside other numpy/pandas types."""
+        from elspeth.core.canonical import _normalize_for_canonical
+
+        data = {
+            "timestamp": np.datetime64("2024-01-01"),
+            "count": np.int64(42),
+            "rate": np.float64(3.14),
+        }
+        result = _normalize_for_canonical(data)
+        assert isinstance(result["timestamp"], str)
+        assert result["count"] == 42
+        assert result["rate"] == 3.14
+
+
 class TestCoreIntegration:
     """Core module integration - all Phase 1 components exportable."""
 

@@ -66,7 +66,6 @@ from elspeth.core.landscape.recorder import LandscapeRecorder
 from elspeth.core.landscape.reproducibility import (
     ReproducibilityGrade,
     compute_grade,
-    set_run_grade,
     update_grade_after_purge,
 )
 from elspeth.core.landscape.row_data import RowDataResult, RowDataState
@@ -143,7 +142,6 @@ __all__ = [
     "rows_table",
     "runs_table",
     "serialize_datetime",
-    "set_run_grade",
     "token_parents_table",
     "tokens_table",
     "update_grade_after_purge",

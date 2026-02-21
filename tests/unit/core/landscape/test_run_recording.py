@@ -19,7 +19,8 @@ import json
 
 import pytest
 
-from elspeth.contracts import ExportStatus, NodeType, RunStatus
+from elspeth.contracts import ExportStatus, FieldContract, NodeType, RunStatus, SchemaContract
+from elspeth.contracts.errors import AuditIntegrityError
 from elspeth.contracts.schema import SchemaConfig
 from elspeth.core.landscape import LandscapeDB, LandscapeRecorder
 
@@ -118,6 +119,29 @@ class TestCompleteRun:
         )
         assert run.reproducibility_grade == "full_reproducible"
 
+    def test_rejects_non_terminal_status_running(self) -> None:
+        _db, recorder = _setup()
+        with pytest.raises(AuditIntegrityError, match="terminal status"):
+            recorder.complete_run("run-1", RunStatus.RUNNING)
+
+    def test_accepts_interrupted_status(self) -> None:
+        _db, recorder = _setup()
+        run = recorder.complete_run("run-1", RunStatus.INTERRUPTED)
+        assert run.status == RunStatus.INTERRUPTED
+        assert run.completed_at is not None
+
+    def test_accepts_completed_status(self) -> None:
+        _db, recorder = _setup()
+        run = recorder.complete_run("run-1", RunStatus.COMPLETED)
+        assert run.status == RunStatus.COMPLETED
+        assert run.completed_at is not None
+
+    def test_accepts_failed_status(self) -> None:
+        _db, recorder = _setup()
+        run = recorder.complete_run("run-1", RunStatus.FAILED)
+        assert run.status == RunStatus.FAILED
+        assert run.completed_at is not None
+
 
 class TestGetSourceSchema:
     """Tests for get_source_schema — retrieves source schema for resume."""
@@ -198,14 +222,14 @@ class TestSecretResolutions:
                 "secret_name": "api-key",
                 "timestamp": 1705320000.0,
                 "latency_ms": 150.0,
-                "fingerprint": "fp-hash-123",
+                "fingerprint": "a" * 64,
             },
         ]
         recorder.record_secret_resolutions("run-1", resolutions)
         results = recorder.get_secret_resolutions_for_run("run-1")
         assert len(results) == 1
         assert results[0].env_var_name == "API_KEY"
-        assert results[0].fingerprint == "fp-hash-123"
+        assert results[0].fingerprint == "a" * 64
         assert results[0].vault_url == "https://vault.example.com"
 
     def test_empty_resolutions(self) -> None:
@@ -292,3 +316,61 @@ class TestFinalizeRun:
         assert run.status == RunStatus.COMPLETED
         assert run.reproducibility_grade == "full_reproducible"
         assert run.completed_at is not None
+
+
+# ===========================================================================
+# Bug 7.3: Run contract hash verification
+# ===========================================================================
+
+
+class TestGetRunContractHashVerification:
+    """Tests for get_run_contract hash verification (Bug 7.3)."""
+
+    def _make_contract(self) -> SchemaContract:
+        return SchemaContract(
+            mode="FIXED",
+            fields=(
+                FieldContract(
+                    normalized_name="id",
+                    original_name="id",
+                    python_type=int,
+                    required=True,
+                    source="declared",
+                ),
+            ),
+            locked=True,
+        )
+
+    def test_get_run_contract_returns_contract(self) -> None:
+        """get_run_contract() round-trips a valid contract."""
+        _db, recorder = _setup()
+        contract = self._make_contract()
+        recorder.update_run_contract("run-1", contract)
+        restored = recorder.get_run_contract("run-1")
+        assert restored is not None
+        assert restored.mode == "FIXED"
+        assert len(restored.fields) == 1
+
+    def test_get_run_contract_verifies_hash(self) -> None:
+        """get_run_contract() raises AuditIntegrityError on hash mismatch (Bug 7.3)."""
+        from sqlalchemy import update
+
+        from elspeth.core.landscape.schema import runs_table
+
+        _db, recorder = _setup()
+        contract = self._make_contract()
+        recorder.update_run_contract("run-1", contract)
+
+        # Tamper with the stored hash
+        with _db.connection() as conn:
+            conn.execute(update(runs_table).where(runs_table.c.run_id == "run-1").values(schema_contract_hash="tampered_hash_value"))
+            conn.commit()
+
+        with pytest.raises(AuditIntegrityError, match="hash mismatch"):
+            recorder.get_run_contract("run-1")
+
+    def test_get_run_contract_returns_none_when_no_contract(self) -> None:
+        """get_run_contract() returns None when no contract stored."""
+        _db, recorder = _setup()
+        result = recorder.get_run_contract("run-1")
+        assert result is None

@@ -162,6 +162,48 @@ class TestBatchReplicateTypeEnforcement:
         with pytest.raises(TypeError, match="must be int, got NoneType"):
             transform.process(rows, ctx)
 
+    def test_bool_true_copies_raises_type_error(self, ctx: PluginContext) -> None:
+        """Bool True in copies field raises TypeError (not silently treated as 1).
+
+        Python's isinstance(True, int) returns True because bool is a subclass
+        of int. The fix uses `type(x) is int` for strict type checking, so
+        True/False are rejected as distinct logical types.
+        """
+        from elspeth.plugins.transforms.batch_replicate import BatchReplicate
+
+        transform = BatchReplicate(
+            {
+                "schema": DYNAMIC_SCHEMA,
+                "copies_field": "copies",
+            }
+        )
+
+        rows = [make_pipeline_row({"id": 1, "copies": True})]
+
+        with pytest.raises(TypeError, match="must be int, got bool"):
+            transform.process(rows, ctx)
+
+    def test_bool_false_copies_raises_type_error(self, ctx: PluginContext) -> None:
+        """Bool False in copies field raises TypeError (not silently treated as 0).
+
+        Without strict type checking, False would be treated as 0 copies,
+        which would then be quarantined as invalid (< 1). The bug is that
+        the type check passes at all - bool is not int for contract purposes.
+        """
+        from elspeth.plugins.transforms.batch_replicate import BatchReplicate
+
+        transform = BatchReplicate(
+            {
+                "schema": DYNAMIC_SCHEMA,
+                "copies_field": "copies",
+            }
+        )
+
+        rows = [make_pipeline_row({"id": 1, "copies": False})]
+
+        with pytest.raises(TypeError, match="must be int, got bool"):
+            transform.process(rows, ctx)
+
     def test_zero_copies_returns_error_when_all_invalid(self, ctx: PluginContext) -> None:
         """All rows with zero copies returns error result (no valid output to expand)."""
         from elspeth.plugins.transforms.batch_replicate import BatchReplicate
@@ -277,6 +319,20 @@ class TestBatchReplicateConfigValidation:
                 }
             )
 
+    def test_default_copies_above_max_rejected(self) -> None:
+        """Config with default_copies > max_copies is rejected at validation time."""
+        from elspeth.plugins.config_base import PluginConfigError
+        from elspeth.plugins.transforms.batch_replicate import BatchReplicate
+
+        with pytest.raises(PluginConfigError, match="exceeds max_copies"):
+            BatchReplicate(
+                {
+                    "schema": {"mode": "observed"},
+                    "default_copies": 11,
+                    "max_copies": 10,
+                }
+            )
+
 
 class TestBatchReplicateSchemaContract:
     """Schema contract tests."""
@@ -358,3 +414,55 @@ class TestBatchReplicateDeepCopy:
 
         second = result.rows[1].to_dict()
         assert "injected" not in second["meta"]
+
+
+class TestBatchReplicateDeclaredOutputFields:
+    """Tests for declared_output_fields — centralized collision detection support.
+
+    Field collision detection is enforced centrally by TransformExecutor
+    (see TestTransformExecutor in test_executors.py). These tests verify
+    that BatchReplicate correctly declares its output fields so the executor
+    can perform pre-execution collision checks.
+    """
+
+    def test_declared_output_fields_contains_copy_index_when_enabled(self) -> None:
+        """declared_output_fields includes copy_index when include_copy_index is True."""
+        from elspeth.plugins.transforms.batch_replicate import BatchReplicate
+
+        transform = BatchReplicate(
+            {
+                "schema": DYNAMIC_SCHEMA,
+                "copies_field": "copies",
+                "include_copy_index": True,
+            }
+        )
+
+        assert "copy_index" in transform.declared_output_fields
+
+    def test_declared_output_fields_empty_when_copy_index_disabled(self) -> None:
+        """declared_output_fields is empty when include_copy_index is False."""
+        from elspeth.plugins.transforms.batch_replicate import BatchReplicate
+
+        transform = BatchReplicate(
+            {
+                "schema": DYNAMIC_SCHEMA,
+                "copies_field": "copies",
+                "include_copy_index": False,
+            }
+        )
+
+        assert len(transform.declared_output_fields) == 0
+
+    def test_declared_output_fields_drives_schema_evolution(self) -> None:
+        """declared_output_fields is non-empty when include_copy_index=True, enabling schema evolution."""
+        from elspeth.plugins.transforms.batch_replicate import BatchReplicate
+
+        transform = BatchReplicate(
+            {
+                "schema": DYNAMIC_SCHEMA,
+                "copies_field": "copies",
+                "include_copy_index": True,
+            }
+        )
+
+        assert transform.declared_output_fields

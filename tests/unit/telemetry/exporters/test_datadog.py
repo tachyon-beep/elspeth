@@ -17,7 +17,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from elspeth.contracts import GateEvaluated, TokenCompleted
+from elspeth.contracts import GateEvaluated, TokenCompleted, TokenUsage
 from elspeth.contracts.enums import RoutingMode, RowOutcome, RunStatus
 from elspeth.contracts.events import (
     RunFinished,
@@ -507,7 +507,7 @@ class TestDatadogExporterTagSerialization:
             provider="azure-openai",
             status=CallStatus.SUCCESS,
             latency_ms=150.0,
-            token_usage={"prompt_tokens": 100, "completion_tokens": 50},
+            token_usage=TokenUsage(prompt_tokens=100, completion_tokens=50),
         )
         exporter.export(event)
 

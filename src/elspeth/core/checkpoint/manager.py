@@ -1,8 +1,10 @@
 """CheckpointManager for creating and loading checkpoints."""
 
+from __future__ import annotations
+
 import uuid
 from datetime import UTC, datetime
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 
 from sqlalchemy import asc, delete, desc, select
 
@@ -13,6 +15,7 @@ from elspeth.core.landscape.database import LandscapeDB
 from elspeth.core.landscape.schema import checkpoints_table
 
 if TYPE_CHECKING:
+    from elspeth.contracts.aggregation_checkpoint import AggregationCheckpointState
     from elspeth.core.dag import ExecutionGraph
 
 
@@ -57,8 +60,8 @@ class CheckpointManager:
         token_id: str,
         node_id: str,
         sequence_number: int,
-        graph: "ExecutionGraph",
-        aggregation_state: dict[str, Any] | None = None,
+        graph: ExecutionGraph,
+        aggregation_state: AggregationCheckpointState | None = None,
     ) -> Checkpoint:
         """Create a checkpoint at current progress point.
 
@@ -94,7 +97,7 @@ class CheckpointManager:
             # - NaN/Infinity rejection per CLAUDE.md audit integrity requirements
             # Note: We don't use canonical_json because it normalizes floats to integers,
             # breaking round-trip for aggregation state
-            agg_json = checkpoint_dumps(aggregation_state) if aggregation_state is not None else None
+            agg_json = checkpoint_dumps(aggregation_state.to_dict()) if aggregation_state is not None else None
 
             # Compute topology hashes INSIDE transaction (Bug #1 fix)
             # This ensures hash matches graph state at exact moment of checkpoint creation
@@ -157,18 +160,23 @@ class CheckpointManager:
         if result is None:
             return None
 
-        checkpoint = Checkpoint(
-            checkpoint_id=result.checkpoint_id,
-            run_id=result.run_id,
-            token_id=result.token_id,
-            node_id=result.node_id,
-            sequence_number=result.sequence_number,
-            created_at=result.created_at,
-            upstream_topology_hash=result.upstream_topology_hash,
-            checkpoint_node_config_hash=result.checkpoint_node_config_hash,
-            aggregation_state_json=result.aggregation_state_json,
-            format_version=result.format_version,  # None for legacy checkpoints
-        )
+        try:
+            checkpoint = Checkpoint(
+                checkpoint_id=result.checkpoint_id,
+                run_id=result.run_id,
+                token_id=result.token_id,
+                node_id=result.node_id,
+                sequence_number=result.sequence_number,
+                created_at=result.created_at,
+                upstream_topology_hash=result.upstream_topology_hash,
+                checkpoint_node_config_hash=result.checkpoint_node_config_hash,
+                aggregation_state_json=result.aggregation_state_json,
+                format_version=result.format_version,  # None for legacy checkpoints
+            )
+        except ValueError as e:
+            raise CheckpointCorruptionError(
+                f"Checkpoint corruption detected for run '{run_id}', checkpoint '{result.checkpoint_id}': {e}"
+            ) from e
 
         # Validate checkpoint compatibility before returning
         self._validate_checkpoint_compatibility(checkpoint)
@@ -189,21 +197,28 @@ class CheckpointManager:
                 select(checkpoints_table).where(checkpoints_table.c.run_id == run_id).order_by(asc(checkpoints_table.c.sequence_number))
             ).fetchall()
 
-        return [
-            Checkpoint(
-                checkpoint_id=r.checkpoint_id,
-                run_id=r.run_id,
-                token_id=r.token_id,
-                node_id=r.node_id,
-                sequence_number=r.sequence_number,
-                created_at=r.created_at,
-                upstream_topology_hash=r.upstream_topology_hash,
-                checkpoint_node_config_hash=r.checkpoint_node_config_hash,
-                aggregation_state_json=r.aggregation_state_json,
-                format_version=r.format_version,  # None for legacy checkpoints
-            )
-            for r in results
-        ]
+        checkpoints = []
+        for r in results:
+            try:
+                checkpoints.append(
+                    Checkpoint(
+                        checkpoint_id=r.checkpoint_id,
+                        run_id=r.run_id,
+                        token_id=r.token_id,
+                        node_id=r.node_id,
+                        sequence_number=r.sequence_number,
+                        created_at=r.created_at,
+                        upstream_topology_hash=r.upstream_topology_hash,
+                        checkpoint_node_config_hash=r.checkpoint_node_config_hash,
+                        aggregation_state_json=r.aggregation_state_json,
+                        format_version=r.format_version,  # None for legacy checkpoints
+                    )
+                )
+            except ValueError as e:
+                raise CheckpointCorruptionError(
+                    f"Checkpoint corruption detected for run '{run_id}', checkpoint '{r.checkpoint_id}': {e}"
+                ) from e
+        return checkpoints
 
     def delete_checkpoints(self, run_id: str) -> int:
         """Delete all checkpoints for a completed run.

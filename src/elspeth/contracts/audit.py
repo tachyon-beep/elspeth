@@ -140,6 +140,7 @@ class Token:
     expand_group_id: str | None = None  # For deaggregation grouping
     branch_name: str | None = None
     step_in_pipeline: int | None = None  # Step where token was created (fork/coalesce/expand)
+    run_id: str | None = None  # Run ownership — required in DB, optional in dataclass for backwards compat
 
 
 @dataclass
@@ -640,12 +641,37 @@ class Operation:
     _ALLOWED_STATUSES: ClassVar[frozenset[str]] = frozenset({"open", "completed", "failed", "pending"})
 
     def __post_init__(self) -> None:
-        """Validate constrained literal fields for Tier 1 audit integrity."""
+        """Validate constrained literal fields and lifecycle invariants for Tier 1 audit integrity.
+
+        Status-dependent invariants:
+        - open: completed_at, duration_ms, error_message must all be None
+        - completed: completed_at and duration_ms must be present, error_message must be None
+        - failed: completed_at and duration_ms must be present, error_message must be present
+        - pending: completed_at and duration_ms must be present
+        """
         if self.operation_type not in self._ALLOWED_OPERATION_TYPES:
             raise ValueError(f"operation_type must be one of {sorted(self._ALLOWED_OPERATION_TYPES)}, got {self.operation_type!r}")
 
         if self.status not in self._ALLOWED_STATUSES:
             raise ValueError(f"status must be one of {sorted(self._ALLOWED_STATUSES)}, got {self.status!r}")
+
+        # Lifecycle invariant validation — Tier 1 crash on impossible state combinations
+        if self.status == "open":
+            if self.completed_at is not None:
+                raise ValueError(f"Operation {self.operation_id!r}: status='open' but completed_at is set")
+            if self.duration_ms is not None:
+                raise ValueError(f"Operation {self.operation_id!r}: status='open' but duration_ms is set")
+            if self.error_message is not None:
+                raise ValueError(f"Operation {self.operation_id!r}: status='open' but error_message is set")
+        elif self.status in {"completed", "failed", "pending"}:
+            if self.completed_at is None:
+                raise ValueError(f"Operation {self.operation_id!r}: status={self.status!r} but completed_at is None")
+            if self.duration_ms is None:
+                raise ValueError(f"Operation {self.operation_id!r}: status={self.status!r} but duration_ms is None")
+            if self.status == "failed" and self.error_message is None:
+                raise ValueError(f"Operation {self.operation_id!r}: status='failed' but error_message is None")
+            if self.status == "completed" and self.error_message is not None:
+                raise ValueError(f"Operation {self.operation_id!r}: status='completed' but error_message is set")
 
     def to_dict(self) -> dict[str, Any]:
         """Convert to dict for database insertion.
@@ -692,6 +718,8 @@ class SecretResolution:
         resolution_latency_ms: Time to fetch from vault (None if not measured)
     """
 
+    _ALLOWED_SOURCES: ClassVar[frozenset[str]] = frozenset({"keyvault"})
+
     resolution_id: str
     run_id: str
     timestamp: float  # Epoch seconds - may be before run start
@@ -701,3 +729,46 @@ class SecretResolution:
     vault_url: str | None = None
     secret_name: str | None = None
     resolution_latency_ms: float | None = None
+
+    def __post_init__(self) -> None:
+        """Validate Tier 1 invariants for secret provenance records.
+
+        Per Data Manifesto: The audit database is OUR data. If we read
+        garbage from it, something catastrophic happened - crash immediately.
+
+        Invariants:
+        - resolution_id, run_id, env_var_name, source, fingerprint must be non-empty strings
+        - source must be a known value ('keyvault')
+        - fingerprint must be 64-char lowercase hex (HMAC-SHA256)
+        - timestamp must be finite
+        - resolution_latency_ms must be non-negative when present
+        - keyvault source requires non-empty vault_url and secret_name
+        """
+        import math
+
+        if not self.resolution_id:
+            raise ValueError("SecretResolution: resolution_id is required and cannot be empty")
+        if not self.run_id:
+            raise ValueError("SecretResolution: run_id is required and cannot be empty")
+        if not self.env_var_name:
+            raise ValueError("SecretResolution: env_var_name is required and cannot be empty")
+        if not self.source:
+            raise ValueError("SecretResolution: source is required and cannot be empty")
+        if self.source not in self._ALLOWED_SOURCES:
+            raise ValueError(f"SecretResolution: source must be one of {sorted(self._ALLOWED_SOURCES)}, got {self.source!r}")
+        if not self.fingerprint:
+            raise ValueError("SecretResolution: fingerprint is required and cannot be empty")
+        if len(self.fingerprint) != 64 or not all(c in "0123456789abcdef" for c in self.fingerprint):
+            raise ValueError(
+                f"SecretResolution: fingerprint must be 64-char lowercase hex (HMAC-SHA256), "
+                f"got {self.fingerprint!r} (length={len(self.fingerprint)})"
+            )
+        if not isinstance(self.timestamp, (int, float)) or math.isinf(self.timestamp) or math.isnan(self.timestamp):
+            raise ValueError(f"SecretResolution: timestamp must be a finite number, got {self.timestamp!r}")
+        if self.resolution_latency_ms is not None and self.resolution_latency_ms < 0:
+            raise ValueError(f"SecretResolution: resolution_latency_ms must be non-negative, got {self.resolution_latency_ms!r}")
+        if self.source == "keyvault":
+            if not self.vault_url:
+                raise ValueError("SecretResolution: vault_url is required when source='keyvault'")
+            if not self.secret_name:
+                raise ValueError("SecretResolution: secret_name is required when source='keyvault'")

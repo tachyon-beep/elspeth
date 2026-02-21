@@ -95,7 +95,7 @@ class PurgeManager:
             .select_from(rows_table.join(runs_table, rows_table.c.run_id == runs_table.c.run_id))
             .where(
                 and_(
-                    runs_table.c.status != "running",
+                    runs_table.c.status.in_(("completed", "failed")),
                     runs_table.c.completed_at.isnot(None),
                     runs_table.c.completed_at < cutoff,
                     rows_table.c.source_data_ref.isnot(None),
@@ -143,7 +143,7 @@ class PurgeManager:
         # Both "completed" and "failed" runs are eligible for purge once they're
         # past the retention period. Only "running" runs are excluded.
         run_expired_condition = and_(
-            runs_table.c.status != "running",
+            runs_table.c.status.in_(("completed", "failed")),
             runs_table.c.completed_at.isnot(None),
             runs_table.c.completed_at < cutoff,
         )
@@ -333,12 +333,19 @@ class PurgeManager:
         safe_to_delete = expired_refs - active_refs
         return list(safe_to_delete)
 
+    # SQLite default SQLITE_MAX_VARIABLE_NUMBER is 999. Chunk IN clauses
+    # to stay well under this limit (8 queries x chunk_size variables each).
+    _PURGE_CHUNK_SIZE = 100
+
     def _find_affected_run_ids(self, refs: list[str]) -> set[str]:
         """Find run IDs that have payloads in the given refs list.
 
         Queries all payload reference columns to find which runs are affected
         by purging the specified refs. Used to update reproducibility grades
         after purge completes.
+
+        Large ref lists are chunked to avoid exceeding SQLite's bind variable
+        limit (SQLITE_MAX_VARIABLE_NUMBER, default 999).
 
         Args:
             refs: List of payload references (content hashes) being purged
@@ -349,26 +356,34 @@ class PurgeManager:
         if not refs:
             return set()
 
-        refs_set = set(refs)
+        refs_list = list(set(refs))
+        all_run_ids: set[str] = set()
 
-        # Query all run_ids that have any of these refs
+        for offset in range(0, len(refs_list), self._PURGE_CHUNK_SIZE):
+            chunk = refs_list[offset : offset + self._PURGE_CHUNK_SIZE]
+            all_run_ids |= self._find_affected_run_ids_chunk(chunk)
+
+        return all_run_ids
+
+    def _find_affected_run_ids_chunk(self, refs_chunk: list[str]) -> set[str]:
+        """Find run IDs affected by a single chunk of refs."""
         # 1. From rows.source_data_ref
-        row_runs_query = select(rows_table.c.run_id).distinct().where(rows_table.c.source_data_ref.in_(refs_set))
+        row_runs_query = select(rows_table.c.run_id).distinct().where(rows_table.c.source_data_ref.in_(refs_chunk))
 
         # 2. From operations.input_data_ref and operations.output_data_ref
-        operation_input_runs_query = select(operations_table.c.run_id).distinct().where(operations_table.c.input_data_ref.in_(refs_set))
-        operation_output_runs_query = select(operations_table.c.run_id).distinct().where(operations_table.c.output_data_ref.in_(refs_set))
+        operation_input_runs_query = select(operations_table.c.run_id).distinct().where(operations_table.c.input_data_ref.in_(refs_chunk))
+        operation_output_runs_query = select(operations_table.c.run_id).distinct().where(operations_table.c.output_data_ref.in_(refs_chunk))
 
         # 3. From calls.request_ref and calls.response_ref (transform calls via state_id)
         # Use node_states.run_id directly (denormalized column)
         call_state_join = calls_table.join(node_states_table, calls_table.c.state_id == node_states_table.c.state_id)
 
         call_state_request_runs_query = (
-            select(node_states_table.c.run_id).distinct().select_from(call_state_join).where(calls_table.c.request_ref.in_(refs_set))
+            select(node_states_table.c.run_id).distinct().select_from(call_state_join).where(calls_table.c.request_ref.in_(refs_chunk))
         )
 
         call_state_response_runs_query = (
-            select(node_states_table.c.run_id).distinct().select_from(call_state_join).where(calls_table.c.response_ref.in_(refs_set))
+            select(node_states_table.c.run_id).distinct().select_from(call_state_join).where(calls_table.c.response_ref.in_(refs_chunk))
         )
 
         # 4. From calls.request_ref and calls.response_ref (source/sink calls via operation_id)
@@ -376,18 +391,18 @@ class PurgeManager:
         call_op_join = calls_table.join(operations_table, calls_table.c.operation_id == operations_table.c.operation_id)
 
         call_op_request_runs_query = (
-            select(operations_table.c.run_id).distinct().select_from(call_op_join).where(calls_table.c.request_ref.in_(refs_set))
+            select(operations_table.c.run_id).distinct().select_from(call_op_join).where(calls_table.c.request_ref.in_(refs_chunk))
         )
 
         call_op_response_runs_query = (
-            select(operations_table.c.run_id).distinct().select_from(call_op_join).where(calls_table.c.response_ref.in_(refs_set))
+            select(operations_table.c.run_id).distinct().select_from(call_op_join).where(calls_table.c.response_ref.in_(refs_chunk))
         )
 
         # 5. From routing_events.reason_ref
         routing_join = routing_events_table.join(node_states_table, routing_events_table.c.state_id == node_states_table.c.state_id)
 
         routing_runs_query = (
-            select(node_states_table.c.run_id).distinct().select_from(routing_join).where(routing_events_table.c.reason_ref.in_(refs_set))
+            select(node_states_table.c.run_id).distinct().select_from(routing_join).where(routing_events_table.c.reason_ref.in_(refs_chunk))
         )
 
         # Union all run_id queries

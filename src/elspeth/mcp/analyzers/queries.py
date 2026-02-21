@@ -345,11 +345,11 @@ def explain_token(
     result_dict = cast(dict[str, Any], _dataclass_to_dict(result))
 
     # Annotate routing_events with flow_type convenience field
-    for event in result_dict.get("routing_events", []):
-        event["flow_type"] = "divert" if event.get("mode") == "divert" else "normal"
+    for event in result_dict["routing_events"]:
+        event["flow_type"] = "divert" if event["mode"] == "divert" else "normal"
 
     # Build divert_summary from routing events
-    divert_events = [e for e in result_dict.get("routing_events", []) if e.get("mode") == "divert"]
+    divert_events = [e for e in result_dict["routing_events"] if e["mode"] == "divert"]
 
     if divert_events:
         divert_event = divert_events[-1]  # Last divert event is the terminal one
@@ -386,7 +386,14 @@ def get_errors(
 
     Returns:
         Errors grouped by type
+
+    Raises:
+        ValueError: If error_type is not "all", "validation", or "transform"
     """
+    valid_error_types = {"all", "validation", "transform"}
+    if error_type not in valid_error_types:
+        raise ValueError(f"Invalid error_type '{error_type}'. Must be one of: {', '.join(sorted(valid_error_types))}")
+
     from sqlalchemy import select
 
     from elspeth.core.landscape.schema import transform_errors_table, validation_errors_table
@@ -477,7 +484,11 @@ def get_node_states(
                 raise ValueError(f"Invalid status '{status}'. Valid: {valid}") from None
             query = query.where(node_states_table.c.status == status)
 
-        query = query.order_by(node_states_table.c.step_index)
+        query = query.order_by(
+            node_states_table.c.step_index,
+            node_states_table.c.attempt,
+            node_states_table.c.token_id,
+        )
         rows = conn.execute(query).fetchall()
 
     return [

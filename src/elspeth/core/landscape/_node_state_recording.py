@@ -30,6 +30,7 @@ from elspeth.core.landscape.schema import (
 
 if TYPE_CHECKING:
     from elspeth.contracts.errors import TransformSuccessReason
+    from elspeth.contracts.node_state_context import NodeStateContext
     from elspeth.contracts.payload_store import PayloadStore
     from elspeth.core.landscape._database_ops import DatabaseOps
     from elspeth.core.landscape.database import LandscapeDB
@@ -56,7 +57,6 @@ class NodeStateRecordingMixin:
         *,
         state_id: str | None = None,
         attempt: int = 0,
-        context_before: dict[str, Any] | None = None,
         quarantined: bool = False,
     ) -> NodeStateOpen:
         """Begin recording a node state (token visiting a node).
@@ -69,7 +69,6 @@ class NodeStateRecordingMixin:
             input_data: Input data for hashing
             state_id: Optional state ID (generated if not provided)
             attempt: Attempt number (0 for first attempt)
-            context_before: Optional context snapshot before processing
             quarantined: If True, input_data is Tier-3 external data that may
                 contain non-canonical values (NaN, Infinity). Uses repr_hash fallback.
 
@@ -86,8 +85,6 @@ class NodeStateRecordingMixin:
             input_hash = stable_hash(input_data)
         timestamp = now()
 
-        context_json = canonical_json(context_before) if context_before is not None else None
-
         state = NodeStateOpen(
             state_id=state_id,
             token_id=token_id,
@@ -96,7 +93,7 @@ class NodeStateRecordingMixin:
             attempt=attempt,
             status=NodeStateStatus.OPEN,
             input_hash=input_hash,
-            context_before_json=context_json,
+            context_before_json=None,
             started_at=timestamp,
         )
 
@@ -110,7 +107,6 @@ class NodeStateRecordingMixin:
                 attempt=state.attempt,
                 status=state.status.value,
                 input_hash=state.input_hash,
-                context_before_json=state.context_before_json,
                 started_at=state.started_at,
             )
         )
@@ -126,7 +122,7 @@ class NodeStateRecordingMixin:
         output_data: dict[str, Any] | list[dict[str, Any]] | None = None,
         duration_ms: float | None = None,
         error: ExecutionError | TransformErrorReason | CoalesceFailureReason | None = None,
-        context_after: dict[str, Any] | None = None,
+        context_after: NodeStateContext | None = None,
     ) -> NodeStatePending: ...
 
     @overload
@@ -139,7 +135,7 @@ class NodeStateRecordingMixin:
         duration_ms: float | None = None,
         error: ExecutionError | TransformErrorReason | CoalesceFailureReason | None = None,
         success_reason: TransformSuccessReason | None = None,
-        context_after: dict[str, Any] | None = None,
+        context_after: NodeStateContext | None = None,
     ) -> NodeStateCompleted: ...
 
     @overload
@@ -151,7 +147,7 @@ class NodeStateRecordingMixin:
         output_data: dict[str, Any] | list[dict[str, Any]] | None = None,
         duration_ms: float | None = None,
         error: ExecutionError | TransformErrorReason | CoalesceFailureReason | None = None,
-        context_after: dict[str, Any] | None = None,
+        context_after: NodeStateContext | None = None,
     ) -> NodeStateFailed: ...
 
     def complete_node_state(
@@ -163,7 +159,7 @@ class NodeStateRecordingMixin:
         duration_ms: float | None = None,
         error: ExecutionError | TransformErrorReason | CoalesceFailureReason | None = None,
         success_reason: TransformSuccessReason | None = None,
-        context_after: dict[str, Any] | None = None,
+        context_after: NodeStateContext | None = None,
     ) -> NodeStatePending | NodeStateCompleted | NodeStateFailed:
         """Complete a node state.
 
@@ -188,10 +184,16 @@ class NodeStateRecordingMixin:
         if duration_ms is None:
             raise ValueError("duration_ms is required when completing a node state")
 
+        if status == NodeStateStatus.COMPLETED and output_data is None:
+            raise ValueError("COMPLETED node state requires output_data (output_hash would be NULL)")
+
+        if status == NodeStateStatus.FAILED and error is None:
+            raise ValueError("FAILED node state requires error details")
+
         timestamp = now()
         output_hash = stable_hash(output_data) if output_data is not None else None
         error_json = canonical_json(error) if error is not None else None
-        context_json = canonical_json(context_after) if context_after is not None else None
+        context_json = canonical_json(context_after.to_dict()) if context_after is not None else None
         # Serialize success reason if provided (use canonical_json for audit consistency)
         success_reason_json = canonical_json(success_reason) if success_reason is not None else None
 
@@ -316,6 +318,9 @@ class NodeStateRecordingMixin:
         Returns:
             List of RoutingEvent models
         """
+        if not routes:
+            return []
+
         routing_group_id = generate_id()
         reason_hash = stable_hash(reason) if reason else None
         timestamp = now()

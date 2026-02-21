@@ -773,59 +773,6 @@ class TestFlushRemainingAggregationBuffers:
         assert result.rows_succeeded == 1
         assert len(pending["output"]) == 1
 
-    def test_checkpoint_callback_called_for_completed(self) -> None:
-        """checkpoint_callback is invoked for each completed token."""
-        token = make_token_info()
-        completed = Mock(outcome=RowOutcome.COMPLETED, token=token, sink_name="output")
-
-        agg_transform = _make_batch_transform(node_id="agg-1")
-        config = _make_config(
-            transforms=[agg_transform],
-            aggregation_settings={"agg-1": _make_agg_settings()},
-        )
-        processor = Mock()
-        processor.get_aggregation_buffer_count.return_value = 1
-        processor.handle_timeout_flush.return_value = ([completed], [])
-
-        pending = _make_pending()
-        callback = Mock()
-
-        flush_remaining_aggregation_buffers(
-            config=config,
-            processor=processor,
-            ctx=Mock(),
-            pending_tokens=pending,
-            checkpoint_callback=callback,
-        )
-
-        callback.assert_called_once_with(token)
-
-    def test_checkpoint_callback_not_called_for_failed(self) -> None:
-        """checkpoint_callback is NOT invoked for failed tokens."""
-        failed = Mock(outcome=RowOutcome.FAILED)
-
-        agg_transform = _make_batch_transform(node_id="agg-1")
-        config = _make_config(
-            transforms=[agg_transform],
-            aggregation_settings={"agg-1": _make_agg_settings()},
-        )
-        processor = Mock()
-        processor.get_aggregation_buffer_count.return_value = 1
-        processor.handle_timeout_flush.return_value = ([failed], [])
-
-        pending = _make_pending()
-        callback = Mock()
-
-        flush_remaining_aggregation_buffers(
-            config=config,
-            processor=processor,
-            ctx=Mock(),
-            pending_tokens=pending,
-            checkpoint_callback=callback,
-        )
-
-        callback.assert_not_called()
-
     def test_uses_end_of_source_trigger(self) -> None:
         """Flush uses END_OF_SOURCE trigger type."""
         agg_transform = _make_batch_transform(node_id="agg-1")
@@ -866,21 +813,18 @@ class TestFlushRemainingAggregationBuffers:
         processor.process_token.return_value = [downstream]
 
         pending = _make_pending()
-        callback = Mock()
 
         result = flush_remaining_aggregation_buffers(
             config=config,
             processor=processor,
             ctx=Mock(),
             pending_tokens=pending,
-            checkpoint_callback=callback,
         )
 
         assert result.rows_succeeded == 1
-        callback.assert_called_once_with(work_token)
 
-    def test_downstream_routed_with_checkpoint(self) -> None:
-        """ROUTED downstream outcome triggers checkpoint callback."""
+    def test_downstream_routed_tokens_counted(self) -> None:
+        """ROUTED downstream outcome is counted correctly."""
         work_item = _make_work_item()
         routed = _make_result(RowOutcome.ROUTED, sink_name="risk")
 
@@ -895,21 +839,18 @@ class TestFlushRemainingAggregationBuffers:
         processor.process_token.return_value = [routed]
 
         pending: dict[str, list[tuple[TokenInfo, PendingOutcome | None]]] = {"output": [], "risk": []}
-        callback = Mock()
 
         result = flush_remaining_aggregation_buffers(
             config=config,
             processor=processor,
             ctx=Mock(),
             pending_tokens=pending,
-            checkpoint_callback=callback,
         )
 
         assert result.rows_routed == 1
-        callback.assert_called_once()
 
-    def test_downstream_coalesced_with_checkpoint(self) -> None:
-        """COALESCED downstream outcome increments both counters + checkpoint."""
+    def test_downstream_coalesced_tokens_counted(self) -> None:
+        """COALESCED downstream outcome increments both counters."""
         work_item = _make_work_item()
         coalesced = _make_result(RowOutcome.COALESCED, sink_name="output")
 
@@ -924,44 +865,16 @@ class TestFlushRemainingAggregationBuffers:
         processor.process_token.return_value = [coalesced]
 
         pending = _make_pending()
-        callback = Mock()
 
         result = flush_remaining_aggregation_buffers(
             config=config,
             processor=processor,
             ctx=Mock(),
             pending_tokens=pending,
-            checkpoint_callback=callback,
         )
 
         assert result.rows_coalesced == 1
         assert result.rows_succeeded == 1
-        callback.assert_called_once()
-
-    def test_no_callback_when_none(self) -> None:
-        """No crash when checkpoint_callback is None."""
-        token = make_token_info()
-        completed = Mock(outcome=RowOutcome.COMPLETED, token=token, sink_name="output")
-
-        agg_transform = _make_batch_transform(node_id="agg-1")
-        config = _make_config(
-            transforms=[agg_transform],
-            aggregation_settings={"agg-1": _make_agg_settings()},
-        )
-        processor = Mock()
-        processor.get_aggregation_buffer_count.return_value = 1
-        processor.handle_timeout_flush.return_value = ([completed], [])
-
-        pending = _make_pending()
-
-        # No crash — checkpoint_callback=None is valid
-        flush_remaining_aggregation_buffers(
-            config=config,
-            processor=processor,
-            ctx=Mock(),
-            pending_tokens=pending,
-            checkpoint_callback=None,
-        )
 
     def test_branch_routing_for_completed_tokens(self) -> None:
         """Completed tokens route via result.sink_name, not branch_name."""
@@ -1218,13 +1131,3 @@ class TestRouteAggregationOutcome:
 
         with pytest.raises(OrchestrationInvariantError, match="missing sink_name"):
             _route_aggregation_outcome(result, pending)
-
-    def test_invokes_checkpoint_callback(self) -> None:
-        """Calls checkpoint_callback with the routed token after successful routing."""
-        result = _make_result(RowOutcome.COMPLETED, sink_name="output")
-        pending = _make_pending()
-        callback = Mock()
-
-        _route_aggregation_outcome(result, pending, checkpoint_callback=callback)
-
-        callback.assert_called_once_with(result.token)

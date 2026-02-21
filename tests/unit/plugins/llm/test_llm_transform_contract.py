@@ -7,6 +7,7 @@ from unittest.mock import MagicMock
 import pytest
 
 from elspeth.contracts.schema_contract import PipelineRow, SchemaContract
+from elspeth.contracts.token_usage import TokenUsage
 from elspeth.plugins.clients.llm import LLMResponse
 from elspeth.plugins.llm.base import BaseLLMTransform
 from elspeth.testing import make_field, make_row
@@ -33,7 +34,7 @@ class MockLLMTransform(BaseLLMTransform):
             self._mock_client.chat_completion.return_value = LLMResponse(
                 content=self.mock_response_content,
                 model="mock-model",
-                usage={"prompt_tokens": 10, "completion_tokens": 20},
+                usage=TokenUsage.known(10, 20),
                 latency_ms=100.0,
             )
         return self._mock_client

@@ -2,7 +2,10 @@ from __future__ import annotations
 
 import json
 
+import pytest
+
 from elspeth.contracts import NodeType
+from elspeth.contracts.errors import AuditIntegrityError
 from elspeth.contracts.schema import SchemaConfig
 from elspeth.core.canonical import stable_hash
 from elspeth.core.landscape import LandscapeDB, LandscapeRecorder
@@ -803,3 +806,188 @@ class TestGetTransformErrorsForRun:
         assert len(errors) == 5
         timestamps = [e.created_at for e in errors]
         assert timestamps == sorted(timestamps)
+
+
+# ===========================================================================
+# Bug 7.4: record_transform_error NaN fallback
+# ===========================================================================
+
+
+class TestRecordTransformErrorNaNFallback:
+    """Bug 7.4: NaN in error_details must not crash record_transform_error()."""
+
+    def test_nan_in_error_details_does_not_crash(self):
+        """error_details containing NaN should use repr-based fallback."""
+        _db, recorder = _setup_with_token()
+        error_id = recorder.record_transform_error(
+            run_id="run-1",
+            token_id="tok-1",
+            transform_id="transform-1",
+            row_data={"name": "test"},
+            error_details={"reason": "division_error", "field": "ratio", "error": "nan_result", "value": float("nan")},
+            destination="quarantine",
+        )
+        assert error_id.startswith("terr_")
+
+        # Verify the error was stored
+        errors = recorder.get_transform_errors_for_run("run-1")
+        assert len(errors) == 1
+        # The error_details_json should contain the fallback metadata
+        details = json.loads(errors[0].error_details_json)
+        assert details["__non_canonical__"] is True
+        assert "repr" in details
+
+    def test_infinity_in_error_details_does_not_crash(self):
+        """error_details containing Infinity should use repr-based fallback."""
+        _db, recorder = _setup_with_token()
+        error_id = recorder.record_transform_error(
+            run_id="run-1",
+            token_id="tok-1",
+            transform_id="transform-1",
+            row_data={"name": "test"},
+            error_details={"reason": "overflow", "field": "big", "error": "inf", "value": float("inf")},
+            destination="quarantine",
+        )
+        assert error_id.startswith("terr_")
+
+    def test_normal_error_details_still_uses_canonical_json(self):
+        """Normal error_details should still use canonical JSON (no fallback)."""
+        _db, recorder = _setup_with_token()
+        recorder.record_transform_error(
+            run_id="run-1",
+            token_id="tok-1",
+            transform_id="transform-1",
+            row_data={"name": "test"},
+            error_details={"reason": "parse_failed", "field": "date", "error": "invalid format"},
+            destination="quarantine",
+        )
+        errors = recorder.get_transform_errors_for_run("run-1")
+        assert len(errors) == 1
+        details = json.loads(errors[0].error_details_json)
+        # Normal JSON - no fallback metadata
+        assert "__non_canonical__" not in details
+        assert details["reason"] == "parse_failed"
+
+
+# ===========================================================================
+# Regression tests: P1-2026-02-14 record_transform_error cross-run prevention
+# ===========================================================================
+
+
+def _setup_two_runs_with_transform() -> tuple[LandscapeDB, LandscapeRecorder]:
+    """Set up a shared database with two runs, each with source + transform nodes."""
+    db = LandscapeDB.in_memory()
+    recorder = LandscapeRecorder(db)
+    for run_id in ("run-A", "run-B"):
+        recorder.begin_run(config={}, canonical_version="v1", run_id=run_id)
+        recorder.register_node(
+            run_id=run_id,
+            plugin_name="csv",
+            node_type=NodeType.SOURCE,
+            plugin_version="1.0",
+            config={},
+            node_id="source-0",
+            schema_config=_DYNAMIC_SCHEMA,
+        )
+        recorder.register_node(
+            run_id=run_id,
+            plugin_name="transform",
+            node_type=NodeType.TRANSFORM,
+            plugin_version="1.0",
+            config={},
+            node_id="transform-1",
+            schema_config=_DYNAMIC_SCHEMA,
+        )
+    return db, recorder
+
+
+class TestRecordTransformErrorCrossRunPrevention:
+    """P1-2026-02-14: record_transform_error must validate token/run ownership.
+
+    These tests verify that recording a transform error under the wrong run_id
+    raises AuditIntegrityError immediately, rather than silently corrupting
+    the audit trail.
+    """
+
+    def test_rejects_wrong_run_id(self):
+        """record_transform_error must crash if token belongs to a different run."""
+        _db, recorder = _setup_two_runs_with_transform()
+
+        # Create row and token in run-A
+        recorder.create_row("run-A", "source-0", 0, {"name": "test"}, row_id="row-A")
+        recorder.create_token("row-A", token_id="tok-A")
+
+        # Attempt to record error under run-B -- must crash
+        with pytest.raises(AuditIntegrityError, match="Cross-run contamination"):
+            recorder.record_transform_error(
+                run_id="run-B",
+                token_id="tok-A",
+                transform_id="transform-1",
+                row_data={"name": "test"},
+                error_details={"reason": "test_error", "field": "f", "error": "E"},
+                destination="quarantine",
+            )
+
+    def test_accepts_correct_run_id(self):
+        """record_transform_error must succeed when run_id matches token ownership."""
+        _db, recorder = _setup_with_token(run_id="run-1")
+
+        error_id = recorder.record_transform_error(
+            run_id="run-1",
+            token_id="tok-1",
+            transform_id="transform-1",
+            row_data={"name": "test"},
+            error_details={"reason": "test_error", "field": "f", "error": "E"},
+            destination="quarantine",
+        )
+        assert error_id.startswith("terr_")
+
+    def test_rejects_nonexistent_token(self):
+        """record_transform_error must crash if token does not exist."""
+        _db, recorder = _setup_with_token(run_id="run-1")
+
+        with pytest.raises(AuditIntegrityError, match="does not exist"):
+            recorder.record_transform_error(
+                run_id="run-1",
+                token_id="nonexistent-token",
+                transform_id="transform-1",
+                row_data={"name": "test"},
+                error_details={"reason": "test_error", "field": "f", "error": "E"},
+                destination="quarantine",
+            )
+
+    def test_schema_composite_fk_prevents_cross_run_error(self):
+        """Schema composite FK on transform_errors must reject mismatched (token_id, run_id).
+
+        Even if the application-level check were bypassed, the database constraint
+        should reject the insert.
+        """
+        from sqlalchemy.exc import IntegrityError as SAIntegrityError
+
+        from elspeth.core.landscape._helpers import generate_id, now
+        from elspeth.core.landscape.schema import transform_errors_table
+
+        _db, recorder = _setup_two_runs_with_transform()
+
+        # Create row and token in run-A
+        recorder.create_row("run-A", "source-0", 0, {"name": "test"}, row_id="row-A")
+        recorder.create_token("row-A", token_id="tok-A")
+
+        # Try to insert directly into transform_errors with mismatched (token_id, run_id)
+        # tok-A belongs to run-A, but we try to record under run-B
+        # The composite FK should reject this
+        row_data = {"name": "test"}
+        with pytest.raises(SAIntegrityError), _db.connection() as conn:
+            conn.execute(
+                transform_errors_table.insert().values(
+                    error_id=f"terr_{generate_id()[:12]}",
+                    run_id="run-B",
+                    token_id="tok-A",
+                    transform_id="transform-1",
+                    row_hash=stable_hash(row_data),
+                    row_data_json="{}",
+                    error_details_json="{}",
+                    destination="quarantine",
+                    created_at=now(),
+                )
+            )

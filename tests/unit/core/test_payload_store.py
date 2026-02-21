@@ -201,6 +201,62 @@ class TestFilesystemPayloadStore:
         assert corrupted_hash in str(exc_info.value)  # actual
 
 
+class TestPayloadStoreConcurrency:
+    """Bug 7.7: Concurrent writes to the same hash must not race on temp files."""
+
+    def test_concurrent_writes_same_hash(self, tmp_path: Path) -> None:
+        """Multiple threads writing the same content should all succeed."""
+        import concurrent.futures
+
+        from elspeth.core.payload_store import FilesystemPayloadStore
+
+        store = FilesystemPayloadStore(base_path=tmp_path)
+        content = b"concurrent content for deduplication test"
+        errors: list[Exception] = []
+
+        def _write() -> str:
+            try:
+                return store.store(content)
+            except Exception as e:
+                errors.append(e)
+                raise
+
+        with concurrent.futures.ThreadPoolExecutor(max_workers=8) as executor:
+            futures = [executor.submit(_write) for _ in range(20)]
+            results = [f.result() for f in futures]
+
+        # All writes should succeed and return the same hash
+        assert len(errors) == 0
+        assert all(r == results[0] for r in results)
+
+        # Content should be retrievable
+        assert store.retrieve(results[0]) == content
+
+    def test_concurrent_writes_different_hashes(self, tmp_path: Path) -> None:
+        """Concurrent writes of different content should all succeed."""
+        import concurrent.futures
+
+        from elspeth.core.payload_store import FilesystemPayloadStore
+
+        store = FilesystemPayloadStore(base_path=tmp_path)
+        errors: list[Exception] = []
+
+        def _write(i: int) -> str:
+            try:
+                return store.store(f"content_{i}".encode())
+            except Exception as e:
+                errors.append(e)
+                raise
+
+        with concurrent.futures.ThreadPoolExecutor(max_workers=8) as executor:
+            futures = [executor.submit(_write, i) for i in range(20)]
+            results = [f.result() for f in futures]
+
+        assert len(errors) == 0
+        # All hashes should be unique
+        assert len(set(results)) == 20
+
+
 class TestPayloadStoreSecurityValidation:
     """Security tests for content_hash validation and path containment.
 

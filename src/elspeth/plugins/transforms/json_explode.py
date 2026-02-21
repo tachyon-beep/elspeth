@@ -26,12 +26,10 @@ from pydantic import Field
 
 from elspeth.contracts.contract_propagation import narrow_contract_to_output
 from elspeth.contracts.plugin_context import PluginContext
-from elspeth.contracts.schema import SchemaConfig
 from elspeth.contracts.schema_contract import FieldContract, PipelineRow, SchemaContract
 from elspeth.plugins.base import BaseTransform
 from elspeth.plugins.config_base import DataPluginConfig, PluginConfigError
 from elspeth.plugins.results import TransformResult
-from elspeth.plugins.schema_factory import create_schema_from_config
 
 
 class JSONExplodeConfig(DataPluginConfig):
@@ -110,19 +108,16 @@ class JSONExplode(BaseTransform):
         self._output_field = cfg.output_field
         self._include_index = cfg.include_index
 
-        # Input schema from config for validation
-        self.input_schema = create_schema_from_config(cfg.schema_config, "JSONExplodeInputSchema", allow_coercion=False)
+        # Declare output fields for centralized collision detection in TransformExecutor.
+        fields = [cfg.output_field]
+        if cfg.include_index:
+            fields.append("item_index")
+        self.declared_output_fields = frozenset(fields)
 
-        # Output schema MUST be dynamic because JSONExplode changes row shape:
-        # - Removes array_field
-        # - Adds output_field (e.g., "item")
-        # - Adds item_index (if include_index=True)
-        # The output shape depends on config, not input schema.
-        # Per P1-2026-01-19-shape-changing-transforms-output-schema-mismatch
-        self.output_schema = create_schema_from_config(
-            SchemaConfig.from_dict({"mode": "observed"}),
-            "JSONExplodeOutputSchema",
-            allow_coercion=False,
+        self.input_schema, self.output_schema = self._create_schemas(
+            cfg.schema_config,
+            "JSONExplode",
+            adds_fields=True,
         )
 
     def process(self, row: PipelineRow, ctx: PluginContext) -> TransformResult:
@@ -195,6 +190,14 @@ class JSONExplode(BaseTransform):
                         f"row {i} has fields {sorted(row_keys)}"
                     )
 
+        # Determine the contract type for the output field.
+        # If the exploded array contains heterogeneous types (e.g., ["a", {"k": 1}]),
+        # the output field type must be `object` (the universal type) rather than
+        # the type inferred from only the first element. This prevents downstream
+        # components from relying on a contract type that doesn't hold for all rows.
+        item_types = {type(item) for item in array_value}
+        output_field_is_heterogeneous = len(item_types) > 1
+
         # Update contract using first output row (all rows have same schema)
         output_contract = narrow_contract_to_output(
             input_contract=row.contract,
@@ -213,6 +216,26 @@ class JSONExplode(BaseTransform):
                         source="inferred",
                     ),
                 ),
+                locked=True,
+            )
+        elif output_field_is_heterogeneous:
+            # Override the inferred type to `object` when items have mixed types.
+            # narrow_contract_to_output inferred the type from the first element only,
+            # which would be wrong for subsequent rows with different element types.
+            patched_fields = tuple(
+                FieldContract(
+                    normalized_name=fc.normalized_name,
+                    original_name=fc.original_name,
+                    python_type=object if fc.normalized_name == self._output_field else fc.python_type,
+                    required=fc.required,
+                    source=fc.source,
+                    nullable=fc.nullable,
+                )
+                for fc in output_contract.fields
+            )
+            output_contract = SchemaContract(
+                mode=output_contract.mode,
+                fields=patched_fields,
                 locked=True,
             )
 

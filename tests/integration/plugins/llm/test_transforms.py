@@ -24,6 +24,7 @@ import httpx
 import pytest
 
 from elspeth.contracts import BatchPendingError, CallStatus, CallType, NodeType
+from elspeth.contracts.batch_checkpoint import BatchCheckpointState, RowMappingEntry
 from elspeth.contracts.identity import TokenInfo
 from elspeth.contracts.plugin_context import PluginContext
 from elspeth.contracts.schema import SchemaConfig
@@ -634,7 +635,7 @@ class TestAzureBatchLLMTransformIntegration:
         """Create plugin context for testing.
 
         PluginContext now has native checkpoint support via
-        get_checkpoint/update_checkpoint/clear_checkpoint methods.
+        get_checkpoint/set_checkpoint/clear_checkpoint methods.
         """
         return PluginContext(run_id="test-run", config={})
 
@@ -680,14 +681,13 @@ class TestAzureBatchLLMTransformIntegration:
         assert error.batch_id == "batch-xyz789"
         assert error.status == "submitted"
 
-        # Verify checkpoint was saved
+        # Verify checkpoint was saved as typed BatchCheckpointState
         checkpoint = ctx_with_checkpoint._checkpoint  # type: ignore[attr-defined]
-        assert checkpoint["batch_id"] == "batch-xyz789"
-        assert checkpoint["input_file_id"] == "file-abc123"
-        assert checkpoint["row_count"] == 3
-        assert "row_mapping" in checkpoint
-        assert len(checkpoint["row_mapping"]) == 3
-        assert "submitted_at" in checkpoint
+        assert checkpoint.batch_id == "batch-xyz789"
+        assert checkpoint.input_file_id == "file-abc123"
+        assert checkpoint.row_count == 3
+        assert len(checkpoint.row_mapping) == 3
+        assert checkpoint.submitted_at  # non-empty ISO string
 
     def test_batch_resume_and_completion_flow(self, transform: AzureBatchLLMTransform) -> None:
         """Verify batch resume downloads results and maps to correct rows."""
@@ -696,24 +696,24 @@ class TestAzureBatchLLMTransformIntegration:
         # Set up context with existing checkpoint for resume test
         ctx = PluginContext(run_id="test-run", config={})
         recent_timestamp = datetime.now(UTC).isoformat()
-        ctx._checkpoint.update(
-            {
-                "batch_id": "batch-xyz789",
-                "input_file_id": "file-abc123",
-                "row_mapping": {
-                    "row-0-aaa": {"index": 0, "variables_hash": "hash0"},
-                    "row-1-bbb": {"index": 1, "variables_hash": "hash1"},
-                    "row-2-ccc": {"index": 2, "variables_hash": "hash2"},
+        ctx.set_checkpoint(
+            BatchCheckpointState(
+                batch_id="batch-xyz789",
+                input_file_id="file-abc123",
+                row_mapping={
+                    "row-0-aaa": RowMappingEntry(index=0, variables_hash="hash0"),
+                    "row-1-bbb": RowMappingEntry(index=1, variables_hash="hash1"),
+                    "row-2-ccc": RowMappingEntry(index=2, variables_hash="hash2"),
                 },
-                "template_errors": [],
-                "submitted_at": recent_timestamp,
-                "row_count": 3,
-                "requests": {
+                template_errors=[],
+                submitted_at=recent_timestamp,
+                row_count=3,
+                requests={
                     "row-0-aaa": {"messages": [{"role": "user", "content": "a"}], "model": "test-model"},
                     "row-1-bbb": {"messages": [{"role": "user", "content": "b"}], "model": "test-model"},
                     "row-2-ccc": {"messages": [{"role": "user", "content": "c"}], "model": "test-model"},
                 },
-            }
+            )
         )
 
         # Mock completed batch
@@ -787,8 +787,8 @@ class TestAzureBatchLLMTransformIntegration:
         assert result.rows[2]["llm_response"] == "Result C"
         assert result.rows[2]["text"] == "Item C"
 
-        # Checkpoint should be cleared
-        assert ctx._checkpoint == {}  # type: ignore[attr-defined]
+        # Checkpoint should be cleared (None after clear_checkpoint)
+        assert ctx._checkpoint is None  # type: ignore[attr-defined]
 
     def test_batch_partial_template_failures(self, ctx_with_checkpoint: PluginContext, transform: AzureBatchLLMTransform) -> None:
         """Verify partial template failures are tracked and results assembled."""
@@ -817,12 +817,11 @@ class TestAzureBatchLLMTransformIntegration:
 
         # Checkpoint should track template errors
         checkpoint = ctx_with_checkpoint._checkpoint  # type: ignore[attr-defined]
-        assert "template_errors" in checkpoint
-        assert len(checkpoint["template_errors"]) == 1
-        assert checkpoint["template_errors"][0][0] == 1  # Index of failed row
+        assert len(checkpoint.template_errors) == 1
+        assert checkpoint.template_errors[0][0] == 1  # Index of failed row
 
         # row_mapping should only have valid rows
-        assert len(checkpoint["row_mapping"]) == 2
+        assert len(checkpoint.row_mapping) == 2
 
     def test_batch_api_error_per_row_handled(self, transform: AzureBatchLLMTransform) -> None:
         """Verify per-row API errors are included in results."""
@@ -831,22 +830,22 @@ class TestAzureBatchLLMTransformIntegration:
         ctx = PluginContext(run_id="test-run", config={})
         # Pre-populate checkpoint for resume test
         recent_timestamp = datetime.now(UTC).isoformat()
-        ctx._checkpoint.update(
-            {
-                "batch_id": "batch-xyz789",
-                "input_file_id": "file-abc123",
-                "row_mapping": {
-                    "row-0-aaa": {"index": 0, "variables_hash": "hash0"},
-                    "row-1-bbb": {"index": 1, "variables_hash": "hash1"},
+        ctx.set_checkpoint(
+            BatchCheckpointState(
+                batch_id="batch-xyz789",
+                input_file_id="file-abc123",
+                row_mapping={
+                    "row-0-aaa": RowMappingEntry(index=0, variables_hash="hash0"),
+                    "row-1-bbb": RowMappingEntry(index=1, variables_hash="hash1"),
                 },
-                "template_errors": [],
-                "submitted_at": recent_timestamp,
-                "row_count": 2,
-                "requests": {
+                template_errors=[],
+                submitted_at=recent_timestamp,
+                row_count=2,
+                requests={
                     "row-0-aaa": {"messages": [{"role": "user", "content": "a"}], "model": "test-model"},
                     "row-1-bbb": {"messages": [{"role": "user", "content": "b"}], "model": "test-model"},
                 },
-            }
+            )
         )
 
         mock_client = Mock()
@@ -973,7 +972,7 @@ class TestAuditedLLMClientIntegration:
         # Verify response
         assert response.content == "Test response"
         assert response.model == "gpt-4"
-        assert response.usage["prompt_tokens"] == 10
+        assert response.usage.prompt_tokens == 10
 
         # Verify audit trail
         calls = recorder.get_calls(state_id)

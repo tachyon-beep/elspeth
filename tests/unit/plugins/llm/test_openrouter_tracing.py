@@ -10,6 +10,7 @@ from unittest.mock import MagicMock, patch
 
 from elspeth.contracts import TransformResult
 from elspeth.contracts.schema_contract import FieldContract, PipelineRow, SchemaContract
+from elspeth.contracts.token_usage import TokenUsage
 from elspeth.plugins.llm.openrouter import OpenRouterConfig, OpenRouterLLMTransform
 from elspeth.plugins.llm.openrouter_multi_query import (
     OpenRouterMultiQueryConfig,
@@ -374,7 +375,7 @@ class TestLangfuseSpanCreation:
             prompt="Hello world",
             response_content="Hi there!",
             model="anthropic/claude-3-opus",
-            usage={"prompt_tokens": 10, "completion_tokens": 5, "total_tokens": 15},
+            usage=TokenUsage.known(10, 5),
             latency_ms=150.0,
         )
 

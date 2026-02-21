@@ -241,14 +241,13 @@ class TestFieldMapper:
         with pytest.raises(PluginConfigError, match="schema"):
             FieldMapper({"mapping": {"a": "b"}})
 
-    def test_validate_input_rejects_wrong_type(self, ctx: PluginContext) -> None:
-        """validate_input=True crashes on wrong types (upstream bug).
+    def test_validate_input_attribute_set_from_config(self) -> None:
+        """validate_input=True is stored as attribute for executor enforcement.
 
-        Per three-tier trust model: transforms use allow_coercion=False,
-        so string "42" is NOT coerced to int 42 - it raises ValidationError.
+        Input validation is centralized in TransformExecutor. This test verifies
+        the plugin correctly sets the attribute from config so the executor can
+        check it before calling process().
         """
-        from pydantic import ValidationError
-
         from elspeth.plugins.transforms.field_mapper import FieldMapper
 
         transform = FieldMapper(
@@ -259,8 +258,7 @@ class TestFieldMapper:
             }
         )
 
-        with pytest.raises(ValidationError):
-            transform.process(make_pipeline_row({"count": "not_an_int"}), ctx)
+        assert transform.validate_input is True
 
     def test_validate_input_disabled_passes_wrong_type(self, ctx: PluginContext) -> None:
         """validate_input=False (default) passes wrong types through.
@@ -302,6 +300,94 @@ class TestFieldMapper:
         # Any data passes with dynamic schema
         result = transform.process(make_pipeline_row({"anything": "goes", "count": "string"}), ctx)
         assert result.status == "success"
+
+
+class TestFieldMapperDuplicateTargetRejection:
+    """Tests for duplicate target field name rejection.
+
+    When multiple source fields map to the same target, the last write wins
+    and earlier values are silently lost. This also corrupts contract metadata
+    (type/original_name lineage from the wrong source field). The fix rejects
+    such mappings at config time.
+    """
+
+    def test_duplicate_targets_rejected_at_config_time(self) -> None:
+        """Two sources mapping to the same target raises PluginConfigError."""
+        from elspeth.plugins.config_base import PluginConfigError
+        from elspeth.plugins.transforms.field_mapper import FieldMapper
+
+        with pytest.raises(PluginConfigError, match="duplicate target"):
+            FieldMapper(
+                {
+                    "schema": DYNAMIC_SCHEMA,
+                    "mapping": {"a": "x", "b": "x"},
+                }
+            )
+
+    def test_triple_duplicate_targets_rejected(self) -> None:
+        """Three sources mapping to the same target raises PluginConfigError."""
+        from elspeth.plugins.config_base import PluginConfigError
+        from elspeth.plugins.transforms.field_mapper import FieldMapper
+
+        with pytest.raises(PluginConfigError, match="duplicate target"):
+            FieldMapper(
+                {
+                    "schema": DYNAMIC_SCHEMA,
+                    "mapping": {"a": "z", "b": "z", "c": "z"},
+                }
+            )
+
+    def test_multiple_distinct_duplicate_targets_rejected(self) -> None:
+        """Multiple groups of duplicate targets are all reported."""
+        from elspeth.plugins.config_base import PluginConfigError
+        from elspeth.plugins.transforms.field_mapper import FieldMapper
+
+        with pytest.raises(PluginConfigError, match="duplicate target"):
+            FieldMapper(
+                {
+                    "schema": DYNAMIC_SCHEMA,
+                    "mapping": {"a": "x", "b": "x", "c": "y", "d": "y"},
+                }
+            )
+
+    def test_unique_targets_accepted(self) -> None:
+        """Mappings with unique targets are accepted normally."""
+        from elspeth.plugins.transforms.field_mapper import FieldMapper
+
+        # Should not raise
+        transform = FieldMapper(
+            {
+                "schema": DYNAMIC_SCHEMA,
+                "mapping": {"a": "x", "b": "y", "c": "z"},
+            }
+        )
+        assert transform._mapping == {"a": "x", "b": "y", "c": "z"}
+
+    def test_identity_mapping_accepted(self) -> None:
+        """Identity mappings (source == target) are accepted."""
+        from elspeth.plugins.transforms.field_mapper import FieldMapper
+
+        # Should not raise
+        transform = FieldMapper(
+            {
+                "schema": DYNAMIC_SCHEMA,
+                "mapping": {"a": "a", "b": "b"},
+            }
+        )
+        assert transform._mapping == {"a": "a", "b": "b"}
+
+    def test_error_message_includes_collision_details(self) -> None:
+        """Error message includes which sources collide on which target."""
+        from elspeth.plugins.config_base import PluginConfigError
+        from elspeth.plugins.transforms.field_mapper import FieldMapper
+
+        with pytest.raises(PluginConfigError, match="silent data loss"):
+            FieldMapper(
+                {
+                    "schema": DYNAMIC_SCHEMA,
+                    "mapping": {"first_name": "name", "last_name": "name"},
+                }
+            )
 
 
 class TestFieldMapperOutputSchema:

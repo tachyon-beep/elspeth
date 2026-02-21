@@ -659,12 +659,18 @@ def explain(
     landscape_settings = config.landscape if config else None
     if landscape_settings is None and settings_path is not None and settings_path.exists():
         try:
-            from elspeth.core.config import load_settings
-
             settings_for_passphrase = load_settings(settings_path)
             landscape_settings = settings_for_passphrase.landscape
-        except Exception:
-            pass  # No settings available — passphrase will be None
+        except (FileNotFoundError, yaml.YAMLError, YamlParserError, YamlScannerError):
+            pass  # Settings file unreadable — passphrase will be None
+        except (ValidationError, SecretLoadError) as e:
+            # Settings loaded but failed validation or secret resolution.
+            # User explicitly provided --settings, so surface the error.
+            if json_output:
+                typer.echo(json_module.dumps({"error": f"Settings loading failed: {e}"}))
+            else:
+                typer.echo(f"Error loading settings: {e}", err=True)
+            raise typer.Exit(1) from None
 
     try:
         passphrase = resolve_audit_passphrase(landscape_settings)
@@ -1364,6 +1370,9 @@ def purge(
 
     # Determine retention days: CLI override > config > default (90)
     if retention_days is not None:
+        if retention_days <= 0:
+            typer.echo("Error: --retention-days must be greater than 0.", err=True)
+            raise typer.Exit(1)
         effective_retention_days = retention_days
     elif config:
         effective_retention_days = config.payload_store.retention_days
@@ -1615,6 +1624,7 @@ def resume(
         db_url = f"sqlite:///{db_path}"
     else:
         db_url = settings_config.landscape.url
+        _validate_existing_sqlite_db_url(db_url, source="settings.yaml")
         typer.echo(f"Using database from settings.yaml: {db_url}")
 
     # Resolve SQLCipher passphrase
@@ -1628,9 +1638,35 @@ def resume(
 
     # Initialize database and recovery manager
     try:
-        db = LandscapeDB.from_url(db_url, passphrase=passphrase)
+        db = LandscapeDB.from_url(db_url, passphrase=passphrase, create_tables=False)
     except Exception as e:
         typer.echo(f"Error connecting to database: {e}", err=True)
+        raise typer.Exit(1) from None
+
+    # Verify database has Landscape schema (resume requires existing tables).
+    # With create_tables=False, tables are NOT created — so an existing file
+    # without Landscape tables (empty DB, wrong file) would crash later with
+    # "OperationalError: no such table: runs". Validate upfront.
+    from sqlalchemy import inspect as sa_inspect
+
+    try:
+        inspector = sa_inspect(db.engine)
+        existing_tables = set(inspector.get_table_names())
+    except Exception as e:
+        typer.echo(f"Error inspecting database schema: {e}", err=True)
+        db.close()
+        raise typer.Exit(1) from None
+
+    required_tables = {"runs", "tokens", "node_states"}
+    missing_tables = required_tables - existing_tables
+    if missing_tables:
+        typer.echo(
+            f"Error: Database exists but is not a Landscape database "
+            f"(missing tables: {', '.join(sorted(missing_tables))}). "
+            f"Check the database path.",
+            err=True,
+        )
+        db.close()
         raise typer.Exit(1) from None
 
     try:
@@ -1677,7 +1713,7 @@ def resume(
                 "token_id": resume_point.token_id,
                 "node_id": resume_point.node_id,
                 "sequence_number": resume_point.sequence_number,
-                "has_aggregation_state": bool(resume_point.aggregation_state),
+                "has_aggregation_state": resume_point.aggregation_state is not None,
             },
             "unprocessed_rows": len(unprocessed_row_ids),
         }
@@ -1695,7 +1731,7 @@ def resume(
             typer.echo(f"  Token ID: {resume_point.token_id}")
             typer.echo(f"  Node ID: {resume_point.node_id}")
             typer.echo(f"  Sequence number: {resume_point.sequence_number}")
-            if resume_point.aggregation_state:
+            if resume_point.aggregation_state is not None:
                 typer.echo("  Has aggregation state: Yes")
             else:
                 typer.echo("  Has aggregation state: No")

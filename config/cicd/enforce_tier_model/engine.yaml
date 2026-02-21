@@ -6,6 +6,11 @@ per_file_rules:
   reason: AST-based expression parser requires isinstance() for node type dispatch and try/except for unknown AST node types
   expires: null
 allow_hits:
+- key: engine/orchestrator/types.py:R5:AggregationFlushResult:__post_init__:fp=84d6c2fc1218a9d6
+  owner: architecture
+  reason: Frozen dataclass invariant — isinstance check to deep-freeze mutable routed_destinations dict via MappingProxyType
+  safety: Converts mutable dict to frozen proxy — defensive construction, not runtime masking
+  expires: null
 - key: engine/triggers.py:R5:TriggerEvaluator:record_accept:fp=a183521ba11a8ee6
   owner: bugfix
   reason: Defense-in-depth - ExpressionParser returns Any; boundary validation before use
@@ -21,87 +26,62 @@ allow_hits:
   reason: 'Post-durability callbacks: checkpoint callback fails after durable sink write'
   safety: Logged with error - sink artifact exists but checkpoint failed, resume will replay
   expires: null
-- key: engine/batch_adapter.py:R9:RowWaiter:wait:fp=c5f4c4f695cabe87
+- key: engine/batch_adapter.py:R9:RowWaiter:wait:fp=281637010027cfeb
   owner: architecture
-  reason: Cleanup/pop with default - key may not exist in race or optional scenarios
-  safety: Code reviewed - legitimate pattern
+  reason: Cleanup/pop with default - entry may not exist due to race between timeout and emit
+  safety: Documented TOCTOU race pattern - pop(None) is intentional cleanup of possibly-absent entry
   expires: '2026-05-02'
-- key: engine/batch_adapter.py:R9:RowWaiter:wait:fp=3125065ec11fe578
+- key: engine/batch_adapter.py:R5:RowWaiter:wait:fp=0f387fe464ef789a
   owner: architecture
-  reason: Cleanup/pop with default - key may not exist in race or optional scenarios
-  safety: Code reviewed - legitimate pattern
+  reason: isinstance(entry.result, ExceptionResult) - discriminated union for worker exception propagation
+  safety: Plugin bugs must crash; isinstance re-raises original exception from worker thread
   expires: '2026-05-02'
-- key: engine/batch_adapter.py:R5:RowWaiter:wait:fp=98c907e643e5e178
+- key: engine/executors/state_guard.py:R4:NodeStateGuard:__exit__:fp=d468bfb5ff5ba03d
   owner: architecture
-  reason: AST/type checking - required for safe parsing or discriminated unions
-  safety: Code reviewed - legitimate pattern
-  expires: '2026-05-02'
-- key: engine/executors/transform.py:R5:TransformExecutor:execute_transform:fp=7d6caeafa644ce8a
+  reason: Guard records FAILED when block exits without complete() — wraps recorder call to avoid masking the OrchestrationInvariantError raised afterward
+  safety: Logs failure but always raises OrchestrationInvariantError; audit state is preserved or crash occurs
+  expires: null
+- key: engine/executors/state_guard.py:R4:NodeStateGuard:__exit__:fp=7c0edec765252374
+  owner: architecture
+  reason: Guard auto-completes node_state as FAILED on unhandled exception — structural audit integrity guarantee
+  safety: Wraps complete_node_state in try/except; logs failure but never masks original exception
+  expires: null
+- key: engine/executors/transform.py:R5:TransformExecutor:execute_transform:fp=494f5113c48cd952
   owner: architecture
   reason: isinstance() check required to find batch-aware transforms - protocol contract verification
   safety: BatchTransformMixin is system-owned; isinstance replaces prior hasattr checks for type safety
   expires: '2026-05-02'
-- key: engine/executors/transform.py:R5:TransformExecutor:execute_transform:fp=7a7fb1c0cf22d8b1
+- key: engine/executors/transform.py:R2:TransformExecutor:execute_transform:fp=df2a6deffd9fa500
+  owner: architecture
+  reason: getattr() for lifecycle guard — graceful for non-BaseTransform protocol implementations
+  safety: Default True skips check for third-party implementations; only enforces on BaseTransform subclasses
+  expires: '2026-05-02'
+- key: engine/executors/transform.py:R5:TransformExecutor:execute_transform:fp=54664f4255eaeb4c
   owner: architecture
   reason: isinstance(e, TimeoutError) for retry timeout handling in batch transform path
   safety: Exception type discrimination for retry logic - required for correct timeout eviction
   expires: '2026-05-02'
-- key: engine/executors/aggregation.py:R1:AggregationExecutor:get_buffered_rows:fp=06051363f1310248
-  owner: P2-2026-02-02
-  reason: After validation against aggregation_settings, .get() handles legitimate case of valid node with no rows buffered
-    yet
-  safety: OrchestrationInvariantError raised if node_id not in aggregation_settings
+- key: engine/executors/aggregation.py:R4:AggregationExecutor:execute_flush:fp=4cce0f617a1b963c
+  owner: bugfix
+  reason: Outer exception handler ensures batch lifecycle cleanup; skips cleanup if batch already submitted (pending)
+  safety: Pending batches preserve state for retry; non-pending batches marked FAILED with buffers cleared; exception re-raised
   expires: null
-- key: engine/executors/aggregation.py:R1:AggregationExecutor:get_buffered_tokens:fp=b2b3cfd9c4ff464d
-  owner: P2-2026-02-02
-  reason: After validation against aggregation_settings, .get() handles legitimate case of valid node with no tokens buffered
-    yet
-  safety: OrchestrationInvariantError raised if node_id not in aggregation_settings
-  expires: null
-- key: engine/executors/aggregation.py:R1:AggregationExecutor:_get_buffered_data:fp=512df894a2f21f11
-  owner: P2-2026-02-02
-  reason: After validation against aggregation_settings, .get() handles legitimate case of valid node with no rows buffered
-    yet
-  safety: OrchestrationInvariantError raised if node_id not in aggregation_settings
-  expires: null
-- key: engine/executors/aggregation.py:R1:AggregationExecutor:_get_buffered_data:fp=5216f215c86ea14f
-  owner: P2-2026-02-02
-  reason: After validation against aggregation_settings, .get() handles legitimate case of valid node with no tokens buffered
-    yet
-  safety: OrchestrationInvariantError raised if node_id not in aggregation_settings
-  expires: null
-- key: engine/executors/aggregation.py:R1:AggregationExecutor:get_buffer_count:fp=2af69943d496dd91
-  owner: P2-2026-02-02
-  reason: After validation against aggregation_settings, .get() handles legitimate case of valid node with no rows buffered
-    yet
-  safety: OrchestrationInvariantError raised if node_id not in aggregation_settings
-  expires: null
-- key: engine/executors/aggregation.py:R1:AggregationExecutor:execute_flush:fp=0ecfec5ff2cea2f3
-  owner: P2-2026-02-02
-  reason: Pattern is .get() followed by explicit None check raising RuntimeError
-  safety: RuntimeError raised immediately if batch_id is None - explicit failure, not silent
-  expires: null
-- key: engine/executors/aggregation.py:R1:AggregationExecutor:restore_from_checkpoint:fp=6442d020c984a254
-  owner: P2-2026-02-02
-  reason: Version check for checkpoint format - None from missing key triggers ValueError
-  safety: ValueError raised for missing or wrong version - explicit validation pattern
-  expires: null
-- key: engine/executors/aggregation.py:R1:AggregationExecutor:get_batch_id:fp=922eeb56835282e5
+- key: engine/executors/aggregation.py:R1:AggregationExecutor:get_batch_id:fp=b0865bcd694cbe2b
   owner: P2-2026-02-02
   reason: Testing/inspection method that needs to work with partial setups; returns None if no batch exists
   safety: Documented as "primarily for testing" - production uses checkpoint state
   expires: null
-- key: engine/executors/aggregation.py:R1:AggregationExecutor:get_restored_state:fp=f3d90467a9f6a7c8
+- key: engine/executors/aggregation.py:R1:AggregationExecutor:restore_state:fp=ed36533ce9f4ccc7
+  owner: P2-2026-02-02
+  reason: Checkpoint recovery - node may not be configured if pipeline changed between runs
+  safety: Logs warning and returns early if node not found; no silent data loss
+  expires: null
+- key: engine/executors/aggregation.py:R1:AggregationExecutor:get_restored_state:fp=e38476f86c3c4c4b
   owner: P2-2026-02-02
   reason: Checkpoint recovery lookup - returns None if no state was restored for node
   safety: Designed API contract - None is valid return for nodes without restored state
   expires: null
-- key: engine/executors/aggregation.py:R5:AggregationExecutor:restore_from_checkpoint:fp=ea867007e8071a7b
-  owner: architecture
-  reason: AST/type checking - required for safe parsing or discriminated unions
-  safety: Code reviewed - legitimate pattern
-  expires: '2026-05-02'
-- key: engine/orchestrator/export.py:R1:_json_schema_to_python_type:fp=ff8235b7d923ad65
+- key: engine/orchestrator/export.py:R1:_json_schema_to_python_type:fp=9f87dd7733f3ecc3
   owner: bugfix
   reason: Framework boundary - Pydantic JSON schema anyOf entries may be $ref (no "type" key) or typed (has "type" key); .get() filters null vs non-null items
   safety: Non-null items fed to recursive resolver which crashes on unrecognized schemas
@@ -136,7 +116,7 @@ allow_hits:
   reason: Plugin cleanup must attempt all closures; broad catch collects errors then raises
   safety: Code reviewed - collects all cleanup errors into list, raises ExceptionGroup after all attempted
   expires: '2026-05-02'
-- key: engine/tokens.py:R5:TokenManager:create_quarantine_token:fp=dcd7d270154917c7
+- key: engine/tokens.py:R5:TokenManager:create_quarantine_token:fp=03d3a7a8ae0081d4
   owner: P1-2026-02-05-typecheck
   reason: Internal boundary - PipelineRow vs dict discrimination after mypy typecheck fixes
   safety: isinstance() check converts PipelineRow to dict for audit trail consistency
@@ -161,6 +141,26 @@ allow_hits:
   reason: Protocol dispatch to detect transforms with on_success during jump-target sink resolution
   safety: Traversal map invariants are enforced; raises on cycles or when no sink and no gate found
   expires: '2026-03-11'
+- key: engine/dag_navigator.py:R1:DAGNavigator:create_continuation_work_item:fp=ff169983eb391d6b
+  owner: bugfix
+  reason: _node_to_plugin.get() needed — not all node IDs are in plugin map (source nodes, coalesce pseudo-nodes)
+  safety: None return from .get() is the correct signal for non-gate nodes; isinstance(None, GateSettings) → False
+  expires: '2026-05-15'
+- key: engine/dag_navigator.py:R5:DAGNavigator:create_continuation_work_item:fp=9cc1f86c748ddbac
+  owner: bugfix
+  reason: isinstance(GateSettings) distinguishes fork-gate origin from non-fork continuation to prevent backward routing
+  safety: Gate nodes route to branch_first_node; non-gate nodes advance forward via resolve_next_node
+  expires: '2026-05-15'
+- key: engine/processor.py:R1:RowProcessor:_process_single_token:fp=ac15baef4e834495
+  owner: bugfix
+  reason: _node_step_map.get() — gate jump target may not be in step map for pseudo-nodes
+  safety: None result skips coalesce check gracefully; structural invariant enforced elsewhere
+  expires: '2026-05-15'
+- key: engine/processor.py:R1:RowProcessor:_process_single_token:fp=54de81fe8e42ea2f
+  owner: bugfix
+  reason: _node_step_map.get() — coalesce node may not be in step map for dynamic topologies
+  safety: None result skips coalesce check gracefully; structural invariant enforced elsewhere
+  expires: '2026-05-15'
 - key: engine/processor.py:R1:RowProcessor:_notify_coalesce_of_lost_branch:fp=d9917e18ce071880
   owner: architecture
   reason: dict.get() correct - not all branch names have coalesce point mapping
@@ -176,12 +176,12 @@ allow_hits:
   reason: Type dispatch - RowPlugin is union of TransformProtocol|GateProtocol, must distinguish to access is_batch_aware
   safety: Crashes on type mismatch - no silent fallback
   expires: '2026-03-09'
-- key: engine/orchestrator/core.py:R5:Orchestrator:_execute_run:fp=db519e29e1e3386e
+- key: engine/orchestrator/core.py:R5:Orchestrator:_execute_run:fp=72d9408dff8e0ceb
   owner: architecture
   reason: Tier 3 boundary - quarantine path handles non-dict source rows
   safety: Crashes on type mismatch - no silent fallback
   expires: '2026-03-09'
-- key: engine/orchestrator/core.py:R6:Orchestrator:_execute_run:fp=6dae427ebe4be8dc
+- key: engine/orchestrator/core.py:R6:Orchestrator:_execute_run:fp=b24ff697f608c5fe
   owner: bugfix
   reason: Tier-3 boundary — quarantined row data may contain NaN/Infinity that stable_hash rejects
   safety: Falls back to repr_hash for telemetry content_hash; audit trail uses separate hashing path
@@ -191,27 +191,27 @@ allow_hits:
   reason: Type dispatch - RowPlugin is union of TransformProtocol|GateProtocol, must distinguish to access is_batch_aware
   safety: Crashes on type mismatch - no silent fallback
   expires: '2026-03-09'
-- key: engine/orchestrator/aggregation.py:R5:find_aggregation_transform:fp=3be2315780c311dd
+- key: engine/orchestrator/aggregation.py:R5:find_aggregation_transform:fp=b99e6bee5e64dbcf
   owner: architecture
   reason: isinstance() check required to find batch-aware transforms - protocol contract verification
   safety: Crashes on type mismatch - no silent fallback
   expires: '2026-03-09'
-- key: engine/executors/gate.py:R5:GateExecutor:execute_config_gate:fp=3706bff320558413
+- key: engine/executors/gate.py:R5:GateExecutor:execute_config_gate:fp=4b2f7aa9a085b1c7
   owner: architecture
   reason: AST/type checking - ExpressionParser returns Any; must distinguish bool/str for route label conversion
   safety: Explicit isinstance branching for AST eval result types
   expires: '2026-05-13'
-- key: engine/executors/gate.py:R5:GateExecutor:execute_config_gate:fp=abb30c18d686eebf
+- key: engine/executors/gate.py:R5:GateExecutor:execute_config_gate:fp=3aaf01f00fbd6486
   owner: architecture
   reason: AST/type checking - ExpressionParser returns Any; must distinguish bool/str for route label conversion
   safety: Explicit isinstance branching for AST eval result types
   expires: '2026-05-13'
-- key: engine/executors/gate.py:R1:GateExecutor:_record_routing:fp=689777d14fc32f32
+- key: engine/executors/gate.py:R1:GateExecutor:_record_routing:fp=7957c7b3993f565b
   owner: architecture
   reason: Optional edge_id lookup - edge map may not have all node combinations during routing
   safety: Falls back to generating edge_id when not in prebuilt map
   expires: '2026-05-13'
-- key: engine/executors/gate.py:R1:GateExecutor:_record_routing:fp=654e8d6981aab2d3
+- key: engine/executors/gate.py:R1:GateExecutor:_record_routing:fp=38dabd7f2719bfd0
   owner: architecture
   reason: Optional edge_id lookup - edge map may not have all node combinations during routing
   safety: Falls back to generating edge_id when not in prebuilt map

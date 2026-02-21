@@ -265,24 +265,24 @@ class TestTypeTagIsolation:
     """Type tags must only trigger for exact datetime tag dicts."""
 
     def test_datetime_tag_with_extra_keys_preserved_as_dict(self) -> None:
-        """Property: {"__datetime__": "...", "other": "y"} is NOT restored as datetime.
+        """Property: envelope with extra keys is NOT restored as datetime.
 
-        Only dicts with EXACTLY one key "__datetime__" are type tags.
+        Only dicts with EXACTLY __elspeth_type__ and __elspeth_value__ are type tags.
         """
-        data = {"__datetime__": "2024-01-01T00:00:00+00:00", "extra": "value"}
+        data = {"__elspeth_type__": "datetime", "__elspeth_value__": "2024-01-01T00:00:00+00:00", "extra": "value"}
         restored = _restore_types(data)
         assert isinstance(restored, dict)
-        assert "__datetime__" in restored
+        assert "__elspeth_type__" in restored
         assert "extra" in restored
 
     @given(
-        extra_key=st.text(min_size=1, max_size=20).filter(lambda s: s != "__datetime__"),
+        extra_key=st.text(min_size=1, max_size=20).filter(lambda s: s not in ("__elspeth_type__", "__elspeth_value__")),
         extra_val=json_primitives,
     )
     @settings(max_examples=100)
     def test_datetime_tag_with_any_extra_key_stays_dict(self, extra_key: str, extra_val) -> None:
-        """Property: Adding ANY extra key to a datetime tag dict prevents restoration."""
-        data = {"__datetime__": "2024-06-15T12:30:00+00:00", extra_key: extra_val}
+        """Property: Adding ANY extra key to a type envelope prevents restoration."""
+        data = {"__elspeth_type__": "datetime", "__elspeth_value__": "2024-06-15T12:30:00+00:00", extra_key: extra_val}
         restored = _restore_types(data)
         assert isinstance(restored, dict)
         assert not isinstance(restored, datetime)  # type: ignore[unreachable]  # mypy thinks dict & datetime disjoint, but test validates decoder
@@ -290,22 +290,22 @@ class TestTypeTagIsolation:
     @given(value=st.text(min_size=1, max_size=50))
     @settings(max_examples=100)
     def test_non_iso_datetime_tag_raises_on_restore(self, value: str) -> None:
-        """Property: Invalid ISO string in datetime tag raises ValueError on restore.
+        """Property: Invalid ISO string in datetime envelope raises ValueError on restore.
 
-        If someone crafts a {"__datetime__": "garbage"} dict, fromisoformat()
-        will raise, which is correct behavior (Tier 1 trust - crash on corruption).
+        If someone crafts a {"__elspeth_type__": "datetime", "__elspeth_value__": "garbage"},
+        fromisoformat() will raise, which is correct behavior (Tier 1 trust - crash on corruption).
         """
         assume(not _is_valid_isoformat(value))
-        data = {"__datetime__": value}
+        data = {"__elspeth_type__": "datetime", "__elspeth_value__": value}
         with pytest.raises(ValueError):
             _restore_types(data)
 
     def test_nested_datetime_tags_restored(self) -> None:
-        """Property: Datetime tags nested in lists/dicts all get restored."""
+        """Property: Datetime envelopes nested in lists/dicts all get restored."""
         data = {
-            "outer": {"__datetime__": "2024-01-01T00:00:00+00:00"},
+            "outer": {"__elspeth_type__": "datetime", "__elspeth_value__": "2024-01-01T00:00:00+00:00"},
             "list": [
-                {"__datetime__": "2024-06-15T12:00:00+00:00"},
+                {"__elspeth_type__": "datetime", "__elspeth_value__": "2024-06-15T12:00:00+00:00"},
                 "plain_string",
             ],
         }

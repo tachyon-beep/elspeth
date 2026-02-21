@@ -208,12 +208,14 @@ class TestSanitizedWebhookUrl:
         assert result_user_only.fingerprint is not None
 
         # Verify exact fingerprints match expected HMAC of sorted credentials
-        # For user:pass -> sorted(["user", "pass"]) = ["pass", "user"] -> "pass|user"
-        expected_userpass = secret_fingerprint("pass|user")
+        # For user:pass -> sorted(["user", "pass"]) = ["pass", "user"] -> JSON array
+        import json as json_module
+
+        expected_userpass = secret_fingerprint(json_module.dumps(sorted(["pass", "user"]), separators=(",", ":")))
         assert result_userpass.fingerprint == expected_userpass
 
-        # For user only -> "user"
-        expected_user_only = secret_fingerprint("user")
+        # For user only -> JSON array with single element
+        expected_user_only = secret_fingerprint(json_module.dumps(["user"], separators=(",", ":")))
         assert result_user_only.fingerprint == expected_user_only
 
         # Different fingerprints because one has password, one doesn't
@@ -519,11 +521,15 @@ class TestFragmentTokenSanitization:
 
         result = SanitizedWebhookUrl.from_raw_url(url)
 
-        expected = secret_fingerprint("my-token")
+        import json as json_module
+
+        expected = secret_fingerprint(json_module.dumps(["my-token"], separators=(",", ":")))
         assert result.fingerprint == expected
 
     def test_fragment_and_query_fingerprint_combined(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """Fingerprint combines secrets from both query and fragment."""
+        import json as json_module
+
         from elspeth.core.security.fingerprint import secret_fingerprint
 
         monkeypatch.setenv("ELSPETH_FINGERPRINT_KEY", "test-key")
@@ -531,8 +537,8 @@ class TestFragmentTokenSanitization:
 
         result = SanitizedWebhookUrl.from_raw_url(url)
 
-        # Fingerprint is sorted combination: "key1|key2"
-        expected = secret_fingerprint("key1|key2")
+        # Fingerprint is canonical JSON array of sorted values
+        expected = secret_fingerprint(json_module.dumps(sorted(["key1", "key2"]), separators=(",", ":")))
         assert result.fingerprint == expected
 
     def test_fragment_raises_when_no_key_production_mode(self, monkeypatch: pytest.MonkeyPatch) -> None:

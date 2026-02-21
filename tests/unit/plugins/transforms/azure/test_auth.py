@@ -92,61 +92,48 @@ class TestAzureAuthConfigInvalid:
         assert "Multiple authentication methods configured" in str(exc_info.value)
 
     def test_sas_token_without_account_url_raises(self) -> None:
-        """SAS token without account_url raises ValidationError.
-
-        Note: The validator treats incomplete configs as 'no auth method'
-        because has_sas_token requires BOTH sas_token AND account_url.
-        """
+        """SAS token without account_url raises ValidationError with specific message."""
         with pytest.raises(ValidationError) as exc_info:
             AzureAuthConfig(sas_token="sv=2022-11-02&ss=b")
-        # Incomplete method = no complete method found
-        assert "No authentication method configured" in str(exc_info.value)
+        assert "SAS token auth requires account_url" in str(exc_info.value)
 
     def test_managed_identity_without_account_url_raises(self) -> None:
-        """Managed Identity without account_url raises ValidationError.
-
-        Note: The validator treats incomplete configs as 'no auth method'
-        because has_managed_identity requires BOTH flag AND account_url.
-        """
+        """Managed Identity without account_url raises ValidationError with specific message."""
         with pytest.raises(ValidationError) as exc_info:
             AzureAuthConfig(use_managed_identity=True)
-        # Incomplete method = no complete method found
-        assert "No authentication method configured" in str(exc_info.value)
+        assert "Managed Identity auth requires account_url" in str(exc_info.value)
 
     def test_partial_service_principal_missing_tenant_id_raises(self) -> None:
-        """Partial service principal config raises ValidationError.
-
-        Note: When no complete auth method is found, the validator raises
-        'no auth method configured' before checking partial configs.
-        """
+        """Partial service principal config raises ValidationError with specific missing field."""
         with pytest.raises(ValidationError) as exc_info:
             AzureAuthConfig(
                 client_id="11111111-1111-1111-1111-111111111111",
                 client_secret="secret-value",
                 account_url="https://mystorageaccount.blob.core.windows.net",
             )
-        # Incomplete method = no complete method found
-        assert "No authentication method configured" in str(exc_info.value)
+        assert "Service Principal auth requires all fields" in str(exc_info.value)
+        assert "tenant_id" in str(exc_info.value)
 
     def test_partial_service_principal_missing_client_secret_raises(self) -> None:
-        """Partial service principal config raises ValidationError."""
+        """Partial service principal config raises ValidationError with specific missing field."""
         with pytest.raises(ValidationError) as exc_info:
             AzureAuthConfig(
                 tenant_id="00000000-0000-0000-0000-000000000000",
                 client_id="11111111-1111-1111-1111-111111111111",
                 account_url="https://mystorageaccount.blob.core.windows.net",
             )
-        assert "No authentication method configured" in str(exc_info.value)
+        assert "Service Principal auth requires all fields" in str(exc_info.value)
+        assert "client_secret" in str(exc_info.value)
 
     def test_partial_service_principal_missing_account_url_raises(self) -> None:
-        """Partial service principal config raises ValidationError."""
+        """Partial service principal config raises ValidationError with specific message."""
         with pytest.raises(ValidationError) as exc_info:
             AzureAuthConfig(
                 tenant_id="00000000-0000-0000-0000-000000000000",
                 client_id="11111111-1111-1111-1111-111111111111",
                 client_secret="secret-value",
             )
-        assert "No authentication method configured" in str(exc_info.value)
+        assert "Service Principal auth requires account_url" in str(exc_info.value)
 
     def test_extra_fields_forbidden(self) -> None:
         """Extra fields are forbidden (extra='forbid')."""

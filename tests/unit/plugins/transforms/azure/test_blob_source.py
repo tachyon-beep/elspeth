@@ -1012,3 +1012,62 @@ class TestAzureBlobSourceAuthClientCreation:
 
             # Verify from_connection_string was called
             mock_service_client_cls.from_connection_string.assert_called_once_with(TEST_CONNECTION_STRING)
+
+
+class TestBug4_4_RuntimeErrorOnLoadFailure:
+    """Bug 4.4: Azure SDK errors in load() raise RuntimeError, not type(e).
+
+    Previously, the code used `raise type(e)(...)` which can fail when the
+    exception class doesn't accept a single string argument (e.g., Azure
+    SDK exceptions with complex constructors). Now uses RuntimeError(...) from e.
+    """
+
+    def test_azure_sdk_error_raises_runtime_error(self, mock_blob_client, ctx: PluginContext) -> None:
+        """Azure SDK error in load() wraps as RuntimeError with original chained."""
+        source = AzureBlobSource(make_config())
+
+        # Simulate an Azure SDK error with a complex constructor
+        class AzureResourceNotFoundError(Exception):
+            def __init__(self, message: str, *, status_code: int = 404) -> None:
+                super().__init__(message)
+                self.status_code = status_code
+
+        mock_blob_client.return_value.download_blob.return_value.readall.side_effect = AzureResourceNotFoundError(
+            "Blob not found", status_code=404
+        )
+
+        with pytest.raises(RuntimeError) as exc_info:
+            list(source.load(ctx))
+
+        # Should be RuntimeError, not AzureResourceNotFoundError
+        assert type(exc_info.value) is RuntimeError
+        assert "Failed to download blob" in str(exc_info.value)
+        assert TEST_BLOB_PATH in str(exc_info.value)
+        # Original exception is chained via `from e`
+        assert exc_info.value.__cause__ is not None
+        assert isinstance(exc_info.value.__cause__, AzureResourceNotFoundError)
+
+
+class TestBug4_5_UnicodeDecodeErrorInJSONL:
+    """Bug 4.5: UnicodeDecodeError in JSONL quarantines instead of crashing.
+
+    Previously, _load_jsonl() did not catch UnicodeDecodeError, so invalid
+    encoding in JSONL blob data would crash the pipeline. Now it quarantines
+    the row and continues.
+    """
+
+    def test_invalid_encoding_quarantines_row(self, mock_blob_client, ctx: PluginContext) -> None:
+        """UnicodeDecodeError in JSONL blob decoding yields quarantined row."""
+        source = AzureBlobSource(make_config(format="jsonl"))
+
+        # Binary data that isn't valid UTF-8
+        invalid_bytes = b"\xff\xfe\x00\x01Invalid UTF-8 content"
+        mock_blob_client.return_value.download_blob.return_value.readall.return_value = invalid_bytes
+
+        rows = list(source.load(ctx))
+
+        # Should yield a quarantined row, not crash
+        assert len(rows) >= 1
+        quarantined_rows = [r for r in rows if r.is_quarantined]
+        assert len(quarantined_rows) == 1
+        assert "Failed to decode JSONL blob as" in quarantined_rows[0].quarantine_error

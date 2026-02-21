@@ -14,6 +14,7 @@ from elspeth.contracts import (
     Token,
     TokenOutcome,
 )
+from elspeth.contracts.errors import AuditIntegrityError
 from elspeth.core.canonical import canonical_json, repr_hash, stable_hash
 from elspeth.core.landscape._helpers import generate_id, now
 from elspeth.core.landscape.schema import (
@@ -45,6 +46,97 @@ class TokenRecordingMixin:
     _token_outcome_repo: TokenOutcomeRepository
     _payload_store: PayloadStore | None
 
+    def _resolve_run_id_for_row(self, row_id: str) -> str:
+        """Resolve the run_id that owns a given row_id.
+
+        This is Tier 1 (our data). If the row doesn't exist, it's a bug
+        in our code or database corruption -- crash immediately.
+
+        Args:
+            row_id: Row ID to look up
+
+        Returns:
+            run_id that owns the row
+
+        Raises:
+            AuditIntegrityError: If row_id not found (Tier 1 corruption)
+        """
+        query = select(rows_table.c.run_id).where(rows_table.c.row_id == row_id)
+        result = self._ops.execute_fetchone(query)
+        if result is None:
+            raise AuditIntegrityError(
+                f"Token references row_id={row_id!r} which does not exist in the rows table. "
+                f"This is Tier 1 data corruption -- the row should have been created before any token."
+            )
+        run_id: str = result.run_id
+        return run_id
+
+    def _resolve_token_ownership(self, token_id: str) -> tuple[str, str]:
+        """Resolve the (row_id, run_id) that owns a given token_id.
+
+        Looks up token -> row_id, then row -> run_id. This is Tier 1 (our data).
+        If the token or its row doesn't exist, it's a bug or database corruption.
+
+        Args:
+            token_id: Token ID to look up
+
+        Returns:
+            Tuple of (row_id, run_id) that own the token
+
+        Raises:
+            AuditIntegrityError: If token or its row not found (Tier 1 corruption)
+        """
+        query = select(tokens_table.c.row_id, tokens_table.c.run_id).where(tokens_table.c.token_id == token_id)
+        result = self._ops.execute_fetchone(query)
+        if result is None:
+            raise AuditIntegrityError(
+                f"Token {token_id!r} does not exist in the tokens table. "
+                f"This is Tier 1 data corruption -- the token should have been created before recording outcomes."
+            )
+        return result.row_id, result.run_id
+
+    def _validate_token_run_ownership(self, token_id: str, run_id: str) -> None:
+        """Validate that a token belongs to the specified run.
+
+        Per Tier 1 trust model: cross-run contamination of audit records is
+        evidence tampering. Crash immediately if the invariant is violated.
+
+        Args:
+            token_id: Token to validate
+            run_id: Expected run ID
+
+        Raises:
+            AuditIntegrityError: If token does not belong to the specified run
+        """
+        _row_id, actual_run_id = self._resolve_token_ownership(token_id)
+        if actual_run_id != run_id:
+            raise AuditIntegrityError(
+                f"Cross-run contamination prevented: token {token_id!r} belongs to "
+                f"run {actual_run_id!r}, but caller supplied run_id={run_id!r}. "
+                f"This would corrupt the audit trail by attributing records to the wrong run."
+            )
+
+    def _validate_token_row_ownership(self, token_id: str, row_id: str) -> None:
+        """Validate that a token belongs to the specified row.
+
+        Per Tier 1 trust model: cross-row lineage corruption makes the audit
+        trail unreliable. Crash immediately if the invariant is violated.
+
+        Args:
+            token_id: Token to validate
+            row_id: Expected row ID
+
+        Raises:
+            AuditIntegrityError: If token does not belong to the specified row
+        """
+        actual_row_id, _run_id = self._resolve_token_ownership(token_id)
+        if actual_row_id != row_id:
+            raise AuditIntegrityError(
+                f"Cross-row lineage corruption prevented: token {token_id!r} belongs to "
+                f"row {actual_row_id!r}, but caller supplied row_id={row_id!r}. "
+                f"This would create invalid parent-child lineage across different rows."
+            )
+
     def create_row(
         self,
         run_id: str,
@@ -53,7 +145,6 @@ class TokenRecordingMixin:
         data: dict[str, Any],
         *,
         row_id: str | None = None,
-        payload_ref: str | None = None,
         quarantined: bool = False,
     ) -> Row:
         """Create a source row record.
@@ -64,7 +155,6 @@ class TokenRecordingMixin:
             row_index: Position in source (0-indexed)
             data: Row data for hashing and optional storage
             row_id: Optional row ID (generated if not provided)
-            payload_ref: DEPRECATED - payload persistence now handled internally
             quarantined: If True, data is Tier-3 external data that may contain
                 non-canonical values (NaN, Infinity). Uses repr_hash fallback.
 
@@ -72,7 +162,7 @@ class TokenRecordingMixin:
             Row model
 
         Note:
-            Payload persistence is now handled by LandscapeRecorder, not callers.
+            Payload persistence is handled by LandscapeRecorder, not callers.
             If self._payload_store is configured, the method will:
             1. Serialize data using canonical_json (handles pandas/numpy/datetime/Decimal)
             2. Store in payload store
@@ -97,8 +187,8 @@ class TokenRecordingMixin:
         timestamp = now()
 
         # Landscape owns payload persistence - serialize and store if configured
-        final_payload_ref = payload_ref  # Legacy path (will be removed)
-        if self._payload_store is not None and payload_ref is None:
+        final_payload_ref: str | None = None
+        if self._payload_store is not None:
             # Canonical JSON handles pandas/numpy/Decimal/datetime types.
             # For quarantined data, fall back to json.dumps(repr()) if
             # canonical serialization fails on non-canonical values.
@@ -146,6 +236,10 @@ class TokenRecordingMixin:
     ) -> Token:
         """Create a token (row instance in DAG path).
 
+        Derives run_id from the row record to guarantee run ownership
+        consistency. The tokens table stores run_id to enable composite
+        FK enforcement on downstream tables.
+
         Args:
             row_id: Source row this token represents
             token_id: Optional token ID (generated if not provided)
@@ -155,9 +249,15 @@ class TokenRecordingMixin:
 
         Returns:
             Token model
+
+        Raises:
+            AuditIntegrityError: If row_id does not exist (Tier 1 corruption)
         """
         token_id = token_id or generate_id()
         timestamp = now()
+
+        # Derive run_id from the row record (Tier 1 -- our data, must exist)
+        run_id = self._resolve_run_id_for_row(row_id)
 
         token = Token(
             token_id=token_id,
@@ -166,12 +266,14 @@ class TokenRecordingMixin:
             join_group_id=join_group_id,
             branch_name=branch_name,
             created_at=timestamp,
+            run_id=run_id,
         )
 
         self._ops.execute_insert(
             tokens_table.insert().values(
                 token_id=token.token_id,
                 row_id=token.row_id,
+                run_id=run_id,
                 fork_group_id=token.fork_group_id,
                 join_group_id=token.join_group_id,
                 branch_name=token.branch_name,
@@ -195,6 +297,10 @@ class TokenRecordingMixin:
         ATOMIC: Creates children AND records parent FORKED outcome in single transaction.
         Stores branch contract for recovery validation.
 
+        Validates that parent_token_id belongs to the specified row_id and run_id
+        before any writes. Cross-run/cross-row contamination crashes immediately
+        per Tier 1 trust model.
+
         Args:
             parent_token_id: Token being forked
             row_id: Row ID (same for all children)
@@ -207,12 +313,17 @@ class TokenRecordingMixin:
 
         Raises:
             ValueError: If branches is empty (defense-in-depth for audit integrity)
+            AuditIntegrityError: If parent token does not belong to specified run/row
         """
         # Defense-in-depth: validate even though RoutingAction.fork_to_paths()
         # already validates. Per CLAUDE.md "no silent drops" - empty forks
         # would cause tokens to disappear without audit trail.
         if not branches:
             raise ValueError("fork_token requires at least one branch")
+
+        # Validate parent token ownership before any writes (Tier 1 invariant)
+        self._validate_token_run_ownership(parent_token_id, run_id)
+        self._validate_token_row_ownership(parent_token_id, row_id)
 
         fork_group_id = generate_id()
         children = []
@@ -223,11 +334,12 @@ class TokenRecordingMixin:
                 child_id = generate_id()
                 timestamp = now()
 
-                # Create child token
+                # Create child token (run_id derived from parent -- already validated)
                 conn.execute(
                     tokens_table.insert().values(
                         token_id=child_id,
                         row_id=row_id,
+                        run_id=run_id,
                         fork_group_id=fork_group_id,
                         branch_name=branch_name,
                         step_in_pipeline=step_in_pipeline,
@@ -252,6 +364,7 @@ class TokenRecordingMixin:
                         branch_name=branch_name,
                         step_in_pipeline=step_in_pipeline,
                         created_at=timestamp,
+                        run_id=run_id,
                     )
                 )
 
@@ -284,6 +397,10 @@ class TokenRecordingMixin:
         Creates a new token representing the merged result.
         Records all parent relationships.
 
+        Validates that all parent tokens belong to the specified row_id and
+        that they all share the same run_id. Cross-run/cross-row contamination
+        crashes immediately per Tier 1 trust model.
+
         Args:
             parent_token_ids: Tokens being merged
             row_id: Row ID for the merged token
@@ -291,7 +408,29 @@ class TokenRecordingMixin:
 
         Returns:
             Merged Token model
+
+        Raises:
+            AuditIntegrityError: If parent tokens do not belong to specified row
+                or if parent tokens span multiple runs
         """
+        # Validate all parent tokens belong to the same row and run (Tier 1 invariant)
+        run_id: str | None = None
+        for parent_id in parent_token_ids:
+            self._validate_token_row_ownership(parent_id, row_id)
+            _row_id, parent_run_id = self._resolve_token_ownership(parent_id)
+            if run_id is None:
+                run_id = parent_run_id
+            elif parent_run_id != run_id:
+                raise AuditIntegrityError(
+                    f"Cross-run contamination prevented in coalesce: parent token {parent_id!r} "
+                    f"belongs to run {parent_run_id!r}, but other parents belong to run {run_id!r}. "
+                    f"All parent tokens in a coalesce must belong to the same run."
+                )
+
+        # Derive run_id from row if no parents (edge case: shouldn't happen in practice)
+        if run_id is None:
+            run_id = self._resolve_run_id_for_row(row_id)
+
         join_group_id = generate_id()
         token_id = generate_id()
         timestamp = now()
@@ -302,6 +441,7 @@ class TokenRecordingMixin:
                 tokens_table.insert().values(
                     token_id=token_id,
                     row_id=row_id,
+                    run_id=run_id,
                     join_group_id=join_group_id,
                     step_in_pipeline=step_in_pipeline,
                     created_at=timestamp,
@@ -324,6 +464,7 @@ class TokenRecordingMixin:
             join_group_id=join_group_id,
             step_in_pipeline=step_in_pipeline,
             created_at=timestamp,
+            run_id=run_id,
         )
 
     def expand_token(
@@ -340,6 +481,10 @@ class TokenRecordingMixin:
 
         ATOMIC: Creates children AND optionally records parent EXPANDED outcome
         in single transaction.
+
+        Validates that parent_token_id belongs to the specified row_id and run_id
+        before any writes. Cross-run/cross-row contamination crashes immediately
+        per Tier 1 trust model.
 
         Creates N child tokens from a single parent for 1->N expansion.
         All children share the same row_id (same source row) and are
@@ -362,9 +507,14 @@ class TokenRecordingMixin:
 
         Raises:
             ValueError: If count < 1
+            AuditIntegrityError: If parent token does not belong to specified run/row
         """
         if count < 1:
             raise ValueError("expand_token requires at least 1 child")
+
+        # Validate parent token ownership before any writes (Tier 1 invariant)
+        self._validate_token_run_ownership(parent_token_id, run_id)
+        self._validate_token_row_ownership(parent_token_id, row_id)
 
         expand_group_id = generate_id()
         children = []
@@ -374,11 +524,12 @@ class TokenRecordingMixin:
                 child_id = generate_id()
                 timestamp = now()
 
-                # Create child token with expand_group_id
+                # Create child token with expand_group_id (run_id from parent -- already validated)
                 conn.execute(
                     tokens_table.insert().values(
                         token_id=child_id,
                         row_id=row_id,
+                        run_id=run_id,
                         expand_group_id=expand_group_id,
                         step_in_pipeline=step_in_pipeline,
                         created_at=timestamp,
@@ -401,6 +552,7 @@ class TokenRecordingMixin:
                         expand_group_id=expand_group_id,
                         step_in_pipeline=step_in_pipeline,
                         created_at=timestamp,
+                        run_id=run_id,
                     )
                 )
 
@@ -523,6 +675,9 @@ class TokenRecordingMixin:
         For BUFFERED tokens, a second call records the terminal outcome
         when the batch flushes.
 
+        Validates that the token belongs to the specified run_id before recording.
+        Cross-run contamination crashes immediately per Tier 1 trust model.
+
         Args:
             run_id: Current run ID
             token_id: Token that reached this outcome
@@ -540,6 +695,7 @@ class TokenRecordingMixin:
 
         Raises:
             ValueError: If required fields for outcome type are missing
+            AuditIntegrityError: If token does not belong to the specified run
             IntegrityError: If terminal outcome already exists for token
         """
         # Validate required fields per outcome type (contract enforcement)
@@ -553,6 +709,9 @@ class TokenRecordingMixin:
             expand_group_id=expand_group_id,
             error_hash=error_hash,
         )
+
+        # Validate token belongs to the specified run (Tier 1 invariant)
+        self._validate_token_run_ownership(token_id, run_id)
 
         outcome_id = f"out_{generate_id()[:12]}"
         is_terminal = outcome.is_terminal

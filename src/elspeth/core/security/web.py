@@ -21,10 +21,10 @@ the TOCTOU (Time-of-Check to Time-of-Use) vulnerability in traditional SSRF defe
 from __future__ import annotations
 
 import ipaddress
+import queue
 import socket
 import urllib.parse
 from concurrent.futures import ThreadPoolExecutor
-from concurrent.futures import TimeoutError as FuturesTimeoutError
 from dataclasses import dataclass
 
 
@@ -59,6 +59,11 @@ BLOCKED_IP_RANGES = [
     ipaddress.ip_network("fe80::/10"),  # IPv6 link-local (RFC 4291) - can reach metadata
     ipaddress.ip_network("::ffff:0:0/96"),  # IPv4-mapped IPv6 - CRITICAL: bypass vector!
 ]
+
+# Bounded thread pool for DNS resolution.  Caps concurrent getaddrinfo threads
+# so repeated timeouts (e.g. blackholed resolver) cannot exhaust OS threads.
+_DNS_POOL_SIZE = 8
+_dns_pool = ThreadPoolExecutor(max_workers=_DNS_POOL_SIZE, thread_name_prefix="dns_resolve")
 
 
 def validate_url_scheme(url: str) -> None:
@@ -207,8 +212,17 @@ def validate_url_for_ssrf(url: str, timeout: float = 5.0) -> SSRFSafeRequest:
         raise SSRFBlockedError("URL has no hostname")
 
     # Determine port (explicit or default)
-    if parsed.port:
-        port = parsed.port
+    # parsed.port can raise ValueError for out-of-range ports (e.g. 99999).
+    # Port 0 is falsy but must be explicitly rejected (not a valid HTTP port).
+    try:
+        explicit_port = parsed.port
+    except ValueError as e:
+        raise SSRFBlockedError(f"Invalid port in URL: {e}") from e
+
+    if explicit_port is not None:
+        if explicit_port == 0:
+            raise SSRFBlockedError("Port 0 is not allowed")
+        port = explicit_port
     else:
         port = 443 if parsed.scheme.lower() == "https" else 80
 
@@ -219,22 +233,35 @@ def validate_url_for_ssrf(url: str, timeout: float = 5.0) -> SSRFSafeRequest:
     if parsed.fragment:
         path = f"{path}#{parsed.fragment}"
 
-    # Step 3: Resolve DNS with timeout
-    def _resolve() -> list[str]:
-        return _resolve_hostname(hostname)
+    # Step 3: Resolve DNS with timeout via bounded thread pool.
+    # Using a shared ThreadPoolExecutor (max _DNS_POOL_SIZE workers) instead
+    # of spawning one daemon thread per call.  Under repeated timeouts (e.g.
+    # blackholed DNS resolver), at most _DNS_POOL_SIZE threads are blocked in
+    # getaddrinfo; additional requests queue and time out without creating new
+    # threads.
+    result_queue: queue.Queue[tuple[str, list[str] | BaseException]] = queue.Queue()
 
-    with ThreadPoolExecutor(max_workers=1, thread_name_prefix="dns_resolve") as executor:
-        future = executor.submit(_resolve)
+    def _resolve_worker() -> None:
         try:
-            ip_list = future.result(timeout=timeout)
-        except FuturesTimeoutError as e:
-            raise NetworkError(f"DNS resolution timeout ({timeout}s): {hostname}") from e
-        except (SSRFBlockedError, NetworkError):
-            raise  # Re-raise our own exception types unchanged
-        except Exception as e:
-            # Unexpected exceptions from DNS resolution (UnicodeError, OSError, etc.)
-            # are external system failures — wrap as NetworkError
-            raise NetworkError(f"DNS resolution failed: {hostname}: {e}") from e
+            result_queue.put(("ok", _resolve_hostname(hostname)))
+        except BaseException as exc:
+            result_queue.put(("error", exc))
+
+    _dns_pool.submit(_resolve_worker)
+
+    try:
+        status, value = result_queue.get(timeout=timeout)
+    except queue.Empty:
+        raise NetworkError(f"DNS resolution timeout ({timeout}s): {hostname}") from None
+
+    if status == "error":
+        exc = value
+        assert isinstance(exc, BaseException)
+        if isinstance(exc, (SSRFBlockedError, NetworkError)):
+            raise exc
+        raise NetworkError(f"DNS resolution failed: {hostname}: {exc}") from exc
+
+    ip_list: list[str] = value  # type: ignore[assignment]
 
     if not ip_list:
         raise NetworkError(f"DNS resolution returned no addresses: {hostname}")

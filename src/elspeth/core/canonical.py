@@ -92,6 +92,16 @@ def _normalize_value(obj: Any) -> Any:
             return _normalize_value(obj.item())
         return [_normalize_value(x) for x in obj.tolist()]
 
+    # NumPy datetime64
+    if isinstance(obj, np.datetime64):
+        if np.isnat(obj):
+            return None
+        # Convert to pd.Timestamp for consistent UTC ISO 8601 output
+        ts = pd.Timestamp(obj)
+        if ts.tz is None:
+            return ts.tz_localize("UTC").isoformat()
+        return ts.tz_convert("UTC").isoformat()
+
     # Pandas types
     if isinstance(obj, pd.Timestamp):
         # Naive timestamps assumed UTC (explicit policy)
@@ -267,9 +277,13 @@ def sanitize_for_canonical(obj: Any) -> Any:
     """
     if isinstance(obj, dict):
         return {k: sanitize_for_canonical(v) for k, v in obj.items()}
-    if isinstance(obj, list):
+    if isinstance(obj, (list, tuple)):
         return [sanitize_for_canonical(v) for v in obj]
     if isinstance(obj, float) and (math.isnan(obj) or math.isinf(obj)):
+        return None
+    # numpy floating scalars (without importing numpy)
+    obj_type = type(obj)
+    if obj_type.__module__ == "numpy" and "float" in obj_type.__name__ and not math.isfinite(float(obj)):
         return None
     return obj
 

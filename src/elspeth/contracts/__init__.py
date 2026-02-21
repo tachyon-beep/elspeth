@@ -16,6 +16,11 @@ Import patterns:
     from elspeth.core.config import RetrySettings, ElspethSettings
 """
 
+from elspeth.contracts.aggregation_checkpoint import (
+    AggregationCheckpointState,
+    AggregationNodeCheckpoint,
+    AggregationTokenCheckpoint,
+)
 from elspeth.contracts.audit import (
     Artifact,
     Batch,
@@ -45,8 +50,20 @@ from elspeth.contracts.audit import (
     TransformErrorRecord,
     ValidationErrorRecord,
 )
+from elspeth.contracts.batch_checkpoint import BatchCheckpointState, RowMappingEntry
+from elspeth.contracts.call_data import (
+    CallPayload,
+    HTTPCallError,
+    HTTPCallRequest,
+    HTTPCallResponse,
+    LLMCallError,
+    LLMCallRequest,
+    LLMCallResponse,
+    RawCallPayload,
+)
 from elspeth.contracts.checkpoint import ResumeCheck, ResumePoint
 from elspeth.contracts.cli import ExecutionResult, ProgressEvent
+from elspeth.contracts.coalesce_metadata import ArrivalOrderEntry, CoalesceMetadata
 
 # =============================================================================
 # Settings classes are NOT re-exported from contracts
@@ -170,6 +187,15 @@ from elspeth.contracts.header_modes import (
     resolve_headers,
 )
 from elspeth.contracts.identity import TokenInfo
+from elspeth.contracts.node_state_context import (
+    AggregationFlushContext,
+    GateEvaluationContext,
+    NodeStateContext,
+    PoolConfigSnapshot,
+    PoolExecutionContext,
+    PoolStatsSnapshot,
+    QueryOrderEntry,
+)
 from elspeth.contracts.payload_store import IntegrityError, PayloadStore
 from elspeth.contracts.plugin_context import (
     PluginContext,
@@ -204,6 +230,7 @@ from elspeth.contracts.schema_contract_factory import (
     map_schema_mode,
 )
 from elspeth.contracts.sink import OutputValidationResult
+from elspeth.contracts.token_usage import TokenUsage
 from elspeth.contracts.transform_contract import (
     create_output_contract_from_schema,
     validate_output_against_contract,
@@ -315,9 +342,26 @@ __all__ = [  # Grouped by category for readability
     "error_edge_label",
     # identity
     "TokenInfo",
+    # batch checkpoint
+    "BatchCheckpointState",
+    "RowMappingEntry",
     # checkpoint
+    "AggregationCheckpointState",
+    "AggregationNodeCheckpoint",
+    "AggregationTokenCheckpoint",
     "ResumeCheck",
     "ResumePoint",
+    # coalesce metadata
+    "ArrivalOrderEntry",
+    "CoalesceMetadata",
+    # node state context
+    "AggregationFlushContext",
+    "GateEvaluationContext",
+    "NodeStateContext",
+    "PoolConfigSnapshot",
+    "PoolExecutionContext",
+    "PoolStatsSnapshot",
+    "QueryOrderEntry",
     # types
     "AggregationName",
     "BranchName",
@@ -383,6 +427,17 @@ __all__ = [  # Grouped by category for readability
     "SanitizedWebhookUrl",
     # sink
     "OutputValidationResult",
+    # token usage
+    "TokenUsage",
+    # call data (LLM + HTTP audit records)
+    "CallPayload",
+    "HTTPCallError",
+    "HTTPCallRequest",
+    "HTTPCallResponse",
+    "LLMCallError",
+    "LLMCallRequest",
+    "LLMCallResponse",
+    "RawCallPayload",
     # schema contracts (Phase 1: Core Contracts)
     "ContractBuilder",
     "create_contract_from_config",

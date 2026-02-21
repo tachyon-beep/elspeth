@@ -142,8 +142,12 @@ def parse_tracing_config(config: dict[str, Any] | None) -> TracingConfig | None:
                 host=config.get("host", "https://cloud.langfuse.com"),
                 tracing_enabled=config.get("tracing_enabled", True),
             )
+        case "none":
+            return TracingConfig(provider="none")
         case _:
-            return TracingConfig(provider=provider)
+            raise ValueError(
+                f"Unknown tracing provider '{provider}'. Supported providers: {', '.join(sorted(SUPPORTED_TRACING_PROVIDERS))}"
+            )
 
 
 def validate_tracing_config(config: TracingConfig) -> list[str]:

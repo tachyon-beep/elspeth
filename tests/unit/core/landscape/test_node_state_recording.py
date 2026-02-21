@@ -194,25 +194,6 @@ class TestBeginNodeState:
 
         assert result1.input_hash != result2.input_hash
 
-    def test_stores_context_before_json(self):
-        _db, recorder, _row_id, token_id = _setup_with_token()
-
-        context = {"retry_count": 0, "source": "csv"}
-        result = recorder.begin_node_state(
-            token_id=token_id,
-            node_id="source-0",
-            run_id="run-1",
-            step_index=0,
-            input_data={"x": 1},
-            context_before=context,
-        )
-
-        fetched = recorder.get_node_state(result.state_id)
-        assert fetched is not None
-        assert fetched.context_before_json is not None
-        parsed = json.loads(fetched.context_before_json)
-        assert parsed == context
-
     def test_context_before_defaults_to_none(self):
         _db, recorder, _row_id, token_id = _setup_with_token()
 
@@ -576,6 +557,13 @@ class TestCompleteNodeState:
         assert parsed == success
 
     def test_stores_context_after_json(self):
+        from elspeth.contracts.node_state_context import (
+            PoolConfigSnapshot,
+            PoolExecutionContext,
+            PoolStatsSnapshot,
+            QueryOrderEntry,
+        )
+
         _db, recorder, _row_id, token_id = _setup_with_token()
 
         state = recorder.begin_node_state(
@@ -585,7 +573,18 @@ class TestCompleteNodeState:
             step_index=0,
             input_data={"x": 1},
         )
-        context = {"tokens_used": 150, "model": "gpt-4"}
+        context = PoolExecutionContext(
+            pool_config=PoolConfigSnapshot(pool_size=4, max_capacity_retry_seconds=30.0, dispatch_delay_at_completion_ms=10.0),
+            pool_stats=PoolStatsSnapshot(
+                capacity_retries=0,
+                successes=2,
+                peak_delay_ms=15.0,
+                current_delay_ms=10.0,
+                total_throttle_time_ms=0.0,
+                max_concurrent_reached=2,
+            ),
+            query_ordering=(QueryOrderEntry(submit_index=0, complete_index=0, buffer_wait_ms=0.0),),
+        )
         recorder.complete_node_state(
             state.state_id,
             NodeStateStatus.COMPLETED,
@@ -599,7 +598,7 @@ class TestCompleteNodeState:
         assert isinstance(fetched, NodeStateCompleted)
         assert fetched.context_after_json is not None
         parsed = json.loads(fetched.context_after_json)
-        assert parsed == context
+        assert parsed == context.to_dict()
 
     def test_stores_duration_ms(self):
         _db, recorder, _row_id, token_id = _setup_with_token()
@@ -783,7 +782,7 @@ class TestCompleteNodeState:
         assert isinstance(fetched, NodeStateCompleted)
         assert fetched.context_after_json is None
 
-    def test_error_json_defaults_to_none_for_failed(self):
+    def test_rejects_completed_without_output_data(self):
         _db, recorder, _row_id, token_id = _setup_with_token()
 
         state = recorder.begin_node_state(
@@ -793,15 +792,95 @@ class TestCompleteNodeState:
             step_index=0,
             input_data={"x": 1},
         )
-        recorder.complete_node_state(
-            state.state_id,
-            NodeStateStatus.FAILED,
-            duration_ms=10,
+
+        with pytest.raises(ValueError, match="COMPLETED node state requires output_data"):
+            recorder.complete_node_state(
+                state.state_id,
+                NodeStateStatus.COMPLETED,
+                output_data=None,
+                duration_ms=10,
+            )
+
+    def test_rejects_failed_without_error(self):
+        _db, recorder, _row_id, token_id = _setup_with_token()
+
+        state = recorder.begin_node_state(
+            token_id=token_id,
+            node_id="source-0",
+            run_id="run-1",
+            step_index=0,
+            input_data={"x": 1},
         )
 
-        fetched = recorder.get_node_state(state.state_id)
-        assert isinstance(fetched, NodeStateFailed)
-        assert fetched.error_json is None
+        with pytest.raises(ValueError, match="FAILED node state requires error"):
+            recorder.complete_node_state(
+                state.state_id,
+                NodeStateStatus.FAILED,
+                error=None,
+                duration_ms=10,
+            )
+
+    def test_completed_with_valid_output_data_succeeds(self):
+        _db, recorder, _row_id, token_id = _setup_with_token()
+
+        state = recorder.begin_node_state(
+            token_id=token_id,
+            node_id="source-0",
+            run_id="run-1",
+            step_index=0,
+            input_data={"x": 1},
+        )
+
+        result = recorder.complete_node_state(
+            state.state_id,
+            NodeStateStatus.COMPLETED,
+            output_data={"x": 1, "result": "ok"},
+            duration_ms=10,
+        )
+        assert isinstance(result, NodeStateCompleted)
+
+    def test_failed_with_valid_error_succeeds(self):
+        _db, recorder, _row_id, token_id = _setup_with_token()
+
+        state = recorder.begin_node_state(
+            token_id=token_id,
+            node_id="source-0",
+            run_id="run-1",
+            step_index=0,
+            input_data={"x": 1},
+        )
+
+        result = recorder.complete_node_state(
+            state.state_id,
+            NodeStateStatus.FAILED,
+            error={"reason": "something broke"},
+            duration_ms=10,
+        )
+        assert isinstance(result, NodeStateFailed)
+
+    def test_error_json_defaults_to_none_for_failed(self):
+        """FAILED without error is now rejected by pre-write validation.
+
+        This test documents that the old behavior (FAILED with error=None
+        silently producing error_json=None) is no longer allowed. See
+        test_rejects_failed_without_error for the replacement test.
+        """
+        _db, recorder, _row_id, token_id = _setup_with_token()
+
+        state = recorder.begin_node_state(
+            token_id=token_id,
+            node_id="source-0",
+            run_id="run-1",
+            step_index=0,
+            input_data={"x": 1},
+        )
+
+        with pytest.raises(ValueError, match="FAILED node state requires error"):
+            recorder.complete_node_state(
+                state.state_id,
+                NodeStateStatus.FAILED,
+                duration_ms=10,
+            )
 
     def test_success_reason_defaults_to_none(self):
         _db, recorder, _row_id, token_id = _setup_with_token()
@@ -1732,3 +1811,27 @@ class TestRecordRoutingEvents:
 
         for event in events:
             assert event.created_at is not None
+
+    def test_empty_routes_returns_empty_without_orphaned_payload(self, tmp_path):
+        """Bug ut1w: empty routes must return early without storing payload."""
+        from unittest.mock import MagicMock
+
+        _db, recorder, _row_id, token_id, _edge_id = _setup_with_token_and_edge()
+
+        state = recorder.begin_node_state(
+            token_id=token_id,
+            node_id="source-0",
+            run_id="run-1",
+            step_index=0,
+            input_data={"x": 1},
+        )
+
+        # Mock the payload store to detect any store() calls
+        mock_store = MagicMock()
+        recorder._payload_store = mock_store
+
+        reason = {"action": "continue", "match": "default"}
+        events = recorder.record_routing_events(state.state_id, routes=[], reason=reason)
+
+        assert events == []
+        mock_store.store.assert_not_called()

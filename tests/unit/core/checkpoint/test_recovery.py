@@ -18,6 +18,11 @@ from elspeth.contracts import (
     RowOutcome,
     RunStatus,
 )
+from elspeth.contracts.aggregation_checkpoint import (
+    AggregationCheckpointState,
+    AggregationNodeCheckpoint,
+    AggregationTokenCheckpoint,
+)
 from elspeth.contracts.contract_records import ContractAuditRecord
 from elspeth.contracts.schema_contract import FieldContract, SchemaContract
 from elspeth.core.checkpoint import CheckpointCorruptionError, CheckpointManager, RecoveryManager
@@ -134,11 +139,12 @@ def _insert_row(conn: Connection, run_id: str, row_id: str, *, row_index: int, s
     )
 
 
-def _insert_token(conn: Connection, token_id: str, row_id: str) -> None:
+def _insert_token(conn: Connection, run_id: str, token_id: str, row_id: str) -> None:
     conn.execute(
         tokens_table.insert().values(
             token_id=token_id,
             row_id=row_id,
+            run_id=run_id,
             created_at=datetime.now(UTC),
         )
     )
@@ -165,7 +171,7 @@ def _create_failed_run_with_checkpoint(
     *,
     checkpoint_node_id: str = "checkpoint-node",
     with_contract: bool = True,
-    aggregation_state: dict[str, Any] | None = None,
+    aggregation_state: AggregationCheckpointState | None = None,
     graph: ExecutionGraph | None = None,
 ) -> ExecutionGraph:
     active_graph = graph or _create_graph(node_id=checkpoint_node_id)
@@ -175,7 +181,7 @@ def _create_failed_run_with_checkpoint(
         _insert_node(conn, run_id, "source-node", node_type=NodeType.SOURCE)
         _insert_node(conn, run_id, checkpoint_node_id)
         _insert_row(conn, run_id, "row-0", row_index=0, source_data_ref=None)
-        _insert_token(conn, "tok-0", "row-0")
+        _insert_token(conn, run_id, "tok-0", "row-0")
 
     checkpoint_manager.create_checkpoint(
         run_id=run_id,
@@ -296,18 +302,30 @@ def test_get_resume_point_restores_aggregation_state(
         db,
         checkpoint_manager,
         run_id,
-        aggregation_state={
-            "_version": 1,
-            "agg-node": {
-                "tokens": [
-                    {
-                        "row_id": "row-buffered",
-                        "token_id": "tok-buffered",
-                        "row_data": {"id": 5},
-                    }
-                ]
+        aggregation_state=AggregationCheckpointState(
+            version="3.0",
+            nodes={
+                "agg-node": AggregationNodeCheckpoint(
+                    tokens=(
+                        AggregationTokenCheckpoint(
+                            token_id="tok-buffered",
+                            row_id="row-buffered",
+                            branch_name=None,
+                            fork_group_id=None,
+                            join_group_id=None,
+                            expand_group_id=None,
+                            row_data={"id": 5},
+                            contract_version="test",
+                        ),
+                    ),
+                    batch_id="batch-001",
+                    elapsed_age_seconds=0.0,
+                    count_fire_offset=None,
+                    condition_fire_offset=None,
+                    contract={"mode": "FLEXIBLE", "locked": False, "version_hash": "test", "fields": []},
+                ),
             },
-        },
+        ),
     )
 
     resume_point = recovery_manager.get_resume_point(run_id, graph)
@@ -316,7 +334,7 @@ def test_get_resume_point_restores_aggregation_state(
     assert resume_point.node_id == "checkpoint-node"
     assert resume_point.sequence_number == 1
     assert resume_point.aggregation_state is not None
-    assert "agg-node" in resume_point.aggregation_state
+    assert "agg-node" in resume_point.aggregation_state.nodes
 
 
 def test_get_unprocessed_rows_returns_empty_when_no_checkpoint(recovery_manager: RecoveryManager) -> None:
@@ -337,23 +355,30 @@ def test_get_unprocessed_rows_handles_fork_and_excludes_buffered_rows(
 
         # row-completed: one completed token -> should be excluded.
         _insert_row(conn, run_id, "row-completed", row_index=0, source_data_ref=None)
-        _insert_token(conn, "tok-completed", "row-completed")
+        _insert_token(conn, run_id, "tok-completed", "row-completed")
         _insert_terminal_outcome(conn, run_id, "tok-completed", outcome=RowOutcome.COMPLETED)
 
         # row-delegation-only: FORKED parent only, no child terminal -> should be included.
         _insert_row(conn, run_id, "row-delegation-only", row_index=1, source_data_ref=None)
-        _insert_token(conn, "tok-parent", "row-delegation-only")
+        _insert_token(conn, run_id, "tok-parent", "row-delegation-only")
         _insert_terminal_outcome(conn, run_id, "tok-parent", outcome=RowOutcome.FORKED)
 
         # row-child-pending: one completed child + one pending child -> should be included.
         _insert_row(conn, run_id, "row-child-pending", row_index=2, source_data_ref=None)
-        _insert_token(conn, "tok-child-ok", "row-child-pending")
+        _insert_token(conn, run_id, "tok-child-ok", "row-child-pending")
         _insert_terminal_outcome(conn, run_id, "tok-child-ok", outcome=RowOutcome.COMPLETED)
-        _insert_token(conn, "tok-child-pending", "row-child-pending")
+        _insert_token(conn, run_id, "tok-child-pending", "row-child-pending")
 
-        # row-buffered: appears incomplete but is buffered in checkpoint state -> excluded.
+        # row-buffered: appears incomplete but all incomplete tokens are buffered
+        # in checkpoint state -> excluded.
         _insert_row(conn, run_id, "row-buffered", row_index=3, source_data_ref=None)
-        _insert_token(conn, "tok-buffered", "row-buffered")
+        _insert_token(conn, run_id, "tok-buffered", "row-buffered")
+
+        # row-mixed-buffering: one incomplete token buffered + one incomplete token
+        # not buffered -> must remain unprocessed.
+        _insert_row(conn, run_id, "row-mixed-buffering", row_index=4, source_data_ref=None)
+        _insert_token(conn, run_id, "tok-mixed-buffered", "row-mixed-buffering")
+        _insert_token(conn, run_id, "tok-mixed-pending", "row-mixed-buffering")
 
     checkpoint_manager.create_checkpoint(
         run_id=run_id,
@@ -361,14 +386,124 @@ def test_get_unprocessed_rows_handles_fork_and_excludes_buffered_rows(
         node_id="checkpoint-node",
         sequence_number=10,
         graph=graph,
-        aggregation_state={
-            "_version": 1,
-            "agg-node": {"tokens": [{"row_id": "row-buffered"}]},
-        },
+        aggregation_state=AggregationCheckpointState(
+            version="3.0",
+            nodes={
+                "agg-node": AggregationNodeCheckpoint(
+                    tokens=(
+                        AggregationTokenCheckpoint(
+                            token_id="tok-buffered",
+                            row_id="row-buffered",
+                            branch_name=None,
+                            fork_group_id=None,
+                            join_group_id=None,
+                            expand_group_id=None,
+                            row_data={},
+                            contract_version="test",
+                        ),
+                        AggregationTokenCheckpoint(
+                            token_id="tok-mixed-buffered",
+                            row_id="row-mixed-buffering",
+                            branch_name=None,
+                            fork_group_id=None,
+                            join_group_id=None,
+                            expand_group_id=None,
+                            row_data={},
+                            contract_version="test",
+                        ),
+                    ),
+                    batch_id="batch-001",
+                    elapsed_age_seconds=0.0,
+                    count_fire_offset=None,
+                    condition_fire_offset=None,
+                    contract={"mode": "FLEXIBLE", "locked": False, "version_hash": "test", "fields": []},
+                ),
+            },
+        ),
     )
 
     unprocessed = recovery_manager.get_unprocessed_rows(run_id)
-    assert unprocessed == ["row-delegation-only", "row-child-pending"]
+    assert unprocessed == ["row-delegation-only", "row-child-pending", "row-mixed-buffering"]
+
+
+def test_get_unprocessed_rows_chunks_buffered_token_query(
+    db: LandscapeDB,
+    checkpoint_manager: CheckpointManager,
+    recovery_manager: RecoveryManager,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Regression: buffered-token filtering must chunk the row_id IN clause
+    to avoid exceeding SQLite's SQLITE_MAX_VARIABLE_NUMBER bind limit.
+
+    By setting _METADATA_CHUNK_SIZE=1, each row_id gets its own query.
+    The filtering logic must still produce correct results across chunks.
+    """
+    monkeypatch.setattr("elspeth.core.checkpoint.recovery._METADATA_CHUNK_SIZE", 1)
+
+    run_id = "run-chunk-buffered"
+    graph = _create_graph(node_id="checkpoint-node")
+    with db.connection() as conn:
+        _insert_run(conn, run_id, status=RunStatus.FAILED, with_contract=True)
+        _insert_node(conn, run_id, "source-node", node_type=NodeType.SOURCE)
+        _insert_node(conn, run_id, "checkpoint-node")
+
+        # row-a: incomplete token is buffered -> excluded
+        _insert_row(conn, run_id, "row-a", row_index=0, source_data_ref=None)
+        _insert_token(conn, run_id, "tok-a", "row-a")
+
+        # row-b: incomplete token is NOT buffered -> included
+        _insert_row(conn, run_id, "row-b", row_index=1, source_data_ref=None)
+        _insert_token(conn, run_id, "tok-b", "row-b")
+
+        # row-c: incomplete token is buffered -> excluded
+        _insert_row(conn, run_id, "row-c", row_index=2, source_data_ref=None)
+        _insert_token(conn, run_id, "tok-c", "row-c")
+
+    checkpoint_manager.create_checkpoint(
+        run_id=run_id,
+        token_id="tok-a",
+        node_id="checkpoint-node",
+        sequence_number=1,
+        graph=graph,
+        aggregation_state=AggregationCheckpointState(
+            version="3.0",
+            nodes={
+                "agg-node": AggregationNodeCheckpoint(
+                    tokens=(
+                        AggregationTokenCheckpoint(
+                            token_id="tok-a",
+                            row_id="row-a",
+                            branch_name=None,
+                            fork_group_id=None,
+                            join_group_id=None,
+                            expand_group_id=None,
+                            row_data={},
+                            contract_version="test",
+                        ),
+                        AggregationTokenCheckpoint(
+                            token_id="tok-c",
+                            row_id="row-c",
+                            branch_name=None,
+                            fork_group_id=None,
+                            join_group_id=None,
+                            expand_group_id=None,
+                            row_data={},
+                            contract_version="test",
+                        ),
+                    ),
+                    batch_id="batch-001",
+                    elapsed_age_seconds=0.0,
+                    count_fire_offset=None,
+                    condition_fire_offset=None,
+                    contract={"mode": "FLEXIBLE", "locked": False, "version_hash": "test", "fields": []},
+                ),
+            },
+        ),
+    )
+
+    unprocessed = recovery_manager.get_unprocessed_rows(run_id)
+    # row-a and row-c excluded (buffered), row-b included
+    assert unprocessed == ["row-b"]
 
 
 class _SimpleSchema(PluginSchema):
@@ -550,9 +685,9 @@ def test_get_unprocessed_rows_handles_delegation_token_with_completed_leaf(
         _insert_node(conn, run_id, "source-node", node_type=NodeType.SOURCE)
         _insert_node(conn, run_id, "checkpoint-node")
         _insert_row(conn, run_id, "row-forked-complete", row_index=1, source_data_ref=None)
-        _insert_token(conn, "tok-parent", "row-forked-complete")
+        _insert_token(conn, run_id, "tok-parent", "row-forked-complete")
         _insert_terminal_outcome(conn, run_id, "tok-parent", outcome=RowOutcome.FORKED)
-        _insert_token(conn, "tok-child", "row-forked-complete")
+        _insert_token(conn, run_id, "tok-child", "row-forked-complete")
         _insert_terminal_outcome(conn, run_id, "tok-child", outcome=RowOutcome.COMPLETED)
 
     checkpoint_manager.create_checkpoint(

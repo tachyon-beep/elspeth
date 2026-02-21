@@ -93,8 +93,6 @@ class LandscapeJournal:
         context: object,
         executemany: bool,
     ) -> None:
-        if self._disabled:
-            return
         if not self._is_write_statement(statement):
             return
 
@@ -116,8 +114,6 @@ class LandscapeJournal:
         buffer.append(record)
 
     def _after_commit(self, conn: Connection) -> None:
-        if self._disabled:
-            return
         if _BUFFER_KEY not in conn.info:
             return
 

@@ -85,8 +85,11 @@ def normalize_type_for_contract(value: Any) -> type:
         if np.isnat(value):
             return type(None)
         return datetime
-    if isinstance(value, (np.str_, np.bytes_)):
+    if isinstance(value, np.str_):
         return str
+    # NOTE: np.bytes_ is NOT normalized to str (or bytes). It falls through
+    # to the ALLOWED_CONTRACT_TYPES check and raises TypeError. This prevents
+    # silent misclassification of binary data as text in schema contracts.
 
     # Reject unsupported types immediately (fail-fast for checkpoint compatibility)
     # Per CLAUDE.md: Silent failures corrupt audit trail - crash early with clear error

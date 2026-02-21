@@ -313,6 +313,45 @@ class TestMergeContractWithOutput:
         id_field = next(f for f in merged.fields if f.normalized_name == "id")
         assert id_field.source == "declared"
 
+    def test_merge_preserves_nullable_from_output_schema(self) -> None:
+        """Regression: merge_contract_with_output must preserve nullable from output field.
+
+        Without this fix, nullable=True fields in the output schema lose their
+        nullable flag after merge, causing false contract violations when valid
+        None values flow through downstream transforms.
+        """
+        field_id = make_field("id", int, original_name="id", required=True, source="declared")
+        input_contract = SchemaContract(
+            mode="FLEXIBLE",
+            fields=(field_id,),
+            locked=True,
+        )
+
+        field_id_out = make_field("id", int, original_name="id", required=True, source="declared")
+        field_score = make_field(
+            "score",
+            float,
+            original_name="score",
+            required=False,
+            source="declared",
+            nullable=True,
+        )
+        output_schema_contract = SchemaContract(
+            mode="FLEXIBLE",
+            fields=(field_id_out, field_score),
+            locked=True,
+        )
+
+        merged = merge_contract_with_output(
+            input_contract=input_contract,
+            output_schema_contract=output_schema_contract,
+        )
+
+        score_field = next(f for f in merged.fields if f.normalized_name == "score")
+        assert score_field.nullable is True
+        assert score_field.python_type is float
+        assert score_field.required is False
+
 
 class TestPropagateContractEdgeCases:
     """Edge case tests for contract propagation."""
@@ -380,6 +419,42 @@ class TestPropagateContractEdgeCases:
         assert price_field.python_type is float
         assert price_field.required is True
         assert price_field.source == "declared"
+
+    def test_field_rename_preserves_nullable(self) -> None:
+        """Regression: renaming a nullable field must preserve nullable=True.
+
+        Without this, Optional[float] fields lose their nullable flag after
+        rename, causing false contract violations on valid None values.
+        """
+        from elspeth.contracts.contract_propagation import narrow_contract_to_output
+
+        field_score = make_field(
+            "risk_score",
+            float,
+            original_name="Risk Score",
+            required=False,
+            source="declared",
+            nullable=True,
+        )
+        field_id = make_field("id", int, original_name="ID", required=True, source="declared")
+        input_contract = SchemaContract(
+            mode="FLEXIBLE",
+            fields=(field_score, field_id),
+            locked=True,
+        )
+
+        output_row = {"score": None, "id": 1}
+        output_contract = narrow_contract_to_output(
+            input_contract=input_contract,
+            output_row=output_row,
+            renamed_fields={"Risk Score": "score"},
+        )
+
+        score_field = output_contract.get_field("score")
+        assert score_field is not None
+        assert score_field.nullable is True
+        assert score_field.python_type is float
+        assert score_field.original_name == "Risk Score"
 
     def test_type_conflict_between_contract_and_actual_data(self) -> None:
         """Input contract declares int, but output has string - documents mismatch behavior.
@@ -526,15 +601,18 @@ class TestPropagateContractNonPrimitiveTypes:
         metadata_field = output_contract.get_field("metadata")
         assert metadata_field.python_type is object
 
-    def test_unsupported_non_dict_list_type_is_still_skipped(self, input_contract: SchemaContract) -> None:
-        """Unsupported non-dict/list values preserve existing skip behavior."""
+    def test_unsupported_type_preserved_as_object(self, input_contract: SchemaContract) -> None:
+        """Unsupported types are preserved as object in contract (not silently dropped).
 
-        class _CustomUnsupported:
-            pass
+        Regression test for P1 bug: propagate_contract silently dropped fields
+        with unsupported types (e.g., Decimal, tuple, custom classes), causing
+        contract/data divergence and FIXED mode access failures.
+        """
+        from decimal import Decimal
 
         output_row = {
             "id": 1,
-            "custom": _CustomUnsupported(),
+            "price": Decimal("12.34"),
         }
 
         output_contract = propagate_contract(
@@ -545,7 +623,52 @@ class TestPropagateContractNonPrimitiveTypes:
 
         field_names = {f.normalized_name for f in output_contract.fields}
         assert "id" in field_names
-        assert "custom" not in field_names
+        assert "price" in field_names
+        price_field = output_contract.get_field("price")
+        assert price_field.python_type is object
+        assert price_field.source == "inferred"
+        assert price_field.required is False
+
+    def test_custom_class_preserved_as_object(self, input_contract: SchemaContract) -> None:
+        """Custom class values are preserved as object in contract."""
+
+        class _CustomClass:
+            pass
+
+        output_row = {
+            "id": 1,
+            "custom": _CustomClass(),
+        }
+
+        output_contract = propagate_contract(
+            input_contract=input_contract,
+            output_row=output_row,
+            transform_adds_fields=True,
+        )
+
+        field_names = {f.normalized_name for f in output_contract.fields}
+        assert "id" in field_names
+        assert "custom" in field_names
+        custom_field = output_contract.get_field("custom")
+        assert custom_field.python_type is object
+
+    def test_tuple_preserved_as_object(self, input_contract: SchemaContract) -> None:
+        """Tuple values are preserved as object in contract."""
+        output_row = {
+            "id": 1,
+            "coords": (1.0, 2.0),
+        }
+
+        output_contract = propagate_contract(
+            input_contract=input_contract,
+            output_row=output_row,
+            transform_adds_fields=True,
+        )
+
+        field_names = {f.normalized_name for f in output_contract.fields}
+        assert "coords" in field_names
+        coords_field = output_contract.get_field("coords")
+        assert coords_field.python_type is object
 
     def test_non_finite_float_still_raises_value_error(self, input_contract: SchemaContract) -> None:
         """Non-finite floats remain invalid for contract inference."""

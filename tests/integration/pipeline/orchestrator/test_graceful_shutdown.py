@@ -517,6 +517,7 @@ class TestInterruptAndResume:
                     insert(tokens_table).values(
                         token_id=f"t{i}",
                         row_id=f"r{i}",
+                        run_id=run_id,
                         created_at=now,
                     )
                 )

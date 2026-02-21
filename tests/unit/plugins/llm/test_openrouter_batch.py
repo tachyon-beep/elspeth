@@ -773,3 +773,130 @@ class TestOpenRouterBatchTelemetryAttribution:
             result = transform.process(make_pipeline_row(row), ctx)
 
         assert result.status == "success"
+
+
+class TestOpenRouterBatchDeclaredOutputFields:
+    """Tests for declared_output_fields — centralized collision detection support.
+
+    Field collision detection is enforced centrally by TransformExecutor
+    (see TestTransformExecutor in test_executors.py). These tests verify
+    that OpenRouterBatchLLMTransform correctly declares its output fields so the
+    executor can perform pre-execution collision checks.
+    """
+
+    def test_declared_output_fields_contains_response_field(self) -> None:
+        """declared_output_fields includes the main response field."""
+        transform, _ctx = _create_transform_with_context()
+        assert "llm_response" in transform.declared_output_fields
+
+    def test_declared_output_fields_contains_audit_fields(self) -> None:
+        """declared_output_fields includes suffixed audit/metadata fields."""
+        transform, _ctx = _create_transform_with_context()
+        assert "llm_response_usage" in transform.declared_output_fields
+        assert "llm_response_model" in transform.declared_output_fields
+        assert "llm_response_template_hash" in transform.declared_output_fields
+
+
+class TestOpenRouterBatchErrorKeyCollision:
+    """Regression tests for ydk4: source rows with an 'error' field.
+
+    Before the fix, _process_batch used key-presence detection
+    ("error" in result) to distinguish success from error dicts. If a
+    source row had a field named "error", the success output dict
+    contained that key, triggering the error branch and silently
+    dropping the LLM response.
+
+    The fix replaces raw dict sentinels with a typed _RowOutcome
+    dataclass that branches on an explicit .ok flag.
+    """
+
+    def test_success_row_with_error_field_not_misclassified(self, chaosllm_server) -> None:
+        """Source row with 'error' field is processed as SUCCESS, not misclassified."""
+        transform, ctx = _create_transform_with_context()
+        row = {"text": "Hello world", "error": "previous_pipeline_error_value"}
+
+        with mock_httpx_client(chaosllm_server, _create_mock_response(chaosllm_server, content="Analyzed!")):
+            result = transform.process(make_pipeline_row(row), ctx)
+
+        assert result.status == "success"
+        assert result.row is not None
+        # LLM response must be populated, NOT None
+        assert result.row["llm_response"] == "Analyzed!"
+        # Original 'error' field must be preserved
+        assert result.row["error"] == "previous_pipeline_error_value"
+        # No error marker should be present
+        assert result.row.get("llm_response_error") is None
+
+    def test_batch_with_error_field_rows_all_succeed(self, chaosllm_server) -> None:
+        """Batch where every row has an 'error' field — all should succeed."""
+        transform, ctx = _create_transform_with_context({"pool_size": 2})
+        rows = [
+            {"text": "Row 1", "error": "err_a"},
+            {"text": "Row 2", "error": "err_b"},
+            {"text": "Row 3", "error": "err_c"},
+        ]
+
+        responses = [_create_mock_response(chaosllm_server, content=f"Result {i}") for i in range(3)]
+
+        with mock_httpx_client(chaosllm_server, responses):
+            result = transform.process([make_pipeline_row(r) for r in rows], ctx)
+
+        assert result.status == "success"
+        assert result.rows is not None
+        assert len(result.rows) == 3
+
+        for i, output_row in enumerate(result.rows):
+            # LLM response populated
+            assert output_row["llm_response"] is not None
+            # Original error field preserved
+            assert output_row["error"] == f"err_{'abc'[i]}"
+            # No error marker
+            assert output_row.get("llm_response_error") is None
+
+    def test_error_row_with_error_field_still_captured_correctly(self, chaosllm_server) -> None:
+        """Source row with 'error' field + failed LLM call captures the error correctly."""
+        transform, ctx = _create_transform_with_context()
+        row = {"text": "Hello", "error": "pre-existing"}
+
+        error_response = Mock(spec=httpx.Response)
+        error_response.status_code = 500
+        error = httpx.HTTPStatusError(
+            "Server Error",
+            request=Mock(),
+            response=error_response,
+        )
+
+        with mock_httpx_client(chaosllm_server, side_effect=error):
+            result = transform.process(make_pipeline_row(row), ctx)
+
+        assert result.status == "success"
+        assert result.row is not None
+        # LLM response should be None (error)
+        assert result.row["llm_response"] is None
+        # Error should be from the API failure, not from the source row's "error" field
+        assert result.row["llm_response_error"]["reason"] == "api_call_failed"
+        assert result.row["llm_response_error"]["status_code"] == 500
+
+
+class TestBug4_8_FieldCollisionBeforeAPICall:
+    """Bug 4.8: Field collision detected before making API call.
+
+    Originally, the plugin-level collision check happened after the API call,
+    wasting expensive HTTP requests. That was fixed to check before the call.
+
+    Now, collision detection is fully centralized in TransformExecutor
+    (see TestTransformExecutor in test_executors.py). The pre-execution check
+    prevents the transform from running at all when collisions exist.
+
+    This test verifies declared_output_fields is populated correctly so the
+    executor can perform its pre-execution collision check.
+    """
+
+    def test_declared_output_fields_enables_executor_level_check(self) -> None:
+        """declared_output_fields is populated, enabling executor collision detection."""
+        transform, _ctx = _create_transform_with_context()
+
+        # The field that would collide must be in declared_output_fields
+        assert "llm_response" in transform.declared_output_fields
+        assert isinstance(transform.declared_output_fields, frozenset)
+        assert len(transform.declared_output_fields) > 0

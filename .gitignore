@@ -159,9 +159,9 @@ landscape.db-wal
 # pre-commit cache
 .pre-commit-cache/
 
-# bv (beads viewer) local config and caches
-.bv/
-.perles/config.yaml
-.beads_tree/
-.keel/
+# Tool-specific local config and caches
 .codex/
+
+# Filigree issue tracker
+.filigree/
+.mcp.json

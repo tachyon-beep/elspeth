@@ -37,7 +37,6 @@ from elspeth.core.landscape.database import LandscapeDB
 from elspeth.core.landscape.reproducibility import (
     ReproducibilityGrade,
     compute_grade,
-    set_run_grade,
     update_grade_after_purge,
 )
 from elspeth.core.landscape.schema import nodes_table, runs_table
@@ -125,6 +124,11 @@ def _insert_nodes(db: LandscapeDB, run_id: str, determinisms: list[Determinism])
                     registered_at=now,
                 )
             )
+
+
+def _set_run_grade(db: LandscapeDB, run_id: str, grade: ReproducibilityGrade) -> None:
+    with db.connection() as conn:
+        conn.execute(runs_table.update().where(runs_table.c.run_id == run_id).values(reproducibility_grade=grade.value))
 
 
 def _get_run_grade(db: LandscapeDB, run_id: str) -> ReproducibilityGrade:
@@ -289,7 +293,7 @@ class TestGradeDegradationProperties:
         """Property: Degradation rule applied via update_grade_after_purge()."""
         with LandscapeDB.in_memory() as db:
             run_id = _create_run(db)
-            set_run_grade(db, run_id, grade)
+            _set_run_grade(db, run_id, grade)
             update_grade_after_purge(db, run_id)
 
             expected = ReproducibilityGrade.ATTRIBUTABLE_ONLY if grade == ReproducibilityGrade.REPLAY_REPRODUCIBLE else grade
@@ -304,7 +308,7 @@ class TestGradeDegradationProperties:
         """
         with LandscapeDB.in_memory() as db:
             run_id = _create_run(db)
-            set_run_grade(db, run_id, grade)
+            _set_run_grade(db, run_id, grade)
 
             update_grade_after_purge(db, run_id)
             once = _get_run_grade(db, run_id)
@@ -329,7 +333,7 @@ class TestGradeDegradationProperties:
 
         with LandscapeDB.in_memory() as db:
             run_id = _create_run(db)
-            set_run_grade(db, run_id, grade)
+            _set_run_grade(db, run_id, grade)
             update_grade_after_purge(db, run_id)
             result = _get_run_grade(db, run_id)
 
@@ -356,7 +360,7 @@ class TestClassificationDegradationInteractionProperties:
             _insert_nodes(db, run_id, [det])
 
             grade = compute_grade(db, run_id)
-            set_run_grade(db, run_id, grade)
+            _set_run_grade(db, run_id, grade)
             update_grade_after_purge(db, run_id)
 
             assert _get_run_grade(db, run_id) == ReproducibilityGrade.FULL_REPRODUCIBLE
@@ -373,7 +377,7 @@ class TestClassificationDegradationInteractionProperties:
             _insert_nodes(db, run_id, [det])
 
             grade = compute_grade(db, run_id)
-            set_run_grade(db, run_id, grade)
+            _set_run_grade(db, run_id, grade)
             update_grade_after_purge(db, run_id)
 
             assert _get_run_grade(db, run_id) == ReproducibilityGrade.ATTRIBUTABLE_ONLY

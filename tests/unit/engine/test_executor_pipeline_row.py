@@ -952,9 +952,10 @@ class TestAggregationExecutorPipelineRow:
         assert buffered_tokens[0].row_data.contract is contract
 
     def test_checkpoint_contains_dicts_not_pipeline_row(self) -> None:
-        """get_checkpoint_state() should return JSON-serializable dicts."""
+        """get_checkpoint_state() should return typed DTO with JSON-serializable to_dict()."""
         import json
 
+        from elspeth.contracts.aggregation_checkpoint import AggregationCheckpointState
         from elspeth.contracts.types import NodeID
         from elspeth.core.config import AggregationSettings, TriggerConfig
         from elspeth.engine.executors import AggregationExecutor
@@ -995,24 +996,24 @@ class TestAggregationExecutorPipelineRow:
         # Buffer the row
         executor.buffer_row(node_id, token)
 
-        # Get checkpoint state
+        # Get checkpoint state — now returns typed DTO
         checkpoint = executor.get_checkpoint_state()
+        assert isinstance(checkpoint, AggregationCheckpointState)
 
-        # Verify checkpoint is JSON-serializable
+        # Verify to_dict() output is JSON-serializable
+        checkpoint_dict = checkpoint.to_dict()
         try:
-            serialized = json.dumps(checkpoint)
+            serialized = json.dumps(checkpoint_dict)
             assert len(serialized) > 0
         except (TypeError, ValueError) as e:
-            pytest.fail(f"Checkpoint should be JSON-serializable but got error: {e}")
+            pytest.fail(f"Checkpoint to_dict() should be JSON-serializable but got error: {e}")
 
-        # Verify row_data is stored as dict in checkpoint
-        node_checkpoint = checkpoint[str(node_id)]
-        assert "tokens" in node_checkpoint
-        token_data = node_checkpoint["tokens"][0]
-        assert "row_data" in token_data
+        # Verify row_data is stored as dict in checkpoint token
+        node_checkpoint = checkpoint.nodes[str(node_id)]
+        token_ckpt = node_checkpoint.tokens[0]
         # row_data should be a dict, not PipelineRow
-        assert isinstance(token_data["row_data"], dict)
-        assert token_data["row_data"] == {"value": "test"}
+        assert isinstance(token_ckpt.row_data, dict)
+        assert token_ckpt.row_data == {"value": "test"}
 
     def test_checkpoint_includes_contract_for_restore(self) -> None:
         """Checkpoint should include contract info to enable PipelineRow restoration."""
@@ -1060,12 +1061,13 @@ class TestAggregationExecutorPipelineRow:
         checkpoint = executor.get_checkpoint_state()
 
         # Verify contract info is stored (either per-token or per-node)
-        node_checkpoint = checkpoint[str(node_id)]
-        # Contract should be stored somewhere in checkpoint
-        # Either as "contract" at node level or "contract_version" per token
-        assert "contract" in node_checkpoint or any("contract_version" in t for t in node_checkpoint["tokens"]), (
-            "Checkpoint must include contract info for PipelineRow restoration"
-        )
+        from elspeth.contracts.aggregation_checkpoint import AggregationCheckpointState
+
+        assert isinstance(checkpoint, AggregationCheckpointState)
+        node_checkpoint = checkpoint.nodes[str(node_id)]
+        # Contract stored at node level and contract_version per token
+        assert node_checkpoint.contract is not None
+        assert all(t.contract_version for t in node_checkpoint.tokens), "Checkpoint must include contract info for PipelineRow restoration"
 
     def test_restore_from_checkpoint_creates_pipeline_row(self) -> None:
         """restore_from_checkpoint should reconstruct TokenInfo with PipelineRow."""

@@ -15,6 +15,7 @@ from elspeth.contracts import (
     Row,
     RowLineage,
     Token,
+    TokenOutcome,
     TokenParent,
 )
 from elspeth.contracts.errors import AuditIntegrityError
@@ -24,6 +25,7 @@ from elspeth.core.landscape.schema import (
     node_states_table,
     routing_events_table,
     rows_table,
+    token_outcomes_table,
     token_parents_table,
     tokens_table,
 )
@@ -38,9 +40,12 @@ if TYPE_CHECKING:
         NodeStateRepository,
         RoutingEventRepository,
         RowRepository,
+        TokenOutcomeRepository,
         TokenParentRepository,
         TokenRepository,
     )
+
+_QUERY_CHUNK_SIZE = 500
 
 
 class QueryMethodsMixin:
@@ -55,6 +60,7 @@ class QueryMethodsMixin:
     _call_repo: CallRepository
     _node_state_repo: NodeStateRepository
     _routing_event_repo: RoutingEventRepository
+    _token_outcome_repo: TokenOutcomeRepository
     _payload_store: PayloadStore | None
 
     def get_rows(self, run_id: str) -> list[Row]:
@@ -222,6 +228,9 @@ class QueryMethodsMixin:
     def get_routing_events_for_states(self, state_ids: list[str]) -> list[RoutingEvent]:
         """Get routing events for multiple states in one query.
 
+        Chunks state_ids to stay within SQLite's SQLITE_MAX_VARIABLE_NUMBER
+        limit (default 999).
+
         Args:
             state_ids: List of state IDs to query
 
@@ -231,22 +240,30 @@ class QueryMethodsMixin:
         """
         if not state_ids:
             return []
-        query = (
-            select(routing_events_table)
-            .join(node_states_table, routing_events_table.c.state_id == node_states_table.c.state_id)
-            .where(routing_events_table.c.state_id.in_(state_ids))
-            .order_by(
-                node_states_table.c.step_index,
-                node_states_table.c.attempt,
-                routing_events_table.c.ordinal,
-                routing_events_table.c.event_id,
+
+        all_db_rows = []
+        for offset in range(0, len(state_ids), _QUERY_CHUNK_SIZE):
+            chunk = state_ids[offset : offset + _QUERY_CHUNK_SIZE]
+            query = (
+                select(
+                    routing_events_table,
+                    node_states_table.c.step_index,
+                    node_states_table.c.attempt,
+                )
+                .join(node_states_table, routing_events_table.c.state_id == node_states_table.c.state_id)
+                .where(routing_events_table.c.state_id.in_(chunk))
             )
-        )
-        db_rows = self._ops.execute_fetchall(query)
-        return [self._routing_event_repo.load(r) for r in db_rows]
+            all_db_rows.extend(self._ops.execute_fetchall(query))
+
+        # Sort all rows by the same ordering the original single-query version used
+        all_db_rows.sort(key=lambda r: (r.step_index, r.attempt, r.ordinal, r.event_id))
+        return [self._routing_event_repo.load(r) for r in all_db_rows]
 
     def get_calls_for_states(self, state_ids: list[str]) -> list[Call]:
         """Get external calls for multiple states in one query.
+
+        Chunks state_ids to stay within SQLite's SQLITE_MAX_VARIABLE_NUMBER
+        limit (default 999).
 
         Args:
             state_ids: List of state IDs to query
@@ -257,18 +274,24 @@ class QueryMethodsMixin:
         """
         if not state_ids:
             return []
-        query = (
-            select(calls_table)
-            .join(node_states_table, calls_table.c.state_id == node_states_table.c.state_id)
-            .where(calls_table.c.state_id.in_(state_ids))
-            .order_by(
-                node_states_table.c.step_index,
-                node_states_table.c.attempt,
-                calls_table.c.call_index,
+
+        all_db_rows = []
+        for offset in range(0, len(state_ids), _QUERY_CHUNK_SIZE):
+            chunk = state_ids[offset : offset + _QUERY_CHUNK_SIZE]
+            query = (
+                select(
+                    calls_table,
+                    node_states_table.c.step_index,
+                    node_states_table.c.attempt,
+                )
+                .join(node_states_table, calls_table.c.state_id == node_states_table.c.state_id)
+                .where(calls_table.c.state_id.in_(chunk))
             )
-        )
-        db_rows = self._ops.execute_fetchall(query)
-        return [self._call_repo.load(r) for r in db_rows]
+            all_db_rows.extend(self._ops.execute_fetchall(query))
+
+        # Sort all rows by the same ordering the original single-query version used
+        all_db_rows.sort(key=lambda r: (r.step_index, r.attempt, r.call_index))
+        return [self._call_repo.load(r) for r in all_db_rows]
 
     # === Batch Query Methods (Bug 76r: N+1 query fix for exporter) ===
     #
@@ -389,6 +412,23 @@ class QueryMethodsMixin:
         db_rows = self._ops.execute_fetchall(query)
         return [self._token_parent_repo.load(r) for r in db_rows]
 
+    def get_all_token_outcomes_for_run(self, run_id: str) -> list[TokenOutcome]:
+        """Get all token outcomes for a run (batch query).
+
+        Args:
+            run_id: Run ID
+
+        Returns:
+            List of TokenOutcome models, ordered by token_id then recorded_at
+        """
+        query = (
+            select(token_outcomes_table)
+            .where(token_outcomes_table.c.run_id == run_id)
+            .order_by(token_outcomes_table.c.token_id, token_outcomes_table.c.recorded_at)
+        )
+        db_rows = self._ops.execute_fetchall(query)
+        return [self._token_outcome_repo.load(r) for r in db_rows]
+
     # === Explain Methods (Graceful Degradation) ===
 
     def explain_row(self, run_id: str, row_id: str) -> RowLineage | None:
@@ -418,7 +458,7 @@ class QueryMethodsMixin:
         source_data: dict[str, Any] | None = None
         payload_available = False
 
-        if row.source_data_ref and self._payload_store:
+        if row.source_data_ref is not None and self._payload_store is not None:
             try:
                 payload_bytes = self._payload_store.retrieve(row.source_data_ref)
                 decoded_source_data = json.loads(payload_bytes.decode("utf-8"))

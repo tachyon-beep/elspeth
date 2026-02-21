@@ -22,6 +22,7 @@ from elspeth.contracts.events import (
     PhaseCompleted,
     PhaseError,
     PhaseStarted,
+    RunCompletionStatus,
     RunSummary,
 )
 from elspeth.core.events import EventBusProtocol
@@ -48,11 +49,12 @@ def create_console_formatters(prefix: str = "Run") -> dict[type, Callable[..., N
 
     def _format_run_summary(event: RunSummary) -> None:
         status_symbols = {
-            "completed": "✓",
-            "partial": "⚠",
-            "failed": "✗",
+            RunCompletionStatus.COMPLETED: "✓",
+            RunCompletionStatus.PARTIAL: "⚠",
+            RunCompletionStatus.FAILED: "✗",
+            RunCompletionStatus.INTERRUPTED: "⏸",
         }
-        symbol = status_symbols[event.status.value]
+        symbol = status_symbols[event.status]
         routed_summary = ""
         if event.routed > 0:
             dest_parts = [f"{name}:{count}" for name, count in event.routed_destinations]

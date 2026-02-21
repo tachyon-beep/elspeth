@@ -150,19 +150,28 @@ def load_secrets_from_config(config: SecretsConfig) -> list[dict[str, Any]]:
         if env_var_name != _FP_KEY:
             ordered_mapping.append((env_var_name, keyvault_secret_name))
 
+    # Phase 1: Fetch all secrets and compute fingerprints WITHOUT mutating os.environ.
+    # This ensures that a failure partway through does not leave partial state.
+    pending_env: list[tuple[str, str]] = []  # (env_var_name, secret_value)
+
     for env_var_name, keyvault_secret_name in ordered_mapping:
         start_time = time.time()
         try:
             secret_value, _ref = loader.get_secret(keyvault_secret_name)
             latency_ms = (time.time() - start_time) * 1000
 
-            # Inject into environment (overrides existing)
-            os.environ[env_var_name] = str(secret_value)
+            # Stage the env var for atomic application later
+            pending_env.append((env_var_name, str(secret_value)))
 
             # Compute fingerprint immediately — plaintext never leaves this function.
             # Acquire fingerprint key lazily (it may have just been loaded above).
+            # For ELSPETH_FINGERPRINT_KEY itself, we need to use the just-fetched value
+            # since it's not in os.environ yet.
             if fingerprint_key is None:
-                fingerprint_key = get_fingerprint_key()
+                if env_var_name == _FP_KEY:
+                    fingerprint_key = str(secret_value).encode()
+                else:
+                    fingerprint_key = get_fingerprint_key()
             fp = secret_fingerprint(str(secret_value), key=fingerprint_key)
 
             resolutions.append(
@@ -203,5 +212,9 @@ def load_secrets_from_config(config: SecretsConfig) -> list[dict[str, Any]]:
                     f"Mapped from: {env_var_name}\n"
                     f"Error: {e}"
                 ) from e
+
+    # Phase 2: All secrets fetched successfully — apply to os.environ atomically.
+    for env_var_name, secret_value in pending_env:
+        os.environ[env_var_name] = secret_value
 
     return resolutions

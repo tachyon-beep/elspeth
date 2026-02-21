@@ -899,6 +899,50 @@ class TestGetNodes:
         assert gate_node.node_type == NodeType.GATE
         assert gate_node.determinism == Determinism.DETERMINISTIC
 
+    def test_null_sequence_nodes_deterministic_ordering(self) -> None:
+        """Bug qfxc: multiple NULL-sequence nodes must have deterministic order."""
+        _db, recorder = _setup()
+        # Register multiple nodes with NULL sequence — order must be stable
+        recorder.register_node(
+            run_id="run-1",
+            plugin_name="pluginC",
+            node_type=NodeType.TRANSFORM,
+            plugin_version="1.0.0",
+            config={},
+            node_id="node-c",
+            schema_config=_DYNAMIC_SCHEMA,
+        )
+        recorder.register_node(
+            run_id="run-1",
+            plugin_name="pluginA",
+            node_type=NodeType.TRANSFORM,
+            plugin_version="1.0.0",
+            config={},
+            node_id="node-a",
+            schema_config=_DYNAMIC_SCHEMA,
+        )
+        recorder.register_node(
+            run_id="run-1",
+            plugin_name="pluginB",
+            node_type=NodeType.TRANSFORM,
+            plugin_version="1.0.0",
+            config={},
+            node_id="node-b",
+            schema_config=_DYNAMIC_SCHEMA,
+        )
+
+        # Call get_nodes() twice and verify identical ordering
+        nodes_first = recorder.get_nodes("run-1")
+        nodes_second = recorder.get_nodes("run-1")
+
+        ids_first = [n.node_id for n in nodes_first]
+        ids_second = [n.node_id for n in nodes_second]
+        assert ids_first == ids_second
+
+        # All nodes have NULL sequence — tiebreaker is (registered_at, node_id)
+        for n in nodes_first:
+            assert n.sequence_in_pipeline is None
+
 
 # ---------------------------------------------------------------------------
 # get_edges

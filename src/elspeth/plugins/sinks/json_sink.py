@@ -200,7 +200,7 @@ class JSONSink(BaseSink):
         self._path = cfg.resolved_path()
         self._encoding = cfg.encoding
         self._indent = cfg.indent
-        self._validate_input = cfg.validate_input
+        self.validate_input = cfg.validate_input
 
         # Header mode configuration
         self._headers_mode: HeaderMode = cfg.headers_mode
@@ -240,6 +240,9 @@ class JSONSink(BaseSink):
         # Set input_schema for protocol compliance
         self.input_schema = self._schema_class
 
+        # Required-field enforcement (centralized in SinkExecutor)
+        self.declared_required_fields = self._schema_config.get_effective_required_fields()
+
         self._file: IO[str] | None = None
         self._rows: list[dict[str, Any]] = []  # Buffer for json array format
 
@@ -264,12 +267,6 @@ class JSONSink(BaseSink):
                 content_hash=hashlib.sha256(b"").hexdigest(),
                 size_bytes=0,
             )
-
-        # Optional input validation - crash on failure (upstream bug!)
-        if self._validate_input and not self._schema_config.is_observed:
-            for row in rows:
-                # Raises ValidationError on failure - this is intentional
-                self._schema_class.model_validate(row)
 
         # Lazy resolution of contract from context for headers: original mode
         # ctx.contract is set by orchestrator after first valid source row
@@ -311,9 +308,27 @@ class JSONSink(BaseSink):
 
         Uses write mode (truncate) or append mode based on self._mode.
         Append mode is used during resume to add to existing output.
+
+        When appending to an existing file with an explicit schema (fixed or
+        flexible), validates schema compatibility before opening. This mirrors
+        CSVSink's append-mode validation and prevents silent schema drift.
         """
         if self._file is None:
             file_mode = "a" if self._mode == "append" else "w"
+
+            # Validate schema compatibility before first append to existing file.
+            # Without this, append mode can write rows with incompatible schemas
+            # into the same JSONL file, violating sink schema contracts.
+            if self._mode == "append" and self._path.exists() and not self._schema_config.is_observed:
+                validation = self.validate_output_target()
+                if not validation.valid:
+                    msg_parts = [f"JSONL schema mismatch: {validation.error_message}"]
+                    if validation.missing_fields:
+                        msg_parts.append(f"Missing fields: {list(validation.missing_fields)}")
+                    if validation.extra_fields:
+                        msg_parts.append(f"Extra fields: {list(validation.extra_fields)}")
+                    raise ValueError(". ".join(msg_parts))
+
             self._file = open(self._path, file_mode, encoding=self._encoding)  # noqa: SIM115
 
         for row in rows:
@@ -546,7 +561,19 @@ class JSONSink(BaseSink):
 
         # Transform each row's keys to display names
         # Fields not in the mapping keep their original names (transform-added fields)
-        return [{display_map.get(k, k): v for k, v in row.items()} for row in rows]
+        result_rows = []
+        for row in rows:
+            mapped: dict[str, Any] = {}
+            for k, v in row.items():
+                display_key = display_map[k] if k in display_map else k  # noqa: SIM401 — .get() banned by tier model
+                if display_key in mapped:
+                    raise ValueError(
+                        f"Header collision: multiple fields map to output key '{display_key}'. "
+                        f"Check display_headers mapping for duplicate targets."
+                    )
+                mapped[display_key] = v
+            result_rows.append(mapped)
+        return result_rows
 
     # === Lifecycle Hooks ===
 

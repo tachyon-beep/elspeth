@@ -2,37 +2,11 @@
 
 from __future__ import annotations
 
-from concurrent.futures import TimeoutError as FuturesTimeoutError
+import time
 
 import pytest
 
-from elspeth.core.security.web import NetworkError, validate_url_for_ssrf
-
-
-class _FutureRaises:
-    """Simple future test double that raises from result()."""
-
-    def __init__(self, exc: Exception) -> None:
-        self._exc = exc
-
-    def result(self, timeout: float | None = None) -> list[str]:
-        raise self._exc
-
-
-class _ExecutorReturnsFuture:
-    """ThreadPoolExecutor test double for deterministic DNS branch testing."""
-
-    def __init__(self, future: _FutureRaises, *args: object, **kwargs: object) -> None:
-        self._future = future
-
-    def __enter__(self) -> _ExecutorReturnsFuture:
-        return self
-
-    def __exit__(self, exc_type: object, exc_val: object, exc_tb: object) -> bool:
-        return False
-
-    def submit(self, fn: object) -> _FutureRaises:
-        return self._future
+from elspeth.core.security.web import NetworkError, SSRFBlockedError, validate_url_for_ssrf
 
 
 class TestSSRFDnsFailureBranches:
@@ -40,20 +14,23 @@ class TestSSRFDnsFailureBranches:
 
     def test_dns_timeout_is_translated_to_network_error(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """Resolver timeout must surface as explicit NetworkError."""
-        monkeypatch.setattr(
-            "elspeth.core.security.web.ThreadPoolExecutor",
-            lambda *args, **kwargs: _ExecutorReturnsFuture(_FutureRaises(FuturesTimeoutError())),
-        )
+
+        def _slow_resolve(hostname: str) -> list[str]:
+            time.sleep(5)  # Much longer than the 0.01s timeout
+            return ["127.0.0.1"]
+
+        monkeypatch.setattr("elspeth.core.security.web._resolve_hostname", _slow_resolve)
 
         with pytest.raises(NetworkError, match=r"DNS resolution timeout \(0\.01s\): example\.com"):
             validate_url_for_ssrf("https://example.com/path", timeout=0.01)
 
     def test_unexpected_resolver_exception_is_wrapped_as_network_error(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """Unexpected resolver exceptions must be wrapped, not leaked raw."""
-        monkeypatch.setattr(
-            "elspeth.core.security.web.ThreadPoolExecutor",
-            lambda *args, **kwargs: _ExecutorReturnsFuture(_FutureRaises(RuntimeError("resolver thread exploded"))),
-        )
+
+        def _exploding_resolve(hostname: str) -> list[str]:
+            raise RuntimeError("resolver thread exploded")
+
+        monkeypatch.setattr("elspeth.core.security.web._resolve_hostname", _exploding_resolve)
 
         with pytest.raises(NetworkError, match=r"DNS resolution failed: example\.com: resolver thread exploded"):
             validate_url_for_ssrf("https://example.com")
@@ -64,3 +41,88 @@ class TestSSRFDnsFailureBranches:
 
         with pytest.raises(NetworkError, match=r"DNS resolution returned no addresses: example\.com"):
             validate_url_for_ssrf("https://example.com")
+
+
+# ===========================================================================
+# Bug 7.5: DNS timeout effectiveness (daemon thread cleanup)
+# ===========================================================================
+
+
+class TestDnsTimeoutEffectiveness:
+    """Bug 7.5: DNS resolution uses a bounded thread pool to avoid resource leaks."""
+
+    def test_timeout_does_not_block_caller(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """After timeout, the caller must return promptly without blocking."""
+
+        def _very_slow_resolve(hostname: str) -> list[str]:
+            time.sleep(30)
+            return ["127.0.0.1"]
+
+        monkeypatch.setattr("elspeth.core.security.web._resolve_hostname", _very_slow_resolve)
+
+        start = time.monotonic()
+        with pytest.raises(NetworkError, match="DNS resolution timeout"):
+            validate_url_for_ssrf("https://example.com", timeout=0.05)
+        elapsed = time.monotonic() - start
+
+        # Should return in well under 1 second, not 30
+        assert elapsed < 1.0, f"Timeout took {elapsed:.1f}s — caller blocked on DNS thread"
+
+    def test_ssrf_blocked_error_propagated_directly(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """SSRFBlockedError from resolver must propagate unwrapped."""
+
+        def _ssrf_resolve(hostname: str) -> list[str]:
+            raise SSRFBlockedError("blocked by test")
+
+        monkeypatch.setattr("elspeth.core.security.web._resolve_hostname", _ssrf_resolve)
+
+        with pytest.raises(SSRFBlockedError, match="blocked by test"):
+            validate_url_for_ssrf("https://example.com")
+
+    def test_dns_pool_is_bounded(self) -> None:
+        """Thread pool must have a fixed upper bound on worker count."""
+        from elspeth.core.security.web import _DNS_POOL_SIZE, _dns_pool
+
+        assert _dns_pool._max_workers == _DNS_POOL_SIZE
+        assert _DNS_POOL_SIZE <= 16, "Pool size should be modest to prevent resource exhaustion"
+
+
+# ===========================================================================
+# Bug 7.6: Port parsing
+# ===========================================================================
+
+
+class TestPortParsing:
+    """Bug 7.6: Port 0 and invalid ports must be rejected."""
+
+    def test_port_zero_is_rejected(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Port 0 is falsy but must be explicitly blocked."""
+        with pytest.raises(SSRFBlockedError, match="Port 0"):
+            validate_url_for_ssrf("https://example.com:0/path")
+
+    def test_explicit_port_is_used(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Explicit port (non-zero) should be used in the request."""
+        monkeypatch.setattr(
+            "elspeth.core.security.web._resolve_hostname",
+            lambda hostname: ["93.184.216.34"],
+        )
+        result = validate_url_for_ssrf("https://example.com:8443/path")
+        assert result.port == 8443
+
+    def test_default_https_port(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """No explicit port on HTTPS should default to 443."""
+        monkeypatch.setattr(
+            "elspeth.core.security.web._resolve_hostname",
+            lambda hostname: ["93.184.216.34"],
+        )
+        result = validate_url_for_ssrf("https://example.com/path")
+        assert result.port == 443
+
+    def test_default_http_port(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """No explicit port on HTTP should default to 80."""
+        monkeypatch.setattr(
+            "elspeth.core.security.web._resolve_hostname",
+            lambda hostname: ["93.184.216.34"],
+        )
+        result = validate_url_for_ssrf("http://example.com/path")
+        assert result.port == 80

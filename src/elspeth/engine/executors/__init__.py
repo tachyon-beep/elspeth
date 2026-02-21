@@ -13,6 +13,7 @@ from elspeth.contracts.enums import TriggerType
 from elspeth.engine.executors.aggregation import AGGREGATION_CHECKPOINT_VERSION, AggregationExecutor
 from elspeth.engine.executors.gate import GateExecutor
 from elspeth.engine.executors.sink import SinkExecutor
+from elspeth.engine.executors.state_guard import NodeStateGuard
 from elspeth.engine.executors.transform import TransformExecutor
 from elspeth.engine.executors.types import GateOutcome, MissingEdgeError
 
@@ -22,6 +23,7 @@ __all__ = [
     "GateExecutor",
     "GateOutcome",
     "MissingEdgeError",
+    "NodeStateGuard",
     "SinkExecutor",
     "TokenInfo",
     "TransformExecutor",

@@ -155,7 +155,7 @@ def get_run_summary(db: LandscapeDB, recorder: LandscapeRecorder, run_id: str) -
             "total": validation_error_count + transform_error_count,
         },
         "outcome_distribution": outcome_distribution,  # type: ignore[typeddict-item]  # SA Row attr types
-        "avg_state_duration_ms": round(avg_duration, 2) if avg_duration else None,
+        "avg_state_duration_ms": round(avg_duration, 2) if avg_duration is not None else None,
     }
 
 
@@ -208,18 +208,25 @@ def get_dag_structure(db: LandscapeDB, recorder: LandscapeRecorder, run_id: str)
             terminal_sink_map[e.from_node_id] = sink_id_to_name[e.to_node_id]
 
     # Generate mermaid diagram
+    # Use sequential aliases (N0, N1, ...) for unique Mermaid node IDs.
+    # Truncating node_id to 8 chars caused collisions (e.g. all transforms
+    # shared the "transfor" prefix).
+    node_alias = {n.node_id: f"N{i}" for i, n in enumerate(nodes)}
     lines = ["graph TD"]
     for n in nodes:
+        alias = node_alias[n.node_id]
         label = f"{n.plugin_name}[{n.node_type.value}]"
-        lines.append(f'    {n.node_id[:8]}["{label}"]')
+        lines.append(f'    {alias}["{label}"]')
     for e in edges:
+        from_alias = node_alias[e.from_node_id]
+        to_alias = node_alias[e.to_node_id]
         if e.default_mode == RoutingMode.DIVERT:
             arrow = f"-.->|{e.label}|"
         elif e.label == "continue":
             arrow = "-->"
         else:
             arrow = f"-->|{e.label}|"
-        lines.append(f"    {e.from_node_id[:8]} {arrow} {e.to_node_id[:8]}")
+        lines.append(f"    {from_alias} {arrow} {to_alias}")
 
     return {
         "run_id": run_id,
@@ -297,11 +304,11 @@ def get_performance_report(db: LandscapeDB, recorder: LandscapeRecorder, run_id:
         pct_of_total = ((row.total_ms or 0) / total_time_ms * 100) if total_time_ms > 0 else 0
         node_performance.append(
             {
-                "node_id": row.node_id[:12] + "...",
+                "node_id": row.node_id,
                 "plugin": row.plugin_name,
                 "type": row.node_type,
                 "executions": row.executions,
-                "avg_ms": round(row.avg_ms, 2) if row.avg_ms else None,
+                "avg_ms": round(row.avg_ms, 2) if row.avg_ms is not None else None,
                 "min_ms": row.min_ms,
                 "max_ms": row.max_ms,
                 "total_ms": row.total_ms,
@@ -581,13 +588,13 @@ def describe_schema(db: LandscapeDB, recorder: LandscapeRecorder) -> SchemaDescr
                 {
                     "name": col["name"],
                     "type": str(col["type"]),
-                    "nullable": col.get("nullable", True),
+                    "nullable": col["nullable"],
                 }
             )
 
         # Get primary key
         pk = inspector.get_pk_constraint(table_name)
-        pk_columns = pk.get("constrained_columns", []) if pk else []
+        pk_columns = pk["constrained_columns"] if pk else []
 
         # Get foreign keys
         fks = inspector.get_foreign_keys(table_name)
@@ -679,7 +686,7 @@ def get_outcome_analysis(db: LandscapeDB, recorder: LandscapeRecorder, run_id: s
     outcomes = [
         {
             "outcome": row.outcome,
-            "is_terminal": row.is_terminal,
+            "is_terminal": bool(row.is_terminal),
             "count": row.count,
         }
         for row in outcome_rows

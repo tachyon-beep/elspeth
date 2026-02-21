@@ -194,15 +194,19 @@ class TestSingleQueryProcessing:
                 assert result.reason["reason"] == "template_rendering_failed"
                 assert "missing" in result.reason["error"]
 
-    def test_get_llm_client_requires_recorder(self) -> None:
-        """_get_llm_client raises RuntimeError if recorder not set via on_start."""
+    def test_on_start_sets_lifecycle_flag(self) -> None:
+        """on_start() sets _on_start_called flag for centralized lifecycle guard."""
         transform = AzureMultiQueryLLMTransform(make_config())
-        # Don't call on_start - recorder will be None
+        assert not transform._on_start_called
 
-        with pytest.raises(RuntimeError) as exc_info:
-            transform._get_llm_client("state-123")
+        ctx = Mock()
+        ctx.landscape = Mock()
+        ctx.run_id = "test-run"
+        ctx.telemetry_emit = None
+        ctx.rate_limit_registry = None
+        transform.on_start(ctx)
 
-        assert "recorder" in str(exc_info.value).lower()
+        assert transform._on_start_called
 
 
 class TestRowProcessingWithPipelining:
@@ -736,6 +740,8 @@ class TestSequentialMode:
         _, result, _state_id = collector.results[0]
         assert isinstance(result, TransformResult)
         assert result.status == "success"
+        # Sequential mode has no pool — context_after should be None
+        assert result.context_after is None
 
     def test_sequential_mode_cleans_up_clients(
         self,
@@ -851,24 +857,21 @@ class TestPoolMetadataAuditIntegration:
         assert isinstance(result, TransformResult)
         assert result.status == "success"
 
-        # VERIFY: context_after should contain pool metadata
+        # VERIFY: context_after should contain typed pool metadata
+        from elspeth.contracts.node_state_context import PoolExecutionContext
+
         assert result.context_after is not None, (
             "TransformResult.context_after should contain pool metadata. "
             "_execute_queries_parallel must call executor.get_stats() and "
             "include it in the result."
         )
+        assert isinstance(result.context_after, PoolExecutionContext)
 
-        # Verify pool_config is present
-        assert "pool_config" in result.context_after, f"pool_config missing from context_after. Got: {result.context_after.keys()}"
-        pool_config = result.context_after["pool_config"]
-        assert pool_config["pool_size"] == 4
+        # Verify pool_config via typed attribute access
+        assert result.context_after.pool_config.pool_size == 4
 
-        # Verify pool_stats is present
-        assert "pool_stats" in result.context_after, f"pool_stats missing from context_after. Got: {result.context_after.keys()}"
-        pool_stats = result.context_after["pool_stats"]
-        # max_concurrent_reached should be > 0 since queries ran in parallel
-        assert "max_concurrent_reached" in pool_stats
-        assert pool_stats["max_concurrent_reached"] > 0
+        # Verify pool_stats via typed attribute access
+        assert result.context_after.pool_stats.max_concurrent_reached > 0
 
     def test_parallel_mode_includes_query_ordering_in_context_after(
         self,
@@ -917,24 +920,59 @@ class TestPoolMetadataAuditIntegration:
         _, result, _ = collector.results[0]
         # Type narrow: result from batch processing should be TransformResult, not ExceptionResult
         assert isinstance(result, TransformResult)
-        assert result.context_after is not None
 
-        # Verify query_ordering is present
-        assert "query_ordering" in result.context_after, f"query_ordering missing from context_after. Got: {result.context_after.keys()}"
-        query_ordering = result.context_after["query_ordering"]
+        from elspeth.contracts.node_state_context import PoolExecutionContext
+
+        assert isinstance(result.context_after, PoolExecutionContext)
+
+        # Verify query_ordering via typed attribute access
+        query_ordering = result.context_after.query_ordering
 
         # Should have 4 entries (2 case studies x 2 criteria)
         assert len(query_ordering) == 4, f"Expected 4 query ordering entries, got {len(query_ordering)}"
 
-        # Each entry should have ordering metadata
+        # Each entry should have typed fields
         for entry in query_ordering:
-            assert "submit_index" in entry
-            assert "complete_index" in entry
-            assert "buffer_wait_ms" in entry
-            assert isinstance(entry["submit_index"], int)
-            assert isinstance(entry["complete_index"], int)
-            assert isinstance(entry["buffer_wait_ms"], float)
+            assert isinstance(entry.submit_index, int)
+            assert isinstance(entry.complete_index, int)
+            assert isinstance(entry.buffer_wait_ms, float)
 
 
 # Removed test_azure_multi_query_with_pipeline_row - duplicate of existing accept() API tests
 # The transform raises NotImplementedError for process() and directs to accept() API
+
+
+class TestBug4_1_KeyErrorInBuildTemplateContext:
+    """Bug 4.1: KeyError in build_template_context returns error, not crash.
+
+    When a row is missing fields required by build_template_context(),
+    a KeyError is raised. Previously this was uncaught and crashed the transform.
+    Now it's caught and returns TransformResult.error() with reason
+    "template_context_failed".
+    """
+
+    def test_missing_input_field_returns_error(self, chaosllm_server) -> None:
+        """Row missing required input field returns error instead of crashing."""
+        with chaosllm_azure_openai_client(chaosllm_server):
+            transform = AzureMultiQueryLLMTransform(make_config())
+            ctx = make_plugin_context()
+            transform.on_start(ctx)
+
+            # Row is missing cs1_bg, cs1_sym, cs1_hist — required by case study "cs1"
+            row = {"cs2_bg": "bg", "cs2_sym": "sym", "cs2_hist": "hist"}
+            spec = transform._query_specs[0]  # cs1_diagnosis — needs cs1_bg, cs1_sym, cs1_hist
+
+            assert ctx.state_id is not None
+            result = transform._process_single_query(
+                row,
+                spec,
+                ctx.state_id,
+                "test-token-id",
+                make_pipeline_row(row).contract,
+            )
+
+            assert result.status == "error"
+            assert result.reason is not None
+            assert result.reason["reason"] == "missing_field"
+            # Error should mention one of the missing fields
+            assert "cs1_bg" in result.reason["error"] or "cs1_sym" in result.reason["error"] or "cs1_hist" in result.reason["error"]

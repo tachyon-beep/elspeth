@@ -208,19 +208,35 @@ class CSVFormatter:
     """
 
     def flatten(self, record: dict[str, Any], prefix: str = "") -> dict[str, Any]:
-        """Flatten nested dict to dot-notation keys."""
+        """Flatten nested dict to dot-notation keys.
+
+        Raises:
+            ValueError: If flattened keys collide (e.g., dotted source keys
+                vs nested dict keys produce identical paths).
+        """
         result: dict[str, Any] = {}
 
         for key, value in record.items():
             full_key = f"{prefix}.{key}" if prefix else key
 
             if isinstance(value, dict):
-                result.update(self.flatten(value, full_key))
+                nested = self.flatten(value, full_key)
+                for nested_key, nested_val in nested.items():
+                    if nested_key in result:
+                        raise ValueError(
+                            f"CSV flatten key collision: '{nested_key}' produced by both "
+                            f"a nested dict and a prior key. Audit export would lose data."
+                        )
+                    result[nested_key] = nested_val
             elif isinstance(value, list):
+                if full_key in result:
+                    raise ValueError(f"CSV flatten key collision: '{full_key}' already exists. Audit export would lose data.")
                 # Convert lists to JSON strings for CSV
                 # Use serialize_datetime to validate (rejects NaN/Infinity) and convert datetimes
                 result[full_key] = json.dumps(serialize_datetime(value))
             else:
+                if full_key in result:
+                    raise ValueError(f"CSV flatten key collision: '{full_key}' already exists. Audit export would lose data.")
                 # Validate scalar values and normalize datetimes to ISO strings.
                 result[full_key] = serialize_datetime(value)
 

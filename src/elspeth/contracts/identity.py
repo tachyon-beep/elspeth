@@ -6,10 +6,8 @@ These types answer: "How do we refer to things?"
 from __future__ import annotations
 
 from dataclasses import dataclass, replace
-from typing import TYPE_CHECKING
 
-if TYPE_CHECKING:
-    from elspeth.contracts.schema_contract import PipelineRow
+from elspeth.contracts.schema_contract import PipelineRow
 
 
 @dataclass(frozen=True, slots=True)

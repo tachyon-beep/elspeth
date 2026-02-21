@@ -79,6 +79,9 @@ def secret_fingerprint(secret: str, *, key: bytes | None = None) -> str:
     if key is None:
         key = get_fingerprint_key()
 
+    if len(key) == 0:
+        raise ValueError("Fingerprint key must not be empty — an empty HMAC key produces meaningless fingerprints")
+
     digest = hmac.new(
         key=key,
         msg=secret.encode("utf-8"),

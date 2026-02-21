@@ -13,7 +13,7 @@ from elspeth.contracts import (
     TokenInfo,
 )
 from elspeth.contracts.enums import NodeStateStatus
-from elspeth.contracts.errors import OrchestrationInvariantError
+from elspeth.contracts.errors import OrchestrationInvariantError, PluginContractViolation
 from elspeth.contracts.plugin_context import PluginContext
 from elspeth.core.landscape import LandscapeRecorder
 from elspeth.core.operations import track_operation
@@ -146,18 +146,35 @@ class SinkExecutor:
         sink_node_id: str = sink.node_id
 
         states: list[tuple[TokenInfo, NodeStateOpen]] = []
-        for token in tokens:
-            # Extract dict from PipelineRow for Landscape recording
-            # Landscape stores raw dicts, not PipelineRow objects
-            input_dict = token.row_data.to_dict()
-            state = self._recorder.begin_node_state(
-                token_id=token.token_id,
-                node_id=sink_node_id,
-                run_id=ctx.run_id,
-                step_index=step_in_pipeline,
-                input_data=input_dict,
-            )
-            states.append((token, state))
+        try:
+            for token in tokens:
+                # Extract dict from PipelineRow for Landscape recording
+                # Landscape stores raw dicts, not PipelineRow objects
+                input_dict = token.row_data.to_dict()
+                state = self._recorder.begin_node_state(
+                    token_id=token.token_id,
+                    node_id=sink_node_id,
+                    run_id=ctx.run_id,
+                    step_index=step_in_pipeline,
+                    input_data=input_dict,
+                )
+                states.append((token, state))
+        except Exception as e:
+            # If begin_node_state fails mid-batch, previously opened states
+            # are left OPEN.  Complete them as FAILED before re-raising.
+            # Fix for B3: sink state-opening loop terminality.
+            if states:
+                begin_error: ExecutionError = {
+                    "exception": str(e),
+                    "type": type(e).__name__,
+                    "phase": "begin_node_state",
+                }
+                self._complete_states_failed(
+                    states=states,
+                    duration_ms=0.0,
+                    error=begin_error,
+                )
+            raise
         # Synchronize context contract to the sink-bound tokens.
         # Sinks (e.g., headers: original) lazily capture ctx.contract during write().
         # For mixed batches, merge contracts to preserve all available header lineage.
@@ -208,6 +225,45 @@ class SinkExecutor:
                 node_id=sink_node_id,
                 token_ids=sink_token_ids,
             ):
+                # Centralized input validation (before sink.write)
+                # Wrapped in try/except to complete opened node states on failure.
+                # Without this, validation errors leave states OPEN permanently,
+                # violating the terminality invariant.
+                # Fix: elspeth-rapid-p161
+                try:
+                    if sink.validate_input:
+                        from pydantic import ValidationError
+
+                        for row in rows:
+                            try:
+                                sink.input_schema.model_validate(row)
+                            except ValidationError as e:
+                                raise PluginContractViolation(
+                                    f"Sink '{sink.name}' input validation failed: {e}. This indicates an upstream transform/source schema bug."
+                                ) from e
+
+                    # Centralized required-field check (before sink.write)
+                    if sink.declared_required_fields:
+                        for row_index, row in enumerate(rows):
+                            missing = sorted(f for f in sink.declared_required_fields if f not in row)
+                            if missing:
+                                raise PluginContractViolation(
+                                    f"Sink '{sink.name}' row {row_index} is missing required fields "
+                                    f"{missing}. This indicates an upstream transform/schema bug."
+                                )
+                except Exception as e:
+                    validation_error: ExecutionError = {
+                        "exception": str(e),
+                        "type": type(e).__name__,
+                        "phase": "pre_write_validation",
+                    }
+                    self._complete_states_failed(
+                        states=states,
+                        duration_ms=0.0,
+                        error=validation_error,
+                    )
+                    raise
+
                 start = time.perf_counter()
                 try:
                     artifact_info = sink.write(rows, ctx)

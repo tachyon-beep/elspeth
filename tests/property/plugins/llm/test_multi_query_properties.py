@@ -158,7 +158,7 @@ class TestQuerySpecContextProperties:
     @given(data=st.data())
     @settings(max_examples=50)
     def test_context_includes_full_row(self, data: st.DataObject) -> None:
-        """Property: Context['row'] contains the full original row."""
+        """Property: Context['source_row'] contains the full original row."""
         name = data.draw(field_names)
         value = data.draw(string_values)
         row = {name: value}
@@ -173,7 +173,7 @@ class TestQuerySpecContextProperties:
         )
 
         ctx = spec.build_template_context(row)
-        assert ctx["row"] == row
+        assert ctx["source_row"] == row
 
     def test_missing_field_raises_key_error(self) -> None:
         """Property: Missing required field raises KeyError."""
@@ -195,7 +195,7 @@ class TestQuerySpecContextProperties:
     )
     @settings(max_examples=50)
     def test_context_has_exactly_expected_keys(self, n_fields: int, data: st.DataObject) -> None:
-        """Property: Context has input_N, criterion, case_study, and row only."""
+        """Property: Context has input_N, criterion, case_study, and source_row only."""
         names = data.draw(st.lists(field_names, min_size=n_fields, max_size=n_fields, unique=True))
         row = dict.fromkeys(names, "v")
 
@@ -211,5 +211,5 @@ class TestQuerySpecContextProperties:
         ctx = spec.build_template_context(row)
 
         expected_keys = {f"input_{i}" for i in range(1, n_fields + 1)}
-        expected_keys |= {"criterion", "case_study", "row"}
+        expected_keys |= {"criterion", "case_study", "source_row"}
         assert set(ctx.keys()) == expected_keys

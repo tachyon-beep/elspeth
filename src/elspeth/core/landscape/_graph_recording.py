@@ -222,7 +222,13 @@ class GraphRecordingMixin:
             .where(nodes_table.c.run_id == run_id)
             # Use nullslast() for consistent NULL handling across databases
             # Nodes without sequence (e.g., dynamically added) sort last
-            .order_by(nodes_table.c.sequence_in_pipeline.nullslast())
+            # Tiebreakers (registered_at, node_id) ensure deterministic ordering
+            # for export signing when sequence_in_pipeline is NULL
+            .order_by(
+                nodes_table.c.sequence_in_pipeline.nullslast(),
+                nodes_table.c.registered_at,
+                nodes_table.c.node_id,
+            )
         )
         rows = self._ops.execute_fetchall(query)
         return [self._node_repo.load(row) for row in rows]

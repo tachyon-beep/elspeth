@@ -63,6 +63,14 @@ def create_contract_from_config(
     """
     mode = map_schema_mode(config.mode)
 
+    # Validate normalized mode is a known value
+    if mode not in ("FIXED", "FLEXIBLE", "OBSERVED"):
+        raise ValueError(f"Invalid schema mode '{config.mode}' (normalized: '{mode}'). Expected 'fixed', 'flexible', or 'observed'.")
+
+    # Validate invariant: FIXED and FLEXIBLE require explicit fields
+    if mode in ("FIXED", "FLEXIBLE") and config.fields is None:
+        raise ValueError(f"Schema mode '{config.mode}' requires explicit field definitions. Use 'mode: observed' to infer types from data.")
+
     # Build reverse mapping for looking up original names
     # field_resolution is original->normalized, we need normalized->original
     normalized_to_original: dict[str, str] = {}
@@ -88,9 +96,10 @@ def create_contract_from_config(
             field_contracts.append(fc)
         fields = tuple(field_contracts)
 
+    # Derive locked from normalized mode, not raw config.mode.
     # FIXED schemas start locked (types are fully declared).
     # FLEXIBLE/OBSERVED start unlocked and lock after first valid row.
-    locked = config.mode == "fixed"
+    locked = mode == "FIXED"
 
     return SchemaContract(
         mode=mode,

@@ -12,6 +12,9 @@ allowed_external_types:
   - "engine/orchestrator/types:RunResult"
   - "engine/orchestrator/types:AggregationFlushResult"
   - "engine/orchestrator/types:ExecutionCounters"
+  # Pooling reorder buffer - used by contracts/node_state_context.py factory
+  # Typing pooling internals is a separate scope; boundary is at from_executor_stats()
+  - "plugins/pooling/reorder_buffer:BufferEntry"
 
 # dict[str, Any] patterns that are intentional
 # Format: "file_path:context:param_name"
@@ -25,20 +28,16 @@ allowed_dict_patterns:
 
   # Engine - row data handling
   - "src/elspeth/engine/tokens.py:TokenManager.expand_token:expanded_rows (list)"
-  - "src/elspeth/engine/processor.py:RowProcessor.get_aggregation_checkpoint_state:return"
   - "src/elspeth/engine/expression_parser.py:_ExpressionEvaluator.__init__:row"
   - "src/elspeth/engine/expression_parser.py:ExpressionParser.evaluate:row"
   - "src/elspeth/engine/coalesce_executor.py:CoalesceExecutor._merge_data:return"
 
-  # Aggregation executor - checkpoint and state methods
-  - "src/elspeth/engine/executors/aggregation.py:AggregationExecutor.get_buffered_rows:return (list)"
-  - "src/elspeth/engine/executors/aggregation.py:AggregationExecutor.get_checkpoint_state:return"
-  - "src/elspeth/engine/executors/aggregation.py:AggregationExecutor.restore_from_checkpoint:state"
-  - "src/elspeth/engine/executors/aggregation.py:AggregationExecutor.restore_state:state"
-  - "src/elspeth/engine/executors/aggregation.py:AggregationExecutor.get_restored_state:return"
+  # Node state guard - row data is Tier 2 pipeline data
+  - "src/elspeth/engine/executors/state_guard.py:NodeStateGuard.__init__:input_data"
+  - "src/elspeth/engine/executors/state_guard.py:NodeStateGuard.complete:output_data"
 
-  # Orchestrator - checkpoint state (refactored into orchestrator/core.py)
-  - "src/elspeth/engine/orchestrator/core.py:Orchestrator._maybe_checkpoint:aggregation_state"
+  # Aggregation executor - row data handling (checkpoint state now typed via AggregationCheckpointState)
+  - "src/elspeth/engine/executors/aggregation.py:AggregationExecutor.get_buffered_rows:return (list)"
 
   # Protocols - row data in plugin interface
   - "src/elspeth/plugins/protocols.py:SinkProtocol.write:rows (list)"
@@ -53,6 +52,8 @@ allowed_dict_patterns:
   - "src/elspeth/plugins/sinks/database_sink.py:DatabaseSink._ensure_table:row"
   - "src/elspeth/plugins/sinks/database_sink.py:DatabaseSink._create_columns_from_schema_or_row:row"
   - "src/elspeth/plugins/sinks/database_sink.py:DatabaseSink.write:rows (list)"
+  - "src/elspeth/plugins/sinks/database_sink.py:DatabaseSink._serialize_any_typed_fields:rows (list)"
+  - "src/elspeth/plugins/sinks/database_sink.py:DatabaseSink._serialize_any_typed_fields:return (list)"
   - "src/elspeth/plugins/sinks/csv_sink.py:CSVSink.write:rows (list)"
   - "src/elspeth/plugins/sinks/csv_sink.py:CSVSink._open_file:rows (list)"
   - "src/elspeth/plugins/sinks/csv_sink.py:CSVSink._get_field_names_and_display:row"
@@ -149,18 +150,14 @@ allowed_dict_patterns:
   # Schema reconstruction - deserializing schemas from landscape database (refactored into orchestrator/export.py)
 
   # ═══════════════════════════════════════════════════════════════════════════
-  # AGGREGATION STATE
-  # Aggregation plugins maintain arbitrary state between rows. The state format
-  # is plugin-specific and cannot be typed at the framework level.
+  # AGGREGATION STATE — Now typed via AggregationCheckpointState (elspeth-rapid-095ec6)
+  # Only row_data inside tokens remains dict[str, Any] (pipeline data, Tier 2)
   # ═══════════════════════════════════════════════════════════════════════════
-  - "src/elspeth/core/checkpoint/manager.py:CheckpointManager.create_checkpoint:aggregation_state"
 
   # ═══════════════════════════════════════════════════════════════════════════
   # PLUGIN CONTEXT - Recording and routing
   # PluginContext methods handle dynamic data from pipeline execution
   # ═══════════════════════════════════════════════════════════════════════════
-  - "src/elspeth/contracts/plugin_context.py:PluginContext.get_checkpoint:return"
-  - "src/elspeth/contracts/plugin_context.py:PluginContext.update_checkpoint:data"
   - "src/elspeth/contracts/plugin_context.py:PluginContext.record_call:request_data"
   - "src/elspeth/contracts/plugin_context.py:PluginContext.record_call:response_data"
   - "src/elspeth/contracts/plugin_context.py:PluginContext.record_call:error"
@@ -178,9 +175,7 @@ allowed_dict_patterns:
 
   # Node state recording
   - "src/elspeth/core/landscape/_node_state_recording.py:NodeStateRecordingMixin.begin_node_state:input_data"
-  - "src/elspeth/core/landscape/_node_state_recording.py:NodeStateRecordingMixin.begin_node_state:context_before"
   - "src/elspeth/core/landscape/_node_state_recording.py:NodeStateRecordingMixin.complete_node_state:output_data"
-  - "src/elspeth/core/landscape/_node_state_recording.py:NodeStateRecordingMixin.complete_node_state:context_after"
 
   # Token recording
   - "src/elspeth/core/landscape/_token_recording.py:TokenRecordingMixin.create_row:data"
@@ -250,12 +245,8 @@ allowed_dict_patterns:
   - "src/elspeth/plugins/llm/azure.py:AzureLLMTransform.__init__:config"
   - "src/elspeth/plugins/llm/azure.py:AzureLLMTransform.azure_config:return"
 
-  # Azure batch LLM
+  # Azure batch LLM (checkpoint params typed as BatchCheckpointState — only config/return remain)
   - "src/elspeth/plugins/llm/azure_batch.py:AzureBatchLLMTransform.__init__:config"
-  - "src/elspeth/plugins/llm/azure_batch.py:AzureBatchLLMTransform._get_checkpoint:return"
-  - "src/elspeth/plugins/llm/azure_batch.py:AzureBatchLLMTransform._update_checkpoint:data"
-  - "src/elspeth/plugins/llm/azure_batch.py:AzureBatchLLMTransform._check_batch_status:checkpoint"
-  - "src/elspeth/plugins/llm/azure_batch.py:AzureBatchLLMTransform._download_results:checkpoint"
   - "src/elspeth/plugins/llm/azure_batch.py:AzureBatchLLMTransform.azure_config:return"
 
   # Azure multi-query LLM (refactored: PipelineRow is now the row type at plugin boundary)
@@ -315,18 +306,12 @@ allowed_dict_patterns:
 
   # ═══════════════════════════════════════════════════════════════════════════
   # TELEMETRY EXPORTERS - External observability trust boundary
-  # Exporter config comes from YAML and is validated internally. The configure()
-  # method receives raw config before type validation.
+  # Exporter serialization returns dict[str, Any] by design for OTLP/JSON payloads.
   # ═══════════════════════════════════════════════════════════════════════════
-  - "src/elspeth/telemetry/protocols.py:ExporterProtocol.configure:config"
-  - "src/elspeth/telemetry/exporters/azure_monitor.py:AzureMonitorExporter.configure:config"
   - "src/elspeth/telemetry/exporters/azure_monitor.py:AzureMonitorExporter._serialize_event_attributes:return"
-  - "src/elspeth/telemetry/exporters/otlp.py:OTLPExporter.configure:config"
   - "src/elspeth/telemetry/exporters/otlp.py:OTLPExporter._serialize_event_attributes:return"
   - "src/elspeth/telemetry/exporters/otlp.py:_SyntheticReadableSpan.__init__:attributes"
-  - "src/elspeth/telemetry/exporters/console.py:ConsoleExporter.configure:config"
   - "src/elspeth/telemetry/exporters/console.py:ConsoleExporter._serialize_event:return"
-  - "src/elspeth/telemetry/exporters/datadog.py:DatadogExporter.configure:config"
 
   # ═══════════════════════════════════════════════════════════════════════════
   # STRUCTLOG PROCESSORS - Framework boundary
@@ -367,7 +352,6 @@ allowed_dict_patterns:
   - "src/elspeth/testing/__init__.py:make_source_row:data"
   - "src/elspeth/testing/__init__.py:make_source_row_quarantined:data"
   - "src/elspeth/testing/__init__.py:make_success:data"
-  - "src/elspeth/testing/__init__.py:make_success:context_after"
   - "src/elspeth/testing/__init__.py:make_gate_continue:data"
   - "src/elspeth/testing/__init__.py:make_gate_route:data"
   - "src/elspeth/testing/__init__.py:make_gate_fork:data"
@@ -473,4 +457,3 @@ allowed_dict_patterns:
 
   # OpenRouter batch LLM (async batch API)
   - "src/elspeth/plugins/llm/openrouter_batch.py:OpenRouterBatchLLMTransform.__init__:config"
-  - "src/elspeth/plugins/llm/openrouter_batch.py:OpenRouterBatchLLMTransform._process_single_row:return"

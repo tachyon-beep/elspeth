@@ -451,3 +451,248 @@ class TestBatchTransformMixinEviction:
         assert isinstance(result, TransformResult)
         assert result.status == "success"
         assert state_id == "state-attempt-2"
+
+
+class SlowBatchTransform(BaseTransform, BatchTransformMixin):
+    """Batch transform with configurable processing delay.
+
+    Used for testing shutdown ordering where we need workers to be
+    actively processing when shutdown is called.
+    """
+
+    name = "slow_batch_transform"
+
+    def __init__(self, delay: float = 0.2) -> None:
+        super().__init__({"schema": {"mode": "observed"}})
+        self._batch_initialized = False
+        self._delay = delay
+        self._processing_started = threading.Event()
+
+    def connect_output(self, output: CollectorOutputPort, max_pending: int = 10) -> None:
+        if self._batch_initialized:
+            raise RuntimeError("connect_output() already called")
+        self.init_batch_processing(
+            max_pending=max_pending,
+            output=output,
+            name=self.name,
+            max_workers=max_pending,
+        )
+        self._batch_initialized = True
+
+    def accept(self, row: dict[str, Any], ctx: PluginContext) -> None:
+        if not self._batch_initialized:
+            raise RuntimeError("connect_output() must be called before accept()")
+        self.accept_row(make_pipeline_row(row), ctx, self._process_row)
+
+    def _process_row(self, row: PipelineRow, ctx: PluginContext) -> TransformResult:
+        self._processing_started.set()
+        import time
+
+        time.sleep(self._delay)
+        output = row.to_dict()
+        output["processed"] = True
+        return TransformResult.success(make_pipeline_row(output), success_reason={"action": "test"})
+
+    def process(self, row: PipelineRow, ctx: PluginContext) -> TransformResult:
+        raise NotImplementedError("Use accept() for row-level pipelining")
+
+    def close(self) -> None:
+        if self._batch_initialized:
+            self.shutdown_batch_processing()
+
+
+class TestShutdownDrainsInFlightRows:
+    """Regression tests for P1-2026-02-14: shutdown can silently drop in-flight rows.
+
+    The bug: shutdown_batch_processing() set _batch_shutdown before workers finished,
+    causing the release loop to exit before completed results could be emitted.
+
+    Fix: Release loop exits only on ShutdownError from buffer, not on _batch_shutdown.
+    Shutdown waits for workers first, then shuts down buffer.
+    """
+
+    @pytest.fixture
+    def collector(self) -> CollectorOutputPort:
+        return CollectorOutputPort()
+
+    def test_shutdown_emits_all_in_flight_rows(self, collector: CollectorOutputPort) -> None:
+        """shutdown_batch_processing must not drop rows that workers are processing.
+
+        Submits rows, then immediately calls shutdown. All rows must appear in
+        the collector output -- none may be silently dropped.
+        """
+        transform = SlowBatchTransform(delay=0.1)
+        transform.connect_output(collector, max_pending=5)
+
+        num_rows = 3
+        for i in range(num_rows):
+            token = make_token(f"row-{i}")
+            ctx = PluginContext(run_id="test-run", config={}, token=token, state_id=f"state-{i}")
+            transform.accept({"idx": i}, ctx)
+
+        # Shutdown while workers are still processing
+        transform.shutdown_batch_processing(timeout=10.0)
+
+        # ALL rows must have been emitted -- no silent drops
+        assert len(collector.results) == num_rows, (
+            f"Expected {num_rows} results but got {len(collector.results)}. "
+            f"Shutdown dropped {num_rows - len(collector.results)} in-flight rows."
+        )
+
+        # Verify all rows completed successfully
+        for i, (_token_out, result, state_id) in enumerate(collector.results):
+            assert isinstance(result, TransformResult)
+            assert result.status == "success"
+            assert state_id == f"state-{i}"
+
+    def test_shutdown_without_pending_rows_is_clean(self, collector: CollectorOutputPort) -> None:
+        """Shutdown with no pending rows should not hang or error."""
+        transform = SimpleBatchTransform()
+        transform.connect_output(collector, max_pending=5)
+
+        # No rows submitted -- shutdown should be instant
+        transform.shutdown_batch_processing(timeout=5.0)
+
+        assert len(collector.results) == 0
+
+    def test_shutdown_after_flush_emits_all_rows(self, collector: CollectorOutputPort) -> None:
+        """Flush then shutdown should emit all rows exactly once."""
+        transform = SlowBatchTransform(delay=0.05)
+        transform.connect_output(collector, max_pending=5)
+
+        num_rows = 4
+        for i in range(num_rows):
+            token = make_token(f"row-{i}")
+            ctx = PluginContext(run_id="test-run", config={}, token=token, state_id=f"state-{i}")
+            transform.accept({"idx": i}, ctx)
+
+        transform.flush_batch_processing(timeout=10.0)
+        transform.shutdown_batch_processing(timeout=5.0)
+
+        assert len(collector.results) == num_rows
+
+
+class FailingOutputPort:
+    """Output port that raises on first emit, then succeeds.
+
+    Used for testing release loop error handling with stale token detection.
+    """
+
+    def __init__(self) -> None:
+        self.results: list[tuple[Any, Any, Any]] = []
+        self._fail_count = 0
+        self._should_fail_at: set[int] = set()
+        self._emit_count = 0
+
+    def fail_at(self, *indices: int) -> None:
+        """Configure which emit calls should fail (0-indexed)."""
+        self._should_fail_at = set(indices)
+
+    def emit(self, token: Any, result: Any, state_id: Any) -> None:
+        current = self._emit_count
+        self._emit_count += 1
+        if current in self._should_fail_at:
+            raise RuntimeError(f"Simulated output port failure at emit #{current}")
+        self.results.append((token, result, state_id))
+
+
+class TestReleaseLoopStaleTokenDetection:
+    """Regression tests for P1-2026-02-14: release loop stale token/state_id.
+
+    The bug: exception handler in _release_loop used token/state_id from
+    a previous iteration when the exception occurred before entry.result unpack.
+
+    Fix: Reset token/state_id to None at each loop start. If exception occurs
+    with token=None, it's a pre-unpack internal error -- re-raise immediately.
+    """
+
+    def test_post_unpack_emit_failure_emits_exception_result(self) -> None:
+        """When emit() fails AFTER unpacking entry.result, the exception handler
+        should use the current token/state_id (not stale ones)."""
+        port = FailingOutputPort()
+        port.fail_at(0)  # First emit fails
+
+        transform = SimpleBatchTransform()
+        # Manually initialize with our special port
+        transform.init_batch_processing(
+            max_pending=5,
+            output=port,
+            name="stale-token-test",
+            max_workers=5,
+        )
+        transform._batch_initialized = True
+
+        try:
+            token = make_token("row-0")
+            ctx = PluginContext(run_id="test-run", config={}, token=token, state_id="state-0")
+            transform.accept({"data": "test"}, ctx)
+
+            # Wait for processing to complete and release loop to handle the failure
+            import time
+
+            time.sleep(1.0)
+
+            # The second emit (ExceptionResult fallback) should have succeeded.
+            # The port's results list should have the ExceptionResult with the
+            # CORRECT token (row-0), not a stale one.
+            assert len(port.results) >= 1
+            emitted_token, emitted_result, emitted_state = port.results[0]
+
+            # Import to check type
+            from elspeth.contracts import ExceptionResult as ER
+
+            assert isinstance(emitted_result, ER), f"Expected ExceptionResult from fallback emit, got {type(emitted_result).__name__}"
+            # The token should be the CURRENT row's token, not stale
+            assert emitted_token is token
+            assert emitted_state == "state-0"
+        finally:
+            transform.shutdown_batch_processing(timeout=5.0)
+
+    def test_multiple_rows_no_stale_token_crossover(self) -> None:
+        """Processing multiple rows where emit fails on one should not
+        cause the wrong token to be used in the error handler."""
+        port = FailingOutputPort()
+        port.fail_at(1)  # Second emit fails (row-1)
+
+        transform = SimpleBatchTransform()
+        transform.init_batch_processing(
+            max_pending=5,
+            output=port,
+            name="crossover-test",
+            max_workers=5,
+        )
+        transform._batch_initialized = True
+
+        try:
+            tokens = []
+            for i in range(3):
+                token = make_token(f"row-{i}")
+                tokens.append(token)
+                ctx = PluginContext(run_id="test-run", config={}, token=token, state_id=f"state-{i}")
+                transform.accept({"idx": i}, ctx)
+
+            import time
+
+            time.sleep(2.0)
+
+            # Row 0 should have emitted successfully
+            # Row 1 should have failed then emitted ExceptionResult
+            # Row 2 should have emitted successfully
+            # Total port.results should be at least 3 (row-0 success, row-1 ExceptionResult, row-2 success)
+            assert len(port.results) >= 3
+
+            # Verify row-0 succeeded
+            t0, r0, s0 = port.results[0]
+            assert t0 is tokens[0]
+            assert isinstance(r0, TransformResult)
+            assert s0 == "state-0"
+
+            # Verify row-1's error used the correct token (not stale from row-0)
+            t1, r1, s1 = port.results[1]
+            from elspeth.contracts import ExceptionResult as ER
+
+            assert isinstance(r1, ER), f"Expected ExceptionResult for row-1, got {type(r1).__name__}"
+            assert t1 is tokens[1], "Error handler used stale token from previous row"
+            assert s1 == "state-1", "Error handler used stale state_id from previous row"
+        finally:
+            transform.shutdown_batch_processing(timeout=5.0)

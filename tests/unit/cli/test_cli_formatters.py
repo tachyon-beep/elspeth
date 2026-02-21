@@ -59,6 +59,52 @@ class TestConsoleFormatters:
         assert "→2 routed" in rendered
         assert "()" not in rendered
 
+    def test_run_summary_handles_interrupted_status(self) -> None:
+        """INTERRUPTED status must not crash the console formatter.
+
+        Regression: P1-2026-02-14 — RunCompletionStatus.INTERRUPTED was added
+        to the orchestrator but not to the formatter's status symbol map,
+        causing a KeyError on graceful shutdown.
+        """
+        summary_handler = create_console_formatters(prefix="Run")[RunSummary]
+        event = RunSummary(
+            run_id="run-interrupted",
+            status=RunCompletionStatus.INTERRUPTED,
+            total_rows=50,
+            succeeded=30,
+            failed=0,
+            quarantined=0,
+            duration_seconds=5.0,
+            exit_code=3,
+        )
+
+        with patch("elspeth.cli_formatters.typer.echo") as mock_echo:
+            summary_handler(event)
+
+        rendered = mock_echo.call_args.args[0]
+        assert "INTERRUPTED" in rendered
+        assert "\u23f8" in rendered  # Pause symbol
+
+    def test_run_summary_all_statuses_have_symbols(self) -> None:
+        """Every RunCompletionStatus value must be handled by the formatter.
+
+        Prevents future additions to RunCompletionStatus from crashing the formatter.
+        """
+        summary_handler = create_console_formatters(prefix="Test")[RunSummary]
+        for status in RunCompletionStatus:
+            event = RunSummary(
+                run_id=f"run-{status.value}",
+                status=status,
+                total_rows=1,
+                succeeded=1 if status == RunCompletionStatus.COMPLETED else 0,
+                failed=1 if status == RunCompletionStatus.FAILED else 0,
+                quarantined=0,
+                duration_seconds=1.0,
+                exit_code=0,
+            )
+            with patch("elspeth.cli_formatters.typer.echo"):
+                summary_handler(event)  # Should not raise
+
     def test_progress_elapsed_zero_formats_rate_as_zero(self) -> None:
         """Progress formatter must avoid divide-by-zero when elapsed_seconds == 0."""
         progress_handler = create_console_formatters()[ProgressEvent]

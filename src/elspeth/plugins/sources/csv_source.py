@@ -7,12 +7,11 @@ IMPORTANT: Sources use allow_coercion=True to normalize external data.
 This is the ONLY place in the pipeline where coercion is allowed.
 """
 
-import contextlib
 import csv
 from collections.abc import Iterator
 from typing import Any
 
-from pydantic import ValidationError
+from pydantic import Field, ValidationError
 
 from elspeth.contracts import PluginSchema, SourceRow
 from elspeth.contracts.contract_builder import ContractBuilder
@@ -34,7 +33,7 @@ class CSVSourceConfig(TabularSourceDataConfig):
 
     delimiter: str = ","
     encoding: str = "utf-8"
-    skip_rows: int = 0
+    skip_rows: int = Field(default=0, ge=0)
 
 
 class CSVSource(BaseSource):
@@ -131,207 +130,333 @@ class CSVSource(BaseSource):
 
         # CRITICAL: newline='' required for proper embedded newline handling
         # See: https://docs.python.org/3/library/csv.html
-        with open(self._path, encoding=self._encoding, newline="") as f:
-            # Create csv.reader on file handle for multiline field support
-            reader = csv.reader(f, delimiter=self._delimiter)
+        try:
+            f = open(self._path, encoding=self._encoding, newline="")  # noqa: SIM115
+        except UnicodeDecodeError as e:
+            # Some encodings (e.g., utf-16) can fail at open() on BOM/header bytes.
+            # This is Tier 3 (external data) — quarantine, don't crash.
+            raw_row = {"file_path": str(self._path), "__encoding__": self._encoding}
+            error_msg = f"CSV file cannot be decoded with encoding '{self._encoding}': {e}"
+            ctx.record_validation_error(
+                row=raw_row,
+                error=error_msg,
+                schema_mode="parse",
+                destination=self._on_validation_failure,
+            )
+            if self._on_validation_failure != "discard":
+                yield SourceRow.quarantined(
+                    row=raw_row,
+                    error=error_msg,
+                    destination=self._on_validation_failure,
+                )
+            return
 
-            # Skip CSV records as configured (not raw lines), preserving multiline alignment.
-            # csv.Error is caught because skip_rows targets non-CSV metadata preamble
-            # (comments, version headers, etc.) that may contain unmatched quotes or
-            # other constructs invalid under RFC 4180.  The user explicitly asked to
-            # discard these rows, so a parse failure is not an error worth surfacing.
-            for _ in range(self._skip_rows):
-                with contextlib.suppress(csv.Error):
-                    next(reader, None)
+        try:
+            yield from self._load_from_file(f, ctx)
+        except UnicodeDecodeError as e:
+            # Decode failure while reading rows — Tier 3 boundary.
+            # Record parse-level error and stop (remaining rows may be corrupt).
+            physical_line = getattr(f, "lineno", None) or "unknown"
+            raw_row = {
+                "file_path": str(self._path),
+                "__encoding__": self._encoding,
+                "__line_number__": physical_line,
+            }
+            error_msg = f"CSV decode error (encoding '{self._encoding}'): {e}"
+            ctx.record_validation_error(
+                row=raw_row,
+                error=error_msg,
+                schema_mode="parse",
+                destination=self._on_validation_failure,
+            )
+            if self._on_validation_failure != "discard":
+                yield SourceRow.quarantined(
+                    row=raw_row,
+                    error=error_msg,
+                    destination=self._on_validation_failure,
+                )
+        finally:
+            f.close()
 
-            # Determine headers based on config
-            if self._columns is not None:
-                # Headerless mode - use explicit columns
-                raw_headers = None
-            else:
-                # Read header row from file
-                try:
-                    raw_headers = next(reader)
-                except StopIteration:
-                    return  # Empty file after skip_rows
-                except csv.Error as e:
-                    # Header parse failure at source boundary (Tier 3): record and quarantine/discard
-                    physical_line = reader.line_num if reader.line_num > 0 else self._skip_rows + 1
+    def _load_from_file(self, f: Any, ctx: PluginContext) -> Iterator[SourceRow]:
+        """Load rows from an open CSV file handle.
+
+        Extracted from load() to allow UnicodeDecodeError handling at the
+        file-reading boundary (Tier 3 external data). All csv.Error and
+        StopIteration handling remains here.
+
+        The caller (load()) is responsible for closing f.
+
+        Args:
+            f: Open file handle for the CSV file
+            ctx: Plugin context for recording errors
+
+        Yields:
+            SourceRow for each row (valid or quarantined)
+        """
+        # Create csv.reader on file handle for multiline field support
+        reader = csv.reader(f, delimiter=self._delimiter)
+
+        # Skip CSV records as configured (not raw lines), preserving multiline alignment.
+        # skip_rows targets non-CSV metadata preamble (comments, version headers, etc.)
+        # that may contain unmatched quotes or other RFC 4180 violations.
+        #
+        # CRITICAL: csv.Error during skip means the parser consumed an unknown amount
+        # of data (e.g., an unmatched quote swallowed subsequent lines). We record the
+        # error and stop processing to avoid silent data loss from corrupted parser state.
+        for skip_idx in range(self._skip_rows):
+            try:
+                if next(reader, None) is None:
+                    # Fewer rows than skip_rows — file exhausted during skip.
+                    # Record that we ran out of data so the audit trail shows
+                    # skip_rows consumed everything (no silent empty result).
+                    skip_count = skip_idx  # rows successfully skipped before exhaustion
+                    error_msg = (
+                        f"CSV file exhausted during skip_rows; "
+                        f"skip_rows={self._skip_rows} requested but file "
+                        f"only had {skip_count} row(s) to skip "
+                        f"(no header or data rows remain)"
+                    )
                     raw_row = {
                         "file_path": str(self._path),
-                        "__line_number__": physical_line,
-                        "__raw_line__": "(unparseable CSV header)",
+                        "skip_rows": self._skip_rows,
+                        "rows_skipped": skip_count,
                     }
-                    error_msg = f"CSV parse error at line {physical_line}: {e}"
-
                     ctx.record_validation_error(
                         row=raw_row,
                         error=error_msg,
                         schema_mode="parse",
                         destination=self._on_validation_failure,
                     )
-
-                    if self._on_validation_failure != "discard":
-                        yield SourceRow.quarantined(
-                            row=raw_row,
-                            error=error_msg,
-                            destination=self._on_validation_failure,
-                        )
                     return
-
-            # Resolve field names (normalization + mapping)
-            # This may raise ValueError on collision
-            self._field_resolution = resolve_field_names(
-                raw_headers=raw_headers,
-                normalize_fields=self._normalize_fields,
-                field_mapping=self._field_mapping,
-                columns=self._columns,
-            )
-            headers = self._field_resolution.final_headers
-            expected_count = len(headers)
-
-            # Create initial contract with field resolution
-            initial_contract = create_contract_from_config(
-                self._schema_config,
-                field_resolution=self._field_resolution.resolution_mapping,
-            )
-            self._contract_builder = ContractBuilder(initial_contract)
-
-            # Track whether first valid row has been processed (for type inference)
-            first_valid_row_processed = False
-
-            # Process data rows with manual iteration to catch csv.Error per row
-            row_num = 0  # Logical row number (data rows only)
-            while True:
-                try:
-                    # Try to read next row - csv.Error raised here for malformed rows
-                    values = next(reader)
-                except StopIteration:
-                    break  # End of file
-                except csv.Error as e:
-                    # CSV parsing error (bad quoting, unmatched quotes, etc.)
-                    # Quarantine this row instead of crashing the run
-                    row_num += 1
-                    physical_line = reader.line_num
-                    raw_row = {
-                        "__raw_line__": "(unparseable due to csv.Error)",
-                        "__line_number__": physical_line,
-                        "__row_number__": row_num,
-                    }
-                    error_msg = f"CSV parse error at line {physical_line}: {e}"
-
-                    ctx.record_validation_error(
+            except csv.Error as e:
+                # Parser error during skip — the csv reader state may be corrupted
+                # (e.g., unmatched quote consumed subsequent lines). Record the error
+                # and stop processing to prevent silent data loss.
+                physical_line = reader.line_num if reader.line_num > 0 else skip_idx + 1
+                raw_row = {
+                    "file_path": str(self._path),
+                    "__line_number__": physical_line,
+                    "__raw_line__": f"(csv.Error during skip_rows at row {skip_idx + 1})",
+                }
+                error_msg = f"CSV parse error during skip_rows at row {skip_idx + 1} (line {physical_line}): {e}"
+                ctx.record_validation_error(
+                    row=raw_row,
+                    error=error_msg,
+                    schema_mode="parse",
+                    destination=self._on_validation_failure,
+                )
+                if self._on_validation_failure != "discard":
+                    yield SourceRow.quarantined(
                         row=raw_row,
+                        error=error_msg,
+                        destination=self._on_validation_failure,
+                    )
+                return  # Don't continue with corrupted parser state
+
+        # Determine headers based on config
+        if self._columns is not None:
+            # Headerless mode - use explicit columns
+            raw_headers = None
+        else:
+            # Read header row from file
+            try:
+                raw_headers = next(reader)
+            except StopIteration:
+                # File exhausted after skip_rows — no header row remains.
+                # Record so the audit trail shows skip_rows consumed all content.
+                if self._skip_rows > 0:
+                    error_msg = (
+                        f"CSV file has no header row after skipping {self._skip_rows} row(s); skip_rows may exceed available content"
+                    )
+                    ctx.record_validation_error(
+                        row={
+                            "file_path": str(self._path),
+                            "skip_rows": self._skip_rows,
+                        },
                         error=error_msg,
                         schema_mode="parse",
                         destination=self._on_validation_failure,
                     )
+                return
+            except csv.Error as e:
+                # Header parse failure at source boundary (Tier 3): record and quarantine/discard
+                physical_line = reader.line_num if reader.line_num > 0 else self._skip_rows + 1
+                raw_row = {
+                    "file_path": str(self._path),
+                    "__line_number__": physical_line,
+                    "__raw_line__": "(unparseable CSV header)",
+                }
+                error_msg = f"CSV parse error at line {physical_line}: {e}"
 
-                    if self._on_validation_failure != "discard":
-                        yield SourceRow.quarantined(
-                            row=raw_row,
-                            error=error_msg,
-                            destination=self._on_validation_failure,
-                        )
-                    continue  # Skip to next row
+                ctx.record_validation_error(
+                    row=raw_row,
+                    error=error_msg,
+                    schema_mode="parse",
+                    destination=self._on_validation_failure,
+                )
 
-                # Skip empty rows (blank lines in CSV)
-                # csv.reader returns [] for blank lines, which would cause field count mismatch
-                if not values:
-                    continue
+                if self._on_validation_failure != "discard":
+                    yield SourceRow.quarantined(
+                        row=raw_row,
+                        error=error_msg,
+                        destination=self._on_validation_failure,
+                    )
+                return
 
+        # Resolve field names (normalization + mapping)
+        # This may raise ValueError on collision
+        self._field_resolution = resolve_field_names(
+            raw_headers=raw_headers,
+            normalize_fields=self._normalize_fields,
+            field_mapping=self._field_mapping,
+            columns=self._columns,
+        )
+        headers = self._field_resolution.final_headers
+        expected_count = len(headers)
+
+        # Create initial contract with field resolution
+        initial_contract = create_contract_from_config(
+            self._schema_config,
+            field_resolution=self._field_resolution.resolution_mapping,
+        )
+        self._contract_builder = ContractBuilder(initial_contract)
+
+        # Track whether first valid row has been processed (for type inference)
+        first_valid_row_processed = False
+
+        # Process data rows with manual iteration to catch csv.Error per row
+        row_num = 0  # Logical row number (data rows only)
+        while True:
+            try:
+                # Try to read next row - csv.Error raised here for malformed rows
+                values = next(reader)
+            except StopIteration:
+                break  # End of file
+            except csv.Error as e:
+                # CSV parsing error (bad quoting, unmatched quotes, etc.)
+                # Quarantine this row instead of crashing the run
                 row_num += 1
-                # reader.line_num tracks physical file line position (including multiline fields)
                 physical_line = reader.line_num
+                raw_row = {
+                    "__raw_line__": "(unparseable due to csv.Error)",
+                    "__line_number__": physical_line,
+                    "__row_number__": row_num,
+                }
+                error_msg = f"CSV parse error at line {physical_line}: {e}"
 
-                # Column count validation - quarantine malformed rows in both header and headerless modes
-                # Per Three-Tier Trust Model: source data is Tier 3 (zero trust), quarantine bad rows
-                if len(values) != expected_count:
-                    raw_row = {
-                        "__raw_line__": self._delimiter.join(values),
-                        "__line_number__": physical_line,
-                        "__row_number__": row_num,
-                    }
-                    error_msg = f"CSV parse error at line {physical_line}: expected {expected_count} fields, got {len(values)}"
+                ctx.record_validation_error(
+                    row=raw_row,
+                    error=error_msg,
+                    schema_mode="parse",
+                    destination=self._on_validation_failure,
+                )
 
-                    ctx.record_validation_error(
+                if self._on_validation_failure != "discard":
+                    yield SourceRow.quarantined(
                         row=raw_row,
                         error=error_msg,
-                        schema_mode="parse",
                         destination=self._on_validation_failure,
                     )
+                continue  # Skip to next row
 
-                    if self._on_validation_failure != "discard":
-                        yield SourceRow.quarantined(
-                            row=raw_row,
+            # Skip empty rows (blank lines in CSV)
+            # csv.reader returns [] for blank lines, which would cause field count mismatch
+            if not values:
+                continue
+
+            row_num += 1
+            # reader.line_num tracks physical file line position (including multiline fields)
+            physical_line = reader.line_num
+
+            # Column count validation - quarantine malformed rows in both header and headerless modes
+            # Per Three-Tier Trust Model: source data is Tier 3 (zero trust), quarantine bad rows
+            if len(values) != expected_count:
+                raw_row = {
+                    "__raw_line__": self._delimiter.join(values),
+                    "__line_number__": physical_line,
+                    "__row_number__": row_num,
+                }
+                error_msg = f"CSV parse error at line {physical_line}: expected {expected_count} fields, got {len(values)}"
+
+                ctx.record_validation_error(
+                    row=raw_row,
+                    error=error_msg,
+                    schema_mode="parse",
+                    destination=self._on_validation_failure,
+                )
+
+                if self._on_validation_failure != "discard":
+                    yield SourceRow.quarantined(
+                        row=raw_row,
+                        error=error_msg,
+                        destination=self._on_validation_failure,
+                    )
+                continue
+
+            # Build row dict
+            row = dict(zip(headers, values, strict=False))
+
+            # Validate row against schema
+            try:
+                validated = self._schema_class.model_validate(row)
+                validated_row = validated.to_row()
+
+                # Process first valid row for type inference
+                if not first_valid_row_processed:
+                    self._contract_builder.process_first_row(
+                        validated_row,
+                        self._field_resolution.resolution_mapping,
+                    )
+                    self.set_schema_contract(self._contract_builder.contract)
+                    first_valid_row_processed = True
+
+                # Validate against locked contract to catch type drift on
+                # inferred fields. Pydantic extra="allow" accepts any type
+                # for extras — the contract enforces inferred types here.
+                contract = self.get_schema_contract()
+                if contract is not None and contract.locked:
+                    violations = contract.validate(validated_row)
+                    if violations:
+                        error_msg = "; ".join(str(v) for v in violations)
+                        ctx.record_validation_error(
+                            row=validated_row,
                             error=error_msg,
+                            schema_mode=self._schema_config.mode,
                             destination=self._on_validation_failure,
                         )
-                    continue
-
-                # Build row dict
-                row = dict(zip(headers, values, strict=False))
-
-                # Validate row against schema
-                try:
-                    validated = self._schema_class.model_validate(row)
-                    validated_row = validated.to_row()
-
-                    # Process first valid row for type inference
-                    if not first_valid_row_processed:
-                        self._contract_builder.process_first_row(
-                            validated_row,
-                            self._field_resolution.resolution_mapping,
-                        )
-                        self.set_schema_contract(self._contract_builder.contract)
-                        first_valid_row_processed = True
-
-                    # Validate against locked contract to catch type drift on
-                    # inferred fields. Pydantic extra="allow" accepts any type
-                    # for extras — the contract enforces inferred types here.
-                    contract = self.get_schema_contract()
-                    if contract is not None and contract.locked:
-                        violations = contract.validate(validated_row)
-                        if violations:
-                            error_msg = "; ".join(str(v) for v in violations)
-                            ctx.record_validation_error(
+                        if self._on_validation_failure != "discard":
+                            yield SourceRow.quarantined(
                                 row=validated_row,
                                 error=error_msg,
-                                schema_mode=self._schema_config.mode,
                                 destination=self._on_validation_failure,
                             )
-                            if self._on_validation_failure != "discard":
-                                yield SourceRow.quarantined(
-                                    row=validated_row,
-                                    error=error_msg,
-                                    destination=self._on_validation_failure,
-                                )
-                            continue
+                        continue
 
-                    yield SourceRow.valid(
-                        validated_row,
-                        contract=contract,
-                    )
-                except ValidationError as e:
-                    ctx.record_validation_error(
+                yield SourceRow.valid(
+                    validated_row,
+                    contract=contract,
+                )
+            except ValidationError as e:
+                ctx.record_validation_error(
+                    row=row,
+                    error=str(e),
+                    schema_mode=self._schema_config.mode,
+                    destination=self._on_validation_failure,
+                )
+
+                if self._on_validation_failure != "discard":
+                    yield SourceRow.quarantined(
                         row=row,
                         error=str(e),
-                        schema_mode=self._schema_config.mode,
                         destination=self._on_validation_failure,
                     )
 
-                    if self._on_validation_failure != "discard":
-                        yield SourceRow.quarantined(
-                            row=row,
-                            error=str(e),
-                            destination=self._on_validation_failure,
-                        )
-
-            # CRITICAL: Handle empty source case (all rows quarantined or no rows)
-            # If no valid rows were processed, the contract is still unlocked.
-            # Lock it now so downstream consumers have a consistent contract state.
-            if not first_valid_row_processed and self._contract_builder is not None:
-                self.set_schema_contract(self._contract_builder.contract.with_locked())
+        # CRITICAL: Handle empty source case (all rows quarantined or no rows)
+        # If no valid rows were processed, the contract is still unlocked.
+        # Lock it now so downstream consumers have a consistent contract state.
+        if not first_valid_row_processed and self._contract_builder is not None:
+            self.set_schema_contract(self._contract_builder.contract.with_locked())
 
     def close(self) -> None:
         """Release resources (no-op for CSV source)."""

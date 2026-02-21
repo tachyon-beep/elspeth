@@ -22,7 +22,12 @@ from elspeth.contracts.schema_contract import FieldContract, PipelineRow, Schema
 from elspeth.plugins.base import BaseTransform
 from elspeth.plugins.clients.llm import LLMClientError
 from elspeth.plugins.config_base import TransformDataConfig
-from elspeth.plugins.llm import get_llm_audit_fields, get_llm_guaranteed_fields
+from elspeth.plugins.llm import (
+    _build_augmented_output_schema,
+    get_llm_audit_fields,
+    get_llm_guaranteed_fields,
+    populate_llm_metadata_fields,
+)
 from elspeth.plugins.llm.templates import PromptTemplate, TemplateError
 from elspeth.plugins.pooling import PoolConfig
 from elspeth.plugins.schema_factory import create_schema_from_config
@@ -193,6 +198,7 @@ class BaseLLMTransform(BaseTransform):
                 self._limiter = None  # Set in on_start
 
             def on_start(self, ctx: PluginContext) -> None:
+                super().on_start(ctx)  # Required: sets lifecycle flag
                 # Capture rate limiter for throttling
                 self._limiter = (
                     ctx.rate_limit_registry.get_limiter("openai")
@@ -223,6 +229,9 @@ class BaseLLMTransform(BaseTransform):
         super().__init__(config)
 
         cfg = LLMConfig.from_dict(config)
+        # Declare output fields for centralized collision detection in TransformExecutor.
+        # Computed here from response_field so the executor can check BEFORE running.
+        self.declared_output_fields = frozenset([*get_llm_guaranteed_fields(cfg.response_field), *get_llm_audit_fields(cfg.response_field)])
         self._model = cfg.model
         self._template = PromptTemplate(
             cfg.template,
@@ -244,7 +253,15 @@ class BaseLLMTransform(BaseTransform):
             allow_coercion=False,  # Transforms do NOT coerce
         )
         self.input_schema = schema
-        self.output_schema = schema
+        # Build augmented output schema that includes LLM-added fields.
+        # Without this, output_schema diverges from output_schema_config's
+        # guaranteed_fields, causing DAG validation failures for explicit-schema
+        # pipelines where downstream consumers require LLM output fields.
+        self.output_schema = _build_augmented_output_schema(
+            base_schema_config=schema_config,
+            response_field=cfg.response_field,
+            schema_name=f"{self.name}OutputSchema",
+        )
 
         # Build output schema config with field categorization
         guaranteed = get_llm_guaranteed_fields(self._response_field)
@@ -320,10 +337,10 @@ class BaseLLMTransform(BaseTransform):
             messages.append({"role": "system", "content": self._system_prompt})
         messages.append({"role": "user", "content": rendered.prompt})
 
-        # 3. Get LLM client from subclass (self-contained pattern)
+        # 4. Get LLM client from subclass (self-contained pattern)
         llm_client = self._get_llm_client(ctx)
 
-        # 4. Call LLM via audited client
+        # 5. Call LLM via audited client
         # This is an EXTERNAL SYSTEM - wrap in try/catch
         # Retryable errors (RateLimitError, NetworkError, ServerError) are re-raised
         # to let the engine's RetryManager handle them. Non-retryable errors
@@ -345,21 +362,23 @@ class BaseLLMTransform(BaseTransform):
                 retryable=False,
             )
 
-        # 5. Build output row (OUR CODE - let exceptions crash)
+        # 6. Build output row (OUR CODE - let exceptions crash)
         output = row_data.copy()
         output[self._response_field] = response.content
-        output[f"{self._response_field}_model"] = response.model
-        output[f"{self._response_field}_usage"] = response.usage
+        populate_llm_metadata_fields(
+            output,
+            self._response_field,
+            usage=response.usage,
+            model=response.model,
+            template_hash=rendered.template_hash,
+            variables_hash=rendered.variables_hash,
+            template_source=rendered.template_source,
+            lookup_hash=rendered.lookup_hash,
+            lookup_source=rendered.lookup_source,
+            system_prompt_source=self._system_prompt_source,
+        )
 
-        # 6. Add audit metadata for template traceability
-        output[f"{self._response_field}_template_hash"] = rendered.template_hash
-        output[f"{self._response_field}_variables_hash"] = rendered.variables_hash
-        output[f"{self._response_field}_template_source"] = rendered.template_source
-        output[f"{self._response_field}_lookup_hash"] = rendered.lookup_hash
-        output[f"{self._response_field}_lookup_source"] = rendered.lookup_source
-        output[f"{self._response_field}_system_prompt_source"] = self._system_prompt_source
-
-        # 7. Propagate contract (always present in PipelineRow)
+        # 8. Propagate contract (always present in PipelineRow)
         output_contract = propagate_contract(
             input_contract=input_contract,
             output_row=output,

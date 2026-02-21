@@ -91,7 +91,15 @@ class ContractBuilder:
             # Per CLAUDE.md: No silent fallback - if field is in row but not in
             # resolution, that's a bug in the source plugin. KeyError is correct!
             original_name = normalized_to_original[normalized_name]
-            updated = updated.with_field(normalized_name, original_name, value)
+
+            # Catch unsupported types (dict, list, Decimal, etc.) and map to
+            # object ("any"), consistent with contract_propagation.py.
+            # These are valid data values that should infer as 'object' type,
+            # not crash the contract builder.
+            try:
+                updated = updated.with_field(normalized_name, original_name, value)
+            except TypeError:
+                updated = updated.with_field(normalized_name, original_name, object())
 
         # Lock the contract
         updated = updated.with_locked()

@@ -9,16 +9,14 @@ If the source outputs wrong types, the transform crashes immediately.
 import copy
 from typing import Any
 
-from pydantic import Field
+from pydantic import Field, model_validator
 
 from elspeth.contracts.contract_propagation import narrow_contract_to_output
 from elspeth.contracts.plugin_context import PluginContext
-from elspeth.contracts.schema import SchemaConfig
 from elspeth.contracts.schema_contract import PipelineRow
 from elspeth.plugins.base import BaseTransform
 from elspeth.plugins.config_base import TransformDataConfig
 from elspeth.plugins.results import TransformResult
-from elspeth.plugins.schema_factory import create_schema_from_config
 from elspeth.plugins.sentinels import MISSING
 from elspeth.plugins.utils import get_nested_field
 
@@ -34,6 +32,38 @@ class FieldMapperConfig(TransformDataConfig):
     select_only: bool = False
     strict: bool = False
     validate_input: bool = False  # Optional input validation
+
+    @model_validator(mode="after")
+    def _reject_duplicate_targets(self) -> "FieldMapperConfig":
+        """Reject mappings where multiple sources map to the same target.
+
+        Duplicate targets cause silent data loss: the last write wins,
+        overwriting the value from the earlier mapping without any error.
+        This also produces incorrect contract metadata (type/original_name
+        lineage from the wrong source field).
+        """
+        if not self.mapping:
+            return self
+        targets: list[str] = list(self.mapping.values())
+        seen: set[str] = set()
+        duplicates: set[str] = set()
+        for target in targets:
+            if target in seen:
+                duplicates.add(target)
+            seen.add(target)
+        if duplicates:
+            # Build source->target details for the error message
+            collisions: dict[str, list[str]] = {}
+            for source, target in self.mapping.items():
+                if target in duplicates:
+                    collisions.setdefault(target, []).append(source)
+            msg = (
+                f"Mapping has duplicate target field names: "
+                f"{', '.join(f'{t!r} <- {srcs}' for t, srcs in sorted(collisions.items()))}. "
+                f"Multiple sources mapping to the same target causes silent data loss."
+            )
+            raise ValueError(msg)
+        return self
 
 
 class FieldMapper(BaseTransform):
@@ -58,27 +88,14 @@ class FieldMapper(BaseTransform):
         self._mapping: dict[str, str] = cfg.mapping
         self._select_only: bool = cfg.select_only
         self._strict: bool = cfg.strict
-        self._validate_input: bool = cfg.validate_input
+        self.validate_input = cfg.validate_input
 
         self._schema_config = cfg.schema_config
 
-        # Create input schema from config
-        # CRITICAL: allow_coercion=False - wrong types are source bugs
-        self.input_schema = create_schema_from_config(
+        self.input_schema, self.output_schema = self._create_schemas(
             cfg.schema_config,
-            "FieldMapperInputSchema",
-            allow_coercion=False,
-        )
-
-        # Output schema MUST be dynamic because FieldMapper changes row shape:
-        # - With mapping, fields can be renamed
-        # - With select_only=True, only mapped fields appear in output
-        # The output shape depends on config, not input schema.
-        # Per P1-2026-01-19-shape-changing-transforms-output-schema-mismatch
-        self.output_schema = create_schema_from_config(
-            SchemaConfig.from_dict({"mode": "observed"}),
-            "FieldMapperOutputSchema",
-            allow_coercion=False,
+            "FieldMapper",
+            adds_fields=True,
         )
 
     def process(self, row: PipelineRow, ctx: PluginContext) -> TransformResult:
@@ -97,10 +114,6 @@ class FieldMapper(BaseTransform):
         """
         # Keep a normalized dict view only for validation and dotted-path lookups.
         row_data = row.to_dict()
-
-        # Optional input validation - crash on wrong types (source bug!)
-        if self._validate_input and not self._schema_config.is_observed:
-            self.input_schema.model_validate(row_data)  # Raises on failure
 
         # Start with empty or copy depending on select_only
         if self._select_only:

@@ -12,6 +12,7 @@ from unittest.mock import Mock
 
 import pytest
 
+from elspeth.contracts.aggregation_checkpoint import AggregationCheckpointState
 from elspeth.contracts.schema_contract import FieldContract, SchemaContract
 from elspeth.contracts.types import NodeID
 from elspeth.core.config import AggregationSettings, TriggerConfig
@@ -56,12 +57,15 @@ class TestCheckpointVersionValidation:
             run_id="test_run",
         )
 
-        # Get checkpoint state
+        # Get checkpoint state — now returns typed DTO
         state = executor.get_checkpoint_state()
+        assert isinstance(state, AggregationCheckpointState)
 
-        # Verify version field exists
-        assert "_version" in state, "Checkpoint state must include _version field (Bug #12 fix)"
-        assert state["_version"] == "3.0", f"Expected version '3.0', got {state['_version']!r}"
+        # Verify version field
+        assert state.version == "3.0", f"Expected version '3.0', got {state.version!r}"
+        # Verify wire format includes _version key
+        state_dict = state.to_dict()
+        assert "_version" in state_dict, "Checkpoint wire format must include _version field (Bug #12 fix)"
 
     def test_restore_requires_matching_version(self) -> None:
         """Verify restore fails with incompatible checkpoint version.
@@ -83,13 +87,12 @@ class TestCheckpointVersionValidation:
         )
 
         # Attempt to restore with incompatible version (old version 1.1)
-        incompatible_state = {
-            "_version": "1.1",  # Old version - rejected after PipelineRow migration
-            "test_node": {
-                "tokens": [],
-                "batch_id": None,
-            },
-        }
+        # Parse via from_dict() to get a typed DTO with wrong version
+        incompatible_state = AggregationCheckpointState.from_dict(
+            {
+                "_version": "1.1",  # Old version - rejected after PipelineRow migration
+            }
+        )
 
         with pytest.raises(ValueError) as exc_info:
             executor.restore_from_checkpoint(incompatible_state)
@@ -112,15 +115,8 @@ class TestCheckpointVersionValidation:
         This ensures old checkpoints (before Bug #12 fix) are rejected
         rather than silently causing issues.
         """
-        span_factory = SpanFactory()
-        executor = AggregationExecutor(
-            recorder=None,  # type: ignore
-            span_factory=span_factory,
-            step_resolver=lambda node_id: 1,
-            run_id="test_run",
-        )
-
-        # Attempt to restore without version field (old format)
+        # Attempt to parse checkpoint without version field (old format)
+        # Validation now happens in from_dict(), not in restore_from_checkpoint()
         old_format_state: dict[str, Any] = {
             "test_node": {
                 "tokens": [],
@@ -129,11 +125,12 @@ class TestCheckpointVersionValidation:
         }
 
         with pytest.raises(ValueError) as exc_info:
-            executor.restore_from_checkpoint(old_format_state)
+            AggregationCheckpointState.from_dict(old_format_state)
 
-        # Verify error mentions incompatible version (None != "1.0")
+        # Verify error mentions corruption (missing _version is Tier 1 corruption)
         error_msg = str(exc_info.value)
-        assert "Incompatible checkpoint version" in error_msg
+        assert "Corrupted checkpoint" in error_msg
+        assert "_version" in error_msg
 
     def test_restore_succeeds_with_valid_version(self) -> None:
         """Verify restore succeeds with matching checkpoint version.
@@ -148,7 +145,7 @@ class TestCheckpointVersionValidation:
         """
         span_factory = SpanFactory()
         # AggregationExecutor requires aggregation_settings for nodes that appear in checkpoint
-        # The restore_from_checkpoint method expects _trigger_evaluators to exist for each node
+        # The restore_from_checkpoint method expects _nodes entries to exist for each node
         node_id = NodeID("test_node")
         trigger = TriggerConfig(count=10)
         aggregation_settings = {node_id: AggregationSettings(name="test_agg", plugin="batch_stats", input="source_out", trigger=trigger)}
@@ -160,31 +157,33 @@ class TestCheckpointVersionValidation:
             aggregation_settings=aggregation_settings,
         )
 
-        # Valid checkpoint state with matching version
+        # Valid checkpoint state with matching version — constructed via from_dict()
         contract = _make_contract({"value": 1})
         contract_version = contract.version_hash()
-        valid_state = {
-            "_version": "3.0",  # Matching version
-            "test_node": {
-                "tokens": [
-                    {
-                        "token_id": "tok-001",
-                        "row_id": "row-001",
-                        "row_data": {"value": 1},
-                        "branch_name": None,
-                        "fork_group_id": None,
-                        "join_group_id": None,
-                        "expand_group_id": None,
-                        "contract_version": contract_version,  # v2.0: required for contract reference
-                    }
-                ],
-                "batch_id": "batch-001",
-                "elapsed_age_seconds": 0.0,
-                "count_fire_offset": None,  # P2-2026-02-01: Required in v2.0
-                "condition_fire_offset": None,  # P2-2026-02-01: Required in v2.0
-                "contract": contract.to_checkpoint_format(),  # v2.0: contract required for PipelineRow restoration
-            },
-        }
+        valid_state = AggregationCheckpointState.from_dict(
+            {
+                "_version": "3.0",
+                "test_node": {
+                    "tokens": [
+                        {
+                            "token_id": "tok-001",
+                            "row_id": "row-001",
+                            "row_data": {"value": 1},
+                            "branch_name": None,
+                            "fork_group_id": None,
+                            "join_group_id": None,
+                            "expand_group_id": None,
+                            "contract_version": contract_version,
+                        }
+                    ],
+                    "batch_id": "batch-001",
+                    "elapsed_age_seconds": 0.0,
+                    "count_fire_offset": None,
+                    "condition_fire_offset": None,
+                    "contract": contract.to_checkpoint_format(),
+                },
+            }
+        )
 
         # Should not raise any errors
         executor.restore_from_checkpoint(valid_state)
@@ -226,7 +225,9 @@ class TestCheckpointVersionValidation:
         executor.buffer_row(node_id, token)
         state = executor.get_checkpoint_state()
 
-        token_state = state["test_node"]["tokens"][0]
+        # Access via typed DTO — verify no transient WorkItem fields leak into checkpoint
+        node_ckpt = state.nodes["test_node"]
+        token_dict = node_ckpt.tokens[0].to_dict()
         forbidden_fields = {
             "start_step",
             "current_node_id",
@@ -234,4 +235,4 @@ class TestCheckpointVersionValidation:
             "coalesce_node_id",
             "coalesce_name",
         }
-        assert forbidden_fields.isdisjoint(token_state.keys())
+        assert forbidden_fields.isdisjoint(token_dict.keys())

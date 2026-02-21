@@ -194,6 +194,7 @@ class TestConcurrentResume:
                 tokens_table.insert().values(
                     token_id="tok-000",
                     row_id="row-000",
+                    run_id=run_id,
                     created_at=now,
                 )
             )

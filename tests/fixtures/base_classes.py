@@ -138,6 +138,8 @@ class _TestSinkBase:
     node_id: str | None = None
     determinism = Determinism.DETERMINISTIC
     plugin_version = "1.0.0"
+    validate_input: bool = False
+    declared_required_fields: frozenset[str] = frozenset()
 
     def __init__(self) -> None:
         self.config: dict[str, Any] = {"schema": {"mode": "observed"}}
@@ -166,9 +168,10 @@ class _TestTransformBase:
     plugin_version = "1.0.0"
     is_batch_aware: bool = False
     creates_tokens: bool = False
-    transforms_adds_fields: bool = False
     on_error: str | None = None
     on_success: str | None = None
+    validate_input: bool = False
+    declared_output_fields: frozenset[str] = frozenset()
 
     def __init__(self) -> None:
         self.config: dict[str, Any] = {"schema": {"mode": "observed"}}

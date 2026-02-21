@@ -17,7 +17,18 @@ from collections.abc import Iterator
 from datetime import UTC, datetime
 from typing import Any
 
-from elspeth.contracts import NodeStateCompleted, NodeStateOpen, NodeStatePending
+from elspeth.contracts import (
+    BatchMember,
+    Call,
+    NodeState,
+    NodeStateCompleted,
+    NodeStateOpen,
+    NodeStatePending,
+    RoutingEvent,
+    Token,
+    TokenOutcome,
+    TokenParent,
+)
 from elspeth.core.canonical import canonical_json
 from elspeth.core.landscape.database import LandscapeDB
 from elspeth.core.landscape.recorder import LandscapeRecorder
@@ -38,6 +49,7 @@ class LandscapeExporter:
     - row: Source rows
     - token: Row instances
     - token_parent: Token lineage for forks/joins
+    - token_outcome: Terminal state for tokens
     - node_state: Processing records
     - routing_event: Routing decisions
     - call: External calls (may have state_id OR operation_id)
@@ -235,7 +247,7 @@ class LandscapeExporter:
 
         # Batch query: Pre-load all operation-parented calls (N+1 fix)
         all_op_calls = self._recorder.get_all_operation_calls_for_run(run_id)
-        op_calls_by_operation: dict[str, list[Any]] = defaultdict(list)
+        op_calls_by_operation: dict[str, list[Call]] = defaultdict(list)
         for call in all_op_calls:
             if call.operation_id:
                 op_calls_by_operation[call.operation_id].append(call)
@@ -286,34 +298,40 @@ class LandscapeExporter:
 
         # Batch query 1: All tokens for this run
         all_tokens = self._recorder.get_all_tokens_for_run(run_id)
-        tokens_by_row: dict[str, list[Any]] = defaultdict(list)
+        tokens_by_row: dict[str, list[Token]] = defaultdict(list)
         for token in all_tokens:
             tokens_by_row[token.row_id].append(token)
 
         # Batch query 2: All token parents for this run
         all_parents = self._recorder.get_all_token_parents_for_run(run_id)
-        parents_by_token: dict[str, list[Any]] = defaultdict(list)
+        parents_by_token: dict[str, list[TokenParent]] = defaultdict(list)
         for parent in all_parents:
             parents_by_token[parent.token_id].append(parent)
 
         # Batch query 3: All node states for this run
         all_states = self._recorder.get_all_node_states_for_run(run_id)
-        states_by_token: dict[str, list[Any]] = defaultdict(list)
+        states_by_token: dict[str, list[NodeState]] = defaultdict(list)
         for state in all_states:
             states_by_token[state.token_id].append(state)
 
         # Batch query 4: All routing events for this run
         all_routing_events = self._recorder.get_all_routing_events_for_run(run_id)
-        events_by_state: dict[str, list[Any]] = defaultdict(list)
+        events_by_state: dict[str, list[RoutingEvent]] = defaultdict(list)
         for event in all_routing_events:
             events_by_state[event.state_id].append(event)
 
         # Batch query 5: All state-parented calls for this run
         all_calls = self._recorder.get_all_calls_for_run(run_id)
-        calls_by_state: dict[str, list[Any]] = defaultdict(list)
+        calls_by_state: dict[str, list[Call]] = defaultdict(list)
         for call in all_calls:
             if call.state_id:  # Should always be true for state-parented calls
                 calls_by_state[call.state_id].append(call)
+
+        # Batch query 6: All token outcomes for this run
+        all_token_outcomes = self._recorder.get_all_token_outcomes_for_run(run_id)
+        outcomes_by_token: dict[str, list[TokenOutcome]] = defaultdict(list)
+        for outcome in all_token_outcomes:
+            outcomes_by_token[outcome.token_id].append(outcome)
 
         # Now iterate through rows using pre-loaded data (no more per-entity queries)
         for row in self._recorder.get_rows(run_id):
@@ -348,6 +366,26 @@ class LandscapeExporter:
                         "token_id": parent.token_id,
                         "parent_token_id": parent.parent_token_id,
                         "ordinal": parent.ordinal,
+                    }
+
+                # Token outcomes (from pre-loaded dict)
+                for outcome in outcomes_by_token.get(token.token_id, []):
+                    yield {
+                        "record_type": "token_outcome",
+                        "run_id": run_id,
+                        "outcome_id": outcome.outcome_id,
+                        "token_id": outcome.token_id,
+                        "outcome": outcome.outcome.value,
+                        "is_terminal": outcome.is_terminal,
+                        "recorded_at": outcome.recorded_at.isoformat(),
+                        "sink_name": outcome.sink_name,
+                        "batch_id": outcome.batch_id,
+                        "fork_group_id": outcome.fork_group_id,
+                        "join_group_id": outcome.join_group_id,
+                        "expand_group_id": outcome.expand_group_id,
+                        "error_hash": outcome.error_hash,
+                        "context_json": outcome.context_json,
+                        "expected_branches_json": outcome.expected_branches_json,
                     }
 
                 # Node states for this token (from pre-loaded dict)
@@ -481,7 +519,7 @@ class LandscapeExporter:
 
         # Batch query: Pre-load all batch members (N+1 fix)
         all_batch_members = self._recorder.get_all_batch_members_for_run(run_id)
-        members_by_batch: dict[str, list[Any]] = defaultdict(list)
+        members_by_batch: dict[str, list[BatchMember]] = defaultdict(list)
         for member in all_batch_members:
             members_by_batch[member.batch_id].append(member)
 

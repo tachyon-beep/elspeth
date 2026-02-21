@@ -49,7 +49,7 @@ class TrackingTransform(BaseTransform):
         self.close_call_count = 0
 
     def on_start(self, ctx: Any) -> None:
-        pass
+        super().on_start(ctx)
 
     def on_complete(self, ctx: Any) -> None:
         pass

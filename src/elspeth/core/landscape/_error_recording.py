@@ -16,9 +16,11 @@ from elspeth.contracts import (
     ValidationErrorRecord,
     ValidationErrorWithContract,
 )
+from elspeth.contracts.errors import AuditIntegrityError
 from elspeth.core.canonical import canonical_json, repr_hash, stable_hash
 from elspeth.core.landscape._helpers import generate_id, now
 from elspeth.core.landscape.schema import (
+    tokens_table,
     transform_errors_table,
     validation_errors_table,
 )
@@ -130,6 +132,33 @@ class ErrorRecordingMixin:
 
         return error_id
 
+    def _validate_token_run_ownership_for_error(self, token_id: str, run_id: str) -> None:
+        """Validate that a token belongs to the specified run before recording an error.
+
+        Per Tier 1 trust model: cross-run contamination of audit records is
+        evidence tampering. Crash immediately if the invariant is violated.
+
+        Args:
+            token_id: Token to validate
+            run_id: Expected run ID
+
+        Raises:
+            AuditIntegrityError: If token does not belong to the specified run
+        """
+        query = select(tokens_table.c.run_id).where(tokens_table.c.token_id == token_id)
+        result = self._ops.execute_fetchone(query)
+        if result is None:
+            raise AuditIntegrityError(
+                f"Token {token_id!r} does not exist in the tokens table. "
+                f"This is Tier 1 data corruption -- the token should have been created before recording errors."
+            )
+        if result.run_id != run_id:
+            raise AuditIntegrityError(
+                f"Cross-run contamination prevented in record_transform_error: token {token_id!r} "
+                f"belongs to run {result.run_id!r}, but caller supplied run_id={run_id!r}. "
+                f"This would corrupt the audit trail by attributing errors to the wrong run."
+            )
+
     def record_transform_error(
         self,
         run_id: str,
@@ -144,6 +173,9 @@ class ErrorRecordingMixin:
         Called when a transform returns TransformResult.error().
         This is for legitimate errors, NOT transform bugs.
 
+        Validates that the token belongs to the specified run_id before recording.
+        Cross-run contamination crashes immediately per Tier 1 trust model.
+
         Args:
             run_id: Current run ID
             token_id: Token ID for the row
@@ -154,8 +186,34 @@ class ErrorRecordingMixin:
 
         Returns:
             error_id for tracking
+
+        Raises:
+            AuditIntegrityError: If token does not belong to the specified run
         """
+        # Validate token belongs to the specified run (Tier 1 invariant)
+        self._validate_token_run_ownership_for_error(token_id, run_id)
+
         error_id = f"terr_{generate_id()[:12]}"
+        logger = logging.getLogger(__name__)
+
+        # error_details may contain NaN/Infinity or non-serializable values
+        # (e.g. from exception context in row operations). Wrap in try/except
+        # per Tier 3 boundary: error_details originates from transform results
+        # which may contain arbitrary row-derived data.
+        try:
+            error_details_json = canonical_json(error_details)
+        except (ValueError, TypeError) as e:
+            logger.warning(
+                "Transform error details not canonically serializable (using repr fallback): %s",
+                str(e),
+            )
+            error_details_json = json.dumps(
+                {
+                    "__non_canonical__": True,
+                    "repr": repr(error_details)[:500],
+                    "serialization_error": str(e),
+                }
+            )
 
         self._ops.execute_insert(
             transform_errors_table.insert().values(
@@ -165,7 +223,7 @@ class ErrorRecordingMixin:
                 transform_id=transform_id,
                 row_hash=stable_hash(row_data),
                 row_data_json=canonical_json(row_data),
-                error_details_json=canonical_json(error_details),
+                error_details_json=error_details_json,
                 destination=destination,
                 created_at=now(),
             )

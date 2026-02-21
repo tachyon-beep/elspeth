@@ -230,7 +230,22 @@ def _normalize_field_spec(spec: Any, *, index: int) -> str:
         if "name" in spec and "type" in spec:
             name = spec["name"]
             type_spec = spec["type"]
-            optional = not spec.get("required", True)
+            if not isinstance(name, str):
+                raise ValueError(f"Field spec at index {index}: 'name' must be a string, got {type(name).__name__}.")
+            if not isinstance(type_spec, str):
+                raise ValueError(f"Field spec at index {index}: 'type' must be a string, got {type(type_spec).__name__}.")
+            if "required" not in spec:
+                raise ValueError(
+                    f"Field spec at index {index}: 'required' key is missing. "
+                    f"Round-trip dict format requires 'name', 'type', and 'required' keys."
+                )
+            if type(spec["required"]) is not bool:
+                raise ValueError(
+                    f"Field spec at index {index}: 'required' must be a bool, "
+                    f"got {type(spec['required']).__name__} ({spec['required']!r}). "
+                    f"Use true/false (YAML) or True/False (Python), not strings."
+                )
+            optional = spec["required"] is False
             return f"{name}: {type_spec}{'?' if optional else ''}"
 
         # YAML `- id: int` parses as {"id": "int"}
@@ -319,8 +334,11 @@ class SchemaConfig:
             SchemaConfig instance
 
         Raises:
-            ValueError: If config is invalid
+            ValueError: If config is invalid (including non-dict input)
         """
+        if not isinstance(config, dict):
+            raise ValueError(f"Schema config must be a dict, got {type(config).__name__}")
+
         # Parse contract fields (valid for all schema modes)
         guaranteed_fields = _parse_field_names_list(config.get("guaranteed_fields"), "guaranteed_fields")
         required_fields = _parse_field_names_list(config.get("required_fields"), "required_fields")

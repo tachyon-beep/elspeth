@@ -3,6 +3,7 @@ from __future__ import annotations
 import pytest
 
 from elspeth.contracts import BatchStatus, NodeType, TriggerType
+from elspeth.contracts.errors import AuditIntegrityError
 from elspeth.contracts.schema import SchemaConfig
 from elspeth.core.landscape import LandscapeDB, LandscapeRecorder
 
@@ -368,6 +369,25 @@ class TestCompleteBatch:
         assert fetched.status == BatchStatus.COMPLETED
         assert fetched.trigger_type == TriggerType.END_OF_SOURCE
         assert fetched.trigger_reason == "source exhausted"
+
+    def test_rejects_non_terminal_status_executing(self):
+        _db, recorder = _setup()
+        recorder.create_batch("run-1", "agg-1", batch_id="b-1")
+        with pytest.raises(AuditIntegrityError, match="terminal status"):
+            recorder.complete_batch("b-1", BatchStatus.EXECUTING)
+
+    def test_rejects_non_terminal_status_draft(self):
+        _db, recorder = _setup()
+        recorder.create_batch("run-1", "agg-1", batch_id="b-1")
+        with pytest.raises(AuditIntegrityError, match="terminal status"):
+            recorder.complete_batch("b-1", BatchStatus.DRAFT)
+
+    def test_accepts_completed_status(self):
+        _db, recorder = _setup()
+        recorder.create_batch("run-1", "agg-1", batch_id="b-1")
+        result = recorder.complete_batch("b-1", BatchStatus.COMPLETED)
+        assert result.status == BatchStatus.COMPLETED
+        assert result.completed_at is not None
 
 
 # ---------------------------------------------------------------------------
@@ -822,6 +842,51 @@ class TestRetryBatch:
         retry2 = recorder.retry_batch(retry1.batch_id)
         assert retry2.attempt == 2
 
+    def test_retry_is_idempotent(self):
+        """Retrying the same failed batch twice returns the same retry batch."""
+        _db, recorder = _setup_with_token()
+        recorder.create_batch("run-1", "agg-1", batch_id="b-orig")
+        recorder.add_batch_member("b-orig", "tok-1", ordinal=0)
+        recorder.add_batch_member("b-orig", "tok-2", ordinal=1)
+        recorder.update_batch_status("b-orig", BatchStatus.FAILED)
+
+        first_retry = recorder.retry_batch("b-orig")
+        second_retry = recorder.retry_batch("b-orig")
+
+        assert first_retry.batch_id == second_retry.batch_id
+        assert first_retry.attempt == second_retry.attempt == 1
+
+        # Only one retry batch exists (not two)
+        all_batches = recorder.get_batches("run-1")
+        attempt_1_batches = [b for b in all_batches if b.attempt == 1]
+        assert len(attempt_1_batches) == 1
+
+    def test_retry_idempotency_across_recovery_cycles(self):
+        """Simulates crash-recovery-crash-recovery creating only one retry."""
+        _db, recorder = _setup_with_token()
+        recorder.create_batch("run-1", "agg-1", batch_id="b-orig")
+        recorder.add_batch_member("b-orig", "tok-1", ordinal=0)
+        recorder.update_batch_status("b-orig", BatchStatus.FAILED)
+
+        # First recovery cycle creates retry batch
+        retry1 = recorder.retry_batch("b-orig")
+
+        # Simulate crash: retry batch stays as DRAFT
+        # Second recovery cycle tries to retry the same failed batch
+        retry2 = recorder.retry_batch("b-orig")
+
+        # Third recovery cycle — same thing
+        retry3 = recorder.retry_batch("b-orig")
+
+        # All three calls return the same batch
+        assert retry1.batch_id == retry2.batch_id == retry3.batch_id
+        assert retry1.attempt == 1
+
+        # Members were only copied once
+        members = recorder.get_batch_members(retry1.batch_id)
+        assert len(members) == 1
+        assert members[0].token_id == "tok-1"
+
 
 # ---------------------------------------------------------------------------
 # register_artifact
@@ -1173,3 +1238,55 @@ class TestGetArtifacts:
         assert run1_arts[0].artifact_id == "art-r1"
         assert len(run2_arts) == 1
         assert run2_arts[0].artifact_id == "art-r2"
+
+    def test_deterministic_ordering_by_created_at_then_artifact_id(self):
+        """Bug 6kno: get_artifacts() must return deterministic order for export signing."""
+        _db, recorder = _setup_with_sink()
+        recorder.begin_node_state(
+            "tok-1",
+            "source-0",
+            "run-1",
+            0,
+            {"data": "test"},
+            state_id="state-1",
+        )
+        # Register multiple artifacts
+        recorder.register_artifact(
+            run_id="run-1",
+            state_id="state-1",
+            sink_node_id="sink-0",
+            artifact_type="csv",
+            path="/output/c.csv",
+            content_hash="sha256:c",
+            size_bytes=300,
+            artifact_id="art-c",
+        )
+        recorder.register_artifact(
+            run_id="run-1",
+            state_id="state-1",
+            sink_node_id="sink-0",
+            artifact_type="csv",
+            path="/output/a.csv",
+            content_hash="sha256:a",
+            size_bytes=100,
+            artifact_id="art-a",
+        )
+        recorder.register_artifact(
+            run_id="run-1",
+            state_id="state-1",
+            sink_node_id="sink-0",
+            artifact_type="json",
+            path="/output/b.json",
+            content_hash="sha256:b",
+            size_bytes=200,
+            artifact_id="art-b",
+        )
+
+        # Call twice — must be identical
+        artifacts_first = recorder.get_artifacts("run-1")
+        artifacts_second = recorder.get_artifacts("run-1")
+
+        ids_first = [a.artifact_id for a in artifacts_first]
+        ids_second = [a.artifact_id for a in artifacts_second]
+        assert ids_first == ids_second
+        assert len(ids_first) == 3

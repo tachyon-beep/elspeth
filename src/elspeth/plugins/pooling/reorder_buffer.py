@@ -9,8 +9,23 @@ metadata is captured for audit trail.
 from __future__ import annotations
 
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from threading import Lock
+from typing import Any
+
+
+# Sentinel to distinguish "not yet completed" from a legitimate None result.
+# Using a dedicated class so it cannot be confused with any valid T value.
+class _Sentinel:
+    """Internal sentinel for unfilled buffer slots."""
+
+    __slots__ = ()
+
+    def __repr__(self) -> str:
+        return "<_UNFILLED>"
+
+
+_UNFILLED = _Sentinel()
 
 
 @dataclass
@@ -42,7 +57,8 @@ class _InternalEntry[T]:
     submit_timestamp: float
     complete_index: int | None = None
     complete_timestamp: float | None = None
-    result: T | None = None
+    # Use sentinel default so None is a valid result value
+    result: Any = field(default=_UNFILLED)
     is_complete: bool = False
 
 
@@ -103,7 +119,7 @@ class ReorderBuffer[T]:
 
         Args:
             index: Index returned from submit()
-            result: The result for this item
+            result: The result for this item (None is a valid value)
 
         Raises:
             KeyError: If index was never submitted
@@ -142,11 +158,18 @@ class ReorderBuffer[T]:
                 if not entry.is_complete:
                     break
 
-                # Entry is complete and all previous are emitted
-                # Narrow Optional types: is_complete guarantees these are set
-                assert entry.complete_timestamp is not None
-                assert entry.complete_index is not None
-                assert entry.result is not None
+                # Entry is complete and all previous are emitted.
+                # is_complete guarantees complete_timestamp and complete_index
+                # were set in complete(). If they are None here, that is an
+                # internal bug — crash immediately (Tier 1: our data).
+                if entry.complete_timestamp is None:
+                    raise RuntimeError(
+                        f"ReorderBuffer internal error: entry {entry.submit_index} is_complete=True but complete_timestamp is None"
+                    )
+                if entry.complete_index is None:
+                    raise RuntimeError(
+                        f"ReorderBuffer internal error: entry {entry.submit_index} is_complete=True but complete_index is None"
+                    )
 
                 # Calculate buffer wait time (time between completion and emission)
                 buffer_wait_ms = (now - entry.complete_timestamp) * 1000

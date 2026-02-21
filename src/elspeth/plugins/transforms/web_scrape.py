@@ -141,6 +141,19 @@ class WebScrapeTransform(BaseTransform):
         self._content_field = cfg.content_field
         self._fingerprint_field = cfg.fingerprint_field
 
+        # Declare output fields for centralized collision detection in TransformExecutor.
+        self.declared_output_fields = frozenset(
+            [
+                cfg.content_field,
+                cfg.fingerprint_field,
+                "fetch_status",
+                "fetch_url_final",
+                "fetch_request_hash",
+                "fetch_response_raw_hash",
+                "fetch_response_processed_hash",
+            ]
+        )
+
         # Format and fingerprint mode
         self._format = cfg.format
         self._fingerprint_mode = cfg.fingerprint_mode
@@ -229,6 +242,8 @@ class WebScrapeTransform(BaseTransform):
 
         # Compute fingerprint
         fingerprint = compute_fingerprint(content, mode=self._fingerprint_mode)
+
+        # Field collision check already done before fetch — no need to re-check here.
 
         # Store payloads for forensic recovery
         # Context is guaranteed to have these - executor sets them

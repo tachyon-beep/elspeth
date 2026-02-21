@@ -7,10 +7,8 @@ import hashlib
 import tempfile
 from pathlib import Path
 
-import pytest
 from hypothesis import given
 from hypothesis import strategies as st
-from pydantic import ValidationError
 
 from elspeth.contracts.plugin_context import PluginContext
 from elspeth.plugins.sinks.json_sink import JSONSink
@@ -95,8 +93,13 @@ class TestJSONSinkProperties:
             assert descriptor.content_hash == _compute_sha256(path)
             assert descriptor.size_bytes == path.stat().st_size
 
-    def test_json_sink_validate_input_rejects_wrong_types(self, tmp_path: Path) -> None:
-        path = tmp_path / "bad.jsonl"
+    def test_json_sink_validate_input_attribute_set_from_config(self, tmp_path: Path) -> None:
+        """validate_input=True stored as attribute for executor enforcement.
+
+        Input validation is centralized in SinkExecutor. This test verifies
+        the plugin correctly sets the attribute from config.
+        """
+        path = tmp_path / "good.jsonl"
 
         sink = JSONSink(
             {
@@ -106,7 +109,5 @@ class TestJSONSinkProperties:
                 "validate_input": True,
             }
         )
-        ctx = PluginContext(run_id="test-run", config={})
 
-        with pytest.raises(ValidationError):
-            sink.write([{"value": "not-an-int"}], ctx)
+        assert sink.validate_input is True

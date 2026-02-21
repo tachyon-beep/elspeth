@@ -15,7 +15,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from elspeth.contracts import TokenCompleted
+from elspeth.contracts import TokenCompleted, TokenUsage
 from elspeth.contracts.enums import RowOutcome, RunStatus
 from elspeth.contracts.events import (
     RunFinished,
@@ -459,13 +459,13 @@ class TestOTLPExporterSpanConversion:
             provider="azure-openai",
             status=CallStatus.SUCCESS,
             latency_ms=150.0,
-            token_usage={"prompt_tokens": 100, "completion_tokens": 50},
+            token_usage=TokenUsage(prompt_tokens=100, completion_tokens=50),
         )
         exporter.export(event)
 
         exported_spans = mock_sdk.export.call_args[0][0]
         attrs = exported_spans[0].attributes
-        # Dict should be JSON string
+        # Frozen dataclass → dict via asdict() → JSON string
         import json
 
         token_usage = json.loads(attrs["token_usage"])

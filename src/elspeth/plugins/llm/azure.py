@@ -18,10 +18,16 @@ from elspeth.contracts import Determinism, TransformErrorReason, TransformResult
 from elspeth.contracts.plugin_context import PluginContext
 from elspeth.contracts.schema import SchemaConfig
 from elspeth.contracts.schema_contract import PipelineRow
+from elspeth.contracts.token_usage import TokenUsage
 from elspeth.plugins.base import BaseTransform
 from elspeth.plugins.batching import BatchTransformMixin, OutputPort
 from elspeth.plugins.clients.llm import AuditedLLMClient, LLMClientError
-from elspeth.plugins.llm import get_llm_audit_fields, get_llm_guaranteed_fields
+from elspeth.plugins.llm import (
+    _build_augmented_output_schema,
+    get_llm_audit_fields,
+    get_llm_guaranteed_fields,
+    populate_llm_metadata_fields,
+)
 from elspeth.plugins.llm.base import LLMConfig
 from elspeth.plugins.llm.templates import PromptTemplate, TemplateError
 from elspeth.plugins.llm.tracing import (
@@ -142,6 +148,9 @@ class AzureLLMTransform(BaseTransform, BatchTransformMixin):
         # Parse Azure-specific config to validate all required fields
         cfg = AzureOpenAIConfig.from_dict(config)
 
+        # Declare output fields for centralized collision detection in TransformExecutor.
+        self.declared_output_fields = frozenset([*get_llm_guaranteed_fields(cfg.response_field), *get_llm_audit_fields(cfg.response_field)])
+
         # Store Azure-specific config
         self._azure_endpoint = cfg.endpoint
         self._azure_api_key: str | None = cfg.api_key
@@ -172,7 +181,11 @@ class AzureLLMTransform(BaseTransform, BatchTransformMixin):
             allow_coercion=False,  # Transforms do NOT coerce
         )
         self.input_schema = schema
-        self.output_schema = schema
+        self.output_schema = _build_augmented_output_schema(
+            base_schema_config=schema_config,
+            response_field=cfg.response_field,
+            schema_name=f"{self.name}OutputSchema",
+        )
 
         # Build output schema config with field categorization
         guaranteed = get_llm_guaranteed_fields(self._response_field)
@@ -248,6 +261,7 @@ class AzureLLMTransform(BaseTransform, BatchTransformMixin):
         recorder, run_id, telemetry callback, and rate limiter for use in worker threads.
         Also initializes Tier 2 tracing if configured.
         """
+        super().on_start(ctx)
         self._recorder = ctx.landscape
         self._run_id = ctx.run_id
         self._telemetry_emit = ctx.telemetry_emit
@@ -435,7 +449,11 @@ class AzureLLMTransform(BaseTransform, BatchTransformMixin):
         messages.append({"role": "user", "content": rendered.prompt})
 
         # 3. Get LLM client (cached per state_id for call_index uniqueness)
-        if ctx.state_id is None:
+        # BUG-AZURE-STATE-ID: Snapshot state_id at method entry. ctx.state_id is mutable
+        # (engine rewrites it per retry attempt on the shared context object), so using
+        # it in the finally block could evict the wrong cache entry during retry races.
+        state_id = ctx.state_id
+        if state_id is None:
             raise RuntimeError("Azure LLM transform requires state_id. Ensure transform is executed through the engine.")
 
         try:
@@ -444,7 +462,7 @@ class AzureLLMTransform(BaseTransform, BatchTransformMixin):
             if ctx.token is None:
                 raise RuntimeError("Azure LLM transform requires ctx.token. Ensure transform is executed through the engine.")
             token_id = ctx.token.token_id
-            llm_client = self._get_llm_client(ctx.state_id, token_id=token_id)
+            llm_client = self._get_llm_client(state_id, token_id=token_id)
 
             # 4. Call LLM (EXTERNAL - wrap)
             # Retryable errors (RateLimitError, NetworkError, ServerError) are re-raised
@@ -493,14 +511,18 @@ class AzureLLMTransform(BaseTransform, BatchTransformMixin):
             # 5. Build output row (OUR CODE - let exceptions crash)
             output = row.to_dict()
             output[self._response_field] = response.content
-            output[f"{self._response_field}_usage"] = response.usage
-            output[f"{self._response_field}_template_hash"] = rendered.template_hash
-            output[f"{self._response_field}_variables_hash"] = rendered.variables_hash
-            output[f"{self._response_field}_template_source"] = rendered.template_source
-            output[f"{self._response_field}_lookup_hash"] = rendered.lookup_hash
-            output[f"{self._response_field}_lookup_source"] = rendered.lookup_source
-            output[f"{self._response_field}_system_prompt_source"] = self._system_prompt_source
-            output[f"{self._response_field}_model"] = response.model
+            populate_llm_metadata_fields(
+                output,
+                self._response_field,
+                usage=response.usage,
+                model=response.model,
+                template_hash=rendered.template_hash,
+                variables_hash=rendered.variables_hash,
+                template_source=rendered.template_source,
+                lookup_hash=rendered.lookup_hash,
+                lookup_source=rendered.lookup_source,
+                system_prompt_source=self._system_prompt_source,
+            )
 
             # 6. Propagate contract (always present in PipelineRow)
             output_contract = propagate_contract(
@@ -514,9 +536,10 @@ class AzureLLMTransform(BaseTransform, BatchTransformMixin):
                 success_reason={"action": "enriched", "fields_added": [self._response_field]},
             )
         finally:
-            # Clean up cached client for this state_id to prevent unbounded growth
+            # Clean up cached client for this state_id to prevent unbounded growth.
+            # Uses snapshot (not ctx.state_id) to avoid evicting wrong entry during retry races.
             with self._llm_clients_lock:
-                self._llm_clients.pop(ctx.state_id, None)
+                self._llm_clients.pop(state_id, None)
 
     def _get_underlying_client(self) -> AzureOpenAI:
         """Get or create the underlying Azure OpenAI client.
@@ -549,8 +572,7 @@ class AzureLLMTransform(BaseTransform, BatchTransformMixin):
         """
         with self._llm_clients_lock:
             if state_id not in self._llm_clients:
-                if self._recorder is None:
-                    raise RuntimeError("Azure transform requires recorder. Ensure on_start was called.")
+                assert self._recorder is not None
                 self._llm_clients[state_id] = AuditedLLMClient(
                     recorder=self._recorder,
                     state_id=state_id,
@@ -621,7 +643,7 @@ class AzureLLMTransform(BaseTransform, BatchTransformMixin):
         token_id: str,
         prompt: str,
         response_content: str,
-        usage: dict[str, int] | None,
+        usage: TokenUsage | None,
         latency_ms: float | None,
     ) -> None:
         """Record LLM call to Langfuse using v3 nested context managers.
@@ -634,7 +656,7 @@ class AzureLLMTransform(BaseTransform, BatchTransformMixin):
             token_id: Token ID for correlation
             prompt: The prompt sent to the LLM
             response_content: The response received
-            usage: Token usage dict with prompt_tokens/completion_tokens
+            usage: Token usage (``TokenUsage`` or ``None``)
             latency_ms: Call latency in milliseconds
         """
         if not self._tracing_active or self._langfuse_client is None:
@@ -658,15 +680,11 @@ class AzureLLMTransform(BaseTransform, BatchTransformMixin):
             ):
                 update_kwargs: dict[str, Any] = {"output": response_content}
 
-                if usage:
-                    # Validate types at external boundary (Tier 3 data from LLM API)
-                    prompt_tokens = usage.get("prompt_tokens", 0)
-                    completion_tokens = usage.get("completion_tokens", 0)
-                    if isinstance(prompt_tokens, int) and isinstance(completion_tokens, int):
-                        update_kwargs["usage_details"] = {
-                            "input": prompt_tokens,
-                            "output": completion_tokens,
-                        }
+                if usage is not None and usage.is_known:
+                    update_kwargs["usage_details"] = {
+                        "input": usage.prompt_tokens,
+                        "output": usage.completion_tokens,
+                    }
 
                 if latency_ms is not None:
                     update_kwargs["metadata"] = {"latency_ms": latency_ms}
@@ -765,4 +783,19 @@ def _configure_azure_monitor(config: TracingConfig) -> bool:
         connection_string=config.connection_string,
         enable_live_metrics=config.enable_live_metrics,
     )
+
+    # Wire enable_content_recording to the Azure AI Inference tracing SDK.
+    # Without this, the config field is accepted and logged but never applied,
+    # leaving operators with a false sense of their content recording policy.
+    try:
+        from azure.ai.inference.tracing import AIInferenceInstrumentor  # type: ignore[import-not-found,import-untyped]  # optional dep
+
+        AIInferenceInstrumentor().instrument(enable_content_recording=config.enable_content_recording)
+    except ImportError:
+        # azure-ai-inference not installed — fall back to environment variable
+        # which the OpenAI SDK instrumentor reads at trace emission time.
+        import os
+
+        os.environ["AZURE_TRACING_GEN_AI_CONTENT_RECORDING_ENABLED"] = str(config.enable_content_recording).lower()
+
     return True

@@ -833,3 +833,90 @@ def test_http_config_timeout_custom() -> None:
         )
     )
     assert transform._timeout == 60
+
+
+class TestWebScrapeDeclaredOutputFields:
+    """Tests for declared_output_fields — centralized collision detection support.
+
+    Field collision detection is enforced centrally by TransformExecutor
+    (see TestTransformExecutor in test_executors.py). These tests verify
+    that WebScrapeTransform correctly declares its output fields so the
+    executor can perform pre-execution collision checks.
+    """
+
+    def test_declared_output_fields_contains_hardcoded_fields(self):
+        """declared_output_fields includes hardcoded fetch_* audit fields."""
+        transform = WebScrapeTransform(
+            {
+                "schema": {"mode": "observed"},
+                "url_field": "url",
+                "content_field": "page_content",
+                "fingerprint_field": "page_fingerprint",
+                "http": {
+                    "abuse_contact": "test@example.com",
+                    "scraping_reason": "Testing declared fields",
+                },
+            }
+        )
+
+        assert "fetch_status" in transform.declared_output_fields
+        assert "fetch_url_final" in transform.declared_output_fields
+        assert "fetch_request_hash" in transform.declared_output_fields
+        assert "fetch_response_raw_hash" in transform.declared_output_fields
+        assert "fetch_response_processed_hash" in transform.declared_output_fields
+
+    def test_declared_output_fields_contains_configurable_fields(self):
+        """declared_output_fields includes configurable content and fingerprint fields."""
+        transform = WebScrapeTransform(
+            {
+                "schema": {"mode": "observed"},
+                "url_field": "url",
+                "content_field": "page_content",
+                "fingerprint_field": "page_fingerprint",
+                "http": {
+                    "abuse_contact": "test@example.com",
+                    "scraping_reason": "Testing declared fields",
+                },
+            }
+        )
+
+        assert "page_content" in transform.declared_output_fields
+        assert "page_fingerprint" in transform.declared_output_fields
+
+    def test_declared_output_fields_adapts_to_config(self):
+        """declared_output_fields changes when content/fingerprint field names change."""
+        transform = WebScrapeTransform(
+            {
+                "schema": {"mode": "observed"},
+                "url_field": "url",
+                "content_field": "scraped_html",
+                "fingerprint_field": "content_hash",
+                "http": {
+                    "abuse_contact": "test@example.com",
+                    "scraping_reason": "Testing declared fields",
+                },
+            }
+        )
+
+        assert "scraped_html" in transform.declared_output_fields
+        assert "content_hash" in transform.declared_output_fields
+        # Old names should NOT be present
+        assert "page_content" not in transform.declared_output_fields
+        assert "page_fingerprint" not in transform.declared_output_fields
+
+    def test_declared_output_fields_drives_schema_evolution(self):
+        """declared_output_fields is non-empty, enabling schema evolution."""
+        transform = WebScrapeTransform(
+            {
+                "schema": {"mode": "observed"},
+                "url_field": "url",
+                "content_field": "page_content",
+                "fingerprint_field": "page_fingerprint",
+                "http": {
+                    "abuse_contact": "test@example.com",
+                    "scraping_reason": "Testing declared fields",
+                },
+            }
+        )
+
+        assert transform.declared_output_fields

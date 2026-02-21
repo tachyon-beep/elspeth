@@ -33,10 +33,23 @@ class PoolConfig(BaseModel):
 
     @model_validator(mode="after")
     def _validate_delay_invariants(self) -> Self:
-        """Validate min_dispatch_delay_ms <= max_dispatch_delay_ms."""
+        """Validate delay ordering and AIMD backoff viability.
+
+        Ensures that:
+        1. min_dispatch_delay_ms <= max_dispatch_delay_ms
+        2. AIMD backoff can actually produce a non-zero delay, preventing
+           infinite-speed retry loops on capacity errors
+        """
         if self.min_dispatch_delay_ms > self.max_dispatch_delay_ms:
             raise ValueError(
                 f"min_dispatch_delay_ms ({self.min_dispatch_delay_ms}) cannot exceed max_dispatch_delay_ms ({self.max_dispatch_delay_ms})"
+            )
+        if self.max_dispatch_delay_ms == 0:
+            raise ValueError("max_dispatch_delay_ms must be > 0 to allow AIMD backoff on capacity errors")
+        if self.min_dispatch_delay_ms == 0 and self.recovery_step_ms == 0:
+            raise ValueError(
+                "min_dispatch_delay_ms and recovery_step_ms cannot both be 0: "
+                "AIMD recovery would never increase delay above 0, disabling backoff entirely"
             )
         return self
 

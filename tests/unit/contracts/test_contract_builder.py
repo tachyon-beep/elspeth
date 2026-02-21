@@ -344,6 +344,119 @@ class TestContractBuilderEdgeCases:
         assert updated.locked is True
         assert len(updated.fields) == 0
 
+    def test_dict_value_infers_as_object(self) -> None:
+        """Dict values in first row infer as 'object' type, not crash.
+
+        Regression test for P1-2026-02-14: ContractBuilder.process_first_row()
+        crashed with TypeError on dict values because normalize_type_for_contract()
+        rejects non-primitive types. dict/list should map to object (any) type,
+        consistent with contract_propagation.py.
+        """
+        from elspeth.contracts.contract_builder import ContractBuilder
+
+        contract = SchemaContract(mode="OBSERVED", fields=(), locked=False)
+        builder = ContractBuilder(contract)
+
+        first_row = {"payload": {"key": "value", "nested": True}}
+        field_resolution = {"payload": "payload"}
+
+        updated = builder.process_first_row(first_row, field_resolution)
+
+        assert updated.locked is True
+        payload_field = next(f for f in updated.fields if f.normalized_name == "payload")
+        assert payload_field.python_type is object
+        assert payload_field.source == "inferred"
+
+    def test_list_value_infers_as_object(self) -> None:
+        """List values in first row infer as 'object' type, not crash.
+
+        Regression test for P1-2026-02-14: Same root cause as dict crash.
+        Lists are valid JSON structures that should infer as object.
+        """
+        from elspeth.contracts.contract_builder import ContractBuilder
+
+        contract = SchemaContract(mode="OBSERVED", fields=(), locked=False)
+        builder = ContractBuilder(contract)
+
+        first_row = {"tags": ["alpha", "beta", "gamma"]}
+        field_resolution = {"tags": "tags"}
+
+        updated = builder.process_first_row(first_row, field_resolution)
+
+        assert updated.locked is True
+        tags_field = next(f for f in updated.fields if f.normalized_name == "tags")
+        assert tags_field.python_type is object
+        assert tags_field.source == "inferred"
+
+    def test_mixed_primitive_and_complex_values(self) -> None:
+        """Mixed primitive and dict/list values all infer correctly.
+
+        Regression test for P1-2026-02-14: Ensures dict/list handling does
+        not break primitive type inference.
+        """
+        from elspeth.contracts.contract_builder import ContractBuilder
+
+        contract = SchemaContract(mode="OBSERVED", fields=(), locked=False)
+        builder = ContractBuilder(contract)
+
+        first_row = {
+            "id": 1,
+            "name": "Alice",
+            "metadata": {"role": "admin"},
+            "scores": [95, 87, 92],
+        }
+        field_resolution = {k: k for k in first_row}
+
+        updated = builder.process_first_row(first_row, field_resolution)
+
+        types = {f.normalized_name: f.python_type for f in updated.fields}
+        assert types["id"] is int
+        assert types["name"] is str
+        assert types["metadata"] is object
+        assert types["scores"] is object
+
+    def test_flexible_with_dict_extra_field(self) -> None:
+        """FLEXIBLE mode handles dict extras from JSON sources.
+
+        Regression test for P1-2026-02-14: JSON sources commonly have nested
+        objects alongside primitive declared fields.
+        """
+        from elspeth.contracts.contract_builder import ContractBuilder
+
+        declared = make_field("id", int, original_name="id", required=True, source="declared")
+        contract = SchemaContract(mode="FLEXIBLE", fields=(declared,), locked=False)
+        builder = ContractBuilder(contract)
+
+        first_row = {"id": 1, "usage": {"prompt_tokens": 100, "completion_tokens": 50}}
+        field_resolution = {"id": "id", "usage": "usage"}
+
+        updated = builder.process_first_row(first_row, field_resolution)
+
+        assert len(updated.fields) == 2
+        usage_field = next(f for f in updated.fields if f.normalized_name == "usage")
+        assert usage_field.python_type is object
+        assert usage_field.source == "inferred"
+        assert usage_field.required is False
+
+    def test_nested_list_of_dicts_infers_as_object(self) -> None:
+        """Nested list of dicts infers as object type.
+
+        Regression test for P1-2026-02-14: Common JSON pattern where a field
+        contains an array of objects.
+        """
+        from elspeth.contracts.contract_builder import ContractBuilder
+
+        contract = SchemaContract(mode="OBSERVED", fields=(), locked=False)
+        builder = ContractBuilder(contract)
+
+        first_row = {"items": [{"name": "a"}, {"name": "b"}]}
+        field_resolution = {"items": "items"}
+
+        updated = builder.process_first_row(first_row, field_resolution)
+
+        items_field = updated.fields[0]
+        assert items_field.python_type is object
+
     def test_field_in_row_not_in_resolution_crashes(self) -> None:
         """Field in row but not in resolution raises KeyError (Tier 1 integrity).
 

@@ -162,6 +162,7 @@ class TestSchemaNotNullConstraints:
                 insert(tokens_table).values(
                     token_id="test_token",
                     row_id="test_row",
+                    run_id="test_run",
                     created_at=now,
                 )
             )

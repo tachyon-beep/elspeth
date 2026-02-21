@@ -453,16 +453,19 @@ class TestCSVSourceQuarantineYielding:
         assert results[0].is_quarantined is False
         assert results[0].row == {"header1": "1", "header2": "2"}
 
-    def test_skip_rows_tolerates_csv_error_in_preamble(self, tmp_path: Path, ctx: PluginContext, monkeypatch: pytest.MonkeyPatch) -> None:
-        """skip_rows should not abort on csv.Error from malformed preamble rows.
+    def test_skip_rows_csv_error_in_preamble_quarantines_and_stops(
+        self, tmp_path: Path, ctx: PluginContext, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """csv.Error during skip_rows quarantines and stops processing.
 
-        Regression test: skip_rows is designed for non-CSV metadata (comments,
-        version headers) that may contain unmatched quotes or other RFC 4180
-        violations.  A csv.Error during the skip loop must not crash the run.
+        Regression test: csv.Error during skip means parser state may be
+        corrupted (e.g., unmatched quote consumed subsequent lines). Instead
+        of silently continuing with potentially corrupted state, the source
+        records the error and stops to prevent silent data loss.
 
         Python 3.13's csv module in non-strict mode is extremely lenient and
         rarely raises csv.Error, so we inject the error via monkeypatch to
-        exercise the defensive code path.
+        exercise the code path.
         """
         from unittest.mock import patch
 
@@ -497,8 +500,7 @@ class TestCSVSourceQuarantineYielding:
                 def __next__(self):
                     calls["count"] += 1
                     if calls["count"] == 1:
-                        # Consume the real row to keep file position in sync
-                        original_next()
+                        # Simulate parser corruption: error without consuming real row
                         raise csv.Error("injected: unmatched quote in preamble")
                     return original_next()
 
@@ -511,12 +513,13 @@ class TestCSVSourceQuarantineYielding:
         with patch("elspeth.plugins.sources.csv_source.csv.reader", side_effect=patched_reader):
             results = list(source.load(ctx))
 
-        assert len(results) == 2
-        assert results[0].row == {"id": "1", "name": "alice"}
-        assert results[1].row == {"id": "2", "name": "bob"}
+        # csv.Error during skip now quarantines and stops (no data rows)
+        assert len(results) == 1
+        assert results[0].is_quarantined is True
+        assert "skip_rows" in results[0].quarantine_error
 
-    def test_skip_rows_tolerates_csv_error_on_all_skipped_rows(self, tmp_path: Path, ctx: PluginContext) -> None:
-        """Multiple csv.Error exceptions during skip_rows should all be handled."""
+    def test_skip_rows_csv_error_on_first_skip_stops_immediately(self, tmp_path: Path, ctx: PluginContext) -> None:
+        """csv.Error on the first skip row stops immediately (doesn't try remaining skips)."""
         from unittest.mock import patch
 
         from elspeth.plugins.sources.csv_source import CSVSource
@@ -546,8 +549,7 @@ class TestCSVSourceQuarantineYielding:
 
                 def __next__(self):
                     calls["count"] += 1
-                    if calls["count"] <= 2:
-                        original_next()
+                    if calls["count"] == 1:
                         raise csv.Error(f"injected: preamble row {calls['count']}")
                     return original_next()
 
@@ -560,8 +562,9 @@ class TestCSVSourceQuarantineYielding:
         with patch("elspeth.plugins.sources.csv_source.csv.reader", side_effect=patched_reader):
             results = list(source.load(ctx))
 
+        # Stops on first csv.Error, yields quarantine row
         assert len(results) == 1
-        assert results[0].row == {"id": "10", "value": "hello"}
+        assert results[0].is_quarantined is True
 
     def test_empty_rows_are_skipped(self, tmp_path: Path, ctx: PluginContext) -> None:
         """Empty rows (blank lines) should be skipped without generating errors.
@@ -917,3 +920,283 @@ class TestCSVSourceFieldNormalization:
         assert source._field_resolution.resolution_mapping["CaSE Study1 !!!! xx!"] == "case_study1_xx"
         assert source._field_resolution.resolution_mapping["Amount $"] == "amount"
         assert source._field_resolution.normalization_version == "1.0.0"
+
+
+class TestCSVSourceSkipRowsAudit:
+    """Regression tests for P1: skip_rows silently drops CSV data.
+
+    Bug: P1-2026-02-14-skip-rows-can-silently-drop-all-remaining-csv-data
+
+    Per Three-Tier Trust Model, when skip_rows misconfiguration or malformed
+    preamble rows cause data loss, the audit trail must record it. Silent
+    empty results are forbidden.
+    """
+
+    @pytest.fixture
+    def ctx(self) -> PluginContext:
+        """Create a minimal plugin context."""
+        return PluginContext(run_id="test-run", config={})
+
+    def test_skip_rows_exceeds_file_records_validation_error(
+        self, tmp_path: Path, ctx: PluginContext, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """skip_rows > available rows records validation error, not silent empty."""
+        import logging
+
+        from elspeth.plugins.sources.csv_source import CSVSource
+
+        csv_file = tmp_path / "small.csv"
+        csv_file.write_text("id,name\n1,alice\n")  # 2 rows total
+
+        source = CSVSource(
+            {
+                "path": str(csv_file),
+                "skip_rows": 5,  # Way more than available
+                "on_validation_failure": "quarantine",
+                "schema": DYNAMIC_SCHEMA,
+            }
+        )
+
+        with caplog.at_level(logging.WARNING, logger="elspeth.contracts.plugin_context"):
+            results = list(source.load(ctx))
+
+        # No data rows yielded (file exhausted during skip)
+        assert len(results) == 0
+
+        # But the validation error was recorded (logged since no Landscape)
+        assert len(caplog.records) >= 1
+        error_record = caplog.records[0].message
+        assert "skip_rows" in error_record or "exhausted" in error_record
+
+    def test_skip_rows_equals_file_length_records_validation_error(self, tmp_path: Path) -> None:
+        """skip_rows consuming all rows records via landscape."""
+        from unittest.mock import MagicMock
+
+        from elspeth.plugins.sources.csv_source import CSVSource
+
+        csv_file = tmp_path / "exact.csv"
+        csv_file.write_text("header1\nrow1\n")  # 2 rows total
+
+        mock_landscape = MagicMock()
+        mock_landscape.record_validation_error.return_value = "verr_test"
+        ctx = PluginContext(
+            run_id="test-run",
+            config={},
+            node_id="source_csv",
+            landscape=mock_landscape,
+        )
+
+        source = CSVSource(
+            {
+                "path": str(csv_file),
+                "skip_rows": 3,  # More than available
+                "on_validation_failure": "quarantine",
+                "schema": DYNAMIC_SCHEMA,
+            }
+        )
+
+        results = list(source.load(ctx))
+        assert len(results) == 0
+
+        # Validation error recorded in landscape
+        mock_landscape.record_validation_error.assert_called_once()
+        call_kwargs = mock_landscape.record_validation_error.call_args[1]
+        assert call_kwargs["schema_mode"] == "parse"
+        assert "skip_rows" in call_kwargs["error"]
+
+    def test_skip_rows_csv_error_quarantines_and_stops(self, tmp_path: Path, ctx: PluginContext) -> None:
+        """csv.Error during skip_rows yields quarantine and stops processing."""
+        from unittest.mock import patch
+
+        from elspeth.plugins.sources.csv_source import CSVSource
+
+        csv_file = tmp_path / "preamble_error.csv"
+        csv_file.write_text("preamble\nid,name\n1,alice\n2,bob\n")
+
+        source = CSVSource(
+            {
+                "path": str(csv_file),
+                "skip_rows": 1,
+                "on_validation_failure": "quarantine",
+                "schema": DYNAMIC_SCHEMA,
+            }
+        )
+
+        # Inject csv.Error during skip (simulates corrupted parser state)
+        original_csv_reader = csv.reader
+
+        def patched_reader(*args, **kwargs):
+            real_reader = original_csv_reader(*args, **kwargs)
+            calls = {"count": 0}
+            original_next = real_reader.__next__
+
+            class ErrorInjectingReader:
+                def __iter__(self):
+                    return self
+
+                def __next__(self):
+                    calls["count"] += 1
+                    if calls["count"] == 1:
+                        # Do NOT consume the real row — simulate parser corruption
+                        raise csv.Error("injected: unmatched quote corrupted state")
+                    return original_next()
+
+                @property
+                def line_num(self):
+                    return real_reader.line_num
+
+            return ErrorInjectingReader()
+
+        with patch("elspeth.plugins.sources.csv_source.csv.reader", side_effect=patched_reader):
+            results = list(source.load(ctx))
+
+        # Should yield exactly 1 quarantined row and STOP (no data rows)
+        assert len(results) == 1
+        quarantined = results[0]
+        assert quarantined.is_quarantined is True
+        assert quarantined.quarantine_destination == "quarantine"
+        assert quarantined.quarantine_error is not None
+        assert "skip_rows" in quarantined.quarantine_error
+        assert "csv.Error" in quarantined.quarantine_error or "unmatched" in quarantined.quarantine_error
+
+    def test_skip_rows_csv_error_with_discard_stops_without_yield(self, tmp_path: Path, ctx: PluginContext) -> None:
+        """csv.Error during skip_rows with discard mode stops without yielding."""
+        from unittest.mock import patch
+
+        from elspeth.plugins.sources.csv_source import CSVSource
+
+        csv_file = tmp_path / "preamble_error.csv"
+        csv_file.write_text("preamble\nid,name\n1,alice\n")
+
+        source = CSVSource(
+            {
+                "path": str(csv_file),
+                "skip_rows": 1,
+                "on_validation_failure": "discard",
+                "schema": DYNAMIC_SCHEMA,
+            }
+        )
+
+        original_csv_reader = csv.reader
+
+        def patched_reader(*args, **kwargs):
+            real_reader = original_csv_reader(*args, **kwargs)
+            calls = {"count": 0}
+            original_next = real_reader.__next__
+
+            class ErrorInjectingReader:
+                def __iter__(self):
+                    return self
+
+                def __next__(self):
+                    calls["count"] += 1
+                    if calls["count"] == 1:
+                        raise csv.Error("injected: corrupted state")
+                    return original_next()
+
+                @property
+                def line_num(self):
+                    return real_reader.line_num
+
+            return ErrorInjectingReader()
+
+        with patch("elspeth.plugins.sources.csv_source.csv.reader", side_effect=patched_reader):
+            results = list(source.load(ctx))
+
+        # Discard mode: no quarantined rows yielded, but processing stopped
+        assert len(results) == 0
+
+    def test_skip_rows_csv_error_records_validation_error(self, tmp_path: Path) -> None:
+        """csv.Error during skip_rows records validation error in landscape."""
+        from unittest.mock import MagicMock, patch
+
+        from elspeth.plugins.sources.csv_source import CSVSource
+
+        csv_file = tmp_path / "preamble_error.csv"
+        csv_file.write_text("preamble\nid,name\n1,alice\n")
+
+        mock_landscape = MagicMock()
+        mock_landscape.record_validation_error.return_value = "verr_test"
+        ctx = PluginContext(
+            run_id="test-run",
+            config={},
+            node_id="source_csv",
+            landscape=mock_landscape,
+        )
+
+        source = CSVSource(
+            {
+                "path": str(csv_file),
+                "skip_rows": 1,
+                "on_validation_failure": "quarantine",
+                "schema": DYNAMIC_SCHEMA,
+            }
+        )
+
+        original_csv_reader = csv.reader
+
+        def patched_reader(*args, **kwargs):
+            real_reader = original_csv_reader(*args, **kwargs)
+            calls = {"count": 0}
+            original_next = real_reader.__next__
+
+            class ErrorInjectingReader:
+                def __iter__(self):
+                    return self
+
+                def __next__(self):
+                    calls["count"] += 1
+                    if calls["count"] == 1:
+                        raise csv.Error("injected")
+                    return original_next()
+
+                @property
+                def line_num(self):
+                    return real_reader.line_num
+
+            return ErrorInjectingReader()
+
+        with patch("elspeth.plugins.sources.csv_source.csv.reader", side_effect=patched_reader):
+            list(source.load(ctx))
+
+        mock_landscape.record_validation_error.assert_called_once()
+        call_kwargs = mock_landscape.record_validation_error.call_args[1]
+        assert call_kwargs["schema_mode"] == "parse"
+        assert "skip_rows" in call_kwargs["error"]
+
+    def test_skip_rows_no_header_after_successful_skip_records_error(self, tmp_path: Path) -> None:
+        """File with exactly skip_rows rows (no header left) records validation error."""
+        from unittest.mock import MagicMock
+
+        from elspeth.plugins.sources.csv_source import CSVSource
+
+        csv_file = tmp_path / "no_header.csv"
+        # Only 1 row — skip_rows=1 consumes it, no header remains
+        csv_file.write_text("preamble line\n")
+
+        mock_landscape = MagicMock()
+        mock_landscape.record_validation_error.return_value = "verr_test"
+        ctx = PluginContext(
+            run_id="test-run",
+            config={},
+            node_id="source_csv",
+            landscape=mock_landscape,
+        )
+
+        source = CSVSource(
+            {
+                "path": str(csv_file),
+                "skip_rows": 1,
+                "on_validation_failure": "quarantine",
+                "schema": DYNAMIC_SCHEMA,
+            }
+        )
+
+        results = list(source.load(ctx))
+        assert len(results) == 0
+
+        # Validation error recorded for missing header after skip
+        mock_landscape.record_validation_error.assert_called_once()
+        call_kwargs = mock_landscape.record_validation_error.call_args[1]
+        assert "skip_rows" in call_kwargs["error"] or "header" in call_kwargs["error"]
+        assert call_kwargs["schema_mode"] == "parse"

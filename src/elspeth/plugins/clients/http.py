@@ -21,6 +21,7 @@ import httpx
 import structlog
 
 from elspeth.contracts import CallStatus, CallType
+from elspeth.contracts.call_data import CallPayload, HTTPCallError, HTTPCallRequest, HTTPCallResponse
 from elspeth.contracts.events import ExternalCallCompleted
 from elspeth.core.canonical import stable_hash
 from elspeth.core.security.web import (
@@ -363,11 +364,15 @@ class AuditedHTTPClient(AuditedClientBase):
         error_data: dict[str, Any] | None,
         latency_ms: float,
         call_status: CallStatus,
+        request_payload: CallPayload,
+        response_payload: CallPayload | None = None,
         token_id_override: str | None = None,
     ) -> None:
         """Record call to audit trail and emit telemetry event.
 
         Args:
+            request_payload: Typed DTO for telemetry (e.g., HTTPCallRequest).
+            response_payload: Typed DTO for telemetry (e.g., HTTPCallResponse).
             token_id_override: Per-call token_id for telemetry. When provided,
                 overrides the client-level token_id. Used by batch transforms
                 where a single client serves multiple tokens.
@@ -400,8 +405,8 @@ class AuditedHTTPClient(AuditedClientBase):
                     token_id=effective_token_id,
                     request_hash=stable_hash(request_data),
                     response_hash=stable_hash(response_data) if response_data else None,
-                    request_payload=request_data,
-                    response_payload=response_data,
+                    request_payload=request_payload,
+                    response_payload=response_payload,
                     token_usage=None,
                 )
             )
@@ -454,17 +459,17 @@ class AuditedHTTPClient(AuditedClientBase):
         merged_headers = {**self._default_headers, **(headers or {})}
         effective_timeout = timeout if timeout is not None else self._timeout
 
-        # Build request data for audit trail (method-specific fields always present
-        # for stable schema per method)
-        request_data: dict[str, Any] = {
-            "method": method,
-            "url": full_url,
-            "headers": self._filter_request_headers(merged_headers),
-        }
-        if method == "POST":
-            request_data["json"] = json
-        elif method == "GET":
-            request_data["params"] = params
+        # Build request DTO for audit trail — dataclass handles method-specific
+        # field inclusion via to_dict() (POST includes json, GET includes params).
+        # DTO stays alive for typed telemetry payload; dict form used for Landscape hashing.
+        request_dto = HTTPCallRequest(
+            method=method,
+            url=full_url,
+            headers=self._filter_request_headers(merged_headers),
+            json=json,
+            params=params,
+        )
+        request_data = request_dto.to_dict()
 
         start = time.perf_counter()
 
@@ -493,20 +498,21 @@ class AuditedHTTPClient(AuditedClientBase):
             is_success = 200 <= response.status_code < 300
             call_status = CallStatus.SUCCESS if is_success else CallStatus.ERROR
 
-            response_data: dict[str, Any] = {
-                "status_code": response.status_code,
-                "headers": self._filter_response_headers(dict(response.headers)),
-                "body_size": len(response.content),
-                "body": response_body,
-            }
+            response_dto = HTTPCallResponse(
+                status_code=response.status_code,
+                headers=self._filter_response_headers(dict(response.headers)),
+                body_size=len(response.content),
+                body=response_body,
+            )
+            response_data = response_dto.to_dict()
 
             error_data: dict[str, Any] | None = None
             if not is_success:
-                error_data = {
-                    "type": "HTTPError",
-                    "message": f"HTTP {response.status_code}",
-                    "status_code": response.status_code,
-                }
+                error_data = HTTPCallError(
+                    type="HTTPError",
+                    message=f"HTTP {response.status_code}",
+                    status_code=response.status_code,
+                ).to_dict()
 
             self._record_and_emit(
                 call_index=call_index,
@@ -517,6 +523,8 @@ class AuditedHTTPClient(AuditedClientBase):
                 error_data=error_data,
                 latency_ms=latency_ms,
                 call_status=call_status,
+                request_payload=request_dto,
+                response_payload=response_dto,
                 token_id_override=token_id,
             )
 
@@ -531,12 +539,14 @@ class AuditedHTTPClient(AuditedClientBase):
                 request_data=request_data,
                 response=None,
                 response_data=None,
-                error_data={
-                    "type": type(e).__name__,
-                    "message": str(e),
-                },
+                error_data=HTTPCallError(
+                    type=type(e).__name__,
+                    message=str(e),
+                ).to_dict(),
                 latency_ms=latency_ms,
                 call_status=CallStatus.ERROR,
+                request_payload=request_dto,
+                response_payload=None,
                 token_id_override=token_id,
             )
 
@@ -655,13 +665,15 @@ class AuditedHTTPClient(AuditedClientBase):
         if request.scheme == "https":
             extensions["sni_hostname"] = request.sni_hostname
 
-        # Record original URL and resolved IP in audit trail
-        request_data: dict[str, Any] = {
-            "method": "GET",
-            "url": request.original_url,
-            "resolved_ip": request.resolved_ip,
-            "headers": self._filter_request_headers(merged_headers),
-        }
+        # Record original URL and resolved IP in audit trail.
+        # DTO stays alive for typed telemetry payload; dict form used for Landscape hashing.
+        request_dto = HTTPCallRequest(
+            method="GET",
+            url=request.original_url,
+            headers=self._filter_request_headers(merged_headers),
+            resolved_ip=request.resolved_ip,
+        )
+        request_data = request_dto.to_dict()
 
         start = time.perf_counter()
 
@@ -726,22 +738,22 @@ class AuditedHTTPClient(AuditedClientBase):
             is_success = 200 <= response.status_code < 300
             call_status = CallStatus.SUCCESS if is_success else CallStatus.ERROR
 
-            response_data: dict[str, Any] = {
-                "status_code": response.status_code,
-                "headers": self._filter_response_headers(dict(response.headers)),
-                "body_size": len(response.content),
-                "body": response_body,
-            }
-            if redirect_count > 0:
-                response_data["redirect_count"] = redirect_count
+            response_dto = HTTPCallResponse(
+                status_code=response.status_code,
+                headers=self._filter_response_headers(dict(response.headers)),
+                body_size=len(response.content),
+                body=response_body,
+                redirect_count=redirect_count,
+            )
+            response_data = response_dto.to_dict()
 
             error_data: dict[str, Any] | None = None
             if not is_success:
-                error_data = {
-                    "type": "HTTPError",
-                    "message": f"HTTP {response.status_code}",
-                    "status_code": response.status_code,
-                }
+                error_data = HTTPCallError(
+                    type="HTTPError",
+                    message=f"HTTP {response.status_code}",
+                    status_code=response.status_code,
+                ).to_dict()
 
             self._recorder.record_call(
                 state_id=self._state_id,
@@ -768,8 +780,8 @@ class AuditedHTTPClient(AuditedClientBase):
                         token_id=self._telemetry_token_id(),
                         request_hash=stable_hash(request_data),
                         response_hash=stable_hash(response_data),
-                        request_payload=request_data,
-                        response_payload=response_data,
+                        request_payload=request_dto,
+                        response_payload=response_dto,
                         token_usage=None,
                     )
                 )
@@ -794,10 +806,10 @@ class AuditedHTTPClient(AuditedClientBase):
                 call_type=CallType.HTTP,
                 status=CallStatus.ERROR,
                 request_data=request_data,
-                error={
-                    "type": type(e).__name__,
-                    "message": str(e),
-                },
+                error=HTTPCallError(
+                    type=type(e).__name__,
+                    message=str(e),
+                ).to_dict(),
                 latency_ms=latency_ms,
             )
 
@@ -815,7 +827,7 @@ class AuditedHTTPClient(AuditedClientBase):
                         token_id=self._telemetry_token_id(),
                         request_hash=stable_hash(request_data),
                         response_hash=None,
-                        request_payload=request_data,
+                        request_payload=request_dto,
                         response_payload=None,
                         token_usage=None,
                     )
@@ -897,39 +909,64 @@ class AuditedHTTPClient(AuditedClientBase):
             if redirect_request.scheme == "https":
                 extensions["sni_hostname"] = redirect_request.sni_hostname
 
+            # Acquire rate limit for each redirect hop — each hop is a separate
+            # outbound network request that must be throttled independently.
+            # See P2-2026-02-14-redirect-hops-bypass-rate-limiter.
+            self._acquire_rate_limit()
+
             hop_start = time.perf_counter()
+
+            # Pre-allocate call index and request data BEFORE the hop so that
+            # both success and failure paths can record the hop in the audit trail.
+            hop_call_index = self._next_call_index()
+            redirects_followed += 1
+            hop_request_data = HTTPCallRequest(
+                method="GET",
+                url=redirect_url,
+                headers=self._filter_request_headers(hop_headers),
+                resolved_ip=redirect_request.resolved_ip,
+                hop_number=redirects_followed,
+                redirect_from=redirect_from,
+            ).to_dict()
 
             # Ephemeral client per redirect hop: same TLS/SNI isolation rationale
             # as the initial SSRF-safe request — IP-based connection_url would
             # cause the pool to reuse connections across different hostnames.
-            with httpx.Client(
-                timeout=timeout,
-                follow_redirects=False,
-            ) as hop_client:
-                response = hop_client.get(
-                    redirect_request.connection_url,
-                    headers=hop_headers,
-                    extensions=extensions if extensions else None,
+            try:
+                with httpx.Client(
+                    timeout=timeout,
+                    follow_redirects=False,
+                ) as hop_client:
+                    response = hop_client.get(
+                        redirect_request.connection_url,
+                        headers=hop_headers,
+                        extensions=extensions if extensions else None,
+                    )
+            except Exception as hop_err:
+                hop_latency_ms = (time.perf_counter() - hop_start) * 1000
+                # Record the failed hop in the audit trail so lineage is complete
+                self._recorder.record_call(
+                    state_id=self._state_id,
+                    call_index=hop_call_index,
+                    call_type=CallType.HTTP_REDIRECT,
+                    status=CallStatus.ERROR,
+                    request_data=hop_request_data,
+                    error=HTTPCallError(
+                        type=type(hop_err).__name__,
+                        message=str(hop_err),
+                    ).to_dict(),
+                    latency_ms=hop_latency_ms,
                 )
+                raise
 
             hop_latency_ms = (time.perf_counter() - hop_start) * 1000
-            redirects_followed += 1
 
             # Record this redirect hop in the audit trail.
             # Each hop is a real network call — it may hit a different server.
-            hop_call_index = self._next_call_index()
-            hop_request_data = {
-                "method": "GET",
-                "url": redirect_url,
-                "resolved_ip": redirect_request.resolved_ip,
-                "hop_number": redirects_followed,
-                "redirect_from": redirect_from,
-                "headers": self._filter_request_headers(hop_headers),
-            }
-            hop_response_data = {
-                "status_code": response.status_code,
-                "headers": self._filter_response_headers(dict(response.headers)),
-            }
+            hop_response_data = HTTPCallResponse(
+                status_code=response.status_code,
+                headers=self._filter_response_headers(dict(response.headers)),
+            ).to_dict()
 
             self._recorder.record_call(
                 state_id=self._state_id,

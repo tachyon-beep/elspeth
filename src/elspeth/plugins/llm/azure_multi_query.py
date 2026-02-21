@@ -15,7 +15,9 @@ from typing import TYPE_CHECKING, Any, cast
 
 from elspeth.contracts import TransformErrorCategory, TransformResult
 from elspeth.contracts.schema_contract import FieldContract, PipelineRow, SchemaContract
+from elspeth.contracts.token_usage import TokenUsage
 from elspeth.plugins.clients.llm import AuditedLLMClient, LLMClientError, RateLimitError
+from elspeth.plugins.llm import populate_llm_metadata_fields
 from elspeth.plugins.llm.base_multi_query import BaseMultiQueryTransform
 from elspeth.plugins.llm.multi_query import (
     MultiQueryConfig,
@@ -185,11 +187,24 @@ class AzureMultiQueryLLMTransform(BaseMultiQueryTransform):
 
         start_time = time.monotonic()
         # 1. Build synthetic row for PromptTemplate
-        synthetic_row = spec.build_template_context(row)
+        try:
+            synthetic_row = spec.build_template_context(row)
+        except KeyError as e:
+            return TransformResult.error(
+                {
+                    "reason": "missing_field",
+                    "error": str(e),
+                    "query": spec.output_prefix,
+                }
+            )
 
         # 2. Render template using PromptTemplate (preserves audit metadata)
+        # NOTE: contract=None because synthetic_row has a different schema than the
+        # source contract. Wrapping it in PipelineRow(synthetic, source_contract) would
+        # cause FIXED-mode KeyError on synthetic keys like input_1, criterion, etc.
+        # Fix: elspeth-rapid-xzst
         try:
-            rendered = self._template.render_with_metadata(synthetic_row, contract=input_contract)
+            rendered = self._template.render_with_metadata(synthetic_row)
         except TemplateError as e:
             return TransformResult.error(
                 {
@@ -265,9 +280,35 @@ class AzureMultiQueryLLMTransform(BaseMultiQueryTransform):
             latency_ms=latency_ms,
         )
 
-        # 6. Check for response truncation BEFORE parsing
-        completion_tokens = response.usage.get("completion_tokens", 0)
-        if effective_max_tokens is not None and completion_tokens > 0 and completion_tokens >= effective_max_tokens:
+        # 6. Check for response truncation BEFORE parsing.
+        # Use finish_reason as the authoritative signal when available;
+        # fall back to the token-count heuristic only when finish_reason
+        # is absent (e.g. provider omitted it or streaming mode).
+        finish_reason: str | None = None
+        if response.raw_response is not None:
+            choices = response.raw_response.get("choices")
+            if choices and isinstance(choices, list) and len(choices) > 0:
+                first_choice = choices[0]
+                if isinstance(first_choice, dict):
+                    finish_reason = first_choice.get("finish_reason")
+
+        completion_tokens = response.usage.completion_tokens
+
+        is_truncated: bool
+        if finish_reason is not None:
+            # Authoritative: finish_reason == "length" means the model hit the token limit
+            is_truncated = finish_reason == "length"
+        else:
+            # Fallback heuristic: completion_tokens >= max_tokens suggests truncation
+            # If completion_tokens is None (provider didn't report), we can't detect truncation
+            is_truncated = (
+                effective_max_tokens is not None
+                and completion_tokens is not None
+                and completion_tokens > 0
+                and completion_tokens >= effective_max_tokens
+            )
+
+        if is_truncated:
             truncation_error: TransformErrorReason = {
                 "reason": "response_truncated",
                 "error": (
@@ -278,7 +319,8 @@ class AzureMultiQueryLLMTransform(BaseMultiQueryTransform):
                 "query": spec.output_prefix,
                 "max_tokens": effective_max_tokens,
                 "completion_tokens": completion_tokens,
-                "prompt_tokens": response.usage.get("prompt_tokens", 0),
+                "prompt_tokens": response.usage.prompt_tokens,
+                "finish_reason": finish_reason,
             }
             if response.content:
                 truncation_error["raw_response_preview"] = response.content[:500]
@@ -305,7 +347,7 @@ class AzureMultiQueryLLMTransform(BaseMultiQueryTransform):
             if validation_result.detail:
                 error_info["error"] = validation_result.detail
                 error_info["content_after_fence_strip"] = content
-                error_info["usage"] = response.usage
+                error_info["usage"] = response.usage.to_dict()
             if validation_result.expected:
                 error_info["expected"] = validation_result.expected
             if validation_result.actual:
@@ -345,21 +387,18 @@ class AzureMultiQueryLLMTransform(BaseMultiQueryTransform):
             output[output_key] = value
 
         # 9. Add metadata for audit trail
-        output[f"{spec.output_prefix}_usage"] = (
-            response.usage
-            if response.usage
-            else {
-                "prompt_tokens": 0,
-                "completion_tokens": 0,
-            }
+        populate_llm_metadata_fields(
+            output,
+            spec.output_prefix,
+            usage=response.usage,
+            model=response.model,
+            template_hash=rendered.template_hash,
+            variables_hash=rendered.variables_hash,
+            template_source=rendered.template_source,
+            lookup_hash=rendered.lookup_hash,
+            lookup_source=rendered.lookup_source,
+            system_prompt_source=self._system_prompt_source,
         )
-        output[f"{spec.output_prefix}_model"] = response.model
-        output[f"{spec.output_prefix}_template_hash"] = rendered.template_hash
-        output[f"{spec.output_prefix}_variables_hash"] = rendered.variables_hash
-        output[f"{spec.output_prefix}_template_source"] = rendered.template_source
-        output[f"{spec.output_prefix}_lookup_hash"] = rendered.lookup_hash
-        output[f"{spec.output_prefix}_lookup_source"] = rendered.lookup_source
-        output[f"{spec.output_prefix}_system_prompt_source"] = self._system_prompt_source
 
         fields_added = [f"{spec.output_prefix}_{fc.suffix}" for fc in self._output_mapping.values()]
         observed = SchemaContract(
@@ -407,8 +446,7 @@ class AzureMultiQueryLLMTransform(BaseMultiQueryTransform):
         """Get or create LLM client for a state_id."""
         with self._llm_clients_lock:
             if state_id not in self._llm_clients:
-                if self._recorder is None:
-                    raise RuntimeError("Transform requires recorder. Ensure on_start was called.")
+                assert self._recorder is not None
                 self._llm_clients[state_id] = AuditedLLMClient(
                     recorder=self._recorder,
                     state_id=state_id,
@@ -488,7 +526,7 @@ class AzureMultiQueryLLMTransform(BaseMultiQueryTransform):
         query_prefix: str,
         prompt: str,
         response_content: str,
-        usage: dict[str, int] | None,
+        usage: TokenUsage | None,
         latency_ms: float | None,
     ) -> None:
         """Record LLM call to Langfuse using v3 nested context managers."""
@@ -513,14 +551,11 @@ class AzureMultiQueryLLMTransform(BaseMultiQueryTransform):
             ):
                 update_kwargs: dict[str, Any] = {"output": response_content}
 
-                if usage:
-                    prompt_tokens = usage.get("prompt_tokens", 0)
-                    completion_tokens = usage.get("completion_tokens", 0)
-                    if isinstance(prompt_tokens, int) and isinstance(completion_tokens, int):
-                        update_kwargs["usage_details"] = {
-                            "input": prompt_tokens,
-                            "output": completion_tokens,
-                        }
+                if usage is not None and usage.is_known:
+                    update_kwargs["usage_details"] = {
+                        "input": usage.prompt_tokens,
+                        "output": usage.completion_tokens,
+                    }
 
                 if latency_ms is not None:
                     update_kwargs["metadata"] = {"latency_ms": latency_ms}

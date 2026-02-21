@@ -741,3 +741,112 @@ class TestPassThroughNodesInheritComputedSchema:
         assert set(gate_schema_dict["guaranteed_fields"]) == {"field_a", "field_b"}
         assert "audit_fields" in gate_schema_dict
         assert set(gate_schema_dict["audit_fields"]) == {"field_c", "field_d"}
+
+
+class TestSchemaAliasingPrevention:
+    """Tests that schema dicts are deep-copied, not aliased across nodes.
+
+    BUG FIX: P1-2026-02-14 — _best_schema_dict() returned direct references
+    to schema dicts, so gate and coalesce nodes could share the same dict
+    object. Mutating one node's schema would silently corrupt another's.
+    """
+
+    def test_gate_schema_is_independent_of_upstream_transform(self) -> None:
+        """Gate's config['schema'] must not be the same object as upstream transform schema.
+
+        Before the fix, _best_schema_dict() returned the raw dict reference,
+        so gate.config['schema'] and transform.config['schema'] were the
+        same Python object. Deep-copy prevents this aliasing.
+        """
+        transform = MockTransformWithoutSchemaConfig()
+        source = MockSource()
+        wired = WiredTransform(
+            plugin=transform,  # type: ignore[arg-type]
+            settings=TransformSettings(
+                name="basic_step",
+                plugin=transform.name,
+                input="source_out",
+                on_success="gate_in",
+                on_error="discard",
+                options={},
+            ),
+        )
+
+        gate = GateSettings(
+            name="quality_gate",
+            input="gate_in",
+            condition="True",
+            routes={"true": "output", "false": "output"},
+        )
+
+        graph = ExecutionGraph.from_plugin_instances(
+            source=source,  # type: ignore[arg-type]
+            source_settings=SourceSettings(plugin=source.name, on_success="source_out", options={}),
+            transforms=[wired],
+            sinks={"output": MockSink()},  # type: ignore[dict-item]
+            aggregations={},
+            gates=[gate],
+        )
+
+        transform_nodes = [n for n in graph.get_nodes() if n.node_type == NodeType.TRANSFORM]
+        gate_nodes = [n for n in graph.get_nodes() if n.node_type == NodeType.GATE]
+        assert len(transform_nodes) == 1
+        assert len(gate_nodes) == 1
+
+        transform_schema = transform_nodes[0].config["schema"]
+        gate_schema = gate_nodes[0].config["schema"]
+
+        # Schemas must be structurally equal but NOT the same object
+        assert transform_schema["guaranteed_fields"] == gate_schema["guaranteed_fields"]
+        assert transform_schema is not gate_schema, (
+            "Gate schema must be a deep copy, not aliased to transform schema. "
+            "Aliasing means mutations to one node's schema silently corrupt another."
+        )
+
+    def test_multiple_gates_have_independent_schemas(self) -> None:
+        """Multiple gates consuming the same upstream must have independent schemas."""
+        transform = MockTransformWithoutSchemaConfig()
+        source = MockSource()
+        wired = WiredTransform(
+            plugin=transform,  # type: ignore[arg-type]
+            settings=TransformSettings(
+                name="basic_step",
+                plugin=transform.name,
+                input="source_out",
+                on_success="gate1_in",
+                on_error="discard",
+                options={},
+            ),
+        )
+
+        gate1 = GateSettings(
+            name="gate_1",
+            input="gate1_in",
+            condition="True",
+            routes={"true": "gate2_in", "false": "output"},
+        )
+
+        gate2 = GateSettings(
+            name="gate_2",
+            input="gate2_in",
+            condition="True",
+            routes={"true": "output", "false": "output"},
+        )
+
+        graph = ExecutionGraph.from_plugin_instances(
+            source=source,  # type: ignore[arg-type]
+            source_settings=SourceSettings(plugin=source.name, on_success="source_out", options={}),
+            transforms=[wired],
+            sinks={"output": MockSink()},  # type: ignore[dict-item]
+            aggregations={},
+            gates=[gate1, gate2],
+        )
+
+        gate_nodes = [n for n in graph.get_nodes() if n.node_type == NodeType.GATE]
+        assert len(gate_nodes) == 2
+
+        gate1_schema = gate_nodes[0].config["schema"]
+        gate2_schema = gate_nodes[1].config["schema"]
+
+        # Both should have schemas but be independent objects
+        assert gate1_schema is not gate2_schema, "Multiple gates must have independent schema copies to prevent aliasing corruption."

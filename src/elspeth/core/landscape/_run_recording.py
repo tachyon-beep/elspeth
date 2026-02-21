@@ -32,6 +32,9 @@ if TYPE_CHECKING:
     from elspeth.core.landscape.reproducibility import ReproducibilityGrade
 
 
+_TERMINAL_RUN_STATUSES = frozenset({RunStatus.COMPLETED, RunStatus.FAILED, RunStatus.INTERRUPTED})
+
+
 class RunRecordingMixin:
     """Run lifecycle methods. Mixed into LandscapeRecorder."""
 
@@ -125,7 +128,16 @@ class RunRecordingMixin:
 
         Returns:
             Updated Run model
+
+        Raises:
+            AuditIntegrityError: If status is not a terminal run status
         """
+        if status not in _TERMINAL_RUN_STATUSES:
+            raise AuditIntegrityError(
+                f"complete_run() requires terminal status, got {status.value!r}. "
+                f"Valid terminal statuses: {sorted(s.value for s in _TERMINAL_RUN_STATUSES)}"
+            )
+
         timestamp = now()
 
         self._ops.execute_update(
@@ -188,7 +200,12 @@ class RunRecordingMixin:
                 f"Cannot resume without schema - type fidelity would be violated."
             )
 
-        return str(source_schema_json)
+        if type(source_schema_json) is not str:
+            raise ValueError(
+                f"Run {run_id} source_schema_json is {type(source_schema_json).__name__}, "
+                f"expected str - audit data corruption (Tier 1 violation)"
+            )
+        return source_schema_json
 
     def record_source_field_resolution(
         self,
@@ -336,9 +353,12 @@ class RunRecordingMixin:
             SchemaContract if stored, None if no contract was stored
 
         Raises:
-            ValueError: If stored contract fails integrity verification
+            AuditIntegrityError: If stored contract hash doesn't match recomputed hash
         """
-        query = select(runs_table.c.schema_contract_json).where(runs_table.c.run_id == run_id)
+        query = select(
+            runs_table.c.schema_contract_json,
+            runs_table.c.schema_contract_hash,
+        ).where(runs_table.c.run_id == run_id)
         row = self._ops.execute_fetchone(query)
 
         if row is None:
@@ -350,7 +370,20 @@ class RunRecordingMixin:
 
         # Restore via audit record (includes hash verification)
         audit_record = ContractAuditRecord.from_json(schema_contract_json)
-        return audit_record.to_schema_contract()
+        contract = audit_record.to_schema_contract()
+
+        # Verify stored hash matches recomputed hash (Tier 1 integrity)
+        stored_hash = row.schema_contract_hash
+        if stored_hash is not None:
+            recomputed_hash = contract.version_hash()
+            if recomputed_hash != stored_hash:
+                raise AuditIntegrityError(
+                    f"Schema contract hash mismatch for run {run_id}: "
+                    f"stored={stored_hash}, recomputed={recomputed_hash}. "
+                    f"This indicates database corruption or tampering."
+                )
+
+        return contract
 
     def record_secret_resolutions(
         self,

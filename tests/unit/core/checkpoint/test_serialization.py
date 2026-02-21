@@ -41,12 +41,23 @@ def test_checkpoint_dumps_rejects_non_finite_values_in_nested_list() -> None:
         checkpoint_dumps({"values": [1.0, {"inner": float("nan")}]})
 
 
-def test_checkpoint_loads_restores_datetime_tag() -> None:
-    payload = '{"ts":{"__datetime__":"2026-02-08T10:15:30+00:00"}}'
+def test_checkpoint_loads_restores_new_envelope() -> None:
+    """New envelope format restores datetime correctly."""
+    payload = '{"ts":{"__elspeth_type__":"datetime","__elspeth_value__":"2026-02-08T10:15:30+00:00"}}'
     result = checkpoint_loads(payload)
 
     assert isinstance(result["ts"], datetime)
     assert result["ts"] == datetime(2026, 2, 8, 10, 15, 30, tzinfo=UTC)
+
+
+def test_checkpoint_loads_old_datetime_tag_is_not_restored() -> None:
+    """Old shape-based tag is NOT restored (no legacy code per CLAUDE.md)."""
+    payload = '{"ts":{"__datetime__":"2026-02-08T10:15:30+00:00"}}'
+    result = checkpoint_loads(payload)
+
+    # Should remain as a plain dict, NOT be converted to datetime
+    assert isinstance(result["ts"], dict)
+    assert result["ts"]["__datetime__"] == "2026-02-08T10:15:30+00:00"
 
 
 def test_checkpoint_loads_does_not_restore_lookalike_tag_with_extra_keys() -> None:
@@ -56,3 +67,84 @@ def test_checkpoint_loads_does_not_restore_lookalike_tag_with_extra_keys() -> No
     assert isinstance(result["ts"], dict)
     assert result["ts"]["__datetime__"] == "2026-02-08T10:15:30+00:00"
     assert result["ts"]["extra"] == 1
+
+
+# ===========================================================================
+# Bug 7.1: Collision-safe type envelopes
+# ===========================================================================
+
+
+def test_checkpoint_roundtrip_user_dict_matching_old_datetime_shape() -> None:
+    """User dict matching the OLD shape-based tag must NOT be deserialized as datetime.
+
+    Bug 7.1: A user dict like {"__datetime__": "2026-02-08T10:15:30+00:00"} with
+    exactly 1 key would previously be incorrectly deserialized as a datetime object.
+    The new envelope format prevents this collision.
+    """
+    user_data = {"field": {"__datetime__": "2026-02-08T10:15:30+00:00"}}
+    result = checkpoint_loads(checkpoint_dumps(user_data))
+
+    # The value should remain a dict, not be converted to datetime
+    assert isinstance(result["field"], dict)
+    assert result["field"]["__datetime__"] == "2026-02-08T10:15:30+00:00"
+
+
+def test_checkpoint_roundtrip_user_dict_with_reserved_key() -> None:
+    """User dict containing __elspeth_type__ must survive round-trip as a dict.
+
+    The _escape_reserved_keys() function wraps such dicts in an escape envelope
+    so they aren't confused with real type envelopes during deserialization.
+    """
+    user_data = {
+        "config": {
+            "__elspeth_type__": "some_user_value",
+            "other_key": 42,
+        }
+    }
+    result = checkpoint_loads(checkpoint_dumps(user_data))
+
+    assert isinstance(result["config"], dict)
+    assert result["config"]["__elspeth_type__"] == "some_user_value"
+    assert result["config"]["other_key"] == 42
+
+
+def test_checkpoint_roundtrip_datetime_still_works_with_new_envelope() -> None:
+    """Datetime round-trip via the new collision-safe envelope."""
+    dt = datetime(2026, 2, 8, 10, 15, 30, tzinfo=UTC)
+    result = checkpoint_loads(checkpoint_dumps({"ts": dt}))
+
+    assert isinstance(result["ts"], datetime)
+    assert result["ts"] == dt
+
+
+def test_checkpoint_roundtrip_nested_datetime_and_user_data() -> None:
+    """Complex structure with both datetime and user dict containing reserved key."""
+    dt = datetime(2026, 1, 1, 0, 0, 0, tzinfo=UTC)
+    data = {
+        "real_datetime": dt,
+        "user_dict_with_reserved": {"__elspeth_type__": "user_label"},
+        "user_dict_with_old_tag": {"__datetime__": "not-a-real-timestamp"},
+        "normal": "value",
+    }
+    result = checkpoint_loads(checkpoint_dumps(data))
+
+    assert isinstance(result["real_datetime"], datetime)
+    assert result["real_datetime"] == dt
+    assert isinstance(result["user_dict_with_reserved"], dict)
+    assert result["user_dict_with_reserved"]["__elspeth_type__"] == "user_label"
+    assert isinstance(result["user_dict_with_old_tag"], dict)
+    assert result["user_dict_with_old_tag"]["__datetime__"] == "not-a-real-timestamp"
+    assert result["normal"] == "value"
+
+
+def test_checkpoint_new_envelope_used_in_dumps_output() -> None:
+    """Verify the serialized form uses __elspeth_type__ not __datetime__."""
+    import json
+
+    dt = datetime(2026, 2, 8, 10, 15, 30, tzinfo=UTC)
+    serialized = checkpoint_dumps({"ts": dt})
+    raw = json.loads(serialized)
+
+    assert "__elspeth_type__" in raw["ts"]
+    assert raw["ts"]["__elspeth_type__"] == "datetime"
+    assert "__elspeth_value__" in raw["ts"]

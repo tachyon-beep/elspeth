@@ -21,7 +21,9 @@ import httpx
 
 from elspeth.contracts import TransformResult
 from elspeth.contracts.schema_contract import FieldContract, PipelineRow, SchemaContract
+from elspeth.contracts.token_usage import TokenUsage
 from elspeth.plugins.clients.http import AuditedHTTPClient
+from elspeth.plugins.llm import populate_llm_metadata_fields
 from elspeth.plugins.llm.base_multi_query import BaseMultiQueryTransform
 from elspeth.plugins.llm.multi_query import (
     MultiQueryConfigMixin,
@@ -34,6 +36,7 @@ from elspeth.plugins.llm.tracing import (
     LangfuseTracingConfig,
     validate_tracing_config,
 )
+from elspeth.plugins.llm.validation import _reject_nonfinite_constant
 from elspeth.plugins.pooling import CapacityError, is_capacity_error
 
 if TYPE_CHECKING:
@@ -193,12 +196,26 @@ class OpenRouterMultiQueryLLMTransform(BaseMultiQueryTransform):
             CapacityError: On rate limit (429/503/529) for pooled retry
         """
         # 1. Build synthetic row for PromptTemplate
-        synthetic_row = spec.build_template_context(row)
+        # Row field access is Tier 2 (operations on row values) — wrap for graceful quarantine.
+        # Fix: elspeth-rapid-gcdc — was bare call; Azure version already had this handling.
+        try:
+            synthetic_row = spec.build_template_context(row)
+        except KeyError as e:
+            return TransformResult.error(
+                {
+                    "reason": "missing_field",
+                    "error": str(e),
+                    "query": spec.output_prefix,
+                }
+            )
 
         # 2. Render template (THEIR DATA - wrap in try/catch)
-        # BUG FIX (d9yk/fd40): Pass contract for dual-name template access
+        # NOTE: contract=None because synthetic_row has a different schema than the
+        # source contract. Wrapping it in PipelineRow(synthetic, source_contract) would
+        # cause FIXED-mode KeyError on synthetic keys like input_1, criterion, etc.
+        # Fix: elspeth-rapid-xzst
         try:
-            rendered = self._template.render_with_metadata(synthetic_row, contract=input_contract)
+            rendered = self._template.render_with_metadata(synthetic_row)
         except TemplateError as e:
             return TransformResult.error(
                 {
@@ -310,15 +327,25 @@ class OpenRouterMultiQueryLLMTransform(BaseMultiQueryTransform):
                 retryable=False,
             )
 
+        # Tier 3 boundary: validate content is str before .strip()
+        if not isinstance(content, str):
+            return TransformResult.error(
+                {
+                    "reason": "type_mismatch",
+                    "error": f"Expected content to be str, got {type(content).__name__}",
+                    "query": spec.output_prefix,
+                },
+                retryable=False,
+            )
+
         # OpenRouter can return {"usage": null} or omit usage entirely.
-        # dict.get("usage", {}) only returns {} when key is MISSING, not when value is null.
-        # The `or {}` ensures we get an empty dict for both missing AND null cases.
-        usage = data.get("usage") or {}
+        # Tier 3 boundary: coerce to TokenUsage immediately.
+        usage = TokenUsage.from_dict(data.get("usage") or {})
 
         # 8b. Check for response truncation BEFORE parsing
-        # usage is Tier 3 external data - use .get() for optional fields
-        completion_tokens = usage.get("completion_tokens", 0)
-        if effective_max_tokens is not None and completion_tokens >= effective_max_tokens:
+        # If completion_tokens is None (provider didn't report), we can't detect truncation
+        completion_tokens = usage.completion_tokens
+        if effective_max_tokens is not None and completion_tokens is not None and completion_tokens >= effective_max_tokens:
             truncation_error: TransformErrorReason = {
                 "reason": "response_truncated",
                 "error": (
@@ -329,7 +356,7 @@ class OpenRouterMultiQueryLLMTransform(BaseMultiQueryTransform):
                 "query": spec.output_prefix,
                 "max_tokens": effective_max_tokens,
                 "completion_tokens": completion_tokens,
-                "prompt_tokens": usage.get("prompt_tokens", 0),
+                "prompt_tokens": usage.prompt_tokens,
             }
             if content:
                 truncation_error["raw_response_preview"] = content[:500]
@@ -347,8 +374,8 @@ class OpenRouterMultiQueryLLMTransform(BaseMultiQueryTransform):
                 content_str = content_str[:-3].strip()
 
         try:
-            parsed = json.loads(content_str)
-        except json.JSONDecodeError as e:
+            parsed = json.loads(content_str, parse_constant=_reject_nonfinite_constant)
+        except (json.JSONDecodeError, ValueError) as e:
             parse_error: TransformErrorReason = {
                 "reason": "json_parse_failed",
                 "error": str(e),
@@ -401,14 +428,18 @@ class OpenRouterMultiQueryLLMTransform(BaseMultiQueryTransform):
             output[output_key] = value
 
         # 11. Add metadata for audit trail
-        output[f"{spec.output_prefix}_usage"] = usage
-        output[f"{spec.output_prefix}_model"] = data.get("model", self._model)
-        output[f"{spec.output_prefix}_template_hash"] = rendered.template_hash
-        output[f"{spec.output_prefix}_variables_hash"] = rendered.variables_hash
-        output[f"{spec.output_prefix}_template_source"] = rendered.template_source
-        output[f"{spec.output_prefix}_lookup_hash"] = rendered.lookup_hash
-        output[f"{spec.output_prefix}_lookup_source"] = rendered.lookup_source
-        output[f"{spec.output_prefix}_system_prompt_source"] = self._system_prompt_source
+        populate_llm_metadata_fields(
+            output,
+            spec.output_prefix,
+            usage=usage,
+            model=data.get("model", self._model),
+            template_hash=rendered.template_hash,
+            variables_hash=rendered.variables_hash,
+            template_source=rendered.template_source,
+            lookup_hash=rendered.lookup_hash,
+            lookup_source=rendered.lookup_source,
+            system_prompt_source=self._system_prompt_source,
+        )
 
         fields_added = [f"{spec.output_prefix}_{field_config.suffix}" for field_config in self._output_mapping.values()]
         observed = SchemaContract(
@@ -436,8 +467,7 @@ class OpenRouterMultiQueryLLMTransform(BaseMultiQueryTransform):
         """
         with self._http_clients_lock:
             if state_id not in self._http_clients:
-                if self._recorder is None:
-                    raise RuntimeError("OpenRouter multi-query transform requires recorder. Ensure on_start was called.")
+                assert self._recorder is not None
                 self._http_clients[state_id] = AuditedHTTPClient(
                     recorder=self._recorder,
                     state_id=state_id,

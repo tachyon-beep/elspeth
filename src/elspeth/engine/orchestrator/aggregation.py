@@ -15,7 +15,6 @@ pure delegation targets.
 from __future__ import annotations
 
 from collections import Counter
-from collections.abc import Callable
 from typing import TYPE_CHECKING
 
 from elspeth.contracts import PendingOutcome, RowOutcome, TokenInfo
@@ -42,7 +41,6 @@ def _require_sink_name(result: RowResult) -> str:
 def _route_aggregation_outcome(
     result: RowResult,
     pending_tokens: dict[str, list[tuple[TokenInfo, PendingOutcome | None]]],
-    checkpoint_callback: Callable[[TokenInfo], None] | None = None,
 ) -> None:
     """Route a non-failed aggregation result to the appropriate sink.
 
@@ -56,10 +54,14 @@ def _route_aggregation_outcome(
     processor. The sink_name is authoritative for COMPLETED results (guaranteed
     by RowResult.__post_init__).
 
+    Note: Checkpointing is NOT done here. Tokens appended to pending_tokens
+    are only checkpointed after SinkExecutor.write() achieves durability,
+    via the checkpoint_after_sink callback. Checkpointing before sink
+    durability causes data loss on crash. Fix: elspeth-rapid-xtmo.
+
     Args:
         result: A non-FAILED RowResult from aggregation processing
         pending_tokens: Dict of sink_name -> tokens to append results to
-        checkpoint_callback: Optional callback after successful routing
     """
     sink_name = _require_sink_name(result)
     if sink_name not in pending_tokens:
@@ -68,9 +70,6 @@ def _route_aggregation_outcome(
             f"Available: {sorted(pending_tokens.keys())}. Token: {result.token}"
         )
     pending_tokens[sink_name].append((result.token, PendingOutcome(result.outcome)))
-
-    if checkpoint_callback is not None:
-        checkpoint_callback(result.token)
 
 
 def find_aggregation_transform(
@@ -171,6 +170,10 @@ def check_aggregation_timeouts(
 
     Routing uses result.sink_name (set by on_success in the processor) rather
     than a default_sink_name parameter.
+
+    Note: Checkpointing is NOT done here. Tokens routed to pending_tokens are
+    only checkpointed after SinkExecutor.write() achieves sink durability,
+    via the checkpoint_after_sink callback. Fix: elspeth-rapid-xtmo.
 
     Args:
         config: Pipeline configuration with aggregation_settings
@@ -308,7 +311,6 @@ def flush_remaining_aggregation_buffers(
     processor: RowProcessor,
     ctx: PluginContext,
     pending_tokens: dict[str, list[tuple[TokenInfo, PendingOutcome | None]]],
-    checkpoint_callback: Callable[[TokenInfo], None] | None = None,
 ) -> AggregationFlushResult:
     """Flush remaining aggregation buffers at end-of-source.
 
@@ -322,14 +324,15 @@ def flush_remaining_aggregation_buffers(
     Routing uses result.sink_name (set by on_success in the processor) rather
     than a default_sink_name parameter.
 
+    Note: Checkpointing is NOT done here. Tokens routed to pending_tokens are
+    only checkpointed after SinkExecutor.write() achieves sink durability,
+    via the checkpoint_after_sink callback. Fix: elspeth-rapid-xtmo.
+
     Args:
         config: Pipeline configuration with aggregation_settings
         processor: RowProcessor with public aggregation facades
         ctx: Plugin context for transform execution
         pending_tokens: Dict of sink_name -> tokens to append results to
-        checkpoint_callback: Optional callback to create checkpoint after successful
-            token processing. Called with the token that was processed. The callback
-            should capture run_id, node_id, and processor for getting aggregation state.
 
     Returns:
         AggregationFlushResult with counts for succeeded, failed, routed,
@@ -373,7 +376,7 @@ def flush_remaining_aggregation_buffers(
             if result.outcome == RowOutcome.FAILED:
                 rows_failed += 1
             else:
-                _route_aggregation_outcome(result, pending_tokens, checkpoint_callback)
+                _route_aggregation_outcome(result, pending_tokens)
                 rows_succeeded += 1
 
         # Process work items through remaining transforms
@@ -393,7 +396,7 @@ def flush_remaining_aggregation_buffers(
                 if result.outcome == RowOutcome.FAILED:
                     rows_failed += 1
                 elif result.outcome == RowOutcome.COMPLETED:
-                    _route_aggregation_outcome(result, pending_tokens, checkpoint_callback)
+                    _route_aggregation_outcome(result, pending_tokens)
                     rows_succeeded += 1
                 elif result.outcome == RowOutcome.ROUTED:
                     rows_routed += 1
@@ -405,8 +408,6 @@ def flush_remaining_aggregation_buffers(
                             f"Available: {sorted(pending_tokens.keys())}. Token: {result.token}"
                         )
                     pending_tokens[routed_sink].append((result.token, PendingOutcome(RowOutcome.ROUTED)))
-                    if checkpoint_callback is not None:
-                        checkpoint_callback(result.token)
                 elif result.outcome == RowOutcome.QUARANTINED:
                     rows_quarantined += 1
                 elif result.outcome == RowOutcome.COALESCED:
@@ -419,8 +420,6 @@ def flush_remaining_aggregation_buffers(
                             f"Available: {sorted(pending_tokens.keys())}. Token: {result.token}"
                         )
                     pending_tokens[sink_name].append((result.token, PendingOutcome(RowOutcome.COMPLETED)))
-                    if checkpoint_callback is not None:
-                        checkpoint_callback(result.token)
                 elif result.outcome == RowOutcome.FORKED:
                     rows_forked += 1
                 elif result.outcome == RowOutcome.EXPANDED:

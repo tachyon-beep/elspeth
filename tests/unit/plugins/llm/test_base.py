@@ -10,6 +10,7 @@ from pydantic import ValidationError
 from elspeth.contracts import Determinism
 from elspeth.contracts.plugin_context import PluginContext
 from elspeth.contracts.schema_contract import PipelineRow, SchemaContract
+from elspeth.contracts.token_usage import TokenUsage
 from elspeth.plugins.clients.llm import (
     AuditedLLMClient,
     LLMClientError,
@@ -440,7 +441,7 @@ class TestBaseLLMTransformProcess:
         mock_client.chat_completion.return_value = LLMResponse(
             content="Analysis result",
             model="gpt-4",
-            usage={"prompt_tokens": 10, "completion_tokens": 20},
+            usage=TokenUsage.known(10, 20),
             latency_ms=150.0,
         )
         TestLLMTransform = create_test_transform_class(mock_client=mock_client)
@@ -474,7 +475,7 @@ class TestBaseLLMTransformProcess:
         mock_client.chat_completion.return_value = LLMResponse(
             content="Result",
             model="gpt-4",
-            usage={},
+            usage=TokenUsage.unknown(),
         )
         TestLLMTransform = create_test_transform_class(mock_client=mock_client)
 
@@ -503,7 +504,7 @@ class TestBaseLLMTransformProcess:
         mock_client.chat_completion.return_value = LLMResponse(
             content="Response",
             model="gpt-4",
-            usage={},
+            usage=TokenUsage.unknown(),
         )
         TestLLMTransform = create_test_transform_class(mock_client=mock_client)
 
@@ -533,7 +534,7 @@ class TestBaseLLMTransformProcess:
         mock_client.chat_completion.return_value = LLMResponse(
             content="Response",
             model="gpt-4",
-            usage={},
+            usage=TokenUsage.unknown(),
         )
         TestLLMTransform = create_test_transform_class(mock_client=mock_client)
 
@@ -558,7 +559,7 @@ class TestBaseLLMTransformProcess:
         mock_client.chat_completion.return_value = LLMResponse(
             content="Response",
             model="gpt-4",
-            usage={},
+            usage=TokenUsage.unknown(),
         )
         TestLLMTransform = create_test_transform_class(mock_client=mock_client)
 
@@ -624,6 +625,45 @@ class TestBaseLLMTransformProcess:
         transform.close()
 
 
+class TestBaseLLMTransformAddsFields:
+    """Regression test for Phase 0 fix #12: BaseLLM adds_fields.
+
+    Bug: BaseLLMTransform did not declare output fields, so schema
+    evolution was silently skipped in the executor.
+
+    Fix: declared_output_fields is derived from the response field
+    config at init time. The executor uses bool(declared_output_fields)
+    to decide whether to record schema evolution.
+    """
+
+    def test_base_llm_transform_has_declared_output_fields(self) -> None:
+        """BaseLLMTransform must declare output fields at init."""
+        TestLLMTransform = create_test_transform_class()
+        transform = TestLLMTransform(
+            {
+                "model": "gpt-4",
+                "template": "{{ row.text }}",
+                "schema": DYNAMIC_SCHEMA,
+                "required_input_fields": [],
+            }
+        )
+        assert transform.declared_output_fields, "LLM transforms must declare output fields"
+
+    def test_concrete_subclass_has_declared_output_fields(self) -> None:
+        """Concrete subclass has non-empty declared_output_fields."""
+        TestLLMTransform = create_test_transform_class()
+        transform = TestLLMTransform(
+            {
+                "model": "gpt-4",
+                "template": "{{ row.text }}",
+                "schema": DYNAMIC_SCHEMA,
+                "required_input_fields": [],
+            }
+        )
+        assert isinstance(transform.declared_output_fields, frozenset)
+        assert len(transform.declared_output_fields) > 0
+
+
 class TestBaseLLMTransformSchemaHandling:
     """Tests for schema configuration handling."""
 
@@ -666,3 +706,64 @@ class TestBaseLLMTransformSchemaHandling:
             }
         )
         assert validated.anything == "goes"  # type: ignore[attr-defined]
+
+
+class TestBaseLLMTransformDeclaredOutputFields:
+    """Tests for declared_output_fields — centralized collision detection support.
+
+    Field collision detection is enforced centrally by TransformExecutor
+    (see TestTransformExecutor in test_executors.py). These tests verify
+    that BaseLLMTransform correctly declares its output fields so the
+    executor can perform pre-execution collision checks.
+    """
+
+    def test_declared_output_fields_contains_response_field(self) -> None:
+        """declared_output_fields includes the main response field."""
+        TransformClass = create_test_transform_class(mock_client=Mock(spec=AuditedLLMClient))
+        transform = TransformClass(
+            {
+                "model": "gpt-4",
+                "template": "Classify: {{ row.text }}",
+                "response_field": "llm_response",
+                "schema": DYNAMIC_SCHEMA,
+                "required_input_fields": [],
+            }
+        )
+
+        assert "llm_response" in transform.declared_output_fields
+
+    def test_declared_output_fields_contains_audit_fields(self) -> None:
+        """declared_output_fields includes suffixed audit/metadata fields."""
+        TransformClass = create_test_transform_class(mock_client=Mock(spec=AuditedLLMClient))
+        transform = TransformClass(
+            {
+                "model": "gpt-4",
+                "template": "Classify: {{ row.text }}",
+                "response_field": "llm_response",
+                "schema": DYNAMIC_SCHEMA,
+                "required_input_fields": [],
+            }
+        )
+
+        # Audit fields use the response_field as prefix
+        assert "llm_response_usage" in transform.declared_output_fields
+        assert "llm_response_model" in transform.declared_output_fields
+        assert "llm_response_template_hash" in transform.declared_output_fields
+
+    def test_declared_output_fields_adapts_to_response_field_name(self) -> None:
+        """declared_output_fields changes when response_field config changes."""
+        TransformClass = create_test_transform_class(mock_client=Mock(spec=AuditedLLMClient))
+        transform = TransformClass(
+            {
+                "model": "gpt-4",
+                "template": "Classify: {{ row.text }}",
+                "response_field": "custom_output",
+                "schema": DYNAMIC_SCHEMA,
+                "required_input_fields": [],
+            }
+        )
+
+        assert "custom_output" in transform.declared_output_fields
+        assert "custom_output_usage" in transform.declared_output_fields
+        # Old name should NOT be present
+        assert "llm_response" not in transform.declared_output_fields

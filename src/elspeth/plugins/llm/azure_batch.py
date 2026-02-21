@@ -27,12 +27,19 @@ from typing import Any
 from pydantic import Field
 
 from elspeth.contracts import BatchPendingError, CallStatus, CallType, Determinism, RowErrorEntry, TransformErrorReason, TransformResult
+from elspeth.contracts.batch_checkpoint import BatchCheckpointState, RowMappingEntry
 from elspeth.contracts.plugin_context import PluginContext
 from elspeth.contracts.schema import SchemaConfig
 from elspeth.contracts.schema_contract import PipelineRow
+from elspeth.contracts.token_usage import TokenUsage
 from elspeth.plugins.base import BaseTransform
 from elspeth.plugins.config_base import TransformDataConfig
-from elspeth.plugins.llm import get_llm_audit_fields, get_llm_guaranteed_fields
+from elspeth.plugins.llm import (
+    _build_augmented_output_schema,
+    get_llm_audit_fields,
+    get_llm_guaranteed_fields,
+    populate_llm_metadata_fields,
+)
 from elspeth.plugins.llm.templates import PromptTemplate, TemplateError
 from elspeth.plugins.llm.tracing import (
     LangfuseTracingConfig,
@@ -148,6 +155,10 @@ class AzureBatchLLMTransform(BaseTransform):
         super().__init__(config)
 
         cfg = AzureBatchConfig.from_dict(config)
+
+        # Declare output fields for centralized collision detection.
+        self.declared_output_fields = frozenset([*get_llm_guaranteed_fields(cfg.response_field), *get_llm_audit_fields(cfg.response_field)])
+
         self._deployment_name = cfg.deployment_name
         self._endpoint = cfg.endpoint.rstrip("/")
         self._api_key: str | None = cfg.api_key
@@ -174,7 +185,11 @@ class AzureBatchLLMTransform(BaseTransform):
             allow_coercion=False,  # Transforms do NOT coerce
         )
         self.input_schema = schema
-        self.output_schema = schema
+        self.output_schema = _build_augmented_output_schema(
+            base_schema_config=schema_config,
+            response_field=cfg.response_field,
+            schema_name="AzureBatchOutputSchema",
+        )
 
         # Build output schema config with field categorization
         guaranteed = get_llm_guaranteed_fields(self._response_field)
@@ -206,6 +221,7 @@ class AzureBatchLLMTransform(BaseTransform):
 
         Called by the engine at pipeline start. Initializes Tier 2 tracing.
         """
+        super().on_start(ctx)
         if self._tracing_config is not None:
             self._setup_tracing()
 
@@ -460,35 +476,32 @@ class AzureBatchLLMTransform(BaseTransform):
         checkpoint = self._get_checkpoint(ctx)
 
         if checkpoint is not None:
-            if "batch_id" not in checkpoint:
-                raise RuntimeError(
-                    f"Checkpoint missing required 'batch_id' for AzureBatchLLMTransform. Checkpoint keys: {sorted(checkpoint.keys())}"
-                )
             # PHASE 2: Resume - batch already submitted
+            # BatchCheckpointState is frozen and always has batch_id — no missing-key check needed
             return self._check_batch_status(checkpoint, rows, ctx)
 
         # PHASE 1: Fresh batch - submit new
         return self._submit_batch(rows, ctx)
 
-    def _get_checkpoint(self, ctx: PluginContext) -> dict[str, Any] | None:
+    def _get_checkpoint(self, ctx: PluginContext) -> BatchCheckpointState | None:
         """Get checkpoint state from context.
 
         Args:
             ctx: Plugin context
 
         Returns:
-            Checkpoint dict or None if no checkpoint
+            Typed checkpoint state or None if no checkpoint
         """
         return ctx.get_checkpoint()
 
-    def _update_checkpoint(self, ctx: PluginContext, data: dict[str, Any]) -> None:
-        """Update checkpoint state.
+    def _set_checkpoint(self, ctx: PluginContext, state: BatchCheckpointState) -> None:
+        """Set checkpoint state.
 
         Args:
             ctx: Plugin context
-            data: Checkpoint data to save
+            state: Typed checkpoint state to save
         """
-        ctx.update_checkpoint(data)
+        ctx.set_checkpoint(state)
 
     def _clear_checkpoint(self, ctx: PluginContext) -> None:
         """Clear checkpoint state.
@@ -517,7 +530,7 @@ class AzureBatchLLMTransform(BaseTransform):
         """
         # 1. Render templates for all rows, track failures
         requests: list[dict[str, Any]] = []
-        row_mapping: dict[str, dict[str, Any]] = {}  # custom_id -> {index, variables_hash}
+        row_mapping: dict[str, RowMappingEntry] = {}  # custom_id -> typed entry
         template_errors: list[tuple[int, str]] = []  # (index, error)
 
         for idx, row in enumerate(rows):
@@ -550,10 +563,10 @@ class AzureBatchLLMTransform(BaseTransform):
                 request["body"]["max_tokens"] = self._max_tokens
 
             requests.append(request)
-            row_mapping[custom_id] = {
-                "index": idx,
-                "variables_hash": rendered.variables_hash,
-            }
+            row_mapping[custom_id] = RowMappingEntry(
+                index=idx,
+                variables_hash=rendered.variables_hash,
+            )
 
         # Build request lookup for audit recording (custom_id -> request body)
         # This allows the audit trail to record exactly what was sent to the LLM
@@ -661,16 +674,16 @@ class AzureBatchLLMTransform(BaseTransform):
             )
 
         # 4. CHECKPOINT immediately after submit
-        checkpoint_data = {
-            "batch_id": batch.id,
-            "input_file_id": batch_file.id,
-            "row_mapping": row_mapping,
-            "template_errors": template_errors,
-            "submitted_at": datetime.now(UTC).isoformat(),
-            "row_count": len(rows),
-            "requests": requests_by_id,  # BUG-AZURE-01: Store original requests for audit recording
-        }
-        self._update_checkpoint(ctx, checkpoint_data)
+        checkpoint_state = BatchCheckpointState(
+            batch_id=batch.id,
+            input_file_id=batch_file.id,
+            row_mapping=row_mapping,
+            template_errors=template_errors,
+            submitted_at=datetime.now(UTC).isoformat(),
+            row_count=len(rows),
+            requests=requests_by_id,  # BUG-AZURE-01: Store original requests for audit recording
+        )
+        self._set_checkpoint(ctx, checkpoint_state)
 
         # 5. Raise BatchPendingError - engine handles retry scheduling
         # Include checkpoint and node_id so caller can persist and restore
@@ -678,20 +691,67 @@ class AzureBatchLLMTransform(BaseTransform):
             batch.id,
             "submitted",
             check_after_seconds=self._poll_interval,
-            checkpoint=checkpoint_data,
+            checkpoint=checkpoint_state,
             node_id=self.node_id,
         )
 
+    def _record_per_row_failure_calls(
+        self,
+        checkpoint: BatchCheckpointState,
+        ctx: PluginContext,
+        terminal_status: str,
+        error_detail: str | None = None,
+    ) -> None:
+        """Record per-row LLM call records for terminal batch failure paths.
+
+        When a batch fails/cancels/expires/times-out, the per-row LLM calls are
+        never recorded because _download_results() (the only place that records them)
+        is only called on the "completed" path. This method ensures audit completeness
+        by emitting a CallType.LLM error record for each submitted request before
+        the checkpoint is cleared.
+
+        Args:
+            checkpoint: Typed checkpoint state with requests and row_mapping.
+            ctx: Plugin context for record_call.
+            terminal_status: The batch terminal status (failed, cancelled, expired, batch_timeout).
+            error_detail: Optional extra error detail string.
+        """
+        if not checkpoint.requests and not checkpoint.row_mapping:
+            return  # No requests were submitted (e.g., all templates failed)
+
+        for custom_id, original_request in checkpoint.requests.items():
+            row_index = checkpoint.row_mapping[custom_id].index
+            error_info: dict[str, Any] = {
+                "reason": f"batch_{terminal_status}",
+                "batch_id": checkpoint.batch_id,
+                "custom_id": custom_id,
+            }
+            if error_detail:
+                error_info["detail"] = error_detail
+
+            ctx.record_call(
+                call_type=CallType.LLM,
+                status=CallStatus.ERROR,
+                request_data={
+                    "custom_id": custom_id,
+                    "row_index": row_index,
+                    **original_request,
+                },
+                response_data=None,
+                error=error_info,
+                provider="azure",
+            )
+
     def _check_batch_status(
         self,
-        checkpoint: dict[str, Any],
+        checkpoint: BatchCheckpointState,
         rows: list[PipelineRow],
         ctx: PluginContext,
     ) -> TransformResult:
         """Check batch status and complete if ready.
 
         Args:
-            checkpoint: Checkpoint data with batch_id
+            checkpoint: Typed checkpoint state with batch_id
             rows: Original rows (needed for output assembly)
             ctx: Plugin context
 
@@ -701,7 +761,7 @@ class AzureBatchLLMTransform(BaseTransform):
         Raises:
             BatchPendingError: If batch still in progress
         """
-        batch_id = checkpoint["batch_id"]
+        batch_id = checkpoint.batch_id
         client = self._get_client()
 
         # Check batch status (with audit recording)
@@ -748,17 +808,13 @@ class AzureBatchLLMTransform(BaseTransform):
 
         if batch.status == "completed":
             # Calculate latency from submission to completion
-            submitted_at_str = checkpoint.get("submitted_at")
-            if submitted_at_str:
-                submitted_at = datetime.fromisoformat(submitted_at_str)
-                latency_ms = (datetime.now(UTC) - submitted_at).total_seconds() * 1000
-            else:
-                latency_ms = 0.0
+            submitted_at = datetime.fromisoformat(checkpoint.submitted_at)
+            latency_ms = (datetime.now(UTC) - submitted_at).total_seconds() * 1000
 
             # Record to Langfuse (job-level tracing)
             self._record_langfuse_batch_job(
                 batch_id=batch_id,
-                row_count=checkpoint.get("row_count", len(rows)),
+                row_count=checkpoint.row_count,
                 latency_ms=latency_ms,
                 status="completed",
             )
@@ -767,8 +823,7 @@ class AzureBatchLLMTransform(BaseTransform):
             return self._download_results(batch, checkpoint, rows, ctx)
 
         elif batch.status == "failed":
-            # Batch failed - clear checkpoint and return error
-            self._clear_checkpoint(ctx)
+            # Batch failed - record per-row calls, then clear checkpoint and return error
 
             error_info: TransformErrorReason = {
                 "reason": "batch_failed",
@@ -779,18 +834,26 @@ class AzureBatchLLMTransform(BaseTransform):
                 error_info["errors"] = [{"message": e.message, "error_type": e.code} for e in batch.errors.data]
                 error_message = "; ".join(e.message for e in batch.errors.data)
 
+            # Extract checkpoint values before clearing
+            submitted_at = datetime.fromisoformat(checkpoint.submitted_at)
+            row_count = checkpoint.row_count
+
+            # Record per-row LLM calls BEFORE clearing checkpoint for audit completeness
+            self._record_per_row_failure_calls(
+                checkpoint,
+                ctx,
+                terminal_status="failed",
+                error_detail=error_message,
+            )
+            self._clear_checkpoint(ctx)
+
             # Calculate latency for failed batch
-            submitted_at_str = checkpoint.get("submitted_at")
-            if submitted_at_str:
-                submitted_at = datetime.fromisoformat(submitted_at_str)
-                latency_ms = (datetime.now(UTC) - submitted_at).total_seconds() * 1000
-            else:
-                latency_ms = 0.0
+            latency_ms = (datetime.now(UTC) - submitted_at).total_seconds() * 1000
 
             # Record failure to Langfuse
             self._record_langfuse_batch_job(
                 batch_id=batch_id,
-                row_count=checkpoint.get("row_count", len(rows)),
+                row_count=row_count,
                 latency_ms=latency_ms,
                 status="failed",
                 error=error_message,
@@ -799,21 +862,21 @@ class AzureBatchLLMTransform(BaseTransform):
             return TransformResult.error(error_info)
 
         elif batch.status == "cancelled":
-            # Batch was cancelled - clear checkpoint and return error
+            # Extract checkpoint values before clearing
+            submitted_at = datetime.fromisoformat(checkpoint.submitted_at)
+            row_count = checkpoint.row_count
+
+            # Batch was cancelled - record per-row calls, then clear checkpoint and return error
+            self._record_per_row_failure_calls(checkpoint, ctx, terminal_status="cancelled")
             self._clear_checkpoint(ctx)
 
             # Calculate latency for cancelled batch
-            submitted_at_str = checkpoint.get("submitted_at")
-            if submitted_at_str:
-                submitted_at = datetime.fromisoformat(submitted_at_str)
-                latency_ms = (datetime.now(UTC) - submitted_at).total_seconds() * 1000
-            else:
-                latency_ms = 0.0
+            latency_ms = (datetime.now(UTC) - submitted_at).total_seconds() * 1000
 
             # Record cancellation to Langfuse
             self._record_langfuse_batch_job(
                 batch_id=batch_id,
-                row_count=checkpoint.get("row_count", len(rows)),
+                row_count=row_count,
                 latency_ms=latency_ms,
                 status="cancelled",
             )
@@ -826,7 +889,8 @@ class AzureBatchLLMTransform(BaseTransform):
             )
 
         elif batch.status == "expired":
-            # Batch expired (exceeded 24h) - clear checkpoint and return error
+            # Batch expired (exceeded 24h) - record per-row calls, clear checkpoint and return error
+            self._record_per_row_failure_calls(checkpoint, ctx, terminal_status="expired")
             self._clear_checkpoint(ctx)
             return TransformResult.error(
                 {
@@ -838,11 +902,11 @@ class AzureBatchLLMTransform(BaseTransform):
         else:
             # Still processing (validating, in_progress, finalizing)
             # Check if we've exceeded max wait time
-            submitted_at_str = checkpoint["submitted_at"]
-            submitted_at = datetime.fromisoformat(submitted_at_str)
+            submitted_at = datetime.fromisoformat(checkpoint.submitted_at)
             elapsed_hours = (datetime.now(UTC) - submitted_at).total_seconds() / 3600
 
             if elapsed_hours > self._max_wait_hours:
+                self._record_per_row_failure_calls(checkpoint, ctx, terminal_status="batch_timeout")
                 self._clear_checkpoint(ctx)
                 return TransformResult.error(
                     {
@@ -866,7 +930,7 @@ class AzureBatchLLMTransform(BaseTransform):
     def _download_results(
         self,
         batch: Any,
-        checkpoint: dict[str, Any],
+        checkpoint: BatchCheckpointState,
         rows: list[PipelineRow],
         ctx: PluginContext,
     ) -> TransformResult:
@@ -874,7 +938,7 @@ class AzureBatchLLMTransform(BaseTransform):
 
         Args:
             batch: Completed Azure batch object
-            checkpoint: Checkpoint data with row mapping
+            checkpoint: Typed checkpoint state with row mapping
             rows: Original input rows (list[PipelineRow])
             ctx: Plugin context
 
@@ -882,12 +946,9 @@ class AzureBatchLLMTransform(BaseTransform):
             TransformResult with all processed rows
         """
         client = self._get_client()
-        if "row_mapping" not in checkpoint:
-            raise RuntimeError("Checkpoint missing required 'row_mapping' for AzureBatchLLMTransform.")
-        if "template_errors" not in checkpoint:
-            raise RuntimeError("Checkpoint missing required 'template_errors' for AzureBatchLLMTransform.")
-        row_mapping: dict[str, dict[str, Any]] = checkpoint["row_mapping"]
-        template_errors: list[tuple[int, str]] = checkpoint["template_errors"]
+        # BatchCheckpointState is frozen — row_mapping and template_errors always present
+        row_mapping = checkpoint.row_mapping
+        template_errors = checkpoint.template_errors
 
         # Download output file (with audit recording)
         output_file_id = batch.output_file_id
@@ -1030,6 +1091,9 @@ class AzureBatchLLMTransform(BaseTransform):
                 if "body" not in response:
                     malformed_lines.append(f"Line {line_num}: Missing 'response.body'")
                     continue
+                if not isinstance(response["body"], dict):
+                    malformed_lines.append(f"Line {line_num}: 'response.body' is not a dict, got {type(response['body']).__name__}")
+                    continue
 
             # Now validated - store as Tier 2 data
             results_by_id[custom_id] = result
@@ -1096,7 +1160,7 @@ class AzureBatchLLMTransform(BaseTransform):
         template_error_indices = {idx for idx, _ in template_errors}
 
         # Build reverse mapping once (O(n) instead of O(n^2) lookup per row)
-        idx_to_custom_id: dict[int, str] = {info["index"]: cid for cid, info in row_mapping.items()}
+        idx_to_custom_id: dict[int, str] = {info.index: cid for cid, info in row_mapping.items()}
 
         for idx, row in enumerate(rows):
             if idx in template_error_indices:
@@ -1131,7 +1195,7 @@ class AzureBatchLLMTransform(BaseTransform):
                 # Record Call for audit trail completeness - request WAS made but no response
                 # Without this, explain(token_id) would show incomplete lineage
                 # Access directly from checkpoint (Tier 1 data - we wrote it)
-                original_request = checkpoint["requests"][custom_id]
+                original_request = checkpoint.requests[custom_id]
                 ctx.record_call(
                     call_type=CallType.LLM,
                     status=CallStatus.ERROR,
@@ -1204,37 +1268,40 @@ class AzureBatchLLMTransform(BaseTransform):
 
                 # Boundary validation passed - now we trust these fields
                 content = message.get("content", "")  # content can be empty string, that's valid
-                usage = body.get("usage", {})  # usage is optional in Azure API
+                usage = TokenUsage.from_dict(body.get("usage", {}))  # usage is optional in Azure API
+
+                # Field collision check already done in _submit_batch() before
+                # submitting the batch — no need to re-check here.
 
                 output_row = row.to_dict()
                 output_row[self._response_field] = content
 
                 # Retrieve variables_hash from checkpoint
-                row_info = row_mapping[custom_id]
-                variables_hash = row_info["variables_hash"]
+                variables_hash = row_mapping[custom_id].variables_hash
 
-                # Guaranteed fields (contract-stable)
-                output_row[f"{self._response_field}_usage"] = usage
-                output_row[f"{self._response_field}_model"] = body.get("model", self._deployment_name)
-
-                # Audit fields (provenance metadata)
-                output_row[f"{self._response_field}_template_hash"] = self._template.template_hash
-                output_row[f"{self._response_field}_variables_hash"] = variables_hash
-                output_row[f"{self._response_field}_template_source"] = self._template.template_source
-                output_row[f"{self._response_field}_lookup_hash"] = self._template.lookup_hash
-                output_row[f"{self._response_field}_lookup_source"] = self._template.lookup_source
-                output_row[f"{self._response_field}_system_prompt_source"] = self._system_prompt_source
+                populate_llm_metadata_fields(
+                    output_row,
+                    self._response_field,
+                    usage=usage,
+                    model=body.get("model", self._deployment_name),
+                    template_hash=self._template.template_hash,
+                    variables_hash=variables_hash,
+                    template_source=self._template.template_source,
+                    lookup_hash=self._template.lookup_hash,
+                    lookup_source=self._template.lookup_source,
+                    system_prompt_source=self._system_prompt_source,
+                )
 
                 output_rows.append(output_row)
 
         # Record per-row LLM calls against the batch's state
         # Uses existing state_id from context (set by AggregationExecutor)
-        # Note: checkpoint["requests"] is Tier 1 data (we wrote it) - crash if missing
-        requests_data = checkpoint["requests"]
+        # Note: checkpoint.requests is Tier 1 data (we wrote it) - typed access
+        requests_data = checkpoint.requests
 
         for custom_id, result in results_by_id.items():
             original_request = requests_data[custom_id]
-            row_index = row_mapping[custom_id]["index"]
+            row_index = row_mapping[custom_id].index
 
             # Determine call status from result (Tier 2 - validated at boundary)
             if "error" in result:

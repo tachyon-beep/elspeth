@@ -16,6 +16,7 @@ if TYPE_CHECKING:
     from elspeth.contracts.payload_store import PayloadStore
 
 from elspeth.contracts import SourceRow, TokenInfo
+from elspeth.contracts.errors import OrchestrationInvariantError
 from elspeth.contracts.schema_contract import PipelineRow, SchemaContract
 from elspeth.contracts.types import NodeID, StepResolver
 from elspeth.core.landscape import LandscapeRecorder
@@ -283,8 +284,16 @@ class TokenManager:
         Returns:
             Merged TokenInfo with PipelineRow row_data
         """
-        # Use first parent's row_id (they should all be the same)
+        if not parents:
+            raise OrchestrationInvariantError("coalesce_tokens requires at least one parent token")
+
         row_id = parents[0].row_id
+        mismatched = [p.token_id for p in parents if p.row_id != row_id]
+        if mismatched:
+            raise OrchestrationInvariantError(
+                f"coalesce_tokens requires all parents to share row_id={row_id}; mismatched token_ids={mismatched}"
+            )
+
         step = self._step_resolver(node_id)
 
         merged = self._recorder.coalesce_tokens(

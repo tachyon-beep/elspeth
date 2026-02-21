@@ -12,7 +12,7 @@ from __future__ import annotations
 import hashlib
 import json
 import secrets
-from dataclasses import asdict
+from collections.abc import Mapping
 from datetime import UTC, datetime
 from enum import Enum
 from typing import TYPE_CHECKING, Any
@@ -104,7 +104,7 @@ class OTLPExporter:
         """Exporter name for configuration reference."""
         return self._name
 
-    def configure(self, config: dict[str, Any]) -> None:
+    def configure(self, config: Mapping[str, Any]) -> None:
         """Configure the exporter with settings from pipeline configuration.
 
         Args:
@@ -330,7 +330,7 @@ class OTLPExporter:
         Returns:
             Dictionary of attribute key-value pairs
         """
-        data = asdict(event)
+        data = event.to_dict()
         data["event_type"] = type(event).__name__
 
         result: dict[str, Any] = {}

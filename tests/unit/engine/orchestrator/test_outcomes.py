@@ -548,3 +548,151 @@ class TestFlushCoalescePending:
 
         assert counters.rows_coalesced == 0
         assert counters.rows_coalesce_failed == 0
+
+
+# =============================================================================
+# CoalesceOutcome state validation
+# BUG FIX: P1-2026-02-14 — invalid CoalesceOutcome states were silently
+# ignored, potentially losing work or hiding bugs.
+# =============================================================================
+
+
+class TestCoalesceOutcomeValidation:
+    """Tests that invalid CoalesceOutcome states crash instead of being silently ignored.
+
+    BUG: handle_coalesce_timeouts and flush_coalesce_pending only checked
+    two branches (merged_token / failure_reason) with no else clause.
+    If a malformed outcome arrived (both None, or both set), it was silently
+    dropped, violating fail-fast expectations.
+    """
+
+    def test_handle_coalesce_timeouts_rejects_both_none(self) -> None:
+        """Outcome with both merged_token=None and failure_reason=None crashes."""
+        from elspeth.contracts.errors import OrchestrationInvariantError
+
+        outcome = Mock()
+        outcome.merged_token = None
+        outcome.failure_reason = None
+
+        coalesce_executor = Mock()
+        coalesce_executor.get_registered_names.return_value = ["merge_1"]
+        coalesce_executor.check_timeouts.return_value = [outcome]
+
+        counters = _make_counters()
+        pending = _make_pending()
+        node_map = {CoalesceName("merge_1"): NodeID("coalesce::merge_1")}
+
+        with pytest.raises(OrchestrationInvariantError, match="Invalid CoalesceOutcome state"):
+            handle_coalesce_timeouts(
+                coalesce_executor=coalesce_executor,
+                coalesce_node_map=node_map,
+                processor=Mock(),
+                config_sinks={"output": Mock()},
+                ctx=Mock(),
+                counters=counters,
+                pending_tokens=pending,
+            )
+
+    def test_handle_coalesce_timeouts_rejects_both_set(self) -> None:
+        """Outcome with both merged_token and failure_reason set crashes."""
+        from elspeth.contracts.errors import OrchestrationInvariantError
+
+        outcome = Mock()
+        outcome.merged_token = make_token_info()
+        outcome.failure_reason = "some_failure"
+
+        coalesce_executor = Mock()
+        coalesce_executor.get_registered_names.return_value = ["merge_1"]
+        coalesce_executor.check_timeouts.return_value = [outcome]
+
+        counters = _make_counters()
+        pending = _make_pending()
+        node_map = {CoalesceName("merge_1"): NodeID("coalesce::merge_1")}
+
+        with pytest.raises(OrchestrationInvariantError, match="Invalid CoalesceOutcome state"):
+            handle_coalesce_timeouts(
+                coalesce_executor=coalesce_executor,
+                coalesce_node_map=node_map,
+                processor=Mock(),
+                config_sinks={"output": Mock()},
+                ctx=Mock(),
+                counters=counters,
+                pending_tokens=pending,
+            )
+
+    def test_flush_coalesce_pending_rejects_both_none(self) -> None:
+        """flush_coalesce_pending crashes on outcome with both fields None."""
+        from elspeth.contracts.errors import OrchestrationInvariantError
+
+        outcome = Mock()
+        outcome.merged_token = None
+        outcome.failure_reason = None
+
+        coalesce_executor = Mock()
+        coalesce_executor.flush_pending.return_value = [outcome]
+
+        counters = _make_counters()
+        pending = _make_pending()
+
+        with pytest.raises(OrchestrationInvariantError, match="Invalid CoalesceOutcome state"):
+            flush_coalesce_pending(
+                coalesce_executor=coalesce_executor,
+                coalesce_node_map={},
+                processor=Mock(),
+                config_sinks={"output": Mock()},
+                ctx=Mock(),
+                counters=counters,
+                pending_tokens=pending,
+            )
+
+    def test_flush_coalesce_pending_rejects_both_set(self) -> None:
+        """flush_coalesce_pending crashes on outcome with both fields set."""
+        from elspeth.contracts.errors import OrchestrationInvariantError
+
+        outcome = Mock()
+        outcome.merged_token = make_token_info()
+        outcome.failure_reason = "contradictory"
+        outcome.coalesce_name = "merge_1"
+
+        coalesce_executor = Mock()
+        coalesce_executor.flush_pending.return_value = [outcome]
+
+        counters = _make_counters()
+        pending = _make_pending()
+
+        with pytest.raises(OrchestrationInvariantError, match="Invalid CoalesceOutcome state"):
+            flush_coalesce_pending(
+                coalesce_executor=coalesce_executor,
+                coalesce_node_map={CoalesceName("merge_1"): NodeID("coalesce::merge_1")},
+                processor=Mock(),
+                config_sinks={"output": Mock()},
+                ctx=Mock(),
+                counters=counters,
+                pending_tokens=pending,
+            )
+
+    def test_flush_coalesce_pending_rejects_missing_coalesce_name(self) -> None:
+        """flush_coalesce_pending crashes if merged_token present but coalesce_name is None."""
+        from elspeth.contracts.errors import OrchestrationInvariantError
+
+        outcome = Mock()
+        outcome.merged_token = make_token_info()
+        outcome.failure_reason = None
+        outcome.coalesce_name = None
+
+        coalesce_executor = Mock()
+        coalesce_executor.flush_pending.return_value = [outcome]
+
+        counters = _make_counters()
+        pending = _make_pending()
+
+        with pytest.raises(OrchestrationInvariantError, match="coalesce_name is None"):
+            flush_coalesce_pending(
+                coalesce_executor=coalesce_executor,
+                coalesce_node_map={},
+                processor=Mock(),
+                config_sinks={"output": Mock()},
+                ctx=Mock(),
+                counters=counters,
+                pending_tokens=pending,
+            )

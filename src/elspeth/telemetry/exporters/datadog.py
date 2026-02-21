@@ -10,7 +10,7 @@ Datadog spans that are automatically batched and exported to the Datadog agent.
 
 from __future__ import annotations
 
-from dataclasses import asdict
+from collections.abc import Mapping
 from datetime import datetime
 from enum import Enum
 from typing import TYPE_CHECKING, Any
@@ -70,7 +70,7 @@ class DatadogExporter:
         """Exporter name for configuration reference."""
         return self._name
 
-    def configure(self, config: dict[str, Any]) -> None:
+    def configure(self, config: Mapping[str, Any]) -> None:
         """Configure the exporter with settings from pipeline configuration.
 
         Args:
@@ -281,7 +281,7 @@ class DatadogExporter:
             span: The Datadog span to add tags to
             event: The telemetry event with fields to convert
         """
-        data = asdict(event)
+        data = event.to_dict()
 
         for key, value in data.items():
             if value is None:

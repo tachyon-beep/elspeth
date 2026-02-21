@@ -271,6 +271,28 @@ class TestOpenRouterLLMTransformInit:
         with pytest.raises(NotImplementedError, match="row-level pipelining"):
             transform.process(make_pipeline_row({"text": "hello"}), ctx)
 
+    def test_declared_output_fields_populated(self) -> None:
+        """Regression: OpenRouterLLMTransform was previously unprotected from field collisions.
+
+        Before centralized collision enforcement, OpenRouterLLMTransform had NO
+        collision check. This test verifies declared_output_fields is populated
+        so TransformExecutor can enforce collision detection.
+        """
+        transform = OpenRouterLLMTransform(
+            {
+                "api_key": "sk-test-key",
+                "model": "anthropic/claude-3-opus",
+                "template": "{{ row.text }}",
+                "schema": DYNAMIC_SCHEMA,
+                "required_input_fields": [],
+            }
+        )
+
+        assert isinstance(transform.declared_output_fields, frozenset)
+        assert len(transform.declared_output_fields) > 0
+        assert "llm_response" in transform.declared_output_fields
+        assert "llm_response_model" in transform.declared_output_fields
+
 
 class TestOpenRouterLLMTransformPipelining:
     """Tests for OpenRouterLLMTransform with row-level pipelining.
@@ -1731,3 +1753,168 @@ class TestOpenRouterConcurrency:
         transform.close()
 
         assert transform._recorder is None
+
+
+class TestOpenRouterNanRejection:
+    """Regression: OpenRouter response parsing must reject NaN/Infinity.
+
+    response.json() accepts NaN/Infinity by default. Using json.loads
+    with parse_constant rejects them. Usage values must also be validated
+    for finiteness (overflow literals like 1e309 produce float('inf')).
+    """
+
+    @pytest.fixture
+    def mock_recorder(self) -> Mock:
+        recorder = Mock()
+        recorder.record_call = Mock()
+        return recorder
+
+    @pytest.fixture
+    def collector(self) -> CollectorOutputPort:
+        return CollectorOutputPort()
+
+    def test_nan_in_response_body_returns_error(self, mock_recorder: Mock, collector: CollectorOutputPort, chaosllm_server) -> None:
+        """NaN token in API response body is rejected at parse boundary."""
+        nan_body = '{"choices": [{"message": {"content": "ok"}}], "usage": {"prompt_tokens": NaN}, "model": "test"}'
+        response = _create_mock_response(chaosllm_server, raw_body=nan_body, status_code=200, headers={"content-type": "application/json"})
+
+        transform = OpenRouterLLMTransform(
+            {
+                "api_key": "sk-test-key",
+                "model": "openai/gpt-4",
+                "template": "{{ row.text }}",
+                "schema": DYNAMIC_SCHEMA,
+                "required_input_fields": [],
+            }
+        )
+        init_ctx = PluginContext(run_id="test", config={}, landscape=mock_recorder)
+        transform.on_start(init_ctx)
+        transform.connect_output(collector, max_pending=10)
+
+        token = make_token("row-1")
+        ctx = PluginContext(
+            run_id="test",
+            config={},
+            landscape=mock_recorder,
+            state_id="test-state",
+            token=token,
+        )
+
+        try:
+            with mock_httpx_client(chaosllm_server, response=response):
+                transform.accept(make_pipeline_row({"text": "hello"}), ctx)
+                transform.flush_batch_processing(timeout=10.0)
+
+            assert len(collector.results) == 1
+            _, result, _ = collector.results[0]
+            assert result.status == "error"
+            assert result.reason is not None
+            assert result.reason["reason"] == "invalid_json_response"
+        finally:
+            transform.close()
+
+    def test_non_finite_usage_value_returns_error(self, mock_recorder: Mock, collector: CollectorOutputPort, chaosllm_server) -> None:
+        """Usage field with overflow float (inf from 1e309) is rejected."""
+        inf_body = '{"choices": [{"message": {"content": "ok"}}], "usage": {"prompt_tokens": 1e309}, "model": "test"}'
+        response = _create_mock_response(chaosllm_server, raw_body=inf_body, status_code=200, headers={"content-type": "application/json"})
+
+        transform = OpenRouterLLMTransform(
+            {
+                "api_key": "sk-test-key",
+                "model": "openai/gpt-4",
+                "template": "{{ row.text }}",
+                "schema": DYNAMIC_SCHEMA,
+                "required_input_fields": [],
+            }
+        )
+        init_ctx = PluginContext(run_id="test", config={}, landscape=mock_recorder)
+        transform.on_start(init_ctx)
+        transform.connect_output(collector, max_pending=10)
+
+        token = make_token("row-1")
+        ctx = PluginContext(
+            run_id="test",
+            config={},
+            landscape=mock_recorder,
+            state_id="test-state",
+            token=token,
+        )
+
+        try:
+            with mock_httpx_client(chaosllm_server, response=response):
+                transform.accept(make_pipeline_row({"text": "hello"}), ctx)
+                transform.flush_batch_processing(timeout=10.0)
+
+            assert len(collector.results) == 1
+            _, result, _ = collector.results[0]
+            assert result.status == "error"
+            assert result.reason is not None
+            assert result.reason["reason"] == "non_finite_usage"
+        finally:
+            transform.close()
+
+
+class TestOpenRouterMalformedUtf8:
+    """Regression: Invalid UTF-8 in API response must fail, not silently mutate.
+
+    Parsing via response.text uses lossy decoding (replacement characters),
+    which can let corrupted external data pass as valid JSON instead of
+    failing at the boundary. Parsing from response.content (raw bytes)
+    ensures decode errors surface as invalid_json_response.
+    """
+
+    @pytest.fixture
+    def mock_recorder(self) -> Mock:
+        recorder = Mock()
+        recorder.record_call = Mock()
+        return recorder
+
+    @pytest.fixture
+    def collector(self) -> CollectorOutputPort:
+        return CollectorOutputPort()
+
+    def test_invalid_utf8_response_returns_error(self, mock_recorder: Mock, collector: CollectorOutputPort, chaosllm_server) -> None:
+        """Response with invalid UTF-8 bytes must be rejected, not silently decoded."""
+        # Valid JSON prefix with invalid UTF-8 continuation byte embedded
+        invalid_utf8 = b'{"choices": [{"message": {"content": "hello \x80\x81 world"}}]}'
+        response = _create_mock_response(
+            chaosllm_server,
+            raw_body=invalid_utf8,
+            status_code=200,
+            headers={"content-type": "application/json"},
+        )
+
+        transform = OpenRouterLLMTransform(
+            {
+                "api_key": "sk-test-key",
+                "model": "openai/gpt-4",
+                "template": "{{ row.text }}",
+                "schema": DYNAMIC_SCHEMA,
+                "required_input_fields": [],
+            }
+        )
+        init_ctx = PluginContext(run_id="test", config={}, landscape=mock_recorder)
+        transform.on_start(init_ctx)
+        transform.connect_output(collector, max_pending=10)
+
+        token = make_token("row-1")
+        ctx = PluginContext(
+            run_id="test",
+            config={},
+            landscape=mock_recorder,
+            state_id="test-state",
+            token=token,
+        )
+
+        try:
+            with mock_httpx_client(chaosllm_server, response=response):
+                transform.accept(make_pipeline_row({"text": "hello"}), ctx)
+                transform.flush_batch_processing(timeout=10.0)
+
+            assert len(collector.results) == 1
+            _, result, _ = collector.results[0]
+            assert result.status == "error"
+            assert result.reason is not None
+            assert result.reason["reason"] == "invalid_json_response"
+        finally:
+            transform.close()

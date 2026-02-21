@@ -1026,6 +1026,20 @@ class TestSchemaContractAnyType:
         violations = contract.validate({"data": None})
         assert violations == []
 
+    def test_validate_object_type_accepts_custom_class(self) -> None:
+        """Field with python_type=object accepts custom class values."""
+
+        class Custom:
+            pass
+
+        contract = SchemaContract(
+            mode="FIXED",
+            fields=(make_field("data", object, original_name="Data", required=True, source="declared"),),
+            locked=True,
+        )
+        violations = contract.validate({"data": Custom()})
+        assert violations == []
+
     def test_validate_any_type_still_requires_presence(self) -> None:
         """Required 'any' field still must be present."""
         from elspeth.contracts.errors import MissingFieldViolation
@@ -1101,3 +1115,96 @@ class TestSchemaContractAnyType:
         assert len(violations) == 1
         assert isinstance(violations[0], TypeMismatchViolation)
         assert violations[0].normalized_name == "id"
+
+
+# --- PipelineRow Tests ---
+
+
+class TestPipelineRowInit:
+    """Tests for PipelineRow constructor enforcement.
+
+    Regression tests for P1 bug: PipelineRow.__init__ silently coerced
+    non-dict input via dict(), masking Tier-1 corruption.
+    """
+
+    def test_dict_input_accepted(self) -> None:
+        """PipelineRow accepts plain dict input."""
+        from elspeth.contracts.schema_contract import PipelineRow
+
+        contract = SchemaContract(
+            mode="FLEXIBLE",
+            fields=(make_field("a", int, original_name="a", required=True, source="declared"),),
+            locked=True,
+        )
+        row = PipelineRow({"a": 1}, contract)
+        assert row["a"] == 1
+
+    def test_list_of_tuples_rejected(self) -> None:
+        """PipelineRow rejects list of tuples (Tier 1 enforcement).
+
+        dict([("a", 1)]) succeeds silently, masking data corruption.
+        """
+        from elspeth.contracts.schema_contract import PipelineRow
+
+        contract = SchemaContract(
+            mode="FLEXIBLE",
+            fields=(make_field("a", int, original_name="a", required=True, source="declared"),),
+            locked=True,
+        )
+        with pytest.raises(TypeError, match="PipelineRow requires exactly dict"):
+            PipelineRow([("a", 1)], contract)  # type: ignore[arg-type]
+
+    def test_ordered_dict_rejected(self) -> None:
+        """PipelineRow rejects OrderedDict (only exact dict allowed)."""
+        from collections import OrderedDict
+
+        from elspeth.contracts.schema_contract import PipelineRow
+
+        contract = SchemaContract(
+            mode="FLEXIBLE",
+            fields=(make_field("a", int, original_name="a", required=True, source="declared"),),
+            locked=True,
+        )
+        with pytest.raises(TypeError, match="PipelineRow requires exactly dict"):
+            PipelineRow(OrderedDict(a=1), contract)  # type: ignore[arg-type]
+
+    def test_defaultdict_rejected(self) -> None:
+        """PipelineRow rejects defaultdict (only exact dict allowed)."""
+        from collections import defaultdict
+
+        from elspeth.contracts.schema_contract import PipelineRow
+
+        contract = SchemaContract(
+            mode="FLEXIBLE",
+            fields=(make_field("a", int, original_name="a", required=True, source="declared"),),
+            locked=True,
+        )
+        dd = defaultdict(int, a=1)
+        with pytest.raises(TypeError, match="PipelineRow requires exactly dict"):
+            PipelineRow(dd, contract)  # type: ignore[arg-type]
+
+    def test_input_dict_not_mutated(self) -> None:
+        """PipelineRow copies input dict, so mutations don't affect internal state."""
+        from elspeth.contracts.schema_contract import PipelineRow
+
+        contract = SchemaContract(
+            mode="FLEXIBLE",
+            fields=(make_field("a", int, original_name="a", required=True, source="declared"),),
+            locked=True,
+        )
+        original = {"a": 1}
+        row = PipelineRow(original, contract)
+        original["a"] = 999
+        assert row["a"] == 1  # Internal state unaffected
+
+    def test_error_message_includes_actual_type(self) -> None:
+        """TypeError message includes the actual type name for debugging."""
+        from elspeth.contracts.schema_contract import PipelineRow
+
+        contract = SchemaContract(
+            mode="FLEXIBLE",
+            fields=(),
+            locked=True,
+        )
+        with pytest.raises(TypeError, match="list"):
+            PipelineRow([], contract)  # type: ignore[arg-type]

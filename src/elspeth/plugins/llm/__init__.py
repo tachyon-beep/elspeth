@@ -35,6 +35,16 @@ These fields exist for audit trail reconstruction (explain() queries)
 and may change between versions without notice.
 """
 
+from __future__ import annotations
+
+from typing import TYPE_CHECKING
+
+from elspeth.contracts.token_usage import TokenUsage
+
+if TYPE_CHECKING:
+    from elspeth.contracts import PluginSchema
+    from elspeth.contracts.schema import SchemaConfig
+
 # Metadata field suffixes for contract-stable fields (downstream can depend on these)
 LLM_GUARANTEED_SUFFIXES: tuple[str, ...] = (
     "",  # The response content field itself
@@ -79,6 +89,11 @@ def get_llm_guaranteed_fields(response_field: str) -> tuple[str, ...]:
     """
     if not response_field or not response_field.strip():
         raise ValueError("response_field cannot be empty or whitespace-only")
+    if not response_field.isidentifier():
+        raise ValueError(
+            f"response_field '{response_field}' is not a valid Python identifier. "
+            f"Use only letters, digits, and underscores, starting with a letter or underscore."
+        )
     return tuple(f"{response_field}{suffix}" for suffix in LLM_GUARANTEED_SUFFIXES)
 
 
@@ -100,6 +115,11 @@ def get_llm_audit_fields(response_field: str) -> tuple[str, ...]:
     """
     if not response_field or not response_field.strip():
         raise ValueError("response_field cannot be empty or whitespace-only")
+    if not response_field.isidentifier():
+        raise ValueError(
+            f"response_field '{response_field}' is not a valid Python identifier. "
+            f"Use only letters, digits, and underscores, starting with a letter or underscore."
+        )
     return tuple(f"{response_field}{suffix}" for suffix in LLM_AUDIT_SUFFIXES)
 
 
@@ -125,14 +145,122 @@ def get_multi_query_guaranteed_fields(output_prefix: str) -> tuple[str, ...]:
     """
     if not output_prefix or not output_prefix.strip():
         raise ValueError("output_prefix cannot be empty or whitespace-only")
+    if not output_prefix.isidentifier():
+        raise ValueError(
+            f"output_prefix '{output_prefix}' is not a valid Python identifier. "
+            f"Use only letters, digits, and underscores, starting with a letter or underscore."
+        )
     return tuple(f"{output_prefix}{suffix}" for suffix in MULTI_QUERY_GUARANTEED_SUFFIXES)
+
+
+def populate_llm_metadata_fields(
+    output: dict[str, object],
+    field_prefix: str,
+    *,
+    usage: TokenUsage | None,
+    model: str,
+    template_hash: str,
+    variables_hash: str,
+    template_source: str | None,
+    lookup_hash: str | None,
+    lookup_source: str | None,
+    system_prompt_source: str | None,
+) -> None:
+    """Populate standard LLM metadata fields into an output row dict.
+
+    The caller sets the base content field separately
+    (e.g., ``output[field_prefix] = response.content``).
+    This function adds the 8 metadata fields that ALL LLM transforms
+    must include for audit completeness.
+
+    Args:
+        output: Mutable row dict to populate.
+        field_prefix: Response field name (e.g., "llm_response").
+        usage: Token usage (``TokenUsage`` or ``None``).
+        model: Model identifier that actually responded.
+        template_hash: SHA-256 of prompt template.
+        variables_hash: SHA-256 of rendered template variables.
+        template_source: Config file path of template (None if inline).
+        lookup_hash: SHA-256 of lookup data (None if no lookup).
+        lookup_source: Config file path of lookup data (None if no lookup).
+        system_prompt_source: Config file path of system prompt (None if inline).
+    """
+    # Guaranteed metadata (contract-stable)
+    # Serialize to dict for row storage — downstream readers still get plain dicts
+    output[f"{field_prefix}_usage"] = usage.to_dict() if usage is not None else None
+    output[f"{field_prefix}_model"] = model
+    # Audit metadata (provenance)
+    output[f"{field_prefix}_template_hash"] = template_hash
+    output[f"{field_prefix}_variables_hash"] = variables_hash
+    output[f"{field_prefix}_template_source"] = template_source
+    output[f"{field_prefix}_lookup_hash"] = lookup_hash
+    output[f"{field_prefix}_lookup_source"] = lookup_source
+    output[f"{field_prefix}_system_prompt_source"] = system_prompt_source
+
+
+def _build_augmented_output_schema(
+    base_schema_config: SchemaConfig,
+    response_field: str,
+    schema_name: str,
+) -> type[PluginSchema]:
+    """Build an output schema that includes LLM-added fields.
+
+    LLM transforms add response, usage, model, and audit fields to output rows.
+    The output schema must include these fields for DAG type validation to pass
+    when downstream consumers have explicit schemas requiring LLM output fields.
+
+    For observed schemas this returns the same dynamic schema (no fields to add).
+    For explicit schemas (fixed/flexible) this augments the base fields with
+    optional LLM output fields typed as ``object`` (Any).
+
+    Args:
+        base_schema_config: The base schema config from plugin options.
+        response_field: Base field name (e.g., "llm_response").
+        schema_name: Name for the generated Pydantic model class.
+
+    Returns:
+        A PluginSchema subclass with input fields plus LLM output fields.
+    """
+    from elspeth.plugins.schema_factory import create_schema_from_config
+
+    if base_schema_config.is_observed:
+        # Observed schemas accept anything — no augmentation needed
+        return create_schema_from_config(base_schema_config, schema_name, allow_coercion=False)
+
+    # For explicit schemas, build an augmented SchemaConfig that includes
+    # LLM output fields as optional fields.
+    from elspeth.contracts.schema import FieldDefinition, SchemaConfig
+
+    base_fields = base_schema_config.fields or ()
+    existing_names = {f.name for f in base_fields}
+
+    # Add LLM fields (guaranteed + audit) as optional 'any' type fields
+    llm_field_names = [
+        *get_llm_guaranteed_fields(response_field),
+        *get_llm_audit_fields(response_field),
+    ]
+    extra_fields = tuple(
+        FieldDefinition(name=name, field_type="any", required=False) for name in llm_field_names if name not in existing_names
+    )
+
+    augmented_config = SchemaConfig(
+        # Use flexible mode so extra fields from upstream are accepted
+        mode="flexible",
+        fields=(*base_fields, *extra_fields),
+        guaranteed_fields=base_schema_config.guaranteed_fields,
+        required_fields=base_schema_config.required_fields,
+        audit_fields=base_schema_config.audit_fields,
+    )
+    return create_schema_from_config(augmented_config, schema_name, allow_coercion=False)
 
 
 __all__ = [
     "LLM_AUDIT_SUFFIXES",
     "LLM_GUARANTEED_SUFFIXES",
     "MULTI_QUERY_GUARANTEED_SUFFIXES",
+    "_build_augmented_output_schema",
     "get_llm_audit_fields",
     "get_llm_guaranteed_fields",
     "get_multi_query_guaranteed_fields",
+    "populate_llm_metadata_fields",
 ]

@@ -238,11 +238,12 @@ class TestEdgeCases:
         result = normalize_type_for_contract(np.str_("hello"))
         assert result is str
 
-    def test_numpy_bytes_returns_str(self) -> None:
-        """numpy.bytes_ normalizes to str."""
+    def test_numpy_bytes_raises_unsupported_type(self) -> None:
+        """numpy.bytes_ is not silently coerced to str — raises TypeError."""
         from elspeth.contracts.type_normalization import normalize_type_for_contract
 
-        assert normalize_type_for_contract(np.bytes_(b"hello")) is str
+        with pytest.raises(TypeError, match="Unsupported type 'bytes_'"):
+            normalize_type_for_contract(np.bytes_(b"hello"))
 
     def test_zero_float_is_valid(self) -> None:
         """0.0 is a valid float (not NaN/Infinity)."""

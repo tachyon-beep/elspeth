@@ -117,9 +117,10 @@ class PassthroughTransform:
     node_id: str | None = None
     is_batch_aware = False
     creates_tokens = False
-    transforms_adds_fields = False
-    on_error: str | None = None
+    on_error: str | None = "discard"
     on_success: str | None = "output"
+    validate_input: bool = False
+    declared_output_fields: frozenset[str] = frozenset()
 
     def process(self, row: Any, ctx: Any) -> TransformResult:
         if isinstance(row, PipelineRow):

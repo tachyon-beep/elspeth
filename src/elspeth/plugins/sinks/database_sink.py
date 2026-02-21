@@ -8,6 +8,7 @@ output correct types. Wrong types = upstream bug = crash.
 """
 
 import hashlib
+import json
 import os
 import time
 from typing import TYPE_CHECKING, Any, Literal
@@ -104,7 +105,7 @@ class DatabaseSink(BaseSink):
         self._sanitized_url = SanitizedDatabaseUrl.from_raw_url(cfg.url, fail_if_no_key=fail_if_no_key)  # For audit trail
         self._table_name = cfg.table
         self._if_exists = cfg.if_exists
-        self._validate_input = cfg.validate_input
+        self.validate_input = cfg.validate_input
 
         # Store schema config for audit trail
         # DataPluginConfig ensures schema_config is not None
@@ -128,10 +129,55 @@ class DatabaseSink(BaseSink):
         # Set input_schema for protocol compliance
         self.input_schema = self._schema_class
 
+        # Required-field enforcement (centralized in SinkExecutor)
+        self.declared_required_fields = self._schema_config.get_effective_required_fields()
+
+        # Track which fields have 'any' type so we can serialize dict/list values
+        # to JSON strings before INSERT (SQL TEXT columns can't store Python dicts).
+        self._any_typed_fields: frozenset[str] = self._compute_any_typed_fields()
+
         self._engine: Engine | None = None
         self._table: Table | None = None
         self._metadata: MetaData | None = None
         self._table_replaced: bool = False  # Track if we've done the replace for this instance
+
+    def _compute_any_typed_fields(self) -> frozenset[str]:
+        """Identify fields with 'any' type from the schema config.
+
+        These fields may contain dict/list values that must be serialized
+        to JSON strings before INSERT into TEXT columns.
+        """
+        if self._schema_config.is_observed or not self._schema_config.fields:
+            return frozenset()
+        return frozenset(f.name for f in self._schema_config.fields if f.field_type == "any")
+
+    def _serialize_any_typed_fields(self, rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        """Serialize dict/list values in 'any'-typed fields to JSON strings.
+
+        SQL TEXT columns cannot store Python dicts or lists. This method
+        converts non-scalar values to their JSON string representation
+        before INSERT, ensuring valid 'any' payloads (e.g., {"k": 1})
+        are stored as '{"k": 1}' rather than crashing with a driver error.
+
+        For observed-mode schemas, ALL fields are checked since any field
+        could contain a complex value when the schema is inferred.
+
+        Scalar values (str, int, float, bool, None) are left unchanged.
+        """
+        if not self._any_typed_fields and not self._schema_config.is_observed:
+            return rows
+
+        result = []
+        for row in rows:
+            new_row = dict(row)
+            fields_to_check = self._any_typed_fields if self._any_typed_fields else set(row.keys())
+            for field in fields_to_check:
+                if field in new_row:
+                    value = new_row[field]
+                    if isinstance(value, (dict, list)):
+                        new_row[field] = json.dumps(value)
+            result.append(new_row)
+        return result
 
     def _ensure_engine_and_metadata_initialized(self) -> None:
         """Initialize engine/metadata pair together.
@@ -208,7 +254,7 @@ class DatabaseSink(BaseSink):
 
         return OutputValidationResult.success(target_fields=existing)
 
-    def _ensure_table(self, row: dict[str, Any]) -> None:
+    def _ensure_table(self, row: dict[str, Any], ctx: PluginContext) -> None:
         """Create table, handling if_exists behavior.
 
         if_exists behavior (follows pandas to_sql semantics):
@@ -220,6 +266,10 @@ class DatabaseSink(BaseSink):
         (including optional ones) are present in the table.
 
         When schema is dynamic, columns are inferred from the first row's keys.
+
+        DDL operations (DROP TABLE, CREATE TABLE) are instrumented via
+        ctx.record_call for audit trail completeness.
+        See P2-2026-02-14-ddl-calls-bypass-ctx-record-call.
         """
         self._ensure_engine_and_metadata_initialized()
         if self._engine is None:
@@ -228,7 +278,7 @@ class DatabaseSink(BaseSink):
         if self._table is None:
             # Handle if_exists="replace": drop table on first write
             if self._if_exists == "replace" and not self._table_replaced:
-                self._drop_table_if_exists()
+                self._drop_table_if_exists(ctx)
                 self._table_replaced = True
 
             columns = self._create_columns_from_schema_or_row(row)
@@ -240,14 +290,49 @@ class DatabaseSink(BaseSink):
                 self._metadata,
                 *columns,
             )
-            self._metadata.create_all(self._engine, checkfirst=True)
 
-    def _drop_table_if_exists(self) -> None:
+            # Instrument CREATE TABLE DDL for audit trail
+            start_time = time.perf_counter()
+            try:
+                self._metadata.create_all(self._engine, checkfirst=True)
+                latency_ms = (time.perf_counter() - start_time) * 1000
+                ctx.record_call(
+                    call_type=CallType.SQL,
+                    status=CallStatus.SUCCESS,
+                    request_data={
+                        "operation": "CREATE_TABLE",
+                        "table": self._table_name,
+                        "if_not_exists": True,
+                    },
+                    response_data={"table_created": self._table_name},
+                    latency_ms=latency_ms,
+                    provider="sqlalchemy",
+                )
+            except Exception as e:
+                latency_ms = (time.perf_counter() - start_time) * 1000
+                ctx.record_call(
+                    call_type=CallType.SQL,
+                    status=CallStatus.ERROR,
+                    request_data={
+                        "operation": "CREATE_TABLE",
+                        "table": self._table_name,
+                        "if_not_exists": True,
+                    },
+                    error={"type": type(e).__name__, "message": str(e)},
+                    latency_ms=latency_ms,
+                    provider="sqlalchemy",
+                )
+                raise
+
+    def _drop_table_if_exists(self, ctx: PluginContext) -> None:
         """Drop the table if it exists (for replace mode).
 
         Uses SQLAlchemy's Table.drop() for portable, dialect-safe drops.
         This handles identifier quoting correctly across all databases
         (SQLite, PostgreSQL, MySQL, etc.).
+
+        DDL is instrumented via ctx.record_call for audit trail completeness.
+        See P2-2026-02-14-ddl-calls-bypass-ctx-record-call.
         """
         if self._engine is None:
             return
@@ -260,7 +345,38 @@ class DatabaseSink(BaseSink):
             # This generates correct identifier quoting for any database
             temp_metadata = MetaData()
             table = Table(self._table_name, temp_metadata)
-            table.drop(self._engine)
+
+            start_time = time.perf_counter()
+            try:
+                table.drop(self._engine)
+                latency_ms = (time.perf_counter() - start_time) * 1000
+                ctx.record_call(
+                    call_type=CallType.SQL,
+                    status=CallStatus.SUCCESS,
+                    request_data={
+                        "operation": "DROP_TABLE",
+                        "table": self._table_name,
+                        "mode": self._if_exists,
+                    },
+                    response_data={"table_dropped": self._table_name},
+                    latency_ms=latency_ms,
+                    provider="sqlalchemy",
+                )
+            except Exception as e:
+                latency_ms = (time.perf_counter() - start_time) * 1000
+                ctx.record_call(
+                    call_type=CallType.SQL,
+                    status=CallStatus.ERROR,
+                    request_data={
+                        "operation": "DROP_TABLE",
+                        "table": self._table_name,
+                        "mode": self._if_exists,
+                    },
+                    error={"type": type(e).__name__, "message": str(e)},
+                    latency_ms=latency_ms,
+                    provider="sqlalchemy",
+                )
+                raise
 
     def _create_columns_from_schema_or_row(self, row: dict[str, Any]) -> list[Column[Any]]:
         """Create SQLAlchemy columns from schema or row keys.
@@ -281,9 +397,9 @@ class DatabaseSink(BaseSink):
 
             for field_def in self._schema_config.fields:
                 sql_type = SCHEMA_TYPE_TO_SQLALCHEMY[field_def.field_type]
-                # Note: nullable=True for optional fields, but SQLAlchemy Column
-                # defaults to nullable=True anyway, so we don't need to set it
-                columns.append(Column(field_def.name, sql_type))
+                # Enforce nullable based on required status: required fields
+                # are NOT NULL, optional fields are nullable.
+                columns.append(Column(field_def.name, sql_type, nullable=not field_def.required))
                 declared_names.add(field_def.name)
 
             if self._schema_config.mode == "flexible":
@@ -334,14 +450,25 @@ class DatabaseSink(BaseSink):
                 row_count=0,
             )
 
-        # Optional input validation - crash on failure (upstream bug!)
-        if self._validate_input and not self._schema_config.is_observed:
-            for row in rows:
-                # Raises ValidationError on failure - this is intentional
-                self._schema_class.model_validate(row)
-
         # Ensure table exists (infer from first row)
-        self._ensure_table(rows[0])
+        self._ensure_table(rows[0], ctx)
+
+        # Validate rows against table columns before INSERT.
+        # SQLAlchemy silently drops keys not in the table schema, which
+        # hides upstream bugs. In fixed mode, extra fields are rejected.
+        # In all modes after table creation, unknown columns are rejected.
+        if self._table is not None:
+            known_columns = {c.name for c in self._table.columns}
+            for i, row in enumerate(rows):
+                extra = sorted(set(row) - known_columns)
+                if extra:
+                    raise ValueError(
+                        f"DatabaseSink row {i} has fields not in table schema: {extra}. This indicates an upstream transform/schema bug."
+                    )
+
+        # Serialize dict/list values in 'any'-typed fields to JSON strings
+        # before INSERT. SQL TEXT columns cannot store Python dicts/lists.
+        insert_rows = self._serialize_any_typed_fields(rows)
 
         # Insert all rows in batch with call recording for audit trail
         # (ctx.operation_id is set by executor)
@@ -349,7 +476,7 @@ class DatabaseSink(BaseSink):
         try:
             if self._engine is not None and self._table is not None:
                 with self._engine.begin() as conn:
-                    conn.execute(insert(self._table), rows)
+                    conn.execute(insert(self._table), insert_rows)
             latency_ms = (time.perf_counter() - start_time) * 1000
 
             # Record successful INSERT in audit trail

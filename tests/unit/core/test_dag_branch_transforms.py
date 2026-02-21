@@ -16,8 +16,9 @@ from __future__ import annotations
 import pytest
 
 from elspeth.contracts.enums import NodeType
-from elspeth.contracts.types import NodeID
+from elspeth.contracts.types import BranchName, CoalesceName, NodeID
 from elspeth.core.dag import ExecutionGraph
+from elspeth.core.dag.models import BranchInfo
 from tests.fixtures.factories import make_graph_fork
 
 # =============================================================================
@@ -298,7 +299,6 @@ class TestGetBranchFirstNodes:
         Transform branches: gate --[MOVE, branch_name]--> T1 --[MOVE, continue]--> ... --> coalesce
         """
         from elspeth.contracts import RoutingMode
-        from elspeth.contracts.types import BranchName, CoalesceName
 
         graph = ExecutionGraph()
         gate = "gate-node"
@@ -328,15 +328,20 @@ class TestGetBranchFirstNodes:
         graph.add_edge(coalesce, "sink", label="continue")
 
         # Set metadata required by get_branch_first_nodes()
-        graph.set_branch_to_coalesce({BranchName(b): CoalesceName("coalesce-node") for b in branches})
+        graph.set_branch_info(
+            {
+                BranchName(b): BranchInfo(
+                    coalesce_name=CoalesceName("coalesce-node"),
+                    gate_node_id=NodeID(gate),
+                )
+                for b in branches
+            }
+        )
         graph.set_coalesce_id_map(
             {
                 CoalesceName("coalesce-node"): NodeID("coalesce-node"),
             }
         )
-
-        # Map each branch to its producing gate node ID
-        graph.set_branch_gate_map({BranchName(b): NodeID(gate) for b in branches})
 
         return graph
 
@@ -407,7 +412,6 @@ class TestGetBranchFirstNodes:
         Bug behavior: returns g2 (matches label b1 on the g1→g2 edge)
         """
         from elspeth.contracts import RoutingMode
-        from elspeth.contracts.types import BranchName, CoalesceName
 
         graph = ExecutionGraph()
         gate = "fork-gate"
@@ -430,10 +434,15 @@ class TestGetBranchFirstNodes:
         graph.add_edge(coalesce, "sink", label="continue")
 
         # Metadata
-        graph.set_branch_to_coalesce({BranchName("b1"): CoalesceName("coalesce-node")})
+        graph.set_branch_info(
+            {
+                BranchName("b1"): BranchInfo(
+                    coalesce_name=CoalesceName("coalesce-node"),
+                    gate_node_id=NodeID("fork-gate"),
+                ),
+            }
+        )
         graph.set_coalesce_id_map({CoalesceName("coalesce-node"): NodeID("coalesce-node")})
-        # Map branch to its producing gate node ID
-        graph.set_branch_gate_map({BranchName("b1"): NodeID("fork-gate")})
 
         result = graph.get_branch_first_nodes()
 
@@ -451,7 +460,6 @@ class TestGetBranchFirstNodes:
                source → gate_b → [t_b] → coalesce
         """
         from elspeth.contracts import RoutingMode
-        from elspeth.contracts.types import BranchName, CoalesceName
 
         graph = ExecutionGraph()
 
@@ -477,19 +485,19 @@ class TestGetBranchFirstNodes:
         graph.add_edge("coalesce", "sink", label="continue")
 
         # Metadata: both branches feed the same coalesce, from different gates
-        graph.set_branch_to_coalesce(
+        graph.set_branch_info(
             {
-                BranchName("path_a"): CoalesceName("coalesce"),
-                BranchName("path_b"): CoalesceName("coalesce"),
+                BranchName("path_a"): BranchInfo(
+                    coalesce_name=CoalesceName("coalesce"),
+                    gate_node_id=NodeID("gate_a"),
+                ),
+                BranchName("path_b"): BranchInfo(
+                    coalesce_name=CoalesceName("coalesce"),
+                    gate_node_id=NodeID("gate_b"),
+                ),
             }
         )
         graph.set_coalesce_id_map({CoalesceName("coalesce"): NodeID("coalesce")})
-        graph.set_branch_gate_map(
-            {
-                BranchName("path_a"): NodeID("gate_a"),
-                BranchName("path_b"): NodeID("gate_b"),
-            }
-        )
 
         result = graph.get_branch_first_nodes()
 

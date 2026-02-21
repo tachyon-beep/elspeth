@@ -7,6 +7,8 @@ Uses BatchTransformMixin for concurrent row processing with FIFO output ordering
 
 from __future__ import annotations
 
+import json
+import math
 from collections.abc import Callable
 from threading import Lock
 from typing import TYPE_CHECKING, Any
@@ -18,11 +20,12 @@ from elspeth.contracts import Determinism, TransformErrorReason, TransformResult
 from elspeth.contracts.plugin_context import PluginContext
 from elspeth.contracts.schema import SchemaConfig
 from elspeth.contracts.schema_contract import PipelineRow
+from elspeth.contracts.token_usage import TokenUsage
 from elspeth.plugins.base import BaseTransform
 from elspeth.plugins.batching import BatchTransformMixin, OutputPort
 from elspeth.plugins.clients.http import AuditedHTTPClient
 from elspeth.plugins.clients.llm import NetworkError, RateLimitError, ServerError
-from elspeth.plugins.llm import get_llm_audit_fields, get_llm_guaranteed_fields
+from elspeth.plugins.llm import get_llm_audit_fields, get_llm_guaranteed_fields, populate_llm_metadata_fields
 from elspeth.plugins.llm.base import LLMConfig
 from elspeth.plugins.llm.templates import PromptTemplate, TemplateError
 from elspeth.plugins.llm.tracing import (
@@ -31,6 +34,7 @@ from elspeth.plugins.llm.tracing import (
     parse_tracing_config,
     validate_tracing_config,
 )
+from elspeth.plugins.llm.validation import _reject_nonfinite_constant
 from elspeth.plugins.schema_factory import create_schema_from_config
 
 if TYPE_CHECKING:
@@ -124,6 +128,9 @@ class OpenRouterLLMTransform(BaseTransform, BatchTransformMixin):
 
         # Parse OpenRouter-specific config (includes all LLMConfig fields)
         cfg = OpenRouterConfig.from_dict(config)
+
+        # Declare output fields for centralized collision detection in TransformExecutor.
+        self.declared_output_fields = frozenset([*get_llm_guaranteed_fields(cfg.response_field), *get_llm_audit_fields(cfg.response_field)])
 
         # Pre-build auth headers — avoids storing the raw API key as a named attribute
         self._request_headers = {
@@ -230,6 +237,7 @@ class OpenRouterLLMTransform(BaseTransform, BatchTransformMixin):
         recorder, run_id, telemetry callback, and rate limiter for use in worker threads.
         Also initializes Tier 2 tracing if configured.
         """
+        super().on_start(ctx)
         self._recorder = ctx.landscape
         self._run_id = ctx.run_id
         self._telemetry_emit = ctx.telemetry_emit
@@ -323,7 +331,7 @@ class OpenRouterLLMTransform(BaseTransform, BatchTransformMixin):
         prompt: str,
         response_content: str,
         model: str,
-        usage: dict[str, int] | None,
+        usage: TokenUsage | None,
         latency_ms: float | None,
     ) -> None:
         """Record LLM call to Langfuse using v3 nested context managers.
@@ -337,7 +345,7 @@ class OpenRouterLLMTransform(BaseTransform, BatchTransformMixin):
             prompt: The prompt sent to the LLM
             response_content: The response received
             model: Model name
-            usage: Token usage dict with prompt_tokens/completion_tokens
+            usage: Token usage (``TokenUsage`` or ``None``)
             latency_ms: Call latency in milliseconds
         """
         if not self._tracing_active or self._langfuse_client is None:
@@ -361,15 +369,11 @@ class OpenRouterLLMTransform(BaseTransform, BatchTransformMixin):
             ):
                 update_kwargs: dict[str, Any] = {"output": response_content}
 
-                if usage:
-                    # Validate types at external boundary (Tier 3 data from LLM API)
-                    prompt_tokens = usage.get("prompt_tokens", 0)
-                    completion_tokens = usage.get("completion_tokens", 0)
-                    if isinstance(prompt_tokens, int) and isinstance(completion_tokens, int):
-                        update_kwargs["usage_details"] = {
-                            "input": prompt_tokens,
-                            "output": completion_tokens,
-                        }
+                if usage is not None and usage.is_known:
+                    update_kwargs["usage_details"] = {
+                        "input": usage.prompt_tokens,
+                        "output": usage.completion_tokens,
+                    }
 
                 if latency_ms is not None:
                     update_kwargs["metadata"] = {"latency_ms": latency_ms}
@@ -588,9 +592,9 @@ class OpenRouterLLMTransform(BaseTransform, BatchTransformMixin):
                 # Network errors (timeout, connection refused) are retryable
                 raise NetworkError(f"Network error: {e}") from e
 
-            # 5. Parse JSON response (EXTERNAL DATA - wrap)
+            # 5. Parse JSON response (EXTERNAL DATA - wrap, reject NaN/Infinity)
             try:
-                data = response.json()
+                data = json.loads(response.content, parse_constant=_reject_nonfinite_constant)
             except (ValueError, TypeError) as e:
                 error_reason_json: TransformErrorReason = {
                     "reason": "invalid_json_response",
@@ -631,8 +635,20 @@ class OpenRouterLLMTransform(BaseTransform, BatchTransformMixin):
                 )
 
             # OpenRouter can return {"usage": null} or omit usage entirely.
-            # Use `or {}` to handle both missing AND null cases.
-            usage = data.get("usage") or {}
+            # Tier 3 boundary: validate and coerce to TokenUsage immediately.
+            raw_usage = data.get("usage") or {}
+            if isinstance(raw_usage, dict):
+                for usage_key, usage_val in raw_usage.items():
+                    if isinstance(usage_val, float) and not math.isfinite(usage_val):
+                        return TransformResult.error(
+                            {
+                                "reason": "non_finite_usage",
+                                "field": usage_key,
+                                "value": str(usage_val),
+                            },
+                            retryable=False,
+                        )
+            usage = TokenUsage.from_dict(raw_usage)
 
             # Record in Langfuse using v3 nested context managers (after successful call)
             latency_ms = (time.monotonic() - start_time) * 1000
@@ -649,14 +665,18 @@ class OpenRouterLLMTransform(BaseTransform, BatchTransformMixin):
             # 7. Build output row (OUR CODE - let exceptions crash)
             output = row.to_dict()
             output[self._response_field] = content
-            output[f"{self._response_field}_usage"] = usage
-            output[f"{self._response_field}_template_hash"] = rendered.template_hash
-            output[f"{self._response_field}_variables_hash"] = rendered.variables_hash
-            output[f"{self._response_field}_template_source"] = rendered.template_source
-            output[f"{self._response_field}_lookup_hash"] = rendered.lookup_hash
-            output[f"{self._response_field}_lookup_source"] = rendered.lookup_source
-            output[f"{self._response_field}_system_prompt_source"] = self._system_prompt_source
-            output[f"{self._response_field}_model"] = data.get("model", self._model)
+            populate_llm_metadata_fields(
+                output,
+                self._response_field,
+                usage=usage,
+                model=data.get("model", self._model),
+                template_hash=rendered.template_hash,
+                variables_hash=rendered.variables_hash,
+                template_source=rendered.template_source,
+                lookup_hash=rendered.lookup_hash,
+                lookup_source=rendered.lookup_source,
+                system_prompt_source=self._system_prompt_source,
+            )
 
             # 8. Propagate contract (always present in PipelineRow)
             output_contract = propagate_contract(
@@ -687,8 +707,7 @@ class OpenRouterLLMTransform(BaseTransform, BatchTransformMixin):
         """
         with self._http_clients_lock:
             if state_id not in self._http_clients:
-                if self._recorder is None:
-                    raise RuntimeError("OpenRouter transform requires recorder. Ensure on_start was called.")
+                assert self._recorder is not None
                 self._http_clients[state_id] = AuditedHTTPClient(
                     recorder=self._recorder,
                     state_id=state_id,

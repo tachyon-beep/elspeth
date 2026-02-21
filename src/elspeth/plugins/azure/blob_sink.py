@@ -309,6 +309,9 @@ class AzureBlobSink(BaseSink):
         # Set input_schema for protocol compliance
         self.input_schema = self._schema_class
 
+        # Required-field enforcement (centralized in SinkExecutor)
+        self.declared_required_fields = self._schema_config.get_effective_required_fields()
+
         # Lazy-loaded clients
         self._container_client: ContainerClient | None = None
         # Buffer rows across write() calls so each upload represents full run output.
@@ -441,10 +444,28 @@ class AzureBlobSink(BaseSink):
         return data_fields, display_fields
 
     def _serialize_csv(self, rows: list[dict[str, Any]]) -> bytes:
-        """Serialize rows to CSV bytes."""
+        """Serialize rows to CSV bytes.
+
+        Validates that all rows conform to the established fieldnames BEFORE
+        any serialization occurs. This prevents partial serialization failures
+        that would leave the buffer in an inconsistent state.
+        """
         output = io.StringIO()
 
         data_fields, display_fields = self._get_field_names_and_display(rows)
+
+        # Preflight validation: reject extra fields before serialization.
+        # Without this, DictWriter raises mid-batch on extras, producing
+        # partial CSV content in the buffer.
+        if not self._schema_config.is_observed:
+            allowed = set(data_fields)
+            for i, row in enumerate(rows):
+                extra = sorted(set(row) - allowed)
+                if extra:
+                    raise ValueError(
+                        f"AzureBlobSink CSV row {i} has unexpected fields: {extra}. This indicates an upstream transform/schema bug."
+                    )
+
         writer = csv.DictWriter(
             output,
             fieldnames=data_fields,
@@ -569,13 +590,13 @@ class AzureBlobSink(BaseSink):
 
         # EXTERNAL SYSTEM: Azure Blob SDK calls - wrap with try/except
         # Record call for audit trail (ctx.operation_id is set by executor)
+        # Capture overwrite flag BEFORE the try block so it reflects the actual
+        # value used for the upload call, not the post-mutation state.
+        upload_overwrite = self._overwrite or self._has_uploaded
         start_time = time.perf_counter()
         try:
             container_client = self._get_container_client()
             blob_client = container_client.get_blob_client(rendered_path)
-            # Keep overwrite=False protection for first write against pre-existing
-            # blobs, then permit in-run rewrites to update cumulative content.
-            upload_overwrite = self._overwrite or self._has_uploaded
 
             # Upload with overwrite policy enforced atomically by Azure SDK.
             # When overwrite=False, upload_blob raises ResourceExistsError server-side,
@@ -625,7 +646,7 @@ class AzureBlobSink(BaseSink):
                     "operation": "upload_blob",
                     "container": self._container,
                     "blob_path": rendered_path,
-                    "overwrite": self._overwrite or self._has_uploaded,
+                    "overwrite": upload_overwrite,
                 },
                 error=error_data,
                 latency_ms=latency_ms,

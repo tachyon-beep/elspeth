@@ -274,7 +274,8 @@ class TestAfterCursorExecute:
 
         assert "landscape_journal_buffer" not in conn.info
 
-    def test_disabled_journal_skips(self, tmp_path: Path) -> None:
+    def test_disabled_journal_still_buffers_for_recovery(self, tmp_path: Path) -> None:
+        """When disabled, records still buffer so _append_records can attempt recovery."""
         journal = _make_journal(tmp_path)
         journal._disabled = True
         conn = _make_conn()
@@ -288,7 +289,8 @@ class TestAfterCursorExecute:
             executemany=False,
         )
 
-        assert "landscape_journal_buffer" not in conn.info
+        assert "landscape_journal_buffer" in conn.info
+        assert len(conn.info["landscape_journal_buffer"]) == 1
 
     def test_appends_to_existing_buffer(self, tmp_path: Path) -> None:
         journal = _make_journal(tmp_path)
@@ -356,7 +358,8 @@ class TestAfterCommit:
         journal_path = tmp_path / "journal.jsonl"
         assert not journal_path.exists()
 
-    def test_disabled_journal_skips(self, tmp_path: Path) -> None:
+    def test_disabled_journal_routes_through_append_records(self, tmp_path: Path) -> None:
+        """When disabled, _after_commit routes records through _append_records for recovery tracking."""
         journal = _make_journal(tmp_path)
         journal._disabled = True
         buffer = [{"timestamp": "t", "statement": "INSERT", "parameters": {}, "executemany": False}]
@@ -364,8 +367,10 @@ class TestAfterCommit:
 
         journal._after_commit(conn)
 
-        journal_path = tmp_path / "journal.jsonl"
-        assert not journal_path.exists()
+        # Records are counted as dropped (recovery attempts every 100 drops)
+        assert journal._total_dropped == 1
+        # Buffer is cleared after commit processes it
+        assert buffer == []
 
 
 class TestAfterRollback:

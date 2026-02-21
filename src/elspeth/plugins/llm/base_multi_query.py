@@ -9,6 +9,7 @@ and implement the abstract methods for their respective API protocols.
 
 from __future__ import annotations
 
+import math
 import time
 from abc import ABC, abstractmethod
 from collections.abc import Callable
@@ -16,9 +17,11 @@ from typing import TYPE_CHECKING, Any, cast
 
 from elspeth.contracts import Determinism, TransformResult, propagate_contract
 from elspeth.contracts.errors import QueryFailureDetail
+from elspeth.contracts.node_state_context import PoolExecutionContext
 from elspeth.contracts.plugin_context import PluginContext
 from elspeth.contracts.schema import SchemaConfig
 from elspeth.contracts.schema_contract import FieldContract, PipelineRow, SchemaContract
+from elspeth.contracts.token_usage import TokenUsage
 from elspeth.plugins.base import BaseTransform
 from elspeth.plugins.batching import BatchTransformMixin, OutputPort
 from elspeth.plugins.clients.llm import LLMClientError
@@ -58,7 +61,6 @@ class BaseMultiQueryTransform(BaseTransform, BatchTransformMixin, ABC):
     """
 
     creates_tokens = False  # Does not create new tokens (1 row in -> 1 row out)
-    transforms_adds_fields = True  # Multi-query adds output_prefix result fields per query spec
     determinism: Determinism = Determinism.NON_DETERMINISTIC
     plugin_version = "1.0.0"
 
@@ -110,6 +112,10 @@ class BaseMultiQueryTransform(BaseTransform, BatchTransformMixin, ABC):
 
         all_audit = {field for spec in self._query_specs for field in get_llm_audit_fields(spec.output_prefix)}
 
+        # Declare output fields for centralized collision detection in TransformExecutor.
+        # Includes output_mapping fields, guaranteed fields, AND audit fields per spec.
+        self.declared_output_fields = frozenset(all_guaranteed | all_audit)
+
         base_guaranteed = schema_config.guaranteed_fields or ()
         base_audit = schema_config.audit_fields or ()
 
@@ -121,14 +127,17 @@ class BaseMultiQueryTransform(BaseTransform, BatchTransformMixin, ABC):
             required_fields=schema_config.required_fields,
         )
 
-        # Create schema from config
-        schema = create_schema_from_config(
+        # Create input schema from original config, output schema from enriched config
+        self.input_schema = create_schema_from_config(
             schema_config,
-            f"{self.name}Schema",
+            f"{self.name}InputSchema",
             allow_coercion=False,
         )
-        self.input_schema = schema
-        self.output_schema = schema
+        self.output_schema = create_schema_from_config(
+            self._output_schema_config,
+            f"{self.name}OutputSchema",
+            allow_coercion=False,
+        )
 
         # Pooled execution setup
         if cfg.pool_config is not None:
@@ -185,6 +194,7 @@ class BaseMultiQueryTransform(BaseTransform, BatchTransformMixin, ABC):
 
     def on_start(self, ctx: PluginContext) -> None:
         """Capture recorder, telemetry, and rate limit context for pooled execution."""
+        super().on_start(ctx)
         self._recorder = ctx.landscape
         self._run_id = ctx.run_id
         self._telemetry_emit = ctx.telemetry_emit
@@ -316,7 +326,12 @@ class BaseMultiQueryTransform(BaseTransform, BatchTransformMixin, ABC):
         Returns:
             TransformResult with all query results merged, or error
         """
-        pool_context: dict[str, Any] | None = None
+        # Compute output field names for success_reason metadata
+        all_fields_added = [
+            f"{spec.output_prefix}_{field_config.suffix}" for spec in self._query_specs for field_config in self._output_mapping.values()
+        ]
+
+        pool_context: PoolExecutionContext | None = None
         if self._executor is not None:
             results, pool_context = self._execute_queries_parallel(row_for_queries, state_id, token_id, input_contract)
         else:
@@ -349,10 +364,6 @@ class BaseMultiQueryTransform(BaseTransform, BatchTransformMixin, ABC):
         for result in results:
             if result.row is not None:
                 output.update(result.row)
-
-        all_fields_added = [
-            f"{spec.output_prefix}_{field_config.suffix}" for spec in self._query_specs for field_config in self._output_mapping.values()
-        ]
         observed = SchemaContract(
             mode="OBSERVED",
             fields=tuple(
@@ -379,7 +390,7 @@ class BaseMultiQueryTransform(BaseTransform, BatchTransformMixin, ABC):
         state_id: str,
         token_id: str,
         input_contract: SchemaContract | None,
-    ) -> tuple[list[TransformResult], dict[str, Any]]:
+    ) -> tuple[list[TransformResult], PoolExecutionContext]:
         """Execute queries in parallel via PooledExecutor with AIMD retry.
 
         Args:
@@ -416,20 +427,10 @@ class BaseMultiQueryTransform(BaseTransform, BatchTransformMixin, ABC):
             ),
         )
 
-        pool_stats = self._executor.get_stats()
-        query_ordering = [
-            {
-                "submit_index": entry.submit_index,
-                "complete_index": entry.complete_index,
-                "buffer_wait_ms": entry.buffer_wait_ms,
-            }
-            for entry in entries
-        ]
-        pool_context = {
-            "pool_config": pool_stats["pool_config"],
-            "pool_stats": pool_stats["pool_stats"],
-            "query_ordering": query_ordering,
-        }
+        pool_context = PoolExecutionContext.from_executor_stats(
+            stats=self._executor.get_stats(),
+            entries=entries,
+        )
 
         return [entry.result for entry in entries], pool_context
 
@@ -513,6 +514,8 @@ class BaseMultiQueryTransform(BaseTransform, BatchTransformMixin, ABC):
         elif expected_type == OutputFieldType.INTEGER:
             if isinstance(value, bool):
                 return "expected integer, got boolean"
+            if isinstance(value, float) and not math.isfinite(value):
+                return "expected finite integer, got non-finite float"
             if isinstance(value, int) or (isinstance(value, float) and value.is_integer()):
                 pass
             else:
@@ -523,6 +526,8 @@ class BaseMultiQueryTransform(BaseTransform, BatchTransformMixin, ABC):
                 return "expected number, got boolean"
             if not isinstance(value, (int, float)):
                 return f"expected number, got {type(value).__name__}"
+            if isinstance(value, float) and not math.isfinite(value):
+                return "expected finite number, got non-finite float"
 
         elif expected_type == OutputFieldType.BOOLEAN:
             if not isinstance(value, bool):
@@ -605,22 +610,23 @@ class BaseMultiQueryTransform(BaseTransform, BatchTransformMixin, ABC):
 
                 if result.status == "success" and result.row is not None:
                     # Aggregate usage from result row if available
-                    total_usage: dict[str, int] = {}
+                    total_prompt = 0
+                    total_completion = 0
+                    any_known = False
                     for spec in self._query_specs:
-                        usage = result.row.get(f"{spec.output_prefix}_usage")
-                        if isinstance(usage, dict):
-                            for key in ("prompt_tokens", "completion_tokens"):
-                                val = usage.get(key, 0)
-                                if isinstance(val, int):
-                                    total_usage[key] = total_usage.get(key, 0) + val
-                    if total_usage:
-                        prompt_tokens = total_usage.get("prompt_tokens", 0)
-                        completion_tokens = total_usage.get("completion_tokens", 0)
-                        if isinstance(prompt_tokens, int) and isinstance(completion_tokens, int):
-                            update_kwargs["usage_details"] = {
-                                "input": prompt_tokens,
-                                "output": completion_tokens,
-                            }
+                        raw_usage = result.row.get(f"{spec.output_prefix}_usage")
+                        query_usage = TokenUsage.from_dict(raw_usage) if isinstance(raw_usage, dict) else TokenUsage.unknown()
+                        if query_usage.prompt_tokens is not None:
+                            total_prompt += query_usage.prompt_tokens
+                            any_known = True
+                        if query_usage.completion_tokens is not None:
+                            total_completion += query_usage.completion_tokens
+                            any_known = True
+                    if any_known:
+                        update_kwargs["usage_details"] = {
+                            "input": total_prompt,
+                            "output": total_completion,
+                        }
 
                 metadata: dict[str, Any] = {
                     "query_count": query_count,

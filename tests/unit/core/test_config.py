@@ -3539,3 +3539,272 @@ class TestPluginConfigSchemaValidation:
         config = PluginConfig.from_dict({"schema": {"mode": "observed"}})
         assert config.schema_config is not None
         assert config.schema_config.is_observed
+
+
+class TestUnknownKeyRejection:
+    """Regression tests for jkmk: load_settings must reject unknown top-level keys.
+
+    Previously, load_settings() silently dropped unknown keys via a positive
+    allowlist before Pydantic's extra='forbid' could reject them. This meant
+    typos like 'trnasforms' were silently ignored and the pipeline ran with
+    no transforms configured.
+    """
+
+    def test_typo_key_raises_value_error(self, tmp_path: Path) -> None:
+        """A typo like 'trnasforms' instead of 'transforms' must be rejected."""
+        from elspeth.core.config import load_settings
+
+        config_file = tmp_path / "settings.yaml"
+        config_file.write_text("""
+source:
+  plugin: csv
+  on_success: output
+sinks:
+  output:
+    plugin: csv
+trnasforms:
+  - plugin: passthrough
+    name: test
+    input: source_out
+    on_success: output
+    on_error: discard
+""")
+        with pytest.raises(ValueError, match="trnasforms") as exc_info:
+            load_settings(config_file)
+        # Error message should also include valid keys for diagnosis
+        assert "Valid top-level keys" in str(exc_info.value)
+
+    def test_multiple_typo_keys_all_reported(self, tmp_path: Path) -> None:
+        """Multiple unknown keys should all appear in the error message."""
+        from elspeth.core.config import load_settings
+
+        config_file = tmp_path / "settings.yaml"
+        config_file.write_text("""
+source:
+  plugin: csv
+  on_success: output
+sinks:
+  output:
+    plugin: csv
+trnasforms:
+  - plugin: passthrough
+retrry:
+  max_attempts: 5
+""")
+        with pytest.raises(ValueError, match="trnasforms") as exc_info:
+            load_settings(config_file)
+        assert "retrry" in str(exc_info.value)
+
+    def test_valid_config_still_loads(self, tmp_path: Path) -> None:
+        """A config with only valid keys must load without error (no regression)."""
+        from elspeth.core.config import load_settings
+
+        config_file = tmp_path / "settings.yaml"
+        config_file.write_text("""
+source:
+  plugin: csv
+  on_success: output
+  options:
+    path: input.csv
+sinks:
+  output:
+    plugin: csv
+    options:
+      path: output.csv
+transforms:
+  - plugin: passthrough
+    name: test
+    input: source_out
+    on_success: output
+    on_error: discard
+retry:
+  max_attempts: 5
+""")
+        settings = load_settings(config_file)
+        assert settings.source.plugin == "csv"
+        assert settings.retry.max_attempts == 5
+        assert len(settings.transforms) == 1
+
+    def test_dynaconf_internal_keys_not_rejected(self, tmp_path: Path) -> None:
+        """Dynaconf internal keys (e.g., load_dotenv) must not trigger an error.
+
+        Dynaconf injects keys like LOAD_DOTENV into the settings dict.
+        These are filtered by the allowlist but must not be treated as user errors.
+        """
+        from elspeth.core.config import load_settings
+
+        # A minimal valid config — Dynaconf will inject LOAD_DOTENV automatically
+        config_file = tmp_path / "settings.yaml"
+        config_file.write_text("""
+source:
+  plugin: csv
+  on_success: output
+sinks:
+  output:
+    plugin: csv
+""")
+        # Should load without error (Dynaconf injects LOAD_DOTENV internally)
+        settings = load_settings(config_file)
+        assert settings.source.plugin == "csv"
+
+    def test_env_var_injected_keys_not_rejected(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        """ELSPETH_* env vars injected by Dynaconf must not trigger unknown key error.
+
+        Regression test: Dynaconf captures ALL ELSPETH_* process env vars (e.g.,
+        ELSPETH_LOG_LEVEL set in docker-compose) and injects them into raw_config.
+        The unknown-key check must only flag keys from the YAML file, not env vars.
+        """
+        from elspeth.core.config import load_settings
+
+        # Set an ELSPETH_* env var that is NOT an ElspethSettings field
+        monkeypatch.setenv("ELSPETH_LOG_LEVEL", "DEBUG")
+        monkeypatch.setenv("ELSPETH_CUSTOM_THING", "42")
+
+        config_file = tmp_path / "settings.yaml"
+        config_file.write_text("""
+source:
+  plugin: csv
+  on_success: output
+sinks:
+  output:
+    plugin: csv
+""")
+        # Must NOT raise ValueError about "log_level" or "custom_thing"
+        settings = load_settings(config_file)
+        assert settings.source.plugin == "csv"
+
+    def test_yaml_typo_still_rejected_with_env_vars_present(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        """YAML typos must still be rejected even when env vars are present.
+
+        Regression test: env var filtering must not accidentally disable
+        the typo check for actual YAML key typos.
+        """
+        from elspeth.core.config import load_settings
+
+        # Set a legitimate env var
+        monkeypatch.setenv("ELSPETH_LOG_LEVEL", "DEBUG")
+
+        config_file = tmp_path / "settings.yaml"
+        config_file.write_text("""
+source:
+  plugin: csv
+  on_success: output
+sinks:
+  output:
+    plugin: csv
+trnasforms:
+  - plugin: passthrough
+""")
+        with pytest.raises(ValueError, match="trnasforms"):
+            load_settings(config_file)
+
+    def test_secrets_key_not_rejected(self, tmp_path: Path) -> None:
+        """The 'secrets' YAML key is handled by SecretsConfig, not ElspethSettings.
+
+        It must not be rejected as an unknown key even though it's not in
+        ElspethSettings.model_fields.
+        """
+        from elspeth.core.config import load_settings
+
+        config_file = tmp_path / "settings.yaml"
+        config_file.write_text("""
+source:
+  plugin: csv
+  on_success: output
+sinks:
+  output:
+    plugin: csv
+secrets:
+  source: env
+""")
+        settings = load_settings(config_file)
+        assert settings.source.plugin == "csv"
+
+
+class TestLowercaseSchemaKeysBranchPreservation:
+    """Bug 7.8: _lowercase_schema_keys must preserve coalesce branch names.
+
+    Coalesce branch names are user-defined identifiers that may contain
+    mixed-case. Lowercasing them would cause lookup failures during
+    coalesce execution.
+    """
+
+    def test_branches_keys_are_preserved(self) -> None:
+        from elspeth.core.config import _lowercase_schema_keys
+
+        config = {
+            "COALESCE": [
+                {
+                    "NAME": "merge_results",
+                    "BRANCHES": {
+                        "SentimentPath": "sentiment_out",
+                        "EntityPath": "entity_out",
+                    },
+                    "POLICY": "require_all",
+                    "MERGE": "union",
+                }
+            ]
+        }
+        result = _lowercase_schema_keys(config)
+
+        # Schema keys should be lowercased
+        assert "coalesce" in result
+        coalesce = result["coalesce"][0]
+        assert "name" in coalesce
+        assert "branches" in coalesce
+
+        # Branch names (keys inside branches) must be PRESERVED
+        branches = coalesce["branches"]
+        assert "SentimentPath" in branches
+        assert "EntityPath" in branches
+        # Values inside branches must also be preserved
+        assert branches["SentimentPath"] == "sentiment_out"
+        assert branches["EntityPath"] == "entity_out"
+
+    def test_load_settings_preserves_coalesce_branch_names(self, tmp_path: Path) -> None:
+        """Full config loading preserves mixed-case coalesce branch names."""
+        from elspeth.core.config import load_settings
+
+        config_file = tmp_path / "settings.yaml"
+        config_file.write_text("""
+source:
+  plugin: csv
+  on_success: quality_gate
+sinks:
+  output:
+    plugin: csv
+gates:
+  - name: quality_gate
+    input: quality_gate
+    condition: "True"
+    routes:
+      "true": fork
+      "false": output
+    fork_to:
+      - sentiment_path
+      - entity_path
+transforms:
+  - name: sentiment_transform
+    plugin: passthrough
+    input: sentiment_path
+    on_success: sentiment_out
+    on_error: discard
+  - name: entity_transform
+    plugin: passthrough
+    input: entity_path
+    on_success: entity_out
+    on_error: discard
+coalesce:
+  - name: merge_results
+    branches:
+      sentiment_path: sentiment_out
+      entity_path: entity_out
+    policy: require_all
+    merge: union
+    on_success: output
+""")
+        settings = load_settings(config_file)
+        assert len(settings.coalesce) == 1
+        branches = settings.coalesce[0].branches
+        assert "sentiment_path" in branches
+        assert "entity_path" in branches

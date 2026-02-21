@@ -22,7 +22,6 @@ pipelines could produce corrupt audit trails or lose aggregation data.
 
 from __future__ import annotations
 
-import json
 import tempfile
 from datetime import UTC, datetime
 from pathlib import Path
@@ -33,23 +32,54 @@ from hypothesis import assume, given, settings
 from hypothesis import strategies as st
 
 from elspeth.contracts import Checkpoint, Determinism, NodeType, RunStatus
+from elspeth.contracts.aggregation_checkpoint import (
+    AggregationCheckpointState,
+    AggregationNodeCheckpoint,
+    AggregationTokenCheckpoint,
+)
 from elspeth.core.canonical import stable_hash
 from elspeth.core.checkpoint import CheckpointCompatibilityValidator, CheckpointManager
+from elspeth.core.checkpoint.serialization import checkpoint_loads
 from elspeth.core.dag import ExecutionGraph
 from elspeth.core.landscape.database import LandscapeDB
 from elspeth.core.landscape.schema import nodes_table, rows_table, runs_table, tokens_table
-from tests.strategies.json import json_primitives, json_values
+from tests.strategies.json import json_primitives
 
 # =============================================================================
 # Strategies for checkpoint testing
 # =============================================================================
 
-# Aggregation state: dict with string keys
-aggregation_states = st.dictionaries(
-    st.text(min_size=1, max_size=20, alphabet=st.characters(whitelist_categories=("L", "N"))),
-    json_values,
-    min_size=0,
-    max_size=5,
+# Aggregation state: typed AggregationCheckpointState DTOs
+_node_name_alphabet = st.characters(whitelist_categories=("L", "N"), whitelist_characters="_-")
+_node_names = st.text(min_size=1, max_size=20, alphabet=_node_name_alphabet)
+_safe_ids = st.text(min_size=3, max_size=20, alphabet=st.characters(whitelist_categories=("L", "N"), whitelist_characters="-"))
+
+_agg_token_checkpoints = st.builds(
+    AggregationTokenCheckpoint,
+    token_id=_safe_ids.map(lambda s: f"tok-{s}"),
+    row_id=_safe_ids.map(lambda s: f"row-{s}"),
+    branch_name=st.none() | _safe_ids,
+    fork_group_id=st.none() | _safe_ids,
+    join_group_id=st.none() | _safe_ids,
+    expand_group_id=st.none() | _safe_ids,
+    row_data=st.dictionaries(_node_names, json_primitives, max_size=3),
+    contract_version=_safe_ids,
+)
+
+_agg_node_checkpoints = st.builds(
+    AggregationNodeCheckpoint,
+    tokens=st.lists(_agg_token_checkpoints, min_size=0, max_size=3).map(tuple),
+    batch_id=_safe_ids.map(lambda s: f"batch-{s}"),
+    elapsed_age_seconds=st.floats(min_value=0.0, max_value=3600.0, allow_nan=False, allow_infinity=False),
+    count_fire_offset=st.none() | st.floats(min_value=0.0, max_value=1000.0, allow_nan=False, allow_infinity=False),
+    condition_fire_offset=st.none() | st.floats(min_value=0.0, max_value=1000.0, allow_nan=False, allow_infinity=False),
+    contract=st.just({"mode": "FLEXIBLE", "locked": False, "version_hash": "test", "fields": []}),
+)
+
+aggregation_states = st.builds(
+    AggregationCheckpointState,
+    version=st.just("3.0"),
+    nodes=st.dictionaries(_node_names, _agg_node_checkpoints, min_size=0, max_size=3),
 )
 
 # Valid run IDs
@@ -177,6 +207,7 @@ def setup_checkpoint_prerequisites(
             tokens_table.insert().values(
                 token_id=token_id,
                 row_id="row-001",
+                run_id=run_id,
                 created_at=now,
             )
         )
@@ -192,7 +223,7 @@ class TestAggregationStateRoundTripProperties:
 
     @given(state=aggregation_states)
     @settings(max_examples=200)
-    def test_aggregation_state_roundtrip_deterministic(self, state: dict[str, Any]) -> None:
+    def test_aggregation_state_roundtrip_deterministic(self, state: AggregationCheckpointState) -> None:
         """Property: Aggregation state survives JSON round-trip identically.
 
         This is CRITICAL for crash recovery - if aggregation buffers are
@@ -207,7 +238,7 @@ class TestAggregationStateRoundTripProperties:
             # Create run first (foreign key constraint)
             setup_checkpoint_prerequisites(db, "test-run-001")
 
-            # Create checkpoint with aggregation state
+            # Create checkpoint with typed aggregation state
             checkpoint = manager.create_checkpoint(
                 run_id="test-run-001",
                 token_id="token-001",
@@ -218,14 +249,15 @@ class TestAggregationStateRoundTripProperties:
             )
 
             assert checkpoint.aggregation_state_json is not None
-            restored = json.loads(checkpoint.aggregation_state_json)
-            assert restored == state, f"Aggregation state corrupted during round-trip!\nOriginal: {state}\nRestored: {restored}"
+            restored = checkpoint_loads(checkpoint.aggregation_state_json)
+            expected = state.to_dict()
+            assert restored == expected, f"Aggregation state corrupted during round-trip!\nOriginal: {expected}\nRestored: {restored}"
         finally:
             db.close()
 
     @given(state=aggregation_states)
     @settings(max_examples=100)
-    def test_aggregation_state_hash_deterministic(self, state: dict[str, Any]) -> None:
+    def test_aggregation_state_hash_deterministic(self, state: AggregationCheckpointState) -> None:
         """Property: Same aggregation state produces same JSON representation.
 
         This uses the actual checkpoint serialization path to avoid
@@ -287,6 +319,7 @@ class TestAggregationStateRoundTripProperties:
 
         Per CLAUDE.md, NaN and Infinity are strictly rejected for audit integrity.
         Checkpoints use json.dumps(allow_nan=False) which enforces this policy.
+        NaN is injected via row_data inside a token checkpoint.
         """
         db, _ = create_test_db()
         try:
@@ -295,6 +328,31 @@ class TestAggregationStateRoundTripProperties:
 
             setup_checkpoint_prerequisites(db, "test-nan", token_id="token-nan")
 
+            nan_state = AggregationCheckpointState(
+                version="3.0",
+                nodes={
+                    "test_node": AggregationNodeCheckpoint(
+                        tokens=(
+                            AggregationTokenCheckpoint(
+                                token_id="tok-nan",
+                                row_id="row-nan",
+                                branch_name=None,
+                                fork_group_id=None,
+                                join_group_id=None,
+                                expand_group_id=None,
+                                row_data={"avg": float("nan")},
+                                contract_version="test",
+                            ),
+                        ),
+                        batch_id="batch-001",
+                        elapsed_age_seconds=0.0,
+                        count_fire_offset=None,
+                        condition_fire_offset=None,
+                        contract={"mode": "FLEXIBLE", "locked": False, "version_hash": "test", "fields": []},
+                    ),
+                },
+            )
+
             with pytest.raises(ValueError, match="Cannot serialize non-finite float"):
                 manager.create_checkpoint(
                     run_id="test-nan",
@@ -302,7 +360,7 @@ class TestAggregationStateRoundTripProperties:
                     node_id="transform_0",
                     sequence_number=1,
                     graph=graph,
-                    aggregation_state={"count": 0, "avg": float("nan")},
+                    aggregation_state=nan_state,
                 )
         finally:
             db.close()
@@ -312,6 +370,7 @@ class TestAggregationStateRoundTripProperties:
 
         Per CLAUDE.md, NaN and Infinity are strictly rejected for audit integrity.
         Checkpoints use json.dumps(allow_nan=False) which enforces this policy.
+        Infinity is injected via row_data inside a token checkpoint.
         """
         db, _ = create_test_db()
         try:
@@ -320,6 +379,31 @@ class TestAggregationStateRoundTripProperties:
 
             setup_checkpoint_prerequisites(db, "test-inf", token_id="token-inf")
 
+            inf_state = AggregationCheckpointState(
+                version="3.0",
+                nodes={
+                    "test_node": AggregationNodeCheckpoint(
+                        tokens=(
+                            AggregationTokenCheckpoint(
+                                token_id="tok-inf",
+                                row_id="row-inf",
+                                branch_name=None,
+                                fork_group_id=None,
+                                join_group_id=None,
+                                expand_group_id=None,
+                                row_data={"value": float("inf")},
+                                contract_version="test",
+                            ),
+                        ),
+                        batch_id="batch-001",
+                        elapsed_age_seconds=0.0,
+                        count_fire_offset=None,
+                        condition_fire_offset=None,
+                        contract={"mode": "FLEXIBLE", "locked": False, "version_hash": "test", "fields": []},
+                    ),
+                },
+            )
+
             with pytest.raises(ValueError, match="Cannot serialize non-finite float"):
                 manager.create_checkpoint(
                     run_id="test-inf",
@@ -327,7 +411,7 @@ class TestAggregationStateRoundTripProperties:
                     node_id="transform_0",
                     sequence_number=1,
                     graph=graph,
-                    aggregation_state={"value": float("inf")},
+                    aggregation_state=inf_state,
                 )
         finally:
             db.close()

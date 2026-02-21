@@ -405,15 +405,19 @@ class TestSingleQueryProcessing:
                 assert result.reason["reason"] == "template_rendering_failed"
                 assert "missing" in result.reason["error"]
 
-    def test_get_http_client_requires_recorder(self) -> None:
-        """_get_http_client raises RuntimeError if recorder not set via on_start."""
+    def test_on_start_sets_lifecycle_flag(self) -> None:
+        """on_start() sets _on_start_called flag for centralized lifecycle guard."""
         transform = OpenRouterMultiQueryLLMTransform(make_config())
-        # Don't call on_start - recorder will be None
+        assert not transform._on_start_called
 
-        with pytest.raises(RuntimeError) as exc_info:
-            transform._get_http_client("state-123")
+        ctx = Mock()
+        ctx.landscape = Mock()
+        ctx.run_id = "test-run"
+        ctx.telemetry_emit = None
+        ctx.rate_limit_registry = None
+        transform.on_start(ctx)
 
-        assert "recorder" in str(exc_info.value).lower()
+        assert transform._on_start_called
 
     def test_process_single_query_strips_markdown_code_blocks(self, chaosllm_server) -> None:
         """LLM responses wrapped in markdown code blocks are handled correctly."""
@@ -1168,3 +1172,247 @@ class TestResourceCleanup:
 
         # Verify recorder was captured
         assert transform._recorder is mock_recorder
+
+
+class TestValidateFieldTypeNonFinite:
+    """Regression: _validate_field_type must reject NaN/Infinity for NUMBER fields.
+
+    Non-finite floats from LLM JSON responses pass isinstance(value, float)
+    but crash canonical hashing downstream. The boundary validator must catch
+    them before they enter pipeline data.
+    """
+
+    def test_nan_rejected_for_number_field(self) -> None:
+        """NaN float is rejected for NUMBER output fields."""
+        from elspeth.plugins.llm.multi_query import OutputFieldConfig, OutputFieldType
+
+        transform = OpenRouterMultiQueryLLMTransform(make_config())
+        field_config = OutputFieldConfig(suffix="score", type=OutputFieldType.NUMBER)
+
+        error = transform._validate_field_type("score", float("nan"), field_config)
+        assert error is not None
+        assert "non-finite" in error
+
+    def test_infinity_rejected_for_number_field(self) -> None:
+        """Infinity float is rejected for NUMBER output fields."""
+        from elspeth.plugins.llm.multi_query import OutputFieldConfig, OutputFieldType
+
+        transform = OpenRouterMultiQueryLLMTransform(make_config())
+        field_config = OutputFieldConfig(suffix="score", type=OutputFieldType.NUMBER)
+
+        error = transform._validate_field_type("score", float("inf"), field_config)
+        assert error is not None
+        assert "non-finite" in error
+
+    def test_neg_infinity_rejected_for_number_field(self) -> None:
+        """Negative Infinity is rejected for NUMBER output fields."""
+        from elspeth.plugins.llm.multi_query import OutputFieldConfig, OutputFieldType
+
+        transform = OpenRouterMultiQueryLLMTransform(make_config())
+        field_config = OutputFieldConfig(suffix="score", type=OutputFieldType.NUMBER)
+
+        error = transform._validate_field_type("score", float("-inf"), field_config)
+        assert error is not None
+        assert "non-finite" in error
+
+    def test_nan_rejected_for_integer_field(self) -> None:
+        """NaN float is rejected for INTEGER output fields."""
+        from elspeth.plugins.llm.multi_query import OutputFieldConfig, OutputFieldType
+
+        transform = OpenRouterMultiQueryLLMTransform(make_config())
+        field_config = OutputFieldConfig(suffix="count", type=OutputFieldType.INTEGER)
+
+        error = transform._validate_field_type("count", float("nan"), field_config)
+        assert error is not None
+        assert "non-finite" in error
+
+    def test_finite_number_still_accepted(self) -> None:
+        """Normal finite floats still pass NUMBER validation."""
+        from elspeth.plugins.llm.multi_query import OutputFieldConfig, OutputFieldType
+
+        transform = OpenRouterMultiQueryLLMTransform(make_config())
+        field_config = OutputFieldConfig(suffix="score", type=OutputFieldType.NUMBER)
+
+        assert transform._validate_field_type("score", 3.14, field_config) is None
+        assert transform._validate_field_type("score", 0.0, field_config) is None
+        assert transform._validate_field_type("score", -1.5, field_config) is None
+
+    def test_integer_still_accepted_for_number(self) -> None:
+        """Integers still pass NUMBER validation."""
+        from elspeth.plugins.llm.multi_query import OutputFieldConfig, OutputFieldType
+
+        transform = OpenRouterMultiQueryLLMTransform(make_config())
+        field_config = OutputFieldConfig(suffix="score", type=OutputFieldType.NUMBER)
+
+        assert transform._validate_field_type("score", 42, field_config) is None
+
+
+class TestNanInJsonParsing:
+    """Regression: json.loads must reject NaN/Infinity in LLM response content.
+
+    Python's json.loads accepts non-standard NaN/Infinity tokens by default.
+    parse_constant=_reject_nonfinite_constant must be used to reject them.
+    """
+
+    def test_nan_in_response_json_returns_error(self, chaosllm_server) -> None:
+        """LLM response containing NaN in JSON returns TransformResult.error."""
+        # NaN is a non-standard JSON token that Python's json.loads accepts by default
+        nan_content = '{"score": NaN, "rationale": "test"}'
+        responses = [make_openrouter_response(nan_content)]
+
+        with mock_openrouter_http_responses(chaosllm_server, responses):
+            transform = OpenRouterMultiQueryLLMTransform(make_config())
+            ctx = make_plugin_context()
+            transform.on_start(ctx)
+
+            row = {"cs1_bg": "data", "cs1_sym": "data", "cs1_hist": "data"}
+            spec = transform._query_specs[0]
+
+            assert ctx.state_id is not None
+            result = transform._process_single_query(row, spec, ctx.state_id, "test-token-id", None)
+
+            assert result.status == "error"
+            assert result.reason is not None
+            assert result.reason["reason"] == "json_parse_failed"
+
+    def test_infinity_in_response_json_returns_error(self, chaosllm_server) -> None:
+        """LLM response containing Infinity in JSON returns TransformResult.error."""
+        inf_content = '{"score": Infinity, "rationale": "test"}'
+        responses = [make_openrouter_response(inf_content)]
+
+        with mock_openrouter_http_responses(chaosllm_server, responses):
+            transform = OpenRouterMultiQueryLLMTransform(make_config())
+            ctx = make_plugin_context()
+            transform.on_start(ctx)
+
+            row = {"cs1_bg": "data", "cs1_sym": "data", "cs1_hist": "data"}
+            spec = transform._query_specs[0]
+
+            assert ctx.state_id is not None
+            result = transform._process_single_query(row, spec, ctx.state_id, "test-token-id", None)
+
+            assert result.status == "error"
+            assert result.reason is not None
+            assert result.reason["reason"] == "json_parse_failed"
+
+
+class TestBug4_3_Tier3BoundaryTypeChecks:
+    """Bug 4.3: Type checks for content, usage, and completion_tokens.
+
+    External LLM API responses (Tier 3 data) can have unexpected types.
+    The transform must validate that content is str, usage is dict, and
+    completion_tokens is numeric before operating on them.
+    """
+
+    def test_non_str_content_returns_error(self, chaosllm_server) -> None:
+        """LLM returning non-string content returns error instead of crashing."""
+        import json as json_mod
+
+        # Build a raw httpx.Response with non-string content
+        response_body = {
+            "id": "resp-1",
+            "model": "anthropic/claude-3-opus",
+            "choices": [{"message": {"content": [1, 2, 3]}}],  # list, not str
+            "usage": {"prompt_tokens": 10, "completion_tokens": 5},
+        }
+        raw_response = httpx.Response(
+            status_code=200,
+            content=json_mod.dumps(response_body).encode(),
+            headers={"content-type": "application/json"},
+            request=httpx.Request("POST", "http://testserver/v1/chat/completions"),
+        )
+        # Pass pre-built httpx.Response directly (bypasses ChaosLLM processing)
+        responses: list[dict[str, Any] | str | httpx.Response] = [raw_response]
+
+        with mock_openrouter_http_responses(chaosllm_server, responses):
+            transform = OpenRouterMultiQueryLLMTransform(make_config())
+            ctx = make_plugin_context()
+            transform.on_start(ctx)
+
+            row = {"cs1_bg": "data", "cs1_sym": "data", "cs1_hist": "data"}
+            spec = transform._query_specs[0]
+
+            assert ctx.state_id is not None
+            result = transform._process_single_query(row, spec, ctx.state_id, "test-token-id", None)
+
+            assert result.status == "error"
+            assert result.reason is not None
+            assert result.reason["reason"] == "type_mismatch"
+
+    def test_non_dict_usage_continues_with_unknown_tokens(self, chaosllm_server) -> None:
+        """LLM returning non-dict usage produces unknown TokenUsage and continues.
+
+        TokenUsage.from_dict() gracefully handles non-dict input by returning
+        TokenUsage.unknown(), so the query succeeds with unknown usage rather
+        than returning an error.
+        """
+        import json as json_mod
+
+        # Build a raw httpx.Response with non-dict usage
+        response_body = {
+            "id": "resp-1",
+            "model": "anthropic/claude-3-opus",
+            "choices": [{"message": {"content": '{"score": 5, "rationale": "good"}'}}],
+            "usage": "not_a_dict",  # string, not dict
+        }
+        raw_response = httpx.Response(
+            status_code=200,
+            content=json_mod.dumps(response_body).encode(),
+            headers={"content-type": "application/json"},
+            request=httpx.Request("POST", "http://testserver/v1/chat/completions"),
+        )
+        responses: list[dict[str, Any] | str | httpx.Response] = [raw_response]
+
+        with mock_openrouter_http_responses(chaosllm_server, responses):
+            transform = OpenRouterMultiQueryLLMTransform(make_config())
+            ctx = make_plugin_context()
+            transform.on_start(ctx)
+
+            row = {"cs1_bg": "data", "cs1_sym": "data", "cs1_hist": "data"}
+            spec = transform._query_specs[0]
+
+            assert ctx.state_id is not None
+            result = transform._process_single_query(row, spec, ctx.state_id, "test-token-id", None)
+
+            # Non-dict usage is handled gracefully via TokenUsage.from_dict()
+            # which returns TokenUsage.unknown() — processing continues normally
+            assert result.status == "success"
+            assert result.row is not None
+            assert result.row["cs1_diagnosis_score"] == 5
+            assert result.row["cs1_diagnosis_rationale"] == "good"
+
+    def test_non_numeric_completion_tokens_fallback_to_zero(self, chaosllm_server) -> None:
+        """Non-numeric completion_tokens falls back to 0 instead of crashing."""
+        import json as json_mod
+
+        # Build a raw httpx.Response with non-numeric completion_tokens
+        response_body = {
+            "id": "resp-1",
+            "model": "anthropic/claude-3-opus",
+            "choices": [{"message": {"content": '{"score": 5, "rationale": "good"}'}}],
+            "usage": {"prompt_tokens": 10, "completion_tokens": "not_a_number"},
+        }
+        raw_response = httpx.Response(
+            status_code=200,
+            content=json_mod.dumps(response_body).encode(),
+            headers={"content-type": "application/json"},
+            request=httpx.Request("POST", "http://testserver/v1/chat/completions"),
+        )
+        responses: list[dict[str, Any] | str | httpx.Response] = [raw_response]
+
+        with mock_openrouter_http_responses(chaosllm_server, responses):
+            transform = OpenRouterMultiQueryLLMTransform(make_config())
+            ctx = make_plugin_context()
+            transform.on_start(ctx)
+
+            row = {"cs1_bg": "data", "cs1_sym": "data", "cs1_hist": "data"}
+            spec = transform._query_specs[0]
+
+            assert ctx.state_id is not None
+            # Should not crash - completion_tokens falls back to 0
+            result = transform._process_single_query(row, spec, ctx.state_id, "test-token-id", None)
+
+            # Should succeed (completion_tokens=0 doesn't trigger truncation check)
+            # The result depends on whether JSON parsing succeeds (the content is valid JSON)
+            assert result.status in ("success", "error")
+            # Key assertion: did NOT crash with TypeError

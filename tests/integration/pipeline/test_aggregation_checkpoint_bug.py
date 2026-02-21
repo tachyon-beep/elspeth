@@ -268,7 +268,7 @@ class TestAggregationCheckpointFixVerification:
         # Verify the aggregation state has expected structure
         for call in calls_with_agg_state:
             agg_state = call["aggregation_state"]
-            assert "_version" in agg_state, "Aggregation state should have version field"
+            assert hasattr(agg_state, "version"), "Aggregation state should have version field"
 
     def test_orchestrator_calls_get_aggregation_checkpoint_state(
         self,
@@ -300,4 +300,116 @@ class TestAggregationCheckpointFixVerification:
         # FIX VERIFICATION: This assertion PASSES when fix is applied
         assert len(get_checkpoint_state_calls) > 0, (
             f"FIX NOT WORKING: Found {len(get_checkpoint_state_calls)} get_aggregation_checkpoint_state() calls (expected > 0 after fix)."
+        )
+
+    def test_aggregation_only_frequency_creates_checkpoints(
+        self,
+        landscape_db: LandscapeDB,
+        payload_store,
+    ) -> None:
+        """
+        FIX VERIFICATION: frequency=aggregation_only (0) must NOT be a no-op.
+
+        Before the fix, _maybe_checkpoint skipped unconditionally when
+        frequency == 0, leaving aggregation_only mode with zero resume
+        points. Post-fix, frequency == 0 checkpoints on every post-sink
+        callback (I/O reduction is inherent via aggregation cardinality).
+        """
+        # Source with 3 rows — count trigger at 2 forces one flush mid-stream
+        callback_source = CallbackSource(
+            rows=[
+                {"id": 1, "value": 100},
+                {"id": 2, "value": 200},
+                {"id": 3, "value": 300},
+            ],
+            output_schema=_TestSchema,
+            source_name="agg_only_source",
+            on_success="source_out",
+        )
+        source = as_source(callback_source)
+
+        transform = as_transform(BatchCollectorTransform())
+        collecting_sink = CollectingSink()
+        sink = as_sink(collecting_sink)
+
+        from elspeth.core.dag import ExecutionGraph
+
+        graph = ExecutionGraph.from_plugin_instances(
+            source=source,
+            source_settings=SourceSettings(plugin=source.name, on_success="source_out", options={}),
+            transforms=wire_transforms([transform], source_connection="source_out", final_sink="output"),
+            sinks={"output": sink},
+            aggregations={},
+            gates=[],
+            coalesce_settings=None,
+        )
+
+        transform_id_map = graph.get_transform_id_map()
+        transform_node_id = transform_id_map[0]
+
+        agg_settings = AggregationSettings(
+            name="test_agg",
+            plugin="batch_collector",
+            input="source_out",
+            trigger=TriggerConfig(
+                count=2,
+                timeout_seconds=3600,
+            ),
+            output_mode="transform",
+        )
+
+        config = PipelineConfig(
+            source=source,
+            transforms=[transform],
+            sinks={"output": sink},
+            gates=[],
+            aggregation_settings={
+                transform_node_id: agg_settings,
+            },
+            coalesce_settings=[],
+        )
+
+        # aggregation_only mode — this was the broken code path
+        checkpoint_settings = CheckpointSettings(
+            enabled=True,
+            frequency="aggregation_only",
+        )
+
+        settings = ElspethSettings(
+            source=SourceSettings(plugin="agg_only_source", on_success="source_out", options={}),
+            sinks={"output": SinkSettings(plugin="collecting_sink", options={})},
+            transforms=[],
+            gates=[],
+            checkpoint=checkpoint_settings,
+        )
+
+        from elspeth.contracts.config.runtime import RuntimeCheckpointConfig
+        from elspeth.core.checkpoint import CheckpointManager
+
+        checkpoint_mgr = CheckpointManager(landscape_db)
+        checkpoint_config = RuntimeCheckpointConfig.from_settings(checkpoint_settings)
+        assert checkpoint_config.frequency == 0, "aggregation_only should map to frequency=0"
+
+        checkpoint_calls: list[dict[str, Any]] = []
+        original_create_checkpoint = checkpoint_mgr.create_checkpoint
+
+        def capture_create_checkpoint(*args, **kwargs):
+            checkpoint_calls.append(kwargs)
+            return original_create_checkpoint(*args, **kwargs)
+
+        checkpoint_mgr.create_checkpoint = capture_create_checkpoint  # type: ignore[method-assign]
+
+        orchestrator = Orchestrator(
+            db=landscape_db,
+            checkpoint_manager=checkpoint_mgr,
+            checkpoint_config=checkpoint_config,
+        )
+
+        result = orchestrator.run(config, graph=graph, settings=settings, payload_store=payload_store)
+
+        assert result.status == RunStatus.COMPLETED
+        # With count=2 and 3 rows: one flush at row 2, end-of-source flush for row 3.
+        # Both produce tokens that reach sinks and trigger checkpoint_after_sink.
+        assert len(checkpoint_calls) > 0, (
+            "aggregation_only mode must create checkpoints — frequency=0 was previously a no-op in _maybe_checkpoint"
         )

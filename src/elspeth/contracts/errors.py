@@ -4,7 +4,10 @@ TypedDict schemas for structured error payloads in the audit trail.
 These provide consistent shapes for executor error recording.
 """
 
-from typing import Any, Literal, NotRequired, TypedDict
+from typing import TYPE_CHECKING, Any, Literal, NotRequired, TypedDict
+
+if TYPE_CHECKING:
+    from elspeth.contracts.batch_checkpoint import BatchCheckpointState
 
 
 class ExecutionError(TypedDict):
@@ -141,19 +144,28 @@ class TemplateErrorEntry(TypedDict):
 
 
 class RowErrorEntry(TypedDict):
-    """Entry in row_errors list for batch processing failures."""
+    """Entry in row_errors list for batch processing failures.
+
+    The ``error`` field accepts both simple strings and structured dicts.
+    Batch plugins (e.g., azure_batch) may store structured error bodies
+    from external APIs, which are persisted as-is in the audit trail.
+    """
 
     row_index: int
     reason: str
-    error: NotRequired[str]
+    error: NotRequired[str | dict[str, Any]]
 
 
 class UsageStats(TypedDict, total=False):
-    """LLM token usage statistics."""
+    """LLM token usage statistics.
 
-    prompt_tokens: int
-    completion_tokens: int
-    total_tokens: int
+    Values are ``int | None`` because providers may omit individual fields.
+    ``None`` means "provider did not report this value" — distinct from ``0``.
+    """
+
+    prompt_tokens: int | None
+    completion_tokens: int | None
+    total_tokens: int | None
 
 
 class QueryFailureDetail(TypedDict):
@@ -232,11 +244,14 @@ TransformErrorCategory = Literal[
     "prompt_injection_detected",
     "unknown_category",  # Unknown category from external API (fail-closed)
     "non_string_field",  # Explicitly-configured field is non-string (security fail-closed)
+    # Field collision (output would overwrite input fields)
+    "field_collision",
     # Contract violations (schema validation)
     "contract_violation",
     "multiple_contract_violations",
     # Numeric/computation errors
     "float_overflow",  # Arithmetic overflow producing inf (e.g., sum of large floats)
+    "non_finite_usage",  # LLM API returned NaN/Infinity in usage metadata
     # Executor lifecycle
     "shutdown_requested",  # Worker stopped mid-retry due to executor shutdown
     # Generic (for tests and edge cases)
@@ -347,6 +362,9 @@ class TransformErrorReason(TypedDict):
     message: NotRequired[str]
     url: NotRequired[str]
 
+    # Field collision context
+    collisions: NotRequired[list[str]]  # Field names that would be overwritten
+
     # Multi-query/template context
     query: NotRequired[str]
     template_hash: NotRequired[str]
@@ -358,8 +376,9 @@ class TransformErrorReason(TypedDict):
 
     # LLM response context
     max_tokens: NotRequired[int]
-    completion_tokens: NotRequired[int]
-    prompt_tokens: NotRequired[int]
+    completion_tokens: NotRequired[int | None]
+    prompt_tokens: NotRequired[int | None]
+    finish_reason: NotRequired[str | None]  # LLM finish reason (e.g., "stop", "length")
     raw_response: NotRequired[str]  # LLM response text; absent = empty/unavailable
     raw_response_preview: NotRequired[str]  # Truncated preview; absent = empty/unavailable
     content_after_fence_strip: NotRequired[str]
@@ -448,29 +467,29 @@ class BatchPendingError(Exception):
         batch_id: Azure batch job ID
         status: Current batch status (e.g., "submitted", "in_progress")
         check_after_seconds: When to check again (default 300s = 5 min)
-        checkpoint: Checkpoint data to persist for retry (batch_id, row_mapping, etc.)
+        checkpoint: Typed checkpoint state for retry (BatchCheckpointState)
         node_id: Transform node ID that raised this (for checkpoint keying)
 
     Example:
         # Phase 1: Submit batch
         batch_id = client.batches.create(...)
-        checkpoint_data = {"batch_id": batch_id, "row_mapping": {...}}
-        ctx.update_checkpoint(checkpoint_data)
+        state = BatchCheckpointState(batch_id=batch_id, ...)
+        ctx.set_checkpoint(state)
         raise BatchPendingError(
             batch_id, "submitted",
             check_after_seconds=300,
-            checkpoint=checkpoint_data,
+            checkpoint=state,
             node_id=self.node_id,
         )
 
-        # Caller catches, persists checkpoint, schedules retry
+        # Caller catches, persists checkpoint.to_dict(), schedules retry
 
         # Phase 2: Resume and check (caller passes checkpoint back via orchestrator)
         checkpoint = ctx.get_checkpoint()
-        if checkpoint.get("batch_id"):
-            status = client.batches.retrieve(batch_id).status
+        if checkpoint is not None:
+            status = client.batches.retrieve(checkpoint.batch_id).status
             if status == "in_progress":
-                raise BatchPendingError(batch_id, "in_progress", checkpoint=checkpoint)
+                raise BatchPendingError(checkpoint.batch_id, "in_progress", checkpoint=checkpoint)
             elif status == "completed":
                 # Download results and return
     """
@@ -481,7 +500,7 @@ class BatchPendingError(Exception):
         status: str,
         *,
         check_after_seconds: int = 300,
-        checkpoint: dict[str, Any] | None = None,
+        checkpoint: "BatchCheckpointState | None" = None,
         node_id: str | None = None,
     ) -> None:
         """Initialize BatchPendingError.
@@ -490,7 +509,7 @@ class BatchPendingError(Exception):
             batch_id: Azure batch job ID
             status: Current batch status
             check_after_seconds: Seconds until next check (default 300)
-            checkpoint: Checkpoint data for retry (caller should persist this)
+            checkpoint: Typed checkpoint state for retry (BatchCheckpointState)
             node_id: Transform node ID (for checkpoint keying)
         """
         self.batch_id = batch_id
@@ -742,15 +761,15 @@ class TypeMismatchViolation(ContractViolation):
 
         Returns:
             Dict with 'reason' key and type-specific fields suitable for
-            TransformResult.error(). Includes expected, actual, and value
-            (as repr for safe string representation).
+            TransformResult.error(). Includes expected and actual type names
+            only. Raw values are intentionally excluded to prevent sensitive
+            or unbounded data from reaching the audit trail.
         """
         base = super().to_error_reason()
         base.update(
             {
                 "expected": self.expected_type.__name__,
                 "actual": self.actual_type.__name__,
-                "value": repr(self.actual_value),
             }
         )
         return base

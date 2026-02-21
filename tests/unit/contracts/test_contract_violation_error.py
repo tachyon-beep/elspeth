@@ -154,8 +154,15 @@ class TestTypeMismatchViolationToErrorReason:
         result = exc.to_error_reason()
         assert result["actual"] == "str"
 
-    def test_type_mismatch_to_error_reason_has_value_as_repr(self) -> None:
-        """TypeMismatchViolation.to_error_reason() includes value as repr."""
+    def test_type_mismatch_to_error_reason_excludes_raw_value(self) -> None:
+        """TypeMismatchViolation.to_error_reason() excludes raw value from payload.
+
+        Regression: P1-2026-02-14-typemismatchviolation-to-error-reason-serializes-raw-offending-values
+
+        Raw values are intentionally excluded to prevent sensitive or unbounded
+        data from reaching the persistent audit trail. The actual_value attribute
+        remains available programmatically for debugging.
+        """
         from elspeth.contracts.errors import TypeMismatchViolation
 
         exc = TypeMismatchViolation(
@@ -166,10 +173,16 @@ class TestTypeMismatchViolationToErrorReason:
             actual_value="not_a_number",
         )
         result = exc.to_error_reason()
-        assert result["value"] == "'not_a_number'"
+        assert "value" not in result
+        # Type names are still present
+        assert result["expected"] == "int"
+        assert result["actual"] == "str"
 
-    def test_type_mismatch_to_error_reason_repr_handles_complex_values(self) -> None:
-        """TypeMismatchViolation.to_error_reason() uses repr for complex values."""
+    def test_type_mismatch_to_error_reason_no_raw_value_for_complex_types(self) -> None:
+        """TypeMismatchViolation.to_error_reason() excludes complex values too.
+
+        Regression: ensures large or sensitive values never reach audit trail.
+        """
         from elspeth.contracts.errors import TypeMismatchViolation
 
         exc = TypeMismatchViolation(
@@ -180,7 +193,9 @@ class TestTypeMismatchViolationToErrorReason:
             actual_value=[1, 2, 3],
         )
         result = exc.to_error_reason()
-        assert result["value"] == "[1, 2, 3]"
+        assert "value" not in result
+        assert result["expected"] == "str"
+        assert result["actual"] == "list"
 
 
 class TestExtraFieldViolationToErrorReason:
@@ -370,3 +385,86 @@ class TestTransformErrorReasonAlignment:
 
         missing_keys = emitted_keys - declared_keys
         assert missing_keys == set(), f"Undeclared TransformErrorReason keys: {sorted(missing_keys)}"
+
+
+class TestTypeMismatchViolationNoValueLeak:
+    """Regression tests for P1: TypeMismatchViolation.to_error_reason leaks raw values.
+
+    Bug: P1-2026-02-14-typemismatchviolation-to-error-reason-serializes-raw-offending-values
+
+    The error reason payload must never contain raw actual_value data.
+    The actual_value attribute is still accessible on the exception object
+    for programmatic debugging, but to_error_reason() must not serialize it.
+    """
+
+    def test_sensitive_string_not_leaked(self) -> None:
+        """Sensitive string values must not appear in error reason."""
+        from elspeth.contracts.errors import TypeMismatchViolation
+
+        exc = TypeMismatchViolation(
+            normalized_name="ssn",
+            original_name="SSN",
+            expected_type=int,
+            actual_type=str,
+            actual_value="123-45-6789",
+        )
+        result = exc.to_error_reason()
+        assert "123-45-6789" not in str(result)
+        assert "value" not in result
+
+    def test_large_value_not_leaked(self) -> None:
+        """Large values must not appear in error reason payload."""
+        from elspeth.contracts.errors import TypeMismatchViolation
+
+        large_value = "x" * 10000
+        exc = TypeMismatchViolation(
+            normalized_name="data",
+            original_name="Data",
+            expected_type=int,
+            actual_type=str,
+            actual_value=large_value,
+        )
+        result = exc.to_error_reason()
+        assert "value" not in result
+        # Payload should be small (just type names and metadata)
+        assert len(str(result)) < 500
+
+    def test_actual_value_still_accessible_on_exception(self) -> None:
+        """actual_value is still accessible for programmatic debugging."""
+        from elspeth.contracts.errors import TypeMismatchViolation
+
+        exc = TypeMismatchViolation(
+            normalized_name="amount",
+            original_name="Amount",
+            expected_type=int,
+            actual_type=str,
+            actual_value="not_a_number",
+        )
+        # Attribute is accessible for debugging
+        assert exc.actual_value == "not_a_number"
+        # But not in the serialized error reason
+        assert "value" not in exc.to_error_reason()
+
+    def test_violations_to_error_reason_no_value_in_nested(self) -> None:
+        """Multiple violations also exclude raw values from nested entries."""
+        from elspeth.contracts.errors import (
+            MissingFieldViolation,
+            TypeMismatchViolation,
+            violations_to_error_reason,
+        )
+
+        violations = [
+            MissingFieldViolation(normalized_name="id", original_name="ID"),
+            TypeMismatchViolation(
+                normalized_name="amount",
+                original_name="Amount",
+                expected_type=int,
+                actual_type=str,
+                actual_value="sensitive_data",
+            ),
+        ]
+        result = violations_to_error_reason(violations)
+        # Check that raw value doesn't appear anywhere in the serialized result
+        assert "sensitive_data" not in str(result)
+        for v in result["violations"]:
+            assert "value" not in v

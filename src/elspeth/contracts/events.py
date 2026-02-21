@@ -5,11 +5,16 @@ and completion status. Events are emitted by the orchestrator and consumed
 by CLI formatters for human-readable or structured output.
 """
 
+import copy
+import dataclasses
+from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import datetime
 from enum import StrEnum
+from types import MappingProxyType
 from typing import Any
 
+from elspeth.contracts.call_data import CallPayload
 from elspeth.contracts.enums import (
     CallStatus,
     CallType,
@@ -18,6 +23,7 @@ from elspeth.contracts.enums import (
     RowOutcome,
     RunStatus,
 )
+from elspeth.contracts.token_usage import TokenUsage
 
 
 class PipelinePhase(StrEnum):
@@ -157,6 +163,37 @@ class TelemetryEvent:
     timestamp: datetime
     run_id: str
 
+    def to_dict(self) -> dict[str, Any]:
+        """Serialize event to a plain dict for telemetry export.
+
+        Replaces ``dataclasses.asdict()`` which cannot deep-copy
+        ``MappingProxyType`` fields (raises ``TypeError: cannot pickle
+        'mappingproxy' object``).  This method adds ``MappingProxyType``
+        to the recursive dispatch so frozen mapping fields serialize
+        correctly while remaining immutable at runtime.
+        """
+        # _event_field_to_serializable returns dict for dataclass inputs;
+        # the Any return type is for the recursive leaf cases.
+        result: dict[str, Any] = _event_field_to_serializable(self)
+        return result
+
+
+def _event_field_to_serializable(obj: Any) -> Any:
+    """Recursively convert a value to a plain-dict tree.
+
+    Handles the same cases as ``dataclasses.asdict()`` plus
+    ``MappingProxyType``.
+    """
+    if dataclasses.is_dataclass(obj) and not isinstance(obj, type):
+        return {f.name: _event_field_to_serializable(getattr(obj, f.name)) for f in dataclasses.fields(obj)}
+    if isinstance(obj, MappingProxyType):
+        return {k: _event_field_to_serializable(v) for k, v in obj.items()}
+    if isinstance(obj, dict):
+        return {_event_field_to_serializable(k): _event_field_to_serializable(v) for k, v in obj.items()}
+    if isinstance(obj, (list, tuple)):
+        return type(obj)(_event_field_to_serializable(v) for v in obj)
+    return copy.deepcopy(obj)
+
 
 @dataclass(frozen=True, slots=True)
 class TransformCompleted(TelemetryEvent):
@@ -269,7 +306,11 @@ class FieldResolutionApplied(TelemetryEvent):
     source_plugin: str
     field_count: int
     normalization_version: str | None
-    resolution_mapping: dict[str, str]
+    resolution_mapping: Mapping[str, str]
+
+    def __post_init__(self) -> None:
+        """Snapshot + freeze: always copy to decouple from caller's dict."""
+        object.__setattr__(self, "resolution_mapping", MappingProxyType(dict(self.resolution_mapping)))
 
 
 # =============================================================================
@@ -335,12 +376,16 @@ class ExternalCallCompleted(TelemetryEvent):
     token_id: str | None = None
     request_hash: str | None = None
     response_hash: str | None = None
-    request_payload: dict[str, Any] | None = None
-    response_payload: dict[str, Any] | None = None
-    token_usage: dict[str, int] | None = None
+    request_payload: CallPayload | None = None
+    response_payload: CallPayload | None = None
+    token_usage: TokenUsage | None = None
 
     def __post_init__(self) -> None:
-        """Validate XOR constraint: exactly one of state_id or operation_id must be set."""
+        """Validate XOR constraint.
+
+        No deep-copy needed: frozen DTOs are immutable, and RawCallPayload
+        receives pre-copied data from PluginContext.record_call().
+        """
         has_state = self.state_id is not None
         has_operation = self.operation_id is not None
         if has_state == has_operation:  # Both True or both False
@@ -348,3 +393,24 @@ class ExternalCallCompleted(TelemetryEvent):
                 f"ExternalCallCompleted requires exactly one of state_id or operation_id. "
                 f"Got state_id={self.state_id!r}, operation_id={self.operation_id!r}"
             )
+
+    def to_dict(self) -> dict[str, Any]:
+        """Serialize event, using DTO-aware serialization for payloads.
+
+        Overrides base to_dict() because the generic _event_field_to_serializable
+        would decompose DTOs by dataclass fields (producing wrong shapes for DTOs
+        that omit None fields or spread extra_kwargs). Calling .to_dict() on each
+        payload produces the correct audit-stable dict representation.
+
+        Note: calls _event_field_to_serializable directly instead of super().to_dict()
+        because super() fails with slots=True dataclass inheritance (CPython bug —
+        __class__ cell not set correctly for dynamically created slot classes).
+        """
+        d: dict[str, Any] = _event_field_to_serializable(self)
+        if self.request_payload is not None:
+            d["request_payload"] = self.request_payload.to_dict()
+        if self.response_payload is not None:
+            d["response_payload"] = self.response_payload.to_dict()
+        if self.token_usage is not None:
+            d["token_usage"] = self.token_usage.to_dict()
+        return d

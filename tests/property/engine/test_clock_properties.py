@@ -8,10 +8,10 @@ Clock Protocol Properties:
 - SystemClock uses real time.monotonic()
 
 MockClock Properties:
-- Initial value is configurable
+- Initial value is configurable (must be finite)
 - advance() is monotonic (never decreases time)
-- advance() rejects negative values
-- set() allows arbitrary time values
+- advance() rejects negative, NaN, and Infinity values
+- set() enforces monotonicity (rejects backward and non-finite values)
 - Multiple advances are cumulative
 
 SystemClock Properties:
@@ -160,7 +160,8 @@ class TestMockClockSetProperties:
     @given(start=start_times, new_value=start_times)
     @settings(max_examples=100)
     def test_set_overrides_current_time(self, start: float, new_value: float) -> None:
-        """Property: set() overrides current time to exact value."""
+        """Property: set() overrides current time to exact value (monotonic)."""
+        assume(new_value >= start)
         clock = MockClock(start=start)
 
         clock.set(new_value)
@@ -169,28 +170,29 @@ class TestMockClockSetProperties:
 
     @given(start=start_times, new_value=start_times)
     @settings(max_examples=50)
-    def test_set_allows_backwards_time(self, new_value: float, start: float) -> None:
-        """Property: set() can go backwards (for test setup).
+    def test_set_rejects_backwards_time(self, new_value: float, start: float) -> None:
+        """Property: set() rejects backward values (monotonicity enforced).
 
-        Unlike advance(), set() allows any value. This is intentional
-        for test scenarios that need to manipulate time freely.
+        MockClock enforces monotonicity to prevent silently disabling
+        timeout behavior with backward time jumps.
         """
         assume(new_value < start)
 
         clock = MockClock(start=start)
-        clock.set(new_value)
+        with pytest.raises(ValueError, match="monotonic"):
+            clock.set(new_value)
 
-        assert clock.monotonic() == new_value
-
-    @given(start=start_times, advances=advance_lists, final_value=start_times)
+    @given(start=start_times, advances=advance_lists, extra_advance=positive_advances)
     @settings(max_examples=50)
-    def test_set_after_advances(self, start: float, advances: list[float], final_value: float) -> None:
-        """Property: set() works correctly after previous advances."""
+    def test_set_after_advances(self, start: float, advances: list[float], extra_advance: float) -> None:
+        """Property: set() works correctly after previous advances (forward only)."""
         clock = MockClock(start=start)
 
         for adv in advances:
             clock.advance(adv)
 
+        current = clock.monotonic()
+        final_value = current + extra_advance
         clock.set(final_value)
 
         assert clock.monotonic() == final_value

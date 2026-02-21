@@ -14,16 +14,14 @@ row, with parent linkage to track deaggregation lineage.
 import copy
 from typing import Any
 
-from pydantic import Field
+from pydantic import Field, model_validator
 
 from elspeth.contracts.errors import TransformSuccessReason
 from elspeth.contracts.plugin_context import PluginContext
-from elspeth.contracts.schema import SchemaConfig
 from elspeth.contracts.schema_contract import FieldContract, PipelineRow, SchemaContract
 from elspeth.plugins.base import BaseTransform
 from elspeth.plugins.config_base import TransformDataConfig
 from elspeth.plugins.results import TransformResult
-from elspeth.plugins.schema_factory import create_schema_from_config
 
 
 class BatchReplicateConfig(TransformDataConfig):
@@ -39,12 +37,26 @@ class BatchReplicateConfig(TransformDataConfig):
     default_copies: int = Field(
         default=1,
         ge=1,
+        le=10000,
         description="Default number of copies if copies_field is missing or invalid",
+    )
+    max_copies: int = Field(
+        default=10000,
+        ge=1,
+        le=10000,
+        description="Upper bound on copies per row to prevent unbounded replication",
     )
     include_copy_index: bool = Field(
         default=True,
         description="Whether to add a 'copy_index' field (0-based) to each output row",
     )
+
+    @model_validator(mode="after")
+    def _default_within_max(self) -> "BatchReplicateConfig":
+        if self.default_copies > self.max_copies:
+            msg = f"default_copies ({self.default_copies}) exceeds max_copies ({self.max_copies})"
+            raise ValueError(msg)
+        return self
 
 
 class BatchReplicate(BaseTransform):
@@ -86,25 +98,20 @@ class BatchReplicate(BaseTransform):
     def __init__(self, config: dict[str, Any]) -> None:
         super().__init__(config)
         cfg = BatchReplicateConfig.from_dict(config)
+
+        # Declare output fields for centralized collision detection.
+        self.declared_output_fields = frozenset(["copy_index"] if cfg.include_copy_index else [])
         self._copies_field = cfg.copies_field
         self._default_copies = cfg.default_copies
+        self._max_copies = cfg.max_copies
         self._include_copy_index = cfg.include_copy_index
 
         self._schema_config = cfg.schema_config
 
-        # Input schema from config
-        self.input_schema = create_schema_from_config(
+        self.input_schema, self.output_schema = self._create_schemas(
             cfg.schema_config,
-            "BatchReplicateInputSchema",
-            allow_coercion=False,
-        )
-
-        # Output schema MUST be dynamic because BatchReplicate adds copy_index field
-        # Per P1-2026-01-19-shape-changing-transforms-output-schema-mismatch
-        self.output_schema = create_schema_from_config(
-            SchemaConfig.from_dict({"mode": "observed"}),
-            "BatchReplicateOutputSchema",
-            allow_coercion=False,
+            "BatchReplicate",
+            adds_fields=True,
         )
 
     def process(  # type: ignore[override] # Batch signature: list[PipelineRow] instead of PipelineRow
@@ -145,22 +152,25 @@ class BatchReplicate(BaseTransform):
         for row in rows:
             # Get copies count - field is optional, type must be correct if present
             if self._copies_field not in row:
-                # Field missing - use default (valid scenario)
-                copies = self._default_copies
+                # Field missing - use default, still bounded by max_copies
+                copies = min(self._default_copies, self._max_copies)
             else:
                 raw_copies = row[self._copies_field]
 
                 # Contract enforcement: copies_field must be int if present
                 # Tier 2 pipeline data - wrong types indicate upstream bug
-                if not isinstance(raw_copies, int):
+                # Use `type(x) is int` instead of `isinstance(x, int)` because
+                # bool is a subclass of int in Python, so isinstance(True, int)
+                # returns True. We must reject bool values explicitly.
+                if type(raw_copies) is not int:
                     raise TypeError(
                         f"Field '{self._copies_field}' must be int, got {type(raw_copies).__name__}. "
                         f"This indicates an upstream validation bug - check source schema or prior transforms."
                     )
 
-                # Value-level validation: copies must be >= 1
+                # Value-level validation: copies must be >= 1 and <= max_copies
                 # Tier 2 operation safety - type is correct but value is unsafe
-                if raw_copies < 1:
+                if raw_copies < 1 or raw_copies > self._max_copies:
                     quarantined.append(
                         {
                             "reason": "invalid_copies",

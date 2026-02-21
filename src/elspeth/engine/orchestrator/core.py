@@ -29,6 +29,7 @@ from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
+    from elspeth.contracts.aggregation_checkpoint import AggregationCheckpointState
     from elspeth.contracts.events import TelemetryEvent
     from elspeth.contracts.payload_store import PayloadStore
     from elspeth.core.events import EventBusProtocol
@@ -36,6 +37,7 @@ if TYPE_CHECKING:
 
 from elspeth import __version__ as ENGINE_VERSION
 from elspeth.contracts import (
+    BatchCheckpointState,
     BatchPendingError,
     ExportStatus,
     NodeType,
@@ -194,7 +196,7 @@ class Orchestrator:
         run_id: str,
         token_id: str,
         node_id: str,
-        aggregation_state: dict[str, Any] | None = None,
+        aggregation_state: AggregationCheckpointState | None = None,
     ) -> None:
         """Create checkpoint if configured.
 
@@ -210,7 +212,7 @@ class Orchestrator:
             run_id: Current run ID
             token_id: Token that was just written to sink
             node_id: Sink node that received the token
-            aggregation_state: Current aggregation buffer/trigger state for crash recovery
+            aggregation_state: Typed aggregation checkpoint state for crash recovery
         """
         if not self._checkpoint_config or not self._checkpoint_config.enabled:
             return
@@ -228,11 +230,17 @@ class Orchestrator:
         # - N = every N rows
         frequency = self._checkpoint_config.frequency
         should_checkpoint = False
-        if frequency == 1:
+        if frequency == 0:
+            # aggregation_only: checkpoint unconditionally. In the post-sink
+            # architecture (elspeth-rapid-xtmo), _maybe_checkpoint is only
+            # called from checkpoint_after_sink — i.e., after sink durability.
+            # Aggregation already reduces cardinality (many rows → fewer
+            # aggregated results), so the I/O reduction is inherent.
+            should_checkpoint = True
+        elif frequency == 1:
             should_checkpoint = True  # every_row
         elif frequency > 1:
             should_checkpoint = (self._sequence_number % frequency) == 0  # every_n
-        # frequency == 0: aggregation_only - checkpointed separately in aggregation flush
 
         if should_checkpoint:
             self._checkpoint_manager.create_checkpoint(
@@ -522,7 +530,7 @@ class Orchestrator:
         config_gate_id_map: dict[GateName, NodeID],
         coalesce_id_map: dict[CoalesceName, NodeID],
         payload_store: PayloadStore,
-        restored_aggregation_state: dict[NodeID, dict[str, Any]] | None = None,
+        restored_aggregation_state: dict[NodeID, AggregationCheckpointState] | None = None,
     ) -> tuple[RowProcessor, dict[CoalesceName, NodeID], CoalesceExecutor | None]:
         """Build a RowProcessor with all supporting infrastructure.
 
@@ -668,7 +676,7 @@ class Orchestrator:
         config: PipelineConfig,
         graph: ExecutionGraph | None = None,
         settings: ElspethSettings | None = None,
-        batch_checkpoints: dict[str, dict[str, Any]] | None = None,
+        batch_checkpoints: dict[str, BatchCheckpointState] | None = None,
         *,
         payload_store: PayloadStore,
         secret_resolutions: list[dict[str, Any]] | None = None,
@@ -680,10 +688,10 @@ class Orchestrator:
             config: Pipeline configuration with plugins
             graph: Pre-validated execution graph (required)
             settings: Full settings (for post-run hooks like export)
-            batch_checkpoints: Batch transform checkpoints to restore (from
-                previous BatchPendingError). Maps node_id -> checkpoint_data.
-                Used when retrying a run after a batch transform raised
-                BatchPendingError.
+            batch_checkpoints: Typed batch transform checkpoints to restore
+                (from previous BatchPendingError). Maps node_id ->
+                BatchCheckpointState. Used when retrying a run after a batch
+                transform raised BatchPendingError.
             payload_store: PayloadStore for persisting source row payloads.
                 Required for audit compliance (CLAUDE.md: "Source entry - Raw data
                 stored before any processing").
@@ -982,7 +990,7 @@ class Orchestrator:
         config: PipelineConfig,
         graph: ExecutionGraph,
         settings: ElspethSettings | None = None,
-        batch_checkpoints: dict[str, dict[str, Any]] | None = None,
+        batch_checkpoints: dict[str, BatchCheckpointState] | None = None,
         *,
         payload_store: PayloadStore,
         shutdown_event: threading.Event | None = None,
@@ -1000,7 +1008,7 @@ class Orchestrator:
             config: Pipeline configuration
             graph: Execution graph
             settings: Full settings (optional)
-            batch_checkpoints: Restored batch checkpoints (maps node_id -> checkpoint_data)
+            batch_checkpoints: Typed batch checkpoints (maps node_id -> BatchCheckpointState)
             payload_store: Optional PayloadStore for persisting source row payloads
             shutdown_event: Optional threading.Event set by signal handler on SIGINT/SIGTERM.
                 When set, the processing loop breaks after the current row completes.
@@ -1219,19 +1227,26 @@ class Orchestrator:
         for sink in config.sinks.values():
             sink.on_start(ctx)
 
-        processor, coalesce_node_map, coalesce_executor = self._build_processor(
-            graph=graph,
-            config=config,
-            settings=settings,
-            recorder=recorder,
-            run_id=run_id,
-            source_id=source_id,
-            edge_map=edge_map,
-            route_resolution_map=route_resolution_map,
-            config_gate_id_map=config_gate_id_map,
-            coalesce_id_map=coalesce_id_map,
-            payload_store=payload_store,
-        )
+        # Wrap _build_processor so that if it fails after successful on_start,
+        # plugin cleanup still runs (prevents resource leaks: DB connections,
+        # file handles, thread pools).
+        try:
+            processor, coalesce_node_map, coalesce_executor = self._build_processor(
+                graph=graph,
+                config=config,
+                settings=settings,
+                recorder=recorder,
+                run_id=run_id,
+                source_id=source_id,
+                edge_map=edge_map,
+                route_resolution_map=route_resolution_map,
+                config_gate_id_map=config_gate_id_map,
+                coalesce_id_map=coalesce_id_map,
+                payload_store=payload_store,
+            )
+        except Exception:
+            self._cleanup_plugins(config, ctx, include_source=True)
+            raise
 
         # Process rows - Buffer TOKENS, not dicts, to preserve identity
         counters = ExecutionCounters()
@@ -1254,20 +1269,12 @@ class Orchestrator:
         start_time = time.perf_counter()
         last_progress_time = start_time
 
-        # Compute default last_node_id for end-of-source checkpointing
-        # (e.g., flush_pending when no rows were processed in the main loop)
-        # This mirrors the in-loop logic for consistency
-        default_last_node_id: str
-        if config.gates:
-            last_gate_name = config.gates[-1].name
-            default_last_node_id = config_gate_id_map[GateName(last_gate_name)]
-        elif config.transforms:
-            transform_node_id = config.transforms[-1].node_id
-            if transform_node_id is None:
-                raise OrchestrationInvariantError("Last transform in pipeline has no node_id")
-            default_last_node_id = transform_node_id
-        else:
-            default_last_node_id = source_id
+        # NOTE: Aggregation-flushed tokens are NOT checkpointed at the
+        # aggregation boundary. They go into pending_tokens and are
+        # checkpointed only after SinkExecutor.write() achieves sink
+        # durability, via the checkpoint_after_sink callback.
+        # Fix: elspeth-rapid-xtmo — the previous checkpoint_callback
+        # created checkpoints before sink writes, causing data loss on crash.
 
         # SOURCE phase - initialize source and begin loading
         phase_start = time.perf_counter()
@@ -1641,27 +1648,12 @@ class Orchestrator:
                     # CRITICAL: Flush remaining aggregation buffers at end-of-source
                     # ─────────────────────────────────────────────────────────────────
                     if config.aggregation_settings:
-                        # Build checkpoint callback if checkpointing is enabled
-                        checkpoint_callback: Callable[[TokenInfo], None] | None = None
-                        if self._checkpoint_config and self._checkpoint_config.enabled and self._checkpoint_manager:
-
-                            def make_checkpoint_callback() -> Callable[[TokenInfo], None]:
-                                # Closure captures: run_id, default_last_node_id, processor, self
-                                captured_run_id = run_id
-                                captured_node_id = default_last_node_id
-
-                                def callback(token: TokenInfo) -> None:
-                                    agg_state = processor.get_aggregation_checkpoint_state()
-                                    self._maybe_checkpoint(
-                                        run_id=captured_run_id,
-                                        token_id=token.token_id,
-                                        node_id=captured_node_id,
-                                        aggregation_state=agg_state,
-                                    )
-
-                                return callback
-
-                            checkpoint_callback = make_checkpoint_callback()
+                        # NOTE: Aggregation-flushed tokens are NOT checkpointed here.
+                        # They go into pending_tokens and are checkpointed only after
+                        # SinkExecutor.write() achieves sink durability, via the
+                        # checkpoint_after_sink callback.
+                        # Fix: elspeth-rapid-xtmo — the previous checkpoint_callback
+                        # created checkpoints before sink writes, causing data loss on crash.
 
                         # Call module function directly (no wrapper method)
                         flush_result = flush_remaining_aggregation_buffers(
@@ -1669,7 +1661,6 @@ class Orchestrator:
                             processor=processor,
                             ctx=ctx,
                             pending_tokens=pending_tokens,
-                            checkpoint_callback=checkpoint_callback,
                         )
                         counters.accumulate_flush_result(flush_result)
 
@@ -1865,7 +1856,7 @@ class Orchestrator:
         recorder.update_run_status(run_id, RunStatus.RUNNING)
 
         # 3. Build restored aggregation state map
-        restored_state: dict[str, dict[str, Any]] = {}
+        restored_state: dict[str, AggregationCheckpointState] = {}
         if resume_point.aggregation_state is not None:
             restored_state[resume_point.node_id] = resume_point.aggregation_state
 
@@ -1948,6 +1939,48 @@ class Orchestrator:
                     schema_contract=schema_contract,
                     shutdown_event=active_event,
                 )
+
+            # 6. Complete the run with reproducibility grade
+            # SUCCESS PATH: Must be inside try block so RunFinished is emitted
+            # BEFORE the finally block flushes telemetry to exporters.
+            # Fix: elspeth-rapid-sg0q — previously this was after the finally block,
+            # meaning RunFinished was emitted after telemetry flush (never exported).
+            recorder.finalize_run(run_id, status=RunStatus.COMPLETED)
+            result.status = RunStatus.COMPLETED
+
+            # 7. Emit RunFinished telemetry
+            resume_duration_ms = (time.perf_counter() - resume_start_time) * 1000
+            self._emit_telemetry(
+                RunFinished(
+                    timestamp=datetime.now(UTC),
+                    run_id=run_id,
+                    status=RunStatus.COMPLETED,
+                    row_count=result.rows_processed,
+                    duration_ms=resume_duration_ms,
+                )
+            )
+
+            # 8. Emit RunSummary event
+            total_duration = time.perf_counter() - resume_start_time
+            self._events.emit(
+                RunSummary(
+                    run_id=run_id,
+                    status=RunCompletionStatus.COMPLETED,
+                    total_rows=result.rows_processed,
+                    succeeded=result.rows_succeeded,
+                    failed=result.rows_failed,
+                    quarantined=result.rows_quarantined,
+                    duration_seconds=total_duration,
+                    exit_code=0,
+                    routed=result.rows_routed,
+                    routed_destinations=tuple(result.routed_destinations.items()),
+                )
+            )
+
+            # 9. Delete checkpoints on successful completion
+            self._delete_checkpoints(run_id)
+
+            return result
         except GracefulShutdownError as shutdown_exc:
             # Graceful shutdown: all in-flight work flushed, sinks written.
             # Mark run INTERRUPTED (resumable via `elspeth resume`).
@@ -1981,44 +2014,63 @@ class Orchestrator:
             )
 
             raise  # Propagate to CLI
+        except Exception:
+            # Non-shutdown exception during resume — finalize as FAILED to prevent
+            # the run from being stuck in RUNNING permanently (which blocks future
+            # resume attempts since recovery rejects RUNNING status).
+            total_duration = time.perf_counter() - resume_start_time
+            recorder.finalize_run(run_id, status=RunStatus.FAILED)
 
-        # 6. Complete the run with reproducibility grade
-        recorder.finalize_run(run_id, status=RunStatus.COMPLETED)
-        result.status = RunStatus.COMPLETED
-
-        # 7. Emit RunFinished telemetry (Bug fix #3: resume was missing this)
-        resume_duration_ms = (time.perf_counter() - resume_start_time) * 1000
-        self._emit_telemetry(
-            RunFinished(
-                timestamp=datetime.now(UTC),
-                run_id=run_id,
-                status=RunStatus.COMPLETED,
-                row_count=result.rows_processed,
-                duration_ms=resume_duration_ms,
+            self._emit_telemetry(
+                RunFinished(
+                    timestamp=datetime.now(UTC),
+                    run_id=run_id,
+                    status=RunStatus.FAILED,
+                    row_count=0,
+                    duration_ms=total_duration * 1000,
+                )
             )
-        )
 
-        # 8. Emit RunSummary event (Bug fix #4: resume was missing this)
-        total_duration = time.perf_counter() - resume_start_time
-        self._events.emit(
-            RunSummary(
-                run_id=run_id,
-                status=RunCompletionStatus.COMPLETED,
-                total_rows=result.rows_processed,
-                succeeded=result.rows_succeeded,
-                failed=result.rows_failed,
-                quarantined=result.rows_quarantined,
-                duration_seconds=total_duration,
-                exit_code=0,
-                routed=result.rows_routed,
-                routed_destinations=tuple(result.routed_destinations.items()),
+            self._events.emit(
+                RunSummary(
+                    run_id=run_id,
+                    status=RunCompletionStatus.FAILED,
+                    total_rows=0,
+                    succeeded=0,
+                    failed=0,
+                    quarantined=0,
+                    duration_seconds=total_duration,
+                    exit_code=2,
+                    routed=0,
+                    routed_destinations=(),
+                )
             )
-        )
 
-        # 9. Delete checkpoints on successful completion
-        self._delete_checkpoints(run_id)
+            raise
+        finally:
+            # CRITICAL: Telemetry flush on resume path — mirrors run() semantics.
+            # If _flush_telemetry() raises TelemetryExporterError (fail_on_total=True),
+            # we must preserve any pending exception.
+            # See P2-2026-02-14-resume-does-not-flush-telemetry.
+            import sys
 
-        return result
+            import structlog
+
+            from elspeth.telemetry.errors import TelemetryExporterError
+
+            _logger = structlog.get_logger()
+            pending_exc = sys.exc_info()[0]
+
+            try:
+                self._flush_telemetry()
+            except TelemetryExporterError as e:
+                _logger.warning(
+                    "Telemetry flush failed on resume - will raise after cleanup if no other exception pending",
+                    exporter=e.exporter_name,
+                    error=e.message,
+                )
+                if pending_exc is None:
+                    raise
 
     def _process_resumed_rows(
         self,
@@ -2027,7 +2079,7 @@ class Orchestrator:
         config: PipelineConfig,
         graph: ExecutionGraph,
         unprocessed_rows: list[tuple[str, int, dict[str, Any]]],
-        restored_aggregation_state: dict[str, dict[str, Any]],
+        restored_aggregation_state: dict[str, AggregationCheckpointState],
         settings: ElspethSettings | None = None,
         *,
         payload_store: PayloadStore,
@@ -2148,20 +2200,26 @@ class Orchestrator:
         for sink in config.sinks.values():
             sink.on_start(ctx)
 
-        processor, coalesce_node_map, coalesce_executor = self._build_processor(
-            graph=graph,
-            config=config,
-            settings=settings,
-            recorder=recorder,
-            run_id=run_id,
-            source_id=source_id,
-            edge_map=edge_map,
-            route_resolution_map=route_resolution_map,
-            config_gate_id_map=config_gate_id_map,
-            coalesce_id_map=coalesce_id_map,
-            payload_store=payload_store,
-            restored_aggregation_state={NodeID(k): v for k, v in restored_aggregation_state.items()},
-        )
+        # Wrap _build_processor so that if it fails after successful on_start,
+        # plugin cleanup still runs (same pattern as _execute_run).
+        try:
+            processor, coalesce_node_map, coalesce_executor = self._build_processor(
+                graph=graph,
+                config=config,
+                settings=settings,
+                recorder=recorder,
+                run_id=run_id,
+                source_id=source_id,
+                edge_map=edge_map,
+                route_resolution_map=route_resolution_map,
+                config_gate_id_map=config_gate_id_map,
+                coalesce_id_map=coalesce_id_map,
+                payload_store=payload_store,
+                restored_aggregation_state={NodeID(k): v for k, v in restored_aggregation_state.items()},
+            )
+        except Exception:
+            self._cleanup_plugins(config, ctx, include_source=False)
+            raise
 
         # Process rows - Buffer TOKENS
         counters = ExecutionCounters()
@@ -2258,7 +2316,6 @@ class Orchestrator:
                     processor=processor,
                     ctx=ctx,
                     pending_tokens=pending_tokens,
-                    checkpoint_callback=None,
                 )
                 counters.accumulate_flush_result(flush_result)
 

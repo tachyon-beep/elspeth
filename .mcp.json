@@ -1,8 +1,21 @@
 {
   "mcpServers": {
     "elspeth-landscape": {
-      "command": "elspeth-mcp",
-      "args": []
+      "type": "stdio",
+      "command": "/home/john/elspeth-rapid/.venv/bin/elspeth-mcp",
+      "args": [
+        "--database",
+        "sqlite:///./state/audit.db"
+      ]
+    },
+    "filigree": {
+      "type": "stdio",
+      "command": "/home/john/elspeth-rapid/.venv/bin/filigree-mcp",
+      "args": [
+        "--project",
+        "/home/john/elspeth-rapid"
+      ],
+      "env": {}
     }
   }
 }

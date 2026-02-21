@@ -123,8 +123,13 @@ def test_narrow_contract_preserves_dict_and_list_as_object():
     assert list_field.required is False
 
 
-def test_narrow_contract_skips_unsupported_non_dict_list_type():
-    """Unsupported non-dict/list values preserve existing skip behavior."""
+def test_narrow_contract_preserves_unsupported_type_as_object():
+    """Unsupported types are preserved as object in contract (not silently dropped).
+
+    Regression test for P1 bug: narrow_contract_to_output silently dropped fields
+    with unsupported types, causing contract/data divergence and FIXED mode
+    access failures.
+    """
 
     class _CustomUnsupported:
         pass
@@ -139,8 +144,32 @@ def test_narrow_contract_skips_unsupported_non_dict_list_type():
 
     result = narrow_contract_to_output(input_contract, output_row)
 
-    assert len(result.fields) == 1
-    assert result.fields[0].normalized_name == "a"
+    assert len(result.fields) == 2
+    assert {f.normalized_name for f in result.fields} == {"a", "custom"}
+    custom_field = next(f for f in result.fields if f.normalized_name == "custom")
+    assert custom_field.python_type is object
+    assert custom_field.source == "inferred"
+    assert custom_field.required is False
+
+
+def test_narrow_contract_preserves_decimal_as_object():
+    """Decimal values are preserved as object in narrowed contract."""
+    from decimal import Decimal
+
+    input_contract = SchemaContract(
+        mode="FLEXIBLE",
+        fields=(make_field("a", str, original_name="a", required=True, source="declared"),),
+        locked=True,
+    )
+
+    output_row = {"a": "value", "price": Decimal("12.34")}
+
+    result = narrow_contract_to_output(input_contract, output_row)
+
+    assert len(result.fields) == 2
+    assert {f.normalized_name for f in result.fields} == {"a", "price"}
+    price_field = next(f for f in result.fields if f.normalized_name == "price")
+    assert price_field.python_type is object
 
 
 def test_narrow_contract_skips_non_finite_float():

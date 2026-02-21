@@ -1305,3 +1305,452 @@ class TestResourceCleanup:
         # After on_start, recorder should be captured
         transform.on_start(ctx)
         assert transform._recorder is mock_recorder
+
+
+class TestContentSafetySeverityValidation:
+    """Regression: Bug 1 — Content Safety severity accepts bool/negative.
+
+    The Azure Content Safety API returns severity as int 0-6. The old code
+    used isinstance(severity, int) which accepts bool (True/False are ints in
+    Python). Also, out-of-range values like -1 or 100 were not rejected.
+
+    The fix uses `type(severity) is not int` (rejects bool subclass) plus
+    range check `0 <= severity <= 6`.
+
+    These tests verify the fix by mocking the Azure API response and calling
+    _analyze_content() directly.
+    """
+
+    @pytest.fixture(autouse=True)
+    def mock_httpx_client(self):
+        """Patch httpx.Client to prevent real HTTP calls."""
+        with patch("httpx.Client") as mock_client_class:
+            mock_instance = MagicMock()
+            mock_client_class.return_value = mock_instance
+            yield mock_instance
+
+    def _make_transform(self):
+        """Create a Content Safety transform for testing."""
+        from elspeth.plugins.transforms.azure.content_safety import AzureContentSafety
+
+        transform = AzureContentSafety(
+            {
+                "endpoint": "https://test.cognitiveservices.azure.com",
+                "api_key": "test-key",
+                "fields": ["content"],
+                "thresholds": {"hate": 2, "violence": 2, "sexual": 2, "self_harm": 2},
+                "schema": {"mode": "observed"},
+            }
+        )
+        ctx = make_mock_context()
+        transform.on_start(ctx)
+        return transform
+
+    def test_bool_true_severity_rejected(self, mock_httpx_client: MagicMock) -> None:
+        """severity=True (bool) must be rejected even though isinstance(True, int) is True.
+
+        Python's bool is a subclass of int: isinstance(True, int) returns True.
+        The fix uses `type(severity) is not int` which correctly rejects bool.
+        Before the fix, True was accepted as severity=1.
+        """
+
+        mock_response = _create_mock_http_response(
+            {
+                "categoriesAnalysis": [
+                    {"category": "Hate", "severity": True},  # bool, not int
+                    {"category": "Violence", "severity": 0},
+                    {"category": "Sexual", "severity": 0},
+                    {"category": "SelfHarm", "severity": 0},
+                ]
+            }
+        )
+        mock_httpx_client.post.return_value = mock_response
+
+        transform = self._make_transform()
+        collector = CollectorOutputPort()
+        transform.connect_output(collector, max_pending=10)
+
+        try:
+            row = make_pipeline_row({"content": "test", "id": 1})
+            ctx = make_mock_context()
+            transform.accept(row, ctx)
+            transform.flush_batch_processing(timeout=10.0)
+
+            assert len(collector.results) == 1
+            _, result, _ = collector.results[0]
+            assert result.status == "error"
+            assert result.reason["error_type"] == "malformed_response"
+            assert "severity" in result.reason["message"].lower()
+        finally:
+            transform.close()
+
+    def test_bool_false_severity_rejected(self, mock_httpx_client: MagicMock) -> None:
+        """severity=False (bool) must be rejected.
+
+        False == 0 in Python, so without the fix it would silently pass
+        as severity 0 (safe). This is a fail-open vulnerability.
+        """
+        mock_response = _create_mock_http_response(
+            {
+                "categoriesAnalysis": [
+                    {"category": "Hate", "severity": False},  # bool, not int
+                    {"category": "Violence", "severity": 0},
+                    {"category": "Sexual", "severity": 0},
+                    {"category": "SelfHarm", "severity": 0},
+                ]
+            }
+        )
+        mock_httpx_client.post.return_value = mock_response
+
+        transform = self._make_transform()
+        collector = CollectorOutputPort()
+        transform.connect_output(collector, max_pending=10)
+
+        try:
+            row = make_pipeline_row({"content": "test", "id": 1})
+            ctx = make_mock_context()
+            transform.accept(row, ctx)
+            transform.flush_batch_processing(timeout=10.0)
+
+            assert len(collector.results) == 1
+            _, result, _ = collector.results[0]
+            assert result.status == "error"
+            assert result.reason["error_type"] == "malformed_response"
+        finally:
+            transform.close()
+
+    def test_negative_severity_rejected(self, mock_httpx_client: MagicMock) -> None:
+        """severity=-1 must be rejected (out of range 0-6)."""
+        mock_response = _create_mock_http_response(
+            {
+                "categoriesAnalysis": [
+                    {"category": "Hate", "severity": -1},  # Out of range
+                    {"category": "Violence", "severity": 0},
+                    {"category": "Sexual", "severity": 0},
+                    {"category": "SelfHarm", "severity": 0},
+                ]
+            }
+        )
+        mock_httpx_client.post.return_value = mock_response
+
+        transform = self._make_transform()
+        collector = CollectorOutputPort()
+        transform.connect_output(collector, max_pending=10)
+
+        try:
+            row = make_pipeline_row({"content": "test", "id": 1})
+            ctx = make_mock_context()
+            transform.accept(row, ctx)
+            transform.flush_batch_processing(timeout=10.0)
+
+            assert len(collector.results) == 1
+            _, result, _ = collector.results[0]
+            assert result.status == "error"
+            assert result.reason["error_type"] == "malformed_response"
+            assert "-1" in result.reason["message"]
+        finally:
+            transform.close()
+
+    def test_severity_above_six_rejected(self, mock_httpx_client: MagicMock) -> None:
+        """severity=7 must be rejected (Azure only returns 0-6)."""
+        mock_response = _create_mock_http_response(
+            {
+                "categoriesAnalysis": [
+                    {"category": "Hate", "severity": 7},  # Out of range
+                    {"category": "Violence", "severity": 0},
+                    {"category": "Sexual", "severity": 0},
+                    {"category": "SelfHarm", "severity": 0},
+                ]
+            }
+        )
+        mock_httpx_client.post.return_value = mock_response
+
+        transform = self._make_transform()
+        collector = CollectorOutputPort()
+        transform.connect_output(collector, max_pending=10)
+
+        try:
+            row = make_pipeline_row({"content": "test", "id": 1})
+            ctx = make_mock_context()
+            transform.accept(row, ctx)
+            transform.flush_batch_processing(timeout=10.0)
+
+            assert len(collector.results) == 1
+            _, result, _ = collector.results[0]
+            assert result.status == "error"
+            assert result.reason["error_type"] == "malformed_response"
+        finally:
+            transform.close()
+
+    def test_severity_100_rejected(self, mock_httpx_client: MagicMock) -> None:
+        """severity=100 (large out-of-range) must be rejected."""
+        mock_response = _create_mock_http_response(
+            {
+                "categoriesAnalysis": [
+                    {"category": "Hate", "severity": 0},
+                    {"category": "Violence", "severity": 100},  # Way out of range
+                    {"category": "Sexual", "severity": 0},
+                    {"category": "SelfHarm", "severity": 0},
+                ]
+            }
+        )
+        mock_httpx_client.post.return_value = mock_response
+
+        transform = self._make_transform()
+        collector = CollectorOutputPort()
+        transform.connect_output(collector, max_pending=10)
+
+        try:
+            row = make_pipeline_row({"content": "test", "id": 1})
+            ctx = make_mock_context()
+            transform.accept(row, ctx)
+            transform.flush_batch_processing(timeout=10.0)
+
+            assert len(collector.results) == 1
+            _, result, _ = collector.results[0]
+            assert result.status == "error"
+            assert result.reason["error_type"] == "malformed_response"
+        finally:
+            transform.close()
+
+    @pytest.mark.parametrize("valid_severity", [0, 1, 2, 3, 4, 5, 6])
+    def test_valid_severity_range_accepted(self, mock_httpx_client: MagicMock, valid_severity: int) -> None:
+        """All valid severities 0-6 must be accepted."""
+        mock_response = _create_mock_http_response(
+            {
+                "categoriesAnalysis": [
+                    {"category": "Hate", "severity": valid_severity},
+                    {"category": "Violence", "severity": 0},
+                    {"category": "Sexual", "severity": 0},
+                    {"category": "SelfHarm", "severity": 0},
+                ]
+            }
+        )
+        mock_httpx_client.post.return_value = mock_response
+
+        transform = self._make_transform()
+        collector = CollectorOutputPort()
+        transform.connect_output(collector, max_pending=10)
+
+        try:
+            row = make_pipeline_row({"content": "test", "id": 1})
+            ctx = make_mock_context()
+            transform.accept(row, ctx)
+            transform.flush_batch_processing(timeout=10.0)
+
+            assert len(collector.results) == 1
+            _, result, _ = collector.results[0]
+            # valid_severity <= 2 (threshold) passes; > 2 is a content violation
+            # Both are valid API responses — not malformed_response errors
+            if valid_severity <= 2:
+                assert result.status == "success"
+            else:
+                assert result.status == "error"
+                assert result.reason["reason"] == "content_safety_violation"
+        finally:
+            transform.close()
+
+    def test_string_severity_rejected(self, mock_httpx_client: MagicMock) -> None:
+        """severity="2" (string) must be rejected — wrong type."""
+        mock_response = _create_mock_http_response(
+            {
+                "categoriesAnalysis": [
+                    {"category": "Hate", "severity": "2"},  # string, not int
+                    {"category": "Violence", "severity": 0},
+                    {"category": "Sexual", "severity": 0},
+                    {"category": "SelfHarm", "severity": 0},
+                ]
+            }
+        )
+        mock_httpx_client.post.return_value = mock_response
+
+        transform = self._make_transform()
+        collector = CollectorOutputPort()
+        transform.connect_output(collector, max_pending=10)
+
+        try:
+            row = make_pipeline_row({"content": "test", "id": 1})
+            ctx = make_mock_context()
+            transform.accept(row, ctx)
+            transform.flush_batch_processing(timeout=10.0)
+
+            assert len(collector.results) == 1
+            _, result, _ = collector.results[0]
+            assert result.status == "error"
+            assert result.reason["error_type"] == "malformed_response"
+        finally:
+            transform.close()
+
+    def test_none_severity_rejected(self, mock_httpx_client: MagicMock) -> None:
+        """severity=None must be rejected — would fail open as falsy."""
+        mock_response = _create_mock_http_response(
+            {
+                "categoriesAnalysis": [
+                    {"category": "Hate", "severity": None},  # None, not int
+                    {"category": "Violence", "severity": 0},
+                    {"category": "Sexual", "severity": 0},
+                    {"category": "SelfHarm", "severity": 0},
+                ]
+            }
+        )
+        mock_httpx_client.post.return_value = mock_response
+
+        transform = self._make_transform()
+        collector = CollectorOutputPort()
+        transform.connect_output(collector, max_pending=10)
+
+        try:
+            row = make_pipeline_row({"content": "test", "id": 1})
+            ctx = make_mock_context()
+            transform.accept(row, ctx)
+            transform.flush_batch_processing(timeout=10.0)
+
+            assert len(collector.results) == 1
+            _, result, _ = collector.results[0]
+            assert result.status == "error"
+            assert result.reason["error_type"] == "malformed_response"
+        finally:
+            transform.close()
+
+    def test_float_severity_rejected(self, mock_httpx_client: MagicMock) -> None:
+        """severity=2.5 (float) must be rejected — wrong type."""
+        mock_response = _create_mock_http_response(
+            {
+                "categoriesAnalysis": [
+                    {"category": "Hate", "severity": 2.5},  # float, not int
+                    {"category": "Violence", "severity": 0},
+                    {"category": "Sexual", "severity": 0},
+                    {"category": "SelfHarm", "severity": 0},
+                ]
+            }
+        )
+        mock_httpx_client.post.return_value = mock_response
+
+        transform = self._make_transform()
+        collector = CollectorOutputPort()
+        transform.connect_output(collector, max_pending=10)
+
+        try:
+            row = make_pipeline_row({"content": "test", "id": 1})
+            ctx = make_mock_context()
+            transform.accept(row, ctx)
+            transform.flush_batch_processing(timeout=10.0)
+
+            assert len(collector.results) == 1
+            _, result, _ = collector.results[0]
+            assert result.status == "error"
+            assert result.reason["error_type"] == "malformed_response"
+        finally:
+            transform.close()
+
+
+class TestContentSafetyRetryRaceCondition:
+    """Regression: Bug 5 — state_id captured at method entry for retry safety.
+
+    In _process_row(), ctx.state_id is captured into a local variable at method
+    entry. The finally block uses this local variable (not ctx.state_id) to
+    clean up the cached HTTP client. This prevents a race condition where
+    ctx.state_id changes between try and finally during retry.
+    """
+
+    @pytest.fixture(autouse=True)
+    def mock_httpx_client(self):
+        """Patch httpx.Client to prevent real HTTP calls."""
+        with patch("httpx.Client") as mock_client_class:
+            mock_instance = MagicMock()
+            mock_client_class.return_value = mock_instance
+            yield mock_instance
+
+    def test_cleanup_uses_captured_state_id_not_ctx(self, mock_httpx_client: MagicMock) -> None:
+        """Cleanup uses the local state_id captured at method entry, not ctx.state_id.
+
+        If ctx.state_id changes during processing (e.g., retry with new state),
+        the finally block must clean up the original state_id's HTTP client.
+        """
+        from elspeth.plugins.transforms.azure.content_safety import AzureContentSafety
+
+        mock_response = _create_mock_http_response(
+            {
+                "categoriesAnalysis": [
+                    {"category": "Hate", "severity": 0},
+                    {"category": "Violence", "severity": 0},
+                    {"category": "Sexual", "severity": 0},
+                    {"category": "SelfHarm", "severity": 0},
+                ]
+            }
+        )
+        mock_httpx_client.post.return_value = mock_response
+
+        transform = AzureContentSafety(
+            {
+                "endpoint": "https://test.cognitiveservices.azure.com",
+                "api_key": "test-key",
+                "fields": ["content"],
+                "thresholds": {"hate": 2, "violence": 2, "sexual": 2, "self_harm": 2},
+                "schema": {"mode": "observed"},
+            }
+        )
+
+        ctx = make_mock_context(state_id="original-state-id")
+        transform.on_start(ctx)
+
+        original_state_id = "original-state-id"
+        row = make_pipeline_row({"content": "test", "id": 1})
+
+        # Call _process_row, which captures state_id at entry
+        result = transform._process_row(row, ctx)
+        assert result.status == "success"
+
+        # Verify the original state_id was cleaned up (popped from cache)
+        assert original_state_id not in transform._http_clients
+
+    def test_mutated_ctx_state_id_does_not_affect_cleanup(self, mock_httpx_client: MagicMock) -> None:
+        """Even if ctx.state_id is mutated mid-flight, cleanup targets original state_id.
+
+        This simulates the retry race: ctx.state_id changes after _process_row starts
+        but before the finally block runs.
+        """
+        from elspeth.plugins.transforms.azure.content_safety import AzureContentSafety
+
+        mock_response = _create_mock_http_response(
+            {
+                "categoriesAnalysis": [
+                    {"category": "Hate", "severity": 0},
+                    {"category": "Violence", "severity": 0},
+                    {"category": "Sexual", "severity": 0},
+                    {"category": "SelfHarm", "severity": 0},
+                ]
+            }
+        )
+
+        original_state_id = "original-state-id"
+        mutated_state_id = "mutated-state-id"
+
+        # Mutate ctx.state_id when the API is called (simulating mid-flight mutation)
+        def side_effect_mutate_ctx(*args, **kwargs):
+            ctx.state_id = mutated_state_id
+            return mock_response
+
+        mock_httpx_client.post.side_effect = side_effect_mutate_ctx
+
+        transform = AzureContentSafety(
+            {
+                "endpoint": "https://test.cognitiveservices.azure.com",
+                "api_key": "test-key",
+                "fields": ["content"],
+                "thresholds": {"hate": 2, "violence": 2, "sexual": 2, "self_harm": 2},
+                "schema": {"mode": "observed"},
+            }
+        )
+
+        ctx = make_mock_context(state_id=original_state_id)
+        transform.on_start(ctx)
+
+        row = make_pipeline_row({"content": "test", "id": 1})
+        result = transform._process_row(row, ctx)
+        assert result.status == "success"
+
+        # The original state_id's client should have been cleaned up
+        assert original_state_id not in transform._http_clients
+        # The mutated state_id should NOT have a client (it was never created)
+        assert mutated_state_id not in transform._http_clients

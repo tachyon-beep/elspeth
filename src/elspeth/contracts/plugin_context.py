@@ -26,6 +26,7 @@ if TYPE_CHECKING:
     from opentelemetry.trace import Span, Tracer
 
     from elspeth.contracts import Call, CallStatus, CallType, PayloadStore, TransformErrorReason
+    from elspeth.contracts.batch_checkpoint import BatchCheckpointState
     from elspeth.contracts.config.runtime import RuntimeConcurrencyConfig
     from elspeth.contracts.errors import ContractViolation
     from elspeth.contracts.identity import TokenInfo
@@ -140,48 +141,51 @@ class PluginContext:
 
     # === Phase 6: Checkpoint API ===
     # Used by batch transforms (e.g., azure_batch_llm) for crash recovery.
-    # The checkpoint stores batch_id, row_mapping, etc. between invocations.
+    # The checkpoint stores batch_id, row_mapping, etc. as a typed
+    # BatchCheckpointState (frozen dataclass) between invocations.
     #
     # Checkpoints are keyed by node_id to support multiple batch transforms.
     # The orchestrator restores these from the BatchPendingError.checkpoint
     # when scheduling retries.
-    _checkpoint: dict[str, Any] = field(default_factory=dict)
+    _checkpoint: BatchCheckpointState | None = field(default=None)
 
     # Batch checkpoints restored from previous BatchPendingError
-    # Maps node_id -> checkpoint_data for each batch transform
-    _batch_checkpoints: dict[str, dict[str, Any]] = field(default_factory=dict)
+    # Maps node_id -> typed checkpoint state for each batch transform
+    _batch_checkpoints: dict[str, BatchCheckpointState] = field(default_factory=dict)
 
-    def get_checkpoint(self) -> dict[str, Any] | None:
+    def get_checkpoint(self) -> BatchCheckpointState | None:
         """Get checkpoint state for batch transforms.
 
         Used by batch transforms to recover state after crashes.
-        Returns None if no checkpoint exists (empty dict = no checkpoint).
+        Returns None if no checkpoint exists.
 
         First checks for a restored batch checkpoint (from a previous
         BatchPendingError), then falls back to the local checkpoint.
 
         Returns:
-            Checkpoint dict with batch state, or None if empty
+            BatchCheckpointState with batch state, or None if empty
         """
         # First check for restored batch checkpoint (keyed by node_id)
         if self.node_id and self.node_id in self._batch_checkpoints:
-            restored = self._batch_checkpoints[self.node_id]
-            if restored:
-                return restored
+            return self._batch_checkpoints[self.node_id]
 
         # Fall back to local checkpoint
-        return self._checkpoint if self._checkpoint else None
+        return self._checkpoint
 
-    def update_checkpoint(self, data: dict[str, Any]) -> None:
-        """Update checkpoint state with new data.
+    def set_checkpoint(self, state: BatchCheckpointState) -> None:
+        """Set checkpoint state for batch transforms.
 
-        Merges the provided data into the existing checkpoint.
-        Used by batch transforms to save progress after submission.
+        Replaces the checkpoint with the provided typed state.
+        Writes to the restored batch checkpoint slot (if present for
+        this node), or the local checkpoint otherwise.
 
         Args:
-            data: Checkpoint data to merge (batch_id, row_mapping, etc.)
+            state: Typed checkpoint state (BatchCheckpointState)
         """
-        self._checkpoint.update(data)
+        if self.node_id and self.node_id in self._batch_checkpoints:
+            self._batch_checkpoints[self.node_id] = state
+        else:
+            self._checkpoint = state
 
     def clear_checkpoint(self) -> None:
         """Clear checkpoint state after batch completion.
@@ -192,7 +196,7 @@ class PluginContext:
         Clears both the local checkpoint and any restored batch checkpoint
         for the current node to prevent stale data on subsequent batches.
         """
-        self._checkpoint.clear()
+        self._checkpoint = None
         # Also clear restored batch checkpoint to prevent stale resume data
         if self.node_id and self.node_id in self._batch_checkpoints:
             del self._batch_checkpoints[self.node_id]
@@ -323,9 +327,33 @@ class PluginContext:
             )
             parent_id = self.operation_id
 
+        # Resolve token_id from authoritative state_id lookup BEFORE telemetry.
+        # This is a data integrity check — FrameworkBugError must NOT be swallowed
+        # by the telemetry error handler below.
+        # See P2-2026-02-14-plugincontext-record-call-can-emit-the-wrong-token-id.
+        token_id = None
+        if has_state:
+            assert self.state_id is not None  # Guarded by has_state check above
+            node_state = self.landscape.get_node_state(self.state_id)
+            if node_state is None:
+                raise FrameworkBugError(
+                    f"record_call() has state_id={self.state_id} but get_node_state() "
+                    f"returned None. This is a framework bug — state_id should always "
+                    f"resolve to a valid node_state."
+                )
+            token_id = node_state.token_id
+            # Validate that ctx.token (if set) is consistent with the authoritative source
+            if self.token is not None and self.token.token_id != token_id:
+                raise FrameworkBugError(
+                    f"record_call() token mismatch: ctx.token.token_id={self.token.token_id} "
+                    f"but node_state.token_id={token_id} for state_id={self.state_id}. "
+                    f"This is a framework bug — ctx.token is out of sync with state_id."
+                )
+
         # Emit telemetry AFTER successful Landscape recording
         # Wrapped in try/except to prevent telemetry failures from affecting callers
         try:
+            from elspeth.contracts.call_data import RawCallPayload
             from elspeth.contracts.enums import CallType as CallTypeEnum
             from elspeth.contracts.events import ExternalCallCompleted
             from elspeth.core.canonical import stable_hash
@@ -334,21 +362,22 @@ class PluginContext:
             request_snapshot = copy.deepcopy(request_data)
             response_snapshot = copy.deepcopy(response_data) if response_data is not None else None
 
-            # Extract token usage for LLM calls if available
+            # Extract token usage for LLM calls if available.
+            # response_snapshot is a serialized dict from LLMCallResponse.to_dict(),
+            # so "usage" is Tier 3 external data — coerce via TokenUsage.from_dict().
             token_usage = None
             if call_type == CallTypeEnum.LLM and response_snapshot is not None:
-                usage = response_snapshot.get("usage")
-                if usage and isinstance(usage, dict):
-                    token_usage = usage
+                from elspeth.contracts.token_usage import TokenUsage
 
-            token_id = None
-            if has_state:
-                if self.token is not None:
-                    token_id = self.token.token_id
-                elif self.state_id is not None:
-                    node_state = self.landscape.get_node_state(self.state_id)
-                    if node_state is not None:
-                        token_id = node_state.token_id
+                raw_usage = response_snapshot.get("usage")
+                if isinstance(raw_usage, dict):
+                    tu = TokenUsage.from_dict(raw_usage)
+                    token_usage = tu if tu.has_data else None
+
+            # Wrap snapshots in RawCallPayload for typed telemetry payload.
+            # Snapshots are already deepcopied above — RawCallPayload doesn't copy again.
+            request_payload = RawCallPayload(request_snapshot)
+            response_payload = RawCallPayload(response_snapshot) if response_snapshot is not None else None
 
             self.telemetry_emit(
                 ExternalCallCompleted(
@@ -364,8 +393,8 @@ class PluginContext:
                     latency_ms=latency_ms or 0.0,
                     request_hash=stable_hash(request_snapshot),
                     response_hash=stable_hash(response_snapshot) if response_snapshot is not None else None,
-                    request_payload=request_snapshot,  # Full request snapshot for observability
-                    response_payload=response_snapshot,  # Full response snapshot for observability
+                    request_payload=request_payload,
+                    response_payload=response_payload,
                     token_usage=token_usage,
                 )
             )

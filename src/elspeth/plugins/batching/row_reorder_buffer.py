@@ -241,11 +241,9 @@ class RowReorderBuffer[T]:
 
         with self._release_condition:
             while True:
-                # Check shutdown
-                if self._shutdown:
-                    raise ShutdownError(f"Buffer '{self._name}' is shut down")
-
-                # Check if next sequence is ready
+                # Check if next sequence is ready BEFORE checking shutdown.
+                # This ensures all completed entries are drained during graceful
+                # shutdown, where workers finish before buffer.shutdown() is called.
                 if self._next_release_seq in self._pending:
                     entry = self._pending[self._next_release_seq]
                     if entry.is_complete:
@@ -279,7 +277,13 @@ class RowReorderBuffer[T]:
 
                         return result_entry
 
-                # Not ready - wait
+                # No ready entry -- now check shutdown. Checking AFTER the
+                # ready-entry check ensures we drain all completed entries before
+                # raising ShutdownError on graceful shutdown.
+                if self._shutdown:
+                    raise ShutdownError(f"Buffer '{self._name}' is shut down")
+
+                # Not ready and not shut down - wait for completion or shutdown
                 if deadline is not None:
                     remaining = deadline - time.monotonic()
                     if remaining <= 0:

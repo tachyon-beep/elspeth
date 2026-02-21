@@ -51,12 +51,11 @@ def propagate_contract(
             try:
                 python_type = normalize_type_for_contract(value)
             except TypeError:
-                # Preserve common complex JSON structures as "any" while
-                # preserving prior skip behavior for other unsupported types.
-                if type(value) in (dict, list):
-                    python_type = object
-                else:
-                    continue
+                # Unsupported type: map to object ("any") to preserve field in contract.
+                # Silently skipping would cause contract/data divergence — the row
+                # contains the field but the contract wouldn't, breaking FIXED mode
+                # access and losing field lineage in sinks.
+                python_type = object
 
             new_fields.append(
                 FieldContract(
@@ -141,25 +140,19 @@ def narrow_contract_to_output(
                         python_type=source_contract.python_type,
                         required=source_contract.required,
                         source=source_contract.source,
+                        nullable=source_contract.nullable,
                     )
                 )
                 continue
 
             try:
                 python_type = normalize_type_for_contract(value)
-            except TypeError as e:
-                if type(value) in (dict, list):
-                    python_type = object
-                else:
-                    # Skip unsupported non-dict/list types to preserve prior behavior.
-                    skipped_fields.append(name)
-                    log.debug(
-                        "contract_field_skipped",
-                        field_name=name,
-                        reason=type(e).__name__,
-                        value_type=type(value).__name__,
-                    )
-                    continue
+            except TypeError:
+                # Unsupported type: map to object ("any") to preserve field in contract.
+                # Silently skipping would cause contract/data divergence — the row
+                # contains the field but the contract wouldn't, breaking FIXED mode
+                # access and losing field lineage in sinks.
+                python_type = object
             except ValueError as e:
                 # Skip invalid values (NaN, Infinity)
                 skipped_fields.append(name)
@@ -236,6 +229,7 @@ def merge_contract_with_output(
                 python_type=output_field.python_type,
                 required=output_field.required,
                 source=output_field.source,
+                nullable=output_field.nullable,
             )
         )
 

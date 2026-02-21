@@ -203,16 +203,18 @@ class CallReplayer:
 
         # Parse error JSON if present
         error_data: dict[str, Any] | None = None
-        if call.error_json:
+        if call.error_json is not None:
             error_data = json.loads(call.error_json)
 
         # Determine if this was an error call
         was_error = call.status == CallStatus.ERROR
 
         # Fail if a response was expected but payload is unavailable.
-        # A response is expected if response_hash is set OR status is SUCCESS.
+        # A response is expected if response_ref is set, response_hash is set,
+        # OR status is SUCCESS. response_ref proves a response was recorded even
+        # when response_hash is missing (e.g., error calls with response bodies).
         # This catches both purged payloads AND runs recorded without a payload store.
-        response_expected = call.response_hash is not None or call.status == CallStatus.SUCCESS
+        response_expected = call.response_ref is not None or call.response_hash is not None or call.status == CallStatus.SUCCESS
         if response_data is None and response_expected:
             raise ReplayPayloadMissingError(call.call_id, request_hash)
 

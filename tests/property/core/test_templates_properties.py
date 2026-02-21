@@ -39,12 +39,14 @@ from elspeth.core.templates import (
 # Strategies for generating template components
 # =============================================================================
 
-# Valid Python-style field names (for row.field)
+# Valid Python-style field names (for row.field).
+# Excludes "get" because extract_jinja2_fields intentionally skips row.get
+# (it's a mapping method, handled as row.get("key") call pattern instead).
 valid_field_names = st.text(
     min_size=1,
     max_size=20,
     alphabet=string.ascii_letters + "_",
-).filter(lambda s: s.isidentifier())
+).filter(lambda s: s.isidentifier() and s != "get")
 
 # Field names that can include dashes/special chars (for row["field"])
 bracket_field_names = st.text(

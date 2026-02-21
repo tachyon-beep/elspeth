@@ -36,10 +36,7 @@ from hypothesis import strategies as st
 from elspeth.contracts.enums import Determinism, NodeType, RunStatus
 from elspeth.core.canonical import stable_hash
 from elspeth.core.landscape.database import LandscapeDB
-from elspeth.core.landscape.reproducibility import (
-    ReproducibilityGrade,
-    set_run_grade,
-)
+from elspeth.core.landscape.reproducibility import ReproducibilityGrade
 from elspeth.core.landscape.schema import nodes_table, rows_table, runs_table
 from elspeth.core.retention import PurgeManager, PurgeResult
 
@@ -101,7 +98,14 @@ def _create_completed_run(
             )
         )
     # Set reproducibility grade (required by purge_payloads -> update_grade_after_purge)
-    set_run_grade(db, run_id, ReproducibilityGrade.FULL_REPRODUCIBLE)
+    with db.connection() as conn:
+        conn.execute(
+            runs_table.update()
+            .where(runs_table.c.run_id == run_id)
+            .values(
+                reproducibility_grade=ReproducibilityGrade.FULL_REPRODUCIBLE.value,
+            )
+        )
     return run_id
 
 

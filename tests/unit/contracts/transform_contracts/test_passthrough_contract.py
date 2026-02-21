@@ -109,17 +109,16 @@ class TestPassThroughStrictSchemaContract(TransformContractTestBase):
         """Provide a valid input row matching the strict schema."""
         return {"id": 1, "name": "test"}
 
-    def test_strict_passthrough_rejects_wrong_type(self, transform: TransformProtocol) -> None:
-        """Strict PassThrough MUST crash on wrong input type (upstream bug!)."""
-        from pydantic import ValidationError
+    def test_strict_passthrough_sets_validate_input_for_executor(self, transform: TransformProtocol) -> None:
+        """validate_input=True stored as attribute for executor enforcement.
 
-        ctx = make_context(run_id="test")
-        wrong_type_input = {"id": "not_an_int", "name": "test"}
-        pipeline_row = make_pipeline_row(wrong_type_input)
-
+        Input validation is centralized in TransformExecutor. This test verifies
+        the transform correctly sets the attribute from config so the executor
+        rejects wrong types before calling process().
+        """
         # Per Three-Tier Trust Model: wrong types in pipeline data = crash
-        with pytest.raises(ValidationError):
-            transform.process(pipeline_row, ctx)
+        # Enforcement is now centralized in the executor, not the plugin
+        assert transform.validate_input is True
 
 
 class TestPassThroughPropertyBased:

@@ -13,12 +13,10 @@ from typing import Any
 from pydantic import Field
 
 from elspeth.contracts.plugin_context import PluginContext
-from elspeth.contracts.schema import SchemaConfig
 from elspeth.contracts.schema_contract import FieldContract, PipelineRow, SchemaContract
 from elspeth.plugins.base import BaseTransform
 from elspeth.plugins.config_base import TransformDataConfig
 from elspeth.plugins.results import TransformResult
-from elspeth.plugins.schema_factory import create_schema_from_config
 
 
 class BatchStatsConfig(TransformDataConfig):
@@ -80,21 +78,10 @@ class BatchStats(BaseTransform):
 
         self._schema_config = cfg.schema_config
 
-        # Create input schema from config
-        self.input_schema = create_schema_from_config(
+        self.input_schema, self.output_schema = self._create_schemas(
             cfg.schema_config,
-            "BatchStatsInputSchema",
-            allow_coercion=False,
-        )
-
-        # Output schema MUST be dynamic because BatchStats outputs a completely
-        # different shape: {count, sum, mean, batch_size, group_by?}
-        # The output shape has no relation to the input schema.
-        # Per P1-2026-01-19-shape-changing-transforms-output-schema-mismatch
-        self.output_schema = create_schema_from_config(
-            SchemaConfig.from_dict({"mode": "observed"}),
-            "BatchStatsOutputSchema",
-            allow_coercion=False,
+            "BatchStats",
+            adds_fields=True,
         )
 
     def process(  # type: ignore[override] # Batch signature: list[PipelineRow] instead of PipelineRow
@@ -154,7 +141,8 @@ class BatchStats(BaseTransform):
 
             # Contract enforcement: value_field must be numeric (int or float)
             # Tier 2 pipeline data - wrong types indicate upstream bug
-            if not isinstance(raw_value, (int, float)):
+            # Use type() instead of isinstance() to reject bool (bool is subclass of int)
+            if type(raw_value) not in (int, float):
                 raise TypeError(
                     f"Field '{self._value_field}' must be numeric (int or float), "
                     f"got {type(raw_value).__name__} in row {i}. "
@@ -199,6 +187,11 @@ class BatchStats(BaseTransform):
 
         # Include group_by field — validate homogeneity across batch.
         # group_by is configured contract, so missing field is an upstream bug.
+        if self._group_by is not None and self._group_by in result:
+            raise ValueError(
+                f"group_by field '{self._group_by}' collides with aggregate output key. "
+                f"Choose a group_by field name that is not one of: {', '.join(sorted(result.keys()))}"
+            )
         if self._group_by and rows:
             group_value = rows[0][self._group_by]
             for row in rows[1:]:

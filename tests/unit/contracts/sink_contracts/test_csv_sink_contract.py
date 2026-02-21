@@ -353,12 +353,13 @@ class TestCSVSinkQuotingCharacters:
 class TestCSVSinkValidation:
     """Contract tests for CSVSink input validation."""
 
-    def test_strict_schema_crashes_on_wrong_type(self, tmp_path: Path) -> None:
-        """Strict schema MUST crash on wrong type (upstream bug!)."""
-        from pydantic import ValidationError
+    def test_strict_schema_sets_validate_input_for_executor(self, tmp_path: Path) -> None:
+        """validate_input=True stored as attribute for executor enforcement.
 
-        from elspeth.contracts.plugin_context import PluginContext
-
+        Input validation is centralized in SinkExecutor. This test verifies
+        the sink correctly sets the attribute from config so the executor
+        rejects wrong types before calling write().
+        """
         sink = CSVSink(
             {
                 "path": str(tmp_path / "strict.csv"),
@@ -369,11 +370,6 @@ class TestCSVSinkValidation:
                 "validate_input": True,
             }
         )
-        ctx = PluginContext(run_id="test", config={})
 
-        # Wrong type for 'id' field
-        bad_rows = [{"id": "not_an_int", "name": "Alice"}]
-
-        # Per Three-Tier Trust Model: wrong types = crash
-        with pytest.raises(ValidationError):
-            sink.write(bad_rows, ctx)
+        # Verify the attribute is set for executor enforcement
+        assert sink.validate_input is True

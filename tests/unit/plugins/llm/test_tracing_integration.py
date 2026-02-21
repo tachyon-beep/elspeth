@@ -18,6 +18,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
+from elspeth.contracts.token_usage import TokenUsage
 from elspeth.plugins.llm.azure import AzureLLMTransform
 from elspeth.plugins.llm.openrouter import OpenRouterLLMTransform
 from elspeth.plugins.llm.tracing import AzureAITracingConfig, LangfuseTracingConfig
@@ -118,7 +119,7 @@ class TestLangfuseIntegration:
             token_id="token-123",
             prompt="Hello world",
             response_content="Hi there!",
-            usage={"prompt_tokens": 10, "completion_tokens": 5, "total_tokens": 15},
+            usage=TokenUsage.known(10, 5),
             latency_ms=150.0,
         )
 
@@ -174,7 +175,7 @@ class TestLangfuseIntegration:
             prompt="Analyze this",
             response_content="Analysis complete",
             model="anthropic/claude-3-opus",
-            usage={"prompt_tokens": 20, "completion_tokens": 10, "total_tokens": 30},
+            usage=TokenUsage.known(20, 10),
             latency_ms=250.0,
         )
 
@@ -568,7 +569,7 @@ class TestTracingMetadata:
             token_id="test-token",
             prompt="test prompt",
             response_content="test response",
-            usage={"prompt_tokens": 100, "completion_tokens": 50, "total_tokens": 150},
+            usage=TokenUsage.known(100, 50),
             latency_ms=500.0,
         )
 
@@ -623,8 +624,8 @@ class TestTracingMetadata:
 class TestTracingProviderValidation:
     """Tests for explicit tracing provider validation behavior."""
 
-    def test_unknown_provider_logs_validation_error(self) -> None:
-        """Unknown providers emit a visible validation warning and disable tracing."""
+    def test_unknown_provider_raises_at_config_time(self) -> None:
+        """Unknown providers raise ValueError during config parsing (fail-fast)."""
         config = _make_openrouter_config(
             tracing={
                 "provider": "langfusee",
@@ -632,17 +633,5 @@ class TestTracingProviderValidation:
                 "secret_key": "sk-test",
             }
         )
-        transform = OpenRouterLLMTransform(config)
-
-        with patch("structlog.get_logger") as mock_get_logger:
-            mock_logger = MagicMock()
-            mock_get_logger.return_value = mock_logger
-
-            ctx = _make_mock_ctx()
-            transform.on_start(ctx)
-
-            mock_logger.warning.assert_called_once()
-            warning_call = mock_logger.warning.call_args
-            assert warning_call.args[0] == "Tracing configuration error"
-            assert "Unknown tracing provider" in warning_call.kwargs["error"]
-            assert transform._tracing_active is False
+        with pytest.raises(ValueError, match="Unknown tracing provider"):
+            OpenRouterLLMTransform(config)

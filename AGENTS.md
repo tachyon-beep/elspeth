@@ -1,103 +1,80 @@
-# Repository Guidelines
+<!-- filigree:instructions -->
+## Filigree Issue Tracker
 
-Rule 0. Read CLAUDE.md.
+Use `filigree` for all task tracking in this project. Data lives in `.filigree/`.
 
-## Landing the Plane (Session Completion)
-
-**When ending a work session**, you MUST complete ALL steps below. Work is NOT complete until `git push` succeeds.
-
-**MANDATORY WORKFLOW:**
-
-1. **File issues for remaining work** - Create issues for anything that needs follow-up
-2. **Run quality gates** (if code changed) - Tests, linters, builds
-3. **Update issue status** - Close finished work, update in-progress items
-4. **PUSH TO REMOTE** - This is MANDATORY:
-
-   ```bash
-   git pull --rebase
-   bd sync
-   git push
-   git status  # MUST show "up to date with origin"
-   ```
-
-5. **Clean up** - Clear stashes, prune remote branches
-6. **Verify** - All changes committed AND pushed
-7. **Hand off** - Provide context for next session
-
-**CRITICAL RULES:**
-
-- Work is NOT complete until `git push` succeeds
-- NEVER stop before pushing - that leaves work stranded locally
-- NEVER say "ready to push when you are" - YOU must push
-- If push fails, resolve and retry until it succeeds
-
-## Tier-Model Rule Intent (R5 / Type Checks)
-
-- The goal is not a mechanical rewrite from `isinstance(...)` to `type(...) is ...`.
-- The required reasoning step is: "Can this value ever be a different type during normal operation?"
-- If the answer is "no," remove defensive runtime type checks and trust contracts.
-- If the answer is "yes" at a real trust boundary, validate explicitly and fail clearly (do not silently coerce or skip).
-- PR/commit notes should briefly state this reasoning when changing R5-related code.
-
-<!-- bv-agent-instructions-v1 -->
-
----
-
-## Beads Workflow Integration
-
-This project uses [beads_viewer](https://github.com/Dicklesworthstone/beads_viewer) for issue tracking. Issues are stored in `.beads/` and tracked in git.
-
-### Essential Commands
+### Quick Reference
 
 ```bash
-# View issues (launches TUI - avoid in automated sessions)
-bv
+# Finding work
+filigree ready                              # Show issues ready to work (no blockers)
+filigree list --status=open                 # All open issues
+filigree list --status=in_progress          # Active work
+filigree show <id>                          # Detailed issue view
 
-# CLI commands for agents (use these instead)
-bd ready              # Show issues ready to work (no blockers)
-bd list --status=open # All open issues
-bd show <id>          # Full issue details with dependencies
-bd create --title="..." --type=task --priority=2
-bd update <id> --status=in_progress
-bd close <id> --reason="Completed"
-bd close <id1> <id2>  # Close multiple issues at once
-bd sync               # Commit and push changes
+# Creating & updating
+filigree create "Title" --type=task --priority=2          # New issue
+filigree update <id> --status=in_progress                # Claim work
+filigree close <id>                                      # Mark complete
+filigree close <id> --reason="explanation"               # Close with reason
+
+# Dependencies
+filigree add-dep <issue> <depends-on>       # Add dependency
+filigree remove-dep <issue> <depends-on>    # Remove dependency
+filigree blocked                            # Show blocked issues
+
+# Comments & labels
+filigree add-comment <id> "text"            # Add comment
+filigree get-comments <id>                  # List comments
+filigree add-label <id> <label>             # Add label
+filigree remove-label <id> <label>          # Remove label
+
+# Workflow templates
+filigree types                              # List registered types with state flows
+filigree type-info <type>                   # Full workflow definition for a type
+filigree transitions <id>                   # Valid next states for an issue
+filigree packs                              # List enabled workflow packs
+filigree validate <id>                      # Validate issue against template
+filigree guide <pack>                       # Display workflow guide for a pack
+
+# Atomic claiming
+filigree claim <id> --assignee <name>            # Claim issue (optimistic lock)
+filigree claim-next --assignee <name>            # Claim highest-priority ready issue
+
+# Batch operations
+filigree batch-update <ids...> --priority=0      # Update multiple issues
+filigree batch-close <ids...>                    # Close multiple with error reporting
+
+# Planning
+filigree create-plan --file plan.json            # Create milestone/phase/step hierarchy
+
+# Event history
+filigree changes --since 2026-01-01T00:00:00    # Events since timestamp
+filigree events <id>                             # Event history for issue
+filigree explain-state <type> <state>            # Explain a workflow state
+
+# All commands support --json and --actor flags
+filigree --actor bot-1 create "Title"            # Specify actor identity
+filigree list --json                             # Machine-readable output
+
+# Project health
+filigree stats                              # Project statistics
+filigree search "query"                     # Search issues
+filigree doctor                             # Health check
 ```
 
-### Workflow Pattern
+### Workflow
+1. `filigree ready` to find available work
+2. `filigree show <id>` to review details
+3. `filigree transitions <id>` to see valid state changes
+4. `filigree update <id> --status=in_progress` to claim it
+5. Do the work, commit code
+6. `filigree close <id>` when done
 
-1. **Start**: Run `bd ready` to find actionable work
-2. **Claim**: Use `bd update <id> --status=in_progress`
-3. **Work**: Implement the task
-4. **Complete**: Use `bd close <id>`
-5. **Sync**: Always run `bd sync` at session end
-
-### Key Concepts
-
-- **Dependencies**: Issues can block other issues. `bd ready` shows only unblocked work.
-- **Priority**: P0=critical, P1=high, P2=medium, P3=low, P4=backlog (use numbers, not words)
-- **Types**: task, bug, feature, epic, question, docs
-- **Blocking**: `bd dep add <issue> <depends-on>` to add dependencies
-
-### Session Protocol
-
-**Before ending any session, run this checklist:**
-
-```bash
-git status              # Check what changed
-git add <files>         # Stage code changes
-bd sync                 # Commit beads changes
-git commit -m "..."     # Commit code
-bd sync                 # Commit any new beads changes
-git push                # Push to remote
-```
-
-### Best Practices
-
-- Check `bd ready` at session start to find available work
-- Update status as you work (in_progress → closed)
-- Create new issues with `bd create` when you discover tasks
-- Use descriptive titles and set appropriate priority/type
-- Always `bd sync` before ending session
-
-<!-- end-bv-agent-instructions -->
+### Priority Scale
+- P0: Critical (drop everything)
+- P1: High (do next)
+- P2: Medium (default)
+- P3: Low
+- P4: Backlog
+<!-- /filigree:instructions -->

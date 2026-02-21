@@ -3,6 +3,7 @@
 
 import logging
 import time
+from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
 import structlog
@@ -14,18 +15,25 @@ from elspeth.contracts import (
     SchemaContract,
     TokenInfo,
 )
+from elspeth.contracts.aggregation_checkpoint import (
+    AggregationCheckpointState,
+    AggregationNodeCheckpoint,
+    AggregationTokenCheckpoint,
+)
 from elspeth.contracts.enums import (
     BatchStatus,
     NodeStateStatus,
     TriggerType,
 )
 from elspeth.contracts.errors import OrchestrationInvariantError, PluginContractViolation
+from elspeth.contracts.node_state_context import AggregationFlushContext
 from elspeth.contracts.plugin_context import PluginContext
 from elspeth.contracts.types import NodeID, StepResolver
 from elspeth.core.canonical import stable_hash
 from elspeth.core.config import AggregationSettings
 from elspeth.core.landscape import LandscapeRecorder
 from elspeth.engine.clock import DEFAULT_CLOCK
+from elspeth.engine.executors.state_guard import NodeStateGuard
 from elspeth.engine.spans import SpanFactory
 from elspeth.engine.triggers import TriggerEvaluator
 from elspeth.plugins.protocols import BatchTransformProtocol
@@ -38,6 +46,28 @@ logger = logging.getLogger(__name__)
 slog = structlog.get_logger(__name__)
 
 AGGREGATION_CHECKPOINT_VERSION = "3.0"
+
+
+@dataclass(slots=True)
+class _AggregationNodeState:
+    """Per-node aggregation state.
+
+    Groups settings, trigger evaluator, batch tracking, and row buffers
+    that were previously scattered across six parallel dicts keyed by NodeID,
+    plus a member_count that was in a separate dict keyed by batch_id.
+
+    Mutable because buffers grow during processing and batch_id/member_count
+    change across batch lifecycles.  Not frozen (unlike _BranchEntry in
+    coalesce_executor.py) because the fields are updated in-place.
+    """
+
+    settings: AggregationSettings
+    trigger: TriggerEvaluator
+    batch_id: str | None = None
+    member_count: int = 0
+    buffers: list[dict[str, Any]] = field(default_factory=list)
+    tokens: list[TokenInfo] = field(default_factory=list)
+    restored_state: AggregationCheckpointState | None = None
 
 
 class AggregationExecutor:
@@ -86,22 +116,16 @@ class AggregationExecutor:
         self._step_resolver = step_resolver
         self._run_id = run_id
         self._clock = clock if clock is not None else DEFAULT_CLOCK
-        self._member_counts: dict[str, int] = {}  # batch_id -> count for ordinals
-        self._batch_ids: dict[NodeID, str | None] = {}  # node_id -> current batch_id
-        self._aggregation_settings: dict[NodeID, AggregationSettings] = aggregation_settings or {}
-        self._trigger_evaluators: dict[NodeID, TriggerEvaluator] = {}
-        self._restored_states: dict[NodeID, dict[str, Any]] = {}  # node_id -> state
 
-        # Engine-owned row buffers (node_id -> list of row dicts)
-        self._buffers: dict[NodeID, list[dict[str, Any]]] = {}
-        # Token tracking for audit trail (node_id -> list of TokenInfo)
-        self._buffer_tokens: dict[NodeID, list[TokenInfo]] = {}
-
-        # Create trigger evaluators for each configured aggregation
-        for node_id, settings in self._aggregation_settings.items():
-            self._trigger_evaluators[node_id] = TriggerEvaluator(settings.trigger, clock=self._clock)
-            self._buffers[node_id] = []
-            self._buffer_tokens[node_id] = []
+        # Single consolidated dict replaces 7 parallel dicts:
+        # _aggregation_settings, _trigger_evaluators, _batch_ids,
+        # _member_counts, _buffers, _buffer_tokens, _restored_states
+        self._nodes: dict[NodeID, _AggregationNodeState] = {}
+        for node_id, settings in (aggregation_settings or {}).items():
+            self._nodes[node_id] = _AggregationNodeState(
+                settings=settings,
+                trigger=TriggerEvaluator(settings.trigger, clock=self._clock),
+            )
 
     def buffer_row(
         self,
@@ -125,44 +149,43 @@ class AggregationExecutor:
         # Validate node is a configured aggregation (P2-2026-02-02: whitelist-reduction)
         # Without this check, rows could be buffered without a trigger evaluator,
         # meaning they'd sit in the buffer forever with no way to flush.
-        if node_id not in self._aggregation_settings:
+        if node_id not in self._nodes:
             raise OrchestrationInvariantError(
                 f"buffer_row called for node '{node_id}' which is not in aggregation_settings. "
                 f"Only configured aggregation nodes can buffer rows. "
-                f"Configured nodes: {list(self._aggregation_settings.keys())}"
+                f"Configured nodes: {list(self._nodes.keys())}"
             )
 
+        node = self._nodes[node_id]
+
         # Create batch on first row if needed
-        # Note: We use node_id directly since we've validated it exists in aggregation_settings,
-        # which means it was initialized in __init__ with buffers and trigger evaluator.
-        if node_id not in self._batch_ids or self._batch_ids[node_id] is None:
+        if node.batch_id is None:
             batch = self._recorder.create_batch(
                 run_id=self._run_id,
                 aggregation_node_id=node_id,
             )
-            self._batch_ids[node_id] = batch.batch_id
-            self._member_counts[batch.batch_id] = 0
+            node.batch_id = batch.batch_id
+            node.member_count = 0
 
-        batch_id = self._batch_ids[node_id]
+        batch_id = node.batch_id
         assert batch_id is not None  # We just created it if it was None
 
         # Buffer the row - store dict (JSON-serializable for checkpoints)
         # TokenInfo.row_data is PipelineRow, extract dict for buffer
-        self._buffers[node_id].append(token.row_data.to_dict())
-        self._buffer_tokens[node_id].append(token)
+        node.buffers.append(token.row_data.to_dict())
+        node.tokens.append(token)
 
         # Record batch membership for audit trail
-        ordinal = self._member_counts[batch_id]
+        ordinal = node.member_count
         self._recorder.add_batch_member(
             batch_id=batch_id,
             token_id=token.token_id,
             ordinal=ordinal,
         )
-        self._member_counts[batch_id] = ordinal + 1
+        node.member_count = ordinal + 1
 
-        # Update trigger evaluator - direct access since we validated node_id exists
-        # in aggregation_settings, which guarantees a trigger evaluator was created
-        self._trigger_evaluators[node_id].record_accept()
+        # Update trigger evaluator
+        node.trigger.record_accept()
 
     def get_buffered_rows(self, node_id: NodeID) -> list[dict[str, Any]]:
         """Get currently buffered rows (does not clear buffer).
@@ -178,13 +201,12 @@ class AggregationExecutor:
         """
         # Validate node_id is a configured aggregation (P2-2026-02-02: whitelist-reduction)
         # This distinguishes "valid node, no rows yet" from "invalid node".
-        if node_id not in self._aggregation_settings:
+        if node_id not in self._nodes:
             raise OrchestrationInvariantError(
                 f"get_buffered_rows called for node '{node_id}' which is not in aggregation_settings. "
-                f"Configured nodes: {list(self._aggregation_settings.keys())}"
+                f"Configured nodes: {list(self._nodes.keys())}"
             )
-        # Return empty list if no rows buffered yet (valid state for configured node)
-        return list(self._buffers.get(node_id, []))
+        return list(self._nodes[node_id].buffers)
 
     def get_buffered_tokens(self, node_id: NodeID) -> list[TokenInfo]:
         """Get currently buffered tokens (does not clear buffer).
@@ -199,12 +221,12 @@ class AggregationExecutor:
             OrchestrationInvariantError: If node_id is not a configured aggregation.
         """
         # Validate node_id is a configured aggregation (P2-2026-02-02: whitelist-reduction)
-        if node_id not in self._aggregation_settings:
+        if node_id not in self._nodes:
             raise OrchestrationInvariantError(
                 f"get_buffered_tokens called for node '{node_id}' which is not in aggregation_settings. "
-                f"Configured nodes: {list(self._aggregation_settings.keys())}"
+                f"Configured nodes: {list(self._nodes.keys())}"
             )
-        return list(self._buffer_tokens.get(node_id, []))
+        return list(self._nodes[node_id].tokens)
 
     def _get_buffered_data(self, node_id: NodeID) -> tuple[list[dict[str, Any]], list[TokenInfo]]:
         """Internal: Get buffered rows and tokens without clearing.
@@ -223,14 +245,13 @@ class AggregationExecutor:
             OrchestrationInvariantError: If node_id is not a configured aggregation.
         """
         # Validate node_id is a configured aggregation (P2-2026-02-02: whitelist-reduction)
-        if node_id not in self._aggregation_settings:
+        if node_id not in self._nodes:
             raise OrchestrationInvariantError(
                 f"_get_buffered_data called for node '{node_id}' which is not in aggregation_settings. "
-                f"Configured nodes: {list(self._aggregation_settings.keys())}"
+                f"Configured nodes: {list(self._nodes.keys())}"
             )
-        rows = list(self._buffers.get(node_id, []))
-        tokens = list(self._buffer_tokens.get(node_id, []))
-        return rows, tokens
+        node = self._nodes[node_id]
+        return list(node.buffers), list(node.tokens)
 
     def execute_flush(
         self,
@@ -263,22 +284,16 @@ class AggregationExecutor:
         Raises:
             Exception: Re-raised from transform.process() after recording failure
         """
-        # Get batch_id - must exist if we're flushing
-        batch_id = self._batch_ids.get(node_id)
+        # Get node state — must exist if we're flushing
+        node = self._nodes[node_id]
+        batch_id = node.batch_id
         if batch_id is None:
             raise RuntimeError(f"No batch exists for node {node_id} - cannot flush")
 
-        # Get buffered data - use direct access since batch existence implies buffers exist
-        # (batches are created on first row buffered, so if batch_id exists, buffers must too)
-        # If KeyError here, that indicates internal state corruption in buffer_row.
-        try:
-            buffered_rows = list(self._buffers[node_id])
-            buffered_tokens = list(self._buffer_tokens[node_id])
-        except KeyError as e:
-            raise RuntimeError(
-                f"Internal state corruption: batch_id exists for node '{node_id}' "
-                f"but buffer is missing. batch_id={batch_id}, missing_key={e}"
-            ) from e
+        # Snapshot buffered data (consolidated state eliminates KeyError risk —
+        # buffers and tokens are structurally tied to the same node entry)
+        buffered_rows = list(node.buffers)
+        buffered_tokens = list(node.tokens)
 
         if not buffered_rows:
             raise RuntimeError(f"Cannot flush empty buffer for node {node_id}")
@@ -318,7 +333,7 @@ class AggregationExecutor:
             trigger_type=trigger_type,
         )
 
-        # Step 2: Begin node state for flush operation
+        # Step 2: Prepare node state inputs
         # Wrap batch rows in a dict for node_state recording
         batch_input: dict[str, Any] = {"batch_rows": buffered_rows}
 
@@ -329,184 +344,226 @@ class AggregationExecutor:
         # Resolve step position from node_id (injected StepResolver)
         step = self._step_resolver(node_id)
 
-        state = self._recorder.begin_node_state(
+        # NodeStateGuard guarantees the node state reaches terminal status.
+        # If any post-processing step (output hashing, batch completion) raises
+        # before the state is explicitly completed, the guard auto-completes
+        # it as FAILED.  Batch lifecycle cleanup is handled separately below.
+        with NodeStateGuard(
+            self._recorder,
             token_id=representative_token.token_id,
             node_id=node_id,
             run_id=ctx.run_id,
             step_index=step,
             input_data=batch_input,
             attempt=0,
-        )
+        ) as guard:
+            # Set state_id and node_id on context for external call recording
+            # and batch checkpoint lookup (node_id required for _batch_checkpoints keying)
+            ctx.state_id = guard.state_id
+            ctx.node_id = node_id
+            # Note: call_index allocation handled by LandscapeRecorder.allocate_call_index()
 
-        # Set state_id and node_id on context for external call recording
-        # and batch checkpoint lookup (node_id required for _batch_checkpoints keying)
-        ctx.state_id = state.state_id
-        ctx.node_id = node_id
-        # Note: call_index allocation handled by LandscapeRecorder.allocate_call_index()
+            # Expose per-row token identity for batch transforms. This allows transforms
+            # like OpenRouterBatchLLMTransform to pass the correct token_id to audited
+            # clients, ensuring per-token telemetry correlation in multi-token batches.
+            batch_token_ids = [t.token_id for t in buffered_tokens]
+            ctx.batch_token_ids = batch_token_ids
 
-        # Expose per-row token identity for batch transforms. This allows transforms
-        # like OpenRouterBatchLLMTransform to pass the correct token_id to audited
-        # clients, ensuring per-token telemetry correlation in multi-token batches.
-        batch_token_ids = [t.token_id for t in buffered_tokens]
-        ctx.batch_token_ids = batch_token_ids
-        with self._spans.aggregation_span(
-            transform.name,
-            node_id=node_id,
-            input_hash=input_hash,
-            batch_id=batch_id,
-            token_ids=batch_token_ids,
-        ):
-            start = time.perf_counter()
+            # Track whether the batch was finalized (COMPLETED or FAILED).
+            # Used by the outer except to decide whether to fail the batch.
+            batch_finalized = False
+            # Track whether the batch reached PENDING state (submitted to external service).
+            # If True, the outer except must NOT wipe in-memory batch state because the
+            # external batch is already submitted and needs to be polled/reconciled later.
+            batch_pending = False
+
             try:
-                # Pass reconstructed PipelineRow objects to batch-aware transform
-                result = transform.process(pipeline_rows, ctx)
-                duration_ms = (time.perf_counter() - start) * 1000
+                with self._spans.aggregation_span(
+                    transform.name,
+                    node_id=node_id,
+                    input_hash=input_hash,
+                    batch_id=batch_id,
+                    token_ids=batch_token_ids,
+                ):
+                    start = time.perf_counter()
+                    try:
+                        # Pass reconstructed PipelineRow objects to batch-aware transform
+                        result = transform.process(pipeline_rows, ctx)
+                        duration_ms = (time.perf_counter() - start) * 1000
+                    except BatchPendingError:
+                        # BatchPendingError is a CONTROL-FLOW SIGNAL, not an error.
+                        # The batch has been submitted but isn't complete yet.
+                        # Complete node_state with PENDING status and link batch for audit trail, then re-raise.
+                        duration_ms = (time.perf_counter() - start) * 1000
+                        batch_pending = True
+
+                        # Close node_state with "pending" status - the submission succeeded
+                        # but the result isn't available yet. This prevents orphaned OPEN states.
+                        guard.complete(
+                            NodeStateStatus.PENDING,
+                            duration_ms=duration_ms,
+                        )
+
+                        # Link batch to the aggregation state for traceability.
+                        # Keep status as "executing" but set aggregation_state_id.
+                        self._recorder.update_batch_status(
+                            batch_id=batch_id,
+                            status=BatchStatus.EXECUTING,
+                            state_id=guard.state_id,
+                        )
+
+                        # Clear batch_token_ids before re-raise to prevent stale IDs
+                        # leaking to subsequent calls (PluginContext is reused).
+                        ctx.batch_token_ids = None
+
+                        # Re-raise for orchestrator to schedule retry.
+                        # The batch remains in "executing" status, checkpoint is preserved.
+                        raise
+                    except Exception as e:
+                        duration_ms = (time.perf_counter() - start) * 1000
+
+                        # Record failure in node_state
+                        error: ExecutionError = {
+                            "exception": str(e),
+                            "type": type(e).__name__,
+                        }
+                        guard.complete(
+                            NodeStateStatus.FAILED,
+                            duration_ms=duration_ms,
+                            error=error,
+                        )
+                        raise  # Batch cleanup in outer except
+
+                # -- Post-processing (GUARDED by NodeStateGuard) --
+                # If any of the following steps raise before guard.complete()
+                # is called, the guard auto-completes the state as FAILED.
+
+                # Populate audit fields on result
+                # Wrap stable_hash calls to convert canonicalization errors to PluginContractViolation.
+                # stable_hash calls canonical_json which rejects NaN, Infinity, non-serializable types.
+                # Per CLAUDE.md: plugin bugs must crash with clear error messages.
+                result.input_hash = input_hash
+                try:
+                    if result.row is not None:
+                        result.output_hash = stable_hash(result.row)
+                    elif result.rows is not None:
+                        result.output_hash = stable_hash(result.rows)
+                    else:
+                        result.output_hash = None
+                except (TypeError, ValueError) as e:
+                    raise PluginContractViolation(
+                        f"Aggregation transform '{transform.name}' emitted non-canonical data: {e}. "
+                        f"Ensure output contains only JSON-serializable types. "
+                        f"Use None instead of NaN for missing values."
+                    ) from e
+                result.duration_ms = duration_ms
+
+                # Complete node state and batch
+                if result.status == "success":
+                    # Extract dicts for audit trail (Tier 1: full trust - store plain dicts)
+                    output_data: dict[str, Any] | list[dict[str, Any]]
+                    if result.row is not None:
+                        output_data = result.row.to_dict()
+                    elif result.rows is not None:
+                        output_data = [r.to_dict() for r in result.rows]
+                    else:
+                        # Contract violation: success status requires output data
+                        raise RuntimeError(
+                            f"Aggregation transform '{transform.name}' returned success status but "
+                            f"neither row nor rows contains data. Batch-aware transforms must return "
+                            f"output via TransformResult.success(row) or TransformResult.success_multi(rows). "
+                            f"This is a plugin bug."
+                        )
+
+                    flush_context = AggregationFlushContext(
+                        trigger_type=trigger_type.value,
+                        buffer_size=len(buffered_rows),
+                        batch_id=batch_id,
+                    )
+                    guard.complete(
+                        NodeStateStatus.COMPLETED,
+                        output_data=output_data,
+                        duration_ms=duration_ms,
+                        success_reason=result.success_reason,
+                        context_after=flush_context,
+                    )
+
+                    # Transition batch to completed
+                    self._recorder.complete_batch(
+                        batch_id=batch_id,
+                        status=BatchStatus.COMPLETED,
+                        trigger_type=trigger_type,
+                        state_id=guard.state_id,
+                    )
+                    batch_finalized = True
+                else:
+                    # Transform returned error status
+                    error_info: ExecutionError = {
+                        "exception": str(result.reason) if result.reason else "Transform returned error",
+                        "type": "TransformError",
+                    }
+                    guard.complete(
+                        NodeStateStatus.FAILED,
+                        duration_ms=duration_ms,
+                        error=error_info,
+                    )
+
+                    # Transition batch to failed
+                    self._recorder.complete_batch(
+                        batch_id=batch_id,
+                        status=BatchStatus.FAILED,
+                        trigger_type=trigger_type,
+                        state_id=guard.state_id,
+                    )
+                    batch_finalized = True
+
             except BatchPendingError:
-                # BatchPendingError is a CONTROL-FLOW SIGNAL, not an error.
-                # The batch has been submitted but isn't complete yet.
-                # Complete node_state with PENDING status and link batch for audit trail, then re-raise.
-                duration_ms = (time.perf_counter() - start) * 1000
-
-                # Close node_state with "pending" status - the submission succeeded
-                # but the result isn't available yet. This prevents orphaned OPEN states.
-                self._recorder.complete_node_state(
-                    state_id=state.state_id,
-                    status=NodeStateStatus.PENDING,
-                    duration_ms=duration_ms,
-                )
-
-                # Link batch to the aggregation state for traceability.
-                # Keep status as "executing" but set aggregation_state_id.
-                self._recorder.update_batch_status(
-                    batch_id=batch_id,
-                    status=BatchStatus.EXECUTING,
-                    state_id=state.state_id,
-                )
-
-                # Clear batch_token_ids before re-raise to prevent stale IDs
-                # leaking to subsequent calls (PluginContext is reused).
-                ctx.batch_token_ids = None
-
-                # Re-raise for orchestrator to schedule retry.
-                # The batch remains in "executing" status, checkpoint is preserved.
-                raise
-            except Exception as e:
-                duration_ms = (time.perf_counter() - start) * 1000
-
-                # Record failure in node_state
-                error: ExecutionError = {
-                    "exception": str(e),
-                    "type": type(e).__name__,
-                }
-                self._recorder.complete_node_state(
-                    state_id=state.state_id,
-                    status=NodeStateStatus.FAILED,
-                    duration_ms=duration_ms,
-                    error=error,
-                )
-
-                # Transition batch to failed
-                self._recorder.complete_batch(
-                    batch_id=batch_id,
-                    status=BatchStatus.FAILED,
-                    trigger_type=trigger_type,
-                    state_id=state.state_id,
-                )
-
-                # Reset for next batch
+                raise  # Already handled above, just propagate
+            except Exception:
+                if batch_pending:
+                    # Batch was already submitted to external service. Post-submission
+                    # bookkeeping failed (e.g., update_batch_status DB write error), but
+                    # the external batch exists and must be polled/reconciled on retry.
+                    # Do NOT wipe in-memory batch state — it's the only link to the
+                    # externally-submitted batch. Let the exception propagate so the
+                    # orchestrator can schedule a retry that picks up the pending batch.
+                    ctx.batch_token_ids = None
+                    raise
+                # Batch cleanup on ANY failure (guard handles node state).
+                # Only attempt to fail the batch if it wasn't already finalized
+                # (avoids double-write if complete_batch itself raised).
+                if not batch_finalized:
+                    try:
+                        self._recorder.complete_batch(
+                            batch_id=batch_id,
+                            status=BatchStatus.FAILED,
+                            trigger_type=trigger_type,
+                            state_id=guard.state_id,
+                        )
+                    except Exception:
+                        logger.error(
+                            "Failed to mark batch %s as FAILED during error cleanup",
+                            batch_id,
+                            exc_info=True,
+                        )
+                # Full cleanup: reset batch state, clear buffers, reset trigger
                 self._reset_batch_state(node_id)
-
-                # Clear batch_token_ids before re-raise to prevent stale IDs
-                # leaking to subsequent calls (PluginContext is reused).
+                node.buffers.clear()
+                node.tokens.clear()
+                node.trigger.reset()
                 ctx.batch_token_ids = None
                 raise
 
-        # Step 4: Populate audit fields on result
-        # Wrap stable_hash calls to convert canonicalization errors to PluginContractViolation.
-        # stable_hash calls canonical_json which rejects NaN, Infinity, non-serializable types.
-        # Per CLAUDE.md: plugin bugs must crash with clear error messages.
-        result.input_hash = input_hash
-        try:
-            if result.row is not None:
-                result.output_hash = stable_hash(result.row)
-            elif result.rows is not None:
-                result.output_hash = stable_hash(result.rows)
-            else:
-                result.output_hash = None
-        except (TypeError, ValueError) as e:
-            raise PluginContractViolation(
-                f"Aggregation transform '{transform.name}' emitted non-canonical data: {e}. "
-                f"Ensure output contains only JSON-serializable types. "
-                f"Use None instead of NaN for missing values."
-            ) from e
-        result.duration_ms = duration_ms
-
-        # Step 5: Complete node state
-        if result.status == "success":
-            # Extract dicts for audit trail (Tier 1: full trust - store plain dicts)
-            output_data: dict[str, Any] | list[dict[str, Any]]
-            if result.row is not None:
-                output_data = result.row.to_dict()
-            elif result.rows is not None:
-                output_data = [r.to_dict() for r in result.rows]
-            else:
-                # Contract violation: success status requires output data
-                raise RuntimeError(
-                    f"Aggregation transform '{transform.name}' returned success status but "
-                    f"neither row nor rows contains data. Batch-aware transforms must return "
-                    f"output via TransformResult.success(row) or TransformResult.success_multi(rows). "
-                    f"This is a plugin bug."
-                )
-
-            self._recorder.complete_node_state(
-                state_id=state.state_id,
-                status=NodeStateStatus.COMPLETED,
-                output_data=output_data,
-                duration_ms=duration_ms,
-                success_reason=result.success_reason,
-            )
-
-            # Transition batch to completed
-            self._recorder.complete_batch(
-                batch_id=batch_id,
-                status=BatchStatus.COMPLETED,
-                trigger_type=trigger_type,
-                state_id=state.state_id,
-            )
-        else:
-            # Transform returned error status
-            error_info: ExecutionError = {
-                "exception": str(result.reason) if result.reason else "Transform returned error",
-                "type": "TransformError",
-            }
-            self._recorder.complete_node_state(
-                state_id=state.state_id,
-                status=NodeStateStatus.FAILED,
-                duration_ms=duration_ms,
-                error=error_info,
-            )
-
-            # Transition batch to failed
-            self._recorder.complete_batch(
-                batch_id=batch_id,
-                status=BatchStatus.FAILED,
-                trigger_type=trigger_type,
-                state_id=state.state_id,
-            )
-
-        # Step 6: Save batch_id before reset (needed by caller for CONSUMED_IN_BATCH)
-        # Note: batch_id was validated at the start of this method
+        # Success cleanup: save batch_id before reset (needed by caller for CONSUMED_IN_BATCH)
         flushed_batch_id = batch_id
 
         # Reset for next batch and clear buffers
         self._reset_batch_state(node_id)
-        self._buffers[node_id] = []
-        self._buffer_tokens[node_id] = []
+        node.buffers.clear()
+        node.tokens.clear()
 
         # Reset trigger evaluator for next batch
-        # Direct access since buffer_row validates node_id is in aggregation_settings,
-        # which guarantees a trigger evaluator exists
-        self._trigger_evaluators[node_id].reset()
+        node.trigger.reset()
 
         # Clear batch_token_ids to prevent stale data leaking to next batch
         ctx.batch_token_ids = None
@@ -522,13 +579,10 @@ class AggregationExecutor:
         Args:
             node_id: Aggregation node ID
         """
-        # Direct access - execute_flush validated batch_id exists before calling us
-        batch_id = self._batch_ids[node_id]
-        # Type narrowing: execute_flush validates batch_id is not None before calling
-        assert batch_id is not None, f"_reset_batch_state invariant violation: batch_id is None for {node_id}"
-        del self._batch_ids[node_id]
-        # member_counts is keyed by batch_id (not node_id) - direct access
-        del self._member_counts[batch_id]
+        node = self._nodes[node_id]
+        assert node.batch_id is not None, f"_reset_batch_state invariant violation: batch_id is None for {node_id}"
+        node.batch_id = None
+        node.member_count = 0
 
     def get_buffer_count(self, node_id: NodeID) -> int:
         """Get the number of rows currently buffered for an aggregation.
@@ -543,68 +597,48 @@ class AggregationExecutor:
             OrchestrationInvariantError: If node_id is not a configured aggregation.
         """
         # Validate node_id is a configured aggregation (P2-2026-02-02: whitelist-reduction)
-        if node_id not in self._aggregation_settings:
+        if node_id not in self._nodes:
             raise OrchestrationInvariantError(
                 f"get_buffer_count called for node '{node_id}' which is not in aggregation_settings. "
-                f"Configured nodes: {list(self._aggregation_settings.keys())}"
+                f"Configured nodes: {list(self._nodes.keys())}"
             )
-        return len(self._buffers.get(node_id, []))
+        return len(self._nodes[node_id].buffers)
 
-    def get_checkpoint_state(self) -> dict[str, Any]:
+    def get_checkpoint_state(self) -> AggregationCheckpointState:
         """Return checkpoint state for persistence.
 
         Stores complete TokenInfo objects (not just IDs) to enable restoration
         without database queries. Validates size to prevent pathological growth.
 
         Returns:
-            dict[str, Any]: Checkpoint state with format:
-                {
-                    "node_id_1": {
-                        "tokens": [
-                            {
-                                "token_id": str,
-                                "row_id": str,
-                                "branch_name": str | None,
-                                "fork_group_id": str | None,
-                                "join_group_id": str | None,
-                                "expand_group_id": str | None,
-                                "row_data": dict[str, Any]
-                            },
-                            ...
-                        ]
-                    },
-                    ...
-                }
+            AggregationCheckpointState with all buffered aggregation data.
 
         Raises:
             RuntimeError: If checkpoint exceeds 10MB size limit
         """
         from elspeth.core.checkpoint.serialization import checkpoint_dumps
 
-        # Build checkpoint state from all buffers
-        state: dict[str, Any] = {}
-        for node_id, tokens in self._buffer_tokens.items():
-            if not tokens:  # Only include non-empty buffers
+        # Build checkpoint state from all nodes
+        nodes: dict[str, AggregationNodeCheckpoint] = {}
+        for node_id, node in self._nodes.items():
+            if not node.tokens:  # Only include non-empty buffers
                 continue
 
             # Get trigger state for preservation (Bug #6 + P2-2026-02-01)
-            # If tokens exist for a node, a trigger evaluator MUST exist (created in __init__)
-            # Direct access crashes if evaluator is missing, revealing configuration bugs.
-            evaluator = self._trigger_evaluators[node_id]
-            elapsed_age_seconds = evaluator.get_age_seconds()
+            elapsed_age_seconds = node.trigger.get_age_seconds()
             # P2-2026-02-01: Preserve fire time offsets for "first to fire wins" ordering
-            count_fire_offset = evaluator.get_count_fire_offset()
-            condition_fire_offset = evaluator.get_condition_fire_offset()
+            count_fire_offset = node.trigger.get_count_fire_offset()
+            condition_fire_offset = node.trigger.get_condition_fire_offset()
 
-            if node_id not in self._batch_ids or self._batch_ids[node_id] is None:
+            if node.batch_id is None:
                 raise RuntimeError(
                     f"AggregationExecutor checkpoint missing batch_id for node {node_id}. "
                     "Buffered tokens exist without an active batch_id - internal state corruption."
                 )
 
-            batch_id = self._batch_ids[node_id]
+            batch_id = node.batch_id
 
-            # Store full TokenInfo as dicts (not just IDs)
+            # Store full TokenInfo as typed checkpoints (not just IDs)
             # Include all lineage fields to preserve fork/join/expand metadata
             #
             # PipelineRow Migration (v2.0), hash-width bump (v2.1):
@@ -614,223 +648,134 @@ class AggregationExecutor:
             #
             # Get contract from first token (all tokens in buffer share same contract)
             # Per CLAUDE.md Tier 1: tokens exist, so first token MUST exist
-            first_token_contract = tokens[0].row_data.contract
-            state[node_id] = {
-                "tokens": [
-                    {
-                        "token_id": t.token_id,
-                        "row_id": t.row_id,
-                        "branch_name": t.branch_name,
-                        "fork_group_id": t.fork_group_id,
-                        "join_group_id": t.join_group_id,
-                        "expand_group_id": t.expand_group_id,
-                        "row_data": t.row_data.to_dict(),  # Extract dict for JSON serialization
-                        "contract_version": t.row_data.contract.version_hash(),
-                    }
-                    for t in tokens
-                ],
-                "batch_id": batch_id,
-                "elapsed_age_seconds": elapsed_age_seconds,  # Bug #6: Preserve timeout window
-                # P2-2026-02-01: Preserve trigger fire time offsets
-                "count_fire_offset": count_fire_offset,
-                "condition_fire_offset": condition_fire_offset,
-                # Store contract once per node (all buffered tokens share the same contract)
-                "contract": first_token_contract.to_checkpoint_format(),
-            }
+            first_token_contract = node.tokens[0].row_data.contract
+            token_checkpoints = tuple(
+                AggregationTokenCheckpoint(
+                    token_id=t.token_id,
+                    row_id=t.row_id,
+                    branch_name=t.branch_name,
+                    fork_group_id=t.fork_group_id,
+                    join_group_id=t.join_group_id,
+                    expand_group_id=t.expand_group_id,
+                    row_data=t.row_data.to_dict(),
+                    contract_version=t.row_data.contract.version_hash(),
+                )
+                for t in node.tokens
+            )
 
-        # Checkpoint format version
-        # v1.0: Initial format with elapsed_age_seconds
-        # v1.1: Added count_fire_offset/condition_fire_offset for trigger ordering (P2-2026-02-01)
-        # v2.0: PipelineRow migration - row_data will be PipelineRow with contract
-        # v2.1: Contract version_hash width changed (16 -> 32 hex chars)
-        # v3.0: Phase 2 traversal refactor checkpoint break (no backwards compatibility)
-        state["_version"] = AGGREGATION_CHECKPOINT_VERSION
+            nodes[node_id] = AggregationNodeCheckpoint(
+                tokens=token_checkpoints,
+                batch_id=batch_id,
+                elapsed_age_seconds=elapsed_age_seconds,
+                count_fire_offset=count_fire_offset,
+                condition_fire_offset=condition_fire_offset,
+                contract=first_token_contract.to_checkpoint_format(),
+            )
+
+        checkpoint = AggregationCheckpointState(
+            version=AGGREGATION_CHECKPOINT_VERSION,
+            nodes=nodes,
+        )
 
         # Size validation (on serialized checkpoint)
         # Use checkpoint_dumps to handle datetime (P1-2026-02-05 fix)
-        serialized = checkpoint_dumps(state)
+        serialized = checkpoint_dumps(checkpoint.to_dict())
         size_mb = len(serialized) / 1_000_000
-        total_rows = sum(len(b) for b in self._buffer_tokens.values())
+        total_rows = sum(len(n.tokens) for n in self._nodes.values())
 
         if size_mb > 1:
-            logger.warning(f"Large checkpoint: {size_mb:.1f}MB for {total_rows} buffered rows across {len(state)} nodes")
+            logger.warning(f"Large checkpoint: {size_mb:.1f}MB for {total_rows} buffered rows across {len(nodes)} nodes")
 
         if size_mb > 10:
             raise RuntimeError(
                 f"Checkpoint size {size_mb:.1f}MB exceeds 10MB limit. "
-                f"Buffer contains {total_rows} total rows across {len(state)} nodes. "
+                f"Buffer contains {total_rows} total rows across {len(nodes)} nodes. "
                 f"Solutions: (1) Reduce aggregation count trigger to <5000 rows, "
                 f"(2) Reduce row_data payload size, or (3) Implement checkpoint retention "
                 f"policy"
             )
 
-        return state
+        return checkpoint
 
-    def restore_from_checkpoint(self, state: dict[str, Any]) -> None:
+    def restore_from_checkpoint(self, state: AggregationCheckpointState) -> None:
         """Restore executor state from checkpoint.
 
-        Reconstructs full TokenInfo objects from checkpoint data, eliminating
-        database queries during restoration. Expects format from get_checkpoint_state().
+        Reconstructs full TokenInfo objects from typed checkpoint data,
+        eliminating database queries during restoration.
 
         Args:
-            state: Checkpoint state with format:
-                {
-                    "_version": "3.0",
-                    "node_id": {
-                        "tokens": [{"token_id", "row_id", "branch_name", "row_data", ...}],
-                        "batch_id": str,
-                        "elapsed_age_seconds": float,
-                        "count_fire_offset": float | None,
-                        "condition_fire_offset": float | None
-                    }
-                }
+            state: Typed checkpoint state from ``AggregationCheckpointState.from_dict()``.
 
         Raises:
-            ValueError: If checkpoint format is invalid (per CLAUDE.md - our data, full trust)
+            ValueError: If checkpoint version is incompatible or data is invalid
+                (per CLAUDE.md — our data, full trust)
         """
         # Validate checkpoint version (Bug #12 fix)
-        # v1.1: Pre-PipelineRow migration format
-        # v2.0: PipelineRow migration - row_data will be PipelineRow with contract
-        # v2.1: Contract version_hash width changed (16 -> 32 hex chars)
-        # v3.0: Phase 2 traversal refactor checkpoint break (no backwards compatibility)
         checkpoint_version = AGGREGATION_CHECKPOINT_VERSION
-        version = state.get("_version")
 
-        if version != checkpoint_version:
+        if state.version != checkpoint_version:
             # Log checkpoint rejection for observability
             slog.warning(
                 "checkpoint_version_rejected",
-                found_version=version,
+                found_version=state.version,
                 expected_version=checkpoint_version,
                 reason="incompatible_checkpoint_version",
             )
             raise ValueError(
-                f"Incompatible checkpoint version: {version!r}. "
+                f"Incompatible checkpoint version: {state.version!r}. "
                 f"Expected: {checkpoint_version!r}. "
                 f"Cannot resume from incompatible checkpoint format. "
                 f"This checkpoint may be from a different ELSPETH version."
             )
 
-        for node_id_str, node_state in state.items():
-            # Skip version metadata field
-            if node_id_str == "_version":
-                continue
-            # Convert to typed NodeID for dictionary access
+        for node_id_str, node_checkpoint in state.nodes.items():
             node_id = NodeID(node_id_str)
-            # Validate checkpoint format (OUR DATA - crash on mismatch, don't hide with .get())
-            if "tokens" not in node_state:
-                raise ValueError(
-                    f"Invalid checkpoint format for node {node_id}: missing 'tokens' key. "
-                    f"Found keys: {list(node_state.keys())}. "
-                    f"Expected format: {{'tokens': [...], 'batch_id': str|None}}. "
-                    f"This checkpoint may be from an incompatible ELSPETH version."
-                )
-
-            tokens_data = node_state["tokens"]
-
-            # Validate tokens is a list
-            if not isinstance(tokens_data, list):
-                raise ValueError(f"Invalid checkpoint format for node {node_id}: 'tokens' must be a list, got {type(tokens_data).__name__}")
+            node = self._nodes[node_id]  # Must exist — crash on configuration mismatch
 
             # Restore contract from checkpoint (stored once per node)
             # Per CLAUDE.md Tier 1: contract MUST exist if tokens exist
-            if "contract" not in node_state:
-                raise ValueError(
-                    f"Invalid checkpoint format for node {node_id}: missing 'contract' key. "
-                    f"Checkpoint format {checkpoint_version} requires contract for PipelineRow restoration."
-                )
-            restored_contract = SchemaContract.from_checkpoint(node_state["contract"])
+            restored_contract = SchemaContract.from_checkpoint(node_checkpoint.contract)
 
-            # Reconstruct TokenInfo objects directly from checkpoint
+            # Reconstruct TokenInfo objects directly from typed checkpoint
             reconstructed_tokens = []
-            for t in tokens_data:
-                # Validate required fields (crash on missing - per CLAUDE.md)
-                # All these fields are required in current checkpoint format (values can be None)
-                required_fields = {
-                    "token_id",
-                    "row_id",
-                    "row_data",
-                    "branch_name",
-                    "fork_group_id",
-                    "join_group_id",
-                    "expand_group_id",
-                    "contract_version",  # v2.0: required for contract reference
-                }
-                missing = required_fields - set(t.keys())
-                if missing:
-                    raise ValueError(
-                        f"Checkpoint token missing required fields: {missing}. "
-                        f"Required in checkpoint format {checkpoint_version}: {required_fields}. Found: {set(t.keys())}"
-                    )
-
+            for t in node_checkpoint.tokens:
                 # Validate contract_version matches restored contract
                 # Per CLAUDE.md Tier 1: integrity check on our data
-                if t["contract_version"] != restored_contract.version_hash():
+                if t.contract_version != restored_contract.version_hash():
                     raise ValueError(
-                        f"Contract version mismatch for token {t['token_id']}: "
-                        f"expected {restored_contract.version_hash()}, got {t['contract_version']}. "
+                        f"Contract version mismatch for token {t.token_id}: "
+                        f"expected {restored_contract.version_hash()}, got {t.contract_version}. "
                         f"Checkpoint may be corrupted."
                     )
 
                 # Reconstruct PipelineRow from checkpoint data
-                row_data = PipelineRow(t["row_data"], restored_contract)
+                row_data = PipelineRow(t.row_data, restored_contract)
 
-                # Reconstruct TokenInfo from checkpoint data
-                # NOTE: These fields CAN be None (valid state for unforked tokens), but they
-                # are ALWAYS present in current checkpoint format - use direct access to detect
-                # corruption/missing fields. The difference between "field is None" and
-                # "field is missing" matters: the former is valid, the latter is corruption.
                 reconstructed_tokens.append(
                     TokenInfo(
-                        row_id=t["row_id"],
-                        token_id=t["token_id"],
-                        row_data=row_data,  # PipelineRow, not dict
-                        branch_name=t["branch_name"],
-                        fork_group_id=t["fork_group_id"],
-                        join_group_id=t["join_group_id"],
-                        expand_group_id=t["expand_group_id"],
+                        row_id=t.row_id,
+                        token_id=t.token_id,
+                        row_data=row_data,
+                        branch_name=t.branch_name,
+                        fork_group_id=t.fork_group_id,
+                        join_group_id=t.join_group_id,
+                        expand_group_id=t.expand_group_id,
                     )
                 )
 
-            # Restore buffer state
-            # _buffer_tokens stores TokenInfo with PipelineRow
-            # _buffers stores dicts (JSON-serializable for future checkpoints)
-            self._buffer_tokens[node_id] = reconstructed_tokens
-            self._buffers[node_id] = [t.row_data.to_dict() for t in reconstructed_tokens]
-
-            if "batch_id" not in node_state:
-                raise ValueError(
-                    f"Invalid checkpoint format for node {node_id}: missing 'batch_id' key. "
-                    f"Found keys: {list(node_state.keys())}. "
-                    "Checkpoint entries with tokens must include batch_id."
-                )
-            batch_id = node_state["batch_id"]
-            if batch_id is None:
-                raise ValueError(
-                    f"Invalid checkpoint format for node {node_id}: 'batch_id' is None. "
-                    "Checkpoint entries with tokens must include a batch_id."
-                )
-            self._batch_ids[node_id] = batch_id
-            self._member_counts[batch_id] = len(reconstructed_tokens)
+            # Restore buffer state on consolidated node
+            node.tokens = reconstructed_tokens
+            node.buffers = [t.row_data.to_dict() for t in reconstructed_tokens]
+            node.batch_id = node_checkpoint.batch_id
+            node.member_count = len(reconstructed_tokens)
 
             # Restore trigger evaluator state (Bug #6 + P2-2026-02-01)
-            # If tokens exist for a node, a trigger evaluator MUST exist (created in __init__)
-            # Direct access crashes if evaluator is missing, revealing configuration bugs.
-            evaluator = self._trigger_evaluators[node_id]
-
             # P2-2026-02-01: Use dedicated restore API that preserves fire time ordering
-            # The old approach called record_accept() which set fire times to current time,
-            # then rewound _first_accept_time, causing incorrect "first to fire wins" ordering.
-            # NOTE: All fields are required in current checkpoint format - no backwards compat
-            elapsed_seconds = node_state["elapsed_age_seconds"]
-            count_fire_offset = node_state["count_fire_offset"]
-            condition_fire_offset = node_state["condition_fire_offset"]
-
-            evaluator.restore_from_checkpoint(
+            node.trigger.restore_from_checkpoint(
                 batch_count=len(reconstructed_tokens),
-                elapsed_age_seconds=elapsed_seconds,
-                count_fire_offset=count_fire_offset,
-                condition_fire_offset=condition_fire_offset,
+                elapsed_age_seconds=node_checkpoint.elapsed_age_seconds,
+                count_fire_offset=node_checkpoint.count_fire_offset,
+                condition_fire_offset=node_checkpoint.condition_fire_offset,
             )
 
             # Log successful checkpoint restoration for observability
@@ -855,7 +800,10 @@ class AggregationExecutor:
         Returns:
             Batch ID if a batch is in progress, None otherwise
         """
-        return self._batch_ids.get(node_id)
+        node = self._nodes.get(node_id)
+        if node is None:
+            return None
+        return node.batch_id
 
     def should_flush(self, node_id: NodeID) -> bool:
         """Check if the aggregation should flush based on trigger config.
@@ -870,14 +818,12 @@ class AggregationExecutor:
             OrchestrationInvariantError: If node_id is not a configured aggregation.
         """
         # Validate node_id is a configured aggregation (P2-2026-02-02: whitelist-reduction)
-        # Trigger evaluators are created in __init__ for all configured nodes.
-        if node_id not in self._aggregation_settings:
+        if node_id not in self._nodes:
             raise OrchestrationInvariantError(
                 f"should_flush called for node '{node_id}' which is not in aggregation_settings. "
-                f"Configured nodes: {list(self._aggregation_settings.keys())}"
+                f"Configured nodes: {list(self._nodes.keys())}"
             )
-        # Direct access - evaluator must exist if node is in aggregation_settings
-        return self._trigger_evaluators[node_id].should_trigger()
+        return self._nodes[node_id].trigger.should_trigger()
 
     def get_trigger_type(self, node_id: NodeID) -> "TriggerType | None":
         """Get the TriggerType for the trigger that fired.
@@ -892,12 +838,12 @@ class AggregationExecutor:
             OrchestrationInvariantError: If node_id is not a configured aggregation.
         """
         # Validate node_id is a configured aggregation (P2-2026-02-02: whitelist-reduction)
-        if node_id not in self._aggregation_settings:
+        if node_id not in self._nodes:
             raise OrchestrationInvariantError(
                 f"get_trigger_type called for node '{node_id}' which is not in aggregation_settings. "
-                f"Configured nodes: {list(self._aggregation_settings.keys())}"
+                f"Configured nodes: {list(self._nodes.keys())}"
             )
-        return self._trigger_evaluators[node_id].get_trigger_type()
+        return self._nodes[node_id].trigger.get_trigger_type()
 
     def check_flush_status(self, node_id: NodeID) -> tuple[bool, "TriggerType | None"]:
         """Check flush status and get trigger type in a single operation.
@@ -918,48 +864,50 @@ class AggregationExecutor:
             OrchestrationInvariantError: If node_id is not a configured aggregation.
         """
         # Validate node_id is a configured aggregation (P2-2026-02-02: whitelist-reduction)
-        if node_id not in self._aggregation_settings:
+        if node_id not in self._nodes:
             raise OrchestrationInvariantError(
                 f"check_flush_status called for node '{node_id}' which is not in aggregation_settings. "
-                f"Configured nodes: {list(self._aggregation_settings.keys())}"
+                f"Configured nodes: {list(self._nodes.keys())}"
             )
-        # Direct access - evaluator must exist if node is in aggregation_settings
-        evaluator = self._trigger_evaluators[node_id]
-        should_flush = evaluator.should_trigger()
-        trigger_type = evaluator.get_trigger_type() if should_flush else None
+        node = self._nodes[node_id]
+        should_flush = node.trigger.should_trigger()
+        trigger_type = node.trigger.get_trigger_type() if should_flush else None
         return (should_flush, trigger_type)
 
-    def restore_state(self, node_id: NodeID, state: dict[str, Any]) -> None:
+    def restore_state(self, node_id: NodeID, state: AggregationCheckpointState) -> None:
         """Restore aggregation state from checkpoint.
 
         Called during recovery to restore plugin state. The state is stored
-        for the aggregation plugin to access via get_restored_state().
+        on the node's consolidated state for plugin access via get_restored_state().
 
         Args:
             node_id: Aggregation node ID
-            state: Deserialized aggregation_state from checkpoint
+            state: Typed aggregation checkpoint state
         """
-        self._restored_states[node_id] = state
+        node = self._nodes.get(node_id)
+        if node is None:
+            slog.warning("restore_state_unknown_node", node_id=str(node_id))
+            return
+        node.restored_state = state
 
-    def get_restored_state(self, node_id: NodeID) -> dict[str, Any] | None:
+    def get_restored_state(self, node_id: NodeID) -> AggregationCheckpointState | None:
         """Get restored state for an aggregation node.
 
         Used by aggregation plugins during recovery to restore their
         internal state from checkpoint.
 
-        Note: This is a simple key-value lookup in _restored_states, which is
-        populated by restore_state() during crash recovery. It does NOT validate
-        against aggregation_settings because state restoration happens before
-        full configuration is available, and the method is designed to return
-        None for nodes without restored state.
+        Returns None for nodes without restored state or unconfigured nodes.
 
         Args:
             node_id: Aggregation node ID
 
         Returns:
-            Restored state dict, or None if no state was restored
+            Typed checkpoint state, or None if no state was restored
         """
-        return self._restored_states.get(node_id)
+        node = self._nodes.get(node_id)
+        if node is None:
+            return None
+        return node.restored_state
 
     def restore_batch(self, batch_id: str) -> None:
         """Restore a batch as the current in-progress batch.
@@ -978,11 +926,12 @@ class AggregationExecutor:
             raise ValueError(f"Batch not found: {batch_id}")
 
         node_id = NodeID(batch.aggregation_node_id)
-        self._batch_ids[node_id] = batch_id
+        node = self._nodes[node_id]
+        node.batch_id = batch_id
 
         # Restore member count from database
         members = self._recorder.get_batch_members(batch_id)
-        self._member_counts[batch_id] = len(members)
+        node.member_count = len(members)
 
     # NOTE: The old accept() and flush() methods that took AggregationProtocol
     # were DELETED in the aggregation structural cleanup.

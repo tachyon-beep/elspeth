@@ -541,6 +541,160 @@ class TestJSONExplodeContractPropagation:
         assert output_row["item"] == {"sku": "A1"}
 
 
+class TestJSONExplodeHeterogeneousTypes:
+    """Tests for heterogeneous array type handling.
+
+    When the exploded array contains elements of different types (e.g.,
+    ["a", {"k": 1}]), the output field contract must use `object` (the
+    universal type) rather than inferring from only the first element.
+    """
+
+    @pytest.fixture
+    def ctx(self) -> PluginContext:
+        """Create minimal plugin context."""
+        return PluginContext(run_id="test-run", config={})
+
+    def test_mixed_str_and_dict_uses_object_type(self, ctx: PluginContext) -> None:
+        """Array with str and dict elements gets output_field type=object."""
+        from elspeth.plugins.transforms.json_explode import JSONExplode
+
+        transform = JSONExplode(
+            {
+                "schema": DYNAMIC_SCHEMA,
+                "array_field": "items",
+                "output_field": "item",
+            }
+        )
+
+        row = make_pipeline_row({"id": 1, "items": ["a", {"k": 1}]})
+        result = transform.process(row, ctx)
+
+        assert result.status == "success"
+        assert result.rows is not None
+        assert len(result.rows) == 2
+
+        # Both rows should have the correct values
+        assert result.rows[0]["item"] == "a"
+        assert result.rows[1]["item"] == {"k": 1}
+
+        # Contract type for output_field must be `object`, not `str`
+        item_field = result.rows[0].contract.get_field("item")
+        assert item_field is not None
+        assert item_field.python_type is object, f"Expected object for heterogeneous array, got {item_field.python_type}"
+
+    def test_mixed_int_and_str_uses_object_type(self, ctx: PluginContext) -> None:
+        """Array with int and str elements gets output_field type=object."""
+        from elspeth.plugins.transforms.json_explode import JSONExplode
+
+        transform = JSONExplode(
+            {
+                "schema": DYNAMIC_SCHEMA,
+                "array_field": "items",
+                "output_field": "element",
+            }
+        )
+
+        row = make_pipeline_row({"id": 1, "items": [42, "hello", 3.14]})
+        result = transform.process(row, ctx)
+
+        assert result.status == "success"
+        assert result.rows is not None
+        assert len(result.rows) == 3
+
+        element_field = result.rows[0].contract.get_field("element")
+        assert element_field is not None
+        assert element_field.python_type is object
+
+    def test_homogeneous_array_preserves_inferred_type(self, ctx: PluginContext) -> None:
+        """Array with all same-type elements preserves the inferred type."""
+        from elspeth.plugins.transforms.json_explode import JSONExplode
+
+        transform = JSONExplode(
+            {
+                "schema": DYNAMIC_SCHEMA,
+                "array_field": "items",
+                "output_field": "item",
+            }
+        )
+
+        row = make_pipeline_row({"id": 1, "items": ["a", "b", "c"]})
+        result = transform.process(row, ctx)
+
+        assert result.status == "success"
+        assert result.rows is not None
+
+        item_field = result.rows[0].contract.get_field("item")
+        assert item_field is not None
+        # For homogeneous str array, type should be inferred as str (not object)
+        assert item_field.python_type is str
+
+    def test_single_element_array_preserves_inferred_type(self, ctx: PluginContext) -> None:
+        """Single-element array preserves the inferred type (no heterogeneity)."""
+        from elspeth.plugins.transforms.json_explode import JSONExplode
+
+        transform = JSONExplode(
+            {
+                "schema": DYNAMIC_SCHEMA,
+                "array_field": "items",
+                "output_field": "item",
+            }
+        )
+
+        row = make_pipeline_row({"id": 1, "items": [42]})
+        result = transform.process(row, ctx)
+
+        assert result.status == "success"
+        assert result.rows is not None
+
+        item_field = result.rows[0].contract.get_field("item")
+        assert item_field is not None
+        assert item_field.python_type is int
+
+    def test_mixed_none_and_value_uses_object_type(self, ctx: PluginContext) -> None:
+        """Array with None and non-None elements gets output_field type=object."""
+        from elspeth.plugins.transforms.json_explode import JSONExplode
+
+        transform = JSONExplode(
+            {
+                "schema": DYNAMIC_SCHEMA,
+                "array_field": "items",
+                "output_field": "item",
+            }
+        )
+
+        row = make_pipeline_row({"id": 1, "items": [None, "value"]})
+        result = transform.process(row, ctx)
+
+        assert result.status == "success"
+        assert result.rows is not None
+
+        item_field = result.rows[0].contract.get_field("item")
+        assert item_field is not None
+        assert item_field.python_type is object
+
+    def test_mixed_list_and_dict_uses_object_type(self, ctx: PluginContext) -> None:
+        """Array with list and dict elements gets output_field type=object."""
+        from elspeth.plugins.transforms.json_explode import JSONExplode
+
+        transform = JSONExplode(
+            {
+                "schema": DYNAMIC_SCHEMA,
+                "array_field": "items",
+                "output_field": "item",
+            }
+        )
+
+        row = make_pipeline_row({"id": 1, "items": [[1, 2], {"k": "v"}]})
+        result = transform.process(row, ctx)
+
+        assert result.status == "success"
+        assert result.rows is not None
+
+        item_field = result.rows[0].contract.get_field("item")
+        assert item_field is not None
+        assert item_field.python_type is object
+
+
 class TestJSONExplodeCopyIsolation:
     """Tests that exploded rows have independent copies of nested data.
 
@@ -610,3 +764,70 @@ class TestJSONExplodeCopyIsolation:
         # Second row must NOT see the mutation
         row_1_dict = result.rows[1].to_dict()
         assert row_1_dict["tags"] == ["original"]
+
+
+class TestJSONExplodeDeclaredOutputFields:
+    """Tests for declared_output_fields — centralized collision detection support.
+
+    Field collision detection is enforced centrally by TransformExecutor
+    (see TestTransformExecutor in test_executors.py). These tests verify
+    that JSONExplode correctly declares its output fields so the executor
+    can perform pre-execution collision checks.
+    """
+
+    def test_declared_output_fields_contains_output_field(self) -> None:
+        """declared_output_fields includes the configured output_field."""
+        from elspeth.plugins.transforms.json_explode import JSONExplode
+
+        transform = JSONExplode(
+            {
+                "schema": DYNAMIC_SCHEMA,
+                "array_field": "items",
+                "output_field": "element",
+            }
+        )
+
+        assert "element" in transform.declared_output_fields
+
+    def test_declared_output_fields_contains_item_index_when_enabled(self) -> None:
+        """declared_output_fields includes item_index when include_index is True."""
+        from elspeth.plugins.transforms.json_explode import JSONExplode
+
+        transform = JSONExplode(
+            {
+                "schema": DYNAMIC_SCHEMA,
+                "array_field": "items",
+                "include_index": True,
+            }
+        )
+
+        assert "item_index" in transform.declared_output_fields
+        assert "item" in transform.declared_output_fields  # default output_field
+
+    def test_declared_output_fields_excludes_item_index_when_disabled(self) -> None:
+        """declared_output_fields excludes item_index when include_index is False."""
+        from elspeth.plugins.transforms.json_explode import JSONExplode
+
+        transform = JSONExplode(
+            {
+                "schema": DYNAMIC_SCHEMA,
+                "array_field": "items",
+                "include_index": False,
+            }
+        )
+
+        assert "item_index" not in transform.declared_output_fields
+        assert "item" in transform.declared_output_fields  # still includes output_field
+
+    def test_declared_output_fields_drives_schema_evolution(self) -> None:
+        """declared_output_fields is non-empty, enabling schema evolution."""
+        from elspeth.plugins.transforms.json_explode import JSONExplode
+
+        transform = JSONExplode(
+            {
+                "schema": DYNAMIC_SCHEMA,
+                "array_field": "items",
+            }
+        )
+
+        assert transform.declared_output_fields

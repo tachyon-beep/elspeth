@@ -167,6 +167,7 @@ class TokenRepository:
             expand_group_id=row.expand_group_id,
             branch_name=row.branch_name,
             step_in_pipeline=row.step_in_pipeline,
+            run_id=row.run_id,
         )
 
 
@@ -279,15 +280,21 @@ class NodeStateRepository:
         status = NodeStateStatus(row.status)
 
         if status == NodeStateStatus.OPEN:
-            # BUG #6: OPEN states must have NULL completion fields
-            # Operations haven't finished yet, so output_hash, completed_at, and duration_ms
-            # must all be NULL. Non-NULL values indicate corrupted audit data.
+            # OPEN states must have NULL completion and result fields.
+            # Operations haven't finished yet, so output_hash, completed_at, duration_ms,
+            # context_after_json, error_json, and success_reason_json must all be NULL.
             if row.output_hash is not None:
                 raise ValueError(f"OPEN state {row.state_id} has non-NULL output_hash - audit integrity violation")
             if row.completed_at is not None:
                 raise ValueError(f"OPEN state {row.state_id} has non-NULL completed_at - audit integrity violation")
             if row.duration_ms is not None:
                 raise ValueError(f"OPEN state {row.state_id} has non-NULL duration_ms - audit integrity violation")
+            if row.context_after_json is not None:
+                raise ValueError(f"OPEN state {row.state_id} has non-NULL context_after_json - audit integrity violation")
+            if row.error_json is not None:
+                raise ValueError(f"OPEN state {row.state_id} has non-NULL error_json - audit integrity violation")
+            if row.success_reason_json is not None:
+                raise ValueError(f"OPEN state {row.state_id} has non-NULL success_reason_json - audit integrity violation")
 
             return NodeStateOpen(
                 state_id=row.state_id,
@@ -302,18 +309,18 @@ class NodeStateRepository:
             )
 
         elif status == NodeStateStatus.PENDING:
-            # PENDING states must have completed_at, duration_ms (but no output_hash yet)
-            # Validate required fields - None indicates audit integrity violation
+            # PENDING states must have completed_at, duration_ms (but no output_hash yet).
+            # error_json and success_reason_json must be NULL — results aren't in yet.
             if row.duration_ms is None:
                 raise ValueError(f"PENDING state {row.state_id} has NULL duration_ms - audit integrity violation")
             if row.completed_at is None:
                 raise ValueError(f"PENDING state {row.state_id} has NULL completed_at - audit integrity violation")
-
-            # BUG #6: PENDING states must have NULL output_hash
-            # Batch processing is in progress, no output available yet.
-            # Non-NULL output_hash contradicts PENDING status.
             if row.output_hash is not None:
                 raise ValueError(f"PENDING state {row.state_id} has non-NULL output_hash - audit integrity violation")
+            if row.error_json is not None:
+                raise ValueError(f"PENDING state {row.state_id} has non-NULL error_json - audit integrity violation")
+            if row.success_reason_json is not None:
+                raise ValueError(f"PENDING state {row.state_id} has non-NULL success_reason_json - audit integrity violation")
 
             return NodeStatePending(
                 state_id=row.state_id,
@@ -331,14 +338,16 @@ class NodeStateRepository:
             )
 
         elif status == NodeStateStatus.COMPLETED:
-            # COMPLETED states must have output_hash, completed_at, duration_ms
-            # Validate required fields - None indicates audit integrity violation
+            # COMPLETED states must have output_hash, completed_at, duration_ms.
+            # error_json must be NULL — success and error are mutually exclusive.
             if row.output_hash is None:
                 raise ValueError(f"COMPLETED state {row.state_id} has NULL output_hash - audit integrity violation")
             if row.duration_ms is None:
                 raise ValueError(f"COMPLETED state {row.state_id} has NULL duration_ms - audit integrity violation")
             if row.completed_at is None:
                 raise ValueError(f"COMPLETED state {row.state_id} has NULL completed_at - audit integrity violation")
+            if row.error_json is not None:
+                raise ValueError(f"COMPLETED state {row.state_id} has non-NULL error_json - audit integrity violation")
             return NodeStateCompleted(
                 state_id=row.state_id,
                 token_id=row.token_id,
@@ -357,13 +366,14 @@ class NodeStateRepository:
             )
 
         elif status == NodeStateStatus.FAILED:
-            # FAILED states must have completed_at, duration_ms
-            # error_json and output_hash are optional
-            # Validate required fields - None indicates audit integrity violation
+            # FAILED states must have completed_at, duration_ms.
+            # success_reason_json must be NULL — success and failure are mutually exclusive.
             if row.duration_ms is None:
                 raise ValueError(f"FAILED state {row.state_id} has NULL duration_ms - audit integrity violation")
             if row.completed_at is None:
                 raise ValueError(f"FAILED state {row.state_id} has NULL completed_at - audit integrity violation")
+            if row.success_reason_json is not None:
+                raise ValueError(f"FAILED state {row.state_id} has non-NULL success_reason_json - audit integrity violation")
             return NodeStateFailed(
                 state_id=row.state_id,
                 token_id=row.token_id,
@@ -467,9 +477,11 @@ class TokenOutcomeRepository:
             ValueError: If is_terminal is not 0 or 1 (Tier 1 audit integrity violation)
             ValueError: If outcome and is_terminal disagree (Tier 1 audit integrity violation)
         """
-        # Tier 1 validation: is_terminal must be exactly 0 or 1
+        # Tier 1 validation: is_terminal must be exactly int 0 or 1
         # Per Data Manifesto: audit DB is OUR data - crash on any anomaly
-        if row.is_terminal not in (0, 1):
+        # Note: bool is a subclass of int in Python, so `True in (0, 1)` is True.
+        # We use `type() is int` to reject booleans explicitly.
+        if type(row.is_terminal) is not int or row.is_terminal not in (0, 1):
             raise ValueError(
                 f"TokenOutcome {row.outcome_id} has invalid is_terminal={row.is_terminal!r} (expected 0 or 1) - audit integrity violation"
             )

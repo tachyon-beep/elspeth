@@ -54,6 +54,8 @@ class RowDataResult:
     data: dict[str, Any] | None
 
     def __post_init__(self) -> None:
+        if type(self.state) is not RowDataState:
+            raise TypeError(f"state must be RowDataState, got {type(self.state).__name__}")
         if self.state == RowDataState.AVAILABLE:
             if self.data is None:
                 raise ValueError("AVAILABLE state requires non-None data")

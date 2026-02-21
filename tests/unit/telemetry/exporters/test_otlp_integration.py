@@ -16,7 +16,7 @@ import pytest
 from opentelemetry.exporter.otlp.proto.common.trace_encoder import encode_spans
 from opentelemetry.sdk.trace.export import SpanExportResult
 
-from elspeth.contracts import TokenCompleted
+from elspeth.contracts import TokenCompleted, TokenUsage
 from elspeth.contracts.enums import RowOutcome, RunStatus
 from elspeth.contracts.events import RunFinished, RunStarted
 from elspeth.telemetry.exporters.otlp import OTLPExporter
@@ -264,7 +264,7 @@ class TestOTLPSpanFormat:
             provider="openai",
             status=CallStatus.SUCCESS,
             latency_ms=100.0,
-            token_usage={"prompt_tokens": 50, "completion_tokens": 25},
+            token_usage=TokenUsage(prompt_tokens=50, completion_tokens=25),
         )
         exporter.export(event)
 

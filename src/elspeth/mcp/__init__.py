@@ -14,6 +14,19 @@ Provides read-only tools for querying the audit database:
 - query: Execute read-only SQL queries
 """
 
-from elspeth.mcp.server import create_server, main
+
+def create_server(*args, **kwargs):  # type: ignore[no-untyped-def]
+    """Create an MCP server instance. Requires the [mcp] extra."""
+    from elspeth.mcp.server import create_server as _create_server
+
+    return _create_server(*args, **kwargs)
+
+
+def main(*args, **kwargs):  # type: ignore[no-untyped-def]
+    """Run the MCP server. Requires the [mcp] extra."""
+    from elspeth.mcp.server import main as _main
+
+    return _main(*args, **kwargs)
+
 
 __all__ = ["create_server", "main"]

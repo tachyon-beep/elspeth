@@ -10,6 +10,7 @@ Dependency: models.py (leaf) — no import of graph.py at module level.
 
 from __future__ import annotations
 
+import copy
 import hashlib
 from collections import Counter
 from types import MappingProxyType
@@ -30,6 +31,7 @@ from elspeth.contracts.types import (
 from elspeth.core.canonical import canonical_json
 from elspeth.core.dag.models import (
     _NODE_ID_MAX_LENGTH,
+    BranchInfo,
     GraphValidationError,
     _GateEntry,
     _suggest_similar,
@@ -80,7 +82,10 @@ def _field_required(field_spec: Any) -> bool:
         return not field_spec.strip().endswith("?")
     if isinstance(field_spec, dict):
         if "required" in field_spec:
-            return bool(field_spec["required"])
+            value = field_spec["required"]
+            if type(value) is not bool:
+                raise GraphValidationError(f"Field spec 'required' must be exactly bool, got {type(value).__name__}: {value!r}")
+            return value
         if len(field_spec) == 1:
             ftype = str(next(iter(field_spec.values())))
             return not ftype.strip().endswith("?")
@@ -151,14 +156,18 @@ def build_execution_graph(
         audit_fields from e.g., LLM transforms) over raw config["schema"].
         Pass-through nodes (gates, coalesce) should inherit the computed
         schema so audit records reflect actual data contracts.
+
+        Returns a deep copy to prevent aliasing — mutations to the returned
+        dict must not affect the source node's schema or other nodes that
+        received the same schema. BUG FIX: P1-2026-02-14.
         """
         info = graph.get_node_info(nid)
         if info.output_schema_config is not None:
-            return info.output_schema_config.to_dict()
+            return copy.deepcopy(info.output_schema_config.to_dict())
         # config["schema"] is Any from NodeConfig (dict[str, Any] value access).
         # It's always a dict at runtime — ensured by DataPluginConfig validation.
         schema: dict[str, Any] = info.config["schema"]
-        return schema
+        return copy.deepcopy(schema)
 
     def _sink_name_set() -> set[str]:
         return {str(name) for name in sink_ids}
@@ -346,7 +355,7 @@ def build_execution_graph(
             )
 
         graph.set_coalesce_id_map(coalesce_ids)
-        graph.set_branch_to_coalesce(branch_to_coalesce)
+        # branch_to_coalesce is combined with branch_gate_map into BranchInfo below
     else:
         branch_to_coalesce = {}
 
@@ -756,7 +765,7 @@ def build_execution_graph(
             raise GraphValidationError("Pipeline contains a cycle") from None
     pipeline_nodes = [node_id for node_id in topo_order if node_id in processing_node_ids]
 
-    branch_gate_map: dict[BranchName, NodeID] = {}
+    branch_info: dict[BranchName, BranchInfo] = {}
     if coalesce_settings:
         for gate_entry in gate_entries:
             if gate_entry.fork_to is None:
@@ -764,8 +773,11 @@ def build_execution_graph(
             for branch_name in gate_entry.fork_to:
                 branch_key = BranchName(branch_name)
                 if branch_key in branch_to_coalesce:
-                    branch_gate_map[branch_key] = gate_entry.node_id
-    graph.set_branch_gate_map(branch_gate_map)
+                    branch_info[branch_key] = BranchInfo(
+                        coalesce_name=branch_to_coalesce[branch_key],
+                        gate_node_id=gate_entry.node_id,
+                    )
+    graph.set_branch_info(branch_info)
 
     # ===== POPULATE COALESCE SCHEMA CONFIG =====
     # Coalesce nodes are structural pass-throughs; record the upstream schema
@@ -908,6 +920,11 @@ def build_execution_graph(
     # NodeInfo is frozen=True so we use object.__setattr__ to replace the
     # mutable dict with an immutable MappingProxyType.  This prevents
     # accidental mutation of node configs after graph construction.
+    #
+    # Note: This is a shallow freeze (top-level only). Deep immutability is
+    # not enforced because downstream code (SchemaConfig.from_dict, etc.)
+    # expects dict/list types, not MappingProxyType/tuple. The aliasing bug
+    # (P1-2026-02-14) is fixed by deep-copying in _best_schema_dict() instead.
     for _, attrs in graph._graph.nodes(data=True):
         info = attrs["info"]
         if isinstance(info.config, dict):

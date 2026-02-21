@@ -24,6 +24,7 @@ from elspeth.contracts.types import BranchName, CoalesceName, NodeID, SinkName, 
 from elspeth.engine.dag_navigator import DAGNavigator, WorkItem
 
 if TYPE_CHECKING:
+    from elspeth.contracts.aggregation_checkpoint import AggregationCheckpointState
     from elspeth.contracts.events import TelemetryEvent
     from elspeth.contracts.payload_store import PayloadStore
     from elspeth.engine.clock import Clock
@@ -181,7 +182,7 @@ class RowProcessor:
         branch_to_sink: dict[BranchName, SinkName] | None = None,
         sink_names: frozenset[str] | None = None,
         coalesce_on_success_map: dict[CoalesceName, str] | None = None,
-        restored_aggregation_state: dict[NodeID, dict[str, Any]] | None = None,
+        restored_aggregation_state: dict[NodeID, AggregationCheckpointState] | None = None,
         payload_store: PayloadStore | None = None,
         clock: Clock | None = None,
         max_workers: int | None = None,
@@ -508,7 +509,7 @@ class RowProcessor:
         """
         return self._aggregation_executor.get_buffer_count(node_id)
 
-    def get_aggregation_checkpoint_state(self) -> dict[str, Any]:
+    def get_aggregation_checkpoint_state(self) -> AggregationCheckpointState:
         """Get checkpoint state for all aggregation buffers.
 
         Returns complete state of all aggregation nodes (buffers + triggers)
@@ -516,8 +517,7 @@ class RowProcessor:
         without losing buffered rows.
 
         Returns:
-            Checkpoint state dict suitable for passing to create_checkpoint().
-            Format matches AggregationExecutor.get_checkpoint_state().
+            Typed checkpoint state suitable for passing to create_checkpoint().
         """
         return self._aggregation_executor.get_checkpoint_state()
 
@@ -1766,15 +1766,21 @@ class RowProcessor:
                 if outcome.sink_name is not None:
                     # NOTE: Do NOT record ROUTED outcome here - the token hasn't been written yet.
                     # SinkExecutor.write() records the outcome AFTER sink durability is achieved.
-                    return (
-                        RowResult(
-                            token=current_token,
-                            final_data=current_token.row_data,
-                            outcome=RowOutcome.ROUTED,
-                            sink_name=outcome.sink_name,
-                        ),
+                    # Notify coalesce if this is a forked branch
+                    sibling_results = self._notify_coalesce_of_lost_branch(
+                        current_token,
+                        f"gate_routed_to_sink:{outcome.sink_name}",
                         child_items,
                     )
+                    current_result = RowResult(
+                        token=current_token,
+                        final_data=current_token.row_data,
+                        outcome=RowOutcome.ROUTED,
+                        sink_name=outcome.sink_name,
+                    )
+                    if sibling_results:
+                        return ([current_result, *sibling_results], child_items)
+                    return (current_result, child_items)
                 elif outcome.result.action.kind == RoutingKind.FORK_TO_PATHS:
                     for child_token in outcome.child_tokens:
                         # Look up coalesce info for this branch
@@ -1816,6 +1822,21 @@ class RowProcessor:
                     if resolved_sink is not None:
                         last_on_success_sink = resolved_sink
                     node_id = outcome.next_node_id
+
+                    # Re-validate coalesce ordering invariant after gate jump.
+                    # The initial check at entry only validates the starting node.
+                    # A gate jump can move the token past its coalesce node,
+                    # which would silently bypass join handling.
+                    if coalesce_node_id is not None:
+                        jump_target_step = self._node_step_map.get(node_id)
+                        coalesce_barrier_step = self._node_step_map.get(coalesce_node_id)
+                        if jump_target_step is not None and coalesce_barrier_step is not None and jump_target_step > coalesce_barrier_step:
+                            raise OrchestrationInvariantError(
+                                f"Gate jump moved token '{current_token.token_id}' to node '{node_id}' "
+                                f"(step {jump_target_step}) which is past its coalesce node '{coalesce_node_id}' "
+                                f"(step {coalesce_barrier_step}). This would bypass join handling."
+                            )
+
                     continue
                 else:
                     # CONTINUE: config gate says "proceed to next structural node."

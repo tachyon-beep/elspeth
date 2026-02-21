@@ -466,3 +466,167 @@ class TestKeywordFilterProcessing:
         assert result.reason is not None
         assert result.reason["reason"] == "blocked_content"
         assert result.reason["field"] == "Amount USD"
+
+
+class TestKeywordFilterFieldsValidation:
+    """Regression: Bug 4 — Empty fields config makes keyword filter a no-op.
+
+    A keyword filter with fields=[] or fields="" scans nothing, silently
+    passing all content through. For a security transform, this is a
+    fail-OPEN vulnerability. The fix adds a field_validator that rejects
+    empty strings, empty lists, and lists containing empty strings.
+    """
+
+    def test_empty_list_rejected(self) -> None:
+        """fields=[] must raise ValidationError."""
+        from elspeth.plugins.transforms.keyword_filter import KeywordFilterConfig
+
+        with pytest.raises(PluginConfigError) as exc_info:
+            KeywordFilterConfig.from_dict(
+                {
+                    "fields": [],
+                    "blocked_patterns": ["test"],
+                    "schema": {"mode": "observed"},
+                }
+            )
+        assert "fields" in str(exc_info.value).lower()
+
+    def test_empty_string_rejected(self) -> None:
+        """fields="" must raise ValidationError."""
+        from elspeth.plugins.transforms.keyword_filter import KeywordFilterConfig
+
+        with pytest.raises(PluginConfigError) as exc_info:
+            KeywordFilterConfig.from_dict(
+                {
+                    "fields": "",
+                    "blocked_patterns": ["test"],
+                    "schema": {"mode": "observed"},
+                }
+            )
+        assert "fields" in str(exc_info.value).lower()
+
+    def test_whitespace_only_string_rejected(self) -> None:
+        """fields="  " must raise ValidationError (whitespace-only)."""
+        from elspeth.plugins.transforms.keyword_filter import KeywordFilterConfig
+
+        with pytest.raises(PluginConfigError) as exc_info:
+            KeywordFilterConfig.from_dict(
+                {
+                    "fields": "   ",
+                    "blocked_patterns": ["test"],
+                    "schema": {"mode": "observed"},
+                }
+            )
+        assert "fields" in str(exc_info.value).lower()
+
+    def test_list_containing_empty_string_rejected(self) -> None:
+        """fields=[""] must raise ValidationError."""
+        from elspeth.plugins.transforms.keyword_filter import KeywordFilterConfig
+
+        with pytest.raises(PluginConfigError) as exc_info:
+            KeywordFilterConfig.from_dict(
+                {
+                    "fields": [""],
+                    "blocked_patterns": ["test"],
+                    "schema": {"mode": "observed"},
+                }
+            )
+        assert "fields" in str(exc_info.value).lower()
+
+    def test_list_with_empty_string_among_valid_rejected(self) -> None:
+        """fields=["valid", ""] must raise ValidationError."""
+        from elspeth.plugins.transforms.keyword_filter import KeywordFilterConfig
+
+        with pytest.raises(PluginConfigError) as exc_info:
+            KeywordFilterConfig.from_dict(
+                {
+                    "fields": ["valid", ""],
+                    "blocked_patterns": ["test"],
+                    "schema": {"mode": "observed"},
+                }
+            )
+        assert "fields" in str(exc_info.value).lower()
+
+    def test_valid_single_field_accepted(self) -> None:
+        """fields=["valid"] must be accepted."""
+        from elspeth.plugins.transforms.keyword_filter import KeywordFilterConfig
+
+        cfg = KeywordFilterConfig.from_dict(
+            {
+                "fields": ["valid"],
+                "blocked_patterns": ["test"],
+                "schema": {"mode": "observed"},
+            }
+        )
+        assert cfg.fields == ["valid"]
+
+
+class TestKeywordFilterBlockedPatternsValidation:
+    """Regression: Bug 4 (supplement) — Empty blocked_patterns entries accepted.
+
+    The blocked_patterns validator was strengthened to reject individual empty
+    strings within the list. An empty regex pattern matches everything, which
+    would block all content indiscriminately — a misconfiguration that should
+    fail loud at config time.
+    """
+
+    def test_empty_list_rejected(self) -> None:
+        """blocked_patterns=[] must raise ValidationError."""
+        from elspeth.plugins.transforms.keyword_filter import KeywordFilterConfig
+
+        with pytest.raises(PluginConfigError) as exc_info:
+            KeywordFilterConfig.from_dict(
+                {
+                    "fields": ["content"],
+                    "blocked_patterns": [],
+                    "schema": {"mode": "observed"},
+                }
+            )
+        assert "blocked_patterns" in str(exc_info.value).lower()
+
+    def test_empty_string_pattern_rejected(self) -> None:
+        """blocked_patterns=[""] must raise ValidationError.
+
+        An empty regex matches everything — this is almost certainly a
+        misconfiguration. It would block every row, regardless of content.
+        """
+        from elspeth.plugins.transforms.keyword_filter import KeywordFilterConfig
+
+        with pytest.raises(PluginConfigError) as exc_info:
+            KeywordFilterConfig.from_dict(
+                {
+                    "fields": ["content"],
+                    "blocked_patterns": [""],
+                    "schema": {"mode": "observed"},
+                }
+            )
+        err_str = str(exc_info.value).lower()
+        assert "blocked_patterns" in err_str or "empty" in err_str
+
+    def test_empty_string_among_valid_patterns_rejected(self) -> None:
+        """blocked_patterns=["valid", ""] must reject the empty entry."""
+        from elspeth.plugins.transforms.keyword_filter import KeywordFilterConfig
+
+        with pytest.raises(PluginConfigError) as exc_info:
+            KeywordFilterConfig.from_dict(
+                {
+                    "fields": ["content"],
+                    "blocked_patterns": [r"\bpassword\b", ""],
+                    "schema": {"mode": "observed"},
+                }
+            )
+        err_str = str(exc_info.value).lower()
+        assert "blocked_patterns" in err_str or "empty" in err_str
+
+    def test_valid_patterns_accepted(self) -> None:
+        """Non-empty blocked_patterns must be accepted."""
+        from elspeth.plugins.transforms.keyword_filter import KeywordFilterConfig
+
+        cfg = KeywordFilterConfig.from_dict(
+            {
+                "fields": ["content"],
+                "blocked_patterns": [r"\bpassword\b", r"(?i)secret"],
+                "schema": {"mode": "observed"},
+            }
+        )
+        assert len(cfg.blocked_patterns) == 2

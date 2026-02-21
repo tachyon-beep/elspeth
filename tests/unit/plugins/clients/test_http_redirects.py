@@ -419,3 +419,41 @@ class TestRedirectAuditRecording:
         )
 
         http_client._recorder.record_call.assert_not_called()
+
+
+class TestBug4_7_FailedHopRecordsAuditTrail:
+    """Bug 4.7: Failed redirect hops are recorded in audit trail.
+
+    Previously, if a redirect hop's HTTP request failed (e.g., connection
+    error), the hop was never recorded in the audit trail because the
+    recording happened after the request. Now the audit trail records
+    the failed hop with CallStatus.ERROR before re-raising the exception.
+    """
+
+    @patch("elspeth.plugins.clients.http.validate_url_for_ssrf")
+    def test_failed_hop_recorded_with_error_status(self, mock_validate, http_client):
+        """Redirect hop that raises exception is still recorded in audit trail."""
+        redirect_response = _make_redirect_response("/new-path")
+
+        mock_validate.return_value = _make_ssrf_request("https://example.com/new-path")
+        # Simulate a connection error during the hop request
+        http_client._ephemeral_mock.get.side_effect = httpx.ConnectError("Connection refused")
+
+        with pytest.raises(httpx.ConnectError):
+            http_client._follow_redirects_safe(
+                response=redirect_response,
+                max_redirects=5,
+                timeout=10.0,
+                original_headers={},
+                original_url="https://example.com/old-path",
+            )
+
+        # The failed hop MUST still be recorded in the audit trail
+        http_client._recorder.record_call.assert_called_once()
+        call_kwargs = http_client._recorder.record_call.call_args.kwargs
+        assert call_kwargs["call_type"] == CallType.HTTP_REDIRECT
+        assert call_kwargs["status"] == CallStatus.ERROR
+        assert "ConnectError" in call_kwargs["error"]["type"]
+        assert "Connection refused" in call_kwargs["error"]["message"]
+        assert isinstance(call_kwargs["latency_ms"], float)
+        assert call_kwargs["latency_ms"] >= 0

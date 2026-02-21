@@ -163,6 +163,7 @@ class TestTransformErrorPersistence:
                 tokens_table.insert().values(
                     token_id="token-123",
                     row_id=row.row_id,
+                    run_id=run_id,
                     step_in_pipeline=0,
                     created_at=datetime.now(UTC),
                 )
@@ -247,6 +248,7 @@ class TestTransformErrorPersistence:
                 tokens_table.insert().values(
                     token_id="token-456",
                     row_id=row.row_id,
+                    run_id=run_id,
                     step_in_pipeline=0,
                     created_at=datetime.now(UTC),
                 )
