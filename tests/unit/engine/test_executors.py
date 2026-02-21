@@ -1064,7 +1064,7 @@ class TestGateExecutor:
         token = _make_token(contract=contract)
         ctx = _make_ctx()
 
-        from elspeth.engine.expression_parser import ExpressionEvaluationError
+        from elspeth.core.expression_parser import ExpressionEvaluationError
 
         with pytest.raises(ExpressionEvaluationError):
             executor.execute_config_gate(

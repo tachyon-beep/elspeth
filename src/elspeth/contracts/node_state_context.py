@@ -18,8 +18,8 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Protocol
 
 if TYPE_CHECKING:
+    from elspeth.contracts.engine import BufferEntry
     from elspeth.contracts.results import TransformResult
-    from elspeth.plugins.pooling.reorder_buffer import BufferEntry
 
 
 class NodeStateContext(Protocol):

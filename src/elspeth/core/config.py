@@ -292,7 +292,7 @@ class TriggerConfig(BaseModel):
         if v is None:
             return v
 
-        from elspeth.engine.expression_parser import (
+        from elspeth.core.expression_parser import (
             ExpressionParser,
             ExpressionSecurityError,
             ExpressionSyntaxError,
@@ -548,7 +548,7 @@ class GateSettings(BaseModel):
     @classmethod
     def validate_condition_expression(cls, v: str) -> str:
         """Validate that condition is a valid expression at config time."""
-        from elspeth.engine.expression_parser import (
+        from elspeth.core.expression_parser import (
             ExpressionParser,
             ExpressionSecurityError,
             ExpressionSyntaxError,
@@ -636,7 +636,7 @@ class GateSettings(BaseModel):
         `row['amount'] > 1000` is a config error - the expression evaluates to
         True/False, not "above"/"below".
         """
-        from elspeth.engine.expression_parser import ExpressionParser
+        from elspeth.core.expression_parser import ExpressionParser
 
         parser = ExpressionParser(self.condition)
         if parser.is_boolean_expression():

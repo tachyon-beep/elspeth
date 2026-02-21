@@ -7,6 +7,31 @@ from typing import TypedDict
 from elspeth.contracts.enums import RowOutcome
 
 
+@dataclass
+class BufferEntry[T]:
+    """Entry emitted from the reorder buffer with timing metadata.
+
+    This is the contracts-layer type for reorder buffer results, used by
+    both the pooling subsystem (plugins/) and audit context types
+    (contracts/node_state_context.py).
+
+    Attributes:
+        submit_index: Order in which item was submitted (0-indexed)
+        complete_index: Order in which item completed (may differ from submit)
+        result: The actual result value
+        submit_timestamp: time.perf_counter() when submitted
+        complete_timestamp: time.perf_counter() when completed
+        buffer_wait_ms: Time spent waiting in buffer after completion
+    """
+
+    submit_index: int
+    complete_index: int
+    result: T
+    submit_timestamp: float
+    complete_timestamp: float
+    buffer_wait_ms: float
+
+
 @dataclass(frozen=True, slots=True)
 class PendingOutcome:
     """Pending token outcome waiting for sink durability confirmation.

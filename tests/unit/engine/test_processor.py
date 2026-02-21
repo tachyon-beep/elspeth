@@ -29,7 +29,7 @@ from elspeth.contracts.enums import (
     RoutingKind,
     TriggerType,
 )
-from elspeth.contracts.errors import OrchestrationInvariantError
+from elspeth.contracts.errors import MaxRetriesExceeded, OrchestrationInvariantError
 from elspeth.contracts.plugin_context import PluginContext
 from elspeth.contracts.results import GateResult
 from elspeth.contracts.routing import RoutingAction
@@ -45,7 +45,7 @@ from elspeth.engine.processor import (
     DAGTraversalContext,
     RowProcessor,
 )
-from elspeth.engine.retry import MaxRetriesExceeded, RetryManager
+from elspeth.engine.retry import RetryManager
 from elspeth.engine.spans import SpanFactory
 from elspeth.plugins.clients.llm import LLMClientError
 from elspeth.plugins.pooling import CapacityError

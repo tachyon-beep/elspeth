@@ -17,9 +17,9 @@ from typing import TYPE_CHECKING, Any, Literal
 from elspeth.contracts.url import SanitizedDatabaseUrl, SanitizedWebhookUrl
 
 if TYPE_CHECKING:
+    from elspeth.contracts.errors import MaxRetriesExceeded
     from elspeth.contracts.node_state_context import NodeStateContext
     from elspeth.contracts.schema_contract import PipelineRow, SchemaContract
-    from elspeth.engine.retry import MaxRetriesExceeded
 
 from elspeth.contracts.enums import RowOutcome
 from elspeth.contracts.errors import (

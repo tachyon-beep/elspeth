@@ -53,6 +53,7 @@ CONTRACTS_CONFIG_ITEMS = {
     "RuntimeConcurrencyConfig",
     "RuntimeRateLimitConfig",
     "RuntimeRetryConfig",
+    "RuntimeServiceRateLimit",
     "RuntimeTelemetryConfig",
     # Default registries
     "INTERNAL_DEFAULTS",

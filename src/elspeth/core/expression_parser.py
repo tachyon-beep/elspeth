@@ -1,4 +1,4 @@
-# src/elspeth/engine/expression_parser.py
+# src/elspeth/core/expression_parser.py
 """Safe expression parser for gate conditions.
 
 Uses Python's ast module to parse and evaluate expressions in a restricted

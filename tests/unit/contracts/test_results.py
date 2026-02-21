@@ -21,7 +21,7 @@ from typing import Any
 import pytest
 
 from elspeth.contracts import RoutingAction, RowOutcome, TokenInfo, TransformErrorReason
-from elspeth.contracts.errors import OrchestrationInvariantError
+from elspeth.contracts.errors import MaxRetriesExceeded, OrchestrationInvariantError
 from elspeth.contracts.results import (
     ArtifactDescriptor,
     FailureInfo,
@@ -31,7 +31,6 @@ from elspeth.contracts.results import (
 )
 from elspeth.contracts.schema_contract import PipelineRow, SchemaContract
 from elspeth.contracts.url import SanitizedDatabaseUrl, SanitizedWebhookUrl
-from elspeth.engine.retry import MaxRetriesExceeded
 from elspeth.testing import make_pipeline_row
 
 

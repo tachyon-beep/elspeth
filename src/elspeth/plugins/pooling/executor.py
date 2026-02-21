@@ -19,10 +19,11 @@ from threading import Event, Lock, Semaphore
 from typing import Any
 
 from elspeth.contracts import TransformErrorReason, TransformResult
+from elspeth.contracts.engine import BufferEntry
 from elspeth.plugins.clients.llm import LLMClientError
 from elspeth.plugins.pooling.config import PoolConfig
 from elspeth.plugins.pooling.errors import CapacityError
-from elspeth.plugins.pooling.reorder_buffer import BufferEntry, ReorderBuffer
+from elspeth.plugins.pooling.reorder_buffer import ReorderBuffer
 from elspeth.plugins.pooling.throttle import AIMDThrottle
 
 

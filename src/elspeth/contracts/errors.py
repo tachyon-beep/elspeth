@@ -453,6 +453,24 @@ RoutingReason = ConfigGateReason | TransformErrorReason | SourceQuarantineReason
 # =============================================================================
 
 
+class MaxRetriesExceeded(Exception):
+    """Raised when max retry attempts are exceeded.
+
+    This is a control-flow exception used by RetryManager to signal that
+    all retry attempts have been exhausted. FailureInfo uses this to
+    construct structured error records for the audit trail.
+
+    Attributes:
+        attempts: Number of attempts made before giving up
+        last_error: The exception from the final attempt
+    """
+
+    def __init__(self, attempts: int, last_error: BaseException) -> None:
+        self.attempts = attempts
+        self.last_error = last_error
+        super().__init__(f"Max retries ({attempts}) exceeded: {last_error}")
+
+
 class BatchPendingError(Exception):
     """Raised when batch is submitted but not yet complete.
 

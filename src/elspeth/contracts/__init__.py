@@ -116,7 +116,7 @@ from elspeth.contracts.data import (
     check_compatibility,
     validate_row,
 )
-from elspeth.contracts.engine import PendingOutcome, RetryPolicy
+from elspeth.contracts.engine import BufferEntry, PendingOutcome, RetryPolicy
 from elspeth.contracts.enums import (
     BackpressureMode,
     BatchStatus,
@@ -147,6 +147,7 @@ from elspeth.contracts.errors import (
     ExtraFieldViolation,
     FrameworkBugError,
     GracefulShutdownError,
+    MaxRetriesExceeded,
     MissingFieldViolation,
     PluginContractViolation,
     QueryFailureDetail,
@@ -259,6 +260,7 @@ __all__ = [  # Grouped by category for readability
     "BatchPendingError",
     "FrameworkBugError",
     "GracefulShutdownError",
+    "MaxRetriesExceeded",
     "PluginContractViolation",
     "CoalesceFailureReason",
     "ConfigGateReason",
@@ -391,6 +393,7 @@ __all__ = [  # Grouped by category for readability
     "check_compatibility",
     "validate_row",
     # engine
+    "BufferEntry",
     "PendingOutcome",
     "RetryPolicy",
     # payload_store

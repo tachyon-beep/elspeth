@@ -27,7 +27,7 @@ import pytest
 from hypothesis import assume, given, settings
 from hypothesis import strategies as st
 
-from elspeth.engine.expression_parser import (
+from elspeth.core.expression_parser import (
     ExpressionEvaluationError,
     ExpressionParser,
     ExpressionSecurityError,

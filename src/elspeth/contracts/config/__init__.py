@@ -74,6 +74,7 @@ from elspeth.contracts.config.runtime import (
     RuntimeConcurrencyConfig,
     RuntimeRateLimitConfig,
     RuntimeRetryConfig,
+    RuntimeServiceRateLimit,
     RuntimeTelemetryConfig,
 )
 
@@ -104,6 +105,7 @@ __all__ = [
     "RuntimeRateLimitProtocol",
     "RuntimeRetryConfig",
     "RuntimeRetryProtocol",
+    "RuntimeServiceRateLimit",
     "RuntimeTelemetryConfig",
     "RuntimeTelemetryProtocol",
     "get_internal_default",

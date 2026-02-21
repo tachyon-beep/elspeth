@@ -27,18 +27,12 @@ from elspeth.contracts.config.defaults import INTERNAL_DEFAULTS, POLICY_DEFAULTS
 from elspeth.contracts.engine import RetryPolicy
 from elspeth.contracts.enums import _IMPLEMENTED_BACKPRESSURE_MODES, BackpressureMode, TelemetryGranularity
 
-# NOTE: ServiceRateLimit and other Settings classes are imported lazily inside
-# from_settings() methods to avoid breaking the contracts leaf module boundary.
-# Importing from elspeth.core at module level would pull in 1,200+ modules.
-# FIX: P2-2026-01-20-contracts-config-reexport-breaks-leaf-boundary
-
 if TYPE_CHECKING:
     from elspeth.core.config import (
         CheckpointSettings,
         ConcurrencySettings,
         RateLimitSettings,
         RetrySettings,
-        ServiceRateLimit,
         TelemetrySettings,
     )
 
@@ -272,6 +266,18 @@ class RuntimeRetryConfig:
 
 
 @dataclass(frozen=True, slots=True)
+class RuntimeServiceRateLimit:
+    """Runtime rate limit for a single service.
+
+    Implements ServiceRateLimitProtocol. This is the Runtime-layer counterpart
+    of ServiceRateLimit (Pydantic model in core/config.py), following the
+    standard Settings→Runtime conversion pattern.
+    """
+
+    requests_per_minute: int
+
+
+@dataclass(frozen=True, slots=True)
 class RuntimeRateLimitConfig:
     """Runtime configuration for rate limiting.
 
@@ -281,7 +287,7 @@ class RuntimeRateLimitConfig:
         - enabled: RateLimitSettings.enabled
         - default_requests_per_minute: RateLimitSettings.default_requests_per_minute
         - persistence_path: RateLimitSettings.persistence_path
-        - services: RateLimitSettings.services
+        - services: RateLimitSettings.services (converted to RuntimeServiceRateLimit)
 
     Protocol Coverage:
         RuntimeRateLimitProtocol requires: enabled, default_requests_per_minute,
@@ -296,9 +302,9 @@ class RuntimeRateLimitConfig:
     enabled: bool
     default_requests_per_minute: int
     persistence_path: str | None
-    services: Mapping[str, "ServiceRateLimit"]
+    services: Mapping[str, RuntimeServiceRateLimit]
 
-    def get_service_config(self, service_name: str) -> "ServiceRateLimit":
+    def get_service_config(self, service_name: str) -> RuntimeServiceRateLimit:
         """Get rate limit config for a service, with fallback to defaults.
 
         This mirrors RateLimitSettings.get_service_config() behavior, providing
@@ -308,16 +314,13 @@ class RuntimeRateLimitConfig:
             service_name: Name of the service to get config for
 
         Returns:
-            ServiceRateLimit for the service (specific config if available,
+            RuntimeServiceRateLimit for the service (specific config if available,
             otherwise constructed from defaults)
         """
         if service_name in self.services:
             return self.services[service_name]
 
-        # Lazy import to avoid breaking contracts leaf boundary
-        from elspeth.core.config import ServiceRateLimit
-
-        return ServiceRateLimit(requests_per_minute=self.default_requests_per_minute)
+        return RuntimeServiceRateLimit(requests_per_minute=self.default_requests_per_minute)
 
     @classmethod
     def default(cls) -> "RuntimeRateLimitConfig":
@@ -340,7 +343,7 @@ class RuntimeRateLimitConfig:
             settings.enabled -> enabled
             settings.default_requests_per_minute -> default_requests_per_minute
             settings.persistence_path -> persistence_path
-            settings.services -> services
+            settings.services -> services (converted to RuntimeServiceRateLimit)
 
         Args:
             settings: Validated Pydantic settings model
@@ -352,7 +355,9 @@ class RuntimeRateLimitConfig:
             enabled=settings.enabled,
             default_requests_per_minute=settings.default_requests_per_minute,
             persistence_path=settings.persistence_path,
-            services=MappingProxyType(dict(settings.services)),
+            services=MappingProxyType(
+                {k: RuntimeServiceRateLimit(requests_per_minute=v.requests_per_minute) for k, v in settings.services.items()}
+            ),
         )
 
 

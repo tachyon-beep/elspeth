@@ -12,9 +12,7 @@ allowed_external_types:
   - "engine/orchestrator/types:RunResult"
   - "engine/orchestrator/types:AggregationFlushResult"
   - "engine/orchestrator/types:ExecutionCounters"
-  # Pooling reorder buffer - used by contracts/node_state_context.py factory
-  # Typing pooling internals is a separate scope; boundary is at from_executor_stats()
-  - "plugins/pooling/reorder_buffer:BufferEntry"
+  # BufferEntry moved to contracts/engine.py — no longer an external type exception
 
 # dict[str, Any] patterns that are intentional
 # Format: "file_path:context:param_name"
@@ -28,8 +26,8 @@ allowed_dict_patterns:
 
   # Engine - row data handling
   - "src/elspeth/engine/tokens.py:TokenManager.expand_token:expanded_rows (list)"
-  - "src/elspeth/engine/expression_parser.py:_ExpressionEvaluator.__init__:row"
-  - "src/elspeth/engine/expression_parser.py:ExpressionParser.evaluate:row"
+  - "src/elspeth/core/expression_parser.py:_ExpressionEvaluator.__init__:row"
+  - "src/elspeth/core/expression_parser.py:ExpressionParser.evaluate:row"
   - "src/elspeth/engine/coalesce_executor.py:CoalesceExecutor._merge_data:return"
 
   # Node state guard - row data is Tier 2 pipeline data

@@ -20,13 +20,14 @@ from sqlalchemy import select
 
 from elspeth.contracts import NodeType, PluginSchema, TokenInfo, TransformResult
 from elspeth.contracts.config import RuntimeRetryConfig
+from elspeth.contracts.errors import MaxRetriesExceeded
 from elspeth.contracts.plugin_context import PluginContext
 from elspeth.contracts.schema_contract import FieldContract, PipelineRow, SchemaContract
 from elspeth.core.landscape.database import LandscapeDB
 from elspeth.core.landscape.recorder import LandscapeRecorder
 from elspeth.core.landscape.schema import node_states_table
 from elspeth.engine.executors import TransformExecutor
-from elspeth.engine.retry import MaxRetriesExceeded, RetryManager
+from elspeth.engine.retry import RetryManager
 from elspeth.engine.spans import SpanFactory
 from elspeth.plugins.base import BaseTransform
 from elspeth.testing import make_pipeline_row

@@ -28,9 +28,9 @@ from elspeth.contracts.plugin_context import PluginContext
 from elspeth.contracts.types import NodeID, StepResolver
 from elspeth.core.canonical import stable_hash
 from elspeth.core.config import GateSettings
+from elspeth.core.expression_parser import ExpressionParser
 from elspeth.core.landscape import LandscapeRecorder
 from elspeth.engine.executors.types import GateOutcome, MissingEdgeError
-from elspeth.engine.expression_parser import ExpressionParser
 from elspeth.engine.spans import SpanFactory
 from elspeth.plugins.results import GateResult
 

@@ -1,4 +1,10 @@
 per_file_rules:
+- pattern: core/expression_parser.py
+  rules:
+  - R5
+  - R3
+  reason: AST-based expression parser requires isinstance() for node type dispatch and try/except for unknown AST node types
+  expires: null
 - pattern: core/templates.py
   rules:
   - R5

@@ -13,6 +13,8 @@ from dataclasses import dataclass, field
 from threading import Lock
 from typing import Any
 
+from elspeth.contracts.engine import BufferEntry
+
 
 # Sentinel to distinguish "not yet completed" from a legitimate None result.
 # Using a dedicated class so it cannot be confused with any valid T value.
@@ -26,27 +28,6 @@ class _Sentinel:
 
 
 _UNFILLED = _Sentinel()
-
-
-@dataclass
-class BufferEntry[T]:
-    """Entry emitted from the reorder buffer with timing metadata.
-
-    Attributes:
-        submit_index: Order in which item was submitted (0-indexed)
-        complete_index: Order in which item completed (may differ from submit)
-        result: The actual result value
-        submit_timestamp: time.perf_counter() when submitted
-        complete_timestamp: time.perf_counter() when completed
-        buffer_wait_ms: Time spent waiting in buffer after completion
-    """
-
-    submit_index: int
-    complete_index: int
-    result: T
-    submit_timestamp: float
-    complete_timestamp: float
-    buffer_wait_ms: float
 
 
 @dataclass

@@ -114,12 +114,12 @@ allow_hits:
   reason: setdefault for lazy initialization
   safety: Code reviewed - legitimate pattern
   expires: '2026-05-02'
-- key: plugins/pooling/executor.py:R5:PooledExecutor:_execute_single:fp=923431e7c7c800eb
+- key: plugins/pooling/executor.py:R5:PooledExecutor:_execute_single:fp=15ac82f41543f682
   owner: architecture
   reason: AST/type checking - required for safe parsing or discriminated unions
   safety: Code reviewed - legitimate pattern
   expires: '2026-05-02'
-- key: plugins/pooling/executor.py:R5:PooledExecutor:_execute_single:fp=bbe24a28f3c7d484
+- key: plugins/pooling/executor.py:R5:PooledExecutor:_execute_single:fp=cb58b06afce84275
   owner: architecture
   reason: AST/type checking - required for safe parsing or discriminated unions
   safety: Code reviewed - legitimate pattern
@@ -399,7 +399,7 @@ allow_hits:
   safety: Grouping is deterministic; ValueError raised if collisions found
   expires: '2026-05-17'
 # pooling/executor.py — RuntimeError on thread pool shutdown during batch submission
-- key: plugins/pooling/executor.py:R6:PooledExecutor:_execute_batch_locked:fp=277c4bd1b236787e
+- key: plugins/pooling/executor.py:R6:PooledExecutor:_execute_batch_locked:fp=2b6aaa13ba738c12
   owner: bugfix
   reason: Thread pool may be shut down concurrently; RuntimeError caught to complete buffer slot with error result
   safety: Buffer slot filled with deterministic error result; row gets proper error instead of silent drop
