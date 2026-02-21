@@ -14,6 +14,7 @@ from elspeth.testing.chaosengine.metrics_store import _get_bucket_utc
 from elspeth.testing.chaosengine.types import MetricsConfig
 from elspeth.testing.chaosweb.metrics import (
     WebMetricsRecorder,
+    WebOutcomeClassification,
     _classify_web_outcome,
 )
 
@@ -49,68 +50,72 @@ class TestGetBucketUtc:
 class TestClassifyWebOutcome:
     """Tests for _classify_web_outcome helper function."""
 
+    def test_returns_named_tuple(self) -> None:
+        """Returns a WebOutcomeClassification NamedTuple."""
+        result = _classify_web_outcome("success", 200, None)
+        assert isinstance(result, WebOutcomeClassification)
+
     def test_success_outcome(self) -> None:
         """Success outcome is classified correctly."""
         result = _classify_web_outcome("success", 200, None)
-        (is_success, is_rate_limited, is_forbidden, is_not_found, is_server_error, is_connection_error, is_malformed, is_redirect) = result
-        assert is_success is True
-        assert is_rate_limited is False
-        assert is_forbidden is False
-        assert is_not_found is False
-        assert is_server_error is False
-        assert is_connection_error is False
-        assert is_malformed is False
-        assert is_redirect is False
+        assert result.success is True
+        assert result.rate_limited is False
+        assert result.forbidden is False
+        assert result.not_found is False
+        assert result.server_error is False
+        assert result.connection_error is False
+        assert result.malformed is False
+        assert result.redirect is False
 
     def test_rate_limited_429(self) -> None:
         """429 status code is classified as rate limited."""
         result = _classify_web_outcome("error_injected", 429, None)
-        assert result[1] is True  # is_rate_limited
+        assert result.rate_limited is True
 
     def test_forbidden_403(self) -> None:
         """403 status code is classified as forbidden."""
         result = _classify_web_outcome("error_injected", 403, None)
-        assert result[2] is True  # is_forbidden
+        assert result.forbidden is True
 
     def test_not_found_404(self) -> None:
         """404 status code is classified as not_found."""
         result = _classify_web_outcome("error_injected", 404, None)
-        assert result[3] is True  # is_not_found
+        assert result.not_found is True
 
     def test_server_error_500(self) -> None:
         """500 status code is classified as server error."""
         result = _classify_web_outcome("error_injected", 500, None)
-        assert result[4] is True  # is_server_error
+        assert result.server_error is True
 
     def test_server_error_503(self) -> None:
         """503 status code is classified as server error."""
         result = _classify_web_outcome("error_injected", 503, None)
-        assert result[4] is True  # is_server_error
+        assert result.server_error is True
 
     def test_connection_error_timeout(self) -> None:
         """Timeout error type with no status code is classified as connection error."""
         result = _classify_web_outcome("error_injected", None, "timeout")
-        assert result[5] is True  # is_connection_error
+        assert result.connection_error is True
 
     def test_connection_error_reset(self) -> None:
         """Connection reset error is classified as connection error."""
         result = _classify_web_outcome("error_injected", None, "connection_reset")
-        assert result[5] is True  # is_connection_error
+        assert result.connection_error is True
 
     def test_connection_error_stall(self) -> None:
         """Connection stall error is classified as connection error."""
         result = _classify_web_outcome("error_injected", None, "connection_stall")
-        assert result[5] is True  # is_connection_error
+        assert result.connection_error is True
 
     def test_malformed_outcome(self) -> None:
         """error_malformed outcome is classified correctly."""
         result = _classify_web_outcome("error_malformed", 200, None)
-        assert result[6] is True  # is_malformed
+        assert result.malformed is True
 
     def test_redirect_outcome(self) -> None:
         """error_redirect outcome is classified correctly."""
         result = _classify_web_outcome("error_redirect", 301, None)
-        assert result[7] is True  # is_redirect
+        assert result.redirect is True
 
 
 class TestWebMetricsRecorderBasic:

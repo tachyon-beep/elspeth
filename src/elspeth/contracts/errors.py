@@ -4,7 +4,10 @@ TypedDict schemas for structured error payloads in the audit trail.
 These provide consistent shapes for executor error recording.
 """
 
-from typing import Any, Literal, NotRequired, TypedDict
+from typing import TYPE_CHECKING, Any, Literal, NotRequired, TypedDict
+
+if TYPE_CHECKING:
+    from elspeth.contracts.batch_checkpoint import BatchCheckpointState
 
 
 class ExecutionError(TypedDict):
@@ -464,29 +467,29 @@ class BatchPendingError(Exception):
         batch_id: Azure batch job ID
         status: Current batch status (e.g., "submitted", "in_progress")
         check_after_seconds: When to check again (default 300s = 5 min)
-        checkpoint: Checkpoint data to persist for retry (batch_id, row_mapping, etc.)
+        checkpoint: Typed checkpoint state for retry (BatchCheckpointState)
         node_id: Transform node ID that raised this (for checkpoint keying)
 
     Example:
         # Phase 1: Submit batch
         batch_id = client.batches.create(...)
-        checkpoint_data = {"batch_id": batch_id, "row_mapping": {...}}
-        ctx.update_checkpoint(checkpoint_data)
+        state = BatchCheckpointState(batch_id=batch_id, ...)
+        ctx.set_checkpoint(state)
         raise BatchPendingError(
             batch_id, "submitted",
             check_after_seconds=300,
-            checkpoint=checkpoint_data,
+            checkpoint=state,
             node_id=self.node_id,
         )
 
-        # Caller catches, persists checkpoint, schedules retry
+        # Caller catches, persists checkpoint.to_dict(), schedules retry
 
         # Phase 2: Resume and check (caller passes checkpoint back via orchestrator)
         checkpoint = ctx.get_checkpoint()
-        if checkpoint.get("batch_id"):
-            status = client.batches.retrieve(batch_id).status
+        if checkpoint is not None:
+            status = client.batches.retrieve(checkpoint.batch_id).status
             if status == "in_progress":
-                raise BatchPendingError(batch_id, "in_progress", checkpoint=checkpoint)
+                raise BatchPendingError(checkpoint.batch_id, "in_progress", checkpoint=checkpoint)
             elif status == "completed":
                 # Download results and return
     """
@@ -497,7 +500,7 @@ class BatchPendingError(Exception):
         status: str,
         *,
         check_after_seconds: int = 300,
-        checkpoint: dict[str, Any] | None = None,
+        checkpoint: "BatchCheckpointState | None" = None,
         node_id: str | None = None,
     ) -> None:
         """Initialize BatchPendingError.
@@ -506,7 +509,7 @@ class BatchPendingError(Exception):
             batch_id: Azure batch job ID
             status: Current batch status
             check_after_seconds: Seconds until next check (default 300)
-            checkpoint: Checkpoint data for retry (caller should persist this)
+            checkpoint: Typed checkpoint state for retry (BatchCheckpointState)
             node_id: Transform node ID (for checkpoint keying)
         """
         self.batch_id = batch_id

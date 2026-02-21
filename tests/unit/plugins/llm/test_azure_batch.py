@@ -10,9 +10,10 @@ from unittest.mock import MagicMock, Mock, patch
 import pytest
 
 from elspeth.contracts import BatchPendingError, Determinism
+from elspeth.contracts.batch_checkpoint import BatchCheckpointState, RowMappingEntry
 from elspeth.contracts.plugin_context import PluginContext
 from elspeth.plugins.config_base import PluginConfigError
-from elspeth.plugins.llm.azure_batch import AzureBatchConfig, AzureBatchLLMTransform, _RowMappingEntry
+from elspeth.plugins.llm.azure_batch import AzureBatchConfig, AzureBatchLLMTransform
 from elspeth.testing import make_pipeline_row
 
 # Common schema config for dynamic field handling
@@ -400,7 +401,7 @@ class TestAzureBatchLLMTransformSubmit:
         """Create plugin context for testing.
 
         PluginContext now has native checkpoint support via
-        get_checkpoint/update_checkpoint/clear_checkpoint methods.
+        get_checkpoint/set_checkpoint/clear_checkpoint methods.
         """
         return PluginContext(run_id="test-run", config={})
 
@@ -460,13 +461,13 @@ class TestAzureBatchLLMTransformSubmit:
         with pytest.raises(BatchPendingError):
             transform.process([make_pipeline_row(d) for d in rows], ctx)
 
-        # Verify checkpoint was saved
+        # Verify checkpoint was saved as typed BatchCheckpointState
         checkpoint = ctx._checkpoint  # type: ignore[attr-defined]
-        assert checkpoint["batch_id"] == "batch-456"
-        assert checkpoint["input_file_id"] == "file-123"
-        assert "row_mapping" in checkpoint
-        assert checkpoint["row_count"] == 1
-        assert "submitted_at" in checkpoint
+        assert checkpoint.batch_id == "batch-456"
+        assert checkpoint.input_file_id == "file-123"
+        assert checkpoint.row_mapping  # non-empty
+        assert checkpoint.row_count == 1
+        assert checkpoint.submitted_at  # non-empty ISO string
 
     def test_system_prompt_included_in_batch_requests(self, ctx: PluginContext) -> None:
         """System prompt is included in batch requests when configured."""
@@ -584,14 +585,13 @@ class TestAzureBatchLLMTransformSubmit:
         with pytest.raises(BatchPendingError):
             transform.process([make_pipeline_row(d) for d in rows], ctx)
 
-        # Verify checkpoint includes requests
+        # Verify checkpoint includes requests as typed BatchCheckpointState
         checkpoint = ctx._checkpoint  # type: ignore[attr-defined]
         assert checkpoint is not None
-        assert "requests" in checkpoint
-        assert len(checkpoint["requests"]) == 2
+        assert len(checkpoint.requests) == 2
 
         # Each request should have the full LLM request body
-        for _custom_id, request_body in checkpoint["requests"].items():
+        for _custom_id, request_body in checkpoint.requests.items():
             assert "messages" in request_body
             assert "model" in request_body
             assert request_body["model"] == "gpt-4o-batch"
@@ -667,8 +667,8 @@ class TestAzureBatchLLMTransformTemplateErrors:
 
         # Checkpoint should have template_errors
         checkpoint = ctx._checkpoint  # type: ignore[attr-defined]
-        assert len(checkpoint["template_errors"]) == 1
-        assert checkpoint["template_errors"][0][0] == 1  # Index of failed row
+        assert len(checkpoint.template_errors) == 1
+        assert checkpoint.template_errors[0][0] == 1  # Index of failed row
 
 
 class TestAzureBatchLLMTransformResume:
@@ -682,21 +682,21 @@ class TestAzureBatchLLMTransformResume:
         ctx = PluginContext(run_id="test-run", config={})
         # Pre-populate checkpoint for resume scenario (recent timestamp to avoid timeout)
         recent_timestamp = datetime.now(UTC).isoformat()
-        ctx._checkpoint.update(
-            {
-                "batch_id": "batch-456",
-                "input_file_id": "file-123",
-                "row_mapping": {"row-0-abc12345": {"index": 0, "variables_hash": "hash0"}},
-                "template_errors": [],
-                "submitted_at": recent_timestamp,
-                "row_count": 1,
-                "requests": {
+        ctx.set_checkpoint(
+            BatchCheckpointState(
+                batch_id="batch-456",
+                input_file_id="file-123",
+                row_mapping={"row-0-abc12345": RowMappingEntry(index=0, variables_hash="hash0")},
+                template_errors=[],
+                submitted_at=recent_timestamp,
+                row_count=1,
+                requests={
                     "row-0-abc12345": {
                         "messages": [{"role": "user", "content": "test"}],
                         "model": "my-gpt4o-batch",
                     },
                 },
-            }
+            )
         )
         return ctx
 
@@ -857,8 +857,8 @@ class TestAzureBatchLLMTransformResume:
 
         transform.process([make_pipeline_row(d) for d in rows], ctx_with_checkpoint)
 
-        # Checkpoint should be cleared
-        assert ctx_with_checkpoint._checkpoint == {}  # type: ignore[attr-defined]
+        # Checkpoint should be cleared (None after clear_checkpoint)
+        assert ctx_with_checkpoint._checkpoint is None  # type: ignore[attr-defined]
 
 
 class TestAzureBatchLLMTransformTimeout:
@@ -883,16 +883,16 @@ class TestAzureBatchLLMTransformTimeout:
         """Batch exceeding max_wait_hours returns error."""
         ctx = PluginContext(run_id="test-run", config={})
         # Pre-populate checkpoint from old timestamp for timeout test
-        ctx._checkpoint.update(
-            {
-                "batch_id": "batch-456",
-                "input_file_id": "file-123",
-                "row_mapping": {},
-                "template_errors": [],
-                "submitted_at": "2020-01-01T10:00:00+00:00",  # Old timestamp
-                "row_count": 1,
-                "requests": {},
-            }
+        ctx.set_checkpoint(
+            BatchCheckpointState(
+                batch_id="batch-456",
+                input_file_id="file-123",
+                row_mapping={},
+                template_errors=[],
+                submitted_at="2020-01-01T10:00:00+00:00",  # Old timestamp
+                row_count=1,
+                requests={},
+            )
         )
 
         mock_client = Mock()
@@ -984,24 +984,24 @@ class TestAzureBatchLLMTransformResultAssembly:
         ctx = PluginContext(run_id="test-run", config={})
         # Pre-populate checkpoint for resume test
         recent_timestamp = datetime.now(UTC).isoformat()
-        ctx._checkpoint.update(
-            {
-                "batch_id": "batch-456",
-                "input_file_id": "file-123",
-                "row_mapping": {
-                    "row-0-aaa": {"index": 0, "variables_hash": "hash0"},
-                    "row-1-bbb": {"index": 1, "variables_hash": "hash1"},
-                    "row-2-ccc": {"index": 2, "variables_hash": "hash2"},
+        ctx.set_checkpoint(
+            BatchCheckpointState(
+                batch_id="batch-456",
+                input_file_id="file-123",
+                row_mapping={
+                    "row-0-aaa": RowMappingEntry(index=0, variables_hash="hash0"),
+                    "row-1-bbb": RowMappingEntry(index=1, variables_hash="hash1"),
+                    "row-2-ccc": RowMappingEntry(index=2, variables_hash="hash2"),
                 },
-                "template_errors": [],
-                "submitted_at": recent_timestamp,
-                "row_count": 3,
-                "requests": {
+                template_errors=[],
+                submitted_at=recent_timestamp,
+                row_count=3,
+                requests={
                     "row-0-aaa": {"messages": [{"role": "user", "content": "a"}], "model": "gpt-4o-batch"},
                     "row-1-bbb": {"messages": [{"role": "user", "content": "b"}], "model": "gpt-4o-batch"},
                     "row-2-ccc": {"messages": [{"role": "user", "content": "c"}], "model": "gpt-4o-batch"},
                 },
-            }
+            )
         )
 
         mock_client = Mock()
@@ -1073,19 +1073,22 @@ class TestAzureBatchLLMTransformResultAssembly:
         ctx = PluginContext(run_id="test-run", config={})
         # Pre-populate checkpoint for resume test
         recent_timestamp = datetime.now(UTC).isoformat()
-        ctx._checkpoint.update(
-            {
-                "batch_id": "batch-456",
-                "input_file_id": "file-123",
-                "row_mapping": {"row-0-aaa": {"index": 0, "variables_hash": "hash0"}, "row-1-bbb": {"index": 1, "variables_hash": "hash1"}},
-                "template_errors": [],
-                "submitted_at": recent_timestamp,
-                "row_count": 2,
-                "requests": {
+        ctx.set_checkpoint(
+            BatchCheckpointState(
+                batch_id="batch-456",
+                input_file_id="file-123",
+                row_mapping={
+                    "row-0-aaa": RowMappingEntry(index=0, variables_hash="hash0"),
+                    "row-1-bbb": RowMappingEntry(index=1, variables_hash="hash1"),
+                },
+                template_errors=[],
+                submitted_at=recent_timestamp,
+                row_count=2,
+                requests={
                     "row-0-aaa": {"messages": [{"role": "user", "content": "a"}], "model": "gpt-4o-batch"},
                     "row-1-bbb": {"messages": [{"role": "user", "content": "b"}], "model": "gpt-4o-batch"},
                 },
-            }
+            )
         )
 
         mock_client = Mock()
@@ -1154,14 +1157,19 @@ class TestAzureBatchLLMTransformAuditRecording:
         ctx.state_id = "batch-state-123"  # The batch's node_state
         # Use MagicMock for record_call to track invocations
         ctx.record_call = MagicMock(return_value=MagicMock())
-        ctx.get_checkpoint.return_value = {
-            "batch_id": "azure-batch-789",
-            "row_mapping": {
-                "row-0-abc": {"index": 0, "variables_hash": "hash0"},
-                "row-1-def": {"index": 1, "variables_hash": "hash1"},
+        from elspeth.contracts.batch_checkpoint import BatchCheckpointState, RowMappingEntry
+
+        checkpoint_state = BatchCheckpointState(
+            batch_id="azure-batch-789",
+            input_file_id="input-file-001",
+            row_mapping={
+                "row-0-abc": RowMappingEntry(index=0, variables_hash="hash0"),
+                "row-1-def": RowMappingEntry(index=1, variables_hash="hash1"),
             },
-            "template_errors": [],
-            "requests": {
+            template_errors=[],
+            submitted_at="2024-01-01T00:00:00Z",
+            row_count=2,
+            requests={
                 "row-0-abc": {
                     "messages": [{"role": "user", "content": "Analyze: Hello"}],
                     "model": "gpt-4o-batch",
@@ -1171,7 +1179,8 @@ class TestAzureBatchLLMTransformAuditRecording:
                     "model": "gpt-4o-batch",
                 },
             },
-        }
+        )
+        ctx.get_checkpoint.return_value = checkpoint_state
         ctx.clear_checkpoint = MagicMock()
 
         # Mock Azure batch completion
@@ -1193,7 +1202,7 @@ class TestAzureBatchLLMTransformAuditRecording:
         with patch.object(transform, "_get_client") as mock_client:
             mock_client.return_value.files.content.return_value = mock_output_content
 
-            result = transform._download_results(mock_batch, ctx.get_checkpoint(), rows, ctx)
+            result = transform._download_results(mock_batch, checkpoint_state, rows, ctx)
 
         # Verify result is successful
         assert result.status == "success"
@@ -1251,18 +1260,24 @@ class TestAzureBatchLLMTransformAuditRecording:
         ctx.run_id = "test-run"
         ctx.state_id = "batch-state-123"
         ctx.record_call = capture_call
-        ctx.get_checkpoint.return_value = {
-            "batch_id": "azure-batch-789",
-            "row_mapping": {
-                "row-0-abc": {"index": 0, "variables_hash": "hash0"},
-                "row-1-def": {"index": 1, "variables_hash": "hash1"},
+        from elspeth.contracts.batch_checkpoint import BatchCheckpointState, RowMappingEntry
+
+        checkpoint_state = BatchCheckpointState(
+            batch_id="azure-batch-789",
+            input_file_id="input-file-001",
+            row_mapping={
+                "row-0-abc": RowMappingEntry(index=0, variables_hash="hash0"),
+                "row-1-def": RowMappingEntry(index=1, variables_hash="hash1"),
             },
-            "template_errors": [],
-            "requests": {
+            template_errors=[],
+            submitted_at="2024-01-01T00:00:00Z",
+            row_count=2,
+            requests={
                 "row-0-abc": {"messages": [{"role": "user", "content": "Good"}], "model": "gpt-4o-batch"},
                 "row-1-def": {"messages": [{"role": "user", "content": "Bad"}], "model": "gpt-4o-batch"},
             },
-        }
+        )
+        ctx.get_checkpoint.return_value = checkpoint_state
         ctx.clear_checkpoint = MagicMock()
 
         mock_batch = MagicMock()
@@ -1281,7 +1296,7 @@ class TestAzureBatchLLMTransformAuditRecording:
         with patch.object(transform, "_get_client") as mock_client:
             mock_client.return_value.files.content.return_value = mock_output_content
             # Result unused - we're testing side effects (recorded calls)
-            transform._download_results(mock_batch, ctx.get_checkpoint(), rows, ctx)
+            transform._download_results(mock_batch, checkpoint_state, rows, ctx)
 
         from elspeth.contracts import CallStatus, CallType
 
@@ -1386,30 +1401,31 @@ class TestAzureBatchLLMTransformMissingResults:
         ctx.state_id = "test-state-123"  # Required for record_call
 
         # Set up checkpoint as if batch was submitted with 2 rows
-        checkpoint = {
-            "batch_id": "batch-999",
-            "input_file_id": "file-input",
-            "row_mapping": {
-                "row-0-abc": {"index": 0, "variables_hash": "hash0"},
-                "row-1-def": {"index": 1, "variables_hash": "hash1"},
-            },
-            "template_errors": [],
-            "submitted_at": "2026-01-31T12:00:00Z",
-            "row_count": 2,
-            "requests": {
-                "row-0-abc": {
-                    "model": "my-gpt4o-batch",
-                    "messages": [{"role": "user", "content": "Analyze: Hello"}],
-                    "temperature": 0.0,
+        ctx.set_checkpoint(
+            BatchCheckpointState(
+                batch_id="batch-999",
+                input_file_id="file-input",
+                row_mapping={
+                    "row-0-abc": RowMappingEntry(index=0, variables_hash="hash0"),
+                    "row-1-def": RowMappingEntry(index=1, variables_hash="hash1"),
                 },
-                "row-1-def": {
-                    "model": "my-gpt4o-batch",
-                    "messages": [{"role": "user", "content": "Analyze: World"}],
-                    "temperature": 0.0,
+                template_errors=[],
+                submitted_at="2026-01-31T12:00:00Z",
+                row_count=2,
+                requests={
+                    "row-0-abc": {
+                        "model": "my-gpt4o-batch",
+                        "messages": [{"role": "user", "content": "Analyze: Hello"}],
+                        "temperature": 0.0,
+                    },
+                    "row-1-def": {
+                        "model": "my-gpt4o-batch",
+                        "messages": [{"role": "user", "content": "Analyze: World"}],
+                        "temperature": 0.0,
+                    },
                 },
-            },
-        }
-        ctx._checkpoint = checkpoint
+            )
+        )
 
         # Mock Azure client - batch is completed
         mock_batch = Mock()
@@ -1490,24 +1506,25 @@ class TestAzureBatchLLMTransformMissingResults:
         ctx.landscape = mock_landscape
         ctx.state_id = "test-state-456"
 
-        checkpoint = {
-            "batch_id": "batch-888",
-            "input_file_id": "file-input",
-            "row_mapping": {
-                "row-0-abc": {"index": 0, "variables_hash": "hash0"},
-            },
-            "template_errors": [],
-            "submitted_at": "2026-01-31T12:00:00Z",
-            "row_count": 1,
-            "requests": {
-                "row-0-abc": {
-                    "model": "my-gpt4o-batch",
-                    "messages": [{"role": "user", "content": "Analyze: Hello"}],
-                    "temperature": 0.0,
+        ctx.set_checkpoint(
+            BatchCheckpointState(
+                batch_id="batch-888",
+                input_file_id="file-input",
+                row_mapping={
+                    "row-0-abc": RowMappingEntry(index=0, variables_hash="hash0"),
                 },
-            },
-        }
-        ctx._checkpoint = checkpoint
+                template_errors=[],
+                submitted_at="2026-01-31T12:00:00Z",
+                row_count=1,
+                requests={
+                    "row-0-abc": {
+                        "model": "my-gpt4o-batch",
+                        "messages": [{"role": "user", "content": "Analyze: Hello"}],
+                        "temperature": 0.0,
+                    },
+                },
+            )
+        )
 
         mock_batch = Mock()
         mock_batch.id = "batch-888"
@@ -1633,20 +1650,20 @@ class TestBug4_2_NonDictResponseBody:
         ctx = PluginContext(run_id="test-run", config={})
         recent_timestamp = datetime.now(UTC).isoformat()
 
-        ctx._checkpoint.update(
-            {
-                "batch_id": "batch-456",
-                "input_file_id": "file-123",
-                "row_mapping": {
-                    "row-0-aaa": {"index": 0, "variables_hash": "hash0"},
+        ctx.set_checkpoint(
+            BatchCheckpointState(
+                batch_id="batch-456",
+                input_file_id="file-123",
+                row_mapping={
+                    "row-0-aaa": RowMappingEntry(index=0, variables_hash="hash0"),
                 },
-                "template_errors": [],
-                "submitted_at": recent_timestamp,
-                "row_count": 1,
-                "requests": {
+                template_errors=[],
+                submitted_at=recent_timestamp,
+                row_count=1,
+                requests={
                     "row-0-aaa": {"messages": [{"role": "user", "content": "a"}], "model": "gpt-4o-batch"},
                 },
-            }
+            )
         )
 
         mock_client = Mock()
@@ -1684,32 +1701,5 @@ class TestBug4_2_NonDictResponseBody:
         assert any("not a dict" in err for err in result.reason["errors"])
 
 
-# ---------------------------------------------------------------------------
-# _RowMappingEntry (module-private checkpoint dataclass)
-# ---------------------------------------------------------------------------
-
-
-class TestRowMappingEntry:
-    """Round-trip and crash-on-corruption tests for _RowMappingEntry."""
-
-    def test_round_trip(self) -> None:
-        entry = _RowMappingEntry(index=5, variables_hash="abc123")
-        assert _RowMappingEntry.from_dict(entry.to_dict()) == entry
-
-    def test_to_dict_shape(self) -> None:
-        entry = _RowMappingEntry(index=0, variables_hash="deadbeef")
-        d = entry.to_dict()
-        assert d == {"index": 0, "variables_hash": "deadbeef"}
-
-    def test_frozen(self) -> None:
-        entry = _RowMappingEntry(index=1, variables_hash="hash")
-        with pytest.raises(AttributeError):
-            entry.index = 99  # type: ignore[misc]
-
-    def test_from_dict_missing_index_crashes(self) -> None:
-        with pytest.raises(KeyError, match="index"):
-            _RowMappingEntry.from_dict({"variables_hash": "abc"})
-
-    def test_from_dict_missing_hash_crashes(self) -> None:
-        with pytest.raises(KeyError, match="variables_hash"):
-            _RowMappingEntry.from_dict({"index": 0})
+# RowMappingEntry tests moved to tests/unit/contracts/test_batch_checkpoint.py
+# (class is now in contracts.batch_checkpoint, not azure_batch)

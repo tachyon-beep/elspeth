@@ -158,8 +158,6 @@ allowed_dict_patterns:
   # PLUGIN CONTEXT - Recording and routing
   # PluginContext methods handle dynamic data from pipeline execution
   # ═══════════════════════════════════════════════════════════════════════════
-  - "src/elspeth/contracts/plugin_context.py:PluginContext.get_checkpoint:return"
-  - "src/elspeth/contracts/plugin_context.py:PluginContext.update_checkpoint:data"
   - "src/elspeth/contracts/plugin_context.py:PluginContext.record_call:request_data"
   - "src/elspeth/contracts/plugin_context.py:PluginContext.record_call:response_data"
   - "src/elspeth/contracts/plugin_context.py:PluginContext.record_call:error"
@@ -247,15 +245,8 @@ allowed_dict_patterns:
   - "src/elspeth/plugins/llm/azure.py:AzureLLMTransform.__init__:config"
   - "src/elspeth/plugins/llm/azure.py:AzureLLMTransform.azure_config:return"
 
-  # Azure batch LLM
-  - "src/elspeth/plugins/llm/azure_batch.py:_RowMappingEntry.to_dict:return"
-  - "src/elspeth/plugins/llm/azure_batch.py:_RowMappingEntry.from_dict:data"
+  # Azure batch LLM (checkpoint params typed as BatchCheckpointState — only config/return remain)
   - "src/elspeth/plugins/llm/azure_batch.py:AzureBatchLLMTransform.__init__:config"
-  - "src/elspeth/plugins/llm/azure_batch.py:AzureBatchLLMTransform._get_checkpoint:return"
-  - "src/elspeth/plugins/llm/azure_batch.py:AzureBatchLLMTransform._update_checkpoint:data"
-  - "src/elspeth/plugins/llm/azure_batch.py:AzureBatchLLMTransform._check_batch_status:checkpoint"
-  - "src/elspeth/plugins/llm/azure_batch.py:AzureBatchLLMTransform._download_results:checkpoint"
-  - "src/elspeth/plugins/llm/azure_batch.py:AzureBatchLLMTransform._record_per_row_failure_calls:checkpoint"
   - "src/elspeth/plugins/llm/azure_batch.py:AzureBatchLLMTransform.azure_config:return"
 
   # Azure multi-query LLM (refactored: PipelineRow is now the row type at plugin boundary)

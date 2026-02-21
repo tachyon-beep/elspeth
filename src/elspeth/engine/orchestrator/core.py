@@ -37,6 +37,7 @@ if TYPE_CHECKING:
 
 from elspeth import __version__ as ENGINE_VERSION
 from elspeth.contracts import (
+    BatchCheckpointState,
     BatchPendingError,
     ExportStatus,
     NodeType,
@@ -675,7 +676,7 @@ class Orchestrator:
         config: PipelineConfig,
         graph: ExecutionGraph | None = None,
         settings: ElspethSettings | None = None,
-        batch_checkpoints: dict[str, dict[str, Any]] | None = None,
+        batch_checkpoints: dict[str, BatchCheckpointState] | None = None,
         *,
         payload_store: PayloadStore,
         secret_resolutions: list[dict[str, Any]] | None = None,
@@ -687,10 +688,10 @@ class Orchestrator:
             config: Pipeline configuration with plugins
             graph: Pre-validated execution graph (required)
             settings: Full settings (for post-run hooks like export)
-            batch_checkpoints: Batch transform checkpoints to restore (from
-                previous BatchPendingError). Maps node_id -> checkpoint_data.
-                Used when retrying a run after a batch transform raised
-                BatchPendingError.
+            batch_checkpoints: Typed batch transform checkpoints to restore
+                (from previous BatchPendingError). Maps node_id ->
+                BatchCheckpointState. Used when retrying a run after a batch
+                transform raised BatchPendingError.
             payload_store: PayloadStore for persisting source row payloads.
                 Required for audit compliance (CLAUDE.md: "Source entry - Raw data
                 stored before any processing").
@@ -989,7 +990,7 @@ class Orchestrator:
         config: PipelineConfig,
         graph: ExecutionGraph,
         settings: ElspethSettings | None = None,
-        batch_checkpoints: dict[str, dict[str, Any]] | None = None,
+        batch_checkpoints: dict[str, BatchCheckpointState] | None = None,
         *,
         payload_store: PayloadStore,
         shutdown_event: threading.Event | None = None,
@@ -1007,7 +1008,7 @@ class Orchestrator:
             config: Pipeline configuration
             graph: Execution graph
             settings: Full settings (optional)
-            batch_checkpoints: Restored batch checkpoints (maps node_id -> checkpoint_data)
+            batch_checkpoints: Typed batch checkpoints (maps node_id -> BatchCheckpointState)
             payload_store: Optional PayloadStore for persisting source row payloads
             shutdown_event: Optional threading.Event set by signal handler on SIGINT/SIGTERM.
                 When set, the processing loop breaks after the current row completes.

@@ -29,7 +29,7 @@ class TestAzureBatchSingleRowContractPropagation:
         ctx.state_id = "state_1"
         ctx.record_call = Mock()
         ctx.get_checkpoint = Mock(return_value=None)
-        ctx.update_checkpoint = Mock()
+        ctx.set_checkpoint = Mock()
         ctx.clear_checkpoint = Mock()
         return ctx
 
@@ -125,7 +125,7 @@ class TestOpenRouterBatchSingleRowContractPropagation:
         ctx.state_id = "state_1"
         ctx.record_call = Mock()
         ctx.get_checkpoint = Mock(return_value=None)
-        ctx.update_checkpoint = Mock()
+        ctx.set_checkpoint = Mock()
         ctx.clear_checkpoint = Mock()
         return ctx
 

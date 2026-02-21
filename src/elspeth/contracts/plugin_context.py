@@ -26,6 +26,7 @@ if TYPE_CHECKING:
     from opentelemetry.trace import Span, Tracer
 
     from elspeth.contracts import Call, CallStatus, CallType, PayloadStore, TransformErrorReason
+    from elspeth.contracts.batch_checkpoint import BatchCheckpointState
     from elspeth.contracts.config.runtime import RuntimeConcurrencyConfig
     from elspeth.contracts.errors import ContractViolation
     from elspeth.contracts.identity import TokenInfo
@@ -140,52 +141,51 @@ class PluginContext:
 
     # === Phase 6: Checkpoint API ===
     # Used by batch transforms (e.g., azure_batch_llm) for crash recovery.
-    # The checkpoint stores batch_id, row_mapping, etc. between invocations.
+    # The checkpoint stores batch_id, row_mapping, etc. as a typed
+    # BatchCheckpointState (frozen dataclass) between invocations.
     #
     # Checkpoints are keyed by node_id to support multiple batch transforms.
     # The orchestrator restores these from the BatchPendingError.checkpoint
     # when scheduling retries.
-    _checkpoint: dict[str, Any] = field(default_factory=dict)
+    _checkpoint: BatchCheckpointState | None = field(default=None)
 
     # Batch checkpoints restored from previous BatchPendingError
-    # Maps node_id -> checkpoint_data for each batch transform
-    _batch_checkpoints: dict[str, dict[str, Any]] = field(default_factory=dict)
+    # Maps node_id -> typed checkpoint state for each batch transform
+    _batch_checkpoints: dict[str, BatchCheckpointState] = field(default_factory=dict)
 
-    def get_checkpoint(self) -> dict[str, Any] | None:
+    def get_checkpoint(self) -> BatchCheckpointState | None:
         """Get checkpoint state for batch transforms.
 
         Used by batch transforms to recover state after crashes.
-        Returns None if no checkpoint exists (empty dict = no checkpoint).
+        Returns None if no checkpoint exists.
 
         First checks for a restored batch checkpoint (from a previous
         BatchPendingError), then falls back to the local checkpoint.
 
         Returns:
-            Checkpoint dict with batch state, or None if empty
+            BatchCheckpointState with batch state, or None if empty
         """
         # First check for restored batch checkpoint (keyed by node_id)
         if self.node_id and self.node_id in self._batch_checkpoints:
-            restored = self._batch_checkpoints[self.node_id]
-            if restored:
-                return restored
+            return self._batch_checkpoints[self.node_id]
 
         # Fall back to local checkpoint
-        return self._checkpoint if self._checkpoint else None
+        return self._checkpoint
 
-    def update_checkpoint(self, data: dict[str, Any]) -> None:
-        """Update checkpoint state with new data.
+    def set_checkpoint(self, state: BatchCheckpointState) -> None:
+        """Set checkpoint state for batch transforms.
 
-        Merges the provided data into whichever checkpoint is currently
-        authoritative: the restored batch checkpoint (if present for this
-        node), or the local checkpoint otherwise.
+        Replaces the checkpoint with the provided typed state.
+        Writes to the restored batch checkpoint slot (if present for
+        this node), or the local checkpoint otherwise.
 
         Args:
-            data: Checkpoint data to merge (batch_id, row_mapping, etc.)
+            state: Typed checkpoint state (BatchCheckpointState)
         """
-        if self.node_id and self.node_id in self._batch_checkpoints and self._batch_checkpoints[self.node_id]:
-            self._batch_checkpoints[self.node_id].update(data)
+        if self.node_id and self.node_id in self._batch_checkpoints:
+            self._batch_checkpoints[self.node_id] = state
         else:
-            self._checkpoint.update(data)
+            self._checkpoint = state
 
     def clear_checkpoint(self) -> None:
         """Clear checkpoint state after batch completion.
@@ -196,7 +196,7 @@ class PluginContext:
         Clears both the local checkpoint and any restored batch checkpoint
         for the current node to prevent stale data on subsequent batches.
         """
-        self._checkpoint.clear()
+        self._checkpoint = None
         # Also clear restored batch checkpoint to prevent stale resume data
         if self.node_id and self.node_id in self._batch_checkpoints:
             del self._batch_checkpoints[self.node_id]

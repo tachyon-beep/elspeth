@@ -13,8 +13,11 @@ Each test class corresponds to one bug fix:
 from __future__ import annotations
 
 from datetime import UTC, datetime
-from typing import Any
+from typing import TYPE_CHECKING, Any
 from unittest.mock import Mock, patch
+
+if TYPE_CHECKING:
+    from elspeth.contracts.batch_checkpoint import BatchCheckpointState
 
 import pytest
 
@@ -410,26 +413,28 @@ class TestAzureBatchTerminalFailureCallRecording:
         ctx.record_call = Mock()
         ctx.telemetry_emit = Mock()
         ctx.get_checkpoint = Mock()
-        ctx.update_checkpoint = Mock()
+        ctx.set_checkpoint = Mock()
         ctx.clear_checkpoint = Mock()
         ctx.landscape = Mock()
         transform.on_start(ctx)
 
         return transform, ctx
 
-    def _make_checkpoint(self, batch_id: str = "batch-123") -> dict[str, Any]:
+    def _make_checkpoint(self, batch_id: str = "batch-123", submitted_at: str | None = None) -> BatchCheckpointState:
         """Create a realistic checkpoint with submitted requests."""
-        return {
-            "batch_id": batch_id,
-            "input_file_id": "file-abc",
-            "row_mapping": {
-                "row-0-abc12345": {"index": 0, "variables_hash": "hash0"},
-                "row-1-def67890": {"index": 1, "variables_hash": "hash1"},
+        from elspeth.contracts.batch_checkpoint import BatchCheckpointState, RowMappingEntry
+
+        return BatchCheckpointState(
+            batch_id=batch_id,
+            input_file_id="file-abc",
+            row_mapping={
+                "row-0-abc12345": RowMappingEntry(index=0, variables_hash="hash0"),
+                "row-1-def67890": RowMappingEntry(index=1, variables_hash="hash1"),
             },
-            "template_errors": [],
-            "submitted_at": datetime.now(UTC).isoformat(),
-            "row_count": 2,
-            "requests": {
+            template_errors=[],
+            submitted_at=submitted_at or datetime.now(UTC).isoformat(),
+            row_count=2,
+            requests={
                 "row-0-abc12345": {
                     "model": "test-batch",
                     "messages": [{"role": "user", "content": "hello row 0"}],
@@ -441,7 +446,7 @@ class TestAzureBatchTerminalFailureCallRecording:
                     "temperature": 0.0,
                 },
             },
-        }
+        )
 
     def _assert_per_row_calls_recorded(self, ctx: Mock, expected_status: str) -> None:
         """Assert that per-row LLM call records were emitted with the expected batch status."""
@@ -523,8 +528,7 @@ class TestAzureBatchTerminalFailureCallRecording:
         """Timed-out batch records per-row LLM calls before clearing checkpoint."""
         transform, ctx = self._make_transform_and_ctx()
         # Set submitted_at to far in the past to trigger timeout
-        checkpoint = self._make_checkpoint()
-        checkpoint["submitted_at"] = "2020-01-01T00:00:00+00:00"
+        checkpoint = self._make_checkpoint(submitted_at="2020-01-01T00:00:00+00:00")
 
         rows = [make_pipeline_row({"text": "row0"}), make_pipeline_row({"text": "row1"})]
 
@@ -577,14 +581,17 @@ class TestAzureBatchTerminalFailureCallRecording:
     def test_no_per_row_calls_when_no_requests(self) -> None:
         """No per-row calls emitted when checkpoint has no requests (all templates failed)."""
         transform, ctx = self._make_transform_and_ctx()
-        checkpoint = {
-            "batch_id": "batch-empty",
-            "row_mapping": {},
-            "template_errors": [(0, "bad template")],
-            "submitted_at": datetime.now(UTC).isoformat(),
-            "row_count": 1,
-            "requests": {},
-        }
+        from elspeth.contracts.batch_checkpoint import BatchCheckpointState
+
+        checkpoint = BatchCheckpointState(
+            batch_id="batch-empty",
+            input_file_id="file-empty",
+            row_mapping={},
+            template_errors=[(0, "bad template")],
+            submitted_at=datetime.now(UTC).isoformat(),
+            row_count=1,
+            requests={},
+        )
         rows = [make_pipeline_row({"text": "row0"})]
 
         mock_batch = Mock()

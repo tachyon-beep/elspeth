@@ -6,10 +6,24 @@ for web-specific request recording and outcome classification (forbidden,
 not_found, redirect tracking, encoding, content type).
 """
 
-from typing import Any
+from typing import Any, NamedTuple
 
 from elspeth.testing.chaosengine.metrics_store import MetricsStore
 from elspeth.testing.chaosengine.types import ColumnDef, MetricsConfig, MetricsSchema
+
+
+class WebOutcomeClassification(NamedTuple):
+    """Classification of a web request outcome for time-series aggregation."""
+
+    success: bool
+    rate_limited: bool
+    forbidden: bool
+    not_found: bool
+    server_error: bool
+    connection_error: bool
+    malformed: bool
+    redirect: bool
+
 
 # Schema definition for web metrics tables.
 WEB_METRICS_SCHEMA = MetricsSchema(
@@ -54,36 +68,23 @@ def _classify_web_outcome(
     outcome: str,
     status_code: int | None,
     error_type: str | None,
-) -> tuple[bool, bool, bool, bool, bool, bool, bool, bool]:
-    """Classify an outcome for web time-series aggregation.
-
-    Returns:
-        Tuple of booleans: (success, rate_limited, forbidden, not_found,
-        server_error, connection_error, malformed, redirect)
-    """
-    is_success = outcome == "success"
-    is_rate_limited = status_code == 429
-    is_forbidden = status_code == 403
-    is_not_found = status_code == 404
-    is_server_error = status_code is not None and 500 <= status_code < 600
-    is_connection_error = error_type in (
-        "timeout",
-        "connection_reset",
-        "connection_stall",
-        "incomplete_response",
-    )
-    is_malformed = outcome == "error_malformed"
-    is_redirect = outcome == "error_redirect"
-
-    return (
-        is_success,
-        is_rate_limited,
-        is_forbidden,
-        is_not_found,
-        is_server_error,
-        is_connection_error,
-        is_malformed,
-        is_redirect,
+) -> WebOutcomeClassification:
+    """Classify an outcome for web time-series aggregation."""
+    return WebOutcomeClassification(
+        success=outcome == "success",
+        rate_limited=status_code == 429,
+        forbidden=status_code == 403,
+        not_found=status_code == 404,
+        server_error=status_code is not None and 500 <= status_code < 600,
+        connection_error=error_type
+        in (
+            "timeout",
+            "connection_reset",
+            "connection_stall",
+            "incomplete_response",
+        ),
+        malformed=outcome == "error_malformed",
+        redirect=outcome == "error_redirect",
     )
 
 
@@ -194,28 +195,19 @@ class WebMetricsRecorder:
         )
 
         # Classify and update time-series
-        (
-            is_success,
-            is_rate_limited,
-            is_forbidden,
-            is_not_found,
-            is_server_error,
-            is_connection_error,
-            is_malformed,
-            is_redirect,
-        ) = _classify_web_outcome(outcome, status_code, error_type)
+        cls = _classify_web_outcome(outcome, status_code, error_type)
 
         bucket = self._store.get_bucket_utc(timestamp_utc)
         self._store.update_timeseries(
             bucket,
-            requests_success=int(is_success),
-            requests_rate_limited=int(is_rate_limited),
-            requests_forbidden=int(is_forbidden),
-            requests_not_found=int(is_not_found),
-            requests_server_error=int(is_server_error),
-            requests_connection_error=int(is_connection_error),
-            requests_malformed=int(is_malformed),
-            requests_redirect=int(is_redirect),
+            requests_success=int(cls.success),
+            requests_rate_limited=int(cls.rate_limited),
+            requests_forbidden=int(cls.forbidden),
+            requests_not_found=int(cls.not_found),
+            requests_server_error=int(cls.server_error),
+            requests_connection_error=int(cls.connection_error),
+            requests_malformed=int(cls.malformed),
+            requests_redirect=int(cls.redirect),
         )
 
         # Update latency statistics for the bucket
