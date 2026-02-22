@@ -17,6 +17,7 @@ from elspeth.contracts import (
     Call,
     CallStatus,
     CallType,
+    Checkpoint,
     Determinism,
     Edge,
     ExportStatus,
@@ -33,6 +34,7 @@ from elspeth.contracts import (
     RoutingEvent,
     RoutingMode,
     Row,
+    RowLineage,
     RowOutcome,
     Run,
     RunStatus,
@@ -1438,6 +1440,203 @@ class TestFrozenDataclassImmutability:
                 ),
                 "type_name",
             ),
+            # --- Newly frozen (T1) ---
+            # Run
+            (
+                lambda: Run(
+                    run_id="r1",
+                    started_at=datetime.now(UTC),
+                    config_hash="a" * 64,
+                    settings_json="{}",
+                    canonical_version="1.0",
+                    status=RunStatus.RUNNING,
+                ),
+                "run_id",
+            ),
+            # Node
+            (
+                lambda: Node(
+                    node_id="n1",
+                    run_id="r1",
+                    plugin_name="test",
+                    node_type=NodeType.SOURCE,
+                    plugin_version="1.0",
+                    determinism=Determinism.DETERMINISTIC,
+                    config_hash="a" * 64,
+                    config_json="{}",
+                    registered_at=datetime.now(UTC),
+                ),
+                "node_id",
+            ),
+            # Edge
+            (
+                lambda: Edge(
+                    edge_id="e1",
+                    run_id="r1",
+                    from_node_id="n1",
+                    to_node_id="n2",
+                    label="continue",
+                    default_mode=RoutingMode.MOVE,
+                    created_at=datetime.now(UTC),
+                ),
+                "edge_id",
+            ),
+            # Row
+            (
+                lambda: Row(
+                    row_id="row-1",
+                    run_id="r1",
+                    source_node_id="n1",
+                    row_index=0,
+                    source_data_hash="a" * 64,
+                    created_at=datetime.now(UTC),
+                ),
+                "row_id",
+            ),
+            # Token
+            (
+                lambda: Token(
+                    token_id="t1",
+                    row_id="row-1",
+                    created_at=datetime.now(UTC),
+                ),
+                "token_id",
+            ),
+            # TokenParent
+            (
+                lambda: TokenParent(
+                    token_id="t1",
+                    parent_token_id="t0",
+                    ordinal=0,
+                ),
+                "token_id",
+            ),
+            # Call
+            (
+                lambda: Call(
+                    call_id="c1",
+                    call_index=0,
+                    call_type=CallType.HTTP,
+                    status=CallStatus.SUCCESS,
+                    request_hash="a" * 64,
+                    created_at=datetime.now(UTC),
+                    state_id="s1",
+                ),
+                "call_id",
+            ),
+            # Artifact
+            (
+                lambda: Artifact(
+                    artifact_id="a1",
+                    run_id="r1",
+                    produced_by_state_id="s1",
+                    sink_node_id="sink-1",
+                    artifact_type="csv",
+                    path_or_uri="/tmp/out.csv",
+                    content_hash="a" * 64,
+                    size_bytes=1024,
+                    created_at=datetime.now(UTC),
+                ),
+                "artifact_id",
+            ),
+            # RoutingEvent
+            (
+                lambda: RoutingEvent(
+                    event_id="evt-1",
+                    state_id="s1",
+                    edge_id="e1",
+                    routing_group_id="rg-1",
+                    ordinal=0,
+                    mode=RoutingMode.MOVE,
+                    created_at=datetime.now(UTC),
+                ),
+                "event_id",
+            ),
+            # Batch
+            (
+                lambda: Batch(
+                    batch_id="b1",
+                    run_id="r1",
+                    aggregation_node_id="agg-1",
+                    attempt=1,
+                    status=BatchStatus.DRAFT,
+                    created_at=datetime.now(UTC),
+                ),
+                "batch_id",
+            ),
+            # BatchMember
+            (
+                lambda: BatchMember(
+                    batch_id="b1",
+                    token_id="t1",
+                    ordinal=0,
+                ),
+                "batch_id",
+            ),
+            # BatchOutput
+            (
+                lambda: BatchOutput(
+                    batch_id="b1",
+                    output_type="token",
+                    output_id="t2",
+                ),
+                "batch_id",
+            ),
+            # Checkpoint
+            (
+                lambda: Checkpoint(
+                    checkpoint_id="cp-1",
+                    run_id="r1",
+                    token_id="t1",
+                    node_id="n1",
+                    sequence_number=1,
+                    created_at=datetime.now(UTC),
+                    upstream_topology_hash="a" * 64,
+                    checkpoint_node_config_hash="b" * 64,
+                ),
+                "checkpoint_id",
+            ),
+            # RowLineage
+            (
+                lambda: RowLineage(
+                    row_id="row-1",
+                    run_id="r1",
+                    source_node_id="n1",
+                    row_index=0,
+                    source_data_hash="a" * 64,
+                    created_at=datetime.now(UTC),
+                    source_data=None,
+                    payload_available=False,
+                ),
+                "row_id",
+            ),
+            # ValidationErrorRecord
+            (
+                lambda: ValidationErrorRecord(
+                    error_id="verr-1",
+                    run_id="r1",
+                    node_id="n1",
+                    row_hash="a" * 64,
+                    error="test error",
+                    schema_mode="fixed",
+                    destination="quarantine",
+                    created_at=datetime.now(UTC),
+                ),
+                "error_id",
+            ),
+            # TransformErrorRecord
+            (
+                lambda: TransformErrorRecord(
+                    error_id="terr-1",
+                    run_id="r1",
+                    token_id="t1",
+                    transform_id="xform-1",
+                    row_hash="a" * 64,
+                    destination="error_sink",
+                    created_at=datetime.now(UTC),
+                ),
+                "error_id",
+            ),
         ],
         ids=[
             "NodeStateOpen",
@@ -1446,6 +1645,23 @@ class TestFrozenDataclassImmutability:
             "NodeStateFailed",
             "TokenOutcome",
             "NonCanonicalMetadata",
+            # Newly frozen (T1)
+            "Run",
+            "Node",
+            "Edge",
+            "Row",
+            "Token",
+            "TokenParent",
+            "Call",
+            "Artifact",
+            "RoutingEvent",
+            "Batch",
+            "BatchMember",
+            "BatchOutput",
+            "Checkpoint",
+            "RowLineage",
+            "ValidationErrorRecord",
+            "TransformErrorRecord",
         ],
     )
     def test_frozen_dataclass_rejects_mutation(
