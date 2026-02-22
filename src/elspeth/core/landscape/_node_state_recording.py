@@ -21,7 +21,8 @@ from elspeth.contracts import (
     RoutingSpec,
 )
 from elspeth.contracts.errors import AuditIntegrityError, ExecutionError, TransformErrorReason
-from elspeth.core.canonical import canonical_json, repr_hash, stable_hash
+from elspeth.contracts.hashing import repr_hash
+from elspeth.core.canonical import canonical_json, stable_hash
 from elspeth.core.landscape._helpers import generate_id, now
 from elspeth.core.landscape.schema import (
     node_states_table,

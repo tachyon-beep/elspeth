@@ -135,7 +135,7 @@ class ContractAuditRecord:
         Returns:
             Canonical JSON string
         """
-        from elspeth.core.canonical import canonical_json
+        from elspeth.contracts.hashing import canonical_json
 
         # Canonicalize field order so semantically equivalent contracts serialize
         # identically regardless of upstream insertion/merge ordering.

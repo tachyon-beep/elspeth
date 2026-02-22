@@ -356,7 +356,7 @@ class PluginContext:
             from elspeth.contracts.call_data import RawCallPayload
             from elspeth.contracts.enums import CallType as CallTypeEnum
             from elspeth.contracts.events import ExternalCallCompleted
-            from elspeth.core.canonical import stable_hash
+            from elspeth.contracts.hashing import stable_hash
 
             # Snapshot payloads so async telemetry exports can't drift from call-time hashes.
             request_snapshot = copy.deepcopy(request_data)
@@ -438,7 +438,7 @@ class PluginContext:
         Returns:
             ValidationErrorToken for tracking the quarantined row
         """
-        from elspeth.core.canonical import repr_hash, stable_hash
+        from elspeth.contracts.hashing import repr_hash, stable_hash
 
         # Generate row_id from content hash if not present
         # External data may be non-dict (e.g., JSON array containing primitives),

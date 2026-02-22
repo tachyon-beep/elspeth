@@ -316,7 +316,7 @@ class SchemaContract:
         Returns:
             32-character hex hash string
         """
-        from elspeth.core.canonical import canonical_json
+        from elspeth.contracts.hashing import canonical_json
 
         field_defs = [
             {

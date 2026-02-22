@@ -67,6 +67,7 @@ from elspeth.contracts.events import (
     RunCompletionStatus,
     RunSummary,
 )
+from elspeth.contracts.hashing import repr_hash
 from elspeth.contracts.plugin_context import PluginContext
 from elspeth.contracts.types import (
     AggregationName,
@@ -76,7 +77,7 @@ from elspeth.contracts.types import (
     NodeID,
     SinkName,
 )
-from elspeth.core.canonical import repr_hash, sanitize_for_canonical, stable_hash
+from elspeth.core.canonical import sanitize_for_canonical, stable_hash
 from elspeth.core.config import AggregationSettings
 from elspeth.core.dag import ExecutionGraph
 from elspeth.core.landscape import LandscapeDB, LandscapeRecorder

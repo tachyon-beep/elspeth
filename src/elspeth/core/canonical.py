@@ -30,11 +30,11 @@ import numpy as np
 import pandas as pd
 import rfc8785
 
+from elspeth.contracts.hashing import CANONICAL_VERSION as CANONICAL_VERSION
+from elspeth.contracts.schema_contract import PipelineRow
+
 if TYPE_CHECKING:
     from elspeth.core.dag import ExecutionGraph
-
-# Version string stored with every run for hash verification
-CANONICAL_VERSION = "sha256-rfc8785-v1"
 
 
 def _normalize_value(obj: Any) -> Any:
@@ -146,9 +146,6 @@ def _normalize_for_canonical(data: Any) -> Any:
         ValueError: If data contains NaN, Infinity, or other non-serializable values
     """
     # Handle PipelineRow - convert to dict before processing
-    # Import here to avoid circular dependency
-    from elspeth.contracts.schema_contract import PipelineRow
-
     if isinstance(data, PipelineRow):
         data = data.to_dict()
 
@@ -286,29 +283,3 @@ def sanitize_for_canonical(obj: Any) -> Any:
     if obj_type.__module__ == "numpy" and "float" in obj_type.__name__ and not math.isfinite(float(obj)):
         return None
     return obj
-
-
-def repr_hash(obj: Any) -> str:
-    """Generate SHA-256 hash of repr() for non-canonical data.
-
-    Used as fallback when canonical_json fails (NaN, Infinity, or other
-    non-serializable types). This provides deterministic hashing within
-    the same Python version, but is NOT guaranteed to be stable across
-    different Python versions due to repr() implementation differences.
-
-    This is appropriate for Tier-3 (external data) trust boundary where
-    data is already malformed and being quarantined.
-
-    Args:
-        obj: Any Python object
-
-    Returns:
-        SHA-256 hex digest of repr(obj)
-
-    Example:
-        >>> repr_hash(42)
-        '73475cb40a568e8da8a045ced110137e159f890ac4da883b6b17dc651b3a8049'
-        >>> repr_hash({"value": float("nan")})  # Non-canonical data
-        '49ce040dd7d56208...'
-    """
-    return hashlib.sha256(repr(obj).encode("utf-8")).hexdigest()

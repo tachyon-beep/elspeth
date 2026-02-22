@@ -180,7 +180,7 @@ class TestValidationErrorNonCanonical:
         """
         import json
 
-        from elspeth.core.canonical import repr_hash
+        from elspeth.contracts.hashing import repr_hash
 
         ctx = PluginContext(
             run_id="test-run",
@@ -329,7 +329,7 @@ class TestValidationErrorNonCanonical:
 
 def test_repr_hash_helper():
     """Verify repr_hash() helper produces consistent hashes."""
-    from elspeth.core.canonical import repr_hash
+    from elspeth.contracts.hashing import repr_hash
 
     # Same object should produce same hash
     hash1 = repr_hash(42)
