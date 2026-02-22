@@ -267,7 +267,8 @@ class CSVSink(BaseSink):
         # audit divergence -- CSV has rows the Landscape marks as FAILED.
         staging_buffer = io.StringIO()
         fieldnames = self._fieldnames
-        assert fieldnames is not None, "write() called before _fieldnames set by _write_header()"
+        if fieldnames is None:
+            raise RuntimeError("write() called before _fieldnames set by _write_header()")
         staging_writer = csv.DictWriter(
             staging_buffer,
             fieldnames=fieldnames,

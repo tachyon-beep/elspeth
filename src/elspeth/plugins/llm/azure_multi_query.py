@@ -138,7 +138,8 @@ class AzureMultiQueryLLMTransform(BaseMultiQueryTransform):
 
         logger = structlog.get_logger(__name__)
 
-        assert self._tracing_config is not None
+        if self._tracing_config is None:
+            raise RuntimeError("_tracing_config not set — _setup_tracing called before configure()")
         tracing_config = self._tracing_config
 
         errors = validate_tracing_config(tracing_config)
@@ -446,7 +447,8 @@ class AzureMultiQueryLLMTransform(BaseMultiQueryTransform):
         """Get or create LLM client for a state_id."""
         with self._llm_clients_lock:
             if state_id not in self._llm_clients:
-                assert self._recorder is not None
+                if self._recorder is None:
+                    raise RuntimeError("_recorder not initialized — _get_llm_client called before begin_run()")
                 self._llm_clients[state_id] = AuditedLLMClient(
                     recorder=self._recorder,
                     state_id=state_id,

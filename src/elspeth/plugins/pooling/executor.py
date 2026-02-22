@@ -72,7 +72,8 @@ class PooledExecutor:
         )
 
         # Entries are in submission order with full metadata
-        assert len(entries) == len(contexts)
+        if len(entries) != len(contexts):
+            raise RuntimeError(f"ReorderBuffer returned {len(entries)} entries for {len(contexts)} contexts")
 
         # Extract results when needed
         results = [entry.result for entry in entries]

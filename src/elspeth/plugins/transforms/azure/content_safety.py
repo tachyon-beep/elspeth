@@ -456,7 +456,8 @@ class AzureContentSafety(BaseTransform, BatchTransformMixin):
 
         with self._http_clients_lock:
             if state_id not in self._http_clients:
-                assert self._recorder is not None
+                if self._recorder is None:
+                    raise RuntimeError("_recorder not initialized — _get_http_client called before begin_run()")
                 self._http_clients[state_id] = AuditedHTTPClient(
                     recorder=self._recorder,
                     state_id=state_id,

@@ -167,7 +167,8 @@ class WebScrapeTransform(BaseTransform):
         self._strip_elements = cfg.strip_elements
 
         # Schema
-        assert cfg.schema_config is not None
+        if cfg.schema_config is None:
+            raise RuntimeError("WebScrapeTransform requires schema_config")
         schema = create_schema_from_config(
             cfg.schema_config,
             "WebScrapeSchema",
@@ -247,7 +248,8 @@ class WebScrapeTransform(BaseTransform):
 
         # Store payloads for forensic recovery
         # Context is guaranteed to have these - executor sets them
-        assert ctx.payload_store is not None
+        if ctx.payload_store is None:
+            raise RuntimeError("ctx.payload_store not set by executor")
         request_hash = ctx.payload_store.store(f"GET {url}".encode())
         response_raw_hash = ctx.payload_store.store(response.content)
         response_processed_hash = ctx.payload_store.store(content.encode())
@@ -292,9 +294,12 @@ class WebScrapeTransform(BaseTransform):
             WebScrapeError: For retryable or non-retryable failures
         """
         # Context is guaranteed to have these - executor sets them
-        assert ctx.rate_limit_registry is not None
-        assert ctx.landscape is not None
-        assert ctx.state_id is not None
+        if ctx.rate_limit_registry is None:
+            raise RuntimeError("ctx.rate_limit_registry not set by executor")
+        if ctx.landscape is None:
+            raise RuntimeError("ctx.landscape not set by executor")
+        if ctx.state_id is None:
+            raise RuntimeError("ctx.state_id not set by executor")
         limiter = ctx.rate_limit_registry.get_limiter("web_scrape")
 
         # Create audited client (records to Landscape)

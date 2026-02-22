@@ -296,7 +296,8 @@ class BaseMultiQueryTransform(BaseTransform, BatchTransformMixin, ABC):
                     output_row=output_row,
                     transform_adds_fields=True,
                 )
-                assert result.success_reason is not None, "success status guarantees success_reason"
+                if result.success_reason is None:
+                    raise RuntimeError("success status guarantees success_reason")
                 return TransformResult.success(
                     PipelineRow(output_row, output_contract),
                     success_reason=result.success_reason,
