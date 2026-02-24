@@ -285,9 +285,16 @@ class Call:
     latency_ms: float | None = None
 
     def __post_init__(self) -> None:
-        """Validate enum fields - Tier 1 crash on invalid types."""
+        """Validate enum fields and structural invariants — Tier 1 crash on invalid types."""
         _validate_enum(self.call_type, CallType, "call_type")
         _validate_enum(self.status, CallStatus, "status")
+        # XOR: exactly one of state_id or operation_id must be set
+        has_state = self.state_id is not None
+        has_operation = self.operation_id is not None
+        if has_state == has_operation:
+            raise ValueError(
+                f"Call requires exactly one of state_id or operation_id. Got state_id={self.state_id!r}, operation_id={self.operation_id!r}"
+            )
 
 
 @dataclass(frozen=True, slots=True)
