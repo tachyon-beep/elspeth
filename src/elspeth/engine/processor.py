@@ -374,7 +374,7 @@ class RowProcessor:
                 node_id=transform.node_id,
                 plugin_name=transform.name,
                 status=status,
-                duration_ms=transform_result.duration_ms or 0.0,
+                duration_ms=transform_result.duration_ms if transform_result.duration_ms is not None else 0.0,
                 input_hash=transform_result.input_hash,
                 output_hash=transform_result.output_hash,
             )

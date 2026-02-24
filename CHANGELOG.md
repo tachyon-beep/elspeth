@@ -4,6 +4,21 @@ All notable changes to ELSPETH are documented here.
 
 ---
 
+## [Unreleased] (RC-3.3 — Architectural Remediation)
+
+### Fixed
+
+- **T1:** Frozen all 16 mutable audit record dataclasses — prevents accidental mutation of Tier 1 audit data
+- **T2:** Replaced 18 `assert` statements in production plugin code with explicit `raise` — asserts are stripped by `python -O`
+- **T3:** Fixed 21 truthiness checks across 8 files — `if x:` and `x or default` replaced with `is not None` checks to preserve valid zero/empty-string values in performance reports, telemetry spans, TUI display, audit recording, and testing infrastructure
+- Resolved 3 layer violations (T6, T7, RuntimeServiceRateLimit) — strict 4-layer dependency enforcement
+
+### Changed
+
+- Extracted `contracts/hashing.py` — breaks mutual circular dependency between `contracts/` and `core/canonical.py`
+
+---
+
 ## [0.3.0] - 2026-02-22 (RC-3.2)
 
 ### Highlights

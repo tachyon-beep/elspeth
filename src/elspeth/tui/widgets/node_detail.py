@@ -81,8 +81,8 @@ class NodeDetailPanel:
     Field access follows the three-tier trust model:
     - Required fields (node_id, plugin_name, node_type): Direct access.
       Missing = bug in _load_node_state, should crash.
-    - Optional fields: Use .get() without default, then explicit fallback
-      for display (e.g., `value or 'N/A'`).
+    - Optional fields: Use .get() without default, then explicit None check
+      for display (e.g., `value if value is not None else 'N/A'`).
     """
 
     def __init__(self, node_state: NodeStateInfo | None) -> None:
@@ -113,20 +113,20 @@ class NodeDetailPanel:
         # Identity - node_id is required, others are optional
         lines.append("Identity:")
         state_id = self._state.get("state_id")
-        lines.append(f"  State ID:  {state_id or 'N/A'}")
+        lines.append(f"  State ID:  {state_id if state_id is not None else 'N/A'}")
         lines.append(f"  Node ID:   {self._state['node_id']}")  # Required
         token_id = self._state.get("token_id")
-        lines.append(f"  Token ID:  {token_id or 'N/A'}")
+        lines.append(f"  Token ID:  {token_id if token_id is not None else 'N/A'}")
         lines.append("")
 
         # Status - all optional (may not have execution state yet)
         status = self._state.get("status")
         lines.append("Status:")
-        lines.append(f"  Status:     {status or 'N/A'}")
+        lines.append(f"  Status:     {status if status is not None else 'N/A'}")
         started_at = self._state.get("started_at")
-        lines.append(f"  Started:    {started_at or 'N/A'}")
+        lines.append(f"  Started:    {started_at if started_at is not None else 'N/A'}")
         completed_at = self._state.get("completed_at")
-        lines.append(f"  Completed:  {completed_at or 'N/A'}")
+        lines.append(f"  Completed:  {completed_at if completed_at is not None else 'N/A'}")
         duration = self._state.get("duration_ms")
         if duration is not None:
             lines.append(f"  Duration:   {duration} ms")
@@ -136,8 +136,8 @@ class NodeDetailPanel:
         lines.append("Data Hashes:")
         input_hash = self._state.get("input_hash")
         output_hash = self._state.get("output_hash")
-        lines.append(f"  Input:   {input_hash or '(none)'}")
-        lines.append(f"  Output:  {output_hash or '(none)'}")
+        lines.append(f"  Input:   {input_hash if input_hash is not None else '(none)'}")
+        lines.append(f"  Output:  {output_hash if output_hash is not None else '(none)'}")
         lines.append("")
 
         # Error (if present) - optional field

@@ -321,7 +321,7 @@ def get_performance_report(db: LandscapeDB, recorder: LandscapeRecorder, run_id:
     bottlenecks = [n for n in node_performance if n["pct_of_total"] > 20]
 
     # Identify high-variance nodes (max > 5x avg)
-    high_variance = [n for n in node_performance if n["avg_ms"] and n["max_ms"] and n["max_ms"] > 5 * n["avg_ms"]]
+    high_variance = [n for n in node_performance if n["avg_ms"] is not None and n["max_ms"] is not None and n["max_ms"] > 5 * n["avg_ms"]]
 
     return {
         "run_id": run_id,

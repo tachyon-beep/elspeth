@@ -217,6 +217,89 @@ class TestNodeDetailPanel:
         content = panel.render_content()
         assert "1.5 KB" in content
 
+    def test_zero_duration_displayed_not_masked(self) -> None:
+        """Duration of 0 ms should be displayed, not treated as missing.
+
+        Bug T3: `duration or 'N/A'` would mask 0.0 duration.
+        The existing code uses `if duration is not None:` which is correct,
+        but this test ensures the pattern isn't regressed.
+        """
+        from elspeth.tui.widgets.node_detail import NodeDetailPanel
+
+        node_state = cast(
+            NodeStateInfo,
+            {
+                "state_id": "state-zero",
+                "node_id": "node-001",
+                "token_id": "token-001",
+                "plugin_name": "instant_transform",
+                "node_type": "transform",
+                "status": "completed",
+                "input_hash": "abc123",
+                "output_hash": "def456",
+                "duration_ms": 0.0,  # Zero duration — valid value
+                "started_at": "2024-01-01T10:00:00Z",
+                "completed_at": "2024-01-01T10:00:00Z",
+            },
+        )
+
+        panel = NodeDetailPanel(node_state)
+        content = panel.render_content()
+
+        # 0.0 duration must be displayed, not hidden
+        assert "0.0 ms" in content or "0 ms" in content
+
+    def test_optional_none_fields_display_na(self) -> None:
+        """None optional fields should display 'N/A', not crash or show 'None'."""
+        from elspeth.tui.widgets.node_detail import NodeDetailPanel
+
+        node_state = cast(
+            NodeStateInfo,
+            {
+                "node_id": "node-001",
+                "plugin_name": "transform",
+                "node_type": "transform",
+                # All optional fields are None
+            },
+        )
+
+        panel = NodeDetailPanel(node_state)
+        content = panel.render_content()
+
+        assert "N/A" in content
+        # "None" string should NOT appear in rendered output
+        assert "None" not in content
+
+    def test_empty_string_status_not_masked_as_na(self) -> None:
+        """Empty string status should render as empty, not masked as 'N/A'.
+
+        Bug T3: `status or 'N/A'` treats "" the same as None.
+        Empty string in Tier 1 audit data would be a bug signal — masking it
+        as 'N/A' hides the corruption.
+        """
+        from elspeth.tui.widgets.node_detail import NodeDetailPanel
+
+        node_state = cast(
+            NodeStateInfo,
+            {
+                "state_id": "state-empty",
+                "node_id": "node-001",
+                "plugin_name": "transform",
+                "node_type": "transform",
+                "status": "",  # Empty string — should NOT become "N/A"
+            },
+        )
+
+        panel = NodeDetailPanel(node_state)
+        content = panel.render_content()
+
+        # Find the indented status VALUE line (not the "Status:" section header)
+        lines = content.split("\n")
+        status_value_lines = [line for line in lines if line.strip().startswith("Status:") and line.startswith("  ")]
+        assert len(status_value_lines) == 1
+        # Empty string should be preserved, not masked as "N/A"
+        assert "N/A" not in status_value_lines[0]
+
     def test_malformed_error_json_crashes(self) -> None:
         """Malformed error_json crashes - Tier 1 audit data must be pristine.
 

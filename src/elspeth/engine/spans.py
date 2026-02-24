@@ -170,9 +170,9 @@ class SpanFactory:
         with self._tracer.start_as_current_span(f"transform:{transform_name}") as span:
             span.set_attribute("plugin.name", transform_name)
             span.set_attribute("plugin.type", "transform")
-            if node_id:
+            if node_id is not None:
                 span.set_attribute("node.id", node_id)
-            if input_hash:
+            if input_hash is not None:
                 span.set_attribute("input.hash", input_hash)
             # Token tracking for accurate child token attribution (P2-2026-01-21)
             if token_ids is not None:
@@ -208,9 +208,9 @@ class SpanFactory:
         with self._tracer.start_as_current_span(f"gate:{gate_name}") as span:
             span.set_attribute("plugin.name", gate_name)
             span.set_attribute("plugin.type", "gate")
-            if node_id:
+            if node_id is not None:
                 span.set_attribute("node.id", node_id)
-            if input_hash:
+            if input_hash is not None:
                 span.set_attribute("input.hash", input_hash)
             if token_id is not None:
                 span.set_attribute("token.id", token_id)
@@ -249,11 +249,11 @@ class SpanFactory:
         with self._tracer.start_as_current_span(f"aggregation:{aggregation_name}") as span:
             span.set_attribute("plugin.name", aggregation_name)
             span.set_attribute("plugin.type", "aggregation")
-            if node_id:
+            if node_id is not None:
                 span.set_attribute("node.id", node_id)
-            if input_hash:
+            if input_hash is not None:
                 span.set_attribute("input.hash", input_hash)
-            if batch_id:
+            if batch_id is not None:
                 span.set_attribute("batch.id", batch_id)
             if token_ids is not None:
                 span.set_attribute("token.ids", tuple(token_ids))
@@ -288,7 +288,7 @@ class SpanFactory:
         with self._tracer.start_as_current_span(f"sink:{sink_name}") as span:
             span.set_attribute("plugin.name", sink_name)
             span.set_attribute("plugin.type", "sink")
-            if node_id:
+            if node_id is not None:
                 span.set_attribute("node.id", node_id)
             if token_ids is not None:
                 span.set_attribute("token.ids", tuple(token_ids))

@@ -390,7 +390,7 @@ class PluginContext:
                     call_type=call_type,
                     provider=provider,
                     status=status,
-                    latency_ms=latency_ms or 0.0,
+                    latency_ms=latency_ms if latency_ms is not None else 0.0,
                     request_hash=stable_hash(request_snapshot),
                     response_hash=stable_hash(response_snapshot) if response_snapshot is not None else None,
                     request_payload=request_payload,

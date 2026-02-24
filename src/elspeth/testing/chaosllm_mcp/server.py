@@ -697,11 +697,11 @@ class ChaosLLMAnalyzer:
                 "start": start_iso,
                 "end": end_iso,
             },
-            "total_requests": row["total"] or 0,
-            "success_count": row["success"] or 0,
-            "rate_limited_count": row["rate_limited"] or 0,
-            "capacity_error_count": row["capacity_errors"] or 0,
-            "avg_latency_ms": round(row["avg_latency"], 2) if row["avg_latency"] else None,
+            "total_requests": row["total"] if row["total"] is not None else 0,
+            "success_count": row["success"] if row["success"] is not None else 0,
+            "rate_limited_count": row["rate_limited"] if row["rate_limited"] is not None else 0,
+            "capacity_error_count": row["capacity_errors"] if row["capacity_errors"] is not None else 0,
+            "avg_latency_ms": round(row["avg_latency"], 2) if row["avg_latency"] is not None else None,
             "errors_by_type": errors,
         }
 
