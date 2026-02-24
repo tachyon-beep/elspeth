@@ -1,0 +1,240 @@
+# tests/unit/plugins/test_assert_to_raise.py
+"""Verify assert-to-raise conversions across plugin files.
+
+18 assert statements were replaced with explicit RuntimeError raises across
+8 plugin files.  These tests cover the three most common guard patterns:
+
+1. ``_recorder is None`` before ``_get_llm_client()`` fires
+   (AzureLLMTransform, AzureContentSafety, and the same pattern in others)
+
+2. ``_writer / _file is None`` invariants inside CSVSink.write()
+   (guards that protect against internal state bugs)
+
+3. ``connect_output() already called`` double-initialisation guard
+   (AzureContentSafety — AzureLLMTransform already had this covered)
+
+Each test constructs the *minimum* plugin instance required to reach the
+guard, leaves the precondition violated, and asserts RuntimeError is raised
+with the expected message substring.
+"""
+
+from __future__ import annotations
+
+from unittest.mock import MagicMock, patch
+
+import pytest
+
+# ---------------------------------------------------------------------------
+# Shared config helpers
+# ---------------------------------------------------------------------------
+
+_AZURE_LLM_CONFIG = {
+    "deployment_name": "test-deployment",
+    "endpoint": "https://test.openai.azure.com",
+    "api_key": "test-key",
+    "template": "Classify: {{ row.text }}",
+    "schema": {"mode": "observed"},
+    "required_input_fields": [],  # opt-out for unit tests
+}
+
+_CONTENT_SAFETY_CONFIG = {
+    "endpoint": "https://test.cognitiveservices.azure.com",
+    "api_key": "test-key",
+    "fields": ["content"],
+    "thresholds": {
+        "hate": 2,
+        "violence": 2,
+        "sexual": 2,
+        "self_harm": 0,
+    },
+    "schema": {"mode": "observed"},
+}
+
+
+# ---------------------------------------------------------------------------
+# Test class
+# ---------------------------------------------------------------------------
+
+
+class TestAssertToRaiseConversions:
+    """One representative test per converted guard pattern."""
+
+    # ------------------------------------------------------------------
+    # Pattern 1: AzureLLMTransform — _recorder not initialized
+    # ------------------------------------------------------------------
+
+    def test_azure_llm_recorder_not_initialized_raises(self) -> None:
+        """_get_llm_client() raises RuntimeError when _recorder is None.
+
+        Before the assert-to-raise conversion this was:
+            assert self._recorder is not None
+
+        After conversion:
+            raise RuntimeError(
+                "_recorder not initialized — _get_llm_client called before begin_run()"
+            )
+
+        The guard fires when the transform is used without on_start() having
+        been called (i.e. without the engine setting up the recorder).
+        """
+        from elspeth.plugins.llm.azure import AzureLLMTransform
+
+        transform = AzureLLMTransform(_AZURE_LLM_CONFIG)
+
+        # _recorder is None by default — on_start() was never called.
+        assert transform._recorder is None
+
+        # _get_llm_client must raise, not silently proceed with a None recorder.
+        with pytest.raises(RuntimeError, match="_recorder not initialized"):
+            transform._get_llm_client("some-state-id")
+
+    # ------------------------------------------------------------------
+    # Pattern 2: AzureContentSafety — _recorder not initialized
+    # ------------------------------------------------------------------
+
+    def test_content_safety_recorder_not_initialized_raises(self) -> None:
+        """_get_http_client() raises RuntimeError when _recorder is None.
+
+        Same conversion pattern as AzureLLMTransform but in the
+        AzureContentSafety transform's HTTP client cache method.
+
+        Guard message: "_recorder not initialized — _get_http_client called
+        before begin_run()"
+        """
+        from elspeth.plugins.transforms.azure.content_safety import AzureContentSafety
+
+        transform = AzureContentSafety(_CONTENT_SAFETY_CONFIG)
+
+        # _recorder is None by default — on_start() was never called.
+        assert transform._recorder is None
+
+        # _get_http_client must raise, not silently create a client with None recorder.
+        with pytest.raises(RuntimeError, match="_recorder not initialized"):
+            transform._get_http_client("some-state-id")
+
+    # ------------------------------------------------------------------
+    # Pattern 3: AzureContentSafety — connect_output() already called
+    # ------------------------------------------------------------------
+
+    def test_content_safety_connect_output_twice_raises(self) -> None:
+        """connect_output() raises RuntimeError when called a second time.
+
+        Guard message: "connect_output() already called"
+
+        The first call initialises the batch processing infrastructure.
+        A second call must be rejected — the BatchTransformMixin is already
+        running, and reinitialisation would corrupt internal state.
+        """
+        from elspeth.plugins.batching.ports import CollectorOutputPort
+        from elspeth.plugins.transforms.azure.content_safety import AzureContentSafety
+
+        transform = AzureContentSafety(_CONTENT_SAFETY_CONFIG)
+        collector = CollectorOutputPort()
+
+        # First call succeeds and sets _batch_initialized = True.
+        transform.connect_output(collector, max_pending=5)
+
+        try:
+            with pytest.raises(RuntimeError, match="already called"):
+                transform.connect_output(collector, max_pending=5)
+        finally:
+            transform.close()
+
+    # ------------------------------------------------------------------
+    # Pattern 4: CSVSink — internal invariant guards inside write()
+    # ------------------------------------------------------------------
+
+    def test_csv_sink_writer_not_initialized_raises(self) -> None:
+        """CSVSink.write() raises RuntimeError when _writer is None after _open_file.
+
+        The guard:
+            if file is None or writer is None:
+                raise RuntimeError("CSVSink writer not initialized - this is a bug")
+
+        This protects the invariant that _file and _writer are always set
+        together.  We trigger it by patching _open_file to leave _writer=None
+        while letting the rows-non-empty branch pass.
+        """
+        import tempfile
+        from pathlib import Path
+
+        from elspeth.contracts.plugin_context import PluginContext
+        from elspeth.plugins.sinks.csv_sink import CSVSink
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            output_path = Path(tmpdir) / "out.csv"
+            sink = CSVSink(
+                {
+                    "path": str(output_path),
+                    "schema": {"mode": "observed"},
+                }
+            )
+            ctx = PluginContext(run_id="test-run", config={})
+
+            # Patch _open_file so it opens _file but leaves _writer as None.
+            # This simulates partial initialisation — the exact state the guard
+            # protects against.
+            def broken_open_file(rows: list) -> None:  # type: ignore[type-arg]
+                # Open a real file handle (so the file exists for stat() calls),
+                # but deliberately leave _writer=None.
+                sink._file = open(str(output_path), "w")  # noqa: SIM115
+                sink._writer = None
+                sink._fieldnames = list(rows[0].keys())
+                sink._hasher = __import__("hashlib").sha256()
+
+            with (
+                patch.object(sink, "_open_file", side_effect=broken_open_file),
+                pytest.raises(RuntimeError, match="CSVSink writer not initialized"),
+            ):
+                sink.write([{"col": "value"}], ctx)
+
+            # Clean up the file handle left open by broken_open_file
+            if sink._file is not None:
+                sink._file.close()
+
+    def test_csv_sink_fieldnames_not_set_raises(self) -> None:
+        """CSVSink.write() raises RuntimeError when _fieldnames is None.
+
+        The guard:
+            if fieldnames is None:
+                raise RuntimeError(
+                    "write() called before _fieldnames set by _write_header()"
+                )
+
+        We trigger it by patching _open_file to set _file and _writer but
+        leave _fieldnames=None.
+        """
+        import tempfile
+        from pathlib import Path
+
+        from elspeth.contracts.plugin_context import PluginContext
+        from elspeth.plugins.sinks.csv_sink import CSVSink
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            output_path = Path(tmpdir) / "out.csv"
+            sink = CSVSink(
+                {
+                    "path": str(output_path),
+                    "schema": {"mode": "observed"},
+                }
+            )
+            ctx = PluginContext(run_id="test-run", config={})
+
+            mock_writer = MagicMock()
+
+            def broken_open_file_no_fieldnames(rows: list) -> None:  # type: ignore[type-arg]
+                # Provide _file and _writer but deliberately omit _fieldnames.
+                sink._file = open(str(output_path), "w")  # noqa: SIM115
+                sink._writer = mock_writer
+                sink._fieldnames = None  # intentionally broken
+                sink._hasher = __import__("hashlib").sha256()
+
+            with (
+                patch.object(sink, "_open_file", side_effect=broken_open_file_no_fieldnames),
+                pytest.raises(RuntimeError, match="_fieldnames set by _write_header"),
+            ):
+                sink.write([{"col": "value"}], ctx)
+
+            # Clean up the file handle
+            if sink._file is not None:
+                sink._file.close()
