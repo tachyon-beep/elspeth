@@ -131,6 +131,21 @@ allow_hits:
   reason: Tier-3 boundary - from_policy() validates plugin config (user YAML) before conversion
   safety: Raises ValueError with clear field name and value - no silent recovery
   expires: null
+- key: contracts/hashing.py:R5:_reject_non_finite:fp=d35d4e11d243b198
+  owner: bugfix
+  reason: Canonical JSON NaN/Infinity rejection — isinstance(float) to detect non-finite values before rfc8785.dumps()
+  safety: Raises ValueError immediately — explicit crash, not masking
+  expires: null
+- key: contracts/hashing.py:R5:_reject_non_finite:fp=6bbc05c2197b1800
+  owner: bugfix
+  reason: Canonical JSON recursive rejection — isinstance(dict) to traverse nested data structures for NaN/Infinity
+  safety: Pure traversal for validation — no type coercion or default substitution
+  expires: null
+- key: contracts/hashing.py:R5:_reject_non_finite:fp=346fe02f62559967
+  owner: bugfix
+  reason: Canonical JSON recursive rejection — isinstance(list) to traverse nested data structures for NaN/Infinity
+  safety: Pure traversal for validation — no type coercion or default substitution
+  expires: null
 - key: contracts/header_modes.py:R5:parse_header_mode:fp=dc93452b5432e8a4
   owner: feature
   reason: Config parsing - config value from YAML is Tier 3 external data; isinstance() distinguishes string from dict

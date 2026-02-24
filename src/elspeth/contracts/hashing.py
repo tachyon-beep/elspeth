@@ -17,6 +17,7 @@ delegating to rfc8785.
 from __future__ import annotations
 
 import hashlib
+import math
 from typing import Any
 
 import rfc8785
@@ -24,6 +25,26 @@ import rfc8785
 # Version string stored with every run for hash verification.
 # Single source of truth — core/canonical.py imports this constant.
 CANONICAL_VERSION = "sha256-rfc8785-v1"
+
+
+def _reject_non_finite(obj: Any) -> None:
+    """Reject NaN and Infinity anywhere in a primitive data structure.
+
+    Raises ValueError with a clear message instead of letting rfc8785 raise
+    a cryptic FloatDomainError. Matches the rejection pattern in
+    core/canonical.py's _normalize_for_canonical().
+    """
+    if isinstance(obj, float):
+        if math.isnan(obj):
+            raise ValueError(f"Cannot canonicalize NaN. Use None for missing values, not NaN. Got: {obj!r}")
+        if math.isinf(obj):
+            raise ValueError(f"Cannot canonicalize Infinity. Use None for missing values, not Infinity. Got: {obj!r}")
+    elif isinstance(obj, dict):
+        for v in obj.values():
+            _reject_non_finite(v)
+    elif isinstance(obj, list):
+        for item in obj:
+            _reject_non_finite(item)
 
 
 def canonical_json(obj: Any) -> str:
@@ -39,8 +60,10 @@ def canonical_json(obj: Any) -> str:
         Canonical JSON string (deterministic key order, no whitespace)
 
     Raises:
+        ValueError: If data contains NaN or Infinity
         TypeError: If data contains non-serializable types
     """
+    _reject_non_finite(obj)
     result: bytes = rfc8785.dumps(obj)
     return result.decode("utf-8")
 
