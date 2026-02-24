@@ -190,7 +190,7 @@ class TestLLMClientExceptionTypes:
         mock_recorder.record_call.assert_called_once()
         call_args = mock_recorder.record_call.call_args
         assert call_args.kwargs["status"] == CallStatus.ERROR
-        assert call_args.kwargs["error"]["retryable"] is False
+        assert call_args.kwargs["error"].retryable is False
 
     def test_server_error_raises_server_error(
         self,
@@ -344,7 +344,7 @@ class TestLLMClientExceptionTypes:
         mock_recorder.record_call.assert_called_once()
         call_args = mock_recorder.record_call.call_args
         assert call_args.kwargs["status"] == CallStatus.ERROR
-        assert call_args.kwargs["error"]["retryable"] is True
+        assert call_args.kwargs["error"].retryable is True
 
         # Reset and test non-retryable error
         mock_recorder.reset_mock()
@@ -360,7 +360,7 @@ class TestLLMClientExceptionTypes:
         mock_recorder.record_call.assert_called_once()
         call_args = mock_recorder.record_call.call_args
         assert call_args.kwargs["status"] == CallStatus.ERROR
-        assert call_args.kwargs["error"]["retryable"] is False
+        assert call_args.kwargs["error"].retryable is False
 
 
 class TestAzureSpecificCodes:

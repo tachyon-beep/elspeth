@@ -185,11 +185,9 @@ allowed_dict_patterns:
   # Error recording
   - "src/elspeth/core/landscape/_error_recording.py:ErrorRecordingMixin.record_transform_error:row_data"
 
-  # Call recording (request_data/response_data are now CallPayload, not dict)
-  - "src/elspeth/core/landscape/_call_recording.py:CallRecordingMixin.record_call:error"
+  # Call recording (error params are now CallPayload, not dict — removed stale entries)
   - "src/elspeth/core/landscape/_call_recording.py:CallRecordingMixin.begin_operation:input_data"
   - "src/elspeth/core/landscape/_call_recording.py:CallRecordingMixin.complete_operation:output_data"
-  - "src/elspeth/core/landscape/_call_recording.py:CallRecordingMixin.record_operation_call:error"
   - "src/elspeth/core/landscape/_call_recording.py:CallRecordingMixin.get_call_response_data:return"
 
   # Operations tracking - source/sink I/O audit trail
@@ -277,7 +275,6 @@ allowed_dict_patterns:
   # ═══════════════════════════════════════════════════════════════════════════
   - "src/elspeth/plugins/clients/http.py:AuditedHTTPClient._record_and_emit:request_data"
   - "src/elspeth/plugins/clients/http.py:AuditedHTTPClient._record_and_emit:response_data"
-  - "src/elspeth/plugins/clients/http.py:AuditedHTTPClient._record_and_emit:error_data"
   - "src/elspeth/plugins/clients/http.py:AuditedHTTPClient._execute_request:json"
   - "src/elspeth/plugins/clients/http.py:AuditedHTTPClient.post:json"
   - "src/elspeth/plugins/clients/replayer.py:ReplayMissError.__init__:request_data"

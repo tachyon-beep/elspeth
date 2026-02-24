@@ -253,8 +253,8 @@ def test_post_with_error_response(http_client, mock_recorder):
     # Verify recorded as ERROR
     call_args = mock_recorder.record_call.call_args[1]
     assert call_args["status"] == CallStatus.ERROR
-    assert call_args["error"]["type"] == "HTTPError"
-    assert "500" in call_args["error"]["message"]
+    assert call_args["error"].type == "HTTPError"
+    assert "500" in call_args["error"].message
 
 
 @respx.mock
@@ -268,7 +268,7 @@ def test_post_with_network_error(http_client, mock_recorder):
     # Verify error recorded to Landscape
     call_args = mock_recorder.record_call.call_args[1]
     assert call_args["status"] == CallStatus.ERROR
-    assert call_args["error"]["type"] == "ConnectError"
+    assert call_args["error"].type == "ConnectError"
 
 
 @respx.mock

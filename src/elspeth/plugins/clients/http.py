@@ -361,7 +361,7 @@ class AuditedHTTPClient(AuditedClientBase):
         request_data: dict[str, Any],
         response: httpx.Response | None,
         response_data: dict[str, Any] | None,
-        error_data: dict[str, Any] | None,
+        error_data: CallPayload | None,
         latency_ms: float,
         call_status: CallStatus,
         request_payload: CallPayload,
@@ -506,13 +506,13 @@ class AuditedHTTPClient(AuditedClientBase):
             )
             response_data = response_dto.to_dict()
 
-            error_data: dict[str, Any] | None = None
+            error_data: CallPayload | None = None
             if not is_success:
                 error_data = HTTPCallError(
                     type="HTTPError",
                     message=f"HTTP {response.status_code}",
                     status_code=response.status_code,
-                ).to_dict()
+                )
 
             self._record_and_emit(
                 call_index=call_index,
@@ -542,7 +542,7 @@ class AuditedHTTPClient(AuditedClientBase):
                 error_data=HTTPCallError(
                     type=type(e).__name__,
                     message=str(e),
-                ).to_dict(),
+                ),
                 latency_ms=latency_ms,
                 call_status=CallStatus.ERROR,
                 request_payload=request_dto,
@@ -747,13 +747,13 @@ class AuditedHTTPClient(AuditedClientBase):
             )
             response_data = response_dto.to_dict()
 
-            error_data: dict[str, Any] | None = None
+            error_data: CallPayload | None = None
             if not is_success:
                 error_data = HTTPCallError(
                     type="HTTPError",
                     message=f"HTTP {response.status_code}",
                     status_code=response.status_code,
-                ).to_dict()
+                )
 
             self._recorder.record_call(
                 state_id=self._state_id,
@@ -809,7 +809,7 @@ class AuditedHTTPClient(AuditedClientBase):
                 error=HTTPCallError(
                     type=type(e).__name__,
                     message=str(e),
-                ).to_dict(),
+                ),
                 latency_ms=latency_ms,
             )
 
@@ -954,7 +954,7 @@ class AuditedHTTPClient(AuditedClientBase):
                     error=HTTPCallError(
                         type=type(hop_err).__name__,
                         message=str(hop_err),
-                    ).to_dict(),
+                    ),
                     latency_ms=hop_latency_ms,
                 )
                 raise

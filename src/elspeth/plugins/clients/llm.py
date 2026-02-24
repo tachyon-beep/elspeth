@@ -338,7 +338,7 @@ class AuditedLLMClient(AuditedClientBase):
                     type=error_type,
                     message=str(e),
                     retryable=is_retryable,
-                ).to_dict(),
+                ),
                 latency_ms=latency_ms,
             )
 

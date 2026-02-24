@@ -99,7 +99,7 @@ class CallRecordingMixin:
         status: CallStatus,
         request_data: CallPayload,
         response_data: CallPayload | None = None,
-        error: dict[str, Any] | None = None,
+        error: CallPayload | None = None,
         latency_ms: float | None = None,
         *,
         request_ref: str | None = None,
@@ -114,7 +114,7 @@ class CallRecordingMixin:
             status: Outcome of the call (SUCCESS, ERROR)
             request_data: Request payload (CallPayload — serialized internally)
             response_data: Response payload (CallPayload — serialized internally, optional for errors)
-            error: Error details if status is ERROR (stored as JSON)
+            error: Error payload if status is ERROR (CallPayload — serialized internally)
             latency_ms: Call duration in milliseconds
             request_ref: Optional payload store reference for request
             response_ref: Optional payload store reference for response
@@ -152,8 +152,8 @@ class CallRecordingMixin:
             response_bytes = canonical_json(response_dict).encode("utf-8")
             response_ref = self._payload_store.store(response_bytes)
 
-        # Serialize error if present
-        error_json = canonical_json(error) if error is not None else None
+        # Serialize error if present (CallPayload → dict → JSON)
+        error_json = canonical_json(error.to_dict()) if error is not None else None
 
         values = {
             "call_id": call_id,
@@ -330,7 +330,7 @@ class CallRecordingMixin:
         status: CallStatus,
         request_data: CallPayload,
         response_data: CallPayload | None = None,
-        error: dict[str, Any] | None = None,
+        error: CallPayload | None = None,
         latency_ms: float | None = None,
         *,
         request_ref: str | None = None,
@@ -381,8 +381,8 @@ class CallRecordingMixin:
             response_bytes = canonical_json(response_dict).encode("utf-8")
             response_ref = self._payload_store.store(response_bytes)
 
-        # Serialize error if present
-        error_json = canonical_json(error) if error is not None else None
+        # Serialize error if present (CallPayload → dict → JSON)
+        error_json = canonical_json(error.to_dict()) if error is not None else None
 
         values = {
             "call_id": call_id,

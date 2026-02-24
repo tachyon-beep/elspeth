@@ -311,7 +311,7 @@ class PluginContext:
                 status=status,
                 request_data=RawCallPayload(request_data),
                 response_data=RawCallPayload(response_data) if response_data is not None else None,
-                error=error,
+                error=RawCallPayload(error) if error is not None else None,
                 latency_ms=latency_ms,
             )
             parent_id: str = self.state_id
@@ -325,7 +325,7 @@ class PluginContext:
                 status=status,
                 request_data=RawCallPayload(request_data),
                 response_data=RawCallPayload(response_data) if response_data is not None else None,
-                error=error,
+                error=RawCallPayload(error) if error is not None else None,
                 latency_ms=latency_ms,
                 provider=provider,
             )

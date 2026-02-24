@@ -118,8 +118,8 @@ class TestAuditedHTTPClient:
         recorder.record_call.assert_called_once()
         call_kwargs = recorder.record_call.call_args[1]
         assert call_kwargs["status"] == CallStatus.ERROR
-        assert call_kwargs["error"]["type"] == "ConnectError"
-        assert "Connection refused" in call_kwargs["error"]["message"]
+        assert call_kwargs["error"].type == "ConnectError"
+        assert "Connection refused" in call_kwargs["error"].message
 
     def test_auth_headers_fingerprinted_in_recorded_request(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """Auth headers are fingerprinted (not removed) so different credentials produce different hashes.
@@ -705,9 +705,9 @@ class TestAuditedHTTPClient:
         call_kwargs = recorder.record_call.call_args[1]
         assert call_kwargs["status"] == CallStatus.ERROR
         assert call_kwargs["response_data"].to_dict()["status_code"] == 401
-        assert call_kwargs["error"]["type"] == "HTTPError"
-        assert call_kwargs["error"]["status_code"] == 401
-        assert "401" in call_kwargs["error"]["message"]
+        assert call_kwargs["error"].type == "HTTPError"
+        assert call_kwargs["error"].status_code == 401
+        assert "401" in call_kwargs["error"].message
 
     def test_5xx_response_recorded_as_error(self) -> None:
         """HTTP 5xx responses are recorded with ERROR status."""
@@ -738,8 +738,8 @@ class TestAuditedHTTPClient:
         call_kwargs = recorder.record_call.call_args[1]
         assert call_kwargs["status"] == CallStatus.ERROR
         assert call_kwargs["response_data"].to_dict()["status_code"] == 503
-        assert call_kwargs["error"]["type"] == "HTTPError"
-        assert call_kwargs["error"]["status_code"] == 503
+        assert call_kwargs["error"].type == "HTTPError"
+        assert call_kwargs["error"].status_code == 503
 
     def test_2xx_responses_recorded_as_success(self) -> None:
         """HTTP 2xx responses (200-299) are recorded with SUCCESS status."""
@@ -800,7 +800,7 @@ class TestAuditedHTTPClient:
         # 3xx is not in 2xx range, so recorded as ERROR
         call_kwargs = recorder.record_call.call_args[1]
         assert call_kwargs["status"] == CallStatus.ERROR
-        assert call_kwargs["error"]["status_code"] == 302
+        assert call_kwargs["error"].status_code == 302
 
     def test_large_text_response_not_truncated(self) -> None:
         """Large text responses (>100KB) are recorded completely, not truncated.
@@ -1257,8 +1257,8 @@ class TestAuditedHTTPClientGet:
         recorder.record_call.assert_called_once()
         call_kwargs = recorder.record_call.call_args[1]
         assert call_kwargs["status"] == CallStatus.ERROR
-        assert call_kwargs["error"]["type"] == "ConnectError"
-        assert "Connection refused" in call_kwargs["error"]["message"]
+        assert call_kwargs["error"].type == "ConnectError"
+        assert "Connection refused" in call_kwargs["error"].message
 
     def test_get_auth_headers_fingerprinted(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """GET requests fingerprint auth headers in audit trail."""
@@ -1347,8 +1347,8 @@ class TestAuditedHTTPClientGet:
         call_kwargs = recorder.record_call.call_args[1]
         assert call_kwargs["status"] == CallStatus.ERROR
         assert call_kwargs["response_data"].to_dict()["status_code"] == 404
-        assert call_kwargs["error"]["type"] == "HTTPError"
-        assert call_kwargs["error"]["status_code"] == 404
+        assert call_kwargs["error"].type == "HTTPError"
+        assert call_kwargs["error"].status_code == 404
 
     def test_get_json_response_with_nan_recorded_as_parse_failure(self) -> None:
         """GET JSON response containing NaN is recorded as parse failure.

@@ -264,9 +264,9 @@ class TestAuditedLLMClient:
         recorder.record_call.assert_called_once()
         call_kwargs = recorder.record_call.call_args[1]
         assert call_kwargs["status"] == CallStatus.ERROR
-        assert call_kwargs["error"]["type"] == "Exception"
-        assert "API connection failed" in call_kwargs["error"]["message"]
-        assert call_kwargs["error"]["retryable"] is False
+        assert call_kwargs["error"].type == "Exception"
+        assert "API connection failed" in call_kwargs["error"].message
+        assert call_kwargs["error"].retryable is False
 
     def test_rate_limit_error_marked_retryable(self) -> None:
         """Rate limit errors are marked as retryable."""
@@ -290,7 +290,7 @@ class TestAuditedLLMClient:
 
         # Verify error was recorded with retryable=True
         call_kwargs = recorder.record_call.call_args[1]
-        assert call_kwargs["error"]["retryable"] is True
+        assert call_kwargs["error"].retryable is True
 
     def test_rate_limit_detected_by_keyword(self) -> None:
         """Rate limit is detected by 'rate' keyword in error."""
@@ -335,7 +335,7 @@ class TestAuditedLLMClient:
         assert type(exc_info.value) is LLMClientError
         assert exc_info.value.retryable is False
         call_kwargs = recorder.record_call.call_args[1]
-        assert call_kwargs["error"]["retryable"] is False
+        assert call_kwargs["error"].retryable is False
 
     def test_temperature_and_max_tokens_recorded(self) -> None:
         """Temperature and max_tokens are recorded in request."""

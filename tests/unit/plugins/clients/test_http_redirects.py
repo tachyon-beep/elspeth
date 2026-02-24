@@ -453,7 +453,7 @@ class TestBug4_7_FailedHopRecordsAuditTrail:
         call_kwargs = http_client._recorder.record_call.call_args.kwargs
         assert call_kwargs["call_type"] == CallType.HTTP_REDIRECT
         assert call_kwargs["status"] == CallStatus.ERROR
-        assert "ConnectError" in call_kwargs["error"]["type"]
-        assert "Connection refused" in call_kwargs["error"]["message"]
+        assert "ConnectError" in call_kwargs["error"].type
+        assert "Connection refused" in call_kwargs["error"].message
         assert isinstance(call_kwargs["latency_ms"], float)
         assert call_kwargs["latency_ms"] >= 0
