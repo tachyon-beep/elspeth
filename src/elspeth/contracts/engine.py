@@ -7,7 +7,7 @@ from typing import TypedDict
 from elspeth.contracts.enums import RowOutcome
 
 
-@dataclass
+@dataclass(frozen=True, slots=True)
 class BufferEntry[T]:
     """Entry emitted from the reorder buffer with timing metadata.
 
