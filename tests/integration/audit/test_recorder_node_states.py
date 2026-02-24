@@ -192,6 +192,138 @@ class TestLandscapeRecorderNodeStates:
         assert completed.error_json is not None
         assert "Validation failed" in completed.error_json
 
+    def test_complete_node_state_failed_with_execution_error(self) -> None:
+        """ExecutionError frozen dataclass serializes via to_dict() through complete_node_state().
+
+        Critical: The isinstance dispatch at _node_state_recording.py:199 calls
+        ExecutionError.to_dict() which maps exception_type -> "type" for hash
+        stability.  This test verifies the full path:
+          executor creates ExecutionError -> complete_node_state() -> isinstance
+          dispatches -> to_dict() serializes with "type" key -> canonical_json()
+          -> stored in DB -> readable with correct schema.
+
+        Bug: 3.3-fixes #3 (elspeth-rapid-1168a1)
+        """
+        import json
+
+        from elspeth.contracts import ExecutionError, NodeStateStatus
+        from elspeth.core.landscape.database import LandscapeDB
+        from elspeth.core.landscape.recorder import LandscapeRecorder
+
+        db = LandscapeDB.in_memory()
+        recorder = LandscapeRecorder(db)
+        run = recorder.begin_run(config={}, canonical_version="v1")
+        node = recorder.register_node(
+            run_id=run.run_id,
+            plugin_name="transform",
+            node_type=NodeType.TRANSFORM,
+            plugin_version="1.0",
+            config={},
+            schema_config=DYNAMIC_SCHEMA,
+        )
+        row = recorder.create_row(
+            run_id=run.run_id,
+            source_node_id=node.node_id,
+            row_index=0,
+            data={},
+        )
+        token = recorder.create_token(row_id=row.row_id)
+        state = recorder.begin_node_state(
+            token_id=token.token_id,
+            node_id=node.node_id,
+            run_id=run.run_id,
+            step_index=0,
+            input_data={},
+        )
+
+        error = ExecutionError(
+            exception="division by zero",
+            exception_type="ZeroDivisionError",
+            traceback="Traceback (most recent call last):\n  File ...",
+            phase="process",
+        )
+
+        completed = recorder.complete_node_state(
+            state_id=state.state_id,
+            status=NodeStateStatus.FAILED,
+            error=error,
+            duration_ms=3.0,
+        )
+
+        # Verify the error was stored
+        assert completed.status == NodeStateStatus.FAILED
+        assert completed.error_json is not None
+
+        # Critical assertion: the stored JSON uses "type" (from to_dict()),
+        # NOT "exception_type" (the dataclass field name).
+        stored = json.loads(completed.error_json)
+        assert "type" in stored, (
+            f"error_json must contain 'type' key (from ExecutionError.to_dict()), not 'exception_type'. Got keys: {list(stored.keys())}"
+        )
+        assert "exception_type" not in stored, (
+            "error_json must NOT contain 'exception_type' — ExecutionError.to_dict() should map it to 'type'"
+        )
+        assert stored["type"] == "ZeroDivisionError"
+        assert stored["exception"] == "division by zero"
+        assert stored["traceback"] == "Traceback (most recent call last):\n  File ..."
+        assert stored["phase"] == "process"
+
+    def test_complete_node_state_failed_execution_error_omits_none_fields(self) -> None:
+        """ExecutionError.to_dict() omits None-valued optional fields for hash stability.
+
+        Bug: 3.3-fixes #3 (elspeth-rapid-1168a1)
+        """
+        import json
+
+        from elspeth.contracts import ExecutionError, NodeStateStatus
+        from elspeth.core.landscape.database import LandscapeDB
+        from elspeth.core.landscape.recorder import LandscapeRecorder
+
+        db = LandscapeDB.in_memory()
+        recorder = LandscapeRecorder(db)
+        run = recorder.begin_run(config={}, canonical_version="v1")
+        node = recorder.register_node(
+            run_id=run.run_id,
+            plugin_name="gate",
+            node_type=NodeType.GATE,
+            plugin_version="1.0",
+            config={},
+            schema_config=DYNAMIC_SCHEMA,
+        )
+        row = recorder.create_row(
+            run_id=run.run_id,
+            source_node_id=node.node_id,
+            row_index=0,
+            data={},
+        )
+        token = recorder.create_token(row_id=row.row_id)
+        state = recorder.begin_node_state(
+            token_id=token.token_id,
+            node_id=node.node_id,
+            run_id=run.run_id,
+            step_index=0,
+            input_data={},
+        )
+
+        # Minimal error — no traceback, no phase
+        error = ExecutionError(
+            exception="some error",
+            exception_type="RuntimeError",
+        )
+
+        completed = recorder.complete_node_state(
+            state_id=state.state_id,
+            status=NodeStateStatus.FAILED,
+            error=error,
+            duration_ms=1.0,
+        )
+
+        stored = json.loads(completed.error_json)
+        # Only required fields present — None-valued optional fields omitted
+        assert set(stored.keys()) == {"exception", "type"}
+        assert "traceback" not in stored
+        assert "phase" not in stored
+
     def test_complete_node_state_with_empty_output(self) -> None:
         """Empty dict output is valid and must produce non-NULL output_hash.
 

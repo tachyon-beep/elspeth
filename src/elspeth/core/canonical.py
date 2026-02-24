@@ -10,9 +10,10 @@ IMPORTANT: NaN and Infinity are strictly REJECTED, not silently converted.
 This is defense-in-depth for audit integrity.
 
 NOTE: For non-canonical data that cannot be serialized (malformed external
-data at Tier-3 trust boundary), use repr_hash() as a fallback. This is NOT
-deterministic across Python versions but is appropriate for quarantined data
-where the content is already flagged as problematic.
+data at Tier-3 trust boundary), use ``elspeth.contracts.hashing.repr_hash()``
+as a fallback.  This is NOT deterministic across Python versions but is
+appropriate for quarantined data where the content is already flagged as
+problematic.
 """
 
 from __future__ import annotations
