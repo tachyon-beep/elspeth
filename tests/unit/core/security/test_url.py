@@ -97,6 +97,100 @@ class TestSanitizedDatabaseUrl:
         assert result.sanitized_url == url
         assert result.fingerprint is None
 
+    def test_empty_password_sanitized(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Empty password (user:@host) is still sanitized from the URL.
+
+        Regression: urlparse().password returns "" for user:@host, which is falsy.
+        A `not parsed.password` check would skip sanitization, leaving the
+        credential-bearing colon in the URL.
+        """
+        monkeypatch.setenv("ELSPETH_FINGERPRINT_KEY", "test-key")
+        url = "postgresql://user:@host/db"
+
+        result = SanitizedDatabaseUrl.from_raw_url(url)
+
+        # Colon must be stripped — sanitized URL should not contain ":@"
+        assert ":@" not in result.sanitized_url
+        assert "user@host/db" in result.sanitized_url
+
+    def test_empty_password_fingerprint(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Empty password produces a fingerprint (of the empty string)."""
+        monkeypatch.setenv("ELSPETH_FINGERPRINT_KEY", "test-key")
+        url = "postgresql://user:@host/db"
+
+        result = SanitizedDatabaseUrl.from_raw_url(url)
+
+        # Empty string still gets fingerprinted for audit completeness
+        assert result.fingerprint is not None
+        assert len(result.fingerprint) == 64
+
+    def test_unix_socket_dsn_sanitized(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Unix-socket DSNs (no hostname) are sanitized without corruption.
+
+        Regression: urlparse("postgresql://user:pass@/dbname").hostname is None.
+        Naive f-string interpolation produces "user@None" instead of "user@".
+        """
+        monkeypatch.setenv("ELSPETH_FINGERPRINT_KEY", "test-key")
+        url = "postgresql://user:pass@/dbname?host=/var/run/postgresql"
+
+        result = SanitizedDatabaseUrl.from_raw_url(url)
+
+        assert "pass" not in result.sanitized_url
+        assert "None" not in result.sanitized_url
+        # Should preserve path and query
+        assert "/dbname" in result.sanitized_url
+        assert "host=/var/run/postgresql" in result.sanitized_url
+        assert result.sanitized_url.startswith("postgresql://user@/dbname")
+        assert result.fingerprint is not None
+
+    def test_no_username_no_hostname_dsn(self) -> None:
+        """DSN with only password (no user, no host) sanitizes cleanly."""
+        url = "postgresql://:pass@/dbname"
+
+        result = SanitizedDatabaseUrl.from_raw_url(url, fail_if_no_key=False)
+
+        assert "pass" not in result.sanitized_url
+        assert "None" not in result.sanitized_url
+        assert "/dbname" in result.sanitized_url
+
+    def test_templated_port_preserved(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Non-numeric templated port (e.g., ${PORT}) is preserved without crash.
+
+        Regression: urlparse().port raises ValueError on non-numeric ports.
+        DSNs with template placeholders must sanitize the password while
+        preserving the raw port string for downstream resolution.
+        """
+        monkeypatch.setenv("ELSPETH_FINGERPRINT_KEY", "test-key")
+        url = "postgresql://user:secret@host:${PORT}/db"
+
+        result = SanitizedDatabaseUrl.from_raw_url(url)
+
+        assert "secret" not in result.sanitized_url
+        assert "${PORT}" in result.sanitized_url
+        assert "user@host:${PORT}/db" in result.sanitized_url
+        assert result.fingerprint is not None
+
+    def test_malformed_port_preserved(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Malformed non-numeric port string is preserved without crash."""
+        monkeypatch.setenv("ELSPETH_FINGERPRINT_KEY", "test-key")
+        url = "postgresql://user:secret@host:abc/db"
+
+        result = SanitizedDatabaseUrl.from_raw_url(url)
+
+        assert "secret" not in result.sanitized_url
+        assert ":abc" in result.sanitized_url
+
+    def test_numeric_port_still_works(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Normal numeric port still sanitizes correctly."""
+        monkeypatch.setenv("ELSPETH_FINGERPRINT_KEY", "test-key")
+        url = "postgresql://user:secret@host:5432/db"
+
+        result = SanitizedDatabaseUrl.from_raw_url(url)
+
+        assert "secret" not in result.sanitized_url
+        assert ":5432" in result.sanitized_url
+        assert "user@host:5432/db" in result.sanitized_url
+
     def test_is_frozen(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """SanitizedDatabaseUrl is frozen (immutable)."""
         monkeypatch.setenv("ELSPETH_FINGERPRINT_KEY", "test-key")
@@ -340,6 +434,71 @@ class TestSanitizedWebhookUrl:
         assert "token" not in result.sanitized_url
         assert "[::1]" in result.sanitized_url
         assert result.fingerprint is not None
+
+    def test_templated_port_with_auth_preserved(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Non-numeric templated port preserved when stripping auth.
+
+        Regression: urlparse().port raises ValueError on non-numeric ports.
+        """
+        monkeypatch.setenv("ELSPETH_FINGERPRINT_KEY", "test-key")
+        url = "https://user:pass@api.example.com:${PORT}/webhook"
+
+        result = SanitizedWebhookUrl.from_raw_url(url)
+
+        assert "user" not in result.sanitized_url
+        assert "pass" not in result.sanitized_url
+        assert "${PORT}" in result.sanitized_url
+        assert result.sanitized_url == "https://api.example.com:${PORT}/webhook"
+        assert result.fingerprint is not None
+
+
+class TestExtractRawPort:
+    """Tests for _extract_raw_port helper."""
+
+    def test_simple_port(self) -> None:
+        from elspeth.contracts.url import _extract_raw_port
+
+        assert _extract_raw_port("host:5432") == ":5432"
+
+    def test_no_port(self) -> None:
+        from elspeth.contracts.url import _extract_raw_port
+
+        assert _extract_raw_port("host") == ""
+
+    def test_templated_port(self) -> None:
+        from elspeth.contracts.url import _extract_raw_port
+
+        assert _extract_raw_port("host:${PORT}") == ":${PORT}"
+
+    def test_with_userinfo(self) -> None:
+        from elspeth.contracts.url import _extract_raw_port
+
+        assert _extract_raw_port("user:pass@host:5432") == ":5432"
+
+    def test_ipv6_with_port(self) -> None:
+        from elspeth.contracts.url import _extract_raw_port
+
+        assert _extract_raw_port("[::1]:8443") == ":8443"
+
+    def test_ipv6_without_port(self) -> None:
+        from elspeth.contracts.url import _extract_raw_port
+
+        assert _extract_raw_port("[::1]") == ""
+
+    def test_ipv6_with_userinfo_and_port(self) -> None:
+        from elspeth.contracts.url import _extract_raw_port
+
+        assert _extract_raw_port("user:pass@[::1]:8443") == ":8443"
+
+    def test_empty_netloc(self) -> None:
+        from elspeth.contracts.url import _extract_raw_port
+
+        assert _extract_raw_port("") == ""
+
+    def test_templated_port_with_userinfo(self) -> None:
+        from elspeth.contracts.url import _extract_raw_port
+
+        assert _extract_raw_port("user:pass@host:${PORT}") == ":${PORT}"
 
 
 class TestSensitiveParams:

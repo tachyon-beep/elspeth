@@ -29,6 +29,33 @@ from elspeth.contracts.security import (
     secret_fingerprint,
 )
 
+
+def _extract_raw_port(netloc: str) -> str:
+    """Extract raw port string (including colon) from a URL netloc.
+
+    Unlike ``urlparse().port`` — which calls ``int()`` and raises
+    ``ValueError`` on non-numeric ports — this function returns the raw
+    string.  This handles templated ports like ``${PORT}`` and malformed
+    DSNs that should be passed through unchanged.
+
+    Returns empty string if no port is present.
+    """
+    # Strip userinfo (user:pass@)
+    host_port = netloc.rsplit("@", 1)[-1]
+
+    if host_port.startswith("["):
+        # IPv6: [::1]:port or [::1]
+        bracket_close = host_port.find("]")
+        if bracket_close == -1:
+            return ""
+        after = host_port[bracket_close + 1 :]
+        return after if after.startswith(":") else ""
+
+    # Regular host or IPv4: host:port or host
+    colon = host_port.rfind(":")
+    return host_port[colon:] if colon != -1 else ""
+
+
 # Sensitive query parameter names that should be stripped from webhook URLs.
 # Expanded list per code review to cover OAuth, API keys, signed URLs, etc.
 SENSITIVE_PARAMS = frozenset(
@@ -109,7 +136,7 @@ class SanitizedDatabaseUrl:
         """
         parsed = urlparse(url)
 
-        if not parsed.password:
+        if parsed.password is None:
             return cls(sanitized_url=url, fingerprint=None)
 
         # Compute fingerprint if we have a key
@@ -131,13 +158,23 @@ class SanitizedDatabaseUrl:
             )
         # else: dev mode - just remove password without fingerprint
 
-        # Reconstruct netloc without password
-        port_str = f":{parsed.port}" if parsed.port else ""
-        if parsed.hostname and ":" in parsed.hostname:
-            # IPv6 addresses need brackets
-            netloc = f"{parsed.username}@[{parsed.hostname}]{port_str}"
+        # Reconstruct netloc without password.
+        # hostname can be None for Unix-socket DSNs like
+        # postgresql://user:pass@/dbname?host=/var/run/postgresql
+        host_part = ""
+        if parsed.hostname:
+            if ":" in parsed.hostname:
+                # IPv6 addresses need brackets
+                host_part = f"[{parsed.hostname}]"
+            else:
+                host_part = parsed.hostname
+
+        port_str = _extract_raw_port(parsed.netloc)
+
+        if parsed.username:
+            netloc = f"{parsed.username}@{host_part}{port_str}"
         else:
-            netloc = f"{parsed.username}@{parsed.hostname}{port_str}"
+            netloc = f"{host_part}{port_str}"
 
         sanitized = urlunparse(
             (
@@ -301,12 +338,12 @@ class SanitizedWebhookUrl:
         # SECURITY: Strip entire userinfo section when credentials present
         if has_basic_auth:
             # Remove both username and password - rebuild netloc without userinfo
-            port_str = f":{parsed.port}" if parsed.port else ""
+            port_str = _extract_raw_port(parsed.netloc)
             # IPv6 addresses need brackets (hostname strips them, netloc preserves them)
             if parsed.hostname and ":" in parsed.hostname:
                 netloc = f"[{parsed.hostname}]{port_str}"
             else:
-                netloc = f"{parsed.hostname}{port_str}"
+                netloc = f"{parsed.hostname or ''}{port_str}"
         else:
             netloc = parsed.netloc
 

@@ -360,7 +360,7 @@ class PluginContext:
         try:
             from elspeth.contracts.enums import CallType as CallTypeEnum
             from elspeth.contracts.events import ExternalCallCompleted
-            from elspeth.contracts.hashing import stable_hash
+            from elspeth.contracts.hashing import repr_hash, stable_hash
 
             # Snapshot payloads so async telemetry exports can't drift from call-time hashes.
             request_snapshot = copy.deepcopy(request_data)
@@ -383,6 +383,22 @@ class PluginContext:
             request_payload = RawCallPayload(request_snapshot)
             response_payload = RawCallPayload(response_snapshot) if response_snapshot is not None else None
 
+            # Hash payloads for telemetry correlation.
+            # Use canonical hash when possible, fall back to repr hash for
+            # non-JSON-primitive types (datetime, Decimal, bytes, numpy).
+            # Follows the same pattern as record_validation_error().
+            try:
+                req_hash = stable_hash(request_snapshot)
+            except (TypeError, ValueError):
+                req_hash = repr_hash(request_snapshot)
+
+            resp_hash: str | None = None
+            if response_snapshot is not None:
+                try:
+                    resp_hash = stable_hash(response_snapshot)
+                except (TypeError, ValueError):
+                    resp_hash = repr_hash(response_snapshot)
+
             self.telemetry_emit(
                 ExternalCallCompleted(
                     timestamp=datetime.now(UTC),
@@ -395,8 +411,8 @@ class PluginContext:
                     provider=provider,
                     status=status,
                     latency_ms=latency_ms if latency_ms is not None else 0.0,
-                    request_hash=stable_hash(request_snapshot),
-                    response_hash=stable_hash(response_snapshot) if response_snapshot is not None else None,
+                    request_hash=req_hash,
+                    response_hash=resp_hash,
                     request_payload=request_payload,
                     response_payload=response_payload,
                     token_usage=token_usage,

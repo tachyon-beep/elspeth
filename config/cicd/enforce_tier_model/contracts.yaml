@@ -26,12 +26,12 @@ allow_hits:
   reason: TypeError from normalize_type_for_contract for unsupported types (dict, list, Decimal) — maps to object
   safety: Preserves field in contract as 'any' type; no data loss or silent skip
   expires: '2026-05-14'
-- key: contracts/url.py:R6:SanitizedDatabaseUrl:from_raw_url:fp=a38bc7fe35254e5e
+- key: contracts/url.py:R6:SanitizedDatabaseUrl:from_raw_url:fp=20b25721d9adf860
   owner: architecture
   reason: except ValueError on get_fingerprint_key() — explicit branch for dev mode (no key) vs production (fail_if_no_key)
   safety: Raises SecretFingerprintError when fail_if_no_key=True; only silently continues in dev mode
   expires: null
-- key: contracts/url.py:R6:SanitizedWebhookUrl:from_raw_url:fp=746976346c94d482
+- key: contracts/url.py:R6:SanitizedWebhookUrl:from_raw_url:fp=21ce92115665de50
   owner: architecture
   reason: except ValueError on get_fingerprint_key() — explicit branch for dev mode (no key) vs production (fail_if_no_key)
   safety: Raises SecretFingerprintError when fail_if_no_key=True; only silently continues in dev mode
@@ -216,6 +216,14 @@ allow_hits:
 - key: contracts/plugin_context.py:R5:PluginContext:record_validation_error:fp=934b50978b2478ff
   owner: architecture
   reason: AST/type checking - required for safe parsing or discriminated unions
+- key: contracts/plugin_context.py:R6:PluginContext:record_call:fp=cb9d590863a2e522
+  owner: bugfix
+  reason: repr_hash fallback for non-JSON-primitive request_data — telemetry hash must not crash on datetime/Decimal/numpy
+  safety: Falls back to repr_hash(); telemetry event still emitted with degraded (non-canonical) hash
+- key: contracts/plugin_context.py:R6:PluginContext:record_call:fp=7ee5c6d9857630cb
+  owner: bugfix
+  reason: repr_hash fallback for non-JSON-primitive response_data — same pattern as request_data above
+  safety: Falls back to repr_hash(); telemetry event still emitted with degraded (non-canonical) hash
 - key: contracts/plugin_context.py:R6:PluginContext:record_validation_error:fp=3669895dbbe9ccee
   owner: architecture
   reason: Silent recovery with explicit error handling path
