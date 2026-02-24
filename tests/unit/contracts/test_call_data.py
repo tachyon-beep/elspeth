@@ -10,15 +10,50 @@ from __future__ import annotations
 import pytest
 
 from elspeth.contracts.call_data import (
+    CallPayload,
     HTTPCallError,
     HTTPCallRequest,
     HTTPCallResponse,
     LLMCallError,
     LLMCallRequest,
     LLMCallResponse,
+    RawCallPayload,
 )
 from elspeth.contracts.token_usage import TokenUsage
 from elspeth.core.canonical import stable_hash
+
+# ---------------------------------------------------------------------------
+# RawCallPayload
+# ---------------------------------------------------------------------------
+
+
+class TestRawCallPayload:
+    """RawCallPayload wraps pre-serialized dicts and satisfies CallPayload."""
+
+    def test_frozen(self) -> None:
+        obj = RawCallPayload({"k": "v"})
+        with pytest.raises(AttributeError):
+            obj.data = {"other": "value"}  # type: ignore[misc]
+
+    def test_to_dict_returns_copy(self) -> None:
+        obj = RawCallPayload({"k": "v"})
+        returned = obj.to_dict()
+        returned["injected"] = "mutation"
+        assert "injected" not in obj.to_dict()
+
+    def test_to_dict_matches_input(self) -> None:
+        original = {"type": "TestError", "message": "something failed"}
+        obj = RawCallPayload(original)
+        assert obj.to_dict() == original
+
+    def test_satisfies_call_payload_protocol(self) -> None:
+        assert isinstance(RawCallPayload({"k": "v"}), CallPayload)
+
+    def test_hash_stability(self) -> None:
+        original_dict = {"type": "TestError", "message": "something failed"}
+        payload = RawCallPayload(original_dict)
+        assert stable_hash(payload.to_dict()) == stable_hash(original_dict)
+
 
 # ---------------------------------------------------------------------------
 # LLMCallRequest
