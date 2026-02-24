@@ -164,7 +164,7 @@ class NodeDetailPanel:
         # Error (if present) - optional field
         # error_json is Tier 1 (our audit data) - if malformed, that's a bug
         error_json = self._state.get("error_json")
-        if error_json:
+        if error_json is not None:
             lines.append("Error:")
             # error_json MUST be a string (schema contract)
             if not isinstance(error_json, str):
@@ -223,7 +223,7 @@ class NodeDetailPanel:
         # Artifact (if sink) - optional field
         # artifact is Tier 1 (our audit data) - if malformed, that's a bug
         artifact = self._state.get("artifact")
-        if artifact:
+        if artifact is not None:
             lines.append("Artifact:")
             # artifact MUST be a dict (schema contract)
             if not isinstance(artifact, dict):

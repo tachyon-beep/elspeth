@@ -85,7 +85,7 @@ class ConfigGateReason(TypedDict):
     """Reason from config-driven gate (expression evaluation).
 
     Used by gates defined via GateSettings with condition expressions.
-    The executor auto-generates this reason structure at executors.py:739.
+    Constructed by GateExecutor.execute_config_gate().
 
     Fields:
         condition: The expression that was evaluated (e.g., "row['score'] > 100")
@@ -96,7 +96,7 @@ class ConfigGateReason(TypedDict):
     result: str
 
 
-# RoutingReason union is defined after TransformErrorReason (below line ~410)
+# RoutingReason union is defined after TransformErrorReason (see RoutingReason below)
 
 
 # Literal type for common transform actions (extensible - str also accepted)
