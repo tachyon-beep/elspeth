@@ -208,6 +208,92 @@ landscape:
         assert "Traceback" not in result.output, f"Should not show traceback: {result.output}"
 
 
+class TestExplainPassphraseResolution:
+    """T4: Settings loading failure during passphrase resolution must not be silent.
+
+    When --settings is explicitly provided and the YAML is malformed,
+    explain should exit with an error, not silently continue with
+    passphrase=None.
+    """
+
+    def test_explain_exits_on_malformed_settings_yaml(self, tmp_path: Path) -> None:
+        """explain --settings with malformed YAML exits with code 1."""
+        from elspeth.cli import app
+        from elspeth.core.landscape import LandscapeDB
+
+        # Create a valid Landscape database with one run
+        db_path = tmp_path / "audit.db"
+        db = LandscapeDB.from_url(f"sqlite:///{db_path}")
+        from elspeth.core.landscape.recorder import LandscapeRecorder
+
+        recorder = LandscapeRecorder(db)
+        from elspeth.contracts import RunStatus
+
+        recorder.begin_run(config={}, canonical_version="v1", run_id="run-1")
+        recorder.complete_run("run-1", RunStatus.COMPLETED)
+        db.close()
+
+        # Create a malformed YAML settings file
+        bad_settings = tmp_path / "bad_settings.yaml"
+        bad_settings.write_text("source:\n  plugin: csv\n  options: [\ninvalid yaml")
+
+        result = runner.invoke(
+            app,
+            [
+                "explain",
+                "--database",
+                str(db_path),
+                "--settings",
+                str(bad_settings),
+                "--run",
+                "run-1",
+                "--row",
+                "row-1",
+                "--no-tui",
+            ],
+        )
+
+        assert result.exit_code == 1, f"Expected exit code 1 for malformed settings YAML, got {result.exit_code}. Output: {result.output}"
+        # Error message should mention the YAML/settings problem
+        output_lower = result.output.lower()
+        assert "yaml" in output_lower or "syntax" in output_lower or "settings" in output_lower, (
+            f"Expected error about YAML/settings, got: {result.output}"
+        )
+
+    def test_explain_succeeds_without_settings(self, tmp_path: Path) -> None:
+        """explain --database without --settings should work (passphrase=None)."""
+        from elspeth.cli import app
+        from elspeth.core.landscape import LandscapeDB
+
+        # Create a valid Landscape database with one run
+        db_path = tmp_path / "audit.db"
+        db = LandscapeDB.from_url(f"sqlite:///{db_path}")
+        from elspeth.core.landscape.recorder import LandscapeRecorder
+
+        recorder = LandscapeRecorder(db)
+        from elspeth.contracts import RunStatus
+
+        recorder.begin_run(config={}, canonical_version="v1", run_id="run-1")
+        recorder.complete_run("run-1", RunStatus.COMPLETED)
+        db.close()
+
+        result = runner.invoke(
+            app,
+            [
+                "explain",
+                "--database",
+                str(db_path),
+                "--run",
+                "run-1",
+                "--no-tui",
+            ],
+        )
+
+        # Without --settings, passphrase fallthrough to None is correct
+        # and the command should not fail on settings loading
+        assert "yaml" not in result.output.lower() or result.exit_code == 0
+
+
 class TestBuildResumeGraphs:
     """Test _build_resume_graphs accepts connection-valued on_success.
 

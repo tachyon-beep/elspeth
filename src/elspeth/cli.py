@@ -661,8 +661,15 @@ def explain(
         try:
             settings_for_passphrase = load_settings(settings_path)
             landscape_settings = settings_for_passphrase.landscape
-        except (FileNotFoundError, yaml.YAMLError, YamlParserError, YamlScannerError):
-            pass  # Settings file unreadable — passphrase will be None
+        except (FileNotFoundError, yaml.YAMLError, YamlParserError, YamlScannerError) as e:
+            # User explicitly provided --settings (guarded by settings_path is not None
+            # on line above), so YAML errors are fatal — don't silently proceed
+            # with passphrase=None.
+            if json_output:
+                typer.echo(json_module.dumps({"error": f"Settings YAML error: {e}"}))
+            else:
+                typer.echo(f"Error loading settings: {e}", err=True)
+            raise typer.Exit(1) from None
         except (ValidationError, SecretLoadError) as e:
             # Settings loaded but failed validation or secret resolution.
             # User explicitly provided --settings, so surface the error.
