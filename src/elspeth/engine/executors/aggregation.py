@@ -168,7 +168,8 @@ class AggregationExecutor:
             node.member_count = 0
 
         batch_id = node.batch_id
-        assert batch_id is not None  # We just created it if it was None
+        if batch_id is None:
+            raise OrchestrationInvariantError(f"batch_id is None after creation for node {node_id}")
 
         # Buffer the row - store dict (JSON-serializable for checkpoints)
         # TokenInfo.row_data is PipelineRow, extract dict for buffer
@@ -580,7 +581,8 @@ class AggregationExecutor:
             node_id: Aggregation node ID
         """
         node = self._nodes[node_id]
-        assert node.batch_id is not None, f"_reset_batch_state invariant violation: batch_id is None for {node_id}"
+        if node.batch_id is None:
+            raise OrchestrationInvariantError(f"_reset_batch_state invariant violation: batch_id is None for {node_id}")
         node.batch_id = None
         node.member_count = 0
 

@@ -300,7 +300,8 @@ class PluginContext:
             # This ensures UNIQUE(state_id, call_index) when mixing ctx.record_call()
             # with audited clients (AuditedLLMClient, AuditedHTTPClient), which also
             # use recorder.allocate_call_index(). See P1-2026-01-31-context-record-call-bypasses-allocator.
-            assert self.state_id is not None  # Guarded by has_state check above
+            if self.state_id is None:
+                raise FrameworkBugError("record_call has_state=True but state_id is None")
             call_index = self.landscape.allocate_call_index(self.state_id)
 
             recorded_call = self.landscape.record_call(
@@ -316,7 +317,8 @@ class PluginContext:
             parent_id: str = self.state_id
         else:
             # Operation call - recorder handles call index allocation
-            assert self.operation_id is not None  # Guarded by has_operation check above
+            if self.operation_id is None:
+                raise FrameworkBugError("record_call has_operation=True but operation_id is None")
             recorded_call = self.landscape.record_operation_call(
                 operation_id=self.operation_id,
                 call_type=call_type,
@@ -335,7 +337,8 @@ class PluginContext:
         # See P2-2026-02-14-plugincontext-record-call-can-emit-the-wrong-token-id.
         token_id = None
         if has_state:
-            assert self.state_id is not None  # Guarded by has_state check above
+            if self.state_id is None:
+                raise FrameworkBugError("record_call has_state=True but state_id is None (token_id lookup)")
             node_state = self.landscape.get_node_state(self.state_id)
             if node_state is None:
                 raise FrameworkBugError(

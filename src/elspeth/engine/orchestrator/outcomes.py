@@ -164,7 +164,8 @@ def handle_coalesce_timeouts(
             if has_merged:
                 counters.rows_coalesced += 1
                 merged_token = outcome.merged_token
-                assert merged_token is not None  # guarded by has_merged check above
+                if merged_token is None:
+                    raise OrchestrationInvariantError("CoalesceOutcome has_merged=True but merged_token is None")
                 # Route merged token through processor from the coalesce node.
                 # Processor internals decide terminal vs non-terminal using DAG
                 # continuation metadata and return COMPLETED with sink_name when terminal.
@@ -232,7 +233,8 @@ def flush_coalesce_pending(
                 )
             coalesce_name = CoalesceName(outcome.coalesce_name)
             merged_token = outcome.merged_token
-            assert merged_token is not None  # guarded by invariant check above
+            if merged_token is None:
+                raise OrchestrationInvariantError("CoalesceOutcome has merged_token but value is None after invariant check")
             # Route merged token through processor from the coalesce node.
             # Processor internals decide terminal vs non-terminal using DAG
             # continuation metadata and return COMPLETED with sink_name when terminal.

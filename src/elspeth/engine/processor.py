@@ -364,7 +364,8 @@ class RowProcessor:
         status = NodeStateStatus.COMPLETED if transform_result.status == "success" else NodeStateStatus.FAILED
 
         # node_id is assigned during DAG construction in from_plugin_instances()
-        assert transform.node_id is not None, "node_id must be assigned by DAG construction before execution"
+        if transform.node_id is None:
+            raise OrchestrationInvariantError("node_id must be assigned by DAG construction before execution")
         self._emit_telemetry(
             TransformCompleted(
                 timestamp=datetime.now(UTC),
@@ -991,10 +992,11 @@ class RowProcessor:
                     # for audit trail completeness (same as TransformExecutor error handling)
                     on_error = transform.on_error
                     # on_error is always set (required by TransformSettings) — Tier 1 invariant
-                    assert on_error is not None, (
-                        f"Transform '{transform.name}' has on_error=None — this should be "
-                        f"impossible since TransformSettings requires on_error"
-                    )
+                    if on_error is None:
+                        raise OrchestrationInvariantError(
+                            f"Transform '{transform.name}' has on_error=None — this should be "
+                            f"impossible since TransformSettings requires on_error"
+                        ) from None
 
                     error_details: TransformErrorReason = {"reason": "llm_retryable_error_no_retry", "error": str(e)}
                     ctx.record_transform_error(
@@ -1014,9 +1016,10 @@ class RowProcessor:
                             raise OrchestrationInvariantError(
                                 f"Transform '{transform.node_id}' has on_error={on_error!r} but no DIVERT edge registered."
                             ) from e
-                        assert ctx.state_id is not None, (
-                            f"ctx.state_id must be set by TransformExecutor before exception propagated (transform={transform.node_id})"
-                        )
+                        if ctx.state_id is None:
+                            raise OrchestrationInvariantError(
+                                f"ctx.state_id must be set by TransformExecutor before exception propagated (transform={transform.node_id})"
+                            ) from None
                         self._recorder.record_routing_event(
                             state_id=ctx.state_id,
                             edge_id=error_edge_id,
@@ -1038,9 +1041,10 @@ class RowProcessor:
                 # for audit trail completeness (same as TransformExecutor error handling)
                 on_error = transform.on_error
                 # on_error is always set (required by TransformSettings) — Tier 1 invariant
-                assert on_error is not None, (
-                    f"Transform '{transform.name}' has on_error=None — this should be impossible since TransformSettings requires on_error"
-                )
+                if on_error is None:
+                    raise OrchestrationInvariantError(
+                        f"Transform '{transform.name}' has on_error=None — this should be impossible since TransformSettings requires on_error"
+                    ) from None
 
                 transient_error: TransformErrorReason = {"reason": "transient_error_no_retry", "error": str(e)}
                 ctx.record_transform_error(
@@ -1060,9 +1064,10 @@ class RowProcessor:
                         raise OrchestrationInvariantError(
                             f"Transform '{transform.node_id}' has on_error={on_error!r} but no DIVERT edge registered."
                         ) from e
-                    assert ctx.state_id is not None, (
-                        f"ctx.state_id must be set by TransformExecutor before exception propagated (transform={transform.node_id})"
-                    )
+                    if ctx.state_id is None:
+                        raise OrchestrationInvariantError(
+                            f"ctx.state_id must be set by TransformExecutor before exception propagated (transform={transform.node_id})"
+                        ) from None
                     self._recorder.record_routing_event(
                         state_id=ctx.state_id,
                         edge_id=error_edge_id,
@@ -1703,7 +1708,8 @@ class RowProcessor:
                     # NOTE: Parent EXPANDED outcome is recorded atomically in expand_token()
 
                     # is_multi_row check above guarantees rows is not None
-                    assert transform_result.rows is not None, "is_multi_row guarantees rows is not None"
+                    if transform_result.rows is None:
+                        raise OrchestrationInvariantError("is_multi_row guarantees rows is not None")
                     # Contract consistency is enforced by TransformResult.success_multi()
                     output_contract = transform_result.rows[0].contract
                     child_tokens, _expand_group_id = self._token_manager.expand_token(
