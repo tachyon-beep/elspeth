@@ -185,14 +185,10 @@ allowed_dict_patterns:
   # Error recording
   - "src/elspeth/core/landscape/_error_recording.py:ErrorRecordingMixin.record_transform_error:row_data"
 
-  # Call recording
-  - "src/elspeth/core/landscape/_call_recording.py:CallRecordingMixin.record_call:request_data"
-  - "src/elspeth/core/landscape/_call_recording.py:CallRecordingMixin.record_call:response_data"
+  # Call recording (request_data/response_data are now CallPayload, not dict)
   - "src/elspeth/core/landscape/_call_recording.py:CallRecordingMixin.record_call:error"
   - "src/elspeth/core/landscape/_call_recording.py:CallRecordingMixin.begin_operation:input_data"
   - "src/elspeth/core/landscape/_call_recording.py:CallRecordingMixin.complete_operation:output_data"
-  - "src/elspeth/core/landscape/_call_recording.py:CallRecordingMixin.record_operation_call:request_data"
-  - "src/elspeth/core/landscape/_call_recording.py:CallRecordingMixin.record_operation_call:response_data"
   - "src/elspeth/core/landscape/_call_recording.py:CallRecordingMixin.record_operation_call:error"
   - "src/elspeth/core/landscape/_call_recording.py:CallRecordingMixin.get_call_response_data:return"
 

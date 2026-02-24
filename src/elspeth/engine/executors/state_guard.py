@@ -112,11 +112,11 @@ class NodeStateGuard:
         if exc_type is None:
             # Clean exit without calling complete() — programming error.
             # Record FAILED first (preserve audit invariant), then crash.
-            error: ExecutionError = {
-                "exception": "NodeStateGuard exited normally without complete()",
-                "type": "OrchestrationInvariantError",
-                "phase": "executor_guard_missing_complete",
-            }
+            error = ExecutionError(
+                exception="NodeStateGuard exited normally without complete()",
+                exception_type="OrchestrationInvariantError",
+                phase="executor_guard_missing_complete",
+            )
             try:
                 self._recorder.complete_node_state(
                     state_id=self.state_id,
@@ -138,11 +138,11 @@ class NodeStateGuard:
 
         # An exception occurred and the state was never completed.
         # Auto-complete as FAILED so the audit trail has a terminal record.
-        exc_error: ExecutionError = {
-            "exception": str(exc_val),
-            "type": exc_type.__name__,
-            "phase": "executor_post_process",
-        }
+        exc_error = ExecutionError(
+            exception=str(exc_val),
+            exception_type=exc_type.__name__,
+            phase="executor_post_process",
+        )
         try:
             self._recorder.complete_node_state(
                 state_id=self.state_id,

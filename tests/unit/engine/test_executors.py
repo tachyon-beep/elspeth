@@ -603,7 +603,7 @@ class TestTransformExecutor:
         recorder.complete_node_state.assert_called_once()
         kwargs = recorder.complete_node_state.call_args[1]
         assert kwargs["status"] == NodeStateStatus.FAILED
-        assert "plugin bug" in kwargs["error"]["exception"]
+        assert "plugin bug" in kwargs["error"].exception
 
     def test_exception_path_captures_duration(self) -> None:
         """Duration is captured even when exception is raised."""
@@ -1159,7 +1159,7 @@ class TestGateExecutor:
 
         last_call = recorder.complete_node_state.call_args_list[-1]
         assert last_call[1]["status"] == NodeStateStatus.FAILED
-        assert "None" in last_call[1]["error"]["exception"]
+        assert "None" in last_call[1]["error"].exception
 
     def test_config_gate_int_result_stringified_for_route_lookup(self) -> None:
         """Expression returning int is stringified for route label matching.
@@ -1975,7 +1975,7 @@ class TestSinkExecutor:
         assert len(failed_calls) == 2
         for call in failed_calls:
             error = call[1]["error"]
-            assert error["phase"] == "contract_merge"
+            assert error.phase == "contract_merge"
 
         sink.write.assert_not_called()
         sink.flush.assert_not_called()
@@ -2347,7 +2347,7 @@ class TestNodeStateGuard:
         recorder.complete_node_state.assert_called_once()
         kwargs = recorder.complete_node_state.call_args[1]
         assert kwargs["status"] == NodeStateStatus.FAILED
-        assert kwargs["error"]["phase"] == "executor_guard_missing_complete"
+        assert kwargs["error"].phase == "executor_guard_missing_complete"
 
     def test_exception_auto_completes_as_failed(self) -> None:
         """Unhandled exception triggers auto-complete as FAILED."""
@@ -2370,9 +2370,9 @@ class TestNodeStateGuard:
         kwargs = recorder.complete_node_state.call_args[1]
         assert kwargs["status"] == NodeStateStatus.FAILED
         assert kwargs["state_id"] == "state_001"
-        assert "test crash" in kwargs["error"]["exception"]
-        assert kwargs["error"]["type"] == "ValueError"
-        assert kwargs["error"]["phase"] == "executor_post_process"
+        assert "test crash" in kwargs["error"].exception
+        assert kwargs["error"].exception_type == "ValueError"
+        assert kwargs["error"].phase == "executor_post_process"
         assert kwargs["duration_ms"] >= 0
 
     def test_explicit_complete_prevents_auto_fail(self) -> None:
@@ -2537,7 +2537,7 @@ class TestTransformExecutorTerminality:
         recorder.complete_node_state.assert_called_once()
         kwargs = recorder.complete_node_state.call_args[1]
         assert kwargs["status"] == NodeStateStatus.FAILED
-        assert "executor_post_process" in kwargs["error"]["phase"]
+        assert "executor_post_process" in kwargs["error"].phase
 
     def test_contract_evolution_failure_marks_state_failed(self) -> None:
         """Contract evolution failure → state FAILED, not COMPLETED-then-crash.
@@ -2571,7 +2571,7 @@ class TestTransformExecutorTerminality:
         recorder.complete_node_state.assert_called_once()
         kwargs = recorder.complete_node_state.call_args[1]
         assert kwargs["status"] == NodeStateStatus.FAILED
-        assert kwargs["error"]["phase"] == "executor_post_process"
+        assert kwargs["error"].phase == "executor_post_process"
 
     def test_successful_transform_still_completes_normally(self) -> None:
         """Sanity: guard does not interfere with normal success path."""
@@ -2677,7 +2677,7 @@ class TestAggregationExecutorTerminality:
         failed_calls = [c for c in recorder.complete_node_state.call_args_list if c[1].get("status") == NodeStateStatus.FAILED]
         assert len(failed_calls) >= 1
         # At least one FAILED call should have the guard's phase tag
-        guard_fail = [c for c in failed_calls if c[1].get("error", {}).get("phase") == "executor_post_process"]
+        guard_fail = [c for c in failed_calls if getattr(c[1].get("error"), "phase", None) == "executor_post_process"]
         assert len(guard_fail) == 1
 
         # Batch: FAILED (outer except handler)
@@ -2789,7 +2789,7 @@ class TestSinkExecutorTerminality:
         failed_calls = [c for c in recorder.complete_node_state.call_args_list if c[1].get("status") == NodeStateStatus.FAILED]
         assert len(failed_calls) == 1
         assert failed_calls[0][1]["state_id"] == "state_001"
-        assert failed_calls[0][1]["error"]["phase"] == "begin_node_state"
+        assert failed_calls[0][1]["error"].phase == "begin_node_state"
 
         # Sink write should NOT have been called (failure happened before write)
         sink.write.assert_not_called()

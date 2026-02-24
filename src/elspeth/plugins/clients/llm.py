@@ -333,7 +333,7 @@ class AuditedLLMClient(AuditedClientBase):
                 call_index=call_index,
                 call_type=CallType.LLM,
                 status=CallStatus.ERROR,
-                request_data=request_data,
+                request_data=request_dto,
                 error=LLMCallError(
                     type=error_type,
                     message=str(e),
@@ -421,8 +421,8 @@ class AuditedLLMClient(AuditedClientBase):
             call_index=call_index,
             call_type=CallType.LLM,
             status=CallStatus.SUCCESS,
-            request_data=request_data,
-            response_data=response_data,
+            request_data=request_dto,
+            response_data=response_dto,
             latency_ms=latency_ms,
         )
 

@@ -310,10 +310,10 @@ class TransformExecutor:
                 except Exception as e:
                     duration_ms = (time.perf_counter() - start) * 1000
                     # Record failure
-                    error: ExecutionError = {
-                        "exception": str(e),
-                        "type": type(e).__name__,
-                    }
+                    error = ExecutionError(
+                        exception=str(e),
+                        exception_type=type(e).__name__,
+                    )
                     guard.complete(
                         NodeStateStatus.FAILED,
                         duration_ms=duration_ms,

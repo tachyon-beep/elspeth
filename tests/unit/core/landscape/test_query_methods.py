@@ -6,6 +6,7 @@ from elspeth.contracts import (
     NodeType,
     RoutingMode,
 )
+from elspeth.contracts.call_data import RawCallPayload
 from elspeth.contracts.schema import SchemaConfig
 from elspeth.core.landscape import LandscapeDB, LandscapeRecorder
 from elspeth.core.landscape.row_data import RowDataResult, RowDataState
@@ -423,8 +424,8 @@ class TestGetCalls:
             call_index=0,
             call_type=CallType.LLM,
             status=CallStatus.SUCCESS,
-            request_data={"model": "gpt-4", "prompt": "Hello"},
-            response_data={"completion": "Hi"},
+            request_data=RawCallPayload({"model": "gpt-4", "prompt": "Hello"}),
+            response_data=RawCallPayload({"completion": "Hi"}),
             latency_ms=100.0,
         )
 
@@ -442,8 +443,8 @@ class TestGetCalls:
             call_index=1,
             call_type=CallType.LLM,
             status=CallStatus.SUCCESS,
-            request_data={"prompt": "second"},
-            response_data={"out": "b"},
+            request_data=RawCallPayload({"prompt": "second"}),
+            response_data=RawCallPayload({"out": "b"}),
             latency_ms=50.0,
         )
         recorder.record_call(
@@ -451,8 +452,8 @@ class TestGetCalls:
             call_index=0,
             call_type=CallType.HTTP,
             status=CallStatus.SUCCESS,
-            request_data={"url": "https://example.com"},
-            response_data={"body": "ok"},
+            request_data=RawCallPayload({"url": "https://example.com"}),
+            response_data=RawCallPayload({"body": "ok"}),
             latency_ms=75.0,
         )
 
@@ -530,8 +531,8 @@ class TestGetCallsForStates:
             call_index=0,
             call_type=CallType.LLM,
             status=CallStatus.SUCCESS,
-            request_data={"prompt": "a"},
-            response_data={"out": "x"},
+            request_data=RawCallPayload({"prompt": "a"}),
+            response_data=RawCallPayload({"out": "x"}),
             latency_ms=50.0,
         )
         recorder.record_call(
@@ -539,8 +540,8 @@ class TestGetCallsForStates:
             call_index=0,
             call_type=CallType.HTTP,
             status=CallStatus.SUCCESS,
-            request_data={"url": "https://example.com"},
-            response_data={"body": "ok"},
+            request_data=RawCallPayload({"url": "https://example.com"}),
+            response_data=RawCallPayload({"body": "ok"}),
             latency_ms=75.0,
         )
 
@@ -564,8 +565,8 @@ class TestGetCallsForStates:
             call_index=0,
             call_type=CallType.LLM,
             status=CallStatus.SUCCESS,
-            request_data={"prompt": "test"},
-            response_data={"out": "ok"},
+            request_data=RawCallPayload({"prompt": "test"}),
+            response_data=RawCallPayload({"out": "ok"}),
             latency_ms=100.0,
         )
 
@@ -771,8 +772,8 @@ class TestGetAllCallsForRun:
             call_index=0,
             call_type=CallType.LLM,
             status=CallStatus.SUCCESS,
-            request_data={"prompt": "a"},
-            response_data={"out": "x"},
+            request_data=RawCallPayload({"prompt": "a"}),
+            response_data=RawCallPayload({"out": "x"}),
             latency_ms=50.0,
         )
         recorder.record_call(
@@ -780,8 +781,8 @@ class TestGetAllCallsForRun:
             call_index=0,
             call_type=CallType.HTTP,
             status=CallStatus.SUCCESS,
-            request_data={"url": "https://example.com"},
-            response_data={"body": "ok"},
+            request_data=RawCallPayload({"url": "https://example.com"}),
+            response_data=RawCallPayload({"body": "ok"}),
             latency_ms=75.0,
         )
 
@@ -1077,8 +1078,8 @@ class TestCallsOrderedByExecution:
                 call_index=0,
                 call_type=CallType.LLM,
                 status=CallStatus.SUCCESS,
-                request_data={"prompt": f"call-{i}"},
-                response_data={"out": f"resp-{i}"},
+                request_data=RawCallPayload({"prompt": f"call-{i}"}),
+                response_data=RawCallPayload({"out": f"resp-{i}"}),
                 latency_ms=50.0,
             )
 
@@ -1099,8 +1100,8 @@ class TestCallsOrderedByExecution:
                 call_index=0,
                 call_type=CallType.LLM,
                 status=CallStatus.SUCCESS,
-                request_data={"prompt": f"call-{i}"},
-                response_data={"out": f"resp-{i}"},
+                request_data=RawCallPayload({"prompt": f"call-{i}"}),
+                response_data=RawCallPayload({"out": f"resp-{i}"}),
                 latency_ms=50.0,
             )
 
@@ -1166,8 +1167,8 @@ class TestChunkedQueryMethods:
                 call_index=0,
                 call_type=CallType.LLM,
                 status=CallStatus.SUCCESS,
-                request_data={"prompt": f"call-{sid}"},
-                response_data={"out": "ok"},
+                request_data=RawCallPayload({"prompt": f"call-{sid}"}),
+                response_data=RawCallPayload({"out": "ok"}),
                 latency_ms=50.0,
             )
 
@@ -1213,8 +1214,8 @@ class TestChunkedQueryMethods:
                 call_index=0,
                 call_type=CallType.LLM,
                 status=CallStatus.SUCCESS,
-                request_data={"prompt": f"call-{sid}"},
-                response_data={"out": "ok"},
+                request_data=RawCallPayload({"prompt": f"call-{sid}"}),
+                response_data=RawCallPayload({"out": "ok"}),
                 latency_ms=50.0,
             )
 

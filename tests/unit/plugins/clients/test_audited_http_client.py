@@ -61,11 +61,11 @@ class TestAuditedHTTPClient:
         assert call_kwargs["call_index"] == 0
         assert call_kwargs["call_type"] == CallType.HTTP
         assert call_kwargs["status"] == CallStatus.SUCCESS
-        assert call_kwargs["request_data"]["method"] == "POST"
-        assert call_kwargs["request_data"]["url"] == "https://api.example.com/v1/process"
-        assert call_kwargs["request_data"]["json"] == {"data": "value"}
-        assert call_kwargs["response_data"]["status_code"] == 200
-        assert call_kwargs["response_data"]["body"] == {"result": "success"}
+        assert call_kwargs["request_data"].to_dict()["method"] == "POST"
+        assert call_kwargs["request_data"].to_dict()["url"] == "https://api.example.com/v1/process"
+        assert call_kwargs["request_data"].to_dict()["json"] == {"data": "value"}
+        assert call_kwargs["response_data"].to_dict()["status_code"] == 200
+        assert call_kwargs["response_data"].to_dict()["body"] == {"result": "success"}
         assert call_kwargs["latency_ms"] > 0
 
     def test_call_index_increments(self) -> None:
@@ -158,7 +158,7 @@ class TestAuditedHTTPClient:
             client.post("https://api.example.com/v1/process")
 
         call_kwargs = recorder.record_call.call_args[1]
-        recorded_headers = call_kwargs["request_data"]["headers"]
+        recorded_headers = call_kwargs["request_data"].to_dict()["headers"]
 
         # Auth headers should be FINGERPRINTED, not removed
         # The fingerprint format is "<fingerprint:64hexchars>"
@@ -226,9 +226,9 @@ class TestAuditedHTTPClient:
             client1.post("https://api.example.com/v1/process", json={"data": "test"})
             client2.post("https://api.example.com/v1/process", json={"data": "test"})
 
-        # Get the recorded request_data for each call
-        request_data_1 = recorder1.record_call.call_args[1]["request_data"]
-        request_data_2 = recorder2.record_call.call_args[1]["request_data"]
+        # Get the recorded request_data for each call (now CallPayload DTOs)
+        request_data_1 = recorder1.record_call.call_args[1]["request_data"].to_dict()
+        request_data_2 = recorder2.record_call.call_args[1]["request_data"].to_dict()
 
         # The request_hash values MUST be different
         hash1 = stable_hash(request_data_1)
@@ -272,7 +272,7 @@ class TestAuditedHTTPClient:
             client.post("https://api.example.com/v1/process")
 
         call_kwargs = recorder.record_call.call_args[1]
-        recorded_headers = call_kwargs["request_data"]["headers"]
+        recorded_headers = call_kwargs["request_data"].to_dict()["headers"]
 
         # In dev mode, auth headers are removed (no fingerprint available)
         assert "Authorization" not in recorded_headers
@@ -304,7 +304,7 @@ class TestAuditedHTTPClient:
 
         # Verify full URL was recorded
         call_kwargs = recorder.record_call.call_args[1]
-        assert call_kwargs["request_data"]["url"] == "https://api.example.com/v1/process"
+        assert call_kwargs["request_data"].to_dict()["url"] == "https://api.example.com/v1/process"
 
         # Verify httpx was called with full URL
         mock_client.post.assert_called_once()
@@ -336,7 +336,7 @@ class TestAuditedHTTPClient:
 
         # Should have exactly one slash, not double
         call_kwargs = recorder.record_call.call_args[1]
-        assert call_kwargs["request_data"]["url"] == "https://api.example.com/v1/process"
+        assert call_kwargs["request_data"].to_dict()["url"] == "https://api.example.com/v1/process"
 
         actual_url = mock_client.post.call_args[0][0]
         assert actual_url == "https://api.example.com/v1/process"
@@ -366,7 +366,7 @@ class TestAuditedHTTPClient:
 
         # Should have slash separator inserted
         call_kwargs = recorder.record_call.call_args[1]
-        assert call_kwargs["request_data"]["url"] == "https://api.example.com/v1/process"
+        assert call_kwargs["request_data"].to_dict()["url"] == "https://api.example.com/v1/process"
 
         actual_url = mock_client.post.call_args[0][0]
         assert actual_url == "https://api.example.com/v1/process"
@@ -393,7 +393,7 @@ class TestAuditedHTTPClient:
             client.post("https://api.example.com/v1/process")
 
         call_kwargs = recorder.record_call.call_args[1]
-        assert call_kwargs["response_data"]["body_size"] == len(mock_response.content)
+        assert call_kwargs["response_data"].to_dict()["body_size"] == len(mock_response.content)
 
     def test_request_headers_merged(self) -> None:
         """Per-request headers are merged with default headers."""
@@ -474,7 +474,7 @@ class TestAuditedHTTPClient:
             client.post("https://api.example.com/v1/process")
 
         call_kwargs = recorder.record_call.call_args[1]
-        response_headers = call_kwargs["response_data"]["headers"]
+        response_headers = call_kwargs["response_data"].to_dict()["headers"]
         assert response_headers["content-type"] == "application/json"
         assert response_headers["x-request-id"] == "req-456"
 
@@ -501,7 +501,7 @@ class TestAuditedHTTPClient:
             client.post("https://other-api.example.com/endpoint")
 
         call_kwargs = recorder.record_call.call_args[1]
-        assert call_kwargs["request_data"]["url"] == "https://other-api.example.com/endpoint"
+        assert call_kwargs["request_data"].to_dict()["url"] == "https://other-api.example.com/endpoint"
 
     def test_none_json_body(self) -> None:
         """HTTP call with None json body is handled."""
@@ -526,7 +526,7 @@ class TestAuditedHTTPClient:
             client.post("https://api.example.com/endpoint")
 
         call_kwargs = recorder.record_call.call_args[1]
-        assert call_kwargs["request_data"]["json"] is None
+        assert call_kwargs["request_data"].to_dict()["json"] is None
 
     def test_sensitive_response_headers_filtered(self) -> None:
         """Sensitive response headers (cookies, auth) are filtered from audit trail."""
@@ -559,7 +559,7 @@ class TestAuditedHTTPClient:
             client.post("https://api.example.com/v1/process")
 
         call_kwargs = recorder.record_call.call_args[1]
-        response_headers = call_kwargs["response_data"]["headers"]
+        response_headers = call_kwargs["response_data"].to_dict()["headers"]
 
         # Sensitive headers should NOT be recorded
         assert "set-cookie" not in response_headers
@@ -648,7 +648,7 @@ class TestAuditedHTTPClient:
             client.post("https://api.example.com/endpoint")
 
         call_kwargs = recorder.record_call.call_args[1]
-        assert call_kwargs["response_data"]["body"] == "Plain text response"
+        assert call_kwargs["response_data"].to_dict()["body"] == "Plain text response"
 
     def test_json_response_body_recorded_as_dict(self) -> None:
         """JSON response body is recorded as parsed dict."""
@@ -673,7 +673,7 @@ class TestAuditedHTTPClient:
             client.post("https://api.example.com/endpoint")
 
         call_kwargs = recorder.record_call.call_args[1]
-        assert call_kwargs["response_data"]["body"] == {"choices": [{"message": {"content": "Hello"}}]}
+        assert call_kwargs["response_data"].to_dict()["body"] == {"choices": [{"message": {"content": "Hello"}}]}
 
     def test_4xx_response_recorded_as_error(self) -> None:
         """HTTP 4xx responses are recorded with ERROR status."""
@@ -704,7 +704,7 @@ class TestAuditedHTTPClient:
         # Verify ERROR status was recorded
         call_kwargs = recorder.record_call.call_args[1]
         assert call_kwargs["status"] == CallStatus.ERROR
-        assert call_kwargs["response_data"]["status_code"] == 401
+        assert call_kwargs["response_data"].to_dict()["status_code"] == 401
         assert call_kwargs["error"]["type"] == "HTTPError"
         assert call_kwargs["error"]["status_code"] == 401
         assert "401" in call_kwargs["error"]["message"]
@@ -737,7 +737,7 @@ class TestAuditedHTTPClient:
         # Verify ERROR status was recorded
         call_kwargs = recorder.record_call.call_args[1]
         assert call_kwargs["status"] == CallStatus.ERROR
-        assert call_kwargs["response_data"]["status_code"] == 503
+        assert call_kwargs["response_data"].to_dict()["status_code"] == 503
         assert call_kwargs["error"]["type"] == "HTTPError"
         assert call_kwargs["error"]["status_code"] == 503
 
@@ -833,7 +833,7 @@ class TestAuditedHTTPClient:
             client.post("https://api.example.com/large-response")
 
         call_kwargs = recorder.record_call.call_args[1]
-        recorded_body = call_kwargs["response_data"]["body"]
+        recorded_body = call_kwargs["response_data"].to_dict()["body"]
 
         # CRITICAL: Must record ALL 150KB, not truncated to 100KB
         assert len(recorded_body) == 150_000, f"Expected 150000 chars, got {len(recorded_body)}"
@@ -873,7 +873,7 @@ class TestAuditedHTTPClient:
             client.post("https://api.example.com/large-json")
 
         call_kwargs = recorder.record_call.call_args[1]
-        recorded_body = call_kwargs["response_data"]["body"]
+        recorded_body = call_kwargs["response_data"].to_dict()["body"]
 
         # JSON should be parsed as dict, not truncated
         assert isinstance(recorded_body, dict)
@@ -914,7 +914,7 @@ class TestAuditedHTTPClient:
             client.post("https://api.example.com/image")
 
         call_kwargs = recorder.record_call.call_args[1]
-        recorded_body = call_kwargs["response_data"]["body"]
+        recorded_body = call_kwargs["response_data"].to_dict()["body"]
 
         # Binary should be encoded as base64 in a dict
         assert isinstance(recorded_body, dict), f"Expected dict, got {type(recorded_body)}"
@@ -964,7 +964,7 @@ class TestAuditedHTTPClient:
         call_kwargs = recorder.record_call.call_args[1]
 
         # Body should be recorded as parse failure with raw text
-        recorded_body = call_kwargs["response_data"]["body"]
+        recorded_body = call_kwargs["response_data"].to_dict()["body"]
         assert isinstance(recorded_body, dict)
         assert recorded_body["_json_parse_failed"] is True
         assert "NaN" in recorded_body["_error"] or "non-finite" in recorded_body["_error"]
@@ -1004,7 +1004,7 @@ class TestAuditedHTTPClient:
         recorder.record_call.assert_called_once()
         call_kwargs = recorder.record_call.call_args[1]
 
-        recorded_body = call_kwargs["response_data"]["body"]
+        recorded_body = call_kwargs["response_data"].to_dict()["body"]
         assert recorded_body["_json_parse_failed"] is True
         assert "Infinity" in recorded_body["_error"] or "non-finite" in recorded_body["_error"]
         assert recorded_body["_raw_text"] == json_with_infinity
@@ -1035,7 +1035,7 @@ class TestAuditedHTTPClient:
 
         assert response.status_code == 200
         call_kwargs = recorder.record_call.call_args[1]
-        recorded_body = call_kwargs["response_data"]["body"]
+        recorded_body = call_kwargs["response_data"].to_dict()["body"]
         assert recorded_body["_json_parse_failed"] is True
         assert recorded_body["_raw_text"] == json_with_neg_infinity
 
@@ -1069,7 +1069,7 @@ class TestAuditedHTTPClient:
 
         assert response.status_code == 200
         call_kwargs = recorder.record_call.call_args[1]
-        recorded_body = call_kwargs["response_data"]["body"]
+        recorded_body = call_kwargs["response_data"].to_dict()["body"]
         assert recorded_body["_json_parse_failed"] is True
         assert recorded_body["_raw_text"] == json_with_nested_nan
 
@@ -1104,7 +1104,7 @@ class TestAuditedHTTPClient:
 
         assert response.status_code == 200
         call_kwargs = recorder.record_call.call_args[1]
-        recorded_body = call_kwargs["response_data"]["body"]
+        recorded_body = call_kwargs["response_data"].to_dict()["body"]
 
         # Should be parsed as dict, NOT as parse failure
         assert isinstance(recorded_body, dict)
@@ -1163,11 +1163,11 @@ class TestAuditedHTTPClientGet:
         assert call_kwargs["call_index"] == 0
         assert call_kwargs["call_type"] == CallType.HTTP
         assert call_kwargs["status"] == CallStatus.SUCCESS
-        assert call_kwargs["request_data"]["method"] == "GET"
-        assert call_kwargs["request_data"]["url"] == "https://example.com/page"
-        assert call_kwargs["request_data"]["params"] is None
-        assert call_kwargs["response_data"]["status_code"] == 200
-        assert call_kwargs["response_data"]["body"] == "<html><body>Content</body></html>"
+        assert call_kwargs["request_data"].to_dict()["method"] == "GET"
+        assert call_kwargs["request_data"].to_dict()["url"] == "https://example.com/page"
+        assert call_kwargs["request_data"].to_dict()["params"] is None
+        assert call_kwargs["response_data"].to_dict()["status_code"] == 200
+        assert call_kwargs["response_data"].to_dict()["body"] == "<html><body>Content</body></html>"
         assert call_kwargs["latency_ms"] > 0
 
     def test_get_with_query_params(self) -> None:
@@ -1203,7 +1203,7 @@ class TestAuditedHTTPClientGet:
 
         # Verify params were recorded in audit trail
         call_kwargs = recorder.record_call.call_args[1]
-        assert call_kwargs["request_data"]["params"] == {"q": "test", "limit": 10}
+        assert call_kwargs["request_data"].to_dict()["params"] == {"q": "test", "limit": 10}
 
     def test_get_with_base_url(self) -> None:
         """GET with base_url prepends base to path correctly."""
@@ -1229,7 +1229,7 @@ class TestAuditedHTTPClientGet:
 
         # Verify full URL was recorded
         call_kwargs = recorder.record_call.call_args[1]
-        assert call_kwargs["request_data"]["url"] == "https://api.example.com/v1/resource"
+        assert call_kwargs["request_data"].to_dict()["url"] == "https://api.example.com/v1/resource"
 
         # Verify httpx was called with full URL
         mock_client.get.assert_called_once()
@@ -1286,7 +1286,7 @@ class TestAuditedHTTPClientGet:
             client.get("https://api.example.com/resource")
 
         call_kwargs = recorder.record_call.call_args[1]
-        recorded_headers = call_kwargs["request_data"]["headers"]
+        recorded_headers = call_kwargs["request_data"].to_dict()["headers"]
 
         # Auth header should be fingerprinted
         assert "Authorization" in recorded_headers
@@ -1316,7 +1316,7 @@ class TestAuditedHTTPClientGet:
             client.get("https://api.example.com/data")
 
         call_kwargs = recorder.record_call.call_args[1]
-        assert call_kwargs["response_data"]["body"] == {"items": [1, 2, 3]}
+        assert call_kwargs["response_data"].to_dict()["body"] == {"items": [1, 2, 3]}
 
     def test_get_4xx_response_recorded_as_error(self) -> None:
         """GET with 4xx response is recorded with ERROR status."""
@@ -1346,7 +1346,7 @@ class TestAuditedHTTPClientGet:
         # Verify ERROR status was recorded
         call_kwargs = recorder.record_call.call_args[1]
         assert call_kwargs["status"] == CallStatus.ERROR
-        assert call_kwargs["response_data"]["status_code"] == 404
+        assert call_kwargs["response_data"].to_dict()["status_code"] == 404
         assert call_kwargs["error"]["type"] == "HTTPError"
         assert call_kwargs["error"]["status_code"] == 404
 
@@ -1381,7 +1381,7 @@ class TestAuditedHTTPClientGet:
         recorder.record_call.assert_called_once()
         call_kwargs = recorder.record_call.call_args[1]
 
-        recorded_body = call_kwargs["response_data"]["body"]
+        recorded_body = call_kwargs["response_data"].to_dict()["body"]
         assert recorded_body["_json_parse_failed"] is True
         assert "NaN" in recorded_body["_error"] or "non-finite" in recorded_body["_error"]
         assert recorded_body["_raw_text"] == json_with_nan

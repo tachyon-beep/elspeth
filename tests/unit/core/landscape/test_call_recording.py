@@ -3,6 +3,7 @@ from __future__ import annotations
 import pytest
 
 from elspeth.contracts import CallStatus, CallType, FrameworkBugError, NodeType
+from elspeth.contracts.call_data import RawCallPayload
 from elspeth.contracts.schema import SchemaConfig
 from elspeth.core.canonical import stable_hash
 from elspeth.core.landscape import LandscapeDB, LandscapeRecorder
@@ -125,8 +126,8 @@ class TestAllocateCallIndex:
                 idx,
                 CallType.LLM,
                 CallStatus.SUCCESS,
-                request_data={"i": i},
-                response_data={"r": i},
+                request_data=RawCallPayload({"i": i}),
+                response_data=RawCallPayload({"r": i}),
             )
 
         # Create a NEW recorder on the same DB (simulates resume)
@@ -149,8 +150,8 @@ class TestAllocateCallIndex:
                 operation_id,
                 CallType.HTTP,
                 CallStatus.SUCCESS,
-                request_data={"url": "https://example.com"},
-                response_data={"status": 200},
+                request_data=RawCallPayload({"url": "https://example.com"}),
+                response_data=RawCallPayload({"status": 200}),
             )
 
         # Create a NEW recorder on the same DB (simulates resume)
@@ -181,8 +182,8 @@ class TestRecordCall:
             idx,
             CallType.LLM,
             CallStatus.SUCCESS,
-            request_data={"prompt": "hello"},
-            response_data={"text": "world"},
+            request_data=RawCallPayload({"prompt": "hello"}),
+            response_data=RawCallPayload({"text": "world"}),
             latency_ms=42,
         )
 
@@ -203,8 +204,8 @@ class TestRecordCall:
             idx,
             CallType.HTTP,
             CallStatus.SUCCESS,
-            request_data={"url": "https://example.com"},
-            response_data={"status": 200},
+            request_data=RawCallPayload({"url": "https://example.com"}),
+            response_data=RawCallPayload({"status": 200}),
         )
 
         assert call.response_hash is not None
@@ -220,7 +221,7 @@ class TestRecordCall:
             idx,
             CallType.LLM,
             CallStatus.ERROR,
-            request_data={"prompt": "fail"},
+            request_data=RawCallPayload({"prompt": "fail"}),
             error={"code": "rate_limit", "message": "Too many requests"},
             latency_ms=100,
         )
@@ -238,7 +239,7 @@ class TestRecordCall:
             idx,
             CallType.SQL,
             CallStatus.SUCCESS,
-            request_data={"query": "SELECT 1"},
+            request_data=RawCallPayload({"query": "SELECT 1"}),
             request_ref="req-ref-abc",
             response_ref="resp-ref-xyz",
         )
@@ -255,7 +256,7 @@ class TestRecordCall:
             idx,
             CallType.FILESYSTEM,
             CallStatus.SUCCESS,
-            request_data={"path": "/tmp/file.txt"},
+            request_data=RawCallPayload({"path": "/tmp/file.txt"}),
         )
 
         assert call.response_hash is None
@@ -272,8 +273,8 @@ class TestRecordCall:
                 idx,
                 CallType.LLM,
                 CallStatus.SUCCESS,
-                request_data={"prompt": f"call-{i}"},
-                response_data={"text": f"response-{i}"},
+                request_data=RawCallPayload({"prompt": f"call-{i}"}),
+                response_data=RawCallPayload({"text": f"response-{i}"}),
             )
             calls.append(call)
 
@@ -613,8 +614,8 @@ class TestRecordOperationCall:
             op_id,
             CallType.HTTP,
             CallStatus.SUCCESS,
-            request_data={"url": "https://api.example.com/data"},
-            response_data={"rows": 50},
+            request_data=RawCallPayload({"url": "https://api.example.com/data"}),
+            response_data=RawCallPayload({"rows": 50}),
             latency_ms=200,
         )
 
@@ -633,7 +634,7 @@ class TestRecordOperationCall:
             op_id,
             CallType.SQL,
             CallStatus.ERROR,
-            request_data={"query": "SELECT * FROM missing"},
+            request_data=RawCallPayload({"query": "SELECT * FROM missing"}),
             error={"code": "table_not_found", "message": "Table does not exist"},
             latency_ms=3,
         )
@@ -649,8 +650,8 @@ class TestRecordOperationCall:
             op_id,
             CallType.LLM,
             CallStatus.SUCCESS,
-            request_data={"prompt": "classify"},
-            response_data={"label": "A"},
+            request_data=RawCallPayload({"prompt": "classify"}),
+            response_data=RawCallPayload({"label": "A"}),
             provider="azure-openai",
         )
 
@@ -664,7 +665,7 @@ class TestRecordOperationCall:
             op_id,
             CallType.FILESYSTEM,
             CallStatus.SUCCESS,
-            request_data={"path": "/data/file.csv"},
+            request_data=RawCallPayload({"path": "/data/file.csv"}),
             request_ref="req-ref-001",
             response_ref="resp-ref-001",
         )
@@ -681,7 +682,7 @@ class TestRecordOperationCall:
                 op_id,
                 CallType.HTTP,
                 CallStatus.SUCCESS,
-                request_data={"url": f"https://example.com/{i}"},
+                request_data=RawCallPayload({"url": f"https://example.com/{i}"}),
             )
             calls.append(call)
 
@@ -732,7 +733,7 @@ class TestGetOperationCalls:
                 op_id,
                 CallType.HTTP,
                 CallStatus.SUCCESS,
-                request_data={"index": i},
+                request_data=RawCallPayload({"index": i}),
             )
 
         calls = recorder.get_operation_calls(op_id)
@@ -756,13 +757,13 @@ class TestGetOperationCalls:
             idx,
             CallType.LLM,
             CallStatus.SUCCESS,
-            request_data={"prompt": "state-call"},
+            request_data=RawCallPayload({"prompt": "state-call"}),
         )
         recorder.record_operation_call(
             op_id,
             CallType.HTTP,
             CallStatus.SUCCESS,
-            request_data={"url": "https://example.com"},
+            request_data=RawCallPayload({"url": "https://example.com"}),
         )
 
         op_calls = recorder.get_operation_calls(op_id)
@@ -837,13 +838,13 @@ class TestGetAllOperationCallsForRun:
             op1.operation_id,
             CallType.HTTP,
             CallStatus.SUCCESS,
-            request_data={"url": "a"},
+            request_data=RawCallPayload({"url": "a"}),
         )
         recorder.record_operation_call(
             op2.operation_id,
             CallType.SQL,
             CallStatus.SUCCESS,
-            request_data={"query": "b"},
+            request_data=RawCallPayload({"query": "b"}),
         )
 
         all_calls = recorder.get_all_operation_calls_for_run("run-1")
@@ -867,7 +868,7 @@ class TestGetAllOperationCallsForRun:
             op.operation_id,
             CallType.HTTP,
             CallStatus.SUCCESS,
-            request_data={"url": "op-call"},
+            request_data=RawCallPayload({"url": "op-call"}),
         )
         idx = recorder.allocate_call_index(state_id)
         recorder.record_call(
@@ -875,7 +876,7 @@ class TestGetAllOperationCallsForRun:
             idx,
             CallType.LLM,
             CallStatus.SUCCESS,
-            request_data={"prompt": "state-call"},
+            request_data=RawCallPayload({"prompt": "state-call"}),
         )
 
         all_calls = recorder.get_all_operation_calls_for_run("run-1")
@@ -895,8 +896,8 @@ class TestFindCallByRequestHash:
             idx,
             CallType.LLM,
             CallStatus.SUCCESS,
-            request_data={"prompt": "unique-request"},
-            response_data={"text": "response"},
+            request_data=RawCallPayload({"prompt": "unique-request"}),
+            response_data=RawCallPayload({"text": "response"}),
         )
 
         found = recorder.find_call_by_request_hash("run-1", CallType.LLM, original.request_hash)
@@ -919,7 +920,7 @@ class TestFindCallByRequestHash:
             idx,
             CallType.LLM,
             CallStatus.SUCCESS,
-            request_data={"prompt": "typed-request"},
+            request_data=RawCallPayload({"prompt": "typed-request"}),
         )
 
         found = recorder.find_call_by_request_hash("run-1", CallType.HTTP, original.request_hash)
@@ -937,7 +938,7 @@ class TestFindCallByRequestHash:
                 idx,
                 CallType.LLM,
                 CallStatus.SUCCESS,
-                request_data=same_request,
+                request_data=RawCallPayload(same_request),
             )
             calls.append(call)
 
@@ -960,8 +961,8 @@ class TestGetCallResponseData:
             idx,
             CallType.LLM,
             CallStatus.SUCCESS,
-            request_data={"prompt": "hello"},
-            response_data={"text": "world"},
+            request_data=RawCallPayload({"prompt": "hello"}),
+            response_data=RawCallPayload({"text": "world"}),
         )
 
         result = recorder.get_call_response_data(call.call_id)
@@ -976,7 +977,7 @@ class TestGetCallResponseData:
             idx,
             CallType.LLM,
             CallStatus.ERROR,
-            request_data={"prompt": "fail"},
+            request_data=RawCallPayload({"prompt": "fail"}),
             error={"code": "error"},
         )
 
@@ -1027,8 +1028,8 @@ class TestGetCallResponseData:
             idx,
             CallType.LLM,
             CallStatus.SUCCESS,
-            request_data={"prompt": "hello"},
-            response_data={"text": "world"},
+            request_data=RawCallPayload({"prompt": "hello"}),
+            response_data=RawCallPayload({"text": "world"}),
             response_ref=response_ref,  # Override with our corrupt ref
         )
 
@@ -1071,8 +1072,8 @@ class TestGetCallResponseData:
             idx,
             CallType.LLM,
             CallStatus.SUCCESS,
-            request_data={"prompt": "hello"},
-            response_data={"text": "world"},
+            request_data=RawCallPayload({"prompt": "hello"}),
+            response_data=RawCallPayload({"text": "world"}),
         )
 
         result = recorder.get_call_response_data(call.call_id)

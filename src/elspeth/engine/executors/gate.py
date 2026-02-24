@@ -250,10 +250,10 @@ class GateExecutor:
             except Exception as e:
                 duration_ms = (time.perf_counter() - start) * 1000
                 # Record failure
-                error: ExecutionError = {
-                    "exception": str(e),
-                    "type": type(e).__name__,
-                }
+                error = ExecutionError(
+                    exception=str(e),
+                    exception_type=type(e).__name__,
+                )
                 self._recorder.complete_node_state(
                     state_id=state.state_id,
                     status=NodeStateStatus.FAILED,
@@ -274,10 +274,10 @@ class GateExecutor:
         # Look up destination in routes config
         if route_label not in gate_config.routes:
             # Record failure before raising
-            error = {
-                "exception": f"Route label '{route_label}' not found in routes config",
-                "type": "ValueError",
-            }
+            error = ExecutionError(
+                exception=f"Route label '{route_label}' not found in routes config",
+                exception_type="ValueError",
+            )
             self._recorder.complete_node_state(
                 state_id=state.state_id,
                 status=NodeStateStatus.FAILED,
@@ -319,10 +319,10 @@ class GateExecutor:
             # Record failure before re-raising - ensures node_state is never left OPEN.
             # Catches MissingEdgeError, OrchestrationInvariantError, and any other
             # dispatch/routing errors that would leave the state as non-terminal OPEN.
-            routing_error: ExecutionError = {
-                "exception": str(e),
-                "type": type(e).__name__,
-            }
+            routing_error = ExecutionError(
+                exception=str(e),
+                exception_type=type(e).__name__,
+            )
             self._recorder.complete_node_state(
                 state_id=state.state_id,
                 status=NodeStateStatus.FAILED,

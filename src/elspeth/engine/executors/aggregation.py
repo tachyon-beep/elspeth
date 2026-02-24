@@ -423,10 +423,10 @@ class AggregationExecutor:
                         duration_ms = (time.perf_counter() - start) * 1000
 
                         # Record failure in node_state
-                        error: ExecutionError = {
-                            "exception": str(e),
-                            "type": type(e).__name__,
-                        }
+                        error = ExecutionError(
+                            exception=str(e),
+                            exception_type=type(e).__name__,
+                        )
                         guard.complete(
                             NodeStateStatus.FAILED,
                             duration_ms=duration_ms,
@@ -498,10 +498,10 @@ class AggregationExecutor:
                     batch_finalized = True
                 else:
                     # Transform returned error status
-                    error_info: ExecutionError = {
-                        "exception": str(result.reason) if result.reason else "Transform returned error",
-                        "type": "TransformError",
-                    }
+                    error_info = ExecutionError(
+                        exception=str(result.reason) if result.reason else "Transform returned error",
+                        exception_type="TransformError",
+                    )
                     guard.complete(
                         NodeStateStatus.FAILED,
                         duration_ms=duration_ms,

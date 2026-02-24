@@ -303,9 +303,9 @@ class TestRedirectAuditRecording:
         assert kw["call_type"] == CallType.HTTP_REDIRECT
         assert kw["status"] == CallStatus.SUCCESS
         assert kw["state_id"] == "test-state-001"
-        assert kw["request_data"]["url"] == "https://example.com/new-path"
-        assert kw["request_data"]["hop_number"] == 1
-        assert kw["response_data"]["status_code"] == 200
+        assert kw["request_data"].to_dict()["url"] == "https://example.com/new-path"
+        assert kw["request_data"].to_dict()["hop_number"] == 1
+        assert kw["response_data"].to_dict()["status_code"] == 200
 
     @patch("elspeth.plugins.clients.http.validate_url_for_ssrf")
     def test_chained_redirects_record_multiple_hops(self, mock_validate, http_client):
@@ -334,14 +334,14 @@ class TestRedirectAuditRecording:
         # First hop
         kw1 = recorder.record_call.call_args_list[0].kwargs
         assert kw1["call_type"] == CallType.HTTP_REDIRECT
-        assert kw1["request_data"]["hop_number"] == 1
-        assert kw1["request_data"]["url"] == "https://example.com/step2"
+        assert kw1["request_data"].to_dict()["hop_number"] == 1
+        assert kw1["request_data"].to_dict()["url"] == "https://example.com/step2"
 
         # Second hop
         kw2 = recorder.record_call.call_args_list[1].kwargs
         assert kw2["call_type"] == CallType.HTTP_REDIRECT
-        assert kw2["request_data"]["hop_number"] == 2
-        assert kw2["request_data"]["url"] == "https://example.com/step3"
+        assert kw2["request_data"].to_dict()["hop_number"] == 2
+        assert kw2["request_data"].to_dict()["url"] == "https://example.com/step3"
 
     @patch("elspeth.plugins.clients.http.validate_url_for_ssrf")
     def test_hop_records_include_redirect_from(self, mock_validate, http_client):
@@ -361,8 +361,8 @@ class TestRedirectAuditRecording:
         )
 
         kw = http_client._recorder.record_call.call_args.kwargs
-        assert kw["request_data"]["redirect_from"] == "https://example.com/start"
-        assert kw["request_data"]["url"] == "https://other.com/page"
+        assert kw["request_data"].to_dict()["redirect_from"] == "https://example.com/start"
+        assert kw["request_data"].to_dict()["url"] == "https://other.com/page"
 
     @patch("elspeth.plugins.clients.http.validate_url_for_ssrf")
     def test_hop_records_include_resolved_ip(self, mock_validate, http_client):
@@ -382,7 +382,7 @@ class TestRedirectAuditRecording:
         )
 
         kw = http_client._recorder.record_call.call_args.kwargs
-        assert kw["request_data"]["resolved_ip"] == "93.184.216.34"
+        assert kw["request_data"].to_dict()["resolved_ip"] == "93.184.216.34"
 
     @patch("elspeth.plugins.clients.http.validate_url_for_ssrf")
     def test_hop_records_have_latency(self, mock_validate, http_client):

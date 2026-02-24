@@ -4,22 +4,47 @@ TypedDict schemas for structured error payloads in the audit trail.
 These provide consistent shapes for executor error recording.
 """
 
+from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Literal, NotRequired, TypedDict
 
 if TYPE_CHECKING:
     from elspeth.contracts.batch_checkpoint import BatchCheckpointState
 
 
-class ExecutionError(TypedDict):
-    """Schema for execution error payloads.
+@dataclass(frozen=True, slots=True)
+class ExecutionError:
+    """Frozen dataclass for execution error payloads.
 
     Used by executors when recording node state failures.
+    Immutable and validated at construction time, consistent with
+    other audit DTOs (TokenUsage, LLMCallRequest, etc.).
+
+    The ``exception_type`` field is renamed from ``type`` to avoid
+    shadowing the Python builtin.  ``to_dict()`` serializes it back
+    as ``"type"`` for hash stability with existing audit records.
     """
 
     exception: str  # String representation of the exception
-    type: str  # Exception class name (e.g., "ValueError")
-    traceback: NotRequired[str]  # Optional full traceback
-    phase: NotRequired[str]  # Optional phase indicator (e.g., "flush" for sink flush errors)
+    exception_type: str  # Exception class name (e.g., "ValueError")
+    traceback: str | None = None  # Optional full traceback
+    phase: str | None = None  # Optional phase indicator (e.g., "flush" for sink flush errors)
+
+    def to_dict(self) -> dict[str, Any]:
+        """Serialize to audit-trail dict.
+
+        Uses ``"type"`` as the key name (not ``exception_type``) to
+        maintain hash stability with existing audit records.
+        Omits None-valued optional fields.
+        """
+        d: dict[str, Any] = {
+            "exception": self.exception,
+            "type": self.exception_type,
+        }
+        if self.traceback is not None:
+            d["traceback"] = self.traceback
+        if self.phase is not None:
+            d["phase"] = self.phase
+        return d
 
 
 class CoalesceFailureReason(TypedDict, total=False):

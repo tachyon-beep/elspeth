@@ -1491,8 +1491,8 @@ class TestAzureBatchLLMTransformMissingResults:
 
         error_call = error_calls[0]
         assert error_call.kwargs["call_type"] == CallType.LLM
-        assert error_call.kwargs["request_data"]["custom_id"] == "row-1-def"
-        assert error_call.kwargs["request_data"]["row_index"] == 1
+        assert error_call.kwargs["request_data"].to_dict()["custom_id"] == "row-1-def"
+        assert error_call.kwargs["request_data"].to_dict()["row_index"] == 1
         assert error_call.kwargs["error"]["reason"] == "result_not_found"
 
     def test_all_results_present_no_error_calls(self, transform: AzureBatchLLMTransform) -> None:

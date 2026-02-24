@@ -81,22 +81,25 @@ class TestIntegrationAuditFixes:
         Verifies:
         - Task 5: TypedDict schemas for error/reason payloads
         """
-        error: ExecutionError = {
-            "exception": "Test error",
-            "type": "ValueError",
-        }
+        error = ExecutionError(
+            exception="Test error",
+            exception_type="ValueError",
+        )
 
-        # Type checker validates this structure
-        assert error["exception"] == "Test error"
-        assert error["type"] == "ValueError"
+        # Frozen dataclass validates at construction; to_dict() serializes for audit
+        assert error.exception == "Test error"
+        assert error.exception_type == "ValueError"
+        d = error.to_dict()
+        assert d["type"] == "ValueError"
 
         # Test with optional traceback field
-        error_with_traceback: ExecutionError = {
-            "exception": "Another error",
-            "type": "RuntimeError",
-            "traceback": "Traceback (most recent call last):\n  File ...",
-        }
-        assert "traceback" in error_with_traceback
+        error_with_traceback = ExecutionError(
+            exception="Another error",
+            exception_type="RuntimeError",
+            traceback="Traceback (most recent call last):\n  File ...",
+        )
+        assert error_with_traceback.traceback is not None
+        assert "traceback" in error_with_traceback.to_dict()
 
     def test_plugin_context_accepts_real_recorder(self) -> None:
         """PluginContext accepts LandscapeRecorder without type issues.

@@ -168,7 +168,7 @@ def test_resolved_ip_recorded_in_audit(transform, mock_ctx):
     record_call_args = mock_ctx.landscape.record_call.call_args
     assert record_call_args is not None, "record_call should have been called"
     request_data = record_call_args.kwargs.get("request_data") or record_call_args[1].get("request_data")
-    assert request_data["resolved_ip"] == "93.184.216.34"
+    assert request_data.to_dict()["resolved_ip"] == "93.184.216.34"
 
 
 # ============================================================================

@@ -164,11 +164,11 @@ class SinkExecutor:
             # are left OPEN.  Complete them as FAILED before re-raising.
             # Fix for B3: sink state-opening loop terminality.
             if states:
-                begin_error: ExecutionError = {
-                    "exception": str(e),
-                    "type": type(e).__name__,
-                    "phase": "begin_node_state",
-                }
+                begin_error = ExecutionError(
+                    exception=str(e),
+                    exception_type=type(e).__name__,
+                    phase="begin_node_state",
+                )
                 self._complete_states_failed(
                     states=states,
                     duration_ms=0.0,
@@ -185,11 +185,11 @@ class SinkExecutor:
                 batch_contract = batch_contract.merge(token.row_data.contract)
         except Exception as e:
             merge_duration_ms = (time.perf_counter() - contract_merge_start) * 1000
-            merge_error: ExecutionError = {
-                "exception": str(e),
-                "type": type(e).__name__,
-                "phase": "contract_merge",
-            }
+            merge_error = ExecutionError(
+                exception=str(e),
+                exception_type=type(e).__name__,
+                phase="contract_merge",
+            )
             self._complete_states_failed(
                 states=states,
                 duration_ms=merge_duration_ms,
@@ -252,11 +252,11 @@ class SinkExecutor:
                                     f"{missing}. This indicates an upstream transform/schema bug."
                                 )
                 except Exception as e:
-                    validation_error: ExecutionError = {
-                        "exception": str(e),
-                        "type": type(e).__name__,
-                        "phase": "pre_write_validation",
-                    }
+                    validation_error = ExecutionError(
+                        exception=str(e),
+                        exception_type=type(e).__name__,
+                        phase="pre_write_validation",
+                    )
                     self._complete_states_failed(
                         states=states,
                         duration_ms=0.0,
@@ -270,10 +270,10 @@ class SinkExecutor:
                     duration_ms = (time.perf_counter() - start) * 1000
                 except Exception as e:
                     duration_ms = (time.perf_counter() - start) * 1000
-                    error: ExecutionError = {
-                        "exception": str(e),
-                        "type": type(e).__name__,
-                    }
+                    error = ExecutionError(
+                        exception=str(e),
+                        exception_type=type(e).__name__,
+                    )
                     self._complete_states_failed(
                         states=states,
                         duration_ms=duration_ms,
@@ -289,11 +289,11 @@ class SinkExecutor:
             except Exception as e:
                 # Flush failed - complete all node_states as FAILED before crashing
                 # Without this, states remain OPEN permanently (audit integrity violation)
-                flush_error: ExecutionError = {
-                    "exception": str(e),
-                    "type": type(e).__name__,
-                    "phase": "flush",
-                }
+                flush_error = ExecutionError(
+                    exception=str(e),
+                    exception_type=type(e).__name__,
+                    phase="flush",
+                )
                 flush_duration_ms = (time.perf_counter() - start) * 1000
                 self._complete_states_failed(
                     states=states,

@@ -33,6 +33,11 @@ allow_hits:
   reason: Type narrowing after DB update - discriminated union requires isinstance to verify terminal state
   safety: Raises AuditIntegrityError if wrong state - explicit failure, not masking
   expires: null
+- key: core/landscape/_node_state_recording.py:R5:NodeStateRecordingMixin:complete_node_state:fp=69806d998cd3e695
+  owner: architecture
+  reason: Type dispatch — ExecutionError is frozen dataclass with to_dict(); other error types are TypedDicts (already dicts)
+  safety: Explicit serialization dispatch, not masking — both paths produce dict for canonical_json
+  expires: null
 - key: core/landscape/_error_recording.py:R6:ErrorRecordingMixin:record_validation_error:fp=456420b45c227638
   owner: architecture
   reason: Tier-3 boundary - row_data may contain NaN/Infinity which are not canonically serializable
@@ -302,7 +307,7 @@ allow_hits:
 - key: core/landscape/journal.py:R5:LandscapeJournal:_columns_to_values:fp=8a63a6b78ec0851c
   owner: architecture
   reason: AST/type checking - required for safe parsing or discriminated unions
-- key: core/landscape/_call_recording.py:R6:CallRecordingMixin:get_call_response_data:fp=dd59a2fa59ac304e
+- key: core/landscape/_call_recording.py:R6:CallRecordingMixin:get_call_response_data:fp=d41196d451e97b35
   owner: architecture
   reason: Graceful handling of purged payloads - retention policy may have deleted response data
 - key: core/dag/builder.py:R2:build_execution_graph:fp=1473956f4f20f6c8

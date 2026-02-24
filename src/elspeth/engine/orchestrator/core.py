@@ -1431,7 +1431,7 @@ class Orchestrator:
                                 duration_ms=0,
                                 error=ExecutionError(
                                     exception=quarantine_error_msg,
-                                    type="ValidationError",
+                                    exception_type="ValidationError",
                                 ),
                             )
 

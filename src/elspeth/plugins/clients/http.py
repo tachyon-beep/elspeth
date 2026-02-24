@@ -382,8 +382,8 @@ class AuditedHTTPClient(AuditedClientBase):
             call_index=call_index,
             call_type=CallType.HTTP,
             status=call_status,
-            request_data=request_data,
-            response_data=response_data,
+            request_data=request_payload,
+            response_data=response_payload,
             error=error_data,
             latency_ms=latency_ms,
         )
@@ -760,8 +760,8 @@ class AuditedHTTPClient(AuditedClientBase):
                 call_index=call_index,
                 call_type=CallType.HTTP,
                 status=call_status,
-                request_data=request_data,
-                response_data=response_data,
+                request_data=request_dto,
+                response_data=response_dto,
                 error=error_data,
                 latency_ms=latency_ms,
             )
@@ -805,7 +805,7 @@ class AuditedHTTPClient(AuditedClientBase):
                 call_index=call_index,
                 call_type=CallType.HTTP,
                 status=CallStatus.ERROR,
-                request_data=request_data,
+                request_data=request_dto,
                 error=HTTPCallError(
                     type=type(e).__name__,
                     message=str(e),
@@ -920,14 +920,14 @@ class AuditedHTTPClient(AuditedClientBase):
             # both success and failure paths can record the hop in the audit trail.
             hop_call_index = self._next_call_index()
             redirects_followed += 1
-            hop_request_data = HTTPCallRequest(
+            hop_request_dto = HTTPCallRequest(
                 method="GET",
                 url=redirect_url,
                 headers=self._filter_request_headers(hop_headers),
                 resolved_ip=redirect_request.resolved_ip,
                 hop_number=redirects_followed,
                 redirect_from=redirect_from,
-            ).to_dict()
+            )
 
             # Ephemeral client per redirect hop: same TLS/SNI isolation rationale
             # as the initial SSRF-safe request — IP-based connection_url would
@@ -950,7 +950,7 @@ class AuditedHTTPClient(AuditedClientBase):
                     call_index=hop_call_index,
                     call_type=CallType.HTTP_REDIRECT,
                     status=CallStatus.ERROR,
-                    request_data=hop_request_data,
+                    request_data=hop_request_dto,
                     error=HTTPCallError(
                         type=type(hop_err).__name__,
                         message=str(hop_err),
@@ -963,18 +963,18 @@ class AuditedHTTPClient(AuditedClientBase):
 
             # Record this redirect hop in the audit trail.
             # Each hop is a real network call — it may hit a different server.
-            hop_response_data = HTTPCallResponse(
+            hop_response_dto = HTTPCallResponse(
                 status_code=response.status_code,
                 headers=self._filter_response_headers(dict(response.headers)),
-            ).to_dict()
+            )
 
             self._recorder.record_call(
                 state_id=self._state_id,
                 call_index=hop_call_index,
                 call_type=CallType.HTTP_REDIRECT,
                 status=CallStatus.SUCCESS if response.status_code < 400 else CallStatus.ERROR,
-                request_data=hop_request_data,
-                response_data=hop_response_data,
+                request_data=hop_request_dto,
+                response_data=hop_response_dto,
                 latency_ms=hop_latency_ms,
             )
 

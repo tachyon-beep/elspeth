@@ -20,6 +20,8 @@ from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
 
+from elspeth.contracts.call_data import RawCallPayload
+
 if TYPE_CHECKING:
     # These types are available in Phase 3
     # Using string annotations to avoid import errors in Phase 2
@@ -306,8 +308,8 @@ class PluginContext:
                 call_index=call_index,
                 call_type=call_type,
                 status=status,
-                request_data=request_data,
-                response_data=response_data,
+                request_data=RawCallPayload(request_data),
+                response_data=RawCallPayload(response_data) if response_data is not None else None,
                 error=error,
                 latency_ms=latency_ms,
             )
@@ -319,8 +321,8 @@ class PluginContext:
                 operation_id=self.operation_id,
                 call_type=call_type,
                 status=status,
-                request_data=request_data,
-                response_data=response_data,
+                request_data=RawCallPayload(request_data),
+                response_data=RawCallPayload(response_data) if response_data is not None else None,
                 error=error,
                 latency_ms=latency_ms,
                 provider=provider,
@@ -353,7 +355,6 @@ class PluginContext:
         # Emit telemetry AFTER successful Landscape recording
         # Wrapped in try/except to prevent telemetry failures from affecting callers
         try:
-            from elspeth.contracts.call_data import RawCallPayload
             from elspeth.contracts.enums import CallType as CallTypeEnum
             from elspeth.contracts.events import ExternalCallCompleted
             from elspeth.contracts.hashing import stable_hash

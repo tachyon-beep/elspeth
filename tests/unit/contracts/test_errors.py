@@ -1,33 +1,68 @@
 """Tests for error/reason schema contracts.
 
 Tests for:
-- ExecutionError TypedDict (exception, type, traceback fields)
+- ExecutionError frozen dataclass (exception, exception_type, traceback, phase)
 - RoutingReason TypedDict (rule, matched_value, threshold fields)
 - TransformReason TypedDict (action, fields_modified fields)
 """
 
+import dataclasses
+
 
 class TestExecutionErrorSchema:
-    """Tests for ExecutionError TypedDict schema introspection."""
+    """Tests for ExecutionError frozen dataclass schema."""
 
-    def test_execution_error_required_keys(self) -> None:
-        """ExecutionError has exactly exception and type as required keys."""
+    def test_execution_error_is_frozen_dataclass(self) -> None:
+        """ExecutionError is a frozen dataclass (immutable after construction)."""
         from elspeth.contracts import ExecutionError
 
-        assert ExecutionError.__required_keys__ == frozenset({"exception", "type"})
+        assert dataclasses.is_dataclass(ExecutionError)
+        error = ExecutionError(exception="test", exception_type="ValueError")
+        import pytest
 
-    def test_execution_error_optional_keys(self) -> None:
-        """ExecutionError has traceback and phase as optional keys."""
+        with pytest.raises(dataclasses.FrozenInstanceError):
+            error.exception = "modified"  # type: ignore[misc]
+
+    def test_execution_error_required_and_optional_fields(self) -> None:
+        """ExecutionError has 2 required fields and 2 optional (None-default) fields."""
         from elspeth.contracts import ExecutionError
 
-        assert ExecutionError.__optional_keys__ == frozenset({"traceback", "phase"})
+        fields = {f.name: f for f in dataclasses.fields(ExecutionError)}
+        assert set(fields.keys()) == {"exception", "exception_type", "traceback", "phase"}
+        # Required fields have no default
+        assert fields["exception"].default is dataclasses.MISSING
+        assert fields["exception_type"].default is dataclasses.MISSING
+        # Optional fields default to None
+        assert fields["traceback"].default is None
+        assert fields["phase"].default is None
 
-    def test_execution_error_all_keys(self) -> None:
-        """ExecutionError total keys match required + optional."""
+    def test_execution_error_to_dict_required_only(self) -> None:
+        """to_dict() serializes exception_type as 'type' and omits None fields."""
         from elspeth.contracts import ExecutionError
 
-        all_keys = ExecutionError.__required_keys__ | ExecutionError.__optional_keys__
-        assert all_keys == frozenset({"exception", "type", "traceback", "phase"})
+        error = ExecutionError(exception="boom", exception_type="RuntimeError")
+        d = error.to_dict()
+        assert d == {"exception": "boom", "type": "RuntimeError"}
+        assert "traceback" not in d
+        assert "phase" not in d
+
+    def test_execution_error_to_dict_with_optionals(self) -> None:
+        """to_dict() includes optional fields when set."""
+        from elspeth.contracts import ExecutionError
+
+        error = ExecutionError(
+            exception="boom",
+            exception_type="RuntimeError",
+            traceback="Traceback ...",
+            phase="flush",
+        )
+        d = error.to_dict()
+        assert d == {
+            "exception": "boom",
+            "type": "RuntimeError",
+            "traceback": "Traceback ...",
+            "phase": "flush",
+        }
 
 
 class TestRoutingReasonSchema:
@@ -92,31 +127,34 @@ class TestTransformSuccessReasonSchema:
 
 
 class TestExecutionError:
-    """Tests for ExecutionError TypedDict."""
+    """Tests for ExecutionError frozen dataclass construction."""
 
     def test_execution_error_has_required_fields(self) -> None:
-        """ExecutionError defines exception and type fields."""
+        """ExecutionError requires exception and exception_type fields."""
         from elspeth.contracts import ExecutionError
 
-        error: ExecutionError = {
-            "exception": "ValueError: invalid input",
-            "type": "ValueError",
-        }
+        error = ExecutionError(
+            exception="ValueError: invalid input",
+            exception_type="ValueError",
+        )
 
-        assert error["exception"] == "ValueError: invalid input"
-        assert error["type"] == "ValueError"
+        assert error.exception == "ValueError: invalid input"
+        assert error.exception_type == "ValueError"
+        # to_dict() maps exception_type → "type" for audit stability
+        assert error.to_dict()["type"] == "ValueError"
 
     def test_execution_error_accepts_optional_traceback(self) -> None:
         """ExecutionError can include traceback."""
         from elspeth.contracts import ExecutionError
 
-        error: ExecutionError = {
-            "exception": "KeyError: 'foo'",
-            "type": "KeyError",
-            "traceback": "Traceback (most recent call last):\n...",
-        }
+        error = ExecutionError(
+            exception="KeyError: 'foo'",
+            exception_type="KeyError",
+            traceback="Traceback (most recent call last):\n...",
+        )
 
-        assert "traceback" in error
+        assert error.traceback is not None
+        assert "traceback" in error.to_dict()
 
 
 class TestRoutingReason:

@@ -16,6 +16,7 @@ from elspeth.contracts import (
     FrameworkBugError,
     Operation,
 )
+from elspeth.contracts.call_data import CallPayload
 from elspeth.contracts.errors import AuditIntegrityError
 from elspeth.core.canonical import canonical_json, stable_hash
 from elspeth.core.landscape._helpers import generate_id, now
@@ -96,8 +97,8 @@ class CallRecordingMixin:
         call_index: int,
         call_type: CallType,
         status: CallStatus,
-        request_data: dict[str, Any],
-        response_data: dict[str, Any] | None = None,
+        request_data: CallPayload,
+        response_data: CallPayload | None = None,
         error: dict[str, Any] | None = None,
         latency_ms: float | None = None,
         *,
@@ -111,8 +112,8 @@ class CallRecordingMixin:
             call_index: 0-based index of this call within the state
             call_type: Type of external call (LLM, HTTP, SQL, FILESYSTEM)
             status: Outcome of the call (SUCCESS, ERROR)
-            request_data: Request payload (will be hashed)
-            response_data: Response payload (will be hashed, optional for errors)
+            request_data: Request payload (CallPayload — serialized internally)
+            response_data: Response payload (CallPayload — serialized internally, optional for errors)
             error: Error details if status is ERROR (stored as JSON)
             latency_ms: Call duration in milliseconds
             request_ref: Optional payload store reference for request
@@ -129,22 +130,26 @@ class CallRecordingMixin:
         call_id = generate_id()
         timestamp = now()
 
+        # Serialize CallPayload → dict at the recorder boundary
+        request_dict = request_data.to_dict()
+        response_dict = response_data.to_dict() if response_data is not None else None
+
         # Hash request (always required)
-        request_hash = stable_hash(request_data)
+        request_hash = stable_hash(request_dict)
 
         # Hash response (optional - None for errors without response)
-        response_hash = stable_hash(response_data) if response_data is not None else None
+        response_hash = stable_hash(response_dict) if response_dict is not None else None
 
         # Auto-persist request to payload store if available and ref not provided
         # This enables replay/verify modes to retrieve the original request
         if request_ref is None and self._payload_store is not None:
-            request_bytes = canonical_json(request_data).encode("utf-8")
+            request_bytes = canonical_json(request_dict).encode("utf-8")
             request_ref = self._payload_store.store(request_bytes)
 
         # Auto-persist response to payload store if available and ref not provided
         # This enables replay/verify modes to retrieve the original response
-        if response_data is not None and response_ref is None and self._payload_store is not None:
-            response_bytes = canonical_json(response_data).encode("utf-8")
+        if response_dict is not None and response_ref is None and self._payload_store is not None:
+            response_bytes = canonical_json(response_dict).encode("utf-8")
             response_ref = self._payload_store.store(response_bytes)
 
         # Serialize error if present
@@ -323,8 +328,8 @@ class CallRecordingMixin:
         operation_id: str,
         call_type: CallType,
         status: CallStatus,
-        request_data: dict[str, Any],
-        response_data: dict[str, Any] | None = None,
+        request_data: CallPayload,
+        response_data: CallPayload | None = None,
         error: dict[str, Any] | None = None,
         latency_ms: float | None = None,
         *,
@@ -341,8 +346,8 @@ class CallRecordingMixin:
             operation_id: The operation this call belongs to
             call_type: Type of external call (LLM, HTTP, SQL, FILESYSTEM)
             status: Outcome of the call (SUCCESS, ERROR)
-            request_data: Request payload (will be hashed)
-            response_data: Response payload (will be hashed, optional for errors)
+            request_data: Request payload (CallPayload — serialized internally)
+            response_data: Response payload (CallPayload — serialized internally, optional for errors)
             error: Error details if status is ERROR (stored as JSON)
             latency_ms: Call duration in milliseconds
             request_ref: Optional payload store reference for request
@@ -356,20 +361,24 @@ class CallRecordingMixin:
         call_id = f"call_{operation_id}_{call_index}"
         timestamp = now()
 
+        # Serialize CallPayload → dict at the recorder boundary
+        request_dict = request_data.to_dict()
+        response_dict = response_data.to_dict() if response_data is not None else None
+
         # Hash request (always required)
-        request_hash = stable_hash(request_data)
+        request_hash = stable_hash(request_dict)
 
         # Hash response (optional - None for errors without response)
-        response_hash = stable_hash(response_data) if response_data is not None else None
+        response_hash = stable_hash(response_dict) if response_dict is not None else None
 
         # Auto-persist request to payload store if available and ref not provided
         if request_ref is None and self._payload_store is not None:
-            request_bytes = canonical_json(request_data).encode("utf-8")
+            request_bytes = canonical_json(request_dict).encode("utf-8")
             request_ref = self._payload_store.store(request_bytes)
 
         # Auto-persist response to payload store if available and ref not provided
-        if response_data is not None and response_ref is None and self._payload_store is not None:
-            response_bytes = canonical_json(response_data).encode("utf-8")
+        if response_dict is not None and response_ref is None and self._payload_store is not None:
+            response_bytes = canonical_json(response_dict).encode("utf-8")
             response_ref = self._payload_store.store(response_bytes)
 
         # Serialize error if present

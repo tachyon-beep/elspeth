@@ -161,9 +161,9 @@ class TestAuditedLLMClient:
         assert call_kwargs["call_index"] == 0
         assert call_kwargs["call_type"] == CallType.LLM
         assert call_kwargs["status"] == CallStatus.SUCCESS
-        assert call_kwargs["request_data"]["model"] == "gpt-4"
-        assert call_kwargs["request_data"]["messages"] == [{"role": "user", "content": "Hello"}]
-        assert call_kwargs["response_data"]["content"] == "Hello!"
+        assert call_kwargs["request_data"].to_dict()["model"] == "gpt-4"
+        assert call_kwargs["request_data"].to_dict()["messages"] == [{"role": "user", "content": "Hello"}]
+        assert call_kwargs["response_data"].to_dict()["content"] == "Hello!"
         assert call_kwargs["latency_ms"] > 0
 
     def test_telemetry_emits_token_id_when_configured(self) -> None:
@@ -358,8 +358,8 @@ class TestAuditedLLMClient:
         )
 
         call_kwargs = recorder.record_call.call_args[1]
-        assert call_kwargs["request_data"]["temperature"] == 0.7
-        assert call_kwargs["request_data"]["max_tokens"] == 100
+        assert call_kwargs["request_data"].to_dict()["temperature"] == 0.7
+        assert call_kwargs["request_data"].to_dict()["max_tokens"] == 100
 
     def test_provider_recorded_in_request(self) -> None:
         """Provider name is recorded in request data."""
@@ -381,7 +381,7 @@ class TestAuditedLLMClient:
         )
 
         call_kwargs = recorder.record_call.call_args[1]
-        assert call_kwargs["request_data"]["provider"] == "azure"
+        assert call_kwargs["request_data"].to_dict()["provider"] == "azure"
 
     def test_extra_kwargs_passed_to_client(self) -> None:
         """Extra kwargs are passed to underlying client and recorded."""
@@ -411,8 +411,8 @@ class TestAuditedLLMClient:
 
         # Verify extra kwargs were recorded
         call_kwargs = recorder.record_call.call_args[1]
-        assert call_kwargs["request_data"]["top_p"] == 0.9
-        assert call_kwargs["request_data"]["presence_penalty"] == 0.5
+        assert call_kwargs["request_data"].to_dict()["top_p"] == 0.9
+        assert call_kwargs["request_data"].to_dict()["presence_penalty"] == 0.5
 
     # NOTE: test_response_without_model_dump was removed because we require
     # openai>=2.15 which guarantees model_dump() exists on all responses.
@@ -525,7 +525,7 @@ class TestAuditedLLMClient:
 
         # Verify raw_response is recorded in audit trail
         call_kwargs = recorder.record_call.call_args[1]
-        response_data = call_kwargs["response_data"]
+        response_data = call_kwargs["response_data"].to_dict()
 
         # Summary fields still present for convenience
         assert response_data["content"] == "Hello!"
@@ -600,7 +600,7 @@ class TestAuditedLLMClient:
 
         # Verify all choices are preserved in raw_response
         call_kwargs = recorder.record_call.call_args[1]
-        raw_response = call_kwargs["response_data"]["raw_response"]
+        raw_response = call_kwargs["response_data"].to_dict()["raw_response"]
 
         assert len(raw_response["choices"]) == 3
         assert raw_response["choices"][0]["message"]["content"] == "Option A"
@@ -681,7 +681,7 @@ class TestAuditedLLMClient:
 
         # Verify tool calls are preserved in raw_response
         call_kwargs = recorder.record_call.call_args[1]
-        raw_response = call_kwargs["response_data"]["raw_response"]
+        raw_response = call_kwargs["response_data"].to_dict()["raw_response"]
 
         assert raw_response["choices"][0]["finish_reason"] == "tool_calls"
         tool_calls = raw_response["choices"][0]["message"]["tool_calls"]
@@ -739,8 +739,8 @@ class TestAuditedLLMClient:
         recorder.record_call.assert_called_once()
         call_kwargs = recorder.record_call.call_args[1]
         assert call_kwargs["status"] == CallStatus.SUCCESS
-        assert call_kwargs["response_data"]["content"] == "Hello, I'm working!"
-        assert call_kwargs["response_data"]["usage"] == {}
+        assert call_kwargs["response_data"].to_dict()["content"] == "Hello, I'm working!"
+        assert call_kwargs["response_data"].to_dict()["usage"] == {}
 
 
 class TestBug4_6_SuccessPathOutsideTryExcept:
