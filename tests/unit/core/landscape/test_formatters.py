@@ -455,7 +455,7 @@ class TestLineageTextFormatter:
 
         now = datetime(2026, 1, 29, 12, 0, 0, tzinfo=UTC)
         result = LineageResult(
-            token=Token(token_id="tok-123", row_id="row-456", created_at=now),
+            token=Token(token_id="tok-123", row_id="row-456", created_at=now, run_id="run-001"),
             source_row=RowLineage(
                 row_id="row-456",
                 run_id="run-789",
@@ -487,7 +487,7 @@ class TestLineageTextFormatter:
 
         now = datetime(2026, 1, 29, 12, 0, 0, tzinfo=UTC)
         result = LineageResult(
-            token=Token(token_id="tok-123", row_id="row-456", created_at=now),
+            token=Token(token_id="tok-123", row_id="row-456", created_at=now, run_id="run-001"),
             source_row=RowLineage(
                 row_id="row-456",
                 run_id="run-789",
@@ -527,7 +527,7 @@ class TestLineageTextFormatter:
 
         now = datetime(2026, 1, 29, 12, 0, 0, tzinfo=UTC)
         result = LineageResult(
-            token=Token(token_id="tok-123", row_id="row-456", created_at=now),
+            token=Token(token_id="tok-123", row_id="row-456", created_at=now, run_id="run-001"),
             source_row=RowLineage(
                 row_id="row-456",
                 run_id="run-789",

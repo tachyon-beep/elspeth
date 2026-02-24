@@ -230,6 +230,7 @@ class TestTokenDataclass:
             token_id="tok-001",
             row_id="row-001",
             created_at=datetime.now(UTC),
+            run_id="run-001",
         )
 
     def test_created_at_is_required(self) -> None:
@@ -239,6 +240,7 @@ class TestTokenDataclass:
                 token_id="tok-001",
                 row_id="row-001",
                 # created_at missing
+                run_id="run-001",
             )
 
     def test_fork_group_id_defaults_to_none(self, minimal_token: Token) -> None:

@@ -239,6 +239,7 @@ class TestToken:
             token_id="tok-123",
             row_id="row-456",
             created_at=now,
+            run_id="run-001",
         )
 
         assert token.token_id == "tok-123"
@@ -252,6 +253,7 @@ class TestToken:
             token_id="tok-123",
             row_id="row-456",
             created_at=datetime.now(UTC),
+            run_id="run-001",
             fork_group_id="fork-789",
             branch_name="sentiment",
             step_in_pipeline=3,
@@ -1499,6 +1501,7 @@ class TestFrozenDataclassImmutability:
                     token_id="t1",
                     row_id="row-1",
                     created_at=datetime.now(UTC),
+                    run_id="run-1",
                 ),
                 "token_id",
             ),
@@ -1851,6 +1854,7 @@ class TestRequiredFieldValidation:
                 # token_id missing
                 row_id="row-1",
                 created_at=datetime.now(UTC),
+                run_id="run-1",
             )
 
     def test_node_state_open_requires_input_hash(self) -> None:
@@ -2053,6 +2057,7 @@ class TestPropertyBasedAuditContracts:
             token_id=token_id,
             row_id=row_id,
             created_at=datetime.now(UTC),
+            run_id="run-hyp",
         )
         assert token.token_id == token_id
         assert token.row_id == row_id

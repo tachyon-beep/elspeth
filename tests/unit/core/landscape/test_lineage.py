@@ -72,6 +72,7 @@ def _make_token(
         token_id=token_id,
         row_id=row_id,
         created_at=datetime(2026, 1, 15, tzinfo=UTC),
+        run_id="run-test",
         fork_group_id=fork_group_id,
         join_group_id=join_group_id,
         expand_group_id=expand_group_id,
