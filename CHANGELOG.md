@@ -6,16 +6,43 @@ All notable changes to ELSPETH are documented here.
 
 ## [Unreleased] (RC-3.3 — Architectural Remediation)
 
+4-phase remediation sprint driven by full architecture analysis. Focus: audit integrity hardening, layer enforcement, and elimination of defensive-pattern violations.
+
 ### Fixed
 
-- **T1:** Frozen all 16 mutable audit record dataclasses — prevents accidental mutation of Tier 1 audit data
-- **T2:** Replaced 18 `assert` statements in production plugin code with explicit `raise` — asserts are stripped by `python -O`
-- **T3:** Fixed 21 truthiness checks across 8 files — `if x:` and `x or default` replaced with `is not None` checks to preserve valid zero/empty-string values in performance reports, telemetry spans, TUI display, audit recording, and testing infrastructure
-- Resolved 3 layer violations (T6, T7, RuntimeServiceRateLimit) — strict 4-layer dependency enforcement
+- **T1: Frozen audit records** — Added `frozen=True` to all 16 mutable audit record dataclasses (`Run`, `Node`, `Edge`, `Row`, `Token`, `TokenParent`, `Call`, `Artifact`, `RoutingEvent`, `Batch`, `BatchMember`, `BatchOutput`, `Checkpoint`, `RowLineage`, `ValidationErrorRecord`, `TransformErrorRecord`). All 24 dataclasses in `contracts/audit.py` are now frozen. Mutations crash at the mutation site instead of silently corrupting the Tier 1 audit trail.
+- **T2: Assert removal** — Replaced 18 `assert` statements across 10 plugin files with explicit `if/raise RuntimeError` patterns. Asserts are stripped by `python -O`, silently removing safety checks. Files: `web_scrape.py` (5), `azure.py` (2), `openrouter.py` (1), `openrouter_batch.py` (2), `azure_multi_query.py` (2), `openrouter_multi_query.py` (2), `content_safety.py` (1), `pooling/executor.py` (1), `csv_sink.py` (1), `base_multi_query.py` (1).
+- **T3: Truthiness checks** — Fixed 21 truthiness checks across 8 files. Python's `if x:` and `x or default` silently exclude valid zero values (`0`, `0.0`) and empty strings (`""`). All replaced with explicit `is not None` checks:
+  - `reports.py`: High-variance node filter now includes 0-duration nodes
+  - `spans.py`: 8 span attribute checks (`node_id`, `input_hash`, `batch_id`)
+  - `node_detail.py`: 7 TUI display fallbacks preserve empty strings and zero durations
+  - `processor.py`: `duration_ms` recording preserves `0.0`
+  - `plugin_context.py`: `latency_ms` recording preserves `0.0`
+  - `chaosllm/server.py`, `chaosweb/server.py`: `extra_delay_sec` arithmetic
+  - `chaosllm_mcp/server.py`: 5 metrics aggregation values
+- **T6: ExpressionParser layer violation** — Moved `ExpressionParser` from `engine/` to `core/` to resolve `core/config.py` importing from `engine/` (L1→L2 violation)
+- **T7: Cross-layer contract imports** — Moved `MaxRetriesExceeded` to `contracts/errors.py` and `BufferEntry` to `contracts/engine.py` to resolve `contracts/` importing from `engine/` and `plugins/` (L0→L2 and L0→L3 violations)
+- **RuntimeServiceRateLimit** — New frozen dataclass in `contracts/config/` replaces runtime import of `core.config.ServiceRateLimit` (L0→L1 violation in `RuntimeRateLimitConfig.get_service_config`)
 
 ### Changed
 
-- Extracted `contracts/hashing.py` — breaks mutual circular dependency between `contracts/` and `core/canonical.py`
+- Extracted `contracts/hashing.py` — primitive-only `canonical_json`, `stable_hash`, and `repr_hash` (RFC 8785 + hashlib, no pandas/numpy). Breaks mutual circular dependency between `contracts/` and `core/canonical.py`. `CANONICAL_VERSION` now lives in contracts; `core/canonical.py` imports from there.
+- All imports updated across 33 files for layer violation remediation
+- CI/CD tier-model allowlists and contract fingerprints updated for relocated modules
+
+### Added
+
+- **ADR-006**: Layer Dependency Remediation — documents the strict 4-layer model (`contracts → core → engine → plugins`) and the 10→0 violation fix strategy
+- Full architecture analysis (`docs/arch-analysis-2026-02-22-0446/`) — 26 documents covering subsystem catalog, dependency matrix, C4 diagrams, architect handover brief, and per-subsystem analysis for all 13 subsystems
+- Freeze audit dataclasses plan (`docs/plans/2026-02-22-freeze-audit-dataclasses.md`)
+- `TestFrozenDataclassImmutability` extended to cover all 22 frozen types (6 existing + 16 newly frozen)
+- 10 new truthiness regression tests across `test_reports.py`, `test_spans.py`, `test_node_detail.py`
+
+### Tests
+
+- 92 files changed across the branch (12,149 insertions, 278 deletions)
+- 15 test files updated with import corrections and new test coverage
+- Full suite: 9,822 tests passing, mypy/ruff/tier-model/contracts all clean
 
 ---
 
