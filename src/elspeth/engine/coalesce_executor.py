@@ -14,7 +14,7 @@ import structlog
 from elspeth.contracts import TokenInfo
 from elspeth.contracts.coalesce_metadata import ArrivalOrderEntry, CoalesceMetadata
 from elspeth.contracts.enums import NodeStateStatus, RowOutcome
-from elspeth.contracts.errors import OrchestrationInvariantError
+from elspeth.contracts.errors import CoalesceFailureReason, OrchestrationInvariantError
 from elspeth.contracts.schema_contract import FieldContract, PipelineRow, SchemaContract
 from elspeth.contracts.types import NodeID, StepResolver
 from elspeth.core.config import CoalesceSettings
@@ -257,10 +257,16 @@ class CoalesceExecutor:
                 step_index=step,
                 input_data=token.row_data.to_dict(),  # Recorder expects dict
             )
+            error = CoalesceFailureReason(
+                failure_reason=failure_reason,
+                expected_branches=list(settings.branches),
+                branches_arrived=[],  # Late arrival — merge already happened
+                merge_policy=settings.merge,
+            )
             self._recorder.complete_node_state(
                 state_id=state.state_id,
                 status=NodeStateStatus.FAILED,
-                error={"failure_reason": failure_reason},
+                error=error,
                 duration_ms=0,
             )
             self._recorder.record_token_outcome(
@@ -386,11 +392,20 @@ class CoalesceExecutor:
         now = self._clock.monotonic()
 
         # Complete pending node states with failure
+        error = CoalesceFailureReason(
+            failure_reason=failure_reason,
+            expected_branches=list(settings.branches),
+            branches_arrived=list(pending.branches.keys()),
+            merge_policy=settings.merge,
+            timeout_ms=int(settings.timeout_seconds * 1000)
+            if settings.timeout_seconds is not None and "timeout" in failure_reason
+            else None,
+        )
         for _branch_name, entry in pending.branches.items():
             self._recorder.complete_node_state(
                 state_id=entry.state_id,
                 status=NodeStateStatus.FAILED,
-                error={"failure_reason": failure_reason},
+                error=error,
                 duration_ms=(now - entry.arrival_time) * 1000,
             )
             self._recorder.record_token_outcome(
@@ -452,15 +467,18 @@ class CoalesceExecutor:
             error_msg = "select_branch_not_arrived"
             error_hash = hashlib.sha256(error_msg.encode()).hexdigest()[:16]
 
+            select_error = CoalesceFailureReason(
+                failure_reason="select_branch_not_arrived",
+                expected_branches=list(settings.branches),
+                branches_arrived=list(pending.branches.keys()),
+                merge_policy=settings.merge,
+                select_branch=settings.select_branch,
+            )
             for _branch_name, entry in pending.branches.items():
                 self._recorder.complete_node_state(
                     state_id=entry.state_id,
                     status=NodeStateStatus.FAILED,
-                    error={
-                        "failure_reason": "select_branch_not_arrived",
-                        "select_branch": settings.select_branch,
-                        "branches_arrived": list(pending.branches.keys()),
-                    },
+                    error=select_error,
                     duration_ms=(now - entry.arrival_time) * 1000,
                 )
                 self._recorder.record_token_outcome(

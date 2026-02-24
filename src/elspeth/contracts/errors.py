@@ -1,7 +1,8 @@
 """Error and reason schema contracts.
 
-TypedDict schemas for structured error payloads in the audit trail.
-These provide consistent shapes for executor error recording.
+Frozen dataclasses and TypedDict schemas for structured error payloads
+in the audit trail.  These provide consistent shapes for executor error
+recording.
 """
 
 from dataclasses import dataclass
@@ -47,22 +48,37 @@ class ExecutionError:
         return d
 
 
-class CoalesceFailureReason(TypedDict, total=False):
-    """Schema for coalesce/barrier failure payloads.
+@dataclass(frozen=True, slots=True)
+class CoalesceFailureReason:
+    """Frozen DTO for coalesce/barrier failure payloads.
 
     Used by CoalesceExecutor when recording fork-join barrier failures.
     These are internal engine errors, not transform or plugin errors.
     """
 
-    failure_reason: str  # Why coalesce failed (e.g., "late_arrival_after_merge")
-    waiting_tokens: list[str]  # Token IDs still waiting at barrier
-    barrier: str  # Barrier identifier
+    failure_reason: str  # Why coalesce failed (e.g., "quorum_not_met")
     expected_branches: list[str]  # Branches expected to arrive
-    actual_branches: list[str]  # Branches that actually arrived
-    branches_arrived: list[str]  # Alias for actual_branches (backwards compat)
+    branches_arrived: list[str]  # Branches that actually arrived
     merge_policy: str  # Merge policy in effect
-    timeout_ms: int  # Timeout that triggered failure
-    select_branch: str | None  # Target branch for select merge policy
+    timeout_ms: int | None = None  # Timeout that triggered failure (if applicable)
+    select_branch: str | None = None  # Target branch for select policy (if applicable)
+
+    def to_dict(self) -> dict[str, Any]:
+        """Serialize to audit-trail dict.
+
+        Omits None-valued optional fields for compact JSON.
+        """
+        d: dict[str, Any] = {
+            "failure_reason": self.failure_reason,
+            "expected_branches": self.expected_branches,
+            "branches_arrived": self.branches_arrived,
+            "merge_policy": self.merge_policy,
+        }
+        if self.timeout_ms is not None:
+            d["timeout_ms"] = self.timeout_ms
+        if self.select_branch is not None:
+            d["select_branch"] = self.select_branch
+        return d
 
 
 class ConfigGateReason(TypedDict):

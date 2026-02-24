@@ -193,10 +193,10 @@ class NodeStateRecordingMixin:
 
         timestamp = now()
         output_hash = stable_hash(output_data) if output_data is not None else None
-        # ExecutionError is a frozen dataclass with to_dict(); other error types
-        # (TransformErrorReason, CoalesceFailureReason) are TypedDicts (already dicts).
+        # ExecutionError and CoalesceFailureReason are frozen dataclasses with
+        # to_dict(); TransformErrorReason is a TypedDict (already a dict).
         if error is not None:
-            error_data = error.to_dict() if isinstance(error, ExecutionError) else error
+            error_data = error.to_dict() if isinstance(error, (ExecutionError, CoalesceFailureReason)) else error
             error_json = canonical_json(error_data)
         else:
             error_json = None

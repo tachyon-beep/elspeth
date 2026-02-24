@@ -7,6 +7,7 @@ import structlog
 
 from elspeth.tui.types import (
     ArtifactDisplay,
+    CoalesceErrorDisplay,
     ExecutionErrorDisplay,
     NodeStateInfo,
     TransformErrorDisplay,
@@ -51,6 +52,26 @@ def _validate_transform_error(data: dict[str, Any]) -> TransformErrorDisplay:
         result["error_type"] = data["error_type"]
     if "field" in data:
         result["field"] = data["field"]
+    return result
+
+
+def _validate_coalesce_error(data: dict[str, Any]) -> CoalesceErrorDisplay:
+    """Validate and cast a dict to CoalesceErrorDisplay.
+
+    CoalesceFailureReason has required fields: failure_reason, expected_branches,
+    branches_arrived, merge_policy.
+    Raises KeyError if required fields are missing (Tier 1 - crash on corruption).
+    """
+    result: CoalesceErrorDisplay = {
+        "failure_reason": data["failure_reason"],
+        "expected_branches": data["expected_branches"],
+        "branches_arrived": data["branches_arrived"],
+        "merge_policy": data["merge_policy"],
+    }
+    if "timeout_ms" in data:
+        result["timeout_ms"] = data["timeout_ms"]
+    if "select_branch" in data:
+        result["select_branch"] = data["select_branch"]
     return result
 
 
@@ -159,7 +180,9 @@ class NodeDetailPanel:
                 )
 
             # Discriminated union: determine error variant by field presence
-            # ExecutionError has "type" + "exception", TransformErrorReason has "reason"
+            # ExecutionError has "type" + "exception"
+            # CoalesceFailureReason has "failure_reason"
+            # TransformErrorReason has "reason"
             if "type" in error and "exception" in error:
                 # ExecutionError variant
                 validated = _validate_execution_error(error)
@@ -167,6 +190,17 @@ class NodeDetailPanel:
                 lines.append(f"  Message: {validated['exception']}")
                 if validated.get("phase"):
                     lines.append(f"  Phase:   {validated['phase']}")
+            elif "failure_reason" in error:
+                # CoalesceFailureReason variant
+                validated_coalesce = _validate_coalesce_error(error)
+                lines.append(f"  Failure: {validated_coalesce['failure_reason']}")
+                lines.append(f"  Policy:  {validated_coalesce['merge_policy']}")
+                lines.append(f"  Expected branches: {', '.join(validated_coalesce['expected_branches'])}")
+                lines.append(f"  Arrived branches:  {', '.join(validated_coalesce['branches_arrived']) or '(none)'}")
+                if validated_coalesce.get("timeout_ms") is not None:
+                    lines.append(f"  Timeout: {validated_coalesce['timeout_ms']} ms")
+                if validated_coalesce.get("select_branch"):
+                    lines.append(f"  Select branch: {validated_coalesce['select_branch']}")
             elif "reason" in error:
                 # TransformErrorReason variant
                 validated_transform = _validate_transform_error(error)

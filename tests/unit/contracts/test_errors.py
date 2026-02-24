@@ -2,11 +2,14 @@
 
 Tests for:
 - ExecutionError frozen dataclass (exception, exception_type, traceback, phase)
+- CoalesceFailureReason frozen dataclass (failure_reason, expected_branches, etc.)
 - RoutingReason TypedDict (rule, matched_value, threshold fields)
 - TransformReason TypedDict (action, fields_modified fields)
 """
 
 import dataclasses
+
+import pytest
 
 
 class TestExecutionErrorSchema:
@@ -627,3 +630,134 @@ class TestErrorsFieldType:
             "errors": ["Row 1 failed", detail],
         }
         assert len(reason["errors"]) == 2
+
+
+class TestCoalesceFailureReasonSchema:
+    """Tests for CoalesceFailureReason frozen dataclass schema."""
+
+    def test_is_frozen_dataclass(self) -> None:
+        """CoalesceFailureReason is a frozen dataclass (immutable after construction)."""
+        from elspeth.contracts import CoalesceFailureReason
+
+        assert dataclasses.is_dataclass(CoalesceFailureReason)
+        error = CoalesceFailureReason(
+            failure_reason="quorum_not_met",
+            expected_branches=["a", "b"],
+            branches_arrived=["a"],
+            merge_policy="union",
+        )
+        with pytest.raises(dataclasses.FrozenInstanceError):
+            error.failure_reason = "modified"  # type: ignore[misc]
+
+    def test_has_slots(self) -> None:
+        """CoalesceFailureReason uses __slots__ for memory efficiency."""
+        from elspeth.contracts import CoalesceFailureReason
+
+        assert hasattr(CoalesceFailureReason, "__slots__")
+
+    def test_required_and_optional_fields(self) -> None:
+        """CoalesceFailureReason has 4 required + 2 optional fields."""
+        from elspeth.contracts import CoalesceFailureReason
+
+        fields = {f.name: f for f in dataclasses.fields(CoalesceFailureReason)}
+        assert set(fields.keys()) == {
+            "failure_reason",
+            "expected_branches",
+            "branches_arrived",
+            "merge_policy",
+            "timeout_ms",
+            "select_branch",
+        }
+        # Required fields have no default
+        assert fields["failure_reason"].default is dataclasses.MISSING
+        assert fields["expected_branches"].default is dataclasses.MISSING
+        assert fields["branches_arrived"].default is dataclasses.MISSING
+        assert fields["merge_policy"].default is dataclasses.MISSING
+        # Optional fields default to None
+        assert fields["timeout_ms"].default is None
+        assert fields["select_branch"].default is None
+
+    def test_to_dict_required_only(self) -> None:
+        """to_dict() omits None-valued optional fields."""
+        from elspeth.contracts import CoalesceFailureReason
+
+        error = CoalesceFailureReason(
+            failure_reason="incomplete_branches",
+            expected_branches=["path_a", "path_b"],
+            branches_arrived=["path_a"],
+            merge_policy="union",
+        )
+        d = error.to_dict()
+        assert d == {
+            "failure_reason": "incomplete_branches",
+            "expected_branches": ["path_a", "path_b"],
+            "branches_arrived": ["path_a"],
+            "merge_policy": "union",
+        }
+        assert "timeout_ms" not in d
+        assert "select_branch" not in d
+
+    def test_to_dict_with_timeout(self) -> None:
+        """to_dict() includes timeout_ms when set."""
+        from elspeth.contracts import CoalesceFailureReason
+
+        error = CoalesceFailureReason(
+            failure_reason="quorum_not_met_at_timeout",
+            expected_branches=["a", "b", "c"],
+            branches_arrived=["a"],
+            merge_policy="nested",
+            timeout_ms=30000,
+        )
+        d = error.to_dict()
+        assert d["timeout_ms"] == 30000
+        assert "select_branch" not in d
+
+    def test_to_dict_with_select_branch(self) -> None:
+        """to_dict() includes select_branch when set."""
+        from elspeth.contracts import CoalesceFailureReason
+
+        error = CoalesceFailureReason(
+            failure_reason="select_branch_not_arrived",
+            expected_branches=["fast", "slow"],
+            branches_arrived=["slow"],
+            merge_policy="select",
+            select_branch="fast",
+        )
+        d = error.to_dict()
+        assert d["select_branch"] == "fast"
+        assert "timeout_ms" not in d
+
+    def test_to_dict_with_all_optionals(self) -> None:
+        """to_dict() includes all fields when all are set."""
+        from elspeth.contracts import CoalesceFailureReason
+
+        error = CoalesceFailureReason(
+            failure_reason="select_branch_not_arrived",
+            expected_branches=["a", "b"],
+            branches_arrived=["b"],
+            merge_policy="select",
+            timeout_ms=5000,
+            select_branch="a",
+        )
+        d = error.to_dict()
+        assert d == {
+            "failure_reason": "select_branch_not_arrived",
+            "expected_branches": ["a", "b"],
+            "branches_arrived": ["b"],
+            "merge_policy": "select",
+            "timeout_ms": 5000,
+            "select_branch": "a",
+        }
+
+    def test_late_arrival_has_empty_branches_arrived(self) -> None:
+        """Late arrival failures have empty branches_arrived list."""
+        from elspeth.contracts import CoalesceFailureReason
+
+        error = CoalesceFailureReason(
+            failure_reason="late_arrival_after_merge",
+            expected_branches=["a", "b"],
+            branches_arrived=[],
+            merge_policy="union",
+        )
+        assert error.branches_arrived == []
+        assert error.to_dict()["branches_arrived"] == []

@@ -334,3 +334,120 @@ class TestNodeDetailPanel:
             raise AssertionError("Should have raised JSONDecodeError")
         except json.JSONDecodeError:
             pass  # Expected - audit integrity violation detected
+
+    def test_display_failed_state_coalesce_error(self) -> None:
+        """Display details for a failed node state with CoalesceFailureReason."""
+        import json
+
+        from elspeth.tui.widgets.node_detail import NodeDetailPanel
+
+        error_dict = {
+            "failure_reason": "quorum_not_met",
+            "expected_branches": ["path_a", "path_b", "path_c"],
+            "branches_arrived": ["path_a"],
+            "merge_policy": "nested",
+            "timeout_ms": 30000,
+        }
+        node_state = cast(
+            NodeStateInfo,
+            {
+                "state_id": "state-coalesce",
+                "node_id": "coalesce-001",
+                "token_id": "token-001",
+                "plugin_name": "coalesce",
+                "node_type": "coalesce",
+                "status": "failed",
+                "input_hash": "abc123",
+                "output_hash": None,
+                "duration_ms": 30000.0,
+                "started_at": "2024-01-01T10:00:00Z",
+                "completed_at": "2024-01-01T10:00:30Z",
+                "error_json": json.dumps(error_dict),
+            },
+        )
+
+        panel = NodeDetailPanel(node_state)
+        content = panel.render_content()
+
+        assert "quorum_not_met" in content
+        assert "nested" in content
+        assert "path_a, path_b, path_c" in content
+        assert "path_a" in content
+        assert "30000" in content
+
+    def test_display_coalesce_error_select_branch(self) -> None:
+        """Display coalesce error with select_branch field."""
+        import json
+
+        from elspeth.tui.widgets.node_detail import NodeDetailPanel
+
+        error_dict = {
+            "failure_reason": "select_branch_not_arrived",
+            "expected_branches": ["fast", "slow"],
+            "branches_arrived": ["slow"],
+            "merge_policy": "select",
+            "select_branch": "fast",
+        }
+        node_state = cast(
+            NodeStateInfo,
+            {
+                "state_id": "state-select",
+                "node_id": "coalesce-002",
+                "token_id": "token-002",
+                "plugin_name": "coalesce",
+                "node_type": "coalesce",
+                "status": "failed",
+                "input_hash": "abc123",
+                "output_hash": None,
+                "duration_ms": 5.0,
+                "started_at": "2024-01-01T10:00:00Z",
+                "completed_at": "2024-01-01T10:00:00.005Z",
+                "error_json": json.dumps(error_dict),
+            },
+        )
+
+        panel = NodeDetailPanel(node_state)
+        content = panel.render_content()
+
+        assert "select_branch_not_arrived" in content
+        assert "select" in content
+        assert "fast" in content
+
+    def test_display_coalesce_error_minimal(self) -> None:
+        """Display coalesce error with only required fields."""
+        import json
+
+        from elspeth.tui.widgets.node_detail import NodeDetailPanel
+
+        error_dict = {
+            "failure_reason": "late_arrival_after_merge",
+            "expected_branches": ["a", "b"],
+            "branches_arrived": [],
+            "merge_policy": "union",
+        }
+        node_state = cast(
+            NodeStateInfo,
+            {
+                "state_id": "state-late",
+                "node_id": "coalesce-003",
+                "token_id": "token-003",
+                "plugin_name": "coalesce",
+                "node_type": "coalesce",
+                "status": "failed",
+                "input_hash": "abc123",
+                "output_hash": None,
+                "duration_ms": 0.0,
+                "started_at": "2024-01-01T10:00:00Z",
+                "completed_at": "2024-01-01T10:00:00Z",
+                "error_json": json.dumps(error_dict),
+            },
+        )
+
+        panel = NodeDetailPanel(node_state)
+        content = panel.render_content()
+
+        assert "late_arrival_after_merge" in content
+        assert "union" in content
+        # No timeout or select_branch lines
+        assert "Timeout" not in content
+        assert "Select branch" not in content
