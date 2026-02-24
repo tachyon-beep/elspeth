@@ -179,12 +179,11 @@ def canonical_json(obj: Any) -> str:
     return result.decode("utf-8")
 
 
-def stable_hash(obj: Any, version: str = CANONICAL_VERSION) -> str:
+def stable_hash(obj: Any) -> str:
     """Compute stable hash of object.
 
     Args:
         obj: Data structure to hash
-        version: Hash algorithm version (stored with runs for verification)
 
     Returns:
         SHA-256 hex digest of canonical JSON

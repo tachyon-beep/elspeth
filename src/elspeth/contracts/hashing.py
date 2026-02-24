@@ -68,7 +68,7 @@ def canonical_json(obj: Any) -> str:
     return result.decode("utf-8")
 
 
-def stable_hash(obj: Any, version: str = CANONICAL_VERSION) -> str:
+def stable_hash(obj: Any) -> str:
     """Compute SHA-256 hash of canonical JSON for primitive data.
 
     For data containing pandas/numpy types or PipelineRow, use
@@ -76,7 +76,6 @@ def stable_hash(obj: Any, version: str = CANONICAL_VERSION) -> str:
 
     Args:
         obj: JSON-safe data structure (no pandas/numpy types)
-        version: Hash algorithm version (stored with runs for verification)
 
     Returns:
         SHA-256 hex digest of canonical JSON
