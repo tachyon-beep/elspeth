@@ -86,7 +86,7 @@ class TestRecordCall:
             call_type=CallType.HTTP,
             status=CallStatus.ERROR,
             request_data=RawCallPayload({"url": "https://api.example.com"}),
-            error={"code": 500, "message": "Internal Server Error"},
+            error=RawCallPayload({"code": 500, "message": "Internal Server Error"}),
             latency_ms=50.0,
         )
 
@@ -182,7 +182,7 @@ class TestRecordCall:
             call_type=CallType.HTTP,
             status=CallStatus.ERROR,
             request_data=RawCallPayload(request_data),
-            error=error_data,
+            error=RawCallPayload(error_data),
             latency_ms=50.0,
         )
 
@@ -332,7 +332,7 @@ class TestRecordCall:
             status=CallStatus.ERROR,
             request_data=RawCallPayload({"url": "https://api.example.com/timeout"}),
             # No response_data - the call timed out
-            error={"type": "timeout", "message": "Request timed out after 30s"},
+            error=RawCallPayload({"type": "timeout", "message": "Request timed out after 30s"}),
             latency_ms=30000.0,
         )
 
@@ -550,7 +550,7 @@ class TestCallPayloadPersistence:
                 status=CallStatus.ERROR,
                 request_data=RawCallPayload({"url": "https://api.example.com"}),
                 # No response_data - request failed before response
-                error={"type": "ConnectionError", "message": "Connection refused"},
+                error=RawCallPayload({"type": "ConnectionError", "message": "Connection refused"}),
             )
 
             # request_ref should be populated (we have request_data)

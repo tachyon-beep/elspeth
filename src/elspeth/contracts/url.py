@@ -8,7 +8,7 @@ secret leaks impossible at the type level.
 Usage:
     from elspeth.contracts.url import SanitizedDatabaseUrl, SanitizedWebhookUrl
 
-    # Database URLs - reuses existing _sanitize_dsn infrastructure
+    # Database URLs - extracts password, fingerprints it, returns sanitized URL
     sanitized = SanitizedDatabaseUrl.from_raw_url("postgresql://user:secret@host/db")
     # sanitized.sanitized_url = "postgresql://user@host/db"
     # sanitized.fingerprint = "abc123..." (HMAC of password)
@@ -23,10 +23,11 @@ import json as json_module
 from dataclasses import dataclass
 from urllib.parse import parse_qs, urlencode, urlparse, urlunparse
 
-# NOTE: Fingerprint functions are imported lazily inside methods to avoid
-# breaking the contracts leaf module boundary. Importing from elspeth.core
-# at module level would pull in 1,200+ modules (pandas, numpy, sqlalchemy, etc.)
-# FIX: P2-2026-01-20-contracts-config-reexport-breaks-leaf-boundary
+from elspeth.contracts.security import (
+    SecretFingerprintError,
+    get_fingerprint_key,
+    secret_fingerprint,
+)
 
 # Sensitive query parameter names that should be stripped from webhook URLs.
 # Expanded list per code review to cover OAuth, API keys, signed URLs, etc.
@@ -89,8 +90,9 @@ class SanitizedDatabaseUrl:
     ) -> "SanitizedDatabaseUrl":
         """Create sanitized URL from raw database connection URL.
 
-        Reuses existing `_sanitize_dsn` infrastructure from config.py to ensure
-        consistent behavior with Landscape database URL sanitization.
+        Uses stdlib ``urlparse`` to extract and remove passwords from database
+        connection URLs. Handles SQLAlchemy-style URLs like
+        ``postgresql+psycopg2://user:pass@host:5432/db``.
 
         Args:
             url: Raw database connection URL (SQLAlchemy format)
@@ -105,10 +107,49 @@ class SanitizedDatabaseUrl:
             SecretFingerprintError: If password found, no key available,
                                     and fail_if_no_key=True
         """
-        # Import here to avoid circular dependency (config imports from contracts)
-        from elspeth.core.config import _sanitize_dsn
+        parsed = urlparse(url)
 
-        sanitized, fingerprint, _ = _sanitize_dsn(url, fail_if_no_key=fail_if_no_key)
+        if not parsed.password:
+            return cls(sanitized_url=url, fingerprint=None)
+
+        # Compute fingerprint if we have a key
+        fingerprint: str | None = None
+        try:
+            get_fingerprint_key()
+            have_key = True
+        except ValueError:
+            have_key = False
+
+        if have_key:
+            fingerprint = secret_fingerprint(parsed.password)
+        elif fail_if_no_key:
+            raise SecretFingerprintError(
+                "Database URL contains a password but ELSPETH_FINGERPRINT_KEY "
+                "is not set. Either set the environment variable or use "
+                "ELSPETH_ALLOW_RAW_SECRETS=true for development "
+                "(not recommended for production)."
+            )
+        # else: dev mode - just remove password without fingerprint
+
+        # Reconstruct netloc without password
+        port_str = f":{parsed.port}" if parsed.port else ""
+        if parsed.hostname and ":" in parsed.hostname:
+            # IPv6 addresses need brackets
+            netloc = f"{parsed.username}@[{parsed.hostname}]{port_str}"
+        else:
+            netloc = f"{parsed.username}@{parsed.hostname}{port_str}"
+
+        sanitized = urlunparse(
+            (
+                parsed.scheme,
+                netloc,
+                parsed.path,
+                parsed.params,
+                parsed.query,
+                parsed.fragment,
+            )
+        )
+
         return cls(sanitized_url=sanitized, fingerprint=fingerprint)
 
 
@@ -184,9 +225,6 @@ class SanitizedWebhookUrl:
             SecretFingerprintError: If secrets found, no key available,
                                     and fail_if_no_key=True
         """
-        # Import here to access the error type
-        from elspeth.core.config import SecretFingerprintError
-
         parsed = urlparse(url)
         query_params = parse_qs(parsed.query, keep_blank_values=True)
 
@@ -229,12 +267,6 @@ class SanitizedWebhookUrl:
         # Compute fingerprint only if there are non-empty values
         fingerprint: str | None = None
         if sensitive_values:
-            # Lazy import to avoid breaking contracts leaf boundary
-            from elspeth.core.security.fingerprint import (
-                get_fingerprint_key,
-                secret_fingerprint,
-            )
-
             # We have non-empty secrets - need to fingerprint them
             try:
                 get_fingerprint_key()

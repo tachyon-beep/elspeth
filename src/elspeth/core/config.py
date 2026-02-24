@@ -16,6 +16,7 @@ import yaml
 from pydantic import BaseModel, Field, field_validator, model_validator
 
 from elspeth.contracts.enums import OutputMode, RunMode
+from elspeth.contracts.security import SecretFingerprintError as SecretFingerprintError
 
 # Reserved edge labels that cannot be used as user-defined routing names.
 # "continue" is used for sequential edges, "fork" is a gate-only routing action,
@@ -218,20 +219,6 @@ class SecretsConfig(BaseModel):
             if not self.mapping:
                 raise ValueError("mapping is required when source is 'keyvault' (cannot be empty)")
         return self
-
-
-class SecretFingerprintError(Exception):
-    """Raised when secret fingerprinting fails.
-
-    This occurs when:
-    - Secret-like field names are found in config but ELSPETH_FINGERPRINT_KEY
-      is not set and ELSPETH_ALLOW_RAW_SECRETS is not 'true'
-    - A config dict contains both a secret field (e.g., 'api_key') and the
-      corresponding fingerprint field ('api_key_fingerprint'), which would
-      allow the pre-existing value to overwrite the computed HMAC fingerprint
-    """
-
-    pass
 
 
 class TriggerConfig(BaseModel):

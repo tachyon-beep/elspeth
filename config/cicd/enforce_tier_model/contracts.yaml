@@ -26,11 +26,21 @@ allow_hits:
   reason: TypeError from normalize_type_for_contract for unsupported types (dict, list, Decimal) — maps to object
   safety: Preserves field in contract as 'any' type; no data loss or silent skip
   expires: '2026-05-14'
-- key: contracts/url.py:R6:SanitizedWebhookUrl:from_raw_url:fp=cf2c8467be680950
+- key: contracts/url.py:R6:SanitizedDatabaseUrl:from_raw_url:fp=a38bc7fe35254e5e
   owner: architecture
-  reason: Silent recovery with explicit error handling path
-  safety: Code reviewed - legitimate pattern
-  expires: '2026-05-02'
+  reason: except ValueError on get_fingerprint_key() — explicit branch for dev mode (no key) vs production (fail_if_no_key)
+  safety: Raises SecretFingerprintError when fail_if_no_key=True; only silently continues in dev mode
+  expires: null
+- key: contracts/url.py:R6:SanitizedWebhookUrl:from_raw_url:fp=746976346c94d482
+  owner: architecture
+  reason: except ValueError on get_fingerprint_key() — explicit branch for dev mode (no key) vs production (fail_if_no_key)
+  safety: Raises SecretFingerprintError when fail_if_no_key=True; only silently continues in dev mode
+  expires: null
+- key: contracts/security.py:R1:get_fingerprint_key:fp=f8bc47a912fd28d8
+  owner: architecture
+  reason: os.environ.get() is the correct API for checking env var existence — followed by explicit ValueError raise
+  safety: Raises ValueError immediately if env var not set — not a silent fallback
+  expires: null
 - key: contracts/data.py:R1:validate_row:fp=0f6fa60e1ef14cec
   owner: architecture
   reason: Optional field access at trust boundary

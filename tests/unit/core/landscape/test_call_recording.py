@@ -222,7 +222,7 @@ class TestRecordCall:
             CallType.LLM,
             CallStatus.ERROR,
             request_data=RawCallPayload({"prompt": "fail"}),
-            error={"code": "rate_limit", "message": "Too many requests"},
+            error=RawCallPayload({"code": "rate_limit", "message": "Too many requests"}),
             latency_ms=100,
         )
 
@@ -635,7 +635,7 @@ class TestRecordOperationCall:
             CallType.SQL,
             CallStatus.ERROR,
             request_data=RawCallPayload({"query": "SELECT * FROM missing"}),
-            error={"code": "table_not_found", "message": "Table does not exist"},
+            error=RawCallPayload({"code": "table_not_found", "message": "Table does not exist"}),
             latency_ms=3,
         )
 
@@ -978,7 +978,7 @@ class TestGetCallResponseData:
             CallType.LLM,
             CallStatus.ERROR,
             request_data=RawCallPayload({"prompt": "fail"}),
-            error={"code": "error"},
+            error=RawCallPayload({"code": "error"}),
         )
 
         result = recorder.get_call_response_data(call.call_id)

@@ -543,6 +543,7 @@ class TestLineageTextFormatter:
             calls=[
                 Call(
                     call_id="call-1",
+                    state_id="state-1",
                     call_index=0,
                     call_type=CallType.HTTP,
                     status=CallStatus.SUCCESS,
