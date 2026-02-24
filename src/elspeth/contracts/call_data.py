@@ -41,16 +41,14 @@ class CallPayload(Protocol):
 class RawCallPayload:
     """Wrapper for pre-serialized call payload dicts from PluginContext.
 
-    The dict is used directly (not copied).  The Landscape recording path
-    serializes synchronously before returning, so snapshot isolation is not
-    needed there.  The telemetry path deepcopies the raw dict *separately*
-    before wrapping in its own ``RawCallPayload``.
+    ``to_dict()`` returns a shallow copy to prevent callers from mutating
+    the internal dict through the returned reference.
     """
 
     data: dict[str, Any]
 
     def to_dict(self) -> dict[str, Any]:
-        return self.data
+        return dict(self.data)
 
 
 # ---------------------------------------------------------------------------
