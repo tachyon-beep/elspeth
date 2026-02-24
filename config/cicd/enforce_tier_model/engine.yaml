@@ -110,7 +110,7 @@ allow_hits:
   reason: Plugin cleanup must attempt all closures; broad catch collects errors then raises
   safety: Code reviewed - collects all cleanup errors into list, raises ExceptionGroup after all attempted
   expires: '2026-05-02'
-- key: engine/tokens.py:R5:TokenManager:create_quarantine_token:fp=03d3a7a8ae0081d4
+- key: engine/tokens.py:R5:TokenManager:create_quarantine_token:fp=dcd7d270154917c7
   owner: P1-2026-02-05-typecheck
   reason: Internal boundary - PipelineRow vs dict discrimination after mypy typecheck fixes
   safety: isinstance() check converts PipelineRow to dict for audit trail consistency

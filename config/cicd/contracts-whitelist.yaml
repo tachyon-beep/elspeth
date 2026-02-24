@@ -221,9 +221,6 @@ allowed_dict_patterns:
   - "src/elspeth/plugins/llm/templates.py:PromptTemplate.render:row"
   - "src/elspeth/plugins/llm/templates.py:PromptTemplate.render_with_metadata:row"
 
-  # LLM base
-  - "src/elspeth/plugins/llm/base.py:BaseLLMTransform.__init__:config"
-
   # LLM multi-query
   - "src/elspeth/plugins/llm/multi_query.py:QuerySpec.build_template_context:row"
   - "src/elspeth/plugins/llm/multi_query.py:QuerySpec.build_template_context:return"

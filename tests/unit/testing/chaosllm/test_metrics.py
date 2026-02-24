@@ -15,7 +15,6 @@ from elspeth.testing.chaosengine.metrics_store import _get_bucket_utc
 from elspeth.testing.chaosengine.types import MetricsConfig
 from elspeth.testing.chaosllm.metrics import (
     MetricsRecorder,
-    RequestRecord,
     _classify_outcome,
 )
 
@@ -146,55 +145,6 @@ class TestClassifyOutcome:
         result = _classify_outcome("error_malformed", 200, None)
         _, _, _, _, _, _, is_malformed = result
         assert is_malformed is True
-
-
-class TestRequestRecord:
-    """Tests for RequestRecord dataclass."""
-
-    def test_create_minimal_record(self) -> None:
-        """Can create record with minimal required fields."""
-        record = RequestRecord(
-            request_id="abc123",
-            timestamp_utc="2024-01-15T10:30:00+00:00",
-            endpoint="/chat/completions",
-            outcome="success",
-        )
-        assert record.request_id == "abc123"
-        assert record.outcome == "success"
-        assert record.deployment is None
-        assert record.latency_ms is None
-
-    def test_create_full_record(self) -> None:
-        """Can create record with all fields."""
-        record = RequestRecord(
-            request_id="abc123",
-            timestamp_utc="2024-01-15T10:30:00+00:00",
-            endpoint="/chat/completions",
-            outcome="success",
-            deployment="gpt-4",
-            model="gpt-4-0613",
-            status_code=200,
-            error_type=None,
-            latency_ms=150.5,
-            injected_delay_ms=50.0,
-            message_count=3,
-            prompt_tokens_approx=100,
-            response_tokens=50,
-            response_mode="random",
-        )
-        assert record.latency_ms == 150.5
-        assert record.message_count == 3
-
-    def test_record_is_frozen(self) -> None:
-        """Record is immutable."""
-        record = RequestRecord(
-            request_id="abc123",
-            timestamp_utc="2024-01-15T10:30:00+00:00",
-            endpoint="/chat/completions",
-            outcome="success",
-        )
-        with pytest.raises(AttributeError):
-            record.request_id = "different"  # type: ignore[misc]
 
 
 class TestMetricsRecorderBasic:

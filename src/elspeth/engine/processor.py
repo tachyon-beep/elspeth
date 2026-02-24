@@ -271,7 +271,6 @@ class RowProcessor:
         self._token_manager = TokenManager(
             recorder,
             step_resolver=self._step_resolver,
-            payload_store=payload_store,
         )
         self._transform_executor = TransformExecutor(
             recorder,

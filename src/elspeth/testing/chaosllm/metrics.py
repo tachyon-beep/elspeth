@@ -6,7 +6,6 @@ for LLM-specific request recording and outcome classification.
 """
 
 import sqlite3
-from dataclasses import dataclass
 from typing import Any, NamedTuple
 
 from elspeth.testing.chaosengine.metrics_store import MetricsStore
@@ -50,49 +49,6 @@ LLM_METRICS_SCHEMA = MetricsSchema(
         ("idx_requests_endpoint", "endpoint"),
     ),
 )
-
-
-@dataclass(frozen=True, slots=True)
-class RequestRecord:
-    """A single request record for metrics storage.
-
-    This dataclass captures all metrics for a single request to the ChaosLLM
-    server. All fields except request_id and timestamp_utc are optional to
-    accommodate different request types and outcomes.
-
-    Attributes:
-        request_id: Unique identifier for this request
-        timestamp_utc: ISO-formatted timestamp in UTC
-        endpoint: The API endpoint (e.g., '/chat/completions')
-        outcome: Request outcome ('success', 'error_injected', 'error_malformed')
-        deployment: Azure deployment name (optional)
-        model: Model name (optional)
-        status_code: HTTP status code (optional)
-        error_type: Type of error if any (optional)
-        injection_type: Type of injected behavior (optional)
-        latency_ms: Total response latency in milliseconds (optional)
-        injected_delay_ms: Artificial delay injected in milliseconds (optional)
-        message_count: Number of messages in the request (optional)
-        prompt_tokens_approx: Approximate prompt token count (optional)
-        response_tokens: Number of response tokens (optional)
-        response_mode: Response generation mode (optional)
-    """
-
-    request_id: str
-    timestamp_utc: str
-    endpoint: str
-    outcome: str
-    deployment: str | None = None
-    model: str | None = None
-    status_code: int | None = None
-    error_type: str | None = None
-    injection_type: str | None = None
-    latency_ms: float | None = None
-    injected_delay_ms: float | None = None
-    message_count: int | None = None
-    prompt_tokens_approx: int | None = None
-    response_tokens: int | None = None
-    response_mode: str | None = None
 
 
 class OutcomeClassification(NamedTuple):

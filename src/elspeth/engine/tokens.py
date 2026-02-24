@@ -10,10 +10,7 @@ from __future__ import annotations
 __all__ = ["TokenInfo", "TokenManager"]
 
 import copy
-from typing import TYPE_CHECKING, Any
-
-if TYPE_CHECKING:
-    from elspeth.contracts.payload_store import PayloadStore
+from typing import Any
 
 from elspeth.contracts import SourceRow, TokenInfo
 from elspeth.contracts.errors import OrchestrationInvariantError
@@ -58,19 +55,16 @@ class TokenManager:
         recorder: LandscapeRecorder,
         *,
         step_resolver: StepResolver,
-        payload_store: PayloadStore | None = None,
     ) -> None:
-        """Initialize with recorder, step resolver, and optional payload store.
+        """Initialize with recorder and step resolver.
 
         Args:
             recorder: LandscapeRecorder for audit trail
             step_resolver: Callable that resolves NodeID to 1-indexed audit step position.
                 The canonical implementation is RowProcessor._resolve_audit_step_for_node.
-            payload_store: Optional PayloadStore for persisting source row payloads
         """
         self._recorder = recorder
         self._step_resolver = step_resolver
-        self._payload_store = payload_store
 
     def create_initial_token(
         self,
