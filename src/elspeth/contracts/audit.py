@@ -40,7 +40,7 @@ def _validate_enum(value: object, enum_type: type, field_name: str) -> None:
         raise TypeError(f"{field_name} must be {enum_type.__name__}, got {type(value).__name__}: {value!r}")
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, slots=True)
 class Run:
     """A single execution of a pipeline.
 
@@ -67,7 +67,7 @@ class Run:
         _validate_enum(self.export_status, ExportStatus, "export_status")
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, slots=True)
 class Node:
     """A node (plugin instance) in the execution graph.
 
@@ -95,7 +95,7 @@ class Node:
         _validate_enum(self.determinism, Determinism, "determinism")
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, slots=True)
 class Edge:
     """An edge in the execution graph.
 
@@ -115,7 +115,7 @@ class Edge:
         _validate_enum(self.default_mode, RoutingMode, "default_mode")
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, slots=True)
 class Row:
     """A source row loaded into the system."""
 
@@ -128,7 +128,7 @@ class Row:
     source_data_ref: str | None = None
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, slots=True)
 class Token:
     """A row instance flowing through a specific DAG path."""
 
@@ -143,7 +143,7 @@ class Token:
     run_id: str | None = None  # Run ownership — required in DB, optional in dataclass for backwards compat
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, slots=True)
 class TokenParent:
     """Parent relationship for tokens (supports multi-parent joins)."""
 
@@ -152,7 +152,7 @@ class TokenParent:
     ordinal: int
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, slots=True)
 class NodeStateOpen:
     """A node state currently being processed.
 
@@ -173,7 +173,7 @@ class NodeStateOpen:
     context_before_json: str | None = None
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, slots=True)
 class NodeStatePending:
     """A node state where processing completed but output is pending.
 
@@ -200,7 +200,7 @@ class NodeStatePending:
     context_after_json: str | None = None
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, slots=True)
 class NodeStateCompleted:
     """A node state that completed successfully.
 
@@ -226,7 +226,7 @@ class NodeStateCompleted:
     success_reason_json: str | None = None
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, slots=True)
 class NodeStateFailed:
     """A node state that failed during processing.
 
@@ -256,7 +256,7 @@ class NodeStateFailed:
 NodeState = NodeStateOpen | NodeStatePending | NodeStateCompleted | NodeStateFailed
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, slots=True)
 class Call:
     """An external call made during node processing or operation.
 
@@ -290,7 +290,7 @@ class Call:
         _validate_enum(self.status, CallStatus, "status")
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, slots=True)
 class Artifact:
     """An artifact produced by a sink."""
 
@@ -306,7 +306,7 @@ class Artifact:
     idempotency_key: str | None = None  # For retry deduplication
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, slots=True)
 class RoutingEvent:
     """A routing decision at a gate node.
 
@@ -328,7 +328,7 @@ class RoutingEvent:
         _validate_enum(self.mode, RoutingMode, "mode")
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, slots=True)
 class Batch:
     """An aggregation batch collecting tokens.
 
@@ -352,7 +352,7 @@ class Batch:
         _validate_enum(self.trigger_type, TriggerType, "trigger_type")
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, slots=True)
 class BatchMember:
     """A token belonging to a batch."""
 
@@ -361,7 +361,7 @@ class BatchMember:
     ordinal: int
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, slots=True)
 class BatchOutput:
     """An output produced by a batch."""
 
@@ -370,7 +370,7 @@ class BatchOutput:
     output_id: str
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, slots=True)
 class Checkpoint:
     """Checkpoint for crash recovery.
 
@@ -412,7 +412,7 @@ class Checkpoint:
             raise ValueError("checkpoint_node_config_hash is required and cannot be empty")
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, slots=True)
 class RowLineage:
     """Source row with resolved payload for explain output.
 
@@ -463,7 +463,7 @@ class BatchStatusUpdate(TypedDict, total=False):
     aggregation_state_id: str
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, slots=True)
 class ValidationErrorRecord:
     """A validation error recorded in the audit trail.
 
@@ -482,7 +482,7 @@ class ValidationErrorRecord:
     row_data_json: str | None = None
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, slots=True)
 class NonCanonicalMetadata:
     """Metadata for non-canonical data stored in the audit trail.
 
@@ -550,7 +550,7 @@ class NonCanonicalMetadata:
         )
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, slots=True)
 class TransformErrorRecord:
     """A transform processing error recorded in the audit trail.
 
@@ -569,7 +569,7 @@ class TransformErrorRecord:
     error_details_json: str | None = None
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, slots=True)
 class TokenOutcome:
     """Recorded terminal state for a token.
 
