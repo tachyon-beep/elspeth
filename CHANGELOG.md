@@ -8,6 +8,29 @@ All notable changes to ELSPETH are documented here.
 
 4-phase remediation sprint driven by full architecture analysis. Focus: audit integrity hardening, layer enforcement, and elimination of defensive-pattern violations.
 
+### T10: LLM Plugin Consolidation
+
+Collapsed 6 LLM transform classes (~4,950 lines) into a unified `LLMTransform` with provider dispatch, eliminating ~3,300 lines of duplication. Strategy pattern: `LLMProvider` protocol handles transport (Azure SDK vs OpenRouter HTTP), two processing strategies (`SingleQueryStrategy` / `MultiQueryStrategy`) handle row logic, shared `LangfuseTracer` handles tracing.
+
+**Phase A — Extract shared infrastructure (Tasks 1–4):**
+- Extracted `LangfuseTracer` to `plugins/llm/langfuse.py` — deduplicated ~600 lines of Langfuse v3 span/generation recording across 6 transforms into factory-created `ActiveLangfuseTracer` / `NoOpLangfuseTracer`
+- Extracted shared validation to `plugins/llm/validation.py` — `strip_markdown_fences()`, JSON fence detection
+- Extracted prompt template system to `plugins/llm/templates.py` — `PromptTemplate` with file/inline/lookup support and Jinja2 field extraction
+- Wired all 6 existing transforms to use extracted utilities (backward-compatible, no behavior change)
+
+**Phase B — Unified transform (Tasks 5–12):**
+- Created `LLMProvider` protocol (`plugins/llm/provider.py`) with `FinishReason` enum and typed DTOs
+- Implemented `AzureLLMProvider` (`plugins/llm/providers/azure.py`) — wraps OpenAI SDK with Azure Monitor tracing
+- Implemented `OpenRouterLLMProvider` (`plugins/llm/providers/openrouter.py`) — wraps httpx with OpenRouter HTTP API
+- Relocated config models: `AzureOpenAIConfig` → `providers/azure.py`, `OpenRouterConfig` → `providers/openrouter.py`
+- Created unified `LLMTransform` (`plugins/llm/transform.py`) with `_PROVIDERS` registry dispatching to `(ConfigModel, Provider)` pairs by `provider` field
+- Updated plugin registration: `"llm"` registered as single transform name; old names (`azure_llm`, `openrouter_llm`, `azure_multi_query_llm`, `openrouter_multi_query_llm`) raise `ValueError` with migration guidance
+- Migrated full test suite to unified LLMTransform — all test files updated to use `LLMTransform` with provider configs
+- Updated 16 example YAML files: `plugin: azure_llm` → `plugin: llm` + `provider: azure` (batch plugins `azure_batch_llm` / `openrouter_batch_llm` unchanged)
+- Updated 10 documentation files (tier2-tracing, configuration, user-manual, troubleshooting, keyvault runbook, ARCHITECTURE, data-trust, feature-inventory, telemetry, environment-variables)
+- Deleted 5 old source files: `azure.py`, `openrouter.py`, `base_multi_query.py`, `azure_multi_query.py`, `openrouter_multi_query.py`
+- Cleaned 12 stale contracts-whitelist entries and updated scan groups
+
 ### Fixed
 
 - **T1: Frozen audit records** — Added `frozen=True` to all 16 mutable audit record dataclasses (`Run`, `Node`, `Edge`, `Row`, `Token`, `TokenParent`, `Call`, `Artifact`, `RoutingEvent`, `Batch`, `BatchMember`, `BatchOutput`, `Checkpoint`, `RowLineage`, `ValidationErrorRecord`, `TransformErrorRecord`). All 24 dataclasses in `contracts/audit.py` are now frozen. Mutations crash at the mutation site instead of silently corrupting the Tier 1 audit trail.
@@ -40,9 +63,10 @@ All notable changes to ELSPETH are documented here.
 
 ### Tests
 
-- 92 files changed across the branch (12,149 insertions, 278 deletions)
-- 15 test files updated with import corrections and new test coverage
-- Full suite: 9,822 tests passing, mypy/ruff/tier-model/contracts all clean
+- Full suite: 9,976 tests passing, 16 skipped, 3 xfailed — mypy/ruff/tier-model/contracts all clean
+- T10: 10 test files updated with import path migrations from old modules to `providers/`
+- T10: `test_discovery.py` updated — plugin count 17→13, assertions reference unified `llm` + batch plugins
+- T10: `test_contract_validation.py` updated — 5 plugin name references migrated to `"llm"`
 
 ---
 
