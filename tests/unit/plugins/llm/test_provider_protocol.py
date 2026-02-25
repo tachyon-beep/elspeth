@@ -114,17 +114,35 @@ class TestParseFinishReason:
     def test_valid_content_filter(self) -> None:
         assert parse_finish_reason("content_filter") is FinishReason.CONTENT_FILTER
 
-    def test_unknown_logs_warning(self, capsys: pytest.CaptureFixture[str]) -> None:
-        result = parse_finish_reason("end_turn")
-        assert result is None
-        captured = capsys.readouterr()
-        assert "end_turn" in captured.out
+    def test_unknown_logs_warning(
+        self,
+        capsys: pytest.CaptureFixture[str],
+        caplog: pytest.LogCaptureFixture,
+    ) -> None:
+        import logging
 
-    def test_empty_string_logs_warning(self, capsys: pytest.CaptureFixture[str]) -> None:
-        result = parse_finish_reason("")
+        with caplog.at_level(logging.WARNING, logger="elspeth.plugins.llm.provider"):
+            result = parse_finish_reason("end_turn")
         assert result is None
-        captured = capsys.readouterr()
-        assert "Unknown LLM finish_reason" in captured.out
+        # structlog routes to stdout (PrintLogger) in isolation or stdlib logging
+        # in the full suite — check both capture mechanisms
+        stdout_has_it = "end_turn" in capsys.readouterr().out
+        caplog_has_it = any("end_turn" in r.getMessage() for r in caplog.records)
+        assert stdout_has_it or caplog_has_it, "Expected warning about 'end_turn' in structlog output"
+
+    def test_empty_string_logs_warning(
+        self,
+        capsys: pytest.CaptureFixture[str],
+        caplog: pytest.LogCaptureFixture,
+    ) -> None:
+        import logging
+
+        with caplog.at_level(logging.WARNING, logger="elspeth.plugins.llm.provider"):
+            result = parse_finish_reason("")
+        assert result is None
+        stdout_has_it = "finish_reason" in capsys.readouterr().out.lower()
+        caplog_has_it = any("finish_reason" in r.getMessage().lower() for r in caplog.records)
+        assert stdout_has_it or caplog_has_it, "Expected warning about unknown finish_reason in structlog output"
 
 
 class TestLLMProviderProtocol:

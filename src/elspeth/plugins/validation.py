@@ -120,8 +120,8 @@ class PluginConfigValidator:
         Returns:
             List of validation errors (empty if valid)
         """
-        # Get config model for transform type
-        config_model = self._get_transform_config_model(transform_type)
+        # Get config model for transform type (config needed for provider dispatch)
+        config_model = self._get_transform_config_model(transform_type, config)
 
         # Validate using Pydantic
         try:
@@ -215,8 +215,16 @@ class PluginConfigValidator:
         # that should crash immediately per CLAUDE.md - not be silently converted
         # to a "validation error" that hides the real problem.
 
-    def _get_transform_config_model(self, transform_type: str) -> type["PluginConfig"]:
+    def _get_transform_config_model(
+        self,
+        transform_type: str,
+        config: dict[str, Any] | None = None,
+    ) -> type["PluginConfig"]:
         """Get Pydantic config model for transform type.
+
+        Args:
+            transform_type: Plugin type name
+            config: Plugin configuration dict (needed for provider dispatch on "llm")
 
         Returns:
             Config model class for the transform type
@@ -258,30 +266,39 @@ class PluginConfigValidator:
             from elspeth.plugins.transforms.azure.prompt_shield import AzurePromptShieldConfig
 
             return AzurePromptShieldConfig
-        elif transform_type == "azure_llm":
-            from elspeth.plugins.llm.azure import AzureOpenAIConfig
+        elif transform_type == "llm":
+            # Unified LLM plugin — dispatch to provider-specific config
+            from elspeth.plugins.llm.transform import _PROVIDERS
 
-            return AzureOpenAIConfig
+            provider = config["provider"] if config is not None and "provider" in config else None
+            if provider in _PROVIDERS:
+                config_cls, _ = _PROVIDERS[provider]
+                return config_cls
+            elif provider is not None:
+                raise ValueError(f"Unknown LLM provider '{provider}'. Valid providers: {sorted(_PROVIDERS)}")
+            else:
+                # provider missing — let Pydantic catch it with Literal validation
+                from elspeth.plugins.llm.base import LLMConfig
+
+                return LLMConfig
+        elif transform_type in {
+            "azure_llm",
+            "openrouter_llm",
+            "azure_multi_query_llm",
+            "openrouter_multi_query_llm",
+        }:
+            provider = "azure" if "azure" in transform_type else "openrouter"
+            raise ValueError(
+                f"Plugin '{transform_type}' has been replaced by 'llm' with a 'provider' field. Example: plugin: llm, provider: {provider}"
+            )
         elif transform_type == "azure_batch_llm":
             from elspeth.plugins.llm.azure_batch import AzureBatchConfig
 
             return AzureBatchConfig
-        elif transform_type == "azure_multi_query_llm":
-            from elspeth.plugins.llm.multi_query import MultiQueryConfig
-
-            return MultiQueryConfig
-        elif transform_type == "openrouter_llm":
-            from elspeth.plugins.llm.openrouter import OpenRouterConfig
-
-            return OpenRouterConfig
         elif transform_type == "openrouter_batch_llm":
             from elspeth.plugins.llm.openrouter_batch import OpenRouterBatchConfig
 
             return OpenRouterBatchConfig
-        elif transform_type == "openrouter_multi_query_llm":
-            from elspeth.plugins.llm.openrouter_multi_query import OpenRouterMultiQueryConfig
-
-            return OpenRouterMultiQueryConfig
         elif transform_type == "web_scrape":
             from elspeth.plugins.transforms.web_scrape import WebScrapeConfig
 

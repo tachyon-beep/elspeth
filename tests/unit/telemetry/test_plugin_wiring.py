@@ -39,6 +39,17 @@ EXTERNAL_CALL_PLUGINS: dict[str, dict[str, Any]] = {
         "client_type": "AuditedHTTPClient",
         "pattern": "on_start_capture",
     },
+    # Provider implementations (Phase B of T10 LLM consolidation)
+    "src/elspeth/plugins/llm/providers/azure.py": {
+        "class": "AzureLLMProvider",
+        "client_type": "AuditedLLMClient",
+        "pattern": "init_capture",  # Receives run_id/telemetry_emit in __init__
+    },
+    "src/elspeth/plugins/llm/providers/openrouter.py": {
+        "class": "OpenRouterLLMProvider",
+        "client_type": "AuditedHTTPClient",
+        "pattern": "init_capture",  # Receives run_id/telemetry_emit in __init__
+    },
     "src/elspeth/plugins/transforms/azure/content_safety.py": {
         "class": "AzureContentSafety",
         "client_type": "AuditedHTTPClient",
@@ -98,6 +109,12 @@ class TestTelemetryWiring:
             # This pattern passes them directly from PluginContext, not storing on self
             assert "ctx.run_id" in source, f"{plugin_path} must pass ctx.run_id"
             assert "ctx.telemetry_emit" in source, f"{plugin_path} must pass ctx.telemetry_emit"
+
+        elif pattern == "init_capture":
+            # Provider classes receive run_id/telemetry_emit in __init__
+            # and store them for passing to audited clients
+            assert "run_id" in source, f"{plugin_path} must accept run_id in __init__"
+            assert "telemetry_emit" in source, f"{plugin_path} must accept telemetry_emit in __init__"
 
     @pytest.mark.parametrize(
         "plugin_path,config",

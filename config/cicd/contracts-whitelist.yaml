@@ -256,6 +256,12 @@ allowed_dict_patterns:
   # OpenRouter LLM (refactored: PipelineRow is now the row type at plugin boundary)
   - "src/elspeth/plugins/llm/openrouter.py:OpenRouterLLMTransform.__init__:config"
 
+  # Unified LLM transform (T10 consolidation — dispatches to Azure/OpenRouter providers)
+  - "src/elspeth/plugins/llm/transform.py:LLMTransform.__init__:config"
+
+  # Plugin validation dispatcher — config is user YAML (Tier 3 boundary)
+  - "src/elspeth/plugins/validation.py:PluginConfigValidator._get_transform_config_model:config"
+
   # ═══════════════════════════════════════════════════════════════════════════
   # AZURE PLUGINS - External cloud service trust boundary
   # ═══════════════════════════════════════════════════════════════════════════

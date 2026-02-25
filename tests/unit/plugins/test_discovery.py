@@ -166,7 +166,7 @@ class TestDiscoverAllPlugins:
 
         # Expected counts verified during migration from hookimpl files
         EXPECTED_SOURCE_COUNT = 4  # csv, json, null, azure_blob
-        EXPECTED_TRANSFORM_COUNT = 16  # includes json_explode, batch_replicate, keyword_filter, field_mapper, passthrough, truncate, batch_stats, web_scrape, azure_*, openrouter_*
+        EXPECTED_TRANSFORM_COUNT = 17  # includes json_explode, batch_replicate, keyword_filter, field_mapper, passthrough, truncate, batch_stats, web_scrape, azure_*, openrouter_*, llm
         EXPECTED_SINK_COUNT = 4  # csv, json, database, azure_blob
 
         discovered = discover_all_plugins()

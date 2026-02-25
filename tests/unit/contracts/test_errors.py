@@ -113,6 +113,7 @@ class TestTransformSuccessReasonSchema:
                 "fields_removed",
                 "validation_warnings",
                 "metadata",
+                "queries_completed",
             }
         )
 

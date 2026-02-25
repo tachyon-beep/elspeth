@@ -160,6 +160,9 @@ class TransformSuccessReason(TypedDict):
 
     action: str  # Use TransformActionCategory or custom string
 
+    # Multi-query success context
+    queries_completed: NotRequired[int]  # Number of queries completed in multi-query
+
     # Field tracking
     fields_modified: NotRequired[list[str]]
     fields_added: NotRequired[list[str]]
@@ -251,6 +254,7 @@ TransformErrorCategory = Literal[
     "invalid_input",
     # Template errors
     "template_rendering_failed",
+    "template_context_failed",  # Multi-query template context build failed (missing field)
     "all_templates_failed",
     # JSON/response parsing errors
     "json_parse_failed",
@@ -275,6 +279,7 @@ TransformErrorCategory = Literal[
     "all_rows_failed",
     "result_not_found",
     "query_failed",
+    "multi_query_failed",  # Non-retryable LLM error in multi-query (atomic failure)
     "rate_limited",
     # Content extraction errors (Tier 3 boundary - external HTML/text parsing)
     "content_extraction_failed",
@@ -408,6 +413,11 @@ class TransformErrorReason(TypedDict):
 
     # Multi-query/template context
     query: NotRequired[str]
+    query_name: NotRequired[str]  # Named query identifier in multi-query
+    query_index: NotRequired[int]  # Position of query in multi-query sequence
+    failed_query_name: NotRequired[str]  # Name of query that caused atomic failure
+    failed_query_index: NotRequired[int]  # Index of query that caused atomic failure
+    discarded_successful_queries: NotRequired[int]  # Successful queries discarded (atomic failure)
     template_hash: NotRequired[str]
     template_file_path: NotRequired[str]  # Path to template file; absent = inline template
     template_errors: NotRequired[list[TemplateErrorEntry]]
@@ -416,6 +426,7 @@ class TransformErrorReason(TypedDict):
     total_count: NotRequired[int]  # Total number of queries attempted
 
     # LLM response context
+    content_length: NotRequired[int]  # Length of LLM response content
     max_tokens: NotRequired[int]
     completion_tokens: NotRequired[int | None]
     prompt_tokens: NotRequired[int | None]
