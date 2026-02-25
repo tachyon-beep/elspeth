@@ -3289,11 +3289,12 @@ sinks:
 
 transforms:
   - name: t1
-    plugin: openrouter_llm
+    plugin: llm
     input: source_out
     on_success: output
     on_error: discard
     options:
+      provider: openrouter
       model: test
       template_file: prompts/test.j2
       lookup_file: prompts/lookups.yaml

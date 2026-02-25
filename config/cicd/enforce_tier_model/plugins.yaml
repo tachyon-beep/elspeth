@@ -392,12 +392,6 @@ allow_hits:
   owner: architecture
   reason: httpx Client.get() method call — ephemeral client per redirect hop for TLS isolation
   safety: This is the actual external HTTP call, not a defensive dict access
-# multi_query.py — setdefault for prefix collision detection grouping
-- key: plugins/llm/multi_query.py:R8:validate_multi_query_key_collisions:fp=557a18543679da4a
-  owner: bugfix
-  reason: setdefault used for grouping cross-product prefixes to detect collision ambiguity
-  safety: Grouping is deterministic; ValueError raised if collisions found
-  expires: '2026-05-17'
 # pooling/executor.py — RuntimeError on thread pool shutdown during batch submission
 - key: plugins/pooling/executor.py:R6:PooledExecutor:_execute_batch_locked:fp=2b6aaa13ba738c12
   owner: bugfix

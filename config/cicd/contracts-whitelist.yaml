@@ -224,10 +224,6 @@ allowed_dict_patterns:
   # LLM multi-query
   - "src/elspeth/plugins/llm/multi_query.py:QuerySpec.build_template_context:row"
   - "src/elspeth/plugins/llm/multi_query.py:QuerySpec.build_template_context:return"
-  - "src/elspeth/plugins/llm/multi_query.py:CaseStudyConfig.to_template_data:return"
-  - "src/elspeth/plugins/llm/multi_query.py:CriterionConfig.to_template_data:return"
-  - "src/elspeth/plugins/llm/multi_query.py:UnifiedQuerySpec.build_template_context:row"
-  - "src/elspeth/plugins/llm/multi_query.py:UnifiedQuerySpec.build_template_context:return"
   - "src/elspeth/plugins/llm/multi_query.py:resolve_queries:queries"
 
   # LLM tracing — extra_metadata is provider-specific (deployment, model, query keys vary per caller)
@@ -433,9 +429,6 @@ allowed_dict_patterns:
 
   # Multi-query config base (JSON schema building for LLM structured output)
   - "src/elspeth/plugins/llm/multi_query.py:OutputFieldConfig.to_json_schema:return"
-  - "src/elspeth/plugins/llm/multi_query.py:MultiQueryConfigMixin.parse_output_mapping:return"
-  - "src/elspeth/plugins/llm/multi_query.py:MultiQueryConfigMixin.build_json_schema:return"
-  - "src/elspeth/plugins/llm/multi_query.py:MultiQueryConfigMixin.build_response_format:return"
 
   # OpenRouter batch LLM (async batch API)
   - "src/elspeth/plugins/llm/openrouter_batch.py:OpenRouterBatchLLMTransform.__init__:config"

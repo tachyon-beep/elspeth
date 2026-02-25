@@ -1,13 +1,11 @@
 # tests/property/plugins/llm/test_multi_query_properties.py
 """Property-based tests for multi-query pure data transformations.
 
-Tests cover both the legacy QuerySpec (positional mapping) and the new
-UnifiedQuerySpec (named variable mapping) used by the unified LLMTransform:
+Tests cover QuerySpec (named variable mapping) used by the unified LLMTransform:
 
 1. OutputFieldConfig.to_json_schema: type mapping correctness
-2. QuerySpec.build_template_context: positional variable mapping (legacy)
-3. UnifiedQuerySpec.build_template_context: named variable mapping (unified)
-4. OutputFieldConfig validation: enum requires values, others reject values
+2. QuerySpec.build_template_context: named variable mapping
+3. OutputFieldConfig validation: enum requires values, others reject values
 """
 
 from __future__ import annotations
@@ -20,7 +18,6 @@ from elspeth.plugins.llm.multi_query import (
     OutputFieldConfig,
     OutputFieldType,
     QuerySpec,
-    UnifiedQuerySpec,
 )
 
 # =============================================================================
@@ -102,130 +99,14 @@ class TestOutputFieldSchemaProperties:
 
 
 # =============================================================================
-# QuerySpec.build_template_context Properties (Legacy Positional Mapping)
+# QuerySpec.build_template_context Properties (Named Mapping)
 # =============================================================================
 
 
 class TestQuerySpecContextProperties:
-    """build_template_context must create correct positional mappings."""
-
-    @given(
-        n_fields=st.integers(min_value=1, max_value=5),
-        data=st.data(),
-    )
-    @settings(max_examples=100)
-    def test_positional_mapping(self, n_fields: int, data: st.DataObject) -> None:
-        """Property: input_fields[i] maps to context['input_{i+1}']."""
-        names = data.draw(st.lists(field_names, min_size=n_fields, max_size=n_fields, unique=True))
-        values = data.draw(st.lists(string_values, min_size=n_fields, max_size=n_fields))
-        row = dict(zip(names, values, strict=False))
-
-        spec = QuerySpec(
-            case_study_name="cs1",
-            criterion_name="cr1",
-            input_fields=names,
-            output_prefix="cs1_cr1",
-            criterion_data={"name": "cr1"},
-            case_study_data={"name": "cs1"},
-        )
-
-        ctx = spec.build_template_context(row)
-
-        for i, name in enumerate(names, start=1):
-            assert f"input_{i}" in ctx
-            assert ctx[f"input_{i}"] == row[name]
-
-    @given(data=st.data())
-    @settings(max_examples=50)
-    def test_context_includes_criterion_and_case_study(self, data: st.DataObject) -> None:
-        """Property: Context always includes criterion and case_study dicts."""
-        name = data.draw(field_names)
-        row = {name: "value"}
-        criterion_data = {"name": "test_criterion"}
-        case_study_data = {"name": "test_case_study"}
-
-        spec = QuerySpec(
-            case_study_name="cs1",
-            criterion_name="cr1",
-            input_fields=[name],
-            output_prefix="cs1_cr1",
-            criterion_data=criterion_data,
-            case_study_data=case_study_data,
-        )
-
-        ctx = spec.build_template_context(row)
-        assert ctx["criterion"] == criterion_data
-        assert ctx["case_study"] == case_study_data
-
-    @given(data=st.data())
-    @settings(max_examples=50)
-    def test_context_includes_full_row(self, data: st.DataObject) -> None:
-        """Property: Context['source_row'] contains the full original row."""
-        name = data.draw(field_names)
-        value = data.draw(string_values)
-        row = {name: value}
-
-        spec = QuerySpec(
-            case_study_name="cs1",
-            criterion_name="cr1",
-            input_fields=[name],
-            output_prefix="cs1_cr1",
-            criterion_data={},
-            case_study_data={},
-        )
-
-        ctx = spec.build_template_context(row)
-        assert ctx["source_row"] == row
-
-    def test_missing_field_raises_key_error(self) -> None:
-        """Property: Missing required field raises KeyError."""
-        spec = QuerySpec(
-            case_study_name="cs1",
-            criterion_name="cr1",
-            input_fields=["required_field"],
-            output_prefix="cs1_cr1",
-            criterion_data={},
-            case_study_data={},
-        )
-
-        with pytest.raises(KeyError, match="required_field"):
-            spec.build_template_context({"other_field": "value"})
-
-    @given(
-        n_fields=st.integers(min_value=1, max_value=5),
-        data=st.data(),
-    )
-    @settings(max_examples=50)
-    def test_context_has_exactly_expected_keys(self, n_fields: int, data: st.DataObject) -> None:
-        """Property: Context has input_N, criterion, case_study, and source_row only."""
-        names = data.draw(st.lists(field_names, min_size=n_fields, max_size=n_fields, unique=True))
-        row = dict.fromkeys(names, "v")
-
-        spec = QuerySpec(
-            case_study_name="cs1",
-            criterion_name="cr1",
-            input_fields=names,
-            output_prefix="cs1_cr1",
-            criterion_data={},
-            case_study_data={},
-        )
-
-        ctx = spec.build_template_context(row)
-
-        expected_keys = {f"input_{i}" for i in range(1, n_fields + 1)}
-        expected_keys |= {"criterion", "case_study", "source_row"}
-        assert set(ctx.keys()) == expected_keys
-
-
-# =============================================================================
-# UnifiedQuerySpec.build_template_context Properties (New Named Mapping)
-# =============================================================================
-
-
-class TestUnifiedQuerySpecContextProperties:
     """build_template_context must create correct named variable mappings.
 
-    UnifiedQuerySpec uses named input_fields (dict mapping template variable
+    QuerySpec uses named input_fields (dict mapping template variable
     name to row column name) instead of positional input_1, input_2 variables.
     """
 
@@ -246,7 +127,7 @@ class TestUnifiedQuerySpecContextProperties:
         # Build input_fields mapping: template_var -> column_name
         input_fields = dict(zip(template_vars, column_names, strict=False))
 
-        spec = UnifiedQuerySpec(
+        spec = QuerySpec(
             name="test_query",
             input_fields=input_fields,
         )
@@ -266,7 +147,7 @@ class TestUnifiedQuerySpecContextProperties:
         value = data.draw(string_values)
         row = {column_name: value}
 
-        spec = UnifiedQuerySpec(
+        spec = QuerySpec(
             name="test_query",
             input_fields={"var": column_name},
         )
@@ -276,7 +157,7 @@ class TestUnifiedQuerySpecContextProperties:
 
     def test_missing_column_raises_key_error(self) -> None:
         """Property: Missing row column raises KeyError."""
-        spec = UnifiedQuerySpec(
+        spec = QuerySpec(
             name="test_query",
             input_fields={"template_var": "missing_column"},
         )
@@ -297,7 +178,7 @@ class TestUnifiedQuerySpecContextProperties:
 
         input_fields = dict(zip(template_vars, column_names, strict=False))
 
-        spec = UnifiedQuerySpec(
+        spec = QuerySpec(
             name="test_query",
             input_fields=input_fields,
         )
@@ -310,7 +191,7 @@ class TestUnifiedQuerySpecContextProperties:
     def test_empty_name_rejected(self) -> None:
         """Property: Empty name raises ValueError."""
         with pytest.raises(ValueError, match="non-empty"):
-            UnifiedQuerySpec(
+            QuerySpec(
                 name="",
                 input_fields={"var": "col"},
             )
@@ -318,7 +199,7 @@ class TestUnifiedQuerySpecContextProperties:
     def test_empty_input_fields_rejected(self) -> None:
         """Property: Empty input_fields raises ValueError."""
         with pytest.raises(ValueError, match="non-empty"):
-            UnifiedQuerySpec(
+            QuerySpec(
                 name="test_query",
                 input_fields={},
             )

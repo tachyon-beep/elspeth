@@ -6,8 +6,7 @@ Each test class corresponds to one bug fix:
 2. OpenRouter batch HTTP clients never evicted per batch
 3. Base LLM transform output schema diverges from output_schema_config
 4. Terminal batch failures clear checkpoint without per-row LLM call recording
-5. Multi-query cross-product output prefix collisions
-6. enable_content_recording accepted but never applied
+5. enable_content_recording accepted but never applied
 """
 
 from __future__ import annotations
@@ -18,8 +17,6 @@ from unittest.mock import Mock, patch
 
 if TYPE_CHECKING:
     from elspeth.contracts.batch_checkpoint import BatchCheckpointState
-
-import pytest
 
 from elspeth.contracts import CallStatus, CallType
 from elspeth.contracts.plugin_context import PluginContext
@@ -518,127 +515,7 @@ class TestAzureBatchTerminalFailureCallRecording:
 
 
 # ---------------------------------------------------------------------------
-# Bug 5: Multi-query cross-product output prefix collisions
-# ---------------------------------------------------------------------------
-
-
-class TestMultiQueryPrefixCollisions:
-    """Regression: cross-product prefixes must be unique.
-
-    The prefix f"{case_study.name}_{criterion.name}" can collide when names
-    contain underscores. E.g., ("a_b", "c") and ("a", "b_c") both produce "a_b_c".
-    """
-
-    def test_ambiguous_underscore_collision_rejected(self) -> None:
-        """Config with delimiter-ambiguous names that produce same prefix is rejected."""
-        from elspeth.plugins.config_base import PluginConfigError
-        from elspeth.plugins.llm.multi_query import MultiQueryConfig
-
-        config = {
-            "deployment_name": "gpt-4o",
-            "endpoint": "https://test.openai.azure.com",
-            "api_key": "test-key",
-            "template": "Input: {{ row.input_1 }}",
-            "system_prompt": "JSON.",
-            "case_studies": [
-                {"name": "a_b", "input_fields": ["f1"]},
-                {"name": "a", "input_fields": ["f1"]},
-            ],
-            "criteria": [
-                {"name": "c", "code": "C"},
-                {"name": "b_c", "code": "BC"},
-            ],
-            "response_format": "standard",
-            "output_mapping": {
-                "score": {"suffix": "score", "type": "integer"},
-            },
-            "schema": DYNAMIC_SCHEMA,
-            "required_input_fields": [],
-        }
-
-        with pytest.raises(PluginConfigError, match="prefix collision"):
-            MultiQueryConfig.from_dict(config)
-
-    def test_non_ambiguous_names_accepted(self) -> None:
-        """Config with non-ambiguous names passes validation."""
-        from elspeth.plugins.llm.multi_query import MultiQueryConfig
-
-        config = {
-            "deployment_name": "gpt-4o",
-            "endpoint": "https://test.openai.azure.com",
-            "api_key": "test-key",
-            "template": "Input: {{ row.input_1 }}",
-            "system_prompt": "JSON.",
-            "case_studies": [
-                {"name": "alpha", "input_fields": ["f1"]},
-                {"name": "beta", "input_fields": ["f1"]},
-            ],
-            "criteria": [
-                {"name": "score", "code": "S"},
-                {"name": "quality", "code": "Q"},
-            ],
-            "response_format": "standard",
-            "output_mapping": {
-                "score": {"suffix": "score", "type": "integer"},
-            },
-            "schema": DYNAMIC_SCHEMA,
-            "required_input_fields": [],
-        }
-
-        # Should not raise
-        parsed = MultiQueryConfig.from_dict(config)
-        assert len(parsed.case_studies) == 2
-
-    def test_validate_function_directly(self) -> None:
-        """validate_multi_query_key_collisions catches prefix collisions."""
-        from elspeth.plugins.llm.multi_query import (
-            CaseStudyConfig,
-            CriterionConfig,
-            OutputFieldConfig,
-            validate_multi_query_key_collisions,
-        )
-
-        case_studies = [
-            CaseStudyConfig.from_dict({"name": "x_y", "input_fields": ["f"]}),
-            CaseStudyConfig.from_dict({"name": "x", "input_fields": ["f"]}),
-        ]
-        criteria = [
-            CriterionConfig.from_dict({"name": "z"}),
-            CriterionConfig.from_dict({"name": "y_z"}),
-        ]
-        output_mapping = {
-            "s": OutputFieldConfig.from_dict({"suffix": "s", "type": "integer"}),
-        }
-
-        with pytest.raises(ValueError, match="prefix collision"):
-            validate_multi_query_key_collisions(case_studies, criteria, output_mapping)
-
-    def test_same_prefix_from_identical_pair_is_prevented_by_name_uniqueness(self) -> None:
-        """Duplicate case_study or criterion names are caught separately."""
-        from elspeth.plugins.llm.multi_query import (
-            CaseStudyConfig,
-            CriterionConfig,
-            OutputFieldConfig,
-            validate_multi_query_key_collisions,
-        )
-
-        case_studies = [
-            CaseStudyConfig.from_dict({"name": "cs1", "input_fields": ["f"]}),
-            CaseStudyConfig.from_dict({"name": "cs1", "input_fields": ["f"]}),
-        ]
-        criteria = [
-            CriterionConfig.from_dict({"name": "crit1"}),
-        ]
-        output_mapping = {
-            "s": OutputFieldConfig.from_dict({"suffix": "s", "type": "integer"}),
-        }
-
-        with pytest.raises(ValueError, match="Duplicate case_study name"):
-            validate_multi_query_key_collisions(case_studies, criteria, output_mapping)
-
-
-# ---------------------------------------------------------------------------
-# Bug 6: enable_content_recording accepted but never applied
+# Bug 5: enable_content_recording accepted but never applied
 # ---------------------------------------------------------------------------
 
 

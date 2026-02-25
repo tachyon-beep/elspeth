@@ -39,7 +39,7 @@ from elspeth.plugins.llm import (
 )
 from elspeth.plugins.llm.base import LLMConfig
 from elspeth.plugins.llm.langfuse import LangfuseTracer, create_langfuse_tracer
-from elspeth.plugins.llm.multi_query import UnifiedQuerySpec, resolve_queries
+from elspeth.plugins.llm.multi_query import QuerySpec, resolve_queries
 from elspeth.plugins.llm.provider import FinishReason, LLMProvider
 from elspeth.plugins.llm.providers.azure import AzureLLMProvider, AzureOpenAIConfig
 from elspeth.plugins.llm.providers.openrouter import OpenRouterConfig, OpenRouterLLMProvider
@@ -241,7 +241,7 @@ class SingleQueryStrategy:
 class MultiQueryStrategy:
     """Execute multiple queries per row with atomic failure semantics."""
 
-    query_specs: list[UnifiedQuerySpec]
+    query_specs: list[QuerySpec]
     template: PromptTemplate
     system_prompt: str | None
     system_prompt_source: str | None

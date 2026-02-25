@@ -187,30 +187,30 @@ class TestQuerySpec:
     """Tests for the new domain-agnostic QuerySpec."""
 
     def test_post_init_rejects_empty_name(self) -> None:
-        from elspeth.plugins.llm.multi_query import UnifiedQuerySpec
+        from elspeth.plugins.llm.multi_query import QuerySpec
 
         with pytest.raises(ValueError, match="name must be non-empty"):
-            UnifiedQuerySpec(name="", input_fields={"text": "text"})
+            QuerySpec(name="", input_fields={"text": "text"})
 
     def test_post_init_rejects_empty_input_fields(self) -> None:
-        from elspeth.plugins.llm.multi_query import UnifiedQuerySpec
+        from elspeth.plugins.llm.multi_query import QuerySpec
 
         with pytest.raises(ValueError, match="input_fields must be non-empty"):
-            UnifiedQuerySpec(name="q1", input_fields={})
+            QuerySpec(name="q1", input_fields={})
 
     def test_frozen(self) -> None:
         from dataclasses import FrozenInstanceError
 
-        from elspeth.plugins.llm.multi_query import UnifiedQuerySpec
+        from elspeth.plugins.llm.multi_query import QuerySpec
 
-        spec = UnifiedQuerySpec(name="q1", input_fields={"text": "text_col"})
+        spec = QuerySpec(name="q1", input_fields={"text": "text_col"})
         with pytest.raises(FrozenInstanceError):
             spec.name = "modified"  # type: ignore[misc]
 
     def test_defaults(self) -> None:
-        from elspeth.plugins.llm.multi_query import ResponseFormat, UnifiedQuerySpec
+        from elspeth.plugins.llm.multi_query import QuerySpec, ResponseFormat
 
-        spec = UnifiedQuerySpec(name="q1", input_fields={"text": "text_col"})
+        spec = QuerySpec(name="q1", input_fields={"text": "text_col"})
         assert spec.response_format == ResponseFormat.STANDARD
         assert spec.output_fields is None
         assert spec.template is None
@@ -218,9 +218,9 @@ class TestQuerySpec:
 
     def test_build_template_context_named_variables(self) -> None:
         """Named input_fields map to template variables directly."""
-        from elspeth.plugins.llm.multi_query import UnifiedQuerySpec
+        from elspeth.plugins.llm.multi_query import QuerySpec
 
-        spec = UnifiedQuerySpec(
+        spec = QuerySpec(
             name="q1",
             input_fields={"text_content": "text", "category_name": "category"},
         )
@@ -232,9 +232,9 @@ class TestQuerySpec:
         assert ctx["source_row"] is row
 
     def test_build_template_context_missing_field_raises(self) -> None:
-        from elspeth.plugins.llm.multi_query import UnifiedQuerySpec
+        from elspeth.plugins.llm.multi_query import QuerySpec
 
-        spec = UnifiedQuerySpec(
+        spec = QuerySpec(
             name="q1",
             input_fields={"text_content": "text"},
         )
@@ -280,10 +280,10 @@ class TestResolveQueries:
         assert names == {"q1", "q2"}
 
     def test_list_normalization(self) -> None:
-        from elspeth.plugins.llm.multi_query import UnifiedQuerySpec, resolve_queries
+        from elspeth.plugins.llm.multi_query import QuerySpec, resolve_queries
 
         specs = [
-            UnifiedQuerySpec(name="q1", input_fields={"text": "text_col"}),
+            QuerySpec(name="q1", input_fields={"text": "text_col"}),
         ]
         result = resolve_queries(specs)
         assert len(result) == 1

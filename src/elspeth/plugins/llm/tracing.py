@@ -16,8 +16,9 @@ Supported Providers:
 
 Example YAML Configuration:
     transforms:
-      - plugin: azure_llm
+      - plugin: llm
         options:
+          provider: azure
           deployment_name: gpt-4
           endpoint: ${AZURE_OPENAI_ENDPOINT}
           api_key: ${AZURE_OPENAI_KEY}
