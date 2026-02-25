@@ -227,6 +227,14 @@ allowed_dict_patterns:
   - "src/elspeth/plugins/llm/multi_query.py:CaseStudyConfig.to_template_data:return"
   - "src/elspeth/plugins/llm/multi_query.py:CriterionConfig.to_template_data:return"
 
+  # LLM tracing — extra_metadata is provider-specific (deployment, model, query keys vary per caller)
+  - "src/elspeth/plugins/llm/langfuse.py:LangfuseTracer.record_success:extra_metadata"
+  - "src/elspeth/plugins/llm/langfuse.py:LangfuseTracer.record_error:extra_metadata"
+  - "src/elspeth/plugins/llm/langfuse.py:NoOpLangfuseTracer.record_success:extra_metadata"
+  - "src/elspeth/plugins/llm/langfuse.py:NoOpLangfuseTracer.record_error:extra_metadata"
+  - "src/elspeth/plugins/llm/langfuse.py:ActiveLangfuseTracer.record_success:extra_metadata"
+  - "src/elspeth/plugins/llm/langfuse.py:ActiveLangfuseTracer.record_error:extra_metadata"
+
   # LLM tracing config
   - "src/elspeth/plugins/llm/tracing.py:parse_tracing_config:config"
 

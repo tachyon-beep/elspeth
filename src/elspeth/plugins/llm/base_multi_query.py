@@ -26,6 +26,7 @@ from elspeth.plugins.base import BaseTransform
 from elspeth.plugins.batching import BatchTransformMixin, OutputPort
 from elspeth.plugins.clients.llm import LLMClientError
 from elspeth.plugins.llm import get_llm_audit_fields, get_multi_query_guaranteed_fields
+from elspeth.plugins.llm.langfuse import ActiveLangfuseTracer, LangfuseTracer, create_langfuse_tracer
 from elspeth.plugins.llm.multi_query import OutputFieldConfig, OutputFieldType, QuerySpec, ResponseFormat
 from elspeth.plugins.llm.templates import PromptTemplate
 from elspeth.plugins.llm.tracing import LangfuseTracingConfig, TracingConfig, parse_tracing_config
@@ -153,8 +154,13 @@ class BaseMultiQueryTransform(BaseTransform, BatchTransformMixin, ABC):
 
         # Tier 2: Plugin-internal tracing
         self._tracing_config: TracingConfig | None = parse_tracing_config(cfg.tracing)
-        self._tracing_active: bool = False
-        self._langfuse_client: Any = None
+        self._tracer: LangfuseTracer = create_langfuse_tracer(
+            transform_name=self.name,
+            tracing_config=self._tracing_config,
+        )
+        # TODO(T10-phase-b): remove bridge — _record_row_langfuse_trace should use self._tracer
+        self._tracing_active: bool = isinstance(self._tracer, ActiveLangfuseTracer)
+        self._langfuse_client: Any = self._tracer.client if isinstance(self._tracer, ActiveLangfuseTracer) else None
 
         # Batch processing state (initialized by connect_output)
         self._batch_initialized = False
@@ -242,8 +248,7 @@ class BaseMultiQueryTransform(BaseTransform, BatchTransformMixin, ABC):
 
     def close(self) -> None:
         """Release resources and flush tracing."""
-        if self._tracing_active:
-            self._flush_tracing()
+        self._tracer.flush()
 
         if self._batch_initialized:
             self.shutdown_batch_processing()
@@ -541,19 +546,6 @@ class BaseMultiQueryTransform(BaseTransform, BatchTransformMixin, ABC):
                 return f"value '{value}' not in allowed values: {field_config.values}"
 
         return None
-
-    def _flush_tracing(self) -> None:
-        """Flush any pending tracing data."""
-        import structlog
-
-        logger = structlog.get_logger(__name__)
-
-        if self._langfuse_client is not None:
-            try:
-                self._langfuse_client.flush()
-                logger.debug("Langfuse tracing flushed")
-            except Exception as e:
-                logger.warning("Failed to flush Langfuse tracing", error=str(e))
 
     # ------------------------------------------------------------------
     # Overridable hook: row-level Langfuse tracing

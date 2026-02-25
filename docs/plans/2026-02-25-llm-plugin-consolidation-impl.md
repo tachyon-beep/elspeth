@@ -346,7 +346,7 @@ Four duplicated patterns to extract:
 1. Template rendering error handling (4 instances across azure.py:434, openrouter.py:512, azure_multi_query.py:207, openrouter_multi_query.py:218)
 2. Truncation detection (2 instances: azure_multi_query.py:284, openrouter_multi_query.py:346)
 3. Markdown fence stripping (2 instances: azure_multi_query.py:330, openrouter_multi_query.py:367)
-4. OpenRouter HTTP response parsing (~60 lines: NaN-safe JSON parse via `_reject_nonfinite_constant`, `choices[0]["message"]["content"]` extraction, null content check, usage normalization). Extract as `parse_llm_json_response()` so `OpenRouterLLMProvider` in Phase B can use the shared helper rather than re-duplicating.
+4. ~~OpenRouter HTTP response parsing~~ **Deferred to Phase B (Task 7).** The `parse_llm_json_response()` helper (~60 lines: NaN-safe JSON parse via `_reject_nonfinite_constant`, `choices[0]["message"]["content"]` extraction, null content check, usage normalization) is only needed by `OpenRouterLLMProvider`. Extracting it in Phase A would create an untested helper with no caller — implement it alongside the provider in Task 7 instead.
 
 **Step 1: Write failing tests**
 
@@ -371,11 +371,7 @@ Tests to write:
 - `test_strip_markdown_fences_trailing_whitespace_after_closing_fence` — verify "```json\n{}\n``` " (trailing space) handled
 - `test_strip_markdown_fences_no_closing_fence` — verify content after opening fence is still returned
 - `test_strip_markdown_fences_no_newline_after_opening` — verify ` ```json ` with no body returns as-is
-- `test_parse_llm_json_response_valid` — returns parsed dict, content, usage
-- `test_parse_llm_json_response_rejects_nan` — verify NaN in response body rejected
-- `test_parse_llm_json_response_null_content_raises` — verify ContentPolicyError
-- `test_parse_llm_json_response_non_string_content_raises` — verify LLMClientError
-- `test_parse_llm_json_response_missing_choices_raises` — verify malformed response
+- ~~`test_parse_llm_json_response_*`~~ — **Deferred to Phase B Task 7** (see item 4 above)
 
 **Step 2: Run tests to verify they fail**
 
@@ -620,9 +616,11 @@ Tests:
 - `test_llm_query_result_post_init_rejects_empty_content` — verify `__post_init__` raises ValueError on `content=""`
 - `test_llm_query_result_post_init_rejects_whitespace_content` — verify `__post_init__` raises ValueError on `content="   "` (whitespace-only is functionally empty)
 - `test_llm_query_result_post_init_rejects_empty_model` — verify `__post_init__` raises ValueError on `model=""`
+- `test_llm_query_result_post_init_rejects_whitespace_model` — verify `__post_init__` raises ValueError on `model="   "` (whitespace-only, same pattern as content validation)
 - `test_finish_reason_enum_values` — verify stop, length, content_filter, tool_calls
 - `test_finish_reason_from_string` — verify FinishReason("stop") works
 - `test_parse_finish_reason_unknown_logs_warning` — verify unknown values like "end_turn" log a warning and return None (not silently dropped)
+- `test_parse_finish_reason_empty_string_logs_warning` — verify `parse_finish_reason("")` logs warning and returns None (empty string is not a valid FinishReason)
 - `test_llm_provider_protocol_is_runtime_checkable` — verify isinstance works
 - `test_mock_provider_satisfies_protocol` — create mock implementing protocol, verify isinstance
 
@@ -701,8 +699,9 @@ class LLMQueryResult:
     Usage is normalized via TokenUsage.known/unknown.
 
     NOTE: raw_response is NOT included here. Providers own audit recording
-    via their Audited*Client and record_call() — the raw SDK/HTTP response
-    stays within the provider boundary (D2 principle).
+    via their Audited*Client (chat_completion/post methods record internally
+    via their Landscape recorder) — the raw SDK/HTTP response stays within
+    the provider boundary (D2 principle).
     """
     content: str
     usage: TokenUsage
@@ -772,7 +771,7 @@ The Azure provider is thin — it wraps the existing `AuditedLLMClient` (in `plu
 - The provider re-raises the same typed exceptions (RateLimitError, ContentPolicyError, etc.)
 - Azure AI tracing auto-instrumentation is set up in `on_start()`, NOT in provider `__init__`. The provider creates transport; tracing config belongs to the transform lifecycle.
 - **Finish reason normalization happens here** at the Tier 3 boundary: Azure returns standard OpenAI finish_reason values ("stop", "length", "content_filter"), so `parse_finish_reason()` should handle them directly. If Azure introduces new values, they'll be logged and returned as None.
-- raw_response stays within the provider — it goes to `record_call()` on the AuditedLLMClient, NOT into LLMQueryResult
+- raw_response stays within the provider — it is recorded internally by `AuditedLLMClient.chat_completion()` via its Landscape recorder, NOT passed into LLMQueryResult
 
 **Tests:**
 - `test_execute_query_returns_llm_query_result` — mock AuditedLLMClient, verify correct mapping, verify NO raw_response field
@@ -782,6 +781,8 @@ The Azure provider is thin — it wraps the existing `AuditedLLMClient` (in `plu
 - `test_execute_query_propagates_content_policy_error`
 - `test_execute_query_timeout` — verify httpx.TimeoutException → NetworkError mapping
 - `test_client_cached_per_state_id` — verify same state_id returns same client
+- `test_concurrent_client_creation_same_state_id` — 50 threads racing to create a client for the same state_id, verify exactly one client instance created (mirrors existing `TestAzureClientThreadSafety` pattern)
+- `test_state_id_snapshot_used_not_mutable_ref` — mutate `state_id` parameter after `execute_query()` begins, verify the provider uses the original snapshot value in audit recording and client cache (prevents the openrouter.py bug where `ctx.state_id` was read in `finally` block)
 - `test_close_clears_clients`
 - `test_azure_ai_tracing_setup_in_on_start` — verify _configure_azure_monitor called in lifecycle, not provider init
 
@@ -803,14 +804,14 @@ The OpenRouter provider is thicker — it does raw HTTP and all Tier 3 validatio
 
 **Key implementation details:**
 - Client caching per-state_id with threading.Lock (matches openrouter.py pattern)
-- JSON parsing with `_reject_nonfinite_constant` from validation.py
+- JSON parsing with `reject_nonfinite_constant` from validation.py
 - Content extraction: `data["choices"][0]["message"]["content"]` with validation wrapping
 - Null content check → ContentPolicyError
 - Non-finite usage validation
 - HTTP status code → typed exception mapping (429→RateLimitError, 5xx→ServerError, non-429 4xx→LLMClientError)
 - Uses AuditedHTTPClient for audit recording
 - **Finish reason normalization:** OpenRouter passes through the upstream provider's finish_reason. Some models return non-standard values. The provider calls `parse_finish_reason()` which logs unknown values and returns None.
-- raw_response goes to `record_call()` on AuditedHTTPClient, NOT into LLMQueryResult
+- raw_response stays within the provider — it is recorded internally by `AuditedHTTPClient.post()` via its Landscape recorder, NOT passed into LLMQueryResult
 
 **Tests (use ChaosLLM fixtures from conftest):**
 - `test_execute_query_parses_json_response` — mock HTTP, verify LLMQueryResult fields, verify NO raw_response
@@ -825,7 +826,12 @@ The OpenRouter provider is thicker — it does raw HTTP and all Tier 3 validatio
 - `test_execute_query_timeout_raises_network_error` — mock httpx.TimeoutException
 - `test_execute_query_4xx_raises_llm_client_error` — mock non-429 4xx (uses LLMClientError, not LLMCallError)
 - `test_client_cached_per_state_id`
+- `test_concurrent_client_creation_same_state_id` — 50 threads racing to create a client for the same state_id, verify exactly one client instance created
+- `test_state_id_snapshot_used_not_mutable_ref` — mutate `state_id` parameter after `execute_query()` begins, verify the provider uses the original snapshot value in audit recording and client cache (prevents the openrouter.py bug where `ctx.state_id` was read in `finally` block)
+- `test_execute_query_empty_choices_raises` — mock HTTP response with `choices=[]` (empty list), verify LLMClientError raised (distinct from null content)
 - `test_close_clears_clients`
+
+**Note:** Task 6 and Task 7 test fixtures should use explicit `model="gpt-4o"` in provider config dicts rather than relying on `LLMConfig.model` being required, since Task 8 changes `model` to optional. This prevents test breakage when Task 8 runs.
 
 **Step N: Commit**
 
@@ -882,6 +888,7 @@ Add: `QuerySpecBody` (Pydantic model for dict-keyed config parsing), `resolve_qu
 2. Detect output field key collisions across queries (e.g. two queries both producing `score` field)
 3. Warn on reserved output suffixes (`_error`, `_metadata`, `_raw`) that conflict with ELSPETH internals
 4. Return `list[QuerySpec]` — single query returns a 1-element list (MultiQueryStrategy still applies if `queries` was explicitly configured)
+5. Scan template strings for old positional pattern `{{ input_\d+ }}` and raise `ValueError` with migration-specific message: "Template uses positional variables ({{ input_1 }}). Migrate to named variables matching input_fields keys."
 
 **Schema change note for `model` field:**
 The `model` field on `LLMConfig` changes from `model: str` (required) to `model: str | None = None` (optional). This is because Azure uses `deployment_name` instead. Provider-specific config classes (`AzureOpenAIConfig`, `OpenRouterConfig`) enforce their own requirements:
@@ -906,6 +913,8 @@ class OpenRouterConfig(LLMConfig):
 
 These can live in the provider files or a shared `configs.py` — decide during implementation based on import dependencies.
 
+**Batch config impact:** `OpenRouterBatchConfig` (in `openrouter_batch.py`) inherits from `LLMConfig` and requires `model` to be non-None. Since batch files are NOT part of this consolidation, Task 8 must add an explicit `model: str` field override on `OpenRouterBatchConfig` to preserve its existing validation. Add test: `test_openrouter_batch_config_rejects_none_model`.
+
 **Tests:**
 - Existing config validation tests need migration
 - `test_query_spec_post_init_rejects_empty_name` — verify ValueError on `name=""`
@@ -918,6 +927,8 @@ These can live in the provider files or a shared `configs.py` — decide during 
 - `test_azure_config_requires_deployment_name` — verify AzureOpenAIConfig validation
 - `test_openrouter_config_requires_model` — verify OpenRouterConfig validates non-None model
 - `test_base_llm_config_model_optional` — verify `model: str | None = None` on base LLMConfig
+- `test_openrouter_batch_config_rejects_none_model` — verify `OpenRouterBatchConfig(model=None, ...)` raises ValidationError
+- `test_resolve_queries_rejects_positional_template_variables` — template with `{{ input_1 }}` raises ValueError with migration guidance message
 
 **Step N: Commit**
 
@@ -965,7 +976,7 @@ class LLMTransform(BaseTransform, BatchTransformMixin):
             )
         config_cls, provider_cls = _PROVIDERS[provider_name]
         # Parse config with provider-specific model
-        self._config = config_cls(**config)
+        self._config = config_cls.from_dict(config)
         self._provider = provider_cls(self._config, ...)
         # Factory returns frozen ActiveLangfuseTracer or NoOpLangfuseTracer
         self._tracer = create_langfuse_tracer(
@@ -992,15 +1003,19 @@ Strategy selection: if `queries` is explicitly provided (even with one entry), u
 - `test_strategy_type_is_single_query_when_no_queries` — assert `isinstance(transform._strategy, SingleQueryStrategy)`
 - Provider dispatch: verify "azure" creates AzureLLMProvider, "openrouter" creates OpenRouterLLMProvider
 - Unknown provider: verify helpful error message listing valid providers
-- Error handling: verify all exception types map to correct TransformResult (RateLimitError→retryable, ContentPolicyError→not retryable, LLMClientError→not retryable)
+- Error handling: verify all exception types map to correct TransformResult (RateLimitError→retryable, NetworkError→retryable, ServerError→retryable, ContentPolicyError→not retryable, ContextLengthError→not retryable, LLMClientError→not retryable)
+- `test_error_classification_context_length_error` — verify ContextLengthError maps to non-retryable TransformResult with reason "context_length_exceeded" (5th exception type from `plugins/clients/llm.py`, currently missing from the plan)
 - Contract propagation: verify single-query uses propagate_contract, multi-query builds OBSERVED
 - Truncation: verify truncated responses (finish_reason=LENGTH) return error
 - Fence stripping: verify markdown fences stripped in STANDARD mode
 - `test_tracer_is_noop_when_no_tracing_config` — verify NoOpLangfuseTracer used
 - `test_tracer_is_active_when_langfuse_configured` — verify ActiveLangfuseTracer used
 - `test_multi_query_partial_failure_discards_successful_results` — mock 4 queries where query 3 raises LLMClientError, verify TransformResult is error and output row has NO fields from successful queries (audit integrity)
+    The error reason dict MUST include: (a) which query failed (name + index), (b) the failure detail, and (c) how many queries succeeded but were discarded. This enables operators to distinguish "1 of 10 failed" from "9 of 10 failed" in quarantine investigation.
 - `test_llm_transform_does_not_use_ctx_llm_client` — set ctx.llm_client to sentinel that raises on access, verify transform processes row successfully via provider's own client
 - `test_llm_transform_uses_process_row_not_process` — verify LLMTransform extends BatchTransformMixin and _process_row is the entry point (D8)
+
+**Config test file:** New config tests from Task 8 (QuerySpec validation, resolve_queries, provider configs) should live in `tests/unit/plugins/llm/test_llm_config.py`.
 
 **Step N: Commit**
 
@@ -1015,7 +1030,13 @@ feat(llm): unified LLMTransform with SingleQuery/MultiQuery strategies
 **Files:**
 - Modify: `src/elspeth/plugins/validation.py` — update `_get_transform_config_model()` for "llm" plugin
 - Modify: `src/elspeth/plugins/discovery.py` — verify llm/ directory still scanned correctly
-- Test: update plugin discovery tests
+- Test: `tests/unit/plugins/llm/test_plugin_registration.py` (create new or extend existing discovery tests)
+
+**Tests:**
+- `test_llm_plugin_dispatches_to_azure_config` — verify `_get_transform_config_model("llm", {"provider": "azure"})` returns `AzureOpenAIConfig`
+- `test_llm_plugin_dispatches_to_openrouter_config` — verify `_get_transform_config_model("llm", {"provider": "openrouter"})` returns `OpenRouterConfig`
+- `test_llm_plugin_missing_provider_falls_back_to_base` — verify missing `provider` key returns `LLMConfig` (Pydantic catches the Literal validation)
+- `test_old_plugin_names_raise_helpful_error` — verify `azure_llm`, `openrouter_llm` etc. raise ValueError with migration guidance
 
 **Key changes in validation.py:**
 
@@ -1117,6 +1138,8 @@ refactor(llm): update plugin registration — 5 names → 1 unified 'llm' plugin
 |-----------|----------------|
 | `tests/unit/telemetry/test_plugin_wiring.py` | Verify "llm" plugin wires correctly (NOTE: actual location is `tests/unit/telemetry/`, not `tests/integration/plugins/llm/`) |
 | test_llm_integration.py (if exists) | Update instantiation |
+| `tests/integration/plugins/llm/test_multi_query.py` | Update instantiation to LLMTransform(provider=..., queries=...) |
+| `tests/integration/plugins/llm/test_contract_validation.py` | Verify — may reference old class names |
 
 **Performance tests:**
 
@@ -1129,6 +1152,7 @@ refactor(llm): update plugin registration — 5 names → 1 unified 'llm' plugin
 | Test File | Migration Type |
 |-----------|----------------|
 | test_assert_to_raise.py | AzureOpenAIConfig import path change (from providers/azure.py, not llm/base.py) |
+| `tests/unit/plugins/test_assert_to_raise.py` | Rewrite — imports `AzureLLMTransform` and tests `_get_llm_client()` which no longer exists; needs full test rewrite |
 
 **NOTE:** Before implementation, verify these paths actually exist. During the review, 3 paths were flagged as potentially wrong:
 - `test_azure_multi_query_contract.py` — verify exact location (could be `tests/unit/plugins/llm/` or `tests/unit/contracts/`)
@@ -1166,6 +1190,8 @@ config = {
 3. Then: multi-query tests (multi_query, retry, profiling, contract)
 4. Then: integration, performance, plugin wiring
 5. Run full suite after each batch
+
+**Rollback criterion:** If any batch fails to pass `pytest tests/unit/plugins/llm/ tests/integration/plugins/llm/ -x`, revert that batch's changes before proceeding to the next batch. Old class names still exist (Task 12 deletes them), so reverting test changes to a batch restores a passing state.
 
 **Step N: Commit (may be multiple commits)**
 
@@ -1340,3 +1366,12 @@ After all tasks complete:
 - [ ] `MultiQueryStrategy` traces per-query only (D9) — no row-level aggregate traces
 - [ ] `test_multi_query_partial_failure_discards_successful_results` passes
 - [ ] `test_openrouter_multi_query_tracing_after_alignment` passes (Phase A behavior change verified)
+- [ ] `ContextLengthError` maps to non-retryable `TransformResult` with reason "context_length_exceeded"
+- [ ] `LLMTransform.close()` calls `self._provider.close()` and `self._tracer.flush()` (provider lifecycle)
+- [ ] `src/elspeth/plugins/llm/providers/__init__.py` exists (package is properly registered)
+- [ ] `.venv/bin/python scripts/cicd/enforce_tier_model.py check` passes after Task 9 (not just after Task 12)
+- [ ] `rg "_langfuse_client|isinstance.*ActiveLangfuseTracer" src/` returns no matches after Task 12 (bridge code fully removed)
+- [ ] `rg "AzureLLMTransform|OpenRouterLLMTransform|AzureMultiQueryLLMTransform|OpenRouterMultiQueryLLMTransform" tests/` returns only helpful-error test strings after Task 11
+- [ ] `resolve_queries()` rejects templates with positional `{{ input_\d+ }}` variables (migration safety)
+- [ ] Concurrent client creation test passes for both providers (race condition on first-access)
+- [ ] `state_id` snapshot test passes for both providers (not mutable ref)

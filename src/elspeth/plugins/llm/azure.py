@@ -18,7 +18,6 @@ from elspeth.contracts import Determinism, TransformErrorReason, TransformResult
 from elspeth.contracts.plugin_context import PluginContext
 from elspeth.contracts.schema import SchemaConfig
 from elspeth.contracts.schema_contract import PipelineRow
-from elspeth.contracts.token_usage import TokenUsage
 from elspeth.plugins.base import BaseTransform
 from elspeth.plugins.batching import BatchTransformMixin, OutputPort
 from elspeth.plugins.clients.llm import AuditedLLMClient, LLMClientError
@@ -29,10 +28,10 @@ from elspeth.plugins.llm import (
     populate_llm_metadata_fields,
 )
 from elspeth.plugins.llm.base import LLMConfig
+from elspeth.plugins.llm.langfuse import create_langfuse_tracer
 from elspeth.plugins.llm.templates import PromptTemplate, TemplateError
 from elspeth.plugins.llm.tracing import (
     AzureAITracingConfig,
-    LangfuseTracingConfig,
     TracingConfig,
     parse_tracing_config,
     validate_tracing_config,
@@ -223,7 +222,10 @@ class AzureLLMTransform(BaseTransform, BatchTransformMixin):
         # Tier 2: Plugin-internal tracing
         self._tracing_config: TracingConfig | None = parse_tracing_config(cfg.tracing)
         self._tracing_active: bool = False
-        self._langfuse_client: Any = None  # Langfuse client if configured
+        self._tracer = create_langfuse_tracer(
+            transform_name=self.name,
+            tracing_config=self._tracing_config,
+        )
 
     def connect_output(
         self,
@@ -298,7 +300,7 @@ class AzureLLMTransform(BaseTransform, BatchTransformMixin):
             case "azure_ai":
                 self._setup_azure_ai_tracing(logger, tracing_config)
             case "langfuse":
-                self._setup_langfuse_tracing(logger, tracing_config)
+                pass  # Handled by create_langfuse_tracer() in __init__
             case "none":
                 pass  # No tracing
             case _:
@@ -341,40 +343,6 @@ class AzureLLMTransform(BaseTransform, BatchTransformMixin):
                 "Azure AI tracing requested but package not installed",
                 provider="azure_ai",
                 hint="Install with: uv pip install elspeth[tracing-azure]",
-            )
-
-    def _setup_langfuse_tracing(self, logger: Any, tracing_config: TracingConfig) -> None:
-        """Initialize Langfuse tracing (v3 API).
-
-        Langfuse v3 uses OpenTelemetry-based context managers for lifecycle.
-        The Langfuse client is stored for use in _record_langfuse_trace().
-        """
-        try:
-            from langfuse import Langfuse  # type: ignore[import-not-found,import-untyped]  # optional dep, no stubs
-
-            if not isinstance(tracing_config, LangfuseTracingConfig):
-                return
-
-            self._langfuse_client = Langfuse(
-                public_key=tracing_config.public_key,
-                secret_key=tracing_config.secret_key,
-                host=tracing_config.host,
-                tracing_enabled=tracing_config.tracing_enabled,
-            )
-            self._tracing_active = True
-
-            logger.info(
-                "Langfuse tracing initialized (v3)",
-                provider="langfuse",
-                host=tracing_config.host,
-                tracing_enabled=tracing_config.tracing_enabled,
-            )
-
-        except ImportError:
-            logger.warning(
-                "Langfuse tracing requested but package not installed",
-                provider="langfuse",
-                hint="Install with: uv pip install elspeth[tracing-langfuse]",
             )
 
     def accept(self, row: PipelineRow, ctx: PluginContext) -> None:
@@ -481,12 +449,14 @@ class AzureLLMTransform(BaseTransform, BatchTransformMixin):
             except LLMClientError as e:
                 # Record failed call in Langfuse for observability (before re-raising or returning)
                 latency_ms = (time.monotonic() - start_time) * 1000
-                self._record_langfuse_trace_for_error(
-                    ctx=ctx,
+                self._tracer.record_error(
                     token_id=token_id,
+                    query_name=self.name,
                     prompt=rendered.prompt,
                     error_message=str(e),
+                    model=self._model,
                     latency_ms=latency_ms,
+                    extra_metadata={"deployment": self._deployment_name},
                 )
 
                 if e.retryable:
@@ -500,13 +470,15 @@ class AzureLLMTransform(BaseTransform, BatchTransformMixin):
 
             # Record in Langfuse using v3 nested context managers (after successful call)
             latency_ms = (time.monotonic() - start_time) * 1000
-            self._record_langfuse_trace(
-                ctx=ctx,
+            self._tracer.record_success(
                 token_id=token_id,
+                query_name=self.name,
                 prompt=rendered.prompt,
                 response_content=response.content,
+                model=self._model,
                 usage=response.usage,
                 latency_ms=latency_ms,
+                extra_metadata={"deployment": self._deployment_name},
             )
 
             # 5. Build output row (OUR CODE - let exceptions crash)
@@ -607,9 +579,8 @@ class AzureLLMTransform(BaseTransform, BatchTransformMixin):
 
     def close(self) -> None:
         """Release resources and flush tracing."""
-        # Flush Tier 2 tracing if active
-        if self._tracing_active:
-            self._flush_tracing()
+        # Flush Tier 2 tracing
+        self._tracer.flush()
 
         # Shutdown batch processing infrastructure
         if self._batch_initialized:
@@ -620,153 +591,6 @@ class AzureLLMTransform(BaseTransform, BatchTransformMixin):
         with self._llm_clients_lock:
             self._llm_clients.clear()
             self._underlying_client = None
-        self._langfuse_client = None
-
-    def _flush_tracing(self) -> None:
-        """Flush any pending tracing data."""
-        import structlog
-
-        logger = structlog.get_logger(__name__)
-
-        # Langfuse needs explicit flush
-        if self._langfuse_client is not None:
-            try:
-                self._langfuse_client.flush()
-                logger.debug("Langfuse tracing flushed")
-            except Exception as e:
-                logger.warning("Failed to flush Langfuse tracing", error=str(e))
-
-        # Azure Monitor handles its own batching/flushing
-        # No explicit flush needed
-
-    def _record_langfuse_trace(
-        self,
-        ctx: PluginContext,
-        token_id: str,
-        prompt: str,
-        response_content: str,
-        usage: TokenUsage | None,
-        latency_ms: float | None,
-    ) -> None:
-        """Record LLM call to Langfuse using v3 nested context managers.
-
-        Langfuse v3 uses OpenTelemetry-based context managers. The span and generation
-        are created with start_as_current_observation() and auto-close on exit.
-
-        Args:
-            ctx: Plugin context for telemetry emission
-            token_id: Token ID for correlation
-            prompt: The prompt sent to the LLM
-            response_content: The response received
-            usage: Token usage (``TokenUsage`` or ``None``)
-            latency_ms: Call latency in milliseconds
-        """
-        if not self._tracing_active or self._langfuse_client is None:
-            return
-        if not isinstance(self._tracing_config, LangfuseTracingConfig):
-            return
-
-        try:
-            with (
-                self._langfuse_client.start_as_current_observation(
-                    as_type="span",
-                    name=f"elspeth.{self.name}",
-                    metadata={"token_id": token_id, "plugin": self.name, "deployment": self._deployment_name},
-                ),
-                self._langfuse_client.start_as_current_observation(
-                    as_type="generation",
-                    name="llm_call",
-                    model=self._model,
-                    input=[{"role": "user", "content": prompt}],
-                ) as generation,
-            ):
-                update_kwargs: dict[str, Any] = {"output": response_content}
-
-                if usage is not None and usage.is_known:
-                    update_kwargs["usage_details"] = {
-                        "input": usage.prompt_tokens,
-                        "output": usage.completion_tokens,
-                    }
-
-                if latency_ms is not None:
-                    update_kwargs["metadata"] = {"latency_ms": latency_ms}
-
-                generation.update(**update_kwargs)
-        except Exception as e:
-            # No Silent Failures: emit telemetry event for trace failure
-            ctx.telemetry_emit(
-                {
-                    "event": "langfuse_trace_failed",
-                    "plugin": self.name,
-                    "error": str(e),
-                }
-            )
-            import structlog
-
-            logger = structlog.get_logger(__name__)
-            logger.warning("Failed to record Langfuse trace", error=str(e))
-
-    def _record_langfuse_trace_for_error(
-        self,
-        ctx: PluginContext,
-        token_id: str,
-        prompt: str,
-        error_message: str,
-        latency_ms: float | None,
-    ) -> None:
-        """Record failed LLM call to Langfuse with ERROR level.
-
-        Called when an LLM call fails (rate limit, policy error, etc.) to ensure
-        failed attempts are visible in Langfuse for debugging and correlation.
-
-        Args:
-            ctx: Plugin context for telemetry emission
-            token_id: Token ID for correlation
-            prompt: The prompt that was sent (or attempted)
-            error_message: Error description
-            latency_ms: Time elapsed before failure in milliseconds
-        """
-        if not self._tracing_active or self._langfuse_client is None:
-            return
-        if not isinstance(self._tracing_config, LangfuseTracingConfig):
-            return
-
-        try:
-            with (
-                self._langfuse_client.start_as_current_observation(
-                    as_type="span",
-                    name=f"elspeth.{self.name}",
-                    metadata={"token_id": token_id, "plugin": self.name, "deployment": self._deployment_name},
-                ),
-                self._langfuse_client.start_as_current_observation(
-                    as_type="generation",
-                    name="llm_call",
-                    model=self._model,
-                    input=[{"role": "user", "content": prompt}],
-                ) as generation,
-            ):
-                update_kwargs: dict[str, Any] = {
-                    "level": "ERROR",
-                    "status_message": error_message,
-                }
-
-                if latency_ms is not None:
-                    update_kwargs["metadata"] = {"latency_ms": latency_ms}
-
-                generation.update(**update_kwargs)
-        except Exception as e:
-            # No Silent Failures: emit telemetry event for trace failure
-            ctx.telemetry_emit(
-                {
-                    "event": "langfuse_error_trace_failed",
-                    "plugin": self.name,
-                    "error": str(e),
-                }
-            )
-            import structlog
-
-            logger = structlog.get_logger(__name__)
-            logger.warning("Failed to record Langfuse error trace", error=str(e))
 
 
 def _configure_azure_monitor(config: TracingConfig) -> bool:

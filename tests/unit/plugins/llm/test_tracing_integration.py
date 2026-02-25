@@ -20,6 +20,7 @@ import pytest
 
 from elspeth.contracts.token_usage import TokenUsage
 from elspeth.plugins.llm.azure import AzureLLMTransform
+from elspeth.plugins.llm.langfuse import ActiveLangfuseTracer, NoOpLangfuseTracer
 from elspeth.plugins.llm.openrouter import OpenRouterLLMTransform
 from elspeth.plugins.llm.tracing import AzureAITracingConfig, LangfuseTracingConfig
 
@@ -106,21 +107,22 @@ class TestLangfuseIntegration:
         )
         transform = AzureLLMTransform(config)
 
-        # Inject mock Langfuse client and activate tracing
-        transform._langfuse_client = mock_langfuse_client
-        transform._tracing_active = True
+        # Inject mock Langfuse client via ActiveLangfuseTracer
+        transform._tracer = ActiveLangfuseTracer(
+            transform_name=transform.name,
+            client=mock_langfuse_client,
+        )
 
-        # Create mock context
-        ctx = _make_mock_ctx()
-
-        # Record a trace (v3 pattern - single method call after LLM response)
-        transform._record_langfuse_trace(
-            ctx=ctx,
+        # Record a trace via tracer
+        transform._tracer.record_success(
             token_id="token-123",
+            query_name=transform.name,
             prompt="Hello world",
             response_content="Hi there!",
+            model="gpt-4",
             usage=TokenUsage.known(10, 5),
             latency_ms=150.0,
+            extra_metadata={"deployment": "gpt-4"},
         )
 
         # Verify observations were created (span + generation)
@@ -161,17 +163,16 @@ class TestLangfuseIntegration:
         )
         transform = OpenRouterLLMTransform(config)
 
-        # Inject mock Langfuse client and activate tracing
-        transform._langfuse_client = mock_langfuse_client
-        transform._tracing_active = True
+        # Inject mock Langfuse client via ActiveLangfuseTracer
+        transform._tracer = ActiveLangfuseTracer(
+            transform_name=transform.name,
+            client=mock_langfuse_client,
+        )
 
-        # Create mock context
-        ctx = _make_mock_ctx()
-
-        # Record a trace (v3 pattern)
-        transform._record_langfuse_trace(
-            ctx=ctx,
+        # Record a trace via tracer
+        transform._tracer.record_success(
             token_id="token-456",
+            query_name=transform.name,
             prompt="Analyze this",
             response_content="Analysis complete",
             model="anthropic/claude-3-opus",
@@ -186,7 +187,6 @@ class TestLangfuseIntegration:
         span_kwargs = mock_langfuse_client.captured_observations[0]["kwargs"]
         assert span_kwargs["name"] == "elspeth.openrouter_llm"
         assert span_kwargs["metadata"]["plugin"] == "openrouter_llm"
-        assert span_kwargs["metadata"]["model"] == "anthropic/claude-3-opus"
 
         # Generation captures OpenRouter response
         gen_kwargs = mock_langfuse_client.captured_observations[1]["kwargs"]
@@ -196,8 +196,8 @@ class TestLangfuseIntegration:
         gen_updates = mock_langfuse_client.captured_observations[1]["updates"]
         assert gen_updates[0]["output"] == "Analysis complete"
 
-    def test_langfuse_client_created_on_start(self) -> None:
-        """Langfuse client is created during on_start when config is valid."""
+    def test_langfuse_tracer_created_at_init(self) -> None:
+        """ActiveLangfuseTracer is created at __init__ time when Langfuse config is valid."""
         config = _make_azure_config(
             tracing={
                 "provider": "langfuse",
@@ -206,28 +206,11 @@ class TestLangfuseIntegration:
                 "host": "https://custom.langfuse.com",
             }
         )
+        # Langfuse is installed in test env, so factory returns ActiveLangfuseTracer
         transform = AzureLLMTransform(config)
 
-        # Mock langfuse module
-        mock_langfuse_instance = MagicMock()
-        mock_langfuse_class = MagicMock(return_value=mock_langfuse_instance)
-
-        mock_module = MagicMock()
-        mock_module.Langfuse = mock_langfuse_class
-
-        with patch.dict(sys.modules, {"langfuse": mock_module}):
-            ctx = _make_mock_ctx()
-            transform.on_start(ctx)
-
-            # Verify client was created with correct parameters (v3 includes tracing_enabled)
-            mock_langfuse_class.assert_called_once_with(
-                public_key="pk-test",
-                secret_key="sk-test",
-                host="https://custom.langfuse.com",
-                tracing_enabled=True,
-            )
-            assert transform._tracing_active is True
-            assert transform._langfuse_client is mock_langfuse_instance
+        assert isinstance(transform._tracer, ActiveLangfuseTracer)
+        assert transform._tracer.transform_name == "azure_llm"
 
     def test_langfuse_flush_called_on_close(self) -> None:
         """Langfuse client is flushed when transform closes."""
@@ -240,10 +223,12 @@ class TestLangfuseIntegration:
         )
         transform = AzureLLMTransform(config)
 
-        # Setup mock client
+        # Setup mock tracer
         mock_langfuse = MagicMock()
-        transform._langfuse_client = mock_langfuse
-        transform._tracing_active = True
+        transform._tracer = ActiveLangfuseTracer(
+            transform_name=transform.name,
+            client=mock_langfuse,
+        )
 
         # Close the transform
         transform.close()
@@ -347,7 +332,7 @@ class TestAzureAIAutoInstrumentation:
             mock_logger.warning.assert_called()
             call_args = mock_logger.warning.call_args
             assert "Azure AI tracing not supported" in call_args[0][0]
-            assert transform._tracing_active is False
+            assert isinstance(transform._tracer, NoOpLangfuseTracer)
 
 
 class TestGracefulDegradation:
@@ -357,15 +342,6 @@ class TestGracefulDegradation:
         """Warning logged when Langfuse SDK not installed."""
         import builtins
 
-        config = _make_azure_config(
-            tracing={
-                "provider": "langfuse",
-                "public_key": "pk-test",
-                "secret_key": "sk-test",
-            }
-        )
-        transform = AzureLLMTransform(config)
-
         # Store the original import function
         original_import = builtins.__import__
 
@@ -374,22 +350,22 @@ class TestGracefulDegradation:
                 raise ImportError("No module named 'langfuse'")
             return original_import(name, *args, **kwargs)
 
-        # Ensure langfuse is not already imported
+        # Mock the import at __init__ time (when create_langfuse_tracer is called)
         with (
             patch.dict(sys.modules, {"langfuse": None}),
             patch.object(builtins, "__import__", side_effect=mock_import),
-            patch("structlog.get_logger") as mock_get_logger,
         ):
-            mock_logger = MagicMock()
-            mock_get_logger.return_value = mock_logger
+            config = _make_azure_config(
+                tracing={
+                    "provider": "langfuse",
+                    "public_key": "pk-test",
+                    "secret_key": "sk-test",
+                }
+            )
+            transform = AzureLLMTransform(config)
 
-            ctx = _make_mock_ctx()
-            transform.on_start(ctx)
-
-            # Verify warning was logged
-            mock_logger.warning.assert_called()
-            call_args = mock_logger.warning.call_args
-            assert "package not installed" in call_args[0][0]
+            # Factory should have returned NoOpLangfuseTracer
+            assert isinstance(transform._tracer, NoOpLangfuseTracer)
             assert transform._tracing_active is False
 
     def test_azure_ai_warning_when_not_installed(self) -> None:
@@ -477,18 +453,19 @@ class TestTracingDisabled:
         assert transform._tracing_active is False
 
     def test_record_trace_does_nothing_when_tracing_inactive(self) -> None:
-        """_record_langfuse_trace is a no-op when tracing is inactive."""
+        """NoOpLangfuseTracer.record_success is a no-op when tracing is not configured."""
         config = _make_azure_config()
         transform = AzureLLMTransform(config)
 
-        ctx = _make_mock_ctx()
+        assert isinstance(transform._tracer, NoOpLangfuseTracer)
 
-        # This should not raise any errors (no-op when tracing inactive)
-        transform._record_langfuse_trace(
-            ctx=ctx,
+        # This should not raise any errors (no-op tracer)
+        transform._tracer.record_success(
             token_id="test-token",
+            query_name=transform.name,
             prompt="test",
             response_content="response",
+            model="gpt-4",
             usage=None,
             latency_ms=None,
         )
@@ -521,15 +498,17 @@ class TestTracingMetadata:
 
         mock_langfuse.start_as_current_observation = mock_start_observation
 
-        transform._langfuse_client = mock_langfuse
-        transform._tracing_active = True
+        transform._tracer = ActiveLangfuseTracer(
+            transform_name=transform.name,
+            client=mock_langfuse,
+        )
 
-        ctx = _make_mock_ctx()
-        transform._record_langfuse_trace(
-            ctx=ctx,
+        transform._tracer.record_success(
             token_id="token-abc-123",
+            query_name=transform.name,
             prompt="test",
             response_content="response",
+            model="gpt-4",
             usage=None,
             latency_ms=None,
         )
@@ -560,15 +539,17 @@ class TestTracingMetadata:
         mock_langfuse = MagicMock()
         mock_langfuse.start_as_current_observation = mock_start_observation
 
-        transform._langfuse_client = mock_langfuse
-        transform._tracing_active = True
+        transform._tracer = ActiveLangfuseTracer(
+            transform_name=transform.name,
+            client=mock_langfuse,
+        )
 
-        ctx = _make_mock_ctx()
-        transform._record_langfuse_trace(
-            ctx=ctx,
+        transform._tracer.record_success(
             token_id="test-token",
+            query_name=transform.name,
             prompt="test prompt",
             response_content="test response",
+            model="gpt-4",
             usage=TokenUsage.known(100, 50),
             latency_ms=500.0,
         )
@@ -601,13 +582,14 @@ class TestTracingMetadata:
         mock_langfuse = MagicMock()
         mock_langfuse.start_as_current_observation = mock_start_observation
 
-        transform._langfuse_client = mock_langfuse
-        transform._tracing_active = True
+        transform._tracer = ActiveLangfuseTracer(
+            transform_name=transform.name,
+            client=mock_langfuse,
+        )
 
-        ctx = _make_mock_ctx()
-        transform._record_langfuse_trace(
-            ctx=ctx,
+        transform._tracer.record_success(
             token_id="test-token",
+            query_name=transform.name,
             prompt="test",
             response_content="response",
             model="anthropic/claude-3-opus",

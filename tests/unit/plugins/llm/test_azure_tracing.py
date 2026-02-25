@@ -142,8 +142,10 @@ class TestAzureLLMTransformTracing:
                 mock_configure.assert_called_once()
                 assert transform._tracing_active is True
 
-    def test_langfuse_client_stored_on_successful_setup(self) -> None:
-        """Langfuse client is stored for use in LLM calls."""
+    def test_langfuse_tracer_created_on_langfuse_config(self) -> None:
+        """LangfuseTracer is created when Langfuse tracing is configured."""
+        from elspeth.plugins.llm.langfuse import ActiveLangfuseTracer
+
         transform = self._create_transform(
             tracing_config={
                 "provider": "langfuse",
@@ -152,27 +154,8 @@ class TestAzureLLMTransformTracing:
             }
         )
 
-        mock_langfuse_instance = MagicMock()
-        mock_langfuse_class = MagicMock(return_value=mock_langfuse_instance)
-
-        # Patch the import inside the method
-        import sys
-        from unittest.mock import MagicMock as MM
-
-        mock_module = MM()
-        mock_module.Langfuse = mock_langfuse_class
-
-        with patch.dict(sys.modules, {"langfuse": mock_module}):
-            ctx = MagicMock()
-            ctx.landscape = MagicMock()
-            ctx.run_id = "test-run"
-            ctx.telemetry_emit = lambda x: None
-            ctx.rate_limit_registry = None
-
-            transform.on_start(ctx)
-
-            assert transform._tracing_active is True
-            assert transform._langfuse_client is mock_langfuse_instance
+        # Langfuse is installed in test env, so tracer should be active
+        assert isinstance(transform._tracer, ActiveLangfuseTracer)
 
 
 def _make_mock_ctx(run_id: str = "test-run") -> MagicMock:
@@ -189,13 +172,10 @@ class TestLangfuseSpanCreation:
     """Tests for Langfuse span creation around LLM calls (v3 API)."""
 
     def _create_transform_with_langfuse(self) -> tuple[AzureLLMTransform, MagicMock, list[dict[str, Any]]]:
-        """Create transform with mocked Langfuse client (v3 pattern)."""
+        """Create transform with mocked Langfuse client via LangfuseTracer."""
+        from elspeth.plugins.llm.langfuse import ActiveLangfuseTracer
+
         config = _make_base_config()
-        config["tracing"] = {
-            "provider": "langfuse",
-            "public_key": "pk-xxx",
-            "secret_key": "sk-xxx",
-        }
         transform = AzureLLMTransform(config)
 
         captured_observations: list[dict[str, Any]] = []
@@ -212,8 +192,10 @@ class TestLangfuseSpanCreation:
         mock_langfuse.start_as_current_observation = mock_start_observation
         mock_langfuse.flush = MagicMock()
 
-        transform._langfuse_client = mock_langfuse
-        transform._tracing_active = True
+        transform._tracer = ActiveLangfuseTracer(
+            transform_name=transform.name,
+            client=mock_langfuse,
+        )
 
         return transform, mock_langfuse, captured_observations
 
@@ -221,16 +203,13 @@ class TestLangfuseSpanCreation:
         """Langfuse trace is created when making LLM call (v3: span + generation)."""
         transform, _mock_langfuse, captured_observations = self._create_transform_with_langfuse()
 
-        ctx = _make_mock_ctx()
-
-        # Record trace (v3 pattern - single method call)
-        transform._record_langfuse_trace(
-            ctx=ctx,
+        # Record trace via tracer
+        transform._tracer.record_success(
             token_id="test-token",
+            query_name=transform.name,
             prompt="Hello world",
             response_content="Hi there!",
-            usage=None,
-            latency_ms=None,
+            model="gpt-4",
         )
 
         # Verify observations were created (span + generation)
@@ -242,14 +221,13 @@ class TestLangfuseSpanCreation:
         """Langfuse generation records prompt and response via update()."""
         transform, _mock_langfuse, captured_observations = self._create_transform_with_langfuse()
 
-        ctx = _make_mock_ctx()
-
         # Record a trace
-        transform._record_langfuse_trace(
-            ctx=ctx,
+        transform._tracer.record_success(
             token_id="test-token",
+            query_name=transform.name,
             prompt="Hello world",
             response_content="Hi there!",
+            model="gpt-4",
             usage=TokenUsage.known(10, 5),
             latency_ms=150.0,
         )
@@ -265,24 +243,24 @@ class TestLangfuseSpanCreation:
         assert gen_record["updates"][0]["usage_details"]["input"] == 10
         assert gen_record["updates"][0]["usage_details"]["output"] == 5
 
-    def test_no_trace_when_tracing_not_active(self) -> None:
-        """No trace created when tracing is not active."""
+    def test_no_trace_when_tracing_not_configured(self) -> None:
+        """No-op tracer used when tracing is not configured."""
+        from elspeth.plugins.llm.langfuse import NoOpLangfuseTracer
+
         config = _make_base_config()
         transform = AzureLLMTransform(config)
 
-        ctx = _make_mock_ctx()
+        # When no tracing config, factory returns NoOpLangfuseTracer
+        assert isinstance(transform._tracer, NoOpLangfuseTracer)
 
-        # This should be a no-op (no error, no trace)
-        transform._record_langfuse_trace(
-            ctx=ctx,
+        # record_success should be a silent no-op
+        transform._tracer.record_success(
             token_id="test-token",
+            query_name=transform.name,
             prompt="test",
             response_content="response",
-            usage=None,
-            latency_ms=None,
+            model="gpt-4",
         )
-        # If we get here without error and _langfuse_client is None, test passes
-        assert transform._langfuse_client is None
 
 
 class TestLangfuseFailedCallTracing:
@@ -293,13 +271,10 @@ class TestLangfuseFailedCallTracing:
     """
 
     def _create_transform_with_langfuse(self) -> tuple[AzureLLMTransform, MagicMock, list[dict[str, Any]]]:
-        """Create transform with mocked Langfuse client (v3 pattern)."""
+        """Create transform with mocked Langfuse client via LangfuseTracer."""
+        from elspeth.plugins.llm.langfuse import ActiveLangfuseTracer
+
         config = _make_base_config()
-        config["tracing"] = {
-            "provider": "langfuse",
-            "public_key": "pk-xxx",
-            "secret_key": "sk-xxx",
-        }
         transform = AzureLLMTransform(config)
 
         captured_observations: list[dict[str, Any]] = []
@@ -316,8 +291,10 @@ class TestLangfuseFailedCallTracing:
         mock_langfuse.start_as_current_observation = mock_start_observation
         mock_langfuse.flush = MagicMock()
 
-        transform._langfuse_client = mock_langfuse
-        transform._tracing_active = True
+        transform._tracer = ActiveLangfuseTracer(
+            transform_name=transform.name,
+            client=mock_langfuse,
+        )
 
         return transform, mock_langfuse, captured_observations
 
@@ -325,14 +302,13 @@ class TestLangfuseFailedCallTracing:
         """Failed LLM call records trace with level=ERROR for observability."""
         transform, _mock_langfuse, captured_observations = self._create_transform_with_langfuse()
 
-        ctx = _make_mock_ctx()
-
         # Record failed trace
-        transform._record_langfuse_trace_for_error(
-            ctx=ctx,
+        transform._tracer.record_error(
             token_id="test-token",
+            query_name=transform.name,
             prompt="Hello world",
             error_message="Rate limit exceeded",
+            model="gpt-4",
             latency_ms=50.0,
         )
 
@@ -351,13 +327,12 @@ class TestLangfuseFailedCallTracing:
         """Failed LLM trace includes latency metadata."""
         transform, _mock_langfuse, captured_observations = self._create_transform_with_langfuse()
 
-        ctx = _make_mock_ctx()
-
-        transform._record_langfuse_trace_for_error(
-            ctx=ctx,
+        transform._tracer.record_error(
             token_id="test-token",
+            query_name=transform.name,
             prompt="Test prompt",
             error_message="Content policy violation",
+            model="gpt-4",
             latency_ms=25.0,
         )
 

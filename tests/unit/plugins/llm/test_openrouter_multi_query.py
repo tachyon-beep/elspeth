@@ -677,9 +677,10 @@ class TestRowProcessingWithPipelining:
             mock_response = Mock(spec=httpx.Response)
             mock_response.status_code = 200
             mock_response.headers = {"content-type": "application/json"}
+            response_text = json.dumps(response_data)
             mock_response.json.return_value = response_data
-            mock_response.text = json.dumps(response_data)
-            mock_response.content = b""
+            mock_response.text = response_text
+            mock_response.content = response_text.encode()
             mock_response.raise_for_status = Mock()
             return mock_response
 
@@ -971,9 +972,10 @@ class TestHTTPSpecificBehavior:
             mock_response = Mock(spec=httpx.Response)
             mock_response.status_code = 200
             mock_response.headers = {"content-type": "application/json"}
+            response_text = json.dumps(response_data)
             mock_response.json.return_value = response_data
-            mock_response.text = json.dumps(response_data)
-            mock_response.content = b""
+            mock_response.text = response_text
+            mock_response.content = response_text.encode()
             mock_response.raise_for_status = Mock()
             mock_client.post.return_value = mock_response
 
@@ -1020,9 +1022,10 @@ class TestHTTPSpecificBehavior:
             mock_response = Mock(spec=httpx.Response)
             mock_response.status_code = 200
             mock_response.headers = {"content-type": "application/json"}
+            response_text = json.dumps(response_data)
             mock_response.json.return_value = response_data
-            mock_response.text = json.dumps(response_data)
-            mock_response.content = b""
+            mock_response.text = response_text
+            mock_response.content = response_text.encode()
             mock_response.raise_for_status = Mock()
             mock_client.post.return_value = mock_response
 

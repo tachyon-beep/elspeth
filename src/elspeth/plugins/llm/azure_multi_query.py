@@ -15,7 +15,6 @@ from typing import TYPE_CHECKING, Any, cast
 
 from elspeth.contracts import TransformErrorCategory, TransformResult
 from elspeth.contracts.schema_contract import FieldContract, PipelineRow, SchemaContract
-from elspeth.contracts.token_usage import TokenUsage
 from elspeth.plugins.clients.llm import AuditedLLMClient, LLMClientError, RateLimitError
 from elspeth.plugins.llm import populate_llm_metadata_fields
 from elspeth.plugins.llm.base_multi_query import BaseMultiQueryTransform
@@ -27,11 +26,15 @@ from elspeth.plugins.llm.multi_query import (
 from elspeth.plugins.llm.templates import TemplateError
 from elspeth.plugins.llm.tracing import (
     AzureAITracingConfig,
-    LangfuseTracingConfig,
     TracingConfig,
     validate_tracing_config,
 )
-from elspeth.plugins.llm.validation import ValidationSuccess, validate_json_object_response
+from elspeth.plugins.llm.validation import (
+    ValidationSuccess,
+    check_truncation,
+    strip_markdown_fences,
+    validate_json_object_response,
+)
 from elspeth.plugins.pooling import CapacityError
 
 if TYPE_CHECKING:
@@ -152,7 +155,7 @@ class AzureMultiQueryLLMTransform(BaseMultiQueryTransform):
             case "azure_ai":
                 self._setup_azure_ai_tracing(logger, tracing_config)
             case "langfuse":
-                self._setup_langfuse_tracing(logger, tracing_config)
+                pass  # Handled by create_langfuse_tracer() in base __init__
             case "none":
                 pass
             case _:
@@ -240,21 +243,23 @@ class AzureMultiQueryLLMTransform(BaseMultiQueryTransform):
             response = llm_client.chat_completion(**llm_kwargs)
         except RateLimitError as e:
             latency_ms = (time.monotonic() - start_time) * 1000
-            self._record_langfuse_trace_for_error(
+            self._tracer.record_error(
                 token_id=token_id,
-                query_prefix=spec.output_prefix,
+                query_name=spec.output_prefix,
                 prompt=rendered.prompt,
                 error_message=str(e),
+                model=self._model,
                 latency_ms=latency_ms,
             )
             raise CapacityError(429, str(e)) from e
         except LLMClientError as e:
             latency_ms = (time.monotonic() - start_time) * 1000
-            self._record_langfuse_trace_for_error(
+            self._tracer.record_error(
                 token_id=token_id,
-                query_prefix=spec.output_prefix,
+                query_name=spec.output_prefix,
                 prompt=rendered.prompt,
                 error_message=str(e),
+                model=self._model,
                 latency_ms=latency_ms,
             )
 
@@ -272,19 +277,17 @@ class AzureMultiQueryLLMTransform(BaseMultiQueryTransform):
 
         # Record in Langfuse (per-query trace)
         latency_ms = (time.monotonic() - start_time) * 1000
-        self._record_langfuse_trace(
+        self._tracer.record_success(
             token_id=token_id,
-            query_prefix=spec.output_prefix,
+            query_name=spec.output_prefix,
             prompt=rendered.prompt,
             response_content=response.content,
+            model=self._model,
             usage=response.usage,
             latency_ms=latency_ms,
         )
 
         # 6. Check for response truncation BEFORE parsing.
-        # Use finish_reason as the authoritative signal when available;
-        # fall back to the token-count heuristic only when finish_reason
-        # is absent (e.g. provider omitted it or streaming mode).
         finish_reason: str | None = None
         if response.raw_response is not None:
             choices = response.raw_response.get("choices")
@@ -293,49 +296,22 @@ class AzureMultiQueryLLMTransform(BaseMultiQueryTransform):
                 if isinstance(first_choice, dict):
                     finish_reason = first_choice.get("finish_reason")
 
-        completion_tokens = response.usage.completion_tokens
-
-        is_truncated: bool
-        if finish_reason is not None:
-            # Authoritative: finish_reason == "length" means the model hit the token limit
-            is_truncated = finish_reason == "length"
-        else:
-            # Fallback heuristic: completion_tokens >= max_tokens suggests truncation
-            # If completion_tokens is None (provider didn't report), we can't detect truncation
-            is_truncated = (
-                effective_max_tokens is not None
-                and completion_tokens is not None
-                and completion_tokens > 0
-                and completion_tokens >= effective_max_tokens
-            )
-
-        if is_truncated:
-            truncation_error: TransformErrorReason = {
-                "reason": "response_truncated",
-                "error": (
-                    f"LLM response was truncated at {completion_tokens} tokens "
-                    f"(max_tokens={effective_max_tokens}). "
-                    f"Increase max_tokens for query '{spec.output_prefix}' or shorten your prompt."
-                ),
-                "query": spec.output_prefix,
-                "max_tokens": effective_max_tokens,
-                "completion_tokens": completion_tokens,
-                "prompt_tokens": response.usage.prompt_tokens,
-                "finish_reason": finish_reason,
-            }
-            if response.content:
-                truncation_error["raw_response_preview"] = response.content[:500]
+        truncation_error = check_truncation(
+            finish_reason=finish_reason,
+            completion_tokens=response.usage.completion_tokens,
+            prompt_tokens=response.usage.prompt_tokens,
+            max_tokens=effective_max_tokens,
+            query_name=spec.output_prefix,
+            content_preview=response.content if response.content else None,
+        )
+        if truncation_error is not None:
             return TransformResult.error(truncation_error)
 
         # 7. Parse JSON response (THEIR DATA - wrap)
         content = response.content.strip()
 
         if self._response_format == ResponseFormat.STANDARD and content.startswith("```"):
-            first_newline = content.find("\n")
-            if first_newline != -1:
-                content = content[first_newline + 1 :]
-            if content.endswith("```"):
-                content = content[:-3].strip()
+            content = strip_markdown_fences(content)
 
         validation_result = validate_json_object_response(content)
         if not isinstance(validation_result, ValidationSuccess):
@@ -492,122 +468,3 @@ class AzureMultiQueryLLMTransform(BaseMultiQueryTransform):
                 "Azure AI tracing requested but package not installed",
                 hint="Install with: uv pip install elspeth[tracing-azure]",
             )
-
-    def _setup_langfuse_tracing(self, logger: Any, tracing_config: TracingConfig) -> None:
-        """Initialize Langfuse tracing (v3 API)."""
-        try:
-            from langfuse import Langfuse  # type: ignore[import-not-found,import-untyped]  # optional dep, no stubs
-
-            if not isinstance(tracing_config, LangfuseTracingConfig):
-                return
-
-            self._langfuse_client = Langfuse(
-                public_key=tracing_config.public_key,
-                secret_key=tracing_config.secret_key,
-                host=tracing_config.host,
-                tracing_enabled=tracing_config.tracing_enabled,
-            )
-            self._tracing_active = True
-
-            logger.info(
-                "Langfuse tracing initialized (v3)",
-                provider="langfuse",
-                host=tracing_config.host,
-                tracing_enabled=tracing_config.tracing_enabled,
-            )
-
-        except ImportError:
-            logger.warning(
-                "Langfuse tracing requested but package not installed",
-                hint="Install with: uv pip install elspeth[tracing-langfuse]",
-            )
-
-    def _record_langfuse_trace(
-        self,
-        token_id: str,
-        query_prefix: str,
-        prompt: str,
-        response_content: str,
-        usage: TokenUsage | None,
-        latency_ms: float | None,
-    ) -> None:
-        """Record LLM call to Langfuse using v3 nested context managers."""
-        if not self._tracing_active or self._langfuse_client is None:
-            return
-        if not isinstance(self._tracing_config, LangfuseTracingConfig):
-            return
-
-        try:
-            with (
-                self._langfuse_client.start_as_current_observation(
-                    as_type="span",
-                    name=f"elspeth.{self.name}",
-                    metadata={"token_id": token_id, "plugin": self.name, "query": query_prefix},
-                ),
-                self._langfuse_client.start_as_current_observation(
-                    as_type="generation",
-                    name="llm_call",
-                    model=self._model,
-                    input=[{"role": "user", "content": prompt}],
-                ) as generation,
-            ):
-                update_kwargs: dict[str, Any] = {"output": response_content}
-
-                if usage is not None and usage.is_known:
-                    update_kwargs["usage_details"] = {
-                        "input": usage.prompt_tokens,
-                        "output": usage.completion_tokens,
-                    }
-
-                if latency_ms is not None:
-                    update_kwargs["metadata"] = {"latency_ms": latency_ms}
-
-                generation.update(**update_kwargs)
-        except Exception as e:
-            import structlog
-
-            logger = structlog.get_logger(__name__)
-            logger.warning("Failed to record Langfuse trace", error=str(e), query=query_prefix)
-
-    def _record_langfuse_trace_for_error(
-        self,
-        token_id: str,
-        query_prefix: str,
-        prompt: str,
-        error_message: str,
-        latency_ms: float | None,
-    ) -> None:
-        """Record failed LLM call to Langfuse with ERROR level."""
-        if not self._tracing_active or self._langfuse_client is None:
-            return
-        if not isinstance(self._tracing_config, LangfuseTracingConfig):
-            return
-
-        try:
-            with (
-                self._langfuse_client.start_as_current_observation(
-                    as_type="span",
-                    name=f"elspeth.{self.name}",
-                    metadata={"token_id": token_id, "plugin": self.name, "query": query_prefix},
-                ),
-                self._langfuse_client.start_as_current_observation(
-                    as_type="generation",
-                    name="llm_call",
-                    model=self._model,
-                    input=[{"role": "user", "content": prompt}],
-                ) as generation,
-            ):
-                update_kwargs: dict[str, Any] = {
-                    "level": "ERROR",
-                    "status_message": error_message,
-                }
-
-                if latency_ms is not None:
-                    update_kwargs["metadata"] = {"latency_ms": latency_ms}
-
-                generation.update(**update_kwargs)
-        except Exception as e:
-            import structlog
-
-            logger = structlog.get_logger(__name__)
-            logger.warning("Failed to record Langfuse error trace", error=str(e), query=query_prefix)

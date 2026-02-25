@@ -27,14 +27,14 @@ from elspeth.plugins.clients.http import AuditedHTTPClient
 from elspeth.plugins.clients.llm import NetworkError, RateLimitError, ServerError
 from elspeth.plugins.llm import get_llm_audit_fields, get_llm_guaranteed_fields, populate_llm_metadata_fields
 from elspeth.plugins.llm.base import LLMConfig
+from elspeth.plugins.llm.langfuse import create_langfuse_tracer
 from elspeth.plugins.llm.templates import PromptTemplate, TemplateError
 from elspeth.plugins.llm.tracing import (
-    LangfuseTracingConfig,
     TracingConfig,
     parse_tracing_config,
     validate_tracing_config,
 )
-from elspeth.plugins.llm.validation import _reject_nonfinite_constant
+from elspeth.plugins.llm.validation import reject_nonfinite_constant
 from elspeth.plugins.schema_factory import create_schema_from_config
 
 if TYPE_CHECKING:
@@ -198,8 +198,10 @@ class OpenRouterLLMTransform(BaseTransform, BatchTransformMixin):
 
         # Tier 2: Plugin-internal tracing (Langfuse only)
         self._tracing_config: TracingConfig | None = parse_tracing_config(cfg.tracing)
-        self._tracing_active: bool = False
-        self._langfuse_client: Any = None  # Langfuse client if configured
+        self._tracer = create_langfuse_tracer(
+            transform_name=self.name,
+            tracing_config=self._tracing_config,
+        )
 
     def connect_output(
         self,
@@ -280,7 +282,7 @@ class OpenRouterLLMTransform(BaseTransform, BatchTransformMixin):
                 )
                 return
             case "langfuse":
-                self._setup_langfuse_tracing(logger)
+                pass  # Handled by create_langfuse_tracer() in __init__
             case "none":
                 pass  # No tracing
             case _:
@@ -288,172 +290,6 @@ class OpenRouterLLMTransform(BaseTransform, BatchTransformMixin):
                     "Unknown tracing provider encountered after validation - tracing disabled",
                     provider=self._tracing_config.provider,
                 )
-
-    def _setup_langfuse_tracing(self, logger: Any) -> None:
-        """Initialize Langfuse tracing (v3 API).
-
-        Langfuse v3 uses OpenTelemetry-based context managers for lifecycle.
-        The Langfuse client is stored for use in _record_langfuse_trace().
-        """
-        try:
-            from langfuse import Langfuse  # type: ignore[import-not-found,import-untyped]  # optional dep, no stubs
-
-            cfg = self._tracing_config
-            if not isinstance(cfg, LangfuseTracingConfig):
-                return
-
-            self._langfuse_client = Langfuse(
-                public_key=cfg.public_key,
-                secret_key=cfg.secret_key,
-                host=cfg.host,
-                tracing_enabled=cfg.tracing_enabled,
-            )
-            self._tracing_active = True
-
-            logger.info(
-                "Langfuse tracing initialized (v3)",
-                provider="langfuse",
-                host=cfg.host,
-                tracing_enabled=cfg.tracing_enabled,
-            )
-
-        except ImportError:
-            logger.warning(
-                "Langfuse tracing requested but package not installed",
-                provider="langfuse",
-                hint="Install with: uv pip install elspeth[tracing-langfuse]",
-            )
-
-    def _record_langfuse_trace(
-        self,
-        ctx: PluginContext,
-        token_id: str,
-        prompt: str,
-        response_content: str,
-        model: str,
-        usage: TokenUsage | None,
-        latency_ms: float | None,
-    ) -> None:
-        """Record LLM call to Langfuse using v3 nested context managers.
-
-        Langfuse v3 uses OpenTelemetry-based context managers. The span and generation
-        are created with start_as_current_observation() and auto-close on exit.
-
-        Args:
-            ctx: Plugin context for telemetry emission
-            token_id: Token ID for correlation
-            prompt: The prompt sent to the LLM
-            response_content: The response received
-            model: Model name
-            usage: Token usage (``TokenUsage`` or ``None``)
-            latency_ms: Call latency in milliseconds
-        """
-        if not self._tracing_active or self._langfuse_client is None:
-            return
-        if not isinstance(self._tracing_config, LangfuseTracingConfig):
-            return
-
-        try:
-            with (
-                self._langfuse_client.start_as_current_observation(
-                    as_type="span",
-                    name=f"elspeth.{self.name}",
-                    metadata={"token_id": token_id, "plugin": self.name, "model": model},
-                ),
-                self._langfuse_client.start_as_current_observation(
-                    as_type="generation",
-                    name="llm_call",
-                    model=model,
-                    input=[{"role": "user", "content": prompt}],
-                ) as generation,
-            ):
-                update_kwargs: dict[str, Any] = {"output": response_content}
-
-                if usage is not None and usage.is_known:
-                    update_kwargs["usage_details"] = {
-                        "input": usage.prompt_tokens,
-                        "output": usage.completion_tokens,
-                    }
-
-                if latency_ms is not None:
-                    update_kwargs["metadata"] = {"latency_ms": latency_ms}
-
-                generation.update(**update_kwargs)
-        except Exception as e:
-            # No Silent Failures: emit telemetry event for trace failure
-            ctx.telemetry_emit(
-                {
-                    "event": "langfuse_trace_failed",
-                    "plugin": self.name,
-                    "error": str(e),
-                }
-            )
-            import structlog
-
-            logger = structlog.get_logger(__name__)
-            logger.warning("Failed to record Langfuse trace", error=str(e))
-
-    def _record_langfuse_trace_for_error(
-        self,
-        ctx: PluginContext,
-        token_id: str,
-        prompt: str,
-        error_message: str,
-        latency_ms: float | None,
-    ) -> None:
-        """Record failed LLM call to Langfuse with ERROR level.
-
-        Called when an LLM call fails (rate limit, HTTP error, etc.) to ensure
-        failed attempts are visible in Langfuse for debugging and correlation.
-
-        Args:
-            ctx: Plugin context for telemetry emission
-            token_id: Token ID for correlation
-            prompt: The prompt that was sent (or attempted)
-            error_message: Error description
-            latency_ms: Time elapsed before failure in milliseconds
-        """
-        if not self._tracing_active or self._langfuse_client is None:
-            return
-        if not isinstance(self._tracing_config, LangfuseTracingConfig):
-            return
-
-        try:
-            with (
-                self._langfuse_client.start_as_current_observation(
-                    as_type="span",
-                    name=f"elspeth.{self.name}",
-                    metadata={"token_id": token_id, "plugin": self.name, "model": self._model},
-                ),
-                self._langfuse_client.start_as_current_observation(
-                    as_type="generation",
-                    name="llm_call",
-                    model=self._model,
-                    input=[{"role": "user", "content": prompt}],
-                ) as generation,
-            ):
-                update_kwargs: dict[str, Any] = {
-                    "level": "ERROR",
-                    "status_message": error_message,
-                }
-
-                if latency_ms is not None:
-                    update_kwargs["metadata"] = {"latency_ms": latency_ms}
-
-                generation.update(**update_kwargs)
-        except Exception as e:
-            # No Silent Failures: emit telemetry event for trace failure
-            ctx.telemetry_emit(
-                {
-                    "event": "langfuse_error_trace_failed",
-                    "plugin": self.name,
-                    "error": str(e),
-                }
-            )
-            import structlog
-
-            logger = structlog.get_logger(__name__)
-            logger.warning("Failed to record Langfuse error trace", error=str(e))
 
     def accept(self, row: PipelineRow, ctx: PluginContext) -> None:
         """Accept a row for processing.
@@ -536,14 +372,19 @@ class OpenRouterLLMTransform(BaseTransform, BatchTransformMixin):
             request_body["max_tokens"] = self._max_tokens
 
         # 3. Get HTTP client (cached per state_id for call_index uniqueness)
-        if ctx.state_id is None:
+        # Snapshot state_id before the try block. ctx.state_id is mutable during
+        # retries (engine rewrites it per retry attempt on the shared context object),
+        # so using ctx.state_id in the finally block could evict the wrong cache entry.
+        # Matches the Azure pattern (azure.py:424).
+        state_id = ctx.state_id
+        if state_id is None:
             raise RuntimeError("OpenRouter LLM transform requires state_id. Ensure transform is executed through the engine.")
 
         try:
             import time
 
             token_id_for_client = ctx.token.token_id if ctx.token is not None else None
-            http_client = self._get_http_client(ctx.state_id, token_id=token_id_for_client)
+            http_client = self._get_http_client(state_id, token_id=token_id_for_client)
 
             # 4. Call OpenRouter API (EXTERNAL - wrap)
             token_id = ctx.token.token_id if ctx.token else "unknown"
@@ -559,12 +400,14 @@ class OpenRouterLLMTransform(BaseTransform, BatchTransformMixin):
             except httpx.HTTPStatusError as e:
                 # Record error trace before handling (for observability)
                 latency_ms = (time.monotonic() - start_time) * 1000
-                self._record_langfuse_trace_for_error(
-                    ctx=ctx,
+                self._tracer.record_error(
                     token_id=token_id,
+                    query_name=self.name,
                     prompt=rendered.prompt,
                     error_message=str(e),
+                    model=self._model,
                     latency_ms=latency_ms,
+                    extra_metadata={"model": self._model},
                 )
 
                 # Retryable HTTP errors (429, 503) must RAISE exceptions for engine RetryManager
@@ -582,19 +425,21 @@ class OpenRouterLLMTransform(BaseTransform, BatchTransformMixin):
             except httpx.RequestError as e:
                 # Record error trace before raising (for observability)
                 latency_ms = (time.monotonic() - start_time) * 1000
-                self._record_langfuse_trace_for_error(
-                    ctx=ctx,
+                self._tracer.record_error(
                     token_id=token_id,
+                    query_name=self.name,
                     prompt=rendered.prompt,
                     error_message=str(e),
+                    model=self._model,
                     latency_ms=latency_ms,
+                    extra_metadata={"model": self._model},
                 )
                 # Network errors (timeout, connection refused) are retryable
                 raise NetworkError(f"Network error: {e}") from e
 
             # 5. Parse JSON response (EXTERNAL DATA - wrap, reject NaN/Infinity)
             try:
-                data = json.loads(response.content, parse_constant=_reject_nonfinite_constant)
+                data = json.loads(response.content, parse_constant=reject_nonfinite_constant)
             except (ValueError, TypeError) as e:
                 error_reason_json: TransformErrorReason = {
                     "reason": "invalid_json_response",
@@ -652,14 +497,16 @@ class OpenRouterLLMTransform(BaseTransform, BatchTransformMixin):
 
             # Record in Langfuse using v3 nested context managers (after successful call)
             latency_ms = (time.monotonic() - start_time) * 1000
-            self._record_langfuse_trace(
-                ctx=ctx,
+            model = data.get("model", self._model)
+            self._tracer.record_success(
                 token_id=token_id,
+                query_name=self.name,
                 prompt=rendered.prompt,
                 response_content=content,
-                model=data.get("model", self._model),
+                model=model,
                 usage=usage,
                 latency_ms=latency_ms,
+                extra_metadata={"model": model},
             )
 
             # 7. Build output row (OUR CODE - let exceptions crash)
@@ -690,9 +537,10 @@ class OpenRouterLLMTransform(BaseTransform, BatchTransformMixin):
                 success_reason={"action": "enriched", "fields_added": [self._response_field]},
             )
         finally:
-            # Clean up cached client for this state_id to prevent unbounded growth
+            # Clean up cached client for this state_id to prevent unbounded growth.
+            # Uses snapshot (not ctx.state_id) to avoid evicting wrong entry during retry races.
             with self._http_clients_lock:
-                client = self._http_clients.pop(ctx.state_id, None)
+                client = self._http_clients.pop(state_id, None)
             if client is not None:
                 client.close()
 
@@ -724,9 +572,8 @@ class OpenRouterLLMTransform(BaseTransform, BatchTransformMixin):
 
     def close(self) -> None:
         """Release resources and flush tracing."""
-        # Flush Tier 2 tracing if active
-        if self._tracing_active:
-            self._flush_tracing()
+        # Flush Tier 2 tracing
+        self._tracer.flush()
 
         # Shutdown batch processing infrastructure
         if self._batch_initialized:
@@ -738,18 +585,3 @@ class OpenRouterLLMTransform(BaseTransform, BatchTransformMixin):
             for client in self._http_clients.values():
                 client.close()
             self._http_clients.clear()
-        self._langfuse_client = None
-
-    def _flush_tracing(self) -> None:
-        """Flush any pending tracing data."""
-        import structlog
-
-        logger = structlog.get_logger(__name__)
-
-        # Langfuse needs explicit flush
-        if self._langfuse_client is not None:
-            try:
-                self._langfuse_client.flush()
-                logger.debug("Langfuse tracing flushed")
-            except Exception as e:
-                logger.warning("Failed to flush Langfuse tracing", error=str(e))

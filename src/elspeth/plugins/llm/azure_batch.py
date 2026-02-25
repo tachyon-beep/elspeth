@@ -40,9 +40,9 @@ from elspeth.plugins.llm import (
     get_llm_guaranteed_fields,
     populate_llm_metadata_fields,
 )
+from elspeth.plugins.llm.langfuse import ActiveLangfuseTracer, create_langfuse_tracer
 from elspeth.plugins.llm.templates import PromptTemplate, TemplateError
 from elspeth.plugins.llm.tracing import (
-    LangfuseTracingConfig,
     TracingConfig,
     parse_tracing_config,
     validate_tracing_config,
@@ -213,8 +213,13 @@ class AzureBatchLLMTransform(BaseTransform):
 
         # Tier 2: Plugin-internal tracing (Langfuse only for batch API)
         self._tracing_config: TracingConfig | None = parse_tracing_config(cfg.tracing)
-        self._tracing_active: bool = False
-        self._langfuse_client: Any = None  # Langfuse client if configured
+        self._tracer = create_langfuse_tracer(
+            transform_name=self.name,
+            tracing_config=self._tracing_config,
+        )
+        # TODO(T10-phase-b): remove bridge — _record_langfuse_batch_job should use self._tracer
+        self._tracing_active: bool = isinstance(self._tracer, ActiveLangfuseTracer)
+        self._langfuse_client: Any = self._tracer.client if isinstance(self._tracer, ActiveLangfuseTracer) else None
 
     def on_start(self, ctx: PluginContext) -> None:
         """Initialize tracing if configured.
@@ -257,7 +262,7 @@ class AzureBatchLLMTransform(BaseTransform):
                 )
                 return
             case "langfuse":
-                self._setup_langfuse_tracing(logger)
+                pass  # Handled by create_langfuse_tracer() in __init__
             case "none":
                 pass  # No tracing
             case _:
@@ -265,42 +270,6 @@ class AzureBatchLLMTransform(BaseTransform):
                     "Unknown tracing provider encountered after validation - tracing disabled",
                     provider=self._tracing_config.provider,
                 )
-
-    def _setup_langfuse_tracing(self, logger: Any) -> None:
-        """Initialize Langfuse tracing for batch job tracking (v3 API).
-
-        Langfuse can trace batch jobs at the job level (submit/complete),
-        not per-row (since rows are processed by Azure infrastructure).
-        """
-        try:
-            from langfuse import Langfuse  # type: ignore[import-not-found,import-untyped]  # optional dep, no stubs
-
-            cfg = self._tracing_config
-            if not isinstance(cfg, LangfuseTracingConfig):
-                return
-
-            self._langfuse_client = Langfuse(
-                public_key=cfg.public_key,
-                secret_key=cfg.secret_key,
-                host=cfg.host,
-                tracing_enabled=cfg.tracing_enabled,
-            )
-            self._tracing_active = True
-
-            logger.info(
-                "Langfuse tracing initialized for Azure Batch (v3)",
-                provider="langfuse",
-                host=cfg.host,
-                tracing_enabled=cfg.tracing_enabled,
-                note="Job-level tracing only - individual row tracing not available",
-            )
-
-        except ImportError:
-            logger.warning(
-                "Langfuse tracing requested but package not installed",
-                provider="langfuse",
-                hint="Install with: uv pip install elspeth[tracing-langfuse]",
-            )
 
     def _record_langfuse_batch_job(
         self,
@@ -1393,23 +1362,6 @@ class AzureBatchLLMTransform(BaseTransform):
 
     def close(self) -> None:
         """Release resources and flush tracing."""
-        # Flush Tier 2 tracing if active
-        if self._tracing_active:
-            self._flush_tracing()
-
+        self._tracer.flush()
         self._client = None
         self._langfuse_client = None
-
-    def _flush_tracing(self) -> None:
-        """Flush any pending tracing data."""
-        import structlog
-
-        logger = structlog.get_logger(__name__)
-
-        # Langfuse needs explicit flush
-        if self._langfuse_client is not None:
-            try:
-                self._langfuse_client.flush()
-                logger.debug("Langfuse tracing flushed")
-            except Exception as e:
-                logger.warning("Failed to flush Langfuse tracing", error=str(e))

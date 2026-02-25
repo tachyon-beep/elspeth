@@ -32,11 +32,12 @@ from elspeth.plugins.llm.multi_query import (
 )
 from elspeth.plugins.llm.openrouter import OpenRouterConfig
 from elspeth.plugins.llm.templates import TemplateError
-from elspeth.plugins.llm.tracing import (
-    LangfuseTracingConfig,
-    validate_tracing_config,
+from elspeth.plugins.llm.tracing import validate_tracing_config
+from elspeth.plugins.llm.validation import (
+    check_truncation,
+    reject_nonfinite_constant,
+    strip_markdown_fences,
 )
-from elspeth.plugins.llm.validation import _reject_nonfinite_constant
 from elspeth.plugins.pooling import CapacityError, is_capacity_error
 
 if TYPE_CHECKING:
@@ -164,7 +165,7 @@ class OpenRouterMultiQueryLLMTransform(BaseMultiQueryTransform):
                     hint="Azure AI auto-instruments the OpenAI SDK; OpenRouter uses HTTP directly",
                 )
             case "langfuse":
-                self._setup_langfuse_tracing(logger)
+                pass  # Handled by create_langfuse_tracer() in base __init__
             case "none":
                 pass
             case _:
@@ -279,9 +280,9 @@ class OpenRouterMultiQueryLLMTransform(BaseMultiQueryTransform):
                 retryable=True,
             )
 
-        # 7. Parse JSON response from HTTP (EXTERNAL DATA - wrap)
+        # 7. Parse JSON response from HTTP (EXTERNAL DATA - wrap, reject NaN/Infinity)
         try:
-            data = response.json()
+            data = json.loads(response.content, parse_constant=reject_nonfinite_constant)
         except (ValueError, TypeError) as e:
             json_error: TransformErrorReason = {
                 "reason": "invalid_json_response",
@@ -344,23 +345,15 @@ class OpenRouterMultiQueryLLMTransform(BaseMultiQueryTransform):
         usage = TokenUsage.from_dict(data.get("usage") or {})
 
         # 8b. Check for response truncation BEFORE parsing
-        # If completion_tokens is None (provider didn't report), we can't detect truncation
-        completion_tokens = usage.completion_tokens
-        if effective_max_tokens is not None and completion_tokens is not None and completion_tokens >= effective_max_tokens:
-            truncation_error: TransformErrorReason = {
-                "reason": "response_truncated",
-                "error": (
-                    f"LLM response was truncated at {completion_tokens} tokens "
-                    f"(max_tokens={effective_max_tokens}). "
-                    f"Increase max_tokens for query '{spec.output_prefix}' or shorten your prompt."
-                ),
-                "query": spec.output_prefix,
-                "max_tokens": effective_max_tokens,
-                "completion_tokens": completion_tokens,
-                "prompt_tokens": usage.prompt_tokens,
-            }
-            if content:
-                truncation_error["raw_response_preview"] = content[:500]
+        truncation_error = check_truncation(
+            finish_reason=None,  # OpenRouter HTTP response doesn't expose finish_reason here
+            completion_tokens=usage.completion_tokens,
+            prompt_tokens=usage.prompt_tokens,
+            max_tokens=effective_max_tokens,
+            query_name=spec.output_prefix,
+            content_preview=content if content else None,
+        )
+        if truncation_error is not None:
             return TransformResult.error(truncation_error)
 
         # 9. Parse LLM response content as JSON (THEIR DATA - wrap)
@@ -368,14 +361,10 @@ class OpenRouterMultiQueryLLMTransform(BaseMultiQueryTransform):
 
         # Strip markdown code blocks if present (common in standard mode, not in structured mode)
         if self._response_format == ResponseFormat.STANDARD and content_str.startswith("```"):
-            first_newline = content_str.find("\n")
-            if first_newline != -1:
-                content_str = content_str[first_newline + 1 :]
-            if content_str.endswith("```"):
-                content_str = content_str[:-3].strip()
+            content_str = strip_markdown_fences(content_str)
 
         try:
-            parsed = json.loads(content_str, parse_constant=_reject_nonfinite_constant)
+            parsed = json.loads(content_str, parse_constant=reject_nonfinite_constant)
         except (json.JSONDecodeError, ValueError) as e:
             parse_error: TransformErrorReason = {
                 "reason": "json_parse_failed",
@@ -482,42 +471,3 @@ class OpenRouterMultiQueryLLMTransform(BaseMultiQueryTransform):
                     token_id=token_id,
                 )
             return self._http_clients[state_id]
-
-    # ------------------------------------------------------------------
-    # OpenRouter-specific tracing
-    # ------------------------------------------------------------------
-
-    def _setup_langfuse_tracing(self, logger: Any) -> None:
-        """Initialize Langfuse tracing (v3 API).
-
-        Langfuse v3 uses OpenTelemetry-based context managers for lifecycle.
-        The Langfuse client is stored for use in _record_row_langfuse_trace().
-        """
-        try:
-            from langfuse import Langfuse  # type: ignore[import-not-found,import-untyped]  # optional dep, no stubs
-
-            cfg = self._tracing_config
-            if not isinstance(cfg, LangfuseTracingConfig):
-                return
-
-            self._langfuse_client = Langfuse(
-                public_key=cfg.public_key,
-                secret_key=cfg.secret_key,
-                host=cfg.host,
-                tracing_enabled=cfg.tracing_enabled,
-            )
-            self._tracing_active = True
-
-            logger.info(
-                "Langfuse tracing initialized (v3)",
-                provider="langfuse",
-                host=cfg.host,
-                tracing_enabled=cfg.tracing_enabled,
-            )
-
-        except ImportError:
-            logger.warning(
-                "Langfuse tracing requested but package not installed",
-                provider="langfuse",
-                hint="Install with: uv pip install elspeth[tracing-langfuse]",
-            )

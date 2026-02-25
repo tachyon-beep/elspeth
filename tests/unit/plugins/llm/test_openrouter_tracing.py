@@ -11,6 +11,7 @@ from unittest.mock import MagicMock, patch
 from elspeth.contracts import TransformResult
 from elspeth.contracts.schema_contract import FieldContract, PipelineRow, SchemaContract
 from elspeth.contracts.token_usage import TokenUsage
+from elspeth.plugins.llm.langfuse import ActiveLangfuseTracer, NoOpLangfuseTracer
 from elspeth.plugins.llm.openrouter import OpenRouterConfig, OpenRouterLLMTransform
 from elspeth.plugins.llm.openrouter_multi_query import (
     OpenRouterMultiQueryConfig,
@@ -102,7 +103,7 @@ class TestOpenRouterLLMTransformTracing:
         """No tracing setup when tracing config is None."""
         transform = self._create_transform(tracing_config=None)
         assert transform._tracing_config is None
-        assert transform._tracing_active is False
+        assert isinstance(transform._tracer, NoOpLangfuseTracer)
 
     def test_tracing_config_is_parsed(self) -> None:
         """Tracing config dict is parsed into TracingConfig."""
@@ -141,7 +142,8 @@ class TestOpenRouterLLMTransformTracing:
             mock_logger.warning.assert_called()
             call_args = mock_logger.warning.call_args
             assert "Azure AI tracing not supported" in call_args[0][0]
-            assert transform._tracing_active is False
+            # Langfuse tracer remains NoOp — Azure AI not supported for OpenRouter
+            assert isinstance(transform._tracer, NoOpLangfuseTracer)
 
     def test_tracing_config_validation_errors_logged(self) -> None:
         """Missing required fields log warning during on_start."""
@@ -164,40 +166,29 @@ class TestOpenRouterLLMTransformTracing:
 
             transform.on_start(ctx)
 
-            # Should have logged warnings about missing keys
+            # validate_tracing_config() logs warnings about missing keys during on_start
             mock_logger.warning.assert_called()
-            assert transform._tracing_active is False
 
-    def test_langfuse_client_stored_on_successful_setup(self) -> None:
-        """Langfuse client is stored for use in LLM calls."""
-        transform = self._create_transform(
-            tracing_config={
-                "provider": "langfuse",
-                "public_key": "pk-xxx",
-                "secret_key": "sk-xxx",
-            }
-        )
-
+    def test_langfuse_tracer_created_on_successful_setup(self) -> None:
+        """ActiveLangfuseTracer is created when Langfuse config is provided."""
         mock_langfuse_instance = MagicMock()
         mock_langfuse_class = MagicMock(return_value=mock_langfuse_instance)
 
-        # Patch the import inside the method
         import sys
 
         mock_module = MagicMock()
         mock_module.Langfuse = mock_langfuse_class
 
         with patch.dict(sys.modules, {"langfuse": mock_module}):
-            ctx = MagicMock()
-            ctx.landscape = MagicMock()
-            ctx.run_id = "test-run"
-            ctx.telemetry_emit = lambda x: None
-            ctx.rate_limit_registry = None
+            transform = self._create_transform(
+                tracing_config={
+                    "provider": "langfuse",
+                    "public_key": "pk-xxx",
+                    "secret_key": "sk-xxx",
+                }
+            )
 
-            transform.on_start(ctx)
-
-            assert transform._tracing_active is True
-            assert transform._langfuse_client is mock_langfuse_instance
+            assert isinstance(transform._tracer, ActiveLangfuseTracer)
 
 
 class TestOpenRouterMultiQueryConfigTracing:
@@ -235,7 +226,7 @@ class TestOpenRouterMultiQueryLLMTransformTracing:
         """No tracing setup when tracing config is None."""
         transform = self._create_transform(tracing_config=None)
         assert transform._tracing_config is None
-        assert transform._tracing_active is False
+        assert isinstance(transform._tracer, NoOpLangfuseTracer)
 
     def test_tracing_config_is_parsed(self) -> None:
         """Tracing config dict is parsed into TracingConfig."""
@@ -274,10 +265,10 @@ class TestOpenRouterMultiQueryLLMTransformTracing:
             mock_logger.warning.assert_called()
             call_args = mock_logger.warning.call_args
             assert "Azure AI tracing not supported" in call_args[0][0]
-            assert transform._tracing_active is False
+            assert isinstance(transform._tracer, NoOpLangfuseTracer)
 
-    def test_langfuse_client_stored_on_successful_setup(self) -> None:
-        """Langfuse client is stored for use in LLM calls."""
+    def test_langfuse_tracer_created_on_langfuse_config(self) -> None:
+        """ActiveLangfuseTracer is created when Langfuse tracing is configured."""
         transform = self._create_transform(
             tracing_config={
                 "provider": "langfuse",
@@ -286,26 +277,8 @@ class TestOpenRouterMultiQueryLLMTransformTracing:
             }
         )
 
-        mock_langfuse_instance = MagicMock()
-        mock_langfuse_class = MagicMock(return_value=mock_langfuse_instance)
-
-        # Patch the import inside the method
-        import sys
-
-        mock_module = MagicMock()
-        mock_module.Langfuse = mock_langfuse_class
-
-        with patch.dict(sys.modules, {"langfuse": mock_module}):
-            ctx = MagicMock()
-            ctx.landscape = MagicMock()
-            ctx.run_id = "test-run"
-            ctx.telemetry_emit = lambda x: None
-            ctx.rate_limit_registry = None
-
-            transform.on_start(ctx)
-
-            assert transform._tracing_active is True
-            assert transform._langfuse_client is mock_langfuse_instance
+        # Langfuse is installed in test env, so factory returns ActiveLangfuseTracer at __init__ time
+        assert isinstance(transform._tracer, ActiveLangfuseTracer)
 
 
 class TestLangfuseSpanCreation:
@@ -314,11 +287,6 @@ class TestLangfuseSpanCreation:
     def _create_transform_with_langfuse(self) -> tuple[OpenRouterLLMTransform, MagicMock, list[dict[str, Any]]]:
         """Create transform with mocked Langfuse client (v3 pattern)."""
         config = _make_base_config()
-        config["tracing"] = {
-            "provider": "langfuse",
-            "public_key": "pk-xxx",
-            "secret_key": "sk-xxx",
-        }
         transform = OpenRouterLLMTransform(config)
 
         captured_observations: list[dict[str, Any]] = []
@@ -335,8 +303,7 @@ class TestLangfuseSpanCreation:
         mock_langfuse.start_as_current_observation = mock_start_observation
         mock_langfuse.flush = MagicMock()
 
-        transform._langfuse_client = mock_langfuse
-        transform._tracing_active = True
+        transform._tracer = ActiveLangfuseTracer(transform_name=transform.name, client=mock_langfuse)
 
         return transform, mock_langfuse, captured_observations
 
@@ -344,12 +311,10 @@ class TestLangfuseSpanCreation:
         """Langfuse trace is created when making LLM call (v3: span + generation)."""
         transform, _mock_langfuse, captured_observations = self._create_transform_with_langfuse()
 
-        ctx = _make_mock_ctx()
-
         # Record trace (v3 pattern - single method call)
-        transform._record_langfuse_trace(
-            ctx=ctx,
+        transform._tracer.record_success(
             token_id="test-token",
+            query_name=transform.name,
             prompt="Hello world",
             response_content="Hi there!",
             model="anthropic/claude-3-opus",
@@ -366,12 +331,10 @@ class TestLangfuseSpanCreation:
         """Langfuse generation records prompt and response via update()."""
         transform, _mock_langfuse, captured_observations = self._create_transform_with_langfuse()
 
-        ctx = _make_mock_ctx()
-
         # Record a trace
-        transform._record_langfuse_trace(
-            ctx=ctx,
+        transform._tracer.record_success(
             token_id="test-token",
+            query_name=transform.name,
             prompt="Hello world",
             response_content="Hi there!",
             model="anthropic/claude-3-opus",
@@ -395,20 +358,18 @@ class TestLangfuseSpanCreation:
         config = _make_base_config()
         transform = OpenRouterLLMTransform(config)
 
-        ctx = _make_mock_ctx()
-
-        # This should be a no-op (no error, no trace)
-        transform._record_langfuse_trace(
-            ctx=ctx,
+        # This should be a no-op (no error, no trace) since _tracer is NoOpLangfuseTracer
+        transform._tracer.record_success(
             token_id="test-token",
+            query_name=transform.name,
             prompt="test",
             response_content="response",
             model="anthropic/claude-3-opus",
             usage=None,
             latency_ms=None,
         )
-        # If we get here without error and _langfuse_client is None, test passes
-        assert transform._langfuse_client is None
+        # Verify tracer is NoOp (no Langfuse configured)
+        assert isinstance(transform._tracer, NoOpLangfuseTracer)
 
 
 class TestMultiQueryLangfuseSpanCreation:
@@ -440,6 +401,8 @@ class TestMultiQueryLangfuseSpanCreation:
         mock_langfuse.start_as_current_observation = mock_start_observation
         mock_langfuse.flush = MagicMock()
 
+        # Multi-query base class still uses _langfuse_client/_tracing_active directly
+        # (will be migrated to LangfuseTracer separately)
         transform._langfuse_client = mock_langfuse
         transform._tracing_active = True
 
