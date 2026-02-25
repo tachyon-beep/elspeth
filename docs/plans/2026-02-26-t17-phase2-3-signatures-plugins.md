@@ -298,6 +298,30 @@ These transforms access `ctx.landscape`, `ctx.rate_limit_registry`, etc. in `on_
 
 If a method needs fields from both, it should capture them in `on_start()` (LifecycleContext) and use the captured instance vars in `process()` (TransformContext).
 
+**Step 3a: Fix defensive fallbacks in prompt_shield.py and content_safety.py**
+
+Both `prompt_shield.py` and `content_safety.py` have defensive fallback patterns in `accept()` / `process()` like:
+```python
+if self._recorder is None and ctx.landscape is not None:
+    self._recorder = ctx.landscape
+```
+These violate CLAUDE.md's prohibition on defensive programming (system-owned code should crash, not silently recover). Under `TransformContext`, `ctx.landscape` is not available — which makes these fallbacks both prohibited and impossible. **Remove these fallback blocks.** If `on_start()` wasn't called, that's a bug in the engine — let it crash.
+
+**Step 3b: Refactor web_scrape.py infrastructure access**
+
+`web_scrape.py` is unique: its `process()` method reads infrastructure fields (`ctx.landscape`, `ctx.rate_limit_registry`) that are NOT in `TransformContext`. This must be refactored before the signature can be narrowed:
+
+1. Add `on_start()` override to `WebScrapeTransform` that captures infrastructure:
+   ```python
+   def on_start(self, ctx: LifecycleContext) -> None:
+       super().on_start(ctx)
+       self._recorder = ctx.landscape
+       self._limiter = ctx.rate_limit_registry
+       self._telemetry_emit = ctx.telemetry_emit
+   ```
+2. Update `process()` and internal helpers (`_fetch_url`, etc.) to use `self._recorder`, `self._limiter`, `self._telemetry_emit` instead of `ctx.landscape`, `ctx.rate_limit_registry`, `ctx.telemetry_emit`
+3. Then narrow `process()` to `ctx: TransformContext`
+
 **Step 4: Run tests**
 
 Run: `.venv/bin/python -m pytest tests/unit/plugins/transforms/ -v --timeout=60 -k "web_scrape or prompt_shield or content_safety"`
@@ -454,5 +478,5 @@ on_start()/on_complete() accept LifecycleContext."
 
 **Step 2: Full verification**
 
-Run: `.venv/bin/python -m pytest tests/ -x --timeout=120 -q && .venv/bin/python -m mypy src/ && .venv/bin/python -m ruff check src/ && .venv/bin/python -m scripts.check_contracts`
+Run: `.venv/bin/python -m pytest tests/ -x --timeout=120 -q && .venv/bin/python -m mypy src/ && .venv/bin/python -m ruff check src/ && .venv/bin/python -m scripts.check_contracts && .venv/bin/python scripts/cicd/enforce_tier_model.py check --root src/elspeth --allowlist config/cicd/enforce_tier_model`
 Expected: All pass

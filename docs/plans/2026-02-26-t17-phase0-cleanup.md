@@ -2,7 +2,7 @@
 
 > **For Claude:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task.
 
-**Goal:** Remove 5 dead fields and 2 unused methods from PluginContext before the protocol split, reducing the surface area from 20 fields to 15.
+**Goal:** Remove 4 dead fields and 2 unused methods from PluginContext before the protocol split, reducing the surface area from 19 fields to 15.
 
 **Architecture:** Pure deletion — grep to verify zero usage, delete, fix mypy/tests.
 
@@ -113,7 +113,11 @@ Also remove the now-unused imports at the top: `AbstractContextManager`, `nullco
 **Step 3: Fix test breakage**
 
 Run: `grep -rn 'tracer\|start_span' tests/ --include='*.py'`
-Update any tests that reference these fields — they should be testing PluginContext features that no longer exist.
+
+Known test changes needed in `tests/unit/plugins/test_context.py`:
+- **Line 29**: Delete `assert ctx.tracer is None` assertion
+- **Lines 32-38**: Delete entire `test_start_span_without_tracer` method
+- **Line 4**: `from contextlib import nullcontext` import becomes unused — delete it
 
 **Step 4: Run tests + mypy**
 
@@ -143,7 +147,12 @@ In `src/elspeth/contracts/plugin_context.py`, delete lines 206-223:
 **Step 3: Fix test breakage**
 
 Run: `grep -rn '\.get(' tests/ --include='*.py' | grep -i 'plugin_context\|ctx\.get'`
-Update any tests that exercise the deleted `get()` method.
+
+Known test changes needed in `tests/unit/plugins/test_context.py`:
+- **Lines 40-49**: Delete entire `test_get_config_value` method
+
+Also delete dead `llm_client` test in `tests/unit/plugins/llm/test_transform.py`:
+- **Lines 465-487**: Delete entire `TestProviderClientIsolation` class (tests the dead `llm_client` field)
 
 **Step 4: Run tests + mypy**
 
@@ -178,14 +187,14 @@ Expected: All pass
 
 ```bash
 git add src/elspeth/contracts/plugin_context.py tests/
-git commit -m "refactor(T17): Phase 0 — remove 5 dead fields + 2 unused methods from PluginContext
+git commit -m "refactor(T17): Phase 0 — remove 4 dead fields + 2 unused methods from PluginContext
 
 Remove plugin_name, llm_client, http_client, tracer fields and
 start_span(), get() methods. All had zero production callers.
-Reduces PluginContext surface from 20 fields to 15 before protocol split."
+Reduces PluginContext surface from 19 fields to 15 before protocol split."
 ```
 
 **Step 2: Verify clean state**
 
-Run: `.venv/bin/python -m pytest tests/ -x --timeout=120 -q && .venv/bin/python -m mypy src/ && .venv/bin/python -m ruff check src/`
+Run: `.venv/bin/python -m pytest tests/ -x --timeout=120 -q && .venv/bin/python -m mypy src/ && .venv/bin/python -m ruff check src/ && .venv/bin/python scripts/cicd/enforce_tier_model.py check --root src/elspeth --allowlist config/cicd/enforce_tier_model`
 Expected: All pass

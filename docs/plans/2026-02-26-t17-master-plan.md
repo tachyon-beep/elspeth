@@ -2,7 +2,7 @@
 
 > **For Claude:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task.
 
-**Goal:** Decompose the 20-field PluginContext god-object into 4 phase-based protocols (SourceContext, TransformContext, SinkContext, LifecycleContext), enforcing interface segregation across all plugins.
+**Goal:** Decompose the 19-field PluginContext god-object into 4 phase-based protocols (SourceContext, TransformContext, SinkContext, LifecycleContext), enforcing interface segregation across all plugins.
 
 **Architecture:** Phase-based protocol split — each protocol captures what one plugin category actually accesses. The concrete `PluginContext` class remains as the mutable implementation satisfying all protocols. Executors keep accepting the concrete type (they mutate fields); plugins narrow their signatures to protocol types.
 
@@ -39,6 +39,7 @@ Every phase must pass ALL of these before proceeding:
 .venv/bin/python -m mypy src/                          # Type checking clean
 .venv/bin/python -m ruff check src/                    # Linting clean
 .venv/bin/python -m scripts.check_contracts            # Config contracts pass
+.venv/bin/python scripts/cicd/enforce_tier_model.py check --root src/elspeth --allowlist config/cicd/enforce_tier_model  # Tier model clean
 ```
 
 ## Key Design Constraints
@@ -64,7 +65,8 @@ Every phase must pass ALL of these before proceeding:
 | Sinks | 4 | `csv_sink.py`, `json_sink.py`, `database_sink.py`, `blob_sink.py` |
 | Batching | 1 | `batching/mixin.py` |
 | Executors | 5 | `transform.py`, `sink.py`, `gate.py`, `aggregation.py`, `state_guard.py` |
-| Orchestrator | 3 | `core.py`, `aggregation.py`, `export.py` |
+| Orchestrator | 4 | `core.py`, `aggregation.py`, `export.py`, `outcomes.py` |
+| Processor | 1 | `engine/processor.py` |
 | Operations | 1 | `core/operations.py` |
 | Tests | ~70 | Mostly signature changes in test helpers |
 | Alignment tests | 1 new | `tests/unit/contracts/test_context_protocols.py` |

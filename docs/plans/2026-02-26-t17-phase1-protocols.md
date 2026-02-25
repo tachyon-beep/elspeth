@@ -93,7 +93,7 @@ if TYPE_CHECKING:
     from elspeth.contracts.schema_contract import PipelineRow, SchemaContract
     from elspeth.core.landscape.recorder import LandscapeRecorder
     from elspeth.core.rate_limit import RateLimitRegistry
-    from elspeth.plugins.results import PayloadStore
+    from elspeth.contracts.payload_store import PayloadStore
 
 
 # ---------------------------------------------------------------------------
@@ -499,5 +499,5 @@ four. Modeled on test_config_alignment.py precedent."
 
 **Step 2: Full verification**
 
-Run: `.venv/bin/python -m pytest tests/ -x --timeout=120 -q && .venv/bin/python -m mypy src/ && .venv/bin/python -m ruff check src/ && .venv/bin/python -m scripts.check_contracts`
+Run: `.venv/bin/python -m pytest tests/ -x --timeout=120 -q && .venv/bin/python -m mypy src/ && .venv/bin/python -m ruff check src/ && .venv/bin/python -m scripts.check_contracts && .venv/bin/python scripts/cicd/enforce_tier_model.py check --root src/elspeth --allowlist config/cicd/enforce_tier_model`
 Expected: All pass
