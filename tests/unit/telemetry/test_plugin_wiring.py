@@ -4,7 +4,7 @@
 This test ensures no plugin is accidentally left without telemetry support.
 It inspects plugin source code to verify they:
 1. Capture run_id and telemetry_emit in on_start()
-2. Pass these to audited clients
+2. Pass these to audited clients (or to providers that create audited clients)
 
 This is a regression guard - if a new plugin is added that makes
 external calls, this test will fail until it's properly wired.
@@ -17,27 +17,12 @@ import pytest
 
 # Plugins that make external calls and MUST emit telemetry
 EXTERNAL_CALL_PLUGINS: dict[str, dict[str, Any]] = {
-    # LLM plugins using AuditedLLMClient
-    "src/elspeth/plugins/llm/azure.py": {
-        "class": "AzureLLMTransform",
-        "client_type": "AuditedLLMClient",
-        "pattern": "ctx_passthrough",  # Passes ctx.run_id directly
-    },
-    "src/elspeth/plugins/llm/azure_multi_query.py": {
-        "class": "AzureMultiQueryLLMTransform",
-        "client_type": "AuditedLLMClient",
-        "pattern": "on_start_capture",  # Captures in on_start
-    },
-    # HTTP plugins using AuditedHTTPClient
-    "src/elspeth/plugins/llm/openrouter.py": {
-        "class": "OpenRouterLLMTransform",
-        "client_type": "AuditedHTTPClient",
-        "pattern": "on_start_capture",
-    },
-    "src/elspeth/plugins/llm/openrouter_multi_query.py": {
-        "class": "OpenRouterMultiQueryLLMTransform",
-        "client_type": "AuditedHTTPClient",
-        "pattern": "on_start_capture",
+    # Unified LLM transform — dispatches to providers which create audited clients.
+    # Captures run_id/telemetry_emit in on_start() and passes to provider constructors.
+    "src/elspeth/plugins/llm/transform.py": {
+        "class": "LLMTransform",
+        "client_type": "AzureLLMProvider",  # One of the provider constructors in source
+        "pattern": "on_start_capture",  # Captures in on_start, passes to providers
     },
     # Provider implementations (Phase B of T10 LLM consolidation)
     "src/elspeth/plugins/llm/providers/azure.py": {
@@ -71,6 +56,12 @@ EXTERNAL_CALL_PLUGINS: dict[str, dict[str, Any]] = {
 TELEMETRY_EXEMPT_PLUGINS: dict[str, str] = {
     "src/elspeth/plugins/llm/azure_batch.py": "Batch API - uses file uploads, not per-row calls",
     "src/elspeth/plugins/llm/openrouter_batch.py": "Batch API - uses file uploads, not per-row calls",
+    # Legacy individual transforms — deprecated by unified LLMTransform (T10 Phase B).
+    # These files still exist during the transition period and will be deleted in Task 12.
+    "src/elspeth/plugins/llm/azure.py": "Legacy — deprecated by unified LLMTransform, pending deletion in Task 12",
+    "src/elspeth/plugins/llm/azure_multi_query.py": "Legacy — deprecated by unified LLMTransform, pending deletion in Task 12",
+    "src/elspeth/plugins/llm/openrouter.py": "Legacy — deprecated by unified LLMTransform, pending deletion in Task 12",
+    "src/elspeth/plugins/llm/openrouter_multi_query.py": "Legacy — deprecated by unified LLMTransform, pending deletion in Task 12",
 }
 
 # Files that define audited clients (not plugins that USE them)
@@ -122,16 +113,16 @@ class TestTelemetryWiring:
         ids=lambda x: x if isinstance(x, str) else x.get("class", "unknown"),
     )
     def test_plugin_passes_telemetry_to_client(self, plugin_path: str, config: dict[str, Any]) -> None:
-        """Verify plugin passes telemetry params to audited client."""
+        """Verify plugin passes telemetry params to audited client or provider."""
         full_path = Path(plugin_path)
         source = full_path.read_text()
 
         client_type = config["client_type"]
 
-        # Check that run_id and telemetry_emit are passed to client constructor
+        # Check that the client/provider constructor is called in source
         assert f"{client_type}(" in source, f"{plugin_path} must use {client_type}"
 
-        # Check for run_id= and telemetry_emit= in client instantiation
+        # Check for run_id= and telemetry_emit= in constructor calls
         assert "run_id=" in source, f"{plugin_path} must pass run_id to {client_type}"
         assert "telemetry_emit=" in source, f"{plugin_path} must pass telemetry_emit to {client_type}"
 

@@ -1,5 +1,5 @@
 # tests/plugins/llm/test_openrouter.py
-"""Tests for OpenRouter LLM transform with row-level pipelining."""
+"""Tests for OpenRouter LLM via unified LLMTransform with row-level pipelining."""
 
 import json
 from collections.abc import Generator, Iterator
@@ -17,7 +17,8 @@ from elspeth.contracts.schema_contract import SchemaContract
 from elspeth.engine.batch_adapter import ExceptionResult
 from elspeth.plugins.batching.ports import CollectorOutputPort
 from elspeth.plugins.config_base import PluginConfigError
-from elspeth.plugins.llm.openrouter import OpenRouterConfig, OpenRouterLLMTransform
+from elspeth.plugins.llm.openrouter import OpenRouterConfig
+from elspeth.plugins.llm.transform import LLMTransform
 from elspeth.testing import make_pipeline_row, make_row
 
 from .conftest import chaosllm_openrouter_http_responses, chaosllm_openrouter_httpx_response
@@ -92,6 +93,20 @@ def make_token(row_id: str = "row-1", token_id: str | None = None) -> TokenInfo:
         token_id=token_id or f"token-{row_id}",
         row_data=make_row({}, contract=contract),  # Not used in these tests
     )
+
+
+def _openrouter_config(**overrides: Any) -> dict[str, Any]:
+    """Build a valid OpenRouter LLMTransform config with overrides."""
+    config: dict[str, Any] = {
+        "provider": "openrouter",
+        "api_key": "sk-test-key",
+        "model": "anthropic/claude-3-opus",
+        "template": "Analyze: {{ row.text }}",
+        "schema": DYNAMIC_SCHEMA,
+        "required_input_fields": [],
+    }
+    config.update(overrides)
+    return config
 
 
 class TestOpenRouterConfig:
@@ -220,73 +235,49 @@ class TestOpenRouterConfig:
             )
 
 
-class TestOpenRouterLLMTransformInit:
-    """Tests for OpenRouterLLMTransform initialization."""
+class TestLLMTransformOpenRouterInit:
+    """Tests for LLMTransform initialization with OpenRouter provider."""
 
     def test_transform_stores_config_values(self) -> None:
-        """Transform stores config values as attributes."""
-        transform = OpenRouterLLMTransform(
-            {
-                "api_key": "sk-test-key",
-                "model": "anthropic/claude-3-opus",
-                "template": "Analyze: {{ row.text }}",
-                "schema": DYNAMIC_SCHEMA,
-                "required_input_fields": [],  # Explicit opt-out for this test
-                "base_url": "https://custom.example.com/api/v1",
-                "timeout_seconds": 90.0,
-            }
+        """Transform stores config values via _config attribute."""
+        transform = LLMTransform(
+            _openrouter_config(
+                base_url="https://custom.example.com/api/v1",
+                timeout_seconds=90.0,
+            )
         )
 
         assert transform._model == "anthropic/claude-3-opus"
-        assert transform._request_headers["Authorization"] == "Bearer sk-test-key"
-        assert transform._base_url == "https://custom.example.com/api/v1"
-        assert transform._timeout == 90.0
+        assert transform._config.api_key == "sk-test-key"
+        assert transform._config.base_url == "https://custom.example.com/api/v1"
+        assert transform._config.timeout_seconds == 90.0
 
     def test_determinism_is_non_deterministic(self) -> None:
-        """OpenRouter transforms are marked as non-deterministic."""
-        transform = OpenRouterLLMTransform(
-            {
-                "api_key": "sk-test-key",
-                "model": "anthropic/claude-3-opus",
-                "template": "{{ row.text }}",
-                "schema": DYNAMIC_SCHEMA,
-                "required_input_fields": [],  # Explicit opt-out for this test
-            }
-        )
+        """LLM transforms are marked as non-deterministic."""
+        transform = LLMTransform(_openrouter_config(template="{{ row.text }}"))
         assert transform.determinism == Determinism.NON_DETERMINISTIC
+
+    def test_transform_name_is_llm(self) -> None:
+        """Unified LLMTransform has name 'llm'."""
+        transform = LLMTransform(_openrouter_config(template="{{ row.text }}"))
+        assert transform.name == "llm"
 
     def test_process_raises_not_implemented(self) -> None:
         """process() raises NotImplementedError directing to accept()."""
-        transform = OpenRouterLLMTransform(
-            {
-                "api_key": "sk-test-key",
-                "model": "anthropic/claude-3-opus",
-                "template": "{{ row.text }}",
-                "schema": DYNAMIC_SCHEMA,
-                "required_input_fields": [],  # Explicit opt-out for this test
-            }
-        )
+        transform = LLMTransform(_openrouter_config(template="{{ row.text }}"))
         ctx = PluginContext(run_id="test-run", config={})
 
         with pytest.raises(NotImplementedError, match="row-level pipelining"):
             transform.process(make_pipeline_row({"text": "hello"}), ctx)
 
     def test_declared_output_fields_populated(self) -> None:
-        """Regression: OpenRouterLLMTransform was previously unprotected from field collisions.
+        """Regression: declared_output_fields must be populated for collision detection.
 
-        Before centralized collision enforcement, OpenRouterLLMTransform had NO
+        Before centralized collision enforcement, OpenRouter had NO
         collision check. This test verifies declared_output_fields is populated
         so TransformExecutor can enforce collision detection.
         """
-        transform = OpenRouterLLMTransform(
-            {
-                "api_key": "sk-test-key",
-                "model": "anthropic/claude-3-opus",
-                "template": "{{ row.text }}",
-                "schema": DYNAMIC_SCHEMA,
-                "required_input_fields": [],
-            }
-        )
+        transform = LLMTransform(_openrouter_config(template="{{ row.text }}"))
 
         assert isinstance(transform.declared_output_fields, frozenset)
         assert len(transform.declared_output_fields) > 0
@@ -294,8 +285,8 @@ class TestOpenRouterLLMTransformInit:
         assert "llm_response_model" in transform.declared_output_fields
 
 
-class TestOpenRouterLLMTransformPipelining:
-    """Tests for OpenRouterLLMTransform with row-level pipelining.
+class TestLLMTransformOpenRouterPipelining:
+    """Tests for LLMTransform (OpenRouter) with row-level pipelining.
 
     These tests verify the accept() API that uses BatchTransformMixin
     for concurrent row processing with FIFO output ordering.
@@ -326,17 +317,9 @@ class TestOpenRouterLLMTransformPipelining:
         )
 
     @pytest.fixture
-    def transform(self, collector: CollectorOutputPort, mock_recorder: Mock) -> Generator[OpenRouterLLMTransform, None, None]:
-        """Create and initialize OpenRouter transform with pipelining."""
-        t = OpenRouterLLMTransform(
-            {
-                "api_key": "sk-test-key",
-                "model": "anthropic/claude-3-opus",
-                "template": "Analyze: {{ row.text }}",
-                "schema": DYNAMIC_SCHEMA,
-                "required_input_fields": [],  # Explicit opt-out for this test
-            }
-        )
+    def transform(self, collector: CollectorOutputPort, mock_recorder: Mock) -> Generator[LLMTransform, None, None]:
+        """Create and initialize LLMTransform (OpenRouter) with pipelining."""
+        t = LLMTransform(_openrouter_config())
         # Initialize with recorder reference
         init_ctx = PluginContext(run_id="test", config={}, landscape=mock_recorder)
         t.on_start(init_ctx)
@@ -349,7 +332,7 @@ class TestOpenRouterLLMTransformPipelining:
     def test_successful_api_call_emits_enriched_row(
         self,
         ctx: PluginContext,
-        transform: OpenRouterLLMTransform,
+        transform: LLMTransform,
         collector: CollectorOutputPort,
         chaosllm_server,
     ) -> None:
@@ -384,7 +367,7 @@ class TestOpenRouterLLMTransformPipelining:
     def test_template_rendering_error_emits_error(
         self,
         ctx: PluginContext,
-        transform: OpenRouterLLMTransform,
+        transform: LLMTransform,
         collector: CollectorOutputPort,
         chaosllm_server,
     ) -> None:
@@ -404,15 +387,20 @@ class TestOpenRouterLLMTransformPipelining:
         assert "template_hash" in result.reason
 
     def test_http_error_400_returns_error_result(
-        self, ctx: PluginContext, transform: OpenRouterLLMTransform, collector: CollectorOutputPort, chaosllm_server
+        self, ctx: PluginContext, transform: LLMTransform, collector: CollectorOutputPort, chaosllm_server
     ) -> None:
-        """Non-retryable HTTP errors (4xx except 429) return TransformResult.error()."""
+        """Non-retryable HTTP errors (4xx except 429) return TransformResult.error().
+
+        In the unified LLMTransform, the provider classifies HTTP errors and
+        the strategy catches non-retryable LLMClientError as 'llm_call_failed'.
+        """
+        mock_response = Mock(status_code=400, text="Bad Request")
         with mock_httpx_client(
             chaosllm_server,
             side_effect=httpx.HTTPStatusError(
                 "Bad Request",
                 request=Mock(),
-                response=Mock(status_code=400),
+                response=mock_response,
             ),
         ):
             transform.accept(make_pipeline_row({"text": "hello"}), ctx)
@@ -424,12 +412,11 @@ class TestOpenRouterLLMTransformPipelining:
 
         assert result.status == "error"
         assert result.reason is not None
-        assert result.reason["reason"] == "api_call_failed"
-        assert result.reason["status_code"] == 400
+        assert result.reason["reason"] == "llm_call_failed"
         assert result.retryable is False
 
     def test_http_error_500_raises_server_error(
-        self, ctx: PluginContext, transform: OpenRouterLLMTransform, collector: CollectorOutputPort, chaosllm_server
+        self, ctx: PluginContext, transform: LLMTransform, collector: CollectorOutputPort, chaosllm_server
     ) -> None:
         """Server errors (5xx) raise ServerError for engine RetryManager.
 
@@ -457,7 +444,7 @@ class TestOpenRouterLLMTransformPipelining:
     def test_rate_limit_429_raises_rate_limit_error(
         self,
         ctx: PluginContext,
-        transform: OpenRouterLLMTransform,
+        transform: LLMTransform,
         collector: CollectorOutputPort,
         chaosllm_server,
     ) -> None:
@@ -487,7 +474,7 @@ class TestOpenRouterLLMTransformPipelining:
     def test_service_unavailable_503_raises_server_error(
         self,
         ctx: PluginContext,
-        transform: OpenRouterLLMTransform,
+        transform: LLMTransform,
         collector: CollectorOutputPort,
         chaosllm_server,
     ) -> None:
@@ -517,7 +504,7 @@ class TestOpenRouterLLMTransformPipelining:
     def test_overloaded_529_raises_server_error(
         self,
         ctx: PluginContext,
-        transform: OpenRouterLLMTransform,
+        transform: LLMTransform,
         collector: CollectorOutputPort,
         chaosllm_server,
     ) -> None:
@@ -547,7 +534,7 @@ class TestOpenRouterLLMTransformPipelining:
     def test_network_error_raises_network_error(
         self,
         ctx: PluginContext,
-        transform: OpenRouterLLMTransform,
+        transform: LLMTransform,
         collector: CollectorOutputPort,
         chaosllm_server,
     ) -> None:
@@ -569,7 +556,7 @@ class TestOpenRouterLLMTransformPipelining:
         assert result.exception.retryable is True
 
     def test_missing_state_id_propagates_exception(
-        self, mock_recorder: Mock, transform: OpenRouterLLMTransform, collector: CollectorOutputPort
+        self, mock_recorder: Mock, transform: LLMTransform, collector: CollectorOutputPort
     ) -> None:
         """Missing state_id causes exception propagation, not error result.
 
@@ -604,15 +591,11 @@ class TestOpenRouterLLMTransformPipelining:
 
     def test_system_prompt_included_in_request(self, mock_recorder: Mock, collector: CollectorOutputPort, chaosllm_server) -> None:
         """System prompt is included when configured."""
-        transform = OpenRouterLLMTransform(
-            {
-                "api_key": "sk-test-key",
-                "model": "anthropic/claude-3-opus",
-                "template": "{{ row.text }}",
-                "schema": DYNAMIC_SCHEMA,
-                "required_input_fields": [],  # Explicit opt-out for this test
-                "system_prompt": "You are a helpful assistant.",
-            }
+        transform = LLMTransform(
+            _openrouter_config(
+                template="{{ row.text }}",
+                system_prompt="You are a helpful assistant.",
+            )
         )
         init_ctx = PluginContext(run_id="test", config={}, landscape=mock_recorder)
         transform.on_start(init_ctx)
@@ -649,7 +632,7 @@ class TestOpenRouterLLMTransformPipelining:
     def test_no_system_prompt_single_message(
         self,
         ctx: PluginContext,
-        transform: OpenRouterLLMTransform,
+        transform: LLMTransform,
         collector: CollectorOutputPort,
         chaosllm_server,
     ) -> None:
@@ -668,15 +651,12 @@ class TestOpenRouterLLMTransformPipelining:
 
     def test_custom_response_field(self, mock_recorder: Mock, collector: CollectorOutputPort, chaosllm_server) -> None:
         """Custom response_field name is used."""
-        transform = OpenRouterLLMTransform(
-            {
-                "api_key": "sk-test-key",
-                "model": "openai/gpt-4",
-                "template": "{{ row.text }}",
-                "schema": DYNAMIC_SCHEMA,
-                "required_input_fields": [],  # Explicit opt-out for this test
-                "response_field": "analysis",
-            }
+        transform = LLMTransform(
+            _openrouter_config(
+                model="openai/gpt-4",
+                template="{{ row.text }}",
+                response_field="analysis",
+            )
         )
         init_ctx = PluginContext(run_id="test", config={}, landscape=mock_recorder)
         transform.on_start(init_ctx)
@@ -714,7 +694,7 @@ class TestOpenRouterLLMTransformPipelining:
     def test_model_from_response_used_when_available(
         self,
         ctx: PluginContext,
-        transform: OpenRouterLLMTransform,
+        transform: LLMTransform,
         collector: CollectorOutputPort,
         chaosllm_server,
     ) -> None:
@@ -734,7 +714,7 @@ class TestOpenRouterLLMTransformPipelining:
         assert result.row["llm_response_model"] == "anthropic/claude-3-opus-20240229"
 
     def test_raise_for_status_called(
-        self, ctx: PluginContext, transform: OpenRouterLLMTransform, collector: CollectorOutputPort, chaosllm_server
+        self, ctx: PluginContext, transform: LLMTransform, collector: CollectorOutputPort, chaosllm_server
     ) -> None:
         """raise_for_status is called on response to check errors."""
         mock_response = _create_mock_response(
@@ -742,7 +722,7 @@ class TestOpenRouterLLMTransformPipelining:
             raise_for_status_error=httpx.HTTPStatusError(
                 "400 Bad Request",
                 request=Mock(),
-                response=Mock(status_code=400),
+                response=Mock(status_code=400, text="Bad Request"),
             ),
         )
         with mock_httpx_client(chaosllm_server, response=mock_response):
@@ -756,15 +736,7 @@ class TestOpenRouterLLMTransformPipelining:
 
     def test_connect_output_required_before_accept(self) -> None:
         """accept() raises RuntimeError if connect_output() not called."""
-        transform = OpenRouterLLMTransform(
-            {
-                "api_key": "sk-test-key",
-                "model": "anthropic/claude-3-opus",
-                "template": "{{ row.text }}",
-                "schema": DYNAMIC_SCHEMA,
-                "required_input_fields": [],  # Explicit opt-out for this test
-            }
-        )
+        transform = LLMTransform(_openrouter_config(template="{{ row.text }}"))
 
         token = make_token("row-1")
         ctx = PluginContext(
@@ -779,15 +751,7 @@ class TestOpenRouterLLMTransformPipelining:
 
     def test_connect_output_cannot_be_called_twice(self, collector: CollectorOutputPort, mock_recorder: Mock) -> None:
         """connect_output() raises if called more than once."""
-        transform = OpenRouterLLMTransform(
-            {
-                "api_key": "sk-test-key",
-                "model": "anthropic/claude-3-opus",
-                "template": "{{ row.text }}",
-                "schema": DYNAMIC_SCHEMA,
-                "required_input_fields": [],  # Explicit opt-out for this test
-            }
-        )
+        transform = LLMTransform(_openrouter_config(template="{{ row.text }}"))
         init_ctx = PluginContext(run_id="test", config={}, landscape=mock_recorder)
         transform.on_start(init_ctx)
         transform.connect_output(collector, max_pending=10)
@@ -800,20 +764,12 @@ class TestOpenRouterLLMTransformPipelining:
 
     def test_close_is_noop_when_not_initialized(self) -> None:
         """close() does nothing when transform wasn't fully initialized."""
-        transform = OpenRouterLLMTransform(
-            {
-                "api_key": "sk-test-key",
-                "model": "anthropic/claude-3-opus",
-                "template": "{{ row.text }}",
-                "schema": DYNAMIC_SCHEMA,
-                "required_input_fields": [],  # Explicit opt-out for this test
-            }
-        )
+        transform = LLMTransform(_openrouter_config(template="{{ row.text }}"))
         transform.close()  # Should not raise
 
 
-class TestOpenRouterLLMTransformIntegration:
-    """Integration-style tests for edge cases."""
+class TestLLMTransformOpenRouterIntegration:
+    """Integration-style tests for edge cases with OpenRouter provider."""
 
     @pytest.fixture
     def mock_recorder(self) -> Mock:
@@ -829,11 +785,10 @@ class TestOpenRouterLLMTransformIntegration:
 
     def test_complex_template_with_multiple_variables(self, mock_recorder: Mock, collector: CollectorOutputPort, chaosllm_server) -> None:
         """Complex template with multiple variables works correctly."""
-        transform = OpenRouterLLMTransform(
-            {
-                "api_key": "sk-test-key",
-                "model": "openai/gpt-4",
-                "template": """
+        transform = LLMTransform(
+            _openrouter_config(
+                model="openai/gpt-4",
+                template="""
                     Analyze the following data:
                     Name: {{ row.name }}
                     Score: {{ row.score }}
@@ -841,9 +796,7 @@ class TestOpenRouterLLMTransformIntegration:
 
                     Provide a summary.
                 """,
-                "schema": DYNAMIC_SCHEMA,
-                "required_input_fields": [],  # Explicit opt-out for this test
-            }
+            )
         )
         init_ctx = PluginContext(run_id="test", config={}, landscape=mock_recorder)
         transform.on_start(init_ctx)
@@ -883,15 +836,7 @@ class TestOpenRouterLLMTransformIntegration:
 
     def test_empty_usage_handled_gracefully(self, mock_recorder: Mock, collector: CollectorOutputPort, chaosllm_server) -> None:
         """Empty usage dict from API is handled."""
-        transform = OpenRouterLLMTransform(
-            {
-                "api_key": "sk-test-key",
-                "model": "openai/gpt-4",
-                "template": "{{ row.text }}",
-                "schema": DYNAMIC_SCHEMA,
-                "required_input_fields": [],  # Explicit opt-out for this test
-            }
-        )
+        transform = LLMTransform(_openrouter_config(model="openai/gpt-4", template="{{ row.text }}"))
         init_ctx = PluginContext(run_id="test", config={}, landscape=mock_recorder)
         transform.on_start(init_ctx)
         transform.connect_output(collector, max_pending=10)
@@ -937,15 +882,7 @@ class TestOpenRouterLLMTransformIntegration:
         """
         from elspeth.plugins.clients.llm import NetworkError
 
-        transform = OpenRouterLLMTransform(
-            {
-                "api_key": "sk-test-key",
-                "model": "openai/gpt-4",
-                "template": "{{ row.text }}",
-                "schema": DYNAMIC_SCHEMA,
-                "required_input_fields": [],  # Explicit opt-out for this test
-            }
-        )
+        transform = LLMTransform(_openrouter_config(model="openai/gpt-4", template="{{ row.text }}"))
         init_ctx = PluginContext(run_id="test", config={}, landscape=mock_recorder)
         transform.on_start(init_ctx)
         transform.connect_output(collector, max_pending=10)
@@ -972,21 +909,18 @@ class TestOpenRouterLLMTransformIntegration:
         assert isinstance(result.exception, NetworkError)
         assert result.exception.retryable is True
 
-    def test_timeout_passed_to_http_client(self, mock_recorder: Mock, collector: CollectorOutputPort, chaosllm_server) -> None:
-        """Custom timeout_seconds is used when creating HTTP client."""
-        transform = OpenRouterLLMTransform(
-            {
-                "api_key": "sk-test-key",
-                "model": "openai/gpt-4",
-                "template": "{{ row.text }}",
-                "schema": DYNAMIC_SCHEMA,
-                "required_input_fields": [],  # Explicit opt-out for this test
-                "timeout_seconds": 120.0,  # Custom timeout
-            }
+    def test_timeout_stored_in_config(self, mock_recorder: Mock, collector: CollectorOutputPort, chaosllm_server) -> None:
+        """Custom timeout_seconds is stored in _config for provider creation."""
+        transform = LLMTransform(
+            _openrouter_config(
+                model="openai/gpt-4",
+                template="{{ row.text }}",
+                timeout_seconds=120.0,
+            )
         )
 
-        # The transform stores the timeout internally
-        assert transform._timeout == 120.0
+        # The transform stores the timeout in its config
+        assert transform._config.timeout_seconds == 120.0
 
         init_ctx = PluginContext(run_id="test", config={}, landscape=mock_recorder)
         transform.on_start(init_ctx)
@@ -1015,16 +949,12 @@ class TestOpenRouterLLMTransformIntegration:
         assert result.status == "success"
 
     def test_empty_choices_emits_error(self, mock_recorder: Mock, collector: CollectorOutputPort, chaosllm_server) -> None:
-        """Empty choices array emits TransformResult.error()."""
-        transform = OpenRouterLLMTransform(
-            {
-                "api_key": "sk-test-key",
-                "model": "openai/gpt-4",
-                "template": "{{ row.text }}",
-                "schema": DYNAMIC_SCHEMA,
-                "required_input_fields": [],  # Explicit opt-out for this test
-            }
-        )
+        """Empty choices array emits error via provider exception.
+
+        In the unified LLMTransform, the provider raises LLMClientError for
+        empty choices, which the strategy catches as 'llm_call_failed'.
+        """
+        transform = LLMTransform(_openrouter_config(model="openai/gpt-4", template="{{ row.text }}"))
         init_ctx = PluginContext(run_id="test", config={}, landscape=mock_recorder)
         transform.on_start(init_ctx)
         transform.connect_output(collector, max_pending=10)
@@ -1062,26 +992,18 @@ class TestOpenRouterLLMTransformIntegration:
         assert isinstance(result, TransformResult)
         assert result.status == "error"
         assert result.reason is not None
-        assert result.reason["reason"] == "empty_choices"
+        assert result.reason["reason"] == "llm_call_failed"
 
     def test_null_content_from_content_filtering_emits_error(
         self, mock_recorder: Mock, collector: CollectorOutputPort, chaosllm_server
     ) -> None:
-        """Null content (content filtering) returns error instead of passing None through.
+        """Null content (content filtering) returns error.
 
         P0-05: When OpenRouter returns null content due to content filtering,
-        the single-query transform stored None in the output row. Must return
-        TransformResult.error() with reason 'content_filtered'.
+        the provider raises ContentPolicyError which the strategy catches
+        as a non-retryable 'llm_call_failed'.
         """
-        transform = OpenRouterLLMTransform(
-            {
-                "api_key": "sk-test-key",
-                "model": "openai/gpt-4",
-                "template": "{{ row.text }}",
-                "schema": DYNAMIC_SCHEMA,
-                "required_input_fields": [],  # Explicit opt-out for this test
-            }
-        )
+        transform = LLMTransform(_openrouter_config(model="openai/gpt-4", template="{{ row.text }}"))
         init_ctx = PluginContext(run_id="test", config={}, landscape=mock_recorder)
         transform.on_start(init_ctx)
         transform.connect_output(collector, max_pending=10)
@@ -1119,19 +1041,15 @@ class TestOpenRouterLLMTransformIntegration:
         assert isinstance(result, TransformResult)
         assert result.status == "error"
         assert result.reason is not None
-        assert result.reason["reason"] == "content_filtered"
+        assert result.reason["reason"] == "llm_call_failed"
 
     def test_missing_choices_key_emits_error(self, mock_recorder: Mock, collector: CollectorOutputPort, chaosllm_server) -> None:
-        """Missing 'choices' key in response emits TransformResult.error()."""
-        transform = OpenRouterLLMTransform(
-            {
-                "api_key": "sk-test-key",
-                "model": "openai/gpt-4",
-                "template": "{{ row.text }}",
-                "schema": DYNAMIC_SCHEMA,
-                "required_input_fields": [],  # Explicit opt-out for this test
-            }
-        )
+        """Missing 'choices' key in response emits error via provider exception.
+
+        In the unified LLMTransform, the provider raises LLMClientError for
+        missing choices, which the strategy catches as 'llm_call_failed'.
+        """
+        transform = LLMTransform(_openrouter_config(model="openai/gpt-4", template="{{ row.text }}"))
         init_ctx = PluginContext(run_id="test", config={}, landscape=mock_recorder)
         transform.on_start(init_ctx)
         transform.connect_output(collector, max_pending=10)
@@ -1168,19 +1086,15 @@ class TestOpenRouterLLMTransformIntegration:
         assert isinstance(result, TransformResult)
         assert result.status == "error"
         assert result.reason is not None
-        assert result.reason["reason"] == "malformed_response"
+        assert result.reason["reason"] == "llm_call_failed"
 
     def test_malformed_choice_structure_emits_error(self, mock_recorder: Mock, collector: CollectorOutputPort, chaosllm_server) -> None:
-        """Malformed choice structure emits TransformResult.error()."""
-        transform = OpenRouterLLMTransform(
-            {
-                "api_key": "sk-test-key",
-                "model": "openai/gpt-4",
-                "template": "{{ row.text }}",
-                "schema": DYNAMIC_SCHEMA,
-                "required_input_fields": [],  # Explicit opt-out for this test
-            }
-        )
+        """Malformed choice structure emits error via provider exception.
+
+        In the unified LLMTransform, the provider raises LLMClientError for
+        malformed response structure, which the strategy catches as 'llm_call_failed'.
+        """
+        transform = LLMTransform(_openrouter_config(model="openai/gpt-4", template="{{ row.text }}"))
         init_ctx = PluginContext(run_id="test", config={}, landscape=mock_recorder)
         transform.on_start(init_ctx)
         transform.connect_output(collector, max_pending=10)
@@ -1218,19 +1132,15 @@ class TestOpenRouterLLMTransformIntegration:
         assert isinstance(result, TransformResult)
         assert result.status == "error"
         assert result.reason is not None
-        assert result.reason["reason"] == "malformed_response"
+        assert result.reason["reason"] == "llm_call_failed"
 
     def test_invalid_json_response_emits_error(self, mock_recorder: Mock, collector: CollectorOutputPort, chaosllm_server) -> None:
-        """Non-JSON response body emits TransformResult.error()."""
-        transform = OpenRouterLLMTransform(
-            {
-                "api_key": "sk-test-key",
-                "model": "openai/gpt-4",
-                "template": "{{ row.text }}",
-                "schema": DYNAMIC_SCHEMA,
-                "required_input_fields": [],  # Explicit opt-out for this test
-            }
-        )
+        """Non-JSON response body emits error via provider exception.
+
+        In the unified LLMTransform, the provider raises LLMClientError for
+        invalid JSON, which the strategy catches as 'llm_call_failed'.
+        """
+        transform = LLMTransform(_openrouter_config(model="openai/gpt-4", template="{{ row.text }}"))
         init_ctx = PluginContext(run_id="test", config={}, landscape=mock_recorder)
         transform.on_start(init_ctx)
         transform.connect_output(collector, max_pending=10)
@@ -1262,15 +1172,11 @@ class TestOpenRouterLLMTransformIntegration:
         assert isinstance(result, TransformResult)
         assert result.status == "error"
         assert result.reason is not None
-        assert result.reason["reason"] == "invalid_json_response"
-        assert "content_type" in result.reason
-        assert result.reason["content_type"] == "text/html"
-        assert "body_preview" in result.reason
-        assert "Error: Service Unavailable" in result.reason["body_preview"]
+        assert result.reason["reason"] == "llm_call_failed"
 
 
 class TestOpenRouterTemplateFeatures:
-    """Tests for template files and lookup features in OpenRouter transform."""
+    """Tests for template files and lookup features via LLMTransform (OpenRouter)."""
 
     @pytest.fixture
     def mock_recorder(self) -> Mock:
@@ -1286,15 +1192,12 @@ class TestOpenRouterTemplateFeatures:
 
     def test_lookup_data_accessible_in_template(self, mock_recorder: Mock, collector: CollectorOutputPort, chaosllm_server) -> None:
         """Lookup data is accessible via lookup.* namespace in templates."""
-        transform = OpenRouterLLMTransform(
-            {
-                "api_key": "sk-test-key",
-                "model": "openai/gpt-4",
-                "template": "Classify as {{ lookup.categories[0] }} or {{ lookup.categories[1] }}: {{ row.text }}",
-                "schema": DYNAMIC_SCHEMA,
-                "required_input_fields": [],  # Explicit opt-out for this test
-                "lookup": {"categories": ["positive", "negative"]},
-            }
+        transform = LLMTransform(
+            _openrouter_config(
+                model="openai/gpt-4",
+                template="Classify as {{ lookup.categories[0] }} or {{ lookup.categories[1] }}: {{ row.text }}",
+                lookup={"categories": ["positive", "negative"]},
+            )
         )
         init_ctx = PluginContext(run_id="test", config={}, landscape=mock_recorder)
         transform.on_start(init_ctx)
@@ -1330,15 +1233,12 @@ class TestOpenRouterTemplateFeatures:
 
     def test_two_dimensional_lookup_row_plus_lookup(self, mock_recorder: Mock, collector: CollectorOutputPort, chaosllm_server) -> None:
         """Two-dimensional lookup: lookup.X[row.Y] works correctly."""
-        transform = OpenRouterLLMTransform(
-            {
-                "api_key": "sk-test-key",
-                "model": "openai/gpt-4",
-                "template": "Use tone: {{ lookup.tones[row.tone_id] }}. Message: {{ row.text }}",
-                "schema": DYNAMIC_SCHEMA,
-                "required_input_fields": [],  # Explicit opt-out for this test
-                "lookup": {"tones": {"formal": "professional", "casual": "friendly"}},
-            }
+        transform = LLMTransform(
+            _openrouter_config(
+                model="openai/gpt-4",
+                template="Use tone: {{ lookup.tones[row.tone_id] }}. Message: {{ row.text }}",
+                lookup={"tones": {"formal": "professional", "casual": "friendly"}},
+            )
         )
         init_ctx = PluginContext(run_id="test", config={}, landscape=mock_recorder)
         transform.on_start(init_ctx)
@@ -1372,15 +1272,12 @@ class TestOpenRouterTemplateFeatures:
 
     def test_lookup_hash_included_in_output(self, mock_recorder: Mock, collector: CollectorOutputPort, chaosllm_server) -> None:
         """Output includes lookup_hash when lookup data is configured."""
-        transform = OpenRouterLLMTransform(
-            {
-                "api_key": "sk-test-key",
-                "model": "openai/gpt-4",
-                "template": "Categories: {{ lookup.cats }}. Input: {{ row.text }}",
-                "schema": DYNAMIC_SCHEMA,
-                "required_input_fields": [],  # Explicit opt-out for this test
-                "lookup": {"cats": ["A", "B", "C"]},
-            }
+        transform = LLMTransform(
+            _openrouter_config(
+                model="openai/gpt-4",
+                template="Categories: {{ lookup.cats }}. Input: {{ row.text }}",
+                lookup={"cats": ["A", "B", "C"]},
+            )
         )
         init_ctx = PluginContext(run_id="test", config={}, landscape=mock_recorder)
         transform.on_start(init_ctx)
@@ -1416,15 +1313,12 @@ class TestOpenRouterTemplateFeatures:
 
     def test_template_source_included_in_output(self, mock_recorder: Mock, collector: CollectorOutputPort, chaosllm_server) -> None:
         """Output includes template_source when provided."""
-        transform = OpenRouterLLMTransform(
-            {
-                "api_key": "sk-test-key",
-                "model": "openai/gpt-4",
-                "template": "Analyze: {{ row.text }}",
-                "template_source": "prompts/analysis.j2",
-                "schema": DYNAMIC_SCHEMA,
-                "required_input_fields": [],  # Explicit opt-out for this test
-            }
+        transform = LLMTransform(
+            _openrouter_config(
+                model="openai/gpt-4",
+                template="Analyze: {{ row.text }}",
+                template_source="prompts/analysis.j2",
+            )
         )
         init_ctx = PluginContext(run_id="test", config={}, landscape=mock_recorder)
         transform.on_start(init_ctx)
@@ -1456,17 +1350,14 @@ class TestOpenRouterTemplateFeatures:
 
     def test_all_audit_fields_present_with_lookup(self, mock_recorder: Mock, collector: CollectorOutputPort, chaosllm_server) -> None:
         """All audit metadata fields are present when using template with lookup."""
-        transform = OpenRouterLLMTransform(
-            {
-                "api_key": "sk-test-key",
-                "model": "openai/gpt-4",
-                "template": "{{ lookup.prompt_prefix }} {{ row.text }}",
-                "template_source": "prompts/prefixed.j2",
-                "schema": DYNAMIC_SCHEMA,
-                "required_input_fields": [],  # Explicit opt-out for this test
-                "lookup": {"prompt_prefix": "Please analyze:"},
-                "lookup_source": "prompts/lookups.yaml",
-            }
+        transform = LLMTransform(
+            _openrouter_config(
+                model="openai/gpt-4",
+                template="{{ lookup.prompt_prefix }} {{ row.text }}",
+                template_source="prompts/prefixed.j2",
+                lookup={"prompt_prefix": "Please analyze:"},
+                lookup_source="prompts/lookups.yaml",
+            )
         )
         init_ctx = PluginContext(run_id="test", config={}, landscape=mock_recorder)
         transform.on_start(init_ctx)
@@ -1510,15 +1401,12 @@ class TestOpenRouterTemplateFeatures:
 
     def test_no_lookup_has_none_hash_in_output(self, mock_recorder: Mock, collector: CollectorOutputPort, chaosllm_server) -> None:
         """Output has None for lookup fields when no lookup configured."""
-        transform = OpenRouterLLMTransform(
-            {
-                "api_key": "sk-test-key",
-                "model": "openai/gpt-4",
-                "template": "Simple: {{ row.text }}",
-                "schema": DYNAMIC_SCHEMA,
-                "required_input_fields": [],  # Explicit opt-out for this test
+        transform = LLMTransform(
+            _openrouter_config(
+                model="openai/gpt-4",
+                template="Simple: {{ row.text }}",
                 # No lookup configured
-            }
+            )
         )
         init_ctx = PluginContext(run_id="test", config={}, landscape=mock_recorder)
         transform.on_start(init_ctx)
@@ -1554,24 +1442,21 @@ class TestOpenRouterTemplateFeatures:
 
     def test_lookup_iteration_in_template(self, mock_recorder: Mock, collector: CollectorOutputPort, chaosllm_server) -> None:
         """Lookup data can be iterated in templates."""
-        transform = OpenRouterLLMTransform(
-            {
-                "api_key": "sk-test-key",
-                "model": "openai/gpt-4",
-                "template": """Classify into one of:
+        transform = LLMTransform(
+            _openrouter_config(
+                model="openai/gpt-4",
+                template="""Classify into one of:
 {% for cat in lookup.categories %}
 - {{ cat.name }}: {{ cat.description }}
 {% endfor %}
 Text: {{ row.text }}""",
-                "schema": DYNAMIC_SCHEMA,
-                "required_input_fields": [],  # Explicit opt-out for this test
-                "lookup": {
+                lookup={
                     "categories": [
                         {"name": "spam", "description": "unwanted messages"},
                         {"name": "ham", "description": "legitimate messages"},
                     ]
                 },
-            }
+            )
         )
         init_ctx = PluginContext(run_id="test", config={}, landscape=mock_recorder)
         transform.on_start(init_ctx)
@@ -1606,15 +1491,12 @@ Text: {{ row.text }}""",
 
     def test_template_error_includes_source_in_error_details(self, mock_recorder: Mock, collector: CollectorOutputPort) -> None:
         """Template rendering error includes template_source for debugging."""
-        transform = OpenRouterLLMTransform(
-            {
-                "api_key": "sk-test-key",
-                "model": "openai/gpt-4",
-                "template": "Missing: {{ row.required_field }}",
-                "template_source": "prompts/requires_field.j2",
-                "schema": DYNAMIC_SCHEMA,
-                "required_input_fields": [],  # Explicit opt-out for this test
-            }
+        transform = LLMTransform(
+            _openrouter_config(
+                model="openai/gpt-4",
+                template="Missing: {{ row.required_field }}",
+                template_source="prompts/requires_field.j2",
+            )
         )
         init_ctx = PluginContext(run_id="test", config={}, landscape=mock_recorder)
         transform.on_start(init_ctx)
@@ -1646,7 +1528,7 @@ Text: {{ row.text }}""",
 
 
 class TestOpenRouterConcurrency:
-    """Tests for concurrent row processing via BatchTransformMixin."""
+    """Tests for concurrent row processing via BatchTransformMixin (OpenRouter)."""
 
     @pytest.fixture
     def mock_recorder(self) -> Mock:
@@ -1662,15 +1544,7 @@ class TestOpenRouterConcurrency:
 
     def test_multiple_rows_processed_in_fifo_order(self, mock_recorder: Mock, collector: CollectorOutputPort, chaosllm_server) -> None:
         """Multiple rows are emitted in submission order (FIFO)."""
-        transform = OpenRouterLLMTransform(
-            {
-                "api_key": "sk-test-key",
-                "model": "anthropic/claude-3-opus",
-                "template": "{{ row.text }}",
-                "schema": DYNAMIC_SCHEMA,
-                "required_input_fields": [],  # Explicit opt-out for this test
-            }
-        )
+        transform = LLMTransform(_openrouter_config(template="{{ row.text }}"))
         init_ctx = PluginContext(run_id="test", config={}, landscape=mock_recorder)
         transform.on_start(init_ctx)
         transform.connect_output(collector, max_pending=10)
@@ -1708,16 +1582,8 @@ class TestOpenRouterConcurrency:
             assert result.row["text"] == rows[i]["text"]
 
     def test_on_start_captures_recorder(self, mock_recorder: Mock) -> None:
-        """on_start() captures recorder reference for HTTP client creation."""
-        transform = OpenRouterLLMTransform(
-            {
-                "api_key": "sk-test-key",
-                "model": "anthropic/claude-3-opus",
-                "template": "{{ row.text }}",
-                "schema": DYNAMIC_SCHEMA,
-                "required_input_fields": [],  # Explicit opt-out for this test
-            }
-        )
+        """on_start() captures recorder reference for provider creation."""
+        transform = LLMTransform(_openrouter_config(template="{{ row.text }}"))
 
         # Verify _recorder starts as None
         assert transform._recorder is None
@@ -1735,15 +1601,7 @@ class TestOpenRouterConcurrency:
 
     def test_close_clears_recorder(self, mock_recorder: Mock, collector: CollectorOutputPort) -> None:
         """close() clears recorder reference."""
-        transform = OpenRouterLLMTransform(
-            {
-                "api_key": "sk-test-key",
-                "model": "anthropic/claude-3-opus",
-                "template": "{{ row.text }}",
-                "schema": DYNAMIC_SCHEMA,
-                "required_input_fields": [],  # Explicit opt-out for this test
-            }
-        )
+        transform = LLMTransform(_openrouter_config(template="{{ row.text }}"))
         init_ctx = PluginContext(run_id="test", config={}, landscape=mock_recorder)
         transform.on_start(init_ctx)
         transform.connect_output(collector, max_pending=10)
@@ -1761,6 +1619,10 @@ class TestOpenRouterNanRejection:
     response.json() accepts NaN/Infinity by default. Using json.loads
     with parse_constant rejects them. Usage values must also be validated
     for finiteness (overflow literals like 1e309 produce float('inf')).
+
+    In the unified LLMTransform, the provider (OpenRouterLLMProvider)
+    handles NaN/Infinity rejection and raises LLMClientError, which
+    the strategy catches as 'llm_call_failed'.
     """
 
     @pytest.fixture
@@ -1778,15 +1640,7 @@ class TestOpenRouterNanRejection:
         nan_body = '{"choices": [{"message": {"content": "ok"}}], "usage": {"prompt_tokens": NaN}, "model": "test"}'
         response = _create_mock_response(chaosllm_server, raw_body=nan_body, status_code=200, headers={"content-type": "application/json"})
 
-        transform = OpenRouterLLMTransform(
-            {
-                "api_key": "sk-test-key",
-                "model": "openai/gpt-4",
-                "template": "{{ row.text }}",
-                "schema": DYNAMIC_SCHEMA,
-                "required_input_fields": [],
-            }
-        )
+        transform = LLMTransform(_openrouter_config(model="openai/gpt-4", template="{{ row.text }}"))
         init_ctx = PluginContext(run_id="test", config={}, landscape=mock_recorder)
         transform.on_start(init_ctx)
         transform.connect_output(collector, max_pending=10)
@@ -1809,7 +1663,7 @@ class TestOpenRouterNanRejection:
             _, result, _ = collector.results[0]
             assert result.status == "error"
             assert result.reason is not None
-            assert result.reason["reason"] == "invalid_json_response"
+            assert result.reason["reason"] == "llm_call_failed"
         finally:
             transform.close()
 
@@ -1818,15 +1672,7 @@ class TestOpenRouterNanRejection:
         inf_body = '{"choices": [{"message": {"content": "ok"}}], "usage": {"prompt_tokens": 1e309}, "model": "test"}'
         response = _create_mock_response(chaosllm_server, raw_body=inf_body, status_code=200, headers={"content-type": "application/json"})
 
-        transform = OpenRouterLLMTransform(
-            {
-                "api_key": "sk-test-key",
-                "model": "openai/gpt-4",
-                "template": "{{ row.text }}",
-                "schema": DYNAMIC_SCHEMA,
-                "required_input_fields": [],
-            }
-        )
+        transform = LLMTransform(_openrouter_config(model="openai/gpt-4", template="{{ row.text }}"))
         init_ctx = PluginContext(run_id="test", config={}, landscape=mock_recorder)
         transform.on_start(init_ctx)
         transform.connect_output(collector, max_pending=10)
@@ -1849,7 +1695,7 @@ class TestOpenRouterNanRejection:
             _, result, _ = collector.results[0]
             assert result.status == "error"
             assert result.reason is not None
-            assert result.reason["reason"] == "non_finite_usage"
+            assert result.reason["reason"] == "llm_call_failed"
         finally:
             transform.close()
 
@@ -1860,7 +1706,10 @@ class TestOpenRouterMalformedUtf8:
     Parsing via response.text uses lossy decoding (replacement characters),
     which can let corrupted external data pass as valid JSON instead of
     failing at the boundary. Parsing from response.content (raw bytes)
-    ensures decode errors surface as invalid_json_response.
+    ensures decode errors surface as errors.
+
+    In the unified LLMTransform, the provider raises LLMClientError which
+    the strategy catches as 'llm_call_failed'.
     """
 
     @pytest.fixture
@@ -1884,15 +1733,7 @@ class TestOpenRouterMalformedUtf8:
             headers={"content-type": "application/json"},
         )
 
-        transform = OpenRouterLLMTransform(
-            {
-                "api_key": "sk-test-key",
-                "model": "openai/gpt-4",
-                "template": "{{ row.text }}",
-                "schema": DYNAMIC_SCHEMA,
-                "required_input_fields": [],
-            }
-        )
+        transform = LLMTransform(_openrouter_config(model="openai/gpt-4", template="{{ row.text }}"))
         init_ctx = PluginContext(run_id="test", config={}, landscape=mock_recorder)
         transform.on_start(init_ctx)
         transform.connect_output(collector, max_pending=10)
@@ -1915,6 +1756,6 @@ class TestOpenRouterMalformedUtf8:
             _, result, _ = collector.results[0]
             assert result.status == "error"
             assert result.reason is not None
-            assert result.reason["reason"] == "invalid_json_response"
+            assert result.reason["reason"] == "llm_call_failed"
         finally:
             transform.close()

@@ -1,11 +1,14 @@
-"""Load testing and profiling for Azure Multi-Query LLM transform.
+"""Load testing and profiling for LLM transform multi-query mode.
 
-This module tests the transform under realistic load conditions to:
+This module tests the unified LLMTransform with MultiQueryStrategy under
+realistic load conditions to:
 1. Verify correct behavior with many rows
 2. Profile CPU and memory usage
 3. Identify bottlenecks
-4. Test parallel vs sequential execution
-5. Verify rate limit handling
+4. Test sequential execution performance
+5. Verify rate limit handling and row atomicity
+
+Updated from AzureMultiQueryLLMTransform to unified LLMTransform.
 """
 
 from __future__ import annotations
@@ -13,14 +16,14 @@ from __future__ import annotations
 import json
 import time
 from typing import Any
-from unittest.mock import Mock, patch
+from unittest.mock import Mock
 
 import pytest
 
 from elspeth.contracts import TransformResult
 from elspeth.contracts.token_usage import TokenUsage
 from elspeth.plugins.batching.ports import CollectorOutputPort
-from elspeth.plugins.llm.azure_multi_query import AzureMultiQueryLLMTransform
+from elspeth.plugins.llm.transform import LLMTransform
 from elspeth.testing import make_pipeline_row
 
 from .conftest import (
@@ -28,9 +31,56 @@ from .conftest import (
     make_plugin_context,
     make_token,
 )
-from .conftest import (
-    make_azure_multi_query_config as make_config,
-)
+
+
+def _make_config(**overrides: Any) -> dict[str, Any]:
+    """Create valid Azure multi-query config for unified LLMTransform.
+
+    Equivalent to the old make_azure_multi_query_config but using the new
+    queries-based format instead of case_studies/criteria cross-product.
+    """
+    config: dict[str, Any] = {
+        "provider": "azure",
+        "deployment_name": "gpt-4o",
+        "endpoint": "https://test.openai.azure.com",
+        "api_key": "test-key",
+        "template": "Evaluate: {{ row.text_content }}",
+        "system_prompt": "You are an assessment AI. Respond in JSON.",
+        "schema": {"mode": "observed"},
+        "required_input_fields": [],
+        "queries": {
+            "cs1_diagnosis": {
+                "input_fields": {"text_content": "cs1_bg"},
+                "output_fields": [
+                    {"suffix": "score", "type": "integer"},
+                    {"suffix": "rationale", "type": "string"},
+                ],
+            },
+            "cs1_treatment": {
+                "input_fields": {"text_content": "cs1_bg"},
+                "output_fields": [
+                    {"suffix": "score", "type": "integer"},
+                    {"suffix": "rationale", "type": "string"},
+                ],
+            },
+            "cs2_diagnosis": {
+                "input_fields": {"text_content": "cs2_bg"},
+                "output_fields": [
+                    {"suffix": "score", "type": "integer"},
+                    {"suffix": "rationale", "type": "string"},
+                ],
+            },
+            "cs2_treatment": {
+                "input_fields": {"text_content": "cs2_bg"},
+                "output_fields": [
+                    {"suffix": "score", "type": "integer"},
+                    {"suffix": "rationale", "type": "string"},
+                ],
+            },
+        },
+    }
+    config.update(overrides)
+    return config
 
 
 def make_mock_llm_response(score: int, rationale: str, delay_ms: float = 0) -> tuple[dict[str, Any], float] | dict[str, Any]:
@@ -43,14 +93,14 @@ class TestLoadScenarios:
     """Test plugin under various load scenarios."""
 
     @pytest.mark.slow
-    def test_many_rows_parallel_execution(self, chaosllm_server) -> None:
-        """Process 100 rows with 4 parallel queries each (400 total queries).
+    def test_many_rows_sequential_execution(self, chaosllm_server) -> None:
+        """Process 100 rows with 4 sequential queries each (400 total queries).
 
-        Uses row-level pipelining via BatchTransformMixin. Query-level pooling
-        is disabled to avoid mock threading issues.
+        Uses row-level pipelining via BatchTransformMixin. Query-level execution
+        is sequential in MultiQueryStrategy.
         """
         row_count = 100
-        queries_per_row = 4  # 2 case studies x 2 criteria
+        queries_per_row = 4  # 4 query specs
 
         def response_factory(call_index: int, _request: dict[str, Any]) -> tuple[dict[str, Any], float]:
             """Simulate LLM response with 50ms latency."""
@@ -65,11 +115,9 @@ class TestLoadScenarios:
             call_count,
             _mock_azure_class,
         ):
-            # Disable query-level pooling to avoid mock threading issues
-            config = make_config()
-            del config["pool_size"]
+            config = _make_config()
 
-            transform = AzureMultiQueryLLMTransform(config)
+            transform = LLMTransform(config)
             init_ctx = make_plugin_context()
             transform.on_start(init_ctx)
 
@@ -82,11 +130,7 @@ class TestLoadScenarios:
                 for i in range(row_count):
                     row = {
                         "cs1_bg": f"patient_{i}_bg",
-                        "cs1_sym": f"patient_{i}_sym",
-                        "cs1_hist": f"patient_{i}_hist",
                         "cs2_bg": f"patient_{i}_cs2_bg",
-                        "cs2_sym": f"patient_{i}_cs2_sym",
-                        "cs2_hist": f"patient_{i}_cs2_hist",
                     }
                     token = make_token(f"row-{i}")
                     ctx = make_plugin_context(state_id=f"batch-load-{i}", token=token)
@@ -125,82 +169,67 @@ class TestLoadScenarios:
                 transform.close()
 
     @pytest.mark.slow
-    def test_sequential_vs_parallel_performance(self, chaosllm_server) -> None:
-        """Compare sequential vs parallel execution performance.
+    def test_sequential_execution_performance(self, chaosllm_server) -> None:
+        """Measure sequential execution performance with row-level pipelining.
 
-        Note: This test measures row-level pipelining only.
-        Query-level pooling is disabled in both cases for fair comparison.
+        In the unified LLMTransform, queries are always sequential within a row.
+        Row-level pipelining (BatchTransformMixin) provides parallelism across rows.
         """
-        row_count = 10  # Smaller dataset for comparison
+        row_count = 10
         queries_per_row = 4
 
-        def run_test(pool_size: int | None) -> tuple[float, int]:
-            """Run test with given pool_size, return (elapsed_time, total_calls)."""
+        def response_factory(call_index: int, _request: dict[str, Any]) -> tuple[dict[str, Any], float]:
+            return make_mock_llm_response(  # type: ignore[return-value]
+                score=85,
+                rationale=f"Response {call_index}",
+                delay_ms=50,
+            )
 
-            def response_factory(call_index: int, _request: dict[str, Any]) -> tuple[dict[str, Any], float]:
-                return make_mock_llm_response(  # type: ignore[return-value]
-                    score=85,
-                    rationale=f"Response {call_index}",
-                    delay_ms=50,
-                )
+        with chaosllm_azure_openai_sequence(chaosllm_server, response_factory) as (
+            _mock_client,
+            call_count,
+            _mock_azure_class,
+        ):
+            config = _make_config()
 
-            with chaosllm_azure_openai_sequence(chaosllm_server, response_factory) as (
-                _mock_client,
-                call_count,
-                _mock_azure_class,
-            ):
-                # Both modes use sequential query execution (no pool_size)
-                # to avoid mock threading issues
-                config = make_config()
-                del config["pool_size"]
+            transform = LLMTransform(config)
+            init_ctx = make_plugin_context()
+            transform.on_start(init_ctx)
 
-                transform = AzureMultiQueryLLMTransform(config)
-                init_ctx = make_plugin_context()
-                transform.on_start(init_ctx)
+            collector = CollectorOutputPort()
+            transform.connect_output(collector, max_pending=20)
 
-                collector = CollectorOutputPort()
-                transform.connect_output(collector, max_pending=20)
+            try:
+                start_time = time.time()
 
-                try:
-                    start_time = time.time()
+                for i in range(row_count):
+                    row = {
+                        "cs1_bg": f"data_{i}",
+                        "cs2_bg": f"data_{i}",
+                    }
+                    token = make_token(f"row-{i}")
+                    ctx = make_plugin_context(state_id=f"state-{i}", token=token)
+                    transform.accept(make_pipeline_row(row), ctx)
 
-                    for i in range(row_count):
-                        row = {
-                            "cs1_bg": f"data_{i}",
-                            "cs1_sym": f"data_{i}",
-                            "cs1_hist": f"data_{i}",
-                            "cs2_bg": f"data_{i}",
-                            "cs2_sym": f"data_{i}",
-                            "cs2_hist": f"data_{i}",
-                        }
-                        token = make_token(f"row-{i}")
-                        ctx = make_plugin_context(state_id=f"state-{i}", token=token)
-                        transform.accept(make_pipeline_row(row), ctx)
+                transform.flush_batch_processing(timeout=30.0)
+                elapsed = time.time() - start_time
 
-                    transform.flush_batch_processing(timeout=30.0)
-                    elapsed = time.time() - start_time
+                assert len(collector.results) == row_count
+                for _, result, _state_id in collector.results:
+                    assert isinstance(result, TransformResult)
+                    assert result.status == "success"
 
-                    assert len(collector.results) == row_count
-                    for _, result, _state_id in collector.results:
-                        assert isinstance(result, TransformResult)
-                        assert result.status == "success"
+                assert call_count[0] == row_count * queries_per_row
 
-                    return elapsed, call_count[0]
+                print("\nSequential execution performance:")
+                print(f"  Rows: {row_count}")
+                print(f"  Total queries: {call_count[0]}")
+                print(f"  Elapsed time: {elapsed:.2f}s")
+                print(f"  Queries/second: {call_count[0] / elapsed:.2f}")
+                print("  Note: Row-level pipelining provides cross-row parallelism")
 
-                finally:
-                    transform.close()
-
-        # Test both modes (both use sequential query execution)
-        sequential_time, sequential_calls = run_test(pool_size=None)
-        parallel_time, parallel_calls = run_test(pool_size=4)
-
-        # Both should execute same number of queries
-        assert sequential_calls == parallel_calls == row_count * queries_per_row
-
-        print("\nSequential vs Parallel comparison:")
-        print(f"  Sequential time: {sequential_time:.2f}s")
-        print(f"  Parallel time: {parallel_time:.2f}s")
-        print("  Note: Query-level pooling disabled; both use row-level pipelining")
+            finally:
+                transform.close()
 
     @pytest.mark.slow
     def test_memory_usage_with_large_batch(self, chaosllm_server) -> None:
@@ -217,7 +246,6 @@ class TestLoadScenarios:
         row_count = 200
 
         def response_factory(_call_index: int, _request: dict[str, Any]) -> tuple[dict[str, Any], float]:
-            # Return small responses (shouldn't accumulate much memory)
             return make_mock_llm_response(  # type: ignore[return-value]
                 score=85,
                 rationale="Short response",
@@ -229,11 +257,9 @@ class TestLoadScenarios:
             _call_count,
             _mock_azure_class,
         ):
-            # Disable query-level pooling to avoid mock threading issues
-            config = make_config()
-            del config["pool_size"]
+            config = _make_config()
 
-            transform = AzureMultiQueryLLMTransform(config)
+            transform = LLMTransform(config)
             init_ctx = make_plugin_context()
             transform.on_start(init_ctx)
 
@@ -248,11 +274,7 @@ class TestLoadScenarios:
                 for i in range(row_count):
                     row = {
                         "cs1_bg": f"data_{i}",
-                        "cs1_sym": f"data_{i}",
-                        "cs1_hist": f"data_{i}",
                         "cs2_bg": f"data_{i}",
-                        "cs2_sym": f"data_{i}",
-                        "cs2_hist": f"data_{i}",
                     }
                     token = make_token(f"row-{i}")
                     ctx = make_plugin_context(state_id=f"batch-mem-{i}", token=token)
@@ -282,69 +304,72 @@ class TestLoadScenarios:
                 transform.close()
 
     def test_rate_limit_error_handling(self) -> None:
-        """Verify plugin handles rate limit errors correctly."""
+        """Verify plugin handles rate limit errors correctly via provider mock."""
         from elspeth.plugins.clients.llm import RateLimitError
+        from elspeth.plugins.llm.provider import LLMQueryResult
 
-        # Disable query-level pooling to avoid mock threading issues
-        config = make_config()
-        del config["pool_size"]
+        config = _make_config()
 
-        transform = AzureMultiQueryLLMTransform(config)
+        transform = LLMTransform(config)
         init_ctx = make_plugin_context()
         transform.on_start(init_ctx)
 
         collector = CollectorOutputPort()
         transform.connect_output(collector, max_pending=10)
 
-        # Mock the LLM client to raise RateLimitError
-        with patch.object(transform, "_get_llm_client") as mock_get_client:
-            mock_llm_client = Mock()
+        # Mock the provider to raise RateLimitError on some queries
+        mock_provider = Mock()
+        query_call_count = [0]
 
-            # Counter for tracking which call we're on
-            llm_call_count = [0]
+        def mock_execute_query(
+            messages: list[dict[str, str]],
+            *,
+            model: str,
+            temperature: float,
+            max_tokens: int | None,
+            state_id: str,
+            token_id: str,
+        ) -> LLMQueryResult:
+            query_call_count[0] += 1
+            if query_call_count[0] % 3 == 0:
+                raise RateLimitError("Rate limit exceeded")
+            return LLMQueryResult(
+                content=json.dumps({"score": 85, "rationale": "OK"}),
+                usage=TokenUsage.known(10, 5),
+                model="gpt-4o",
+            )
 
-            def mock_chat_completion(**kwargs: Any) -> Mock:
-                llm_call_count[0] += 1
-                if llm_call_count[0] % 3 == 0:
-                    raise RateLimitError("Rate limit exceeded")
-                return Mock(
-                    content=json.dumps({"score": 85, "rationale": "OK"}),
-                    usage=TokenUsage.known(10, 5),
-                    model="gpt-4o",
-                )
+        mock_provider.execute_query.side_effect = mock_execute_query
+        mock_provider.close = Mock()
+        transform._provider = mock_provider
 
-            mock_llm_client.chat_completion.side_effect = mock_chat_completion
-            mock_get_client.return_value = mock_llm_client
+        try:
+            row = {
+                "cs1_bg": "data",
+                "cs2_bg": "data",
+            }
+            token = make_token("row-rate-limit")
+            ctx = make_plugin_context(state_id="rate-limit-test", token=token)
+            transform.accept(make_pipeline_row(row), ctx)
+            transform.flush_batch_processing(timeout=10.0)
 
-            try:
-                row = {
-                    "cs1_bg": "data",
-                    "cs1_sym": "data",
-                    "cs1_hist": "data",
-                    "cs2_bg": "data",
-                    "cs2_sym": "data",
-                    "cs2_hist": "data",
-                }
-                token = make_token("row-rate-limit")
-                ctx = make_plugin_context(state_id="rate-limit-test", token=token)
-                transform.accept(make_pipeline_row(row), ctx)
-                transform.flush_batch_processing(timeout=10.0)
+            # Process will fail because one query hits rate limit (retryable → re-raised)
+            assert len(collector.results) == 1
+            _, result, _state_id = collector.results[0]
 
-                # Process will fail because one of the 4 queries hits rate limit
-                assert len(collector.results) == 1
-                _, result, _state_id = collector.results[0]
-                assert isinstance(result, TransformResult)
+            # RateLimitError is retryable → re-raised as exception
+            from elspeth.engine.batch_adapter import ExceptionResult
 
-                # All-or-nothing: entire row should fail
+            if isinstance(result, TransformResult):
                 assert result.status == "error"
-                assert result.reason is not None
-                assert "query_failed" in result.reason["reason"]
+            else:
+                assert isinstance(result, ExceptionResult)
 
-            finally:
-                transform.close()
+        finally:
+            transform.close()
 
     def test_client_caching_behavior(self, chaosllm_server) -> None:
-        """Verify LLM client caching works correctly."""
+        """Verify underlying AzureOpenAI client is only created once."""
 
         def response_factory(call_index: int, _request: dict[str, Any]) -> dict[str, Any]:
             return make_mock_llm_response(score=85, rationale=f"Response {call_index}")  # type: ignore[return-value]
@@ -354,11 +379,9 @@ class TestLoadScenarios:
             call_count,
             mock_azure_class,
         ):
-            # Disable query-level pooling to avoid mock threading issues
-            config = make_config()
-            del config["pool_size"]
+            config = _make_config()
 
-            transform = AzureMultiQueryLLMTransform(config)
+            transform = LLMTransform(config)
             init_ctx = make_plugin_context()
             transform.on_start(init_ctx)
 
@@ -373,11 +396,7 @@ class TestLoadScenarios:
                 for i in range(3):
                     row = {
                         "cs1_bg": f"data_{i}",
-                        "cs1_sym": f"data_{i}",
-                        "cs1_hist": f"data_{i}",
                         "cs2_bg": f"data_{i}",
-                        "cs2_sym": f"data_{i}",
-                        "cs2_hist": f"data_{i}",
                     }
                     token = make_token(f"row-{i}")
                     # Use same state_id to test client caching per state
@@ -410,268 +429,290 @@ class TestRowAtomicity:
         """Verify NO partial rows are emitted when capacity errors occur mid-row.
 
         CRITICAL PROPERTY: A row must have ALL queries complete before being emitted.
-        If any query fails (including capacity errors), the ENTIRE row must be marked
-        as failed, not partially processed.
+        If any query fails, the ENTIRE row must be marked as failed, not partially
+        processed.
         """
         from elspeth.plugins.clients.llm import RateLimitError
+        from elspeth.plugins.llm.provider import LLMQueryResult
 
-        # Simulate 10% of queries hitting capacity errors
-        FAILURE_RATE = 0.1  # 10% of queries fail
+        config = _make_config()
 
-        # Disable query-level pooling to avoid mock threading issues
-        config = make_config()
-        del config["pool_size"]
-
-        transform = AzureMultiQueryLLMTransform(config)
+        transform = LLMTransform(config)
         init_ctx = make_plugin_context()
         transform.on_start(init_ctx)
 
         collector = CollectorOutputPort()
         transform.connect_output(collector, max_pending=50)
 
-        # Mock the LLM client to raise RateLimitError for failed queries
-        with patch.object(transform, "_get_llm_client") as mock_get_client:
-            llm_call_count = [0]
+        # Mock provider to simulate rate limit errors
+        mock_provider = Mock()
+        llm_call_count = [0]
 
-            def mock_chat_completion(**kwargs: Any) -> Mock:
-                llm_call_count[0] += 1
-                if llm_call_count[0] % 10 == 0:
-                    raise RateLimitError("Rate limit exceeded")
-                return Mock(
-                    content=json.dumps({"score": 85 + llm_call_count[0], "rationale": f"R{llm_call_count[0]}"}),
-                    usage=TokenUsage.known(10, 5),
-                    model="gpt-4o",
-                )
+        def mock_execute_query(
+            messages: list[dict[str, str]],
+            *,
+            model: str,
+            temperature: float,
+            max_tokens: int | None,
+            state_id: str,
+            token_id: str,
+        ) -> LLMQueryResult:
+            llm_call_count[0] += 1
+            if llm_call_count[0] % 10 == 0:
+                raise RateLimitError("Rate limit exceeded")
+            return LLMQueryResult(
+                content=json.dumps({"score": 85 + llm_call_count[0], "rationale": f"R{llm_call_count[0]}"}),
+                usage=TokenUsage.known(10, 5),
+                model="gpt-4o",
+            )
 
-            mock_llm_client = Mock()
-            mock_llm_client.chat_completion.side_effect = mock_chat_completion
-            mock_get_client.return_value = mock_llm_client
+        mock_provider.execute_query.side_effect = mock_execute_query
+        mock_provider.close = Mock()
+        transform._provider = mock_provider
 
-            try:
-                # Process 50 rows (200 total queries, ~20 will fail)
-                for i in range(50):
-                    row = {
-                        "row_id": i,  # Track which row this is
-                        "cs1_bg": f"data_{i}",
-                        "cs1_sym": f"data_{i}",
-                        "cs1_hist": f"data_{i}",
-                        "cs2_bg": f"data_{i}",
-                        "cs2_sym": f"data_{i}",
-                        "cs2_hist": f"data_{i}",
-                    }
-                    token = make_token(f"row-{i}")
-                    ctx = make_plugin_context(state_id=f"atomicity-{i}", token=token)
-                    transform.accept(make_pipeline_row(row), ctx)
+        try:
+            # Process 50 rows (200 total queries, ~20 will fail)
+            for i in range(50):
+                row = {
+                    "row_id": i,
+                    "cs1_bg": f"data_{i}",
+                    "cs2_bg": f"data_{i}",
+                }
+                token = make_token(f"row-{i}")
+                ctx = make_plugin_context(state_id=f"atomicity-{i}", token=token)
+                transform.accept(make_pipeline_row(row), ctx)
 
-                transform.flush_batch_processing(timeout=30.0)
+            transform.flush_batch_processing(timeout=30.0)
 
-                assert len(collector.results) == 50  # All 50 rows returned (success or error)
+            assert len(collector.results) == 50  # All 50 rows returned (success, error, or exception)
 
-                # Verify atomicity: Each row has EITHER all 4 output fields OR an error status
-                successful_rows = 0
-                failed_rows = 0
+            # Verify atomicity: Each row has EITHER all 4 output fields OR is an error/exception
+            successful_rows = 0
+            failed_rows = 0
 
-                for _, result, _state_id in collector.results:
-                    assert isinstance(result, TransformResult)
-                    if result.status == "error":
-                        failed_rows += 1
-                        # CRITICAL: Failed rows must NOT have partial output fields
-                        # Error result has no row data (or row data without output fields)
-                    else:
-                        successful_rows += 1
-                        # CRITICAL: Successful rows must have ALL 4 output fields
-                        assert result.row is not None
-                        assert "cs1_diagnosis_score" in result.row, "Missing cs1_diagnosis_score"
-                        assert "cs1_treatment_score" in result.row, "Missing cs1_treatment_score"
-                        assert "cs2_diagnosis_score" in result.row, "Missing cs2_diagnosis_score"
-                        assert "cs2_treatment_score" in result.row, "Missing cs2_treatment_score"
-                        # All 4 scores should be present and valid
-                        assert isinstance(result.row["cs1_diagnosis_score"], int)
-                        assert isinstance(result.row["cs1_treatment_score"], int)
-                        assert isinstance(result.row["cs2_diagnosis_score"], int)
-                        assert isinstance(result.row["cs2_treatment_score"], int)
+            from elspeth.engine.batch_adapter import ExceptionResult
 
-                # Should have both successes and failures (due to 10% failure rate)
-                assert successful_rows > 0, "Expected some successful rows"
-                assert failed_rows > 0, "Expected some failed rows due to capacity errors"
+            for _, result, _state_id in collector.results:
+                if isinstance(result, ExceptionResult):
+                    # Retryable error propagated — atomic failure
+                    failed_rows += 1
+                    continue
 
-                print("\nRow atomicity verification:")
-                print("  Total rows: 50")
-                print(f"  Successful rows: {successful_rows}")
-                print(f"  Failed rows: {failed_rows}")
-                print(f"  Total queries attempted: {llm_call_count[0]}")
-                print(f"  Expected failures (~10%): {int(llm_call_count[0] * FAILURE_RATE)}")
-                print("  NO PARTIAL ROWS DETECTED")
+                assert isinstance(result, TransformResult)
+                if result.status == "error":
+                    failed_rows += 1
+                    # CRITICAL: Failed rows must NOT have partial output fields
+                else:
+                    successful_rows += 1
+                    # CRITICAL: Successful rows must have ALL 4 output fields
+                    assert result.row is not None
+                    assert "cs1_diagnosis_score" in result.row, "Missing cs1_diagnosis_score"
+                    assert "cs1_treatment_score" in result.row, "Missing cs1_treatment_score"
+                    assert "cs2_diagnosis_score" in result.row, "Missing cs2_diagnosis_score"
+                    assert "cs2_treatment_score" in result.row, "Missing cs2_treatment_score"
+                    # All 4 scores should be present and valid
+                    assert isinstance(result.row["cs1_diagnosis_score"], int)
+                    assert isinstance(result.row["cs1_treatment_score"], int)
+                    assert isinstance(result.row["cs2_diagnosis_score"], int)
+                    assert isinstance(result.row["cs2_treatment_score"], int)
 
-            finally:
-                transform.close()
+            # Should have both successes and failures (due to ~10% failure rate)
+            assert successful_rows > 0, "Expected some successful rows"
+            assert failed_rows > 0, "Expected some failed rows due to capacity errors"
+
+            print("\nRow atomicity verification:")
+            print("  Total rows: 50")
+            print(f"  Successful rows: {successful_rows}")
+            print(f"  Failed rows: {failed_rows}")
+            print(f"  Total queries attempted: {llm_call_count[0]}")
+            print("  NO PARTIAL ROWS DETECTED")
+
+        finally:
+            transform.close()
 
     def test_row_atomicity_high_failure_rate(self) -> None:
         """Verify row atomicity with 80% failure rate (extreme stress test)."""
         from elspeth.plugins.clients.llm import RateLimitError
+        from elspeth.plugins.llm.provider import LLMQueryResult
 
-        # Disable query-level pooling to avoid mock threading issues
-        config = make_config()
-        del config["pool_size"]
+        config = _make_config()
 
-        transform = AzureMultiQueryLLMTransform(config)
+        transform = LLMTransform(config)
         init_ctx = make_plugin_context()
         transform.on_start(init_ctx)
 
         collector = CollectorOutputPort()
         transform.connect_output(collector, max_pending=20)
 
-        with patch.object(transform, "_get_llm_client") as mock_get_client:
-            llm_call_count = [0]
+        mock_provider = Mock()
+        llm_call_count = [0]
 
-            def mock_chat_completion(**kwargs: Any) -> Mock:
-                """Simulate 80% failure rate."""
-                llm_call_count[0] += 1
-                # Only calls ending in 0 or 5 succeed (20%)
-                if llm_call_count[0] % 5 not in [0, 5]:
-                    raise RateLimitError("Rate limit exceeded")
-                return Mock(
-                    content=json.dumps({"score": 85, "rationale": "OK"}),
-                    usage=TokenUsage.known(10, 5),
-                    model="gpt-4o",
-                )
+        def mock_execute_query(
+            messages: list[dict[str, str]],
+            *,
+            model: str,
+            temperature: float,
+            max_tokens: int | None,
+            state_id: str,
+            token_id: str,
+        ) -> LLMQueryResult:
+            """Simulate 80% failure rate."""
+            llm_call_count[0] += 1
+            # Only calls ending in 0 or 5 succeed (20%)
+            if llm_call_count[0] % 5 not in [0, 5]:
+                raise RateLimitError("Rate limit exceeded")
+            return LLMQueryResult(
+                content=json.dumps({"score": 85, "rationale": "OK"}),
+                usage=TokenUsage.known(10, 5),
+                model="gpt-4o",
+            )
 
-            mock_llm_client = Mock()
-            mock_llm_client.chat_completion.side_effect = mock_chat_completion
-            mock_get_client.return_value = mock_llm_client
+        mock_provider.execute_query.side_effect = mock_execute_query
+        mock_provider.close = Mock()
+        transform._provider = mock_provider
 
-            try:
-                # Process 20 rows (80 queries, ~64 will fail)
-                for i in range(20):
-                    row = {
-                        "row_id": i,
-                        "cs1_bg": f"data_{i}",
-                        "cs1_sym": f"data_{i}",
-                        "cs1_hist": f"data_{i}",
-                        "cs2_bg": f"data_{i}",
-                        "cs2_sym": f"data_{i}",
-                        "cs2_hist": f"data_{i}",
-                    }
-                    token = make_token(f"row-{i}")
-                    ctx = make_plugin_context(state_id=f"high-failure-{i}", token=token)
-                    transform.accept(make_pipeline_row(row), ctx)
+        try:
+            # Process 20 rows (80 queries, ~64 will fail)
+            for i in range(20):
+                row = {
+                    "row_id": i,
+                    "cs1_bg": f"data_{i}",
+                    "cs2_bg": f"data_{i}",
+                }
+                token = make_token(f"row-{i}")
+                ctx = make_plugin_context(state_id=f"high-failure-{i}", token=token)
+                transform.accept(make_pipeline_row(row), ctx)
 
-                transform.flush_batch_processing(timeout=30.0)
+            transform.flush_batch_processing(timeout=30.0)
 
-                assert len(collector.results) == 20
+            assert len(collector.results) == 20
 
-                # With 80% failure rate, most rows should fail (each row needs 4 successful queries)
-                successful_rows = 0
-                failed_rows = 0
+            from elspeth.engine.batch_adapter import ExceptionResult
 
-                for _, result, _state_id in collector.results:
-                    assert isinstance(result, TransformResult)
-                    if result.status == "error":
-                        failed_rows += 1
-                        # Verify NO partial output in error results
-                    else:
-                        successful_rows += 1
-                        # Verify ALL outputs present
-                        assert result.row is not None
-                        assert "cs1_diagnosis_score" in result.row
-                        assert "cs1_treatment_score" in result.row
-                        assert "cs2_diagnosis_score" in result.row
-                        assert "cs2_treatment_score" in result.row
+            # With 80% failure rate, most rows should fail
+            successful_rows = 0
+            failed_rows = 0
 
-                # With 80% failure rate, most rows should fail
-                assert failed_rows > successful_rows, "Expected more failures than successes with 80% failure rate"
+            for _, result, _state_id in collector.results:
+                if isinstance(result, ExceptionResult):
+                    failed_rows += 1
+                    continue
 
-                print("\nHigh failure rate atomicity test:")
-                print(f"  Successful rows: {successful_rows}")
-                print(f"  Failed rows: {failed_rows}")
-                print("  NO PARTIAL ROWS EVEN AT 80% FAILURE RATE")
+                assert isinstance(result, TransformResult)
+                if result.status == "error":
+                    failed_rows += 1
+                else:
+                    successful_rows += 1
+                    # Verify ALL outputs present
+                    assert result.row is not None
+                    assert "cs1_diagnosis_score" in result.row
+                    assert "cs1_treatment_score" in result.row
+                    assert "cs2_diagnosis_score" in result.row
+                    assert "cs2_treatment_score" in result.row
 
-            finally:
-                transform.close()
+            # With 80% failure rate, most rows should fail
+            assert failed_rows > successful_rows, "Expected more failures than successes with 80% failure rate"
+
+            print("\nHigh failure rate atomicity test:")
+            print(f"  Successful rows: {successful_rows}")
+            print(f"  Failed rows: {failed_rows}")
+            print("  NO PARTIAL ROWS EVEN AT 80% FAILURE RATE")
+
+        finally:
+            transform.close()
 
     def test_concurrent_row_processing_atomicity(self) -> None:
         """Verify row atomicity when multiple rows processed concurrently with failures.
 
         This tests the edge case where:
-        - Multiple rows are being processed simultaneously
+        - Multiple rows are being processed simultaneously via BatchTransformMixin
         - Some queries succeed, some fail
         - Plugin must still maintain per-row atomicity
         """
         from elspeth.plugins.clients.llm import RateLimitError
+        from elspeth.plugins.llm.provider import LLMQueryResult
 
-        # Disable query-level pooling to avoid mock threading issues
-        config = make_config()
-        del config["pool_size"]
+        config = _make_config()
 
-        transform = AzureMultiQueryLLMTransform(config)
+        transform = LLMTransform(config)
         init_ctx = make_plugin_context()
         transform.on_start(init_ctx)
 
         collector = CollectorOutputPort()
         transform.connect_output(collector, max_pending=30)
 
-        with patch.object(transform, "_get_llm_client") as mock_get_client:
-            llm_call_count = [0]
+        mock_provider = Mock()
+        llm_call_count = [0]
 
-            def mock_chat_completion(**kwargs: Any) -> Mock:
-                """Simulate failures in a pattern that affects different rows."""
-                llm_call_count[0] += 1
-                # Fail every 7th query (staggered pattern across rows)
-                if llm_call_count[0] % 7 == 0:
-                    raise RateLimitError("Rate limit exceeded")
-                return Mock(
-                    content=json.dumps({"score": 85, "rationale": "OK"}),
-                    usage=TokenUsage.known(10, 5),
-                    model="gpt-4o",
-                )
+        def mock_execute_query(
+            messages: list[dict[str, str]],
+            *,
+            model: str,
+            temperature: float,
+            max_tokens: int | None,
+            state_id: str,
+            token_id: str,
+        ) -> LLMQueryResult:
+            """Simulate failures in a pattern that affects different rows."""
+            llm_call_count[0] += 1
+            # Fail every 7th query (staggered pattern across rows)
+            if llm_call_count[0] % 7 == 0:
+                raise RateLimitError("Rate limit exceeded")
+            return LLMQueryResult(
+                content=json.dumps({"score": 85, "rationale": "OK"}),
+                usage=TokenUsage.known(10, 5),
+                model="gpt-4o",
+            )
 
-            mock_llm_client = Mock()
-            mock_llm_client.chat_completion.side_effect = mock_chat_completion
-            mock_get_client.return_value = mock_llm_client
+        mock_provider.execute_query.side_effect = mock_execute_query
+        mock_provider.close = Mock()
+        transform._provider = mock_provider
 
-            try:
-                # Process 30 rows
-                for i in range(30):
-                    row = {
-                        "row_id": i,
-                        "cs1_bg": f"data_{i}",
-                        "cs1_sym": f"data_{i}",
-                        "cs1_hist": f"data_{i}",
-                        "cs2_bg": f"data_{i}",
-                        "cs2_sym": f"data_{i}",
-                        "cs2_hist": f"data_{i}",
-                    }
-                    token = make_token(f"row-{i}")
-                    ctx = make_plugin_context(state_id=f"concurrent-{i}", token=token)
-                    transform.accept(make_pipeline_row(row), ctx)
+        try:
+            # Process 30 rows
+            for i in range(30):
+                row = {
+                    "row_id": i,
+                    "cs1_bg": f"data_{i}",
+                    "cs2_bg": f"data_{i}",
+                }
+                token = make_token(f"row-{i}")
+                ctx = make_plugin_context(state_id=f"concurrent-{i}", token=token)
+                transform.accept(make_pipeline_row(row), ctx)
 
-                transform.flush_batch_processing(timeout=30.0)
+            transform.flush_batch_processing(timeout=30.0)
 
-                assert len(collector.results) == 30
+            assert len(collector.results) == 30
 
-                # Verify atomicity for all rows
-                for _, result, _state_id in collector.results:
-                    assert isinstance(result, TransformResult)
-                    if result.status == "error":
-                        # Failed row: must have no output fields
-                        pass
-                    else:
-                        # Successful row: MUST have ALL 4 output fields
-                        assert result.row is not None
-                        has_cs1_diag = "cs1_diagnosis_score" in result.row
-                        has_cs1_treat = "cs1_treatment_score" in result.row
-                        has_cs2_diag = "cs2_diagnosis_score" in result.row
-                        has_cs2_treat = "cs2_treatment_score" in result.row
+            from elspeth.engine.batch_adapter import ExceptionResult
 
-                        output_field_count = sum([has_cs1_diag, has_cs1_treat, has_cs2_diag, has_cs2_treat])
-                        assert output_field_count == 4, f"Row has {output_field_count} output fields (expected 4)"
+            # Verify atomicity for all rows
+            for _, result, _state_id in collector.results:
+                if isinstance(result, ExceptionResult):
+                    # Retryable error propagated — atomic failure
+                    continue
 
-                print("\nConcurrent processing atomicity test:")
-                print(f"  Total queries: {llm_call_count[0]}")
-                print("  ALL ROWS ATOMIC (0 or 4 output fields, never 1-3)")
+                assert isinstance(result, TransformResult)
+                if result.status == "error":
+                    # Failed row: must have no output fields
+                    pass
+                else:
+                    # Successful row: MUST have ALL 4 output fields
+                    assert result.row is not None
+                    has_cs1_diag = "cs1_diagnosis_score" in result.row
+                    has_cs1_treat = "cs1_treatment_score" in result.row
+                    has_cs2_diag = "cs2_diagnosis_score" in result.row
+                    has_cs2_treat = "cs2_treatment_score" in result.row
 
-            finally:
-                transform.close()
+                    output_field_count = sum([has_cs1_diag, has_cs1_treat, has_cs2_diag, has_cs2_treat])
+                    assert output_field_count == 4, f"Row has {output_field_count} output fields (expected 4)"
+
+            print("\nConcurrent processing atomicity test:")
+            print(f"  Total queries: {llm_call_count[0]}")
+            print("  ALL ROWS ATOMIC (0 or 4 output fields, never 1-3)")
+
+        finally:
+            transform.close()
 
 
 class TestProfilingInstrumentation:
@@ -695,11 +736,9 @@ class TestProfilingInstrumentation:
             call_count,
             _mock_azure_class,
         ):
-            # Disable query-level pooling to avoid mock threading issues
-            config = make_config()
-            del config["pool_size"]
+            config = _make_config()
 
-            transform = AzureMultiQueryLLMTransform(config)
+            transform = LLMTransform(config)
             init_ctx = make_plugin_context()
             transform.on_start(init_ctx)
 
@@ -711,11 +750,7 @@ class TestProfilingInstrumentation:
                 for i in range(20):
                     row = {
                         "cs1_bg": f"data_{i}",
-                        "cs1_sym": f"data_{i}",
-                        "cs1_hist": f"data_{i}",
                         "cs2_bg": f"data_{i}",
-                        "cs2_sym": f"data_{i}",
-                        "cs2_hist": f"data_{i}",
                     }
                     token = make_token(f"row-{i}")
                     ctx = make_plugin_context(state_id=f"timing-{i}", token=token)
@@ -758,11 +793,9 @@ class TestProfilingInstrumentation:
             _call_count,
             _mock_azure_class,
         ):
-            # Disable query-level pooling to avoid mock threading issues
-            config = make_config()
-            del config["pool_size"]
+            config = _make_config()
 
-            transform = AzureMultiQueryLLMTransform(config)
+            transform = LLMTransform(config)
             init_ctx = make_plugin_context()
             transform.on_start(init_ctx)
 
@@ -776,11 +809,7 @@ class TestProfilingInstrumentation:
                 for i in range(100):
                     row = {
                         "cs1_bg": f"data_{i}",
-                        "cs1_sym": f"data_{i}",
-                        "cs1_hist": f"data_{i}",
                         "cs2_bg": f"data_{i}",
-                        "cs2_sym": f"data_{i}",
-                        "cs2_hist": f"data_{i}",
                     }
                     token = make_token(f"row-{i}")
                     ctx = make_plugin_context(state_id=f"overhead-{i}", token=token)

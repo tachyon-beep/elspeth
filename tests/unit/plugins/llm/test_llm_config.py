@@ -290,19 +290,25 @@ class TestResolveQueries:
         assert result[0].name == "q1"
 
     def test_key_collision_raises(self) -> None:
-        """Two queries producing the same output field suffix."""
+        """Two queries whose name+suffix combination produces the same full output key.
+
+        Query "q1_extra" with suffix "score" -> key "q1_extra_score"
+        Query "q1" with suffix "extra_score" -> key "q1_extra_score"
+
+        Both produce the identical full output key, so resolve_queries must raise.
+        """
         from elspeth.plugins.llm.multi_query import resolve_queries
 
         with pytest.raises(ValueError, match="collision"):
             resolve_queries(
                 {
-                    "q1": {
+                    "q1_extra": {
                         "input_fields": {"text": "text_col"},
                         "output_fields": [{"suffix": "score", "type": "integer"}],
                     },
-                    "q2": {
+                    "q1": {
                         "input_fields": {"text": "text_col"},
-                        "output_fields": [{"suffix": "score", "type": "integer"}],
+                        "output_fields": [{"suffix": "extra_score", "type": "integer"}],
                     },
                 }
             )
@@ -319,6 +325,23 @@ class TestResolveQueries:
                     "q1": {
                         "input_fields": {"text": "text_col"},
                         "output_fields": [{"suffix": "error", "type": "string"}],
+                    },
+                }
+            )
+        assert any("reserved" in r.message.lower() for r in caplog.records)
+
+    def test_reserved_suffix_from_constants_warns(self, caplog: pytest.LogCaptureFixture) -> None:
+        """Output field with suffix derived from LLM_GUARANTEED_SUFFIXES (e.g., 'usage') warns."""
+        import logging
+
+        from elspeth.plugins.llm.multi_query import resolve_queries
+
+        with caplog.at_level(logging.WARNING, logger="elspeth.plugins.llm.multi_query"):
+            resolve_queries(
+                {
+                    "q1": {
+                        "input_fields": {"text": "text_col"},
+                        "output_fields": [{"suffix": "usage", "type": "string"}],
                     },
                 }
             )

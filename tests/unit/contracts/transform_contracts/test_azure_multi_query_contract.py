@@ -1,9 +1,12 @@
 # tests/unit/contracts/transform_contracts/test_azure_multi_query_contract.py
-"""Contract tests for Azure Multi-Query LLM transform.
+"""Contract tests for multi-query LLM transform (Azure provider).
 
 Note: Row-based contract tests (TransformContractPropertyTestBase) were removed because
-AzureMultiQueryLLMTransform uses BatchTransformMixin and doesn't support process(). The
+LLMTransform uses BatchTransformMixin and doesn't support process(). The
 attribute tests (name, schema, determinism) are now included in BatchTransformContractTestBase.
+
+Migrated from AzureMultiQueryLLMTransform to unified LLMTransform with provider="azure"
+and queries dict format (T10 Phase B consolidation).
 """
 
 from __future__ import annotations
@@ -15,7 +18,7 @@ import pytest
 
 from elspeth.contracts.plugin_context import PluginContext
 from elspeth.plugins.batching.mixin import BatchTransformMixin
-from elspeth.plugins.llm.azure_multi_query import AzureMultiQueryLLMTransform
+from elspeth.plugins.llm.transform import LLMTransform
 
 from .test_batch_transform_protocol import BatchTransformContractTestBase
 
@@ -48,35 +51,53 @@ def mock_azure_openai():
         yield mock_client
 
 
-class TestAzureMultiQueryLLMSpecific:
-    def test_query_expansion_matches_cross_product(self) -> None:
-        transform = AzureMultiQueryLLMTransform(
+class TestMultiQueryLLMSpecific:
+    def test_query_expansion_matches_configured_queries(self) -> None:
+        transform = LLMTransform(
             {
+                "provider": "azure",
                 "deployment_name": "gpt-4o",
                 "endpoint": "https://test.openai.azure.com",
                 "api_key": "test-key",
-                "template": "{{ row.input_1 }}",
-                "case_studies": [
-                    {"name": "cs1", "input_fields": ["a"]},
-                    {"name": "cs2", "input_fields": ["b"]},
-                ],
-                "criteria": [
-                    {"name": "crit1"},
-                    {"name": "crit2"},
-                    {"name": "crit3"},
-                ],
-                "response_format": "standard",
-                "output_mapping": {"score": {"suffix": "score", "type": "integer"}},
+                "template": "{{ row.text_content }}",
                 "schema": {"mode": "observed"},
                 "required_input_fields": [],
+                "queries": {
+                    "cs1_crit1": {
+                        "input_fields": {"text_content": "a"},
+                        "output_fields": [{"suffix": "score", "type": "integer"}],
+                    },
+                    "cs1_crit2": {
+                        "input_fields": {"text_content": "a"},
+                        "output_fields": [{"suffix": "rating", "type": "integer"}],
+                    },
+                    "cs1_crit3": {
+                        "input_fields": {"text_content": "a"},
+                        "output_fields": [{"suffix": "grade", "type": "integer"}],
+                    },
+                    "cs2_crit1": {
+                        "input_fields": {"text_content": "b"},
+                        "output_fields": [{"suffix": "eval_score", "type": "integer"}],
+                    },
+                    "cs2_crit2": {
+                        "input_fields": {"text_content": "b"},
+                        "output_fields": [{"suffix": "eval_rating", "type": "integer"}],
+                    },
+                    "cs2_crit3": {
+                        "input_fields": {"text_content": "b"},
+                        "output_fields": [{"suffix": "eval_grade", "type": "integer"}],
+                    },
+                },
             }
         )
         transform.on_error = "quarantine_sink"
 
-        assert len(transform._query_specs) == 6
+        # Strategy holds the query specs in the unified architecture
+        assert hasattr(transform._strategy, "query_specs")
+        assert len(transform._strategy.query_specs) == 6
 
-        prefixes = {s.output_prefix for s in transform._query_specs}
-        assert prefixes == {
+        names = {s.name for s in transform._strategy.query_specs}
+        assert names == {
             "cs1_crit1",
             "cs1_crit2",
             "cs1_crit3",
@@ -86,18 +107,21 @@ class TestAzureMultiQueryLLMSpecific:
         }
 
     def test_creates_tokens_false(self) -> None:
-        transform = AzureMultiQueryLLMTransform(
+        transform = LLMTransform(
             {
+                "provider": "azure",
                 "deployment_name": "gpt-4o",
                 "endpoint": "https://test.openai.azure.com",
                 "api_key": "test-key",
-                "template": "{{ row.input_1 }}",
-                "case_studies": [{"name": "cs1", "input_fields": ["a"]}],
-                "criteria": [{"name": "crit1"}],
-                "response_format": "standard",
-                "output_mapping": {"score": {"suffix": "score", "type": "integer"}},
+                "template": "{{ row.text_content }}",
                 "schema": {"mode": "observed"},
                 "required_input_fields": [],
+                "queries": {
+                    "cs1_crit1": {
+                        "input_fields": {"text_content": "a"},
+                        "output_fields": [{"suffix": "score", "type": "integer"}],
+                    },
+                },
             }
         )
         transform.on_error = "quarantine_sink"
@@ -105,24 +129,27 @@ class TestAzureMultiQueryLLMSpecific:
         assert transform.creates_tokens is False
 
 
-class TestAzureMultiQueryLLMAuditTrail:
+class TestMultiQueryLLMAuditTrail:
     # NOTE: test_llm_call_recorded_in_audit was deleted because it tested the old
-    # process() API. AzureMultiQueryLLMTransform now uses accept() via BatchTransformMixin.
+    # process() API. LLMTransform now uses accept() via BatchTransformMixin.
     # Audit trail tests should use integration tests that exercise the full pipeline.
 
     def test_on_error_configuration_required(self) -> None:
-        transform = AzureMultiQueryLLMTransform(
+        transform = LLMTransform(
             {
+                "provider": "azure",
                 "deployment_name": "gpt-4o",
                 "endpoint": "https://test.openai.azure.com",
                 "api_key": "test-key",
-                "template": "{{ row.input_1 }}",
-                "case_studies": [{"name": "cs1", "input_fields": ["a"]}],
-                "criteria": [{"name": "crit1"}],
-                "response_format": "standard",
-                "output_mapping": {"score": {"suffix": "score", "type": "integer"}},
+                "template": "{{ row.text_content }}",
                 "schema": {"mode": "observed"},
                 "required_input_fields": [],
+                "queries": {
+                    "cs1_crit1": {
+                        "input_fields": {"text_content": "a"},
+                        "output_fields": [{"suffix": "score", "type": "integer"}],
+                    },
+                },
             }
         )
         transform.on_error = "quarantine_sink"
@@ -130,31 +157,30 @@ class TestAzureMultiQueryLLMAuditTrail:
         assert transform.on_error is not None
 
 
-class TestAzureMultiQueryBatchContract(BatchTransformContractTestBase):
-    """Verify Azure multi-query transform honors BatchTransformMixin contract."""
+class TestMultiQueryBatchContract(BatchTransformContractTestBase):
+    """Verify multi-query LLM transform honors BatchTransformMixin contract."""
 
     @pytest.fixture
     def batch_transform(self) -> BatchTransformMixin:
         """Provide unconfigured transform (no connect_output yet)."""
-        t = AzureMultiQueryLLMTransform(
+        t = LLMTransform(
             {
+                "provider": "azure",
                 "deployment_name": "gpt-4o",
                 "endpoint": "https://test.openai.azure.com",
                 "api_key": "test-key",
-                "template": "{{ row.input_1 }} {{ row.criterion.name }}",
-                "case_studies": [
-                    {"name": "cs1", "input_fields": ["cs1_a", "cs1_b"]},
-                ],
-                "criteria": [
-                    {"name": "test_criterion", "code": "TEST"},
-                ],
-                "response_format": "standard",
-                "output_mapping": {
-                    "score": {"suffix": "score", "type": "integer"},
-                    "rationale": {"suffix": "rationale", "type": "string"},
-                },
+                "template": "{{ row.text_content }} {{ row.criterion_name }}",
                 "schema": {"mode": "observed"},
                 "required_input_fields": [],
+                "queries": {
+                    "cs1_test_criterion": {
+                        "input_fields": {"text_content": "cs1_a", "criterion_name": "cs1_b"},
+                        "output_fields": [
+                            {"suffix": "score", "type": "integer"},
+                            {"suffix": "rationale", "type": "string"},
+                        ],
+                    },
+                },
             }
         )
         t.on_error = "quarantine_sink"

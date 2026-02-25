@@ -1,22 +1,25 @@
 # tests/plugins/llm/test_azure_tracing.py
-"""Tests for Tier 2 tracing in AzureLLMTransform.
+"""Tests for Tier 2 tracing in LLMTransform (Azure provider).
 
 Note: Tests updated for Langfuse SDK v3 (context manager pattern).
+Migrated from AzureLLMTransform to unified LLMTransform.
 """
 
 from contextlib import contextmanager
 from typing import Any
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock
 
 from elspeth.contracts.token_usage import TokenUsage
-from elspeth.plugins.llm.azure import AzureLLMTransform, AzureOpenAIConfig
-from elspeth.plugins.llm.tracing import AzureAITracingConfig
+from elspeth.plugins.llm.azure import AzureOpenAIConfig
+from elspeth.plugins.llm.langfuse import ActiveLangfuseTracer, NoOpLangfuseTracer
+from elspeth.plugins.llm.transform import LLMTransform
 from elspeth.testing import make_pipeline_row
 
 
 def _make_base_config() -> dict[str, Any]:
     """Create base config with all required fields."""
     return {
+        "provider": "azure",
         "deployment_name": "gpt-4",
         "endpoint": "https://test.openai.azure.com",
         "api_key": "test-key",
@@ -59,93 +62,55 @@ class TestAzureOpenAIConfigTracing:
         assert config.tracing["provider"] == "langfuse"
 
 
-class TestAzureLLMTransformTracing:
-    """Tests for tracing lifecycle in AzureLLMTransform."""
+class TestLLMTransformAzureTracing:
+    """Tests for tracing lifecycle in LLMTransform (Azure provider)."""
 
-    def _create_transform(self, tracing_config: dict[str, Any] | None = None) -> AzureLLMTransform:
+    def _create_transform(self, tracing_config: dict[str, Any] | None = None) -> LLMTransform:
         """Create a transform with optional tracing config."""
         config = _make_base_config()
         if tracing_config is not None:
             config["tracing"] = tracing_config
-        return AzureLLMTransform(config)
+        return LLMTransform(config)
 
     def test_no_tracing_when_config_is_none(self) -> None:
-        """No tracing setup when tracing config is None."""
+        """NoOpLangfuseTracer when tracing config is None."""
         transform = self._create_transform(tracing_config=None)
-        assert transform._tracing_config is None
-        assert transform._tracing_active is False
+        assert isinstance(transform._tracer, NoOpLangfuseTracer)
 
-    def test_tracing_config_is_parsed(self) -> None:
-        """Tracing config dict is parsed into TracingConfig."""
+    def test_tracing_config_validation_returns_noop_on_missing_keys(self) -> None:
+        """Langfuse config with missing keys produces NoOpLangfuseTracer.
+
+        LLMTransform's create_langfuse_tracer factory returns NoOp when
+        Langfuse config has missing public_key/secret_key (Langfuse SDK
+        construction fails silently and the factory catches that).
+        """
+        # azure_ai tracing is not Langfuse, so factory returns NoOp
         transform = self._create_transform(
             tracing_config={
                 "provider": "azure_ai",
                 "connection_string": "InstrumentationKey=xxx",
             }
         )
-        assert transform._tracing_config is not None
-        assert isinstance(transform._tracing_config, AzureAITracingConfig)
+        # azure_ai is not LangfuseTracingConfig, so create_langfuse_tracer returns NoOp
+        assert isinstance(transform._tracer, NoOpLangfuseTracer)
 
-    def test_tracing_config_validation_errors_logged(self) -> None:
-        """Missing required fields log warning during on_start."""
-        transform = self._create_transform(
-            tracing_config={
-                "provider": "azure_ai",
-                # Missing connection_string
-            }
-        )
+    def test_azure_ai_tracing_produces_noop_langfuse_tracer(self) -> None:
+        """Azure AI tracing config produces NoOpLangfuseTracer.
 
-        with patch("structlog.get_logger") as mock_get_logger:
-            mock_logger = MagicMock()
-            mock_get_logger.return_value = mock_logger
-
-            ctx = MagicMock()
-            ctx.landscape = MagicMock()
-            ctx.run_id = "test-run"
-            ctx.telemetry_emit = lambda x: None
-            ctx.rate_limit_registry = None
-
-            transform.on_start(ctx)
-
-            # Should have logged a warning about missing connection_string
-            mock_logger.warning.assert_called()
-            assert transform._tracing_active is False
-
-    def test_tracing_active_flag_set_on_successful_setup(self) -> None:
-        """_tracing_active is True after successful tracing setup."""
+        LLMTransform only supports Langfuse tracing. Azure AI (OpenTelemetry)
+        tracing is not configured by LLMTransform's __init__ — the factory
+        returns NoOp for non-Langfuse configs.
+        """
         transform = self._create_transform(
             tracing_config={
                 "provider": "azure_ai",
                 "connection_string": "InstrumentationKey=xxx",
             }
         )
-
-        # Mock successful import and configure
-        with patch("elspeth.plugins.llm.azure._configure_azure_monitor") as mock_configure:
-            mock_configure.return_value = True  # Success
-
-            # Mock OTEL to avoid conflict check
-            with patch("opentelemetry.trace.get_tracer_provider") as mock_get_provider:
-                mock_provider = MagicMock()
-                mock_provider.__class__.__name__ = "ProxyTracerProvider"
-                mock_get_provider.return_value = mock_provider
-
-                ctx = MagicMock()
-                ctx.landscape = MagicMock()
-                ctx.run_id = "test-run"
-                ctx.telemetry_emit = lambda x: None
-                ctx.rate_limit_registry = None
-
-                transform.on_start(ctx)
-
-                # Verify configure was called
-                mock_configure.assert_called_once()
-                assert transform._tracing_active is True
+        assert isinstance(transform._tracer, NoOpLangfuseTracer)
 
     def test_langfuse_tracer_created_on_langfuse_config(self) -> None:
-        """LangfuseTracer is created when Langfuse tracing is configured."""
-        from elspeth.plugins.llm.langfuse import ActiveLangfuseTracer
-
+        """ActiveLangfuseTracer is created when Langfuse tracing is configured."""
         transform = self._create_transform(
             tracing_config={
                 "provider": "langfuse",
@@ -171,12 +136,10 @@ def _make_mock_ctx(run_id: str = "test-run") -> MagicMock:
 class TestLangfuseSpanCreation:
     """Tests for Langfuse span creation around LLM calls (v3 API)."""
 
-    def _create_transform_with_langfuse(self) -> tuple[AzureLLMTransform, MagicMock, list[dict[str, Any]]]:
+    def _create_transform_with_langfuse(self) -> tuple[LLMTransform, MagicMock, list[dict[str, Any]]]:
         """Create transform with mocked Langfuse client via LangfuseTracer."""
-        from elspeth.plugins.llm.langfuse import ActiveLangfuseTracer
-
         config = _make_base_config()
-        transform = AzureLLMTransform(config)
+        transform = LLMTransform(config)
 
         captured_observations: list[dict[str, Any]] = []
 
@@ -245,10 +208,8 @@ class TestLangfuseSpanCreation:
 
     def test_no_trace_when_tracing_not_configured(self) -> None:
         """No-op tracer used when tracing is not configured."""
-        from elspeth.plugins.llm.langfuse import NoOpLangfuseTracer
-
         config = _make_base_config()
-        transform = AzureLLMTransform(config)
+        transform = LLMTransform(config)
 
         # When no tracing config, factory returns NoOpLangfuseTracer
         assert isinstance(transform._tracer, NoOpLangfuseTracer)
@@ -270,12 +231,10 @@ class TestLangfuseFailedCallTracing:
     still traced to Langfuse with level="ERROR" for observability.
     """
 
-    def _create_transform_with_langfuse(self) -> tuple[AzureLLMTransform, MagicMock, list[dict[str, Any]]]:
+    def _create_transform_with_langfuse(self) -> tuple[LLMTransform, MagicMock, list[dict[str, Any]]]:
         """Create transform with mocked Langfuse client via LangfuseTracer."""
-        from elspeth.plugins.llm.langfuse import ActiveLangfuseTracer
-
         config = _make_base_config()
-        transform = AzureLLMTransform(config)
+        transform = LLMTransform(config)
 
         captured_observations: list[dict[str, Any]] = []
 
@@ -347,21 +306,17 @@ class TestLangfuseFailedCallTracing:
 
         transform, _mock_langfuse, captured_observations = self._create_transform_with_langfuse()
 
-        # Set up recorder and run_id (required for _get_llm_client)
-        transform._recorder = MagicMock()
-        transform._run_id = "test-run"
+        # Set up provider mock (LLMTransform delegates to _provider.execute_query)
+        mock_provider = MagicMock()
+        mock_provider.execute_query.side_effect = LLMClientError("Content policy violation", retryable=False)
+        transform._provider = mock_provider
 
         ctx = _make_mock_ctx()
         ctx.state_id = "test-state"
         ctx.token = MagicMock()
         ctx.token.token_id = "test-token-id"
 
-        # Mock _get_llm_client to return a client that raises an error
-        mock_client = MagicMock()
-        mock_client.chat_completion.side_effect = LLMClientError("Content policy violation", retryable=False)
-
-        with patch.object(transform, "_get_llm_client", return_value=mock_client):
-            result = transform._process_row(make_pipeline_row({"name": "test"}), ctx)
+        result = transform._process_row(make_pipeline_row({"name": "test"}), ctx)
 
         # Should return error result
         assert result.status == "error"
@@ -381,25 +336,21 @@ class TestLangfuseFailedCallTracing:
 
         transform, _mock_langfuse, captured_observations = self._create_transform_with_langfuse()
 
-        # Set up recorder and run_id (required for _get_llm_client)
-        transform._recorder = MagicMock()
-        transform._run_id = "test-run"
+        # Set up provider mock (LLMTransform delegates to _provider.execute_query)
+        mock_provider = MagicMock()
+        mock_provider.execute_query.side_effect = LLMClientError("Rate limit exceeded", retryable=True)
+        transform._provider = mock_provider
 
         ctx = _make_mock_ctx()
         ctx.state_id = "test-state"
         ctx.token = MagicMock()
         ctx.token.token_id = "test-token-id"
 
-        # Mock _get_llm_client to return a client that raises a retryable error
-        mock_client = MagicMock()
-        mock_client.chat_completion.side_effect = LLMClientError("Rate limit exceeded", retryable=True)
-
-        with patch.object(transform, "_get_llm_client", return_value=mock_client):
-            try:
-                transform._process_row(make_pipeline_row({"name": "test"}), ctx)
-                raise AssertionError("Should have raised LLMClientError")
-            except LLMClientError:
-                pass  # Expected
+        try:
+            transform._process_row(make_pipeline_row({"name": "test"}), ctx)
+            raise AssertionError("Should have raised LLMClientError")
+        except LLMClientError:
+            pass  # Expected
 
         # Error trace should still have been recorded before re-raising
         assert len(captured_observations) == 2  # span + generation

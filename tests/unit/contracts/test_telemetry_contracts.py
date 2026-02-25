@@ -12,8 +12,8 @@ This catches wiring bugs that unit tests miss.
 Tested plugins:
 - AuditedLLMClient -> ExternalCallCompleted (call_type=LLM)
 - AuditedHTTPClient -> ExternalCallCompleted (call_type=HTTP)
-- AzureLLMTransform (via AuditedLLMClient)
-- OpenRouterLLMTransform (via AuditedHTTPClient)
+- LLMTransform with provider="azure" (via AuditedLLMClient)
+- LLMTransform with provider="openrouter" (via AuditedHTTPClient)
 
 Each test verifies:
 1. Plugin is configured and run through production Orchestrator
@@ -583,8 +583,8 @@ class TestPluginTelemetryThroughAuditedClients:
     AuditedHTTPClient, the telemetry events are correctly emitted.
 
     Note: Full orchestrator integration tests for batch transforms (like
-    AzureLLMTransform) require more complex setup. These tests verify the
-    underlying client contracts that those plugins depend on.
+    LLMTransform with provider="azure") require more complex setup. These
+    tests verify the underlying client contracts that those plugins depend on.
     """
 
     def test_audited_llm_client_telemetry_flows_through_callback(self) -> None:

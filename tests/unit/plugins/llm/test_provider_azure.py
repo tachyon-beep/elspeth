@@ -95,7 +95,7 @@ class TestExecuteQuery:
         assert result.usage.is_known
         assert result.usage.prompt_tokens == 10
         assert result.usage.completion_tokens == 5
-        assert not hasattr(result, "raw_response")
+        assert "raw_response" not in LLMQueryResult.__dataclass_fields__
 
     def test_maps_finish_reason(self, provider: AzureLLMProvider) -> None:
         with patch.object(provider, "_get_llm_client") as mock_get:

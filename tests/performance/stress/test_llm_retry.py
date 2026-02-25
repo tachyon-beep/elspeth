@@ -15,6 +15,8 @@ Migrated from:
 - tests/stress/llm/test_openrouter_llm_stress.py
 - tests/stress/llm/test_openrouter_multi_query_stress.py
 - tests/stress/llm/test_mixed_errors.py
+
+All transforms now use unified LLMTransform with provider dispatch.
 """
 
 from __future__ import annotations
@@ -25,10 +27,7 @@ from typing import Any
 import pytest
 
 from elspeth.contracts.plugin_context import PluginContext
-from elspeth.plugins.llm.azure import AzureLLMTransform
-from elspeth.plugins.llm.azure_multi_query import AzureMultiQueryLLMTransform
-from elspeth.plugins.llm.openrouter import OpenRouterLLMTransform
-from elspeth.plugins.llm.openrouter_multi_query import OpenRouterMultiQueryLLMTransform
+from elspeth.plugins.llm.transform import LLMTransform
 
 from .conftest import (
     ChaosLLMHTTPFixture,
@@ -48,7 +47,7 @@ from .conftest import (
 pytestmark = pytest.mark.stress
 
 # JSON template for multi-query responses
-# Must match the output_mapping in make_*_multi_query_config
+# Must match the output_fields in make_*_multi_query_config
 MULTI_QUERY_JSON_TEMPLATE = '{"score": 5, "rationale": "Test assessment rationale"}'
 
 
@@ -58,7 +57,7 @@ MULTI_QUERY_JSON_TEMPLATE = '{"score": 5, "rationale": "Test assessment rational
 
 
 def _feed_rows(
-    transform: AzureLLMTransform | OpenRouterLLMTransform | AzureMultiQueryLLMTransform | OpenRouterMultiQueryLLMTransform,
+    transform: LLMTransform,
     rows: list[dict[str, Any]],
     recorder: object,
     run_id: str,
@@ -132,7 +131,7 @@ class TestAzureLLMStress:
             pool_size=8,
             max_capacity_retry_seconds=60,
         )
-        transform = AzureLLMTransform(config)
+        transform = LLMTransform(config)
 
         output = CollectingOutputPort()
         transform.connect_output(output, max_pending=30)
@@ -175,7 +174,7 @@ class TestAzureLLMStress:
             pool_size=4,
             max_capacity_retry_seconds=30,
         )
-        transform = AzureLLMTransform(config)
+        transform = LLMTransform(config)
 
         output = CollectingOutputPort()
         transform.connect_output(output, max_pending=20)
@@ -220,7 +219,7 @@ class TestAzureLLMStress:
             pool_size=4,
             max_capacity_retry_seconds=45,
         )
-        transform = AzureLLMTransform(config)
+        transform = LLMTransform(config)
 
         output = CollectingOutputPort()
         transform.connect_output(output, max_pending=15)
@@ -260,7 +259,7 @@ class TestAzureLLMStress:
             pool_size=8,  # High concurrency
             max_capacity_retry_seconds=30,
         )
-        transform = AzureLLMTransform(config)
+        transform = LLMTransform(config)
 
         output = CollectingOutputPort()
         transform.connect_output(output, max_pending=32)
@@ -294,8 +293,8 @@ class TestAzureLLMStress:
 class TestAzureMultiQueryStress:
     """Azure multi-query transform under error injection.
 
-    With 2 case studies x 2 criteria = 4 queries per row, error rates
-    are amplified. A 25% error rate means ~68% of rows will have at least
+    With 4 named queries per row, error rates are amplified.
+    A 25% error rate means ~68% of rows will have at least
     one failed query (1 - 0.75^4).
     """
 
@@ -319,14 +318,14 @@ class TestAzureMultiQueryStress:
         - Rows with any failed query are errored
         - Successful rows have all 4 query outputs
         """
-        recorder, run_id, node_id = create_recorder_and_run(tmp_path_factory, "azure_multi_query_llm")
+        recorder, run_id, node_id = create_recorder_and_run(tmp_path_factory)
 
         config = make_azure_multi_query_config(
             chaosllm_http_server.url,
             pool_size=4,
             max_capacity_retry_seconds=45,
         )
-        transform = AzureMultiQueryLLMTransform(config)
+        transform = LLMTransform(config)
 
         output = CollectingOutputPort()
         transform.connect_output(output, max_pending=20)
@@ -375,14 +374,14 @@ class TestAzureMultiQueryStress:
         - AIMD coordinates across queries
         - Total requests > 4x rows due to retries
         """
-        recorder, run_id, node_id = create_recorder_and_run(tmp_path_factory, "azure_multi_query_llm")
+        recorder, run_id, node_id = create_recorder_and_run(tmp_path_factory)
 
         config = make_azure_multi_query_config(
             chaosllm_http_server.url,
             pool_size=4,
             max_capacity_retry_seconds=60,
         )
-        transform = AzureMultiQueryLLMTransform(config)
+        transform = LLMTransform(config)
 
         output = CollectingOutputPort()
         transform.connect_output(output, max_pending=20)
@@ -425,14 +424,14 @@ class TestAzureMultiQueryStress:
         - All rows reach terminal state
         - Errors are properly recorded
         """
-        recorder, run_id, node_id = create_recorder_and_run(tmp_path_factory, "azure_multi_query_llm")
+        recorder, run_id, node_id = create_recorder_and_run(tmp_path_factory)
 
         config = make_azure_multi_query_config(
             chaosllm_http_server.url,
             pool_size=4,
             max_capacity_retry_seconds=30,
         )
-        transform = AzureMultiQueryLLMTransform(config)
+        transform = LLMTransform(config)
 
         output = CollectingOutputPort()
         transform.connect_output(output, max_pending=20)
@@ -479,14 +478,14 @@ class TestOpenRouterLLMStress:
         - All 100 rows eventually complete or error gracefully
         - Pipeline doesn't hang or crash
         """
-        recorder, run_id, node_id = create_recorder_and_run(tmp_path_factory, "openrouter_llm")
+        recorder, run_id, node_id = create_recorder_and_run(tmp_path_factory)
 
         config = make_openrouter_llm_config(
             chaosllm_http_server.url,
             pool_size=8,
             max_capacity_retry_seconds=60,
         )
-        transform = OpenRouterLLMTransform(config)
+        transform = LLMTransform(config)
 
         output = CollectingOutputPort()
         transform.connect_output(output, max_pending=30)
@@ -525,14 +524,14 @@ class TestOpenRouterLLMStress:
         - Other rows continue processing
         - No crashes from JSON parse failures
         """
-        recorder, run_id, node_id = create_recorder_and_run(tmp_path_factory, "openrouter_llm")
+        recorder, run_id, node_id = create_recorder_and_run(tmp_path_factory)
 
         config = make_openrouter_llm_config(
             chaosllm_http_server.url,
             pool_size=4,
             max_capacity_retry_seconds=30,
         )
-        transform = OpenRouterLLMTransform(config)
+        transform = LLMTransform(config)
 
         output = CollectingOutputPort()
         transform.connect_output(output, max_pending=20)
@@ -566,7 +565,7 @@ class TestOpenRouterLLMStress:
         - Rows fail gracefully with recorded errors
         - Other rows continue processing
         """
-        recorder, run_id, node_id = create_recorder_and_run(tmp_path_factory, "openrouter_llm")
+        recorder, run_id, node_id = create_recorder_and_run(tmp_path_factory)
 
         config = make_openrouter_llm_config(
             chaosllm_http_server.url,
@@ -574,7 +573,7 @@ class TestOpenRouterLLMStress:
             timeout_seconds=10.0,  # Short timeout for faster tests
             max_capacity_retry_seconds=30,
         )
-        transform = OpenRouterLLMTransform(config)
+        transform = LLMTransform(config)
 
         output = CollectingOutputPort()
         transform.connect_output(output, max_pending=20)
@@ -604,8 +603,8 @@ class TestOpenRouterLLMStress:
 class TestOpenRouterMultiQueryStress:
     """OpenRouter multi-query transform under error injection.
 
-    With 2 case studies x 2 criteria = 4 queries per row, error rates
-    are amplified. These tests validate HTTP-based error handling
+    With 4 named queries per row, error rates are amplified.
+    These tests validate HTTP-based error handling
     in the multi-query context.
     """
 
@@ -622,14 +621,14 @@ class TestOpenRouterMultiQueryStress:
         - Rows with any failed query are errored
         - Successful rows have all 4 query outputs
         """
-        recorder, run_id, node_id = create_recorder_and_run(tmp_path_factory, "openrouter_multi_query_llm")
+        recorder, run_id, node_id = create_recorder_and_run(tmp_path_factory)
 
         config = make_openrouter_multi_query_config(
             chaosllm_http_server.url,
             pool_size=4,
             max_capacity_retry_seconds=45,
         )
-        transform = OpenRouterMultiQueryLLMTransform(config)
+        transform = LLMTransform(config)
 
         output = CollectingOutputPort()
         transform.connect_output(output, max_pending=20)
@@ -674,14 +673,14 @@ class TestOpenRouterMultiQueryStress:
         - HTTP 429 responses trigger AIMD
         - Total requests > 4x rows due to retries
         """
-        recorder, run_id, node_id = create_recorder_and_run(tmp_path_factory, "openrouter_multi_query_llm")
+        recorder, run_id, node_id = create_recorder_and_run(tmp_path_factory)
 
         config = make_openrouter_multi_query_config(
             chaosllm_http_server.url,
             pool_size=4,
             max_capacity_retry_seconds=60,
         )
-        transform = OpenRouterMultiQueryLLMTransform(config)
+        transform = LLMTransform(config)
 
         output = CollectingOutputPort()
         transform.connect_output(output, max_pending=20)
@@ -722,14 +721,14 @@ class TestOpenRouterMultiQueryStress:
         - All rows reach terminal state
         - Mixed error types are handled
         """
-        recorder, run_id, node_id = create_recorder_and_run(tmp_path_factory, "openrouter_multi_query_llm")
+        recorder, run_id, node_id = create_recorder_and_run(tmp_path_factory)
 
         config = make_openrouter_multi_query_config(
             chaosllm_http_server.url,
             pool_size=4,
             max_capacity_retry_seconds=30,
         )
-        transform = OpenRouterMultiQueryLLMTransform(config)
+        transform = LLMTransform(config)
 
         output = CollectingOutputPort()
         transform.connect_output(output, max_pending=20)
@@ -764,14 +763,14 @@ class TestOpenRouterMultiQueryStress:
         With concurrent query processing, verify that row output order
         matches input order for successful rows.
         """
-        recorder, run_id, node_id = create_recorder_and_run(tmp_path_factory, "openrouter_multi_query_llm")
+        recorder, run_id, node_id = create_recorder_and_run(tmp_path_factory)
 
         config = make_openrouter_multi_query_config(
             chaosllm_http_server.url,
             pool_size=4,
             max_capacity_retry_seconds=45,
         )
-        transform = OpenRouterMultiQueryLLMTransform(config)
+        transform = LLMTransform(config)
 
         output = CollectingOutputPort()
         transform.connect_output(output, max_pending=20)
@@ -828,14 +827,14 @@ class TestMixedErrors:
         - All rows reach terminal state
         - Pipeline completes within reasonable time
         """
-        recorder, run_id, node_id = create_recorder_and_run(tmp_path_factory, "azure_llm")
+        recorder, run_id, node_id = create_recorder_and_run(tmp_path_factory)
 
         config = make_azure_llm_config(
             chaosllm_http_server.url,
             pool_size=8,
             max_capacity_retry_seconds=45,
         )
-        transform = AzureLLMTransform(config)
+        transform = LLMTransform(config)
 
         output = CollectingOutputPort()
         transform.connect_output(output, max_pending=30)
@@ -878,14 +877,14 @@ class TestMixedErrors:
 
         Verifies HTTP-level error handling with mixed error types.
         """
-        recorder, run_id, node_id = create_recorder_and_run(tmp_path_factory, "openrouter_llm")
+        recorder, run_id, node_id = create_recorder_and_run(tmp_path_factory)
 
         config = make_openrouter_llm_config(
             chaosllm_http_server.url,
             pool_size=8,
             max_capacity_retry_seconds=45,
         )
-        transform = OpenRouterLLMTransform(config)
+        transform = LLMTransform(config)
 
         output = CollectingOutputPort()
         transform.connect_output(output, max_pending=30)
@@ -928,14 +927,14 @@ class TestMixedErrors:
         - All rows traceable
         - Audit records consistent
         """
-        recorder, run_id, node_id = create_recorder_and_run(tmp_path_factory, "azure_llm")
+        recorder, run_id, node_id = create_recorder_and_run(tmp_path_factory)
 
         config = make_azure_llm_config(
             chaosllm_http_server.url,
             pool_size=4,
             max_capacity_retry_seconds=30,
         )
-        transform = AzureLLMTransform(config)
+        transform = LLMTransform(config)
 
         output = CollectingOutputPort()
         transform.connect_output(output, max_pending=20)
@@ -1011,14 +1010,14 @@ class TestMixedErrors:
         - AIMD backoff kicks in appropriately
         - No sudden crash when error rate spikes
         """
-        recorder, run_id, node_id = create_recorder_and_run(tmp_path_factory, "azure_llm")
+        recorder, run_id, node_id = create_recorder_and_run(tmp_path_factory)
 
         config = make_azure_llm_config(
             chaosllm_http_server.url,
             pool_size=4,
             max_capacity_retry_seconds=60,
         )
-        transform = AzureLLMTransform(config)
+        transform = LLMTransform(config)
 
         output = CollectingOutputPort()
         transform.connect_output(output, max_pending=20)
@@ -1087,14 +1086,14 @@ class TestMixedErrors:
         - Recovery after burst period
         - Final completion despite bursts
         """
-        recorder, run_id, node_id = create_recorder_and_run(tmp_path_factory, "azure_llm")
+        recorder, run_id, node_id = create_recorder_and_run(tmp_path_factory)
 
         config = make_azure_llm_config(
             chaosllm_http_server.url,
             pool_size=4,
             max_capacity_retry_seconds=60,
         )
-        transform = AzureLLMTransform(config)
+        transform = LLMTransform(config)
 
         output = CollectingOutputPort()
         transform.connect_output(output, max_pending=20)

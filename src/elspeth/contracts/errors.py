@@ -280,6 +280,7 @@ TransformErrorCategory = Literal[
     "result_not_found",
     "query_failed",
     "multi_query_failed",  # Non-retryable LLM error in multi-query (atomic failure)
+    "context_length_exceeded",  # LLM context too long (not retryable — shorten prompt)
     "rate_limited",
     # Content extraction errors (Tier 3 boundary - external HTML/text parsing)
     "content_extraction_failed",

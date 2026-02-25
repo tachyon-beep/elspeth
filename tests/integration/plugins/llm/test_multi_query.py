@@ -1,8 +1,9 @@
 # tests/integration/plugins/llm/test_multi_query.py
-"""Integration tests for Azure Multi-Query LLM transform.
+"""Integration tests for multi-query LLM transform.
 
-Tests verify the multi-query transform processes a 2x5 assessment matrix
-(2 case studies x 5 criteria = 10 LLM calls) correctly through the executor.
+Tests verify the multi-query transform processes multiple named queries
+correctly through the executor, using the unified LLMTransform with
+provider="azure" and queries dict config.
 """
 
 from __future__ import annotations
@@ -23,45 +24,167 @@ from elspeth.core.landscape.database import LandscapeDB
 from elspeth.core.landscape.recorder import LandscapeRecorder
 from elspeth.engine.executors import TransformExecutor
 from elspeth.engine.spans import SpanFactory
-from elspeth.plugins.llm.azure_multi_query import AzureMultiQueryLLMTransform
+from elspeth.plugins.llm.transform import LLMTransform
 from elspeth.testing import make_pipeline_row
 
 DYNAMIC_SCHEMA = {"mode": "observed"}
 
 
 def make_full_config() -> dict[str, Any]:
-    """Create realistic config with 2 case studies x 5 criteria."""
+    """Create realistic config with 10 named queries (2 case studies x 5 criteria).
+
+    Uses the unified LLMTransform queries dict format where each query has
+    named input_fields mapping template variables to row columns, and
+    output_fields defining typed output columns.
+    """
     return {
+        "provider": "azure",
         "deployment_name": "gpt-4o",
         "endpoint": "https://test.openai.azure.com",
         "api_key": "test-key",
         "system_prompt": 'You are an assessment AI. Respond in JSON: {"score": <0-100>, "rationale": "<text>"}',
         "template": """
 Case Study:
-Background: {{ row.input_1 }}
-Symptoms: {{ row.input_2 }}
-History: {{ row.input_3 }}
+Background: {{ row.background }}
+Symptoms: {{ row.symptoms }}
+History: {{ row.history }}
 
-Criterion: {{ row.criterion.name }}
-Description: {{ row.criterion.description }}
+Criterion: {{ row.criterion_name }}
+Description: {{ row.criterion_description }}
 
 Assess this case against the criterion.
 """,
-        "case_studies": [
-            {"name": "cs1", "input_fields": ["cs1_background", "cs1_symptoms", "cs1_history"]},
-            {"name": "cs2", "input_fields": ["cs2_background", "cs2_symptoms", "cs2_history"]},
-        ],
-        "criteria": [
-            {"name": "diagnosis", "code": "DIAG", "description": "Assess diagnostic accuracy"},
-            {"name": "treatment", "code": "TREAT", "description": "Assess treatment plan"},
-            {"name": "prognosis", "code": "PROG", "description": "Assess prognosis accuracy"},
-            {"name": "risk", "code": "RISK", "description": "Assess risk identification"},
-            {"name": "followup", "code": "FOLLOW", "description": "Assess follow-up planning"},
-        ],
-        "response_format": "standard",
-        "output_mapping": {
-            "score": {"suffix": "score", "type": "integer"},
-            "rationale": {"suffix": "rationale", "type": "string"},
+        "queries": {
+            "cs1_diagnosis": {
+                "input_fields": {
+                    "background": "cs1_background",
+                    "symptoms": "cs1_symptoms",
+                    "history": "cs1_history",
+                    "criterion_name": "cs1_diagnosis_criterion_name",
+                    "criterion_description": "cs1_diagnosis_criterion_desc",
+                },
+                "output_fields": [
+                    {"suffix": "score", "type": "integer"},
+                    {"suffix": "rationale", "type": "string"},
+                ],
+            },
+            "cs1_treatment": {
+                "input_fields": {
+                    "background": "cs1_background",
+                    "symptoms": "cs1_symptoms",
+                    "history": "cs1_history",
+                    "criterion_name": "cs1_treatment_criterion_name",
+                    "criterion_description": "cs1_treatment_criterion_desc",
+                },
+                "output_fields": [
+                    {"suffix": "score", "type": "integer"},
+                    {"suffix": "rationale", "type": "string"},
+                ],
+            },
+            "cs1_prognosis": {
+                "input_fields": {
+                    "background": "cs1_background",
+                    "symptoms": "cs1_symptoms",
+                    "history": "cs1_history",
+                    "criterion_name": "cs1_prognosis_criterion_name",
+                    "criterion_description": "cs1_prognosis_criterion_desc",
+                },
+                "output_fields": [
+                    {"suffix": "score", "type": "integer"},
+                    {"suffix": "rationale", "type": "string"},
+                ],
+            },
+            "cs1_risk": {
+                "input_fields": {
+                    "background": "cs1_background",
+                    "symptoms": "cs1_symptoms",
+                    "history": "cs1_history",
+                    "criterion_name": "cs1_risk_criterion_name",
+                    "criterion_description": "cs1_risk_criterion_desc",
+                },
+                "output_fields": [
+                    {"suffix": "score", "type": "integer"},
+                    {"suffix": "rationale", "type": "string"},
+                ],
+            },
+            "cs1_followup": {
+                "input_fields": {
+                    "background": "cs1_background",
+                    "symptoms": "cs1_symptoms",
+                    "history": "cs1_history",
+                    "criterion_name": "cs1_followup_criterion_name",
+                    "criterion_description": "cs1_followup_criterion_desc",
+                },
+                "output_fields": [
+                    {"suffix": "score", "type": "integer"},
+                    {"suffix": "rationale", "type": "string"},
+                ],
+            },
+            "cs2_diagnosis": {
+                "input_fields": {
+                    "background": "cs2_background",
+                    "symptoms": "cs2_symptoms",
+                    "history": "cs2_history",
+                    "criterion_name": "cs2_diagnosis_criterion_name",
+                    "criterion_description": "cs2_diagnosis_criterion_desc",
+                },
+                "output_fields": [
+                    {"suffix": "score", "type": "integer"},
+                    {"suffix": "rationale", "type": "string"},
+                ],
+            },
+            "cs2_treatment": {
+                "input_fields": {
+                    "background": "cs2_background",
+                    "symptoms": "cs2_symptoms",
+                    "history": "cs2_history",
+                    "criterion_name": "cs2_treatment_criterion_name",
+                    "criterion_description": "cs2_treatment_criterion_desc",
+                },
+                "output_fields": [
+                    {"suffix": "score", "type": "integer"},
+                    {"suffix": "rationale", "type": "string"},
+                ],
+            },
+            "cs2_prognosis": {
+                "input_fields": {
+                    "background": "cs2_background",
+                    "symptoms": "cs2_symptoms",
+                    "history": "cs2_history",
+                    "criterion_name": "cs2_prognosis_criterion_name",
+                    "criterion_description": "cs2_prognosis_criterion_desc",
+                },
+                "output_fields": [
+                    {"suffix": "score", "type": "integer"},
+                    {"suffix": "rationale", "type": "string"},
+                ],
+            },
+            "cs2_risk": {
+                "input_fields": {
+                    "background": "cs2_background",
+                    "symptoms": "cs2_symptoms",
+                    "history": "cs2_history",
+                    "criterion_name": "cs2_risk_criterion_name",
+                    "criterion_description": "cs2_risk_criterion_desc",
+                },
+                "output_fields": [
+                    {"suffix": "score", "type": "integer"},
+                    {"suffix": "rationale", "type": "string"},
+                ],
+            },
+            "cs2_followup": {
+                "input_fields": {
+                    "background": "cs2_background",
+                    "symptoms": "cs2_symptoms",
+                    "history": "cs2_history",
+                    "criterion_name": "cs2_followup_criterion_name",
+                    "criterion_description": "cs2_followup_criterion_desc",
+                },
+                "output_fields": [
+                    {"suffix": "score", "type": "integer"},
+                    {"suffix": "rationale", "type": "string"},
+                ],
+            },
         },
         "schema": {"mode": "observed"},
         "required_input_fields": [],  # Explicit opt-out for this test
@@ -117,7 +240,7 @@ def mock_azure_openai_multi_query(
 def recorder(tmp_path) -> LandscapeRecorder:
     """Create recorder with file-based DB for cross-thread access.
 
-    AzureMultiQueryLLMTransform uses BatchTransformMixin which processes
+    LLMTransform uses BatchTransformMixin which processes
     rows in a background thread. SQLite in-memory databases are
     per-connection, so the background thread would get an empty DB.
     A file-based temp DB is shared across threads correctly.
@@ -147,7 +270,7 @@ def node_id(recorder: LandscapeRecorder, run_id: str) -> str:
     schema = SchemaConfig.from_dict(DYNAMIC_SCHEMA)
     node = recorder.register_node(
         run_id=run_id,
-        plugin_name="azure_multi_query_llm",
+        plugin_name="llm",
         node_type=NodeType.TRANSFORM,
         plugin_version="1.0",
         config={},
@@ -191,7 +314,6 @@ class TestMultiQueryIntegration:
     ) -> None:
         """Test complete 2x5 assessment matrix (10 LLM calls)."""
         # Generate responses for all 10 queries
-        # Order: cs1 x all criteria, then cs2 x all criteria
         responses: list[dict[str, Any]] = []
         for cs in ["cs1", "cs2"]:
             for crit in ["diagnosis", "treatment", "prognosis", "risk", "followup"]:
@@ -203,7 +325,7 @@ class TestMultiQueryIntegration:
                 )
 
         with mock_azure_openai_multi_query(responses) as mock_client:
-            transform = AzureMultiQueryLLMTransform(make_full_config())
+            transform = LLMTransform(make_full_config())
             transform.node_id = node_id
 
             ctx = PluginContext(
@@ -213,7 +335,8 @@ class TestMultiQueryIntegration:
             )
             transform.on_start(ctx)
 
-            row_data = {
+            # Build row data with all named input fields that queries reference
+            row_data: dict[str, Any] = {
                 "user_id": "user-001",
                 "cs1_background": "45yo male, office worker",
                 "cs1_symptoms": "Chest pain, shortness of breath",
@@ -222,6 +345,18 @@ class TestMultiQueryIntegration:
                 "cs2_symptoms": "Knee pain after running",
                 "cs2_history": "Previous ACL injury",
             }
+            # Add criterion name/description fields for each query
+            criteria_info = {
+                "diagnosis": ("Diagnostic accuracy", "Assess diagnostic accuracy"),
+                "treatment": ("Treatment plan", "Assess treatment plan"),
+                "prognosis": ("Prognosis accuracy", "Assess prognosis accuracy"),
+                "risk": ("Risk identification", "Assess risk identification"),
+                "followup": ("Follow-up planning", "Assess follow-up planning"),
+            }
+            for cs in ["cs1", "cs2"]:
+                for crit, (name, desc) in criteria_info.items():
+                    row_data[f"{cs}_{crit}_criterion_name"] = name
+                    row_data[f"{cs}_{crit}_criterion_desc"] = desc
 
             token = create_token_in_recorder(
                 recorder,
@@ -242,19 +377,20 @@ class TestMultiQueryIntegration:
             assert result.status == "success", f"Expected success, got {result.status}: {result.reason}"
             assert error_sink is None
 
-            # Should have made 10 LLM calls (2 case studies x 5 criteria)
+            # Should have made 10 LLM calls (10 named queries)
             assert mock_client.chat.completions.create.call_count == 10
 
-            # Output should have all 20 assessment fields (10 scores + 10 rationales)
+            # Output should have all assessment fields
             output = result.row
             assert output is not None, "Result row should not be None"
             assert output["user_id"] == "user-001"  # Original preserved
 
-            # Check all score and rationale fields exist
+            # Check all score and rationale fields exist (prefixed by query name)
             for cs in ["cs1", "cs2"]:
                 for crit in ["diagnosis", "treatment", "prognosis", "risk", "followup"]:
-                    assert f"{cs}_{crit}_score" in output, f"Missing {cs}_{crit}_score"
-                    assert f"{cs}_{crit}_rationale" in output, f"Missing {cs}_{crit}_rationale"
+                    query_name = f"{cs}_{crit}"
+                    assert f"{query_name}_score" in output, f"Missing {query_name}_score"
+                    assert f"{query_name}_rationale" in output, f"Missing {query_name}_rationale"
 
             # Verify audit trail - LLM calls were recorded via AuditedLLMClient
             from elspeth.contracts import CallStatus, CallType
@@ -275,35 +411,43 @@ class TestMultiQueryIntegration:
         node_id: str,
     ) -> None:
         """Verify multiple rows process without deadlock through multi-query transform."""
-        # Simplified config: 1 case study x 2 criteria = 2 LLM calls per row
-        config = {
+        # Simplified config: 2 named queries = 2 LLM calls per row
+        config: dict[str, Any] = {
+            "provider": "azure",
             "deployment_name": "gpt-4o",
             "endpoint": "https://test.openai.azure.com",
             "api_key": "test-key",
             "system_prompt": "Respond in JSON",
-            "template": "Assess: {{ row.input_1 }} against {{ row.criterion.name }}",
-            "case_studies": [
-                {"name": "case", "input_fields": ["background"]},
-            ],
-            "criteria": [
-                {"name": "quality", "code": "Q", "description": "Quality check"},
-                {"name": "safety", "code": "S", "description": "Safety check"},
-            ],
-            "response_format": "standard",
-            "output_mapping": {"score": {"suffix": "score", "type": "integer"}},
+            "template": "Assess: {{ row.background }} against {{ row.criterion_name }}",
+            "queries": {
+                "case_quality": {
+                    "input_fields": {
+                        "background": "background",
+                        "criterion_name": "quality_criterion_name",
+                    },
+                    "output_fields": [{"suffix": "score", "type": "integer"}],
+                },
+                "case_safety": {
+                    "input_fields": {
+                        "background": "background",
+                        "criterion_name": "safety_criterion_name",
+                    },
+                    "output_fields": [{"suffix": "score", "type": "integer"}],
+                },
+            },
             "schema": {"mode": "observed"},
             "required_input_fields": [],  # Explicit opt-out for this test
             "pool_size": 5,
         }
 
-        # 2 criteria per row, cycle for multiple rows
+        # 2 queries per row, cycle for multiple rows
         responses = [
             {"score": 80},
             {"score": 90},
         ]
 
         with mock_azure_openai_multi_query(responses) as mock_client:
-            transform = AzureMultiQueryLLMTransform(config)
+            transform = LLMTransform(config)
             transform.node_id = node_id
 
             ctx = PluginContext(
@@ -315,9 +459,9 @@ class TestMultiQueryIntegration:
 
             # Process 3 rows
             rows = [
-                {"background": "Row 1 data"},
-                {"background": "Row 2 data"},
-                {"background": "Row 3 data"},
+                {"background": "Row 1 data", "quality_criterion_name": "Quality check", "safety_criterion_name": "Safety check"},
+                {"background": "Row 2 data", "quality_criterion_name": "Quality check", "safety_criterion_name": "Safety check"},
+                {"background": "Row 3 data", "quality_criterion_name": "Quality check", "safety_criterion_name": "Safety check"},
             ]
             results: list[TransformResult] = []
 
@@ -342,7 +486,7 @@ class TestMultiQueryIntegration:
             # All 3 should succeed (this would hang with the old bug)
             assert all(r.status == "success" for r in results)
 
-            # Each row makes 2 LLM calls (1 case x 2 criteria), so 6 total
+            # Each row makes 2 LLM calls (2 queries), so 6 total
             assert mock_client.chat.completions.create.call_count == 6
 
             # Verify each row has the expected output fields

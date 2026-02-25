@@ -16,6 +16,7 @@ Architecture:
 
 from __future__ import annotations
 
+import json
 import time
 from collections.abc import Callable
 from dataclasses import dataclass
@@ -29,7 +30,7 @@ from elspeth.contracts.schema import SchemaConfig
 from elspeth.contracts.schema_contract import PipelineRow
 from elspeth.plugins.base import BaseTransform
 from elspeth.plugins.batching import BatchTransformMixin, OutputPort
-from elspeth.plugins.clients.llm import LLMClientError
+from elspeth.plugins.clients.llm import ContextLengthError, LLMClientError
 from elspeth.plugins.llm import (
     _build_augmented_output_schema,
     get_llm_audit_fields,
@@ -142,6 +143,20 @@ class SingleQueryStrategy:
                 max_tokens=self.max_tokens,
                 state_id=state_id,
                 token_id=token_id,
+            )
+        except ContextLengthError as e:
+            latency_ms = (time.monotonic() - start_time) * 1000
+            tracer.record_error(
+                token_id=token_id,
+                query_name="single",
+                prompt=rendered.prompt,
+                error_message=str(e),
+                model=self.model,
+                latency_ms=latency_ms,
+            )
+            return TransformResult.error(
+                {"reason": "context_length_exceeded", "error": str(e)},
+                retryable=False,
             )
         except LLMClientError as e:
             latency_ms = (time.monotonic() - start_time) * 1000
@@ -313,6 +328,26 @@ class MultiQueryStrategy:
                     state_id=state_id,
                     token_id=token_id,
                 )
+            except ContextLengthError as e:
+                latency_ms = (time.monotonic() - start_time) * 1000
+                tracer.record_error(
+                    token_id=token_id,
+                    query_name=spec.name,
+                    prompt=rendered.prompt,
+                    error_message=str(e),
+                    model=self.model,
+                    latency_ms=latency_ms,
+                )
+                return TransformResult.error(
+                    {
+                        "reason": "context_length_exceeded",
+                        "failed_query_name": spec.name,
+                        "failed_query_index": query_idx,
+                        "error": str(e),
+                        "discarded_successful_queries": query_idx,
+                    },
+                    retryable=False,
+                )
             except LLMClientError as e:
                 latency_ms = (time.monotonic() - start_time) * 1000
                 tracer.record_error(
@@ -373,8 +408,45 @@ class MultiQueryStrategy:
                 latency_ms=latency_ms,
             )
 
-            # Store query-prefixed output fields
-            accumulated_outputs[f"{spec.name}_{self.response_field}"] = content
+            # JSON parsing + field extraction when output_fields configured
+            if spec.output_fields:
+                # LLM response content is Tier 3 — parse and validate immediately
+                try:
+                    parsed = json.loads(content)
+                except (json.JSONDecodeError, ValueError) as e:
+                    return TransformResult.error(
+                        {
+                            "reason": "json_parse_failed",
+                            "query_name": spec.name,
+                            "query_index": query_idx,
+                            "error": str(e),
+                            "raw_response_preview": content[:500],
+                            "discarded_successful_queries": query_idx,
+                        },
+                        retryable=False,
+                    )
+                if not isinstance(parsed, dict):
+                    return TransformResult.error(
+                        {
+                            "reason": "invalid_json_type",
+                            "query_name": spec.name,
+                            "query_index": query_idx,
+                            "expected": "object",
+                            "actual": type(parsed).__name__,
+                            "discarded_successful_queries": query_idx,
+                        },
+                        retryable=False,
+                    )
+                # Extract typed fields into prefixed output columns
+                for field in spec.output_fields:
+                    field_key = f"{spec.name}_{field.suffix}"
+                    accumulated_outputs[field_key] = parsed.get(field.suffix)
+                # Also store raw content for audit traceability
+                accumulated_outputs[f"{spec.name}_{self.response_field}"] = content
+            else:
+                # Unstructured: store raw content only
+                accumulated_outputs[f"{spec.name}_{self.response_field}"] = content
+
             populate_llm_metadata_fields(
                 accumulated_outputs,
                 f"{spec.name}_{self.response_field}",

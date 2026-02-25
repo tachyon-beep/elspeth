@@ -4,14 +4,14 @@
 18 assert statements were replaced with explicit RuntimeError raises across
 8 plugin files.  These tests cover the three most common guard patterns:
 
-1. ``_recorder is None`` before ``_get_llm_client()`` fires
-   (AzureLLMTransform, AzureContentSafety, and the same pattern in others)
+1. ``_recorder is None`` before ``_create_provider()`` fires
+   (LLMTransform unified guard, and the same pattern in AzureContentSafety)
 
 2. ``_writer / _file is None`` invariants inside CSVSink.write()
    (guards that protect against internal state bugs)
 
 3. ``connect_output() already called`` double-initialisation guard
-   (AzureContentSafety — AzureLLMTransform already had this covered)
+   (AzureContentSafety — LLMTransform already had this covered)
 
 Each test constructs the *minimum* plugin instance required to reach the
 guard, leaves the precondition violated, and asserts RuntimeError is raised
@@ -28,13 +28,14 @@ import pytest
 # Shared config helpers
 # ---------------------------------------------------------------------------
 
-_AZURE_LLM_CONFIG = {
+_LLM_AZURE_CONFIG = {
+    "provider": "azure",
     "deployment_name": "test-deployment",
     "endpoint": "https://test.openai.azure.com",
     "api_key": "test-key",
     "template": "Classify: {{ row.text }}",
     "schema": {"mode": "observed"},
-    "required_input_fields": [],  # opt-out for unit tests
+    "required_input_fields": [],
 }
 
 _CONTENT_SAFETY_CONFIG = {
@@ -60,33 +61,33 @@ class TestAssertToRaiseConversions:
     """One representative test per converted guard pattern."""
 
     # ------------------------------------------------------------------
-    # Pattern 1: AzureLLMTransform — _recorder not initialized
+    # Pattern 1: LLMTransform — _recorder not initialized
     # ------------------------------------------------------------------
 
-    def test_azure_llm_recorder_not_initialized_raises(self) -> None:
-        """_get_llm_client() raises RuntimeError when _recorder is None.
+    def test_llm_transform_recorder_not_initialized_raises(self) -> None:
+        """_create_provider() raises RuntimeError when _recorder is None.
 
         Before the assert-to-raise conversion this was:
             assert self._recorder is not None
 
         After conversion:
             raise RuntimeError(
-                "_recorder not initialized — _get_llm_client called before begin_run()"
+                "_recorder not initialized — _create_provider called before on_start()"
             )
 
         The guard fires when the transform is used without on_start() having
         been called (i.e. without the engine setting up the recorder).
         """
-        from elspeth.plugins.llm.azure import AzureLLMTransform
+        from elspeth.plugins.llm.transform import LLMTransform
 
-        transform = AzureLLMTransform(_AZURE_LLM_CONFIG)
+        transform = LLMTransform(_LLM_AZURE_CONFIG)
 
         # _recorder is None by default — on_start() was never called.
         assert transform._recorder is None
 
-        # _get_llm_client must raise, not silently proceed with a None recorder.
+        # _create_provider must raise, not silently proceed with a None recorder.
         with pytest.raises(RuntimeError, match="_recorder not initialized"):
-            transform._get_llm_client("some-state-id")
+            transform._create_provider()
 
     # ------------------------------------------------------------------
     # Pattern 2: AzureContentSafety — _recorder not initialized
@@ -95,7 +96,7 @@ class TestAssertToRaiseConversions:
     def test_content_safety_recorder_not_initialized_raises(self) -> None:
         """_get_http_client() raises RuntimeError when _recorder is None.
 
-        Same conversion pattern as AzureLLMTransform but in the
+        Same conversion pattern as the LLM transform but in the
         AzureContentSafety transform's HTTP client cache method.
 
         Guard message: "_recorder not initialized — _get_http_client called

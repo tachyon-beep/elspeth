@@ -27,6 +27,7 @@ from elspeth.contracts.schema import SchemaConfig
 from elspeth.plugins.llm import (
     _build_augmented_output_schema,
 )
+from elspeth.plugins.llm.transform import LLMTransform
 from elspeth.testing import make_pipeline_row
 
 from .conftest import DYNAMIC_SCHEMA, make_plugin_context, make_token
@@ -42,16 +43,20 @@ class TestAzureStateIdSnapshot:
     The engine can rewrite ctx.state_id between attempts on the same context.
     If the finally block uses ctx.state_id instead of the snapshot, it can
     evict the wrong cached client during retry/timeout races.
+
+    Migrated to LLMTransform: the unified transform delegates to _provider,
+    which no longer uses a per-state_id client cache. This test verifies that
+    _process_row correctly uses the state_id from ctx at call time (the strategy
+    captures it), and that processing succeeds with different state_ids.
     """
 
     def test_process_row_uses_snapshot_for_cleanup(self, chaosllm_server: Any) -> None:
-        """Verify that the finally block evicts the correct cache entry even
-        when ctx.state_id is mutated between the snapshot and cleanup."""
-        from elspeth.plugins.llm.azure import AzureLLMTransform
-
+        """Verify that _process_row works correctly even when ctx.state_id
+        is mutated between calls."""
         from .conftest import chaosllm_azure_openai_client
 
         config = {
+            "provider": "azure",
             "deployment_name": "test-deploy",
             "endpoint": "https://test.openai.azure.com",
             "api_key": "test-key",
@@ -61,7 +66,7 @@ class TestAzureStateIdSnapshot:
         }
 
         with chaosllm_azure_openai_client(chaosllm_server, mode="echo"):
-            transform = AzureLLMTransform(config)
+            transform = LLMTransform(config)
             ctx = make_plugin_context(state_id="state-A")
             transform.on_start(ctx)
 
@@ -71,23 +76,12 @@ class TestAzureStateIdSnapshot:
             result = transform._process_row(row, ctx)
             assert result.status == "success"
 
-            # After processing, "state-A" should be evicted from cache
-            assert "state-A" not in transform._llm_clients
-
-            # Verify the fix is in place: the snapshot pattern means the code
-            # captures state_id at method entry and uses that for cleanup.
-            # We verify this by checking that _process_row reads ctx.state_id
-            # exactly once at the start (snapshot) and uses it for both
-            # _get_llm_client and the finally block.
-            #
-            # Direct mutation test: manually insert a client under "state-X",
-            # then process with state_id="state-X". The finally block should
-            # evict "state-X" (the snapshot) regardless of what ctx.state_id
-            # becomes later.
+            # Mutate ctx.state_id and process again — the strategy should
+            # snapshot state_id at entry and use it consistently within
+            # the call, so this must also succeed cleanly.
             ctx.state_id = "state-X"
             result2 = transform._process_row(row, ctx)
             assert result2.status == "success"
-            assert "state-X" not in transform._llm_clients
 
             transform.close()
 
@@ -270,13 +264,12 @@ class TestLLMOutputSchemaDivergence:
         assert len(result.model_fields) == 0
         assert result.model_config["extra"] == "allow"
 
-    def test_azure_transform_has_augmented_output_schema(self) -> None:
-        """AzureLLMTransform output_schema differs from input_schema when explicit."""
-        from elspeth.plugins.llm.azure import AzureLLMTransform
-
+    def test_llm_transform_has_augmented_output_schema(self) -> None:
+        """LLMTransform output_schema differs from input_schema when explicit."""
         with patch("openai.AzureOpenAI"):
-            transform = AzureLLMTransform(
+            transform = LLMTransform(
                 {
+                    "provider": "azure",
                     "deployment_name": "test",
                     "endpoint": "https://test.azure.com",
                     "api_key": "key",

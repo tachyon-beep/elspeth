@@ -286,7 +286,7 @@ def resolve_queries(
     # System-reserved suffixes used by multi-query error handling
     reserved_suffixes.add("error")
 
-    seen_suffixes: dict[str, str] = {}  # suffix → first query name
+    seen_output_keys: dict[str, str] = {}  # full output key → first query name
     for spec in specs:
         if spec.output_fields:
             for field in spec.output_fields:
@@ -297,14 +297,18 @@ def resolve_queries(
                         spec.name,
                         field.suffix,
                     )
-                # Check for cross-query suffix collisions
-                if field.suffix in seen_suffixes:
+                # Check for cross-query output key collisions.
+                # Output keys are "{query_name}_{suffix}" (see MultiQueryStrategy),
+                # so different queries MAY share the same suffix as long as the full
+                # key is unique.
+                output_key = f"{spec.name}_{field.suffix}"
+                if output_key in seen_output_keys:
                     raise ValueError(
-                        f"Output field suffix collision: suffix '{field.suffix}' "
-                        f"used by both query '{seen_suffixes[field.suffix]}' "
+                        f"Output field key collision: key '{output_key}' "
+                        f"used by both query '{seen_output_keys[output_key]}' "
                         f"and query '{spec.name}'"
                     )
-                seen_suffixes[field.suffix] = spec.name
+                seen_output_keys[output_key] = spec.name
 
     return specs
 

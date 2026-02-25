@@ -1,12 +1,13 @@
 # tests/property/plugins/llm/test_multi_query_properties.py
 """Property-based tests for multi-query pure data transformations.
 
-The multi-query system evaluates a cross-product of (case_study x criterion)
-against each row. These tests cover the pure logic:
+Tests cover both the legacy QuerySpec (positional mapping) and the new
+UnifiedQuerySpec (named variable mapping) used by the unified LLMTransform:
 
 1. OutputFieldConfig.to_json_schema: type mapping correctness
-2. QuerySpec.build_template_context: positional variable mapping
-3. OutputFieldConfig validation: enum requires values, others reject values
+2. QuerySpec.build_template_context: positional variable mapping (legacy)
+3. UnifiedQuerySpec.build_template_context: named variable mapping (unified)
+4. OutputFieldConfig validation: enum requires values, others reject values
 """
 
 from __future__ import annotations
@@ -19,6 +20,7 @@ from elspeth.plugins.llm.multi_query import (
     OutputFieldConfig,
     OutputFieldType,
     QuerySpec,
+    UnifiedQuerySpec,
 )
 
 # =============================================================================
@@ -100,7 +102,7 @@ class TestOutputFieldSchemaProperties:
 
 
 # =============================================================================
-# QuerySpec.build_template_context Properties
+# QuerySpec.build_template_context Properties (Legacy Positional Mapping)
 # =============================================================================
 
 
@@ -213,3 +215,110 @@ class TestQuerySpecContextProperties:
         expected_keys = {f"input_{i}" for i in range(1, n_fields + 1)}
         expected_keys |= {"criterion", "case_study", "source_row"}
         assert set(ctx.keys()) == expected_keys
+
+
+# =============================================================================
+# UnifiedQuerySpec.build_template_context Properties (New Named Mapping)
+# =============================================================================
+
+
+class TestUnifiedQuerySpecContextProperties:
+    """build_template_context must create correct named variable mappings.
+
+    UnifiedQuerySpec uses named input_fields (dict mapping template variable
+    name to row column name) instead of positional input_1, input_2 variables.
+    """
+
+    @given(
+        n_fields=st.integers(min_value=1, max_value=5),
+        data=st.data(),
+    )
+    @settings(max_examples=100)
+    def test_named_mapping(self, n_fields: int, data: st.DataObject) -> None:
+        """Property: input_fields maps template_var -> row[column_name] correctly."""
+        template_vars = data.draw(st.lists(field_names, min_size=n_fields, max_size=n_fields, unique=True))
+        column_names = data.draw(st.lists(field_names, min_size=n_fields, max_size=n_fields, unique=True))
+        values = data.draw(st.lists(string_values, min_size=n_fields, max_size=n_fields))
+
+        # Build row from column_names -> values
+        row = dict(zip(column_names, values, strict=False))
+
+        # Build input_fields mapping: template_var -> column_name
+        input_fields = dict(zip(template_vars, column_names, strict=False))
+
+        spec = UnifiedQuerySpec(
+            name="test_query",
+            input_fields=input_fields,
+        )
+
+        ctx = spec.build_template_context(row)
+
+        # Each template variable should map to the correct row value
+        for template_var, column_name in input_fields.items():
+            assert template_var in ctx
+            assert ctx[template_var] == row[column_name]
+
+    @given(data=st.data())
+    @settings(max_examples=50)
+    def test_context_includes_source_row(self, data: st.DataObject) -> None:
+        """Property: Context['source_row'] contains the full original row."""
+        column_name = data.draw(field_names)
+        value = data.draw(string_values)
+        row = {column_name: value}
+
+        spec = UnifiedQuerySpec(
+            name="test_query",
+            input_fields={"var": column_name},
+        )
+
+        ctx = spec.build_template_context(row)
+        assert ctx["source_row"] == row
+
+    def test_missing_column_raises_key_error(self) -> None:
+        """Property: Missing row column raises KeyError."""
+        spec = UnifiedQuerySpec(
+            name="test_query",
+            input_fields={"template_var": "missing_column"},
+        )
+
+        with pytest.raises(KeyError):
+            spec.build_template_context({"other_field": "value"})
+
+    @given(
+        n_fields=st.integers(min_value=1, max_value=5),
+        data=st.data(),
+    )
+    @settings(max_examples=50)
+    def test_context_has_exactly_expected_keys(self, n_fields: int, data: st.DataObject) -> None:
+        """Property: Context has named variables and source_row only."""
+        template_vars = data.draw(st.lists(field_names, min_size=n_fields, max_size=n_fields, unique=True))
+        column_names = data.draw(st.lists(field_names, min_size=n_fields, max_size=n_fields, unique=True))
+        row = dict.fromkeys(column_names, "v")
+
+        input_fields = dict(zip(template_vars, column_names, strict=False))
+
+        spec = UnifiedQuerySpec(
+            name="test_query",
+            input_fields=input_fields,
+        )
+
+        ctx = spec.build_template_context(row)
+
+        expected_keys = set(template_vars) | {"source_row"}
+        assert set(ctx.keys()) == expected_keys
+
+    def test_empty_name_rejected(self) -> None:
+        """Property: Empty name raises ValueError."""
+        with pytest.raises(ValueError, match="non-empty"):
+            UnifiedQuerySpec(
+                name="",
+                input_fields={"var": "col"},
+            )
+
+    def test_empty_input_fields_rejected(self) -> None:
+        """Property: Empty input_fields raises ValueError."""
+        with pytest.raises(ValueError, match="non-empty"):
+            UnifiedQuerySpec(
+                name="test_query",
+                input_fields={},
+            )

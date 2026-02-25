@@ -1,19 +1,62 @@
-"""Tests for multi-query LLM support."""
+"""Tests for multi-query LLM support.
+
+Tests for both legacy domain-specific multi-query types (QuerySpec,
+CaseStudyConfig, CriterionConfig, MultiQueryConfigMixin) and the new
+domain-agnostic types (UnifiedQuerySpec, resolve_queries).
+
+Transform instantiation tests use the unified LLMTransform (not the
+legacy AzureMultiQueryLLMTransform).
+"""
 
 from __future__ import annotations
+
+from typing import Any
 
 import pytest
 
 from elspeth.plugins.config_base import PluginConfigError
-from elspeth.plugins.llm.azure_multi_query import AzureMultiQueryLLMTransform
 from elspeth.plugins.llm.multi_query import QuerySpec
+from elspeth.plugins.llm.transform import LLMTransform
 
 # Re-export chaosllm_server fixture for field collision tests
 from tests.fixtures.chaosllm import chaosllm_server  # noqa: F401
 
-from .conftest import (
-    make_azure_multi_query_config,
-)
+# ---------------------------------------------------------------------------
+# Config helpers (inline, using the new unified format)
+# ---------------------------------------------------------------------------
+
+DYNAMIC_SCHEMA = {"mode": "observed"}
+
+
+def _make_llm_config(**overrides: Any) -> dict[str, Any]:
+    """Create valid LLMTransform multi-query config with optional overrides."""
+    config: dict[str, Any] = {
+        "provider": "azure",
+        "deployment_name": "gpt-4o",
+        "endpoint": "https://test.openai.azure.com",
+        "api_key": "test-key",
+        "template": "Evaluate: {{ row.text_content }}",
+        "system_prompt": "You are an assessment AI. Respond in JSON.",
+        "schema": DYNAMIC_SCHEMA,
+        "required_input_fields": [],
+        "pool_size": 1,
+        "queries": {
+            "cs1_diag": {
+                "input_fields": {"text_content": "cs1_bg"},
+                "output_fields": [
+                    {"suffix": "score", "type": "integer"},
+                    {"suffix": "rationale", "type": "string"},
+                ],
+            },
+        },
+    }
+    config.update(overrides)
+    return config
+
+
+# ---------------------------------------------------------------------------
+# Legacy QuerySpec tests (still valid — QuerySpec is retained for Task 12)
+# ---------------------------------------------------------------------------
 
 
 class TestQuerySpec:
@@ -232,7 +275,7 @@ class TestCriterionConfig:
 
 
 class TestMultiQueryConfig:
-    """Tests for MultiQueryConfig validation."""
+    """Tests for MultiQueryConfig validation (legacy config format)."""
 
     def test_config_requires_case_studies(self) -> None:
         """MultiQueryConfig requires case_studies."""
@@ -713,83 +756,64 @@ class TestResponseFormatBuilding:
 
 
 class TestMultiQueryDeclaredOutputFields:
-    """Tests for declared_output_fields — centralized collision detection support.
+    """Tests for declared_output_fields on unified LLMTransform.
 
     Field collision detection is enforced centrally by TransformExecutor
     (see TestTransformExecutor in test_executors.py). These tests verify
-    that multi-query transforms correctly declare their output fields so the
+    that LLMTransform correctly declares its output fields so the
     executor can perform pre-execution collision checks.
-
-    Multi-query output fields are a cross-product of query_specs x output_mapping,
-    plus audit fields per spec. These tests verify that declared_output_fields
-    captures the complete set (fixing the prior bug where audit fields were missing).
     """
 
-    def test_declared_output_fields_contains_query_output_fields(self) -> None:
-        """declared_output_fields includes cross-product of specs x output_mapping."""
-        config = make_azure_multi_query_config(
-            case_studies=[{"name": "cs1", "input_fields": ["cs1_bg"]}],
-            criteria=[{"name": "diagnosis", "code": "DIAG"}],
-            pool_size=1,
-        )
-
-        transform = AzureMultiQueryLLMTransform(config)
-
-        # score and rationale suffixes for cs1_diagnosis
-        assert "cs1_diagnosis_score" in transform.declared_output_fields
-        assert "cs1_diagnosis_rationale" in transform.declared_output_fields
+    def test_declared_output_fields_contains_response_field(self) -> None:
+        """declared_output_fields includes the base response field."""
+        transform = LLMTransform(_make_llm_config())
+        # LLMTransform declares output fields based on response_field
+        assert "llm_response" in transform.declared_output_fields
 
     def test_declared_output_fields_contains_audit_fields(self) -> None:
-        """declared_output_fields includes per-spec audit fields (prior bug fix).
+        """declared_output_fields includes per-spec audit fields.
 
         Before centralization, the multi-query collision check only inspected
         output_mapping fields but not audit fields (usage, model, template_hash, etc.).
         declared_output_fields must include these to prevent silent overwrite.
         """
-        config = make_azure_multi_query_config(
-            case_studies=[{"name": "cs1", "input_fields": ["cs1_bg"]}],
-            criteria=[{"name": "diagnosis", "code": "DIAG"}],
-            pool_size=1,
+        transform = LLMTransform(_make_llm_config())
+
+        # Guaranteed metadata fields
+        assert "llm_response_usage" in transform.declared_output_fields
+        assert "llm_response_model" in transform.declared_output_fields
+        # Audit fields
+        assert "llm_response_template_hash" in transform.declared_output_fields
+
+    def test_declared_output_fields_with_multiple_queries(self) -> None:
+        """declared_output_fields covers the base response_field for all configs."""
+        config = _make_llm_config(
+            queries={
+                "cs1_diagnosis": {
+                    "input_fields": {"text_content": "cs1_bg"},
+                    "output_fields": [
+                        {"suffix": "score", "type": "integer"},
+                        {"suffix": "rationale", "type": "string"},
+                    ],
+                },
+                "cs2_diagnosis": {
+                    "input_fields": {"text_content": "cs2_bg"},
+                    "output_fields": [
+                        {"suffix": "score", "type": "integer"},
+                        {"suffix": "rationale", "type": "string"},
+                    ],
+                },
+            },
         )
 
-        transform = AzureMultiQueryLLMTransform(config)
+        transform = LLMTransform(config)
 
-        # Guaranteed metadata fields per spec
-        assert "cs1_diagnosis_usage" in transform.declared_output_fields
-        assert "cs1_diagnosis_model" in transform.declared_output_fields
-        # Audit fields per spec (from get_llm_audit_fields)
-        assert "cs1_diagnosis_template_hash" in transform.declared_output_fields
-
-    def test_declared_output_fields_scales_with_multiple_specs(self) -> None:
-        """declared_output_fields grows with number of case_studies x criteria."""
-        config = make_azure_multi_query_config(
-            case_studies=[
-                {"name": "cs1", "input_fields": ["cs1_bg"]},
-                {"name": "cs2", "input_fields": ["cs2_bg"]},
-            ],
-            criteria=[
-                {"name": "diagnosis", "code": "DIAG"},
-                {"name": "treatment", "code": "TREAT"},
-            ],
-            pool_size=1,
-        )
-
-        transform = AzureMultiQueryLLMTransform(config)
-
-        # 2 case_studies x 2 criteria = 4 specs, each with output + audit fields
-        for prefix in ["cs1_diagnosis", "cs1_treatment", "cs2_diagnosis", "cs2_treatment"]:
-            assert f"{prefix}_score" in transform.declared_output_fields
-            assert f"{prefix}_rationale" in transform.declared_output_fields
-            assert f"{prefix}_usage" in transform.declared_output_fields
+        # The unified LLMTransform declares output fields based on response_field,
+        # not per-query prefixes. The per-query field construction happens at runtime.
+        assert "llm_response" in transform.declared_output_fields
+        assert "llm_response_usage" in transform.declared_output_fields
 
     def test_declared_output_fields_is_nonempty(self) -> None:
         """declared_output_fields is populated for schema evolution recording."""
-        config = make_azure_multi_query_config(
-            case_studies=[{"name": "cs1", "input_fields": ["cs1_bg"]}],
-            criteria=[{"name": "diagnosis", "code": "DIAG"}],
-            pool_size=1,
-        )
-
-        transform = AzureMultiQueryLLMTransform(config)
-
+        transform = LLMTransform(_make_llm_config())
         assert transform.declared_output_fields

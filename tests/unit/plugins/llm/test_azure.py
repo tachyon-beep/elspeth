@@ -1,5 +1,5 @@
 # tests/plugins/llm/test_azure.py
-"""Tests for Azure OpenAI LLM transform with row-level pipelining."""
+"""Tests for Azure OpenAI LLM provider via unified LLMTransform."""
 
 from collections.abc import Generator
 from unittest.mock import Mock, patch
@@ -13,7 +13,8 @@ from elspeth.engine.batch_adapter import ExceptionResult
 from elspeth.plugins.batching.ports import CollectorOutputPort
 from elspeth.plugins.clients.llm import RateLimitError
 from elspeth.plugins.config_base import PluginConfigError
-from elspeth.plugins.llm.azure import AzureLLMTransform, AzureOpenAIConfig
+from elspeth.plugins.llm.azure import AzureOpenAIConfig
+from elspeth.plugins.llm.transform import LLMTransform
 from elspeth.testing import make_pipeline_row
 
 from .conftest import chaosllm_azure_openai_client
@@ -29,6 +30,21 @@ def make_token(row_id: str = "row-1", token_id: str | None = None) -> TokenInfo:
         token_id=token_id or f"token-{row_id}",
         row_data=make_pipeline_row({}),
     )
+
+
+def _make_azure_config(**overrides: object) -> dict[str, object]:
+    """Build a standard Azure LLMTransform config dict with overrides."""
+    config: dict[str, object] = {
+        "provider": "azure",
+        "deployment_name": "my-gpt4o-deployment",
+        "endpoint": "https://my-resource.openai.azure.com",
+        "api_key": "azure-api-key",
+        "template": "{{ row.text }}",
+        "schema": DYNAMIC_SCHEMA,
+        "required_input_fields": [],
+    }
+    config.update(overrides)
+    return config
 
 
 class TestAzureOpenAIConfig:
@@ -171,151 +187,67 @@ class TestAzureOpenAIConfig:
         assert config.response_field == "llm_response"
 
 
-class TestAzureLLMTransformInit:
-    """Tests for AzureLLMTransform initialization."""
+class TestLLMTransformAzureInit:
+    """Tests for LLMTransform initialization with Azure provider."""
 
     def test_transform_name(self) -> None:
         """Transform has correct name."""
-        transform = AzureLLMTransform(
-            {
-                "deployment_name": "my-gpt4o-deployment",
-                "endpoint": "https://my-resource.openai.azure.com",
-                "api_key": "azure-api-key",
-                "template": "{{ row.text }}",
-                "schema": DYNAMIC_SCHEMA,
-                "required_input_fields": [],  # Explicit opt-out for this test
-            }
-        )
-        assert transform.name == "azure_llm"
+        transform = LLMTransform(_make_azure_config(template="{{ row.text }}"))
+        assert transform.name == "llm"
 
     def test_transform_stores_azure_config(self) -> None:
-        """Transform stores Azure-specific config."""
-        transform = AzureLLMTransform(
-            {
-                "deployment_name": "my-gpt4o-deployment",
-                "endpoint": "https://my-resource.openai.azure.com",
-                "api_key": "azure-api-key",
-                "template": "{{ row.text }}",
-                "schema": DYNAMIC_SCHEMA,
-                "required_input_fields": [],  # Explicit opt-out for this test
-                "api_version": "2023-12-01-preview",
-            }
+        """Transform stores Azure-specific config accessible via _config."""
+        transform = LLMTransform(
+            _make_azure_config(
+                template="{{ row.text }}",
+                api_version="2023-12-01-preview",
+            )
         )
-        assert transform._azure_endpoint == "https://my-resource.openai.azure.com"
-        assert transform._azure_api_key == "azure-api-key"
-        assert transform._azure_api_version == "2023-12-01-preview"
-        assert transform._deployment_name == "my-gpt4o-deployment"
+        assert transform._config.endpoint == "https://my-resource.openai.azure.com"
+        assert transform._config.api_key == "azure-api-key"
+        assert transform._config.api_version == "2023-12-01-preview"
+        assert transform._config.deployment_name == "my-gpt4o-deployment"
 
     def test_model_set_to_deployment_name(self) -> None:
         """Model is set to deployment_name for API calls."""
-        transform = AzureLLMTransform(
-            {
-                "deployment_name": "my-gpt4o-deployment",
-                "endpoint": "https://my-resource.openai.azure.com",
-                "api_key": "azure-api-key",
-                "template": "{{ row.text }}",
-                "schema": DYNAMIC_SCHEMA,
-                "required_input_fields": [],  # Explicit opt-out for this test
-            }
-        )
+        transform = LLMTransform(_make_azure_config(template="{{ row.text }}"))
         assert transform._model == "my-gpt4o-deployment"
-
-    def test_azure_config_property(self) -> None:
-        """azure_config property returns correct values."""
-        transform = AzureLLMTransform(
-            {
-                "deployment_name": "my-gpt4o-deployment",
-                "endpoint": "https://my-resource.openai.azure.com",
-                "api_key": "azure-api-key",
-                "template": "{{ row.text }}",
-                "schema": DYNAMIC_SCHEMA,
-                "required_input_fields": [],  # Explicit opt-out for this test
-                "api_version": "2023-12-01-preview",
-            }
-        )
-
-        config = transform.azure_config
-        assert config["endpoint"] == "https://my-resource.openai.azure.com"
-        assert config["api_version"] == "2023-12-01-preview"
-        assert config["provider"] == "azure"
-        # api_key is NOT included in azure_config (security)
-        assert "api_key" not in config
-
-    def test_deployment_name_property(self) -> None:
-        """deployment_name property returns correct value."""
-        transform = AzureLLMTransform(
-            {
-                "deployment_name": "my-gpt4o-deployment",
-                "endpoint": "https://my-resource.openai.azure.com",
-                "api_key": "azure-api-key",
-                "template": "{{ row.text }}",
-                "schema": DYNAMIC_SCHEMA,
-                "required_input_fields": [],  # Explicit opt-out for this test
-            }
-        )
-        assert transform.deployment_name == "my-gpt4o-deployment"
 
     def test_determinism_is_non_deterministic(self) -> None:
         """Azure transforms are marked as non-deterministic."""
-        transform = AzureLLMTransform(
-            {
-                "deployment_name": "my-gpt4o-deployment",
-                "endpoint": "https://my-resource.openai.azure.com",
-                "api_key": "azure-api-key",
-                "template": "{{ row.text }}",
-                "schema": DYNAMIC_SCHEMA,
-                "required_input_fields": [],  # Explicit opt-out for this test
-            }
-        )
+        transform = LLMTransform(_make_azure_config(template="{{ row.text }}"))
         assert transform.determinism == Determinism.NON_DETERMINISTIC
 
     def test_config_validation_failure_deployment_name(self) -> None:
-        """Missing deployment_name raises PluginConfigError."""
-        with pytest.raises(PluginConfigError):
-            AzureLLMTransform(
+        """Missing deployment_name raises error via LLMTransform."""
+        with pytest.raises((PluginConfigError, ValueError)):
+            LLMTransform(
                 {
+                    "provider": "azure",
                     "endpoint": "https://my-resource.openai.azure.com",
                     "api_key": "azure-api-key",
                     "template": "{{ row.text }}",
                     "schema": DYNAMIC_SCHEMA,
-                    "required_input_fields": [],  # Explicit opt-out for this test
+                    "required_input_fields": [],
                 }
             )
 
     def test_process_raises_not_implemented(self) -> None:
         """process() raises NotImplementedError directing to accept()."""
-        transform = AzureLLMTransform(
-            {
-                "deployment_name": "my-gpt4o-deployment",
-                "endpoint": "https://my-resource.openai.azure.com",
-                "api_key": "azure-api-key",
-                "template": "{{ row.text }}",
-                "schema": DYNAMIC_SCHEMA,
-                "required_input_fields": [],  # Explicit opt-out for this test
-            }
-        )
+        transform = LLMTransform(_make_azure_config(template="{{ row.text }}"))
         ctx = PluginContext(run_id="test-run", config={})
 
         with pytest.raises(NotImplementedError, match="row-level pipelining"):
             transform.process(make_pipeline_row({"text": "hello"}), ctx)
 
     def test_declared_output_fields_populated(self) -> None:
-        """Regression: AzureLLMTransform was previously unprotected from field collisions.
+        """Regression: LLMTransform must declare output fields for collision detection.
 
         Before centralized collision enforcement, AzureLLMTransform had NO
         collision check. This test verifies declared_output_fields is populated
         so TransformExecutor can enforce collision detection.
         """
-        transform = AzureLLMTransform(
-            {
-                "deployment_name": "my-gpt4o-deployment",
-                "endpoint": "https://my-resource.openai.azure.com",
-                "api_key": "azure-api-key",
-                "template": "{{ row.text }}",
-                "schema": DYNAMIC_SCHEMA,
-                "required_input_fields": [],
-            }
-        )
+        transform = LLMTransform(_make_azure_config(template="{{ row.text }}"))
 
         assert isinstance(transform.declared_output_fields, frozenset)
         assert len(transform.declared_output_fields) > 0
@@ -323,10 +255,10 @@ class TestAzureLLMTransformInit:
         assert "llm_response_model" in transform.declared_output_fields
 
 
-class TestAzureLLMTransformPipelining:
-    """Tests for AzureLLMTransform with row-level pipelining.
+class TestLLMTransformAzurePipelining:
+    """Tests for LLMTransform with Azure provider using row-level pipelining.
 
-    These tests verify the new accept() API that uses BatchTransformMixin
+    These tests verify the accept() API that uses BatchTransformMixin
     for concurrent row processing with FIFO output ordering.
     """
 
@@ -355,18 +287,9 @@ class TestAzureLLMTransformPipelining:
         )
 
     @pytest.fixture
-    def transform(self, collector: CollectorOutputPort, mock_recorder: Mock) -> Generator[AzureLLMTransform, None, None]:
-        """Create and initialize Azure transform with pipelining."""
-        t = AzureLLMTransform(
-            {
-                "deployment_name": "my-gpt4o-deployment",
-                "endpoint": "https://my-resource.openai.azure.com",
-                "api_key": "azure-api-key",
-                "template": "Analyze: {{ row.text }}",
-                "schema": DYNAMIC_SCHEMA,
-                "required_input_fields": [],  # Explicit opt-out for this test
-            }
-        )
+    def transform(self, collector: CollectorOutputPort, mock_recorder: Mock) -> Generator[LLMTransform, None, None]:
+        """Create and initialize LLMTransform with Azure provider and pipelining."""
+        t = LLMTransform(_make_azure_config(template="Analyze: {{ row.text }}"))
         # Initialize with recorder reference
         init_ctx = PluginContext(run_id="test", config={}, landscape=mock_recorder)
         t.on_start(init_ctx)
@@ -379,7 +302,7 @@ class TestAzureLLMTransformPipelining:
     def test_successful_llm_call_emits_enriched_row(
         self,
         ctx: PluginContext,
-        transform: AzureLLMTransform,
+        transform: LLMTransform,
         collector: CollectorOutputPort,
         chaosllm_server,
     ) -> None:
@@ -413,7 +336,7 @@ class TestAzureLLMTransformPipelining:
     def test_model_passed_to_azure_client_is_deployment_name(
         self,
         ctx: PluginContext,
-        transform: AzureLLMTransform,
+        transform: LLMTransform,
         collector: CollectorOutputPort,
         chaosllm_server,
     ) -> None:
@@ -428,7 +351,7 @@ class TestAzureLLMTransformPipelining:
     def test_template_rendering_error_emits_error(
         self,
         ctx: PluginContext,
-        transform: AzureLLMTransform,
+        transform: LLMTransform,
         collector: CollectorOutputPort,
         chaosllm_server,
     ) -> None:
@@ -450,7 +373,7 @@ class TestAzureLLMTransformPipelining:
     def test_llm_client_error_emits_error(
         self,
         ctx: PluginContext,
-        transform: AzureLLMTransform,
+        transform: LLMTransform,
         collector: CollectorOutputPort,
         chaosllm_server,
     ) -> None:
@@ -472,7 +395,7 @@ class TestAzureLLMTransformPipelining:
     def test_rate_limit_error_propagates_for_engine_retry(
         self,
         ctx: PluginContext,
-        transform: AzureLLMTransform,
+        transform: LLMTransform,
         collector: CollectorOutputPort,
         chaosllm_server,
     ) -> None:
@@ -500,7 +423,7 @@ class TestAzureLLMTransformPipelining:
         assert "429" in str(result.exception)
 
     def test_missing_state_id_propagates_exception(
-        self, mock_recorder: Mock, transform: AzureLLMTransform, collector: CollectorOutputPort
+        self, mock_recorder: Mock, transform: LLMTransform, collector: CollectorOutputPort
     ) -> None:
         """Missing state_id causes exception propagation, not error result.
 
@@ -533,7 +456,7 @@ class TestAzureLLMTransformPipelining:
         assert isinstance(result.exception, RuntimeError)
         assert "state_id" in str(result.exception)
 
-    def test_process_row_missing_token_raises_runtime_error(self, mock_recorder: Mock, transform: AzureLLMTransform) -> None:
+    def test_process_row_missing_token_raises_runtime_error(self, mock_recorder: Mock, transform: LLMTransform) -> None:
         """Direct _process_row call with missing token must crash explicitly."""
         ctx = PluginContext(
             run_id="test-run",
@@ -553,16 +476,11 @@ class TestAzureLLMTransformPipelining:
         chaosllm_server,
     ) -> None:
         """System prompt is included when configured."""
-        transform = AzureLLMTransform(
-            {
-                "deployment_name": "my-gpt4o-deployment",
-                "endpoint": "https://my-resource.openai.azure.com",
-                "api_key": "azure-api-key",
-                "template": "{{ row.text }}",
-                "schema": DYNAMIC_SCHEMA,
-                "required_input_fields": [],  # Explicit opt-out for this test
-                "system_prompt": "You are a helpful assistant.",
-            }
+        transform = LLMTransform(
+            _make_azure_config(
+                template="{{ row.text }}",
+                system_prompt="You are a helpful assistant.",
+            )
         )
         init_ctx = PluginContext(run_id="test", config={}, landscape=mock_recorder)
         transform.on_start(init_ctx)
@@ -599,17 +517,12 @@ class TestAzureLLMTransformPipelining:
         chaosllm_server,
     ) -> None:
         """Temperature and max_tokens are passed to Azure client."""
-        transform = AzureLLMTransform(
-            {
-                "deployment_name": "my-gpt4o-deployment",
-                "endpoint": "https://my-resource.openai.azure.com",
-                "api_key": "azure-api-key",
-                "template": "{{ row.text }}",
-                "schema": DYNAMIC_SCHEMA,
-                "required_input_fields": [],  # Explicit opt-out for this test
-                "temperature": 0.7,
-                "max_tokens": 500,
-            }
+        transform = LLMTransform(
+            _make_azure_config(
+                template="{{ row.text }}",
+                temperature=0.7,
+                max_tokens=500,
+            )
         )
         init_ctx = PluginContext(run_id="test", config={}, landscape=mock_recorder)
         transform.on_start(init_ctx)
@@ -643,16 +556,11 @@ class TestAzureLLMTransformPipelining:
         chaosllm_server,
     ) -> None:
         """Custom response_field name is used."""
-        transform = AzureLLMTransform(
-            {
-                "deployment_name": "my-gpt4o-deployment",
-                "endpoint": "https://my-resource.openai.azure.com",
-                "api_key": "azure-api-key",
-                "template": "{{ row.text }}",
-                "schema": DYNAMIC_SCHEMA,
-                "required_input_fields": [],  # Explicit opt-out for this test
-                "response_field": "analysis",
-            }
+        transform = LLMTransform(
+            _make_azure_config(
+                template="{{ row.text }}",
+                response_field="analysis",
+            )
         )
         init_ctx = PluginContext(run_id="test", config={}, landscape=mock_recorder)
         transform.on_start(init_ctx)
@@ -692,16 +600,7 @@ class TestAzureLLMTransformPipelining:
 
     def test_connect_output_required_before_accept(self) -> None:
         """accept() raises RuntimeError if connect_output() not called."""
-        transform = AzureLLMTransform(
-            {
-                "deployment_name": "my-gpt4o-deployment",
-                "endpoint": "https://my-resource.openai.azure.com",
-                "api_key": "azure-api-key",
-                "template": "{{ row.text }}",
-                "schema": DYNAMIC_SCHEMA,
-                "required_input_fields": [],  # Explicit opt-out for this test
-            }
-        )
+        transform = LLMTransform(_make_azure_config(template="{{ row.text }}"))
 
         token = make_token("row-1")
         ctx = PluginContext(
@@ -716,16 +615,7 @@ class TestAzureLLMTransformPipelining:
 
     def test_connect_output_cannot_be_called_twice(self, collector: CollectorOutputPort, mock_recorder: Mock) -> None:
         """connect_output() raises if called more than once."""
-        transform = AzureLLMTransform(
-            {
-                "deployment_name": "my-gpt4o-deployment",
-                "endpoint": "https://my-resource.openai.azure.com",
-                "api_key": "azure-api-key",
-                "template": "{{ row.text }}",
-                "schema": DYNAMIC_SCHEMA,
-                "required_input_fields": [],  # Explicit opt-out for this test
-            }
-        )
+        transform = LLMTransform(_make_azure_config(template="{{ row.text }}"))
         init_ctx = PluginContext(run_id="test", config={}, landscape=mock_recorder)
         transform.on_start(init_ctx)
         transform.connect_output(collector, max_pending=10)
@@ -737,7 +627,7 @@ class TestAzureLLMTransformPipelining:
             transform.close()
 
     def test_azure_client_created_with_correct_credentials(
-        self, ctx: PluginContext, transform: AzureLLMTransform, collector: CollectorOutputPort
+        self, ctx: PluginContext, transform: LLMTransform, collector: CollectorOutputPort
     ) -> None:
         """AzureOpenAI client is created with correct credentials."""
         with patch("openai.AzureOpenAI") as mock_azure_class:
@@ -768,8 +658,8 @@ class TestAzureLLMTransformPipelining:
             )
 
 
-class TestAzureLLMTransformIntegration:
-    """Integration-style tests for Azure-specific edge cases."""
+class TestLLMTransformAzureIntegration:
+    """Integration-style tests for Azure-specific edge cases via LLMTransform."""
 
     @pytest.fixture
     def mock_recorder(self) -> Mock:
@@ -784,20 +674,9 @@ class TestAzureLLMTransformIntegration:
         return CollectorOutputPort()
 
     def test_azure_config_with_default_api_version(self) -> None:
-        """azure_config uses default api_version when not specified."""
-        transform = AzureLLMTransform(
-            {
-                "deployment_name": "my-gpt4o-deployment",
-                "endpoint": "https://my-resource.openai.azure.com",
-                "api_key": "azure-api-key",
-                "template": "{{ row.text }}",
-                "schema": DYNAMIC_SCHEMA,
-                "required_input_fields": [],  # Explicit opt-out for this test
-            }
-        )
-
-        config = transform.azure_config
-        assert config["api_version"] == "2024-10-21"
+        """LLMTransform with Azure provider uses default api_version when not specified."""
+        transform = LLMTransform(_make_azure_config(template="{{ row.text }}"))
+        assert transform._config.api_version == "2024-10-21"
 
     def test_complex_template_with_multiple_variables(
         self,
@@ -806,12 +685,9 @@ class TestAzureLLMTransformIntegration:
         chaosllm_server,
     ) -> None:
         """Complex template with multiple variables works correctly."""
-        transform = AzureLLMTransform(
-            {
-                "deployment_name": "my-gpt4o-deployment",
-                "endpoint": "https://my-resource.openai.azure.com",
-                "api_key": "azure-api-key",
-                "template": """
+        transform = LLMTransform(
+            _make_azure_config(
+                template="""
                     Analyze the following data:
                     Name: {{ row.name }}
                     Score: {{ row.score }}
@@ -819,9 +695,7 @@ class TestAzureLLMTransformIntegration:
 
                     Provide a summary.
                 """,
-                "schema": DYNAMIC_SCHEMA,
-                "required_input_fields": [],  # Explicit opt-out for this test
-            }
+            )
         )
         init_ctx = PluginContext(run_id="test", config={}, landscape=mock_recorder)
         transform.on_start(init_ctx)
@@ -866,16 +740,7 @@ class TestAzureLLMTransformIntegration:
         chaosllm_server,
     ) -> None:
         """LLM calls are recorded via AuditedLLMClient."""
-        transform = AzureLLMTransform(
-            {
-                "deployment_name": "my-gpt4o-deployment",
-                "endpoint": "https://my-resource.openai.azure.com",
-                "api_key": "azure-api-key",
-                "template": "{{ row.text }}",
-                "schema": DYNAMIC_SCHEMA,
-                "required_input_fields": [],  # Explicit opt-out for this test
-            }
-        )
+        transform = LLMTransform(_make_azure_config(template="{{ row.text }}"))
         init_ctx = PluginContext(run_id="test", config={}, landscape=mock_recorder)
         transform.on_start(init_ctx)
         transform.connect_output(collector, max_pending=10)
@@ -900,8 +765,8 @@ class TestAzureLLMTransformIntegration:
         assert mock_recorder.record_call.called
 
 
-class TestAzureLLMTransformConcurrency:
-    """Tests for concurrent row processing via BatchTransformMixin."""
+class TestLLMTransformAzureConcurrency:
+    """Tests for concurrent row processing via BatchTransformMixin with Azure provider."""
 
     @pytest.fixture
     def mock_recorder(self) -> Mock:
@@ -922,16 +787,7 @@ class TestAzureLLMTransformConcurrency:
         chaosllm_server,
     ) -> None:
         """Multiple rows are emitted in submission order (FIFO)."""
-        transform = AzureLLMTransform(
-            {
-                "deployment_name": "my-gpt4o-deployment",
-                "endpoint": "https://my-resource.openai.azure.com",
-                "api_key": "azure-api-key",
-                "template": "{{ row.text }}",
-                "schema": DYNAMIC_SCHEMA,
-                "required_input_fields": [],  # Explicit opt-out for this test
-            }
-        )
+        transform = LLMTransform(_make_azure_config(template="{{ row.text }}"))
         init_ctx = PluginContext(run_id="test", config={}, landscape=mock_recorder)
         transform.on_start(init_ctx)
         transform.connect_output(collector, max_pending=10)
@@ -968,17 +824,8 @@ class TestAzureLLMTransformConcurrency:
             assert result.row["text"] == rows[i]["text"]
 
     def test_on_start_captures_recorder(self, mock_recorder: Mock) -> None:
-        """on_start() captures recorder reference for LLM client creation."""
-        transform = AzureLLMTransform(
-            {
-                "deployment_name": "my-gpt4o-deployment",
-                "endpoint": "https://my-resource.openai.azure.com",
-                "api_key": "azure-api-key",
-                "template": "{{ row.text }}",
-                "schema": DYNAMIC_SCHEMA,
-                "required_input_fields": [],  # Explicit opt-out for this test
-            }
-        )
+        """on_start() captures recorder reference for provider creation."""
+        transform = LLMTransform(_make_azure_config(template="{{ row.text }}"))
 
         # Verify _recorder starts as None
         assert transform._recorder is None
@@ -994,18 +841,9 @@ class TestAzureLLMTransformConcurrency:
         # Verify recorder was captured
         assert transform._recorder is mock_recorder
 
-    def test_close_clears_recorder_and_clients(self, mock_recorder: Mock, collector: CollectorOutputPort) -> None:
-        """close() clears recorder reference and cached clients."""
-        transform = AzureLLMTransform(
-            {
-                "deployment_name": "my-gpt4o-deployment",
-                "endpoint": "https://my-resource.openai.azure.com",
-                "api_key": "azure-api-key",
-                "template": "{{ row.text }}",
-                "schema": DYNAMIC_SCHEMA,
-                "required_input_fields": [],  # Explicit opt-out for this test
-            }
-        )
+    def test_close_clears_recorder(self, mock_recorder: Mock, collector: CollectorOutputPort) -> None:
+        """close() clears recorder reference."""
+        transform = LLMTransform(_make_azure_config(template="{{ row.text }}"))
         init_ctx = PluginContext(run_id="test", config={}, landscape=mock_recorder)
         transform.on_start(init_ctx)
         transform.connect_output(collector, max_pending=10)
@@ -1015,41 +853,3 @@ class TestAzureLLMTransformConcurrency:
         transform.close()
 
         assert transform._recorder is None
-
-
-class TestAzureClientThreadSafety:
-    """Thread-safety of lazy client initialization."""
-
-    def test_concurrent_get_underlying_client_returns_single_instance(self) -> None:
-        """Multiple threads calling _get_underlying_client() must get the same instance.
-
-        Without the lock, N threads racing on first access would each create
-        an AzureOpenAI client, leaking N-1 HTTP connection pools.
-        """
-        from concurrent.futures import ThreadPoolExecutor
-
-        transform = AzureLLMTransform(
-            {
-                "endpoint": "https://test.openai.azure.com/",
-                "api_key": "test-key",
-                "deployment_name": "gpt-4",
-                "template": "{{ text }}",
-                "schema": DYNAMIC_SCHEMA,
-                "required_input_fields": [],
-            }
-        )
-
-        clients: list[object] = []
-
-        with patch("openai.AzureOpenAI") as mock_cls:
-            # Return a fresh mock each call — without the lock, we'd get multiple
-            mock_cls.side_effect = lambda **kwargs: Mock()
-
-            with ThreadPoolExecutor(max_workers=20) as executor:
-                futures = [executor.submit(transform._get_underlying_client) for _ in range(100)]
-                clients = [f.result() for f in futures]
-
-        # All 100 calls must return the same object
-        assert len({id(c) for c in clients}) == 1
-        # Constructor called exactly once
-        assert mock_cls.call_count == 1

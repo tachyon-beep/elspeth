@@ -243,7 +243,7 @@ class TestErrorClassification:
         assert result.status == "error"
         assert result.retryable is False
         assert result.reason is not None
-        assert "llm_call_failed" in str(result.reason.get("reason", ""))
+        assert result.reason["reason"] == "context_length_exceeded"
 
     def test_error_classification_llm_client_error_not_retryable(self, transform_with_mock_provider: Any) -> None:
         transform, mock_provider, row, ctx = transform_with_mock_provider
@@ -499,7 +499,7 @@ class TestMultiQueryPartialFailure:
         """4 queries, query 3 fails → ALL results discarded, error has details."""
         from elspeth.plugins.llm.transform import LLMTransform, MultiQueryStrategy
 
-        config = _make_config()
+        config = _make_config(template="Classify: {{ row.text_content }}")
         config["queries"] = {
             "q1": {"input_fields": {"text_content": "text"}},
             "q2": {"input_fields": {"text_content": "text"}},
@@ -530,17 +530,223 @@ class TestMultiQueryPartialFailure:
         result = transform._process_row(_make_row(), _make_ctx())
         assert result.status == "error"
 
-        # Error reason must include: (a) which query failed, (b) failure detail,
-        # (c) how many queries succeeded but were discarded
+        # Error reason must include: (a) which query failed (name + index),
+        # (b) failure detail, (c) how many queries succeeded but were discarded
         assert result.reason is not None
-        reason_str = str(result.reason)
-        # Must identify the failing query
-        assert "q3" in reason_str or "3" in reason_str
-        # Must mention discarded results count
-        assert "discarded_successful_queries" in reason_str
+        assert result.reason["failed_query_name"] == "q3"
+        assert result.reason["failed_query_index"] == 2  # 0-indexed
+        assert result.reason["discarded_successful_queries"] == 2
+        assert "Bad response for query 3" in result.reason["error"]
 
         # No output data should exist
         assert result.row is None
+
+
+# ---------------------------------------------------------------------------
+# Multi-query JSON parsing and field extraction
+# ---------------------------------------------------------------------------
+
+
+class TestMultiQueryJSONExtraction:
+    """Verify multi-query JSON parsing and field extraction when output_fields configured."""
+
+    def test_output_fields_extracts_typed_fields_from_json(self) -> None:
+        """When output_fields is configured, JSON is parsed and fields extracted."""
+        from elspeth.plugins.llm.transform import LLMTransform
+
+        config = _make_config(
+            template="Evaluate: {{ row.text_content }}",
+            queries={
+                "quality": {
+                    "input_fields": {"text_content": "text"},
+                    "output_fields": [
+                        {"suffix": "score", "type": "integer"},
+                        {"suffix": "label", "type": "string"},
+                    ],
+                },
+            },
+        )
+        transform = LLMTransform(config)
+        mock_provider = Mock()
+        mock_provider.execute_query.return_value = LLMQueryResult(
+            content='{"score": 85, "label": "high quality"}',
+            usage=TokenUsage.known(10, 5),
+            model="gpt-4o",
+            finish_reason=FinishReason.STOP,
+        )
+        transform._provider = mock_provider
+
+        result = transform._process_row(_make_row(), _make_ctx())
+        assert result.status == "success"
+        assert result.row is not None
+        output = result.row.to_dict()
+        # Extracted typed fields
+        assert output["quality_score"] == 85
+        assert output["quality_label"] == "high quality"
+        # Raw content also stored for audit
+        assert output["quality_llm_response"] == '{"score": 85, "label": "high quality"}'
+
+    def test_output_fields_missing_field_returns_none(self) -> None:
+        """When a field is missing from JSON response, it stores None."""
+        from elspeth.plugins.llm.transform import LLMTransform
+
+        config = _make_config(
+            template="Evaluate: {{ row.text_content }}",
+            queries={
+                "q1": {
+                    "input_fields": {"text_content": "text"},
+                    "output_fields": [
+                        {"suffix": "score", "type": "integer"},
+                        {"suffix": "missing_field", "type": "string"},
+                    ],
+                },
+            },
+        )
+        transform = LLMTransform(config)
+        mock_provider = Mock()
+        mock_provider.execute_query.return_value = LLMQueryResult(
+            content='{"score": 42}',
+            usage=TokenUsage.known(10, 5),
+            model="gpt-4o",
+            finish_reason=FinishReason.STOP,
+        )
+        transform._provider = mock_provider
+
+        result = transform._process_row(_make_row(), _make_ctx())
+        assert result.status == "success"
+        assert result.row is not None
+        output = result.row.to_dict()
+        assert output["q1_score"] == 42
+        assert output["q1_missing_field"] is None
+
+    def test_output_fields_json_parse_failure_returns_error(self) -> None:
+        """When LLM returns invalid JSON and output_fields expects JSON, return error."""
+        from elspeth.plugins.llm.transform import LLMTransform
+
+        config = _make_config(
+            template="Evaluate: {{ row.text_content }}",
+            queries={
+                "q1": {
+                    "input_fields": {"text_content": "text"},
+                    "output_fields": [{"suffix": "score", "type": "integer"}],
+                },
+            },
+        )
+        transform = LLMTransform(config)
+        mock_provider = Mock()
+        mock_provider.execute_query.return_value = LLMQueryResult(
+            content="not valid json at all",
+            usage=TokenUsage.known(10, 5),
+            model="gpt-4o",
+            finish_reason=FinishReason.STOP,
+        )
+        transform._provider = mock_provider
+
+        result = transform._process_row(_make_row(), _make_ctx())
+        assert result.status == "error"
+        assert result.reason is not None
+        assert result.reason["reason"] == "json_parse_failed"
+        assert result.reason["query_name"] == "q1"
+
+    def test_output_fields_json_array_returns_error(self) -> None:
+        """When LLM returns a JSON array instead of object, return structured error."""
+        from elspeth.plugins.llm.transform import LLMTransform
+
+        config = _make_config(
+            template="Evaluate: {{ row.text_content }}",
+            queries={
+                "q1": {
+                    "input_fields": {"text_content": "text"},
+                    "output_fields": [{"suffix": "score", "type": "integer"}],
+                },
+            },
+        )
+        transform = LLMTransform(config)
+        mock_provider = Mock()
+        mock_provider.execute_query.return_value = LLMQueryResult(
+            content="[1, 2, 3]",
+            usage=TokenUsage.known(10, 5),
+            model="gpt-4o",
+            finish_reason=FinishReason.STOP,
+        )
+        transform._provider = mock_provider
+
+        result = transform._process_row(_make_row(), _make_ctx())
+        assert result.status == "error"
+        assert result.reason is not None
+        assert result.reason["reason"] == "invalid_json_type"
+        assert result.reason["expected"] == "object"
+        assert result.reason["actual"] == "list"
+
+    def test_no_output_fields_stores_raw_content(self) -> None:
+        """When output_fields is None, raw content stored (current behavior)."""
+        from elspeth.plugins.llm.transform import LLMTransform
+
+        config = _make_config(
+            template="Classify: {{ row.text_content }}",
+            queries={
+                "q1": {"input_fields": {"text_content": "text"}},
+            },
+        )
+        transform = LLMTransform(config)
+        mock_provider = Mock()
+        mock_provider.execute_query.return_value = LLMQueryResult(
+            content="just plain text",
+            usage=TokenUsage.known(10, 5),
+            model="gpt-4o",
+            finish_reason=FinishReason.STOP,
+        )
+        transform._provider = mock_provider
+
+        result = transform._process_row(_make_row(), _make_ctx())
+        assert result.status == "success"
+        assert result.row is not None
+        assert result.row["q1_llm_response"] == "just plain text"
+
+
+# ---------------------------------------------------------------------------
+# Multi-query context length error
+# ---------------------------------------------------------------------------
+
+
+class TestMultiQueryContextLength:
+    """Verify ContextLengthError in multi-query returns specific reason."""
+
+    def test_context_length_error_returns_specific_reason(self) -> None:
+        from elspeth.plugins.llm.transform import LLMTransform
+
+        config = _make_config(
+            template="Evaluate: {{ row.text_content }}",
+            queries={
+                "q1": {"input_fields": {"text_content": "text"}},
+                "q2": {"input_fields": {"text_content": "text"}},
+            },
+        )
+        transform = LLMTransform(config)
+        call_count = [0]
+
+        def mock_execute(messages, *, model, temperature, max_tokens, state_id, token_id):
+            call_count[0] += 1
+            if call_count[0] == 2:
+                raise ContextLengthError("Context too long for q2")
+            return LLMQueryResult(
+                content="ok",
+                usage=TokenUsage.known(10, 5),
+                model="gpt-4o",
+                finish_reason=FinishReason.STOP,
+            )
+
+        mock_provider = Mock()
+        mock_provider.execute_query.side_effect = mock_execute
+        transform._provider = mock_provider
+
+        result = transform._process_row(_make_row(), _make_ctx())
+        assert result.status == "error"
+        assert result.retryable is False
+        assert result.reason is not None
+        assert result.reason["reason"] == "context_length_exceeded"
+        assert result.reason["failed_query_name"] == "q2"
+        assert result.reason["discarded_successful_queries"] == 1
 
 
 # ---------------------------------------------------------------------------

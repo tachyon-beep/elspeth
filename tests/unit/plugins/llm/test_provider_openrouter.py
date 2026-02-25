@@ -113,6 +113,27 @@ class TestExecuteQuery:
         assert result.usage.completion_tokens == 5
         assert not hasattr(result, "raw_response")
 
+    def test_max_tokens_none_omitted_from_request_body(self, provider: OpenRouterLLMProvider) -> None:
+        """When max_tokens=None, it should NOT appear in the request body."""
+        with patch.object(provider, "_get_http_client") as mock_get:
+            mock_client = MagicMock()
+            mock_client.post.return_value = _make_http_response()
+            mock_get.return_value = mock_client
+
+            provider.execute_query(
+                messages=[{"role": "user", "content": "hi"}],
+                model="gpt-4o",
+                temperature=0.0,
+                max_tokens=None,
+                state_id="state-1",
+                token_id="tok-1",
+            )
+
+            # Verify the POST body does NOT contain max_tokens
+            call_args = mock_client.post.call_args
+            request_body = call_args.kwargs.get("json", call_args[1].get("json", {}))
+            assert "max_tokens" not in request_body
+
     def test_rejects_nan_in_response(self, provider: OpenRouterLLMProvider) -> None:
         with patch.object(provider, "_get_http_client") as mock_get:
             mock_client = MagicMock()
@@ -308,6 +329,40 @@ class TestHTTPErrorMapping:
         with patch.object(provider, "_get_http_client") as mock_get:
             mock_client = MagicMock()
             mock_client.post.return_value = _make_error_response(500)
+            mock_get.return_value = mock_client
+
+            with pytest.raises(ServerError):
+                provider.execute_query(
+                    messages=[{"role": "user", "content": "hi"}],
+                    model="gpt-4o",
+                    temperature=0.0,
+                    max_tokens=100,
+                    state_id="state-1",
+                    token_id="tok-1",
+                )
+
+    def test_502_raises_server_error(self, provider: OpenRouterLLMProvider) -> None:
+        """Verify 502 Bad Gateway maps to ServerError (5xx range, not just 500)."""
+        with patch.object(provider, "_get_http_client") as mock_get:
+            mock_client = MagicMock()
+            mock_client.post.return_value = _make_error_response(502)
+            mock_get.return_value = mock_client
+
+            with pytest.raises(ServerError):
+                provider.execute_query(
+                    messages=[{"role": "user", "content": "hi"}],
+                    model="gpt-4o",
+                    temperature=0.0,
+                    max_tokens=100,
+                    state_id="state-1",
+                    token_id="tok-1",
+                )
+
+    def test_503_raises_server_error(self, provider: OpenRouterLLMProvider) -> None:
+        """Verify 503 Service Unavailable maps to ServerError."""
+        with patch.object(provider, "_get_http_client") as mock_get:
+            mock_client = MagicMock()
+            mock_client.post.return_value = _make_error_response(503)
             mock_get.return_value = mock_client
 
             with pytest.raises(ServerError):
