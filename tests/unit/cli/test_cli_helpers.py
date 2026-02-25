@@ -125,6 +125,7 @@ aggregations:
     plugin: passthrough
     input: my_batch
     on_success: output
+    on_error: discard
     options:
       schema:
         mode: observed
@@ -178,6 +179,7 @@ aggregations:
     plugin: batch_stats
     input: stats_batch
     on_success: output
+    on_error: discard
     options:
       schema:
         mode: observed
@@ -237,7 +239,15 @@ def test_aggregation_rejects_transform_without_is_batch_aware_attribute():
     config_dict = {
         "source": {"plugin": "csv", "on_success": "broken_agg", "options": {"path": "t.csv", "on_validation_failure": "discard"}},
         "aggregations": [
-            {"name": "broken_agg", "plugin": "mock", "input": "broken_agg", "on_success": "out", "options": {}, "trigger": {"count": 5}}
+            {
+                "name": "broken_agg",
+                "plugin": "mock",
+                "input": "broken_agg",
+                "on_success": "out",
+                "on_error": "discard",
+                "options": {},
+                "trigger": {"count": 5},
+            }
         ],
         "sinks": {"out": {"plugin": "csv", "options": {"path": "o.csv"}}},
     }
