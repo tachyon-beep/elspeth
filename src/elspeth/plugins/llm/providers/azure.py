@@ -64,7 +64,8 @@ class AzureLLMProvider:
         self._telemetry_emit = telemetry_emit
         self._limiter = limiter
 
-        # Client caches
+        # Client caches — lock ordering: _llm_clients_lock → _underlying_client_lock
+        # (always acquire _llm_clients_lock first to prevent deadlock)
         self._llm_clients: dict[str, AuditedLLMClient] = {}
         self._llm_clients_lock = Lock()
         self._underlying_client: Any = None  # AzureOpenAI | None

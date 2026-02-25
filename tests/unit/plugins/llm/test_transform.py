@@ -132,21 +132,19 @@ class TestStrategyDispatch:
 class TestProviderDispatch:
     """Verify correct provider creation based on provider field."""
 
-    def test_azure_creates_azure_provider(self) -> None:
-        from elspeth.plugins.llm.providers.azure import AzureLLMProvider
+    def test_azure_creates_azure_config(self) -> None:
+        from elspeth.plugins.llm.azure import AzureOpenAIConfig
         from elspeth.plugins.llm.transform import LLMTransform
 
         transform = LLMTransform(_make_config(provider="azure"))
-        assert isinstance(transform._provider_cls, type)
-        assert transform._provider_cls is AzureLLMProvider
+        assert isinstance(transform._config, AzureOpenAIConfig)
 
-    def test_openrouter_creates_openrouter_provider(self) -> None:
-        from elspeth.plugins.llm.providers.openrouter import OpenRouterLLMProvider
+    def test_openrouter_creates_openrouter_config(self) -> None:
+        from elspeth.plugins.llm.openrouter import OpenRouterConfig
         from elspeth.plugins.llm.transform import LLMTransform
 
         transform = LLMTransform(_make_config(provider="openrouter"))
-        assert isinstance(transform._provider_cls, type)
-        assert transform._provider_cls is OpenRouterLLMProvider
+        assert isinstance(transform._config, OpenRouterConfig)
 
     def test_unknown_provider_raises_with_valid_options(self) -> None:
         from elspeth.plugins.llm.transform import LLMTransform
@@ -295,6 +293,39 @@ class TestSingleQuerySuccess:
         # Output row has a contract (propagated from input)
         assert result.row.contract is not None
 
+    def test_contract_propagation_multi_query(self) -> None:
+        """Multi-query mode propagates contract with OBSERVED fields from all queries."""
+        from elspeth.plugins.llm.transform import LLMTransform
+
+        # Multi-query needs a template that works with build_template_context output.
+        # input_fields maps {"text_content": "text"}, meaning row["text"] is accessed
+        # as row.text_content in the template (PromptTemplate.render wraps context under "row").
+        config = _make_config(
+            template="Classify: {{ row.text_content }}",
+            queries={
+                "quality": {"input_fields": {"text_content": "text"}},
+                "relevance": {"input_fields": {"text_content": "text"}},
+            },
+        )
+        transform = LLMTransform(config)
+        mock_provider = Mock()
+        mock_provider.execute_query.return_value = LLMQueryResult(
+            content='{"result": "ok"}',
+            usage=TokenUsage.known(10, 5),
+            model="gpt-4o",
+            finish_reason=FinishReason.STOP,
+        )
+        transform._provider = mock_provider
+
+        row = _make_row()
+        result = transform._process_row(row, _make_ctx())
+        assert result.status == "success"
+        assert result.row is not None
+        # Output row has a contract (propagated from input, includes new fields)
+        assert result.row.contract is not None
+        # Multi-query adds query-prefixed fields
+        assert any(k.startswith("quality_") or k.startswith("relevance_") for k in result.row.to_dict())
+
 
 # ---------------------------------------------------------------------------
 # Truncation detection
@@ -402,6 +433,33 @@ class TestTracerWiring:
 # ---------------------------------------------------------------------------
 # Provider client isolation
 # ---------------------------------------------------------------------------
+
+
+class TestTracingLifecycle:
+    """Verify tracing setup is in transform lifecycle, not provider init."""
+
+    def test_azure_ai_tracing_not_in_provider_init(self) -> None:
+        """Azure AI tracing setup belongs in on_start(), not provider __init__.
+
+        The AzureLLMProvider docstring confirms: 'tracing config belongs to the
+        transform lifecycle'. Verify that constructing a provider does NOT
+        attempt to configure azure_ai tracing.
+        """
+        from elspeth.plugins.llm.providers.azure import AzureLLMProvider
+
+        provider = AzureLLMProvider(
+            endpoint="https://test.openai.azure.com/",
+            api_key="test-key",
+            api_version="2024-10-21",
+            deployment_name="gpt-4o",
+            recorder=Mock(),
+            run_id="run-1",
+            telemetry_emit=Mock(),
+        )
+        # Provider should NOT have any tracing attributes — tracing is transform-owned
+        assert not hasattr(provider, "_azure_monitor_configured")
+        assert not hasattr(provider, "_tracing_config")
+        assert not hasattr(provider, "_tracer")
 
 
 class TestProviderClientIsolation:

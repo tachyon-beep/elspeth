@@ -62,7 +62,9 @@ class LLMConfig(TransformDataConfig):
 
     provider: Literal["azure", "openrouter"] = Field(..., description="LLM provider")
     model: str | None = Field(None, description="Model identifier (optional — Azure uses deployment_name)")
-    queries: list[Any] | dict[str, Any] | None = Field(None, description="Multi-query specs (None = single-query mode)")
+    queries: list[dict[str, Any]] | dict[str, dict[str, Any]] | None = Field(
+        None, description="Multi-query specs (None = single-query mode)"
+    )
     template: str = Field(..., description="Jinja2 prompt template")
     system_prompt: str | None = Field(None, description="Optional system prompt")
     temperature: float = Field(0.0, ge=0.0, le=2.0, description="Sampling temperature")

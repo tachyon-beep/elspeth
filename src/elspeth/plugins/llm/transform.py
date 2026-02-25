@@ -433,12 +433,14 @@ class LLMTransform(BaseTransform, BatchTransformMixin):
     def __init__(self, config: dict[str, Any]) -> None:
         super().__init__(config)
 
-        # Provider dispatch from single registry
+        # Provider dispatch from single registry.
+        # .get() is appropriate here: config is user YAML (Tier 3 boundary), and
+        # defaulting to "" produces a clear ValueError listing valid providers,
+        # which is more helpful than a raw KeyError on missing 'provider' key.
         provider_name = config.get("provider", "")
         if provider_name not in _PROVIDERS:
             raise ValueError(f"Unknown LLM provider '{provider_name}'. Valid providers: {sorted(_PROVIDERS)}")
-        config_cls, provider_cls = _PROVIDERS[provider_name]
-        self._provider_cls = provider_cls
+        config_cls, _ = _PROVIDERS[provider_name]
 
         # Parse config with provider-specific model.
         # config_cls is AzureOpenAIConfig or OpenRouterConfig at runtime;

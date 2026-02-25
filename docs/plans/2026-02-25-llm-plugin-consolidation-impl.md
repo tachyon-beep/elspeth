@@ -845,7 +845,7 @@ feat(llm): add OpenRouterLLMProvider — HTTP transport with Tier 3 validation
 
 **Files:**
 - Modify: `src/elspeth/plugins/llm/base.py` — keep LLMConfig, add multi-query fields
-- Modify: `src/elspeth/plugins/llm/multi_query.py` — rewrite QuerySpec domain-agnostic, remove CaseStudyConfig/CriterionConfig/MultiQueryConfigMixin/MultiQueryConfig
+- Modify: `src/elspeth/plugins/llm/multi_query.py` — add domain-agnostic `UnifiedQuerySpec` + `resolve_queries()` alongside legacy classes (legacy classes retained until Task 12 since `azure_multi_query.py`/`openrouter_multi_query.py`/`base_multi_query.py` still import them; `UnifiedQuerySpec` → `QuerySpec` rename happens in Task 12 after legacy deletion)
 - Create config classes for Azure and OpenRouter in their provider files (or a new `configs.py`)
 - Test: extend existing config tests
 
@@ -879,9 +879,9 @@ class QuerySpec:
             raise ValueError("QuerySpec.input_fields must be non-empty")
 ```
 
-Remove: `CaseStudyConfig`, `CriterionConfig`, `MultiQueryConfigMixin`, `MultiQueryConfig`, `validate_multi_query_key_collisions`
+**Deferred to Task 12:** Delete `CaseStudyConfig`, `CriterionConfig`, `MultiQueryConfigMixin`, `MultiQueryConfig`, `validate_multi_query_key_collisions`, and rename `UnifiedQuerySpec` → `QuerySpec`. These classes cannot be deleted in Task 8 because the legacy transform files (`azure_multi_query.py`, `openrouter_multi_query.py`, `base_multi_query.py`) still import them and are not deleted until Task 12.
 
-Add: `QuerySpecBody` (Pydantic model for dict-keyed config parsing), `resolve_queries()` function (normalizes list|dict to list[QuerySpec])
+Add: `resolve_queries()` function (normalizes list|dict to list[UnifiedQuerySpec])
 
 **`resolve_queries()` validation requirements:**
 1. Raise `ValueError` if `queries` list is empty (no-op transforms are bugs)

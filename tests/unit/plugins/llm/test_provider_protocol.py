@@ -4,7 +4,6 @@
 from __future__ import annotations
 
 from dataclasses import FrozenInstanceError
-from typing import runtime_checkable
 
 import pytest
 
@@ -89,10 +88,10 @@ class TestFinishReason:
     """Tests for FinishReason StrEnum."""
 
     def test_enum_values(self) -> None:
-        assert FinishReason.STOP == "stop"
-        assert FinishReason.LENGTH == "length"
-        assert FinishReason.CONTENT_FILTER == "content_filter"
-        assert FinishReason.TOOL_CALLS == "tool_calls"
+        assert FinishReason.STOP.value == "stop"
+        assert FinishReason.LENGTH.value == "length"
+        assert FinishReason.CONTENT_FILTER.value == "content_filter"
+        assert FinishReason.TOOL_CALLS.value == "tool_calls"
 
     def test_from_string(self) -> None:
         assert FinishReason("stop") is FinishReason.STOP
@@ -113,6 +112,9 @@ class TestParseFinishReason:
 
     def test_valid_content_filter(self) -> None:
         assert parse_finish_reason("content_filter") is FinishReason.CONTENT_FILTER
+
+    def test_valid_tool_calls(self) -> None:
+        assert parse_finish_reason("tool_calls") is FinishReason.TOOL_CALLS
 
     def test_unknown_logs_warning(
         self,
@@ -149,9 +151,9 @@ class TestLLMProviderProtocol:
     """Tests for the LLMProvider protocol."""
 
     def test_is_runtime_checkable(self) -> None:
-        assert runtime_checkable in getattr(LLMProvider, "__protocol_attrs__", ()) or hasattr(LLMProvider, "__protocol_attrs__")
-        # More direct check: isinstance should work
-        assert isinstance(LLMProvider, type)
+        # Verify @runtime_checkable allows isinstance checks.
+        # Without the decorator, isinstance() would raise TypeError.
+        assert not isinstance(object(), LLMProvider)
 
     def test_mock_provider_satisfies_protocol(self) -> None:
         class MockProvider:

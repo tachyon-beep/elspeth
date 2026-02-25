@@ -227,6 +227,23 @@ class TestExecuteQuery:
                     token_id="tok-1",
                 )
 
+    def test_execute_query_timeout_propagates_as_network_error(self, provider: AzureLLMProvider) -> None:
+        """Timeout errors from AuditedLLMClient propagate as NetworkError (retryable)."""
+        with patch.object(provider, "_get_llm_client") as mock_get:
+            mock_client = MagicMock()
+            mock_client.chat_completion.side_effect = NetworkError("Request timed out")
+            mock_get.return_value = mock_client
+
+            with pytest.raises(NetworkError, match="timed out"):
+                provider.execute_query(
+                    messages=[{"role": "user", "content": "hi"}],
+                    model="gpt-4o",
+                    temperature=0.0,
+                    max_tokens=100,
+                    state_id="state-1",
+                    token_id="tok-1",
+                )
+
     def test_no_raw_response_still_works(self, provider: AzureLLMProvider) -> None:
         """finish_reason gracefully handles missing raw_response."""
         with patch.object(provider, "_get_llm_client") as mock_get:
