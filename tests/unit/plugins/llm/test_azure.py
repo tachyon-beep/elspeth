@@ -13,7 +13,7 @@ from elspeth.engine.batch_adapter import ExceptionResult
 from elspeth.plugins.batching.ports import CollectorOutputPort
 from elspeth.plugins.clients.llm import RateLimitError
 from elspeth.plugins.config_base import PluginConfigError
-from elspeth.plugins.llm.azure import AzureOpenAIConfig
+from elspeth.plugins.llm.providers.azure import AzureOpenAIConfig
 from elspeth.plugins.llm.transform import LLMTransform
 from elspeth.testing import make_pipeline_row
 

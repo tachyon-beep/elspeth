@@ -19,7 +19,7 @@ from pydantic import Field, field_validator, model_validator
 
 from elspeth.contracts.schema_contract import PipelineRow
 from elspeth.plugins.config_base import PluginConfig
-from elspeth.plugins.llm.azure import AzureOpenAIConfig
+from elspeth.plugins.llm.providers.azure import AzureOpenAIConfig
 
 logger = logging.getLogger(__name__)
 

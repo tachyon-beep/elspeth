@@ -10,11 +10,12 @@ source:
       - 'text: str'
     on_validation_failure: discard
 transforms:
-- plugin: azure_llm
+- plugin: llm
   name: sentiment_enrichment
   input: source_out
   on_success: output
   options:
+    provider: azure
     deployment_name: ${AZURE_OPENAI_DEPLOYMENT}
     endpoint: ${AZURE_OPENAI_ENDPOINT}
     api_key: ${AZURE_OPENAI_KEY}

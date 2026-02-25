@@ -133,14 +133,14 @@ class TestProviderDispatch:
     """Verify correct provider creation based on provider field."""
 
     def test_azure_creates_azure_config(self) -> None:
-        from elspeth.plugins.llm.azure import AzureOpenAIConfig
+        from elspeth.plugins.llm.providers.azure import AzureOpenAIConfig
         from elspeth.plugins.llm.transform import LLMTransform
 
         transform = LLMTransform(_make_config(provider="azure"))
         assert isinstance(transform._config, AzureOpenAIConfig)
 
     def test_openrouter_creates_openrouter_config(self) -> None:
-        from elspeth.plugins.llm.openrouter import OpenRouterConfig
+        from elspeth.plugins.llm.providers.openrouter import OpenRouterConfig
         from elspeth.plugins.llm.transform import LLMTransform
 
         transform = LLMTransform(_make_config(provider="openrouter"))

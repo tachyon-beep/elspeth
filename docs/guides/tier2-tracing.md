@@ -28,8 +28,8 @@ ELSPETH has two independent telemetry tiers:
 
 ### Real-Time Plugins
 
-| Provider | azure_llm | azure_multi_query_llm | openrouter_llm | openrouter_multi_query_llm |
-|----------|-----------|----------------------|----------------|---------------------------|
+| Provider | llm (provider: azure) | llm (provider: azure, queries: ...) | llm (provider: openrouter) | llm (provider: openrouter, queries: ...) |
+|----------|----------------------|-------------------------------------|---------------------------|----------------------------------------|
 | Azure AI (App Insights) | Yes | Yes | No | No |
 | Langfuse | Yes | Yes | Yes | Yes |
 
@@ -54,8 +54,9 @@ Azure AI tracing uses Azure Monitor OpenTelemetry to auto-instrument the OpenAI 
 
 ```yaml
 transforms:
-  - plugin: azure_llm
+  - plugin: llm
     options:
+      provider: azure
       deployment_name: gpt-4o
       endpoint: ${AZURE_OPENAI_ENDPOINT}
       api_key: ${AZURE_OPENAI_KEY}
@@ -108,8 +109,9 @@ Langfuse provides LLM-specific observability with prompt engineering analytics, 
 
 ```yaml
 transforms:
-  - plugin: azure_llm  # Or any LLM plugin
+  - plugin: llm  # With any provider (azure, openrouter, etc.)
     options:
+      provider: azure
       deployment_name: gpt-4o
       endpoint: ${AZURE_OPENAI_ENDPOINT}
       api_key: ${AZURE_OPENAI_KEY}
@@ -148,7 +150,7 @@ uv pip install elspeth[tracing-langfuse]
 
 ### What Gets Captured
 
-For real-time plugins (azure_llm, openrouter_llm, etc.):
+For real-time plugins (llm with provider: azure, llm with provider: openrouter, etc.):
 - Full prompt content
 - Full response content
 - Token usage (input, output, total)
@@ -156,7 +158,7 @@ For real-time plugins (azure_llm, openrouter_llm, etc.):
 - Model information
 - Token ID for correlation with Landscape
 
-For multi-query plugins (azure_multi_query_llm, openrouter_multi_query_llm):
+For multi-query plugins (llm with provider: azure and queries, llm with provider: openrouter and queries):
 - Trace per row (not per query)
 - Aggregate query count and success count
 - Total latency for all queries in the row
@@ -203,8 +205,9 @@ telemetry:
 
 # Tier 2: LLM-specific tracing to Langfuse for prompt engineering
 transforms:
-  - plugin: azure_llm
+  - plugin: llm
     options:
+      provider: azure
       deployment_name: gpt-4o
       endpoint: ${AZURE_OPENAI_ENDPOINT}
       api_key: ${AZURE_OPENAI_KEY}
@@ -256,8 +259,9 @@ telemetry:
 
 # Tier 2: Langfuse for LLM tracing (no OTEL conflict)
 transforms:
-  - plugin: azure_llm
+  - plugin: llm
     options:
+      provider: azure
       tracing:
         provider: langfuse
         public_key: ${LANGFUSE_PUBLIC_KEY}
@@ -275,8 +279,9 @@ telemetry:
 
 # Tier 2: Azure AI (now owns OTEL)
 transforms:
-  - plugin: azure_llm
+  - plugin: llm
     options:
+      provider: azure
       tracing:
         provider: azure_ai
         connection_string: ${APPLICATIONINSIGHTS_CONNECTION_STRING}
@@ -294,8 +299,9 @@ telemetry:
 
 # No Tier 2 tracing - rely on Tier 1 for LLM visibility
 transforms:
-  - plugin: azure_llm
+  - plugin: llm
     options:
+      provider: azure
       # No tracing: block
 ```
 
@@ -316,15 +322,17 @@ When multiple LLM plugins have different tracing configurations:
 ```yaml
 transforms:
   # All LLM plugins trace to same Langfuse project
-  - plugin: azure_llm
+  - plugin: llm
     options:
+      provider: azure
       tracing:
         provider: langfuse
         public_key: ${LANGFUSE_PUBLIC_KEY}
         secret_key: ${LANGFUSE_SECRET_KEY}
 
-  - plugin: openrouter_llm
+  - plugin: llm
     options:
+      provider: openrouter
       tracing:
         provider: langfuse
         public_key: ${LANGFUSE_PUBLIC_KEY}
@@ -348,8 +356,9 @@ Tier 2 tracing is designed to fail gracefully. If the required SDK is not instal
 **To explicitly disable tracing:**
 ```yaml
 transforms:
-  - plugin: azure_llm
+  - plugin: llm
     options:
+      provider: azure
       # Simply omit the tracing block, or:
       tracing:
         provider: none

@@ -1,14 +1,14 @@
 # ChaosLLM Sentiment Analysis Example
 
-Demonstrates sentiment analysis using the `openrouter_llm` transform against a local ChaosLLM server for testing without API keys.
+Demonstrates sentiment analysis using the `llm` transform against a local ChaosLLM server for testing without API keys.
 
 ## What This Shows
 
 The same pipeline as [`openrouter_sentiment`](../openrouter_sentiment/), but configured to hit a local ChaosLLM server instead of the real OpenRouter API. This allows testing LLM pipeline behaviour — including error handling and retries — without consuming API credits.
 
 ```
-source ─(source_out)─> openrouter_llm ─┬─(output)─> results.json
-                                        └─(on_error)─> quarantined.json
+source ─(source_out)─> llm ─┬─(output)─> results.json
+                            └─(on_error)─> quarantined.json
 ```
 
 ## Prerequisites

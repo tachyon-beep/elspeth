@@ -213,8 +213,9 @@ secrets:
 
 # Now you can use ${AZURE_OPENAI_KEY} in other config sections
 transforms:
-  - plugin: azure_multi_query_llm
+  - plugin: llm
     options:
+      provider: azure
       api_key: ${AZURE_OPENAI_KEY}
       endpoint: ${AZURE_OPENAI_ENDPOINT}
       model: gpt-4
@@ -533,8 +534,9 @@ AZURE_OPENAI_ENDPOINT=https://...
 # Pipeline config didn't have secrets section
 # settings.yaml (old)
 transforms:
-  - plugin: azure_multi_query_llm
+  - plugin: llm
     options:
+      provider: azure
       api_key: ${AZURE_OPENAI_KEY}  # Loaded from environment
 ```
 
@@ -556,8 +558,9 @@ secrets:
     AZURE_OPENAI_ENDPOINT: openai-endpoint
 
 transforms:
-  - plugin: azure_multi_query_llm
+  - plugin: llm
     options:
+      provider: azure
       api_key: ${AZURE_OPENAI_KEY}  # Same syntax, loaded from vault
       endpoint: ${AZURE_OPENAI_ENDPOINT}
 ```

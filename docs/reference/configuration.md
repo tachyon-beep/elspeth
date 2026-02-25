@@ -645,7 +645,7 @@ ELSPETH's built-in plugins use these service names for rate limiting:
 
 | Service Name | Used By | Description |
 |--------------|---------|-------------|
-| `azure_openai` | `azure_llm`, `azure_multi_query_llm` | Azure OpenAI API calls |
+| `azure_openai` | `llm` (provider: azure) | Azure OpenAI API calls |
 | `azure_content_safety` | `azure_content_safety` | Azure Content Safety API |
 | `azure_prompt_shield` | `azure_prompt_shield` | Azure Prompt Shield API |
 
@@ -658,7 +658,7 @@ ELSPETH's built-in plugins use these service names for rate limiting:
 3. **Acquisition**: Plugins acquire rate limit tokens before making external calls
 4. **Blocking**: When the limit is reached, calls block until capacity is available
 
-Rate limits apply per-service across all uses in a pipeline. For example, if you have two `azure_llm` transforms, they share the `azure_openai` rate limit.
+Rate limits apply per-service across all uses in a pipeline. For example, if you have two `llm` transforms (provider: azure), they share the `azure_openai` rate limit.
 
 ### Example: Azure LLM Pipeline with Rate Limits
 
@@ -672,8 +672,9 @@ source:
 
 transforms:
   # First LLM transform
-  - plugin: azure_llm
+  - plugin: llm
     options:
+      provider: azure
       deployment_name: gpt-4o
       endpoint: ${AZURE_OPENAI_ENDPOINT}
       api_key: ${AZURE_OPENAI_KEY}
@@ -682,8 +683,9 @@ transforms:
         fields: dynamic
 
   # Second LLM transform - shares rate limit with first
-  - plugin: azure_llm
+  - plugin: llm
     options:
+      provider: azure
       deployment_name: gpt-4o
       endpoint: ${AZURE_OPENAI_ENDPOINT}
       api_key: ${AZURE_OPENAI_KEY}
@@ -704,7 +706,7 @@ rate_limit:
   enabled: true
   services:
     azure_openai:
-      requests_per_minute: 100  # 100 RPM shared across all azure_llm transforms
+      requests_per_minute: 100  # 100 RPM shared across all llm (provider: azure) transforms
 ```
 
 ### Persistence for Distributed Systems
@@ -724,7 +726,7 @@ This ensures rate limits are respected across multiple pipeline processes hittin
 
 ### Two-Layer Rate Control (LLM Transforms)
 
-LLM transforms like `azure_multi_query_llm` have **two complementary throttling mechanisms** working at different layers:
+LLM transforms like `llm` (provider: azure, with multiple queries) have **two complementary throttling mechanisms** working at different layers:
 
 | Layer | Mechanism | Purpose | When It Acts |
 |-------|-----------|---------|--------------|
@@ -790,11 +792,15 @@ rate_limit:
 
 # Reactive handling (plugin options)
 transforms:
-  - plugin: azure_multi_query_llm
+  - plugin: llm
     options:
+      provider: azure
       deployment_name: gpt-4o
       endpoint: ${AZURE_OPENAI_ENDPOINT}
       api_key: ${AZURE_OPENAI_KEY}
+      queries:
+        - template: "Classify: {{ row.text }}"
+        - template: "Summarize: {{ row.text }}"
       pool_size: 8                      # Concurrent queries per row
       max_dispatch_delay_ms: 5000       # Max AIMD backoff delay (ms)
       max_capacity_retry_seconds: 3600  # Give up after 1 hour of 429s

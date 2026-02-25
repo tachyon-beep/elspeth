@@ -316,11 +316,9 @@ C4Component
         Component(web_scrape, "WebScrape", "Python", "HTML extraction")
     }
 
-    Container_Boundary(llm, "LLM Transforms (6)") {
-        Component(azure_llm, "AzureLLM", "Python", "Azure OpenAI row-level")
+    Container_Boundary(llm, "LLM Transforms") {
+        Component(llm_transform, "LLMTransform", "Python", "Unified LLM (azure/openrouter providers, single/multi-query)")
         Component(azure_batch, "AzureBatchLLM", "Python", "Azure Batch API")
-        Component(azure_multi, "AzureMultiQuery", "Python", "Multiple queries per row")
-        Component(openrouter_llm, "OpenRouterLLM", "Python", "OpenRouter row-level")
     }
 
     Container_Boundary(sinks, "Sinks (4)") {
@@ -346,8 +344,8 @@ C4Component
     Rel(batch_stats, base, "Extends BaseTransform")
     Rel(json_explode, base, "Extends BaseTransform")
     Rel(web_scrape, base, "Extends BaseTransform")
-    Rel(azure_llm, base, "Extends BaseTransform")
-    Rel(azure_llm, llm_client, "Uses")
+    Rel(llm_transform, base, "Extends BaseTransform")
+    Rel(llm_transform, llm_client, "Uses")
     Rel(web_scrape, http_client, "Uses")
     Rel(csv_sink, base, "Extends BaseSink")
     Rel(json_sink, base, "Extends BaseSink")
@@ -364,7 +362,7 @@ C4Component
 | **PluginManager** | pluggy-based discovery and registration |
 | **Sources** | 4 plugins (csv, json, azure_blob, null) |
 | **Transforms** | 11+ plugins (field_mapper, passthrough, truncate, batch_stats, web_scrape, etc.) |
-| **LLM Transforms** | 6 plugins (azure_llm, azure_batch, azure_multi_query, openrouter variants) |
+| **LLM Transforms** | Unified LLMTransform (azure/openrouter providers, single/multi-query strategies) + azure_batch |
 | **Sinks** | 4 plugins (csv, json, database, azure_blob) |
 | **Clients** | 4 audited clients (HTTP, LLM, Replayer, Verifier) |
 

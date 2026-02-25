@@ -124,10 +124,10 @@ class TestDiscoverAllPlugins:
         transform_names = [cls.name for cls in discovered["transforms"]]  # type: ignore[attr-defined]
         assert "passthrough" in transform_names
         assert "field_mapper" in transform_names
-        # LLM transforms live in plugins/llm/ - verify ALL are discovered
-        assert "azure_llm" in transform_names, f"Missing azure_llm in {transform_names}"
-        assert "openrouter_llm" in transform_names, f"Missing openrouter_llm in {transform_names}"
+        # LLM transforms live in plugins/llm/ - verify unified + batch are discovered
+        assert "llm" in transform_names, f"Missing llm in {transform_names}"
         assert "azure_batch_llm" in transform_names, f"Missing azure_batch_llm in {transform_names}"
+        assert "openrouter_batch_llm" in transform_names, f"Missing openrouter_batch_llm in {transform_names}"
         # Azure transforms live in plugins/transforms/azure/ (subdirectory!)
         assert "azure_content_safety" in transform_names, f"Missing azure_content_safety in {transform_names}"
         assert "azure_prompt_shield" in transform_names, f"Missing azure_prompt_shield in {transform_names}"
@@ -166,7 +166,7 @@ class TestDiscoverAllPlugins:
 
         # Expected counts verified during migration from hookimpl files
         EXPECTED_SOURCE_COUNT = 4  # csv, json, null, azure_blob
-        EXPECTED_TRANSFORM_COUNT = 17  # includes json_explode, batch_replicate, keyword_filter, field_mapper, passthrough, truncate, batch_stats, web_scrape, azure_*, openrouter_*, llm
+        EXPECTED_TRANSFORM_COUNT = 13  # 8 standard transforms + 2 azure safety + llm + azure_batch_llm + openrouter_batch_llm
         EXPECTED_SINK_COUNT = 4  # csv, json, database, azure_blob
 
         discovered = discover_all_plugins()

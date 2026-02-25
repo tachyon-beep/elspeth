@@ -10,8 +10,8 @@ from typing import Any
 from unittest.mock import MagicMock
 
 from elspeth.contracts.token_usage import TokenUsage
-from elspeth.plugins.llm.azure import AzureOpenAIConfig
 from elspeth.plugins.llm.langfuse import ActiveLangfuseTracer, NoOpLangfuseTracer
+from elspeth.plugins.llm.providers.azure import AzureOpenAIConfig
 from elspeth.plugins.llm.transform import LLMTransform
 from elspeth.testing import make_pipeline_row
 

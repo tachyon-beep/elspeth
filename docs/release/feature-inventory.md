@@ -67,12 +67,8 @@
 
 | Plugin Name | Config Key | Type | Provider | Features |
 |-------------|-----------|------|----------|----------|
-| Azure LLM | `azure_llm` | LLM | Azure OpenAI | Single-row classification, template prompts |
+| LLM Transform | `llm` | LLM | Azure OpenAI, OpenRouter | Unified transform with provider selection (azure/openrouter), single-query and multi-query strategies, template prompts, structured output |
 | Azure Batch LLM | `azure_batch` | Batch LLM | Azure OpenAI Batch API | 50% cost savings, async processing |
-| Azure Multi-Query | `azure_multi_query` | Batch LLM | Azure OpenAI | Multiple prompts per row, structured output |
-| OpenRouter LLM | `openrouter` | LLM | OpenRouter (100+ providers) | Multi-provider access |
-| OpenRouter Multi-Query | `openrouter_multi_query` | Batch LLM | OpenRouter | Multiple prompts, structured output |
-| Multi-Query (Generic) | `multi_query` | LLM | Configurable | Cross-product evaluation |
 
 **LLM Capabilities:**
 - Jinja2 template-based prompting

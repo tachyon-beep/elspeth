@@ -17,12 +17,13 @@ source:
       - 'cs2_history: str'
     on_validation_failure: discard
 transforms:
-- name: azure_multi_query_llm_0
-  plugin: azure_multi_query_llm
+- name: llm_0
+  plugin: llm
   input: source_out
   on_success: results
   on_error: quarantine
   options:
+    provider: azure
     deployment_name: ${AZURE_OPENAI_DEPLOYMENT}
     endpoint: ${AZURE_OPENAI_ENDPOINT}
     api_key: ${AZURE_OPENAI_KEY}

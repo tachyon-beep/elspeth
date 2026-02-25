@@ -93,7 +93,7 @@ class TestAzureOpenAIConfig:
     """Tests for Azure-specific config class."""
 
     def test_requires_deployment_name(self) -> None:
-        from elspeth.plugins.llm.azure import AzureOpenAIConfig
+        from elspeth.plugins.llm.providers.azure import AzureOpenAIConfig
 
         with pytest.raises((ValidationError, ValueError)):
             AzureOpenAIConfig(
@@ -104,7 +104,7 @@ class TestAzureOpenAIConfig:
             )
 
     def test_model_defaults_to_deployment_name(self) -> None:
-        from elspeth.plugins.llm.azure import AzureOpenAIConfig
+        from elspeth.plugins.llm.providers.azure import AzureOpenAIConfig
 
         config = AzureOpenAIConfig(
             deployment_name="gpt-4o-deploy",
@@ -118,7 +118,7 @@ class TestAzureOpenAIConfig:
         assert config.model == "gpt-4o-deploy"
 
     def test_tracing_field_on_azure(self) -> None:
-        from elspeth.plugins.llm.azure import AzureOpenAIConfig
+        from elspeth.plugins.llm.providers.azure import AzureOpenAIConfig
 
         config = AzureOpenAIConfig(
             deployment_name="gpt-4o",
@@ -137,7 +137,7 @@ class TestOpenRouterConfig:
 
     def test_requires_model(self) -> None:
         """OpenRouter requires model to be non-None."""
-        from elspeth.plugins.llm.openrouter import OpenRouterConfig
+        from elspeth.plugins.llm.providers.openrouter import OpenRouterConfig
 
         # model=None should fail validation
         with pytest.raises((ValidationError, ValueError)):
@@ -150,7 +150,7 @@ class TestOpenRouterConfig:
             )
 
     def test_accepts_explicit_model(self) -> None:
-        from elspeth.plugins.llm.openrouter import OpenRouterConfig
+        from elspeth.plugins.llm.providers.openrouter import OpenRouterConfig
 
         config = OpenRouterConfig(
             model="openai/gpt-4o",

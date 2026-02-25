@@ -8,12 +8,13 @@ source:
     normalize_fields: true
     on_validation_failure: discard
 transforms:
-- name: openrouter_multi_query_llm_0
-  plugin: openrouter_multi_query_llm
+- name: llm_0
+  plugin: llm
   input: source_out
   on_success: output
   on_error: quarantine
   options:
+    provider: openrouter
     model: anthropic/claude-3-5-sonnet
     api_key: ${OPENROUTER_API_KEY}
     system_prompt: 'You are a medical assessment AI. For each case study and criterion,

@@ -19,7 +19,7 @@ class TestLLMPluginConfigDispatch:
 
     def test_llm_plugin_dispatches_to_azure_config(self) -> None:
         """verify _get_transform_config_model("llm", {"provider": "azure"}) returns AzureOpenAIConfig."""
-        from elspeth.plugins.llm.azure import AzureOpenAIConfig
+        from elspeth.plugins.llm.providers.azure import AzureOpenAIConfig
 
         validator = PluginConfigValidator()
         config_model = validator._get_transform_config_model("llm", {"provider": "azure"})
@@ -27,7 +27,7 @@ class TestLLMPluginConfigDispatch:
 
     def test_llm_plugin_dispatches_to_openrouter_config(self) -> None:
         """verify _get_transform_config_model("llm", {"provider": "openrouter"}) returns OpenRouterConfig."""
-        from elspeth.plugins.llm.openrouter import OpenRouterConfig
+        from elspeth.plugins.llm.providers.openrouter import OpenRouterConfig
 
         validator = PluginConfigValidator()
         config_model = validator._get_transform_config_model("llm", {"provider": "openrouter"})

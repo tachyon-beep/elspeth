@@ -14,18 +14,65 @@ evicting the wrong cache entry during retry races.
 from __future__ import annotations
 
 from threading import Lock
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Literal, Self
 
 import structlog
+from pydantic import Field, model_validator
 
 from elspeth.plugins.clients.llm import AuditedLLMClient
+from elspeth.plugins.llm.base import LLMConfig
 from elspeth.plugins.llm.provider import LLMQueryResult, parse_finish_reason
+from elspeth.plugins.llm.tracing import AzureAITracingConfig, TracingConfig
 
 if TYPE_CHECKING:
     from elspeth.core.landscape.recorder import LandscapeRecorder
     from elspeth.plugins.clients.base import TelemetryEmitCallback
 
 logger = structlog.get_logger(__name__)
+
+
+class AzureOpenAIConfig(LLMConfig):
+    """Azure OpenAI-specific configuration.
+
+    Extends LLMConfig with Azure-specific settings:
+    - deployment_name: Azure deployment name (required) - used as model identifier
+    - endpoint: Azure OpenAI endpoint URL (required)
+    - api_key: Azure OpenAI API key (required)
+    - api_version: Azure API version (default: 2024-10-21)
+
+    Pooling options (inherited from LLMConfig):
+    - pool_size: Number of concurrent workers (1=sequential, >1=pooled)
+    - max_dispatch_delay_ms: Maximum AIMD backoff delay
+    - max_capacity_retry_seconds: Timeout for capacity error retries
+
+    Note: The 'model' field from LLMConfig is automatically set to
+    deployment_name if not explicitly provided.
+    """
+
+    # Azure configs always have provider="azure" — narrowed Literal prevents misconfiguration
+    provider: Literal["azure"] = Field(default="azure", description="LLM provider")
+
+    # Override model to make it optional - will default to deployment_name
+    model: str = Field(default="", description="Model identifier (defaults to deployment_name)")
+
+    deployment_name: str = Field(..., description="Azure deployment name")
+    endpoint: str = Field(..., description="Azure OpenAI endpoint URL")
+    api_key: str = Field(..., description="Azure OpenAI API key")
+    api_version: str = Field(default="2024-10-21", description="Azure API version")
+
+    # Tier 2: Plugin-internal tracing (optional)
+    # Use environment variables for secrets: ${APPLICATIONINSIGHTS_CONNECTION_STRING}
+    tracing: dict[str, Any] | None = Field(
+        default=None,
+        description="Tier 2 tracing configuration (azure_ai, langfuse, or none)",
+    )
+
+    @model_validator(mode="after")
+    def _set_model_from_deployment(self) -> Self:
+        """Set model to deployment_name if not explicitly provided."""
+        if not self.model:
+            self.model = self.deployment_name
+        return self
 
 
 class AzureLLMProvider:
@@ -171,3 +218,37 @@ class AzureLLMProvider:
             self._llm_clients.clear()
         with self._underlying_client_lock:
             self._underlying_client = None
+
+
+def _configure_azure_monitor(config: TracingConfig) -> bool:
+    """Configure Azure Monitor (module-level to allow mocking).
+
+    Returns True on success, False on failure.
+    """
+    from azure.monitor.opentelemetry import (
+        configure_azure_monitor,  # type: ignore[import-not-found,import-untyped,attr-defined]  # optional dep: azure-monitor-opentelemetry
+    )
+
+    if not isinstance(config, AzureAITracingConfig):
+        return False
+
+    configure_azure_monitor(
+        connection_string=config.connection_string,
+        enable_live_metrics=config.enable_live_metrics,
+    )
+
+    # Wire enable_content_recording to the Azure AI Inference tracing SDK.
+    # Without this, the config field is accepted and logged but never applied,
+    # leaving operators with a false sense of their content recording policy.
+    try:
+        from azure.ai.inference.tracing import AIInferenceInstrumentor  # type: ignore[import-not-found,import-untyped]  # optional dep
+
+        AIInferenceInstrumentor().instrument(enable_content_recording=config.enable_content_recording)
+    except ImportError:
+        # azure-ai-inference not installed — fall back to environment variable
+        # which the OpenAI SDK instrumentor reads at trace emission time.
+        import os
+
+        os.environ["AZURE_TRACING_GEN_AI_CONTENT_RECORDING_ENABLED"] = str(config.enable_content_recording).lower()
+
+    return True

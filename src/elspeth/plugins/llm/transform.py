@@ -37,14 +37,12 @@ from elspeth.plugins.llm import (
     get_llm_guaranteed_fields,
     populate_llm_metadata_fields,
 )
-from elspeth.plugins.llm.azure import AzureOpenAIConfig
 from elspeth.plugins.llm.base import LLMConfig
 from elspeth.plugins.llm.langfuse import LangfuseTracer, create_langfuse_tracer
 from elspeth.plugins.llm.multi_query import UnifiedQuerySpec, resolve_queries
-from elspeth.plugins.llm.openrouter import OpenRouterConfig
 from elspeth.plugins.llm.provider import FinishReason, LLMProvider
-from elspeth.plugins.llm.providers.azure import AzureLLMProvider
-from elspeth.plugins.llm.providers.openrouter import OpenRouterLLMProvider
+from elspeth.plugins.llm.providers.azure import AzureLLMProvider, AzureOpenAIConfig
+from elspeth.plugins.llm.providers.openrouter import OpenRouterConfig, OpenRouterLLMProvider
 from elspeth.plugins.llm.templates import PromptTemplate, TemplateError
 from elspeth.plugins.llm.tracing import parse_tracing_config
 from elspeth.plugins.llm.validation import strip_markdown_fences

@@ -144,7 +144,7 @@ class TestDAGContractValidationWithLLMConfig:
         graph.add_node(
             "llm_1",
             node_type=NodeType.TRANSFORM,
-            plugin_name="azure_llm",
+            plugin_name="llm",
             config={
                 "schema": {"mode": "observed"},
                 "required_input_fields": ["id", "customer_name"],
@@ -187,7 +187,7 @@ class TestDAGContractValidationWithLLMConfig:
         graph.add_node(
             "llm_1",
             node_type=NodeType.TRANSFORM,
-            plugin_name="azure_llm",
+            plugin_name="llm",
             config={
                 "schema": {"mode": "observed"},
                 "required_input_fields": ["id", "customer_name"],
@@ -231,7 +231,7 @@ class TestDAGContractValidationWithLLMConfig:
         graph.add_node(
             "llm_1",
             node_type=NodeType.TRANSFORM,
-            plugin_name="azure_llm",
+            plugin_name="llm",
             config={
                 "schema": {"mode": "observed"},
                 "required_input_fields": ["id"],  # Explicit: only id is required
@@ -274,7 +274,7 @@ class TestMultiTransformChain:
         graph.add_node(
             "llm_classify",
             node_type=NodeType.TRANSFORM,
-            plugin_name="azure_llm",
+            plugin_name="llm",
             config={
                 "schema": {"mode": "observed", "guaranteed_fields": ["raw_text", "classification"]},
                 "required_input_fields": ["raw_text"],
@@ -285,7 +285,7 @@ class TestMultiTransformChain:
         graph.add_node(
             "llm_action",
             node_type=NodeType.TRANSFORM,
-            plugin_name="azure_llm",
+            plugin_name="llm",
             config={
                 "schema": {"mode": "observed"},
                 "required_input_fields": ["classification"],

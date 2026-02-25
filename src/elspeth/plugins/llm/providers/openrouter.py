@@ -17,10 +17,11 @@ from __future__ import annotations
 import json
 import math
 from threading import Lock
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Literal
 
 import httpx
 import structlog
+from pydantic import Field
 
 from elspeth.contracts.token_usage import TokenUsage
 from elspeth.plugins.clients.http import AuditedHTTPClient
@@ -32,6 +33,7 @@ from elspeth.plugins.clients.llm import (
     RateLimitError,
     ServerError,
 )
+from elspeth.plugins.llm.base import LLMConfig
 from elspeth.plugins.llm.provider import LLMQueryResult, parse_finish_reason
 from elspeth.plugins.llm.validation import reject_nonfinite_constant
 
@@ -40,6 +42,40 @@ if TYPE_CHECKING:
     from elspeth.plugins.clients.base import TelemetryEmitCallback
 
 logger = structlog.get_logger(__name__)
+
+
+class OpenRouterConfig(LLMConfig):
+    """OpenRouter-specific configuration.
+
+    Extends LLMConfig with OpenRouter API settings:
+    - api_key: OpenRouter API key (required)
+    - base_url: API base URL (default: https://openrouter.ai/api/v1)
+    - timeout_seconds: Request timeout (default: 60.0)
+
+    Tier 2 tracing:
+    - tracing: Optional Langfuse configuration (azure_ai not supported for OpenRouter)
+    """
+
+    # OpenRouter configs always have provider="openrouter" — narrowed Literal prevents misconfiguration
+    provider: Literal["openrouter"] = Field(default="openrouter", description="LLM provider")
+
+    # Override base model to make it required — OpenRouter has no deployment_name fallback
+    model: str = Field(..., description="Model identifier (e.g., 'openai/gpt-4o')")
+
+    api_key: str = Field(..., description="OpenRouter API key")
+    base_url: str = Field(
+        default="https://openrouter.ai/api/v1",
+        description="OpenRouter API base URL",
+    )
+    timeout_seconds: float = Field(default=60.0, gt=0, description="Request timeout")
+
+    # Tier 2: Plugin-internal tracing (optional, Langfuse only)
+    # Azure AI tracing is NOT supported - it auto-instruments the OpenAI SDK,
+    # but OpenRouter uses HTTP directly via httpx.
+    tracing: dict[str, Any] | None = Field(
+        default=None,
+        description="Tier 2 tracing configuration (langfuse only - azure_ai not supported)",
+    )
 
 
 class OpenRouterLLMProvider:

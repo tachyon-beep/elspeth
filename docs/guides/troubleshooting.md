@@ -112,8 +112,9 @@ docker run --rm \
 5. For Azure services, verify your resource endpoint is correct:
    ```yaml
    row_plugins:
-     - plugin: azure_llm
+     - plugin: llm
        options:
+         provider: azure
          endpoint: "https://your-resource.openai.azure.com"
          deployment_name: "your-deployment"
    ```
@@ -139,8 +140,9 @@ docker run --rm \
 2. Increase timeout for slow operations:
    ```yaml
    row_plugins:
-     - plugin: azure_llm
+     - plugin: llm
        options:
+         provider: azure
          timeout: 120  # seconds
    ```
 

@@ -662,7 +662,7 @@ class TestEnableContentRecording:
         """enable_content_recording is passed to AIInferenceInstrumentor when available."""
         import sys
 
-        from elspeth.plugins.llm.azure import _configure_azure_monitor
+        from elspeth.plugins.llm.providers.azure import _configure_azure_monitor
         from elspeth.plugins.llm.tracing import AzureAITracingConfig
 
         config = AzureAITracingConfig(
@@ -697,7 +697,7 @@ class TestEnableContentRecording:
         """enable_content_recording=False is correctly passed through."""
         import sys
 
-        from elspeth.plugins.llm.azure import _configure_azure_monitor
+        from elspeth.plugins.llm.providers.azure import _configure_azure_monitor
         from elspeth.plugins.llm.tracing import AzureAITracingConfig
 
         config = AzureAITracingConfig(
@@ -731,7 +731,7 @@ class TestEnableContentRecording:
         """
         import os
 
-        from elspeth.plugins.llm.azure import _configure_azure_monitor
+        from elspeth.plugins.llm.providers.azure import _configure_azure_monitor
         from elspeth.plugins.llm.tracing import AzureAITracingConfig
 
         config = AzureAITracingConfig(
@@ -758,7 +758,7 @@ class TestEnableContentRecording:
         """enable_content_recording=False sets env var to 'false'."""
         import os
 
-        from elspeth.plugins.llm.azure import _configure_azure_monitor
+        from elspeth.plugins.llm.providers.azure import _configure_azure_monitor
         from elspeth.plugins.llm.tracing import AzureAITracingConfig
 
         config = AzureAITracingConfig(
