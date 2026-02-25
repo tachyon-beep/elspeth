@@ -2,7 +2,7 @@
 
 > **For Claude:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task.
 
-**Goal:** Collapse 6 LLM transform classes into a unified LLMTransform with LLMProvider protocol, eliminating ~2,700 lines of duplication.
+**Goal:** Collapse 6 LLM transform classes (~4,950 lines) into a unified LLMTransform with LLMProvider protocol, eliminating ~3,300 lines of duplication.
 
 **Architecture:** Strategy pattern — LLMProvider protocol handles transport (Azure SDK vs OpenRouter HTTP), two processing strategies (SingleQuery/MultiQuery) handle row logic, shared LangfuseTracer handles tracing. Domain-specific terminology replaced with generic QuerySpec.
 
@@ -30,22 +30,32 @@ The Langfuse tracing code is duplicated across all 6 LLM transform files (~600 l
 - `_record_langfuse_trace_for_error()`: identical body, same metadata variation
 - `_flush_tracing()`: byte-for-byte identical across all files
 
+**Note on tracing method variations (from reality check):**
+- `openrouter_multi_query.py`: has `_setup_langfuse_tracing` but NOT `_record_langfuse_trace`/`_record_langfuse_trace_for_error` — uses different tracing pattern
+- `azure_multi_query.py`: has all three record methods but NOT `_flush_tracing` (inherited from `BaseMultiQueryTransform`)
+- `azure_batch.py`: has `_record_langfuse_batch_job` (different from `_record_langfuse_trace`)
+- Task 3 wiring must account for these per-file variations
+
 **Step 1: Write failing tests for LangfuseTracer**
 
 Test file: `tests/unit/plugins/llm/test_langfuse_tracer.py`
 
 Tests to write:
-- `test_init_with_langfuse_config_creates_client` — mock Langfuse import, verify client created with correct keys
-- `test_init_with_non_langfuse_config_does_nothing` — pass AzureAITracingConfig, verify no client
-- `test_init_langfuse_not_installed_logs_warning` — simulate ImportError, verify warning logged
+- `test_create_with_langfuse_config_returns_active_tracer` — mock Langfuse import, verify ActiveLangfuseTracer returned
+- `test_create_with_non_langfuse_config_returns_noop` — pass AzureAITracingConfig, verify NoOpLangfuseTracer
+- `test_create_with_none_config_returns_noop` — pass None, verify NoOpLangfuseTracer
+- `test_create_langfuse_not_installed_logs_warning_returns_noop` — simulate ImportError, verify warning logged, returns NoOpLangfuseTracer
 - `test_record_success_creates_span_and_generation` — mock client, verify nested context managers called with correct metadata
 - `test_record_success_with_usage_updates_generation` — verify usage_details populated when usage.is_known
 - `test_record_success_without_usage_skips_usage_details` — verify no usage_details when usage is None
 - `test_record_error_sets_error_level` — verify level="ERROR" and status_message set
-- `test_record_when_inactive_is_noop` — verify no calls when tracing_active is False
-- `test_record_exception_emits_telemetry` — mock client that raises, verify telemetry_emit called (No Silent Failures)
+- `test_noop_tracer_record_success_is_silent` — verify NoOpLangfuseTracer.record_success does nothing
+- `test_noop_tracer_record_error_is_silent` — verify NoOpLangfuseTracer.record_error does nothing
+- `test_record_exception_logs_warning` — mock client that raises, verify structlog warning emitted (No Silent Failures — tracing failures go to structlog, not telemetry stream)
 - `test_flush_calls_client_flush` — verify flush() delegated to client
-- `test_flush_when_no_client_is_noop`
+- `test_flush_failure_logs_warning` — verify flush exception logged at warning level
+- `test_flush_when_noop_is_silent`
+- `test_noop_tracer_matches_protocol_signature` — verify NoOpLangfuseTracer has explicit parameter signatures (not *args/**kwargs), enabling mypy drift detection
 
 **Step 2: Run tests to verify they fail**
 
@@ -63,80 +73,107 @@ Extracts the Langfuse v3 span/generation recording pattern that was duplicated
 across all 6 LLM transform files. Uses the OpenTelemetry-based context manager
 API (start_as_current_observation).
 
-Follows No Silent Failures: any tracing emission point emits telemetry on failure.
+Uses factory pattern to avoid mutable two-phase initialization. The factory
+returns either an ActiveLangfuseTracer or NoOpLangfuseTracer — both frozen,
+both satisfying the LangfuseTracer protocol.
+
+Follows No Silent Failures: tracing failures are logged at warning level via
+structlog. Tracing failures do NOT go to the ELSPETH telemetry stream because
+TelemetryEmitCallback expects ExternalCallCompleted dataclass instances, and
+tracing failures are a different event class.
 """
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Any, Callable
+from dataclasses import dataclass
+from typing import TYPE_CHECKING, Any, Protocol
+
+import structlog
 
 from elspeth.contracts.token_usage import TokenUsage
 from elspeth.plugins.llm.tracing import LangfuseTracingConfig, TracingConfig
 
 if TYPE_CHECKING:
-    pass  # Langfuse is optional dependency
+    from langfuse import Langfuse  # type: ignore[import-not-found,import-untyped]
+
+logger = structlog.get_logger(__name__)
 
 
-TelemetryEmitCallback = Callable[[dict[str, Any]], None]
-
-
-@dataclass
-class LangfuseTracer:
-    """Manages Langfuse v3 span recording for LLM queries.
-
-    Consolidates the 3 duplicated methods (_setup, _record_success, _record_error)
-    that appeared across all 6 LLM transform files.
-
-    Usage:
-        tracer = LangfuseTracer(transform_name="llm")
-        tracer.setup(tracing_config, logger)
-        tracer.record_success(telemetry_emit, token_id, "query_name", prompt, result)
-        tracer.record_error(telemetry_emit, token_id, "query_name", prompt, error_msg)
-        tracer.flush()
-    """
-
-    transform_name: str
-    _client: Any = field(default=None, init=False, repr=False)
-    _active: bool = field(default=False, init=False)
-
-    def setup(self, tracing_config: TracingConfig | None, logger: Any) -> None:
-        """Initialize Langfuse client from config. Noop if not LangfuseTracingConfig."""
-        if tracing_config is None:
-            return
-        if not isinstance(tracing_config, LangfuseTracingConfig):
-            return
-
-        try:
-            from langfuse import Langfuse  # type: ignore[import-not-found,import-untyped]
-
-            self._client = Langfuse(
-                public_key=tracing_config.public_key,
-                secret_key=tracing_config.secret_key,
-                host=tracing_config.host,
-                tracing_enabled=tracing_config.tracing_enabled,
-            )
-            self._active = True
-            logger.info(
-                "Langfuse tracing initialized (v3)",
-                provider="langfuse",
-                host=tracing_config.host,
-                tracing_enabled=tracing_config.tracing_enabled,
-            )
-        except ImportError:
-            logger.warning(
-                "Langfuse tracing requested but package not installed",
-                provider="langfuse",
-                hint="Install with: uv pip install elspeth[tracing-langfuse]",
-            )
-
-    @property
-    def is_active(self) -> bool:
-        return self._active and self._client is not None
+class LangfuseTracer(Protocol):
+    """What the transform needs from tracing. Narrow interface."""
 
     def record_success(
         self,
-        telemetry_emit: TelemetryEmitCallback | None,
+        token_id: str,
+        query_name: str,
+        prompt: str,
+        response_content: str,
+        model: str,
+        usage: TokenUsage | None = None,
+        latency_ms: float | None = None,
+        extra_metadata: dict[str, Any] | None = None,
+    ) -> None: ...
+
+    def record_error(
+        self,
+        token_id: str,
+        query_name: str,
+        prompt: str,
+        error_message: str,
+        model: str,
+        latency_ms: float | None = None,
+        extra_metadata: dict[str, Any] | None = None,
+    ) -> None: ...
+
+    def flush(self) -> None: ...
+
+
+@dataclass(frozen=True, slots=True)
+class NoOpLangfuseTracer:
+    """No-op tracer for when Langfuse is not configured.
+
+    Matches LangfuseTracer Protocol signatures exactly — enables mypy to
+    catch signature drift between Protocol and implementations.
+    """
+
+    def record_success(
+        self,
+        token_id: str,
+        query_name: str,
+        prompt: str,
+        response_content: str,
+        model: str,
+        usage: TokenUsage | None = None,
+        latency_ms: float | None = None,
+        extra_metadata: dict[str, Any] | None = None,
+    ) -> None:
+        pass
+
+    def record_error(
+        self,
+        token_id: str,
+        query_name: str,
+        prompt: str,
+        error_message: str,
+        model: str,
+        latency_ms: float | None = None,
+        extra_metadata: dict[str, Any] | None = None,
+    ) -> None:
+        pass
+
+    def flush(self) -> None:
+        pass
+
+
+@dataclass(frozen=True, slots=True)
+class ActiveLangfuseTracer:
+    """Fully-initialized Langfuse tracer. Immutable after construction."""
+
+    transform_name: str
+    client: Any  # Langfuse instance — typed as Any since it's an optional import
+
+    def record_success(
+        self,
         token_id: str,
         query_name: str,
         prompt: str,
@@ -147,21 +184,18 @@ class LangfuseTracer:
         extra_metadata: dict[str, Any] | None = None,
     ) -> None:
         """Record successful LLM call as Langfuse span + generation."""
-        if not self.is_active:
-            return
-
         try:
             metadata = {"token_id": token_id, "plugin": self.transform_name, "query": query_name}
             if extra_metadata:
                 metadata.update(extra_metadata)
 
             with (
-                self._client.start_as_current_observation(
+                self.client.start_as_current_observation(
                     as_type="span",
                     name=f"elspeth.{self.transform_name}",
                     metadata=metadata,
                 ),
-                self._client.start_as_current_observation(
+                self.client.start_as_current_observation(
                     as_type="generation",
                     name="llm_call",
                     model=model,
@@ -181,11 +215,10 @@ class LangfuseTracer:
 
                 generation.update(**update_kwargs)
         except Exception as e:
-            self._handle_trace_failure("langfuse_trace_failed", e, telemetry_emit)
+            _handle_trace_failure("langfuse_trace_failed", self.transform_name, e)
 
     def record_error(
         self,
-        telemetry_emit: TelemetryEmitCallback | None,
         token_id: str,
         query_name: str,
         prompt: str,
@@ -195,21 +228,18 @@ class LangfuseTracer:
         extra_metadata: dict[str, Any] | None = None,
     ) -> None:
         """Record failed LLM call as Langfuse span + generation with ERROR level."""
-        if not self.is_active:
-            return
-
         try:
             metadata = {"token_id": token_id, "plugin": self.transform_name, "query": query_name}
             if extra_metadata:
                 metadata.update(extra_metadata)
 
             with (
-                self._client.start_as_current_observation(
+                self.client.start_as_current_observation(
                     as_type="span",
                     name=f"elspeth.{self.transform_name}",
                     metadata=metadata,
                 ),
-                self._client.start_as_current_observation(
+                self.client.start_as_current_observation(
                     as_type="generation",
                     name="llm_call",
                     model=model,
@@ -226,28 +256,71 @@ class LangfuseTracer:
 
                 generation.update(**update_kwargs)
         except Exception as e:
-            self._handle_trace_failure("langfuse_error_trace_failed", e, telemetry_emit)
+            _handle_trace_failure("langfuse_error_trace_failed", self.transform_name, e)
 
     def flush(self) -> None:
         """Flush pending tracing data."""
-        if self._client is None:
-            return
         try:
-            self._client.flush()
+            self.client.flush()
         except Exception as e:
-            import structlog
-            logger = structlog.get_logger(__name__)
-            logger.warning("Failed to flush Langfuse tracing", error=str(e))
+            _handle_trace_failure("langfuse_flush_failed", self.transform_name, e)
 
-    def _handle_trace_failure(
-        self, event_name: str, error: Exception, telemetry_emit: TelemetryEmitCallback | None
-    ) -> None:
-        """Handle trace recording failure — No Silent Failures."""
-        if telemetry_emit is not None:
-            telemetry_emit({"event": event_name, "plugin": self.transform_name, "error": str(error)})
-        import structlog
-        logger = structlog.get_logger(__name__)
-        logger.warning(f"Failed to record Langfuse trace: {event_name}", error=str(error))
+
+def _handle_trace_failure(
+    event_name: str, transform_name: str, error: Exception,
+) -> None:
+    """Handle trace recording failure — No Silent Failures via structlog.
+
+    Tracing failures go to structlog only, not the ELSPETH telemetry stream.
+    TelemetryEmitCallback expects ExternalCallCompleted (from plugins/clients/base.py),
+    which does not match tracing failure events.
+    """
+    logger.warning(
+        "langfuse_trace_failed",
+        event=event_name,
+        plugin=transform_name,
+        error=str(error),
+        error_type=type(error).__name__,
+    )
+
+
+def create_langfuse_tracer(
+    transform_name: str,
+    tracing_config: TracingConfig | None,
+) -> LangfuseTracer:
+    """Factory: returns ActiveLangfuseTracer or NoOpLangfuseTracer.
+
+    Fully constructs the tracer — no deferred setup() needed. The transform
+    holds the returned object from __init__ through the entire lifecycle.
+    """
+    if tracing_config is None:
+        return NoOpLangfuseTracer()
+    if not isinstance(tracing_config, LangfuseTracingConfig):
+        return NoOpLangfuseTracer()
+
+    try:
+        from langfuse import Langfuse  # type: ignore[import-not-found,import-untyped]
+
+        client = Langfuse(
+            public_key=tracing_config.public_key,
+            secret_key=tracing_config.secret_key,
+            host=tracing_config.host,
+            tracing_enabled=tracing_config.tracing_enabled,
+        )
+        logger.info(
+            "Langfuse tracing initialized (v3)",
+            provider="langfuse",
+            host=tracing_config.host,
+            tracing_enabled=tracing_config.tracing_enabled,
+        )
+        return ActiveLangfuseTracer(transform_name=transform_name, client=client)
+    except ImportError:
+        logger.warning(
+            "Langfuse tracing requested but package not installed",
+            provider="langfuse",
+            hint="Install with: uv pip install elspeth[tracing-langfuse]",
+        )
+        return NoOpLangfuseTracer()
 ```
 
 **Step 4: Run tests to verify they pass**
@@ -267,12 +340,13 @@ feat(llm): extract LangfuseTracer — consolidate 6 duplicated tracing implement
 
 **Files:**
 - Modify: `src/elspeth/plugins/llm/validation.py` (add functions)
-- Test: `tests/unit/plugins/llm/test_validation.py` (extend existing)
+- Test: `tests/unit/plugins/llm/test_validation.py` (create new — this file does not exist yet)
 
-Three duplicated patterns to extract:
+Four duplicated patterns to extract:
 1. Template rendering error handling (4 instances across azure.py:434, openrouter.py:512, azure_multi_query.py:207, openrouter_multi_query.py:218)
 2. Truncation detection (2 instances: azure_multi_query.py:284, openrouter_multi_query.py:346)
 3. Markdown fence stripping (2 instances: azure_multi_query.py:330, openrouter_multi_query.py:367)
+4. OpenRouter HTTP response parsing (~60 lines: NaN-safe JSON parse via `_reject_nonfinite_constant`, `choices[0]["message"]["content"]` extraction, null content check, usage normalization). Extract as `parse_llm_json_response()` so `OpenRouterLLMProvider` in Phase B can use the shared helper rather than re-duplicating.
 
 **Step 1: Write failing tests**
 
@@ -286,13 +360,22 @@ Tests to write:
 - `test_render_template_safe_includes_query_name_when_provided`
 - `test_check_truncation_finish_reason_length_returns_error`
 - `test_check_truncation_finish_reason_stop_returns_none`
+- `test_check_truncation_finish_reason_enum_length_returns_error` — verify FinishReason.LENGTH works (StrEnum == str)
 - `test_check_truncation_token_heuristic_returns_error`
 - `test_check_truncation_no_finish_reason_no_tokens_returns_none`
 - `test_check_truncation_includes_preview_when_content_provided`
+- `test_check_truncation_max_tokens_zero_returns_none` — verify max_tokens=0 does NOT spuriously trigger
 - `test_strip_markdown_fences_removes_triple_backtick`
 - `test_strip_markdown_fences_removes_language_tag`
 - `test_strip_markdown_fences_noop_when_no_fences`
-- `test_strip_markdown_fences_noop_in_structured_mode`
+- `test_strip_markdown_fences_trailing_whitespace_after_closing_fence` — verify "```json\n{}\n``` " (trailing space) handled
+- `test_strip_markdown_fences_no_closing_fence` — verify content after opening fence is still returned
+- `test_strip_markdown_fences_no_newline_after_opening` — verify ` ```json ` with no body returns as-is
+- `test_parse_llm_json_response_valid` — returns parsed dict, content, usage
+- `test_parse_llm_json_response_rejects_nan` — verify NaN in response body rejected
+- `test_parse_llm_json_response_null_content_raises` — verify ContentPolicyError
+- `test_parse_llm_json_response_non_string_content_raises` — verify LLMClientError
+- `test_parse_llm_json_response_missing_choices_raises` — verify malformed response
 
 **Step 2: Run tests to verify they fail**
 
@@ -304,11 +387,11 @@ Expected: FAIL — functions do not exist
 Add to `src/elspeth/plugins/llm/validation.py`:
 
 ```python
-from elspeth.contracts.token_usage import TokenUsage
-from elspeth.plugins.llm.templates import PromptTemplate, RenderedPrompt, TemplateError
+from typing import Any
 
-# Type alias for structured error reasons
-TransformErrorReason = dict[str, Any]
+from elspeth.contracts.token_usage import TokenUsage
+from elspeth.contracts.errors import TransformErrorReason  # Use existing TypedDict — do NOT redefine
+from elspeth.plugins.llm.templates import PromptTemplate, RenderedPrompt, TemplateError
 
 
 def render_template_safe(
@@ -339,7 +422,7 @@ def render_template_safe(
 
 def check_truncation(
     *,
-    finish_reason: str | None,
+    finish_reason: str | None,  # Accepts FinishReason (StrEnum) or raw str — StrEnum == str
     completion_tokens: int | None,
     prompt_tokens: int | None,
     max_tokens: int | None,
@@ -349,15 +432,18 @@ def check_truncation(
     """Check for response truncation. Returns error dict or None.
 
     Uses finish_reason as authoritative signal, falls back to token heuristic.
-    Consolidates truncation detection from azure_multi_query.py:284 and
-    openrouter_multi_query.py:346.
+    Accepts both FinishReason enum and raw str (StrEnum comparison works with ==).
+    Consolidates truncation detection from azure_multi_query.py and
+    openrouter_multi_query.py.
     """
     is_truncated: bool
     if finish_reason is not None:
         is_truncated = finish_reason == "length"
     else:
+        # Token heuristic fallback — guard against max_tokens=0 spurious trigger
         is_truncated = (
             max_tokens is not None
+            and max_tokens > 0
             and completion_tokens is not None
             and completion_tokens > 0
             and completion_tokens >= max_tokens
@@ -390,8 +476,8 @@ def strip_markdown_fences(content: str) -> str:
     LLMs sometimes wrap JSON responses in ```json ... ``` blocks even in
     JSON mode. This strips them so JSON parsing succeeds.
 
-    Consolidates identical logic from azure_multi_query.py:330 and
-    openrouter_multi_query.py:367.
+    Consolidates identical logic from azure_multi_query.py and
+    openrouter_multi_query.py.
     """
     stripped = content.strip()
     if not stripped.startswith("```"):
@@ -400,7 +486,9 @@ def strip_markdown_fences(content: str) -> str:
     first_newline = stripped.find("\n")
     if first_newline != -1:
         stripped = stripped[first_newline + 1:]
-    if stripped.endswith("```"):
+    # Handle trailing whitespace before closing fence (e.g. "``` \n")
+    if stripped.rstrip().endswith("```"):
+        stripped = stripped.rstrip()
         stripped = stripped[:-3].strip()
     return stripped
 ```
@@ -430,13 +518,26 @@ feat(llm): extract shared validation helpers — template errors, truncation, fe
 
 This is a mechanical refactor. For each file:
 
-1. Add `from elspeth.plugins.llm.langfuse import LangfuseTracer`
-2. Add `self._langfuse_tracer = LangfuseTracer(transform_name=self.name)` in `__init__`
-3. Replace `_setup_langfuse_tracing()` calls with `self._langfuse_tracer.setup(tracing_config, logger)`
-4. Replace `_record_langfuse_trace()` calls with `self._langfuse_tracer.record_success(...)`
-5. Replace `_record_langfuse_trace_for_error()` calls with `self._langfuse_tracer.record_error(...)`
-6. Replace `_flush_tracing()` with `self._langfuse_tracer.flush()`
-7. Delete the 3-4 private methods that are now replaced
+1. Add `from elspeth.plugins.llm.langfuse import create_langfuse_tracer`
+2. In `__init__` or `on_start()`, replace `self._setup_langfuse_tracing()` with:
+   ```python
+   self._tracer = create_langfuse_tracer(
+       transform_name=self.name,
+       tracing_config=self._tracing_config,
+       trace_logger=self._logger,
+   )
+   ```
+3. Replace `_record_langfuse_trace()` calls with `self._tracer.record_success(...)`
+4. Replace `_record_langfuse_trace_for_error()` calls with `self._tracer.record_error(...)`
+5. Replace `_flush_tracing()` with `self._tracer.flush()`
+6. Delete the 3-4 private methods that are now replaced
+
+**Per-file variations to handle:**
+- **azure.py, openrouter.py**: Standard pattern — `_setup_langfuse_tracing` + `_record_langfuse_trace` + `_record_langfuse_trace_for_error` + `_flush_tracing`. Straightforward replacement.
+- **azure_multi_query.py**: Has all three record methods but NOT `_flush_tracing` (inherited from `BaseMultiQueryTransform`). Wire `_flush_tracing` through the inherited `on_complete`.
+- **openrouter_multi_query.py**: Has `_setup_langfuse_tracing` but NOT `_record_langfuse_trace`/`_record_langfuse_trace_for_error` — uses a different tracing pattern. **WARNING: This alignment is a behavior change**, not just an extraction. Add a targeted tracing test (`test_openrouter_multi_query_tracing_after_alignment`) that verifies the aligned `record_success`/`record_error` calls produce correct Langfuse observations before committing Phase A.
+- **azure_batch.py**: Has `_record_langfuse_batch_job` (different from `_record_langfuse_trace`). Leave batch-specific recording in place; only replace `_setup_langfuse_tracing` and `_flush_tracing`.
+- **openrouter_batch.py**: Same batch consideration as azure_batch.py.
 
 For azure_multi_query.py and openrouter_multi_query.py additionally:
 1. Add `from elspeth.plugins.llm.validation import check_truncation, strip_markdown_fences`
@@ -515,9 +616,13 @@ Phase B introduces the new architecture. This is the structural change — files
 
 Tests:
 - `test_llm_query_result_is_frozen` — verify frozen dataclass
-- `test_llm_query_result_fields` — verify all fields present with correct types
+- `test_llm_query_result_fields` — verify content, usage, model, finish_reason fields (NO raw_response — providers own audit recording)
+- `test_llm_query_result_post_init_rejects_empty_content` — verify `__post_init__` raises ValueError on `content=""`
+- `test_llm_query_result_post_init_rejects_whitespace_content` — verify `__post_init__` raises ValueError on `content="   "` (whitespace-only is functionally empty)
+- `test_llm_query_result_post_init_rejects_empty_model` — verify `__post_init__` raises ValueError on `model=""`
 - `test_finish_reason_enum_values` — verify stop, length, content_filter, tool_calls
 - `test_finish_reason_from_string` — verify FinishReason("stop") works
+- `test_parse_finish_reason_unknown_logs_warning` — verify unknown values like "end_turn" log a warning and return None (not silently dropped)
 - `test_llm_provider_protocol_is_runtime_checkable` — verify isinstance works
 - `test_mock_provider_satisfies_protocol` — create mock implementing protocol, verify isinstance
 
@@ -535,17 +640,24 @@ Providers are responsible for:
 3. Tier 3 boundary validation (response parsing, NaN rejection)
 4. Error classification (raising typed exceptions)
 5. Audit trail recording (via their Audited*Client)
+6. Finish reason normalization (provider-specific → FinishReason enum)
 
 The transform above the provider never sees raw SDK/HTTP responses.
+raw_response is NOT on LLMQueryResult — providers record audit data
+via their Audited*Client (D2 from architecture remediation).
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass
 from enum import StrEnum
-from typing import Any, Protocol, runtime_checkable
+from typing import Protocol, runtime_checkable
+
+import structlog
 
 from elspeth.contracts.token_usage import TokenUsage
+
+logger = structlog.get_logger(__name__)
 
 
 class FinishReason(StrEnum):
@@ -559,14 +671,25 @@ class FinishReason(StrEnum):
 def parse_finish_reason(raw: str | None) -> FinishReason | None:
     """Parse raw finish_reason string into validated enum.
 
-    Unknown values return None (provider-specific reasons we don't handle).
+    Unknown values log a warning and return None. This is intentional —
+    providers have provider-specific finish reasons (e.g. Anthropic's
+    "end_turn", "max_tokens") that we don't want to crash on, but we
+    DO want visibility when new values appear.
+
+    Providers should normalize their known finish reasons BEFORE calling
+    this function (e.g. Anthropic "end_turn" → "stop").
     """
     if raw is None:
         return None
     try:
         return FinishReason(raw)
     except ValueError:
-        return None  # Unknown finish reason — don't crash, just don't act on it
+        logger.warning(
+            "Unknown LLM finish_reason — not acting on it",
+            finish_reason=raw,
+            known_values=[e.value for e in FinishReason],
+        )
+        return None
 
 
 @dataclass(frozen=True, slots=True)
@@ -574,26 +697,39 @@ class LLMQueryResult:
     """Normalized, validated result from any LLM provider.
 
     All Tier 3 validation has already happened inside the provider.
-    Content is guaranteed non-null, non-empty string.
+    Content is guaranteed non-null, non-empty, non-whitespace-only string.
     Usage is normalized via TokenUsage.known/unknown.
+
+    NOTE: raw_response is NOT included here. Providers own audit recording
+    via their Audited*Client and record_call() — the raw SDK/HTTP response
+    stays within the provider boundary (D2 principle).
     """
     content: str
     usage: TokenUsage
     model: str
-    raw_response: dict[str, Any]  # For audit recording — stays within provider boundary
     finish_reason: FinishReason | None = None
+
+    def __post_init__(self) -> None:
+        if not self.content or not self.content.strip():
+            raise ValueError("LLMQueryResult.content must be non-empty (whitespace-only rejected)")
+        if not self.model:
+            raise ValueError("LLMQueryResult.model must be non-empty")
 
 
 @runtime_checkable
 class LLMProvider(Protocol):
     """What LLMTransform needs from a provider. Narrow interface.
 
-    Providers raise typed exceptions from elspeth.plugins.clients.errors:
+    Providers raise typed exceptions from elspeth.plugins.clients.llm:
     - RateLimitError: 429 / rate limit (retryable)
     - NetworkError: connection failures (retryable)
     - ServerError: 5xx errors (retryable)
     - ContentPolicyError: content filtering (not retryable)
-    - LLMCallError: other failures (not retryable)
+    - LLMClientError: other failures (not retryable)
+
+    Note: LLMClientError (exception in plugins/clients/llm.py) is NOT the
+    same as LLMCallError (frozen dataclass in contracts/call_data.py for
+    audit recording). Providers RAISE LLMClientError; they RECORD LLMCallError.
     """
 
     def execute_query(
@@ -630,19 +766,24 @@ feat(llm): add LLMProvider protocol and LLMQueryResult DTO
 The Azure provider is thin — it wraps the existing `AuditedLLMClient` (in `plugins/clients/llm.py`) and normalizes its `LLMResponse` to `LLMQueryResult`.
 
 **Key implementation details:**
-- Client caching is per-state_id with threading.Lock (matches azure.py:446-470)
+- Client caching is per-state_id with threading.Lock (matches azure.py:446-470). **Note:** `azure_multi_query.py` uses a two-lock pattern (raw SDK client + audited wrapper). Determine at implementation time whether the unified provider needs one or two levels of caching.
+- **CRITICAL: `state_id` snapshot bug.** `azure.py:453` correctly snapshots `state_id` before the try block because `ctx.state_id` is mutable during retries. `openrouter.py:693` uses `ctx.state_id` directly in the finally block (buggy). The unified provider MUST use the Azure pattern: `snapshot_state_id = state_id` at method entry, use `snapshot_state_id` in all subsequent code including error/finally paths.
 - Error classification already happens inside AuditedLLMClient (llm.py:322-390)
 - The provider re-raises the same typed exceptions (RateLimitError, ContentPolicyError, etc.)
-- Azure AI tracing auto-instrumentation is set up in __init__ if tracing_config.provider == "azure_ai"
+- Azure AI tracing auto-instrumentation is set up in `on_start()`, NOT in provider `__init__`. The provider creates transport; tracing config belongs to the transform lifecycle.
+- **Finish reason normalization happens here** at the Tier 3 boundary: Azure returns standard OpenAI finish_reason values ("stop", "length", "content_filter"), so `parse_finish_reason()` should handle them directly. If Azure introduces new values, they'll be logged and returned as None.
+- raw_response stays within the provider — it goes to `record_call()` on the AuditedLLMClient, NOT into LLMQueryResult
 
 **Tests:**
-- `test_execute_query_returns_llm_query_result` — mock AuditedLLMClient, verify correct mapping
+- `test_execute_query_returns_llm_query_result` — mock AuditedLLMClient, verify correct mapping, verify NO raw_response field
 - `test_execute_query_maps_finish_reason` — verify FinishReason enum conversion
+- `test_execute_query_unknown_finish_reason_returns_none` — verify provider-specific value (e.g. "end_turn") yields `finish_reason=None` on result
 - `test_execute_query_propagates_rate_limit_error` — verify RateLimitError passes through
 - `test_execute_query_propagates_content_policy_error`
+- `test_execute_query_timeout` — verify httpx.TimeoutException → NetworkError mapping
 - `test_client_cached_per_state_id` — verify same state_id returns same client
 - `test_close_clears_clients`
-- `test_azure_ai_tracing_setup_in_init` — verify _configure_azure_monitor called
+- `test_azure_ai_tracing_setup_in_on_start` — verify _configure_azure_monitor called in lifecycle, not provider init
 
 **Step N: Commit**
 
@@ -666,19 +807,23 @@ The OpenRouter provider is thicker — it does raw HTTP and all Tier 3 validatio
 - Content extraction: `data["choices"][0]["message"]["content"]` with validation wrapping
 - Null content check → ContentPolicyError
 - Non-finite usage validation
-- HTTP status code → typed exception mapping (429→RateLimitError, 5xx→ServerError)
+- HTTP status code → typed exception mapping (429→RateLimitError, 5xx→ServerError, non-429 4xx→LLMClientError)
 - Uses AuditedHTTPClient for audit recording
+- **Finish reason normalization:** OpenRouter passes through the upstream provider's finish_reason. Some models return non-standard values. The provider calls `parse_finish_reason()` which logs unknown values and returns None.
+- raw_response goes to `record_call()` on AuditedHTTPClient, NOT into LLMQueryResult
 
 **Tests (use ChaosLLM fixtures from conftest):**
-- `test_execute_query_parses_json_response` — mock HTTP, verify LLMQueryResult fields
+- `test_execute_query_parses_json_response` — mock HTTP, verify LLMQueryResult fields, verify NO raw_response
 - `test_execute_query_rejects_nan_in_response` — verify NaN/Infinity rejected
 - `test_execute_query_rejects_null_content` — verify ContentPolicyError raised
-- `test_execute_query_rejects_non_string_content` — verify LLMCallError
+- `test_execute_query_rejects_non_string_content` — verify LLMClientError raised (NOT LLMCallError — that's a dataclass for audit)
 - `test_execute_query_validates_usage_non_finite` — verify non-finite usage values rejected
+- `test_execute_query_unknown_finish_reason` — verify provider-specific value yields `finish_reason=None` and logs warning
 - `test_execute_query_429_raises_rate_limit_error` — mock 429 response
 - `test_execute_query_500_raises_server_error` — mock 5xx response
 - `test_execute_query_network_error_raises_network_error` — mock connection failure
-- `test_execute_query_4xx_raises_llm_call_error` — mock non-429 4xx
+- `test_execute_query_timeout_raises_network_error` — mock httpx.TimeoutException
+- `test_execute_query_4xx_raises_llm_client_error` — mock non-429 4xx (uses LLMClientError, not LLMCallError)
 - `test_client_cached_per_state_id`
 - `test_close_clears_clients`
 
@@ -703,7 +848,7 @@ feat(llm): add OpenRouterLLMProvider — HTTP transport with Tier 3 validation
 `base.py` — LLMConfig gets the `provider` field and optional multi-query fields:
 ```python
 class LLMConfig(TransformDataConfig):
-    provider: str = Field(..., description="LLM provider (azure, openrouter)")
+    provider: Literal["azure", "openrouter"] = Field(..., description="LLM provider")
     model: str | None = Field(None, description="Model identifier")
     # ... existing fields ...
     queries: list[QuerySpec] | dict[str, QuerySpecBody] | None = Field(None, description="Multi-query specs")
@@ -720,11 +865,30 @@ class QuerySpec:
     output_fields: list[OutputFieldConfig] | None = None
     template: str | None = None
     max_tokens: int | None = None
+
+    def __post_init__(self) -> None:
+        if not self.name:
+            raise ValueError("QuerySpec.name must be non-empty")
+        if not self.input_fields:
+            raise ValueError("QuerySpec.input_fields must be non-empty")
 ```
 
 Remove: `CaseStudyConfig`, `CriterionConfig`, `MultiQueryConfigMixin`, `MultiQueryConfig`, `validate_multi_query_key_collisions`
 
 Add: `QuerySpecBody` (Pydantic model for dict-keyed config parsing), `resolve_queries()` function (normalizes list|dict to list[QuerySpec])
+
+**`resolve_queries()` validation requirements:**
+1. Raise `ValueError` if `queries` list is empty (no-op transforms are bugs)
+2. Detect output field key collisions across queries (e.g. two queries both producing `score` field)
+3. Warn on reserved output suffixes (`_error`, `_metadata`, `_raw`) that conflict with ELSPETH internals
+4. Return `list[QuerySpec]` — single query returns a 1-element list (MultiQueryStrategy still applies if `queries` was explicitly configured)
+
+**Schema change note for `model` field:**
+The `model` field on `LLMConfig` changes from `model: str` (required) to `model: str | None = None` (optional). This is because Azure uses `deployment_name` instead. Provider-specific config classes (`AzureOpenAIConfig`, `OpenRouterConfig`) enforce their own requirements:
+- `AzureOpenAIConfig`: `deployment_name: str` (required), `model: None` (defaults, ignored)
+- `OpenRouterConfig`: `model: str` (required — validates non-None in its own validator)
+
+Test fixtures for multi-query tests need updating for this schema change.
 
 Provider-specific config:
 ```python
@@ -744,8 +908,16 @@ These can live in the provider files or a shared `configs.py` — decide during 
 
 **Tests:**
 - Existing config validation tests need migration
-- New tests for QuerySpec (domain-agnostic), resolve_queries(), dict-keyed parsing
-- Test `model: str | None = None` (not empty string)
+- `test_query_spec_post_init_rejects_empty_name` — verify ValueError on `name=""`
+- `test_query_spec_post_init_rejects_empty_input_fields` — verify ValueError on `input_fields={}`
+- `test_resolve_queries_empty_list_raises` — verify ValueError("no queries configured")
+- `test_resolve_queries_key_collision_raises` — two queries producing same output field
+- `test_resolve_queries_reserved_suffix_warns` — query producing `_error` suffix logs warning
+- `test_resolve_queries_dict_to_list` — verify dict-keyed config normalizes to list[QuerySpec]
+- `test_resolve_queries_single_query_returns_one_element_list`
+- `test_azure_config_requires_deployment_name` — verify AzureOpenAIConfig validation
+- `test_openrouter_config_requires_model` — verify OpenRouterConfig validates non-None model
+- `test_base_llm_config_model_optional` — verify `model: str | None = None` on base LLMConfig
 
 **Step N: Commit**
 
@@ -768,11 +940,16 @@ This is the core of Phase B. The unified transform with:
 
 **Key implementation details:**
 
+`LLMTransform` extends `BatchTransformMixin` (D8). All existing LLM transforms
+use `accept()`/`connect_output()`/`flush_batch_processing()`, NOT `process()`.
+Strategies are called from `_process_row()`, preserving concurrent row
+processing with FIFO output ordering and backpressure.
+
 `LLMTransform.__init__` dispatches provider:
 ```python
-_PROVIDERS = {
-    "azure": AzureLLMProvider,
-    "openrouter": OpenRouterLLMProvider,
+_PROVIDERS: dict[str, tuple[type[LLMConfig], type[LLMProvider]]] = {
+    "azure": (AzureOpenAIConfig, AzureLLMProvider),
+    "openrouter": (OpenRouterConfig, OpenRouterLLMProvider),
 }
 
 class LLMTransform(BaseTransform, BatchTransformMixin):
@@ -781,29 +958,49 @@ class LLMTransform(BaseTransform, BatchTransformMixin):
 
     def __init__(self, config: dict[str, Any]) -> None:
         provider_name = config["provider"]
-        provider_cls = _PROVIDERS[provider_name]
+        if provider_name not in _PROVIDERS:
+            raise ValueError(
+                f"Unknown LLM provider '{provider_name}'. "
+                f"Valid providers: {sorted(_PROVIDERS)}"
+            )
+        config_cls, provider_cls = _PROVIDERS[provider_name]
         # Parse config with provider-specific model
-        self._config = _parse_config(provider_name, config)
+        self._config = config_cls(**config)
         self._provider = provider_cls(self._config, ...)
-        self._tracer = LangfuseTracer(transform_name=self.name)
+        # Factory returns frozen ActiveLangfuseTracer or NoOpLangfuseTracer
+        self._tracer = create_langfuse_tracer(
+            transform_name=self.name,
+            tracing_config=self._config.tracing,
+        )
         self._query_specs = resolve_queries(self._config)
         self._strategy = (
-            MultiQueryStrategy(...) if len(self._query_specs) > 1 or self._config.queries
+            MultiQueryStrategy(...) if self._config.queries is not None
             else SingleQueryStrategy(...)
         )
 ```
 
-Strategy selection: if `queries` is explicitly provided (even with one entry), use MultiQueryStrategy. Otherwise SingleQueryStrategy. This preserves explicit intent.
+Strategy selection: if `queries` is explicitly provided (even with one entry), use MultiQueryStrategy. Otherwise SingleQueryStrategy. This preserves explicit intent. Uses `is not None` (not truthiness) per project convention.
+
+**Single provider registry:** Both `_get_transform_config_model()` and `__init__()` read from `_PROVIDERS`, eliminating the sync failure mode of two independent dispatch tables.
+
+**Note on `PluginContext.llm_client`:** After T10, providers own their own client lifecycle (D2). `LLMTransform._process_row()` MUST NOT read `ctx.llm_client`. The executor may still set it (it doesn't know the transform's internals), but it is unused. A test (`test_llm_transform_does_not_use_ctx_llm_client`) verifies this with a sentinel. Removing `ctx.llm_client` from the executor path is deferred to T17.
 
 **Tests (using ChaosLLM fixtures):**
 - Single-query tests: verify LLMTransform(provider="azure") with no queries works as single-query
 - Multi-query tests: verify LLMTransform(provider="openrouter", queries=...) uses multi-query strategy
+- `test_strategy_type_is_multi_query_when_queries_provided` — assert `isinstance(transform._strategy, MultiQueryStrategy)` to catch strategy dispatch bugs
+- `test_strategy_type_is_single_query_when_no_queries` — assert `isinstance(transform._strategy, SingleQueryStrategy)`
 - Provider dispatch: verify "azure" creates AzureLLMProvider, "openrouter" creates OpenRouterLLMProvider
-- Unknown provider: verify helpful error message
-- Error handling: verify all exception types map to correct TransformResult
+- Unknown provider: verify helpful error message listing valid providers
+- Error handling: verify all exception types map to correct TransformResult (RateLimitError→retryable, ContentPolicyError→not retryable, LLMClientError→not retryable)
 - Contract propagation: verify single-query uses propagate_contract, multi-query builds OBSERVED
-- Truncation: verify truncated responses return error
+- Truncation: verify truncated responses (finish_reason=LENGTH) return error
 - Fence stripping: verify markdown fences stripped in STANDARD mode
+- `test_tracer_is_noop_when_no_tracing_config` — verify NoOpLangfuseTracer used
+- `test_tracer_is_active_when_langfuse_configured` — verify ActiveLangfuseTracer used
+- `test_multi_query_partial_failure_discards_successful_results` — mock 4 queries where query 3 raises LLMClientError, verify TransformResult is error and output row has NO fields from successful queries (audit integrity)
+- `test_llm_transform_does_not_use_ctx_llm_client` — set ctx.llm_client to sentinel that raises on access, verify transform processes row successfully via provider's own client
+- `test_llm_transform_uses_process_row_not_process` — verify LLMTransform extends BatchTransformMixin and _process_row is the entry point (D8)
 
 **Step N: Commit**
 
@@ -830,13 +1027,27 @@ elif transform_type == "azure_multi_query_llm": ...
 elif transform_type == "openrouter_llm": ...
 elif transform_type == "openrouter_multi_query_llm": ...
 
-# AFTER:
+# AFTER — uses shared _PROVIDERS registry from transform.py:
 elif transform_type == "llm":
-    from elspeth.plugins.llm.transform import LLMTransform
-    # Config validation is provider-dependent — resolved at instantiation
-    from elspeth.plugins.llm.base import LLMConfig
-    return LLMConfig
+    from elspeth.plugins.llm.transform import _PROVIDERS
+
+    # Read provider field to select correct config class
+    provider = config.get("provider") if isinstance(config, dict) else None
+    if provider in _PROVIDERS:
+        config_cls, _ = _PROVIDERS[provider]
+        return config_cls
+    elif provider is not None:
+        raise ValueError(
+            f"Unknown LLM provider '{provider}'. "
+            f"Valid providers: {sorted(_PROVIDERS)}"
+        )
+    else:
+        # provider missing entirely — let Pydantic catch it with Literal validation
+        from elspeth.plugins.llm.base import LLMConfig
+        return LLMConfig
 ```
+
+**Why provider-dispatch matters:** Without this, `_get_transform_config_model()` returns the base `LLMConfig` which lacks provider-specific required fields (`deployment_name`, `endpoint`). Pydantic validation would pass with missing fields, and the error would surface later at instantiation with a confusing traceback.
 
 Batch entries stay unchanged:
 ```python
@@ -870,6 +1081,8 @@ refactor(llm): update plugin registration — 5 names → 1 unified 'llm' plugin
 
 **Test migration inventory:**
 
+**Unit tests (`tests/unit/plugins/llm/`):**
+
 | Test File | Current Import | New Import | Migration Type |
 |-----------|---------------|-----------|----------------|
 | test_azure.py | AzureLLMTransform | LLMTransform(provider="azure") | Instantiation change |
@@ -883,11 +1096,46 @@ refactor(llm): update plugin registration — 5 names → 1 unified 'llm' plugin
 | test_openrouter_tracing.py | OpenRouterLLMTransform, OpenRouterMultiQueryLLMTransform | LLMTransform(provider="openrouter") | Instantiation change |
 | test_tracing_integration.py | AzureLLMTransform, OpenRouterLLMTransform | LLMTransform | Instantiation change |
 | test_p1_bug_fixes.py | via conftest factories | Update factories | Factory update |
-| test_azure_multi_query_contract.py | AzureMultiQueryLLMTransform | LLMTransform(provider="azure", queries=...) | Instantiation + config |
+
+**Contract tests (`tests/unit/contracts/`):**
+
+| Test File | Current Import | New Import | Migration Type |
+|-----------|---------------|-----------|----------------|
+| transform_contracts/test_azure_multi_query_contract.py | AzureMultiQueryLLMTransform | LLMTransform(provider="azure", queries=...) | Instantiation + config |
 | test_telemetry_contracts.py | Multiple transforms | LLMTransform | Instantiation change |
-| test_plugin_wiring.py | Multiple transforms | LLMTransform | Check wiring |
-| test_llm_retry.py (stress) | via stress conftest | Update stress factories | Factory update |
-| test_assert_to_raise.py | AzureOpenAIConfig | AzureOpenAIConfig (new location) | Import path change |
+
+**Property tests (`tests/property/plugins/llm/`):**
+
+| Test File | Migration Type |
+|-----------|----------------|
+| test_multi_query_properties.py | Update to domain-agnostic QuerySpec (case_studies/criteria → queries) |
+| Any hypothesis tests referencing old class names | Update strategies to use LLMTransform |
+
+**Integration tests (`tests/integration/plugins/llm/`):**
+
+| Test File | Migration Type |
+|-----------|----------------|
+| `tests/unit/telemetry/test_plugin_wiring.py` | Verify "llm" plugin wires correctly (NOTE: actual location is `tests/unit/telemetry/`, not `tests/integration/plugins/llm/`) |
+| test_llm_integration.py (if exists) | Update instantiation |
+
+**Performance tests:**
+
+| Test File | Migration Type |
+|-----------|----------------|
+| test_llm_retry.py (stress) | via stress conftest factory update |
+
+**Other:**
+
+| Test File | Migration Type |
+|-----------|----------------|
+| test_assert_to_raise.py | AzureOpenAIConfig import path change (from providers/azure.py, not llm/base.py) |
+
+**NOTE:** Before implementation, verify these paths actually exist. During the review, 3 paths were flagged as potentially wrong:
+- `test_azure_multi_query_contract.py` — verify exact location (could be `tests/unit/plugins/llm/` or `tests/unit/contracts/`)
+- `test_telemetry_contracts.py` — verify exact location
+- `test_plugin_wiring.py` — verify exact location (could be `tests/integration/` or `tests/unit/`)
+
+Run `find tests/ -name "*llm*" -o -name "*multi_query*" -o -name "*plugin_wiring*" | sort` to build the definitive list at implementation time.
 
 **Multi-query config migration:**
 Old config uses `case_studies` + `criteria`. New config uses `queries` dict.
@@ -961,6 +1209,48 @@ transforms:
 
 For multi-query examples, the config structure changes more significantly (case_studies/criteria → queries dict).
 
+**Template variable migration:**
+Single-query templates use Jinja2 variables that reference row fields directly (e.g., `{{ text }}`, `{{ customer_id }}`). These DO NOT change — single-query templates are unaffected.
+
+Multi-query templates need migration from positional `{{ input_1 }}` to named variables matching the `input_fields` mapping:
+
+```yaml
+# BEFORE (multi-query with case_studies)
+transforms:
+  - plugin: azure_multi_query_llm
+    options:
+      case_studies:
+        - name: cs1
+          input_fields: [text, category]
+      criteria:
+        - name: quality
+          description: "Rate the quality"
+      template: "Evaluate {{ input_1 }} in category {{ input_2 }}"
+
+# AFTER (multi-query with queries dict)
+transforms:
+  - plugin: llm
+    options:
+      provider: azure
+      deployment_name: gpt-4
+      endpoint: ${AZURE_OPENAI_ENDPOINT}
+      api_key: ${AZURE_OPENAI_KEY}
+      queries:
+        cs1_quality:
+          input_fields:
+            text_content: text      # template var: row field
+            category_name: category
+          response_format: standard
+          output_fields:
+            - suffix: score
+              type: integer
+          template: "Evaluate {{ text_content }} in category {{ category_name }}"
+```
+
+Note how `{{ input_1 }}` → `{{ text_content }}` and `{{ input_2 }}` → `{{ category_name }}` — the template variables now match the keys in `input_fields`, making templates self-documenting.
+
+**Template variable safety:** Verify that `PromptTemplate` uses Jinja2's `StrictUndefined` policy so that un-migrated templates referencing `{{ input_1 }}` raise `TemplateError` rather than silently rendering as empty string. Add a test: `test_template_with_undeclared_variable_raises_error`.
+
 **Example files to update (16 total):**
 - `examples/azure_openai_sentiment/settings.yaml` — azure_llm → llm+azure
 - `examples/azure_openai_sentiment/settings_pooled.yaml`
@@ -979,7 +1269,17 @@ For multi-query examples, the config structure changes more significantly (case_
 - `examples/schema_contracts_llm_assessment/settings.yaml`
 - `examples/template_lookups/settings.yaml`
 
-**After updating examples, delete old files:**
+**Documentation files to update (8 files, 33 references):**
+- `docs/guides/tier2-tracing.md` — 17 refs (provider comparison table needs full rewrite)
+- `docs/runbooks/configure-keyvault-secrets.md` — 3 refs
+- `docs/guides/user-manual.md` — 3 refs
+- `docs/guides/troubleshooting.md` — 2 refs
+- `docs/reference/environment-variables.md` — 4 refs
+- `docs/reference/configuration.md` — 4 refs
+- `ARCHITECTURE.md` — component name references
+- Example `README.md` files in examples directories
+
+**After updating examples and docs, delete old files:**
 1. Delete the 5 old transform files
 2. Verify no imports remain: `rg "from elspeth.plugins.llm.azure import" src/` (should only find batch)
 3. Verify no imports remain: `rg "from elspeth.plugins.llm.openrouter import" src/` (should only find batch)
@@ -995,13 +1295,13 @@ Run: `.venv/bin/python scripts/cicd/enforce_tier_model.py check --root src/elspe
 **Step N+1: Commit**
 
 ```
-refactor(llm): delete 5 old transform files, update 16 example YAMLs
+refactor(llm): delete 5 old transform files, update 16 example YAMLs + 8 doc files
 
 Removes azure.py, openrouter.py, base_multi_query.py, azure_multi_query.py,
 openrouter_multi_query.py. All functionality is now in transform.py with
 providers/azure.py and providers/openrouter.py.
 
-Net: ~3,400 lines deleted, ~720 created. ~2,700 line reduction.
+Net: ~4,200 lines deleted, ~900 created. ~3,300 line reduction.
 ```
 
 ---
@@ -1015,8 +1315,28 @@ After all tasks complete:
 - [ ] `.venv/bin/python -m ruff check src/` — clean
 - [ ] `.venv/bin/python scripts/cicd/enforce_tier_model.py check --root src/elspeth --allowlist config/cicd/enforce_tier_model` — pass
 - [ ] `.venv/bin/python -m scripts.check_contracts` — pass
-- [ ] `rg "azure_llm\|openrouter_llm\|azure_multi_query_llm\|openrouter_multi_query_llm" src/ examples/` — only batch refs or helpful error strings
+- [ ] `rg "azure_llm\|openrouter_llm\|azure_multi_query_llm\|openrouter_multi_query_llm" src/ examples/ docs/` — only batch refs or helpful error strings
 - [ ] No `from elspeth.plugins.llm.azure import` in src/ (except batch files)
 - [ ] No `from elspeth.plugins.llm.openrouter import` in src/ (except batch files)
-- [ ] LLM test count >= 392 (no tests dropped)
+- [ ] LLM test count >= 520 (original 392 + ~128 new tests from Tasks 1, 2, 5, 6, 7, 8, 9)
 - [ ] All 16 example YAMLs use `plugin: llm` with `provider:` field
+- [ ] No `raw_response` on LLMQueryResult anywhere in src/ or tests/
+- [ ] No `LLMCallError` used as a raiseable exception (only `LLMClientError` from `plugins/clients/llm`)
+- [ ] No local `TransformErrorReason` redefinitions (only imported from `contracts.errors`)
+- [ ] `parse_finish_reason()` logs unknown values (verify with test)
+- [ ] `create_langfuse_tracer()` factory used everywhere (no manual `LangfuseTracer(...)` construction)
+- [ ] QuerySpec `__post_init__` validation covers empty name and empty input_fields
+- [ ] `resolve_queries()` rejects empty list and detects key collisions
+- [ ] `LLMTransform` extends `BatchTransformMixin` — strategies called from `_process_row()`, not `process()`
+- [ ] `LLMTransform._process_row()` does NOT read `ctx.llm_client` (sentinel test passes)
+- [ ] `NoOpLangfuseTracer` has explicit parameter signatures matching Protocol (no `*args/**kwargs`)
+- [ ] No `telemetry_emit` parameter on `LangfuseTracer` methods (tracing failures go to structlog only)
+- [ ] `LLMQueryResult.__post_init__` rejects whitespace-only content (`"   "`)
+- [ ] `provider` field on `LLMConfig` uses `Literal["azure", "openrouter"]`, not `str`
+- [ ] `_PROVIDERS` registry is single dict used by both `_get_transform_config_model()` and `__init__()`
+- [ ] `state_id` is snapshot before try block in providers (Azure pattern, not OpenRouter buggy pattern)
+- [ ] `PromptTemplate` uses `StrictUndefined` — un-migrated `{{ input_1 }}` raises `TemplateError`
+- [ ] All 8 doc files updated (33 old plugin name references removed)
+- [ ] `MultiQueryStrategy` traces per-query only (D9) — no row-level aggregate traces
+- [ ] `test_multi_query_partial_failure_discards_successful_results` passes
+- [ ] `test_openrouter_multi_query_tracing_after_alignment` passes (Phase A behavior change verified)

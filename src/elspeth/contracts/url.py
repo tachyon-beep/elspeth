@@ -21,7 +21,7 @@ Usage:
 
 import json as json_module
 from dataclasses import dataclass
-from urllib.parse import parse_qs, urlencode, urlparse, urlunparse
+from urllib.parse import parse_qs, unquote, urlencode, urlparse, urlunparse
 
 from elspeth.contracts.security import (
     SecretFingerprintError,
@@ -148,7 +148,10 @@ class SanitizedDatabaseUrl:
             have_key = False
 
         if have_key:
-            fingerprint = secret_fingerprint(parsed.password)
+            # Decode percent-encoding before fingerprinting so the fingerprint
+            # represents the actual secret value, not the URL encoding.
+            # urlparse().password preserves percent-encoding (e.g., "p%40ss" for "p@ss").
+            fingerprint = secret_fingerprint(unquote(parsed.password))
         elif fail_if_no_key:
             raise SecretFingerprintError(
                 "Database URL contains a password but ELSPETH_FINGERPRINT_KEY "
@@ -292,10 +295,12 @@ class SanitizedWebhookUrl:
         # SECURITY: Treat BOTH username and password as sensitive.
         # Many services use username for bearer tokens (e.g., https://token@github.com)
         has_basic_auth = parsed.username is not None or parsed.password is not None
+        # Decode percent-encoding before fingerprinting so the fingerprint
+        # represents the actual secret value, not the URL encoding.
         if parsed.username:
-            sensitive_values.append(parsed.username)
+            sensitive_values.append(unquote(parsed.username))
         if parsed.password:
-            sensitive_values.append(parsed.password)
+            sensitive_values.append(unquote(parsed.password))
 
         # If no sensitive keys in query, fragment, or Basic Auth found, return URL unchanged
         if not has_sensitive_query_keys and not has_sensitive_fragment_keys and not has_basic_auth:

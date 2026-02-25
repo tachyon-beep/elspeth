@@ -120,3 +120,45 @@ class TestCanonicalJsonConsistency:
     def test_stable_hash_matches_core(self) -> None:
         data = {"str": "hello", "int": 42, "bool": True, "null": None, "float": 3.14}
         assert contracts_hashing.stable_hash(data) == core_canonical.stable_hash(data)
+
+
+class TestTelemetryLandscapeHashAlignment:
+    """Verify there is only one hash computation path for call recording.
+
+    After the architectural fix, telemetry reads hashes from the recorded Call
+    object rather than recomputing them. This test validates that
+    core.canonical.stable_hash (used by the recorder) handles all payload types
+    that appear in practice, ensuring the single-source-of-truth design works.
+    """
+
+    def test_primitive_payload_hashes(self) -> None:
+        """Primitive-only payloads hash successfully."""
+        payload = {"model": "gpt-4", "temperature": 0.7, "max_tokens": 100}
+        h = core_canonical.stable_hash(payload)
+        assert len(h) == 64
+        assert h == core_canonical.stable_hash(payload)  # deterministic
+
+    def test_datetime_payload_hashes(self) -> None:
+        """Payloads containing datetime hash successfully via normalization."""
+        payload = {"model": "gpt-4", "timestamp": datetime(2026, 1, 1, tzinfo=UTC)}
+        h = core_canonical.stable_hash(payload)
+        assert len(h) == 64
+
+    def test_bytes_payload_hashes(self) -> None:
+        """Payloads containing bytes hash successfully via normalization."""
+        payload = {"content": b"binary-data", "status": "ok"}
+        h = core_canonical.stable_hash(payload)
+        assert len(h) == 64
+
+    def test_decimal_payload_hashes(self) -> None:
+        """Payloads containing Decimal hash successfully via normalization."""
+        from decimal import Decimal
+
+        payload = {"cost": Decimal("0.0042"), "model": "gpt-4"}
+        h = core_canonical.stable_hash(payload)
+        assert len(h) == 64
+
+    def test_contracts_and_core_agree_on_primitives(self) -> None:
+        """Both hash implementations agree for primitive data (regression guard)."""
+        payload = {"model": "gpt-4", "temperature": 0.7, "max_tokens": 100}
+        assert contracts_hashing.stable_hash(payload) == core_canonical.stable_hash(payload)

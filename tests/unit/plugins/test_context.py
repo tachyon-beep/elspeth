@@ -704,8 +704,15 @@ class TestRecordCallTelemetryPayloadSnapshot:
         def capture_telemetry(event):
             emitted_events.append(event)
 
+        request_data = {"a": 1, "nested": {"x": 2}}
+        expected_request = {"a": 1, "nested": {"x": 2}}
+
         mock_landscape = MagicMock()
-        mock_landscape.record_call.return_value = MagicMock(call_id="call-001")
+        mock_landscape.record_call.return_value = MagicMock(
+            call_id="call-001",
+            request_hash=stable_hash(expected_request),
+            response_hash=stable_hash({"ok": True}),
+        )
 
         ctx = PluginContext(
             run_id="test-run",
@@ -714,9 +721,6 @@ class TestRecordCallTelemetryPayloadSnapshot:
             state_id="state-001",
             telemetry_emit=capture_telemetry,
         )
-
-        request_data = {"a": 1, "nested": {"x": 2}}
-        expected_request = {"a": 1, "nested": {"x": 2}}
 
         ctx.record_call(
             call_type=CallType.HTTP,
@@ -752,7 +756,11 @@ class TestRecordCallTelemetryPayloadSnapshot:
             emitted_events.append(event)
 
         mock_landscape = MagicMock()
-        mock_landscape.record_call.return_value = MagicMock(call_id="call-001")
+        mock_landscape.record_call.return_value = MagicMock(
+            call_id="call-001",
+            request_hash=stable_hash({"prompt": "hi"}),
+            response_hash=stable_hash({"usage": {"prompt_tokens": 1, "completion_tokens": 2}}),
+        )
 
         ctx = PluginContext(
             run_id="test-run",
@@ -906,9 +914,16 @@ class TestRecordCallTelemetryResponseHash:
         def capture_telemetry(event):
             emitted_events.append(event)
 
-        # Mock landscape to avoid DB setup - we only care about telemetry
+        # Mock landscape — recorder is single source of truth for hashes.
+        # Empty dict {} is a valid response with a real hash, not None.
+        from elspeth.core.canonical import stable_hash
+
         mock_landscape = MagicMock()
-        mock_landscape.record_call.return_value = MagicMock(call_id="call-001")
+        mock_landscape.record_call.return_value = MagicMock(
+            call_id="call-001",
+            request_hash=stable_hash({"endpoint": "/empty"}),
+            response_hash=stable_hash({}),
+        )
 
         ctx = PluginContext(
             run_id="test-run",
@@ -928,13 +943,14 @@ class TestRecordCallTelemetryResponseHash:
             status=CallStatus.SUCCESS,
         )
 
-        # Verify telemetry was emitted with response_hash
+        # Verify telemetry was emitted with response_hash from recorder
         assert len(emitted_events) == 1
         event = emitted_events[0]
         # response_hash should NOT be None for empty dict
         assert event.response_hash is not None, (
             "Empty dict response should still get hashed. Got response_hash=None which breaks telemetry/audit correlation."
         )
+        assert event.response_hash == stable_hash({})
 
     def test_empty_list_response_gets_hashed(self) -> None:
         """Empty list [] response should emit response_hash in telemetry."""
@@ -949,8 +965,14 @@ class TestRecordCallTelemetryResponseHash:
         def capture_telemetry(event):
             emitted_events.append(event)
 
+        from elspeth.core.canonical import stable_hash
+
         mock_landscape = MagicMock()
-        mock_landscape.record_call.return_value = MagicMock(call_id="call-001")
+        mock_landscape.record_call.return_value = MagicMock(
+            call_id="call-001",
+            request_hash=stable_hash({"query": "SELECT * FROM empty_table"}),
+            response_hash=stable_hash({"rows": []}),
+        )
 
         ctx = PluginContext(
             run_id="test-run",
@@ -980,6 +1002,7 @@ class TestRecordCallTelemetryResponseHash:
 
         from elspeth.contracts.enums import CallStatus, CallType
         from elspeth.contracts.plugin_context import PluginContext
+        from elspeth.core.canonical import stable_hash
 
         emitted_events: list[Any] = []
 
@@ -987,7 +1010,11 @@ class TestRecordCallTelemetryResponseHash:
             emitted_events.append(event)
 
         mock_landscape = MagicMock()
-        mock_landscape.record_call.return_value = MagicMock(call_id="call-001")
+        mock_landscape.record_call.return_value = MagicMock(
+            call_id="call-001",
+            request_hash=stable_hash({"method": "DELETE"}),
+            response_hash=stable_hash({"body": ""}),
+        )
 
         ctx = PluginContext(
             run_id="test-run",
@@ -1024,7 +1051,11 @@ class TestRecordCallTelemetryResponseHash:
             emitted_events.append(event)
 
         mock_landscape = MagicMock()
-        mock_landscape.record_call.return_value = MagicMock(call_id="call-001")
+        mock_landscape.record_call.return_value = MagicMock(
+            call_id="call-001",
+            request_hash="abc123",
+            response_hash=None,  # No response recorded
+        )
 
         ctx = PluginContext(
             run_id="test-run",

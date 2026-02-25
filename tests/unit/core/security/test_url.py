@@ -787,6 +787,70 @@ class TestFragmentTokenSanitization:
         assert result.fingerprint is not None
 
 
+class TestPercentEncodedPasswordFingerprint:
+    """Tests that fingerprinting uses decoded passwords, not percent-encoded text.
+
+    urlparse().password preserves percent-encoding (e.g., p%40ss for p@ss).
+    Fingerprinting the encoded form means the fingerprint represents the URL
+    encoding rather than the actual secret value.
+    """
+
+    def test_database_url_fingerprints_decoded_password(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Fingerprint of percent-encoded password matches fingerprint of decoded password."""
+        from elspeth.contracts.security import secret_fingerprint
+
+        monkeypatch.setenv("ELSPETH_FINGERPRINT_KEY", "test-key")
+        # Password "p@ss" must be percent-encoded in URL as "p%40ss"
+        url = "postgresql://user:p%40ss@host/db"
+
+        result = SanitizedDatabaseUrl.from_raw_url(url)
+
+        # Fingerprint should be of the actual password "p@ss", not "p%40ss"
+        expected = secret_fingerprint("p@ss")
+        assert result.fingerprint == expected
+
+    def test_database_url_percent_encoded_colon(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Fingerprint handles percent-encoded colon in password."""
+        from elspeth.contracts.security import secret_fingerprint
+
+        monkeypatch.setenv("ELSPETH_FINGERPRINT_KEY", "test-key")
+        # Password "p:ss" encoded as "p%3Ass"
+        url = "postgresql://user:p%3Ass@host/db"
+
+        result = SanitizedDatabaseUrl.from_raw_url(url)
+
+        expected = secret_fingerprint("p:ss")
+        assert result.fingerprint == expected
+
+    def test_database_url_unencoded_password_unchanged(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Passwords without percent-encoding are unaffected by decoding."""
+        from elspeth.contracts.security import secret_fingerprint
+
+        monkeypatch.setenv("ELSPETH_FINGERPRINT_KEY", "test-key")
+        url = "postgresql://user:plainpassword@host/db"
+
+        result = SanitizedDatabaseUrl.from_raw_url(url)
+
+        expected = secret_fingerprint("plainpassword")
+        assert result.fingerprint == expected
+
+    def test_webhook_basic_auth_fingerprints_decoded_credentials(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Webhook Basic Auth fingerprints use decoded username and password."""
+        import json as json_module
+
+        from elspeth.contracts.security import secret_fingerprint
+
+        monkeypatch.setenv("ELSPETH_FINGERPRINT_KEY", "test-key")
+        # Username "us@r" encoded as "us%40r", password "p@ss" as "p%40ss"
+        url = "https://us%40r:p%40ss@api.example.com/webhook"
+
+        result = SanitizedWebhookUrl.from_raw_url(url)
+
+        # Fingerprint should use decoded values
+        expected = secret_fingerprint(json_module.dumps(sorted(["us@r", "p@ss"]), separators=(",", ":")))
+        assert result.fingerprint == expected
+
+
 class TestIntegrationWithArtifactDescriptor:
     """Integration tests with ArtifactDescriptor."""
 
