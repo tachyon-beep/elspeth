@@ -145,7 +145,7 @@ def _make_transform_with_mock_provider(
     return transform, mock_provider
 
 
-class TestOpenRouterMultiQueryLLMTransformInit:
+class TestOpenRouterMultiQueryInit:
     """Tests for transform initialization."""
 
     def test_transform_has_correct_name(self) -> None:
