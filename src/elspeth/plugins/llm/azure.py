@@ -10,7 +10,7 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from threading import Lock
-from typing import TYPE_CHECKING, Any, Self
+from typing import TYPE_CHECKING, Any, Literal, Self
 
 from pydantic import Field, model_validator
 
@@ -61,6 +61,9 @@ class AzureOpenAIConfig(LLMConfig):
     Note: The 'model' field from LLMConfig is automatically set to
     deployment_name if not explicitly provided.
     """
+
+    # Azure configs always have provider="azure" — narrowed Literal prevents misconfiguration
+    provider: Literal["azure"] = Field(default="azure", description="LLM provider")
 
     # Override model to make it optional - will default to deployment_name
     model: str = Field(default="", description="Model identifier (defaults to deployment_name)")

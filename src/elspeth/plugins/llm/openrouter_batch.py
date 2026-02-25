@@ -21,7 +21,7 @@ from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
 from threading import Lock
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Literal
 
 import httpx
 from pydantic import Field
@@ -87,6 +87,12 @@ class OpenRouterBatchConfig(LLMConfig):
         max_tokens: Maximum response tokens
         response_field: Output field name (default: llm_response)
     """
+
+    # OpenRouter batch configs always have provider="openrouter" — narrowed Literal prevents misconfiguration
+    provider: Literal["openrouter"] = Field(default="openrouter", description="LLM provider")
+
+    # Override base model to make it required — OpenRouter has no deployment_name fallback
+    model: str = Field(..., description="Model identifier (e.g., 'openai/gpt-4o-mini')")
 
     api_key: str = Field(..., description="OpenRouter API key")
     base_url: str = Field(

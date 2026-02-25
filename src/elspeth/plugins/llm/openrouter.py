@@ -11,7 +11,7 @@ import json
 import math
 from collections.abc import Callable
 from threading import Lock
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Literal
 
 import httpx
 from pydantic import Field
@@ -52,6 +52,12 @@ class OpenRouterConfig(LLMConfig):
     Tier 2 tracing:
     - tracing: Optional Langfuse configuration (azure_ai not supported for OpenRouter)
     """
+
+    # OpenRouter configs always have provider="openrouter" — narrowed Literal prevents misconfiguration
+    provider: Literal["openrouter"] = Field(default="openrouter", description="LLM provider")
+
+    # Override base model to make it required — OpenRouter has no deployment_name fallback
+    model: str = Field(..., description="Model identifier (e.g., 'openai/gpt-4o')")
 
     api_key: str = Field(..., description="OpenRouter API key")
     base_url: str = Field(

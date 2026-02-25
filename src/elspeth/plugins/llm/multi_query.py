@@ -1,7 +1,16 @@
-"""Multi-query LLM support for case study x criteria cross-product evaluation."""
+"""Multi-query LLM support for case study x criteria cross-product evaluation.
+
+Contains both the legacy domain-specific multi-query types (QuerySpec,
+CaseStudyConfig, CriterionConfig, MultiQueryConfigMixin) and the new
+domain-agnostic types (UnifiedQuerySpec, resolve_queries). Legacy types
+are retained during the transition period (Tasks 5-12) and will be
+deleted in Task 12.
+"""
 
 from __future__ import annotations
 
+import logging
+import re
 from dataclasses import dataclass
 from enum import StrEnum
 from typing import Any, Self
@@ -11,6 +20,8 @@ from pydantic import Field, field_validator, model_validator
 from elspeth.contracts.schema_contract import PipelineRow
 from elspeth.plugins.config_base import PluginConfig
 from elspeth.plugins.llm.azure import AzureOpenAIConfig
+
+logger = logging.getLogger(__name__)
 
 
 class OutputFieldType(StrEnum):
@@ -128,6 +139,174 @@ class QuerySpec:
         context["source_row"] = row
 
         return context
+
+
+@dataclass(frozen=True, slots=True)
+class UnifiedQuerySpec:
+    """Domain-agnostic query specification for multi-query transforms.
+
+    Unlike the legacy QuerySpec (case_study x criterion cross-product),
+    this uses named input_fields (dict mapping template variable name
+    to row column name) instead of positional input_1, input_2 variables.
+
+    Attributes:
+        name: Unique query identifier (used in output field prefixes)
+        input_fields: Mapping of template variable → row column name
+        response_format: LLM response format mode
+        output_fields: Typed output field definitions (None = unstructured)
+        template: Per-query template override (None = use config-level template)
+        max_tokens: Per-query max_tokens override (None = use config-level)
+    """
+
+    name: str
+    input_fields: dict[str, str]
+    response_format: ResponseFormat = ResponseFormat.STANDARD
+    output_fields: list[OutputFieldConfig] | None = None
+    template: str | None = None
+    max_tokens: int | None = None
+
+    def __post_init__(self) -> None:
+        if not self.name:
+            raise ValueError("name must be non-empty")
+        if not self.input_fields:
+            raise ValueError("input_fields must be non-empty")
+
+    def build_template_context(self, row: PipelineRow | dict[str, Any]) -> dict[str, Any]:
+        """Build template context mapping named variables to row values.
+
+        Args:
+            row: Full row data (dict or PipelineRow)
+
+        Returns:
+            Context dict with named variables and source_row reference
+
+        Raises:
+            KeyError: If a required row column is missing
+        """
+        context: dict[str, Any] = {}
+        for template_var, row_column in self.input_fields.items():
+            context[template_var] = row[row_column]
+        context["source_row"] = row
+        return context
+
+
+# Pattern for detecting legacy positional template variables {{ input_N }}
+_POSITIONAL_VAR_PATTERN = re.compile(r"\{\{\s*input_\d+\s*\}\}")
+
+
+def resolve_queries(
+    queries: list[UnifiedQuerySpec] | dict[str, Any] | list[dict[str, Any]],
+) -> list[UnifiedQuerySpec]:
+    """Normalize query definitions into a list of UnifiedQuerySpec.
+
+    Accepts:
+    - list[UnifiedQuerySpec]: Pass through as-is
+    - dict[str, dict]: Key becomes query name, value has spec fields
+    - list[dict]: Each dict must include 'name' key
+
+    Validates:
+    - Non-empty input
+    - No output field suffix collisions across queries
+    - Warns on reserved suffixes (e.g., "error", "usage", "model")
+    - Rejects legacy positional template variables ({{ input_N }})
+
+    Args:
+        queries: Query definitions in any supported format
+
+    Returns:
+        List of validated UnifiedQuerySpec instances
+
+    Raises:
+        ValueError: If queries is empty, has collisions, or uses positional vars
+    """
+    specs: list[UnifiedQuerySpec] = []
+
+    if isinstance(queries, dict):
+        if not queries:
+            raise ValueError("no queries configured")
+        for name, definition in queries.items():
+            # Parse output_fields from dicts if present
+            output_fields = None
+            raw_output_fields = definition.get("output_fields")
+            if raw_output_fields is not None:
+                output_fields = [OutputFieldConfig(**of) if isinstance(of, dict) else of for of in raw_output_fields]
+            specs.append(
+                UnifiedQuerySpec(
+                    name=name,
+                    input_fields=definition["input_fields"],
+                    response_format=ResponseFormat(definition["response_format"])
+                    if "response_format" in definition
+                    else ResponseFormat.STANDARD,
+                    output_fields=output_fields,
+                    template=definition.get("template"),
+                    max_tokens=definition.get("max_tokens"),
+                )
+            )
+    elif isinstance(queries, list):
+        if not queries:
+            raise ValueError("no queries configured")
+        for item in queries:
+            if isinstance(item, UnifiedQuerySpec):
+                specs.append(item)
+            else:
+                # dict form with 'name' key
+                output_fields = None
+                raw_output_fields = item.get("output_fields")
+                if raw_output_fields is not None:
+                    output_fields = [OutputFieldConfig(**of) if isinstance(of, dict) else of for of in raw_output_fields]
+                specs.append(
+                    UnifiedQuerySpec(
+                        name=item["name"],
+                        input_fields=item["input_fields"],
+                        response_format=ResponseFormat(item.get("response_format", "standard")),
+                        output_fields=output_fields,
+                        template=item.get("template"),
+                        max_tokens=item.get("max_tokens"),
+                    )
+                )
+    else:
+        raise TypeError(f"queries must be list or dict, got {type(queries).__name__}")
+
+    # Validate: reject positional template variables
+    for spec in specs:
+        if spec.template and _POSITIONAL_VAR_PATTERN.search(spec.template):
+            raise ValueError(
+                f"Query '{spec.name}' template uses positional variables "
+                f"(e.g., {{{{ input_1 }}}}). Use named input_fields instead: "
+                f"map template variables to row columns via input_fields dict."
+            )
+
+    # Validate: check output field suffix collisions across queries
+    from elspeth.plugins.llm import LLM_AUDIT_SUFFIXES, LLM_GUARANTEED_SUFFIXES
+
+    reserved_suffixes = set()
+    for suffix in LLM_GUARANTEED_SUFFIXES + LLM_AUDIT_SUFFIXES:
+        if suffix:
+            reserved_suffixes.add(suffix.lstrip("_"))
+    # System-reserved suffixes used by multi-query error handling
+    reserved_suffixes.add("error")
+
+    seen_suffixes: dict[str, str] = {}  # suffix → first query name
+    for spec in specs:
+        if spec.output_fields:
+            for field in spec.output_fields:
+                # Warn on reserved suffixes
+                if field.suffix in reserved_suffixes:
+                    logger.warning(
+                        "Query '%s' output field suffix '%s' matches a reserved LLM suffix. This may cause output field conflicts.",
+                        spec.name,
+                        field.suffix,
+                    )
+                # Check for cross-query suffix collisions
+                if field.suffix in seen_suffixes:
+                    raise ValueError(
+                        f"Output field suffix collision: suffix '{field.suffix}' "
+                        f"used by both query '{seen_suffixes[field.suffix]}' "
+                        f"and query '{spec.name}'"
+                    )
+                seen_suffixes[field.suffix] = spec.name
+
+    return specs
 
 
 class CaseStudyConfig(PluginConfig):

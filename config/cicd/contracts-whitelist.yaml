@@ -226,6 +226,9 @@ allowed_dict_patterns:
   - "src/elspeth/plugins/llm/multi_query.py:QuerySpec.build_template_context:return"
   - "src/elspeth/plugins/llm/multi_query.py:CaseStudyConfig.to_template_data:return"
   - "src/elspeth/plugins/llm/multi_query.py:CriterionConfig.to_template_data:return"
+  - "src/elspeth/plugins/llm/multi_query.py:UnifiedQuerySpec.build_template_context:row"
+  - "src/elspeth/plugins/llm/multi_query.py:UnifiedQuerySpec.build_template_context:return"
+  - "src/elspeth/plugins/llm/multi_query.py:resolve_queries:queries"
 
   # LLM tracing — extra_metadata is provider-specific (deployment, model, query keys vary per caller)
   - "src/elspeth/plugins/llm/langfuse.py:LangfuseTracer.record_success:extra_metadata"

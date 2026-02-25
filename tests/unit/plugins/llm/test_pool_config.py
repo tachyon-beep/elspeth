@@ -15,6 +15,7 @@ class TestPoolConfigDefaults:
         """Default pool_size=1 means sequential processing."""
         config = LLMConfig.from_dict(
             {
+                "provider": "azure",
                 "model": "gpt-4",
                 "template": "{{ row.text }}",
                 "schema": {"mode": "observed"},
@@ -28,6 +29,7 @@ class TestPoolConfigDefaults:
         """pool_size=1 should not create pool config."""
         config = LLMConfig.from_dict(
             {
+                "provider": "azure",
                 "model": "gpt-4",
                 "template": "{{ row.text }}",
                 "schema": {"mode": "observed"},
@@ -47,6 +49,7 @@ class TestPoolConfigExplicit:
         """pool_size > 1 should create pool config with defaults."""
         config = LLMConfig.from_dict(
             {
+                "provider": "azure",
                 "model": "gpt-4",
                 "template": "{{ row.text }}",
                 "schema": {"mode": "observed"},
@@ -69,6 +72,7 @@ class TestPoolConfigExplicit:
         """Custom AIMD settings should be applied."""
         config = LLMConfig.from_dict(
             {
+                "provider": "azure",
                 "model": "gpt-4",
                 "template": "{{ row.text }}",
                 "schema": {"mode": "observed"},
@@ -130,6 +134,7 @@ class TestPoolConfigValidation:
         with pytest.raises(PluginConfigError):
             LLMConfig.from_dict(
                 {
+                    "provider": "azure",
                     "model": "gpt-4",
                     "template": "{{ row.text }}",
                     "schema": {"mode": "observed"},
@@ -143,6 +148,7 @@ class TestPoolConfigValidation:
         with pytest.raises(PluginConfigError):
             LLMConfig.from_dict(
                 {
+                    "provider": "azure",
                     "model": "gpt-4",
                     "template": "{{ row.text }}",
                     "schema": {"mode": "observed"},
@@ -157,6 +163,7 @@ class TestPoolConfigValidation:
         with pytest.raises(PluginConfigError):
             LLMConfig.from_dict(
                 {
+                    "provider": "azure",
                     "model": "gpt-4",
                     "template": "{{ row.text }}",
                     "schema": {"mode": "observed"},

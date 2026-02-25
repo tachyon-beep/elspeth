@@ -8,7 +8,7 @@ and pool configuration (flat fields assembled into PoolConfig).
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, Literal
 
 from pydantic import Field, field_validator, model_validator
 
@@ -42,12 +42,14 @@ class LLMConfig(TransformDataConfig):
     only declare the fields that are TRULY required (always accessed).
 
     LLM-specific fields:
-    - model: Model identifier (required)
+    - provider: LLM provider ("azure" or "openrouter")
+    - model: Model identifier (optional — Azure uses deployment_name instead)
     - template: Jinja2 prompt template (required)
     - system_prompt: Optional system message
     - temperature: Sampling temperature (default 0.0 for determinism)
     - max_tokens: Maximum response tokens
     - response_field: Field name for LLM response in output
+    - queries: Multi-query specs (None = single-query mode)
 
     Pool configuration (flat fields assembled into PoolConfig when pool_size > 1):
     - pool_size: Number of concurrent requests (1 = sequential, no pooling)
@@ -58,7 +60,9 @@ class LLMConfig(TransformDataConfig):
     - max_capacity_retry_seconds: Max time to retry capacity errors per row
     """
 
-    model: str = Field(..., description="Model identifier (e.g., 'gpt-4', 'claude-3-opus')")
+    provider: Literal["azure", "openrouter"] = Field(..., description="LLM provider")
+    model: str | None = Field(None, description="Model identifier (optional — Azure uses deployment_name)")
+    queries: list[Any] | dict[str, Any] | None = Field(None, description="Multi-query specs (None = single-query mode)")
     template: str = Field(..., description="Jinja2 prompt template")
     system_prompt: str | None = Field(None, description="Optional system prompt")
     temperature: float = Field(0.0, ge=0.0, le=2.0, description="Sampling temperature")

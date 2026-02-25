@@ -897,6 +897,12 @@ The `model` field on `LLMConfig` changes from `model: str` (required) to `model:
 
 Test fixtures for multi-query tests need updating for this schema change.
 
+**`template` field stays required on `LLMConfig`.**
+Multi-query transforms use a single shared template rendered with different context per query (via `QuerySpec.build_template_context()`). The `QuerySpec.template` field is for per-query template overrides only — the shared `LLMConfig.template` remains the base. Both single-query and multi-query modes require a template.
+
+**`tracing` field placement:**
+The `tracing: dict[str, Any] | None` field currently lives on both `AzureOpenAIConfig` and `OpenRouterConfig` independently (duplicated). It stays on provider-specific configs — NOT moved to `LLMConfig` base — because Azure supports both `azure_ai` and `langfuse` tracing while OpenRouter only supports `langfuse` (azure_ai auto-instruments the OpenAI SDK which OpenRouter doesn't use). Provider-specific validation can enforce this constraint.
+
 Provider-specific config:
 ```python
 class AzureOpenAIConfig(LLMConfig):
@@ -904,11 +910,13 @@ class AzureOpenAIConfig(LLMConfig):
     endpoint: str
     api_key: str
     api_version: str = "2024-10-21"
+    tracing: dict[str, Any] | None = None  # azure_ai or langfuse
 
 class OpenRouterConfig(LLMConfig):
     api_key: str
     base_url: str = "https://openrouter.ai/api/v1"
     timeout_seconds: float = 60.0
+    tracing: dict[str, Any] | None = None  # langfuse only (azure_ai not supported)
 ```
 
 These can live in the provider files or a shared `configs.py` — decide during implementation based on import dependencies.
@@ -920,6 +928,7 @@ These can live in the provider files or a shared `configs.py` — decide during 
 - `test_query_spec_post_init_rejects_empty_name` — verify ValueError on `name=""`
 - `test_query_spec_post_init_rejects_empty_input_fields` — verify ValueError on `input_fields={}`
 - `test_resolve_queries_empty_list_raises` — verify ValueError("no queries configured")
+- `test_resolve_queries_empty_dict_raises` — verify ValueError("no queries configured") when `queries={}` (empty dict normalizes to empty list)
 - `test_resolve_queries_key_collision_raises` — two queries producing same output field
 - `test_resolve_queries_reserved_suffix_warns` — query producing `_error` suffix logs warning
 - `test_resolve_queries_dict_to_list` — verify dict-keyed config normalizes to list[QuerySpec]
@@ -958,7 +967,10 @@ processing with FIFO output ordering and backpressure.
 
 `LLMTransform.__init__` dispatches provider:
 ```python
-_PROVIDERS: dict[str, tuple[type[LLMConfig], type[LLMProvider]]] = {
+# NOTE: type[LLMProvider] won't work for concrete classes implementing a Protocol.
+# Use Callable[..., LLMProvider] or just omit the type annotation and let mypy
+# infer from usage. The concrete classes are structurally compatible.
+_PROVIDERS: dict[str, tuple[type[LLMConfig], Any]] = {
     "azure": (AzureOpenAIConfig, AzureLLMProvider),
     "openrouter": (OpenRouterConfig, OpenRouterLLMProvider),
 }
@@ -979,9 +991,13 @@ class LLMTransform(BaseTransform, BatchTransformMixin):
         self._config = config_cls.from_dict(config)
         self._provider = provider_cls(self._config, ...)
         # Factory returns frozen ActiveLangfuseTracer or NoOpLangfuseTracer
+        # tracing lives on provider-specific configs (AzureOpenAIConfig, OpenRouterConfig),
+        # both of which define tracing: dict[str, Any] | None. Since config_cls is always
+        # one of those two, self._config.tracing is always present. No defensive getattr.
+        tracing_config = parse_tracing_config(self._config.tracing) if self._config.tracing else None
         self._tracer = create_langfuse_tracer(
             transform_name=self.name,
-            tracing_config=self._config.tracing,
+            tracing_config=tracing_config,
         )
         self._query_specs = resolve_queries(self._config)
         self._strategy = (
@@ -1352,7 +1368,7 @@ After all tasks complete:
 - [ ] `parse_finish_reason()` logs unknown values (verify with test)
 - [ ] `create_langfuse_tracer()` factory used everywhere (no manual `LangfuseTracer(...)` construction)
 - [ ] QuerySpec `__post_init__` validation covers empty name and empty input_fields
-- [ ] `resolve_queries()` rejects empty list and detects key collisions
+- [ ] `resolve_queries()` rejects empty list, empty dict, and detects key collisions
 - [ ] `LLMTransform` extends `BatchTransformMixin` — strategies called from `_process_row()`, not `process()`
 - [ ] `LLMTransform._process_row()` does NOT read `ctx.llm_client` (sentinel test passes)
 - [ ] `NoOpLangfuseTracer` has explicit parameter signatures matching Protocol (no `*args/**kwargs`)

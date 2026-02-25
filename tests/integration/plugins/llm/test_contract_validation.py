@@ -22,6 +22,7 @@ class TestLLMContractValidationBasics:
         config = LLMConfig.from_dict(
             {
                 "schema": {"mode": "observed"},
+                "provider": "azure",
                 "model": "gpt-4",
                 "template": "Hello {{ row.customer_name }}",
                 "required_input_fields": ["customer_name"],
@@ -58,6 +59,7 @@ class TestLLMTemplateFieldDeclarationRequired:
             LLMConfig.from_dict(
                 {
                     "schema": {"mode": "observed"},
+                    "provider": "azure",
                     "model": "gpt-4",
                     "template": "Customer: {{ row.customer_id }}, Amount: {{ row.amount }}",
                     # No required_input_fields - this is now an error
@@ -77,6 +79,7 @@ class TestLLMTemplateFieldDeclarationRequired:
         config = LLMConfig.from_dict(
             {
                 "schema": {"mode": "observed"},
+                "provider": "azure",
                 "model": "gpt-4",
                 "template": "Customer: {{ row.customer_id }}",
                 "required_input_fields": [],  # Explicit: "I accept runtime risk"
@@ -93,6 +96,7 @@ class TestLLMTemplateFieldDeclarationRequired:
         config = LLMConfig.from_dict(
             {
                 "schema": {"mode": "observed"},
+                "provider": "azure",
                 "model": "gpt-4",
                 "template": "Customer: {{ row.customer_id }}",
                 "required_input_fields": ["customer_id"],
@@ -109,6 +113,7 @@ class TestLLMTemplateFieldDeclarationRequired:
         config = LLMConfig.from_dict(
             {
                 "schema": {"mode": "observed"},
+                "provider": "azure",
                 "model": "gpt-4",
                 "template": "Static prompt with {{ lookup.value }}",
             }

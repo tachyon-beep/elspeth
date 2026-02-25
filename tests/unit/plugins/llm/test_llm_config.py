@@ -1,0 +1,349 @@
+# tests/unit/plugins/llm/test_llm_config.py
+"""Tests for unified LLM config models (Task 8).
+
+Tests the new provider-dispatched LLMConfig, domain-agnostic QuerySpec,
+resolve_queries() normalization, and provider-specific config classes.
+"""
+
+from __future__ import annotations
+
+import pytest
+from pydantic import ValidationError
+
+from elspeth.contracts.schema import SchemaConfig
+from elspeth.plugins.llm.base import LLMConfig
+
+# Shared observed schema for test convenience
+_OBSERVED_SCHEMA = SchemaConfig(mode="observed", fields=None)
+
+
+# ---------------------------------------------------------------------------
+# LLMConfig base changes
+# ---------------------------------------------------------------------------
+
+
+class TestLLMConfigBase:
+    """Tests for LLMConfig base class changes."""
+
+    def test_model_optional_defaults_to_none(self) -> None:
+        """model field is optional and defaults to None."""
+        config = LLMConfig(
+            provider="azure",
+            template="Classify: {{ text }}",
+            schema_config=_OBSERVED_SCHEMA,
+            required_input_fields=["text"],
+        )
+        assert config.model is None
+
+    def test_model_accepts_explicit_value(self) -> None:
+        config = LLMConfig(
+            provider="azure",
+            model="gpt-4o",
+            template="Classify: {{ text }}",
+            schema_config=_OBSERVED_SCHEMA,
+            required_input_fields=["text"],
+        )
+        assert config.model == "gpt-4o"
+
+    def test_provider_field_required(self) -> None:
+        """provider field is required — Literal["azure", "openrouter"]."""
+        with pytest.raises(ValidationError):
+            LLMConfig(
+                provider="invalid_provider",
+                template="hello",
+                schema_config=_OBSERVED_SCHEMA,
+                required_input_fields=[],
+            )
+
+    def test_provider_azure_accepted(self) -> None:
+        config = LLMConfig(
+            provider="azure",
+            template="hello {{ text }}",
+            schema_config=_OBSERVED_SCHEMA,
+            required_input_fields=["text"],
+        )
+        assert config.provider == "azure"
+
+    def test_provider_openrouter_accepted(self) -> None:
+        config = LLMConfig(
+            provider="openrouter",
+            template="hello {{ text }}",
+            schema_config=_OBSERVED_SCHEMA,
+            required_input_fields=["text"],
+        )
+        assert config.provider == "openrouter"
+
+    def test_queries_field_none_by_default(self) -> None:
+        """queries is None when not provided (single-query mode)."""
+        config = LLMConfig(
+            provider="azure",
+            template="hello {{ text }}",
+            schema_config=_OBSERVED_SCHEMA,
+            required_input_fields=["text"],
+        )
+        assert config.queries is None
+
+
+# ---------------------------------------------------------------------------
+# Provider-specific configs
+# ---------------------------------------------------------------------------
+
+
+class TestAzureOpenAIConfig:
+    """Tests for Azure-specific config class."""
+
+    def test_requires_deployment_name(self) -> None:
+        from elspeth.plugins.llm.azure import AzureOpenAIConfig
+
+        with pytest.raises((ValidationError, ValueError)):
+            AzureOpenAIConfig(
+                template="hello",
+                schema_config=_OBSERVED_SCHEMA,
+                required_input_fields=[],
+                # Missing deployment_name, endpoint, api_key
+            )
+
+    def test_model_defaults_to_deployment_name(self) -> None:
+        from elspeth.plugins.llm.azure import AzureOpenAIConfig
+
+        config = AzureOpenAIConfig(
+            deployment_name="gpt-4o-deploy",
+            endpoint="https://test.openai.azure.com/",
+            api_key="key",
+            template="hello",
+            schema_config=_OBSERVED_SCHEMA,
+            required_input_fields=[],
+        )
+        # Azure sets model = deployment_name when model is empty/None
+        assert config.model == "gpt-4o-deploy"
+
+    def test_tracing_field_on_azure(self) -> None:
+        from elspeth.plugins.llm.azure import AzureOpenAIConfig
+
+        config = AzureOpenAIConfig(
+            deployment_name="gpt-4o",
+            endpoint="https://test.openai.azure.com/",
+            api_key="key",
+            template="hello",
+            schema_config=_OBSERVED_SCHEMA,
+            required_input_fields=[],
+            tracing={"provider": "langfuse", "public_key": "pk"},
+        )
+        assert config.tracing is not None
+
+
+class TestOpenRouterConfig:
+    """Tests for OpenRouter-specific config class."""
+
+    def test_requires_model(self) -> None:
+        """OpenRouter requires model to be non-None."""
+        from elspeth.plugins.llm.openrouter import OpenRouterConfig
+
+        # model=None should fail validation
+        with pytest.raises((ValidationError, ValueError)):
+            OpenRouterConfig(
+                api_key="key",
+                template="hello",
+                schema_config=_OBSERVED_SCHEMA,
+                required_input_fields=[],
+                # model not provided — should fail because OpenRouter needs it
+            )
+
+    def test_accepts_explicit_model(self) -> None:
+        from elspeth.plugins.llm.openrouter import OpenRouterConfig
+
+        config = OpenRouterConfig(
+            model="openai/gpt-4o",
+            api_key="key",
+            template="hello",
+            schema_config=_OBSERVED_SCHEMA,
+            required_input_fields=[],
+        )
+        assert config.model == "openai/gpt-4o"
+
+
+class TestOpenRouterBatchConfigModelRequired:
+    """OpenRouterBatchConfig must reject model=None."""
+
+    def test_rejects_none_model(self) -> None:
+        from elspeth.plugins.llm.openrouter_batch import OpenRouterBatchConfig
+
+        with pytest.raises((ValidationError, ValueError)):
+            OpenRouterBatchConfig(
+                api_key="key",
+                template="hello",
+                schema_config=_OBSERVED_SCHEMA,
+                required_input_fields=[],
+                # model not provided
+            )
+
+
+# ---------------------------------------------------------------------------
+# Domain-agnostic QuerySpec
+# ---------------------------------------------------------------------------
+
+
+class TestQuerySpec:
+    """Tests for the new domain-agnostic QuerySpec."""
+
+    def test_post_init_rejects_empty_name(self) -> None:
+        from elspeth.plugins.llm.multi_query import UnifiedQuerySpec
+
+        with pytest.raises(ValueError, match="name must be non-empty"):
+            UnifiedQuerySpec(name="", input_fields={"text": "text"})
+
+    def test_post_init_rejects_empty_input_fields(self) -> None:
+        from elspeth.plugins.llm.multi_query import UnifiedQuerySpec
+
+        with pytest.raises(ValueError, match="input_fields must be non-empty"):
+            UnifiedQuerySpec(name="q1", input_fields={})
+
+    def test_frozen(self) -> None:
+        from dataclasses import FrozenInstanceError
+
+        from elspeth.plugins.llm.multi_query import UnifiedQuerySpec
+
+        spec = UnifiedQuerySpec(name="q1", input_fields={"text": "text_col"})
+        with pytest.raises(FrozenInstanceError):
+            spec.name = "modified"  # type: ignore[misc]
+
+    def test_defaults(self) -> None:
+        from elspeth.plugins.llm.multi_query import ResponseFormat, UnifiedQuerySpec
+
+        spec = UnifiedQuerySpec(name="q1", input_fields={"text": "text_col"})
+        assert spec.response_format == ResponseFormat.STANDARD
+        assert spec.output_fields is None
+        assert spec.template is None
+        assert spec.max_tokens is None
+
+    def test_build_template_context_named_variables(self) -> None:
+        """Named input_fields map to template variables directly."""
+        from elspeth.plugins.llm.multi_query import UnifiedQuerySpec
+
+        spec = UnifiedQuerySpec(
+            name="q1",
+            input_fields={"text_content": "text", "category_name": "category"},
+        )
+        row = {"text": "hello world", "category": "science", "extra": "ignored"}
+        ctx = spec.build_template_context(row)
+
+        assert ctx["text_content"] == "hello world"
+        assert ctx["category_name"] == "science"
+        assert ctx["source_row"] is row
+
+    def test_build_template_context_missing_field_raises(self) -> None:
+        from elspeth.plugins.llm.multi_query import UnifiedQuerySpec
+
+        spec = UnifiedQuerySpec(
+            name="q1",
+            input_fields={"text_content": "text"},
+        )
+        with pytest.raises(KeyError, match="text"):
+            spec.build_template_context({"other": "value"})
+
+
+# ---------------------------------------------------------------------------
+# resolve_queries()
+# ---------------------------------------------------------------------------
+
+
+class TestResolveQueries:
+    """Tests for resolve_queries() normalization."""
+
+    def test_empty_list_raises(self) -> None:
+        from elspeth.plugins.llm.multi_query import resolve_queries
+
+        with pytest.raises(ValueError, match="no queries configured"):
+            resolve_queries([])
+
+    def test_empty_dict_raises(self) -> None:
+        from elspeth.plugins.llm.multi_query import resolve_queries
+
+        with pytest.raises(ValueError, match="no queries configured"):
+            resolve_queries({})
+
+    def test_dict_to_list_normalization(self) -> None:
+        from elspeth.plugins.llm.multi_query import resolve_queries
+
+        result = resolve_queries(
+            {
+                "q1": {
+                    "input_fields": {"text": "text_col"},
+                },
+                "q2": {
+                    "input_fields": {"category": "cat_col"},
+                },
+            }
+        )
+        assert len(result) == 2
+        names = {q.name for q in result}
+        assert names == {"q1", "q2"}
+
+    def test_list_normalization(self) -> None:
+        from elspeth.plugins.llm.multi_query import UnifiedQuerySpec, resolve_queries
+
+        specs = [
+            UnifiedQuerySpec(name="q1", input_fields={"text": "text_col"}),
+        ]
+        result = resolve_queries(specs)
+        assert len(result) == 1
+        assert result[0].name == "q1"
+
+    def test_key_collision_raises(self) -> None:
+        """Two queries producing the same output field suffix."""
+        from elspeth.plugins.llm.multi_query import resolve_queries
+
+        with pytest.raises(ValueError, match="collision"):
+            resolve_queries(
+                {
+                    "q1": {
+                        "input_fields": {"text": "text_col"},
+                        "output_fields": [{"suffix": "score", "type": "integer"}],
+                    },
+                    "q2": {
+                        "input_fields": {"text": "text_col"},
+                        "output_fields": [{"suffix": "score", "type": "integer"}],
+                    },
+                }
+            )
+
+    def test_reserved_suffix_warns(self, caplog: pytest.LogCaptureFixture) -> None:
+        """Output field with reserved _error suffix logs warning."""
+        import logging
+
+        from elspeth.plugins.llm.multi_query import resolve_queries
+
+        with caplog.at_level(logging.WARNING, logger="elspeth.plugins.llm.multi_query"):
+            resolve_queries(
+                {
+                    "q1": {
+                        "input_fields": {"text": "text_col"},
+                        "output_fields": [{"suffix": "error", "type": "string"}],
+                    },
+                }
+            )
+        assert any("reserved" in r.message.lower() for r in caplog.records)
+
+    def test_single_query_returns_one_element_list(self) -> None:
+        from elspeth.plugins.llm.multi_query import resolve_queries
+
+        result = resolve_queries(
+            {
+                "only_one": {"input_fields": {"text": "text_col"}},
+            }
+        )
+        assert len(result) == 1
+
+    def test_rejects_positional_template_variables(self) -> None:
+        """Templates with {{ input_1 }} pattern raise with migration guidance."""
+        from elspeth.plugins.llm.multi_query import resolve_queries
+
+        with pytest.raises(ValueError, match="positional variables"):
+            resolve_queries(
+                {
+                    "q1": {
+                        "input_fields": {"text": "text_col"},
+                        "template": "Evaluate {{ input_1 }} quality",
+                    },
+                }
+            )
