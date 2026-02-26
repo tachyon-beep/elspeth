@@ -33,6 +33,16 @@ Collapsed 6 LLM transform classes (~4,950 lines) into a unified `LLMTransform` w
 
 ### Fixed
 
+- **Silent failure remediation (10 findings)** — Comprehensive review of LLM plugin error handling:
+  - Langfuse metadata construction moved outside try blocks — our bugs crash immediately, only SDK calls wrapped
+  - Missing `langfuse` package now raises `RuntimeError` with install instructions instead of silently returning NoOp tracer
+  - Unrecognized tracing config types now emit structlog warning instead of silent no-op
+  - Unknown LLM finish reasons now include actionable guidance in warning message
+  - Azure no-choices response path now logs warning instead of silent `None` return
+  - `azure-ai-inference` ImportError fallback now logs warning
+  - Telemetry callback pre-start replaced `lambda: None` with warning function
+  - Missing LLM output fields now return `TransformResult.error()` with field details instead of silent `None` via `.get()`
+  - Null LLM content (content-filtered) now returns error with `content_filtered` reason instead of storing `None`
 - **Unified LLM transform bugs** — Fixed four bugs in `LLMTransform`: limiter dispatch used wrong config attribute, `response_format` not passed to provider, declared `output_fields` not extracted from multi-query responses, NaN/Infinity values in LLM JSON responses not rejected
 - **Aggregation `on_error` required** — `on_error` is now required for aggregation transforms; converted multi-query examples to unified LLM format
 - **T1: Frozen audit records** — Added `frozen=True` to all 16 mutable audit record dataclasses (`Run`, `Node`, `Edge`, `Row`, `Token`, `TokenParent`, `Call`, `Artifact`, `RoutingEvent`, `Batch`, `BatchMember`, `BatchOutput`, `Checkpoint`, `RowLineage`, `ValidationErrorRecord`, `TransformErrorRecord`). All 24 dataclasses in `contracts/audit.py` are now frozen. Mutations crash at the mutation site instead of silently corrupting the Tier 1 audit trail.
@@ -64,10 +74,12 @@ Collapsed 6 LLM transform classes (~4,950 lines) into a unified `LLMTransform` w
 - 10 new truthiness regression tests across `test_reports.py`, `test_spans.py`, `test_node_detail.py`
 - T17 PluginContext protocol split design doc and hierarchical implementation plan (master + 5 sub-plans)
 - Backpressure modes and import hierarchy documentation in architecture docs
+- `available_fields` key in `TransformErrorReason` TypedDict for LLM output field mismatch diagnostics
+- 65 new tests for review-identified coverage gaps: error serialization dispatch (33), provider lifecycle (9), JSON validation (16), PluginContext record_call wrapping (5), GateExecutor error field rename (2)
 
 ### Tests
 
-- Full suite: 9,952 tests passing, 16 skipped, 3 xfailed — mypy/ruff/contracts all clean
+- Full suite: 10,040 tests passing, 16 skipped, 3 xfailed — mypy/ruff/contracts all clean
 - T10: 10 test files updated with import path migrations from old modules to `providers/`
 - T10: `test_discovery.py` updated — plugin count 17→13, assertions reference unified `llm` + batch plugins
 - T10: `test_contract_validation.py` updated — 5 plugin name references migrated to `"llm"`

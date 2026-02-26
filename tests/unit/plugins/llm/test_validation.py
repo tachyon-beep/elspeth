@@ -9,11 +9,17 @@ Covers:
 
 from __future__ import annotations
 
+import pytest
+
 from elspeth.plugins.llm.templates import PromptTemplate, RenderedPrompt
 from elspeth.plugins.llm.validation import (
+    ValidationError,
+    ValidationSuccess,
     check_truncation,
+    reject_nonfinite_constant,
     render_template_safe,
     strip_markdown_fences,
+    validate_json_object_response,
 )
 
 # ── render_template_safe tests ─────────────────────────────────────
@@ -234,3 +240,124 @@ class TestStripMarkdownFences:
         content = '```\n{\n  "a": 1,\n  "b": 2\n}\n```'
         result = strip_markdown_fences(content)
         assert result == '{\n  "a": 1,\n  "b": 2\n}'
+
+
+# ── validate_json_object_response tests ──────────────────────────
+
+
+class TestValidateJsonObjectResponse:
+    """Tests for validate_json_object_response — Tier 3 boundary validation."""
+
+    def test_valid_json_object_returns_success(self) -> None:
+        """Valid JSON object should return ValidationSuccess with parsed dict."""
+        result = validate_json_object_response('{"category": "spam", "score": 0.9}')
+        assert isinstance(result, ValidationSuccess)
+        assert result.data == {"category": "spam", "score": 0.9}
+
+    def test_invalid_json_string_returns_error(self) -> None:
+        """Malformed JSON should return ValidationError with reason=invalid_json."""
+        result = validate_json_object_response("{not valid json}")
+        assert isinstance(result, ValidationError)
+        assert result.reason == "invalid_json"
+        assert result.detail is not None
+
+    def test_json_array_returns_error(self) -> None:
+        """JSON array should return ValidationError with reason=invalid_json_type."""
+        result = validate_json_object_response("[1, 2, 3]")
+        assert isinstance(result, ValidationError)
+        assert result.reason == "invalid_json_type"
+        assert result.expected == "object"
+        assert result.actual == "list"
+
+    def test_json_null_returns_error(self) -> None:
+        """JSON null should return ValidationError with reason=invalid_json_type."""
+        result = validate_json_object_response("null")
+        assert isinstance(result, ValidationError)
+        assert result.reason == "invalid_json_type"
+        assert result.expected == "object"
+        assert result.actual == "NoneType"
+
+    def test_json_with_nan_returns_error(self) -> None:
+        """JSON containing NaN should return ValidationError (reject_nonfinite_constant)."""
+        result = validate_json_object_response('{"value": NaN}')
+        assert isinstance(result, ValidationError)
+        assert result.reason == "invalid_json"
+        assert result.detail is not None
+
+    def test_empty_string_returns_error(self) -> None:
+        """Empty string should return ValidationError."""
+        result = validate_json_object_response("")
+        assert isinstance(result, ValidationError)
+        assert result.reason == "invalid_json"
+
+    def test_json_number_primitive_returns_error(self) -> None:
+        """JSON number primitive should return ValidationError."""
+        result = validate_json_object_response("42")
+        assert isinstance(result, ValidationError)
+        assert result.reason == "invalid_json_type"
+        assert result.expected == "object"
+        assert result.actual == "int"
+
+    def test_json_string_primitive_returns_error(self) -> None:
+        """JSON string primitive should return ValidationError."""
+        result = validate_json_object_response('"hello"')
+        assert isinstance(result, ValidationError)
+        assert result.reason == "invalid_json_type"
+        assert result.expected == "object"
+        assert result.actual == "str"
+
+    def test_json_boolean_primitive_returns_error(self) -> None:
+        """JSON boolean should return ValidationError."""
+        result = validate_json_object_response("true")
+        assert isinstance(result, ValidationError)
+        assert result.reason == "invalid_json_type"
+        assert result.expected == "object"
+        assert result.actual == "bool"
+
+    def test_json_with_infinity_returns_error(self) -> None:
+        """JSON containing Infinity should return ValidationError."""
+        result = validate_json_object_response('{"value": Infinity}')
+        assert isinstance(result, ValidationError)
+        assert result.reason == "invalid_json"
+
+    def test_json_with_negative_infinity_returns_error(self) -> None:
+        """JSON containing -Infinity should return ValidationError."""
+        result = validate_json_object_response('{"value": -Infinity}')
+        assert isinstance(result, ValidationError)
+        assert result.reason == "invalid_json"
+
+    def test_nested_object_returns_success(self) -> None:
+        """Nested JSON object should return ValidationSuccess."""
+        content = '{"outer": {"inner": "value"}, "list": [1, 2]}'
+        result = validate_json_object_response(content)
+        assert isinstance(result, ValidationSuccess)
+        assert result.data["outer"] == {"inner": "value"}
+        assert result.data["list"] == [1, 2]
+
+    def test_empty_object_returns_success(self) -> None:
+        """Empty JSON object {} should return ValidationSuccess."""
+        result = validate_json_object_response("{}")
+        assert isinstance(result, ValidationSuccess)
+        assert result.data == {}
+
+
+# ── reject_nonfinite_constant tests ──────────────────────────────
+
+
+class TestRejectNonfiniteConstant:
+    """Tests for reject_nonfinite_constant — parse_constant callback."""
+
+    def test_nan_raises_value_error(self) -> None:
+        """NaN should raise ValueError."""
+        with pytest.raises(ValueError, match="NaN"):
+            reject_nonfinite_constant("NaN")
+
+    def test_infinity_raises_value_error(self) -> None:
+        """Infinity should raise ValueError."""
+        with pytest.raises(ValueError, match="Infinity"):
+            reject_nonfinite_constant("Infinity")
+
+    def test_negative_infinity_raises_value_error(self) -> None:
+        """-Infinity should raise ValueError."""
+        with pytest.raises(ValueError, match="-Infinity"):
+            reject_nonfinite_constant("-Infinity")

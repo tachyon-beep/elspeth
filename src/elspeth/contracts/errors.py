@@ -427,6 +427,7 @@ class TransformErrorReason(TypedDict):
     total_count: NotRequired[int]  # Total number of queries attempted
 
     # LLM response context
+    available_fields: NotRequired[list[str]]  # Fields present in LLM JSON response (for missing_output_field)
     content_length: NotRequired[int]  # Length of LLM response content
     max_tokens: NotRequired[int]
     completion_tokens: NotRequired[int | None]

@@ -2862,3 +2862,97 @@ class TestSinkExecutorTerminality:
         assert len(failed_calls) == 2
         failed_state_ids = {c[1]["state_id"] for c in failed_calls}
         assert failed_state_ids == {"state_001", "state_002"}
+
+
+# =============================================================================
+# Gap #6: GateExecutor ExecutionError field rename integration
+# =============================================================================
+
+
+class TestGateExecutorExecutionErrorFieldRename:
+    """Integration test: ExecutionError 'exception_type' serializes as 'type' in audit trail.
+
+    The ExecutionError dataclass has field ``exception_type`` but serializes as
+    ``"type"`` in ``to_dict()`` for hash stability. This test verifies the full
+    path: gate expression error -> ExecutionError -> recorder -> serialized dict
+    has the correct key name.
+    """
+
+    def test_gate_error_records_type_not_exception_type_in_audit(self) -> None:
+        """Gate execution error should record 'type' (not 'exception_type') in the error dict.
+
+        Exercises the full path: GateExecutor catches expression evaluation error,
+        creates ExecutionError, passes it to recorder.complete_node_state(error=...),
+        and the serialized form uses 'type' as the key name.
+        """
+        from elspeth.contracts.errors import ExecutionError
+        from elspeth.core.expression_parser import ExpressionEvaluationError
+
+        recorder = _make_recorder()
+        executor = GateExecutor(recorder, _make_span_factory(), _make_step_resolver())
+        config = GateSettings(
+            name="my_gate",
+            input="in_conn",
+            condition="row['nonexistent_field'] > 0",
+            routes={"true": "next_conn", "false": "error_sink"},
+        )
+        contract = _make_contract()
+        token = _make_token(contract=contract)
+        ctx = _make_ctx()
+
+        # Trigger an expression evaluation error
+        with pytest.raises(ExpressionEvaluationError):
+            executor.execute_config_gate(config, "cg_1", token, ctx)
+
+        # Find the FAILED call to complete_node_state
+        failed_calls = [call for call in recorder.complete_node_state.call_args_list if call.kwargs.get("status") == NodeStateStatus.FAILED]
+        assert len(failed_calls) >= 1, "Expected at least one FAILED node state call"
+
+        # Extract the error argument — it should be an ExecutionError
+        error_obj = failed_calls[0].kwargs.get("error")
+        assert error_obj is not None, "error kwarg should be set on FAILED state"
+        assert isinstance(error_obj, ExecutionError)
+
+        # Verify the dataclass field is 'exception_type' (internal name)
+        assert error_obj.exception_type == "ExpressionEvaluationError"
+
+        # Verify to_dict() serializes as 'type' (audit trail key)
+        error_dict = error_obj.to_dict()
+        assert "type" in error_dict, "Serialized error should use 'type' key, not 'exception_type'"
+        assert "exception_type" not in error_dict, "Serialized error should NOT contain 'exception_type' key"
+        assert error_dict["type"] == "ExpressionEvaluationError"
+
+    def test_gate_route_label_error_serializes_type_correctly(self) -> None:
+        """Route label mismatch error also serializes 'exception_type' as 'type'.
+
+        This tests the second error path in execute_config_gate: when the route
+        label is not in the routes config.
+        """
+        from elspeth.contracts.errors import ExecutionError
+
+        recorder = _make_recorder()
+        executor = GateExecutor(recorder, _make_span_factory(), _make_step_resolver())
+        config = GateSettings(
+            name="my_gate",
+            input="in_conn",
+            condition="None",  # Evaluates to None, str(None) = "None"
+            routes={"true": "next_conn", "false": "error_sink"},
+        )
+        contract = _make_contract()
+        token = _make_token(contract=contract)
+        ctx = _make_ctx()
+
+        # "None" is not in routes, so this raises ValueError
+        with pytest.raises(ValueError, match="None"):
+            executor.execute_config_gate(config, "cg_1", token, ctx)
+
+        failed_calls = [call for call in recorder.complete_node_state.call_args_list if call.kwargs.get("status") == NodeStateStatus.FAILED]
+        assert len(failed_calls) >= 1
+
+        error_obj = failed_calls[0].kwargs.get("error")
+        assert isinstance(error_obj, ExecutionError)
+
+        # Verify serialization: 'type' key with value 'ValueError'
+        error_dict = error_obj.to_dict()
+        assert error_dict["type"] == "ValueError"
+        assert "exception_type" not in error_dict

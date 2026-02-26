@@ -992,9 +992,9 @@ class TestHTTPSpecificBehavior:
         transform: LLMTransform,
         collector: CollectorOutputPort,
     ) -> None:
-        """Missing expected field in LLM JSON response stores None via .get()."""
-        # Response has 'score' but missing 'rationale' — output_fields use
-        # parsed.get(field.suffix) which returns None for missing fields
+        """Missing expected field in LLM JSON response is an error, not silent None."""
+        # Response has 'score' but missing 'rationale' — field presence is
+        # validated at the Tier 3 boundary, producing a clear error.
         transform._provider.execute_query.return_value = make_query_result(
             {"score": 85}  # Missing 'rationale'
         )
@@ -1016,12 +1016,11 @@ class TestHTTPSpecificBehavior:
         assert len(collector.results) == 1
         _, result, _state_id = collector.results[0]
         assert isinstance(result, TransformResult), f"Expected TransformResult, got {type(result)}"
-        # MultiQueryStrategy uses parsed.get(field.suffix) which returns None
-        # for missing fields — the query still succeeds
-        assert result.status == "success"
-        assert result.row is not None
-        # The missing field is None
-        assert result.row["cs1_diagnosis_rationale"] is None
+        assert result.status == "error"
+        assert result.reason is not None
+        assert result.reason["reason"] == "missing_output_field"
+        assert result.reason["field"] == "rationale"
+        assert "score" in result.reason["available_fields"]
 
     def test_handles_connection_error(
         self,

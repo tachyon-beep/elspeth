@@ -241,8 +241,8 @@ class TestLangfuseIntegration:
 class TestGracefulDegradation:
     """Tests for graceful degradation when SDKs are not installed."""
 
-    def test_langfuse_warning_when_not_installed(self) -> None:
-        """NoOpLangfuseTracer returned when Langfuse SDK not installed."""
+    def test_langfuse_raises_when_not_installed(self) -> None:
+        """RuntimeError raised when Langfuse SDK not installed but configured."""
         import builtins
 
         # Store the original import function
@@ -253,10 +253,12 @@ class TestGracefulDegradation:
                 raise ImportError("No module named 'langfuse'")
             return original_import(name, *args, **kwargs)
 
-        # Mock the import at __init__ time (when create_langfuse_tracer is called)
+        # Missing Langfuse package with explicit config is a startup error —
+        # the user has a reasonable expectation that configured tracing is active.
         with (
             patch.dict(sys.modules, {"langfuse": None}),
             patch.object(builtins, "__import__", side_effect=mock_import),
+            pytest.raises(RuntimeError, match=r"langfuse.*not installed"),
         ):
             config = _make_azure_config(
                 tracing={
@@ -265,18 +267,13 @@ class TestGracefulDegradation:
                     "secret_key": "sk-test",
                 }
             )
-            transform = LLMTransform(config)
+            LLMTransform(config)
 
-            # Factory should have returned NoOpLangfuseTracer
-            assert isinstance(transform._tracer, NoOpLangfuseTracer)
+    def test_tracing_raises_when_config_incomplete_and_not_installed(self) -> None:
+        """RuntimeError when Langfuse config is incomplete AND package missing.
 
-    def test_tracing_inactive_when_config_validation_fails(self) -> None:
-        """NoOpLangfuseTracer when Langfuse config is incomplete (missing keys).
-
-        create_langfuse_tracer attempts to construct Langfuse(public_key=None,
-        secret_key=None, ...) which may raise or return a broken client depending
-        on the SDK version. We mock the import to force ImportError, ensuring
-        NoOpLangfuseTracer is returned for incomplete config.
+        Even with incomplete config (missing keys), the user explicitly asked
+        for langfuse tracing. Missing package is a startup error.
         """
         import builtins
 
@@ -290,6 +287,7 @@ class TestGracefulDegradation:
         with (
             patch.dict(sys.modules, {"langfuse": None}),
             patch.object(builtins, "__import__", side_effect=mock_import),
+            pytest.raises(RuntimeError, match=r"langfuse.*not installed"),
         ):
             config = _make_azure_config(
                 tracing={
@@ -297,10 +295,7 @@ class TestGracefulDegradation:
                     # Missing public_key and secret_key
                 }
             )
-            transform = LLMTransform(config)
-
-            # With langfuse unavailable, factory returns NoOpLangfuseTracer
-            assert isinstance(transform._tracer, NoOpLangfuseTracer)
+            LLMTransform(config)
 
 
 class TestTracingDisabled:

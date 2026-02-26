@@ -561,8 +561,8 @@ class TestMultiQueryJSONExtraction:
         # Raw content also stored for audit
         assert output["quality_llm_response"] == '{"score": 85, "label": "high quality"}'
 
-    def test_output_fields_missing_field_returns_none(self) -> None:
-        """When a field is missing from JSON response, it stores None."""
+    def test_output_fields_missing_field_returns_error(self) -> None:
+        """When a declared field is missing from LLM JSON response, return error."""
         from elspeth.plugins.llm.transform import LLMTransform
 
         config = _make_config(
@@ -588,11 +588,11 @@ class TestMultiQueryJSONExtraction:
         transform._provider = mock_provider
 
         result = transform._process_row(_make_row(), _make_ctx())
-        assert result.status == "success"
-        assert result.row is not None
-        output = result.row.to_dict()
-        assert output["q1_score"] == 42
-        assert output["q1_missing_field"] is None
+        assert result.status == "error"
+        assert result.reason is not None
+        assert result.reason["reason"] == "missing_output_field"
+        assert result.reason["field"] == "missing_field"
+        assert "score" in result.reason["available_fields"]
 
     def test_output_fields_json_parse_failure_returns_error(self) -> None:
         """When LLM returns invalid JSON and output_fields expects JSON, return error."""

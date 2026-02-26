@@ -367,9 +367,8 @@ class TestContentFilteredNoneResponse:
     When content moderation filters a response, OpenRouter returns:
     {"choices": [{"message": {"content": null}}]}
 
-    The plugin extracts content via choices[0]["message"]["content"],
-    which yields Python None. This must not crash — it should be stored
-    as None (a valid signal that content was filtered).
+    The plugin detects null content and returns an error with
+    reason="content_filtered" — matching the unified provider pattern.
     """
 
     @pytest.fixture
@@ -381,11 +380,11 @@ class TestContentFilteredNoneResponse:
     def recorder(self, db: LandscapeDB) -> LandscapeRecorder:
         return LandscapeRecorder(db)
 
-    def test_null_content_stored_as_none(self, chaosllm_server, recorder: LandscapeRecorder) -> None:
-        """Content-filtered response with null content produces row with None.
+    def test_null_content_detected_as_content_filtered(self, chaosllm_server, recorder: LandscapeRecorder) -> None:
+        """Content-filtered response with null content produces error row.
 
-        This validates that the plugin doesn't crash on None content
-        (related to P0 NoneType crash pattern in openrouter_multi_query).
+        This validates that the plugin detects null content (content filtering)
+        and records it as an error rather than silently passing None through.
         """
         run_id, _, state_id = _setup_recorder_state(recorder)
         ctx = _make_real_context(recorder, run_id, state_id)
@@ -416,12 +415,11 @@ class TestContentFilteredNoneResponse:
         assert result.rows is not None
         assert len(result.rows) == 1
 
-        # Content is None (filtered) — this is a valid output, not an error
+        # Null content is detected as content filtering — recorded as error row
         output = result.rows[0]
         assert output["llm_response"] is None
-        # No error marker — null content is "success" (content was filtered,
-        # but the API call itself succeeded)
-        assert output.get("llm_response_error") is None
+        assert output["llm_response_error"] is not None
+        assert output["llm_response_error"]["reason"] == "content_filtered"
 
         transform.close()
 

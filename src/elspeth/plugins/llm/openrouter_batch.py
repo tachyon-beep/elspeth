@@ -54,6 +54,18 @@ from elspeth.plugins.schema_factory import create_schema_from_config
 if TYPE_CHECKING:
     from elspeth.core.landscape.recorder import LandscapeRecorder
 
+import structlog
+
+_logger = structlog.get_logger(__name__)
+
+
+def _warn_telemetry_before_start(event: Any) -> None:
+    """Default telemetry callback before on_start() — warns instead of silently dropping."""
+    _logger.warning(
+        "telemetry_emit called before on_start() — event dropped",
+        event_type=type(event).__name__,
+    )
+
 
 @dataclass(frozen=True, slots=True)
 class _RowOutcome:
@@ -223,7 +235,7 @@ class OpenRouterBatchLLMTransform(BaseTransform):
         # Recorder and telemetry references (set in on_start)
         self._recorder: LandscapeRecorder | None = None
         self._run_id: str = ""
-        self._telemetry_emit: Callable[[Any], None] = lambda event: None
+        self._telemetry_emit: Callable[[Any], None] = _warn_telemetry_before_start
         self._limiter: Any = None  # RateLimiter | NoOpLimiter | None
 
         # HTTP client cache — one per state_id for call_index uniqueness.
@@ -681,6 +693,17 @@ class OpenRouterBatchLLMTransform(BaseTransform):
                     "reason": "malformed_response",
                     "error": f"{type(e).__name__}: {e}",
                     "response_keys": list(data.keys()) if isinstance(data, dict) else None,
+                },
+            )
+
+        # Null content = content filtered by provider (Tier 3 boundary).
+        # Matches the unified provider pattern in providers/openrouter.py.
+        if content is None:
+            return _RowOutcome(
+                ok=False,
+                error={
+                    "reason": "content_filtered",
+                    "error": "LLM returned null content (likely content-filtered by provider)",
                 },
             )
 

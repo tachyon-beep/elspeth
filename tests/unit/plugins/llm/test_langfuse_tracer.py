@@ -13,6 +13,8 @@ from __future__ import annotations
 from typing import Any
 from unittest.mock import MagicMock, patch
 
+import pytest
+
 from elspeth.contracts.token_usage import TokenUsage
 from elspeth.plugins.llm.langfuse import (
     ActiveLangfuseTracer,
@@ -65,7 +67,7 @@ class TestCreateLangfuseTracer:
         assert isinstance(tracer, PatchedActiveTracer)
         assert tracer.transform_name == "test_transform"
 
-    def test_create_langfuse_not_installed_logs_warning_returns_noop(self) -> None:
+    def test_create_langfuse_not_installed_raises_runtime_error(self) -> None:
         import builtins
 
         config = LangfuseTracingConfig(
@@ -82,15 +84,12 @@ class TestCreateLangfuseTracer:
 
         with (
             patch("builtins.__import__", side_effect=mock_import),
-            patch("elspeth.plugins.llm.langfuse.logger") as mock_logger,
+            pytest.raises(RuntimeError, match=r"langfuse.*not installed"),
         ):
-            tracer = create_langfuse_tracer(
+            create_langfuse_tracer(
                 transform_name="test_transform",
                 tracing_config=config,
             )
-        assert isinstance(tracer, NoOpLangfuseTracer)
-        mock_logger.warning.assert_called_once()
-        assert "not installed" in mock_logger.warning.call_args[0][0]
 
 
 # ── NoOp tracer tests ─────────────────────────────────────────────

@@ -163,7 +163,9 @@ class AzureLLMProvider:
                 response_format=response_format,
             )
 
-            # Extract finish_reason from raw_response (SDK-validated API response — Tier 2)
+            # Extract finish_reason from raw_response.
+            # raw_response is the Azure SDK's deserialized API response (Tier 3
+            # external boundary — SDK structure may change between versions).
             finish_reason = None
             if response.raw_response is not None:
                 choices = response.raw_response.get("choices", [])
@@ -171,6 +173,11 @@ class AzureLLMProvider:
                     raw_fr = choices[0].get("finish_reason")
                     if raw_fr is not None:
                         finish_reason = parse_finish_reason(str(raw_fr))
+                else:
+                    logger.warning(
+                        "Azure SDK response missing choices — finish_reason unavailable",
+                        raw_response_keys=list(response.raw_response.keys()),
+                    )
 
             return LLMQueryResult(
                 content=response.content,
@@ -252,6 +259,11 @@ def _configure_azure_monitor(config: TracingConfig) -> bool:
         # which the OpenAI SDK instrumentor reads at trace emission time.
         import os
 
+        logger.warning(
+            "azure-ai-inference not installed — falling back to environment variable for content recording",
+            hint="Install azure-ai-inference for full tracing support",
+            fallback_env_var="AZURE_TRACING_GEN_AI_CONTENT_RECORDING_ENABLED",
+        )
         os.environ["AZURE_TRACING_GEN_AI_CONTENT_RECORDING_ENABLED"] = str(config.enable_content_recording).lower()
 
     return True

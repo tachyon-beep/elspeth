@@ -53,14 +53,26 @@ if TYPE_CHECKING:
 
 logger = structlog.get_logger(__name__)
 
+
+def _warn_telemetry_before_start(event: Any) -> None:
+    """Default telemetry callback before on_start() — warns instead of silently dropping."""
+    logger.warning(
+        "telemetry_emit called before on_start() — event dropped",
+        event_type=type(event).__name__,
+    )
+
+
 # ---------------------------------------------------------------------------
 # Provider registry — single source of truth for both config parsing and
 # provider instantiation. Eliminates the sync failure mode of two dispatch tables.
 # ---------------------------------------------------------------------------
 
-# NOTE: type[LLMProvider] won't work for concrete classes implementing a Protocol.
-# The concrete classes are structurally compatible — mypy verifies this.
-_PROVIDERS: dict[str, tuple[type[LLMConfig], Any]] = {
+# NOTE: type[LLMProvider] won't work here — mypy doesn't support type[Protocol]
+# for structural subtyping. The concrete classes (AzureLLMProvider,
+# OpenRouterLLMProvider) are verified against LLMProvider by mypy at their
+# definition sites. The provider class is stored here for documentation only —
+# actual construction uses isinstance narrowing in _create_provider().
+_PROVIDERS: dict[str, tuple[type[LLMConfig], type]] = {
     "azure": (AzureOpenAIConfig, AzureLLMProvider),
     "openrouter": (OpenRouterConfig, OpenRouterLLMProvider),
 }
@@ -458,10 +470,24 @@ class MultiQueryStrategy:
                         },
                         retryable=False,
                     )
-                # Extract typed fields into prefixed output columns
+                # Extract typed fields into prefixed output columns.
+                # Validate field presence — Tier 3 boundary: if the LLM omitted
+                # a declared field, that's an error, not a silent None.
                 for field in spec.output_fields:
                     field_key = f"{spec.name}_{field.suffix}"
-                    accumulated_outputs[field_key] = parsed.get(field.suffix)
+                    if field.suffix not in parsed:
+                        return TransformResult.error(
+                            {
+                                "reason": "missing_output_field",
+                                "query_name": spec.name,
+                                "query_index": query_idx,
+                                "field": field.suffix,
+                                "available_fields": list(parsed.keys()),
+                                "discarded_successful_queries": query_idx,
+                            },
+                            retryable=False,
+                        )
+                    accumulated_outputs[field_key] = parsed[field.suffix]
                 # Also store raw content for audit traceability
                 accumulated_outputs[f"{spec.name}_{self.response_field}"] = content
             else:
@@ -645,7 +671,7 @@ class LLMTransform(BaseTransform, BatchTransformMixin):
         # Recorder, telemetry, rate limit (set in on_start)
         self._recorder: LandscapeRecorder | None = None
         self._run_id: str = ""
-        self._telemetry_emit: Callable[[Any], None] = lambda event: None
+        self._telemetry_emit: Callable[[Any], None] = _warn_telemetry_before_start
         self._limiter: Any = None
 
         # Batch processing state

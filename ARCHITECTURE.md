@@ -293,7 +293,8 @@ C4Component
         Component(protocols, "Protocols", "Python", "SourceProtocol, TransformProtocol, etc.")
         Component(base, "Base Classes", "Python ABC", "BaseSource, BaseTransform, etc.")
         Component(results, "Results", "Python", "TransformResult, SourceRow, etc.")
-        Component(context, "PluginContext", "Python", "Runtime context for plugins")
+        Component(context, "PluginContext", "Python", "Runtime context with phase-typed protocols")
+        Component(contexts, "Phase Protocols", "Python", "SourceContext / TransformContext / SinkContext / LifecycleContext")
         Component(manager, "PluginManager", "pluggy", "Discovery and registration")
         Component(hookspecs, "Hookspecs", "pluggy", "Hook specifications")
     }
@@ -359,7 +360,7 @@ C4Component
 | **Protocols** | 4 runtime-checkable interfaces (Source, Transform, BatchTransform, Sink) |
 | **Base Classes** | Abstract implementations with common functionality |
 | **Results** | Typed results (`TransformResult`, `SourceRow`) |
-| **PluginContext** | Runtime context passed to all plugin methods |
+| **PluginContext** | Runtime context passed to all plugin methods — phase-typed via `SourceContext`, `TransformContext`, `SinkContext`, `LifecycleContext` protocols (defined in `contracts/contexts.py`) |
 | **PluginManager** | pluggy-based discovery and registration |
 | **Sources** | 4 plugins (csv, json, azure_blob, null) |
 | **Transforms** | 11+ plugins (field_mapper, passthrough, truncate, batch_stats, web_scrape, etc.) |

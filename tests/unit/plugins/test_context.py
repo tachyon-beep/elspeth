@@ -1057,3 +1057,197 @@ class TestRecordCallTelemetryResponseHash:
         assert len(emitted_events) == 1
         # None is correct for truly missing response
         assert emitted_events[0].response_hash is None
+
+
+class TestRecordCallRawCallPayloadWrapping:
+    """Tests for RawCallPayload wrapping in record_call.
+
+    Verifies that request_data and response_data dicts are wrapped in
+    RawCallPayload before being passed to the Landscape recorder (lines 262-265
+    of plugin_context.py) and that None response_data is NOT wrapped.
+    """
+
+    def test_response_data_none_not_wrapped_in_raw_call_payload(self) -> None:
+        """record_call() with response_data=None should pass None, not RawCallPayload(None)."""
+        from unittest.mock import MagicMock
+
+        from elspeth.contracts.enums import CallStatus, CallType
+        from elspeth.contracts.plugin_context import PluginContext
+
+        mock_landscape = MagicMock()
+        mock_landscape.record_call.return_value = MagicMock(
+            call_id="call-001",
+            request_hash="req-hash",
+            response_hash=None,
+        )
+
+        ctx = PluginContext(
+            run_id="test-run",
+            config={},
+            landscape=mock_landscape,
+            state_id="state-001",
+        )
+
+        ctx.record_call(
+            call_type=CallType.HTTP,
+            provider="api.example.com",
+            request_data={"method": "HEAD"},
+            response_data=None,
+            latency_ms=5.0,
+            status=CallStatus.SUCCESS,
+        )
+
+        # Verify record_call was invoked with response_data=None (not wrapped)
+        call_kwargs = mock_landscape.record_call.call_args[1]
+        assert call_kwargs["response_data"] is None
+
+    def test_response_data_dict_wrapped_in_raw_call_payload(self) -> None:
+        """record_call() with response_data=dict should wrap in RawCallPayload."""
+        from unittest.mock import MagicMock
+
+        from elspeth.contracts.call_data import RawCallPayload
+        from elspeth.contracts.enums import CallStatus, CallType
+        from elspeth.contracts.plugin_context import PluginContext
+
+        mock_landscape = MagicMock()
+        mock_landscape.record_call.return_value = MagicMock(
+            call_id="call-002",
+            request_hash="req-hash",
+            response_hash="resp-hash",
+        )
+
+        ctx = PluginContext(
+            run_id="test-run",
+            config={},
+            landscape=mock_landscape,
+            state_id="state-001",
+        )
+
+        ctx.record_call(
+            call_type=CallType.HTTP,
+            provider="api.example.com",
+            request_data={"method": "GET"},
+            response_data={"key": "val"},
+            latency_ms=10.0,
+            status=CallStatus.SUCCESS,
+        )
+
+        call_kwargs = mock_landscape.record_call.call_args[1]
+        # response_data should be RawCallPayload, not a raw dict
+        assert isinstance(call_kwargs["response_data"], RawCallPayload)
+        assert call_kwargs["response_data"].to_dict() == {"key": "val"}
+
+    def test_request_data_wrapped_in_raw_call_payload(self) -> None:
+        """record_call() always wraps request_data in RawCallPayload."""
+        from unittest.mock import MagicMock
+
+        from elspeth.contracts.call_data import RawCallPayload
+        from elspeth.contracts.enums import CallStatus, CallType
+        from elspeth.contracts.plugin_context import PluginContext
+
+        mock_landscape = MagicMock()
+        mock_landscape.record_call.return_value = MagicMock(
+            call_id="call-003",
+            request_hash="req-hash",
+            response_hash=None,
+        )
+
+        ctx = PluginContext(
+            run_id="test-run",
+            config={},
+            landscape=mock_landscape,
+            state_id="state-001",
+        )
+
+        ctx.record_call(
+            call_type=CallType.HTTP,
+            provider="api.example.com",
+            request_data={"endpoint": "/test"},
+            response_data=None,
+            latency_ms=5.0,
+            status=CallStatus.SUCCESS,
+        )
+
+        call_kwargs = mock_landscape.record_call.call_args[1]
+        assert isinstance(call_kwargs["request_data"], RawCallPayload)
+        assert call_kwargs["request_data"].to_dict() == {"endpoint": "/test"}
+
+    def test_telemetry_event_request_payload_is_raw_call_payload(self) -> None:
+        """Telemetry event emitted by record_call has request_payload as RawCallPayload."""
+        from typing import Any
+        from unittest.mock import MagicMock
+
+        from elspeth.contracts.call_data import RawCallPayload
+        from elspeth.contracts.enums import CallStatus, CallType
+        from elspeth.contracts.plugin_context import PluginContext
+
+        emitted_events: list[Any] = []
+
+        def capture_telemetry(event: Any) -> None:
+            emitted_events.append(event)
+
+        mock_landscape = MagicMock()
+        mock_landscape.record_call.return_value = MagicMock(
+            call_id="call-004",
+            request_hash="req-hash",
+            response_hash="resp-hash",
+        )
+
+        ctx = PluginContext(
+            run_id="test-run",
+            config={},
+            landscape=mock_landscape,
+            state_id="state-001",
+            telemetry_emit=capture_telemetry,
+        )
+
+        ctx.record_call(
+            call_type=CallType.HTTP,
+            provider="api.example.com",
+            request_data={"method": "POST", "body": "data"},
+            response_data={"status": 200},
+            latency_ms=12.0,
+            status=CallStatus.SUCCESS,
+        )
+
+        assert len(emitted_events) == 1
+        event = emitted_events[0]
+        assert isinstance(event.request_payload, RawCallPayload)
+        assert isinstance(event.response_payload, RawCallPayload)
+
+    def test_operation_context_also_wraps_in_raw_call_payload(self) -> None:
+        """record_call() via operation_id path also wraps in RawCallPayload."""
+        from unittest.mock import MagicMock
+
+        from elspeth.contracts.call_data import RawCallPayload
+        from elspeth.contracts.enums import CallStatus, CallType
+        from elspeth.contracts.plugin_context import PluginContext
+
+        mock_landscape = MagicMock()
+        mock_landscape.record_operation_call.return_value = MagicMock(
+            call_id="op-call-001",
+            request_hash="req-hash",
+            response_hash="resp-hash",
+        )
+
+        ctx = PluginContext(
+            run_id="test-run",
+            config={},
+            landscape=mock_landscape,
+            operation_id="operation-001",
+        )
+
+        ctx.record_call(
+            call_type=CallType.HTTP,
+            provider="api.example.com",
+            request_data={"url": "https://example.com"},
+            response_data={"body": "response"},
+            latency_ms=20.0,
+            status=CallStatus.SUCCESS,
+        )
+
+        call_kwargs = mock_landscape.record_operation_call.call_args[1]
+        assert isinstance(call_kwargs["request_data"], RawCallPayload)
+        assert isinstance(call_kwargs["response_data"], RawCallPayload)
+        assert call_kwargs["request_data"].to_dict() == {"url": "https://example.com"}
+        assert call_kwargs["response_data"].to_dict() == {"body": "response"}

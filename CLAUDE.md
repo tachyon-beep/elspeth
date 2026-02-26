@@ -648,7 +648,7 @@ src/elspeth/
 │   ├── operations.py   # Operation type definitions
 │   ├── payload_store.py # Content-addressable storage for large blobs
 │   └── templates.py    # Jinja2 field extraction
-├── contracts/          # Type contracts, schemas, protocol definitions, and hashing primitives
+├── contracts/          # Type contracts, schemas, protocol definitions, hashing primitives, and phase-typed contexts
 ├── engine/
 │   ├── orchestrator/   # Full run lifecycle management (core, aggregation, export, outcomes, validation)
 │   ├── executors/      # Transform, gate, sink, aggregation executors

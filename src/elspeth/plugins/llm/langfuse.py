@@ -113,11 +113,22 @@ class ActiveLangfuseTracer:
         extra_metadata: dict[str, Any] | None = None,
     ) -> None:
         """Record successful LLM call as Langfuse span + generation."""
-        try:
-            metadata = {"token_id": token_id, "plugin": self.transform_name, "query": query_name}
-            if extra_metadata:
-                metadata.update(extra_metadata)
+        # Build metadata and kwargs (OUR CODE — let bugs crash immediately)
+        metadata = {"token_id": token_id, "plugin": self.transform_name, "query": query_name}
+        if extra_metadata:
+            metadata.update(extra_metadata)
 
+        update_kwargs: dict[str, Any] = {"output": response_content}
+        if usage is not None and usage.is_known:
+            update_kwargs["usage_details"] = {
+                "input": usage.prompt_tokens,
+                "output": usage.completion_tokens,
+            }
+        if latency_ms is not None:
+            update_kwargs["metadata"] = {"latency_ms": latency_ms}
+
+        # Langfuse SDK calls (EXTERNAL boundary — catch SDK/transport errors)
+        try:
             with (
                 self.client.start_as_current_observation(
                     as_type="span",
@@ -131,17 +142,6 @@ class ActiveLangfuseTracer:
                     input=[{"role": "user", "content": prompt}],
                 ) as generation,
             ):
-                update_kwargs: dict[str, Any] = {"output": response_content}
-
-                if usage is not None and usage.is_known:
-                    update_kwargs["usage_details"] = {
-                        "input": usage.prompt_tokens,
-                        "output": usage.completion_tokens,
-                    }
-
-                if latency_ms is not None:
-                    update_kwargs["metadata"] = {"latency_ms": latency_ms}
-
                 generation.update(**update_kwargs)
         except Exception as e:
             _handle_trace_failure("langfuse_trace_failed", self.transform_name, e)
@@ -157,11 +157,20 @@ class ActiveLangfuseTracer:
         extra_metadata: dict[str, Any] | None = None,
     ) -> None:
         """Record failed LLM call as Langfuse span + generation with ERROR level."""
-        try:
-            metadata = {"token_id": token_id, "plugin": self.transform_name, "query": query_name}
-            if extra_metadata:
-                metadata.update(extra_metadata)
+        # Build metadata and kwargs (OUR CODE — let bugs crash immediately)
+        metadata = {"token_id": token_id, "plugin": self.transform_name, "query": query_name}
+        if extra_metadata:
+            metadata.update(extra_metadata)
 
+        update_kwargs: dict[str, Any] = {
+            "level": "ERROR",
+            "status_message": error_message,
+        }
+        if latency_ms is not None:
+            update_kwargs["metadata"] = {"latency_ms": latency_ms}
+
+        # Langfuse SDK calls (EXTERNAL boundary — catch SDK/transport errors)
+        try:
             with (
                 self.client.start_as_current_observation(
                     as_type="span",
@@ -175,14 +184,6 @@ class ActiveLangfuseTracer:
                     input=[{"role": "user", "content": prompt}],
                 ) as generation,
             ):
-                update_kwargs: dict[str, Any] = {
-                    "level": "ERROR",
-                    "status_message": error_message,
-                }
-
-                if latency_ms is not None:
-                    update_kwargs["metadata"] = {"latency_ms": latency_ms}
-
                 generation.update(**update_kwargs)
         except Exception as e:
             _handle_trace_failure("langfuse_error_trace_failed", self.transform_name, e)
@@ -226,6 +227,12 @@ def create_langfuse_tracer(
     if tracing_config is None:
         return NoOpLangfuseTracer()
     if not isinstance(tracing_config, LangfuseTracingConfig):
+        # User provided tracing config but it's not Langfuse — warn so they
+        # know tracing is inactive (e.g. typo in provider name).
+        logger.warning(
+            "Tracing config provided but not recognized as Langfuse — tracing disabled",
+            tracing_provider=tracing_config.provider,
+        )
         return NoOpLangfuseTracer()
 
     try:
@@ -245,9 +252,10 @@ def create_langfuse_tracer(
         )
         return ActiveLangfuseTracer(transform_name=transform_name, client=client)
     except ImportError:
-        logger.warning(
-            "Langfuse tracing requested but package not installed",
-            provider="langfuse",
-            hint="Install with: uv pip install elspeth[tracing-langfuse]",
-        )
-        return NoOpLangfuseTracer()
+        # User explicitly configured Langfuse tracing but the package is missing.
+        # This is a startup error, not a silent degradation — the user has a
+        # reasonable expectation that configured tracing is active.
+        raise RuntimeError(
+            "Langfuse tracing is configured but the 'langfuse' package is not installed. "
+            "Install with: uv pip install 'elspeth[tracing-langfuse]'"
+        ) from None

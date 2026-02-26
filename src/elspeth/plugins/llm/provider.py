@@ -49,6 +49,11 @@ def parse_finish_reason(raw: str | None) -> FinishReason | None:
 
     Providers should normalize their known finish reasons BEFORE calling
     this function (e.g. Anthropic "end_turn" → "stop").
+
+    IMPORTANT: Callers MUST NOT call this with raw=None to represent
+    "no finish_reason in response" — pass None directly instead. This
+    function should only be called when a non-None raw value exists.
+    The return value of None means "provider sent an unrecognized value."
     """
     if raw is None:
         return None
@@ -56,9 +61,12 @@ def parse_finish_reason(raw: str | None) -> FinishReason | None:
         return FinishReason(raw)
     except ValueError:
         logger.warning(
-            "Unknown LLM finish_reason — not acting on it",
+            "Unknown LLM finish_reason — treating as normal completion",
             finish_reason=raw,
             known_values=[e.value for e in FinishReason],
+            action="Unrecognized finish reasons are not treated as errors. "
+            "If this value indicates a problem (e.g. safety filter), "
+            "add it to FinishReason enum and handle in LLMTransform.",
         )
         return None
 

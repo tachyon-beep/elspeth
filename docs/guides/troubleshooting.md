@@ -121,6 +121,54 @@ docker run --rm \
 
 ---
 
+### LLM Transform Errors
+
+#### Error: `missing_output_field` in error_json
+
+**Cause:** The LLM returned valid JSON, but a required output field was not present in the response. This commonly happens when the LLM generates a response that doesn't match the expected schema.
+
+**Example error_json:**
+```json
+{
+  "reason": "missing_output_field",
+  "query_name": "classify",
+  "field": "category",
+  "available_fields": ["label", "confidence"]
+}
+```
+
+**Solution:**
+
+1. Check your prompt template — ensure it instructs the LLM to include the required fields
+2. Review the `available_fields` in the error to see what the LLM actually returned
+3. Consider adding few-shot examples to your prompt to guide the output format
+4. If the field is genuinely optional, remove it from `output_fields` in your query spec
+
+#### Error: `content_filtered` in error_json
+
+**Cause:** The LLM provider returned a null content response, typically because the request or response was flagged by the provider's content safety filters.
+
+**Solution:**
+
+1. Review the prompt being sent — check for content that might trigger safety filters
+2. Check the provider's content policy documentation
+3. For Azure OpenAI, review the content filtering configuration on your deployment
+4. The row will be marked as errored (not quarantined) — investigate via:
+   ```bash
+   elspeth explain --run <run_id> --database ./runs/audit.db
+   ```
+
+#### Error: `RuntimeError: langfuse ... not installed`
+
+**Cause:** Langfuse tracing is configured in your pipeline YAML but the `langfuse` package is not installed. As of RC3.3, this fails fast instead of silently degrading.
+
+**Solution:**
+```bash
+uv pip install 'elspeth[tracing-langfuse]'
+```
+
+---
+
 ## Pipeline Issues
 
 ### Pipeline Hangs or Times Out
