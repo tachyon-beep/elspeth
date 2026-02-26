@@ -1558,3 +1558,79 @@ class TestMultiQueryParallelExecution:
         transform._provider = Mock()
         transform.close()
         # After close, executor should be shut down (no error = success)
+
+
+# ---------------------------------------------------------------------------
+# _configure_azure_monitor hardening
+# ---------------------------------------------------------------------------
+
+
+class TestConfigureAzureMonitor:
+    """Tests for _configure_azure_monitor hardening."""
+
+    def test_returns_false_when_azure_monitor_sdk_not_installed(self) -> None:
+        """_configure_azure_monitor returns False (not raises) when SDK missing."""
+        from elspeth.plugins.llm.providers.azure import (
+            _configure_azure_monitor,
+            _reset_azure_monitor_state,
+        )
+        from elspeth.plugins.llm.tracing import AzureAITracingConfig
+
+        _reset_azure_monitor_state()
+        config = AzureAITracingConfig(connection_string="InstrumentationKey=test")
+        with patch(
+            "elspeth.plugins.llm.providers.azure.configure_azure_monitor",
+            None,  # Simulate missing SDK: configure_azure_monitor is None
+        ):
+            result = _configure_azure_monitor(config)
+            assert result is False
+        _reset_azure_monitor_state()
+
+    def test_idempotency_second_call_returns_true_without_reconfiguring(self) -> None:
+        """Second call to _configure_azure_monitor returns True without calling SDK again."""
+        from elspeth.plugins.llm.providers.azure import (
+            _configure_azure_monitor,
+            _reset_azure_monitor_state,
+        )
+        from elspeth.plugins.llm.tracing import AzureAITracingConfig
+
+        _reset_azure_monitor_state()  # Ensure clean state
+        config = AzureAITracingConfig(connection_string="InstrumentationKey=test")
+        with patch(
+            "elspeth.plugins.llm.providers.azure.configure_azure_monitor",
+        ) as mock_sdk:
+            # First call — configures
+            result1 = _configure_azure_monitor(config)
+            assert result1 is True
+            assert mock_sdk.call_count == 1
+
+            # Second call — idempotent, skips SDK
+            result2 = _configure_azure_monitor(config)
+            assert result2 is True
+            assert mock_sdk.call_count == 1  # NOT called again
+
+        _reset_azure_monitor_state()  # Clean up
+
+    def test_idempotency_logs_warning_on_second_call(self) -> None:
+        """Second call logs a warning about duplicate initialization."""
+        from elspeth.plugins.llm.providers.azure import (
+            _configure_azure_monitor,
+            _reset_azure_monitor_state,
+        )
+        from elspeth.plugins.llm.tracing import AzureAITracingConfig
+
+        _reset_azure_monitor_state()
+        config = AzureAITracingConfig(connection_string="InstrumentationKey=test")
+        with (
+            patch("elspeth.plugins.llm.providers.azure.configure_azure_monitor"),
+            patch("elspeth.plugins.llm.providers.azure.logger") as mock_logger,
+        ):
+            _configure_azure_monitor(config)
+            mock_logger.reset_mock()  # Clear warnings from first call (env-var fallback)
+
+            _configure_azure_monitor(config)
+            mock_logger.warning.assert_called_once_with(
+                "Azure Monitor already configured — skipping duplicate initialization",
+            )
+
+        _reset_azure_monitor_state()

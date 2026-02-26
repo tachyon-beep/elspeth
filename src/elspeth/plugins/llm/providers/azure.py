@@ -230,22 +230,53 @@ class AzureLLMProvider:
             self._underlying_client = None
 
 
+# Optional SDK import — module-level so tests can mock it.
+try:
+    from azure.monitor.opentelemetry import (
+        configure_azure_monitor,  # type: ignore[import-not-found,import-untyped,attr-defined]  # optional dep: azure-monitor-opentelemetry
+    )
+except ImportError:
+    configure_azure_monitor = None  # type: ignore[assignment,misc]
+
+# Module-level idempotency guard — Azure Monitor is process-global.
+_azure_monitor_configured: bool = False
+
+
+def _reset_azure_monitor_state() -> None:
+    """Reset module state for testing only."""
+    global _azure_monitor_configured
+    _azure_monitor_configured = False
+
+
 def _configure_azure_monitor(config: TracingConfig) -> bool:
     """Configure Azure Monitor (module-level to allow mocking).
 
     Returns True on success, False on failure.
+    Idempotent: second call logs a warning and returns True.
     """
-    from azure.monitor.opentelemetry import (
-        configure_azure_monitor,  # type: ignore[import-not-found,import-untyped,attr-defined]  # optional dep: azure-monitor-opentelemetry
-    )
+    global _azure_monitor_configured
 
     if not isinstance(config, AzureAITracingConfig):
         return False
 
-    configure_azure_monitor(
-        connection_string=config.connection_string,
-        enable_live_metrics=config.enable_live_metrics,
-    )
+    if _azure_monitor_configured:
+        logger.warning(
+            "Azure Monitor already configured — skipping duplicate initialization",
+        )
+        return True
+
+    try:
+        configure_azure_monitor(
+            connection_string=config.connection_string,
+            enable_live_metrics=config.enable_live_metrics,
+        )
+    except TypeError:
+        # configure_azure_monitor is None — SDK not installed at module level
+        logger.warning(
+            "azure-monitor-opentelemetry is not installed — Azure AI tracing inactive",
+            hint="Install with: uv pip install 'elspeth[azure]'",
+        )
+        return False
 
     # Wire enable_content_recording to the Azure AI Inference tracing SDK.
     # Without this, the config field is accepted and logged but never applied,
@@ -266,4 +297,5 @@ def _configure_azure_monitor(config: TracingConfig) -> bool:
         )
         os.environ["AZURE_TRACING_GEN_AI_CONTENT_RECORDING_ENABLED"] = str(config.enable_content_recording).lower()
 
+    _azure_monitor_configured = True
     return True
