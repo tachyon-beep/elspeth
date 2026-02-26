@@ -370,6 +370,19 @@ C4Component
 
 **Total Plugin Ecosystem:** 29+ plugins across 4 categories
 
+#### Plugin Context Protocols
+
+Plugin methods accept narrowed protocol types instead of the full `PluginContext`:
+
+| Protocol | Used By | Key Fields |
+|----------|---------|------------|
+| `SourceContext` | `load()` | `run_id`, `node_id`, `record_validation_error()`, `record_call()` |
+| `TransformContext` | `process()` / `accept()` | `state_id`, `token`, `record_call()`, checkpoint API |
+| `SinkContext` | `write()` | `contract`, `landscape`, `run_id`, `record_call()` |
+| `LifecycleContext` | `on_start()` / `on_complete()` | `node_id`, `landscape`, `rate_limit_registry`, `telemetry_emit`, `payload_store` |
+
+The concrete `PluginContext` class (in `contracts/plugin_context.py`) structurally satisfies all 4 protocols. Engine executors mutate `PluginContext` fields between pipeline steps (`ctx.state_id = ...`, `ctx.token = ...`); plugins see narrowed read-only views via protocol typing. Protocol definitions live in `contracts/contexts.py`.
+
 ---
 
 ## Data Flow Diagrams
