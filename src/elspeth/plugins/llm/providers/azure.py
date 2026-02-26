@@ -265,18 +265,17 @@ def _configure_azure_monitor(config: TracingConfig) -> bool:
         )
         return True
 
-    try:
-        configure_azure_monitor(
-            connection_string=config.connection_string,
-            enable_live_metrics=config.enable_live_metrics,
-        )
-    except TypeError:
-        # configure_azure_monitor is None — SDK not installed at module level
-        logger.warning(
+    if configure_azure_monitor is None:
+        logger.warning(  # type: ignore[unreachable]  # runtime fallback when SDK not installed (see line 239)
             "azure-monitor-opentelemetry is not installed — Azure AI tracing inactive",
             hint="Install with: uv pip install 'elspeth[azure]'",
         )
         return False
+
+    configure_azure_monitor(
+        connection_string=config.connection_string,
+        enable_live_metrics=config.enable_live_metrics,
+    )
 
     # Wire enable_content_recording to the Azure AI Inference tracing SDK.
     # Without this, the config field is accepted and logged but never applied,

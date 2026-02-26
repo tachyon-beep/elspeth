@@ -339,9 +339,9 @@ class TestTracingDisabled:
     def test_azure_ai_tracing_results_in_noop(self) -> None:
         """Azure AI tracing config results in NoOpLangfuseTracer.
 
-        LLMTransform does not support Azure AI tracing directly.
-        AzureAITracingConfig is parsed but create_langfuse_tracer returns
-        NoOpLangfuseTracer for non-Langfuse configs.
+        Azure AI tracing is handled via _configure_azure_monitor() in on_start(),
+        not through the Langfuse tracer. The Langfuse factory returns
+        NoOpLangfuseTracer for AzureAITracingConfig since it's not a Langfuse config.
         """
         config = _make_azure_config(
             tracing={

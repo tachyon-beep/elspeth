@@ -1568,15 +1568,24 @@ class TestMultiQueryParallelExecution:
 class TestConfigureAzureMonitor:
     """Tests for _configure_azure_monitor hardening."""
 
-    def test_returns_false_when_azure_monitor_sdk_not_installed(self) -> None:
-        """_configure_azure_monitor returns False (not raises) when SDK missing."""
-        from elspeth.plugins.llm.providers.azure import (
-            _configure_azure_monitor,
-            _reset_azure_monitor_state,
-        )
-        from elspeth.plugins.llm.tracing import AzureAITracingConfig
+    @pytest.fixture(autouse=True)
+    def _reset_azure_monitor(self) -> Any:
+        """Reset module-level idempotency guard before and after each test.
+
+        Using autouse prevents test contamination if a test fails mid-execution —
+        the teardown (after yield) always runs regardless of test outcome.
+        """
+        from elspeth.plugins.llm.providers.azure import _reset_azure_monitor_state
 
         _reset_azure_monitor_state()
+        yield
+        _reset_azure_monitor_state()
+
+    def test_returns_false_when_sdk_is_none(self) -> None:
+        """_configure_azure_monitor returns False when SDK is None (not installed)."""
+        from elspeth.plugins.llm.providers.azure import _configure_azure_monitor
+        from elspeth.plugins.llm.tracing import AzureAITracingConfig
+
         config = AzureAITracingConfig(connection_string="InstrumentationKey=test")
         with patch(
             "elspeth.plugins.llm.providers.azure.configure_azure_monitor",
@@ -1584,17 +1593,47 @@ class TestConfigureAzureMonitor:
         ):
             result = _configure_azure_monitor(config)
             assert result is False
-        _reset_azure_monitor_state()
+
+    def test_real_sdk_typeerror_propagates(self) -> None:
+        """Real TypeError from SDK (e.g., bad keyword arg) propagates as crash.
+
+        After replacing the broad except TypeError with an explicit None check,
+        a real TypeError from the SDK itself must NOT be caught — it indicates
+        an incompatible SDK version or a bug in our call, both of which we
+        need to know about immediately.
+        """
+        from elspeth.plugins.llm.providers.azure import _configure_azure_monitor
+        from elspeth.plugins.llm.tracing import AzureAITracingConfig
+
+        config = AzureAITracingConfig(connection_string="InstrumentationKey=test")
+
+        def broken_sdk(**kwargs: Any) -> None:
+            raise TypeError("unexpected keyword argument 'enable_live_metrics'")
+
+        with (
+            patch("elspeth.plugins.llm.providers.azure.configure_azure_monitor", broken_sdk),
+            pytest.raises(TypeError, match="unexpected keyword argument"),
+        ):
+            _configure_azure_monitor(config)
+
+    def test_returns_false_for_non_azure_ai_config(self) -> None:
+        """_configure_azure_monitor returns False for non-AzureAITracingConfig.
+
+        Directly tests the isinstance guard at the top of the function,
+        rather than relying on indirect coverage through on_start().
+        """
+        from elspeth.plugins.llm.providers.azure import _configure_azure_monitor
+        from elspeth.plugins.llm.tracing import TracingConfig
+
+        config = TracingConfig(provider="none")
+        result = _configure_azure_monitor(config)
+        assert result is False
 
     def test_idempotency_second_call_returns_true_without_reconfiguring(self) -> None:
         """Second call to _configure_azure_monitor returns True without calling SDK again."""
-        from elspeth.plugins.llm.providers.azure import (
-            _configure_azure_monitor,
-            _reset_azure_monitor_state,
-        )
+        from elspeth.plugins.llm.providers.azure import _configure_azure_monitor
         from elspeth.plugins.llm.tracing import AzureAITracingConfig
 
-        _reset_azure_monitor_state()  # Ensure clean state
         config = AzureAITracingConfig(connection_string="InstrumentationKey=test")
         with patch(
             "elspeth.plugins.llm.providers.azure.configure_azure_monitor",
@@ -1609,17 +1648,11 @@ class TestConfigureAzureMonitor:
             assert result2 is True
             assert mock_sdk.call_count == 1  # NOT called again
 
-        _reset_azure_monitor_state()  # Clean up
-
     def test_idempotency_logs_warning_on_second_call(self) -> None:
         """Second call logs a warning about duplicate initialization."""
-        from elspeth.plugins.llm.providers.azure import (
-            _configure_azure_monitor,
-            _reset_azure_monitor_state,
-        )
+        from elspeth.plugins.llm.providers.azure import _configure_azure_monitor
         from elspeth.plugins.llm.tracing import AzureAITracingConfig
 
-        _reset_azure_monitor_state()
         config = AzureAITracingConfig(connection_string="InstrumentationKey=test")
         with (
             patch("elspeth.plugins.llm.providers.azure.configure_azure_monitor"),
@@ -1633,7 +1666,28 @@ class TestConfigureAzureMonitor:
                 "Azure Monitor already configured — skipping duplicate initialization",
             )
 
-        _reset_azure_monitor_state()
+    def test_failed_first_call_allows_retry(self) -> None:
+        """Failed first call (None SDK) does NOT set idempotency flag, allowing recovery.
+
+        If the first call fails because the SDK is not installed, a subsequent call
+        with a working SDK should succeed. The idempotency guard must only be set
+        on success.
+        """
+        from elspeth.plugins.llm.providers.azure import _configure_azure_monitor
+        from elspeth.plugins.llm.tracing import AzureAITracingConfig
+
+        config = AzureAITracingConfig(connection_string="InstrumentationKey=test")
+
+        # First call with None SDK — should fail
+        with patch("elspeth.plugins.llm.providers.azure.configure_azure_monitor", None):
+            result1 = _configure_azure_monitor(config)
+            assert result1 is False
+
+        # Second call with working SDK — should succeed (not blocked by idempotency)
+        with patch("elspeth.plugins.llm.providers.azure.configure_azure_monitor") as mock_sdk:
+            result2 = _configure_azure_monitor(config)
+            assert result2 is True
+            mock_sdk.assert_called_once()
 
 
 class TestAzureAITracingSetup:
@@ -1717,27 +1771,45 @@ class TestAzureAITracingOnStart:
     """Tests for _configure_azure_monitor() wiring in on_start()."""
 
     def test_on_start_calls_configure_azure_monitor(self) -> None:
-        """on_start() calls _configure_azure_monitor for AzureAITracingConfig."""
+        """on_start() calls _configure_azure_monitor for AzureAITracingConfig.
+
+        Also verifies success-path logging: logger.info is called with
+        "Azure AI tracing initialized" and the content_recording value.
+        """
         from elspeth.plugins.llm.tracing import AzureAITracingConfig
         from elspeth.plugins.llm.transform import LLMTransform
 
         config = _make_config(
             provider="azure",
-            tracing={"provider": "azure_ai", "connection_string": "InstrumentationKey=test"},
+            tracing={
+                "provider": "azure_ai",
+                "connection_string": "InstrumentationKey=test",
+                "enable_content_recording": True,
+            },
         )
         transform = LLMTransform(config)
         ctx = _make_lifecycle_ctx()
 
-        with patch(
-            "elspeth.plugins.llm.transform._configure_azure_monitor",
-            return_value=True,
-        ) as mock_configure:
+        with (
+            patch(
+                "elspeth.plugins.llm.transform._configure_azure_monitor",
+                return_value=True,
+            ) as mock_configure,
+            patch("elspeth.plugins.llm.transform.logger") as mock_logger,
+        ):
             transform.on_start(ctx)
 
             mock_configure.assert_called_once()
             call_arg = mock_configure.call_args.args[0]
             assert isinstance(call_arg, AzureAITracingConfig)
             assert call_arg.connection_string == "InstrumentationKey=test"
+
+            # Verify success-path logging includes content_recording value
+            mock_logger.info.assert_any_call(
+                "Azure AI tracing initialized",
+                provider="azure_ai",
+                content_recording=True,
+            )
 
     def test_on_start_configure_azure_monitor_failure_logs_warning(self) -> None:
         """on_start() logs warning when _configure_azure_monitor returns False."""

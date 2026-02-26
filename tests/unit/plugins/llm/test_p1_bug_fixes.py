@@ -657,6 +657,50 @@ class TestEnableContentRecording:
             if old_value is not None:
                 os.environ[env_key] = old_value
 
+    def test_enable_live_metrics_forwarded_when_true(self) -> None:
+        """enable_live_metrics=True is forwarded to configure_azure_monitor SDK call.
+
+        All existing tests use enable_live_metrics=False. This test catches
+        a hardcoded False that would pass all other tests but silently ignore
+        the user's configuration.
+        """
+        import sys
+
+        from elspeth.plugins.llm.providers.azure import (
+            _configure_azure_monitor,
+            _reset_azure_monitor_state,
+        )
+        from elspeth.plugins.llm.tracing import AzureAITracingConfig
+
+        _reset_azure_monitor_state()
+
+        config = AzureAITracingConfig(
+            connection_string="InstrumentationKey=test-key",
+            enable_content_recording=False,
+            enable_live_metrics=True,
+        )
+
+        mock_instrumentor_instance = Mock()
+        mock_instrumentor_class = Mock(return_value=mock_instrumentor_instance)
+
+        mock_tracing_module = Mock()
+        mock_tracing_module.AIInferenceInstrumentor = mock_instrumentor_class
+
+        try:
+            with (
+                patch("elspeth.plugins.llm.providers.azure.configure_azure_monitor") as mock_az_monitor,
+                patch.dict(sys.modules, {"azure.ai.inference.tracing": mock_tracing_module}),
+            ):
+                result = _configure_azure_monitor(config)
+
+            assert result is True
+            mock_az_monitor.assert_called_once_with(
+                connection_string="InstrumentationKey=test-key",
+                enable_live_metrics=True,
+            )
+        finally:
+            _reset_azure_monitor_state()
+
     def test_content_recording_false_env_var(self) -> None:
         """enable_content_recording=False sets env var to 'false'."""
         import os
