@@ -160,6 +160,7 @@ aggregations:
     plugin: batch_stats
     input: stats_input
     on_success: output
+    on_error: discard
     trigger:
       count: 10
     options:
@@ -259,6 +260,7 @@ aggregations:
     plugin: batch_stats
     input: stats_input
     on_success: output
+    on_error: discard
     trigger:
       count: 10
     options:
@@ -319,6 +321,7 @@ aggregations:
     plugin: batch_stats
     input: stats_input
     on_success: output
+    on_error: discard
     trigger:
       count: 10
     options:

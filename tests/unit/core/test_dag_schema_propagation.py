@@ -375,6 +375,7 @@ class TestAggregationSchemaConfigPropagation:
             plugin="mock_agg_transform",
             input="agg_in",
             on_success="output",
+            on_error="discard",
             trigger=trigger,
             output_mode="transform",
             options={"schema": {"mode": "observed"}},

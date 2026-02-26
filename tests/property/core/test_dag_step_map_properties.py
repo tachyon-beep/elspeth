@@ -97,6 +97,7 @@ def _build_graph(
                 plugin=f"{agg_name}_plugin",
                 input=agg_input,
                 on_success=agg_on_success,
+                on_error="discard",
                 trigger={"count": 1},
             ),
         )

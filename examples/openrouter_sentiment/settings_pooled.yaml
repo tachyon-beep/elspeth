@@ -14,6 +14,7 @@ transforms:
   name: sentiment_enrichment
   input: source_out
   on_success: output
+  on_error: discard
   options:
     provider: openrouter
     api_key: ${OPENROUTER_API_KEY}

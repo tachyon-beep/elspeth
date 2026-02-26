@@ -1282,6 +1282,7 @@ class TestAggregationExecutor:
             name="test_agg",
             plugin="batch_stats",
             input="default",
+            on_error="discard",
             trigger=TriggerConfig(count=count),
         )
         executor = AggregationExecutor(
@@ -2621,6 +2622,7 @@ class TestAggregationExecutorTerminality:
             name="test_agg",
             plugin="batch_stats",
             input="default",
+            on_error="discard",
             trigger=TriggerConfig(count=count),
         )
         executor = AggregationExecutor(

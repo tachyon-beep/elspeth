@@ -163,6 +163,7 @@ class TestAggregationSettings:
             trigger=TriggerConfig(count=100),
             output_mode="transform",
             input="source_out",
+            on_error="discard",
         )
         assert settings.name == "batch_stats"
         assert settings.plugin == "stats_aggregation"
@@ -179,6 +180,7 @@ class TestAggregationSettings:
             trigger=TriggerConfig(count=1000, timeout_seconds=3600.0),
             output_mode="transform",
             input="source_out",
+            on_error="discard",
         )
         assert settings.trigger.count == 1000
         assert settings.trigger.timeout_seconds == 3600.0
@@ -192,6 +194,7 @@ class TestAggregationSettings:
             plugin="stats_aggregation",
             trigger=TriggerConfig(count=100),
             input="source_out",
+            on_error="discard",
         )
         assert settings.output_mode == "transform"
 
@@ -205,6 +208,7 @@ class TestAggregationSettings:
             trigger=TriggerConfig(timeout_seconds=60.0),
             output_mode="passthrough",
             input="source_out",
+            on_error="discard",
         )
         assert settings.output_mode == "passthrough"
 
@@ -218,6 +222,7 @@ class TestAggregationSettings:
             trigger=TriggerConfig(count=50),
             output_mode="transform",
             input="source_out",
+            on_error="discard",
         )
         assert settings.output_mode == "transform"
 
@@ -232,6 +237,7 @@ class TestAggregationSettings:
                 trigger=TriggerConfig(count=100),
                 output_mode="invalid",  # type: ignore[arg-type]
                 input="source_out",
+                on_error="discard",
             )
 
     def test_aggregation_settings_requires_name(self) -> None:
@@ -243,6 +249,7 @@ class TestAggregationSettings:
                 plugin="stats_aggregation",
                 trigger=TriggerConfig(count=100),
                 input="source_out",
+                on_error="discard",
             )
 
     def test_aggregation_settings_options_default_empty(self) -> None:
@@ -254,6 +261,7 @@ class TestAggregationSettings:
             plugin="stats_aggregation",
             trigger=TriggerConfig(count=100),
             input="source_out",
+            on_error="discard",
         )
         assert settings.options == {}
 
@@ -267,6 +275,7 @@ class TestAggregationSettings:
             trigger=TriggerConfig(count=100),
             options={"fields": ["value"], "compute_mean": True},
             input="source_out",
+            on_error="discard",
         )
         assert settings.options == {"fields": ["value"], "compute_mean": True}
 
@@ -307,6 +316,7 @@ class TestElspethSettingsAggregations:
                     plugin="stats",
                     trigger=TriggerConfig(count=100),
                     input="source_out",
+                    on_error="discard",
                 ),
             ],
         )
@@ -333,12 +343,14 @@ class TestElspethSettingsAggregations:
                         plugin="stats",
                         trigger=TriggerConfig(count=100),
                         input="source_out",
+                        on_error="discard",
                     ),
                     AggregationSettings(
                         name="batch_stats",  # Duplicate!
                         plugin="other_stats",
                         trigger=TriggerConfig(timeout_seconds=30),
                         input="source_out",
+                        on_error="discard",
                     ),
                 ],
             )

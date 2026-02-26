@@ -24,79 +24,259 @@ transforms:
       {"score": <number>, "rationale": "<explanation>"}
 
       '
-    template: '## Case Study
-
-      **Background:** {{ row.input_1 }}
-
-      **Symptoms:** {{ row.input_2 }}
-
-      **History:** {{ row.input_3 }}
-
-
-      ## Evaluation Criterion: {{ row.criterion.name }}
-
-      {{ row.criterion.description }}
-
-
-      {% if row.criterion.subcriteria %}
-
-      Consider these subcriteria:
-
-      {% for sub in row.criterion.subcriteria %}
-
-      - {{ sub }}
-
-      {% endfor %}
-
-      {% endif %}
-
-
-      Provide your assessment.
-
-      '
-    lookup_file: criteria_lookup.yaml
+    template: 'Assess: {{ row.input_1 }}'
     required_input_fields: []
-    case_studies:
-    - name: cs1
-      input_fields:
-      - case_study_1_background_info
-      - cs1_symptoms_signs
-      - cs1_medical_history
-    - name: cs2
-      input_fields:
-      - case_study_2_background_info
-      - cs2_symptoms_signs
-      - cs2_medical_history
-    criteria:
-    - name: diagnosis
-      code: DIAG
-      description: Assess the accuracy and completeness of the diagnosis
-      subcriteria:
-      - Correct primary diagnosis
-      - Appropriate differential diagnoses considered
-      - Evidence-based reasoning
-    - name: treatment
-      code: TREAT
-      description: Assess the appropriateness of the treatment plan
-      subcriteria:
-      - Guideline-concordant treatment
-      - Patient-specific considerations
-      - Risk-benefit analysis
-    - name: prognosis
-      code: PROG
-      description: Assess the accuracy of prognostic assessment
-      subcriteria:
-      - Realistic timeline
-      - Key prognostic factors identified
-      - Clear communication
-    response_format: standard
-    output_mapping:
-      score:
-        suffix: score
-        type: integer
-      rationale:
-        suffix: rationale
-        type: string
+    queries:
+      cs1_diagnosis:
+        input_fields:
+          input_1: case_study_1_background_info
+          input_2: cs1_symptoms_signs
+          input_3: cs1_medical_history
+        template: |
+          ## Case Study
+          **Background:** {{ row.input_1 }}
+          **Symptoms:** {{ row.input_2 }}
+          **History:** {{ row.input_3 }}
+
+          ## Evaluation Criterion: Diagnosis
+          Assess the accuracy and completeness of the diagnosis
+
+          Consider these subcriteria:
+          - Correct primary diagnosis
+          - Appropriate differential diagnoses considered
+          - Evidence-based reasoning
+
+          Provide your assessment.
+        output_fields:
+          - suffix: score
+            type: integer
+          - suffix: rationale
+            type: string
+      cs1_treatment:
+        input_fields:
+          input_1: case_study_1_background_info
+          input_2: cs1_symptoms_signs
+          input_3: cs1_medical_history
+        template: |
+          ## Case Study
+          **Background:** {{ row.input_1 }}
+          **Symptoms:** {{ row.input_2 }}
+          **History:** {{ row.input_3 }}
+
+          ## Evaluation Criterion: Treatment
+          Assess the appropriateness of the treatment plan
+
+          Consider these subcriteria:
+          - Guideline-concordant treatment
+          - Patient-specific considerations
+          - Risk-benefit analysis
+
+          Provide your assessment.
+        output_fields:
+          - suffix: score
+            type: integer
+          - suffix: rationale
+            type: string
+      cs1_prognosis:
+        input_fields:
+          input_1: case_study_1_background_info
+          input_2: cs1_symptoms_signs
+          input_3: cs1_medical_history
+        template: |
+          ## Case Study
+          **Background:** {{ row.input_1 }}
+          **Symptoms:** {{ row.input_2 }}
+          **History:** {{ row.input_3 }}
+
+          ## Evaluation Criterion: Prognosis
+          Assess the accuracy of prognostic assessment
+
+          Consider these subcriteria:
+          - Realistic timeline
+          - Key prognostic factors identified
+          - Clear communication
+
+          Provide your assessment.
+        output_fields:
+          - suffix: score
+            type: integer
+          - suffix: rationale
+            type: string
+      cs1_risk:
+        input_fields:
+          input_1: case_study_1_background_info
+          input_2: cs1_symptoms_signs
+          input_3: cs1_medical_history
+        template: |
+          ## Case Study
+          **Background:** {{ row.input_1 }}
+          **Symptoms:** {{ row.input_2 }}
+          **History:** {{ row.input_3 }}
+
+          ## Evaluation Criterion: Risk
+          Assess identification of risks and complications
+
+          Consider these subcriteria:
+          - Comprehensive risk identification
+          - Appropriate severity assessment
+          - Mitigation strategies
+
+          Provide your assessment.
+        output_fields:
+          - suffix: score
+            type: integer
+          - suffix: rationale
+            type: string
+      cs1_followup:
+        input_fields:
+          input_1: case_study_1_background_info
+          input_2: cs1_symptoms_signs
+          input_3: cs1_medical_history
+        template: |
+          ## Case Study
+          **Background:** {{ row.input_1 }}
+          **Symptoms:** {{ row.input_2 }}
+          **History:** {{ row.input_3 }}
+
+          ## Evaluation Criterion: Follow-up
+          Assess the follow-up and monitoring plan
+
+          Consider these subcriteria:
+          - Appropriate follow-up timeline
+          - Clear monitoring parameters
+          - Escalation criteria defined
+
+          Provide your assessment.
+        output_fields:
+          - suffix: score
+            type: integer
+          - suffix: rationale
+            type: string
+      cs2_diagnosis:
+        input_fields:
+          input_1: case_study_2_background_info
+          input_2: cs2_symptoms_signs
+          input_3: cs2_medical_history
+        template: |
+          ## Case Study
+          **Background:** {{ row.input_1 }}
+          **Symptoms:** {{ row.input_2 }}
+          **History:** {{ row.input_3 }}
+
+          ## Evaluation Criterion: Diagnosis
+          Assess the accuracy and completeness of the diagnosis
+
+          Consider these subcriteria:
+          - Correct primary diagnosis
+          - Appropriate differential diagnoses considered
+          - Evidence-based reasoning
+
+          Provide your assessment.
+        output_fields:
+          - suffix: score
+            type: integer
+          - suffix: rationale
+            type: string
+      cs2_treatment:
+        input_fields:
+          input_1: case_study_2_background_info
+          input_2: cs2_symptoms_signs
+          input_3: cs2_medical_history
+        template: |
+          ## Case Study
+          **Background:** {{ row.input_1 }}
+          **Symptoms:** {{ row.input_2 }}
+          **History:** {{ row.input_3 }}
+
+          ## Evaluation Criterion: Treatment
+          Assess the appropriateness of the treatment plan
+
+          Consider these subcriteria:
+          - Guideline-concordant treatment
+          - Patient-specific considerations
+          - Risk-benefit analysis
+
+          Provide your assessment.
+        output_fields:
+          - suffix: score
+            type: integer
+          - suffix: rationale
+            type: string
+      cs2_prognosis:
+        input_fields:
+          input_1: case_study_2_background_info
+          input_2: cs2_symptoms_signs
+          input_3: cs2_medical_history
+        template: |
+          ## Case Study
+          **Background:** {{ row.input_1 }}
+          **Symptoms:** {{ row.input_2 }}
+          **History:** {{ row.input_3 }}
+
+          ## Evaluation Criterion: Prognosis
+          Assess the accuracy of prognostic assessment
+
+          Consider these subcriteria:
+          - Realistic timeline
+          - Key prognostic factors identified
+          - Clear communication
+
+          Provide your assessment.
+        output_fields:
+          - suffix: score
+            type: integer
+          - suffix: rationale
+            type: string
+      cs2_risk:
+        input_fields:
+          input_1: case_study_2_background_info
+          input_2: cs2_symptoms_signs
+          input_3: cs2_medical_history
+        template: |
+          ## Case Study
+          **Background:** {{ row.input_1 }}
+          **Symptoms:** {{ row.input_2 }}
+          **History:** {{ row.input_3 }}
+
+          ## Evaluation Criterion: Risk
+          Assess identification of risks and complications
+
+          Consider these subcriteria:
+          - Comprehensive risk identification
+          - Appropriate severity assessment
+          - Mitigation strategies
+
+          Provide your assessment.
+        output_fields:
+          - suffix: score
+            type: integer
+          - suffix: rationale
+            type: string
+      cs2_followup:
+        input_fields:
+          input_1: case_study_2_background_info
+          input_2: cs2_symptoms_signs
+          input_3: cs2_medical_history
+        template: |
+          ## Case Study
+          **Background:** {{ row.input_1 }}
+          **Symptoms:** {{ row.input_2 }}
+          **History:** {{ row.input_3 }}
+
+          ## Evaluation Criterion: Follow-up
+          Assess the follow-up and monitoring plan
+
+          Consider these subcriteria:
+          - Appropriate follow-up timeline
+          - Clear monitoring parameters
+          - Escalation criteria defined
+
+          Provide your assessment.
+        output_fields:
+          - suffix: score
+            type: integer
+          - suffix: rationale
+            type: string
     pool_size: 5
     temperature: 0.0
     max_tokens: 500

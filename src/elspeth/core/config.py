@@ -390,6 +390,7 @@ class AggregationSettings(BaseModel):
         aggregations:
           - name: batch_stats
             plugin: stats_aggregation
+            on_error: discard
             trigger:
               count: 100
             output_mode: transform
@@ -407,6 +408,9 @@ class AggregationSettings(BaseModel):
     on_success: str | None = Field(
         default=None,
         description="Connection name or sink name for aggregation output",
+    )
+    on_error: str = Field(
+        description="Sink name for rows that fail batch processing, or 'discard'",
     )
     trigger: TriggerConfig = Field(description="When to flush the batch")
     output_mode: OutputMode = Field(

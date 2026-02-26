@@ -183,6 +183,7 @@ class TestAggregationCheckpointFixVerification:
             name="test_agg",
             plugin="batch_collector",
             input="source_out",
+            on_error="discard",
             trigger=TriggerConfig(
                 count=10,  # High count - won't trigger during 5 rows
                 timeout_seconds=3600,  # 1 hour - won't trigger
@@ -351,6 +352,7 @@ class TestAggregationCheckpointFixVerification:
             name="test_agg",
             plugin="batch_collector",
             input="source_out",
+            on_error="discard",
             trigger=TriggerConfig(
                 count=2,
                 timeout_seconds=3600,

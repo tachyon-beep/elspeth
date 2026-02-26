@@ -60,6 +60,7 @@ def instantiate_plugins_from_config(config: "ElspethSettings") -> dict[str, Any]
         transform = transform_cls(dict(agg_config.options))
         # Bridge: inject routing from settings level (lifted from options)
         transform.on_success = agg_config.on_success
+        transform.on_error = agg_config.on_error
 
         # Validate batch-aware requirement (fail-fast before graph construction)
         if not transform.is_batch_aware:

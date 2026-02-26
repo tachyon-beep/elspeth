@@ -90,6 +90,7 @@ class TestConnectionNameValidation:
                 name="agg0",
                 plugin="batch_stats",
                 input="__internal__",
+                on_error="discard",
                 trigger=TriggerConfig(count=5),
                 options={},
             )
@@ -103,6 +104,7 @@ class TestConnectionNameValidation:
                 plugin="batch_stats",
                 input="agg_in",
                 on_success="__quarantine__",
+                on_error="discard",
                 trigger=TriggerConfig(count=5),
                 options={},
             )

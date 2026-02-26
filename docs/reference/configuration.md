@@ -398,6 +398,7 @@ Batch rows until a trigger fires, then process as a group.
 aggregations:
   - name: batch_stats
     plugin: stats_aggregation
+    on_error: discard           # Sink name for batch errors, or 'discard'
     trigger:
       count: 100              # Fire after 100 rows
       timeout_seconds: 3600   # Or after 1 hour
@@ -412,6 +413,7 @@ aggregations:
 |-------|------|----------|-------------|
 | `name` | string | **Yes** | Unique aggregation identifier |
 | `plugin` | string | **Yes** | Aggregation plugin name |
+| `on_error` | string | **Yes** | Sink name for rows that fail batch processing, or `discard` |
 | `trigger` | object | **Yes** | When to flush the batch |
 | `output_mode` | string | No | `passthrough` or `transform` (default: `transform`) |
 | `expected_output_count` | int | No | For `transform` mode: validate output row count |

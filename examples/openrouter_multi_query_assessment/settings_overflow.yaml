@@ -19,6 +19,7 @@ transforms:
   name: assessment_multi_query
   input: source_out
   on_success: output
+  on_error: discard
   options:
     provider: openrouter
     model: anthropic/claude-3-5-sonnet
@@ -27,73 +28,299 @@ transforms:
       \ this EXACT JSON format:\n{\n  \"echo_row\": \"<the ROW value>\",\n  \"echo_case\": \"<the CASE value>\",\n  \"echo_criterion\"\
       : \"<the CRITERION value>\",\n  \"echo_word\": \"<the WORD value>\",\n  \"echo_number\": \"<the NUMBER value>\",\n \
       \ \"echo_color\": \"<the COLOR value>\"\n}\n\nCopy the values EXACTLY as provided. Do not add or change anything.\n"
-    template: 'ECHO THESE VALUES EXACTLY:
-
-
-      ROW={{ row.source_row.user_id }}
-
-      CASE={{ row.case_study.name }}
-
-      CRITERION={{ row.criterion.code }}
-
-      WORD={{ row.input_1 }}
-
-      NUMBER={{ row.input_2 }}
-
-      COLOR={{ row.input_3 }}
-
-
-      Respond with JSON containing these exact values.
-
-      '
+    template: 'Echo: {{ row.input_1 }}'
     required_input_fields: []
-    case_studies:
-    - name: cs1
-      input_fields:
-      - cs1_word
-      - cs1_number
-      - cs1_color
-    - name: cs2
-      input_fields:
-      - cs2_word
-      - cs2_number
-      - cs2_color
-    criteria:
-    - name: criterion_a
-      code: CRIT-A
-      description: First criterion
-    - name: criterion_b
-      code: CRIT-B
-      description: Second criterion
-    - name: criterion_c
-      code: CRIT-C
-      description: Third criterion
-    - name: criterion_d
-      code: CRIT-D
-      description: Fourth criterion
-    - name: criterion_e
-      code: CRIT-E
-      description: Fifth criterion
-    response_format: standard
-    output_mapping:
-      echo_row:
-        suffix: echo_row
-        type: string
-      echo_case:
-        suffix: echo_case
-        type: string
-      echo_criterion:
-        suffix: echo_criterion
-        type: string
-      echo_word:
-        suffix: echo_word
-        type: string
-      echo_number:
-        suffix: echo_number
-        type: string
-      echo_color:
-        suffix: echo_color
-        type: string
+    queries:
+      cs1_criterion_a:
+        input_fields:
+          input_1: cs1_word
+          input_2: cs1_number
+          input_3: cs1_color
+        template: |
+          ECHO THESE VALUES EXACTLY:
+
+          ROW={{ row.source_row.user_id }}
+          CASE=cs1
+          CRITERION=CRIT-A
+          WORD={{ row.input_1 }}
+          NUMBER={{ row.input_2 }}
+          COLOR={{ row.input_3 }}
+
+          Respond with JSON containing these exact values.
+        output_fields:
+          - suffix: echo_row
+            type: string
+          - suffix: echo_case
+            type: string
+          - suffix: echo_criterion
+            type: string
+          - suffix: echo_word
+            type: string
+          - suffix: echo_number
+            type: string
+          - suffix: echo_color
+            type: string
+      cs1_criterion_b:
+        input_fields:
+          input_1: cs1_word
+          input_2: cs1_number
+          input_3: cs1_color
+        template: |
+          ECHO THESE VALUES EXACTLY:
+
+          ROW={{ row.source_row.user_id }}
+          CASE=cs1
+          CRITERION=CRIT-B
+          WORD={{ row.input_1 }}
+          NUMBER={{ row.input_2 }}
+          COLOR={{ row.input_3 }}
+
+          Respond with JSON containing these exact values.
+        output_fields:
+          - suffix: echo_row
+            type: string
+          - suffix: echo_case
+            type: string
+          - suffix: echo_criterion
+            type: string
+          - suffix: echo_word
+            type: string
+          - suffix: echo_number
+            type: string
+          - suffix: echo_color
+            type: string
+      cs1_criterion_c:
+        input_fields:
+          input_1: cs1_word
+          input_2: cs1_number
+          input_3: cs1_color
+        template: |
+          ECHO THESE VALUES EXACTLY:
+
+          ROW={{ row.source_row.user_id }}
+          CASE=cs1
+          CRITERION=CRIT-C
+          WORD={{ row.input_1 }}
+          NUMBER={{ row.input_2 }}
+          COLOR={{ row.input_3 }}
+
+          Respond with JSON containing these exact values.
+        output_fields:
+          - suffix: echo_row
+            type: string
+          - suffix: echo_case
+            type: string
+          - suffix: echo_criterion
+            type: string
+          - suffix: echo_word
+            type: string
+          - suffix: echo_number
+            type: string
+          - suffix: echo_color
+            type: string
+      cs1_criterion_d:
+        input_fields:
+          input_1: cs1_word
+          input_2: cs1_number
+          input_3: cs1_color
+        template: |
+          ECHO THESE VALUES EXACTLY:
+
+          ROW={{ row.source_row.user_id }}
+          CASE=cs1
+          CRITERION=CRIT-D
+          WORD={{ row.input_1 }}
+          NUMBER={{ row.input_2 }}
+          COLOR={{ row.input_3 }}
+
+          Respond with JSON containing these exact values.
+        output_fields:
+          - suffix: echo_row
+            type: string
+          - suffix: echo_case
+            type: string
+          - suffix: echo_criterion
+            type: string
+          - suffix: echo_word
+            type: string
+          - suffix: echo_number
+            type: string
+          - suffix: echo_color
+            type: string
+      cs1_criterion_e:
+        input_fields:
+          input_1: cs1_word
+          input_2: cs1_number
+          input_3: cs1_color
+        template: |
+          ECHO THESE VALUES EXACTLY:
+
+          ROW={{ row.source_row.user_id }}
+          CASE=cs1
+          CRITERION=CRIT-E
+          WORD={{ row.input_1 }}
+          NUMBER={{ row.input_2 }}
+          COLOR={{ row.input_3 }}
+
+          Respond with JSON containing these exact values.
+        output_fields:
+          - suffix: echo_row
+            type: string
+          - suffix: echo_case
+            type: string
+          - suffix: echo_criterion
+            type: string
+          - suffix: echo_word
+            type: string
+          - suffix: echo_number
+            type: string
+          - suffix: echo_color
+            type: string
+      cs2_criterion_a:
+        input_fields:
+          input_1: cs2_word
+          input_2: cs2_number
+          input_3: cs2_color
+        template: |
+          ECHO THESE VALUES EXACTLY:
+
+          ROW={{ row.source_row.user_id }}
+          CASE=cs2
+          CRITERION=CRIT-A
+          WORD={{ row.input_1 }}
+          NUMBER={{ row.input_2 }}
+          COLOR={{ row.input_3 }}
+
+          Respond with JSON containing these exact values.
+        output_fields:
+          - suffix: echo_row
+            type: string
+          - suffix: echo_case
+            type: string
+          - suffix: echo_criterion
+            type: string
+          - suffix: echo_word
+            type: string
+          - suffix: echo_number
+            type: string
+          - suffix: echo_color
+            type: string
+      cs2_criterion_b:
+        input_fields:
+          input_1: cs2_word
+          input_2: cs2_number
+          input_3: cs2_color
+        template: |
+          ECHO THESE VALUES EXACTLY:
+
+          ROW={{ row.source_row.user_id }}
+          CASE=cs2
+          CRITERION=CRIT-B
+          WORD={{ row.input_1 }}
+          NUMBER={{ row.input_2 }}
+          COLOR={{ row.input_3 }}
+
+          Respond with JSON containing these exact values.
+        output_fields:
+          - suffix: echo_row
+            type: string
+          - suffix: echo_case
+            type: string
+          - suffix: echo_criterion
+            type: string
+          - suffix: echo_word
+            type: string
+          - suffix: echo_number
+            type: string
+          - suffix: echo_color
+            type: string
+      cs2_criterion_c:
+        input_fields:
+          input_1: cs2_word
+          input_2: cs2_number
+          input_3: cs2_color
+        template: |
+          ECHO THESE VALUES EXACTLY:
+
+          ROW={{ row.source_row.user_id }}
+          CASE=cs2
+          CRITERION=CRIT-C
+          WORD={{ row.input_1 }}
+          NUMBER={{ row.input_2 }}
+          COLOR={{ row.input_3 }}
+
+          Respond with JSON containing these exact values.
+        output_fields:
+          - suffix: echo_row
+            type: string
+          - suffix: echo_case
+            type: string
+          - suffix: echo_criterion
+            type: string
+          - suffix: echo_word
+            type: string
+          - suffix: echo_number
+            type: string
+          - suffix: echo_color
+            type: string
+      cs2_criterion_d:
+        input_fields:
+          input_1: cs2_word
+          input_2: cs2_number
+          input_3: cs2_color
+        template: |
+          ECHO THESE VALUES EXACTLY:
+
+          ROW={{ row.source_row.user_id }}
+          CASE=cs2
+          CRITERION=CRIT-D
+          WORD={{ row.input_1 }}
+          NUMBER={{ row.input_2 }}
+          COLOR={{ row.input_3 }}
+
+          Respond with JSON containing these exact values.
+        output_fields:
+          - suffix: echo_row
+            type: string
+          - suffix: echo_case
+            type: string
+          - suffix: echo_criterion
+            type: string
+          - suffix: echo_word
+            type: string
+          - suffix: echo_number
+            type: string
+          - suffix: echo_color
+            type: string
+      cs2_criterion_e:
+        input_fields:
+          input_1: cs2_word
+          input_2: cs2_number
+          input_3: cs2_color
+        template: |
+          ECHO THESE VALUES EXACTLY:
+
+          ROW={{ row.source_row.user_id }}
+          CASE=cs2
+          CRITERION=CRIT-E
+          WORD={{ row.input_1 }}
+          NUMBER={{ row.input_2 }}
+          COLOR={{ row.input_3 }}
+
+          Respond with JSON containing these exact values.
+        output_fields:
+          - suffix: echo_row
+            type: string
+          - suffix: echo_case
+            type: string
+          - suffix: echo_criterion
+            type: string
+          - suffix: echo_word
+            type: string
+          - suffix: echo_number
+            type: string
+          - suffix: echo_color
+            type: string
     pool_size: 5
     temperature: 0.0
     max_tokens: 200

@@ -832,6 +832,7 @@ class TestAggregationExecutorPipelineRow:
             name="test_agg",
             plugin="batch_stats",
             input="default",
+            on_error="discard",
             trigger=TriggerConfig(count=10),
         )
         node_id = NodeID("agg_001")
@@ -883,6 +884,7 @@ class TestAggregationExecutorPipelineRow:
             name="test_agg",
             plugin="batch_stats",
             input="default",
+            on_error="discard",
             trigger=TriggerConfig(count=10),
         )
         node_id = NodeID("agg_001")
@@ -929,6 +931,7 @@ class TestAggregationExecutorPipelineRow:
             name="test_agg",
             plugin="batch_stats",
             input="default",
+            on_error="discard",
             trigger=TriggerConfig(count=10),
         )
         node_id = NodeID("agg_001")
@@ -980,6 +983,7 @@ class TestAggregationExecutorPipelineRow:
             name="test_agg",
             plugin="batch_stats",
             input="default",
+            on_error="discard",
             trigger=TriggerConfig(count=10),
         )
         node_id = NodeID("agg_001")
@@ -1041,6 +1045,7 @@ class TestAggregationExecutorPipelineRow:
             name="test_agg",
             plugin="batch_stats",
             input="default",
+            on_error="discard",
             trigger=TriggerConfig(count=10),
         )
         node_id = NodeID("agg_001")
@@ -1095,6 +1100,7 @@ class TestAggregationExecutorPipelineRow:
             name="test_agg",
             plugin="batch_stats",
             input="default",
+            on_error="discard",
             trigger=TriggerConfig(count=10),
         )
         node_id = NodeID("agg_001")
@@ -1157,6 +1163,7 @@ class TestAggregationExecutorPipelineRow:
             name="test_agg",
             plugin="batch_stats",
             input="default",
+            on_error="discard",
             trigger=TriggerConfig(count=10),
         )
         node_id = NodeID("agg_001")

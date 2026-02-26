@@ -131,6 +131,7 @@ def test_build_aggregation_pipeline_sets_source_input_and_terminal_sink() -> Non
         plugin="batch_transform",
         input="batch_in",
         on_success="output",
+        on_error="discard",
         trigger=TriggerConfig(count=2),
         output_mode="transform",
         options={},

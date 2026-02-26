@@ -293,6 +293,7 @@ class TestExplicitSinkRouting:
             name="batch",
             plugin="batch_passthrough",
             input="source_out",
+            on_error="discard",
             trigger=TriggerConfig(count=2),
             output_mode="transform",
         )

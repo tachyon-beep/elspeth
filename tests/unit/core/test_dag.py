@@ -80,8 +80,9 @@ def _aggregation_settings(cls: Any, /, **kwargs: Any) -> Any:
     on_success = kwargs.pop("on_success", None)
     if on_success is None and "on_success" in options:
         on_success = options.pop("on_success")
+    on_error = kwargs.pop("on_error", "discard")
     input_connection = kwargs.pop("input", _AUTO_AGG_INPUT)
-    return cls(input=input_connection, on_success=on_success, options=options, **kwargs)
+    return cls(input=input_connection, on_success=on_success, on_error=on_error, options=options, **kwargs)
 
 
 def _apply_explicit_success_routing(settings: Any) -> Any:

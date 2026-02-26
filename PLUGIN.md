@@ -290,6 +290,7 @@ aggregations:
   plugin: batch_stats
   input: processed           # Explicit input connection
   on_success: stats_out      # Named output connection
+  on_error: discard          # Sink name for batch errors, or 'discard'
   trigger:
     count: 100  # Process every 100 rows
   output_mode: single  # N inputs → 1 output
