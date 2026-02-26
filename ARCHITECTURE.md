@@ -2,8 +2,8 @@
 
 C4 model documentation for the ELSPETH auditable pipeline framework.
 
-**Last Updated:** 2026-02-13 (synchronized with RC-3 branch)
-**Framework Version:** 0.3.0 (RC-3)
+**Last Updated:** 2026-02-26 (synchronized with RC-3.3 branch)
+**Framework Version:** 0.3.0 (RC-3.3)
 **Architecture Grade:** A- (Production Ready)
 
 ---
@@ -189,7 +189,7 @@ C4Component
         Component(retry, "RetryManager", "tenacity", "Retry logic with backoff")
         Component(spans, "SpanFactory", "OpenTelemetry", "Tracing integration")
         Component(triggers, "Triggers", "Python", "Aggregation trigger evaluation")
-        Component(expression, "ExpressionParser", "Python", "Config gate condition parsing")
+        Component(expression, "ExpressionParser", "Python (core/)", "Config gate condition parsing")
     }
 
     Rel(orchestrator, processor, "Creates and uses")
@@ -213,7 +213,7 @@ C4Component
 | **RetryManager** | `retry.py` | ~146 | Tenacity-based retry with exponential backoff |
 | **SpanFactory** | `spans.py` | ~298 | Create OpenTelemetry spans for observability |
 | **Triggers** | `triggers.py` | ~301 | Evaluate count/timeout/condition triggers for aggregation |
-| **ExpressionParser** | `expression_parser.py` | ~652 | Safe AST-based expression evaluation (no eval) |
+| **ExpressionParser** | `core/expression_parser.py` | ~652 | Safe AST-based expression evaluation (no eval) — lives in `core/` (used by config validation) |
 | **BatchAdapter** | `batch_adapter.py` | ~226 | Batch transform output routing |
 | **Clock** | `clock.py` | ~11 | Testable time abstraction |
 
@@ -292,7 +292,7 @@ C4Component
     Container_Boundary(plugins, "Plugins Subsystem") {
         Component(protocols, "Protocols", "Python", "SourceProtocol, TransformProtocol, etc.")
         Component(base, "Base Classes", "Python ABC", "BaseSource, BaseTransform, etc.")
-        Component(results, "Results", "Python", "TransformResult, GateResult, etc.")
+        Component(results, "Results", "Python", "TransformResult, SourceRow, etc.")
         Component(context, "PluginContext", "Python", "Runtime context for plugins")
         Component(manager, "PluginManager", "pluggy", "Discovery and registration")
         Component(hookspecs, "Hookspecs", "pluggy", "Hook specifications")
@@ -319,6 +319,7 @@ C4Component
     Container_Boundary(llm, "LLM Transforms") {
         Component(llm_transform, "LLMTransform", "Python", "Unified LLM (azure/openrouter providers, single/multi-query)")
         Component(azure_batch, "AzureBatchLLM", "Python", "Azure Batch API")
+        Component(openrouter_batch, "OpenRouterBatchLLM", "Python", "OpenRouter Batch HTTP")
     }
 
     Container_Boundary(sinks, "Sinks (4)") {
@@ -357,12 +358,12 @@ C4Component
 |-----------|---------------|
 | **Protocols** | 4 runtime-checkable interfaces (Source, Transform, BatchTransform, Sink) |
 | **Base Classes** | Abstract implementations with common functionality |
-| **Results** | Typed results (`TransformResult`, `GateResult`, `SourceRow`) |
+| **Results** | Typed results (`TransformResult`, `SourceRow`) |
 | **PluginContext** | Runtime context passed to all plugin methods |
 | **PluginManager** | pluggy-based discovery and registration |
 | **Sources** | 4 plugins (csv, json, azure_blob, null) |
 | **Transforms** | 11+ plugins (field_mapper, passthrough, truncate, batch_stats, web_scrape, etc.) |
-| **LLM Transforms** | Unified LLMTransform (azure/openrouter providers, single/multi-query strategies) + azure_batch |
+| **LLM Transforms** | Unified LLMTransform (azure/openrouter providers, single/multi-query strategies) + azure_batch + openrouter_batch |
 | **Sinks** | 4 plugins (csv, json, database, azure_blob) |
 | **Clients** | 4 audited clients (HTTP, LLM, Replayer, Verifier) |
 
@@ -857,6 +858,7 @@ ELSPETH uses ADRs to document significant architectural choices.
 | **ADR-003** | Schema validation lifecycle | Two-phase (contract → type) at DAG construction | Catches mismatches before processing |
 | **ADR-004** | Explicit sink routing | Named DAG edges replace implicit convention | Enables auditable routing decisions |
 | **ADR-005** | Declarative DAG wiring | `input`/`on_success` connections | Every edge explicitly declared and validated |
+| **ADR-006** | Layer dependency remediation | Strict 4-layer model (`contracts → core → engine → plugins`) | 10 violations → 0, CI enforcement |
 
 ### Implicit Architectural Decisions
 
@@ -955,7 +957,7 @@ Based on comprehensive analysis (2026-02-02), ELSPETH demonstrates exceptional a
 - Test LOC: ~201,000 (2.7:1 ratio)
 - Subsystems: 22
 - Plugins: 29+
-- ADRs: 5
+- ADRs: 6
 - Architecture Grade: A-
 
 All diagrams use Mermaid syntax for version control compatibility.

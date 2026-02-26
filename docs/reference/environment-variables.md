@@ -303,7 +303,7 @@ docker run --rm \
   -e OPENROUTER_API_KEY="${OPENROUTER_API_KEY}" \
   -e DATABASE_URL="sqlite:////app/state/landscape.db" \
   -v $(pwd)/config:/app/config:ro \
-  ghcr.io/johnm-dta/elspeth:v0.1.0 \
+  ghcr.io/johnm-dta/elspeth:v0.3.0 \
   run --settings /app/config/pipeline.yaml --execute
 ```
 
@@ -327,4 +327,4 @@ See the [Docker Deployment Guide](../guides/docker.md) for complete container us
 
 - [Configuration Reference](configuration.md) - Complete pipeline configuration options
 - [Docker Deployment Guide](../guides/docker.md) - Container deployment
-- [User Manual](../USER_MANUAL.md) - Day-to-day CLI usage
+- [User Manual](../guides/user-manual.md) - Day-to-day CLI usage

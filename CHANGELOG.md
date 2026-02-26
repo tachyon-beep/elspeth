@@ -33,6 +33,8 @@ Collapsed 6 LLM transform classes (~4,950 lines) into a unified `LLMTransform` w
 
 ### Fixed
 
+- **Unified LLM transform bugs** — Fixed four bugs in `LLMTransform`: limiter dispatch used wrong config attribute, `response_format` not passed to provider, declared `output_fields` not extracted from multi-query responses, NaN/Infinity values in LLM JSON responses not rejected
+- **Aggregation `on_error` required** — `on_error` is now required for aggregation transforms; converted multi-query examples to unified LLM format
 - **T1: Frozen audit records** — Added `frozen=True` to all 16 mutable audit record dataclasses (`Run`, `Node`, `Edge`, `Row`, `Token`, `TokenParent`, `Call`, `Artifact`, `RoutingEvent`, `Batch`, `BatchMember`, `BatchOutput`, `Checkpoint`, `RowLineage`, `ValidationErrorRecord`, `TransformErrorRecord`). All 24 dataclasses in `contracts/audit.py` are now frozen. Mutations crash at the mutation site instead of silently corrupting the Tier 1 audit trail.
 - **T2: Assert removal** — Replaced 18 `assert` statements across 10 plugin files with explicit `if/raise RuntimeError` patterns. Asserts are stripped by `python -O`, silently removing safety checks. Files: `web_scrape.py` (5), `azure.py` (2), `openrouter.py` (1), `openrouter_batch.py` (2), `azure_multi_query.py` (2), `openrouter_multi_query.py` (2), `content_safety.py` (1), `pooling/executor.py` (1), `csv_sink.py` (1), `base_multi_query.py` (1).
 - **T3: Truthiness checks** — Fixed 21 truthiness checks across 8 files. Python's `if x:` and `x or default` silently exclude valid zero values (`0`, `0.0`) and empty strings (`""`). All replaced with explicit `is not None` checks:
@@ -60,10 +62,12 @@ Collapsed 6 LLM transform classes (~4,950 lines) into a unified `LLMTransform` w
 - Freeze audit dataclasses plan (`docs/plans/2026-02-22-freeze-audit-dataclasses.md`)
 - `TestFrozenDataclassImmutability` extended to cover all 22 frozen types (6 existing + 16 newly frozen)
 - 10 new truthiness regression tests across `test_reports.py`, `test_spans.py`, `test_node_detail.py`
+- T17 PluginContext protocol split design doc and hierarchical implementation plan (master + 5 sub-plans)
+- Backpressure modes and import hierarchy documentation in architecture docs
 
 ### Tests
 
-- Full suite: 9,976 tests passing, 16 skipped, 3 xfailed — mypy/ruff/tier-model/contracts all clean
+- Full suite: 9,952 tests passing, 16 skipped, 3 xfailed — mypy/ruff/contracts all clean
 - T10: 10 test files updated with import path migrations from old modules to `providers/`
 - T10: `test_discovery.py` updated — plugin count 17→13, assertions reference unified `llm` + batch plugins
 - T10: `test_contract_validation.py` updated — 5 plugin name references migrated to `"llm"`

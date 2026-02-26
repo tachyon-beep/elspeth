@@ -53,7 +53,7 @@ export ELSPETH_ALLOW_RAW_SECRETS=true
 ```bash
 docker run --rm \
   -e ELSPETH_FINGERPRINT_KEY="your-key" \
-  ghcr.io/johnm-dta/elspeth:v0.1.0 \
+  ghcr.io/johnm-dta/elspeth:v0.3.0 \
   run --settings /app/config/pipeline.yaml --execute
 ```
 
@@ -111,7 +111,7 @@ docker run --rm \
 
 5. For Azure services, verify your resource endpoint is correct:
    ```yaml
-   row_plugins:
+   transforms:
      - plugin: llm
        options:
          provider: azure
@@ -139,7 +139,7 @@ docker run --rm \
 
 2. Increase timeout for slow operations:
    ```yaml
-   row_plugins:
+   transforms:
      - plugin: llm
        options:
          provider: azure
@@ -249,20 +249,20 @@ docker run --rm \
    ```bash
    docker run --rm \
      -v $(pwd)/input:/app/input:ro \
-     ghcr.io/johnm-dta/elspeth:v0.1.0 \
+     ghcr.io/johnm-dta/elspeth:v0.3.0 \
      ls /app/input
    ```
 
 2. Ensure pipeline config uses container paths, not host paths:
    ```yaml
    # CORRECT - container path
-   datasource:
+   source:
      plugin: csv
      options:
        path: /app/input/data.csv
 
    # WRONG - host path
-   datasource:
+   source:
      plugin: csv
      options:
        path: ./input/data.csv
@@ -369,7 +369,7 @@ The readiness probe prevents traffic before the app is ready. The liveness probe
 2. Check the configuration reference for required fields
 
 3. Common issues:
-   - Missing `datasource` section
+   - Missing `source` section
    - Missing `sinks` section
    - Plugin options with wrong types
    - Undefined environment variables in `${VAR}` syntax
@@ -405,6 +405,6 @@ If you're still stuck:
 
 ## See Also
 
-- [User Manual](../USER_MANUAL.md) - CLI commands and usage
-- [Docker Deployment Guide](docker.md) - Container deployment
+- [User Manual](user-manual.md) - CLI commands and usage
+- [Docker Deployment Guide](../runbooks/docker.md) - Container deployment
 - [Environment Variables Reference](../reference/environment-variables.md) - Configuration options

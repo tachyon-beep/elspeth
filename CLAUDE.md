@@ -642,12 +642,13 @@ src/elspeth/
 │   ├── config.py       # Configuration loading (Dynaconf + Pydantic)
 │   ├── canonical.py    # Deterministic JSON hashing (RFC 8785)
 │   ├── events.py       # Synchronous event bus for CLI observability
+│   ├── expression_parser.py # AST-based expression parsing (no eval)
 │   ├── identifiers.py  # ID generation utilities
 │   ├── logging.py      # Structured logging setup
 │   ├── operations.py   # Operation type definitions
 │   ├── payload_store.py # Content-addressable storage for large blobs
 │   └── templates.py    # Jinja2 field extraction
-├── contracts/          # Type contracts, schemas, and protocol definitions
+├── contracts/          # Type contracts, schemas, protocol definitions, and hashing primitives
 ├── engine/
 │   ├── orchestrator/   # Full run lifecycle management (core, aggregation, export, outcomes, validation)
 │   ├── executors/      # Transform, gate, sink, aggregation executors
@@ -658,14 +659,13 @@ src/elspeth/
 │   ├── retry.py        # Tenacity-based retry with backoff
 │   ├── tokens.py       # Token identity and lineage management
 │   ├── triggers.py     # Aggregation trigger evaluation
-│   ├── expression_parser.py # AST-based expression parsing (no eval)
 │   ├── clock.py        # Clock abstraction for testing
 │   └── spans.py        # Telemetry span management
 ├── plugins/
 │   ├── sources/        # CSVSource, JSONSource, NullSource, AzureBlobSource
 │   ├── transforms/     # FieldMapper, Passthrough, Truncate, etc.
 │   ├── sinks/          # CSVSink, JSONSink, DatabaseSink, BlobSink
-│   ├── llm/            # Azure OpenAI transforms (batch, multi-query)
+│   ├── llm/            # Unified LLMTransform with provider pattern (azure/openrouter) + batch transforms
 │   ├── clients/        # HTTP, LLM, Replayer, Verifier clients
 │   ├── batching/       # Batch-aware transform adapters
 │   └── pooling/        # Thread pool management for plugins
