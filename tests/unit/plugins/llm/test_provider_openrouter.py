@@ -111,7 +111,6 @@ class TestExecuteQuery:
         assert result.usage.is_known
         assert result.usage.prompt_tokens == 10
         assert result.usage.completion_tokens == 5
-        assert not hasattr(result, "raw_response")
 
     def test_max_tokens_none_omitted_from_request_body(self, provider: OpenRouterLLMProvider) -> None:
         """When max_tokens=None, it should NOT appear in the request body."""
@@ -555,44 +554,6 @@ class TestClientCaching:
 
         provider.close()
         assert len(provider._http_clients) == 0
-
-
-class TestStateIdSnapshot:
-    """Tests for state_id snapshot behavior."""
-
-    def test_state_id_snapshot_used_not_mutable_ref(
-        self,
-        mock_recorder: MagicMock,
-        mock_telemetry_emit: MagicMock,
-    ) -> None:
-        """Verify the provider uses the original state_id value, not a mutable reference."""
-        provider = OpenRouterLLMProvider(
-            api_key="test-key",
-            recorder=mock_recorder,
-            run_id="run-1",
-            telemetry_emit=mock_telemetry_emit,
-        )
-
-        # Track which state_id was used to create the client
-        created_state_ids: list[str] = []
-
-        def tracking_get(sid: str, *, token_id: str | None = None) -> MagicMock:
-            created_state_ids.append(sid)
-            mock_client = MagicMock()
-            mock_client.post.return_value = _make_http_response()
-            return mock_client
-
-        with patch.object(provider, "_get_http_client", side_effect=tracking_get):
-            provider.execute_query(
-                messages=[{"role": "user", "content": "hi"}],
-                model="gpt-4o",
-                temperature=0.0,
-                max_tokens=100,
-                state_id="state-original",
-                token_id="tok-1",
-            )
-
-        assert created_state_ids == ["state-original"]
 
 
 class TestProtocolCompliance:

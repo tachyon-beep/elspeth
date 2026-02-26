@@ -24,7 +24,9 @@ from elspeth.plugins.llm.multi_query import (
 # Strategies
 # =============================================================================
 
-field_names = st.text(min_size=1, max_size=15, alphabet="abcdefghijklmnopqrstuvwxyz_")
+field_names = st.text(min_size=1, max_size=15, alphabet="abcdefghijklmnopqrstuvwxyz_").filter(
+    lambda s: s != "source_row"  # Reserved key in build_template_context
+)
 
 string_values = st.text(min_size=0, max_size=30)
 

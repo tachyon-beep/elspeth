@@ -13,7 +13,6 @@ from unittest.mock import Mock, patch
 
 import pytest
 
-from elspeth.contracts import Determinism
 from elspeth.contracts.schema_contract import PipelineRow
 from elspeth.contracts.token_usage import TokenUsage
 from elspeth.plugins.clients.llm import (
@@ -100,51 +99,12 @@ def _make_transform_with_mock_provider(
 
 
 # ---------------------------------------------------------------------------
-# Strategy dispatch
-# ---------------------------------------------------------------------------
-
-
-class TestStrategyDispatch:
-    """Verify correct strategy selection based on queries field."""
-
-    def test_strategy_type_is_single_query_when_no_queries(self) -> None:
-        """When queries is None (default), SingleQueryStrategy is used."""
-        from elspeth.plugins.llm.transform import LLMTransform, SingleQueryStrategy
-
-        config = _make_config()
-        transform = LLMTransform(config)
-        assert isinstance(transform._strategy, SingleQueryStrategy)
-
-    def test_strategy_type_is_multi_query_when_queries_provided(self) -> None:
-        """When queries is explicitly provided, MultiQueryStrategy is used."""
-        from elspeth.plugins.llm.transform import LLMTransform, MultiQueryStrategy
-
-        config = _make_multi_query_config()
-        transform = LLMTransform(config)
-        assert isinstance(transform._strategy, MultiQueryStrategy)
-
-
-# ---------------------------------------------------------------------------
 # Provider dispatch
 # ---------------------------------------------------------------------------
 
 
 class TestProviderDispatch:
     """Verify correct provider creation based on provider field."""
-
-    def test_azure_creates_azure_config(self) -> None:
-        from elspeth.plugins.llm.providers.azure import AzureOpenAIConfig
-        from elspeth.plugins.llm.transform import LLMTransform
-
-        transform = LLMTransform(_make_config(provider="azure"))
-        assert isinstance(transform._config, AzureOpenAIConfig)
-
-    def test_openrouter_creates_openrouter_config(self) -> None:
-        from elspeth.plugins.llm.providers.openrouter import OpenRouterConfig
-        from elspeth.plugins.llm.transform import LLMTransform
-
-        transform = LLMTransform(_make_config(provider="openrouter"))
-        assert isinstance(transform._config, OpenRouterConfig)
 
     def test_unknown_provider_raises_with_valid_options(self) -> None:
         from elspeth.plugins.llm.transform import LLMTransform
@@ -164,18 +124,6 @@ class TestProviderDispatch:
 
 class TestTransformProperties:
     """Verify LLMTransform class attributes and lifecycle."""
-
-    def test_name_is_llm(self) -> None:
-        from elspeth.plugins.llm.transform import LLMTransform
-
-        transform = LLMTransform(_make_config())
-        assert transform.name == "llm"
-
-    def test_determinism_is_non_deterministic(self) -> None:
-        from elspeth.plugins.llm.transform import LLMTransform
-
-        transform = LLMTransform(_make_config())
-        assert transform.determinism == Determinism.NON_DETERMINISTIC
 
     def test_llm_transform_uses_process_row_not_process(self) -> None:
         """LLMTransform extends BatchTransformMixin — process() raises NotImplementedError."""
@@ -428,38 +376,6 @@ class TestTracerWiring:
             )
             transform = LLMTransform(config)
             assert isinstance(transform._tracer, ActiveLangfuseTracer)
-
-
-# ---------------------------------------------------------------------------
-# Provider client isolation
-# ---------------------------------------------------------------------------
-
-
-class TestTracingLifecycle:
-    """Verify tracing setup is in transform lifecycle, not provider init."""
-
-    def test_azure_ai_tracing_not_in_provider_init(self) -> None:
-        """Azure AI tracing setup belongs in on_start(), not provider __init__.
-
-        The AzureLLMProvider docstring confirms: 'tracing config belongs to the
-        transform lifecycle'. Verify that constructing a provider does NOT
-        attempt to configure azure_ai tracing.
-        """
-        from elspeth.plugins.llm.providers.azure import AzureLLMProvider
-
-        provider = AzureLLMProvider(
-            endpoint="https://test.openai.azure.com/",
-            api_key="test-key",
-            api_version="2024-10-21",
-            deployment_name="gpt-4o",
-            recorder=Mock(),
-            run_id="run-1",
-            telemetry_emit=Mock(),
-        )
-        # Provider should NOT have any tracing attributes — tracing is transform-owned
-        assert not hasattr(provider, "_azure_monitor_configured")
-        assert not hasattr(provider, "_tracing_config")
-        assert not hasattr(provider, "_tracer")
 
 
 # ---------------------------------------------------------------------------

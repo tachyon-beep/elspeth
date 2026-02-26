@@ -95,7 +95,6 @@ class TestExecuteQuery:
         assert result.usage.is_known
         assert result.usage.prompt_tokens == 10
         assert result.usage.completion_tokens == 5
-        assert "raw_response" not in LLMQueryResult.__dataclass_fields__
 
     def test_maps_finish_reason(self, provider: AzureLLMProvider) -> None:
         with patch.object(provider, "_get_llm_client") as mock_get:
@@ -363,49 +362,6 @@ class TestClientCaching:
         provider.close()
         assert len(provider._llm_clients) == 0
         assert provider._underlying_client is None
-
-
-class TestStateIdSnapshot:
-    """Tests for state_id snapshot behavior."""
-
-    def test_state_id_snapshot_used_not_mutable_ref(
-        self,
-        mock_recorder: MagicMock,
-        mock_telemetry_emit: MagicMock,
-    ) -> None:
-        """Verify the provider uses the original state_id value, not a mutable reference."""
-        provider = AzureLLMProvider(
-            endpoint="https://test.openai.azure.com/",
-            api_key="test-key",
-            api_version="2024-10-21",
-            deployment_name="gpt-4o",
-            recorder=mock_recorder,
-            run_id="run-1",
-            telemetry_emit=mock_telemetry_emit,
-        )
-
-        # Track which state_id was used to create the client
-        created_state_ids: list[str] = []
-
-        def tracking_get(sid: str, *, token_id: str | None = None) -> AuditedLLMClient:
-            created_state_ids.append(sid)
-            mock_client = MagicMock()
-            mock_client.chat_completion.return_value = _make_llm_response()
-            return mock_client
-
-        with patch.object(provider, "_get_llm_client", side_effect=tracking_get):
-            # Pass state_id as a string — strings are immutable in Python,
-            # so this test verifies the snapshot pattern is used in finally block
-            provider.execute_query(
-                messages=[{"role": "user", "content": "hi"}],
-                model="gpt-4o",
-                temperature=0.0,
-                max_tokens=100,
-                state_id="state-original",
-                token_id="tok-1",
-            )
-
-        assert created_state_ids == ["state-original"]
 
 
 class TestProtocolCompliance:

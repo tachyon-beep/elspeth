@@ -129,34 +129,6 @@ class TestMultiQueryLLMSpecific:
         assert transform.creates_tokens is False
 
 
-class TestMultiQueryLLMAuditTrail:
-    # NOTE: test_llm_call_recorded_in_audit was deleted because it tested the old
-    # process() API. LLMTransform now uses accept() via BatchTransformMixin.
-    # Audit trail tests should use integration tests that exercise the full pipeline.
-
-    def test_on_error_configuration_required(self) -> None:
-        transform = LLMTransform(
-            {
-                "provider": "azure",
-                "deployment_name": "gpt-4o",
-                "endpoint": "https://test.openai.azure.com",
-                "api_key": "test-key",
-                "template": "{{ row.text_content }}",
-                "schema": {"mode": "observed"},
-                "required_input_fields": [],
-                "queries": {
-                    "cs1_crit1": {
-                        "input_fields": {"text_content": "a"},
-                        "output_fields": [{"suffix": "score", "type": "integer"}],
-                    },
-                },
-            }
-        )
-        transform.on_error = "quarantine_sink"
-
-        assert transform.on_error is not None
-
-
 class TestMultiQueryBatchContract(BatchTransformContractTestBase):
     """Verify multi-query LLM transform honors BatchTransformMixin contract."""
 

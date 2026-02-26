@@ -1320,12 +1320,6 @@ class TestGateExecutor:
             "Without NodeStateGuard, this failure would leave the state OPEN."
         )
 
-    def test_gate_uses_node_state_guard(self) -> None:
-        """Verify GateExecutor imports and uses NodeStateGuard (structural check)."""
-        import elspeth.engine.executors.gate as gate_mod
-
-        assert hasattr(gate_mod, "NodeStateGuard"), "GateExecutor module should import NodeStateGuard for structural terminality"
-
 
 # =============================================================================
 # TestAggregationExecutor

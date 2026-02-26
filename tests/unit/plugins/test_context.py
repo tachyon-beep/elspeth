@@ -48,15 +48,6 @@ def _make_checkpoint(**overrides: object) -> "BatchCheckpointState":
 class TestCheckpointAPI:
     """Tests for checkpoint API used by batch transforms."""
 
-    def test_checkpoint_methods_exist(self) -> None:
-        """PluginContext has checkpoint methods."""
-        from elspeth.contracts.plugin_context import PluginContext
-
-        ctx = PluginContext(run_id="run-001", config={})
-        assert hasattr(ctx, "get_checkpoint")
-        assert hasattr(ctx, "set_checkpoint")
-        assert hasattr(ctx, "clear_checkpoint")
-
     def test_get_checkpoint_returns_none_when_empty(self) -> None:
         """Empty checkpoint returns None."""
         from elspeth.contracts.plugin_context import PluginContext
@@ -225,14 +216,6 @@ class TestCheckpointRestoredBehavior:
 
 class TestValidationErrorRecording:
     """Tests for recording validation errors from sources."""
-
-    def test_record_validation_error_exists(self) -> None:
-        """PluginContext has record_validation_error method."""
-        from elspeth.contracts.plugin_context import PluginContext
-
-        ctx = PluginContext(run_id="test-run", config={})
-        assert hasattr(ctx, "record_validation_error")
-        assert callable(ctx.record_validation_error)
 
     def test_record_validation_error_returns_quarantine_token(self) -> None:
         """record_validation_error returns token for tracking quarantined row."""

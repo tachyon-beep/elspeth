@@ -15,22 +15,6 @@ from elspeth.contracts.contexts import (
 )
 
 
-class TestProtocolsImportable:
-    """Smoke test: protocols can be imported."""
-
-    def test_source_context_importable(self) -> None:
-        assert SourceContext is not None
-
-    def test_transform_context_importable(self) -> None:
-        assert TransformContext is not None
-
-    def test_sink_context_importable(self) -> None:
-        assert SinkContext is not None
-
-    def test_lifecycle_context_importable(self) -> None:
-        assert LifecycleContext is not None
-
-
 class TestPluginContextSatisfiesProtocols:
     """Verify PluginContext structurally satisfies all 4 protocols.
 

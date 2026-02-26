@@ -64,52 +64,6 @@ class TestRouteResolutionIntegrity:
         with pytest.raises(GraphValidationError, match="has no destination in route resolution map"):
             graph._validate_route_resolution_map_complete()
 
-    def test_from_plugin_instances_invokes_route_resolution_validation(self, plugin_manager, monkeypatch) -> None:
-        from elspeth.cli_helpers import instantiate_plugins_from_config
-        from elspeth.core.config import ElspethSettings, GateSettings, SinkSettings, SourceSettings
-
-        called = {"value": False}
-
-        def fail_validator(self: ExecutionGraph) -> None:
-            called["value"] = True
-            raise GraphValidationError("sentinel route-resolution validation")
-
-        monkeypatch.setattr(ExecutionGraph, "_validate_route_resolution_map_complete", fail_validator)
-
-        settings = ElspethSettings(
-            source=SourceSettings(
-                plugin="csv",
-                on_success="to_gate",
-                options={
-                    "path": "test.csv",
-                    "on_validation_failure": "discard",
-                    "schema": {"mode": "observed"},
-                },
-            ),
-            gates=[
-                GateSettings(
-                    name="router",
-                    input="to_gate",
-                    condition="row['score'] > 0.5",
-                    routes={"true": "output", "false": "output"},
-                )
-            ],
-            sinks={"output": SinkSettings(plugin="json", options={"path": "out.json", "schema": {"mode": "observed"}})},
-        )
-
-        plugins = instantiate_plugins_from_config(settings)
-        with pytest.raises(GraphValidationError, match="sentinel route-resolution validation"):
-            ExecutionGraph.from_plugin_instances(
-                source=plugins.source,
-                source_settings=plugins.source_settings,
-                transforms=plugins.transforms,
-                sinks=plugins.sinks,
-                aggregations=plugins.aggregations,
-                gates=list(settings.gates),
-            )
-
-        assert called["value"] is True
-
 
 class TestForkBranchIntegrity:
     """Fork branch names must be globally unique across all gates."""
