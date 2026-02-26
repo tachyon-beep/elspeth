@@ -92,6 +92,12 @@ from elspeth.contracts.config import (
     RuntimeTelemetryConfig,
     RuntimeTelemetryProtocol,
 )
+from elspeth.contracts.contexts import (
+    LifecycleContext,
+    SinkContext,
+    SourceContext,
+    TransformContext,
+)
 
 # Schema contracts (Phase 2: Source Integration)
 from elspeth.contracts.contract_builder import ContractBuilder
@@ -399,6 +405,11 @@ __all__ = [  # Grouped by category for readability
     # payload_store
     "IntegrityError",
     "PayloadStore",
+    # contexts (phase-based protocols)
+    "LifecycleContext",
+    "SinkContext",
+    "SourceContext",
+    "TransformContext",
     # plugin_context
     "PluginContext",
     "TransformErrorToken",

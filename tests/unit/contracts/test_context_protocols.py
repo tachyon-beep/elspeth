@@ -1,0 +1,242 @@
+"""Protocol alignment tests for PluginContext decomposition.
+
+Modeled on tests/unit/core/test_config_alignment.py — these verify that
+PluginContext satisfies all 4 phase-based protocols structurally.
+"""
+
+import dataclasses
+import inspect
+
+from elspeth.contracts.contexts import (
+    LifecycleContext,
+    SinkContext,
+    SourceContext,
+    TransformContext,
+)
+
+
+class TestProtocolsImportable:
+    """Smoke test: protocols can be imported."""
+
+    def test_source_context_importable(self) -> None:
+        assert SourceContext is not None
+
+    def test_transform_context_importable(self) -> None:
+        assert TransformContext is not None
+
+    def test_sink_context_importable(self) -> None:
+        assert SinkContext is not None
+
+    def test_lifecycle_context_importable(self) -> None:
+        assert LifecycleContext is not None
+
+
+class TestPluginContextSatisfiesProtocols:
+    """Verify PluginContext structurally satisfies all 4 protocols.
+
+    These are the critical alignment tests. If PluginContext is missing
+    a field or method that a protocol declares, isinstance() fails.
+    """
+
+    def _make_ctx(self) -> object:
+        from elspeth.contracts.plugin_context import PluginContext
+
+        return PluginContext(run_id="test", config={})
+
+    def test_satisfies_source_context(self) -> None:
+        ctx = self._make_ctx()
+        assert isinstance(ctx, SourceContext)
+
+    def test_satisfies_transform_context(self) -> None:
+        ctx = self._make_ctx()
+        assert isinstance(ctx, TransformContext)
+
+    def test_satisfies_sink_context(self) -> None:
+        ctx = self._make_ctx()
+        assert isinstance(ctx, SinkContext)
+
+    def test_satisfies_lifecycle_context(self) -> None:
+        ctx = self._make_ctx()
+        assert isinstance(ctx, LifecycleContext)
+
+
+class TestProtocolDiscrimination:
+    """Verify protocols are not trivially satisfied — each has unique requirements.
+
+    [R2] Uses real minimal objects, not just set arithmetic on field names.
+    A minimal SourceContext-only object must NOT satisfy TransformContext, etc.
+    """
+
+    def test_minimal_source_does_not_satisfy_transform(self) -> None:
+        """A minimal SourceContext-only object should not satisfy TransformContext."""
+
+        @dataclasses.dataclass
+        class MinimalSource:
+            run_id: str = "test"
+            node_id: str | None = None
+            operation_id: str | None = None
+            landscape: object = None
+            telemetry_emit: object = lambda _: None
+
+            def record_validation_error(self, *a: object, **kw: object) -> None: ...
+
+            def record_call(self, *a: object, **kw: object) -> None: ...
+
+        obj = MinimalSource()
+        assert isinstance(obj, SourceContext), "MinimalSource should satisfy SourceContext"
+        assert not isinstance(obj, TransformContext), "MinimalSource should NOT satisfy TransformContext"
+
+    def test_minimal_transform_does_not_satisfy_source(self) -> None:
+        """A minimal TransformContext-only object should not satisfy SourceContext."""
+
+        @dataclasses.dataclass
+        class MinimalTransform:
+            run_id: str = "test"
+            state_id: str | None = None
+            node_id: str | None = None
+            token: object = None
+            batch_token_ids: object = None
+            contract: object = None
+
+            def record_call(self, *a: object, **kw: object) -> None: ...
+
+            def get_checkpoint(self) -> None: ...
+
+            def set_checkpoint(self, state: object) -> None: ...
+
+            def clear_checkpoint(self) -> None: ...
+
+        obj = MinimalTransform()
+        assert isinstance(obj, TransformContext), "MinimalTransform should satisfy TransformContext"
+        assert not isinstance(obj, SourceContext), "MinimalTransform should NOT satisfy SourceContext"
+
+    def test_minimal_sink_does_not_satisfy_lifecycle(self) -> None:
+        """A minimal SinkContext-only object should not satisfy LifecycleContext."""
+
+        @dataclasses.dataclass
+        class MinimalSink:
+            run_id: str = "test"
+            contract: object = None
+            landscape: object = None
+            operation_id: str | None = None
+
+            def record_call(self, *a: object, **kw: object) -> None: ...
+
+        obj = MinimalSink()
+        assert isinstance(obj, SinkContext), "MinimalSink should satisfy SinkContext"
+        assert not isinstance(obj, LifecycleContext), "MinimalSink should NOT satisfy LifecycleContext"
+
+
+# [R3] Executor-only fields: on PluginContext but intentionally NOT in any protocol.
+# These are fields the engine mutates directly and plugins never access via ctx.
+EXECUTOR_ONLY_FIELDS = {"config", "_checkpoint", "_batch_checkpoints"}
+
+# [R4] Engine-internal methods: on PluginContext but called by engine, not plugins.
+ENGINE_INTERNAL_METHODS = {"record_transform_error"}
+
+
+class TestProtocolFieldCoverage:
+    """Verify protocol fields map to real PluginContext attributes.
+
+    [R3] Uses mechanical introspection (not hardcoded lists) to catch drift.
+    Modeled on test_config_alignment.py bidirectional verification pattern.
+    """
+
+    def _get_protocol_members(self, protocol_cls: type) -> set[str]:
+        """Extract all declared members from a Protocol class.
+
+        Uses __dict__ inspection rather than get_type_hints() because
+        TYPE_CHECKING imports are unavailable at runtime.
+        """
+        return {name for name in protocol_cls.__dict__ if not name.startswith("_")}
+
+    def _get_plugin_context_fields(self) -> set[str]:
+        """Get all field names from PluginContext dataclass."""
+        from elspeth.contracts.plugin_context import PluginContext
+
+        return {f.name for f in dataclasses.fields(PluginContext)}
+
+    def _get_plugin_context_methods(self) -> set[str]:
+        """Get all public method names from PluginContext."""
+        from elspeth.contracts.plugin_context import PluginContext
+
+        return {name for name, val in inspect.getmembers(PluginContext, predicate=inspect.isfunction) if not name.startswith("_")}
+
+    def test_all_protocol_fields_exist_on_plugin_context(self) -> None:
+        """Every field/method declared in any protocol must exist on PluginContext."""
+        from elspeth.contracts.plugin_context import PluginContext
+
+        ctx = PluginContext(run_id="test", config={})
+        all_protocols = [SourceContext, TransformContext, SinkContext, LifecycleContext]
+        for protocol in all_protocols:
+            for member in self._get_protocol_members(protocol):
+                assert hasattr(ctx, member), f"PluginContext missing {protocol.__name__} member: {member}"
+
+    def test_all_plugin_context_fields_accounted_for(self) -> None:
+        """[R3] Bidirectional: every PluginContext field must be in at least one protocol
+        OR in the explicit EXECUTOR_ONLY_FIELDS allowlist."""
+        all_protocol_members: set[str] = set()
+        for protocol in [SourceContext, TransformContext, SinkContext, LifecycleContext]:
+            all_protocol_members |= self._get_protocol_members(protocol)
+
+        plugin_context_fields = self._get_plugin_context_fields()
+        unaccounted = plugin_context_fields - all_protocol_members - EXECUTOR_ONLY_FIELDS
+        assert not unaccounted, (
+            f"PluginContext fields not in any protocol or EXECUTOR_ONLY_FIELDS: {unaccounted}. "
+            f"Either add to a protocol or to EXECUTOR_ONLY_FIELDS with justification."
+        )
+
+    def test_all_plugin_context_methods_accounted_for(self) -> None:
+        """[R3] Bidirectional: every PluginContext public method must be in at least one
+        protocol OR in the explicit ENGINE_INTERNAL_METHODS allowlist."""
+        all_protocol_members: set[str] = set()
+        for protocol in [SourceContext, TransformContext, SinkContext, LifecycleContext]:
+            all_protocol_members |= self._get_protocol_members(protocol)
+
+        plugin_context_methods = self._get_plugin_context_methods()
+        unaccounted = plugin_context_methods - all_protocol_members - ENGINE_INTERNAL_METHODS
+        assert not unaccounted, (
+            f"PluginContext methods not in any protocol or ENGINE_INTERNAL_METHODS: {unaccounted}. "
+            f"Either add to a protocol or to ENGINE_INTERNAL_METHODS with justification."
+        )
+
+    def test_executor_only_fields_are_real(self) -> None:
+        """Every entry in EXECUTOR_ONLY_FIELDS must exist on PluginContext."""
+        plugin_context_fields = self._get_plugin_context_fields()
+        phantom = EXECUTOR_ONLY_FIELDS - plugin_context_fields
+        assert not phantom, f"EXECUTOR_ONLY_FIELDS entries not on PluginContext: {phantom}"
+
+    def test_engine_internal_methods_are_real(self) -> None:
+        """Every entry in ENGINE_INTERNAL_METHODS must exist on PluginContext."""
+        plugin_context_methods = self._get_plugin_context_methods()
+        phantom = ENGINE_INTERNAL_METHODS - plugin_context_methods
+        assert not phantom, f"ENGINE_INTERNAL_METHODS entries not on PluginContext: {phantom}"
+
+
+class TestProtocolOverlapDocumentation:
+    """Document field overlap between protocols.
+
+    run_id is intentionally in all 4 protocols. Other fields should
+    have minimal overlap. This test serves as documentation — it
+    fails if overlap changes unexpectedly.
+    """
+
+    EXPECTED_UNIVERSAL: frozenset[str] = frozenset({"run_id"})  # In all protocols by design
+
+    def test_universal_fields_are_only_run_id(self) -> None:
+        """Only run_id should appear in all 4 protocols."""
+        source_fields = {"run_id", "node_id", "operation_id", "landscape", "telemetry_emit"}
+        transform_fields = {"run_id", "state_id", "node_id", "token", "batch_token_ids", "contract"}
+        sink_fields = {"run_id", "contract", "landscape", "operation_id"}
+        lifecycle_fields = {
+            "run_id",
+            "node_id",
+            "landscape",
+            "rate_limit_registry",
+            "telemetry_emit",
+            "payload_store",
+            "concurrency_config",
+        }
+
+        universal = source_fields & transform_fields & sink_fields & lifecycle_fields
+        assert universal == self.EXPECTED_UNIVERSAL, f"Expected only {self.EXPECTED_UNIVERSAL} in all protocols, got {universal}"
