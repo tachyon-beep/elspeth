@@ -14,8 +14,7 @@
       "args": [
         "--project",
         "/home/john/elspeth-rapid"
-      ],
-      "env": {}
+      ]
     }
   }
 }
