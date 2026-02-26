@@ -6,7 +6,7 @@ from typing import Any
 from pydantic import Field, field_validator
 
 from elspeth.contracts import Determinism
-from elspeth.contracts.plugin_context import PluginContext
+from elspeth.contracts.contexts import TransformContext
 from elspeth.contracts.schema_contract import PipelineRow
 from elspeth.plugins.base import BaseTransform
 from elspeth.plugins.config_base import TransformDataConfig
@@ -145,7 +145,7 @@ class KeywordFilter(BaseTransform):
     def process(
         self,
         row: PipelineRow,
-        ctx: PluginContext,
+        ctx: TransformContext,
     ) -> TransformResult:
         """Scan configured fields for blocked patterns.
 

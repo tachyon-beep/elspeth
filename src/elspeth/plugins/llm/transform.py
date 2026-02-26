@@ -25,7 +25,7 @@ from typing import TYPE_CHECKING, Any, Protocol, cast
 import structlog
 
 from elspeth.contracts import Determinism, TransformErrorReason, TransformResult, propagate_contract
-from elspeth.contracts.plugin_context import PluginContext
+from elspeth.contracts.contexts import LifecycleContext, TransformContext
 from elspeth.contracts.schema import SchemaConfig
 from elspeth.contracts.schema_contract import PipelineRow
 from elspeth.plugins.base import BaseTransform
@@ -77,7 +77,7 @@ class QueryStrategy(Protocol):
     def execute(
         self,
         row: PipelineRow,
-        ctx: PluginContext,
+        ctx: TransformContext,
         *,
         provider: LLMProvider,
         tracer: LangfuseTracer,
@@ -99,7 +99,7 @@ class SingleQueryStrategy:
     def execute(
         self,
         row: PipelineRow,
-        ctx: PluginContext,
+        ctx: TransformContext,
         *,
         provider: LLMProvider,
         tracer: LangfuseTracer,
@@ -253,7 +253,7 @@ class MultiQueryStrategy:
     def execute(
         self,
         row: PipelineRow,
-        ctx: PluginContext,
+        ctx: TransformContext,
         *,
         provider: LLMProvider,
         tracer: LangfuseTracer,
@@ -665,7 +665,7 @@ class LLMTransform(BaseTransform, BatchTransformMixin):
         )
         self._batch_initialized = True
 
-    def on_start(self, ctx: PluginContext) -> None:
+    def on_start(self, ctx: LifecycleContext) -> None:
         """Capture recorder/telemetry and create provider instance."""
         super().on_start(ctx)
         self._recorder = ctx.landscape
@@ -710,19 +710,19 @@ class LLMTransform(BaseTransform, BatchTransformMixin):
         else:
             raise RuntimeError(f"Unknown config type: {type(self._config).__name__}")
 
-    def accept(self, row: PipelineRow, ctx: PluginContext) -> None:
+    def accept(self, row: PipelineRow, ctx: TransformContext) -> None:
         """Accept a row for processing (pipeline entry point)."""
         if not self._batch_initialized:
             raise RuntimeError("connect_output() must be called before accept()")
         self.accept_row(row, ctx, self._process_row)
 
-    def process(self, row: PipelineRow, ctx: PluginContext) -> TransformResult:
+    def process(self, row: PipelineRow, ctx: TransformContext) -> TransformResult:
         """Not supported — use accept() for row-level pipelining."""
         raise NotImplementedError(
             f"{self.__class__.__name__} uses row-level pipelining. Use accept() instead of process(). See class docstring for usage."
         )
 
-    def _process_row(self, row: PipelineRow, ctx: PluginContext) -> TransformResult:
+    def _process_row(self, row: PipelineRow, ctx: TransformContext) -> TransformResult:
         """Process a single row via the selected strategy.
 
         Called by worker threads from BatchTransformMixin. Delegates to

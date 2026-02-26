@@ -40,8 +40,8 @@ def _mock_getaddrinfo(ip: str) -> Any:
 
 
 @pytest.fixture
-def transform():
-    return WebScrapeTransform(
+def transform(mock_ctx):
+    t = WebScrapeTransform(
         {
             "schema": {"mode": "observed"},
             "url_field": "url",
@@ -53,6 +53,8 @@ def transform():
             },
         }
     )
+    t.on_start(mock_ctx)
+    return t
 
 
 @pytest.fixture

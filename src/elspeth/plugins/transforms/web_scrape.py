@@ -21,8 +21,8 @@ import httpx
 from pydantic import BaseModel, Field
 
 from elspeth.contracts import Determinism
+from elspeth.contracts.contexts import LifecycleContext, TransformContext
 from elspeth.contracts.contract_propagation import narrow_contract_to_output
-from elspeth.contracts.plugin_context import PluginContext
 from elspeth.contracts.schema_contract import PipelineRow
 from elspeth.core.security.web import (
     NetworkError as SSRFNetworkError,
@@ -177,12 +177,24 @@ class WebScrapeTransform(BaseTransform):
         self.input_schema = schema
         self.output_schema = schema
 
-    def process(self, row: PipelineRow, ctx: PluginContext) -> TransformResult:
+    def on_start(self, ctx: LifecycleContext) -> None:
+        """Capture infrastructure dependencies at pipeline start."""
+        super().on_start(ctx)
+        if ctx.landscape is None:
+            raise RuntimeError("WebScrapeTransform requires landscape for audited HTTP calls")
+        if ctx.rate_limit_registry is None:
+            raise RuntimeError("WebScrapeTransform requires rate_limit_registry")
+        self._recorder = ctx.landscape
+        self._limiter = ctx.rate_limit_registry
+        self._telemetry_emit = ctx.telemetry_emit
+        self._payload_store = ctx.payload_store
+
+    def process(self, row: PipelineRow, ctx: TransformContext) -> TransformResult:
         """Fetch URL and enrich row with content and fingerprint.
 
         Args:
             row: Input row (PipelineRow guaranteed by engine)
-            ctx: Plugin context with landscape, payload_store, etc.
+            ctx: Transform context with token, state_id, run_id
 
         Returns:
             TransformResult.success() with enriched row, or
@@ -246,13 +258,12 @@ class WebScrapeTransform(BaseTransform):
 
         # Field collision check already done before fetch — no need to re-check here.
 
-        # Store payloads for forensic recovery
-        # Context is guaranteed to have these - executor sets them
-        if ctx.payload_store is None:
-            raise RuntimeError("ctx.payload_store not set by executor")
-        request_hash = ctx.payload_store.store(f"GET {url}".encode())
-        response_raw_hash = ctx.payload_store.store(response.content)
-        response_processed_hash = ctx.payload_store.store(content.encode())
+        # Store payloads for forensic recovery (captured in on_start)
+        if self._payload_store is None:
+            raise RuntimeError("WebScrapeTransform requires payload_store (not wired by executor)")
+        request_hash = self._payload_store.store(f"GET {url}".encode())
+        response_raw_hash = self._payload_store.store(response.content)
+        response_processed_hash = self._payload_store.store(content.encode())
 
         # Enrich row with scraped data
         # Use explicit to_dict() conversion (PipelineRow guaranteed by engine)
@@ -280,7 +291,7 @@ class WebScrapeTransform(BaseTransform):
             },
         )
 
-    def _fetch_url(self, safe_request: SSRFSafeRequest, ctx: PluginContext) -> httpx.Response:
+    def _fetch_url(self, safe_request: SSRFSafeRequest, ctx: TransformContext) -> httpx.Response:
         """Fetch URL using SSRF-safe IP pinning with audit recording.
 
         Args:
@@ -293,21 +304,17 @@ class WebScrapeTransform(BaseTransform):
         Raises:
             WebScrapeError: For retryable or non-retryable failures
         """
-        # Context is guaranteed to have these - executor sets them
-        if ctx.rate_limit_registry is None:
-            raise RuntimeError("ctx.rate_limit_registry not set by executor")
-        if ctx.landscape is None:
-            raise RuntimeError("ctx.landscape not set by executor")
+        # Infrastructure captured in on_start()
         if ctx.state_id is None:
             raise RuntimeError("ctx.state_id not set by executor")
-        limiter = ctx.rate_limit_registry.get_limiter("web_scrape")
+        limiter = self._limiter.get_limiter("web_scrape")
 
         # Create audited client (records to Landscape)
         client = AuditedHTTPClient(
-            recorder=ctx.landscape,
+            recorder=self._recorder,
             state_id=ctx.state_id,
             run_id=ctx.run_id,
-            telemetry_emit=ctx.telemetry_emit,
+            telemetry_emit=self._telemetry_emit,
             timeout=self._timeout,
             limiter=limiter,
             token_id=ctx.token.token_id if ctx.token is not None else None,

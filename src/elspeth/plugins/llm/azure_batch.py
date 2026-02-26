@@ -28,7 +28,7 @@ from pydantic import Field
 
 from elspeth.contracts import BatchPendingError, CallStatus, CallType, Determinism, RowErrorEntry, TransformErrorReason, TransformResult
 from elspeth.contracts.batch_checkpoint import BatchCheckpointState, RowMappingEntry
-from elspeth.contracts.plugin_context import PluginContext
+from elspeth.contracts.contexts import LifecycleContext, TransformContext
 from elspeth.contracts.schema import SchemaConfig
 from elspeth.contracts.schema_contract import PipelineRow
 from elspeth.contracts.token_usage import TokenUsage
@@ -221,7 +221,7 @@ class AzureBatchLLMTransform(BaseTransform):
         self._tracing_active: bool = isinstance(self._tracer, ActiveLangfuseTracer)
         self._langfuse_client: Any = self._tracer.client if isinstance(self._tracer, ActiveLangfuseTracer) else None
 
-    def on_start(self, ctx: PluginContext) -> None:
+    def on_start(self, ctx: LifecycleContext) -> None:
         """Initialize tracing if configured.
 
         Called by the engine at pipeline start. Initializes Tier 2 tracing.
@@ -352,7 +352,7 @@ class AzureBatchLLMTransform(BaseTransform):
     def process(
         self,
         row: PipelineRow | list[PipelineRow],
-        ctx: PluginContext,
+        ctx: TransformContext,
     ) -> TransformResult:
         """Process batch with checkpoint-based recovery.
 
@@ -378,7 +378,7 @@ class AzureBatchLLMTransform(BaseTransform):
     def _process_single(
         self,
         row: PipelineRow,
-        ctx: PluginContext,
+        ctx: TransformContext,
     ) -> TransformResult:
         """Process a single row (fallback for non-batch mode).
 
@@ -414,7 +414,7 @@ class AzureBatchLLMTransform(BaseTransform):
     def _process_batch(
         self,
         rows: list[PipelineRow],
-        ctx: PluginContext,
+        ctx: TransformContext,
     ) -> TransformResult:
         """Process batch with two-phase checkpoint approach.
 
@@ -452,7 +452,7 @@ class AzureBatchLLMTransform(BaseTransform):
         # PHASE 1: Fresh batch - submit new
         return self._submit_batch(rows, ctx)
 
-    def _get_checkpoint(self, ctx: PluginContext) -> BatchCheckpointState | None:
+    def _get_checkpoint(self, ctx: TransformContext) -> BatchCheckpointState | None:
         """Get checkpoint state from context.
 
         Args:
@@ -463,7 +463,7 @@ class AzureBatchLLMTransform(BaseTransform):
         """
         return ctx.get_checkpoint()
 
-    def _set_checkpoint(self, ctx: PluginContext, state: BatchCheckpointState) -> None:
+    def _set_checkpoint(self, ctx: TransformContext, state: BatchCheckpointState) -> None:
         """Set checkpoint state.
 
         Args:
@@ -472,7 +472,7 @@ class AzureBatchLLMTransform(BaseTransform):
         """
         ctx.set_checkpoint(state)
 
-    def _clear_checkpoint(self, ctx: PluginContext) -> None:
+    def _clear_checkpoint(self, ctx: TransformContext) -> None:
         """Clear checkpoint state.
 
         Args:
@@ -483,7 +483,7 @@ class AzureBatchLLMTransform(BaseTransform):
     def _submit_batch(
         self,
         rows: list[PipelineRow],
-        ctx: PluginContext,
+        ctx: TransformContext,
     ) -> TransformResult:
         """Submit new batch to Azure Batch API.
 
@@ -667,7 +667,7 @@ class AzureBatchLLMTransform(BaseTransform):
     def _record_per_row_failure_calls(
         self,
         checkpoint: BatchCheckpointState,
-        ctx: PluginContext,
+        ctx: TransformContext,
         terminal_status: str,
         error_detail: str | None = None,
     ) -> None:
@@ -715,7 +715,7 @@ class AzureBatchLLMTransform(BaseTransform):
         self,
         checkpoint: BatchCheckpointState,
         rows: list[PipelineRow],
-        ctx: PluginContext,
+        ctx: TransformContext,
     ) -> TransformResult:
         """Check batch status and complete if ready.
 
@@ -901,7 +901,7 @@ class AzureBatchLLMTransform(BaseTransform):
         batch: Any,
         checkpoint: BatchCheckpointState,
         rows: list[PipelineRow],
-        ctx: PluginContext,
+        ctx: TransformContext,
     ) -> TransformResult:
         """Download batch results and assemble output rows.
 

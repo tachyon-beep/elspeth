@@ -27,7 +27,7 @@ from jinja2.sandbox import SandboxedEnvironment
 from pydantic import BaseModel, Field, field_validator, model_validator
 
 from elspeth.contracts import ArtifactDescriptor, CallStatus, CallType, PluginSchema
-from elspeth.contracts.plugin_context import PluginContext
+from elspeth.contracts.contexts import LifecycleContext, SinkContext
 from elspeth.plugins.azure.auth import AzureAuthConfig
 from elspeth.plugins.base import BaseSink
 from elspeth.plugins.config_base import DataPluginConfig
@@ -343,7 +343,7 @@ class AzureBlobSink(BaseSink):
 
         return self._container_client
 
-    def _render_blob_path(self, ctx: PluginContext) -> str:
+    def _render_blob_path(self, ctx: SinkContext) -> str:
         """Render blob path template with context variables.
 
         Args:
@@ -366,7 +366,7 @@ class AzureBlobSink(BaseSink):
             timestamp=datetime.now(tz=UTC).isoformat(),
         )
 
-    def _get_or_init_blob_path(self, ctx: PluginContext) -> str:
+    def _get_or_init_blob_path(self, ctx: SinkContext) -> str:
         """Get stable blob path for this sink instance.
 
         The path is rendered once on first write and reused thereafter so
@@ -511,7 +511,7 @@ class AzureBlobSink(BaseSink):
         self._resolved_display_headers = {v: k for k, v in resolution_mapping.items()}
         self._display_headers_resolved = True
 
-    def _resolve_display_headers_if_needed(self, ctx: PluginContext) -> None:
+    def _resolve_display_headers_if_needed(self, ctx: SinkContext) -> None:
         """Lazily resolve display headers from Landscape if restore_source_headers=True."""
         if self._display_headers_resolved:
             return
@@ -544,7 +544,7 @@ class AzureBlobSink(BaseSink):
 
         return [{display_map[k] if k in display_map else k: v for k, v in row.items()} for row in rows]  # noqa: SIM401
 
-    def write(self, rows: list[dict[str, Any]], ctx: PluginContext) -> ArtifactDescriptor:
+    def write(self, rows: list[dict[str, Any]], ctx: SinkContext) -> ArtifactDescriptor:
         """Write a batch of rows to Azure Blob Storage.
 
         Args:
@@ -698,10 +698,10 @@ class AzureBlobSink(BaseSink):
 
     # === Lifecycle Hooks ===
 
-    def on_start(self, ctx: PluginContext) -> None:
+    def on_start(self, ctx: LifecycleContext) -> None:
         """Called before processing begins."""
         pass
 
-    def on_complete(self, ctx: PluginContext) -> None:
+    def on_complete(self, ctx: LifecycleContext) -> None:
         """Called after processing completes."""
         pass

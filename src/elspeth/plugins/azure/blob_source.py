@@ -20,7 +20,7 @@ import pandas as pd
 from pydantic import BaseModel, Field, ValidationError, field_validator, model_validator
 
 from elspeth.contracts import CallStatus, CallType, PluginSchema, SourceRow
-from elspeth.contracts.plugin_context import PluginContext
+from elspeth.contracts.contexts import SourceContext
 from elspeth.core.identifiers import validate_field_names
 from elspeth.plugins.azure.auth import AzureAuthConfig
 from elspeth.plugins.base import BaseSource
@@ -380,7 +380,7 @@ class AzureBlobSource(BaseSource):
 
         return self._blob_client
 
-    def load(self, ctx: PluginContext) -> Iterator[SourceRow]:
+    def load(self, ctx: SourceContext) -> Iterator[SourceRow]:
         """Load rows from Azure Blob Storage.
 
         Each row is validated against the configured schema:
@@ -471,7 +471,7 @@ class AzureBlobSource(BaseSource):
         if not self._first_valid_row_processed and self._contract_builder is not None:
             self.set_schema_contract(self._contract_builder.contract.with_locked())
 
-    def _load_csv(self, blob_data: bytes, ctx: PluginContext) -> Iterator[SourceRow]:
+    def _load_csv(self, blob_data: bytes, ctx: SourceContext) -> Iterator[SourceRow]:
         """Load rows from CSV blob data.
 
         Args:
@@ -581,7 +581,7 @@ class AzureBlobSource(BaseSource):
             row = {str(k): v for k, v in record.items()}
             yield from self._validate_and_yield(row, ctx)
 
-    def _load_json_array(self, blob_data: bytes, ctx: PluginContext) -> Iterator[SourceRow]:
+    def _load_json_array(self, blob_data: bytes, ctx: SourceContext) -> Iterator[SourceRow]:
         """Load rows from JSON array blob data.
 
         Args:
@@ -653,7 +653,7 @@ class AzureBlobSource(BaseSource):
         for row in data:
             yield from self._validate_and_yield(row, ctx)
 
-    def _load_jsonl(self, blob_data: bytes, ctx: PluginContext) -> Iterator[SourceRow]:
+    def _load_jsonl(self, blob_data: bytes, ctx: SourceContext) -> Iterator[SourceRow]:
         """Load rows from JSONL (newline-delimited JSON) blob data.
 
         Args:
@@ -726,7 +726,7 @@ class AzureBlobSource(BaseSource):
 
             yield from self._validate_and_yield(row, ctx)
 
-    def _validate_and_yield(self, row: Any, ctx: PluginContext) -> Iterator[SourceRow]:
+    def _validate_and_yield(self, row: Any, ctx: SourceContext) -> Iterator[SourceRow]:
         """Validate a row and yield if valid, otherwise quarantine.
 
         For FLEXIBLE/OBSERVED schemas, the first valid row triggers type inference and

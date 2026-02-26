@@ -64,6 +64,11 @@ class TestWebScrapeContract(TransformContractPropertyTestBase):
             }
         )
 
+    @pytest.fixture(autouse=True)
+    def _init_lifecycle(self, transform, ctx) -> None:
+        """Call on_start() to capture infrastructure before tests call process()."""
+        transform.on_start(ctx)
+
     @pytest.fixture
     def valid_input(self) -> dict[str, Any]:
         """Provide a valid input row with a URL field."""

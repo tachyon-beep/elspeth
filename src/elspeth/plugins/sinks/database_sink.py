@@ -21,7 +21,7 @@ from sqlalchemy.engine import Engine
 from sqlalchemy.types import TypeEngine
 
 from elspeth.contracts import ArtifactDescriptor, CallStatus, CallType, PluginSchema
-from elspeth.contracts.plugin_context import PluginContext
+from elspeth.contracts.contexts import LifecycleContext, SinkContext
 from elspeth.contracts.url import SanitizedDatabaseUrl
 from elspeth.core.canonical import canonical_json
 from elspeth.plugins.base import BaseSink
@@ -254,7 +254,7 @@ class DatabaseSink(BaseSink):
 
         return OutputValidationResult.success(target_fields=existing)
 
-    def _ensure_table(self, row: dict[str, Any], ctx: PluginContext) -> None:
+    def _ensure_table(self, row: dict[str, Any], ctx: SinkContext) -> None:
         """Create table, handling if_exists behavior.
 
         if_exists behavior (follows pandas to_sql semantics):
@@ -324,7 +324,7 @@ class DatabaseSink(BaseSink):
                 )
                 raise
 
-    def _drop_table_if_exists(self, ctx: PluginContext) -> None:
+    def _drop_table_if_exists(self, ctx: SinkContext) -> None:
         """Drop the table if it exists (for replace mode).
 
         Uses SQLAlchemy's Table.drop() for portable, dialect-safe drops.
@@ -413,7 +413,7 @@ class DatabaseSink(BaseSink):
         # Fallback (shouldn't happen with valid config): use row keys
         return [Column(key, Text) for key in row]
 
-    def write(self, rows: list[dict[str, Any]], ctx: PluginContext) -> ArtifactDescriptor:
+    def write(self, rows: list[dict[str, Any]], ctx: SinkContext) -> ArtifactDescriptor:
         """Write a batch of rows to the database.
 
         CRITICAL: Hashes the canonical JSON payload BEFORE insert.
@@ -543,10 +543,10 @@ class DatabaseSink(BaseSink):
 
     # === Lifecycle Hooks ===
 
-    def on_start(self, ctx: PluginContext) -> None:
+    def on_start(self, ctx: LifecycleContext) -> None:
         """Called before processing begins."""
         pass
 
-    def on_complete(self, ctx: PluginContext) -> None:
+    def on_complete(self, ctx: LifecycleContext) -> None:
         """Called after processing completes."""
         pass

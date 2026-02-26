@@ -17,7 +17,7 @@ from elspeth.contracts import Determinism
 
 if TYPE_CHECKING:
     from elspeth.contracts import ArtifactDescriptor, PluginSchema, SourceRow
-    from elspeth.contracts.plugin_context import PluginContext
+    from elspeth.contracts.contexts import LifecycleContext, SinkContext, SourceContext, TransformContext
     from elspeth.contracts.schema_contract import PipelineRow
     from elspeth.contracts.sink import OutputValidationResult
     from elspeth.plugins.results import TransformResult
@@ -53,7 +53,7 @@ class SourceProtocol(Protocol):
             name = "csv"
             output_schema = RowSchema
 
-            def load(self, ctx: PluginContext) -> Iterator[SourceRow]:
+            def load(self, ctx: SourceContext) -> Iterator[SourceRow]:
                 with open(self.path) as f:
                     reader = csv.DictReader(f)
                     for row in reader:
@@ -81,11 +81,11 @@ class SourceProtocol(Protocol):
         """Initialize with configuration."""
         ...
 
-    def load(self, ctx: "PluginContext") -> Iterator["SourceRow"]:
+    def load(self, ctx: "SourceContext") -> Iterator["SourceRow"]:
         """Load and yield rows from the source.
 
         Args:
-            ctx: Plugin context with run metadata
+            ctx: Source context with run metadata and recording methods
 
         Yields:
             SourceRow for each row - either SourceRow.valid() for valid rows
@@ -103,11 +103,11 @@ class SourceProtocol(Protocol):
 
     # === Lifecycle Hooks ===
 
-    def on_start(self, ctx: "PluginContext") -> None:
+    def on_start(self, ctx: "LifecycleContext") -> None:
         """Called once before load(). If raises, pipeline aborts; on_complete/close skipped."""
         ...
 
-    def on_complete(self, ctx: "PluginContext") -> None:
+    def on_complete(self, ctx: "LifecycleContext") -> None:
         """Called after load() completes or on error, before close(). Individually protected."""
         ...
 
@@ -173,7 +173,7 @@ class TransformProtocol(Protocol):
             output_schema = OutputSchema
             is_batch_aware = False
 
-            def process(self, row: PipelineRow, ctx: PluginContext) -> TransformResult:
+            def process(self, row: PipelineRow, ctx: TransformContext) -> TransformResult:
                 enriched = {**row.to_dict(), "timestamp": datetime.now().isoformat()}
                 return TransformResult.success(
                     enriched,
@@ -232,13 +232,13 @@ class TransformProtocol(Protocol):
     def process(
         self,
         row: "PipelineRow",
-        ctx: "PluginContext",
+        ctx: "TransformContext",
     ) -> "TransformResult":
         """Process a single row.
 
         Args:
             row: Input row as PipelineRow (immutable, supports dual-name access)
-            ctx: Plugin context
+            ctx: Transform context with per-row identity and recording methods
 
         Returns:
             TransformResult with processed row dict or error
@@ -255,11 +255,11 @@ class TransformProtocol(Protocol):
 
     # === Lifecycle Hooks ===
 
-    def on_start(self, ctx: "PluginContext") -> None:
+    def on_start(self, ctx: "LifecycleContext") -> None:
         """Called once before any process() call. If raises, pipeline aborts; on_complete/close skipped."""
         ...
 
-    def on_complete(self, ctx: "PluginContext") -> None:
+    def on_complete(self, ctx: "LifecycleContext") -> None:
         """Called after all rows processed or on error, before close(). Individually protected."""
         ...
 
@@ -301,7 +301,7 @@ class BatchTransformProtocol(Protocol):
             def process(
                 self,
                 rows: list[PipelineRow],
-                ctx: PluginContext,
+                ctx: TransformContext,
             ) -> TransformResult:
                 total = sum(row["amount"] for row in rows)
                 return TransformResult.success(
@@ -343,13 +343,13 @@ class BatchTransformProtocol(Protocol):
     def process(
         self,
         rows: list["PipelineRow"],
-        ctx: "PluginContext",
+        ctx: "TransformContext",
     ) -> "TransformResult":
         """Process a batch of rows.
 
         Args:
             rows: List of input rows as PipelineRow instances
-            ctx: Plugin context
+            ctx: Transform context with per-row identity and recording methods
 
         Returns:
             TransformResult with aggregated result or multiple output rows
@@ -362,11 +362,11 @@ class BatchTransformProtocol(Protocol):
 
     # === Lifecycle Hooks ===
 
-    def on_start(self, ctx: "PluginContext") -> None:
+    def on_start(self, ctx: "LifecycleContext") -> None:
         """Called once before any process() call. If raises, pipeline aborts; on_complete/close skipped."""
         ...
 
-    def on_complete(self, ctx: "PluginContext") -> None:
+    def on_complete(self, ctx: "LifecycleContext") -> None:
         """Called after all rows processed or on error, before close(). Individually protected."""
         ...
 
@@ -418,7 +418,7 @@ class SinkProtocol(Protocol):
             input_schema = RowSchema
             idempotent = False  # Appends are not idempotent
 
-            def write(self, rows: list[dict], ctx: PluginContext) -> ArtifactDescriptor:
+            def write(self, rows: list[dict], ctx: SinkContext) -> ArtifactDescriptor:
                 for row in rows:
                     self._writer.writerow(row)
                 return ArtifactDescriptor.for_file(
@@ -461,13 +461,13 @@ class SinkProtocol(Protocol):
     def write(
         self,
         rows: list[dict[str, Any]],
-        ctx: "PluginContext",
+        ctx: "SinkContext",
     ) -> "ArtifactDescriptor":
         """Write a batch of rows to the sink.
 
         Args:
             rows: List of row dicts to write
-            ctx: Plugin context
+            ctx: Sink context with run identity and recording methods
 
         Returns:
             ArtifactDescriptor with content_hash and size_bytes (REQUIRED for audit)
@@ -504,11 +504,11 @@ class SinkProtocol(Protocol):
 
     # === Lifecycle Hooks ===
 
-    def on_start(self, ctx: "PluginContext") -> None:
+    def on_start(self, ctx: "LifecycleContext") -> None:
         """Called once before any write() call. If raises, pipeline aborts; on_complete/close skipped."""
         ...
 
-    def on_complete(self, ctx: "PluginContext") -> None:
+    def on_complete(self, ctx: "LifecycleContext") -> None:
         """Called after all rows written or on error, before close(). Individually protected."""
         ...
 

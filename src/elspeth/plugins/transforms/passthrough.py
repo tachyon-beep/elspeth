@@ -11,7 +11,7 @@ from typing import Any
 
 from pydantic import Field
 
-from elspeth.contracts.plugin_context import PluginContext
+from elspeth.contracts.contexts import TransformContext
 from elspeth.contracts.schema_contract import PipelineRow
 from elspeth.plugins.base import BaseTransform
 from elspeth.plugins.config_base import TransformDataConfig
@@ -55,7 +55,7 @@ class PassThrough(BaseTransform):
         self._schema_config = cfg.schema_config
         self.input_schema, self.output_schema = self._create_schemas(cfg.schema_config, "PassThrough")
 
-    def process(self, row: PipelineRow, ctx: PluginContext) -> TransformResult:
+    def process(self, row: PipelineRow, ctx: TransformContext) -> TransformResult:
         """Return row unchanged (deep copy to prevent mutation).
 
         Args:

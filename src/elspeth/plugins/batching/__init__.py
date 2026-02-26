@@ -19,10 +19,10 @@ Example:
             super().__init__(config)
             self.init_batch_processing(max_pending=30, output=output)
 
-        def accept(self, row: dict, ctx: PluginContext) -> None:
+        def accept(self, row: dict, ctx: TransformContext) -> None:
             self.accept_row(row, ctx, self._do_llm_processing)
 
-        def _do_llm_processing(self, row: dict, ctx: PluginContext) -> TransformResult:
+        def _do_llm_processing(self, row: dict, ctx: TransformContext) -> TransformResult:
             # Actual LLM work here
             return TransformResult.success(row, success_reason={"action": "processed"})
 """

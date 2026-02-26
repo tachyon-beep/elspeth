@@ -23,7 +23,7 @@ import httpx
 from pydantic import BaseModel, Field, field_validator
 
 from elspeth.contracts import Determinism
-from elspeth.contracts.plugin_context import PluginContext
+from elspeth.contracts.contexts import LifecycleContext, TransformContext
 from elspeth.contracts.schema_contract import PipelineRow
 from elspeth.plugins.base import BaseTransform
 from elspeth.plugins.batching import BatchTransformMixin, OutputPort
@@ -201,7 +201,7 @@ class AzureContentSafety(BaseTransform, BatchTransformMixin):
         # Batch processing state (initialized by connect_output)
         self._batch_initialized = False
 
-    def on_start(self, ctx: PluginContext) -> None:
+    def on_start(self, ctx: LifecycleContext) -> None:
         """Capture recorder, telemetry, and rate limit context for pooled execution."""
         super().on_start(ctx)
         self._recorder = ctx.landscape
@@ -239,7 +239,7 @@ class AzureContentSafety(BaseTransform, BatchTransformMixin):
         )
         self._batch_initialized = True
 
-    def accept(self, row: PipelineRow, ctx: PluginContext) -> None:
+    def accept(self, row: PipelineRow, ctx: TransformContext) -> None:
         """Accept a row for processing.
 
         Submits the row to the batch processing pipeline. Returns quickly
@@ -257,16 +257,12 @@ class AzureContentSafety(BaseTransform, BatchTransformMixin):
         if not self._batch_initialized:
             raise RuntimeError("connect_output() must be called before accept(). This wires up the output port for result emission.")
 
-        # Capture recorder on first row (same as on_start)
-        if self._recorder is None and ctx.landscape is not None:
-            self._recorder = ctx.landscape
-
         self.accept_row(row, ctx, self._process_row)
 
     def process(
         self,
         row: PipelineRow,
-        ctx: PluginContext,
+        ctx: TransformContext,
     ) -> TransformResult:
         """Not supported - use accept() for row-level pipelining.
 
@@ -283,7 +279,7 @@ class AzureContentSafety(BaseTransform, BatchTransformMixin):
     def _process_row(
         self,
         row: PipelineRow,
-        ctx: PluginContext,
+        ctx: TransformContext,
     ) -> TransformResult:
         """Process a single row. Called by worker threads.
 

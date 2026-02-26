@@ -14,8 +14,8 @@ from typing import Any
 from pydantic import Field, ValidationError
 
 from elspeth.contracts import PluginSchema, SourceRow
+from elspeth.contracts.contexts import SourceContext
 from elspeth.contracts.contract_builder import ContractBuilder
-from elspeth.contracts.plugin_context import PluginContext
 from elspeth.contracts.schema_contract_factory import create_contract_from_config
 from elspeth.plugins.base import BaseSource
 from elspeth.plugins.config_base import TabularSourceDataConfig
@@ -102,7 +102,7 @@ class CSVSource(BaseSource):
         # Contract creation deferred until load() when field_resolution is known
         self._contract_builder: ContractBuilder | None = None
 
-    def load(self, ctx: PluginContext) -> Iterator[SourceRow]:
+    def load(self, ctx: SourceContext) -> Iterator[SourceRow]:
         """Load rows from CSV file with optional field normalization.
 
         Uses csv.reader directly on file handle to properly support
@@ -178,7 +178,7 @@ class CSVSource(BaseSource):
         finally:
             f.close()
 
-    def _load_from_file(self, f: Any, ctx: PluginContext) -> Iterator[SourceRow]:
+    def _load_from_file(self, f: Any, ctx: SourceContext) -> Iterator[SourceRow]:
         """Load rows from an open CSV file handle.
 
         Extracted from load() to allow UnicodeDecodeError handling at the

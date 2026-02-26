@@ -16,8 +16,8 @@ from typing import Any
 
 from pydantic import Field, model_validator
 
+from elspeth.contracts.contexts import TransformContext
 from elspeth.contracts.errors import TransformSuccessReason
-from elspeth.contracts.plugin_context import PluginContext
 from elspeth.contracts.schema_contract import FieldContract, PipelineRow, SchemaContract
 from elspeth.plugins.base import BaseTransform
 from elspeth.plugins.config_base import TransformDataConfig
@@ -115,7 +115,7 @@ class BatchReplicate(BaseTransform):
         )
 
     def process(  # type: ignore[override] # Batch signature: list[PipelineRow] instead of PipelineRow
-        self, rows: list[PipelineRow], ctx: PluginContext
+        self, rows: list[PipelineRow], ctx: TransformContext
     ) -> TransformResult:
         """Replicate each row based on its copies field.
 

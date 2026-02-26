@@ -24,8 +24,8 @@ from typing import Any
 
 from pydantic import Field
 
+from elspeth.contracts.contexts import TransformContext
 from elspeth.contracts.contract_propagation import narrow_contract_to_output
-from elspeth.contracts.plugin_context import PluginContext
 from elspeth.contracts.schema_contract import FieldContract, PipelineRow, SchemaContract
 from elspeth.plugins.base import BaseTransform
 from elspeth.plugins.config_base import DataPluginConfig, PluginConfigError
@@ -120,7 +120,7 @@ class JSONExplode(BaseTransform):
             adds_fields=True,
         )
 
-    def process(self, row: PipelineRow, ctx: PluginContext) -> TransformResult:
+    def process(self, row: PipelineRow, ctx: TransformContext) -> TransformResult:
         """Explode array field into multiple rows.
 
         Args:

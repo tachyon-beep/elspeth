@@ -17,7 +17,7 @@ from typing import Any, Literal
 from pydantic import ValidationError
 
 from elspeth.contracts import PluginSchema, SourceRow
-from elspeth.contracts.plugin_context import PluginContext
+from elspeth.contracts.contexts import SourceContext
 from elspeth.plugins.base import BaseSource
 from elspeth.plugins.config_base import SourceDataConfig
 from elspeth.plugins.schema_factory import create_schema_from_config
@@ -141,7 +141,7 @@ class JSONSource(BaseSource):
             self._contract_builder = ContractBuilder(initial_contract)
             # Contract will be set after processing first valid row in load()
 
-    def load(self, ctx: PluginContext) -> Iterator[SourceRow]:
+    def load(self, ctx: SourceContext) -> Iterator[SourceRow]:
         """Load rows from JSON file.
 
         Each row is validated against the configured schema:
@@ -174,7 +174,7 @@ class JSONSource(BaseSource):
         if not self._first_valid_row_processed and self._contract_builder is not None:
             self.set_schema_contract(self._contract_builder.contract.with_locked())
 
-    def _load_jsonl(self, ctx: PluginContext) -> Iterator[SourceRow]:
+    def _load_jsonl(self, ctx: SourceContext) -> Iterator[SourceRow]:
         """Load from JSONL format (one JSON object per line).
 
         Per Three-Tier Trust Model (CLAUDE.md), external data (Tier 3) that
@@ -237,7 +237,7 @@ class JSONSource(BaseSource):
             if quarantined is not None:
                 yield quarantined
 
-    def _load_json_array(self, ctx: PluginContext) -> Iterator[SourceRow]:
+    def _load_json_array(self, ctx: SourceContext) -> Iterator[SourceRow]:
         """Load from JSON array format.
 
         Per Three-Tier Trust Model (CLAUDE.md), external data (Tier 3) that
@@ -340,7 +340,7 @@ class JSONSource(BaseSource):
         for row in data:
             yield from self._validate_and_yield(row, ctx)
 
-    def _validate_and_yield(self, row: dict[str, Any], ctx: PluginContext) -> Iterator[SourceRow]:
+    def _validate_and_yield(self, row: dict[str, Any], ctx: SourceContext) -> Iterator[SourceRow]:
         """Validate a row and yield if valid, otherwise quarantine.
 
         For FLEXIBLE/OBSERVED schemas, the first valid row triggers type inference and
@@ -410,7 +410,7 @@ class JSONSource(BaseSource):
 
     def _record_parse_error(
         self,
-        ctx: PluginContext,
+        ctx: SourceContext,
         row: Mapping[str, object],
         error_msg: str,
     ) -> SourceRow | None:

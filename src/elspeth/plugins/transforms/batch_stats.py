@@ -12,7 +12,7 @@ from typing import Any
 
 from pydantic import Field
 
-from elspeth.contracts.plugin_context import PluginContext
+from elspeth.contracts.contexts import TransformContext
 from elspeth.contracts.schema_contract import FieldContract, PipelineRow, SchemaContract
 from elspeth.plugins.base import BaseTransform
 from elspeth.plugins.config_base import TransformDataConfig
@@ -85,7 +85,7 @@ class BatchStats(BaseTransform):
         )
 
     def process(  # type: ignore[override] # Batch signature: list[PipelineRow] instead of PipelineRow
-        self, rows: list[PipelineRow], ctx: PluginContext
+        self, rows: list[PipelineRow], ctx: TransformContext
     ) -> TransformResult:
         """Compute statistics over a batch of rows.
 

@@ -21,9 +21,9 @@ Lifecycle Contract (all hooks called on main thread by orchestrator):
 
 - on_start: Per-run initialization (acquire resources, capture context).
   If on_start raises, neither on_complete nor close is called.
-- on_complete: Processing finished (success or error). Receives PluginContext
+- on_complete: Processing finished (success or error). Receives LifecycleContext
   for landscape/telemetry interaction. Called even on pipeline crash.
-- close: Pure resource teardown (no PluginContext). Called even on pipeline
+- close: Pure resource teardown (no context). Called even on pipeline
   crash. Each plugin's cleanup is individually protected.
 - Call order across plugin types (normal run):
   source.on_start -> transforms.on_start -> sinks.on_start -> [processing]
@@ -31,6 +31,8 @@ Lifecycle Contract (all hooks called on main thread by orchestrator):
   -> source.close -> transforms.close -> sinks.close
 - Resume runs skip source lifecycle entirely (NullSource is used).
 """
+
+from __future__ import annotations
 
 from abc import ABC, abstractmethod
 from collections.abc import Iterator
@@ -40,9 +42,9 @@ from elspeth.contracts import ArtifactDescriptor, Determinism, PluginSchema, Sou
 from elspeth.contracts.schema_contract import PipelineRow
 
 if TYPE_CHECKING:
+    from elspeth.contracts.contexts import LifecycleContext, SinkContext, SourceContext, TransformContext
     from elspeth.contracts.schema_contract import SchemaContract
     from elspeth.contracts.sink import OutputValidationResult
-from elspeth.contracts.plugin_context import PluginContext
 from elspeth.plugins.results import (
     TransformResult,
 )
@@ -68,7 +70,7 @@ class BaseTransform(ABC):
             input_schema = InputSchema
             output_schema = OutputSchema
 
-            def process(self, row: PipelineRow, ctx: PluginContext) -> TransformResult:
+            def process(self, row: PipelineRow, ctx: TransformContext) -> TransformResult:
                 return TransformResult.success(
                     {**row.to_dict(), "new_field": "value"},
                     success_reason={"action": "processed"},
@@ -87,13 +89,13 @@ class BaseTransform(ABC):
         class MyLLMTransform(BaseTransform, BatchTransformMixin):
             name = "my_llm"
 
-            def accept(self, row: PipelineRow, ctx: PluginContext) -> None:
+            def accept(self, row: PipelineRow, ctx: TransformContext) -> None:
                 self.accept_row(row, ctx, self._do_work)
 
             def connect_output(self, output: OutputPort, max_pending: int = 30) -> None:
                 self.init_batch_processing(max_pending=max_pending, output=output)
 
-            def _do_work(self, row: PipelineRow, ctx: PluginContext) -> TransformResult:
+            def _do_work(self, row: PipelineRow, ctx: TransformContext) -> TransformResult:
                 # Runs in worker thread
                 return TransformResult.success(...)
 
@@ -226,7 +228,7 @@ class BaseTransform(ABC):
     def process(
         self,
         row: PipelineRow,
-        ctx: PluginContext,
+        ctx: TransformContext,
     ) -> TransformResult:
         """Process a single row.
 
@@ -251,7 +253,7 @@ class BaseTransform(ABC):
         """Release resources (connections, file handles, thread pools).
 
         Called once per run after on_complete(), inside a finally block.
-        No PluginContext is available -- this is pure resource teardown.
+        No context is available -- this is pure resource teardown.
 
         Guaranteed to be called if on_start() succeeded, even when the
         pipeline crashes mid-processing. NOT called if on_start() itself
@@ -278,7 +280,7 @@ class BaseTransform(ABC):
     # Resume path: on_start/on_complete/close are called normally for
     # transforms during resume runs.
 
-    def on_start(self, ctx: PluginContext) -> None:
+    def on_start(self, ctx: LifecycleContext) -> None:
         """Called once before any rows are processed.
 
         Override for per-run initialization: capturing the recorder,
@@ -291,13 +293,13 @@ class BaseTransform(ABC):
         """
         self._on_start_called = True
 
-    def on_complete(self, ctx: PluginContext) -> None:  # noqa: B027 - optional hook
+    def on_complete(self, ctx: LifecycleContext) -> None:  # noqa: B027 - optional hook
         """Called after all rows are processed (or after pipeline error).
 
         Override for recording final metrics, flushing application-level
         buffers, or updating audit state. Always called before close().
 
-        Called on the main thread. Receives PluginContext so it can
+        Called on the main thread. Receives LifecycleContext so it can
         interact with the landscape and telemetry. Individually protected:
         if this raises, other plugins still get their on_complete/close calls.
         """
@@ -339,9 +341,9 @@ class BaseSink(ABC):
     on_complete vs close:
         - on_complete(ctx): "Processing is done." Use for finalizing output
           format (e.g., writing JSON array closing bracket), recording metrics,
-          or updating audit state. Receives PluginContext.
+          or updating audit state. Receives LifecycleContext.
         - close(): "Release all resources." Use for closing file handles or
-          network connections. No PluginContext -- pure resource teardown.
+          network connections. No context -- pure resource teardown.
 
     Example:
         class CSVSink(BaseSink):
@@ -349,7 +351,7 @@ class BaseSink(ABC):
             input_schema = RowSchema
             idempotent = False
 
-            def write(self, rows: list[dict], ctx: PluginContext) -> ArtifactDescriptor:
+            def write(self, rows: list[dict], ctx: SinkContext) -> ArtifactDescriptor:
                 for row in rows:
                     self._writer.writerow(row)
                 return ArtifactDescriptor.for_file(
@@ -405,7 +407,7 @@ class BaseSink(ABC):
             f"implement configure_for_resume()."
         )
 
-    def validate_output_target(self) -> "OutputValidationResult":
+    def validate_output_target(self) -> OutputValidationResult:
         """Validate existing output target matches configured schema.
 
         Called by engine/CLI before write operations in append/resume mode.
@@ -434,7 +436,7 @@ class BaseSink(ABC):
         _ = resolution_mapping  # Explicitly consume the argument
 
     # Output contract for schema-aware sinks (Phase 3)
-    _output_contract: "SchemaContract | None" = None
+    _output_contract: SchemaContract | None = None
 
     def __init__(self, config: dict[str, Any]) -> None:
         """Initialize with configuration.
@@ -449,13 +451,13 @@ class BaseSink(ABC):
     def write(
         self,
         rows: list[dict[str, Any]],
-        ctx: PluginContext,
+        ctx: SinkContext,
     ) -> ArtifactDescriptor:
         """Write a batch of rows to the sink.
 
         Args:
             rows: List of row dicts to write
-            ctx: Plugin context
+            ctx: Sink context with run identity and recording methods
 
         Returns:
             ArtifactDescriptor with content_hash and size_bytes
@@ -480,7 +482,7 @@ class BaseSink(ABC):
 
     # === Output Contract Support (Phase 3) ===
 
-    def get_output_contract(self) -> "SchemaContract | None":
+    def get_output_contract(self) -> SchemaContract | None:
         """Get the current output contract.
 
         Returns:
@@ -488,7 +490,7 @@ class BaseSink(ABC):
         """
         return self._output_contract
 
-    def set_output_contract(self, contract: "SchemaContract") -> None:
+    def set_output_contract(self, contract: SchemaContract) -> None:
         """Set or update the output contract.
 
         Used for schema-aware sinks that need field metadata (e.g., for
@@ -503,7 +505,7 @@ class BaseSink(ABC):
     # Call ordering: on_start -> write/flush -> on_complete -> close
     # See class docstring for full lifecycle contract and guarantees.
 
-    def on_start(self, ctx: PluginContext) -> None:  # noqa: B027 - optional hook
+    def on_start(self, ctx: LifecycleContext) -> None:  # noqa: B027 - optional hook
         """Called once before any write() call.
 
         Override for per-run initialization. Called on the main thread.
@@ -512,7 +514,7 @@ class BaseSink(ABC):
         """
         pass
 
-    def on_complete(self, ctx: PluginContext) -> None:  # noqa: B027 - optional hook
+    def on_complete(self, ctx: LifecycleContext) -> None:  # noqa: B027 - optional hook
         """Called after all rows are written (or after pipeline error), before close().
 
         Override for finalizing output format, recording metrics, or
@@ -548,15 +550,15 @@ class BaseSource(ABC):
     from stored payloads, not from the original source.
 
     on_complete vs close:
-        - on_complete(ctx): "Loading is done." Receives PluginContext.
-        - close(): "Release all resources." No PluginContext -- pure teardown.
+        - on_complete(ctx): "Loading is done." Receives LifecycleContext.
+        - close(): "Release all resources." No context -- pure teardown.
 
     Example:
         class CSVSource(BaseSource):
             name = "csv"
             output_schema = RowSchema
 
-            def load(self, ctx: PluginContext) -> Iterator[SourceRow]:
+            def load(self, ctx: SourceContext) -> Iterator[SourceRow]:
                 with open(self.config["path"]) as f:
                     reader = csv.DictReader(f)
                     for row in reader:
@@ -583,7 +585,7 @@ class BaseSource(ABC):
     on_success: str
 
     # Schema contract for row validation (Phase 2)
-    _schema_contract: "SchemaContract | None" = None
+    _schema_contract: SchemaContract | None = None
 
     def __init__(self, config: dict[str, Any]) -> None:
         """Initialize with configuration.
@@ -595,11 +597,11 @@ class BaseSource(ABC):
         self._schema_contract = None
 
     @abstractmethod
-    def load(self, ctx: PluginContext) -> Iterator[SourceRow]:
+    def load(self, ctx: SourceContext) -> Iterator[SourceRow]:
         """Load and yield rows from the source.
 
         Args:
-            ctx: Plugin context
+            ctx: Source context with run metadata and recording methods
 
         Yields:
             SourceRow for each row - either SourceRow.valid() for rows that
@@ -622,7 +624,7 @@ class BaseSource(ABC):
 
     # === Schema Contract Support (Phase 2) ===
 
-    def get_schema_contract(self) -> "SchemaContract | None":
+    def get_schema_contract(self) -> SchemaContract | None:
         """Get the current schema contract.
 
         Returns:
@@ -630,7 +632,7 @@ class BaseSource(ABC):
         """
         return self._schema_contract
 
-    def set_schema_contract(self, contract: "SchemaContract") -> None:
+    def set_schema_contract(self, contract: SchemaContract) -> None:
         """Set or update the schema contract.
 
         Called during initialization for explicit schemas (FIXED/FLEXIBLE),
@@ -646,7 +648,7 @@ class BaseSource(ABC):
     # See class docstring for full lifecycle contract and guarantees.
     # Skipped entirely during resume runs (NullSource is used instead).
 
-    def on_start(self, ctx: PluginContext) -> None:  # noqa: B027 - optional hook
+    def on_start(self, ctx: LifecycleContext) -> None:  # noqa: B027 - optional hook
         """Called once before load().
 
         Override for per-run initialization. Called on the main thread.
@@ -657,7 +659,7 @@ class BaseSource(ABC):
         """
         pass
 
-    def on_complete(self, ctx: PluginContext) -> None:  # noqa: B027 - optional hook
+    def on_complete(self, ctx: LifecycleContext) -> None:  # noqa: B027 - optional hook
         """Called after load() completes (or after pipeline error), before close().
 
         Override for recording final metrics or updating audit state.

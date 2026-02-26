@@ -11,8 +11,8 @@ from typing import Any
 
 from pydantic import Field, model_validator
 
+from elspeth.contracts.contexts import TransformContext
 from elspeth.contracts.contract_propagation import narrow_contract_to_output
-from elspeth.contracts.plugin_context import PluginContext
 from elspeth.contracts.schema_contract import PipelineRow
 from elspeth.plugins.base import BaseTransform
 from elspeth.plugins.config_base import TransformDataConfig
@@ -98,7 +98,7 @@ class FieldMapper(BaseTransform):
             adds_fields=True,
         )
 
-    def process(self, row: PipelineRow, ctx: PluginContext) -> TransformResult:
+    def process(self, row: PipelineRow, ctx: TransformContext) -> TransformResult:
         """Apply field mapping to row.
 
         Args:

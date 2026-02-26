@@ -20,8 +20,8 @@ from elspeth.contracts import ArtifactDescriptor, PluginSchema
 if TYPE_CHECKING:
     from elspeth.contracts.schema_contract import SchemaContract
     from elspeth.contracts.sink import OutputValidationResult
+from elspeth.contracts.contexts import LifecycleContext, SinkContext
 from elspeth.contracts.header_modes import HeaderMode, resolve_headers
-from elspeth.contracts.plugin_context import PluginContext
 from elspeth.plugins.base import BaseSink
 from elspeth.plugins.config_base import SinkPathConfig
 from elspeth.plugins.schema_factory import create_schema_from_config
@@ -246,7 +246,7 @@ class JSONSink(BaseSink):
         self._file: IO[str] | None = None
         self._rows: list[dict[str, Any]] = []  # Buffer for json array format
 
-    def write(self, rows: list[dict[str, Any]], ctx: PluginContext) -> ArtifactDescriptor:
+    def write(self, rows: list[dict[str, Any]], ctx: SinkContext) -> ArtifactDescriptor:
         """Write a batch of rows to the JSON file.
 
         Args:
@@ -473,7 +473,7 @@ class JSONSink(BaseSink):
         """
         return self._output_contract
 
-    def _resolve_contract_from_context_if_needed(self, ctx: PluginContext) -> None:
+    def _resolve_contract_from_context_if_needed(self, ctx: SinkContext) -> None:
         """Lazily resolve output contract from context for headers: original mode.
 
         Called on first write() to capture ctx.contract if _output_contract is not
@@ -504,7 +504,7 @@ class JSONSink(BaseSink):
         if ctx.contract is not None:
             self._output_contract = ctx.contract
 
-    def _resolve_display_headers_if_needed(self, ctx: PluginContext) -> None:
+    def _resolve_display_headers_if_needed(self, ctx: SinkContext) -> None:
         """Lazily resolve display headers from Landscape if headers mode is ORIGINAL.
 
         Called on first write() to fetch field resolution mapping. This MUST be lazy
@@ -577,7 +577,7 @@ class JSONSink(BaseSink):
 
     # === Lifecycle Hooks ===
 
-    def on_start(self, ctx: PluginContext) -> None:
+    def on_start(self, ctx: LifecycleContext) -> None:
         """Called before processing begins.
 
         Note: ORIGINAL header resolution is done lazily in write() because
@@ -586,6 +586,6 @@ class JSONSink(BaseSink):
         """
         pass
 
-    def on_complete(self, ctx: PluginContext) -> None:
+    def on_complete(self, ctx: LifecycleContext) -> None:
         """Called after processing completes."""
         pass

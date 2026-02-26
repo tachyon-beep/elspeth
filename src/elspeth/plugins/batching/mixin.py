@@ -29,8 +29,8 @@ if TYPE_CHECKING:
     from typing import Any
 
     from elspeth.contracts import ExceptionResult, TransformResult
+    from elspeth.contracts.contexts import TransformContext
     from elspeth.contracts.identity import TokenInfo
-    from elspeth.contracts.plugin_context import PluginContext
     from elspeth.contracts.schema_contract import PipelineRow
 
 
@@ -71,11 +71,11 @@ class BatchTransformMixin:
                     name="my-llm-transform",
                 )
 
-            def accept(self, row: dict, ctx: PluginContext) -> None:
+            def accept(self, row: dict, ctx: TransformContext) -> None:
                 self.accept_row(row, ctx, self._do_processing)
 
             def _do_processing(
-                self, row: dict, ctx: PluginContext
+                self, row: dict, ctx: TransformContext
             ) -> TransformResult:
                 # Actual processing here (runs in worker thread)
                 result = self._call_llm(row)
@@ -100,7 +100,7 @@ class BatchTransformMixin:
     _batch_wait_timeout: float  # Timeout for waiter.wait() in executor
     _pool_size: int = 30  # Max concurrent rows; used by executor to cap adapter max_pending
 
-    def accept(self, row: PipelineRow, ctx: PluginContext) -> None:
+    def accept(self, row: PipelineRow, ctx: TransformContext) -> None:
         """Accept a row for concurrent processing.
 
         Concrete classes must override this to call accept_row() with their
@@ -173,8 +173,8 @@ class BatchTransformMixin:
     def accept_row(
         self,
         row: PipelineRow,
-        ctx: PluginContext,
-        processor: Callable[[PipelineRow, PluginContext], TransformResult],
+        ctx: TransformContext,
+        processor: Callable[[PipelineRow, TransformContext], TransformResult],
     ) -> None:
         """Accept a row for processing.
 
@@ -222,8 +222,8 @@ class BatchTransformMixin:
         ticket: RowTicket,
         token: TokenInfo,
         row: PipelineRow,
-        ctx: PluginContext,
-        processor: Callable[[PipelineRow, PluginContext], TransformResult],
+        ctx: TransformContext,
+        processor: Callable[[PipelineRow, TransformContext], TransformResult],
     ) -> None:
         """Worker thread: process row and mark complete.
 

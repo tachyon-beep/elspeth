@@ -27,7 +27,7 @@ import httpx
 from pydantic import Field
 
 from elspeth.contracts import CallStatus, CallType, Determinism, TransformResult
-from elspeth.contracts.plugin_context import PluginContext
+from elspeth.contracts.contexts import LifecycleContext, TransformContext
 from elspeth.contracts.schema import SchemaConfig
 from elspeth.contracts.schema_contract import PipelineRow
 from elspeth.contracts.token_usage import TokenUsage
@@ -239,7 +239,7 @@ class OpenRouterBatchLLMTransform(BaseTransform):
             tracing_config=self._tracing_config,
         )
 
-    def on_start(self, ctx: PluginContext) -> None:
+    def on_start(self, ctx: LifecycleContext) -> None:
         """Capture recorder, telemetry, rate limit context, and initialize tracing.
 
         Called by the engine at pipeline start. Captures the landscape
@@ -298,7 +298,7 @@ class OpenRouterBatchLLMTransform(BaseTransform):
     def process(
         self,
         row: PipelineRow | list[PipelineRow],
-        ctx: PluginContext,
+        ctx: TransformContext,
     ) -> TransformResult:
         """Process batch of rows in parallel.
 
@@ -321,7 +321,7 @@ class OpenRouterBatchLLMTransform(BaseTransform):
     def _process_single(
         self,
         row: PipelineRow,
-        ctx: PluginContext,
+        ctx: TransformContext,
     ) -> TransformResult:
         """Process a single row (fallback for non-batch mode).
 
@@ -359,7 +359,7 @@ class OpenRouterBatchLLMTransform(BaseTransform):
     def _process_batch(
         self,
         rows: list[PipelineRow],
-        ctx: PluginContext,
+        ctx: TransformContext,
     ) -> TransformResult:
         """Process batch of rows in parallel via ThreadPoolExecutor.
 
@@ -517,7 +517,7 @@ class OpenRouterBatchLLMTransform(BaseTransform):
         self,
         idx: int,
         row: PipelineRow,
-        ctx: PluginContext,
+        ctx: TransformContext,
     ) -> _RowOutcome:
         """Process a single row through OpenRouter API.
 
