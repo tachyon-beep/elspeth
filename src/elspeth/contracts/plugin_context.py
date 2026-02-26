@@ -1,13 +1,11 @@
 # src/elspeth/contracts/plugin_context.py
 """Plugin execution context.
 
-The PluginContext carries everything a plugin might need during execution.
-Phase 2 includes Optional placeholders for Phase 3 integrations.
-
-Phase 3 Integration Points:
-- landscape: LandscapeRecorder for audit trail
-- tracer: OpenTelemetry Tracer for distributed tracing
-- payload_store: PayloadStore for large blob storage
+The PluginContext carries everything a plugin needs during execution:
+- Run metadata (run_id, config)
+- Audit trail recording (landscape, payload_store)
+- External call recording (record_call, record_validation_error, record_transform_error)
+- Batch transform support (checkpoints, token identity)
 """
 
 from __future__ import annotations
@@ -15,7 +13,6 @@ from __future__ import annotations
 import copy
 import logging
 from collections.abc import Callable
-from contextlib import AbstractContextManager, nullcontext
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
@@ -23,10 +20,6 @@ from typing import TYPE_CHECKING, Any
 from elspeth.contracts.call_data import RawCallPayload
 
 if TYPE_CHECKING:
-    # These types are available in Phase 3
-    # Using string annotations to avoid import errors in Phase 2
-    from opentelemetry.trace import Span, Tracer
-
     from elspeth.contracts import Call, CallStatus, CallType, PayloadStore, TransformErrorReason
     from elspeth.contracts.batch_checkpoint import BatchCheckpointState
     from elspeth.contracts.config.runtime import RuntimeConcurrencyConfig
@@ -35,8 +28,6 @@ if TYPE_CHECKING:
     from elspeth.contracts.schema_contract import PipelineRow, SchemaContract
     from elspeth.core.landscape.recorder import LandscapeRecorder
     from elspeth.core.rate_limit import RateLimitRegistry
-    from elspeth.plugins.clients.http import AuditedHTTPClient
-    from elspeth.plugins.clients.llm import AuditedLLMClient
 
 logger = logging.getLogger(__name__)
 
@@ -74,32 +65,28 @@ class PluginContext:
 
     Provides access to:
     - Run metadata (run_id, config)
-    - Phase 3 integrations (landscape, tracer, payload_store)
-    - Utility methods (get config values, start spans)
+    - Audit trail (landscape, payload_store)
+    - External call recording (record_call)
+    - Validation/transform error recording
+    - Batch checkpoint management
 
     Example:
         def process(self, row: PipelineRow, ctx: PluginContext) -> TransformResult:
-            threshold = ctx.get("threshold", default=0.5)
-            with ctx.start_span("my_operation"):
-                result = do_work(row, threshold)
+            result = do_work(row, ctx.config)
             return TransformResult.success(result, success_reason={"action": "processed"})
     """
 
     run_id: str
     config: dict[str, Any]
 
-    # === Phase 3 Integration Points ===
-    # Optional in Phase 2, populated by engine in Phase 3
-    # Use string annotations to avoid import errors at runtime
+    # === Audit & Infrastructure ===
     landscape: LandscapeRecorder | None = None
-    tracer: Tracer | None = None
     payload_store: PayloadStore | None = None
     rate_limit_registry: RateLimitRegistry | None = None
     concurrency_config: RuntimeConcurrencyConfig | None = None
 
     # Additional metadata
     node_id: str | None = field(default=None)
-    plugin_name: str | None = field(default=None)
 
     # === Row-Level Pipelining (BatchTransformMixin) ===
     # Set by orchestrator/executor when calling accept() on batch transforms.
@@ -115,14 +102,14 @@ class PluginContext:
     # attribution. When None, the transform falls back to ctx.token (single-token mode).
     batch_token_ids: list[str] | None = field(default=None)
 
-    # === Schema Contract (Phase 3: Transform/Sink Integration) ===
+    # === Schema Contract ===
     # Set by executor when processing transforms to enable contract-aware template
     # access (original header names). When transforms receive a plain dict (not
     # PipelineRow), they can still access the contract via ctx.contract.
     # This allows templates using {{ row["Original Header"] }} to resolve correctly.
     contract: SchemaContract | None = field(default=None)
 
-    # === Phase 6: State & Call Recording ===
+    # === State & Call Recording ===
     # Set by executor to enable transforms to record external calls
     # Exactly one of state_id or operation_id should be set when recording calls
     state_id: str | None = field(default=None)  # For transform calls (via node_states)
@@ -130,18 +117,13 @@ class PluginContext:
     # Note: call_index allocation is delegated to LandscapeRecorder.allocate_call_index()
     # to ensure coordination with audited clients. See P1-2026-01-31-context-record-call-bypasses-allocator.
 
-    # === Phase 6: Audited Clients ===
-    # Set by executor when processing LLM transforms
-    llm_client: AuditedLLMClient | None = None
-    http_client: AuditedHTTPClient | None = None
-
-    # === Phase 6: Telemetry Callback ===
+    # === Telemetry Callback ===
     # Callback to emit telemetry events for external calls.
     # Always present - when telemetry is disabled, orchestrator sets this to a no-op.
     # Plugins ALWAYS call this after successful Landscape recording - no None checks.
     telemetry_emit: Callable[[Any], None] = field(default=lambda event: None)
 
-    # === Phase 6: Checkpoint API ===
+    # === Checkpoint API ===
     # Used by batch transforms (e.g., azure_batch_llm) for crash recovery.
     # The checkpoint stores batch_id, row_mapping, etc. as a typed
     # BatchCheckpointState (frozen dataclass) between invocations.
@@ -202,38 +184,6 @@ class PluginContext:
         # Also clear restored batch checkpoint to prevent stale resume data
         if self.node_id and self.node_id in self._batch_checkpoints:
             del self._batch_checkpoints[self.node_id]
-
-    def get(self, key: str, *, default: Any = None) -> Any:
-        """Get a config value by dotted path.
-
-        Args:
-            key: Dotted path like "nested.key"
-            default: Value if key not found
-
-        Returns:
-            Config value or default
-        """
-        parts = key.split(".")
-        value: Any = self.config
-        for part in parts:
-            if isinstance(value, dict) and part in value:
-                value = value[part]
-            else:
-                return default
-        return value
-
-    def start_span(self, name: str) -> AbstractContextManager[Span | None]:
-        """Start an OpenTelemetry span.
-
-        Returns nullcontext if tracer not configured.
-
-        Usage:
-            with ctx.start_span("operation_name"):
-                do_work()
-        """
-        if self.tracer is None:
-            return nullcontext()
-        return self.tracer.start_as_current_span(name)
 
     def record_call(
         self,

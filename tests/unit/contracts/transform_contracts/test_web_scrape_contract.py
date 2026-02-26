@@ -92,7 +92,6 @@ class TestWebScrapeContract(TransformContractPropertyTestBase):
             run_id="test-run-001",
             config={},
             node_id="test-transform",
-            plugin_name="test",
             rate_limit_registry=mock_registry,
             landscape=mock_landscape,
             state_id="test-state-001",

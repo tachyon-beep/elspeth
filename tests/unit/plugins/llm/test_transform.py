@@ -462,31 +462,6 @@ class TestTracingLifecycle:
         assert not hasattr(provider, "_tracer")
 
 
-class TestProviderClientIsolation:
-    """Verify LLMTransform uses its own provider, not ctx.llm_client."""
-
-    def test_llm_transform_does_not_use_ctx_llm_client(self) -> None:
-        """Set ctx.llm_client to sentinel that raises — transform must succeed via provider."""
-        transform, mock_provider = _make_transform_with_mock_provider()
-        mock_provider.execute_query.return_value = LLMQueryResult(
-            content="provider response",
-            usage=TokenUsage.known(10, 5),
-            model="gpt-4o",
-        )
-
-        ctx = _make_ctx()
-        # Sentinel: any access to ctx.llm_client raises
-        sentinel = Mock()
-        sentinel.side_effect = RuntimeError("SENTINEL: ctx.llm_client was accessed!")
-        ctx.llm_client = sentinel
-
-        # Should succeed without touching ctx.llm_client
-        result = transform._process_row(_make_row(), ctx)
-        assert result.status == "success"
-        # Verify sentinel was never called
-        sentinel.assert_not_called()
-
-
 # ---------------------------------------------------------------------------
 # Multi-query partial failure
 # ---------------------------------------------------------------------------

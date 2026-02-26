@@ -78,7 +78,6 @@ class SinkContractTestBase(ABC):
             run_id="test-run-001",
             config={},
             node_id="test-sink",
-            plugin_name="test",
         )
 
     # =========================================================================

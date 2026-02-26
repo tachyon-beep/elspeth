@@ -201,24 +201,31 @@ allow_hits:
   reason: Tier 1 boundary — .get() for optional condition_fire_offset (may be absent in older checkpoints)
   safety: None default is correct — absent offset means "no offset recorded"
   expires: null
-- key: contracts/plugin_context.py:R5:PluginContext:get:fp=29ee8c976e7ffbb9
-  owner: architecture
-  reason: AST/type checking - required for safe parsing or discriminated unions
-- key: contracts/plugin_context.py:R1:PluginContext:record_call:fp=12e08b745591ffba
+- key: contracts/plugin_context.py:R1:PluginContext:record_call:fp=4f0e218bd642c90d
   owner: architecture
   reason: Tier 3 boundary — .get() on serialized LLM response dict to extract optional usage data
-- key: contracts/plugin_context.py:R5:PluginContext:record_call:fp=e1a207f4a697eff6
+  safety: Missing key returns None; no fabrication
+  expires: null
+- key: contracts/plugin_context.py:R5:PluginContext:record_call:fp=a9b4db7453f27ce6
   owner: architecture
   reason: Tier 3 boundary — isinstance() validates usage is dict before TokenUsage.from_dict() coercion
-- key: contracts/plugin_context.py:R4:PluginContext:record_call:fp=63606dffe01919bc
+  safety: Type dispatch for external data validation, not masking bugs
+  expires: null
+- key: contracts/plugin_context.py:R4:PluginContext:record_call:fp=68315a95c7d71e70
   owner: architecture
-  reason: Broad exception handling at external boundary with logging
-- key: contracts/plugin_context.py:R5:PluginContext:record_validation_error:fp=934b50978b2478ff
+  reason: Broad exception handling — telemetry failure must not corrupt the audit call recording
+  safety: Warning logged with error details; Landscape recording already succeeded
+  expires: null
+- key: contracts/plugin_context.py:R5:PluginContext:record_validation_error:fp=4f4efcff4e768b32
   owner: architecture
-  reason: AST/type checking - required for safe parsing or discriminated unions
-- key: contracts/plugin_context.py:R6:PluginContext:record_validation_error:fp=3669895dbbe9ccee
+  reason: Tier 3 boundary — isinstance() checks if external row data is dict before accessing 'id' key
+  safety: Non-dict data falls through to hash-based row_id generation
+  expires: null
+- key: contracts/plugin_context.py:R6:PluginContext:record_validation_error:fp=77aec82106b1d3da
   owner: architecture
-  reason: Silent recovery with explicit error handling path
+  reason: Tier 3 boundary — ValueError/TypeError from stable_hash on non-canonical data falls back to repr_hash
+  safety: Warning logged; row_id still generated via repr_hash for audit trail continuity
+  expires: null
 - key: contracts/routing.py:R5:RoutingAction:__post_init__:fp=4d9b80b717bc7551
   owner: bugfix
   reason: Dataclass invariant enforcement - RoutingAction requires RoutingMode enum, not raw strings

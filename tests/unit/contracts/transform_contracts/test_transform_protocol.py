@@ -88,7 +88,6 @@ class TransformContractTestBase(ABC):
             run_id="test-run-001",
             config={},
             node_id="test-transform",
-            plugin_name="test",
         )
 
     # =========================================================================

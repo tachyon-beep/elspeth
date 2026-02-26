@@ -63,7 +63,6 @@ class SourceContractTestBase(ABC):
             run_id="test-run-001",
             config={},
             node_id="test-source",
-            plugin_name="test",
         )
 
     # =========================================================================
