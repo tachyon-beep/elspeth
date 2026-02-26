@@ -630,3 +630,195 @@ class TestKeywordFilterBlockedPatternsValidation:
             }
         )
         assert len(cfg.blocked_patterns) == 2
+
+
+class TestKeywordFilterNonStringFailClosed:
+    """T16: KeywordFilter must fail-closed when configured fields have non-string values.
+
+    A security filter that silently passes non-string values is fail-OPEN.
+    When the operator explicitly names a field to scan and it contains a
+    non-string value, the row must be quarantined (error result), not
+    silently passed through unchecked.
+
+    The 'all' mode is exempt — it dynamically selects string-valued fields,
+    so non-string fields are correctly excluded by design.
+    """
+
+    def test_non_string_value_in_named_field_returns_error(self) -> None:
+        """Integer in a configured field must return error, not pass through."""
+        from elspeth.plugins.transforms.keyword_filter import KeywordFilter
+
+        transform = KeywordFilter(
+            {
+                "fields": ["amount"],
+                "blocked_patterns": [r"secret"],
+                "schema": {"mode": "observed"},
+            }
+        )
+
+        row = {"amount": 42, "content": "safe text"}
+        result = transform.process(make_pipeline_row(row), make_mock_context())
+
+        assert result.status == "error", "Non-string value in named field must fail-closed"
+        assert result.reason is not None
+        assert result.reason["reason"] == "non_string_field"
+        assert result.reason["field"] == "amount"
+
+    def test_non_string_value_reports_actual_type(self) -> None:
+        """Error reason must include the actual type for diagnostics."""
+        from elspeth.plugins.transforms.keyword_filter import KeywordFilter
+
+        transform = KeywordFilter(
+            {
+                "fields": ["score"],
+                "blocked_patterns": [r"test"],
+                "schema": {"mode": "observed"},
+            }
+        )
+
+        row = {"score": 3.14}
+        result = transform.process(make_pipeline_row(row), make_mock_context())
+
+        assert result.status == "error"
+        assert result.reason is not None
+        assert result.reason["actual_type"] == "float"
+
+    def test_bool_value_in_named_field_returns_error(self) -> None:
+        """Boolean in a configured field must fail-closed."""
+        from elspeth.plugins.transforms.keyword_filter import KeywordFilter
+
+        transform = KeywordFilter(
+            {
+                "fields": ["active"],
+                "blocked_patterns": [r"secret"],
+                "schema": {"mode": "observed"},
+            }
+        )
+
+        row = {"active": True}
+        result = transform.process(make_pipeline_row(row), make_mock_context())
+
+        assert result.status == "error"
+        assert result.reason is not None
+        assert result.reason["reason"] == "non_string_field"
+
+    def test_none_value_in_named_field_returns_error(self) -> None:
+        """None in a configured field must fail-closed."""
+        from elspeth.plugins.transforms.keyword_filter import KeywordFilter
+
+        transform = KeywordFilter(
+            {
+                "fields": ["content"],
+                "blocked_patterns": [r"secret"],
+                "schema": {"mode": "observed"},
+            }
+        )
+
+        row = {"content": None}
+        result = transform.process(make_pipeline_row(row), make_mock_context())
+
+        assert result.status == "error"
+        assert result.reason is not None
+        assert result.reason["reason"] == "non_string_field"
+
+    def test_list_value_in_named_field_returns_error(self) -> None:
+        """List in a configured field must fail-closed."""
+        from elspeth.plugins.transforms.keyword_filter import KeywordFilter
+
+        transform = KeywordFilter(
+            {
+                "fields": ["tags"],
+                "blocked_patterns": [r"secret"],
+                "schema": {"mode": "observed"},
+            }
+        )
+
+        row = {"tags": ["a", "b"]}
+        result = transform.process(make_pipeline_row(row), make_mock_context())
+
+        assert result.status == "error"
+        assert result.reason is not None
+        assert result.reason["reason"] == "non_string_field"
+
+    def test_non_string_not_retryable(self) -> None:
+        """Non-string field error must not be retryable (data issue, not transient)."""
+        from elspeth.plugins.transforms.keyword_filter import KeywordFilter
+
+        transform = KeywordFilter(
+            {
+                "fields": ["count"],
+                "blocked_patterns": [r"test"],
+                "schema": {"mode": "observed"},
+            }
+        )
+
+        row = {"count": 99}
+        result = transform.process(make_pipeline_row(row), make_mock_context())
+
+        assert result.status == "error"
+        assert result.retryable is False
+
+    def test_mixed_fields_string_checked_non_string_errors(self) -> None:
+        """When one named field is non-string, error before checking string fields.
+
+        The filter should detect non-string values in named fields and error
+        immediately, even if other fields contain scannable strings.
+        """
+        from elspeth.plugins.transforms.keyword_filter import KeywordFilter
+
+        transform = KeywordFilter(
+            {
+                "fields": ["amount", "content"],
+                "blocked_patterns": [r"safe_pattern_no_match"],
+                "schema": {"mode": "observed"},
+            }
+        )
+
+        row = {"amount": 42, "content": "safe text"}
+        result = transform.process(make_pipeline_row(row), make_mock_context())
+
+        assert result.status == "error", "Must error on non-string 'amount' even though 'content' is scannable"
+        assert result.reason is not None
+        assert result.reason["field"] == "amount"
+
+    def test_all_mode_still_skips_non_string_fields(self) -> None:
+        """'all' mode must continue to skip non-string fields (no regression).
+
+        The 'all' keyword dynamically selects string-valued fields, so
+        non-string fields are correctly excluded by design. This must
+        not change with the fail-closed fix for named fields.
+        """
+        from elspeth.plugins.transforms.keyword_filter import KeywordFilter
+
+        transform = KeywordFilter(
+            {
+                "fields": "all",
+                "blocked_patterns": [r"secret"],
+                "schema": {"mode": "observed"},
+            }
+        )
+
+        # Only non-string fields — should pass through, not error
+        row = {"count": 42, "active": True, "score": 3.14}
+        result = transform.process(make_pipeline_row(row), make_mock_context())
+
+        assert result.status == "success", "'all' mode must still skip non-string fields"
+
+    def test_string_field_with_match_still_blocks(self) -> None:
+        """String fields with pattern matches must still be blocked (no regression)."""
+        from elspeth.plugins.transforms.keyword_filter import KeywordFilter
+
+        transform = KeywordFilter(
+            {
+                "fields": ["content"],
+                "blocked_patterns": [r"secret"],
+                "schema": {"mode": "observed"},
+            }
+        )
+
+        row = {"content": "contains secret data"}
+        result = transform.process(make_pipeline_row(row), make_mock_context())
+
+        assert result.status == "error"
+        assert result.reason is not None
+        assert result.reason["reason"] == "blocked_content"

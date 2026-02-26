@@ -158,6 +158,7 @@ class KeywordFilter(BaseTransform):
             TransformResult.error(reason) if any pattern matches
         """
         fields_to_scan = self._get_fields_to_scan(row)
+        named_fields = self._fields != "all"
 
         for field_name in fields_to_scan:
             # Use PipelineRow access semantics so configured fields can be either
@@ -167,8 +168,20 @@ class KeywordFilter(BaseTransform):
 
             value = row[field_name]
 
-            # Only scan string values
+            # Non-string values in explicitly named fields must fail-closed.
+            # The operator configured this field for scanning — if the value
+            # isn't scannable, the row must be quarantined, not passed through.
+            # In "all" mode, non-strings are already excluded by _get_fields_to_scan.
             if not isinstance(value, str):
+                if named_fields:
+                    return TransformResult.error(
+                        {
+                            "reason": "non_string_field",
+                            "field": field_name,
+                            "actual_type": type(value).__name__,
+                        },
+                        retryable=False,
+                    )
                 continue
 
             # Check each pattern

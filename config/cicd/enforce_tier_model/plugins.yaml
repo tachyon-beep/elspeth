@@ -74,11 +74,11 @@ allow_hits:
   reason: AST/type checking - required for safe parsing or discriminated unions
   safety: Code reviewed - legitimate pattern
   expires: '2026-05-02'
-- key: plugins/transforms/keyword_filter.py:R5:KeywordFilter:process:fp=a322360de8a02939
-  owner: architecture
-  reason: AST/type checking - required for safe parsing or discriminated unions
-  safety: Code reviewed - legitimate pattern
-  expires: '2026-05-02'
+- key: plugins/transforms/keyword_filter.py:R5:KeywordFilter:process:fp=ffabecb84ab1e05f
+  owner: bugfix
+  reason: Tier 2 row value type check — fail-closed on non-string values in explicitly named fields
+  safety: Returns TransformResult.error() with reason='non_string_field'; 'all' mode unaffected
+  expires: '2026-05-26'
 - key: plugins/transforms/keyword_filter.py:R5:KeywordFilter:_get_fields_to_scan:fp=9a99384d76557d33
   owner: architecture
   reason: AST/type checking - required for safe parsing or discriminated unions
