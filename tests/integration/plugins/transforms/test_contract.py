@@ -48,6 +48,8 @@ class _TestablePluginContext(PluginContext):
         error: str,
         schema_mode: str,
         destination: str,
+        *,
+        contract_violation: object | None = None,
     ) -> "ValidationErrorToken":
         """Override to track validation errors for test assertions."""
         from elspeth.contracts.plugin_context import ValidationErrorToken
