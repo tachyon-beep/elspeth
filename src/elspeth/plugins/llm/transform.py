@@ -27,7 +27,7 @@ import structlog
 from elspeth.contracts import Determinism, TransformErrorReason, TransformResult, propagate_contract
 from elspeth.contracts.contexts import LifecycleContext, TransformContext
 from elspeth.contracts.schema import SchemaConfig
-from elspeth.contracts.schema_contract import PipelineRow
+from elspeth.contracts.schema_contract import FieldContract, PipelineRow, SchemaContract
 from elspeth.plugins.base import BaseTransform
 from elspeth.plugins.batching import BatchTransformMixin, OutputPort
 from elspeth.plugins.clients.llm import ContextLengthError, LLMClientError
@@ -45,7 +45,8 @@ from elspeth.plugins.llm.providers.azure import AzureLLMProvider, AzureOpenAICon
 from elspeth.plugins.llm.providers.openrouter import OpenRouterConfig, OpenRouterLLMProvider
 from elspeth.plugins.llm.templates import PromptTemplate, TemplateError
 from elspeth.plugins.llm.tracing import parse_tracing_config
-from elspeth.plugins.llm.validation import reject_nonfinite_constant, strip_markdown_fences
+from elspeth.plugins.llm.validation import reject_nonfinite_constant, strip_markdown_fences, validate_field_value
+from elspeth.plugins.pooling import PooledExecutor, RowContext
 from elspeth.plugins.schema_factory import create_schema_from_config
 
 if TYPE_CHECKING:
@@ -251,7 +252,17 @@ class SingleQueryStrategy:
 
 @dataclass(frozen=True, slots=True)
 class MultiQueryStrategy:
-    """Execute multiple queries per row with atomic failure semantics."""
+    """Execute multiple queries per row with atomic failure semantics.
+
+    Supports two execution modes:
+    - Sequential (executor=None, pool_size=1): queries run one-by-one
+    - Parallel (executor set, pool_size>1): queries run via PooledExecutor
+      with AIMD throttle backoff on rate limits
+
+    In parallel mode, the PooledExecutor retries individual queries with
+    adaptive backoff, avoiding wasteful full-row retries that discard
+    successful query results.
+    """
 
     query_specs: list[QuerySpec]
     template: PromptTemplate
@@ -261,6 +272,7 @@ class MultiQueryStrategy:
     temperature: float
     max_tokens: int | None
     response_field: str
+    executor: PooledExecutor | None = None
 
     def execute(
         self,
@@ -278,122 +290,294 @@ class MultiQueryStrategy:
             raise RuntimeError("LLMTransform requires ctx.token")
         token_id = ctx.token.token_id
 
-        # Collect results across all queries — atomic: all succeed or all fail
+        if self.executor is not None:
+            return self._execute_parallel(row, state_id, token_id, provider, tracer)
+        return self._execute_sequential(row, state_id, token_id, provider, tracer)
+
+    def _execute_one_query(
+        self,
+        query_idx: int,
+        spec: QuerySpec,
+        row: PipelineRow,
+        state_id: str,
+        token_id: str,
+        provider: LLMProvider,
+        tracer: LangfuseTracer,
+    ) -> dict[str, Any] | TransformResult:
+        """Execute a single query within a multi-query row.
+
+        Returns:
+            dict[str, Any]: Partial output fields on success
+            TransformResult: Error result on failure
+
+        Raises:
+            LLMClientError: Retryable errors propagate to caller for retry
+                handling (PooledExecutor AIMD or sequential error capture).
+        """
+        # Build template context from named input_fields
+        try:
+            template_ctx = spec.build_template_context(row)
+        except KeyError as e:
+            return TransformResult.error(
+                {
+                    "reason": "template_context_failed",
+                    "query_name": spec.name,
+                    "query_index": query_idx,
+                    "error": str(e),
+                },
+                retryable=False,
+            )
+
+        # Use per-query template if provided, else config-level template
+        query_template = self.template
+        if spec.template is not None:
+            query_template = PromptTemplate(spec.template)
+
+        # Render template
+        try:
+            rendered = query_template.render_with_metadata(
+                template_ctx,
+                contract=row.contract,
+            )
+        except TemplateError as e:
+            return TransformResult.error(
+                {
+                    "reason": "template_rendering_failed",
+                    "query_name": spec.name,
+                    "query_index": query_idx,
+                    "error": str(e),
+                    "template_hash": query_template.template_hash,
+                },
+                retryable=False,
+            )
+
+        # Build messages
+        messages: list[dict[str, str]] = []
+        if self.system_prompt:
+            messages.append({"role": "system", "content": self.system_prompt})
+        messages.append({"role": "user", "content": rendered.prompt})
+
+        # Execute query
+        query_max_tokens = spec.max_tokens or self.max_tokens
+
+        # Build response_format for structured output requests
+        response_format: dict[str, Any] | None = None
+        if spec.output_fields:
+            if spec.response_format == ResponseFormat.STRUCTURED:
+                properties = {f.suffix: f.to_json_schema() for f in spec.output_fields}
+                response_format = {
+                    "type": "json_schema",
+                    "json_schema": {
+                        "name": f"{spec.name}_output",
+                        "schema": {
+                            "type": "object",
+                            "properties": properties,
+                            "required": list(properties),
+                        },
+                    },
+                }
+            else:
+                response_format = {"type": "json_object"}
+
+        start_time = time.monotonic()
+        try:
+            result = provider.execute_query(
+                messages,
+                model=self.model,
+                temperature=self.temperature,
+                max_tokens=query_max_tokens,
+                state_id=state_id,
+                token_id=token_id,
+                response_format=response_format,
+            )
+        except ContextLengthError as e:
+            latency_ms = (time.monotonic() - start_time) * 1000
+            tracer.record_error(
+                token_id=token_id,
+                query_name=spec.name,
+                prompt=rendered.prompt,
+                error_message=str(e),
+                model=self.model,
+                latency_ms=latency_ms,
+            )
+            return TransformResult.error(
+                {
+                    "reason": "context_length_exceeded",
+                    "failed_query_name": spec.name,
+                    "failed_query_index": query_idx,
+                    "error": str(e),
+                },
+                retryable=False,
+            )
+        except LLMClientError as e:
+            latency_ms = (time.monotonic() - start_time) * 1000
+            tracer.record_error(
+                token_id=token_id,
+                query_name=spec.name,
+                prompt=rendered.prompt,
+                error_message=str(e),
+                model=self.model,
+                latency_ms=latency_ms,
+            )
+            if e.retryable:
+                raise  # Pool catches with AIMD; sequential catches and returns error
+            return TransformResult.error(
+                {
+                    "reason": "multi_query_failed",
+                    "failed_query_name": spec.name,
+                    "failed_query_index": query_idx,
+                    "error": str(e),
+                },
+                retryable=False,
+            )
+
+        latency_ms = (time.monotonic() - start_time) * 1000
+
+        # Check truncation
+        if result.finish_reason == FinishReason.LENGTH:
+            tracer.record_error(
+                token_id=token_id,
+                query_name=spec.name,
+                prompt=rendered.prompt,
+                error_message="Response truncated (finish_reason=length)",
+                model=self.model,
+                latency_ms=latency_ms,
+            )
+            return TransformResult.error(
+                {
+                    "reason": "response_truncated",
+                    "query_name": spec.name,
+                    "query_index": query_idx,
+                    "finish_reason": "length",
+                },
+                retryable=False,
+            )
+
+        # Strip fences and store content
+        content = strip_markdown_fences(result.content)
+
+        tracer.record_success(
+            token_id=token_id,
+            query_name=spec.name,
+            prompt=rendered.prompt,
+            response_content=content,
+            model=self.model,
+            usage=result.usage,
+            latency_ms=latency_ms,
+        )
+
+        # Build partial output for this query
+        partial: dict[str, Any] = {}
+
+        # JSON parsing + field extraction when output_fields configured
+        if spec.output_fields:
+            # LLM response content is Tier 3 — parse and validate immediately
+            try:
+                parsed = json.loads(content, parse_constant=reject_nonfinite_constant)
+            except (json.JSONDecodeError, ValueError) as e:
+                return TransformResult.error(
+                    {
+                        "reason": "json_parse_failed",
+                        "query_name": spec.name,
+                        "query_index": query_idx,
+                        "error": str(e),
+                        "raw_response_preview": content[:500],
+                    },
+                    retryable=False,
+                )
+            if not isinstance(parsed, dict):
+                return TransformResult.error(
+                    {
+                        "reason": "invalid_json_type",
+                        "query_name": spec.name,
+                        "query_index": query_idx,
+                        "expected": "object",
+                        "actual": type(parsed).__name__,
+                    },
+                    retryable=False,
+                )
+            # Extract typed fields into prefixed output columns.
+            # Validate field presence — Tier 3 boundary: if the LLM omitted
+            # a declared field, that's an error, not a silent None.
+            for field in spec.output_fields:
+                field_key = f"{spec.name}_{field.suffix}"
+                if field.suffix not in parsed:
+                    return TransformResult.error(
+                        {
+                            "reason": "missing_output_field",
+                            "query_name": spec.name,
+                            "query_index": query_idx,
+                            "field": field.suffix,
+                            "available_fields": list(parsed.keys()),
+                        },
+                        retryable=False,
+                    )
+                # Validate value type — Tier 3 boundary: LLM may return
+                # wrong types in standard mode (no API schema enforcement)
+                type_error = validate_field_value(parsed[field.suffix], field)
+                if type_error is not None:
+                    return TransformResult.error(
+                        {
+                            "reason": "field_type_mismatch",
+                            "query_name": spec.name,
+                            "query_index": query_idx,
+                            "field": field.suffix,
+                            "error": type_error,
+                            "value": repr(parsed[field.suffix])[:200],
+                        },
+                        retryable=False,
+                    )
+                partial[field_key] = parsed[field.suffix]
+            # Also store raw content for audit traceability
+            partial[f"{spec.name}_{self.response_field}"] = content
+        else:
+            # Unstructured: store raw content only
+            partial[f"{spec.name}_{self.response_field}"] = content
+
+        populate_llm_metadata_fields(
+            partial,
+            f"{spec.name}_{self.response_field}",
+            usage=result.usage,
+            model=result.model,
+            template_hash=rendered.template_hash,
+            variables_hash=rendered.variables_hash,
+            template_source=rendered.template_source,
+            lookup_hash=rendered.lookup_hash,
+            lookup_source=rendered.lookup_source,
+            system_prompt_source=self.system_prompt_source,
+        )
+
+        return partial
+
+    def _execute_sequential(
+        self,
+        row: PipelineRow,
+        state_id: str,
+        token_id: str,
+        provider: LLMProvider,
+        tracer: LangfuseTracer,
+    ) -> TransformResult:
+        """Execute queries sequentially (pool_size=1 fallback).
+
+        Short-circuits on first error. Retryable LLMClientErrors are returned
+        as error results instead of being re-raised, so the engine retry doesn't
+        wastefully re-execute all queries from scratch.
+        """
         accumulated_outputs: dict[str, Any] = {}
 
         for query_idx, spec in enumerate(self.query_specs):
-            # Build template context from named input_fields
             try:
-                template_ctx = spec.build_template_context(row)
-            except KeyError as e:
-                return TransformResult.error(
-                    {
-                        "reason": "template_context_failed",
-                        "query_name": spec.name,
-                        "query_index": query_idx,
-                        "error": str(e),
-                    },
-                    retryable=False,
-                )
-
-            # Use per-query template if provided, else config-level template
-            query_template = self.template
-            if spec.template is not None:
-                query_template = PromptTemplate(spec.template)
-
-            # Render template
-            try:
-                rendered = query_template.render_with_metadata(
-                    template_ctx,
-                    contract=row.contract,
-                )
-            except TemplateError as e:
-                return TransformResult.error(
-                    {
-                        "reason": "template_rendering_failed",
-                        "query_name": spec.name,
-                        "query_index": query_idx,
-                        "error": str(e),
-                        "template_hash": query_template.template_hash,
-                        "discarded_successful_queries": query_idx,
-                    },
-                    retryable=False,
-                )
-
-            # Build messages
-            messages: list[dict[str, str]] = []
-            if self.system_prompt:
-                messages.append({"role": "system", "content": self.system_prompt})
-            messages.append({"role": "user", "content": rendered.prompt})
-
-            # Execute query
-            query_max_tokens = spec.max_tokens or self.max_tokens
-
-            # Build response_format for structured output requests
-            response_format: dict[str, Any] | None = None
-            if spec.output_fields:
-                if spec.response_format == ResponseFormat.STRUCTURED:
-                    # Build JSON Schema from output field definitions
-                    properties = {f.suffix: f.to_json_schema() for f in spec.output_fields}
-                    response_format = {
-                        "type": "json_schema",
-                        "json_schema": {
-                            "name": f"{spec.name}_output",
-                            "schema": {
-                                "type": "object",
-                                "properties": properties,
-                                "required": list(properties),
-                            },
-                        },
-                    }
-                else:
-                    # STANDARD mode — model outputs JSON but no schema enforcement
-                    response_format = {"type": "json_object"}
-
-            start_time = time.monotonic()
-            try:
-                result = provider.execute_query(
-                    messages,
-                    model=self.model,
-                    temperature=self.temperature,
-                    max_tokens=query_max_tokens,
-                    state_id=state_id,
-                    token_id=token_id,
-                    response_format=response_format,
-                )
-            except ContextLengthError as e:
-                latency_ms = (time.monotonic() - start_time) * 1000
-                tracer.record_error(
-                    token_id=token_id,
-                    query_name=spec.name,
-                    prompt=rendered.prompt,
-                    error_message=str(e),
-                    model=self.model,
-                    latency_ms=latency_ms,
-                )
-                return TransformResult.error(
-                    {
-                        "reason": "context_length_exceeded",
-                        "failed_query_name": spec.name,
-                        "failed_query_index": query_idx,
-                        "error": str(e),
-                        "discarded_successful_queries": query_idx,
-                    },
-                    retryable=False,
+                result = self._execute_one_query(
+                    query_idx,
+                    spec,
+                    row,
+                    state_id,
+                    token_id,
+                    provider,
+                    tracer,
                 )
             except LLMClientError as e:
-                latency_ms = (time.monotonic() - start_time) * 1000
-                tracer.record_error(
-                    token_id=token_id,
-                    query_name=spec.name,
-                    prompt=rendered.prompt,
-                    error_message=str(e),
-                    model=self.model,
-                    latency_ms=latency_ms,
-                )
-                if e.retryable:
-                    raise
-                # Non-retryable: discard ALL accumulated results (atomic failure)
+                # Sequential mode: no AIMD retry — return retryable error result
                 return TransformResult.error(
                     {
                         "reason": "multi_query_failed",
@@ -402,115 +586,128 @@ class MultiQueryStrategy:
                         "error": str(e),
                         "discarded_successful_queries": query_idx,
                     },
-                    retryable=False,
+                    retryable=e.retryable,
                 )
 
-            latency_ms = (time.monotonic() - start_time) * 1000
+            # Error from template/JSON/validation/non-retryable LLM
+            if isinstance(result, TransformResult):
+                # Add discarded count for error reporting
+                if result.reason is not None:
+                    result.reason["discarded_successful_queries"] = query_idx
+                return result
 
-            # Check truncation
-            if result.finish_reason == FinishReason.LENGTH:
-                tracer.record_error(
-                    token_id=token_id,
-                    query_name=spec.name,
-                    prompt=rendered.prompt,
-                    error_message="Response truncated (finish_reason=length)",
-                    model=self.model,
-                    latency_ms=latency_ms,
-                )
-                return TransformResult.error(
-                    {
-                        "reason": "response_truncated",
-                        "query_name": spec.name,
-                        "query_index": query_idx,
-                        "finish_reason": "length",
-                        "discarded_successful_queries": query_idx,
-                    },
-                    retryable=False,
-                )
-
-            # Strip fences and store content
-            content = strip_markdown_fences(result.content)
-
-            tracer.record_success(
-                token_id=token_id,
-                query_name=spec.name,
-                prompt=rendered.prompt,
-                response_content=content,
-                model=self.model,
-                usage=result.usage,
-                latency_ms=latency_ms,
-            )
-
-            # JSON parsing + field extraction when output_fields configured
-            if spec.output_fields:
-                # LLM response content is Tier 3 — parse and validate immediately
-                try:
-                    parsed = json.loads(content, parse_constant=reject_nonfinite_constant)
-                except (json.JSONDecodeError, ValueError) as e:
-                    return TransformResult.error(
-                        {
-                            "reason": "json_parse_failed",
-                            "query_name": spec.name,
-                            "query_index": query_idx,
-                            "error": str(e),
-                            "raw_response_preview": content[:500],
-                            "discarded_successful_queries": query_idx,
-                        },
-                        retryable=False,
-                    )
-                if not isinstance(parsed, dict):
-                    return TransformResult.error(
-                        {
-                            "reason": "invalid_json_type",
-                            "query_name": spec.name,
-                            "query_index": query_idx,
-                            "expected": "object",
-                            "actual": type(parsed).__name__,
-                            "discarded_successful_queries": query_idx,
-                        },
-                        retryable=False,
-                    )
-                # Extract typed fields into prefixed output columns.
-                # Validate field presence — Tier 3 boundary: if the LLM omitted
-                # a declared field, that's an error, not a silent None.
-                for field in spec.output_fields:
-                    field_key = f"{spec.name}_{field.suffix}"
-                    if field.suffix not in parsed:
-                        return TransformResult.error(
-                            {
-                                "reason": "missing_output_field",
-                                "query_name": spec.name,
-                                "query_index": query_idx,
-                                "field": field.suffix,
-                                "available_fields": list(parsed.keys()),
-                                "discarded_successful_queries": query_idx,
-                            },
-                            retryable=False,
-                        )
-                    accumulated_outputs[field_key] = parsed[field.suffix]
-                # Also store raw content for audit traceability
-                accumulated_outputs[f"{spec.name}_{self.response_field}"] = content
-            else:
-                # Unstructured: store raw content only
-                accumulated_outputs[f"{spec.name}_{self.response_field}"] = content
-
-            populate_llm_metadata_fields(
-                accumulated_outputs,
-                f"{spec.name}_{self.response_field}",
-                usage=result.usage,
-                model=result.model,
-                template_hash=rendered.template_hash,
-                variables_hash=rendered.variables_hash,
-                template_source=rendered.template_source,
-                lookup_hash=rendered.lookup_hash,
-                lookup_source=rendered.lookup_source,
-                system_prompt_source=self.system_prompt_source,
-            )
+            accumulated_outputs.update(result)
 
         # All queries succeeded — build output row
         output = {**row.to_dict(), **accumulated_outputs}
+        output_contract = propagate_contract(
+            input_contract=row.contract,
+            output_row=output,
+            transform_adds_fields=True,
+        )
 
-        # Multi-query adds dynamic fields — propagate contract from input
+        return TransformResult.success(
+            PipelineRow(output, output_contract),
+            success_reason={
+                "action": "multi_query_enriched",
+                "queries_completed": len(self.query_specs),
+            },
+        )
+
+    def _execute_parallel(
+        self,
+        row: PipelineRow,
+        state_id: str,
+        token_id: str,
+        provider: LLMProvider,
+        tracer: LangfuseTracer,
+    ) -> TransformResult:
+        """Execute queries in parallel via PooledExecutor with AIMD retry.
+
+        All queries run concurrently. The pool retries individual queries with
+        AIMD backoff on retryable errors — only the failing query retries, not
+        the entire row. Results are collected in submission order.
+        """
+        if self.executor is None:
+            raise RuntimeError("_execute_parallel called without executor")
+
+        # Build RowContext for each query — the pool treats each as a "row"
+        contexts = [
+            RowContext(
+                row={
+                    "original_row": row,
+                    "spec": spec,
+                    "query_idx": i,
+                    "provider": provider,
+                    "tracer": tracer,
+                    "token_id": token_id,
+                    "state_id": state_id,
+                },
+                state_id=state_id,
+                row_index=i,
+            )
+            for i, spec in enumerate(self.query_specs)
+        ]
+
+        def _process_fn(work: dict[str, Any], _work_state_id: str) -> TransformResult:
+            """Pool process function — wraps _execute_one_query for pool interface."""
+            result = self._execute_one_query(
+                work["query_idx"],
+                work["spec"],
+                work["original_row"],
+                work["state_id"],
+                work["token_id"],
+                work["provider"],
+                work["tracer"],
+            )
+            if isinstance(result, TransformResult):
+                return result  # Error passthrough
+            # Success: wrap partial dict in TransformResult for pool interface
+            observed = SchemaContract(
+                mode="OBSERVED",
+                fields=tuple(
+                    FieldContract(
+                        normalized_name=k,
+                        original_name=k,
+                        python_type=type(v) if type(v) in (int, str, float, bool) else object,
+                        required=False,
+                        source="inferred",
+                    )
+                    for k, v in result.items()
+                ),
+                locked=True,
+            )
+            return TransformResult.success(
+                PipelineRow(result, observed),
+                success_reason={"action": "query_completed", "metadata": {"query_name": work["spec"].name}},
+            )
+
+        entries = self.executor.execute_batch(contexts=contexts, process_fn=_process_fn)
+        query_results = [entry.result for entry in entries]
+
+        # Check for failures — atomic: any failure fails the row
+        failed = [(i, r) for i, r in enumerate(query_results) if r.status == "error"]
+        if failed:
+            first_idx, first_result = failed[0]
+            spec = self.query_specs[first_idx]
+            error_reason: TransformErrorReason = cast(
+                TransformErrorReason,
+                dict(first_result.reason) if first_result.reason else {"reason": "multi_query_failed"},
+            )
+            error_reason["failed_query_name"] = spec.name
+            error_reason["failed_query_index"] = first_idx
+            error_reason["discarded_successful_queries"] = len(query_results) - len(failed)
+            error_reason["failed_queries"] = [self.query_specs[i].name for i, _ in failed]
+            error_reason["total_count"] = len(query_results)
+            return TransformResult.error(error_reason, retryable=first_result.retryable)
+
+        # Merge all successful partial outputs
+        accumulated_outputs: dict[str, Any] = {}
+        for result in query_results:
+            if result.row is not None:
+                accumulated_outputs.update(result.row.to_dict())
+
+        output = {**row.to_dict(), **accumulated_outputs}
         output_contract = propagate_contract(
             input_contract=row.contract,
             output_row=output,
@@ -622,6 +819,11 @@ class LLMTransform(BaseTransform, BatchTransformMixin):
             tracing_config=tracing_config,
         )
 
+        # Query-level executor for parallel multi-query execution with AIMD backoff.
+        # Created here (not in on_start) because it doesn't depend on recorder/telemetry.
+        pool_config = self._config.pool_config
+        self._query_executor: PooledExecutor | None = PooledExecutor(pool_config) if pool_config is not None else None
+
         # Strategy dispatch: queries is not None → multi-query
         if self._config.queries is not None:
             query_specs = resolve_queries(self._config.queries)
@@ -634,6 +836,7 @@ class LLMTransform(BaseTransform, BatchTransformMixin):
                 temperature=self._temperature,
                 max_tokens=self._max_tokens,
                 response_field=self._response_field,
+                executor=self._query_executor,
             )
 
             # Multi-query emits prefixed fields — declare them for collision detection
@@ -771,6 +974,9 @@ class LLMTransform(BaseTransform, BatchTransformMixin):
 
         if self._batch_initialized:
             self.shutdown_batch_processing()
+
+        if self._query_executor is not None:
+            self._query_executor.shutdown(wait=True)
 
         if self._provider is not None:
             self._provider.close()

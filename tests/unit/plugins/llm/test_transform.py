@@ -1089,3 +1089,472 @@ class TestResponseFormatPassthrough:
         call_kwargs = mock_provider.execute_query.call_args.kwargs
         # No response_format constraint when output_fields is None
         assert call_kwargs.get("response_format") is None
+
+
+# ---------------------------------------------------------------------------
+# Multi-query field type validation
+# ---------------------------------------------------------------------------
+
+
+class TestMultiQueryFieldTypeValidation:
+    """Verify output field values are validated against declared types.
+
+    LLM responses are Tier 3 (zero trust). In ResponseFormat.STANDARD mode,
+    the API doesn't enforce schema — the LLM can return any JSON types.
+    Field type validation is our defense-in-depth at the boundary.
+    """
+
+    def _make_typed_query_transform(self, output_fields: list[dict[str, Any]]) -> tuple[Any, Mock]:
+        """Create a multi-query transform with specific output_fields config."""
+        from elspeth.plugins.llm.transform import LLMTransform
+
+        config = _make_config(
+            template="Evaluate: {{ row.text_content }}",
+            queries={
+                "q1": {
+                    "input_fields": {"text_content": "text"},
+                    "output_fields": output_fields,
+                },
+            },
+        )
+        transform = LLMTransform(config)
+        mock_provider = Mock()
+        transform._provider = mock_provider
+        return transform, mock_provider
+
+    def _execute_with_content(self, transform: Any, mock_provider: Mock, content: str) -> Any:
+        """Execute _process_row with given LLM response content."""
+        mock_provider.execute_query.return_value = LLMQueryResult(
+            content=content,
+            usage=TokenUsage.known(10, 5),
+            model="gpt-4o",
+            finish_reason=FinishReason.STOP,
+        )
+        return transform._process_row(_make_row(), _make_ctx())
+
+    # -- Integer type validation --
+
+    def test_integer_field_rejects_string(self) -> None:
+        """String value for integer field must be rejected."""
+        transform, provider = self._make_typed_query_transform([{"suffix": "score", "type": "integer"}])
+        result = self._execute_with_content(transform, provider, '{"score": "high"}')
+        assert result.status == "error"
+        assert result.reason["reason"] == "field_type_mismatch"
+        assert result.reason["field"] == "score"
+        assert "expected integer" in result.reason["error"]
+
+    def test_integer_field_rejects_boolean(self) -> None:
+        """Boolean value for integer field must be rejected (bool is subclass of int)."""
+        transform, provider = self._make_typed_query_transform([{"suffix": "count", "type": "integer"}])
+        result = self._execute_with_content(transform, provider, '{"count": true}')
+        assert result.status == "error"
+        assert result.reason["reason"] == "field_type_mismatch"
+        assert "boolean" in result.reason["error"]
+
+    def test_integer_field_accepts_int(self) -> None:
+        """Valid integer value must be accepted."""
+        transform, provider = self._make_typed_query_transform([{"suffix": "score", "type": "integer"}])
+        result = self._execute_with_content(transform, provider, '{"score": 42}')
+        assert result.status == "success"
+        assert result.row["q1_score"] == 42
+
+    def test_integer_field_accepts_float_with_integer_value(self) -> None:
+        """Float with integer value (e.g. 42.0) should be accepted as integer."""
+        transform, provider = self._make_typed_query_transform([{"suffix": "score", "type": "integer"}])
+        result = self._execute_with_content(transform, provider, '{"score": 42.0}')
+        assert result.status == "success"
+
+    # -- Number type validation --
+
+    def test_number_field_rejects_string(self) -> None:
+        """String value for number field must be rejected."""
+        transform, provider = self._make_typed_query_transform([{"suffix": "score", "type": "number"}])
+        result = self._execute_with_content(transform, provider, '{"score": "3.14"}')
+        assert result.status == "error"
+        assert result.reason["reason"] == "field_type_mismatch"
+
+    def test_number_field_rejects_boolean(self) -> None:
+        """Boolean value for number field must be rejected."""
+        transform, provider = self._make_typed_query_transform([{"suffix": "score", "type": "number"}])
+        result = self._execute_with_content(transform, provider, '{"score": false}')
+        assert result.status == "error"
+        assert result.reason["reason"] == "field_type_mismatch"
+
+    def test_number_field_accepts_float(self) -> None:
+        """Valid float must be accepted for number field."""
+        transform, provider = self._make_typed_query_transform([{"suffix": "score", "type": "number"}])
+        result = self._execute_with_content(transform, provider, '{"score": 3.14}')
+        assert result.status == "success"
+        assert result.row["q1_score"] == pytest.approx(3.14)
+
+    def test_number_field_accepts_int(self) -> None:
+        """Integer is valid for number field."""
+        transform, provider = self._make_typed_query_transform([{"suffix": "score", "type": "number"}])
+        result = self._execute_with_content(transform, provider, '{"score": 42}')
+        assert result.status == "success"
+
+    # -- String type validation --
+
+    def test_string_field_rejects_integer(self) -> None:
+        """Integer value for string field must be rejected."""
+        transform, provider = self._make_typed_query_transform([{"suffix": "label", "type": "string"}])
+        result = self._execute_with_content(transform, provider, '{"label": 42}')
+        assert result.status == "error"
+        assert result.reason["reason"] == "field_type_mismatch"
+
+    # -- Boolean type validation --
+
+    def test_boolean_field_rejects_integer(self) -> None:
+        """Integer value for boolean field must be rejected."""
+        transform, provider = self._make_typed_query_transform([{"suffix": "flag", "type": "boolean"}])
+        result = self._execute_with_content(transform, provider, '{"flag": 1}')
+        assert result.status == "error"
+        assert result.reason["reason"] == "field_type_mismatch"
+
+    def test_boolean_field_accepts_true(self) -> None:
+        """Boolean true must be accepted."""
+        transform, provider = self._make_typed_query_transform([{"suffix": "flag", "type": "boolean"}])
+        result = self._execute_with_content(transform, provider, '{"flag": true}')
+        assert result.status == "success"
+        assert result.row["q1_flag"] is True
+
+    # -- Enum type validation --
+
+    def test_enum_field_rejects_invalid_value(self) -> None:
+        """Enum value not in allowed list must be rejected."""
+        transform, provider = self._make_typed_query_transform([{"suffix": "grade", "type": "enum", "values": ["A", "B", "C"]}])
+        result = self._execute_with_content(transform, provider, '{"grade": "D"}')
+        assert result.status == "error"
+        assert result.reason["reason"] == "field_type_mismatch"
+        assert "not in allowed values" in result.reason["error"]
+
+    def test_enum_field_rejects_non_string(self) -> None:
+        """Non-string value for enum field must be rejected."""
+        transform, provider = self._make_typed_query_transform([{"suffix": "grade", "type": "enum", "values": ["A", "B"]}])
+        result = self._execute_with_content(transform, provider, '{"grade": 1}')
+        assert result.status == "error"
+        assert result.reason["reason"] == "field_type_mismatch"
+
+    def test_enum_field_accepts_valid_value(self) -> None:
+        """Valid enum value must be accepted."""
+        transform, provider = self._make_typed_query_transform([{"suffix": "grade", "type": "enum", "values": ["A", "B", "C"]}])
+        result = self._execute_with_content(transform, provider, '{"grade": "B"}')
+        assert result.status == "success"
+        assert result.row["q1_grade"] == "B"
+
+    # -- Error metadata --
+
+    def test_field_type_error_includes_query_metadata(self) -> None:
+        """Type mismatch error must include query name, index, and discarded count."""
+        from elspeth.plugins.llm.transform import LLMTransform
+
+        config = _make_config(
+            template="Evaluate: {{ row.text_content }}",
+            queries={
+                "first": {
+                    "input_fields": {"text_content": "text"},
+                    "output_fields": [{"suffix": "ok", "type": "string"}],
+                },
+                "second": {
+                    "input_fields": {"text_content": "text"},
+                    "output_fields": [{"suffix": "score", "type": "integer"}],
+                },
+            },
+        )
+        transform = LLMTransform(config)
+        mock_provider = Mock()
+        call_count = [0]
+
+        def mock_execute(messages, *, model, temperature, max_tokens, state_id, token_id, response_format=None):
+            call_count[0] += 1
+            if call_count[0] == 1:
+                return LLMQueryResult(
+                    content='{"ok": "good"}',
+                    usage=TokenUsage.known(10, 5),
+                    model="gpt-4o",
+                    finish_reason=FinishReason.STOP,
+                )
+            return LLMQueryResult(
+                content='{"score": "not_a_number"}',
+                usage=TokenUsage.known(10, 5),
+                model="gpt-4o",
+                finish_reason=FinishReason.STOP,
+            )
+
+        mock_provider.execute_query.side_effect = mock_execute
+        transform._provider = mock_provider
+
+        result = transform._process_row(_make_row(), _make_ctx())
+        assert result.status == "error"
+        assert result.reason["reason"] == "field_type_mismatch"
+        assert result.reason["query_name"] == "second"
+        assert result.reason["query_index"] == 1
+        assert result.reason["discarded_successful_queries"] == 1
+
+
+# ---------------------------------------------------------------------------
+# Multi-query execution mode: sequential vs parallel
+# ---------------------------------------------------------------------------
+
+
+class TestMultiQueryExecutionMode:
+    """Verify multi-query strategy dispatches to sequential/parallel correctly."""
+
+    def test_pool_size_1_uses_sequential_no_executor(self) -> None:
+        """pool_size=1 (default) creates no executor — sequential execution."""
+        from elspeth.plugins.llm.transform import LLMTransform, MultiQueryStrategy
+
+        config = _make_config(
+            template="Evaluate: {{ row.text_content }}",
+            queries={"q1": {"input_fields": {"text_content": "text"}}},
+            pool_size=1,
+        )
+        transform = LLMTransform(config)
+        assert isinstance(transform._strategy, MultiQueryStrategy)
+        assert transform._strategy.executor is None
+        assert transform._query_executor is None
+
+    def test_pool_size_gt_1_creates_executor(self) -> None:
+        """pool_size > 1 creates PooledExecutor for parallel multi-query."""
+        from elspeth.plugins.llm.transform import LLMTransform, MultiQueryStrategy
+        from elspeth.plugins.pooling import PooledExecutor
+
+        config = _make_config(
+            template="Evaluate: {{ row.text_content }}",
+            queries={"q1": {"input_fields": {"text_content": "text"}}},
+            pool_size=4,
+        )
+        transform = LLMTransform(config)
+        assert isinstance(transform._strategy, MultiQueryStrategy)
+        assert isinstance(transform._strategy.executor, PooledExecutor)
+        assert isinstance(transform._query_executor, PooledExecutor)
+        # Clean up
+        transform._query_executor.shutdown(wait=True)
+
+    def test_single_query_mode_no_executor(self) -> None:
+        """Single-query mode (no queries) does not create an executor."""
+        from elspeth.plugins.llm.transform import LLMTransform
+
+        config = _make_config(pool_size=4)
+        transform = LLMTransform(config)
+        # pool_size > 1 but single-query mode — executor still created
+        # (it's used by BatchTransformMixin, not query-level parallelism)
+        # The strategy doesn't get an executor since it's SingleQueryStrategy
+        assert transform._query_executor is not None
+        transform._query_executor.shutdown(wait=True)
+
+
+class TestMultiQuerySequentialRetryBehavior:
+    """Verify sequential mode handles retryable errors correctly.
+
+    Bug fix: retryable LLMClientErrors should be returned as error results
+    (with retryable=True) instead of being re-raised as exceptions. Re-raising
+    causes the engine to retry the entire row, wastefully re-executing
+    successful queries.
+    """
+
+    def test_retryable_error_returns_error_result_not_raises(self) -> None:
+        """Sequential mode catches retryable errors as TransformResult.error(retryable=True)."""
+        from elspeth.plugins.llm.transform import LLMTransform
+
+        config = _make_config(
+            template="Evaluate: {{ row.text_content }}",
+            queries={
+                "q1": {"input_fields": {"text_content": "text"}},
+                "q2": {"input_fields": {"text_content": "text"}},
+            },
+            pool_size=1,
+        )
+        transform = LLMTransform(config)
+        call_count = [0]
+
+        def mock_execute(messages, *, model, temperature, max_tokens, state_id, token_id, response_format=None):
+            call_count[0] += 1
+            if call_count[0] == 2:
+                raise RateLimitError("Rate limited on q2")
+            return LLMQueryResult(
+                content="ok",
+                usage=TokenUsage.known(10, 5),
+                model="gpt-4o",
+                finish_reason=FinishReason.STOP,
+            )
+
+        mock_provider = Mock()
+        mock_provider.execute_query.side_effect = mock_execute
+        transform._provider = mock_provider
+
+        # Should NOT raise — should return TransformResult.error(retryable=True)
+        result = transform._process_row(_make_row(), _make_ctx())
+        assert result.status == "error"
+        assert result.retryable is True
+        assert result.reason["reason"] == "multi_query_failed"
+        assert result.reason["failed_query_name"] == "q2"
+        assert result.reason["discarded_successful_queries"] == 1
+
+    def test_non_retryable_error_returns_error_result(self) -> None:
+        """Non-retryable errors still return error TransformResult(retryable=False)."""
+        from elspeth.plugins.llm.transform import LLMTransform
+
+        config = _make_config(
+            template="Evaluate: {{ row.text_content }}",
+            queries={"q1": {"input_fields": {"text_content": "text"}}},
+            pool_size=1,
+        )
+        transform = LLMTransform(config)
+        mock_provider = Mock()
+        mock_provider.execute_query.side_effect = ContentPolicyError("Content blocked")
+        transform._provider = mock_provider
+
+        result = transform._process_row(_make_row(), _make_ctx())
+        assert result.status == "error"
+        assert result.retryable is False
+
+
+class TestMultiQueryParallelExecution:
+    """Verify parallel execution via PooledExecutor."""
+
+    def test_parallel_all_succeed(self) -> None:
+        """All queries succeed in parallel — results merged correctly."""
+        from elspeth.plugins.llm.transform import LLMTransform
+
+        config = _make_config(
+            template="Evaluate: {{ row.text_content }}",
+            queries={
+                "q1": {"input_fields": {"text_content": "text"}},
+                "q2": {"input_fields": {"text_content": "text"}},
+                "q3": {"input_fields": {"text_content": "text"}},
+            },
+            pool_size=4,
+        )
+        transform = LLMTransform(config)
+        mock_provider = Mock()
+        mock_provider.execute_query.return_value = LLMQueryResult(
+            content="response text",
+            usage=TokenUsage.known(10, 5),
+            model="gpt-4o",
+            finish_reason=FinishReason.STOP,
+        )
+        transform._provider = mock_provider
+
+        try:
+            result = transform._process_row(_make_row(), _make_ctx())
+            assert result.status == "success"
+            assert result.row is not None
+            output = result.row.to_dict()
+            assert output["q1_llm_response"] == "response text"
+            assert output["q2_llm_response"] == "response text"
+            assert output["q3_llm_response"] == "response text"
+            assert mock_provider.execute_query.call_count == 3
+        finally:
+            transform._query_executor.shutdown(wait=True)
+
+    def test_parallel_one_fails_non_retryable(self) -> None:
+        """One query fails non-retryable in parallel — row fails atomically."""
+        from elspeth.plugins.llm.transform import LLMTransform
+
+        config = _make_config(
+            template="Evaluate: {{ row.text_content }}",
+            queries={
+                "q1": {"input_fields": {"text_content": "text"}},
+                "q2": {"input_fields": {"text_content": "text"}},
+            },
+            pool_size=4,
+        )
+        transform = LLMTransform(config)
+        call_count = [0]
+
+        def mock_execute(messages, *, model, temperature, max_tokens, state_id, token_id, response_format=None):
+            call_count[0] += 1
+            if call_count[0] == 2:
+                raise ContentPolicyError("Content blocked for q2")
+            return LLMQueryResult(
+                content="ok",
+                usage=TokenUsage.known(10, 5),
+                model="gpt-4o",
+                finish_reason=FinishReason.STOP,
+            )
+
+        mock_provider = Mock()
+        mock_provider.execute_query.side_effect = mock_execute
+        transform._provider = mock_provider
+
+        try:
+            result = transform._process_row(_make_row(), _make_ctx())
+            assert result.status == "error"
+            assert result.retryable is False
+        finally:
+            transform._query_executor.shutdown(wait=True)
+
+    def test_parallel_with_structured_output(self) -> None:
+        """Parallel execution with output_fields — JSON parsed and merged."""
+        from elspeth.plugins.llm.transform import LLMTransform
+
+        config = _make_config(
+            template="Evaluate: {{ row.text_content }}",
+            queries={
+                "quality": {
+                    "input_fields": {"text_content": "text"},
+                    "output_fields": [
+                        {"suffix": "score", "type": "integer"},
+                        {"suffix": "label", "type": "string"},
+                    ],
+                },
+                "relevance": {
+                    "input_fields": {"text_content": "text"},
+                    "output_fields": [
+                        {"suffix": "score", "type": "integer"},
+                    ],
+                },
+            },
+            pool_size=4,
+        )
+        transform = LLMTransform(config)
+        call_count = [0]
+
+        def mock_execute(messages, *, model, temperature, max_tokens, state_id, token_id, response_format=None):
+            call_count[0] += 1
+            if call_count[0] == 1:
+                return LLMQueryResult(
+                    content='{"score": 85, "label": "high"}',
+                    usage=TokenUsage.known(10, 5),
+                    model="gpt-4o",
+                    finish_reason=FinishReason.STOP,
+                )
+            return LLMQueryResult(
+                content='{"score": 72}',
+                usage=TokenUsage.known(10, 5),
+                model="gpt-4o",
+                finish_reason=FinishReason.STOP,
+            )
+
+        mock_provider = Mock()
+        mock_provider.execute_query.side_effect = mock_execute
+        transform._provider = mock_provider
+
+        try:
+            result = transform._process_row(_make_row(), _make_ctx())
+            assert result.status == "success"
+            assert result.row is not None
+            output = result.row.to_dict()
+            assert output["quality_score"] == 85
+            assert output["quality_label"] == "high"
+            assert output["relevance_score"] == 72
+        finally:
+            transform._query_executor.shutdown(wait=True)
+
+    def test_close_shuts_down_executor(self) -> None:
+        """LLMTransform.close() shuts down the query executor."""
+        from elspeth.plugins.llm.transform import LLMTransform
+
+        config = _make_config(
+            template="Evaluate: {{ row.text_content }}",
+            queries={"q1": {"input_fields": {"text_content": "text"}}},
+            pool_size=4,
+        )
+        transform = LLMTransform(config)
+        assert transform._query_executor is not None
+
+        # Mock provider to avoid on_start dependency
+        transform._provider = Mock()
+        transform.close()
+        # After close, executor should be shut down (no error = success)

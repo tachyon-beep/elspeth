@@ -249,6 +249,10 @@ allowed_dict_patterns:
 
   # Unified LLM transform (T10 consolidation — dispatches to Azure/OpenRouter providers)
   - "src/elspeth/plugins/llm/transform.py:LLMTransform.__init__:config"
+  # Multi-query partial output (keys are dynamic: query-spec-dependent field names)
+  - "src/elspeth/plugins/llm/transform.py:MultiQueryStrategy._execute_one_query:return"
+  # Pool work context (PooledExecutor row interface is dict[str, Any])
+  - "src/elspeth/plugins/llm/transform.py:MultiQueryStrategy._process_fn:work"
 
   # Plugin validation dispatcher — config is user YAML (Tier 3 boundary)
   - "src/elspeth/plugins/validation.py:PluginConfigValidator._get_transform_config_model:config"

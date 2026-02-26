@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import pytest
 
+from elspeth.plugins.llm.multi_query import OutputFieldConfig, OutputFieldType
 from elspeth.plugins.llm.templates import PromptTemplate, RenderedPrompt
 from elspeth.plugins.llm.validation import (
     ValidationError,
@@ -19,6 +20,7 @@ from elspeth.plugins.llm.validation import (
     reject_nonfinite_constant,
     render_template_safe,
     strip_markdown_fences,
+    validate_field_value,
     validate_json_object_response,
 )
 
@@ -361,3 +363,120 @@ class TestRejectNonfiniteConstant:
         """-Infinity should raise ValueError."""
         with pytest.raises(ValueError, match="-Infinity"):
             reject_nonfinite_constant("-Infinity")
+
+
+# ── validate_field_value tests ──────────────────────────────────
+
+
+class TestValidateFieldValue:
+    """Tests for validate_field_value — Tier 3 type enforcement on LLM output fields."""
+
+    def _field(self, type_: str, *, suffix: str = "f", values: list[str] | None = None) -> OutputFieldConfig:
+        """Create an OutputFieldConfig for testing."""
+        return OutputFieldConfig(suffix=suffix, type=OutputFieldType(type_), values=values)
+
+    # -- STRING --
+
+    def test_string_accepts_str(self) -> None:
+        assert validate_field_value("hello", self._field("string")) is None
+
+    def test_string_rejects_int(self) -> None:
+        err = validate_field_value(42, self._field("string"))
+        assert err is not None
+        assert "expected string" in err
+
+    def test_string_rejects_bool(self) -> None:
+        err = validate_field_value(True, self._field("string"))
+        assert err is not None
+        assert "expected string" in err
+
+    def test_string_rejects_none(self) -> None:
+        err = validate_field_value(None, self._field("string"))
+        assert err is not None
+
+    # -- INTEGER --
+
+    def test_integer_accepts_int(self) -> None:
+        assert validate_field_value(42, self._field("integer")) is None
+
+    def test_integer_accepts_float_with_integer_value(self) -> None:
+        assert validate_field_value(42.0, self._field("integer")) is None
+
+    def test_integer_rejects_bool(self) -> None:
+        """bool is subclass of int — must be explicitly rejected."""
+        err = validate_field_value(True, self._field("integer"))
+        assert err is not None
+        assert "boolean" in err
+
+    def test_integer_rejects_string(self) -> None:
+        err = validate_field_value("42", self._field("integer"))
+        assert err is not None
+        assert "expected integer" in err
+
+    def test_integer_rejects_float_with_fraction(self) -> None:
+        err = validate_field_value(3.14, self._field("integer"))
+        assert err is not None
+
+    def test_integer_rejects_nonfinite_float(self) -> None:
+        err = validate_field_value(float("inf"), self._field("integer"))
+        assert err is not None
+        assert "non-finite" in err
+
+    def test_integer_rejects_nan(self) -> None:
+        err = validate_field_value(float("nan"), self._field("integer"))
+        assert err is not None
+        assert "non-finite" in err
+
+    # -- NUMBER --
+
+    def test_number_accepts_float(self) -> None:
+        assert validate_field_value(3.14, self._field("number")) is None
+
+    def test_number_accepts_int(self) -> None:
+        assert validate_field_value(42, self._field("number")) is None
+
+    def test_number_rejects_bool(self) -> None:
+        err = validate_field_value(False, self._field("number"))
+        assert err is not None
+        assert "boolean" in err
+
+    def test_number_rejects_string(self) -> None:
+        err = validate_field_value("3.14", self._field("number"))
+        assert err is not None
+
+    def test_number_rejects_nonfinite_float(self) -> None:
+        err = validate_field_value(float("-inf"), self._field("number"))
+        assert err is not None
+        assert "non-finite" in err
+
+    # -- BOOLEAN --
+
+    def test_boolean_accepts_true(self) -> None:
+        assert validate_field_value(True, self._field("boolean")) is None
+
+    def test_boolean_accepts_false(self) -> None:
+        assert validate_field_value(False, self._field("boolean")) is None
+
+    def test_boolean_rejects_int(self) -> None:
+        err = validate_field_value(1, self._field("boolean"))
+        assert err is not None
+        assert "expected boolean" in err
+
+    def test_boolean_rejects_string(self) -> None:
+        err = validate_field_value("true", self._field("boolean"))
+        assert err is not None
+
+    # -- ENUM --
+
+    def test_enum_accepts_valid_value(self) -> None:
+        assert validate_field_value("A", self._field("enum", values=["A", "B"])) is None
+
+    def test_enum_rejects_invalid_value(self) -> None:
+        err = validate_field_value("C", self._field("enum", values=["A", "B"]))
+        assert err is not None
+        assert "not in allowed values" in err
+
+    def test_enum_rejects_non_string(self) -> None:
+        err = validate_field_value(1, self._field("enum", values=["1", "2"]))
+        assert err is not None
+        assert "expected string (enum)" in err

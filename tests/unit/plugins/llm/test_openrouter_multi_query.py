@@ -13,7 +13,7 @@ from unittest.mock import Mock
 
 import pytest
 
-from elspeth.contracts import Determinism, ExceptionResult, TransformResult
+from elspeth.contracts import Determinism, TransformResult
 from elspeth.contracts.identity import TokenInfo
 from elspeth.contracts.plugin_context import PluginContext
 from elspeth.contracts.schema_contract import FieldContract, PipelineRow, SchemaContract
@@ -273,8 +273,13 @@ class TestSingleQueryProcessing:
         assert result.reason is not None
         assert "json" in result.reason["reason"].lower()
 
-    def test_process_row_rate_limit_raises_for_retry(self) -> None:
-        """Rate limit errors (retryable) re-raise for engine retry."""
+    def test_process_row_rate_limit_returns_retryable_error(self) -> None:
+        """Rate limit errors return retryable error result (not raised).
+
+        Multi-query sequential mode catches retryable LLMClientError and returns
+        TransformResult.error(retryable=True) to avoid wastefully re-executing
+        successful queries on engine retry.
+        """
         config = self._make_single_query_config()
         transform, mock_provider = _make_transform_with_mock_provider(config)
 
@@ -283,12 +288,19 @@ class TestSingleQueryProcessing:
         row = make_pipeline_row({"cs1_bg": "data", "cs1_sym": "data", "cs1_hist": "data"})
         ctx = make_plugin_context()
 
-        # RateLimitError is retryable, so it re-raises
-        with pytest.raises(RateLimitError):
-            transform._process_row(row, ctx)
+        result = transform._process_row(row, ctx)
+        assert result.status == "error"
+        assert result.retryable is True
+        assert result.reason is not None
+        assert result.reason["reason"] == "multi_query_failed"
 
-    def test_process_row_server_error_raises_for_retry(self) -> None:
-        """Server errors (retryable) re-raise for engine retry."""
+    def test_process_row_server_error_returns_retryable_error(self) -> None:
+        """Server errors return retryable error result (not raised).
+
+        Multi-query sequential mode catches retryable LLMClientError and returns
+        TransformResult.error(retryable=True) to avoid wastefully re-executing
+        successful queries on engine retry.
+        """
         config = self._make_single_query_config()
         transform, mock_provider = _make_transform_with_mock_provider(config)
 
@@ -297,11 +309,19 @@ class TestSingleQueryProcessing:
         row = make_pipeline_row({"cs1_bg": "data", "cs1_sym": "data", "cs1_hist": "data"})
         ctx = make_plugin_context()
 
-        with pytest.raises(ServerError):
-            transform._process_row(row, ctx)
+        result = transform._process_row(row, ctx)
+        assert result.status == "error"
+        assert result.retryable is True
+        assert result.reason is not None
+        assert result.reason["reason"] == "multi_query_failed"
 
-    def test_process_row_network_error_raises_for_retry(self) -> None:
-        """Network errors are retryable and re-raise."""
+    def test_process_row_network_error_returns_retryable_error(self) -> None:
+        """Network errors return retryable error result (not raised).
+
+        Multi-query sequential mode catches retryable LLMClientError and returns
+        TransformResult.error(retryable=True) to avoid wastefully re-executing
+        successful queries on engine retry.
+        """
         config = self._make_single_query_config()
         transform, mock_provider = _make_transform_with_mock_provider(config)
 
@@ -310,8 +330,11 @@ class TestSingleQueryProcessing:
         row = make_pipeline_row({"cs1_bg": "data", "cs1_sym": "data", "cs1_hist": "data"})
         ctx = make_plugin_context()
 
-        with pytest.raises(NetworkError):
-            transform._process_row(row, ctx)
+        result = transform._process_row(row, ctx)
+        assert result.status == "error"
+        assert result.retryable is True
+        assert result.reason is not None
+        assert result.reason["reason"] == "multi_query_failed"
 
     def test_process_row_client_error_not_retryable(self) -> None:
         """Non-retryable LLMClientError returns error result."""
@@ -1028,7 +1051,12 @@ class TestHTTPSpecificBehavior:
         transform: LLMTransform,
         collector: CollectorOutputPort,
     ) -> None:
-        """Network connection errors are retryable — they re-raise as ExceptionResult."""
+        """Network connection errors return retryable TransformResult.
+
+        Multi-query sequential mode catches retryable LLMClientError and returns
+        TransformResult.error(retryable=True) instead of re-raising, to avoid
+        wastefully re-executing successful queries on engine retry.
+        """
         transform._provider.execute_query.side_effect = NetworkError("Connection refused")
 
         row = make_pipeline_row(
@@ -1047,10 +1075,13 @@ class TestHTTPSpecificBehavior:
 
         assert len(collector.results) == 1
         _, result, _state_id = collector.results[0]
-        # NetworkError is retryable — _process_row re-raises it, so BatchTransformMixin
-        # wraps it in ExceptionResult (not TransformResult).
-        assert isinstance(result, ExceptionResult), f"Expected ExceptionResult, got {type(result)}"
-        assert isinstance(result.exception, NetworkError)
+        # NetworkError is retryable — multi-query catches it and returns a
+        # retryable TransformResult (not ExceptionResult) to preserve successful queries.
+        assert isinstance(result, TransformResult), f"Expected TransformResult, got {type(result)}"
+        assert result.status == "error"
+        assert result.retryable is True
+        assert result.reason is not None
+        assert result.reason["reason"] == "multi_query_failed"
 
 
 class TestResourceCleanup:

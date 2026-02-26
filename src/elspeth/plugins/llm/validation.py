@@ -20,10 +20,12 @@ Shared helpers (added for T10 consolidation):
 from __future__ import annotations
 
 import json
+import math
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
 from elspeth.contracts.errors import TransformErrorReason
+from elspeth.plugins.llm.multi_query import OutputFieldConfig, OutputFieldType
 from elspeth.plugins.llm.templates import PromptTemplate, RenderedPrompt, TemplateError
 
 if TYPE_CHECKING:
@@ -37,6 +39,61 @@ def reject_nonfinite_constant(value: str) -> None:
     boundary where LLM JSON responses are parsed.
     """
     raise ValueError(f"Non-standard JSON constant '{value}' not allowed")
+
+
+def validate_field_value(
+    value: Any,
+    field_config: OutputFieldConfig,
+) -> str | None:
+    """Validate a parsed JSON value against its declared output field type.
+
+    Tier 3 boundary enforcement: LLM responses may contain values that parse
+    as valid JSON but violate the declared schema (e.g., string where integer
+    expected, boolean where number expected, non-finite floats).
+
+    Args:
+        value: The parsed JSON value from the LLM response
+        field_config: Expected type configuration from output_fields
+
+    Returns:
+        Error message string if validation fails, None if valid
+    """
+    expected_type = field_config.type
+
+    if expected_type == OutputFieldType.STRING:
+        if not isinstance(value, str):
+            return f"expected string, got {type(value).__name__}"
+
+    elif expected_type == OutputFieldType.INTEGER:
+        # bool is subclass of int in Python — reject explicitly
+        if isinstance(value, bool):
+            return "expected integer, got boolean"
+        if isinstance(value, float) and not math.isfinite(value):
+            return "expected finite integer, got non-finite float"
+        if isinstance(value, int) or (isinstance(value, float) and value.is_integer()):
+            pass
+        else:
+            return f"expected integer, got {type(value).__name__}"
+
+    elif expected_type == OutputFieldType.NUMBER:
+        if isinstance(value, bool):
+            return "expected number, got boolean"
+        if not isinstance(value, (int, float)):
+            return f"expected number, got {type(value).__name__}"
+        if isinstance(value, float) and not math.isfinite(value):
+            return "expected finite number, got non-finite float"
+
+    elif expected_type == OutputFieldType.BOOLEAN:
+        if not isinstance(value, bool):
+            return f"expected boolean, got {type(value).__name__}"
+
+    elif expected_type == OutputFieldType.ENUM:
+        if not isinstance(value, str):
+            return f"expected string (enum), got {type(value).__name__}"
+        if field_config.values and value not in field_config.values:
+            return f"value '{value}' not in allowed values: {field_config.values}"
+
+    return None
 
 
 @dataclass(frozen=True)

@@ -291,6 +291,8 @@ TransformErrorCategory = Literal[
     "prompt_injection_detected",
     "unknown_category",  # Unknown category from external API (fail-closed)
     "non_string_field",  # Explicitly-configured field is non-string (security fail-closed)
+    # Field type validation (Tier 3 - LLM output value type mismatch)
+    "field_type_mismatch",
     # Field collision (output would overwrite input fields)
     "field_collision",
     # Contract violations (schema validation)
