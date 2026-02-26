@@ -453,11 +453,11 @@ class TestOrchestratorAcceptsGraph:
         plugins = instantiate_plugins_from_config(settings)
 
         graph = ExecutionGraph.from_plugin_instances(
-            source=plugins["source"],
-            source_settings=plugins["source_settings"],
-            transforms=plugins["transforms"],
-            sinks=plugins["sinks"],
-            aggregations=plugins["aggregations"],
+            source=plugins.source,
+            source_settings=plugins.source_settings,
+            transforms=plugins.transforms,
+            sinks=plugins.sinks,
+            aggregations=plugins.aggregations,
             gates=list(settings.gates),
             coalesce_settings=settings.coalesce,
         )
@@ -539,11 +539,11 @@ class TestOrchestratorAcceptsGraph:
         plugins = instantiate_plugins_from_config(settings)
 
         graph = ExecutionGraph.from_plugin_instances(
-            source=plugins["source"],
-            source_settings=plugins["source_settings"],
-            transforms=plugins["transforms"],
-            sinks=plugins["sinks"],
-            aggregations=plugins["aggregations"],
+            source=plugins.source,
+            source_settings=plugins.source_settings,
+            transforms=plugins.transforms,
+            sinks=plugins.sinks,
+            aggregations=plugins.aggregations,
             gates=list(settings.gates),
             coalesce_settings=settings.coalesce,
         )

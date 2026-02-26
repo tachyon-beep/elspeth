@@ -100,11 +100,11 @@ class TestRouteResolutionIntegrity:
         plugins = instantiate_plugins_from_config(settings)
         with pytest.raises(GraphValidationError, match="sentinel route-resolution validation"):
             ExecutionGraph.from_plugin_instances(
-                source=plugins["source"],
-                source_settings=plugins["source_settings"],
-                transforms=plugins["transforms"],
-                sinks=plugins["sinks"],
-                aggregations=plugins["aggregations"],
+                source=plugins.source,
+                source_settings=plugins.source_settings,
+                transforms=plugins.transforms,
+                sinks=plugins.sinks,
+                aggregations=plugins.aggregations,
                 gates=list(settings.gates),
             )
 
@@ -153,11 +153,11 @@ class TestForkBranchIntegrity:
         plugins = instantiate_plugins_from_config(settings)
         with pytest.raises(GraphValidationError, match=r"globally unique across all gates"):
             ExecutionGraph.from_plugin_instances(
-                source=plugins["source"],
-                source_settings=plugins["source_settings"],
-                transforms=plugins["transforms"],
-                sinks=plugins["sinks"],
-                aggregations=plugins["aggregations"],
+                source=plugins.source,
+                source_settings=plugins.source_settings,
+                transforms=plugins.transforms,
+                sinks=plugins.sinks,
+                aggregations=plugins.aggregations,
                 gates=list(settings.gates),
                 coalesce_settings=settings.coalesce,
             )

@@ -341,11 +341,11 @@ class TestConnectionNameRoundtrip:
 
         plugins = instantiate_plugins_from_config(config)
         graph = ExecutionGraph.from_plugin_instances(
-            source=plugins["source"],
-            source_settings=plugins["source_settings"],
-            transforms=plugins["transforms"],
-            sinks=plugins["sinks"],
-            aggregations=plugins["aggregations"],
+            source=plugins.source,
+            source_settings=plugins.source_settings,
+            transforms=plugins.transforms,
+            sinks=plugins.sinks,
+            aggregations=plugins.aggregations,
             gates=list(config.gates),
         )
 
@@ -395,11 +395,11 @@ class TestConnectionNameRoundtrip:
 
         plugins = instantiate_plugins_from_config(config)
         graph = ExecutionGraph.from_plugin_instances(
-            source=plugins["source"],
-            source_settings=plugins["source_settings"],
-            transforms=plugins["transforms"],
-            sinks=plugins["sinks"],
-            aggregations=plugins["aggregations"],
+            source=plugins.source,
+            source_settings=plugins.source_settings,
+            transforms=plugins.transforms,
+            sinks=plugins.sinks,
+            aggregations=plugins.aggregations,
             gates=list(config.gates),
         )
 

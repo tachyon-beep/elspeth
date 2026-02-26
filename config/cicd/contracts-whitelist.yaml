@@ -5,6 +5,8 @@ allowed_external_types:
   - "tui/types:TokenDisplayInfo"
   # DAG wiring helper type shared between CLI instantiation and graph construction
   - "core/dag/models:WiredTransform"
+  # Plugin bundle type shared between CLI helpers and CLI entry points
+  - "cli_helpers:PluginBundle"
   # SSRF safety type - security infrastructure, tightly coupled to validation logic
   - "core/security/web:SSRFSafeRequest"
   # Engine types used in testing factories - test infrastructure wraps these for convenience
@@ -114,11 +116,9 @@ allowed_dict_patterns:
   - "src/elspeth/plugins/validation.py:PluginConfigValidator.validate_schema_config:schema_config"
 
   # CLI - plugin instantiation from configuration
-  - "src/elspeth/cli.py:_build_resume_graphs:plugins"
-  - "src/elspeth/cli_helpers.py:instantiate_plugins_from_config:return"
-  - "src/elspeth/cli.py:_orchestrator_context:plugins"
-  - "src/elspeth/cli.py:_execute_pipeline_with_instances:plugins"
-  - "src/elspeth/cli.py:_execute_resume_with_instances:plugins"
+  # NOTE: _build_resume_graphs, _orchestrator_context, _execute_pipeline_with_instances,
+  # _execute_resume_with_instances, and instantiate_plugins_from_config:return were removed
+  # as part of T11 (PluginBundle extraction) — dict[str, Any] replaced with frozen dataclass.
   - "src/elspeth/cli.py:_load_raw_yaml:return"
 
   # Security - secrets loading from config (Tier 3 external config)

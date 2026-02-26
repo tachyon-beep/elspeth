@@ -1,15 +1,34 @@
 """CLI helper functions for plugin instantiation and database resolution."""
 
 import os
+from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from elspeth.core.config import ElspethSettings, LandscapeSettings
+    from elspeth.core.config import AggregationSettings, ElspethSettings, LandscapeSettings, SourceSettings
+    from elspeth.core.dag import WiredTransform
     from elspeth.core.landscape.recorder import LandscapeRecorder
+    from elspeth.plugins.protocols import SinkProtocol, SourceProtocol, TransformProtocol
 
 
-def instantiate_plugins_from_config(config: "ElspethSettings") -> dict[str, Any]:
+@dataclass(frozen=True, slots=True)
+class PluginBundle:
+    """Pre-instantiated plugin instances from configuration.
+
+    Frozen dataclass replacing the previous dict[str, Any] return from
+    instantiate_plugins_from_config().  Typed fields enable mypy checking
+    and IDE autocomplete on all access sites.
+    """
+
+    source: "SourceProtocol"
+    source_settings: "SourceSettings"
+    transforms: "list[WiredTransform]"
+    sinks: "dict[str, SinkProtocol]"
+    aggregations: "dict[str, tuple[TransformProtocol, AggregationSettings]]"
+
+
+def instantiate_plugins_from_config(config: "ElspethSettings") -> PluginBundle:
     """Instantiate all plugins from configuration.
 
     Creates plugin instances BEFORE graph construction,
@@ -19,12 +38,7 @@ def instantiate_plugins_from_config(config: "ElspethSettings") -> dict[str, Any]
         config: Validated ElspethSettings instance
 
     Returns:
-        Dict with keys:
-            - source: SourceProtocol instance
-            - source_settings: SourceSettings
-            - transforms: list[WiredTransform] (row_plugins only)
-            - sinks: dict[str, SinkProtocol]
-            - aggregations: dict[str, tuple[TransformProtocol, AggregationSettings]]
+        PluginBundle with typed fields for source, transforms, sinks, aggregations.
 
     Raises:
         ValueError: If config references unknown plugins (raised by PluginManager)
@@ -80,13 +94,13 @@ def instantiate_plugins_from_config(config: "ElspethSettings") -> dict[str, Any]
         sink_cls = manager.get_sink_by_name(sink_config.plugin)
         sinks[sink_name] = sink_cls(dict(sink_config.options))
 
-    return {
-        "source": source,
-        "source_settings": config.source,
-        "transforms": transforms,
-        "sinks": sinks,
-        "aggregations": aggregations,
-    }
+    return PluginBundle(
+        source=source,
+        source_settings=config.source,
+        transforms=transforms,
+        sinks=sinks,
+        aggregations=aggregations,
+    )
 
 
 def resolve_database_url(

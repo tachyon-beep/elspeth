@@ -32,11 +32,11 @@ def _build_graph(config: ElspethSettings) -> ExecutionGraph:
 
     plugins = instantiate_plugins_from_config(config)
     return ExecutionGraph.from_plugin_instances(
-        source=plugins["source"],
-        source_settings=plugins["source_settings"],
-        transforms=plugins["transforms"],
-        sinks=plugins["sinks"],
-        aggregations=plugins["aggregations"],
+        source=plugins.source,
+        source_settings=plugins.source_settings,
+        transforms=plugins.transforms,
+        sinks=plugins.sinks,
+        aggregations=plugins.aggregations,
         gates=list(config.gates),
         coalesce_settings=list(config.coalesce) if config.coalesce else None,
     )

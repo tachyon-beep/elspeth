@@ -242,20 +242,20 @@ class TestDeaggregationAuditTrail:
 
         plugins = instantiate_plugins_from_config(settings)
         graph = ExecutionGraph.from_plugin_instances(
-            source=plugins["source"],
-            source_settings=plugins["source_settings"],
-            transforms=plugins["transforms"],
-            sinks=plugins["sinks"],
-            aggregations=plugins["aggregations"],
+            source=plugins.source,
+            source_settings=plugins.source_settings,
+            transforms=plugins.transforms,
+            sinks=plugins.sinks,
+            aggregations=plugins.aggregations,
             gates=list(settings.gates),
         )
 
         # Build pipeline config using the SAME plugin instances as the graph
         # This ensures the test exercises the production code path
         pipeline_config = PipelineConfig(
-            source=plugins["source"],
-            transforms=[wired.plugin for wired in plugins["transforms"]],
-            sinks=plugins["sinks"],
+            source=plugins.source,
+            transforms=[wired.plugin for wired in plugins.transforms],
+            sinks=plugins.sinks,
             config=resolve_config(settings),
         )
 
