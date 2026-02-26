@@ -92,20 +92,22 @@ class TestLLMTransformOpenRouterTracing:
         transform = self._create_transform(tracing_config=None)
         assert isinstance(transform._tracer, NoOpLangfuseTracer)
 
-    def test_azure_ai_provider_produces_noop_tracer(self) -> None:
-        """Azure AI tracing config produces NoOpLangfuseTracer.
+    def test_azure_ai_tracing_rejected_for_openrouter(self) -> None:
+        """Azure AI tracing with openrouter provider raises ValueError at init.
 
-        LLMTransform only supports Langfuse tracing. When provider=openrouter
-        with tracing.provider=azure_ai, the create_langfuse_tracer factory
-        returns NoOp because AzureAITracingConfig is not LangfuseTracingConfig.
+        Azure Monitor auto-instruments the OpenAI SDK, which only the Azure
+        provider uses. OpenRouter uses httpx directly, so azure_ai tracing
+        would silently do nothing.
         """
-        transform = self._create_transform(
-            tracing_config={
-                "provider": "azure_ai",
-                "connection_string": "InstrumentationKey=xxx",
-            }
-        )
-        assert isinstance(transform._tracer, NoOpLangfuseTracer)
+        import pytest
+
+        with pytest.raises(ValueError, match=r"azure_ai tracing.*azure provider"):
+            self._create_transform(
+                tracing_config={
+                    "provider": "azure_ai",
+                    "connection_string": "InstrumentationKey=xxx",
+                }
+            )
 
     def test_tracing_config_validation_returns_noop_on_missing_keys(self) -> None:
         """Langfuse config with missing keys still creates tracer (SDK may fail)."""
@@ -150,15 +152,17 @@ class TestLLMTransformMultiQueryOpenRouterTracing:
         transform = self._create_transform(tracing_config=None)
         assert isinstance(transform._tracer, NoOpLangfuseTracer)
 
-    def test_azure_ai_provider_produces_noop_tracer(self) -> None:
-        """Azure AI tracing config produces NoOpLangfuseTracer for multi-query."""
-        transform = self._create_transform(
-            tracing_config={
-                "provider": "azure_ai",
-                "connection_string": "InstrumentationKey=xxx",
-            }
-        )
-        assert isinstance(transform._tracer, NoOpLangfuseTracer)
+    def test_azure_ai_tracing_rejected_for_openrouter_multi_query(self) -> None:
+        """Azure AI tracing with openrouter multi-query raises ValueError at init."""
+        import pytest
+
+        with pytest.raises(ValueError, match=r"azure_ai tracing.*azure provider"):
+            self._create_transform(
+                tracing_config={
+                    "provider": "azure_ai",
+                    "connection_string": "InstrumentationKey=xxx",
+                }
+            )
 
     def test_langfuse_tracer_created_on_langfuse_config(self) -> None:
         """ActiveLangfuseTracer is created when Langfuse tracing is configured."""

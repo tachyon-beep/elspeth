@@ -41,7 +41,7 @@ from elspeth.plugins.llm.base import LLMConfig
 from elspeth.plugins.llm.langfuse import LangfuseTracer, create_langfuse_tracer
 from elspeth.plugins.llm.multi_query import QuerySpec, ResponseFormat, resolve_queries
 from elspeth.plugins.llm.provider import FinishReason, LLMProvider
-from elspeth.plugins.llm.providers.azure import AzureLLMProvider, AzureOpenAIConfig
+from elspeth.plugins.llm.providers.azure import AzureLLMProvider, AzureOpenAIConfig, _configure_azure_monitor
 from elspeth.plugins.llm.providers.openrouter import OpenRouterConfig, OpenRouterLLMProvider
 from elspeth.plugins.llm.templates import PromptTemplate, TemplateError
 from elspeth.plugins.llm.tracing import AzureAITracingConfig, TracingConfig, parse_tracing_config
@@ -917,6 +917,19 @@ class LLMTransform(BaseTransform, BatchTransformMixin):
 
         # Create provider now that recorder/telemetry are available
         self._provider = self._create_provider()
+
+        # Initialize Azure AI tracing (process-level OpenTelemetry auto-instrumentation).
+        # Must happen after provider creation — the OpenAI SDK must be available.
+        if isinstance(self._tracing_config, AzureAITracingConfig):
+            success = _configure_azure_monitor(self._tracing_config)
+            if success:
+                logger.info(
+                    "Azure AI tracing initialized",
+                    provider="azure_ai",
+                    content_recording=self._tracing_config.enable_content_recording,
+                )
+            else:
+                logger.warning("Azure AI tracing setup failed — tracing inactive")
 
     def _create_provider(self) -> LLMProvider:
         """Instantiate the provider with all required dependencies.

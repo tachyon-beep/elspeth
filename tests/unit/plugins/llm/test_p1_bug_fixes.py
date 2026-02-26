@@ -525,22 +525,31 @@ class TestEnableContentRecording:
     The config field was accepted and logged but never passed to the Azure
     Monitor SDK or environment variable, leaving it as a dead config field.
 
-    Note on mocking strategy: _configure_azure_monitor() uses local imports:
-    - `from azure.monitor.opentelemetry import configure_azure_monitor` (installed)
-    - `from azure.ai.inference.tracing import AIInferenceInstrumentor` (NOT installed)
+    Note on mocking strategy: _configure_azure_monitor() uses module-level imports:
+    - `configure_azure_monitor` is imported at module level in providers/azure.py
+    - `from azure.ai.inference.tracing import AIInferenceInstrumentor` is a local import
 
-    Since configure_azure_monitor is imported inside the function body, we must
-    patch it at the source module, not on elspeth.plugins.llm.azure. For
-    AIInferenceInstrumentor, we inject a mock module into sys.modules since the
-    real package is not installed.
+    We must patch the already-imported reference at
+    ``elspeth.plugins.llm.providers.azure.configure_azure_monitor``, NOT the
+    source module ``azure.monitor.opentelemetry.configure_azure_monitor``.
+    For AIInferenceInstrumentor, we inject a mock module into sys.modules
+    since the real package is not installed.
+
+    Each test resets the module-level idempotency guard via
+    ``_reset_azure_monitor_state()`` to ensure isolation.
     """
 
     def test_content_recording_wired_via_instrumentor(self) -> None:
         """enable_content_recording is passed to AIInferenceInstrumentor when available."""
         import sys
 
-        from elspeth.plugins.llm.providers.azure import _configure_azure_monitor
+        from elspeth.plugins.llm.providers.azure import (
+            _configure_azure_monitor,
+            _reset_azure_monitor_state,
+        )
         from elspeth.plugins.llm.tracing import AzureAITracingConfig
+
+        _reset_azure_monitor_state()
 
         config = AzureAITracingConfig(
             connection_string="InstrumentationKey=test-key",
@@ -555,27 +564,35 @@ class TestEnableContentRecording:
         mock_tracing_module = Mock()
         mock_tracing_module.AIInferenceInstrumentor = mock_instrumentor_class
 
-        with (
-            patch("azure.monitor.opentelemetry.configure_azure_monitor") as mock_az_monitor,
-            patch.dict(sys.modules, {"azure.ai.inference.tracing": mock_tracing_module}),
-        ):
-            result = _configure_azure_monitor(config)
+        try:
+            with (
+                patch("elspeth.plugins.llm.providers.azure.configure_azure_monitor") as mock_az_monitor,
+                patch.dict(sys.modules, {"azure.ai.inference.tracing": mock_tracing_module}),
+            ):
+                result = _configure_azure_monitor(config)
 
-        assert result is True
-        mock_az_monitor.assert_called_once_with(
-            connection_string="InstrumentationKey=test-key",
-            enable_live_metrics=False,
-        )
-        mock_instrumentor_instance.instrument.assert_called_once_with(
-            enable_content_recording=True,
-        )
+            assert result is True
+            mock_az_monitor.assert_called_once_with(
+                connection_string="InstrumentationKey=test-key",
+                enable_live_metrics=False,
+            )
+            mock_instrumentor_instance.instrument.assert_called_once_with(
+                enable_content_recording=True,
+            )
+        finally:
+            _reset_azure_monitor_state()
 
     def test_content_recording_false_wired_via_instrumentor(self) -> None:
         """enable_content_recording=False is correctly passed through."""
         import sys
 
-        from elspeth.plugins.llm.providers.azure import _configure_azure_monitor
+        from elspeth.plugins.llm.providers.azure import (
+            _configure_azure_monitor,
+            _reset_azure_monitor_state,
+        )
         from elspeth.plugins.llm.tracing import AzureAITracingConfig
+
+        _reset_azure_monitor_state()
 
         config = AzureAITracingConfig(
             connection_string="InstrumentationKey=test-key",
@@ -589,15 +606,18 @@ class TestEnableContentRecording:
         mock_tracing_module = Mock()
         mock_tracing_module.AIInferenceInstrumentor = mock_instrumentor_class
 
-        with (
-            patch("azure.monitor.opentelemetry.configure_azure_monitor"),
-            patch.dict(sys.modules, {"azure.ai.inference.tracing": mock_tracing_module}),
-        ):
-            _configure_azure_monitor(config)
+        try:
+            with (
+                patch("elspeth.plugins.llm.providers.azure.configure_azure_monitor"),
+                patch.dict(sys.modules, {"azure.ai.inference.tracing": mock_tracing_module}),
+            ):
+                _configure_azure_monitor(config)
 
-        mock_instrumentor_instance.instrument.assert_called_once_with(
-            enable_content_recording=False,
-        )
+            mock_instrumentor_instance.instrument.assert_called_once_with(
+                enable_content_recording=False,
+            )
+        finally:
+            _reset_azure_monitor_state()
 
     def test_content_recording_falls_back_to_env_var(self) -> None:
         """When AIInferenceInstrumentor is not available, falls back to env var.
@@ -608,8 +628,13 @@ class TestEnableContentRecording:
         """
         import os
 
-        from elspeth.plugins.llm.providers.azure import _configure_azure_monitor
+        from elspeth.plugins.llm.providers.azure import (
+            _configure_azure_monitor,
+            _reset_azure_monitor_state,
+        )
         from elspeth.plugins.llm.tracing import AzureAITracingConfig
+
+        _reset_azure_monitor_state()
 
         config = AzureAITracingConfig(
             connection_string="InstrumentationKey=test-key",
@@ -621,12 +646,13 @@ class TestEnableContentRecording:
         env_key = "AZURE_TRACING_GEN_AI_CONTENT_RECORDING_ENABLED"
         old_value = os.environ.pop(env_key, None)
         try:
-            with patch("azure.monitor.opentelemetry.configure_azure_monitor"):
+            with patch("elspeth.plugins.llm.providers.azure.configure_azure_monitor"):
                 _configure_azure_monitor(config)
 
             assert os.environ.get(env_key) == "true"
         finally:
             # Clean up
+            _reset_azure_monitor_state()
             os.environ.pop(env_key, None)
             if old_value is not None:
                 os.environ[env_key] = old_value
@@ -635,8 +661,13 @@ class TestEnableContentRecording:
         """enable_content_recording=False sets env var to 'false'."""
         import os
 
-        from elspeth.plugins.llm.providers.azure import _configure_azure_monitor
+        from elspeth.plugins.llm.providers.azure import (
+            _configure_azure_monitor,
+            _reset_azure_monitor_state,
+        )
         from elspeth.plugins.llm.tracing import AzureAITracingConfig
+
+        _reset_azure_monitor_state()
 
         config = AzureAITracingConfig(
             connection_string="InstrumentationKey=test-key",
@@ -647,12 +678,13 @@ class TestEnableContentRecording:
         env_key = "AZURE_TRACING_GEN_AI_CONTENT_RECORDING_ENABLED"
         old_value = os.environ.pop(env_key, None)
         try:
-            with patch("azure.monitor.opentelemetry.configure_azure_monitor"):
+            with patch("elspeth.plugins.llm.providers.azure.configure_azure_monitor"):
                 _configure_azure_monitor(config)
 
             assert os.environ.get(env_key) == "false"
         finally:
             # Clean up
+            _reset_azure_monitor_state()
             os.environ.pop(env_key, None)
             if old_value is not None:
                 os.environ[env_key] = old_value

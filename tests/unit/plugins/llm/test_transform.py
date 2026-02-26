@@ -1699,3 +1699,93 @@ class TestAzureAITracingSetup:
         transform = LLMTransform(config)
         assert transform._tracing_config is not None
         assert isinstance(transform._tracing_config, AzureAITracingConfig)
+
+
+def _make_lifecycle_ctx() -> Mock:
+    """Create a mock LifecycleContext for on_start() tests."""
+    ctx = _make_ctx()
+    ctx.landscape = Mock()
+    ctx.rate_limit_registry = None
+    ctx.telemetry_emit = Mock()
+    ctx.node_id = "node-1"
+    ctx.payload_store = None
+    ctx.concurrency_config = None
+    return ctx
+
+
+class TestAzureAITracingOnStart:
+    """Tests for _configure_azure_monitor() wiring in on_start()."""
+
+    def test_on_start_calls_configure_azure_monitor(self) -> None:
+        """on_start() calls _configure_azure_monitor for AzureAITracingConfig."""
+        from elspeth.plugins.llm.tracing import AzureAITracingConfig
+        from elspeth.plugins.llm.transform import LLMTransform
+
+        config = _make_config(
+            provider="azure",
+            tracing={"provider": "azure_ai", "connection_string": "InstrumentationKey=test"},
+        )
+        transform = LLMTransform(config)
+        ctx = _make_lifecycle_ctx()
+
+        with patch(
+            "elspeth.plugins.llm.transform._configure_azure_monitor",
+            return_value=True,
+        ) as mock_configure:
+            transform.on_start(ctx)
+
+            mock_configure.assert_called_once()
+            call_arg = mock_configure.call_args.args[0]
+            assert isinstance(call_arg, AzureAITracingConfig)
+            assert call_arg.connection_string == "InstrumentationKey=test"
+
+    def test_on_start_configure_azure_monitor_failure_logs_warning(self) -> None:
+        """on_start() logs warning when _configure_azure_monitor returns False."""
+        from elspeth.plugins.llm.transform import LLMTransform
+
+        config = _make_config(
+            provider="azure",
+            tracing={"provider": "azure_ai", "connection_string": "InstrumentationKey=test"},
+        )
+        transform = LLMTransform(config)
+        ctx = _make_lifecycle_ctx()
+
+        with (
+            patch("elspeth.plugins.llm.transform._configure_azure_monitor", return_value=False),
+            patch("elspeth.plugins.llm.transform.logger") as mock_logger,
+        ):
+            transform.on_start(ctx)
+            mock_logger.warning.assert_called_once()
+
+    def test_on_start_skips_azure_monitor_for_langfuse(self) -> None:
+        """on_start() does NOT call _configure_azure_monitor for Langfuse tracing."""
+        from elspeth.plugins.llm.transform import LLMTransform
+
+        config = _make_config(
+            provider="azure",
+            tracing={"provider": "langfuse", "public_key": "pk", "secret_key": "sk"},
+        )
+        # Langfuse client creation will fail (no real server), but we mock the tracer
+        with patch("elspeth.plugins.llm.transform.create_langfuse_tracer"):
+            transform = LLMTransform(config)
+
+        ctx = _make_lifecycle_ctx()
+        with patch(
+            "elspeth.plugins.llm.transform._configure_azure_monitor",
+        ) as mock_configure:
+            transform.on_start(ctx)
+            mock_configure.assert_not_called()
+
+    def test_on_start_skips_azure_monitor_when_no_tracing(self) -> None:
+        """on_start() does NOT call _configure_azure_monitor when tracing is None."""
+        from elspeth.plugins.llm.transform import LLMTransform
+
+        config = _make_config(provider="azure")
+        transform = LLMTransform(config)
+        ctx = _make_lifecycle_ctx()
+
+        with patch(
+            "elspeth.plugins.llm.transform._configure_azure_monitor",
+        ) as mock_configure:
+            transform.on_start(ctx)
+            mock_configure.assert_not_called()
