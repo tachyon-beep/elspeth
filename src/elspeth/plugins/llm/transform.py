@@ -44,7 +44,7 @@ from elspeth.plugins.llm.provider import FinishReason, LLMProvider
 from elspeth.plugins.llm.providers.azure import AzureLLMProvider, AzureOpenAIConfig
 from elspeth.plugins.llm.providers.openrouter import OpenRouterConfig, OpenRouterLLMProvider
 from elspeth.plugins.llm.templates import PromptTemplate, TemplateError
-from elspeth.plugins.llm.tracing import parse_tracing_config
+from elspeth.plugins.llm.tracing import AzureAITracingConfig, TracingConfig, parse_tracing_config
 from elspeth.plugins.llm.validation import reject_nonfinite_constant, strip_markdown_fences, validate_field_value
 from elspeth.plugins.pooling import PooledExecutor, RowContext
 from elspeth.plugins.schema_factory import create_schema_from_config
@@ -814,6 +814,17 @@ class LLMTransform(BaseTransform, BatchTransformMixin):
         # tracing lives on provider-specific configs (AzureOpenAIConfig, OpenRouterConfig),
         # both of which define tracing: dict[str, Any] | None.
         tracing_config = parse_tracing_config(self._config.tracing) if self._config.tracing else None
+        self._tracing_config: TracingConfig | None = tracing_config
+
+        # Validate provider/tracing compatibility — azure_ai tracing auto-instruments
+        # the OpenAI SDK, which only the Azure provider uses. Fail loud, not silent.
+        if isinstance(tracing_config, AzureAITracingConfig) and not isinstance(self._config, AzureOpenAIConfig):
+            raise ValueError(
+                "azure_ai tracing requires the azure provider. "
+                "Azure Monitor auto-instruments the OpenAI SDK, which is only used by provider='azure'. "
+                f"Current provider: '{self._config.provider}'"
+            )
+
         self._tracer = create_langfuse_tracer(
             transform_name=self.name,
             tracing_config=tracing_config,

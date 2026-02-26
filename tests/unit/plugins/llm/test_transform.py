@@ -1668,3 +1668,34 @@ class TestAzureAITracingSetup:
             tracer = create_langfuse_tracer("test_transform", config)
             assert isinstance(tracer, NoOpLangfuseTracer)
             mock_logger.warning.assert_called_once()
+
+    def test_azure_ai_tracing_rejected_for_openrouter_provider(self) -> None:
+        """azure_ai tracing with openrouter provider raises ValueError at init.
+
+        Azure Monitor auto-instruments the OpenAI SDK. OpenRouter uses httpx
+        directly, so Azure AI tracing would silently do nothing.
+        """
+        from elspeth.plugins.llm.transform import LLMTransform
+
+        config = _make_config(
+            provider="openrouter",
+            model="openai/gpt-4o",
+            api_key="test-key",
+            tracing={"provider": "azure_ai", "connection_string": "InstrumentationKey=test"},
+        )
+        with pytest.raises(ValueError, match=r"azure_ai tracing.*azure provider"):
+            LLMTransform(config)
+
+    def test_azure_ai_tracing_accepted_for_azure_provider(self) -> None:
+        """azure_ai tracing with azure provider does not raise."""
+        from elspeth.plugins.llm.tracing import AzureAITracingConfig
+        from elspeth.plugins.llm.transform import LLMTransform
+
+        config = _make_config(
+            provider="azure",
+            tracing={"provider": "azure_ai", "connection_string": "InstrumentationKey=test"},
+        )
+        # Should not raise
+        transform = LLMTransform(config)
+        assert transform._tracing_config is not None
+        assert isinstance(transform._tracing_config, AzureAITracingConfig)
