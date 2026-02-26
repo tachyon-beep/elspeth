@@ -63,6 +63,9 @@ ctx.state_id = guard.state_id
 ctx.node_id = node_id
 ctx.batch_token_ids = batch_token_ids
 
+# aggregation.py:418,531,555,570 (cleanup assignments)
+ctx.batch_token_ids = None  # 4 sites resetting batch state
+
 # sink.py:199-205
 ctx.contract = batch_contract
 ctx.state_id = None

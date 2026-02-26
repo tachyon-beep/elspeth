@@ -46,9 +46,9 @@ Every phase must pass ALL of these before proceeding:
 
 1. **Concrete `PluginContext` stays** — executors mutate it between steps
 2. **`record_call()` implementation stays on concrete class** — protocols expose the method signature only
-3. **`on_start()` receives `LifecycleContext`** (wider), `process()`/`write()`/`load()` receive narrower phase context
+3. **`on_start()`/`on_complete()` receive `LifecycleContext`** (wider), `process()`/`write()`/`load()` receive narrower phase context
 4. **Executors keep accepting `PluginContext`** (concrete) — they write to it
-5. **Tests mostly don't change** — `PluginContext(...)` constructions still work
+5. **Tests mostly don't change** — ~444 direct `PluginContext(...)` constructions across ~69 test files continue to work because the concrete class satisfies all 4 protocols
 
 ## Files Touched (Summary)
 
@@ -59,7 +59,7 @@ Every phase must pass ALL of these before proceeding:
 | Plugin protocols | 1 | `src/elspeth/plugins/protocols.py` |
 | Base classes | 1 | `src/elspeth/plugins/base.py` |
 | Source plugins | 4 | `csv_source.py`, `json_source.py`, `null_source.py`, `blob_source.py` |
-| Simple transforms | 5 | `passthrough.py`, `field_mapper.py`, `truncate.py`, `json_explode.py`, `keyword_filter.py` |
+| Simple transforms | 7 | `passthrough.py`, `field_mapper.py`, `truncate.py`, `json_explode.py`, `keyword_filter.py`, `batch_stats.py`, `batch_replicate.py` |
 | Complex transforms | 3 | `web_scrape.py`, `prompt_shield.py`, `content_safety.py` |
 | LLM transforms | 3 | `transform.py`, `openrouter_batch.py`, `azure_batch.py` |
 | Sinks | 4 | `csv_sink.py`, `json_sink.py`, `database_sink.py`, `blob_sink.py` |

@@ -40,7 +40,7 @@ def load(self, ctx: "SourceContext") -> Iterator["SourceRow"]: ...
 def on_start(self, ctx: "LifecycleContext") -> None: ...
 
 # Line 110: on_complete()
-def on_complete(self, ctx: "SourceContext") -> None: ...
+def on_complete(self, ctx: "LifecycleContext") -> None: ...
 ```
 
 **Step 3: Update TransformProtocol signatures**
@@ -57,7 +57,7 @@ def process(
 def on_start(self, ctx: "LifecycleContext") -> None: ...
 
 # Line 262: on_complete()
-def on_complete(self, ctx: "TransformContext") -> None: ...
+def on_complete(self, ctx: "LifecycleContext") -> None: ...
 ```
 
 **Step 4: Update BatchTransformProtocol signatures**
@@ -74,7 +74,7 @@ def process(
 def on_start(self, ctx: "LifecycleContext") -> None: ...
 
 # Line 369: on_complete()
-def on_complete(self, ctx: "TransformContext") -> None: ...
+def on_complete(self, ctx: "LifecycleContext") -> None: ...
 ```
 
 **Step 5: Update SinkProtocol signatures**
@@ -91,7 +91,7 @@ def write(
 def on_start(self, ctx: "LifecycleContext") -> None: ...
 
 # Line 511: on_complete()
-def on_complete(self, ctx: "SinkContext") -> None: ...
+def on_complete(self, ctx: "LifecycleContext") -> None: ...
 ```
 
 **Step 6: Run mypy on just this file**
@@ -224,7 +224,7 @@ Expected: Clean
 
 ---
 
-## Task 4: Update simple transform plugins (5 files)
+## Task 4: Update simple transform plugins (7 files)
 
 **Files:**
 - Modify: `src/elspeth/plugins/transforms/passthrough.py:58`
@@ -232,6 +232,8 @@ Expected: Clean
 - Modify: `src/elspeth/plugins/transforms/truncate.py:88`
 - Modify: `src/elspeth/plugins/transforms/json_explode.py:123`
 - Modify: `src/elspeth/plugins/transforms/keyword_filter.py`
+- Modify: `src/elspeth/plugins/transforms/batch_stats.py:88`
+- Modify: `src/elspeth/plugins/transforms/batch_replicate.py:118`
 
 **Step 1: Update imports in each file**
 
@@ -242,21 +244,26 @@ from elspeth.contracts.contexts import TransformContext
 
 These files don't have `on_start`/`on_complete` overrides, so no `LifecycleContext` needed.
 
+Note: `batch_stats.py` and `batch_replicate.py` are batch-aware transforms (accept `rows: list[PipelineRow]` not `row: PipelineRow`) but follow the same simple import pattern.
+
 **Step 2: Update method signatures**
 
-For each file, change:
+For each row-transform file, change:
 - `def process(self, row: PipelineRow, ctx: PluginContext)` → `def process(self, row: PipelineRow, ctx: TransformContext)`
 
-These transforms don't access ctx at all, so this is purely a signature change.
+For each batch-transform file, change:
+- `def process(self, rows: list[PipelineRow], ctx: PluginContext)` → `def process(self, rows: list[PipelineRow], ctx: TransformContext)`
+
+These transforms don't access ctx at all (or minimally), so this is purely a signature change.
 
 **Step 3: Run tests**
 
-Run: `.venv/bin/python -m pytest tests/unit/plugins/transforms/ -v --timeout=60 -k "passthrough or field_mapper or truncate or json_explode or keyword"`
+Run: `.venv/bin/python -m pytest tests/unit/plugins/transforms/ -v --timeout=60 -k "passthrough or field_mapper or truncate or json_explode or keyword or batch_stats or batch_replicate"`
 Expected: All pass
 
 **Step 4: Run mypy**
 
-Run: `.venv/bin/python -m mypy src/elspeth/plugins/transforms/passthrough.py src/elspeth/plugins/transforms/field_mapper.py src/elspeth/plugins/transforms/truncate.py src/elspeth/plugins/transforms/json_explode.py src/elspeth/plugins/transforms/keyword_filter.py`
+Run: `.venv/bin/python -m mypy src/elspeth/plugins/transforms/passthrough.py src/elspeth/plugins/transforms/field_mapper.py src/elspeth/plugins/transforms/truncate.py src/elspeth/plugins/transforms/json_explode.py src/elspeth/plugins/transforms/keyword_filter.py src/elspeth/plugins/transforms/batch_stats.py src/elspeth/plugins/transforms/batch_replicate.py`
 Expected: Clean
 
 ---
@@ -318,8 +325,10 @@ These violate CLAUDE.md's prohibition on defensive programming (system-owned cod
        self._recorder = ctx.landscape
        self._limiter = ctx.rate_limit_registry
        self._telemetry_emit = ctx.telemetry_emit
+       self._payload_store = ctx.payload_store
    ```
-2. Update `process()` and internal helpers (`_fetch_url`, etc.) to use `self._recorder`, `self._limiter`, `self._telemetry_emit` instead of `ctx.landscape`, `ctx.rate_limit_registry`, `ctx.telemetry_emit`
+   The existing code crashes if `ctx.rate_limit_registry is None` or `ctx.landscape is None` (lines 297-300). Replicate these crash-if-None assertions in `on_start()` so bugs surface early, not when the first row arrives.
+2. Update `process()` and internal helpers (`_fetch_url` at line 283, etc.) to use `self._recorder`, `self._limiter`, `self._telemetry_emit`, and `self._payload_store` instead of `ctx.landscape`, `ctx.rate_limit_registry`, `ctx.telemetry_emit`, `ctx.payload_store`. Note: `_fetch_url` also accesses `ctx.state_id`, `ctx.run_id`, and `ctx.token` — these ARE in `TransformContext` and should remain as `ctx.X`.
 3. Then narrow `process()` to `ctx: TransformContext`
 
 **Step 4: Run tests**
@@ -355,6 +364,9 @@ For `transform.py` (LLMTransform):
 - `def accept(self, row: PipelineRow, ctx: PluginContext)` → `ctx: TransformContext`
 - `def process(self, row: PipelineRow, ctx: PluginContext)` → `ctx: TransformContext`
 - Internal methods `_single_query_process`, `_multi_query_process`, `_process_row`: `ctx: TransformContext`
+- **`LLMQueryStrategy` protocol** (line 80): `def execute(self, ..., ctx: PluginContext)` → `ctx: TransformContext`
+- **`SingleQueryStrategy.execute()`** (line 102): `ctx: TransformContext`
+- **`MultiQueryStrategy.execute()`** (line 256): `ctx: TransformContext`
 
 For `openrouter_batch.py`:
 - `def on_start(self, ctx: PluginContext)` → `ctx: LifecycleContext`
@@ -445,8 +457,10 @@ from elspeth.contracts.contexts import TransformContext
 
 **Step 2: Update method signatures**
 
+- `accept(self, row, ctx: TransformContext, ...)` abstract method (line 103)
 - `accept_row(self, row, ctx: TransformContext, ...)` (line 173)
-- Any internal methods that pass ctx: use `TransformContext`
+- `Callable[[PipelineRow, PluginContext], TransformResult]` type annotations at lines 177 and 226 → `Callable[[PipelineRow, TransformContext], TransformResult]`
+- `_process_and_complete()` and any internal methods that pass ctx: use `TransformContext`
 
 **Step 3: Run tests**
 
