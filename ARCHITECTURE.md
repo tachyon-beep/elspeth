@@ -640,6 +640,7 @@ graph LR
 | `full` | Above + external call details (LLM, HTTP, SQL) | Deep debugging |
 
 **Backpressure Modes:**
+
 - `block`: Wait for export completion (ensures all events delivered)
 - `drop`: Drop events when queue full (fast, lossy)
 
@@ -714,6 +715,7 @@ graph LR
 **Leaf Module Principle:** Contracts package has ZERO outbound dependencies, preventing circular imports and enabling independent testing.
 
 **Import Hierarchy:**
+
 ```
 UI Layer → Engine/Plugins/Telemetry → Core → Contracts (leaf)
 ```
@@ -774,6 +776,7 @@ graph TB
 4. **Failures**: Crash immediately with clear error message
 
 **Example Template Discovery:**
+
 ```python
 from elspeth.core.templates import extract_jinja2_fields
 
@@ -947,6 +950,7 @@ Based on comprehensive analysis (2026-02-02), ELSPETH demonstrates exceptional a
 12. **Quality Assessment** - Architecture grade and risk analysis
 
 **Key Metrics:**
+
 - Production LOC: ~76,000 (234 Python files)
 - Test LOC: ~201,000 (2.7:1 ratio)
 - Subsystems: 22
