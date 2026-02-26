@@ -365,7 +365,7 @@ Expected: All pass
 
 ---
 
-## Task 4 (was 3): Add field coverage tests
+## Task 4: Add field coverage tests
 
 **Files:**
 - Modify: `tests/unit/contracts/test_context_protocols.py`
@@ -454,7 +454,7 @@ Expected: All pass
 
 ---
 
-## Task 5 (was 4): Add protocol disjointness documentation test
+## Task 5: Add protocol disjointness documentation test
 
 **Files:**
 - Modify: `tests/unit/contracts/test_context_protocols.py`
@@ -495,7 +495,7 @@ Expected: All pass
 
 ---
 
-## Task 6 (was 5): Export protocols from contracts package
+## Task 6: Export protocols from contracts package
 
 **Files:**
 - Modify: `src/elspeth/contracts/__init__.py`
@@ -520,7 +520,7 @@ Expected: All pass
 
 ---
 
-## Task 7 (was 6): Commit Phase 1
+## Task 7: Commit Phase 1
 
 **Step 1: Commit**
 
