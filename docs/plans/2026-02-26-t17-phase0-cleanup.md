@@ -28,12 +28,24 @@ In `src/elspeth/contracts/plugin_context.py`, delete line 102:
     plugin_name: str | None = field(default=None)
 ```
 
-**Step 3: Run tests**
+**Step 3: Fix test breakage from `plugin_name` kwarg removal**
+
+> **[B1] BLOCKING — from review panel.** Two contract test base fixtures pass `plugin_name="test"` to
+> `PluginContext(...)`. These are base fixtures inherited by every transform and source contract test.
+> Failing to update them breaks the entire contract test tier.
+
+Run: `grep -rn 'plugin_name' tests/ --include='*.py' | grep -v '__pycache__'`
+
+Known test changes needed:
+- **`tests/unit/contracts/transform_contracts/test_transform_protocol.py:92`** — remove `plugin_name="test"` from `PluginContext(...)` constructor call in the `ctx` fixture
+- **`tests/unit/contracts/source_contracts/test_source_protocol.py:67`** — remove `plugin_name="test"` from `PluginContext(...)` constructor call in the `ctx` fixture
+
+**Step 4: Run tests**
 
 Run: `.venv/bin/python -m pytest tests/ -x --timeout=120 -q`
 Expected: All pass
 
-**Step 4: Run mypy**
+**Step 5: Run mypy**
 
 Run: `.venv/bin/python -m mypy src/`
 Expected: Clean

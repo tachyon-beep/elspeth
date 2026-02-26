@@ -329,6 +329,7 @@ class TestLoadScenarios:
             max_tokens: int | None,
             state_id: str,
             token_id: str,
+            response_format: dict[str, object] | None = None,
         ) -> LLMQueryResult:
             query_call_count[0] += 1
             if query_call_count[0] % 3 == 0:
@@ -456,6 +457,7 @@ class TestRowAtomicity:
             max_tokens: int | None,
             state_id: str,
             token_id: str,
+            response_format: dict[str, object] | None = None,
         ) -> LLMQueryResult:
             llm_call_count[0] += 1
             if llm_call_count[0] % 10 == 0:
@@ -555,6 +557,7 @@ class TestRowAtomicity:
             max_tokens: int | None,
             state_id: str,
             token_id: str,
+            response_format: dict[str, object] | None = None,
         ) -> LLMQueryResult:
             """Simulate 80% failure rate."""
             llm_call_count[0] += 1
@@ -652,6 +655,7 @@ class TestRowAtomicity:
             max_tokens: int | None,
             state_id: str,
             token_id: str,
+            response_format: dict[str, object] | None = None,
         ) -> LLMQueryResult:
             """Simulate failures in a pattern that affects different rows."""
             llm_call_count[0] += 1

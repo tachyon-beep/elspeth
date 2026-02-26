@@ -127,6 +127,7 @@ class AzureLLMProvider:
         max_tokens: int | None,
         state_id: str,
         token_id: str,
+        response_format: dict[str, Any] | None = None,
     ) -> LLMQueryResult:
         """Execute LLM query via Azure OpenAI SDK.
 
@@ -137,6 +138,7 @@ class AzureLLMProvider:
             max_tokens: Max response tokens (None = provider default)
             state_id: Snapshot of state_id for client caching
             token_id: Token identity for audit correlation
+            response_format: OpenAI response_format dict (e.g., {"type": "json_object"})
 
         Returns:
             Normalized LLMQueryResult
@@ -158,6 +160,7 @@ class AzureLLMProvider:
                 messages=messages,
                 temperature=temperature,
                 max_tokens=max_tokens,
+                response_format=response_format,
             )
 
             # Extract finish_reason from raw_response (SDK-validated API response — Tier 2)

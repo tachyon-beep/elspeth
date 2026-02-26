@@ -130,6 +130,7 @@ class OpenRouterLLMProvider:
         max_tokens: int | None,
         state_id: str,
         token_id: str,
+        response_format: dict[str, Any] | None = None,
     ) -> LLMQueryResult:
         """Execute LLM query via OpenRouter HTTP API.
 
@@ -139,6 +140,10 @@ class OpenRouterLLMProvider:
         3. Content extraction and null check
         4. Usage validation (non-finite rejection)
         5. Finish reason normalization
+
+        Args:
+            response_format: OpenAI-compatible response_format dict
+                (e.g., {"type": "json_object"})
 
         Raises:
             RateLimitError: HTTP 429 (retryable)
@@ -160,6 +165,8 @@ class OpenRouterLLMProvider:
             }
             if max_tokens is not None:
                 request_body["max_tokens"] = max_tokens
+            if response_format is not None:
+                request_body["response_format"] = response_format
 
             # HTTP call — raise_for_status for error classification
             try:

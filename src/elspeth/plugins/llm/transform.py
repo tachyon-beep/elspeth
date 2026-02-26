@@ -39,13 +39,13 @@ from elspeth.plugins.llm import (
 )
 from elspeth.plugins.llm.base import LLMConfig
 from elspeth.plugins.llm.langfuse import LangfuseTracer, create_langfuse_tracer
-from elspeth.plugins.llm.multi_query import QuerySpec, resolve_queries
+from elspeth.plugins.llm.multi_query import QuerySpec, ResponseFormat, resolve_queries
 from elspeth.plugins.llm.provider import FinishReason, LLMProvider
 from elspeth.plugins.llm.providers.azure import AzureLLMProvider, AzureOpenAIConfig
 from elspeth.plugins.llm.providers.openrouter import OpenRouterConfig, OpenRouterLLMProvider
 from elspeth.plugins.llm.templates import PromptTemplate, TemplateError
 from elspeth.plugins.llm.tracing import parse_tracing_config
-from elspeth.plugins.llm.validation import strip_markdown_fences
+from elspeth.plugins.llm.validation import reject_nonfinite_constant, strip_markdown_fences
 from elspeth.plugins.schema_factory import create_schema_from_config
 
 if TYPE_CHECKING:
@@ -316,6 +316,28 @@ class MultiQueryStrategy:
 
             # Execute query
             query_max_tokens = spec.max_tokens or self.max_tokens
+
+            # Build response_format for structured output requests
+            response_format: dict[str, Any] | None = None
+            if spec.output_fields:
+                if spec.response_format == ResponseFormat.STRUCTURED:
+                    # Build JSON Schema from output field definitions
+                    properties = {f.suffix: f.to_json_schema() for f in spec.output_fields}
+                    response_format = {
+                        "type": "json_schema",
+                        "json_schema": {
+                            "name": f"{spec.name}_output",
+                            "schema": {
+                                "type": "object",
+                                "properties": properties,
+                                "required": list(properties),
+                            },
+                        },
+                    }
+                else:
+                    # STANDARD mode — model outputs JSON but no schema enforcement
+                    response_format = {"type": "json_object"}
+
             start_time = time.monotonic()
             try:
                 result = provider.execute_query(
@@ -325,6 +347,7 @@ class MultiQueryStrategy:
                     max_tokens=query_max_tokens,
                     state_id=state_id,
                     token_id=token_id,
+                    response_format=response_format,
                 )
             except ContextLengthError as e:
                 latency_ms = (time.monotonic() - start_time) * 1000
@@ -410,7 +433,7 @@ class MultiQueryStrategy:
             if spec.output_fields:
                 # LLM response content is Tier 3 — parse and validate immediately
                 try:
-                    parsed = json.loads(content)
+                    parsed = json.loads(content, parse_constant=reject_nonfinite_constant)
                 except (json.JSONDecodeError, ValueError) as e:
                     return TransformResult.error(
                         {
@@ -520,14 +543,6 @@ class LLMTransform(BaseTransform, BatchTransformMixin):
             config_cls.from_dict(config),
         )
 
-        # Declare output fields for centralized collision detection
-        self.declared_output_fields = frozenset(
-            [
-                *get_llm_guaranteed_fields(self._config.response_field),
-                *get_llm_audit_fields(self._config.response_field),
-            ]
-        )
-
         # Store common LLM settings.
         # AzureOpenAIConfig._set_model_from_deployment ensures model is populated;
         # OpenRouterConfig requires model. So self._config.model is always non-empty.
@@ -593,6 +608,18 @@ class LLMTransform(BaseTransform, BatchTransformMixin):
                 max_tokens=self._max_tokens,
                 response_field=self._response_field,
             )
+
+            # Multi-query emits prefixed fields — declare them for collision detection
+            prefixed_fields: set[str] = set()
+            for spec in query_specs:
+                prefix = f"{spec.name}_{self._response_field}"
+                prefixed_fields.add(prefix)
+                prefixed_fields.update(get_llm_guaranteed_fields(prefix))
+                prefixed_fields.update(get_llm_audit_fields(prefix))
+                if spec.output_fields:
+                    for field in spec.output_fields:
+                        prefixed_fields.add(f"{spec.name}_{field.suffix}")
+            self.declared_output_fields = frozenset(prefixed_fields)
         else:
             self._strategy = SingleQueryStrategy(
                 template=self._template,
@@ -602,6 +629,14 @@ class LLMTransform(BaseTransform, BatchTransformMixin):
                 temperature=self._temperature,
                 max_tokens=self._max_tokens,
                 response_field=self._response_field,
+            )
+
+            # Single-query emits unprefixed fields
+            self.declared_output_fields = frozenset(
+                [
+                    *get_llm_guaranteed_fields(self._config.response_field),
+                    *get_llm_audit_fields(self._config.response_field),
+                ]
             )
 
         # Provider instance — deferred to on_start() when recorder/telemetry available
@@ -636,7 +671,8 @@ class LLMTransform(BaseTransform, BatchTransformMixin):
         self._recorder = ctx.landscape
         self._run_id = ctx.run_id
         self._telemetry_emit = ctx.telemetry_emit
-        self._limiter = ctx.rate_limit_registry.get_limiter("azure_openai") if ctx.rate_limit_registry is not None else None
+        limiter_name = "azure_openai" if isinstance(self._config, AzureOpenAIConfig) else "openrouter"
+        self._limiter = ctx.rate_limit_registry.get_limiter(limiter_name) if ctx.rate_limit_registry is not None else None
 
         # Create provider now that recorder/telemetry are available
         self._provider = self._create_provider()

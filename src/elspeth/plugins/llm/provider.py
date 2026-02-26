@@ -21,7 +21,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from enum import StrEnum
-from typing import Protocol, runtime_checkable
+from typing import Any, Protocol, runtime_checkable
 
 import structlog
 
@@ -115,6 +115,7 @@ class LLMProvider(Protocol):
         max_tokens: int | None,
         state_id: str,
         token_id: str,
+        response_format: dict[str, Any] | None = None,
     ) -> LLMQueryResult: ...
 
     def close(self) -> None: ...

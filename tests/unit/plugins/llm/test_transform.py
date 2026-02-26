@@ -512,7 +512,7 @@ class TestMultiQueryPartialFailure:
         # Mock provider: queries 1,2 succeed, query 3 fails, query 4 would succeed
         call_count = [0]
 
-        def mock_execute_query(messages, *, model, temperature, max_tokens, state_id, token_id):
+        def mock_execute_query(messages, *, model, temperature, max_tokens, state_id, token_id, response_format=None):
             call_count[0] += 1
             if call_count[0] == 3:
                 raise LLMClientError("Bad response for query 3", retryable=False)
@@ -725,7 +725,7 @@ class TestMultiQueryContextLength:
         transform = LLMTransform(config)
         call_count = [0]
 
-        def mock_execute(messages, *, model, temperature, max_tokens, state_id, token_id):
+        def mock_execute(messages, *, model, temperature, max_tokens, state_id, token_id, response_format=None):
             call_count[0] += 1
             if call_count[0] == 2:
                 raise ContextLengthError("Context too long for q2")
@@ -768,3 +768,349 @@ class TestTemplateRendering:
         assert result.status == "error"
         assert result.reason is not None
         assert "template" in str(result.reason).lower()
+
+
+# ---------------------------------------------------------------------------
+# Bug fix: NaN/Infinity rejection in multi-query JSON parsing
+# ---------------------------------------------------------------------------
+
+
+class TestMultiQueryNonFiniteRejection:
+    """Bug #5: json.loads() without parse_constant accepts NaN/Infinity.
+
+    Multi-query JSON parsing at transform.py:413 uses bare json.loads(content),
+    which accepts Python's non-standard NaN, Infinity, -Infinity. These values
+    break RFC 8785 canonical JSON hashing downstream and violate audit integrity.
+
+    The correct pattern (used in validation.py:78 and openrouter.py:203) passes
+    parse_constant=reject_nonfinite_constant to reject non-finite values at the
+    Tier 3 boundary.
+    """
+
+    def _make_structured_query_transform(self) -> tuple[Any, Mock]:
+        """Create a multi-query transform with output_fields (JSON parsing path)."""
+        from elspeth.plugins.llm.transform import LLMTransform
+
+        config = _make_config(
+            template="Evaluate: {{ row.text_content }}",
+            queries={
+                "q1": {
+                    "input_fields": {"text_content": "text"},
+                    "output_fields": [{"suffix": "score", "type": "number"}],
+                },
+            },
+        )
+        transform = LLMTransform(config)
+        mock_provider = Mock()
+        transform._provider = mock_provider
+        return transform, mock_provider
+
+    def test_nan_in_json_response_rejected(self) -> None:
+        """LLM response containing NaN must be rejected, not silently accepted."""
+        transform, mock_provider = self._make_structured_query_transform()
+        mock_provider.execute_query.return_value = LLMQueryResult(
+            content='{"score": NaN}',
+            usage=TokenUsage.known(10, 5),
+            model="gpt-4o",
+            finish_reason=FinishReason.STOP,
+        )
+
+        result = transform._process_row(_make_row(), _make_ctx())
+        assert result.status == "error"
+        assert result.reason is not None
+        assert result.reason["reason"] == "json_parse_failed"
+
+    def test_infinity_in_json_response_rejected(self) -> None:
+        """LLM response containing Infinity must be rejected."""
+        transform, mock_provider = self._make_structured_query_transform()
+        mock_provider.execute_query.return_value = LLMQueryResult(
+            content='{"score": Infinity}',
+            usage=TokenUsage.known(10, 5),
+            model="gpt-4o",
+            finish_reason=FinishReason.STOP,
+        )
+
+        result = transform._process_row(_make_row(), _make_ctx())
+        assert result.status == "error"
+        assert result.reason is not None
+        assert result.reason["reason"] == "json_parse_failed"
+
+    def test_negative_infinity_in_json_response_rejected(self) -> None:
+        """LLM response containing -Infinity must be rejected."""
+        transform, mock_provider = self._make_structured_query_transform()
+        mock_provider.execute_query.return_value = LLMQueryResult(
+            content='{"score": -Infinity}',
+            usage=TokenUsage.known(10, 5),
+            model="gpt-4o",
+            finish_reason=FinishReason.STOP,
+        )
+
+        result = transform._process_row(_make_row(), _make_ctx())
+        assert result.status == "error"
+        assert result.reason is not None
+        assert result.reason["reason"] == "json_parse_failed"
+
+    def test_valid_json_still_accepted(self) -> None:
+        """Finite values in JSON must still parse successfully (no regression)."""
+        transform, mock_provider = self._make_structured_query_transform()
+        mock_provider.execute_query.return_value = LLMQueryResult(
+            content='{"score": 3.14}',
+            usage=TokenUsage.known(10, 5),
+            model="gpt-4o",
+            finish_reason=FinishReason.STOP,
+        )
+
+        result = transform._process_row(_make_row(), _make_ctx())
+        assert result.status == "success"
+        assert result.row is not None
+        assert result.row["q1_score"] == pytest.approx(3.14)
+
+
+# ---------------------------------------------------------------------------
+# Bug fix: Hardcoded limiter name
+# ---------------------------------------------------------------------------
+
+
+class TestLimiterDispatch:
+    """Bug #1: on_start() always requests 'azure_openai' limiter.
+
+    The consolidated transform hardcodes get_limiter("azure_openai") regardless
+    of the configured provider. OpenRouter pipelines should get the 'openrouter'
+    limiter with potentially different rate limit settings.
+    """
+
+    def test_azure_provider_gets_azure_openai_limiter(self) -> None:
+        """Azure config should request the 'azure_openai' limiter."""
+        from elspeth.plugins.llm.transform import LLMTransform
+
+        transform = LLMTransform(_make_config(provider="azure"))
+
+        mock_registry = Mock()
+        mock_registry.get_limiter.return_value = Mock()
+
+        ctx = _make_ctx()
+        ctx.landscape = Mock()
+        ctx.rate_limit_registry = mock_registry
+        ctx.telemetry_emit = lambda event: None
+
+        transform.on_start(ctx)
+
+        mock_registry.get_limiter.assert_called_once_with("azure_openai")
+
+    def test_openrouter_provider_gets_openrouter_limiter(self) -> None:
+        """OpenRouter config should request the 'openrouter' limiter, not 'azure_openai'."""
+        from elspeth.plugins.llm.transform import LLMTransform
+
+        transform = LLMTransform(_make_config(provider="openrouter"))
+
+        mock_registry = Mock()
+        mock_registry.get_limiter.return_value = Mock()
+
+        ctx = _make_ctx()
+        ctx.landscape = Mock()
+        ctx.rate_limit_registry = mock_registry
+        ctx.telemetry_emit = lambda event: None
+
+        transform.on_start(ctx)
+
+        mock_registry.get_limiter.assert_called_once_with("openrouter")
+
+
+# ---------------------------------------------------------------------------
+# Bug fix: Multi-query declared_output_fields missing prefixed fields
+# ---------------------------------------------------------------------------
+
+
+class TestMultiQueryDeclaredOutputFields:
+    """Bug #4: declared_output_fields only declares unprefixed single-query fields.
+
+    Multi-query mode emits prefixed fields like 'quality_llm_response',
+    'quality_score', etc. but these aren't declared in declared_output_fields,
+    so TransformExecutor can't detect input/output name collisions.
+    """
+
+    def test_single_query_declares_base_output_fields(self) -> None:
+        """Baseline: single-query mode declares unprefixed fields correctly."""
+        from elspeth.plugins.llm.transform import LLMTransform
+
+        transform = LLMTransform(_make_config())
+        # Should include response field and metadata
+        assert "llm_response" in transform.declared_output_fields
+        assert "llm_response_usage" in transform.declared_output_fields
+        assert "llm_response_model" in transform.declared_output_fields
+
+    def test_multi_query_declares_prefixed_content_fields(self) -> None:
+        """Multi-query mode must declare query-prefixed content fields."""
+        from elspeth.plugins.llm.transform import LLMTransform
+
+        config = _make_config(
+            template="Classify: {{ row.text_content }}",
+            queries={
+                "quality": {"input_fields": {"text_content": "text"}},
+                "relevance": {"input_fields": {"text_content": "text"}},
+            },
+        )
+        transform = LLMTransform(config)
+
+        # Must include prefixed content fields
+        assert "quality_llm_response" in transform.declared_output_fields
+        assert "relevance_llm_response" in transform.declared_output_fields
+
+    def test_multi_query_declares_prefixed_metadata_fields(self) -> None:
+        """Multi-query mode must declare query-prefixed metadata fields."""
+        from elspeth.plugins.llm.transform import LLMTransform
+
+        config = _make_config(
+            template="Classify: {{ row.text_content }}",
+            queries={
+                "quality": {"input_fields": {"text_content": "text"}},
+            },
+        )
+        transform = LLMTransform(config)
+
+        # Must include prefixed metadata (usage, model, audit fields)
+        assert "quality_llm_response_usage" in transform.declared_output_fields
+        assert "quality_llm_response_model" in transform.declared_output_fields
+        assert "quality_llm_response_template_hash" in transform.declared_output_fields
+
+    def test_multi_query_declares_extracted_output_fields(self) -> None:
+        """When output_fields are configured, their prefixed names must be declared."""
+        from elspeth.plugins.llm.transform import LLMTransform
+
+        config = _make_config(
+            template="Evaluate: {{ row.text_content }}",
+            queries={
+                "quality": {
+                    "input_fields": {"text_content": "text"},
+                    "output_fields": [
+                        {"suffix": "score", "type": "integer"},
+                        {"suffix": "label", "type": "string"},
+                    ],
+                },
+            },
+        )
+        transform = LLMTransform(config)
+
+        # Extracted fields must be declared
+        assert "quality_score" in transform.declared_output_fields
+        assert "quality_label" in transform.declared_output_fields
+
+    def test_multi_query_does_not_declare_unprefixed_single_query_fields(self) -> None:
+        """Multi-query mode should NOT declare unprefixed base fields that it doesn't emit."""
+        from elspeth.plugins.llm.transform import LLMTransform
+
+        config = _make_config(
+            template="Classify: {{ row.text_content }}",
+            queries={
+                "quality": {"input_fields": {"text_content": "text"}},
+            },
+        )
+        transform = LLMTransform(config)
+
+        # Multi-query does NOT emit base "llm_response" — only "quality_llm_response"
+        assert "llm_response" not in transform.declared_output_fields
+
+
+# ---------------------------------------------------------------------------
+# Bug fix: response_format not passed to providers
+# ---------------------------------------------------------------------------
+
+
+class TestResponseFormatPassthrough:
+    """Bug #3: Multi-query response_format not passed to provider.execute_query().
+
+    QuerySpec supports response_format (STANDARD/STRUCTURED), but the provider
+    call in MultiQueryStrategy doesn't pass it. This means the LLM is never
+    asked to output JSON, making JSON parsing unreliable for structured queries.
+    """
+
+    def test_structured_response_format_passed_to_provider(self) -> None:
+        """When response_format=structured, provider must receive response_format."""
+        from elspeth.plugins.llm.transform import LLMTransform
+
+        config = _make_config(
+            template="Evaluate: {{ row.text_content }}",
+            queries={
+                "q1": {
+                    "input_fields": {"text_content": "text"},
+                    "response_format": "structured",
+                    "output_fields": [
+                        {"suffix": "score", "type": "integer"},
+                    ],
+                },
+            },
+        )
+        transform = LLMTransform(config)
+        mock_provider = Mock()
+        mock_provider.execute_query.return_value = LLMQueryResult(
+            content='{"score": 42}',
+            usage=TokenUsage.known(10, 5),
+            model="gpt-4o",
+            finish_reason=FinishReason.STOP,
+        )
+        transform._provider = mock_provider
+
+        transform._process_row(_make_row(), _make_ctx())
+
+        # Verify response_format was passed to provider
+        call_kwargs = mock_provider.execute_query.call_args.kwargs
+        assert "response_format" in call_kwargs
+        assert call_kwargs["response_format"]["type"] == "json_schema"
+
+    def test_standard_response_format_passes_json_object(self) -> None:
+        """When response_format=standard with output_fields, use json_object mode."""
+        from elspeth.plugins.llm.transform import LLMTransform
+
+        config = _make_config(
+            template="Evaluate: {{ row.text_content }}",
+            queries={
+                "q1": {
+                    "input_fields": {"text_content": "text"},
+                    "response_format": "standard",
+                    "output_fields": [
+                        {"suffix": "score", "type": "integer"},
+                    ],
+                },
+            },
+        )
+        transform = LLMTransform(config)
+        mock_provider = Mock()
+        mock_provider.execute_query.return_value = LLMQueryResult(
+            content='{"score": 42}',
+            usage=TokenUsage.known(10, 5),
+            model="gpt-4o",
+            finish_reason=FinishReason.STOP,
+        )
+        transform._provider = mock_provider
+
+        transform._process_row(_make_row(), _make_ctx())
+
+        call_kwargs = mock_provider.execute_query.call_args.kwargs
+        assert "response_format" in call_kwargs
+        assert call_kwargs["response_format"]["type"] == "json_object"
+
+    def test_no_output_fields_omits_response_format(self) -> None:
+        """When no output_fields configured, response_format should not be forced."""
+        from elspeth.plugins.llm.transform import LLMTransform
+
+        config = _make_config(
+            template="Classify: {{ row.text_content }}",
+            queries={
+                "q1": {"input_fields": {"text_content": "text"}},
+            },
+        )
+        transform = LLMTransform(config)
+        mock_provider = Mock()
+        mock_provider.execute_query.return_value = LLMQueryResult(
+            content="just plain text",
+            usage=TokenUsage.known(10, 5),
+            model="gpt-4o",
+            finish_reason=FinishReason.STOP,
+        )
+        transform._provider = mock_provider
+
+        transform._process_row(_make_row(), _make_ctx())
+
+        call_kwargs = mock_provider.execute_query.call_args.kwargs
+        # No response_format constraint when output_fields is None
+        assert call_kwargs.get("response_format") is None

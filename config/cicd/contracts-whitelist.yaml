@@ -226,6 +226,12 @@ allowed_dict_patterns:
   - "src/elspeth/plugins/llm/multi_query.py:QuerySpec.build_template_context:return"
   - "src/elspeth/plugins/llm/multi_query.py:resolve_queries:queries"
 
+  # LLM provider protocol — response_format follows the OpenAI API spec
+  # (varies between {"type": "json_object"} and {"type": "json_schema", ...})
+  - "src/elspeth/plugins/llm/provider.py:LLMProvider.execute_query:response_format"
+  - "src/elspeth/plugins/llm/providers/azure.py:AzureLLMProvider.execute_query:response_format"
+  - "src/elspeth/plugins/llm/providers/openrouter.py:OpenRouterLLMProvider.execute_query:response_format"
+
   # LLM tracing — extra_metadata is provider-specific (deployment, model, query keys vary per caller)
   - "src/elspeth/plugins/llm/langfuse.py:LangfuseTracer.record_success:extra_metadata"
   - "src/elspeth/plugins/llm/langfuse.py:LangfuseTracer.record_error:extra_metadata"

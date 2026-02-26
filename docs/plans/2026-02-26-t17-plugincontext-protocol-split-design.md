@@ -65,6 +65,7 @@ class SinkContext(Protocol):
 class LifecycleContext(Protocol):
     """What on_start()/on_complete() need: infrastructure references."""
     run_id: str
+    node_id: str | None  # [R1] Added per review — set before on_start(), avoids future cascade
     landscape: LandscapeRecorder | None
     rate_limit_registry: RateLimitRegistry | None
     telemetry_emit: Callable[[Any], None]
@@ -137,6 +138,28 @@ Evidence: field access inventory across all 42 plugin files shows phase-based bo
 | `on_start()` vs `process()` type mismatch | Medium | Separate `LifecycleContext` protocol for lifecycle hooks |
 | 444 test constructions | Low | Concrete class unchanged; tests still work. Only signature narrowing is optional |
 | Checkpoint API only used by azure_batch | Low | Include in TransformContext; no-op default for non-batch transforms |
+| `plugin_name="test"` in contract test bases breaks after Phase 0 | High | [B1] Add contract test base fixtures to Phase 0 cleanup list |
+| Defensive fallback removal breaks tests that skip `on_start()` | Medium | [W1] Test audit step before removing fallbacks in Phase 2-3 |
+| `on_start()` → `process()` ordering now load-bearing | Medium | [N3] Strictly better (fail-fast), document behavioral change |
+| `payload_store` not wired in orchestrator constructions | Low | [R6] Pre-existing; T17 surfaces it earlier via `on_start()` |
+
+## Engine-Internal Methods Not in Protocols
+
+> **[R4] Review finding:** `record_transform_error()` exists on `PluginContext` and is called by the engine
+> (`engine/executors/transform.py:461`, `engine/processor.py:1001,1049`), but appears in zero protocols.
+> This is correct — engine calls it, not plugins. Documented here to prevent future confusion.
+> The disjointness tests do not cover it. If it is ever needed by plugins, add to `TransformContext`.
+
+## Protocol Implementation Notes
+
+> **[N4]** `record_call()` implementation on `PluginContext` internally accesses `self.telemetry_emit`.
+> Because both live on the concrete class, this works despite `telemetry_emit` not being in every protocol.
+> `SinkContext` correctly omits `telemetry_emit` from its surface — no sink code accesses `ctx.telemetry_emit` directly. **[N5]**
+>
+> **[N7]** `isinstance()` with `@runtime_checkable` Protocol only checks that attribute *names* exist at runtime,
+> not their signatures or types. mypy's structural check IS the enforcing mechanism. The `isinstance` checks
+> in alignment tests are a weaker guarantee — they confirm name presence, mypy confirms full structural conformance.
+> Both checks are valuable but serve different purposes.
 
 ## Subtasks
 
@@ -160,8 +183,10 @@ Evidence: field access inventory across all 42 plugin files shows phase-based bo
 
 ## Verification Strategy
 
-1. **mypy strict mode** — protocols verified structurally at compile time
-2. **Protocol alignment tests** — modeled on `test_config_alignment.py` precedent
-3. **Plugin contract tests** — existing `TransformContractTestBase` extended for protocol verification
-4. **Full regression** — all ~10,000 tests must pass without modification
-5. **Config contracts checker** — `.venv/bin/python -m scripts.check_contracts`
+1. **mypy strict mode** — protocols verified structurally at compile time (primary enforcement mechanism **[N7]**)
+2. **Protocol alignment tests** — modeled on `test_config_alignment.py` precedent, with mechanical introspection **[R3]** and real minimal-object discrimination tests **[R2]**
+3. **Bidirectional field coverage** — every PluginContext field in at least one protocol or in explicit `EXECUTOR_ONLY_FIELDS` allowlist **[R3]**
+4. **Plugin contract tests** — existing `TransformContractTestBase` extended for protocol verification
+5. **Full regression** — all ~10,000 tests must pass (with **[B1]** contract test base fixture fix in Phase 0)
+6. **Config contracts checker** — `.venv/bin/python -m scripts.check_contracts`
+7. **Test lifecycle audit** — verify `on_start()` is called before `process()` in complex transform tests before removing defensive fallbacks **[W1]**

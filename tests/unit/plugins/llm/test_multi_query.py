@@ -140,14 +140,14 @@ class TestMultiQueryDeclaredOutputFields:
     executor can perform pre-execution collision checks.
     """
 
-    def test_declared_output_fields_contains_response_field(self) -> None:
-        """declared_output_fields includes the base response field."""
+    def test_declared_output_fields_contains_prefixed_response_field(self) -> None:
+        """Multi-query declared_output_fields includes query-prefixed fields."""
         transform = LLMTransform(_make_llm_config())
-        # LLMTransform declares output fields based on response_field
-        assert "llm_response" in transform.declared_output_fields
+        # Multi-query declares prefixed fields matching actual output
+        assert "cs1_diag_llm_response" in transform.declared_output_fields
 
-    def test_declared_output_fields_contains_audit_fields(self) -> None:
-        """declared_output_fields includes per-spec audit fields.
+    def test_declared_output_fields_contains_prefixed_audit_fields(self) -> None:
+        """Multi-query declared_output_fields includes prefixed audit fields.
 
         Before centralization, the multi-query collision check only inspected
         output_mapping fields but not audit fields (usage, model, template_hash, etc.).
@@ -155,14 +155,14 @@ class TestMultiQueryDeclaredOutputFields:
         """
         transform = LLMTransform(_make_llm_config())
 
-        # Guaranteed metadata fields
-        assert "llm_response_usage" in transform.declared_output_fields
-        assert "llm_response_model" in transform.declared_output_fields
+        # Guaranteed metadata fields (prefixed with query name)
+        assert "cs1_diag_llm_response_usage" in transform.declared_output_fields
+        assert "cs1_diag_llm_response_model" in transform.declared_output_fields
         # Audit fields
-        assert "llm_response_template_hash" in transform.declared_output_fields
+        assert "cs1_diag_llm_response_template_hash" in transform.declared_output_fields
 
     def test_declared_output_fields_with_multiple_queries(self) -> None:
-        """declared_output_fields covers the base response_field for all configs."""
+        """Multi-query declared_output_fields covers all query prefixes."""
         config = _make_llm_config(
             queries={
                 "cs1_diagnosis": {
@@ -184,10 +184,12 @@ class TestMultiQueryDeclaredOutputFields:
 
         transform = LLMTransform(config)
 
-        # The unified LLMTransform declares output fields based on response_field,
-        # not per-query prefixes. The per-query field construction happens at runtime.
-        assert "llm_response" in transform.declared_output_fields
-        assert "llm_response_usage" in transform.declared_output_fields
+        # Both query prefixes must be declared
+        assert "cs1_diagnosis_llm_response" in transform.declared_output_fields
+        assert "cs2_diagnosis_llm_response" in transform.declared_output_fields
+        # Extracted fields too
+        assert "cs1_diagnosis_score" in transform.declared_output_fields
+        assert "cs2_diagnosis_rationale" in transform.declared_output_fields
 
     def test_declared_output_fields_is_nonempty(self) -> None:
         """declared_output_fields is populated for schema evolution recording."""

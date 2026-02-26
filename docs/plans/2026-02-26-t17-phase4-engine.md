@@ -12,6 +12,11 @@
 
 **Key constraint:** Executors MUTATE ctx fields (`ctx.state_id = ...`, `ctx.token = ...`). They MUST keep accepting the concrete `PluginContext`, not a protocol type. The protocols are read-only views; mutation happens on the concrete class.
 
+> **[R4] Note:** `record_transform_error()` is called by executors (`transform.py:461`) and the
+> processor (`processor.py:1001,1049`), but is intentionally absent from all four protocols.
+> It is engine-internal — plugins never call it. If mypy flags executor call sites for this method,
+> verify the executor is typed as `PluginContext` (concrete), not a protocol.
+
 ---
 
 ## Task 1: Verify executors already work with protocol-typed plugins

@@ -128,6 +128,7 @@ def _make_mock_provider(
             max_tokens: int | None,
             state_id: str,
             token_id: str,
+            response_format: dict[str, Any] | None = None,
         ) -> LLMQueryResult:
             return LLMQueryResult(
                 content='{"score": 85, "rationale": "Good"}',
@@ -140,7 +141,7 @@ def _make_mock_provider(
     else:
         cycle = itertools.cycle(responses)
 
-        def execute_from_list(messages, *, model, temperature, max_tokens, state_id, token_id):
+        def execute_from_list(messages, *, model, temperature, max_tokens, state_id, token_id, response_format=None):
             payload = next(cycle)
             if isinstance(payload, str):
                 content = payload
@@ -216,7 +217,7 @@ class TestSingleQueryProcessing:
         # Track what messages were sent
         captured_messages: list[list[dict[str, str]]] = []
 
-        def capture_execute(messages, *, model, temperature, max_tokens, state_id, token_id):
+        def capture_execute(messages, *, model, temperature, max_tokens, state_id, token_id, response_format=None):
             captured_messages.append(messages)
             return LLMQueryResult(
                 content='{"score": 85, "rationale": "Good diagnosis"}',
@@ -552,7 +553,7 @@ class TestRowProcessingWithPipelining:
         # 3 good JSON + 1 invalid
         call_count = [0]
 
-        def fail_on_fourth(messages, *, model, temperature, max_tokens, state_id, token_id):
+        def fail_on_fourth(messages, *, model, temperature, max_tokens, state_id, token_id, response_format=None):
             call_count[0] += 1
             if call_count[0] == 4:
                 return LLMQueryResult(
@@ -877,16 +878,16 @@ class TestMultiQueryDeclaredOutputFields:
         transform = LLMTransform(_make_config())
         assert transform.declared_output_fields
 
-    def test_declared_output_fields_contains_response_field(self) -> None:
-        """declared_output_fields includes the base response field and metadata."""
+    def test_declared_output_fields_contains_prefixed_response_fields(self) -> None:
+        """Multi-query declared_output_fields includes query-prefixed fields."""
         transform = LLMTransform(_make_config())
-        # LLMTransform declares output fields based on response_field
-        assert "llm_response" in transform.declared_output_fields
-        assert "llm_response_usage" in transform.declared_output_fields
-        assert "llm_response_model" in transform.declared_output_fields
+        # Multi-query declares prefixed fields, not base unprefixed fields
+        assert "cs1_diagnosis_llm_response" in transform.declared_output_fields
+        assert "cs1_diagnosis_llm_response_usage" in transform.declared_output_fields
+        assert "cs1_diagnosis_llm_response_model" in transform.declared_output_fields
 
-    def test_declared_output_fields_contains_audit_fields(self) -> None:
-        """declared_output_fields includes audit fields (template_hash, etc.)."""
+    def test_declared_output_fields_contains_prefixed_audit_fields(self) -> None:
+        """Multi-query declared_output_fields includes prefixed audit fields."""
         transform = LLMTransform(_make_config())
-        assert "llm_response_template_hash" in transform.declared_output_fields
-        assert "llm_response_variables_hash" in transform.declared_output_fields
+        assert "cs1_diagnosis_llm_response_template_hash" in transform.declared_output_fields
+        assert "cs1_diagnosis_llm_response_variables_hash" in transform.declared_output_fields
