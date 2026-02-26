@@ -190,22 +190,22 @@ allow_hits:
   reason: isinstance() check required to find batch-aware transforms - protocol contract verification
   safety: Crashes on type mismatch - no silent fallback
   expires: '2026-03-09'
-- key: engine/executors/gate.py:R5:GateExecutor:execute_config_gate:fp=4b2f7aa9a085b1c7
+- key: engine/executors/gate.py:R5:GateExecutor:execute_config_gate:fp=dbab5031bc8455e6
   owner: architecture
   reason: AST/type checking - ExpressionParser returns Any; must distinguish bool/str for route label conversion
   safety: Explicit isinstance branching for AST eval result types
   expires: '2026-05-13'
-- key: engine/executors/gate.py:R5:GateExecutor:execute_config_gate:fp=3aaf01f00fbd6486
+- key: engine/executors/gate.py:R5:GateExecutor:execute_config_gate:fp=e4da19eafad3a5d7
   owner: architecture
   reason: AST/type checking - ExpressionParser returns Any; must distinguish bool/str for route label conversion
   safety: Explicit isinstance branching for AST eval result types
   expires: '2026-05-13'
-- key: engine/executors/gate.py:R1:GateExecutor:_record_routing:fp=7957c7b3993f565b
+- key: engine/executors/gate.py:R1:GateExecutor:_record_routing:fp=6338dc38fa0ad392
   owner: architecture
   reason: Optional edge_id lookup - edge map may not have all node combinations during routing
   safety: Falls back to generating edge_id when not in prebuilt map
   expires: '2026-05-13'
-- key: engine/executors/gate.py:R1:GateExecutor:_record_routing:fp=38dabd7f2719bfd0
+- key: engine/executors/gate.py:R1:GateExecutor:_record_routing:fp=cbd0e2550e4db9d2
   owner: architecture
   reason: Optional edge_id lookup - edge map may not have all node combinations during routing
   safety: Falls back to generating edge_id when not in prebuilt map
