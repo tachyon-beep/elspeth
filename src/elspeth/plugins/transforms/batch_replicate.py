@@ -148,8 +148,9 @@ class BatchReplicate(BaseTransform):
 
         valid_rows: list[dict[str, Any]] = []
         quarantined: list[dict[str, Any]] = []
+        quarantined_indices: list[int] = []
 
-        for row in rows:
+        for row_index, row in enumerate(rows):
             # Get copies count - field is optional, type must be correct if present
             if self._copies_field not in row:
                 # Field missing - use default, still bounded by max_copies
@@ -179,6 +180,7 @@ class BatchReplicate(BaseTransform):
                             "row_data": row.to_dict(),
                         }
                     )
+                    quarantined_indices.append(row_index)
                     continue
 
                 copies = raw_copies
@@ -229,6 +231,7 @@ class BatchReplicate(BaseTransform):
             success_reason["metadata"] = {
                 "quarantined_count": len(quarantined),
                 "quarantined": quarantined,
+                "quarantined_indices": quarantined_indices,
             }
 
         # Return only valid replicated rows — quarantined rows are in success_reason

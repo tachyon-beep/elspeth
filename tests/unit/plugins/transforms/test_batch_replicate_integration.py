@@ -218,3 +218,72 @@ def test_batch_replicate_mixed_valid_invalid_excludes_quarantined():
     assert result.success_reason["metadata"]["quarantined_count"] == 2
     assert result.success_reason["metadata"]["quarantined"][0]["row_data"]["id"] == 1
     assert result.success_reason["metadata"]["quarantined"][1]["row_data"]["id"] == 3
+
+
+def test_batch_replicate_quarantined_indices_in_success_reason():
+    """T26: Quarantined row indices must be in success_reason for audit trail.
+
+    The processor needs quarantined_indices to record QUARANTINED terminal
+    state (instead of CONSUMED_IN_BATCH) for quarantined tokens. Without
+    this, quarantined rows silently get CONSUMED_IN_BATCH, misleading
+    auditors into thinking the data was processed.
+    """
+    transform = BatchReplicate(
+        {
+            "schema": {"mode": "observed"},
+            "copies_field": "copies",
+        }
+    )
+
+    rows_data = [
+        {"id": 1, "copies": -1},  # quarantined (index 0)
+        {"id": 2, "copies": 2},  # valid (index 1)
+        {"id": 3, "copies": 0},  # quarantined (index 2)
+        {"id": 4, "copies": 1},  # valid (index 3)
+    ]
+
+    pipeline_rows = []
+    for row in rows_data:
+        fields = tuple(make_field(key, object, original_name=key, required=False, source="inferred") for key in row)
+        contract = SchemaContract(mode="OBSERVED", fields=fields, locked=True)
+        pipeline_rows.append(make_row(row, contract=contract))
+
+    ctx = PluginContext(run_id="test-run", config={})
+    result = transform.process(pipeline_rows, ctx)
+
+    assert result.status == "success"
+    # Must include quarantined_indices for processor to record QUARANTINED outcomes
+    assert "quarantined_indices" in result.success_reason["metadata"], (
+        "success_reason must include quarantined_indices for audit trail recording"
+    )
+    assert result.success_reason["metadata"]["quarantined_indices"] == [0, 2]
+
+
+def test_batch_replicate_no_quarantine_no_indices():
+    """When no rows are quarantined, quarantined_indices should be absent or empty."""
+    transform = BatchReplicate(
+        {
+            "schema": {"mode": "observed"},
+            "copies_field": "copies",
+        }
+    )
+
+    rows_data = [
+        {"id": 1, "copies": 2},
+        {"id": 2, "copies": 1},
+    ]
+
+    pipeline_rows = []
+    for row in rows_data:
+        fields = tuple(make_field(key, object, original_name=key, required=False, source="inferred") for key in row)
+        contract = SchemaContract(mode="OBSERVED", fields=fields, locked=True)
+        pipeline_rows.append(make_row(row, contract=contract))
+
+    ctx = PluginContext(run_id="test-run", config={})
+    result = transform.process(pipeline_rows, ctx)
+
+    assert result.status == "success"
+    # No quarantine metadata at all when no rows are quarantined
+    metadata = result.success_reason.get("metadata")
+    if metadata is not None:
+        assert metadata.get("quarantined_indices", []) == []

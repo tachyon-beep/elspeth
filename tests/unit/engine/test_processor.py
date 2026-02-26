@@ -735,8 +735,13 @@ class TestAggregationFailureMatrix:
         assert results[0].outcome == RowOutcome.FAILED
         assert [call.kwargs["outcome"] for call in record_outcome.call_args_list] == [RowOutcome.FAILED]
 
-    def test_flush_failure_transform_keeps_consumed_in_batch_terminal_semantics(self) -> None:
-        """Transform-mode flush failure keeps terminal outcome as CONSUMED_IN_BATCH (not FAILED)."""
+    def test_flush_failure_transform_records_failed_for_buffered_tokens(self) -> None:
+        """T26: Transform-mode flush failure records FAILED for BUFFERED tokens.
+
+        Before T26, transform-mode buffer time recorded CONSUMED_IN_BATCH (terminal),
+        so flush failures couldn't record FAILED. Now tokens are BUFFERED (non-terminal)
+        at buffer time, allowing FAILED to be recorded on flush error.
+        """
         _db, recorder, processor, transform, _agg_node = self._setup_batch_processor(output_mode="transform")
         source_row = _make_source_row({"value": 10})
         ctx = PluginContext(run_id="test-run", config={})
@@ -769,9 +774,9 @@ class TestAggregationFailureMatrix:
         assert len(results) == 1
         assert results[0].outcome == RowOutcome.FAILED
         outcomes = [call.kwargs["outcome"] for call in record_outcome.call_args_list]
-        assert outcomes == [RowOutcome.CONSUMED_IN_BATCH]
-        assert record_outcome.call_args_list[0].kwargs["batch_id"] == "batch-1"
-        assert RowOutcome.FAILED not in outcomes
+        # T26: should_flush=True on first row means token goes straight to flush
+        # without the buffer-time BUFFERED recording. Only FAILED is recorded.
+        assert outcomes == [RowOutcome.FAILED]
 
     def test_passthrough_success_with_rows_none_raises(self) -> None:
         """Passthrough flush requires rows list; rows=None is an invariant violation."""

@@ -548,45 +548,22 @@ class RowProcessor:
     ) -> list[RowResult]:
         """Handle failed aggregation flush for both passthrough and transform modes.
 
-        Token outcome recording depends on output_mode:
-        - passthrough: tokens have BUFFERED (non-terminal) → record FAILED
-        - transform: tokens have CONSUMED_IN_BATCH (terminal) → cannot record FAILED
-          (would violate unique terminal outcome constraint)
-
-        For count-triggered transform mode, the triggering token needs
-        CONSUMED_IN_BATCH recorded because it went from buffer_row() to
-        execute_flush() without the non-flushing return path.
+        T26: Both modes now have BUFFERED (non-terminal) at buffer time,
+        so FAILED can be recorded as the terminal outcome for all tokens.
         """
         error_hash = hashlib.sha256(fctx.error_msg.encode()).hexdigest()[:16]
         results: list[RowResult] = []
         failure = FailureInfo(exception_type="TransformError", message=fctx.error_msg)
 
-        if fctx.settings.output_mode == OutputMode.PASSTHROUGH:
-            for token in fctx.buffered_tokens:
-                self._recorder.record_token_outcome(
-                    run_id=self._run_id,
-                    token_id=token.token_id,
-                    outcome=RowOutcome.FAILED,
-                    error_hash=error_hash,
-                )
-                self._emit_token_completed(token, RowOutcome.FAILED)
-                results.append(RowResult(token=token, final_data=token.row_data, outcome=RowOutcome.FAILED, error=failure))
-        else:
-            # Transform mode: previously-buffered tokens already have CONSUMED_IN_BATCH.
-            # Triggering token (count-triggered only) needs CONSUMED_IN_BATCH recorded.
-            if fctx.triggering_token is not None:
-                self._recorder.record_token_outcome(
-                    run_id=self._run_id,
-                    token_id=fctx.triggering_token.token_id,
-                    outcome=RowOutcome.CONSUMED_IN_BATCH,
-                    batch_id=fctx.batch_id,
-                )
-            # Emit TokenCompleted for all buffered tokens (deferred from buffer time
-            # to maintain TransformCompleted-before-TokenCompleted ordering).
-            # Note: TransformCompleted is NOT emitted on error path.
-            for token in fctx.buffered_tokens:
-                self._emit_token_completed(token, RowOutcome.CONSUMED_IN_BATCH)
-                results.append(RowResult(token=token, final_data=token.row_data, outcome=RowOutcome.FAILED, error=failure))
+        for token in fctx.buffered_tokens:
+            self._recorder.record_token_outcome(
+                run_id=self._run_id,
+                token_id=token.token_id,
+                outcome=RowOutcome.FAILED,
+                error_hash=error_hash,
+            )
+            self._emit_token_completed(token, RowOutcome.FAILED)
+            results.append(RowResult(token=token, final_data=token.row_data, outcome=RowOutcome.FAILED, error=failure))
 
         return results
 
@@ -657,22 +634,42 @@ class RowProcessor:
         """Route transform-mode aggregation results after successful flush.
 
         Transform mode: N input rows → M output rows with new tokens via expand_token.
-        Records CONSUMED_IN_BATCH for triggering token (if present), emits
-        deferred TokenCompleted telemetry, then routes expanded tokens downstream.
-        """
-        # Record CONSUMED_IN_BATCH for triggering token (count-triggered only)
-        if fctx.triggering_token is not None:
-            self._recorder.record_token_outcome(
-                run_id=self._run_id,
-                token_id=fctx.triggering_token.token_id,
-                outcome=RowOutcome.CONSUMED_IN_BATCH,
-                batch_id=fctx.batch_id,
-            )
+        Records per-token terminal outcomes (CONSUMED_IN_BATCH or QUARANTINED),
+        emits deferred TokenCompleted telemetry, then routes expanded tokens downstream.
 
-        # Emit deferred TokenCompleted for all buffered tokens
-        # (TransformCompleted was already emitted by the caller)
-        for token in fctx.buffered_tokens:
-            self._emit_token_completed(token, RowOutcome.CONSUMED_IN_BATCH)
+        T26: Batch transforms can quarantine individual rows. Quarantined tokens
+        get QUARANTINED terminal state instead of CONSUMED_IN_BATCH, identified
+        via quarantined_indices in the result's success_reason metadata.
+        """
+        # T26: Extract quarantined indices from result metadata.
+        # metadata is optional in TransformSuccessReason — only present when
+        # the batch transform quarantines rows.
+        quarantined_index_set: set[int] = set()
+        if result.success_reason and "metadata" in result.success_reason:
+            metadata = result.success_reason["metadata"]
+            if "quarantined_indices" in metadata:
+                quarantined_index_set = set(metadata["quarantined_indices"])
+
+        # Record terminal outcomes for ALL buffered tokens (deferred from buffer time).
+        # T26: Quarantined tokens get QUARANTINED; valid tokens get CONSUMED_IN_BATCH.
+        for i, token in enumerate(fctx.buffered_tokens):
+            if i in quarantined_index_set:
+                error_hash = hashlib.sha256(f"quarantined_in_batch:{fctx.batch_id}:{i}".encode()).hexdigest()[:16]
+                self._recorder.record_token_outcome(
+                    run_id=self._run_id,
+                    token_id=token.token_id,
+                    outcome=RowOutcome.QUARANTINED,
+                    error_hash=error_hash,
+                )
+                self._emit_token_completed(token, RowOutcome.QUARANTINED)
+            else:
+                self._recorder.record_token_outcome(
+                    run_id=self._run_id,
+                    token_id=token.token_id,
+                    outcome=RowOutcome.CONSUMED_IN_BATCH,
+                    batch_id=fctx.batch_id,
+                )
+                self._emit_token_completed(token, RowOutcome.CONSUMED_IN_BATCH)
 
         # Extract output rows
         if result.is_multi_row:
@@ -826,13 +823,14 @@ class RowProcessor:
         when the trigger fires. Flush handling is delegated to shared helpers
         (_handle_flush_error, _route_passthrough_results, _route_transform_results).
 
-        TEMPORAL DECOUPLING (Bug P2-2026-02-01):
+        TEMPORAL DECOUPLING (Bug P2-2026-02-01, updated T26):
 
-        For transform-mode aggregation, there is intentional temporal decoupling
-        between Landscape recording and telemetry emission:
+        Both modes now record BUFFERED (non-terminal) at buffer time, with
+        terminal outcomes deferred to flush time. This enables per-token
+        QUARANTINED recording when batch transforms quarantine individual rows.
 
-        - **Landscape (audit trail)**: Records CONSUMED_IN_BATCH at buffer time.
-          This is the source of truth - the token IS terminal when buffered.
+        - **Landscape (audit trail)**: Records BUFFERED at buffer time.
+          Terminal outcome (CONSUMED_IN_BATCH, QUARANTINED, FAILED) at flush.
 
         - **Telemetry (observability)**: Emits TokenCompleted at flush time.
           Deferred to maintain ordering invariant (TransformCompleted before
@@ -905,46 +903,30 @@ class RowProcessor:
                 return flush_results, child_items
             raise ValueError(f"Unknown output_mode: {output_mode}")
 
-        # Not flushing yet - row is buffered
-        # In passthrough mode: BUFFERED (non-terminal, will reappear)
-        # In transform mode: CONSUMED_IN_BATCH (terminal)
-        if output_mode == OutputMode.PASSTHROUGH:
-            buf_batch_id = self._aggregation_executor.get_batch_id(node_id)
-            self._recorder.record_token_outcome(
-                run_id=self._run_id,
-                token_id=current_token.token_id,
+        # Not flushing yet - row is buffered (both modes record BUFFERED)
+        # Terminal outcome is deferred to flush time for both modes:
+        # - passthrough: BUFFERED → COMPLETED/FAILED at flush
+        # - transform: BUFFERED → CONSUMED_IN_BATCH/QUARANTINED/FAILED at flush
+        # T26: Transform mode now uses BUFFERED to enable per-token QUARANTINED
+        # recording when batch transforms quarantine individual rows.
+        buf_batch_id = self._aggregation_executor.get_batch_id(node_id)
+        self._recorder.record_token_outcome(
+            run_id=self._run_id,
+            token_id=current_token.token_id,
+            outcome=RowOutcome.BUFFERED,
+            batch_id=buf_batch_id,
+        )
+        # NOTE: Do NOT emit TokenCompleted telemetry here!
+        # Bug P2-2026-02-01: TokenCompleted must be deferred to flush time so that
+        # TransformCompleted can be emitted first.
+        return (
+            RowResult(
+                token=current_token,
+                final_data=current_token.row_data,
                 outcome=RowOutcome.BUFFERED,
-                batch_id=buf_batch_id,
-            )
-            return (
-                RowResult(
-                    token=current_token,
-                    final_data=current_token.row_data,
-                    outcome=RowOutcome.BUFFERED,
-                ),
-                child_items,
-            )
-        else:
-            nf_batch_id = self._aggregation_executor.get_batch_id(node_id)
-            self._recorder.record_token_outcome(
-                run_id=self._run_id,
-                token_id=current_token.token_id,
-                outcome=RowOutcome.CONSUMED_IN_BATCH,
-                batch_id=nf_batch_id,
-            )
-            # NOTE: Do NOT emit TokenCompleted telemetry here!
-            # Bug P2-2026-02-01: TokenCompleted must be deferred to flush time so that
-            # TransformCompleted can be emitted first. The token IS terminal in Landscape
-            # (CONSUMED_IN_BATCH recorded above), but telemetry ordering requires waiting
-            # until the batch actually processes at flush time.
-            return (
-                RowResult(
-                    token=current_token,
-                    final_data=current_token.row_data,
-                    outcome=RowOutcome.CONSUMED_IN_BATCH,
-                ),
-                child_items,
-            )
+            ),
+            child_items,
+        )
 
     def _execute_transform_with_retry(
         self,

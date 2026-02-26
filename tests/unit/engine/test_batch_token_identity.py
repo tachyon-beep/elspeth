@@ -40,7 +40,12 @@ def _assert_all_batch_members_consumed(
     run_id: str,
     batch_id: str,
 ) -> None:
-    """Assert ALL tokens in a batch have CONSUMED_IN_BATCH outcome."""
+    """Assert ALL tokens in a batch have CONSUMED_IN_BATCH as their terminal outcome.
+
+    T26: Tokens now have two outcome records — BUFFERED (non-terminal, at buffer time)
+    and CONSUMED_IN_BATCH (terminal, at flush time). We filter by is_terminal=1 to
+    check the final outcome.
+    """
     with recorder._db.connection() as conn:
         from sqlalchemy import select
 
@@ -58,13 +63,17 @@ def _assert_all_batch_members_consumed(
             token_id = member.token_id
             ordinal = member.ordinal
 
-            outcome_row = conn.execute(select(token_outcomes_table.c.outcome).where(token_outcomes_table.c.token_id == token_id)).fetchone()
+            outcome_row = conn.execute(
+                select(token_outcomes_table.c.outcome)
+                .where(token_outcomes_table.c.token_id == token_id)
+                .where(token_outcomes_table.c.is_terminal == 1)
+            ).fetchone()
 
-            assert outcome_row is not None, f"Batch member {token_id} (ordinal {ordinal}) has no outcome recorded"
+            assert outcome_row is not None, f"Batch member {token_id} (ordinal {ordinal}) has no terminal outcome recorded"
 
             actual = RowOutcome(outcome_row.outcome)
             assert actual == RowOutcome.CONSUMED_IN_BATCH, (
-                f"Batch member {token_id} (ordinal {ordinal}) has outcome {actual}, expected CONSUMED_IN_BATCH."
+                f"Batch member {token_id} (ordinal {ordinal}) has terminal outcome {actual}, expected CONSUMED_IN_BATCH."
             )
 
 
@@ -174,6 +183,9 @@ class TestBatchTokenIdentity:
         # Process 3 rows to trigger batch flush
         all_results = []
         input_token_ids = []
+        # T26: Buffer-time returns BUFFERED; flush-time returns CONSUMED_IN_BATCH
+        # for the triggering token. Collect both to get all input tokens.
+        _batch_outcomes = {RowOutcome.BUFFERED, RowOutcome.CONSUMED_IN_BATCH}
         for i in range(3):
             pipeline_row = make_pipeline_row({"value": (i + 1) * 10})  # 10, 20, 30
             source_row = SourceRow.valid(pipeline_row.to_dict(), contract=pipeline_row.contract)
@@ -184,9 +196,8 @@ class TestBatchTokenIdentity:
                 ctx=ctx,
             )
             all_results.extend(results)
-            # Collect token IDs from CONSUMED_IN_BATCH results
             for r in results:
-                if r.outcome == RowOutcome.CONSUMED_IN_BATCH:
+                if r.outcome in _batch_outcomes:
                     input_token_ids.append(r.token.token_id)
 
         # Get the batch_id from the recorder
@@ -264,7 +275,7 @@ class TestBatchTokenIdentity:
         )
         ctx = PluginContext(run_id=run.run_id, config={})
 
-        # Process row 0 - buffered, returns CONSUMED_IN_BATCH
+        # Process row 0 - buffered, returns BUFFERED (T26: non-terminal at buffer time)
         pipeline_row_0 = make_pipeline_row({"value": 10})
         source_row_0 = SourceRow.valid(pipeline_row_0.to_dict(), contract=pipeline_row_0.contract)
         results_0 = processor.process_row(
@@ -274,7 +285,7 @@ class TestBatchTokenIdentity:
             ctx=ctx,
         )
         assert len(results_0) == 1
-        assert results_0[0].outcome == RowOutcome.CONSUMED_IN_BATCH
+        assert results_0[0].outcome == RowOutcome.BUFFERED
         first_token_id = results_0[0].token.token_id
 
         # Process row 1 - triggers flush
@@ -362,6 +373,9 @@ class TestBatchTokenIdentity:
         # Process 3 rows to trigger batch flush
         all_results = []
         input_token_ids = []
+        # T26: Buffer-time returns BUFFERED; flush-time returns CONSUMED_IN_BATCH
+        # for the triggering token. Collect both to get all input tokens.
+        _batch_outcomes = {RowOutcome.BUFFERED, RowOutcome.CONSUMED_IN_BATCH}
         for i in range(3):
             pipeline_row = make_pipeline_row({"value": (i + 1) * 10})
             source_row = SourceRow.valid(pipeline_row.to_dict(), contract=pipeline_row.contract)
@@ -373,11 +387,11 @@ class TestBatchTokenIdentity:
             )
             all_results.extend(results)
             for r in results:
-                if r.outcome == RowOutcome.CONSUMED_IN_BATCH:
+                if r.outcome in _batch_outcomes:
                     input_token_ids.append(r.token.token_id)
 
-        # Verify we got all 3 consumed tokens
-        assert len(input_token_ids) == 3, f"Expected 3 consumed tokens, got {len(input_token_ids)}"
+        # Verify we got all 3 batch member tokens
+        assert len(input_token_ids) == 3, f"Expected 3 batch member tokens, got {len(input_token_ids)}"
 
         # Verify batch_members table records all input tokens
         from sqlalchemy import select
