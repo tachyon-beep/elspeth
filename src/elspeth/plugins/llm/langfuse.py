@@ -23,7 +23,7 @@ from typing import Any, Protocol
 import structlog
 
 from elspeth.contracts.token_usage import TokenUsage
-from elspeth.plugins.llm.tracing import LangfuseTracingConfig, TracingConfig
+from elspeth.plugins.llm.tracing import AzureAITracingConfig, LangfuseTracingConfig, TracingConfig
 
 logger = structlog.get_logger(__name__)
 
@@ -227,12 +227,13 @@ def create_langfuse_tracer(
     if tracing_config is None:
         return NoOpLangfuseTracer()
     if not isinstance(tracing_config, LangfuseTracingConfig):
-        # User provided tracing config but it's not Langfuse — warn so they
-        # know tracing is inactive (e.g. typo in provider name).
-        logger.warning(
-            "Tracing config provided but not recognized as Langfuse — tracing disabled",
-            tracing_provider=tracing_config.provider,
-        )
+        # Azure AI tracing is handled in LLMTransform.on_start() — no warning needed.
+        # Only warn for truly unrecognized providers (e.g. typo in config).
+        if not isinstance(tracing_config, AzureAITracingConfig):
+            logger.warning(
+                "Tracing config provided but not recognized as Langfuse or Azure AI — tracing disabled",
+                tracing_provider=tracing_config.provider,
+            )
         return NoOpLangfuseTracer()
 
     try:

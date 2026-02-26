@@ -1634,3 +1634,37 @@ class TestConfigureAzureMonitor:
             )
 
         _reset_azure_monitor_state()
+
+
+class TestAzureAITracingSetup:
+    """Tests for Azure AI tracing integration in unified LLM transform."""
+
+    def test_langfuse_factory_no_warning_for_azure_ai_config(self) -> None:
+        """create_langfuse_tracer returns NoOp without warning for AzureAITracingConfig.
+
+        Azure AI tracing is handled separately in on_start(), so the Langfuse
+        factory should not warn about it being 'unrecognized'.
+        """
+        from elspeth.plugins.llm.langfuse import NoOpLangfuseTracer, create_langfuse_tracer
+        from elspeth.plugins.llm.tracing import AzureAITracingConfig
+
+        config = AzureAITracingConfig(connection_string="InstrumentationKey=test")
+        with patch("elspeth.plugins.llm.langfuse.logger") as mock_logger:
+            tracer = create_langfuse_tracer("test_transform", config)
+            assert isinstance(tracer, NoOpLangfuseTracer)
+            mock_logger.warning.assert_not_called()
+
+    def test_langfuse_factory_warns_for_unknown_tracing_provider(self) -> None:
+        """create_langfuse_tracer warns when tracing provider is unrecognized.
+
+        Note: In production, parse_tracing_config() rejects unknown providers
+        before this point. This tests the factory's own defensive behavior.
+        """
+        from elspeth.plugins.llm.langfuse import NoOpLangfuseTracer, create_langfuse_tracer
+        from elspeth.plugins.llm.tracing import TracingConfig
+
+        config = TracingConfig(provider="totally_unknown")
+        with patch("elspeth.plugins.llm.langfuse.logger") as mock_logger:
+            tracer = create_langfuse_tracer("test_transform", config)
+            assert isinstance(tracer, NoOpLangfuseTracer)
+            mock_logger.warning.assert_called_once()
