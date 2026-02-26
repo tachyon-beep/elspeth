@@ -29,7 +29,9 @@ from elspeth.testing.chaosllm.cli import app as chaosllm_app
 from elspeth.testing.chaosllm.cli import mcp_app as chaosllm_mcp_app
 
 if TYPE_CHECKING:
+    from elspeth.cli_helpers import PluginBundle
     from elspeth.contracts.payload_store import PayloadStore
+    from elspeth.contracts.types import AggregationName
     from elspeth.core.landscape import LandscapeDB
     from elspeth.engine import Orchestrator, PipelineConfig
     from elspeth.engine.orchestrator import RowPlugin
@@ -433,18 +435,18 @@ def run(
     # NEW: Build and validate graph from plugin instances
     # Exclude export sink from graph - it's used post-run, not during pipeline execution.
     # The export sink receives audit records after the run completes, not pipeline data.
-    execution_sinks = plugins["sinks"]
+    execution_sinks = plugins.sinks
     if config.landscape.export.enabled and config.landscape.export.sink:
         export_sink_name = config.landscape.export.sink
-        execution_sinks = {k: v for k, v in plugins["sinks"].items() if k != export_sink_name}
+        execution_sinks = {k: v for k, v in plugins.sinks.items() if k != export_sink_name}
 
     try:
         graph = ExecutionGraph.from_plugin_instances(
-            source=plugins["source"],
-            source_settings=plugins["source_settings"],
-            transforms=plugins["transforms"],
+            source=plugins.source,
+            source_settings=plugins.source_settings,
+            transforms=plugins.transforms,
             sinks=execution_sinks,
-            aggregations=plugins["aggregations"],
+            aggregations=plugins.aggregations,
             gates=list(config.gates),
             coalesce_settings=list(config.coalesce) if config.coalesce else None,
         )
@@ -783,7 +785,7 @@ class _OrchestratorContext:
 def _orchestrator_context(
     config: ElspethSettings,
     graph: ExecutionGraph,
-    plugins: dict[str, Any],
+    plugins: PluginBundle,
     *,
     db: LandscapeDB,
     formatter_prefix: str = "Run",
@@ -805,7 +807,7 @@ def _orchestrator_context(
     Args:
         config: Validated ElspethSettings
         graph: Validated ExecutionGraph (schemas populated)
-        plugins: Pre-instantiated plugins from instantiate_plugins_from_config()
+        plugins: Pre-instantiated PluginBundle from instantiate_plugins_from_config()
         db: LandscapeDB connection (caller owns close lifecycle)
         formatter_prefix: Prefix for console formatters ("Run" or "Resume")
         output_format: 'console' or 'json'
@@ -831,17 +833,17 @@ def _orchestrator_context(
     from elspeth.telemetry import create_telemetry_manager
 
     # Unpack pre-instantiated plugins
-    source: SourceProtocol = plugins["source"]
-    sinks: dict[str, SinkProtocol] = plugins["sinks"]
+    source: SourceProtocol = plugins.source
+    sinks: dict[str, SinkProtocol] = plugins.sinks
 
     # Build transforms list: row_plugins + aggregations (with node_id)
-    transforms: list[RowPlugin] = [wired.plugin for wired in plugins["transforms"]]
+    transforms: list[RowPlugin] = [wired.plugin for wired in plugins.transforms]
 
     agg_id_map = graph.get_aggregation_id_map()
     aggregation_settings: dict[str, AggregationSettings] = {}
 
-    for agg_name, (transform, agg_config) in plugins["aggregations"].items():
-        node_id = agg_id_map[agg_name]
+    for agg_name, (transform, agg_config) in plugins.aggregations.items():
+        node_id = agg_id_map[AggregationName(agg_name)]
         aggregation_settings[node_id] = agg_config
         transform.node_id = node_id
         transforms.append(transform)
@@ -901,7 +903,7 @@ def _orchestrator_context(
 def _execute_pipeline_with_instances(
     config: ElspethSettings,
     graph: ExecutionGraph,
-    plugins: dict[str, Any],
+    plugins: PluginBundle,
     verbose: bool = False,
     output_format: Literal["console", "json"] = "console",
     secret_resolutions: list[dict[str, Any]] | None = None,
@@ -912,7 +914,7 @@ def _execute_pipeline_with_instances(
     Args:
         config: Validated ElspethSettings
         graph: Validated ExecutionGraph (schemas populated)
-        plugins: Pre-instantiated plugins from instantiate_plugins_from_config()
+        plugins: Pre-instantiated PluginBundle from instantiate_plugins_from_config()
         verbose: Show detailed output
         output_format: 'console' or 'json'
         secret_resolutions: Optional list of secret resolution records from
@@ -1134,11 +1136,11 @@ def validate(
     # Build and validate graph from plugin instances
     try:
         graph = ExecutionGraph.from_plugin_instances(
-            source=plugins["source"],
-            source_settings=plugins["source_settings"],
-            transforms=plugins["transforms"],
-            sinks=plugins["sinks"],
-            aggregations=plugins["aggregations"],
+            source=plugins.source,
+            source_settings=plugins.source_settings,
+            transforms=plugins.transforms,
+            sinks=plugins.sinks,
+            aggregations=plugins.aggregations,
             gates=list(config.gates),
             coalesce_settings=list(config.coalesce) if config.coalesce else None,
         )
@@ -1448,7 +1450,7 @@ def purge(
 def _execute_resume_with_instances(
     config: ElspethSettings,
     graph: ExecutionGraph,
-    plugins: dict[str, Any],
+    plugins: PluginBundle,
     resume_point: Any,
     payload_store: PayloadStore | None,
     db: LandscapeDB,
@@ -1491,7 +1493,7 @@ def _execute_resume_with_instances(
 
 def _build_resume_graphs(
     settings_config: ElspethSettings,
-    plugins: dict[str, Any],
+    plugins: PluginBundle,
 ) -> tuple[ExecutionGraph, ExecutionGraph]:
     """Build both validation and execution graphs for resume from pre-instantiated plugins.
 
@@ -1508,11 +1510,11 @@ def _build_resume_graphs(
     # Validation graph uses the ORIGINAL source to match the topology hash
     # computed during the original run
     validation_graph = ExecutionGraph.from_plugin_instances(
-        source=plugins["source"],
-        source_settings=plugins["source_settings"],
-        transforms=plugins["transforms"],
-        sinks=plugins["sinks"],
-        aggregations=plugins["aggregations"],
+        source=plugins.source,
+        source_settings=plugins.source_settings,
+        transforms=plugins.transforms,
+        sinks=plugins.sinks,
+        aggregations=plugins.aggregations,
         gates=gate_settings,
         coalesce_settings=coalesce_settings,
     )
@@ -1521,16 +1523,16 @@ def _build_resume_graphs(
     # Execution graph uses NullSource — resume data comes from stored payloads.
     # NullSource inherits the original source's on_success (which may be a connection
     # name or sink name — the DAG builder validates it during graph construction).
-    null_source_on_success = plugins["source"].on_success
+    null_source_on_success = plugins.source.on_success
     null_source = NullSource({})
     null_source.on_success = null_source_on_success
     null_source_settings = SourceSettings(plugin="null", on_success=null_source_on_success)
     execution_graph = ExecutionGraph.from_plugin_instances(
         source=null_source,
         source_settings=null_source_settings,
-        transforms=plugins["transforms"],
-        sinks=plugins["sinks"],
-        aggregations=plugins["aggregations"],
+        transforms=plugins.transforms,
+        sinks=plugins.sinks,
+        aggregations=plugins.aggregations,
         gates=gate_settings,
         coalesce_settings=coalesce_settings,
     )
@@ -1778,7 +1780,7 @@ def resume(
 
         resume_sinks = {}
 
-        for sink_name, sink in plugins["sinks"].items():
+        for sink_name, sink in plugins.sinks.items():
             # Check if sink supports resume
             if not sink.supports_resume:
                 typer.echo(
@@ -1833,14 +1835,16 @@ def resume(
             resume_sinks[sink_name] = sink
 
         # Override source with NullSource for resume (data comes from payloads)
-        null_source_on_success = plugins["source"].on_success
+        from dataclasses import replace
+
+        null_source_on_success = plugins.source.on_success
         null_source = NullSource({})
         null_source.on_success = null_source_on_success
-        resume_plugins = {
-            **plugins,
-            "source": null_source,
-            "sinks": resume_sinks,  # Use append-mode sinks
-        }
+        resume_plugins = replace(
+            plugins,
+            source=null_source,
+            sinks=resume_sinks,  # Use append-mode sinks
+        )
 
         # Execute resume with execution graph (NullSource)
         try:
