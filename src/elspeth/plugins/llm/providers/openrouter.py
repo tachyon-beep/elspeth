@@ -117,8 +117,12 @@ class OpenRouterLLMProvider:
         self._telemetry_emit = telemetry_emit
         self._limiter = limiter
 
-        # Client cache
+        # Client cache with reference counting for parallel multi-query safety.
+        # Multiple parallel queries share the same state_id, so _get_http_client()
+        # returns the same cached client. Reference counting ensures the client is
+        # only closed when the last query releases it.
         self._http_clients: dict[str, AuditedHTTPClient] = {}
+        self._http_client_refs: dict[str, int] = {}
         self._http_clients_lock = Lock()
 
     def execute_query(
@@ -266,14 +270,14 @@ class OpenRouterLLMProvider:
                 finish_reason=finish_reason,
             )
         finally:
-            # Clean up cached client for this state_id
-            with self._http_clients_lock:
-                client = self._http_clients.pop(snapshot_state_id, None)
-            if client is not None:
-                client.close()
+            self._release_http_client(snapshot_state_id)
 
     def _get_http_client(self, state_id: str, *, token_id: str | None = None) -> AuditedHTTPClient:
-        """Get or create AuditedHTTPClient for a state_id (thread-safe)."""
+        """Get or create AuditedHTTPClient for a state_id (thread-safe).
+
+        Increments reference count so parallel queries sharing a state_id
+        keep the client alive until the last query releases it.
+        """
         with self._http_clients_lock:
             if state_id not in self._http_clients:
                 self._http_clients[state_id] = AuditedHTTPClient(
@@ -287,7 +291,21 @@ class OpenRouterLLMProvider:
                     limiter=self._limiter,
                     token_id=token_id,
                 )
+                self._http_client_refs[state_id] = 0
+            self._http_client_refs[state_id] += 1
             return self._http_clients[state_id]
+
+    def _release_http_client(self, state_id: str) -> None:
+        """Decrement reference count and close client when last user releases it."""
+        client_to_close: AuditedHTTPClient | None = None
+        with self._http_clients_lock:
+            count = self._http_client_refs.get(state_id, 0) - 1
+            self._http_client_refs[state_id] = count
+            if count <= 0:
+                client_to_close = self._http_clients.pop(state_id, None)
+                self._http_client_refs.pop(state_id, None)
+        if client_to_close is not None:
+            client_to_close.close()
 
     def close(self) -> None:
         """Release all cached clients."""
@@ -295,3 +313,4 @@ class OpenRouterLLMProvider:
             for client in self._http_clients.values():
                 client.close()
             self._http_clients.clear()
+            self._http_client_refs.clear()

@@ -860,6 +860,20 @@ class RowProcessor:
         # Buffer the row
         self._aggregation_executor.buffer_row(node_id, current_token)
 
+        # T26: Record BUFFERED for this token BEFORE checking flush.
+        # On count-threshold flush, the triggering token would otherwise have
+        # no BUFFERED record — it goes directly to CONSUMED_IN_BATCH/FAILED.
+        # Recording here ensures BUFFERED → terminal for every aggregation token.
+        buf_batch_id = self._aggregation_executor.get_batch_id(node_id)
+        if buf_batch_id is None:
+            raise OrchestrationInvariantError(f"batch_id is None after buffer_row() for node {node_id}")
+        self._recorder.record_token_outcome(
+            run_id=self._run_id,
+            token_id=current_token.token_id,
+            outcome=RowOutcome.BUFFERED,
+            batch_id=buf_batch_id,
+        )
+
         # Check if we should flush
         if self._aggregation_executor.should_flush(node_id):
             trigger_type = self._aggregation_executor.get_trigger_type(node_id)
@@ -903,19 +917,10 @@ class RowProcessor:
                 return flush_results, child_items
             raise ValueError(f"Unknown output_mode: {output_mode}")
 
-        # Not flushing yet - row is buffered (both modes record BUFFERED)
+        # Not flushing yet — BUFFERED already recorded above.
         # Terminal outcome is deferred to flush time for both modes:
         # - passthrough: BUFFERED → COMPLETED/FAILED at flush
         # - transform: BUFFERED → CONSUMED_IN_BATCH/QUARANTINED/FAILED at flush
-        # T26: Transform mode now uses BUFFERED to enable per-token QUARANTINED
-        # recording when batch transforms quarantine individual rows.
-        buf_batch_id = self._aggregation_executor.get_batch_id(node_id)
-        self._recorder.record_token_outcome(
-            run_id=self._run_id,
-            token_id=current_token.token_id,
-            outcome=RowOutcome.BUFFERED,
-            batch_id=buf_batch_id,
-        )
         # NOTE: Do NOT emit TokenCompleted telemetry here!
         # Bug P2-2026-02-01: TokenCompleted must be deferred to flush time so that
         # TransformCompleted can be emitted first.

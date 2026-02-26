@@ -11,6 +11,12 @@ from elspeth.contracts.schema_contract import PipelineRow
 from elspeth.plugins.base import BaseTransform
 from elspeth.plugins.config_base import TransformDataConfig
 from elspeth.plugins.results import TransformResult
+from elspeth.plugins.transforms.safety_utils import (
+    get_fields_to_scan,
+)
+from elspeth.plugins.transforms.safety_utils import (
+    validate_fields_not_empty as _validate_fields,
+)
 
 # ReDoS detection: patterns with nested quantifiers cause catastrophic backtracking
 # on adversarial input. E.g., (a+)+ on "aaa...!" is O(2^n).
@@ -74,16 +80,7 @@ class KeywordFilterConfig(TransformDataConfig):
     @classmethod
     def validate_fields_not_empty(cls, v: str | list[str]) -> str | list[str]:
         """Reject empty fields — security transform must scan at least one field."""
-        if isinstance(v, str):
-            if not v.strip():
-                raise ValueError("fields cannot be empty")
-            return v
-        if len(v) == 0:
-            raise ValueError("fields list cannot be empty — security transform must scan at least one field")
-        for i, name in enumerate(v):
-            if not isinstance(name, str) or not name.strip():
-                raise ValueError(f"fields[{i}] cannot be empty")
-        return v
+        return _validate_fields(v)
 
     @field_validator("blocked_patterns")
     @classmethod
@@ -208,13 +205,7 @@ class KeywordFilter(BaseTransform):
 
     def _get_fields_to_scan(self, row: PipelineRow) -> list[str]:
         """Determine which fields to scan based on config."""
-        if self._fields == "all":
-            # Scan all string-valued fields
-            return [field_name for field_name in row if isinstance(row[field_name], str)]
-        elif isinstance(self._fields, str):
-            return [self._fields]
-        else:
-            return self._fields
+        return get_fields_to_scan(self._fields, row)
 
     def close(self) -> None:
         """Release resources."""

@@ -719,6 +719,7 @@ class TestAggregationFailureMatrix:
 
         with (
             patch.object(processor._aggregation_executor, "buffer_row", side_effect=buffer_row_side_effect),
+            patch.object(processor._aggregation_executor, "get_batch_id", return_value="batch-1"),
             patch.object(processor._aggregation_executor, "should_flush", return_value=True),
             patch.object(processor._aggregation_executor, "get_trigger_type", return_value=TriggerType.COUNT),
             patch.object(processor._aggregation_executor, "execute_flush", side_effect=execute_flush_side_effect),
@@ -733,7 +734,11 @@ class TestAggregationFailureMatrix:
 
         assert len(results) == 1
         assert results[0].outcome == RowOutcome.FAILED
-        assert [call.kwargs["outcome"] for call in record_outcome.call_args_list] == [RowOutcome.FAILED]
+        # BUFFERED is always recorded before the flush check, then FAILED on flush error.
+        assert [call.kwargs["outcome"] for call in record_outcome.call_args_list] == [
+            RowOutcome.BUFFERED,
+            RowOutcome.FAILED,
+        ]
 
     def test_flush_failure_transform_records_failed_for_buffered_tokens(self) -> None:
         """T26: Transform-mode flush failure records FAILED for BUFFERED tokens.
@@ -759,6 +764,7 @@ class TestAggregationFailureMatrix:
 
         with (
             patch.object(processor._aggregation_executor, "buffer_row", side_effect=buffer_row_side_effect),
+            patch.object(processor._aggregation_executor, "get_batch_id", return_value="batch-1"),
             patch.object(processor._aggregation_executor, "should_flush", return_value=True),
             patch.object(processor._aggregation_executor, "get_trigger_type", return_value=TriggerType.COUNT),
             patch.object(processor._aggregation_executor, "execute_flush", side_effect=execute_flush_side_effect),
@@ -774,9 +780,8 @@ class TestAggregationFailureMatrix:
         assert len(results) == 1
         assert results[0].outcome == RowOutcome.FAILED
         outcomes = [call.kwargs["outcome"] for call in record_outcome.call_args_list]
-        # T26: should_flush=True on first row means token goes straight to flush
-        # without the buffer-time BUFFERED recording. Only FAILED is recorded.
-        assert outcomes == [RowOutcome.FAILED]
+        # BUFFERED is always recorded before the flush check, then FAILED on flush error.
+        assert outcomes == [RowOutcome.BUFFERED, RowOutcome.FAILED]
 
     def test_passthrough_success_with_rows_none_raises(self) -> None:
         """Passthrough flush requires rows list; rows=None is an invariant violation."""
@@ -798,9 +803,11 @@ class TestAggregationFailureMatrix:
 
         with (
             patch.object(processor._aggregation_executor, "buffer_row", side_effect=buffer_row_side_effect),
+            patch.object(processor._aggregation_executor, "get_batch_id", return_value="batch-1"),
             patch.object(processor._aggregation_executor, "should_flush", return_value=True),
             patch.object(processor._aggregation_executor, "get_trigger_type", return_value=TriggerType.COUNT),
             patch.object(processor._aggregation_executor, "execute_flush", side_effect=execute_flush_side_effect),
+            patch.object(processor._recorder, "record_token_outcome"),
             patch.object(processor, "_emit_transform_completed"),
             pytest.raises(RuntimeError, match="rows=None"),
         ):
@@ -832,9 +839,11 @@ class TestAggregationFailureMatrix:
 
         with (
             patch.object(processor._aggregation_executor, "buffer_row", side_effect=buffer_row_side_effect),
+            patch.object(processor._aggregation_executor, "get_batch_id", return_value="batch-1"),
             patch.object(processor._aggregation_executor, "should_flush", return_value=True),
             patch.object(processor._aggregation_executor, "get_trigger_type", return_value=TriggerType.COUNT),
             patch.object(processor._aggregation_executor, "execute_flush", side_effect=execute_flush_side_effect),
+            patch.object(processor._recorder, "record_token_outcome"),
             patch.object(processor, "_emit_transform_completed"),
             pytest.raises(ValueError, match="same number of output rows"),
         ):

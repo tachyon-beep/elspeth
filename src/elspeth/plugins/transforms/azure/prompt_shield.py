@@ -1,42 +1,30 @@
 """Azure Prompt Shield transform for jailbreak and prompt injection detection.
 
-This module provides the AzurePromptShield transform which uses Azure's
-Prompt Shield API to detect:
+Uses Azure's Prompt Shield API to detect:
 - User prompt attacks (jailbreak attempts in the user's message)
 - Document attacks (prompt injection in documents/context)
 
-Unlike Content Safety, Prompt Shield is binary detection - no thresholds.
+Unlike Content Safety, Prompt Shield is binary detection — no thresholds.
 Either an attack is detected or it isn't.
 
-Uses BatchTransformMixin for row-level pipelining (multiple rows in flight
-with FIFO output ordering).
+Uses BaseAzureSafetyTransform for shared batch infrastructure.
 """
 
 from __future__ import annotations
 
-from collections.abc import Callable
-from threading import Lock
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
-import httpx
-from pydantic import Field, field_validator
+from pydantic import Field
 
-from elspeth.contracts import Determinism
-from elspeth.contracts.contexts import LifecycleContext, TransformContext
-from elspeth.contracts.schema_contract import PipelineRow
-from elspeth.plugins.base import BaseTransform
-from elspeth.plugins.batching import BatchTransformMixin, OutputPort
-from elspeth.plugins.config_base import TransformDataConfig
-from elspeth.plugins.pooling import CapacityError, is_capacity_error
 from elspeth.plugins.results import TransformResult
-from elspeth.plugins.schema_factory import create_schema_from_config
+from elspeth.plugins.transforms.azure.base import (
+    BaseAzureSafetyConfig,
+    BaseAzureSafetyTransform,
+)
 from elspeth.plugins.transforms.azure.errors import MalformedResponseError
 
-if TYPE_CHECKING:
-    from elspeth.core.landscape.recorder import LandscapeRecorder
 
-
-class AzurePromptShieldConfig(TransformDataConfig):
+class AzurePromptShieldConfig(BaseAzureSafetyConfig):
     """Configuration for Azure Prompt Shield transform.
 
     Requires:
@@ -65,28 +53,6 @@ class AzurePromptShieldConfig(TransformDataConfig):
                 mode: observed
     """
 
-    endpoint: str = Field(..., description="Azure Content Safety endpoint URL")
-    api_key: str = Field(..., description="Azure Content Safety API key")
-    fields: str | list[str] = Field(
-        ...,
-        description="Field name(s) to analyze, or 'all' for all string fields",
-    )
-
-    @field_validator("fields")
-    @classmethod
-    def validate_fields_not_empty(cls, v: str | list[str]) -> str | list[str]:
-        """Reject empty fields — security transform must scan at least one field."""
-        if isinstance(v, str):
-            if not v.strip():
-                raise ValueError("fields cannot be empty")
-            return v
-        if len(v) == 0:
-            raise ValueError("fields list cannot be empty — security transform must scan at least one field")
-        for i, name in enumerate(v):
-            if not isinstance(name, str) or not name.strip():
-                raise ValueError(f"fields[{i}] cannot be empty")
-        return v
-
     # Analysis type control — avoids double API cost when only one analysis is needed
     analysis_type: str = Field(
         "both",
@@ -94,11 +60,8 @@ class AzurePromptShieldConfig(TransformDataConfig):
         description="Which analysis to run: 'both', 'user_prompt', or 'document'",
     )
 
-    # Batch processing timeout
-    max_capacity_retry_seconds: int = Field(3600, gt=0, description="Max seconds to retry capacity errors")
 
-
-class AzurePromptShield(BaseTransform, BatchTransformMixin):
+class AzurePromptShield(BaseAzureSafetyTransform):
     """Detect jailbreak attempts and prompt injection using Azure Prompt Shield.
 
     Analyzes text against Azure's Prompt Shield API which detects:
@@ -107,323 +70,38 @@ class AzurePromptShield(BaseTransform, BatchTransformMixin):
 
     Returns error result if any attack is detected (binary, no thresholds).
 
-    Uses BatchTransformMixin for row-level pipelining: multiple rows can be
-    in flight concurrently with FIFO output ordering.
-
-    Architecture:
-        Orchestrator → accept() → [RowReorderBuffer] → [Worker Pool]
-            → _process_row() → Azure API
-            → emit() → OutputPort (sink or next transform)
-
-    Usage:
-        # 1. Instantiate
-        transform = AzurePromptShield(config)
-
-        # 2. Connect output port (required before accept())
-        transform.connect_output(output_port, max_pending=30)
-
-        # 3. Feed rows (blocks on backpressure)
-        for row in source:
-            transform.accept(row, ctx)
-
-        # 4. Flush and close
-        transform.flush_batch_processing()
-        transform.close()
+    Uses BaseAzureSafetyTransform for row-level pipelining: multiple rows
+    can be in flight concurrently with FIFO output ordering.
     """
 
     name = "azure_prompt_shield"
-    determinism = Determinism.EXTERNAL_CALL
-    plugin_version = "1.0.0"
-    creates_tokens = False
-
-    API_VERSION = "2024-09-01"
 
     def __init__(self, config: dict[str, Any]) -> None:
-        super().__init__(config)
-
         cfg = AzurePromptShieldConfig.from_dict(config)
-        self._endpoint = cfg.endpoint.rstrip("/")
-        self._api_key = cfg.api_key
-        self._fields = cfg.fields
+        super().__init__(config, cfg, "AzurePromptShieldSchema")
         self._analysis_type = cfg.analysis_type
-        self._max_capacity_retry_seconds = cfg.max_capacity_retry_seconds
 
-        schema = create_schema_from_config(
-            cfg.schema_config,
-            "AzurePromptShieldSchema",
-            allow_coercion=False,
-        )
-        self.input_schema = schema
-        # BatchTransformMixin processes rows individually, output schema matches input
-        self.output_schema = schema
-
-        # Per-state_id HTTP client cache for audit trail
-        # Each AuditedHTTPClient has its own call_index counter, ensuring
-        # (state_id, call_index) uniqueness even across retries.
-        self._http_clients: dict[str, Any] = {}  # state_id -> AuditedHTTPClient
-        self._http_clients_lock = Lock()
-
-        # Recorder reference for pooled execution (set in on_start or first accept)
-        self._recorder: LandscapeRecorder | None = None
-        self._run_id: str = ""
-        self._telemetry_emit: Callable[[Any], None] = lambda event: None
-        self._limiter: Any = None  # RateLimiter | NoOpLimiter | None
-
-        # Batch processing state (initialized by connect_output)
-        self._batch_initialized = False
-
-    def on_start(self, ctx: LifecycleContext) -> None:
-        """Capture recorder, telemetry, and rate limit context for pooled execution."""
-        super().on_start(ctx)
-        self._recorder = ctx.landscape
-        self._run_id = ctx.run_id
-        self._telemetry_emit = ctx.telemetry_emit
-        # Get rate limiter for Azure Prompt Shield service (None if rate limiting disabled)
-        self._limiter = ctx.rate_limit_registry.get_limiter("azure_prompt_shield") if ctx.rate_limit_registry is not None else None
-
-    def connect_output(
+    def _analyze_field(
         self,
-        output: OutputPort,
-        max_pending: int = 30,
-    ) -> None:
-        """Connect output port and initialize batch processing.
-
-        Call this after __init__ but before accept(). The output port
-        receives results in FIFO order (submission order, not completion order).
-
-        Args:
-            output: Output port to emit results to (sink adapter or next transform)
-            max_pending: Maximum rows in flight before accept() blocks (backpressure)
-
-        Raises:
-            RuntimeError: If called more than once
-        """
-        if self._batch_initialized:
-            raise RuntimeError("connect_output() already called")
-
-        self.init_batch_processing(
-            max_pending=max_pending,
-            output=output,
-            name=self.name,
-            max_workers=max_pending,  # Match workers to max_pending
-            batch_wait_timeout=float(self._max_capacity_retry_seconds),
-        )
-        self._batch_initialized = True
-
-    def accept(self, row: PipelineRow, ctx: TransformContext) -> None:
-        """Accept a row for processing.
-
-        Submits the row to the batch processing pipeline. Returns quickly
-        unless backpressure is applied (buffer full). Results flow through
-        the output port in FIFO order.
-
-        Args:
-            row: Input row with fields to analyze
-            ctx: Plugin context with token and landscape
-
-        Raises:
-            RuntimeError: If connect_output() was not called
-            ValueError: If ctx.token is None
-        """
-        if not self._batch_initialized:
-            raise RuntimeError("connect_output() must be called before accept(). This wires up the output port for result emission.")
-
-        self.accept_row(row, ctx, self._process_row)
-
-    def process(
-        self,
-        row: PipelineRow,
-        ctx: TransformContext,
-    ) -> TransformResult:
-        """Not supported - use accept() for row-level pipelining.
-
-        This transform uses BatchTransformMixin for concurrent row processing
-        with FIFO output ordering. Call accept() instead of process().
-
-        Raises:
-            NotImplementedError: Always, directing callers to use accept()
-        """
-        raise NotImplementedError(
-            f"{self.__class__.__name__} uses row-level pipelining. Use accept() instead of process(). See class docstring for usage."
-        )
-
-    def _process_row(
-        self,
-        row: PipelineRow,
-        ctx: TransformContext,
-    ) -> TransformResult:
-        """Process a single row. Called by worker threads.
-
-        This is the processor function passed to accept_row(). It runs in
-        the BatchTransformMixin's worker pool.
-
-        Args:
-            row: Input row with fields to analyze
-            ctx: Plugin context with state_id for audit trail
-
-        Returns:
-            TransformResult indicating success or attack detection
-        """
-        # Capture state_id at entry — ctx is mutable and shared across retry
-        # attempts, so ctx.state_id can change between try and finally if a
-        # timeout triggers a retry with a new state_id.
-        state_id = ctx.state_id
-        if state_id is None:
-            raise RuntimeError("state_id is required for batch processing. Ensure transform is executed through the engine.")
-        token_id = ctx.token.token_id if ctx.token is not None else None
-
-        try:
-            return self._process_single_with_state(row, state_id, token_id=token_id)
-        finally:
-            # Clean up cached HTTP client for this state_id
-            with self._http_clients_lock:
-                client = self._http_clients.pop(state_id, None)
-            if client is not None:
-                client.close()
-
-    def _process_single_with_state(
-        self,
-        row: PipelineRow,
+        value: str,
+        field_name: str,
         state_id: str,
         *,
         token_id: str | None = None,
-    ) -> TransformResult:
-        """Process a single row with explicit state_id.
+    ) -> TransformResult | None:
+        """Analyze field via Prompt Shield API for attack detection."""
+        analysis = self._analyze_prompt(value, state_id, token_id=token_id)
 
-        Called by _process_row() in the BatchTransformMixin worker pool.
-
-        Raises:
-            CapacityError: On rate limit errors (for worker pool retry)
-        """
-        fields_to_scan = self._get_fields_to_scan(row)
-        all_mode = self._fields == "all"
-
-        for field_name in fields_to_scan:
-            if field_name not in row:
-                if all_mode:
-                    continue  # "all" mode scans only present string fields
-                # Explicitly-configured field is missing — fail CLOSED.
-                # Security transform must not report "validated" when configured
-                # fields were never analyzed.
-                return TransformResult.error(
-                    {
-                        "reason": "missing_field",
-                        "field": field_name,
-                    },
-                    retryable=False,
-                )
-
-            value = row[field_name]
-            if not isinstance(value, str):
-                # Explicitly-configured field is non-string — fail CLOSED.
-                # Security transform cannot analyze non-string content for prompt injection.
-                # ("all" mode pre-filters to string fields in _get_fields_to_scan,
-                # so this branch only fires for explicitly-configured fields.)
-                return TransformResult.error(
-                    {
-                        "reason": "non_string_field",
-                        "field": field_name,
-                        "actual_type": type(value).__name__,
-                    },
-                    retryable=False,
-                )
-
-            # Call Azure API with state_id for audit trail
-            try:
-                analysis = self._analyze_prompt(value, state_id, token_id=token_id)
-            except httpx.HTTPStatusError as e:
-                status_code = e.response.status_code
-                if is_capacity_error(status_code):
-                    # Convert to CapacityError for pooled executor retry (429/503/529)
-                    raise CapacityError(status_code, str(e)) from e
-                return TransformResult.error(
-                    {
-                        "reason": "api_error",
-                        "error_type": "http_error",
-                        "status_code": status_code,
-                        "message": str(e),
-                    },
-                    retryable=False,
-                )
-            except httpx.RequestError as e:
-                return TransformResult.error(
-                    {
-                        "reason": "api_error",
-                        "error_type": "network_error",
-                        "message": str(e),
-                    },
-                    retryable=True,
-                )
-            except MalformedResponseError as e:
-                # Malformed API response - fail CLOSED, non-retryable
-                # (response structure won't improve on retry)
-                return TransformResult.error(
-                    {
-                        "reason": "api_error",
-                        "error_type": "malformed_response",
-                        "message": str(e),
-                    },
-                    retryable=False,
-                )
-
-            # Check if any attack was detected
-            if analysis["user_prompt_attack"] or analysis["document_attack"]:
-                return TransformResult.error(
-                    {
-                        "reason": "prompt_injection_detected",
-                        "field": field_name,
-                        "attacks": analysis,
-                    },
-                    retryable=False,
-                )
-
-        return TransformResult.success(
-            row,
-            success_reason={"action": "validated"},
-        )
-
-    def _get_fields_to_scan(self, row: PipelineRow) -> list[str]:
-        """Determine which fields to scan based on config."""
-        if self._fields == "all":
-            return [field_name for field_name in row if isinstance(row[field_name], str)]
-        elif isinstance(self._fields, str):
-            return [self._fields]
-        else:
-            return self._fields
-
-    def _get_http_client(self, state_id: str, *, token_id: str | None = None) -> Any:
-        """Get or create audited HTTP client for a state_id.
-
-        Clients are cached to preserve call_index across retries.
-        This ensures uniqueness of (state_id, call_index) even when
-        the worker pool retries after CapacityError.
-
-        Args:
-            state_id: State ID for audit trail recording
-
-        Returns:
-            AuditedHTTPClient instance with per-instance call_index counter
-        """
-        from elspeth.plugins.clients.http import AuditedHTTPClient
-
-        with self._http_clients_lock:
-            if state_id not in self._http_clients:
-                if self._recorder is None:
-                    raise RuntimeError("PromptShield requires recorder for audited calls.")
-                self._http_clients[state_id] = AuditedHTTPClient(
-                    recorder=self._recorder,
-                    state_id=state_id,
-                    run_id=self._run_id,
-                    telemetry_emit=self._telemetry_emit,
-                    timeout=30.0,
-                    headers={
-                        "Ocp-Apim-Subscription-Key": self._api_key,
-                        "Content-Type": "application/json",
-                    },
-                    limiter=self._limiter,
-                    token_id=token_id,
-                )
-            return self._http_clients[state_id]
+        if analysis["user_prompt_attack"] or analysis["document_attack"]:
+            return TransformResult.error(
+                {
+                    "reason": "prompt_injection_detected",
+                    "field": field_name,
+                    "attacks": analysis,
+                },
+                retryable=False,
+            )
+        return None
 
     def _analyze_prompt(
         self,
@@ -434,10 +112,6 @@ class AzurePromptShield(BaseTransform, BatchTransformMixin):
     ) -> dict[str, bool]:
         """Call Azure Prompt Shield API.
 
-        Args:
-            text: Text to analyze for prompt injection
-            state_id: State ID for audit trail recording
-
         Returns dict with:
             user_prompt_attack: True if jailbreak detected in user prompt
             document_attack: True if prompt injection detected in any document
@@ -446,7 +120,6 @@ class AzurePromptShield(BaseTransform, BatchTransformMixin):
         Respects self._analysis_type to avoid double API cost when only one
         analysis path is needed.
         """
-        # Use AuditedHTTPClient - handles recording and telemetry automatically
         http_client = self._get_http_client(state_id, token_id=token_id)
 
         url = f"{self._endpoint}/contentsafety/text:shieldPrompt?api-version={self.API_VERSION}"
@@ -520,17 +193,3 @@ class AzurePromptShield(BaseTransform, BatchTransformMixin):
             "user_prompt_attack": user_attack,
             "document_attack": doc_attack,
         }
-
-    def close(self) -> None:
-        """Release resources."""
-        # Shutdown batch processing infrastructure first
-        if self._batch_initialized:
-            self.shutdown_batch_processing()
-
-        # Close all cached HTTP clients
-        with self._http_clients_lock:
-            for client in self._http_clients.values():
-                client.close()
-            self._http_clients.clear()
-
-        self._recorder = None

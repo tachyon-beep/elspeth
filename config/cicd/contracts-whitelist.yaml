@@ -273,10 +273,9 @@ allowed_dict_patterns:
   - "src/elspeth/plugins/azure/blob_sink.py:AzureBlobSink._apply_display_headers:rows (list)"
   - "src/elspeth/plugins/azure/blob_sink.py:AzureBlobSink._apply_display_headers:return (list)"
 
-  # Azure content safety (refactored: PipelineRow is now the row type at plugin boundary)
+  # Azure safety transforms (base + content_safety + prompt_shield)
+  - "src/elspeth/plugins/transforms/azure/base.py:BaseAzureSafetyTransform.__init__:config"
   - "src/elspeth/plugins/transforms/azure/content_safety.py:AzureContentSafety.__init__:config"
-
-  # Azure prompt shield (refactored: PipelineRow is now the row type at plugin boundary)
   - "src/elspeth/plugins/transforms/azure/prompt_shield.py:AzurePromptShield.__init__:config"
 
   # ═══════════════════════════════════════════════════════════════════════════

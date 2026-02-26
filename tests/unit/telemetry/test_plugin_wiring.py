@@ -35,13 +35,10 @@ EXTERNAL_CALL_PLUGINS: dict[str, dict[str, Any]] = {
         "client_type": "AuditedHTTPClient",
         "pattern": "init_capture",  # Receives run_id/telemetry_emit in __init__
     },
-    "src/elspeth/plugins/transforms/azure/content_safety.py": {
-        "class": "AzureContentSafety",
-        "client_type": "AuditedHTTPClient",
-        "pattern": "on_start_capture",
-    },
-    "src/elspeth/plugins/transforms/azure/prompt_shield.py": {
-        "class": "AzurePromptShield",
+    # Azure safety transforms: on_start() and _get_http_client() live in the base class.
+    # Subclasses inherit telemetry wiring — verify at the base level.
+    "src/elspeth/plugins/transforms/azure/base.py": {
+        "class": "BaseAzureSafetyTransform",
         "client_type": "AuditedHTTPClient",
         "pattern": "on_start_capture",
     },

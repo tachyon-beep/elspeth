@@ -110,7 +110,7 @@ class TestAssertToRaiseConversions:
         assert transform._recorder is None
 
         # _get_http_client must raise, not silently create a client with None recorder.
-        with pytest.raises(RuntimeError, match="_recorder not initialized"):
+        with pytest.raises(RuntimeError, match="recorder not initialized"):
             transform._get_http_client("some-state-id")
 
     # ------------------------------------------------------------------
