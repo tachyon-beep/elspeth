@@ -585,6 +585,7 @@ class LLMTransform(BaseTransform, BatchTransformMixin):
         self._max_tokens = self._config.max_tokens
         self._response_field = self._config.response_field
         self._max_capacity_retry_seconds = self._config.max_capacity_retry_seconds
+        self._pool_size = self._config.pool_size
 
         # Schema
         schema_config = self._config.schema_config
