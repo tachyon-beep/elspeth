@@ -1,4 +1,8 @@
-per_file_rules: []
+per_file_rules:
+- pattern: "engine/*"
+  rules: ["L1"]
+  reason: "Engine orchestrates plugins — structural coupling via protocols/results. Separate refactoring to move protocols to contracts."
+  expires: "2026-09-01"
 allow_hits:
 - key: engine/orchestrator/types.py:R5:AggregationFlushResult:__post_init__:fp=84d6c2fc1218a9d6
   owner: architecture

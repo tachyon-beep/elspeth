@@ -209,7 +209,68 @@ RULES = {
         "description": "dict.pop(key, default) hides missing-key bugs with implicit defaults",
         "remediation": "Access keys directly and fix the schema/contract if KeyError occurs",
     },
+    "L1": {
+        "name": "upward-import",
+        "description": "Import from a higher layer violates the dependency hierarchy (contracts→core→engine→plugins)",
+        "remediation": "Move code down, extract primitives, or restructure caller (see CLAUDE.md Layer Dependency Rules)",
+    },
 }
+
+
+# =============================================================================
+# Layer Hierarchy (import direction enforcement)
+# =============================================================================
+
+# Layer numbers: lower = deeper (fewer allowed dependencies)
+LAYER_HIERARCHY: dict[str, int] = {
+    "contracts": 0,  # L0 — leaf, imports nothing above
+    "core": 1,  # L1 — can import contracts only
+    "engine": 2,  # L2 — can import core, contracts
+}
+# Everything else (plugins, mcp, tui, telemetry, testing, cli*) is implicitly L3.
+
+LAYER_NAMES: dict[int, str] = {
+    0: "L0/contracts",
+    1: "L1/core",
+    2: "L2/engine",
+    3: "L3/application",
+}
+
+
+def _get_file_layer(relative_path: str) -> int:
+    """Determine the layer from a path relative to the scan root.
+
+    Supports both ``--root=src/elspeth`` (paths like ``contracts/...``) and
+    ``--root=src`` (paths like ``elspeth/contracts/...``).
+    """
+    parts = relative_path.split("/")
+    idx = 1 if parts[0] == "elspeth" else 0
+    top = parts[idx] if idx < len(parts) else ""
+    return LAYER_HIERARCHY.get(top, 3)
+
+
+def _get_import_target_layer(module_name: str) -> int | None:
+    """Determine the target layer from a fully qualified import.
+
+    Returns None for non-elspeth imports.
+    """
+    if not module_name.startswith("elspeth."):
+        return None
+    parts = module_name.split(".")
+    if len(parts) < 2:
+        return None
+    return LAYER_HIERARCHY.get(parts[1], 3)
+
+
+def _find_type_checking_lines(tree: ast.Module) -> set[int]:
+    """Collect line numbers of import statements inside ``if TYPE_CHECKING:`` blocks."""
+    lines: set[int] = set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.If) and isinstance(node.test, ast.Name) and node.test.id == "TYPE_CHECKING":
+            for child in node.body:
+                if isinstance(child, (ast.Import, ast.ImportFrom)):
+                    lines.add(child.lineno)
+    return lines
 
 
 # =============================================================================
@@ -502,6 +563,110 @@ def scan_directory(
 
 
 # =============================================================================
+# Layer Import Scanning
+# =============================================================================
+
+
+def scan_layer_imports_file(
+    file_path: Path,
+    root: Path,
+) -> tuple[list[Finding], list[str]]:
+    """Scan a single file for upward layer imports.
+
+    Returns:
+        violations: Findings for runtime upward imports (fail CI unless allowlisted)
+        warnings: Formatted strings for TYPE_CHECKING upward imports (informational)
+    """
+    try:
+        source = file_path.read_text(encoding="utf-8")
+    except (OSError, UnicodeDecodeError):
+        return [], []
+
+    try:
+        tree = ast.parse(source, filename=str(file_path))
+    except SyntaxError:
+        return [], []
+
+    relative_path = str(file_path.relative_to(root))
+    source_lines = source.splitlines()
+    file_layer = _get_file_layer(relative_path)
+
+    # L3 files (plugins, mcp, tui, etc.) can import anything — skip
+    if file_layer >= 3:
+        return [], []
+
+    tc_lines = _find_type_checking_lines(tree)
+    violations: list[Finding] = []
+    warnings: list[str] = []
+
+    for node in ast.walk(tree):
+        # Collect (module_name, line, col) targets from import nodes
+        targets: list[tuple[str, int, int]] = []
+        if isinstance(node, ast.ImportFrom) and node.module and node.level == 0:
+            targets.append((node.module, node.lineno, node.col_offset))
+        elif isinstance(node, ast.Import):
+            for alias in node.names:
+                targets.append((alias.name, node.lineno, node.col_offset))
+
+        for module_name, line, col in targets:
+            target_layer = _get_import_target_layer(module_name)
+            if target_layer is None or target_layer <= file_layer:
+                continue
+
+            snippet = source_lines[line - 1].strip() if line <= len(source_lines) else "<source unavailable>"
+            from_name = LAYER_NAMES[file_layer]
+            to_name = LAYER_NAMES[target_layer]
+
+            if line in tc_lines:
+                warnings.append(f"  {relative_path}:{line} — TYPE_CHECKING import from {to_name} in {from_name}: {snippet}")
+            else:
+                # Fingerprint: keyed on file + imported module (stable across reformatting)
+                payload = f"L1|{relative_path}|{module_name}"
+                fp = hashlib.sha256(payload.encode()).hexdigest()[:16]
+
+                violations.append(
+                    Finding(
+                        rule_id="L1",
+                        file_path=relative_path,
+                        line=line,
+                        col=col,
+                        symbol_context=(),
+                        fingerprint=fp,
+                        code_snippet=snippet,
+                        message=f"Upward import: {from_name} imports from {to_name} ({module_name})",
+                    )
+                )
+
+    return violations, warnings
+
+
+def scan_layer_imports_directory(
+    root: Path,
+    exclude_patterns: list[str] | None = None,
+) -> tuple[list[Finding], list[str]]:
+    """Scan all Python files for upward layer imports."""
+    exclude_patterns = exclude_patterns or []
+    all_violations: list[Finding] = []
+    all_warnings: list[str] = []
+
+    for py_file in root.rglob("*.py"):
+        relative = py_file.relative_to(root)
+        skip = False
+        for pattern in exclude_patterns:
+            if relative.match(pattern) or str(relative).startswith(pattern.rstrip("*/")):
+                skip = True
+                break
+        if skip:
+            continue
+
+        violations, file_warnings = scan_layer_imports_file(py_file, root)
+        all_violations.extend(violations)
+        all_warnings.extend(file_warnings)
+
+    return all_violations, all_warnings
+
+
+# =============================================================================
 # Allowlist Handling
 # =============================================================================
 
@@ -688,6 +853,7 @@ def report_json(
     expired_entries: list[AllowlistEntry],
     expired_file_rules: list[PerFileRule] | None = None,
     unused_file_rules: list[PerFileRule] | None = None,
+    layer_warnings: list[str] | None = None,
 ) -> str:
     """Generate JSON report."""
     result: dict[str, Any] = {
@@ -714,6 +880,8 @@ def report_json(
         ]
     if unused_file_rules:
         result["unused_file_rules"] = [{"pattern": r.pattern, "rules": r.rules, "reason": r.reason} for r in unused_file_rules]
+    if layer_warnings:
+        result["layer_warnings"] = layer_warnings
     return json.dumps(result, indent=2)
 
 
@@ -788,6 +956,7 @@ def run_check(args: argparse.Namespace) -> int:
     allowlist = load_allowlist(allowlist_path)
 
     # Scan for findings - either specific files or whole directory
+    layer_warnings: list[str] = []
     if args.files:
         # Pre-commit mode: only scan the provided files that are under root
         all_findings = []
@@ -797,12 +966,18 @@ def run_check(args: argparse.Namespace) -> int:
             try:
                 resolved.relative_to(root)
                 all_findings.extend(scan_file(resolved, root))
+                layer_v, layer_w = scan_layer_imports_file(resolved, root)
+                all_findings.extend(layer_v)
+                layer_warnings.extend(layer_w)
             except ValueError:
                 # File is not under root, skip it
                 pass
     else:
         # Full directory scan mode
         all_findings = scan_directory(root, args.exclude)
+        layer_v, layer_w = scan_layer_imports_directory(root, args.exclude)
+        all_findings.extend(layer_v)
+        layer_warnings.extend(layer_w)
 
     # Filter out allowlisted findings
     violations: list[Finding] = []
@@ -830,7 +1005,7 @@ def run_check(args: argparse.Namespace) -> int:
     has_errors = bool(violations or stale_entries or expired_entries or expired_file_rules or unused_file_rules)
 
     if args.format == "json":
-        print(report_json(violations, stale_entries, expired_entries, expired_file_rules, unused_file_rules))
+        print(report_json(violations, stale_entries, expired_entries, expired_file_rules, unused_file_rules, layer_warnings))
     else:
         # Text format
         if violations:
@@ -839,6 +1014,14 @@ def run_check(args: argparse.Namespace) -> int:
             print("=" * 60)
             for v in violations:
                 print(format_finding_text(v))
+
+        if layer_warnings:
+            print(f"\n{'=' * 60}")
+            print(f"LAYER WARNINGS (TYPE_CHECKING imports): {len(layer_warnings)}")
+            print("(Architecturally impure but pragmatically acceptable — not a failure)")
+            print("=" * 60)
+            for w in layer_warnings:
+                print(w)
 
         if stale_entries:
             print(f"\n{'=' * 60}")

@@ -678,6 +678,31 @@ src/elspeth/
 └── cli_formatters.py   # Event formatting for CLI output
 ```
 
+## Layer Dependency Rules
+
+ELSPETH uses a strict 4-layer model. Imports must flow **downward only**.
+
+```text
+L0  contracts/     Leaf — imports nothing above. Shared types, enums, protocols.
+L1  core/          Can import L0 only. Landscape, DAG, config, canonical JSON.
+L2  engine/        Can import L0, L1. Orchestrator, processors, executors.
+L3  plugins/       Can import L0, L1, L2. Sources, transforms, sinks, clients.
+    mcp/ tui/ cli* telemetry/ testing/   — also L3 (application layer)
+```
+
+**Enforced by CI:** `scripts/cicd/enforce_tier_model.py` detects upward imports and fails the build. The allowlist mechanism (`config/cicd/enforce_tier_model/`) supports per-file and per-finding exemptions for legitimate exceptions.
+
+**TYPE_CHECKING imports** are reported as warnings, not failures. They're architecturally impure (the dependency still exists for type checkers) but don't create runtime coupling.
+
+### When a New Cross-Layer Need Arises
+
+Resolution options in priority order:
+
+1. **Move the code down.** If the needed code has no upward dependencies, move it to the lower layer. E.g., move a dataclass from `core/` to `contracts/`.
+2. **Extract the primitive.** If only a type or constant is needed, extract it into `contracts/` and import from there.
+3. **Restructure the caller.** Refactor so the higher-layer code isn't needed. Use dependency injection, callbacks, or protocols defined in `contracts/`.
+4. **NEVER:** Add a lazy import with an apologetic comment. This is the "Shifting the Burden" archetype — it defers the structural fix and the pattern will recur.
+
 ## No Legacy Code Policy
 
 **STRICT REQUIREMENT:** Legacy code, backwards compatibility, and compatibility shims are strictly forbidden. WE HAVE NO USERS YET. Deferring breaking changes until we do is the opposite of what we want.
