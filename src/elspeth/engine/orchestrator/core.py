@@ -104,6 +104,7 @@ from elspeth.engine.orchestrator.types import (
     ExecutionCounters,
     GraphArtifacts,
     LoopContext,
+    LoopResult,
     PipelineConfig,
     RouteValidationError,
     RowPlugin,
@@ -1458,7 +1459,6 @@ class Orchestrator:
         processor = loop_ctx.processor
         pending_tokens = loop_ctx.pending_tokens
 
-        counters.rows_quarantined += 1
         # Route quarantined row to configured sink
         # Per CLAUDE.md: plugin bugs must crash, no silent drops
         quarantine_sink = source_item.quarantine_destination
@@ -1481,7 +1481,8 @@ class Orchestrator:
                 f"source._on_validation_failure='{config.source._on_validation_failure}'."
             )
 
-        # Destination validated - proceed with routing.
+        # Destination validated - increment counter and proceed with routing.
+        counters.rows_quarantined += 1
         # Sanitize quarantine data at Tier-3 boundary: replace non-finite
         # floats (NaN, Infinity) with None so downstream canonical JSON
         # and stable_hash operations succeed. The quarantine_error records
@@ -1564,8 +1565,7 @@ class Orchestrator:
         # Per CLAUDE.md: every row must reach exactly one terminal state
         # Fix: P1-2026-01-31 - Do NOT record outcome here!
         # Record outcome AFTER sink durability in SinkExecutor.write()
-        error_detail = source_item.quarantine_error or "unknown_validation_error"
-        quarantine_error_hash = hashlib.sha256(error_detail.encode()).hexdigest()[:16]
+        quarantine_error_hash = hashlib.sha256(quarantine_error_msg.encode()).hexdigest()[:16]
 
         # Pass PendingOutcome with error_hash - outcome recorded after sink durability
         pending_tokens[quarantine_sink].append((quarantine_token, PendingOutcome(RowOutcome.QUARANTINED, quarantine_error_hash)))
@@ -1579,8 +1579,8 @@ class Orchestrator:
         edge_map: Mapping[tuple[NodeID, str], str],
         *,
         shutdown_event: threading.Event | None = None,
-    ) -> bool:
-        """Run the main processing loop: source iteration, quarantine, transform, flush, progress.
+    ) -> LoopResult:
+        """Run the main processing loop: source iteration, quarantine, transform, flush.
 
         This method owns the track_operation(source_load) context. Everything inside
         it — source loading, row processing, aggregation flush, coalesce flush, empty
@@ -1590,8 +1590,12 @@ class Orchestrator:
         has its own track_operation(sink_write). This boundary must be preserved — it
         determines audit attribution (source_load vs sink_write operations).
 
+        Final progress emission and PhaseCompleted(PROCESS) are NOT in this method.
+        They belong AFTER sink writes so they reflect concrete, durable results.
+        The caller emits them using the timing state in LoopResult.
+
         Returns:
-            True if interrupted by shutdown, False otherwise.
+            LoopResult with interrupted flag and timing state for post-sink events.
         """
         # Local imports for telemetry events
         from elspeth.telemetry import (
@@ -1878,6 +1882,17 @@ class Orchestrator:
                     ctx.operation_id = source_operation_id
 
                 # ─────────────────────────────────────────────────────────────────
+                # CRITICAL: Restore operation_id before post-loop flushes.
+                # On normal loop exit, the restore at end-of-iteration (below the
+                # shutdown check) ensures operation_id == source_operation_id.
+                # On shutdown break, that restore is SKIPPED — operation_id is
+                # still None (cleared for transforms at line 1789). Aggregation
+                # and coalesce flushes can trigger transforms that make external
+                # calls — those must be attributed to source_load, not orphaned.
+                # ─────────────────────────────────────────────────────────────────
+                ctx.operation_id = source_operation_id
+
+                # ─────────────────────────────────────────────────────────────────
                 # CRITICAL: Flush remaining aggregation buffers at end-of-source
                 # ─────────────────────────────────────────────────────────────────
                 if config.aggregation_settings:
@@ -1972,28 +1987,14 @@ class Orchestrator:
         # track_operation ended - source_load operation is now complete
         # Source duration is now accurately measured (excludes sink I/O)
 
-        # Emit final progress if we haven't emitted recently or row count not on interval
-        # (RunSummary will show final summary regardless, but progress shows intermediate state)
-        current_time = time.perf_counter()
-        time_since_last_progress = current_time - last_progress_time
-        # Emit if: not on progress_interval boundary OR >1s since last emission
-        if counters.rows_processed % progress_interval != 0 or time_since_last_progress >= 1.0:
-            elapsed = current_time - start_time
-            self._events.emit(
-                ProgressEvent(
-                    rows_processed=counters.rows_processed,
-                    # Include routed rows in success count - they reached their destination
-                    rows_succeeded=counters.rows_succeeded + counters.rows_routed,
-                    rows_failed=counters.rows_failed,
-                    rows_quarantined=counters.rows_quarantined,
-                    elapsed_seconds=elapsed,
-                )
-            )
-
-        # PROCESS phase completed successfully
-        self._events.emit(PhaseCompleted(phase=PipelinePhase.PROCESS, duration_seconds=time.perf_counter() - phase_start))
-
-        return interrupted_by_shutdown
+        # Return timing state so caller can emit progress + PhaseCompleted
+        # AFTER sink writes (concrete, durable results).
+        return LoopResult(
+            interrupted=interrupted_by_shutdown,
+            start_time=start_time,
+            phase_start=phase_start,
+            last_progress_time=last_progress_time,
+        )
 
     def _run_resume_processing_loop(
         self,
@@ -2139,24 +2140,10 @@ class Orchestrator:
     ) -> RunResult:
         """Execute the run using the execution graph.
 
-        The graph provides:
-        - Node IDs and metadata via topological_order() and get_node_info()
-        - Edges via get_edges()
-        - Explicit ID mappings via get_sink_id_map() and get_transform_id_map()
-
-        Args:
-            recorder: LandscapeRecorder for audit trail
-            run_id: Run identifier
-            config: Pipeline configuration
-            graph: Execution graph
-            settings: Full settings (optional)
-            batch_checkpoints: Typed batch checkpoints (maps node_id -> BatchCheckpointState)
-            payload_store: Optional PayloadStore for persisting source row payloads
-            shutdown_event: Optional threading.Event set by signal handler on SIGINT/SIGTERM.
-                When set, the processing loop breaks after the current row completes.
-                All pending work (aggregation flush, sink writes) is still performed.
+        Orchestrates the four phases: graph registration, context initialization,
+        source+process loop, sink writes. Returns RunStatus.RUNNING — the public
+        run() wrapper transitions to COMPLETED after finalize_run().
         """
-        # Store graph for checkpointing during execution
         self._current_graph = graph
 
         # 1. Register graph nodes and edges
@@ -2174,34 +2161,23 @@ class Orchestrator:
             payload_store,
         )
 
-        ctx = run_ctx.ctx
-        processor = run_ctx.processor
-        coalesce_executor = run_ctx.coalesce_executor
-        coalesce_node_map = dict(run_ctx.coalesce_node_map)  # dict for aggregation/coalesce functions
-        agg_transform_lookup = dict(run_ctx.agg_transform_lookup)  # dict for aggregation functions
-
-        # Process rows - Buffer TOKENS, not dicts, to preserve identity
         counters = ExecutionCounters()
-        # Track (token, pending_outcome) pairs for deferred outcome recording
-        # Outcomes are recorded by SinkExecutor.write() AFTER sink durability is achieved
-        # Fix: P1-2026-01-31 - use PendingOutcome to carry error_hash for QUARANTINED
         pending_tokens: dict[str, list[tuple[TokenInfo, PendingOutcome | None]]] = {name: [] for name in config.sinks}
 
-        # Bundle loop state for extracted methods
         loop_ctx = LoopContext(
             counters=counters,
             pending_tokens=pending_tokens,
-            processor=processor,
-            ctx=ctx,
+            processor=run_ctx.processor,
+            ctx=run_ctx.ctx,
             config=config,
-            agg_transform_lookup=agg_transform_lookup,
-            coalesce_executor=coalesce_executor,
-            coalesce_node_map=coalesce_node_map,
+            agg_transform_lookup=run_ctx.agg_transform_lookup,
+            coalesce_executor=run_ctx.coalesce_executor,
+            coalesce_node_map=run_ctx.coalesce_node_map,
         )
 
         try:
-            # 3. Source + Process phase (source load, row processing, aggregation/coalesce flush)
-            interrupted = self._run_main_processing_loop(
+            # 3. Source + Process phase
+            loop_result = self._run_main_processing_loop(
                 loop_ctx,
                 recorder,
                 run_id,
@@ -2212,6 +2188,8 @@ class Orchestrator:
 
             # 4. Sink writes — outside source_load track_operation context.
             # Each sink write has its own track_operation (sink_write) in SinkExecutor.
+            processor = run_ctx.processor
+
             def checkpoint_after_sink(sink_node_id: str) -> Callable[[TokenInfo], None]:
                 def callback(token: TokenInfo) -> None:
                     agg_state = processor.get_aggregation_checkpoint_state()
@@ -2229,16 +2207,36 @@ class Orchestrator:
                 run_id,
                 loop_ctx,
                 artifacts.sink_id_map,
-                interrupted,
+                loop_result.interrupted,
                 on_token_written_factory=checkpoint_after_sink,
             )
 
+            # 5. Final progress + PROCESS phase completion — AFTER sink writes
+            # so these events reflect concrete, durable results. On shutdown,
+            # _flush_and_write_sinks raises GracefulShutdownError before we
+            # reach here — matching the pre-extraction behavior where the
+            # shutdown raise prevented progress/PhaseCompleted emission.
+            progress_interval = 100
+            current_time = time.perf_counter()
+            time_since_last_progress = current_time - loop_result.last_progress_time
+            if counters.rows_processed % progress_interval != 0 or time_since_last_progress >= 1.0:
+                elapsed = current_time - loop_result.start_time
+                self._events.emit(
+                    ProgressEvent(
+                        rows_processed=counters.rows_processed,
+                        rows_succeeded=counters.rows_succeeded + counters.rows_routed,
+                        rows_failed=counters.rows_failed,
+                        rows_quarantined=counters.rows_quarantined,
+                        elapsed_seconds=elapsed,
+                    )
+                )
+
+            self._events.emit(PhaseCompleted(phase=PipelinePhase.PROCESS, duration_seconds=current_time - loop_result.phase_start))
+
         finally:
-            self._cleanup_plugins(config, ctx, include_source=True)
+            self._cleanup_plugins(config, run_ctx.ctx, include_source=True)
 
-        # Clear graph after execution completes
         self._current_graph = None
-
         return counters.to_run_result(run_id, status=RunStatus.RUNNING)
 
     def resume(
@@ -2517,33 +2515,29 @@ class Orchestrator:
     ) -> RunResult:
         """Process unprocessed rows during resume.
 
-        Follows the same pattern as _execute_run() but:
-        - Row data comes from unprocessed_rows (not source)
-        - Source plugin is NOT called (data already recorded)
-        - Restored aggregation state is passed to processor
-        - Uses process_existing_row() instead of process_row()
-
-        Args:
-            recorder: LandscapeRecorder for audit trail
-            run_id: Run being resumed
-            config: Pipeline configuration
-            graph: Execution graph
-            unprocessed_rows: List of (row_id, row_index, row_data) tuples
-            restored_aggregation_state: Map of node_id -> state dict
-            settings: Full settings (optional)
-            payload_store: Optional PayloadStore for persisting source row payloads
-            schema_contract: SchemaContract for wrapping row data in PipelineRow
-
-        Returns:
-            RunResult with processing counts
+        Mirrors _execute_run() structure but with resume-specific divergences
+        documented in the accounting block below. Returns RunStatus.RUNNING —
+        the public resume() wrapper transitions to COMPLETED after finalize_run().
         """
-        # Store graph for checkpointing during execution
+        # ─────────────────────────────────────────────────────────────────
+        # Divergence accounting: _process_resumed_rows vs _execute_run
+        #
+        # Source on_start():       Skipped (include_source_on_start=False)
+        # Graph registration:     Loads from DB (_setup_resume_context)
+        # Quarantine routing:     Not applicable (rows already validated)
+        # Field resolution:       Skipped (loaded from DB in original run)
+        # Schema contract:        Skipped (passed via parameter)
+        # operation_id lifecycle: Not applicable (no source track_operation)
+        # Progress emission:      None (known gap — T24 follow-up)
+        # Checkpointing:          None (on_token_written_factory=None)
+        # ─────────────────────────────────────────────────────────────────
+
         self._current_graph = graph
 
-        # 1. Setup graph artifacts (loads from original run's DB records)
+        # 1. Setup (loads graph artifacts from original run's DB records)
         artifacts = self._setup_resume_context(recorder, run_id, config, graph)
 
-        # 2. Initialize context + processor (source on_start skipped for resume)
+        # 2. Initialize context + processor (source on_start skipped)
         run_ctx = self._initialize_run_context(
             recorder,
             run_id,
@@ -2557,35 +2551,25 @@ class Orchestrator:
             restored_aggregation_state=restored_aggregation_state,
         )
 
-        # Restore contract from run for transforms (was recorded during original run)
-        # This enables contract-aware template access (original header names) during resume
-        run_ctx.ctx.contract = recorder.get_run_contract(run_id)
+        # Restore contract from parameter (already retrieved by resume() caller)
+        run_ctx.ctx.contract = schema_contract
 
-        # Destructure into local variables for processing loop
-        processor = run_ctx.processor
-        ctx = run_ctx.ctx
-        coalesce_executor = run_ctx.coalesce_executor
-        coalesce_node_map = dict(run_ctx.coalesce_node_map)
-        agg_transform_lookup = dict(run_ctx.agg_transform_lookup)
-
-        # Process rows - counters and pending outcome tokens
         counters = ExecutionCounters()
         pending_tokens: dict[str, list[tuple[TokenInfo, PendingOutcome | None]]] = {name: [] for name in config.sinks}
 
-        # Build LoopContext so extracted methods can share this parameter bundle.
-        # Same mutable counters/pending_tokens — mutations visible through both refs.
         loop_ctx = LoopContext(
             counters=counters,
             pending_tokens=pending_tokens,
-            processor=processor,
-            ctx=ctx,
+            processor=run_ctx.processor,
+            ctx=run_ctx.ctx,
             config=config,
-            agg_transform_lookup=agg_transform_lookup,
-            coalesce_executor=coalesce_executor,
-            coalesce_node_map=coalesce_node_map,
+            agg_transform_lookup=run_ctx.agg_transform_lookup,
+            coalesce_executor=run_ctx.coalesce_executor,
+            coalesce_node_map=run_ctx.coalesce_node_map,
         )
 
         try:
+            # 3. Process loop (resume path)
             interrupted = self._run_resume_processing_loop(
                 loop_ctx,
                 unprocessed_rows,
@@ -2593,8 +2577,7 @@ class Orchestrator:
                 shutdown_event=shutdown_event,
             )
 
-            # Write to sinks + raise GracefulShutdownError if interrupted
-            # (no checkpoint callbacks for resume path)
+            # 4. Flush + write sinks (no checkpointing during resume)
             self._flush_and_write_sinks(
                 recorder,
                 run_id,
@@ -2604,9 +2587,7 @@ class Orchestrator:
             )
 
         finally:
-            self._cleanup_plugins(config, ctx, include_source=False)
+            self._cleanup_plugins(config, run_ctx.ctx, include_source=False)
 
-        # Clear graph after execution completes
         self._current_graph = None
-
         return counters.to_run_result(run_id, status=RunStatus.RUNNING)

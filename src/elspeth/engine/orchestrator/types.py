@@ -293,6 +293,21 @@ class LoopContext:
     coalesce_node_map: Mapping[CoalesceName, NodeID]
 
 
+@dataclass(slots=True)
+class LoopResult:
+    """Return value from _run_main_processing_loop().
+
+    Carries timing state back to the caller so that final progress emission
+    and PhaseCompleted can be emitted AFTER sink writes (not before).
+    The resume loop does not use this — it has no progress or phase events.
+    """
+
+    interrupted: bool
+    start_time: float
+    phase_start: float
+    last_progress_time: float
+
+
 type _CheckpointFactory = Callable[[str], Callable[[TokenInfo], None]]
 """Factory that creates a per-sink checkpoint callback.
 

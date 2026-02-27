@@ -28,8 +28,7 @@ from elspeth.engine.orchestrator.aggregation import (
     flush_remaining_aggregation_buffers,
     handle_incomplete_batches,
 )
-from elspeth.engine.orchestrator.types import PipelineConfig
-from elspeth.plugins.protocols import TransformProtocol
+from elspeth.engine.orchestrator.types import AggNodeEntry, PipelineConfig
 from elspeth.testing import make_row, make_token_info
 
 # =============================================================================
@@ -323,7 +322,7 @@ class TestCheckAggregationTimeouts:
         processor.handle_timeout_flush.return_value = ([completed], [])
 
         pending = _make_pending()
-        lookup: dict[str, tuple[TransformProtocol, NodeID]] = {"agg-1": (agg_transform, NodeID("agg-1"))}
+        lookup: dict[str, AggNodeEntry] = {"agg-1": AggNodeEntry(transform=agg_transform, node_id=NodeID("agg-1"))}
 
         result = check_aggregation_timeouts(
             config=config,
@@ -375,7 +374,7 @@ class TestCheckAggregationTimeouts:
         processor.handle_timeout_flush.return_value = ([completed], [])
 
         pending = _make_pending()
-        lookup: dict[str, tuple[TransformProtocol, NodeID]] = {"agg-1": (agg_transform, NodeID("agg-1"))}
+        lookup: dict[str, AggNodeEntry] = {"agg-1": AggNodeEntry(transform=agg_transform, node_id=NodeID("agg-1"))}
 
         result = check_aggregation_timeouts(
             config=config,
@@ -403,7 +402,7 @@ class TestCheckAggregationTimeouts:
         processor.handle_timeout_flush.return_value = ([failed], [])
 
         pending = _make_pending()
-        lookup: dict[str, tuple[TransformProtocol, NodeID]] = {"agg-1": (agg_transform, NodeID("agg-1"))}
+        lookup: dict[str, AggNodeEntry] = {"agg-1": AggNodeEntry(transform=agg_transform, node_id=NodeID("agg-1"))}
 
         result = check_aggregation_timeouts(
             config=config,
@@ -434,7 +433,7 @@ class TestCheckAggregationTimeouts:
         processor.process_token.return_value = [downstream_result]
 
         pending = _make_pending()
-        lookup: dict[str, tuple[TransformProtocol, NodeID]] = {"agg-1": (agg_transform, NodeID("agg-1"))}
+        lookup: dict[str, AggNodeEntry] = {"agg-1": AggNodeEntry(transform=agg_transform, node_id=NodeID("agg-1"))}
 
         result = check_aggregation_timeouts(
             config=config,
@@ -468,7 +467,7 @@ class TestCheckAggregationTimeouts:
         processor.process_token.return_value = []
 
         pending = _make_pending()
-        lookup: dict[str, tuple[TransformProtocol, NodeID]] = {"agg-1": (agg_transform, NodeID("agg-1"))}
+        lookup: dict[str, AggNodeEntry] = {"agg-1": AggNodeEntry(transform=agg_transform, node_id=NodeID("agg-1"))}
 
         check_aggregation_timeouts(
             config=config,
@@ -499,7 +498,7 @@ class TestCheckAggregationTimeouts:
         processor.process_token.return_value = [routed]
 
         pending: dict[str, list[tuple[TokenInfo, PendingOutcome | None]]] = {"output": [], "risk_sink": []}
-        lookup: dict[str, tuple[TransformProtocol, NodeID]] = {"agg-1": (agg_transform, NodeID("agg-1"))}
+        lookup: dict[str, AggNodeEntry] = {"agg-1": AggNodeEntry(transform=agg_transform, node_id=NodeID("agg-1"))}
 
         result = check_aggregation_timeouts(
             config=config,
@@ -530,7 +529,7 @@ class TestCheckAggregationTimeouts:
         processor.process_token.return_value = [quarantined]
 
         pending = _make_pending()
-        lookup: dict[str, tuple[TransformProtocol, NodeID]] = {"agg-1": (agg_transform, NodeID("agg-1"))}
+        lookup: dict[str, AggNodeEntry] = {"agg-1": AggNodeEntry(transform=agg_transform, node_id=NodeID("agg-1"))}
 
         result = check_aggregation_timeouts(
             config=config,
@@ -559,7 +558,7 @@ class TestCheckAggregationTimeouts:
         processor.process_token.return_value = [coalesced]
 
         pending = _make_pending()
-        lookup: dict[str, tuple[TransformProtocol, NodeID]] = {"agg-1": (agg_transform, NodeID("agg-1"))}
+        lookup: dict[str, AggNodeEntry] = {"agg-1": AggNodeEntry(transform=agg_transform, node_id=NodeID("agg-1"))}
 
         result = check_aggregation_timeouts(
             config=config,
@@ -589,7 +588,7 @@ class TestCheckAggregationTimeouts:
         processor.process_token.return_value = [failed]
 
         pending = _make_pending()
-        lookup: dict[str, tuple[TransformProtocol, NodeID]] = {"agg-1": (agg_transform, NodeID("agg-1"))}
+        lookup: dict[str, AggNodeEntry] = {"agg-1": AggNodeEntry(transform=agg_transform, node_id=NodeID("agg-1"))}
 
         result = check_aggregation_timeouts(
             config=config,
@@ -619,7 +618,7 @@ class TestCheckAggregationTimeouts:
         processor.process_token.return_value = [completed]
 
         pending = _make_pending()
-        lookup: dict[str, tuple[TransformProtocol, NodeID]] = {"agg-1": (agg_transform, NodeID("agg-1"))}
+        lookup: dict[str, AggNodeEntry] = {"agg-1": AggNodeEntry(transform=agg_transform, node_id=NodeID("agg-1"))}
 
         result = check_aggregation_timeouts(
             config=config,
@@ -653,7 +652,7 @@ class TestCheckAggregationTimeouts:
         processor.process_token.return_value = outcomes
 
         pending = _make_pending()
-        lookup: dict[str, tuple[TransformProtocol, NodeID]] = {"agg-1": (agg_transform, NodeID("agg-1"))}
+        lookup: dict[str, AggNodeEntry] = {"agg-1": AggNodeEntry(transform=agg_transform, node_id=NodeID("agg-1"))}
 
         result = check_aggregation_timeouts(
             config=config,
@@ -683,7 +682,7 @@ class TestCheckAggregationTimeouts:
         processor.handle_timeout_flush.return_value = ([completed], [])
 
         pending = _make_pending()
-        lookup: dict[str, tuple[TransformProtocol, NodeID]] = {"agg-1": (agg_transform, NodeID("agg-1"))}
+        lookup: dict[str, AggNodeEntry] = {"agg-1": AggNodeEntry(transform=agg_transform, node_id=NodeID("agg-1"))}
 
         result = check_aggregation_timeouts(
             config=config,
