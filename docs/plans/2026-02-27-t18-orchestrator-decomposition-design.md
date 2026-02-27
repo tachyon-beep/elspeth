@@ -122,7 +122,11 @@ class LoopContext:
     ``_run_main_processing_loop()``, ``_run_resume_processing_loop()``,
     and ``accumulate_row_outcomes()``. All other fields are effectively
     read-only after construction. Field reassignment is prevented by
-    convention, not by the dataclass.
+    convention, not by the dataclass. A ``__setattr__`` guard that
+    raises on reassignment of read-only fields after ``__init__``
+    is a natural hardening step but is explicitly deferred to a
+    follow-up commit — it adds test complexity without changing
+    extraction semantics.
 
     Mutation contracts:
     - ``counters``: incremented by _handle_quarantine_row(),
@@ -392,11 +396,11 @@ def _execute_run(self, recorder, run_id, config, graph, settings, batch_checkpoi
     pending_tokens = {name: [] for name in config.sinks}
 
     loop_ctx = LoopContext(
+        counters=counters,
+        pending_tokens=pending_tokens,
         processor=run_ctx.processor,
         ctx=run_ctx.ctx,
         config=config,
-        counters=counters,
-        pending_tokens=pending_tokens,
         agg_transform_lookup=run_ctx.agg_transform_lookup,
         coalesce_executor=run_ctx.coalesce_executor,
         coalesce_node_map=run_ctx.coalesce_node_map,
@@ -410,7 +414,7 @@ def _execute_run(self, recorder, run_id, config, graph, settings, batch_checkpoi
         )
 
         # 4. Flush + write sinks (outside source track_operation)
-        def checkpoint_after_sink(sink_node_id: str) -> Callable[..., None]:
+        def checkpoint_after_sink(sink_node_id: str) -> Callable[[TokenInfo], None]:
             # ... 10 lines capturing processor for checkpoint ...
             ...
 
@@ -445,11 +449,11 @@ def _process_resumed_rows(self, recorder, run_id, config, graph, unprocessed_row
     pending_tokens = {name: [] for name in config.sinks}
 
     loop_ctx = LoopContext(
+        counters=counters,
+        pending_tokens=pending_tokens,
         processor=run_ctx.processor,
         ctx=run_ctx.ctx,
         config=config,
-        counters=counters,
-        pending_tokens=pending_tokens,
         agg_transform_lookup=run_ctx.agg_transform_lookup,
         coalesce_executor=run_ctx.coalesce_executor,
         coalesce_node_map=run_ctx.coalesce_node_map,
@@ -531,7 +535,7 @@ _GateOutcome: TypeAlias = _GateContinue | _GateTerminal
 
 **Design rationale (from review):** The original design used `tuple[RowResult | list[RowResult] | None, TokenInfo, str]` where `None` meant "continue to next node." This conflates "no result yet" with absence of a value, and the caller must check `if result is not None` after every call while also unpacking two mutable out-parameters. Frozen dataclasses make the semantics explicit to mypy and readers. Precedent: `_FlushContext` in `processor.py` already uses this pattern.
 
-The gate outcome type mirrors the transform pattern for consistency. The original design used `RowResult | list[RowResult] | None` with a `None` sentinel for gates, but this created two problems: (1) asymmetry with the transform discriminated union in the same 60-line method, and (2) the gate "jump to specific node" case (where `outcome.next_node_id` overrides the structural next node) cannot be represented by returning `None` — the caller needs the jump target. `_GateContinue.next_node_id` captures this cleanly.
+The gate outcome type mirrors the transform pattern for consistency. The original design used `RowResult | list[RowResult] | None` with a `None` sentinel for gates, but this created two problems: (1) asymmetry with the transform discriminated union in the same 60-line method, and (2) the gate "jump to specific node" case (where `outcome.next_node_id` overrides the structural next node) cannot be represented by returning `None` — the caller needs the target. `_GateContinue.next_node_id` captures this cleanly, and the field name matches `GateOutcome.next_node_id` from `executors/types.py` (maintaining consistent vocabulary across the engine).
 
 ### Current `_process_single_token()` structure
 
@@ -606,7 +610,7 @@ Handles:
 - Explicit next_node_id jump → `_GateContinue(next_node_id=node_id)`
 - Error handling and coalesce notification
 
-Returns `_GateTerminal` for fork/route/divert outcomes. Returns `_GateContinue` for continue/jump outcomes, with `next_node_id` set when the gate specifies an explicit next node (overriding structural DAG order).
+Returns `_GateTerminal` for fork/route/divert outcomes. Returns `_GateContinue` for continue outcomes, with `next_node_id` set when the gate specifies an explicit next node (overriding structural DAG order), or `None` for default structural traversal.
 
 #### 3. `_handle_terminal_token()`
 
@@ -771,7 +775,7 @@ Confirm existing coverage for:
 - **No behavior changes.** Only move code. If a test fails, it's a move error, not a logic bug.
 - **Verify with `git diff --stat`.** Each commit should show lines moved between methods, not net new lines.
 - **Integration tests exercise real code paths.** Per CLAUDE.md: "Never bypass production code paths in tests."
-- **Focused test runs after each commit:** `pytest tests/unit/engine/test_processor.py tests/integration/pipeline/orchestrator/ tests/property/engine/ -x --tb=short` for fast feedback. For high-risk commits (#6, #8, #10), also include `tests/integration/pipeline/` (the parent directory covers fork/join tests that depend on both orchestrator and processor). Full suite run for the final commit and after high-risk commits.
+- **Focused test runs after each commit:** `pytest tests/unit/engine/test_processor.py tests/integration/pipeline/orchestrator/ tests/property/engine/ -x --tb=short` for fast feedback. For high-risk commits (#6, #8, #10, #12), also include `tests/integration/pipeline/` (the parent directory covers fork/join tests that depend on both orchestrator and processor). Commit #12 (`_handle_gate_node`) extracts fork/route/divert/continue/jump branches — equally dangerous for the processor path as #8 is for the orchestrator. Full suite run for the final commit and after high-risk commits.
 - **Side-by-side diff of resume path** required before committing #10 (collapse) — verify flag values match intent and divergence accounting is complete.
 - **`track_operation` boundary verification** for commit #8: confirm that the extraction boundary between `_run_main_processing_loop()` and `_flush_and_write_sinks()` coincides with the `track_operation(source_load)` context boundary. Aggregation flushing and sink writes must remain outside the source operation context.
 
@@ -802,17 +806,22 @@ Confirm existing coverage for:
 | Decision | Choice | Rationale |
 |----------|--------|-----------|
 | Extract Method vs Phase Objects vs Module Functions | Extract Method | Keeps `self` access free, minimal abstraction cost, lowest risk |
-| Immutable return types | Frozen dataclasses with `MappingProxyType` (`GraphArtifacts`, `RunContext`) | Deep immutability matching `DAGTraversalContext` precedent; named fields eliminate positional-swap hazards |
-| Aggregation lookup values | `AggNodeEntry` frozen dataclass | Replaces `tuple[TransformProtocol, NodeID]`; same anti-pattern `GraphArtifacts` was designed to fix |
-| Parameter bundling | `LoopContext` mutable dataclass (`slots=True`, NOT `frozen=True`) | Contains `counters` and `pending_tokens` which are mutated in place; `frozen=True` would create a semantic lie |
+| Immutable return types | Frozen dataclasses with `MappingProxyType` (`GraphArtifacts`, `RunContext`) | Deep immutability matching `DAGTraversalContext` precedent; named fields eliminate positional-swap hazards. `RunContext` wraps dict fields for consistency with `GraphArtifacts` despite short lifetime. |
+| MappingProxyType idiom | Unconditional copy-then-wrap: `MappingProxyType(dict(x))` | Always correct, simple, avoids the guarded `isinstance` check used by `AggregationFlushResult` (legacy inconsistency). New types in this plan use the unconditional form. |
+| Aggregation lookup values | `AggNodeEntry` frozen dataclass | Replaces `tuple[TransformProtocol, NodeID]`; same anti-pattern `GraphArtifacts` was designed to fix. Requires updating `aggregation.py` destructuring (commit #1). |
+| Parameter bundling | `LoopContext` mutable dataclass (`slots=True`, NOT `frozen=True`) | Contains `counters` and `pending_tokens` which are mutated in place; `frozen=True` would create a semantic lie. Mutable/immutable fields visually separated with mutation contracts documented in docstring. |
+| Parameter source of truth | Bundle fields accessed via `loop_ctx`, not passed separately | `_handle_quarantine_row()` accesses `processor` as `loop_ctx.processor`, not as a separate parameter — prevents split-brain where state is available through two paths. |
 | Main/resume loop unification | Two typed loop methods with shared helpers | Preserves full mypy coverage; 20 lines of shared bookkeeping is below duplication threshold |
 | Source iteration | Regular method `_handle_quarantine_row()` (not generator) | Avoids `GeneratorExit` hazard, hidden mutation, untestable quarantine path |
 | Transform node return type | `_TransformOutcome` discriminated union | Replaces `None` sentinel + 3-tuple; explicit semantics for continue vs terminal |
-| Gate node return type | `_GateOutcome` discriminated union | Symmetric with transform pattern; `_GateContinue.next_node_id` captures explicit next-node override that `None` sentinel cannot represent |
+| Gate node return type | `_GateOutcome` discriminated union | Symmetric with transform pattern; `_GateContinue.next_node_id` matches `GateOutcome.next_node_id` vocabulary from `executors/types.py` |
+| Terminal token return | `RowResult \| list[RowResult]` (no `child_items` passthrough) | `_handle_terminal_token()` returns only what it computes; caller wraps with pre-existing `child_items`. Honest contract. |
+| Checkpoint factory type | `Callable[[str], Callable[[TokenInfo], None]]` | Concrete inner type (verified from `_write_pending_to_sinks` line 275); no `Callable[..., None]` type hole. |
 | Checkpointing control | `on_token_written_factory: _CheckpointFactory \| None` | Named TypeAlias documents intent; matches existing `_write_pending_to_sinks()` signature; eliminates boolean flag |
-| `to_run_result()` status parameter | Required (no default) | Previous `RunStatus.RUNNING` default silently produces incorrect audit records if any call site omits the argument |
+| `to_run_result()` status parameter | Required (no default) | Previous `RunStatus.RUNNING` default silently produces incorrect audit records if any call site omits the argument. Preflight: update all callers before commit #1. |
 | Method vs standalone function for extractions | Private methods on same class | Extracted code needs `self._events`, `self._telemetry`, `self._checkpoint_*` etc. |
 | Parameter naming | `current_on_success_sink` (not `last_on_success_sink`) | `current_` describes the parameter's role at the method boundary; `last_` implies loop iteration context |
+| Gate continue field naming | `next_node_id` (not `jump_target`) | Matches established vocabulary: `GateOutcome.next_node_id` in `executors/types.py:44`, `processor.py:1812`, `dag_navigator.py:220` |
 | Resume graph setup | Separate `_setup_resume_context()` method | Loads `GraphArtifacts` from DB instead of registering new ones; parallel to `_register_graph_nodes_and_edges()` |
 | New files? | No (types added to existing `types.py`) | Methods stay on their existing classes. No new modules. |
 
@@ -838,3 +847,5 @@ The main/resume duplication is a "Shifting the Burden" archetype (systems thinki
 5. `operation_id` lifecycle (set/clear/restore vs N/A for resume)
 
 Underspecifying this protocol will reproduce the divergence pattern at the protocol level. Scope T24 with the same rigor as a structural refactor — do not combine it with other RC3.3 work.
+
+**Deferral risk (from systems analysis):** T18 reduces the symptomatic pressure (duplication is now visible, shared methods prevent most drift). This makes T24 feel less urgent, which is the classic "Shifting the Burden" dynamic. Once T18 ships and engineers move to other RC3.3 work (T1, T9, T19 are the critical chain), T24 will be deprioritized. The divergence accounting table will be accurate at commit time and stale within a year. To mitigate: create T24 as a P2 task (not backlog) immediately after T18 closes, with a dedicated design phase before any code is written. The `RowSource` protocol must be designed as a structural refactor — "RowSource protocol" sounds like a 50-line interface, but the true scope is an architectural change to how the execution engine is parameterized.

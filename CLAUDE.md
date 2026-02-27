@@ -4,8 +4,6 @@
 
 ELSPETH is a **domain-agnostic framework for auditable Sense/Decide/Act (SDA) pipelines**. It provides scaffolding for data processing workflows where every decision must be traceable to its source, regardless of whether the "decide" step is an LLM, ML model, rules engine, or threshold check.
 
-**Current Status:** RC-3. Core architecture, plugins, and audit trail are complete. Quality sprint in progress — stabilization fixes, documentation updates, and contract hardening.
-
 ## Auditability Standard
 
 ELSPETH is built for **high-stakes accountability**. The audit trail must withstand formal inquiry.
@@ -104,41 +102,24 @@ Transforms that make external calls (LLM APIs, HTTP requests, database queries) 
 def process(self, row: PipelineRow, ctx: PluginContext) -> TransformResult:
     # row enters as Tier 2 (pipeline data - trust the schema)
 
-    # External call creates Tier 3 boundary
+    # 1. External call creates Tier 3 boundary — wrap it
     try:
         llm_response = self._llm_client.query(prompt)  # EXTERNAL DATA - zero trust
     except Exception as e:
-        return TransformResult.error(
-            {"reason": "llm_call_failed", "error": str(e)},
-            retryable=True,
-        )
+        return TransformResult.error({"reason": "llm_call_failed", "error": str(e)}, retryable=True)
 
-    # IMMEDIATELY validate at the boundary - don't let "their data" travel
+    # 2. IMMEDIATELY validate at the boundary — retryable=False (bad data, not transient)
     try:
         parsed = json.loads(llm_response.content)
     except json.JSONDecodeError:
-        return TransformResult.error(
-            {"reason": "invalid_json", "raw": llm_response.content[:200]},
-            retryable=False,
-        )
+        return TransformResult.error({"reason": "invalid_json", "raw": llm_response.content[:200]}, retryable=False)
 
-    # Validate structure type IMMEDIATELY
     if not isinstance(parsed, dict):
-        return TransformResult.error(
-            {
-                "reason": "invalid_json_type",
-                "expected": "object",
-                "actual": type(parsed).__name__
-            },
-            retryable=False,
-        )
+        return TransformResult.error({"reason": "invalid_json_type"}, retryable=False)
 
-    # NOW it's our data (Tier 2) - add to row and continue
-    output = {**row.to_dict(), "llm_classification": parsed["category"]}  # Safe - validated above
-    return TransformResult.success(
-        output,
-        success_reason={"action": "llm_classified", "category": parsed["category"]},
-    )
+    # 3. NOW it's our data (Tier 2) — validated, trust it
+    output = {**row.to_dict(), "llm_classification": parsed["category"]}
+    return TransformResult.success(output, success_reason={"action": "llm_classified"})
 ```
 
 **The rule: Minimize the distance external data travels before you validate it.**
@@ -739,20 +720,11 @@ If you are proposing a fix that involves "a patch or temporary workaround," STOP
 
 ## Prohibition on Defensive Programming Patterns
 
-This codebase prohibits defensive patterns that mask bugs instead of fixing them. Do not use `.get()`, `getattr()`, `hasattr()`, `isinstance()`, or silent exception handling to suppress errors from nonexistent attributes, malformed data, or incorrect types.
+Do not use `.get()`, `getattr()`, `hasattr()`, `isinstance()`, or silent exception handling to suppress errors from nonexistent attributes, malformed data, or incorrect types. **Access typed dataclass fields directly** (`obj.field`), not defensively (`obj.get("field")`).
 
 A common anti-pattern: an LLM hallucinates a field name, code fails, and the "fix" is `getattr(obj, "hallucinated_field", None)`. This hides the real bug. Fix the actual cause instead.
 
-**Access typed dataclass fields directly** (`obj.field`), not defensively (`obj.get("field")`). If code would fail without a defensive pattern, that failure is a bug to fix.
-
-### Legitimate Uses
-
-Defensive handling IS appropriate at trust boundaries (see Three-Tier Trust Model above for the full rules and examples):
-
-1. **Operations on row values** - Their data can cause operation failures (division by zero, parse errors). Wrap `row["x"] / row["y"]`, but NOT `self._x / self._y` (our bug if that fails).
-2. **External system boundaries** - Validate API/LLM responses immediately at the boundary.
-3. **Framework boundaries** - Plugin schema contracts, Pydantic config validation at load time.
-4. **Serialization** - pandas/numpy dtype normalization in canonical JSON.
+Defensive handling IS appropriate at trust boundaries — see the **Coercion Rules** and **Operation Wrapping Rules** tables in the Three-Tier Trust Model section for the complete rules and examples.
 
 ### The Decision Test
 
@@ -762,8 +734,6 @@ Defensive handling IS appropriate at trust boundaries (see Three-Tier Trust Mode
 | Is this at an external system boundary (API, file, DB)? | ✅ Wrap it | — |
 | Would this fail due to a bug in code we control? | — | ❌ Let it crash |
 | Am I adding this because "something might be None"? | — | ❌ Fix the root cause |
-
-If you're wrapping to hide a bug that "shouldn't happen," remove the wrapper and fix the bug.
 
 <!-- filigree:instructions:v1.3.0:6bd811c8 -->
 ## Filigree Issue Tracker

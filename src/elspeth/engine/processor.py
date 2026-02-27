@@ -749,13 +749,19 @@ class RowProcessor:
                 record_parent_outcome=False,
             )
 
-            # Build triggering RowResult if applicable (count-triggered only)
+            # Build triggering RowResult if applicable (count-triggered only).
+            # The triggering token is always the last buffered token (buffered
+            # immediately before flush), so its index is len(buffered_tokens) - 1.
+            # Its outcome must match what the recorder loop already recorded —
+            # QUARANTINED if in quarantined_index_set, CONSUMED_IN_BATCH otherwise.
             if fctx.triggering_token is not None:
+                triggering_index = len(fctx.buffered_tokens) - 1
+                triggering_outcome = RowOutcome.QUARANTINED if triggering_index in quarantined_index_set else RowOutcome.CONSUMED_IN_BATCH
                 results.append(
                     RowResult(
                         token=fctx.triggering_token,
                         final_data=fctx.triggering_token.row_data,
-                        outcome=RowOutcome.CONSUMED_IN_BATCH,
+                        outcome=triggering_outcome,
                     )
                 )
 

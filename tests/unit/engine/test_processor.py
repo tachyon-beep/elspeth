@@ -914,6 +914,115 @@ class TestAggregationFailureMatrix:
         assert results[0].outcome == RowOutcome.COMPLETED
         assert results[0].sink_name == "agg_sink"
 
+    def test_transform_mode_triggering_token_quarantined_outcome(self) -> None:
+        """Triggering token's RowResult must be QUARANTINED when quarantined_indices includes it.
+
+        Regression: the triggering token (count-triggered flush) was unconditionally
+        returned as CONSUMED_IN_BATCH in its RowResult, even when the recorder had
+        already recorded it as QUARANTINED. This caused outcome disagreement between
+        the audit trail and in-memory control flow.
+        """
+        _db, recorder, processor, transform, _agg_node = self._setup_batch_processor(output_mode="transform")
+        source_row = _make_source_row({"value": 10})
+        ctx = PluginContext(run_id="test-run", config={})
+        captured: dict[str, TokenInfo] = {}
+
+        # The triggering token is the only buffered token (count=1 trigger).
+        # Index 0 in quarantined_indices means the triggering token IS quarantined.
+        flush_result = TransformResult.success(
+            make_row({"value": 999}, contract=_make_contract()),
+            success_reason={
+                "action": "batch_processed",
+                "metadata": {"quarantined_indices": [0]},
+            },
+        )
+
+        def buffer_row_side_effect(node_id: NodeID, token: TokenInfo) -> None:
+            captured["token"] = token
+
+        def execute_flush_side_effect(*, node_id, transform, ctx, trigger_type):
+            return flush_result, [captured["token"]], "batch-1"
+
+        with (
+            patch.object(processor._aggregation_executor, "buffer_row", side_effect=buffer_row_side_effect),
+            patch.object(processor._aggregation_executor, "get_batch_id", return_value="batch-1"),
+            patch.object(processor._aggregation_executor, "should_flush", return_value=True),
+            patch.object(processor._aggregation_executor, "get_trigger_type", return_value=TriggerType.COUNT),
+            patch.object(processor._aggregation_executor, "execute_flush", side_effect=execute_flush_side_effect),
+            patch.object(recorder, "record_token_outcome") as record_outcome,
+            patch.object(processor, "_emit_transform_completed"),
+            patch.object(processor, "_emit_token_completed"),
+            patch.object(processor._token_manager, "expand_token", return_value=([], "expand-group-1")),
+        ):
+            results = processor.process_row(
+                row_index=0,
+                source_row=source_row,
+                transforms=[transform],
+                ctx=ctx,
+            )
+
+        # The triggering token must be returned as QUARANTINED, matching the recorder.
+        triggering_results = [r for r in results if r.outcome == RowOutcome.QUARANTINED]
+        assert len(triggering_results) == 1, (
+            f"Expected triggering token RowResult with QUARANTINED outcome, got outcomes: {[r.outcome for r in results]}"
+        )
+
+        # Recorder must also have recorded QUARANTINED (not CONSUMED_IN_BATCH).
+        recorded_outcomes = [call.kwargs["outcome"] for call in record_outcome.call_args_list]
+        assert RowOutcome.QUARANTINED in recorded_outcomes
+        assert RowOutcome.CONSUMED_IN_BATCH not in recorded_outcomes
+
+    def test_transform_mode_triggering_token_consumed_when_not_quarantined(self) -> None:
+        """Triggering token's RowResult is CONSUMED_IN_BATCH when not in quarantined_indices.
+
+        Companion to the quarantine test — verifies the normal (non-quarantined) path
+        still works correctly after the fix.
+        """
+        _db, recorder, processor, transform, _agg_node = self._setup_batch_processor(output_mode="transform")
+        source_row = _make_source_row({"value": 10})
+        ctx = PluginContext(run_id="test-run", config={})
+        captured: dict[str, TokenInfo] = {}
+
+        # No quarantined_indices — all tokens are consumed normally.
+        flush_result = TransformResult.success(
+            make_row({"value": 999}, contract=_make_contract()),
+            success_reason={"action": "batch_processed"},
+        )
+
+        def buffer_row_side_effect(node_id: NodeID, token: TokenInfo) -> None:
+            captured["token"] = token
+
+        def execute_flush_side_effect(*, node_id, transform, ctx, trigger_type):
+            return flush_result, [captured["token"]], "batch-1"
+
+        with (
+            patch.object(processor._aggregation_executor, "buffer_row", side_effect=buffer_row_side_effect),
+            patch.object(processor._aggregation_executor, "get_batch_id", return_value="batch-1"),
+            patch.object(processor._aggregation_executor, "should_flush", return_value=True),
+            patch.object(processor._aggregation_executor, "get_trigger_type", return_value=TriggerType.COUNT),
+            patch.object(processor._aggregation_executor, "execute_flush", side_effect=execute_flush_side_effect),
+            patch.object(recorder, "record_token_outcome") as record_outcome,
+            patch.object(processor, "_emit_transform_completed"),
+            patch.object(processor, "_emit_token_completed"),
+            patch.object(processor._token_manager, "expand_token", return_value=([], "expand-group-1")),
+        ):
+            results = processor.process_row(
+                row_index=0,
+                source_row=source_row,
+                transforms=[transform],
+                ctx=ctx,
+            )
+
+        # Triggering token should be CONSUMED_IN_BATCH (no quarantine).
+        triggering_results = [r for r in results if r.outcome == RowOutcome.CONSUMED_IN_BATCH]
+        assert len(triggering_results) == 1, (
+            f"Expected triggering token RowResult with CONSUMED_IN_BATCH outcome, got outcomes: {[r.outcome for r in results]}"
+        )
+
+        # Recorder should have CONSUMED_IN_BATCH, not QUARANTINED.
+        recorded_outcomes = [call.kwargs["outcome"] for call in record_outcome.call_args_list]
+        assert RowOutcome.CONSUMED_IN_BATCH in recorded_outcomes
+
 
 class TestProcessRowGateBranching:
     """Tests for non-linear gate branching through next_node_id."""
