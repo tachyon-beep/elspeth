@@ -1298,6 +1298,85 @@ class Orchestrator:
             agg_transform_lookup=agg_transform_lookup,
         )
 
+    def _setup_resume_context(
+        self,
+        recorder: LandscapeRecorder,
+        run_id: str,
+        config: PipelineConfig,
+        graph: ExecutionGraph,
+    ) -> GraphArtifacts:
+        """Resume-path equivalent of _register_graph_nodes_and_edges().
+
+        Loads node ID maps and edge_map from database records instead of
+        registering new ones. The graph is the same as the original run,
+        but nodes/edges already exist in Landscape.
+
+        Returns:
+            GraphArtifacts populated from existing Landscape records.
+        """
+        # Get explicit node ID mappings from graph
+        source_id = graph.get_source()
+        if source_id is None:
+            raise ValueError("Graph has no source node")
+        sink_id_map = graph.get_sink_id_map()
+        transform_id_map = graph.get_transform_id_map()
+        config_gate_id_map = graph.get_config_gate_id_map()
+        coalesce_id_map = graph.get_coalesce_id_map()
+
+        # Build edge_map from database (load real edge IDs registered in original run)
+        # CRITICAL: Must use real edge_ids for FK integrity when recording routing events
+        # Convert keys from (str, str) to (NodeID, str) to match RowProcessor's type
+        raw_edge_map = recorder.get_edge_map(run_id)
+        edge_map: dict[tuple[NodeID, str], str] = {(NodeID(k[0]), k[1]): v for k, v in raw_edge_map.items()}
+
+        # Validate: If graph has edges, database MUST have matching edges (Tier 1 trust)
+        # Missing edges = data corruption or incomplete original run registration
+        graph_edges = graph.get_edges()
+        if graph_edges and not edge_map:
+            raise ValueError(
+                f"Resume failed: Graph has {len(graph_edges)} edges but no edges found in database "
+                f"for run_id '{run_id}'. This indicates data corruption or incomplete edge registration "
+                f"in the original run. Cannot resume without edge data."
+            )
+
+        # Get route resolution map for validation
+        route_resolution_map = graph.get_route_resolution_map()
+
+        # Validate route destinations (config may have changed since original run)
+        # This catches config errors early instead of after partial processing
+        # Call module function directly (no wrapper method)
+        validate_route_destinations(
+            route_resolution_map=route_resolution_map,
+            available_sinks=set(config.sinks.keys()),
+            transform_id_map=transform_id_map,
+            transforms=config.transforms,
+            config_gate_id_map=config_gate_id_map,
+            config_gates=config.gates,
+        )
+
+        # Validate transform error sink destinations
+        # Call module function directly (no wrapper method)
+        validate_transform_error_sinks(
+            transforms=config.transforms,
+            available_sinks=set(config.sinks.keys()),
+        )
+
+        # Validate source quarantine destination
+        # Call module function directly (no wrapper method)
+        validate_source_quarantine_destination(
+            source=config.source,
+            available_sinks=set(config.sinks.keys()),
+        )
+
+        return GraphArtifacts(
+            edge_map=edge_map,
+            source_id=source_id,
+            sink_id_map=sink_id_map,
+            transform_id_map=transform_id_map,
+            config_gate_id_map=config_gate_id_map,
+            coalesce_id_map=coalesce_id_map,
+        )
+
     def _execute_run(
         self,
         recorder: LandscapeRecorder,
@@ -2219,129 +2298,38 @@ class Orchestrator:
         # Store graph for checkpointing during execution
         self._current_graph = graph
 
-        # Get explicit node ID mappings from graph
-        source_id = graph.get_source()
-        if source_id is None:
-            raise ValueError("Graph has no source node")
-        sink_id_map = graph.get_sink_id_map()
-        transform_id_map = graph.get_transform_id_map()
-        config_gate_id_map = graph.get_config_gate_id_map()
-        coalesce_id_map = graph.get_coalesce_id_map()
+        # 1. Setup graph artifacts (loads from original run's DB records)
+        artifacts = self._setup_resume_context(recorder, run_id, config, graph)
 
-        # Build edge_map from database (load real edge IDs registered in original run)
-        # CRITICAL: Must use real edge_ids for FK integrity when recording routing events
-        # Convert keys from (str, str) to (NodeID, str) to match RowProcessor's type
-        raw_edge_map = recorder.get_edge_map(run_id)
-        edge_map: dict[tuple[NodeID, str], str] = {(NodeID(k[0]), k[1]): v for k, v in raw_edge_map.items()}
-
-        # Validate: If graph has edges, database MUST have matching edges (Tier 1 trust)
-        # Missing edges = data corruption or incomplete original run registration
-        graph_edges = graph.get_edges()
-        if graph_edges and not edge_map:
-            raise ValueError(
-                f"Resume failed: Graph has {len(graph_edges)} edges but no edges found in database "
-                f"for run_id '{run_id}'. This indicates data corruption or incomplete edge registration "
-                f"in the original run. Cannot resume without edge data."
-            )
-
-        # Get route resolution map
-        route_resolution_map = graph.get_route_resolution_map()
-
-        # Validate route destinations (config may have changed since original run)
-        # This catches config errors early instead of after partial processing
-        # Call module function directly (no wrapper method)
-        validate_route_destinations(
-            route_resolution_map=route_resolution_map,
-            available_sinks=set(config.sinks.keys()),
-            transform_id_map=transform_id_map,
-            transforms=config.transforms,
-            config_gate_id_map=config_gate_id_map,
-            config_gates=config.gates,
-        )
-
-        # Validate transform error sink destinations
-        # Call module function directly (no wrapper method)
-        validate_transform_error_sinks(
-            transforms=config.transforms,
-            available_sinks=set(config.sinks.keys()),
-        )
-
-        # Validate source quarantine destination
-        # Call module function directly (no wrapper method)
-        validate_source_quarantine_destination(
-            source=config.source,
-            available_sinks=set(config.sinks.keys()),
-        )
-
-        # Assign node_ids to all plugins
-        self._assign_plugin_node_ids(
-            source=config.source,
-            transforms=config.transforms,
-            sinks=config.sinks,
-            source_id=source_id,
-            transform_id_map=transform_id_map,
-            sink_id_map=sink_id_map,
-        )
-
-        # Create context
-        ctx = PluginContext(
-            run_id=run_id,
-            config=config.config,
-            landscape=recorder,
-            rate_limit_registry=self._rate_limit_registry,
-            concurrency_config=self._concurrency_config,
-            telemetry_emit=self._emit_telemetry,
+        # 2. Initialize context + processor (source on_start skipped for resume)
+        run_ctx = self._initialize_run_context(
+            recorder,
+            run_id,
+            config,
+            graph,
+            settings,
+            artifacts,
+            None,  # batch_checkpoints
+            payload_store,
+            include_source_on_start=False,
+            restored_aggregation_state=restored_aggregation_state,
         )
 
         # Restore contract from run for transforms (was recorded during original run)
         # This enables contract-aware template access (original header names) during resume
-        ctx.contract = recorder.get_run_contract(run_id)
+        run_ctx.ctx.contract = recorder.get_run_contract(run_id)
 
-        # Call on_start for transforms and sinks.
-        # Source's on_start/on_complete are intentionally skipped because:
-        # 1. Source's load() is not called - row data comes from stored payloads
-        # 2. The source used during resume is NullSource, which has no resources to manage
-        # 3. If a real source with resources were used in the future (e.g., holding
-        #    a database connection), on_start/on_complete would need to be called here
-        for transform in config.transforms:
-            transform.on_start(ctx)
-        for sink in config.sinks.values():
-            sink.on_start(ctx)
+        # Destructure into local variables for processing loop
+        processor = run_ctx.processor
+        ctx = run_ctx.ctx
+        coalesce_executor = run_ctx.coalesce_executor
+        coalesce_node_map = dict(run_ctx.coalesce_node_map)
+        agg_transform_lookup = dict(run_ctx.agg_transform_lookup)
+        sink_id_map = dict(artifacts.sink_id_map)
 
-        # Wrap _build_processor so that if it fails after successful on_start,
-        # plugin cleanup still runs (same pattern as _execute_run).
-        try:
-            processor, coalesce_node_map, coalesce_executor = self._build_processor(
-                graph=graph,
-                config=config,
-                settings=settings,
-                recorder=recorder,
-                run_id=run_id,
-                source_id=source_id,
-                edge_map=edge_map,
-                route_resolution_map=route_resolution_map,
-                config_gate_id_map=config_gate_id_map,
-                coalesce_id_map=coalesce_id_map,
-                payload_store=payload_store,
-                restored_aggregation_state={NodeID(k): v for k, v in restored_aggregation_state.items()},
-            )
-        except Exception:
-            self._cleanup_plugins(config, ctx, include_source=False)
-            raise
-
-        # Process rows - Buffer TOKENS
+        # Process rows - counters and pending outcome tokens
         counters = ExecutionCounters()
-        # Track (token, pending_outcome) pairs for deferred outcome recording
-        # Outcomes are recorded by SinkExecutor.write() AFTER sink durability is achieved
-        # Fix: P1-2026-01-31 - use PendingOutcome to carry error_hash for QUARANTINED
         pending_tokens: dict[str, list[tuple[TokenInfo, PendingOutcome | None]]] = {name: [] for name in config.sinks}
-
-        # Pre-compute aggregation transform lookup for O(1) access per timeout check
-        agg_transform_lookup: dict[str, AggNodeEntry] = {}
-        if config.aggregation_settings:
-            for t in config.transforms:
-                if isinstance(t, TransformProtocol) and t.is_batch_aware and t.node_id in config.aggregation_settings:
-                    agg_transform_lookup[t.node_id] = AggNodeEntry(transform=t, node_id=NodeID(t.node_id))
 
         interrupted_by_shutdown = False
 
