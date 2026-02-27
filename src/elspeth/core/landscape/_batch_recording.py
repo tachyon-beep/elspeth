@@ -25,10 +25,10 @@ from elspeth.core.landscape.schema import (
 if TYPE_CHECKING:
     from elspeth.core.landscape._database_ops import DatabaseOps
     from elspeth.core.landscape.database import LandscapeDB
-    from elspeth.core.landscape.repositories import (
-        ArtifactRepository,
-        BatchMemberRepository,
-        BatchRepository,
+    from elspeth.core.landscape.model_loaders import (
+        ArtifactLoader,
+        BatchLoader,
+        BatchMemberLoader,
     )
 
 
@@ -41,9 +41,9 @@ class BatchRecordingMixin:
     # Shared state annotations (set by LandscapeRecorder.__init__)
     _db: LandscapeDB
     _ops: DatabaseOps
-    _batch_repo: BatchRepository
-    _batch_member_repo: BatchMemberRepository
-    _artifact_repo: ArtifactRepository
+    _batch_loader: BatchLoader
+    _batch_member_loader: BatchMemberLoader
+    _artifact_loader: ArtifactLoader
 
     def create_batch(
         self,
@@ -214,7 +214,7 @@ class BatchRecordingMixin:
         row = self._ops.execute_fetchone(query)
         if row is None:
             return None
-        return self._batch_repo.load(row)
+        return self._batch_loader.load(row)
 
     def get_batches(
         self,
@@ -244,7 +244,7 @@ class BatchRecordingMixin:
         # Order for deterministic export signatures
         query = query.order_by(batches_table.c.created_at, batches_table.c.batch_id)
         rows = self._ops.execute_fetchall(query)
-        return [self._batch_repo.load(row) for row in rows]
+        return [self._batch_loader.load(row) for row in rows]
 
     def get_incomplete_batches(self, run_id: str) -> list[Batch]:
         """Get batches that need recovery (draft, executing, or failed).
@@ -268,7 +268,7 @@ class BatchRecordingMixin:
             .order_by(batches_table.c.created_at.asc())
         )
         result = self._ops.execute_fetchall(query)
-        return [self._batch_repo.load(row) for row in result]
+        return [self._batch_loader.load(row) for row in result]
 
     def get_batch_members(self, batch_id: str) -> list[BatchMember]:
         """Get all members of a batch.
@@ -281,7 +281,7 @@ class BatchRecordingMixin:
         """
         query = select(batch_members_table).where(batch_members_table.c.batch_id == batch_id).order_by(batch_members_table.c.ordinal)
         rows = self._ops.execute_fetchall(query)
-        return [self._batch_member_repo.load(row) for row in rows]
+        return [self._batch_member_loader.load(row) for row in rows]
 
     def get_all_batch_members_for_run(self, run_id: str) -> list[BatchMember]:
         """Get all batch members for a run (batch query).
@@ -302,7 +302,7 @@ class BatchRecordingMixin:
             .order_by(batch_members_table.c.batch_id, batch_members_table.c.ordinal)
         )
         rows = self._ops.execute_fetchall(query)
-        return [self._batch_member_repo.load(row) for row in rows]
+        return [self._batch_member_loader.load(row) for row in rows]
 
     def retry_batch(self, batch_id: str) -> Batch:
         """Create a new batch attempt from a failed batch (idempotent).
@@ -376,7 +376,7 @@ class BatchRecordingMixin:
         row = self._ops.execute_fetchone(query)
         if row is None:
             return None
-        return self._batch_repo.load(row)
+        return self._batch_loader.load(row)
 
     # === Artifact Registration ===
 
@@ -465,4 +465,4 @@ class BatchRecordingMixin:
         # Order for deterministic export signatures
         query = query.order_by(artifacts_table.c.created_at, artifacts_table.c.artifact_id)
         rows = self._ops.execute_fetchall(query)
-        return [self._artifact_repo.load(row) for row in rows]
+        return [self._artifact_loader.load(row) for row in rows]

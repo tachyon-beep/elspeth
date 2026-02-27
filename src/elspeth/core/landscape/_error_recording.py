@@ -31,9 +31,9 @@ if TYPE_CHECKING:
     from elspeth.contracts.schema_contract import PipelineRow
     from elspeth.core.landscape._database_ops import DatabaseOps
     from elspeth.core.landscape.database import LandscapeDB
-    from elspeth.core.landscape.repositories import (
-        TransformErrorRepository,
-        ValidationErrorRepository,
+    from elspeth.core.landscape.model_loaders import (
+        TransformErrorLoader,
+        ValidationErrorLoader,
     )
 
 
@@ -43,8 +43,8 @@ class ErrorRecordingMixin:
     # Shared state annotations (set by LandscapeRecorder.__init__)
     _db: LandscapeDB
     _ops: DatabaseOps
-    _validation_error_repo: ValidationErrorRepository
-    _transform_error_repo: TransformErrorRepository
+    _validation_error_loader: ValidationErrorLoader
+    _transform_error_loader: TransformErrorLoader
 
     def record_validation_error(
         self,
@@ -250,7 +250,7 @@ class ErrorRecordingMixin:
             validation_errors_table.c.row_hash == row_hash,
         )
         rows = self._ops.execute_fetchall(query)
-        return [self._validation_error_repo.load(r) for r in rows]
+        return [self._validation_error_loader.load(r) for r in rows]
 
     def get_validation_errors_for_run(self, run_id: str) -> list[ValidationErrorRecord]:
         """Get all validation errors for a run.
@@ -265,7 +265,7 @@ class ErrorRecordingMixin:
             select(validation_errors_table).where(validation_errors_table.c.run_id == run_id).order_by(validation_errors_table.c.created_at)
         )
         rows = self._ops.execute_fetchall(query)
-        return [self._validation_error_repo.load(r) for r in rows]
+        return [self._validation_error_loader.load(r) for r in rows]
 
     def get_transform_errors_for_token(self, token_id: str) -> list[TransformErrorRecord]:
         """Get transform errors for a specific token.
@@ -280,7 +280,7 @@ class ErrorRecordingMixin:
             transform_errors_table.c.token_id == token_id,
         )
         rows = self._ops.execute_fetchall(query)
-        return [self._transform_error_repo.load(r) for r in rows]
+        return [self._transform_error_loader.load(r) for r in rows]
 
     def get_transform_errors_for_run(self, run_id: str) -> list[TransformErrorRecord]:
         """Get all transform errors for a run.
@@ -295,4 +295,4 @@ class ErrorRecordingMixin:
             select(transform_errors_table).where(transform_errors_table.c.run_id == run_id).order_by(transform_errors_table.c.created_at)
         )
         rows = self._ops.execute_fetchall(query)
-        return [self._transform_error_repo.load(r) for r in rows]
+        return [self._transform_error_loader.load(r) for r in rows]

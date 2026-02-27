@@ -35,14 +35,14 @@ if TYPE_CHECKING:
     from elspeth.contracts.payload_store import PayloadStore
     from elspeth.core.landscape._database_ops import DatabaseOps
     from elspeth.core.landscape.database import LandscapeDB
-    from elspeth.core.landscape.repositories import (
-        CallRepository,
-        NodeStateRepository,
-        RoutingEventRepository,
-        RowRepository,
-        TokenOutcomeRepository,
-        TokenParentRepository,
-        TokenRepository,
+    from elspeth.core.landscape.model_loaders import (
+        CallLoader,
+        NodeStateLoader,
+        RoutingEventLoader,
+        RowLoader,
+        TokenLoader,
+        TokenOutcomeLoader,
+        TokenParentLoader,
     )
 
 _QUERY_CHUNK_SIZE = 500
@@ -54,13 +54,13 @@ class QueryMethodsMixin:
     # Shared state annotations (set by LandscapeRecorder.__init__)
     _db: LandscapeDB
     _ops: DatabaseOps
-    _row_repo: RowRepository
-    _token_repo: TokenRepository
-    _token_parent_repo: TokenParentRepository
-    _call_repo: CallRepository
-    _node_state_repo: NodeStateRepository
-    _routing_event_repo: RoutingEventRepository
-    _token_outcome_repo: TokenOutcomeRepository
+    _row_loader: RowLoader
+    _token_loader: TokenLoader
+    _token_parent_loader: TokenParentLoader
+    _call_loader: CallLoader
+    _node_state_loader: NodeStateLoader
+    _routing_event_loader: RoutingEventLoader
+    _token_outcome_loader: TokenOutcomeLoader
     _payload_store: PayloadStore | None
 
     def get_rows(self, run_id: str) -> list[Row]:
@@ -74,7 +74,7 @@ class QueryMethodsMixin:
         """
         query = select(rows_table).where(rows_table.c.run_id == run_id).order_by(rows_table.c.row_index)
         db_rows = self._ops.execute_fetchall(query)
-        return [self._row_repo.load(r) for r in db_rows]
+        return [self._row_loader.load(r) for r in db_rows]
 
     def get_tokens(self, row_id: str) -> list[Token]:
         """Get all tokens for a row.
@@ -88,7 +88,7 @@ class QueryMethodsMixin:
         """
         query = select(tokens_table).where(tokens_table.c.row_id == row_id).order_by(tokens_table.c.created_at, tokens_table.c.token_id)
         db_rows = self._ops.execute_fetchall(query)
-        return [self._token_repo.load(r) for r in db_rows]
+        return [self._token_loader.load(r) for r in db_rows]
 
     def get_node_states_for_token(self, token_id: str) -> list[NodeState]:
         """Get all node states for a token.
@@ -107,7 +107,7 @@ class QueryMethodsMixin:
             .order_by(node_states_table.c.step_index, node_states_table.c.attempt)
         )
         db_rows = self._ops.execute_fetchall(query)
-        return [self._node_state_repo.load(r) for r in db_rows]
+        return [self._node_state_loader.load(r) for r in db_rows]
 
     def get_row(self, row_id: str) -> Row | None:
         """Get a row by ID.
@@ -122,7 +122,7 @@ class QueryMethodsMixin:
         r = self._ops.execute_fetchone(query)
         if r is None:
             return None
-        return self._row_repo.load(r)
+        return self._row_loader.load(r)
 
     def get_row_data(self, row_id: str) -> RowDataResult:
         """Get the payload data for a row with explicit state.
@@ -174,7 +174,7 @@ class QueryMethodsMixin:
         r = self._ops.execute_fetchone(query)
         if r is None:
             return None
-        return self._token_repo.load(r)
+        return self._token_loader.load(r)
 
     def get_token_parents(self, token_id: str) -> list[TokenParent]:
         """Get parent relationships for a token.
@@ -187,7 +187,7 @@ class QueryMethodsMixin:
         """
         query = select(token_parents_table).where(token_parents_table.c.token_id == token_id).order_by(token_parents_table.c.ordinal)
         db_rows = self._ops.execute_fetchall(query)
-        return [self._token_parent_repo.load(r) for r in db_rows]
+        return [self._token_parent_loader.load(r) for r in db_rows]
 
     def get_routing_events(self, state_id: str) -> list[RoutingEvent]:
         """Get routing events for a node state.
@@ -205,7 +205,7 @@ class QueryMethodsMixin:
             .order_by(routing_events_table.c.ordinal, routing_events_table.c.event_id)
         )
         db_rows = self._ops.execute_fetchall(query)
-        return [self._routing_event_repo.load(r) for r in db_rows]
+        return [self._routing_event_loader.load(r) for r in db_rows]
 
     def get_calls(self, state_id: str) -> list[Call]:
         """Get external calls for a node state.
@@ -218,7 +218,7 @@ class QueryMethodsMixin:
         """
         query = select(calls_table).where(calls_table.c.state_id == state_id).order_by(calls_table.c.call_index)
         db_rows = self._ops.execute_fetchall(query)
-        return [self._call_repo.load(r) for r in db_rows]
+        return [self._call_loader.load(r) for r in db_rows]
 
     # === Batch Query Methods for State Sets (ech8: N+1 query fix for lineage) ===
     #
@@ -257,7 +257,7 @@ class QueryMethodsMixin:
 
         # Sort all rows by the same ordering the original single-query version used
         all_db_rows.sort(key=lambda r: (r.step_index, r.attempt, r.ordinal, r.event_id))
-        return [self._routing_event_repo.load(r) for r in all_db_rows]
+        return [self._routing_event_loader.load(r) for r in all_db_rows]
 
     def get_calls_for_states(self, state_ids: list[str]) -> list[Call]:
         """Get external calls for multiple states in one query.
@@ -291,7 +291,7 @@ class QueryMethodsMixin:
 
         # Sort all rows by the same ordering the original single-query version used
         all_db_rows.sort(key=lambda r: (r.step_index, r.attempt, r.call_index))
-        return [self._call_repo.load(r) for r in all_db_rows]
+        return [self._call_loader.load(r) for r in all_db_rows]
 
     # === Batch Query Methods (Bug 76r: N+1 query fix for exporter) ===
     #
@@ -315,7 +315,7 @@ class QueryMethodsMixin:
             .order_by(tokens_table.c.row_id, tokens_table.c.created_at, tokens_table.c.token_id)
         )
         db_rows = self._ops.execute_fetchall(query)
-        return [self._token_repo.load(r) for r in db_rows]
+        return [self._token_loader.load(r) for r in db_rows]
 
     def get_all_node_states_for_run(self, run_id: str) -> list[NodeState]:
         """Get all node states for a run (batch query).
@@ -337,7 +337,7 @@ class QueryMethodsMixin:
             )
         )
         db_rows = self._ops.execute_fetchall(query)
-        return [self._node_state_repo.load(r) for r in db_rows]
+        return [self._node_state_loader.load(r) for r in db_rows]
 
     def get_all_routing_events_for_run(self, run_id: str) -> list[RoutingEvent]:
         """Get all routing events for a run (batch query).
@@ -362,7 +362,7 @@ class QueryMethodsMixin:
             )
         )
         db_rows = self._ops.execute_fetchall(query)
-        return [self._routing_event_repo.load(r) for r in db_rows]
+        return [self._routing_event_loader.load(r) for r in db_rows]
 
     def get_all_calls_for_run(self, run_id: str) -> list[Call]:
         """Get all calls (state-parented) for a run (batch query).
@@ -390,7 +390,7 @@ class QueryMethodsMixin:
             )
         )
         db_rows = self._ops.execute_fetchall(query)
-        return [self._call_repo.load(r) for r in db_rows]
+        return [self._call_loader.load(r) for r in db_rows]
 
     def get_all_token_parents_for_run(self, run_id: str) -> list[TokenParent]:
         """Get all token parent relationships for a run (batch query).
@@ -410,7 +410,7 @@ class QueryMethodsMixin:
             .order_by(token_parents_table.c.token_id, token_parents_table.c.ordinal)
         )
         db_rows = self._ops.execute_fetchall(query)
-        return [self._token_parent_repo.load(r) for r in db_rows]
+        return [self._token_parent_loader.load(r) for r in db_rows]
 
     def get_all_token_outcomes_for_run(self, run_id: str) -> list[TokenOutcome]:
         """Get all token outcomes for a run (batch query).
@@ -427,7 +427,7 @@ class QueryMethodsMixin:
             .order_by(token_outcomes_table.c.token_id, token_outcomes_table.c.recorded_at)
         )
         db_rows = self._ops.execute_fetchall(query)
-        return [self._token_outcome_repo.load(r) for r in db_rows]
+        return [self._token_outcome_loader.load(r) for r in db_rows]
 
     # === Explain Methods (Graceful Degradation) ===
 

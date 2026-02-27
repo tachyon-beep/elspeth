@@ -33,22 +33,22 @@ from elspeth.core.landscape._query_methods import QueryMethodsMixin
 from elspeth.core.landscape._run_recording import RunRecordingMixin
 from elspeth.core.landscape._token_recording import TokenRecordingMixin
 from elspeth.core.landscape.database import LandscapeDB
-from elspeth.core.landscape.repositories import (
-    ArtifactRepository,
-    BatchMemberRepository,
-    BatchRepository,
-    CallRepository,
-    EdgeRepository,
-    NodeRepository,
-    NodeStateRepository,
-    RoutingEventRepository,
-    RowRepository,
-    RunRepository,
-    TokenOutcomeRepository,
-    TokenParentRepository,
-    TokenRepository,
-    TransformErrorRepository,
-    ValidationErrorRepository,
+from elspeth.core.landscape.model_loaders import (
+    ArtifactLoader,
+    BatchLoader,
+    BatchMemberLoader,
+    CallLoader,
+    EdgeLoader,
+    NodeLoader,
+    NodeStateLoader,
+    RoutingEventLoader,
+    RowLoader,
+    RunLoader,
+    TokenLoader,
+    TokenOutcomeLoader,
+    TokenParentLoader,
+    TransformErrorLoader,
+    ValidationErrorLoader,
 )
 
 
@@ -102,19 +102,19 @@ class LandscapeRecorder(
         # Database operations helper for reduced boilerplate
         self._ops = DatabaseOps(db)
 
-        # Repository instances for row-to-object conversions
-        self._run_repo = RunRepository()
-        self._node_repo = NodeRepository()
-        self._edge_repo = EdgeRepository()
-        self._row_repo = RowRepository()
-        self._token_repo = TokenRepository()
-        self._token_parent_repo = TokenParentRepository()
-        self._call_repo = CallRepository()
-        self._routing_event_repo = RoutingEventRepository()
-        self._batch_repo = BatchRepository()
-        self._node_state_repo = NodeStateRepository()
-        self._validation_error_repo = ValidationErrorRepository()
-        self._transform_error_repo = TransformErrorRepository()
-        self._token_outcome_repo = TokenOutcomeRepository()
-        self._artifact_repo = ArtifactRepository()
-        self._batch_member_repo = BatchMemberRepository()
+        # Loader instances for row-to-object conversions
+        self._run_loader = RunLoader()
+        self._node_loader = NodeLoader()
+        self._edge_loader = EdgeLoader()
+        self._row_loader = RowLoader()
+        self._token_loader = TokenLoader()
+        self._token_parent_loader = TokenParentLoader()
+        self._call_loader = CallLoader()
+        self._routing_event_loader = RoutingEventLoader()
+        self._batch_loader = BatchLoader()
+        self._node_state_loader = NodeStateLoader()
+        self._validation_error_loader = ValidationErrorLoader()
+        self._transform_error_loader = TransformErrorLoader()
+        self._token_outcome_loader = TokenOutcomeLoader()
+        self._artifact_loader = ArtifactLoader()
+        self._batch_member_loader = BatchMemberLoader()

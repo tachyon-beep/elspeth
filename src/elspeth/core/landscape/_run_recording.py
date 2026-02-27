@@ -28,7 +28,7 @@ if TYPE_CHECKING:
     from elspeth.contracts.schema_contract import SchemaContract
     from elspeth.core.landscape._database_ops import DatabaseOps
     from elspeth.core.landscape.database import LandscapeDB
-    from elspeth.core.landscape.repositories import RunRepository
+    from elspeth.core.landscape.model_loaders import RunLoader
     from elspeth.core.landscape.reproducibility import ReproducibilityGrade
 
 
@@ -41,7 +41,7 @@ class RunRecordingMixin:
     # Shared state annotations (set by LandscapeRecorder.__init__)
     _db: LandscapeDB
     _ops: DatabaseOps
-    _run_repo: RunRepository
+    _run_loader: RunLoader
     _payload_store: PayloadStore | None
 
     def begin_run(
@@ -168,7 +168,7 @@ class RunRecordingMixin:
         row = self._ops.execute_fetchone(query)
         if row is None:
             return None
-        return self._run_repo.load(row)
+        return self._run_loader.load(row)
 
     def get_source_schema(self, run_id: str) -> str:
         """Get source schema JSON for a run (for resume/type restoration).
@@ -464,7 +464,7 @@ class RunRecordingMixin:
             query = query.where(runs_table.c.status == status.value)
 
         rows = self._ops.execute_fetchall(query)
-        return [self._run_repo.load(row) for row in rows]
+        return [self._run_loader.load(row) for row in rows]
 
     def set_export_status(
         self,

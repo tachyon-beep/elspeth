@@ -1,4 +1,4 @@
-"""Repository layer for Landscape audit models.
+"""Model loaders for Landscape audit records.
 
 Handles the seam between SQLAlchemy rows (strings) and domain objects
 (strict enum types). This is NOT a trust boundary - if the database
@@ -47,8 +47,8 @@ from elspeth.contracts.enums import (
 )
 
 
-class RunRepository:
-    """Repository for Run records."""
+class RunLoader:
+    """Loader for Run records."""
 
     def load(self, row: SARow[Any]) -> Run:
         """Load Run from database row.
@@ -73,8 +73,8 @@ class RunRepository:
         )
 
 
-class NodeRepository:
-    """Repository for Node records."""
+class NodeLoader:
+    """Loader for Node records."""
 
     def load(self, row: SARow[Any]) -> Node:
         """Load Node from database row.
@@ -112,8 +112,8 @@ class NodeRepository:
         )
 
 
-class EdgeRepository:
-    """Repository for Edge records."""
+class EdgeLoader:
+    """Loader for Edge records."""
 
     def load(self, row: SARow[Any]) -> Edge:
         """Load Edge from database row.
@@ -131,8 +131,8 @@ class EdgeRepository:
         )
 
 
-class RowRepository:
-    """Repository for Row records."""
+class RowLoader:
+    """Loader for Row records."""
 
     def load(self, row: SARow[Any]) -> Row:
         """Load Row from database row.
@@ -150,8 +150,8 @@ class RowRepository:
         )
 
 
-class TokenRepository:
-    """Repository for Token records."""
+class TokenLoader:
+    """Loader for Token records."""
 
     def load(self, row: SARow[Any]) -> Token:
         """Load Token from database row.
@@ -171,8 +171,8 @@ class TokenRepository:
         )
 
 
-class TokenParentRepository:
-    """Repository for TokenParent records."""
+class TokenParentLoader:
+    """Loader for TokenParent records."""
 
     def load(self, row: SARow[Any]) -> TokenParent:
         """Load TokenParent from database row."""
@@ -183,8 +183,8 @@ class TokenParentRepository:
         )
 
 
-class CallRepository:
-    """Repository for Call records."""
+class CallLoader:
+    """Loader for Call records."""
 
     def load(self, row: SARow[Any]) -> Call:
         """Load Call from database row.
@@ -209,8 +209,8 @@ class CallRepository:
         )
 
 
-class RoutingEventRepository:
-    """Repository for RoutingEvent records."""
+class RoutingEventLoader:
+    """Loader for RoutingEvent records."""
 
     def load(self, row: SARow[Any]) -> RoutingEvent:
         """Load RoutingEvent from database row."""
@@ -227,8 +227,8 @@ class RoutingEventRepository:
         )
 
 
-class BatchRepository:
-    """Repository for Batch records."""
+class BatchLoader:
+    """Loader for Batch records."""
 
     def load(self, row: SARow[Any]) -> Batch:
         """Load Batch from database row."""
@@ -246,8 +246,8 @@ class BatchRepository:
         )
 
 
-class NodeStateRepository:
-    """Repository for NodeState records (discriminated union).
+class NodeStateLoader:
+    """Loader for NodeState records (discriminated union).
 
     NodeState is a discriminated union with 4 variants based on status:
     - NodeStateOpen: Just started, no output yet
@@ -397,8 +397,8 @@ class NodeStateRepository:
             raise ValueError(f"Unknown status {row.status} for state {row.state_id}")
 
 
-class ValidationErrorRepository:
-    """Repository for ValidationErrorRecord records.
+class ValidationErrorLoader:
+    """Loader for ValidationErrorRecord records.
 
     Handles source validation errors (quarantined rows).
     No enum conversion needed - all fields are primitives or strings.
@@ -426,8 +426,8 @@ class ValidationErrorRepository:
         )
 
 
-class TransformErrorRepository:
-    """Repository for TransformErrorRecord records.
+class TransformErrorLoader:
+    """Loader for TransformErrorRecord records.
 
     Handles transform processing errors.
     No enum conversion needed - all fields are primitives or strings.
@@ -455,8 +455,8 @@ class TransformErrorRepository:
         )
 
 
-class TokenOutcomeRepository:
-    """Repository for TokenOutcome records.
+class TokenOutcomeLoader:
+    """Loader for TokenOutcome records.
 
     Handles terminal token states. Converts outcome string to RowOutcome enum.
     """
@@ -510,8 +510,8 @@ class TokenOutcomeRepository:
         )
 
 
-class ArtifactRepository:
-    """Repository for Artifact records.
+class ArtifactLoader:
+    """Loader for Artifact records.
 
     Handles sink output artifacts with content hashes.
     No enum conversion needed - artifact_type is user-defined string.
@@ -540,8 +540,8 @@ class ArtifactRepository:
         )
 
 
-class BatchMemberRepository:
-    """Repository for BatchMember records.
+class BatchMemberLoader:
+    """Loader for BatchMember records.
 
     Handles batch membership records for aggregation tracking.
     No enum conversion needed - all fields are primitives.

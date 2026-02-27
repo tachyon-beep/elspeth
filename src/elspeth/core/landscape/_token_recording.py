@@ -29,10 +29,10 @@ if TYPE_CHECKING:
     from elspeth.contracts.payload_store import PayloadStore
     from elspeth.core.landscape._database_ops import DatabaseOps
     from elspeth.core.landscape.database import LandscapeDB
-    from elspeth.core.landscape.repositories import (
-        RowRepository,
-        TokenOutcomeRepository,
-        TokenRepository,
+    from elspeth.core.landscape.model_loaders import (
+        RowLoader,
+        TokenLoader,
+        TokenOutcomeLoader,
     )
 
 
@@ -42,9 +42,9 @@ class TokenRecordingMixin:
     # Shared state annotations (set by LandscapeRecorder.__init__)
     _db: LandscapeDB
     _ops: DatabaseOps
-    _row_repo: RowRepository
-    _token_repo: TokenRepository
-    _token_outcome_repo: TokenOutcomeRepository
+    _row_loader: RowLoader
+    _token_loader: TokenLoader
+    _token_outcome_loader: TokenOutcomeLoader
     _payload_store: PayloadStore | None
 
     def _resolve_run_id_for_row(self, row_id: str) -> str:
@@ -763,7 +763,7 @@ class TokenRecordingMixin:
         result = self._ops.execute_fetchone(query)
         if result is None:
             return None
-        return self._token_outcome_repo.load(result)
+        return self._token_outcome_loader.load(result)
 
     def get_token_outcomes_for_row(self, run_id: str, row_id: str) -> list[TokenOutcome]:
         """Get all token outcomes for a row in a single query.
@@ -806,4 +806,4 @@ class TokenRecordingMixin:
             .order_by(token_outcomes_table.c.recorded_at)
         )
         rows = self._ops.execute_fetchall(query)
-        return [self._token_outcome_repo.load(r) for r in rows]
+        return [self._token_outcome_loader.load(r) for r in rows]

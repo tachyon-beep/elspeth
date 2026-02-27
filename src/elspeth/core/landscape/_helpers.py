@@ -1,6 +1,6 @@
 """Common helper functions for landscape modules.
 
-These are extracted from recorder.py to be shared across repositories.
+These are extracted from recorder.py to be shared across landscape modules.
 """
 
 import uuid

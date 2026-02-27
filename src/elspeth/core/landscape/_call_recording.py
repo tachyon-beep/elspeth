@@ -30,7 +30,7 @@ if TYPE_CHECKING:
     from elspeth.contracts.payload_store import PayloadStore
     from elspeth.core.landscape._database_ops import DatabaseOps
     from elspeth.core.landscape.database import LandscapeDB
-    from elspeth.core.landscape.repositories import CallRepository
+    from elspeth.core.landscape.model_loaders import CallLoader
 
 
 class CallRecordingMixin:
@@ -39,7 +39,7 @@ class CallRecordingMixin:
     # Shared state annotations (set by LandscapeRecorder.__init__)
     _db: LandscapeDB
     _ops: DatabaseOps
-    _call_repo: CallRepository
+    _call_loader: CallLoader
     _payload_store: PayloadStore | None
     _call_indices: dict[str, int]
     _call_index_lock: Lock
@@ -459,7 +459,7 @@ class CallRecordingMixin:
         """
         query = select(calls_table).where(calls_table.c.operation_id == operation_id).order_by(calls_table.c.call_index)
         db_rows = self._ops.execute_fetchall(query)
-        return [self._call_repo.load(r) for r in db_rows]
+        return [self._call_loader.load(r) for r in db_rows]
 
     def get_operations_for_run(self, run_id: str) -> list[Operation]:
         """Get all operations for a run.
@@ -511,7 +511,7 @@ class CallRecordingMixin:
             .order_by(calls_table.c.operation_id, calls_table.c.call_index)
         )
         db_rows = self._ops.execute_fetchall(query)
-        return [self._call_repo.load(r) for r in db_rows]
+        return [self._call_loader.load(r) for r in db_rows]
 
     def find_call_by_request_hash(
         self,
@@ -563,7 +563,7 @@ class CallRecordingMixin:
         row = self._ops.execute_fetchone(query)
         if row is None:
             return None
-        return self._call_repo.load(row)
+        return self._call_loader.load(row)
 
     def get_call_response_data(self, call_id: str) -> dict[str, Any] | None:
         """Retrieve the response data for a call.

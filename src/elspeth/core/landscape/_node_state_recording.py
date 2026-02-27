@@ -35,7 +35,7 @@ if TYPE_CHECKING:
     from elspeth.contracts.payload_store import PayloadStore
     from elspeth.core.landscape._database_ops import DatabaseOps
     from elspeth.core.landscape.database import LandscapeDB
-    from elspeth.core.landscape.repositories import NodeStateRepository, RoutingEventRepository
+    from elspeth.core.landscape.model_loaders import NodeStateLoader, RoutingEventLoader
 
 
 class NodeStateRecordingMixin:
@@ -44,8 +44,8 @@ class NodeStateRecordingMixin:
     # Shared state annotations (set by LandscapeRecorder.__init__)
     _db: LandscapeDB
     _ops: DatabaseOps
-    _node_state_repo: NodeStateRepository
-    _routing_event_repo: RoutingEventRepository
+    _node_state_loader: NodeStateLoader
+    _routing_event_loader: RoutingEventLoader
     _payload_store: PayloadStore | None
 
     def begin_node_state(
@@ -239,7 +239,7 @@ class NodeStateRecordingMixin:
         row = self._ops.execute_fetchone(query)
         if row is None:
             return None
-        return self._node_state_repo.load(row)
+        return self._node_state_loader.load(row)
 
     def record_routing_event(
         self,

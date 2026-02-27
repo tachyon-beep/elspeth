@@ -27,7 +27,7 @@ if TYPE_CHECKING:
     from elspeth.contracts.schema_contract import SchemaContract
     from elspeth.core.landscape._database_ops import DatabaseOps
     from elspeth.core.landscape.database import LandscapeDB
-    from elspeth.core.landscape.repositories import EdgeRepository, NodeRepository
+    from elspeth.core.landscape.model_loaders import EdgeLoader, NodeLoader
 
 
 class GraphRecordingMixin:
@@ -36,8 +36,8 @@ class GraphRecordingMixin:
     # Shared state annotations (set by LandscapeRecorder.__init__)
     _db: LandscapeDB
     _ops: DatabaseOps
-    _node_repo: NodeRepository
-    _edge_repo: EdgeRepository
+    _node_loader: NodeLoader
+    _edge_loader: EdgeLoader
 
     def register_node(
         self,
@@ -206,7 +206,7 @@ class GraphRecordingMixin:
         row = self._ops.execute_fetchone(query)
         if row is None:
             return None
-        return self._node_repo.load(row)
+        return self._node_loader.load(row)
 
     def get_nodes(self, run_id: str) -> list[Node]:
         """Get all nodes for a run.
@@ -231,7 +231,7 @@ class GraphRecordingMixin:
             )
         )
         rows = self._ops.execute_fetchall(query)
-        return [self._node_repo.load(row) for row in rows]
+        return [self._node_loader.load(row) for row in rows]
 
     def get_node_contracts(self, run_id: str, node_id: str) -> tuple[SchemaContract | None, SchemaContract | None]:
         """Get input and output contracts for a node.
@@ -282,7 +282,7 @@ class GraphRecordingMixin:
         """
         query = select(edges_table).where(edges_table.c.run_id == run_id).order_by(edges_table.c.created_at, edges_table.c.edge_id)
         rows = self._ops.execute_fetchall(query)
-        return [self._edge_repo.load(row) for row in rows]
+        return [self._edge_loader.load(row) for row in rows]
 
     def get_edge(self, edge_id: str) -> Edge:
         """Get a single edge by ID.
@@ -307,7 +307,7 @@ class GraphRecordingMixin:
                 f"A routing_event references a non-existent edge. "
                 f"This indicates database corruption."
             )
-        return self._edge_repo.load(row)
+        return self._edge_loader.load(row)
 
     def get_edge_map(self, run_id: str) -> dict[tuple[str, str], str]:
         """Get edge mapping for a run (from_node_id, label) -> edge_id.
