@@ -105,6 +105,7 @@ from elspeth.engine.orchestrator.types import (
     PipelineConfig,
     RouteValidationError,
     RowPlugin,
+    RunContext,
     RunResult,
 )
 from elspeth.engine.orchestrator.validation import (
@@ -1186,6 +1187,117 @@ class Orchestrator:
             coalesce_id_map=coalesce_id_map,
         )
 
+    def _initialize_run_context(
+        self,
+        recorder: LandscapeRecorder,
+        run_id: str,
+        config: PipelineConfig,
+        graph: ExecutionGraph,
+        settings: ElspethSettings | None,
+        artifacts: GraphArtifacts,
+        batch_checkpoints: dict[str, BatchCheckpointState] | None,
+        payload_store: PayloadStore,
+        *,
+        include_source_on_start: bool = True,
+        restored_aggregation_state: dict[str, AggregationCheckpointState] | None = None,
+    ) -> RunContext:
+        """Initialize run context: assign node IDs, create PluginContext, call on_start, build processor.
+
+        Args:
+            include_source_on_start: If True, call source.on_start(). False for resume
+                (source was fully consumed in original run).
+            restored_aggregation_state: Map of node_id -> state for resume path.
+
+        Returns:
+            RunContext with ctx, processor, coalesce_executor, coalesce_node_map,
+            and agg_transform_lookup.
+        """
+        source_id = artifacts.source_id
+        sink_id_map = dict(artifacts.sink_id_map)
+        transform_id_map = dict(artifacts.transform_id_map)
+        config_gate_id_map = dict(artifacts.config_gate_id_map)
+        coalesce_id_map = dict(artifacts.coalesce_id_map)
+        edge_map = dict(artifacts.edge_map)
+        route_resolution_map = graph.get_route_resolution_map()
+
+        # Assign node_ids to all plugins
+        self._assign_plugin_node_ids(
+            source=config.source,
+            transforms=config.transforms,
+            sinks=config.sinks,
+            source_id=source_id,
+            transform_id_map=transform_id_map,
+            sink_id_map=sink_id_map,
+        )
+
+        # Create context with the LandscapeRecorder
+        # Restore batch checkpoints if provided (from previous BatchPendingError)
+        ctx = PluginContext(
+            run_id=run_id,
+            config=config.config,
+            landscape=recorder,
+            rate_limit_registry=self._rate_limit_registry,
+            concurrency_config=self._concurrency_config,
+            _batch_checkpoints=batch_checkpoints or {},
+            telemetry_emit=self._emit_telemetry,
+        )
+
+        # Set node_id on context for source validation error attribution
+        # This must be set BEFORE source.load() so that any validation errors
+        # (e.g., malformed CSV rows) can be attributed to the source node
+        ctx.node_id = source_id
+
+        # Call on_start for all plugins BEFORE processing.
+        # Order: source -> transforms (pipeline order) -> sinks.
+        # Base classes provide no-op implementations, so no hasattr needed.
+        # NOTE: on_start is called OUTSIDE the try/finally that calls
+        # _cleanup_plugins. If on_start raises, on_complete/close are NOT called.
+        if include_source_on_start:
+            config.source.on_start(ctx)
+        for transform in config.transforms:
+            transform.on_start(ctx)
+        for sink in config.sinks.values():
+            sink.on_start(ctx)
+
+        # Wrap _build_processor so that if it fails after successful on_start,
+        # plugin cleanup still runs (prevents resource leaks: DB connections,
+        # file handles, thread pools).
+        try:
+            processor, coalesce_node_map, coalesce_executor = self._build_processor(
+                graph=graph,
+                config=config,
+                settings=settings,
+                recorder=recorder,
+                run_id=run_id,
+                source_id=source_id,
+                edge_map=edge_map,
+                route_resolution_map=route_resolution_map,
+                config_gate_id_map=config_gate_id_map,
+                coalesce_id_map=coalesce_id_map,
+                payload_store=payload_store,
+                restored_aggregation_state={NodeID(k): v for k, v in restored_aggregation_state.items()}
+                if restored_aggregation_state
+                else None,
+            )
+        except Exception:
+            self._cleanup_plugins(config, ctx, include_source=include_source_on_start)
+            raise
+
+        # Pre-compute aggregation transform lookup for O(1) access per timeout check
+        agg_transform_lookup: dict[str, AggNodeEntry] = {}
+        if config.aggregation_settings:
+            for t in config.transforms:
+                if isinstance(t, TransformProtocol) and t.is_batch_aware and t.node_id in config.aggregation_settings:
+                    agg_transform_lookup[t.node_id] = AggNodeEntry(transform=t, node_id=NodeID(t.node_id))
+
+        return RunContext(
+            ctx=ctx,
+            processor=processor,
+            coalesce_executor=coalesce_executor,
+            coalesce_node_map=coalesce_node_map,
+            agg_transform_lookup=agg_transform_lookup,
+        )
+
     def _execute_run(
         self,
         recorder: LandscapeRecorder,
@@ -1230,72 +1342,27 @@ class Orchestrator:
         # 1. Register graph nodes and edges
         artifacts = self._register_graph_nodes_and_edges(recorder, run_id, config, graph)
 
+        # 2. Initialize context + processor
+        run_ctx = self._initialize_run_context(
+            recorder,
+            run_id,
+            config,
+            graph,
+            settings,
+            artifacts,
+            batch_checkpoints,
+            payload_store,
+        )
+
+        ctx = run_ctx.ctx
+        processor = run_ctx.processor
+        coalesce_executor = run_ctx.coalesce_executor
+        coalesce_node_map = dict(run_ctx.coalesce_node_map)  # dict for aggregation/coalesce functions
+        agg_transform_lookup = dict(run_ctx.agg_transform_lookup)  # dict for aggregation functions
+
         source_id = artifacts.source_id
-        sink_id_map = dict(artifacts.sink_id_map)  # Mutable copy for _write_pending_to_sinks
-        transform_id_map = dict(artifacts.transform_id_map)  # dict for _assign_plugin_node_ids
-        config_gate_id_map = dict(artifacts.config_gate_id_map)  # dict for _build_processor
-        coalesce_id_map = dict(artifacts.coalesce_id_map)  # dict for _build_processor
-        edge_map = dict(artifacts.edge_map)  # Mutable copy for processor
-        route_resolution_map = graph.get_route_resolution_map()
-
-        # Assign node_ids to all plugins
-        self._assign_plugin_node_ids(
-            source=config.source,
-            transforms=config.transforms,
-            sinks=config.sinks,
-            source_id=source_id,
-            transform_id_map=transform_id_map,
-            sink_id_map=sink_id_map,
-        )
-
-        # Create context with the LandscapeRecorder
-        # Restore batch checkpoints if provided (from previous BatchPendingError)
-        ctx = PluginContext(
-            run_id=run_id,
-            config=config.config,
-            landscape=recorder,
-            rate_limit_registry=self._rate_limit_registry,
-            concurrency_config=self._concurrency_config,
-            _batch_checkpoints=batch_checkpoints or {},
-            telemetry_emit=self._emit_telemetry,
-        )
-
-        # Set node_id on context for source validation error attribution
-        # This must be set BEFORE source.load() so that any validation errors
-        # (e.g., malformed CSV rows) can be attributed to the source node
-        ctx.node_id = source_id
-
-        # Call on_start for all plugins BEFORE processing.
-        # Order: source -> transforms (pipeline order) -> sinks.
-        # Base classes provide no-op implementations, so no hasattr needed.
-        # NOTE: on_start is called OUTSIDE the try/finally that calls
-        # _cleanup_plugins. If on_start raises, on_complete/close are NOT called.
-        config.source.on_start(ctx)
-        for transform in config.transforms:
-            transform.on_start(ctx)
-        for sink in config.sinks.values():
-            sink.on_start(ctx)
-
-        # Wrap _build_processor so that if it fails after successful on_start,
-        # plugin cleanup still runs (prevents resource leaks: DB connections,
-        # file handles, thread pools).
-        try:
-            processor, coalesce_node_map, coalesce_executor = self._build_processor(
-                graph=graph,
-                config=config,
-                settings=settings,
-                recorder=recorder,
-                run_id=run_id,
-                source_id=source_id,
-                edge_map=edge_map,
-                route_resolution_map=route_resolution_map,
-                config_gate_id_map=config_gate_id_map,
-                coalesce_id_map=coalesce_id_map,
-                payload_store=payload_store,
-            )
-        except Exception:
-            self._cleanup_plugins(config, ctx, include_source=True)
-            raise
+        sink_id_map = dict(artifacts.sink_id_map)
+        edge_map = dict(artifacts.edge_map)
 
         # Process rows - Buffer TOKENS, not dicts, to preserve identity
         counters = ExecutionCounters()
@@ -1303,13 +1370,6 @@ class Orchestrator:
         # Outcomes are recorded by SinkExecutor.write() AFTER sink durability is achieved
         # Fix: P1-2026-01-31 - use PendingOutcome to carry error_hash for QUARANTINED
         pending_tokens: dict[str, list[tuple[TokenInfo, PendingOutcome | None]]] = {name: [] for name in config.sinks}
-
-        # Pre-compute aggregation transform lookup for O(1) access per timeout check
-        agg_transform_lookup: dict[str, AggNodeEntry] = {}
-        if config.aggregation_settings:
-            for t in config.transforms:
-                if isinstance(t, TransformProtocol) and t.is_batch_aware and t.node_id in config.aggregation_settings:
-                    agg_transform_lookup[t.node_id] = AggNodeEntry(transform=t, node_id=NodeID(t.node_id))
 
         # Progress tracking - hybrid timing: emit on 100 rows OR 5 seconds
         progress_interval = 100
