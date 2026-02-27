@@ -21,13 +21,18 @@ Keep types.py as pure data definitions with minimal dependencies.
 from __future__ import annotations
 
 from collections import Counter
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
 from types import MappingProxyType
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
+    from elspeth.contracts import PendingOutcome, TokenInfo
+    from elspeth.contracts.plugin_context import PluginContext
+    from elspeth.contracts.types import CoalesceName, GateName, NodeID, SinkName
     from elspeth.core.config import AggregationSettings, CoalesceSettings, GateSettings
+    from elspeth.engine.coalesce_executor import CoalesceExecutor
+    from elspeth.engine.processor import RowProcessor
     from elspeth.plugins.protocols import SinkProtocol, SourceProtocol
 
 from elspeth.contracts import RunStatus
@@ -169,12 +174,12 @@ class ExecutionCounters:
         for dest, count in result.routed_destinations.items():
             self.routed_destinations[dest] += count
 
-    def to_run_result(self, run_id: str, status: RunStatus = RunStatus.RUNNING) -> RunResult:
+    def to_run_result(self, run_id: str, status: RunStatus) -> RunResult:
         """Build a RunResult from these counters.
 
         Args:
             run_id: The run identifier.
-            status: Run status (default RUNNING, caller updates to COMPLETED).
+            status: Run status (callers must be explicit).
         """
         return RunResult(
             run_id=run_id,
@@ -200,3 +205,97 @@ class RouteValidationError(Exception):
     processed. It indicates a configuration problem that would cause
     failures during processing.
     """
+
+
+# --- T18: Extraction return types ---
+
+
+@dataclass(frozen=True, slots=True)
+class GraphArtifacts:
+    """Return type for _register_graph_nodes_and_edges().
+
+    Named fields eliminate positional-swap hazards — several members share
+    compatible Mapping[..., NodeID] types that mypy cannot distinguish in a tuple.
+
+    All mapping fields are wrapped in MappingProxyType via __post_init__
+    to enforce deep immutability, matching the DAGTraversalContext precedent.
+    """
+
+    edge_map: Mapping[tuple[NodeID, str], str]
+    source_id: NodeID
+    sink_id_map: Mapping[SinkName, NodeID]
+    transform_id_map: Mapping[int, NodeID]
+    config_gate_id_map: Mapping[GateName, NodeID]
+    coalesce_id_map: Mapping[CoalesceName, NodeID]
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "edge_map", MappingProxyType(dict(self.edge_map)))
+        object.__setattr__(self, "sink_id_map", MappingProxyType(dict(self.sink_id_map)))
+        object.__setattr__(self, "transform_id_map", MappingProxyType(dict(self.transform_id_map)))
+        object.__setattr__(self, "config_gate_id_map", MappingProxyType(dict(self.config_gate_id_map)))
+        object.__setattr__(self, "coalesce_id_map", MappingProxyType(dict(self.coalesce_id_map)))
+
+
+@dataclass(frozen=True, slots=True)
+class AggNodeEntry:
+    """Named pair for aggregation lookup values.
+
+    Replaces tuple[TransformProtocol, NodeID] to prevent positional-swap bugs,
+    applying the same rationale as GraphArtifacts.
+    """
+
+    transform: TransformProtocol
+    node_id: NodeID
+
+
+@dataclass(frozen=True, slots=True)
+class RunContext:
+    """Return type for _initialize_run_context().
+
+    Bundles the five objects created during run initialization that are
+    consumed by subsequent phases. Short-lived: consumed immediately to
+    build LoopContext. Mapping fields are wrapped in MappingProxyType
+    for consistency with GraphArtifacts.
+    """
+
+    ctx: PluginContext
+    processor: RowProcessor
+    coalesce_executor: CoalesceExecutor | None
+    coalesce_node_map: Mapping[CoalesceName, NodeID]
+    agg_transform_lookup: Mapping[str, AggNodeEntry]
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "coalesce_node_map", MappingProxyType(dict(self.coalesce_node_map)))
+        object.__setattr__(self, "agg_transform_lookup", MappingProxyType(dict(self.agg_transform_lookup)))
+
+
+@dataclass(slots=True)
+class LoopContext:
+    """Parameter bundle for _run_main_processing_loop() and _flush_and_write_sinks().
+
+    Reduces 10+ parameter signatures to (self, loop_ctx, ...) and prevents
+    parameter-list growth as the loop acquires new concerns.
+
+    NOT frozen: ``counters`` and ``pending_tokens`` are mutated in place
+    throughout the processing loop.
+    """
+
+    # --- Mutable state (updated row-by-row) ---
+    counters: ExecutionCounters
+    pending_tokens: dict[str, list[tuple[TokenInfo, PendingOutcome | None]]]
+
+    # --- Read-only after construction (not reassigned) ---
+    processor: RowProcessor
+    ctx: PluginContext
+    config: PipelineConfig
+    agg_transform_lookup: Mapping[str, AggNodeEntry]
+    coalesce_executor: CoalesceExecutor | None
+    coalesce_node_map: Mapping[CoalesceName, NodeID]
+
+
+type _CheckpointFactory = Callable[[str], Callable[[TokenInfo], None]]
+"""Factory that creates a per-sink checkpoint callback.
+
+Takes a sink_node_id (str) and returns a callback invoked after each
+token is written to that sink.
+"""

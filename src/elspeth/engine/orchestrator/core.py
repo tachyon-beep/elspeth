@@ -99,6 +99,7 @@ from elspeth.engine.orchestrator.outcomes import (
     handle_coalesce_timeouts,
 )
 from elspeth.engine.orchestrator.types import (
+    AggNodeEntry,
     ExecutionCounters,
     PipelineConfig,
     RouteValidationError,
@@ -1257,12 +1258,11 @@ class Orchestrator:
         pending_tokens: dict[str, list[tuple[TokenInfo, PendingOutcome | None]]] = {name: [] for name in config.sinks}
 
         # Pre-compute aggregation transform lookup for O(1) access per timeout check
-        # Maps node_id_str -> (transform, aggregation_node_id)
-        agg_transform_lookup: dict[str, tuple[TransformProtocol, NodeID]] = {}
+        agg_transform_lookup: dict[str, AggNodeEntry] = {}
         if config.aggregation_settings:
             for t in config.transforms:
                 if isinstance(t, TransformProtocol) and t.is_batch_aware and t.node_id in config.aggregation_settings:
-                    agg_transform_lookup[t.node_id] = (t, NodeID(t.node_id))
+                    agg_transform_lookup[t.node_id] = AggNodeEntry(transform=t, node_id=NodeID(t.node_id))
 
         # Progress tracking - hybrid timing: emit on 100 rows OR 5 seconds
         progress_interval = 100
@@ -1811,7 +1811,7 @@ class Orchestrator:
         # Clear graph after execution completes
         self._current_graph = None
 
-        return counters.to_run_result(run_id)
+        return counters.to_run_result(run_id, status=RunStatus.RUNNING)
 
     def resume(
         self,
@@ -2230,11 +2230,11 @@ class Orchestrator:
         pending_tokens: dict[str, list[tuple[TokenInfo, PendingOutcome | None]]] = {name: [] for name in config.sinks}
 
         # Pre-compute aggregation transform lookup for O(1) access per timeout check
-        agg_transform_lookup: dict[str, tuple[TransformProtocol, NodeID]] = {}
+        agg_transform_lookup: dict[str, AggNodeEntry] = {}
         if config.aggregation_settings:
             for t in config.transforms:
                 if isinstance(t, TransformProtocol) and t.is_batch_aware and t.node_id in config.aggregation_settings:
-                    agg_transform_lookup[t.node_id] = (t, NodeID(t.node_id))
+                    agg_transform_lookup[t.node_id] = AggNodeEntry(transform=t, node_id=NodeID(t.node_id))
 
         interrupted_by_shutdown = False
 
@@ -2362,4 +2362,4 @@ class Orchestrator:
         # Clear graph after execution completes
         self._current_graph = None
 
-        return counters.to_run_result(run_id)
+        return counters.to_run_result(run_id, status=RunStatus.RUNNING)

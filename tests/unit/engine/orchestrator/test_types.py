@@ -10,10 +10,17 @@ field ordering mistakes during construction or addition.
 """
 
 from dataclasses import FrozenInstanceError
+from types import MappingProxyType
+from unittest.mock import Mock
 
 import pytest
 
-from elspeth.engine.orchestrator.types import AggregationFlushResult
+from elspeth.contracts import RunStatus
+from elspeth.contracts.types import CoalesceName, GateName, NodeID, SinkName
+from elspeth.engine.orchestrator.types import (
+    AggregationFlushResult,
+    ExecutionCounters,
+)
 
 
 class TestAggregationFlushResult:
@@ -147,3 +154,118 @@ class TestAggregationFlushResult:
         # Adding zero should return equivalent result
         assert result + zero == result
         assert zero + result == result
+
+
+# ---------------------------------------------------------------------------
+# T18: New type tests
+# ---------------------------------------------------------------------------
+
+
+class TestGraphArtifacts:
+    """Test GraphArtifacts frozen dataclass with MappingProxyType wrapping."""
+
+    def test_fields_frozen_to_mapping_proxy(self) -> None:
+        from elspeth.engine.orchestrator.types import GraphArtifacts
+
+        artifacts = GraphArtifacts(
+            edge_map={("node1", "continue"): "edge1"},
+            source_id=NodeID("source"),
+            sink_id_map={SinkName("output"): NodeID("sink1")},
+            transform_id_map={0: NodeID("t0")},
+            config_gate_id_map={GateName("gate1"): NodeID("g1")},
+            coalesce_id_map={CoalesceName("merge1"): NodeID("c1")},
+        )
+        assert isinstance(artifacts.edge_map, MappingProxyType)
+        assert isinstance(artifacts.sink_id_map, MappingProxyType)
+        assert isinstance(artifacts.transform_id_map, MappingProxyType)
+        assert isinstance(artifacts.config_gate_id_map, MappingProxyType)
+        assert isinstance(artifacts.coalesce_id_map, MappingProxyType)
+
+    def test_is_frozen(self) -> None:
+        from elspeth.engine.orchestrator.types import GraphArtifacts
+
+        artifacts = GraphArtifacts(
+            edge_map={},
+            source_id=NodeID("source"),
+            sink_id_map={},
+            transform_id_map={},
+            config_gate_id_map={},
+            coalesce_id_map={},
+        )
+        with pytest.raises(AttributeError):
+            artifacts.source_id = NodeID("other")  # type: ignore[misc]
+
+
+class TestAggNodeEntry:
+    """Test AggNodeEntry named pair."""
+
+    def test_attribute_access(self) -> None:
+        from elspeth.engine.orchestrator.types import AggNodeEntry
+
+        mock_transform = Mock()
+        entry = AggNodeEntry(transform=mock_transform, node_id=NodeID("agg1"))
+        assert entry.transform is mock_transform
+        assert entry.node_id == NodeID("agg1")
+
+    def test_is_frozen(self) -> None:
+        from elspeth.engine.orchestrator.types import AggNodeEntry
+
+        entry = AggNodeEntry(transform=Mock(), node_id=NodeID("agg1"))
+        with pytest.raises(AttributeError):
+            entry.node_id = NodeID("other")  # type: ignore[misc]
+
+
+class TestRunContext:
+    """Test RunContext frozen dataclass."""
+
+    def test_mapping_fields_frozen(self) -> None:
+        from elspeth.engine.orchestrator.types import AggNodeEntry, RunContext
+
+        run_ctx = RunContext(
+            ctx=Mock(),
+            processor=Mock(),
+            coalesce_executor=None,
+            coalesce_node_map={CoalesceName("m1"): NodeID("c1")},
+            agg_transform_lookup={"node1": AggNodeEntry(transform=Mock(), node_id=NodeID("agg1"))},
+        )
+        assert isinstance(run_ctx.coalesce_node_map, MappingProxyType)
+        assert isinstance(run_ctx.agg_transform_lookup, MappingProxyType)
+
+
+class TestLoopContext:
+    """Test LoopContext mutable dataclass."""
+
+    def test_mutable_fields_can_be_updated(self) -> None:
+        from elspeth.engine.orchestrator.types import LoopContext
+
+        loop_ctx = LoopContext(
+            counters=ExecutionCounters(),
+            pending_tokens={"output": []},
+            processor=Mock(),
+            ctx=Mock(),
+            config=Mock(),
+            agg_transform_lookup={},
+            coalesce_executor=None,
+            coalesce_node_map={},
+        )
+        # Mutable: counters can be incremented
+        loop_ctx.counters.rows_processed += 1
+        assert loop_ctx.counters.rows_processed == 1
+
+        # Mutable: pending_tokens can be appended
+        loop_ctx.pending_tokens["output"].append((Mock(), None))
+        assert len(loop_ctx.pending_tokens["output"]) == 1
+
+
+class TestExecutionCountersToRunResultRequired:
+    """Test that to_run_result requires status parameter (T18 safety fix)."""
+
+    def test_status_is_required_parameter(self) -> None:
+        """After T18, status has no default — callers must be explicit."""
+        counters = ExecutionCounters()
+        # Must pass status explicitly
+        result = counters.to_run_result("run-1", status=RunStatus.COMPLETED)
+        assert result.status == RunStatus.COMPLETED
+
+        result2 = counters.to_run_result("run-1", status=RunStatus.RUNNING)
+        assert result2.status == RunStatus.RUNNING

@@ -21,7 +21,7 @@ from elspeth.contracts import PendingOutcome, RowOutcome, TokenInfo
 from elspeth.contracts.enums import TriggerType
 from elspeth.contracts.errors import OrchestrationInvariantError
 from elspeth.contracts.types import NodeID
-from elspeth.engine.orchestrator.types import AggregationFlushResult, PipelineConfig
+from elspeth.engine.orchestrator.types import AggNodeEntry, AggregationFlushResult, PipelineConfig
 
 if TYPE_CHECKING:
     from elspeth.contracts.plugin_context import PluginContext
@@ -145,7 +145,7 @@ def check_aggregation_timeouts(
     processor: RowProcessor,
     ctx: PluginContext,
     pending_tokens: dict[str, list[tuple[TokenInfo, PendingOutcome | None]]],
-    agg_transform_lookup: dict[str, tuple[TransformProtocol, NodeID]] | None = None,
+    agg_transform_lookup: dict[str, AggNodeEntry] | None = None,
 ) -> AggregationFlushResult:
     """Check and flush any aggregations whose timeout has expired.
 
@@ -181,7 +181,7 @@ def check_aggregation_timeouts(
         ctx: Plugin context for transform execution
         pending_tokens: Dict of sink_name -> tokens to append results to
         agg_transform_lookup: Pre-computed dict mapping node_id_str ->
-            (transform, aggregation_node_id).
+            AggNodeEntry(transform, node_id).
             If None, lookup is computed on each call (less efficient).
 
     Returns:
@@ -221,7 +221,8 @@ def check_aggregation_timeouts(
 
         # Get transform and aggregation node from pre-computed lookup (O(1)) or compute (O(n))
         if agg_transform_lookup and agg_node_id_str in agg_transform_lookup:
-            agg_transform, _agg_node_id = agg_transform_lookup[agg_node_id_str]
+            entry = agg_transform_lookup[agg_node_id_str]
+            agg_transform, _agg_node_id = entry.transform, entry.node_id
         else:
             # Fallback: use helper method if lookup not provided
             agg_transform, _agg_node_id = find_aggregation_transform(config, agg_node_id_str, agg_settings.name)
