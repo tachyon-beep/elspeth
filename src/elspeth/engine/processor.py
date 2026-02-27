@@ -108,6 +108,45 @@ class _FlushContext:
     coalesce_name: CoalesceName | None
 
 
+# --- T18: Discriminated union types for _process_single_token extraction ---
+
+
+@dataclass(frozen=True, slots=True)
+class _TransformContinue:
+    """Token should advance to the next node in the DAG."""
+
+    updated_token: TokenInfo
+    updated_sink: str
+
+
+@dataclass(frozen=True, slots=True)
+class _TransformTerminal:
+    """Token has reached a terminal state (completed, failed, quarantined, etc.)."""
+
+    result: RowResult | list[RowResult]
+
+
+type _TransformOutcome = _TransformContinue | _TransformTerminal
+
+
+@dataclass(frozen=True, slots=True)
+class _GateContinue:
+    """Gate says advance to next node (or jump to a specific node)."""
+
+    updated_sink: str
+    next_node_id: NodeID | None = None  # None = next structural node
+
+
+@dataclass(frozen=True, slots=True)
+class _GateTerminal:
+    """Gate has routed, forked, or diverted the token to a terminal state."""
+
+    result: RowResult | list[RowResult]
+
+
+type _GateOutcome = _GateContinue | _GateTerminal
+
+
 def make_step_resolver(
     node_step_map: Mapping[NodeID, int],
     source_node_id: NodeID,

@@ -119,12 +119,12 @@ allow_hits:
   reason: Internal boundary - PipelineRow vs dict discrimination after mypy typecheck fixes
   safety: isinstance() check converts PipelineRow to dict for audit trail consistency
   expires: null
-- key: engine/processor.py:R5:RowProcessor:_execute_transform_with_retry:is_retryable:fp=442c13d215077904
+- key: engine/processor.py:R5:RowProcessor:_execute_transform_with_retry:is_retryable:fp=ba4814a017ee4355
   owner: architecture
   reason: Retry boundary - LLMClientError exception type check for retryable classification
   safety: Crashes on type mismatch - no silent fallback
   expires: '2026-03-11'
-- key: engine/processor.py:R5:RowProcessor:_execute_transform_with_retry:is_retryable:fp=207511cf2bd8b73e
+- key: engine/processor.py:R5:RowProcessor:_execute_transform_with_retry:is_retryable:fp=b708e5e1c4111284
   owner: architecture
   reason: Retry boundary - ConnectionError/TimeoutError/OSError/CapacityError type check for retryable classification
   safety: Crashes on type mismatch - no silent fallback
@@ -149,22 +149,22 @@ allow_hits:
   reason: isinstance(GateSettings) distinguishes fork-gate origin from non-fork continuation to prevent backward routing
   safety: Gate nodes route to branch_first_node; non-gate nodes advance forward via resolve_next_node
   expires: '2026-05-15'
-- key: engine/processor.py:R1:RowProcessor:_process_single_token:fp=ac15baef4e834495
+- key: engine/processor.py:R1:RowProcessor:_process_single_token:fp=3a714f41235467cd
   owner: bugfix
   reason: _node_step_map.get() — gate jump target may not be in step map for pseudo-nodes
   safety: None result skips coalesce check gracefully; structural invariant enforced elsewhere
   expires: '2026-05-15'
-- key: engine/processor.py:R1:RowProcessor:_process_single_token:fp=54de81fe8e42ea2f
+- key: engine/processor.py:R1:RowProcessor:_process_single_token:fp=6c6bd2428cfd808f
   owner: bugfix
   reason: _node_step_map.get() — coalesce node may not be in step map for dynamic topologies
   safety: None result skips coalesce check gracefully; structural invariant enforced elsewhere
   expires: '2026-05-15'
-- key: engine/processor.py:R1:RowProcessor:_notify_coalesce_of_lost_branch:fp=d9917e18ce071880
+- key: engine/processor.py:R1:RowProcessor:_notify_coalesce_of_lost_branch:fp=347dbe461518a4ba
   owner: architecture
   reason: dict.get() correct - not all branch names have coalesce point mapping
   safety: Crashes on type mismatch - no silent fallback
   expires: '2026-03-11'
-- key: engine/processor.py:R5:RowProcessor:_drain_work_queue:fp=d3d41ce5136954cb
+- key: engine/processor.py:R5:RowProcessor:_drain_work_queue:fp=3516df53ffbc9d9f
   owner: architecture
   reason: Type dispatch on _process_single_token return (RowResult | list[RowResult] | None)
   safety: Crashes on type mismatch - no silent fallback
@@ -214,12 +214,12 @@ allow_hits:
   reason: Optional edge_id lookup - edge map may not have all node combinations during routing
   safety: Falls back to generating edge_id when not in prebuilt map
   expires: '2026-05-13'
-- key: engine/processor.py:R5:RowProcessor:_process_single_token:fp=e5d39bf6e7d7aefe
+- key: engine/processor.py:R5:RowProcessor:_process_single_token:fp=b1a4d8133030707b
   owner: architecture
   reason: Protocol dispatch - isinstance for plugin type routing in unified node traversal
   safety: isinstance for NodeType discrimination - TransformProtocol vs GateSettings
   expires: '2026-05-13'
-- key: engine/processor.py:R5:RowProcessor:_process_single_token:fp=d060a37bc6e4c0e7
+- key: engine/processor.py:R5:RowProcessor:_process_single_token:fp=a42dc1d43473772e
   owner: architecture
   reason: Protocol dispatch - isinstance for plugin type routing in unified node traversal
   safety: isinstance for NodeType discrimination - TransformProtocol vs GateSettings
