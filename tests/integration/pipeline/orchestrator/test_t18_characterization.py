@@ -385,6 +385,101 @@ class TestT18CharacterizationResumePath:
     _process_resumed_rows() documented in the design.
     """
 
+    def test_schema_contract_set_before_transform_execution(self) -> None:
+        """Assert ctx.contract is set to the resume schema_contract BEFORE transforms execute.
+
+        The resume path sets run_ctx.ctx.contract = schema_contract between
+        _initialize_run_context() and LoopContext construction. If a future
+        refactor reorders these steps, transforms would see contract=None.
+
+        Strategy: Run the original pipeline to populate DB with rows, then
+        resume with one of those rows and spy on the transform to capture
+        ctx.contract during process(). Verify it matches the passed contract.
+        """
+        db = LandscapeDB.in_memory()
+        orchestrator = Orchestrator(db)
+
+        captured_contracts: list[SchemaContract | None] = []
+
+        class ContractCapturingTransform(_TestTransformBase):
+            name = "contract_capture_transform"
+            input_schema = _TestSchema
+            output_schema = _TestSchema
+
+            def process(self, row: PipelineRow, ctx: Any) -> TransformResult:
+                captured_contracts.append(ctx.contract)
+                return TransformResult.success(
+                    make_pipeline_row(row.to_dict()),
+                    success_reason={"action": "identity"},
+                )
+
+        source = as_source(ListSource([{"value": 1}]))
+        transform = as_transform(ContractCapturingTransform())
+        output_sink = as_sink(CollectSink("output"))
+
+        config = PipelineConfig(
+            source=source,
+            transforms=[transform],
+            sinks={"output": output_sink},
+        )
+
+        graph = build_production_graph(config)
+        recorder, run_id, payload_store = _begin_test_run(db)
+
+        # First: run the full pipeline to populate DB with rows, nodes, edges
+        orchestrator._execute_run(
+            recorder=recorder,
+            run_id=run_id,
+            config=config,
+            graph=graph,
+            payload_store=payload_store,
+        )
+
+        # Retrieve the actual row_id created during the original run
+        with db._engine.connect() as conn:
+            row_id = conn.execute(
+                text("SELECT row_id FROM rows WHERE run_id = :run_id LIMIT 1"),
+                {"run_id": run_id},
+            ).scalar()
+        assert row_id is not None, "Original run should have created at least one row"
+
+        # Clear captures from original run
+        captured_contracts.clear()
+
+        # Create a distinct schema contract for resume (different from what
+        # the original run would have set, so we can verify identity)
+        resume_contract = SchemaContract(
+            mode="OBSERVED",
+            fields=(
+                FieldContract(
+                    normalized_name="value",
+                    original_name="value",
+                    python_type=int,
+                    required=False,
+                    source="inferred",
+                ),
+            ),
+            locked=True,
+        )
+
+        # Resume with the real row_id from the original run
+        orchestrator._process_resumed_rows(
+            recorder=recorder,
+            run_id=run_id,
+            config=config,
+            graph=graph,
+            unprocessed_rows=[(row_id, 0, {"value": 1})],
+            restored_aggregation_state={},
+            payload_store=payload_store,
+            schema_contract=resume_contract,
+        )
+
+        # The transform must have seen the contract during process()
+        assert len(captured_contracts) == 1, f"Expected 1 transform call, got {len(captured_contracts)}"
+        assert captured_contracts[0] is resume_contract, (
+            f"ctx.contract during resume must be the passed schema_contract, got {captured_contracts[0]!r}"
+        )
+
     def test_source_on_start_not_called_during_resume(self) -> None:
         """Assert source.on_start() is NOT called during resume.
 

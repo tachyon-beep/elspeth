@@ -1803,6 +1803,17 @@ class RowProcessor:
 
         # 5. Jump to specific node
         if outcome.next_node_id is not None:
+            # Validate jump target exists in the DAG (our data — crash on invariant violation).
+            # Without this check, a nonexistent target silently passes the coalesce ordering
+            # check below (both .get() calls return None → condition is False) and only fails
+            # one iteration later with a less informative error from resolve_plugin_for_node().
+            if outcome.next_node_id not in self._node_step_map:
+                raise OrchestrationInvariantError(
+                    f"Gate at node '{node_id}' jumped token '{current_token.token_id}' to "
+                    f"node '{outcome.next_node_id}' which is not in the DAG step map. "
+                    f"Known nodes: {sorted(self._node_step_map.keys())}"
+                )
+
             updated_sink = current_on_success_sink
             resolved_sink = self._nav.resolve_jump_target_sink(outcome.next_node_id)
             if resolved_sink is not None:
@@ -1816,9 +1827,9 @@ class RowProcessor:
             # IMPORTANT: Use outcome.next_node_id (not the caller's node_id param)
             # because we're validating the JUMP TARGET, not the current position.
             if coalesce_node_id is not None:
-                jump_target_step = self._node_step_map.get(outcome.next_node_id)
-                coalesce_barrier_step = self._node_step_map.get(coalesce_node_id)
-                if jump_target_step is not None and coalesce_barrier_step is not None and jump_target_step > coalesce_barrier_step:
+                jump_target_step = self._node_step_map[outcome.next_node_id]
+                coalesce_barrier_step = self._node_step_map[coalesce_node_id]
+                if jump_target_step > coalesce_barrier_step:
                     raise OrchestrationInvariantError(
                         f"Gate jump moved token '{current_token.token_id}' to node '{outcome.next_node_id}' "
                         f"(step {jump_target_step}) which is past its coalesce node '{coalesce_node_id}' "
@@ -1915,6 +1926,11 @@ class RowProcessor:
             - None for held coalesce tokens
         """
         current_token = token
+        # MUTATION CONTRACT: child_items is passed by reference to _handle_transform_node(),
+        # _handle_gate_node(), _notify_coalesce_of_lost_branch(), and _maybe_coalesce_token().
+        # These methods append child WorkItems (fork paths, deaggregation, coalesce merges)
+        # directly into this list. The caller returns child_items alongside the RowResult.
+        # Do NOT replace with return-value-based patterns without updating all call sites.
         child_items: list[WorkItem] = []
 
         # current_node_id=None skips traversal loop entirely, so only allow it
@@ -1999,6 +2015,7 @@ class RowProcessor:
                         coalesce_name=coalesce_name,
                     )
 
+                # NOTE: child_items is mutated inside (deagg appends, coalesce notifications).
                 transform_outcome = self._handle_transform_node(
                     row_transform,
                     current_token,
@@ -2014,6 +2031,7 @@ class RowProcessor:
                 current_token = transform_outcome.updated_token
                 last_on_success_sink = transform_outcome.updated_sink
             elif isinstance(plugin, GateSettings):
+                # NOTE: child_items is mutated inside (fork paths, coalesce notifications).
                 gate_outcome = self._handle_gate_node(
                     plugin,
                     current_token,

@@ -149,16 +149,6 @@ allow_hits:
   reason: isinstance(GateSettings) distinguishes fork-gate origin from non-fork continuation to prevent backward routing
   safety: Gate nodes route to branch_first_node; non-gate nodes advance forward via resolve_next_node
   expires: '2026-05-15'
-- key: engine/processor.py:R1:RowProcessor:_handle_gate_node:fp=82206c1d8d52ff7a
-  owner: bugfix
-  reason: _node_step_map.get() — gate jump target may not be in step map for pseudo-nodes
-  safety: None result skips coalesce check gracefully; structural invariant enforced elsewhere
-  expires: '2026-05-15'
-- key: engine/processor.py:R1:RowProcessor:_handle_gate_node:fp=feedef3d1635ef8b
-  owner: bugfix
-  reason: _node_step_map.get() — coalesce node may not be in step map for dynamic topologies
-  safety: None result skips coalesce check gracefully; structural invariant enforced elsewhere
-  expires: '2026-05-15'
 - key: engine/processor.py:R1:RowProcessor:_notify_coalesce_of_lost_branch:fp=347dbe461518a4ba
   owner: architecture
   reason: dict.get() correct - not all branch names have coalesce point mapping
