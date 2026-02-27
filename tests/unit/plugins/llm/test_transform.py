@@ -903,6 +903,164 @@ class TestMultiQueryDeclaredOutputFields:
 
 
 # ---------------------------------------------------------------------------
+# Regression: Multi-query _output_schema_config must use prefixed fields
+# ---------------------------------------------------------------------------
+
+
+class TestMultiQueryOutputSchemaConfig:
+    """Regression for commit 4c7ca1b9: _output_schema_config must match emission.
+
+    Before the fix, _output_schema_config was built unconditionally with
+    unprefixed single-query fields (llm_response, llm_response_model, etc.)
+    even when multi-query mode emits only prefixed fields (quality_llm_response,
+    relevance_llm_response, etc.). This caused DAG contract propagation to
+    advertise wrong field names, leading to false missing-field validation
+    failures or incorrect contract metadata for downstream transforms.
+    """
+
+    def test_multi_query_guaranteed_fields_are_prefixed(self) -> None:
+        """_output_schema_config.guaranteed_fields must contain query-prefixed names."""
+        from elspeth.plugins.llm.transform import LLMTransform
+
+        transform = LLMTransform(
+            _make_config(
+                template="Classify: {{ row.text_content }}",
+                queries={
+                    "quality": {"input_fields": {"text_content": "text"}},
+                    "relevance": {"input_fields": {"text_content": "text"}},
+                },
+            )
+        )
+
+        guaranteed = set(transform._output_schema_config.guaranteed_fields)
+        assert "quality_llm_response" in guaranteed
+        assert "quality_llm_response_usage" in guaranteed
+        assert "quality_llm_response_model" in guaranteed
+        assert "relevance_llm_response" in guaranteed
+        assert "relevance_llm_response_usage" in guaranteed
+        assert "relevance_llm_response_model" in guaranteed
+
+    def test_multi_query_audit_fields_are_prefixed(self) -> None:
+        """_output_schema_config.audit_fields must contain query-prefixed audit names."""
+        from elspeth.plugins.llm.transform import LLMTransform
+
+        transform = LLMTransform(
+            _make_config(
+                template="Classify: {{ row.text_content }}",
+                queries={
+                    "quality": {"input_fields": {"text_content": "text"}},
+                },
+            )
+        )
+
+        audit = set(transform._output_schema_config.audit_fields)
+        assert "quality_llm_response_template_hash" in audit
+        assert "quality_llm_response_variables_hash" in audit
+
+    def test_multi_query_schema_config_excludes_unprefixed_fields(self) -> None:
+        """Multi-query _output_schema_config must NOT contain unprefixed single-query fields.
+
+        This is the exact regression guard: the old code built _output_schema_config
+        once with unprefixed fields and never updated it for multi-query.
+        """
+        from elspeth.plugins.llm.transform import LLMTransform
+
+        transform = LLMTransform(
+            _make_config(
+                template="Classify: {{ row.text_content }}",
+                queries={
+                    "quality": {"input_fields": {"text_content": "text"}},
+                },
+            )
+        )
+
+        guaranteed = set(transform._output_schema_config.guaranteed_fields)
+        audit = set(transform._output_schema_config.audit_fields)
+        all_fields = guaranteed | audit
+
+        # Unprefixed single-query fields must NOT appear
+        assert "llm_response" not in all_fields
+        assert "llm_response_usage" not in all_fields
+        assert "llm_response_model" not in all_fields
+        assert "llm_response_template_hash" not in all_fields
+
+    def test_multi_query_output_schema_has_prefixed_model_fields(self) -> None:
+        """Pydantic output_schema model must include prefixed fields for explicit schemas."""
+        from elspeth.plugins.llm.transform import LLMTransform
+
+        transform = LLMTransform(
+            _make_config(
+                template="Classify: {{ row.text_content }}",
+                schema={"mode": "flexible", "fields": ["text: str"]},
+                queries={
+                    "quality": {"input_fields": {"text_content": "text"}},
+                },
+            )
+        )
+
+        model_fields = set(transform.output_schema.model_fields)
+        assert "quality_llm_response" in model_fields
+        assert "quality_llm_response_usage" in model_fields
+        # Unprefixed must NOT appear
+        assert "llm_response" not in model_fields
+
+    def test_single_query_schema_config_uses_unprefixed_fields(self) -> None:
+        """Baseline: single-query _output_schema_config uses unprefixed field names."""
+        from elspeth.plugins.llm.transform import LLMTransform
+
+        transform = LLMTransform(_make_config())
+
+        guaranteed = set(transform._output_schema_config.guaranteed_fields)
+        assert "llm_response" in guaranteed
+        assert "llm_response_usage" in guaranteed
+        assert "llm_response_model" in guaranteed
+
+    def test_schema_config_consistent_with_declared_output_fields(self) -> None:
+        """All guaranteed + audit fields in _output_schema_config must appear in declared_output_fields."""
+        from elspeth.plugins.llm.transform import LLMTransform
+
+        transform = LLMTransform(
+            _make_config(
+                template="Classify: {{ row.text_content }}",
+                queries={
+                    "quality": {"input_fields": {"text_content": "text"}},
+                    "relevance": {"input_fields": {"text_content": "text"}},
+                },
+            )
+        )
+
+        schema_fields = set(transform._output_schema_config.guaranteed_fields) | set(transform._output_schema_config.audit_fields)
+        declared = transform.declared_output_fields
+
+        # Every field advertised in schema config must be in declared_output_fields
+        missing = schema_fields - declared
+        assert not missing, f"Fields in _output_schema_config but not declared_output_fields: {missing}"
+
+    def test_multi_query_with_output_fields_in_schema_config(self) -> None:
+        """Extracted output_fields (e.g., score, label) must appear in guaranteed_fields."""
+        from elspeth.plugins.llm.transform import LLMTransform
+
+        transform = LLMTransform(
+            _make_config(
+                template="Evaluate: {{ row.text_content }}",
+                queries={
+                    "quality": {
+                        "input_fields": {"text_content": "text"},
+                        "output_fields": [
+                            {"suffix": "score", "type": "integer"},
+                            {"suffix": "label", "type": "string"},
+                        ],
+                    },
+                },
+            )
+        )
+
+        guaranteed = set(transform._output_schema_config.guaranteed_fields)
+        assert "quality_score" in guaranteed
+        assert "quality_label" in guaranteed
+
+
+# ---------------------------------------------------------------------------
 # Bug fix: response_format not passed to providers
 # ---------------------------------------------------------------------------
 
