@@ -1840,6 +1840,52 @@ class RowProcessor:
             )
         return _GateContinue(updated_token=current_token, updated_sink=current_on_success_sink)
 
+    def _handle_terminal_token(
+        self,
+        current_token: TokenInfo,
+        current_on_success_sink: str,
+    ) -> RowResult:
+        """Handle a token that has traversed all nodes: resolve final sink, return result.
+
+        Determines the effective sink from:
+        1. branch_to_sink mapping (for fork branches routing directly to sinks)
+        2. last_on_success_sink (inherited from transforms or source)
+
+        If the token has a branch_name that maps to a direct sink via _branch_to_sink,
+        that takes precedence. Otherwise, the accumulated on_success sink is used.
+
+        Raises:
+            OrchestrationInvariantError: If no effective sink can be determined (indicates
+                a DAG construction or on_success configuration bug).
+
+        Returns:
+            RowResult with COMPLETED outcome and resolved sink_name.
+        """
+        # Determine sink name from explicit routing maps. Fork children
+        # targeting direct sinks are resolved via _branch_to_sink (built from
+        # DAG COPY edges at construction time). Non-fork tokens use the last
+        # transform's on_success or the source's on_success.
+        effective_sink = current_on_success_sink
+        if current_token.branch_name is not None:
+            branch = BranchName(current_token.branch_name)
+            if branch in self._branch_to_sink:
+                effective_sink = self._branch_to_sink[branch]
+
+        if not effective_sink or not effective_sink.strip():
+            raise OrchestrationInvariantError(
+                f"No effective sink for token {current_token.token_id}: "
+                f"last_on_success_sink={current_on_success_sink!r}, "
+                f"branch_name={current_token.branch_name!r}. "
+                f"This indicates a DAG construction or on_success configuration bug."
+            )
+
+        return RowResult(
+            token=current_token,
+            final_data=current_token.row_data,
+            outcome=RowOutcome.COMPLETED,
+            sink_name=effective_sink,
+        )
+
     def _process_single_token(
         self,
         token: TokenInfo,
@@ -1991,30 +2037,5 @@ class RowProcessor:
 
             node_id = next_node_id
 
-        # Determine sink name from explicit routing maps. Fork children
-        # targeting direct sinks are resolved via _branch_to_sink (built from
-        # DAG COPY edges at construction time). Non-fork tokens use the last
-        # transform's on_success or the source's on_success.
-        effective_sink = last_on_success_sink
-        if current_token.branch_name is not None:
-            branch = BranchName(current_token.branch_name)
-            if branch in self._branch_to_sink:
-                effective_sink = self._branch_to_sink[branch]
-
-        if not effective_sink or not effective_sink.strip():
-            raise OrchestrationInvariantError(
-                f"No effective sink for token {current_token.token_id}: "
-                f"last_on_success_sink={last_on_success_sink!r}, "
-                f"branch_name={current_token.branch_name!r}. "
-                f"This indicates a DAG construction or on_success configuration bug."
-            )
-
-        return (
-            RowResult(
-                token=current_token,
-                final_data=current_token.row_data,
-                outcome=RowOutcome.COMPLETED,
-                sink_name=effective_sink,
-            ),
-            child_items,
-        )
+        result = self._handle_terminal_token(current_token, last_on_success_sink)
+        return result, child_items

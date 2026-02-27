@@ -209,22 +209,22 @@ allow_hits:
   reason: Optional edge_id lookup - edge map may not have all node combinations during routing
   safety: Falls back to generating edge_id when not in prebuilt map
   expires: '2026-05-13'
-- key: engine/processor.py:R5:RowProcessor:_process_single_token:fp=a5d15704bb6466be
+- key: engine/processor.py:R5:RowProcessor:_process_single_token:fp=61539fdd7b38c907
   owner: architecture
   reason: Protocol dispatch - isinstance for plugin type routing in unified node traversal
   safety: isinstance for NodeType discrimination - TransformProtocol vs GateSettings
   expires: '2026-05-13'
-- key: engine/processor.py:R5:RowProcessor:_process_single_token:fp=e0fd40fcf593dda6
+- key: engine/processor.py:R5:RowProcessor:_process_single_token:fp=441440456f690980
   owner: architecture
   reason: Discriminated union dispatch - isinstance for _TransformOutcome result routing
   safety: isinstance for dataclass variant dispatch after _handle_transform_node extraction
   expires: '2026-05-13'
-- key: engine/processor.py:R5:RowProcessor:_process_single_token:fp=4b40f610dfab8eef
+- key: engine/processor.py:R5:RowProcessor:_process_single_token:fp=105b5129cfe40f88
   owner: architecture
   reason: Protocol dispatch - isinstance for plugin type routing in unified node traversal
   safety: isinstance for NodeType discrimination - TransformProtocol vs GateSettings
   expires: '2026-05-13'
-- key: engine/processor.py:R5:RowProcessor:_process_single_token:fp=8dd0b6d89611eaf2
+- key: engine/processor.py:R5:RowProcessor:_process_single_token:fp=02e2907e4cd8dd5e
   owner: architecture
   reason: Discriminated union dispatch - isinstance for _GateOutcome result routing
   safety: isinstance for dataclass variant dispatch after _handle_gate_node extraction
