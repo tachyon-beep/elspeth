@@ -33,6 +33,7 @@ from elspeth.plugins.batching import BatchTransformMixin, OutputPort
 from elspeth.plugins.clients.llm import ContextLengthError, LLMClientError
 from elspeth.plugins.llm import (
     _build_augmented_output_schema,
+    _build_multi_query_output_schema,
     get_llm_audit_fields,
     get_llm_guaranteed_fields,
     populate_llm_metadata_fields,
@@ -784,31 +785,16 @@ class LLMTransform(BaseTransform, BatchTransformMixin):
         self._max_capacity_retry_seconds = self._config.max_capacity_retry_seconds
         self._pool_size = self._config.pool_size
 
-        # Schema
+        # Schema (input — same for both single and multi-query)
         schema_config = self._config.schema_config
         self.input_schema = create_schema_from_config(
             schema_config,
             f"{self.name}Schema",
             allow_coercion=False,
         )
-        self.output_schema = _build_augmented_output_schema(
-            base_schema_config=schema_config,
-            response_field=self._config.response_field,
-            schema_name=f"{self.name}OutputSchema",
-        )
-
-        # Build output schema config with field categorization
-        guaranteed = get_llm_guaranteed_fields(self._response_field)
-        audit = get_llm_audit_fields(self._response_field)
-        base_guaranteed = schema_config.guaranteed_fields or ()
-        base_audit = schema_config.audit_fields or ()
-        self._output_schema_config = SchemaConfig(
-            mode=schema_config.mode,
-            fields=schema_config.fields,
-            guaranteed_fields=tuple(set(base_guaranteed) | set(guaranteed)),
-            audit_fields=tuple(set(base_audit) | set(audit)),
-            required_fields=schema_config.required_fields,
-        )
+        # output_schema and _output_schema_config are set in the strategy
+        # dispatch below — multi-query uses prefixed fields, single-query
+        # uses unprefixed fields.
 
         # Tracer — factory returns frozen ActiveLangfuseTracer or NoOpLangfuseTracer.
         # tracing lives on provider-specific configs (AzureOpenAIConfig, OpenRouterConfig),
@@ -850,17 +836,37 @@ class LLMTransform(BaseTransform, BatchTransformMixin):
                 executor=self._query_executor,
             )
 
-            # Multi-query emits prefixed fields — declare them for collision detection
-            prefixed_fields: set[str] = set()
+            # Multi-query emits prefixed fields — compute all field sets
+            prefixed_guaranteed: set[str] = set()
+            prefixed_audit: set[str] = set()
             for spec in query_specs:
                 prefix = f"{spec.name}_{self._response_field}"
-                prefixed_fields.add(prefix)
-                prefixed_fields.update(get_llm_guaranteed_fields(prefix))
-                prefixed_fields.update(get_llm_audit_fields(prefix))
+                prefixed_guaranteed.add(prefix)
+                prefixed_guaranteed.update(get_llm_guaranteed_fields(prefix))
+                prefixed_audit.update(get_llm_audit_fields(prefix))
                 if spec.output_fields:
                     for field in spec.output_fields:
-                        prefixed_fields.add(f"{spec.name}_{field.suffix}")
-            self.declared_output_fields = frozenset(prefixed_fields)
+                        prefixed_guaranteed.add(f"{spec.name}_{field.suffix}")
+            self.declared_output_fields = frozenset(prefixed_guaranteed | prefixed_audit)
+
+            # Output schema config with prefixed fields for DAG contract propagation
+            base_guaranteed = schema_config.guaranteed_fields or ()
+            base_audit = schema_config.audit_fields or ()
+            self._output_schema_config = SchemaConfig(
+                mode=schema_config.mode,
+                fields=schema_config.fields,
+                guaranteed_fields=tuple(set(base_guaranteed) | prefixed_guaranteed),
+                audit_fields=tuple(set(base_audit) | prefixed_audit),
+                required_fields=schema_config.required_fields,
+            )
+
+            # Pydantic output schema with prefixed LLM fields
+            self.output_schema = _build_multi_query_output_schema(
+                base_schema_config=schema_config,
+                response_field=self._response_field,
+                query_names=tuple(spec.name for spec in query_specs),
+                schema_name=f"{self.name}OutputSchema",
+            )
         else:
             self._strategy = SingleQueryStrategy(
                 template=self._template,
@@ -873,11 +879,26 @@ class LLMTransform(BaseTransform, BatchTransformMixin):
             )
 
             # Single-query emits unprefixed fields
-            self.declared_output_fields = frozenset(
-                [
-                    *get_llm_guaranteed_fields(self._config.response_field),
-                    *get_llm_audit_fields(self._config.response_field),
-                ]
+            guaranteed = get_llm_guaranteed_fields(self._response_field)
+            audit = get_llm_audit_fields(self._response_field)
+            self.declared_output_fields = frozenset([*guaranteed, *audit])
+
+            # Output schema config with unprefixed fields
+            base_guaranteed = schema_config.guaranteed_fields or ()
+            base_audit = schema_config.audit_fields or ()
+            self._output_schema_config = SchemaConfig(
+                mode=schema_config.mode,
+                fields=schema_config.fields,
+                guaranteed_fields=tuple(set(base_guaranteed) | set(guaranteed)),
+                audit_fields=tuple(set(base_audit) | set(audit)),
+                required_fields=schema_config.required_fields,
+            )
+
+            # Pydantic output schema with unprefixed LLM fields
+            self.output_schema = _build_augmented_output_schema(
+                base_schema_config=schema_config,
+                response_field=self._response_field,
+                schema_name=f"{self.name}OutputSchema",
             )
 
         # Provider instance — deferred to on_start() when recorder/telemetry available

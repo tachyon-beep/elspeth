@@ -4,7 +4,7 @@
 **Status:** Reviewed
 **Branch:** RC3.3-architectural-remediation
 **Issue:** elspeth-rapid-cfcbcd
-**Review:** Two review passes — 4-agent peer review (architecture critic, systems thinking, quality engineering, Python engineering). All approve with required changes, incorporated below.
+**Review:** Three review passes — 4-agent peer review (architecture critic, systems thinking, quality engineering, Python engineering). All approve with required changes, incorporated below.
 
 ## Problem
 
@@ -95,13 +95,19 @@ class RunContext:
     """Return type for _initialize_run_context().
 
     Bundles the five objects created during run initialization that are
-    consumed by subsequent phases.
+    consumed by subsequent phases. Short-lived: consumed immediately to
+    build LoopContext. Mapping fields are wrapped in MappingProxyType
+    for consistency with GraphArtifacts.
     """
     ctx: PluginContext
     processor: RowProcessor
     coalesce_executor: CoalesceExecutor | None
-    coalesce_node_map: dict[CoalesceName, NodeID]
-    agg_transform_lookup: dict[str, AggNodeEntry]
+    coalesce_node_map: Mapping[CoalesceName, NodeID]
+    agg_transform_lookup: Mapping[str, AggNodeEntry]
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "coalesce_node_map", MappingProxyType(dict(self.coalesce_node_map)))
+        object.__setattr__(self, "agg_transform_lookup", MappingProxyType(dict(self.agg_transform_lookup)))
 
 
 @dataclass(slots=True)
@@ -117,25 +123,35 @@ class LoopContext:
     and ``accumulate_row_outcomes()``. All other fields are effectively
     read-only after construction. Field reassignment is prevented by
     convention, not by the dataclass.
+
+    Mutation contracts:
+    - ``counters``: incremented by _handle_quarantine_row(),
+      _run_main_processing_loop(), _run_resume_processing_loop(),
+      accumulate_row_outcomes(), accumulate_flush_result()
+    - ``pending_tokens``: appended by _handle_quarantine_row(),
+      accumulate_row_outcomes(); consumed (cleared per-sink) by
+      _write_pending_to_sinks() inside _flush_and_write_sinks()
     """
+    # --- Mutable state (updated row-by-row) ---
+    counters: ExecutionCounters
+    pending_tokens: dict[str, list[tuple[TokenInfo, PendingOutcome | None]]]
+
+    # --- Read-only after construction (not reassigned) ---
     processor: RowProcessor
     ctx: PluginContext
     config: PipelineConfig
-    counters: ExecutionCounters
-    pending_tokens: dict[str, list[tuple[TokenInfo, PendingOutcome | None]]]
-    agg_transform_lookup: dict[str, AggNodeEntry]
+    agg_transform_lookup: Mapping[str, AggNodeEntry]
     coalesce_executor: CoalesceExecutor | None
-    coalesce_node_map: dict[CoalesceName, NodeID]
+    coalesce_node_map: Mapping[CoalesceName, NodeID]
 
 
-_CheckpointFactory: TypeAlias = Callable[[str], Callable[..., None]]
+_CheckpointFactory: TypeAlias = Callable[[str], Callable[[TokenInfo], None]]
 """Factory that creates a per-sink checkpoint callback.
 
 Takes a sink_node_id (str) and returns a callback invoked after each
-token is written to that sink. The inner callable signature should match
-_write_pending_to_sinks()'s on_token_written parameter — tighten the
-inner Callable[..., None] to a concrete protocol once the parameter
-list is verified during implementation.
+token is written to that sink. The inner callable signature matches
+_write_pending_to_sinks()'s on_token_written parameter exactly
+(verified: core.py line 275).
 """
 ```
 
@@ -148,6 +164,11 @@ def to_run_result(self, run_id: str, status: RunStatus = RunStatus.RUNNING) -> R
 # After (required parameter)
 def to_run_result(self, run_id: str, status: RunStatus) -> RunResult:
 ```
+
+**Preflight required before commit #1:** Run `grep -rn 'to_run_result' src/ tests/` and update every call site that omits `status`. Known call sites requiring update:
+- `orchestrator/core.py:1814` — `counters.to_run_result(run_id)` → add `status=RunStatus.COMPLETED`
+- `orchestrator/core.py:2365` — `counters.to_run_result(run_id)` → add `status=RunStatus.COMPLETED` (the post-hoc `result.status = RunStatus.COMPLETED` in `resume()` becomes redundant and should be removed)
+- `tests/property/engine/test_orchestrator_lifecycle_properties.py` — 5 call sites at lines 419, 441, 457, 478, 691 that pass no `status` argument → add `status=RunStatus.RUNNING` (these tests verify counter field mapping, not status semantics)
 
 ### Current `_execute_run()` structure
 
@@ -253,13 +274,14 @@ def _handle_quarantine_row(
     source_item: SourceItem,
     row_index: int,
     edge_map: Mapping[tuple[NodeID, str], str],
-    processor: RowProcessor,
     loop_ctx: LoopContext,
 ) -> None:
 ```
 
+Accesses `loop_ctx.processor` for token creation (not passed separately — avoids split-brain where `processor` is available both as a parameter and via the bundle).
+
 Handles:
-- Token creation for quarantined row
+- Token creation for quarantined row (via `loop_ctx.processor.token_manager`)
 - Node state recording (begin + complete)
 - Routing event recording
 - Error hash computation
@@ -492,9 +514,12 @@ _TransformOutcome: TypeAlias = _TransformContinue | _TransformTerminal
 
 @dataclass(frozen=True, slots=True)
 class _GateContinue:
-    """Gate says advance to next node (or jump to a specific node)."""
+    """Gate says advance to next node (or jump to a specific node).
+
+    Matches GateOutcome.next_node_id vocabulary from executors/types.py.
+    """
     updated_sink: str
-    jump_target: NodeID | None = None  # None = next structural node
+    next_node_id: NodeID | None = None  # None = next structural node
 
 @dataclass(frozen=True, slots=True)
 class _GateTerminal:
@@ -506,7 +531,7 @@ _GateOutcome: TypeAlias = _GateContinue | _GateTerminal
 
 **Design rationale (from review):** The original design used `tuple[RowResult | list[RowResult] | None, TokenInfo, str]` where `None` meant "continue to next node." This conflates "no result yet" with absence of a value, and the caller must check `if result is not None` after every call while also unpacking two mutable out-parameters. Frozen dataclasses make the semantics explicit to mypy and readers. Precedent: `_FlushContext` in `processor.py` already uses this pattern.
 
-The gate outcome type mirrors the transform pattern for consistency. The original design used `RowResult | list[RowResult] | None` with a `None` sentinel for gates, but this created two problems: (1) asymmetry with the transform discriminated union in the same 60-line method, and (2) the gate "jump to specific node" case (where `outcome.next_node_id` overrides the structural next node) cannot be represented by returning `None` — the caller needs the jump target. `_GateContinue.jump_target` captures this cleanly.
+The gate outcome type mirrors the transform pattern for consistency. The original design used `RowResult | list[RowResult] | None` with a `None` sentinel for gates, but this created two problems: (1) asymmetry with the transform discriminated union in the same 60-line method, and (2) the gate "jump to specific node" case (where `outcome.next_node_id` overrides the structural next node) cannot be represented by returning `None` — the caller needs the jump target. `_GateContinue.next_node_id` captures this cleanly.
 
 ### Current `_process_single_token()` structure
 
@@ -577,11 +602,11 @@ Handles:
 - FORK_TO_PATHS (create child tokens, queue work items) → `_GateTerminal`
 - ROUTE_TO_SINK (route to named sink) → `_GateTerminal`
 - DIVERT_TO_ERROR → `_GateTerminal`
-- CONTINUE (advance to next node) → `_GateContinue(jump_target=None)`
-- Explicit next_node_id jump → `_GateContinue(jump_target=node_id)`
+- CONTINUE (advance to next node) → `_GateContinue(next_node_id=None)`
+- Explicit next_node_id jump → `_GateContinue(next_node_id=node_id)`
 - Error handling and coalesce notification
 
-Returns `_GateTerminal` for fork/route/divert outcomes. Returns `_GateContinue` for continue/jump outcomes, with `jump_target` set when the gate specifies an explicit next node (overriding structural DAG order).
+Returns `_GateTerminal` for fork/route/divert outcomes. Returns `_GateContinue` for continue/jump outcomes, with `next_node_id` set when the gate specifies an explicit next node (overriding structural DAG order).
 
 #### 3. `_handle_terminal_token()`
 
@@ -592,8 +617,7 @@ def _handle_terminal_token(
     self,
     current_token: TokenInfo,
     current_on_success_sink: str,
-    child_items: list[WorkItem],
-) -> tuple[RowResult | list[RowResult], list[WorkItem]]:
+) -> RowResult | list[RowResult]:
 ```
 
 Handles:
@@ -601,7 +625,7 @@ Handles:
 - COMPLETED outcome with on_success sink resolution
 - ROUTED outcome for named sink routing
 
-Note: `child_items` is returned unchanged — all fork children are created earlier in the loop by `_handle_gate_node()`. The return type includes `list[WorkItem]` only because the caller expects `(result, child_items)` at every return site.
+Returns only the result — the caller wraps it with the already-constructed `child_items`: `return result, child_items`. This keeps the method's contract honest: it computes a result, it does not manage work items. (All fork children are created earlier in the loop by `_handle_gate_node()`.)
 
 ### After extraction: `_process_single_token()` becomes ~65 lines
 
@@ -646,13 +670,14 @@ def _process_single_token(self, token, ctx, current_node_id, ...):
             if isinstance(gate_outcome, _GateTerminal):
                 return gate_outcome.result, child_items
             current_on_success_sink = gate_outcome.updated_sink
-            if gate_outcome.jump_target is not None:
-                node_id = gate_outcome.jump_target
+            if gate_outcome.next_node_id is not None:
+                node_id = gate_outcome.next_node_id
                 continue
 
         node_id = next_node_id
 
-    return self._handle_terminal_token(current_token, current_on_success_sink, child_items)
+    result = self._handle_terminal_token(current_token, current_on_success_sink)
+    return result, child_items
 ```
 
 ---
@@ -668,38 +693,43 @@ Before any extraction, add a characterization test that exercises the full `_exe
 - A gate that forks to multiple paths
 
 The test must assert:
-- `run_result` counter fields (`rows_succeeded`, `rows_failed`, `rows_quarantined`, `rows_routed`)
-- **Counter conservation identity:** `rows_processed == rows_quarantined + rows_succeeded + rows_failed + rows_routed` — catches double-counting or missed increments during extraction
+- **Per-scenario counter assertions:** Assert specific counter values for the characterization pipeline rather than a single conservation equation. The naive identity `rows_processed == rows_quarantined + rows_succeeded + rows_failed + rows_routed` is **wrong for fork paths** — a source row that forks to 2 paths produces `rows_forked=1` and 2 child tokens that each increment `rows_succeeded`, breaking the identity. Instead, assert the exact expected counters for the specific pipeline configuration (e.g., "2 quarantined, 3 succeeded, 1 forked, 0 failed").
 - `sink.results` contents for each sink
 - Audit record counts in `nodes`, `node_states`, `routing_events` tables
-- **`operation_id` attribution via spy:** Wrap the transform's `process()` method in a spy that captures `ctx.operation_id` at call time, then assert all captured values are `None`. This is the only reliable way to detect an `operation_id` leak — the value cannot be observed from outside the transform call.
+- **`operation_id` attribution via spy:** Use `unittest.mock.patch.object` (not bare attribute assignment) to wrap the transform's `process()` method and capture `ctx.operation_id` at call time, then assert all captured values are `None`. `patch.object` is robust against the caller storing a reference before the spy is installed.
 
 ```python
 # operation_id spy pattern for characterization test
-original_process = transform.process
+from unittest.mock import patch
+
 captured_operation_ids = []
+original_process = transform.process
 
 def spy_process(row, ctx):
     captured_operation_ids.append(ctx.operation_id)
     return original_process(row, ctx)
 
-transform.process = spy_process
-
-# ... run pipeline ...
+with patch.object(transform, "process", side_effect=spy_process):
+    # ... run pipeline ...
+    pass
 
 assert all(op_id is None for op_id in captured_operation_ids), (
     f"operation_id leaked into transform execution: {captured_operation_ids}"
 )
 ```
 
+- **Audit attribution in Landscape:** After the run completes, query the Landscape `calls` table and assert: (1) the `source_load` operation has no calls from sink nodes; (2) sink write calls have `operation_id = None` (they execute outside the source `track_operation` context). This catches extraction errors that break the `track_operation` boundary — the highest-risk boundary in commit #8.
 - **Field resolution after quarantine:** Assert that `field_resolution_recorded` is `True` even when the first source row is quarantined (field resolution must come from the first *valid* row)
-- **Aggregation timeout ordering:** Verify the row that triggers a timeout flush does NOT appear in the flushed batch (regression oracle for BUG FIX P1-2026-01-22)
+- **Aggregation timeout ordering:** Verify the row that triggers a timeout flush does NOT appear in the flushed batch (regression oracle for BUG FIX P1-2026-01-22). Confirm the test uses the `Clock` abstraction for deterministic timeout triggering — do NOT use `time.sleep()`.
 
 This test becomes the regression oracle for the entire extraction sequence.
 
 Additionally, add targeted tests for review-identified gaps:
 - **`on_start()` not called for source during resume:** Create a source with a call tracker on `on_start()`. Run resume. Assert call count is 0 for the source and 1 for each transform/sink.
 - **No checkpoint created during resume:** Run resume path, assert `checkpoint_manager.get_latest_checkpoint(run_id)` returns the pre-resume checkpoint (not a new one from `on_token_written_factory=None`)
+- **No field resolution recorded during resume:** After resume completes, query the Landscape and assert no `field_resolution_recorded` event was emitted during the resume portion of the run (field resolution was already recorded in the original run).
+- **No schema contract recorded during resume:** After resume completes, assert no duplicate schema contract records exist (the schema contract is passed via parameter, not re-recorded).
+- **`_current_graph` lifecycle under error:** Force an error inside an extracted method, verify `self._current_graph is None` after the exception propagates through the `finally` block. This prevents stale graph references from affecting subsequent checkpointing calls.
 
 Confirm existing coverage for:
 - `test_quarantine_routing.py` — counter arithmetic for quarantine
@@ -710,7 +740,7 @@ Confirm existing coverage for:
 ### Commit sequence (each independently testable)
 
 0. **Add characterization tests** — regression oracle for extraction sequence
-1. **Define types in `engine/orchestrator/types.py`** — `GraphArtifacts` (with `MappingProxyType`), `AggNodeEntry`, `RunContext`, `LoopContext` (not frozen), `_CheckpointFactory` TypeAlias. Also fix `ExecutionCounters.to_run_result()` to require `status` parameter.
+1. **Define types in `engine/orchestrator/types.py`** — `GraphArtifacts` (with `MappingProxyType`), `AggNodeEntry`, `RunContext` (with `MappingProxyType`), `LoopContext` (not frozen, mutable/immutable field groups), `_CheckpointFactory` TypeAlias (concrete inner type `Callable[[TokenInfo], None]`). Also fix `ExecutionCounters.to_run_result()` to require `status` parameter (preflight: update all call sites in `src/` and `tests/` — see preflight section above). Also update `aggregation.py` to use `AggNodeEntry` attribute access instead of tuple destructuring (line 224: `agg_transform, _agg_node_id = ...` → `entry = ...; agg_transform = entry.transform`).
 2. **Define outcome types in `processor.py`** — `_TransformContinue`, `_TransformTerminal`, `_TransformOutcome` TypeAlias, `_GateContinue`, `_GateTerminal`, `_GateOutcome` TypeAlias (all private to module)
 3. **Extract `_register_graph_nodes_and_edges()`** — pure move, returns `GraphArtifacts`
 4. **Extract `_initialize_run_context()`** — pure move, takes `GraphArtifacts`, returns `RunContext`
@@ -732,7 +762,7 @@ Confirm existing coverage for:
 | 1 | **#8: `_run_main_processing_loop()`** | Highest | `operation_id` lifecycle lacks direct test coverage; quarantine interaction; `track_operation` boundary |
 | 2 | **#10: Collapse main+resume** | High | Flag inversion risk (`include_source_on_start`, `on_token_written_factory`); divergence accounting must be correct |
 | 3 | **#6: `_handle_quarantine_row()`** | Medium-high | Quarantine counter correctness, schema contract recording, field resolution ordering |
-| 4 | **#12: `_handle_gate_node()`** | Medium | Multiple branches (fork/route/continue/jump/error); `jump_target` semantics |
+| 4 | **#12: `_handle_gate_node()`** | Medium-high | Multiple branches (fork/route/continue/jump/error); `next_node_id` semantics; fork path token multiplication |
 | 5 | **#1-5, 7, 9, 11, 13-14** | Lower | Pure moves or type definitions, well-exercised by existing tests |
 
 ### Risk mitigation
@@ -778,7 +808,7 @@ Confirm existing coverage for:
 | Main/resume loop unification | Two typed loop methods with shared helpers | Preserves full mypy coverage; 20 lines of shared bookkeeping is below duplication threshold |
 | Source iteration | Regular method `_handle_quarantine_row()` (not generator) | Avoids `GeneratorExit` hazard, hidden mutation, untestable quarantine path |
 | Transform node return type | `_TransformOutcome` discriminated union | Replaces `None` sentinel + 3-tuple; explicit semantics for continue vs terminal |
-| Gate node return type | `_GateOutcome` discriminated union | Symmetric with transform pattern; `_GateContinue.jump_target` captures explicit next-node override that `None` sentinel cannot represent |
+| Gate node return type | `_GateOutcome` discriminated union | Symmetric with transform pattern; `_GateContinue.next_node_id` captures explicit next-node override that `None` sentinel cannot represent |
 | Checkpointing control | `on_token_written_factory: _CheckpointFactory \| None` | Named TypeAlias documents intent; matches existing `_write_pending_to_sinks()` signature; eliminates boolean flag |
 | `to_run_result()` status parameter | Required (no default) | Previous `RunStatus.RUNNING` default silently produces incorrect audit records if any call site omits the argument |
 | Method vs standalone function for extractions | Private methods on same class | Extracted code needs `self._events`, `self._telemetry`, `self._checkpoint_*` etc. |

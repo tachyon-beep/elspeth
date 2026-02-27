@@ -254,11 +254,68 @@ def _build_augmented_output_schema(
     return create_schema_from_config(augmented_config, schema_name, allow_coercion=False)
 
 
+def _build_multi_query_output_schema(
+    base_schema_config: SchemaConfig,
+    response_field: str,
+    query_names: tuple[str, ...],
+    schema_name: str,
+) -> type[PluginSchema]:
+    """Build an output schema for multi-query mode with prefixed fields.
+
+    Multi-query transforms emit query-prefixed fields (e.g., quality_llm_response,
+    sentiment_llm_response) instead of the unprefixed single-query fields. The output
+    schema must reflect this for DAG type validation.
+
+    For observed schemas this returns the same dynamic schema (no fields to add).
+    For explicit schemas this augments the base fields with optional prefixed
+    LLM output fields typed as ``object`` (Any).
+
+    Args:
+        base_schema_config: The base schema config from plugin options.
+        response_field: Base field name (e.g., "llm_response").
+        query_names: Tuple of query names (e.g., ("quality", "sentiment")).
+        schema_name: Name for the generated Pydantic model class.
+
+    Returns:
+        A PluginSchema subclass with input fields plus prefixed LLM output fields.
+    """
+    from elspeth.plugins.schema_factory import create_schema_from_config
+
+    if base_schema_config.is_observed:
+        return create_schema_from_config(base_schema_config, schema_name, allow_coercion=False)
+
+    from elspeth.contracts.schema import FieldDefinition
+    from elspeth.contracts.schema import SchemaConfig as _SchemaConfig
+
+    base_fields = base_schema_config.fields or ()
+    existing_names = {f.name for f in base_fields}
+
+    # Add prefixed LLM fields for each query as optional 'any' type fields
+    extra_fields: list[FieldDefinition] = []
+    for query_name in query_names:
+        prefix = f"{query_name}_{response_field}"
+        llm_field_names = [prefix, *get_llm_guaranteed_fields(prefix), *get_llm_audit_fields(prefix)]
+        for name in llm_field_names:
+            if name not in existing_names:
+                extra_fields.append(FieldDefinition(name=name, field_type="any", required=False))
+                existing_names.add(name)
+
+    augmented_config = _SchemaConfig(
+        mode="flexible",
+        fields=(*base_fields, *extra_fields),
+        guaranteed_fields=base_schema_config.guaranteed_fields,
+        required_fields=base_schema_config.required_fields,
+        audit_fields=base_schema_config.audit_fields,
+    )
+    return create_schema_from_config(augmented_config, schema_name, allow_coercion=False)
+
+
 __all__ = [
     "LLM_AUDIT_SUFFIXES",
     "LLM_GUARANTEED_SUFFIXES",
     "MULTI_QUERY_GUARANTEED_SUFFIXES",
     "_build_augmented_output_schema",
+    "_build_multi_query_output_schema",
     "get_llm_audit_fields",
     "get_llm_guaranteed_fields",
     "get_multi_query_guaranteed_fields",

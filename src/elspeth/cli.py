@@ -22,6 +22,7 @@ from pydantic import ValidationError
 from elspeth import __version__
 from elspeth.contracts import ExecutionResult
 from elspeth.contracts.errors import GracefulShutdownError
+from elspeth.contracts.types import AggregationName
 from elspeth.core.config import ElspethSettings, SourceSettings, load_settings, resolve_config
 from elspeth.core.dag import ExecutionGraph, GraphValidationError
 from elspeth.core.security.config_secrets import SecretLoadError, load_secrets_from_config
@@ -31,7 +32,6 @@ from elspeth.testing.chaosllm.cli import mcp_app as chaosllm_mcp_app
 if TYPE_CHECKING:
     from elspeth.cli_helpers import PluginBundle
     from elspeth.contracts.payload_store import PayloadStore
-    from elspeth.contracts.types import AggregationName
     from elspeth.core.landscape import LandscapeDB
     from elspeth.engine import Orchestrator, PipelineConfig
     from elspeth.engine.orchestrator import RowPlugin
@@ -533,7 +533,10 @@ def run(
             typer.echo(f"Resume with: elspeth resume {e.run_id} --execute")
         raise typer.Exit(3)  # noqa: B904 -- distinct exit code: 0=success, 1=error, 3=interrupted
     except Exception as e:
-        # Emit structured error for JSON mode, human-readable for console
+        # Always emit the full traceback — hiding it makes debugging impossible.
+        # The AggregationName NameError hid for days because this block swallowed it.
+        import traceback
+
         if output_format == "json":
             import json
 
@@ -543,12 +546,14 @@ def run(
                         "event": "error",
                         "error": str(e),
                         "error_type": type(e).__name__,
+                        "traceback": traceback.format_exc(),
                     }
                 ),
                 err=True,
             )
         else:
             typer.echo(f"Error during pipeline execution: {e}", err=True)
+            typer.echo(traceback.format_exc(), err=True)
         raise typer.Exit(1) from None
 
     # Emit final execution summary in JSON mode for machine consumption
