@@ -23,7 +23,7 @@ import json
 import signal
 import threading
 import time
-from collections.abc import Callable, Iterator
+from collections.abc import Callable, Iterator, Mapping
 from contextlib import contextmanager, nullcontext
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
@@ -47,6 +47,7 @@ from elspeth.contracts import (
     RowOutcome,
     RunStatus,
     SchemaContract,
+    SourceRow,
     TokenInfo,
 )
 from elspeth.contracts.cli import ProgressEvent
@@ -102,6 +103,7 @@ from elspeth.engine.orchestrator.types import (
     AggNodeEntry,
     ExecutionCounters,
     GraphArtifacts,
+    LoopContext,
     PipelineConfig,
     RouteValidationError,
     RowPlugin,
@@ -1377,6 +1379,150 @@ class Orchestrator:
             coalesce_id_map=coalesce_id_map,
         )
 
+    def _handle_quarantine_row(
+        self,
+        recorder: LandscapeRecorder,
+        run_id: str,
+        source_id: NodeID,
+        source_item: SourceRow,
+        row_index: int,
+        edge_map: Mapping[tuple[NodeID, str], str],
+        loop_ctx: LoopContext,
+    ) -> None:
+        """Handle a quarantined source row: route directly to configured sink.
+
+        Accesses loop_ctx.processor for token creation and loop_ctx.counters
+        for incrementing quarantine count. Appends to loop_ctx.pending_tokens.
+
+        This method performs the complete quarantine workflow:
+        1. Validate quarantine destination exists
+        2. Sanitize data for canonical JSON
+        3. Create quarantine token
+        4. Record source node_state (FAILED)
+        5. Record DIVERT routing_event
+        6. Emit telemetry
+        7. Compute error_hash
+        8. Append to pending_tokens with PendingOutcome
+        """
+        from elspeth.telemetry import RowCreated
+
+        config = loop_ctx.config
+        counters = loop_ctx.counters
+        processor = loop_ctx.processor
+        pending_tokens = loop_ctx.pending_tokens
+
+        counters.rows_quarantined += 1
+        # Route quarantined row to configured sink
+        # Per CLAUDE.md: plugin bugs must crash, no silent drops
+        quarantine_sink = source_item.quarantine_destination
+
+        # Validate destination exists - crash on plugin bug
+        if not quarantine_sink:
+            raise RouteValidationError(
+                f"Source '{config.source.name}' yielded quarantined row "
+                f"(row_index={row_index}) with missing quarantine_destination. "
+                f"This is a plugin bug: quarantined rows MUST specify a destination. "
+                f"Use SourceRow.quarantined(row, error, destination) factory method."
+            )
+        if quarantine_sink not in config.sinks:
+            raise RouteValidationError(
+                f"Source '{config.source.name}' yielded quarantined row "
+                f"(row_index={row_index}) with invalid quarantine_destination='{quarantine_sink}'. "
+                f"No sink named '{quarantine_sink}' exists. "
+                f"Available sinks: {sorted(config.sinks.keys())}. "
+                f"This is a plugin bug: quarantine_destination must match "
+                f"source._on_validation_failure='{config.source._on_validation_failure}'."
+            )
+
+        # Destination validated - proceed with routing.
+        # Sanitize quarantine data at Tier-3 boundary: replace non-finite
+        # floats (NaN, Infinity) with None so downstream canonical JSON
+        # and stable_hash operations succeed. The quarantine_error records
+        # what was originally wrong with the data.
+        source_item.row = sanitize_for_canonical(source_item.row)
+
+        # Create a token for the quarantined row using specialized method
+        # (quarantine rows don't have contracts - they failed validation)
+        quarantine_token = processor.token_manager.create_quarantine_token(
+            run_id=run_id,
+            source_node_id=source_id,
+            row_index=row_index,
+            source_row=source_item,
+        )
+
+        # Record source node_state (step_index=0) for quarantine audit lineage.
+        # Status is FAILED because the source validation rejected this row.
+        quarantine_data = source_item.row if isinstance(source_item.row, dict) else {"_raw": source_item.row}
+        quarantine_error_msg = source_item.quarantine_error or "unknown_validation_error"
+        source_state = recorder.begin_node_state(
+            token_id=quarantine_token.token_id,
+            node_id=source_id,
+            run_id=run_id,
+            step_index=0,
+            input_data=quarantine_data,
+            quarantined=True,
+        )
+        recorder.complete_node_state(
+            state_id=source_state.state_id,
+            status=NodeStateStatus.FAILED,
+            duration_ms=0,
+            error=ExecutionError(
+                exception=quarantine_error_msg,
+                exception_type="ValidationError",
+            ),
+        )
+
+        # Record DIVERT routing_event for the quarantine edge.
+        # The __quarantine__ edge MUST exist — DAG creates it in
+        # the source quarantine edge block of from_plugin_instances().
+        quarantine_edge_key = (source_id, "__quarantine__")
+        try:
+            quarantine_edge_id = edge_map[quarantine_edge_key]
+        except KeyError:
+            raise OrchestrationInvariantError(
+                f"Quarantine row reached orchestrator but no __quarantine__ "
+                f"DIVERT edge exists in DAG for source '{source_id}'. "
+                f"This is a DAG construction bug — "
+                f"on_validation_failure should have created a DIVERT edge "
+                f"in from_plugin_instances()."
+            ) from None
+        recorder.record_routing_event(
+            state_id=source_state.state_id,
+            edge_id=quarantine_edge_id,
+            mode=RoutingMode.DIVERT,
+            reason=SourceQuarantineReason(
+                quarantine_error=quarantine_error_msg,
+            ),
+        )
+
+        # Emit RowCreated telemetry AFTER Landscape recording succeeds
+        # Quarantined rows are Tier-3 data that may contain non-canonical
+        # values (NaN, Infinity). Use stable_hash when possible, fall back
+        # to repr_hash for non-canonical data.
+        try:
+            quarantine_content_hash = stable_hash(source_item.row)
+        except (ValueError, TypeError):
+            quarantine_content_hash = repr_hash(source_item.row)
+        self._emit_telemetry(
+            RowCreated(
+                timestamp=datetime.now(UTC),
+                run_id=run_id,
+                row_id=quarantine_token.row_id,
+                token_id=quarantine_token.token_id,
+                content_hash=quarantine_content_hash,
+            )
+        )
+
+        # Compute error_hash for QUARANTINED outcome audit trail
+        # Per CLAUDE.md: every row must reach exactly one terminal state
+        # Fix: P1-2026-01-31 - Do NOT record outcome here!
+        # Record outcome AFTER sink durability in SinkExecutor.write()
+        error_detail = source_item.quarantine_error or "unknown_validation_error"
+        quarantine_error_hash = hashlib.sha256(error_detail.encode()).hexdigest()[:16]
+
+        # Pass PendingOutcome with error_hash - outcome recorded after sink durability
+        pending_tokens[quarantine_sink].append((quarantine_token, PendingOutcome(RowOutcome.QUARANTINED, quarantine_error_hash)))
+
     def _execute_run(
         self,
         recorder: LandscapeRecorder,
@@ -1415,7 +1561,6 @@ class Orchestrator:
         from elspeth.telemetry import (
             FieldResolutionApplied,
             PhaseChanged,
-            RowCreated,
         )
 
         # 1. Register graph nodes and edges
@@ -1449,6 +1594,18 @@ class Orchestrator:
         # Outcomes are recorded by SinkExecutor.write() AFTER sink durability is achieved
         # Fix: P1-2026-01-31 - use PendingOutcome to carry error_hash for QUARANTINED
         pending_tokens: dict[str, list[tuple[TokenInfo, PendingOutcome | None]]] = {name: [] for name in config.sinks}
+
+        # Bundle loop state for extracted methods
+        loop_ctx = LoopContext(
+            counters=counters,
+            pending_tokens=pending_tokens,
+            processor=processor,
+            ctx=ctx,
+            config=config,
+            agg_transform_lookup=agg_transform_lookup,
+            coalesce_executor=coalesce_executor,
+            coalesce_node_map=coalesce_node_map,
+        )
 
         # Progress tracking - hybrid timing: emit on 100 rows OR 5 seconds
         progress_interval = 100
@@ -1560,120 +1717,16 @@ class Orchestrator:
 
                         # Handle quarantined source rows - route directly to sink
                         if source_item.is_quarantined:
-                            counters.rows_quarantined += 1
-                            # Route quarantined row to configured sink
-                            # Per CLAUDE.md: plugin bugs must crash, no silent drops
-                            quarantine_sink = source_item.quarantine_destination
-
-                            # Validate destination exists - crash on plugin bug
-                            if not quarantine_sink:
-                                raise RouteValidationError(
-                                    f"Source '{config.source.name}' yielded quarantined row "
-                                    f"(row_index={row_index}) with missing quarantine_destination. "
-                                    f"This is a plugin bug: quarantined rows MUST specify a destination. "
-                                    f"Use SourceRow.quarantined(row, error, destination) factory method."
-                                )
-                            if quarantine_sink not in config.sinks:
-                                raise RouteValidationError(
-                                    f"Source '{config.source.name}' yielded quarantined row "
-                                    f"(row_index={row_index}) with invalid quarantine_destination='{quarantine_sink}'. "
-                                    f"No sink named '{quarantine_sink}' exists. "
-                                    f"Available sinks: {sorted(config.sinks.keys())}. "
-                                    f"This is a plugin bug: quarantine_destination must match "
-                                    f"source._on_validation_failure='{config.source._on_validation_failure}'."
-                                )
-
-                            # Destination validated - proceed with routing.
-                            # Sanitize quarantine data at Tier-3 boundary: replace non-finite
-                            # floats (NaN, Infinity) with None so downstream canonical JSON
-                            # and stable_hash operations succeed. The quarantine_error records
-                            # what was originally wrong with the data.
-                            source_item.row = sanitize_for_canonical(source_item.row)
-
-                            # Create a token for the quarantined row using specialized method
-                            # (quarantine rows don't have contracts - they failed validation)
-                            quarantine_token = processor.token_manager.create_quarantine_token(
-                                run_id=run_id,
-                                source_node_id=source_id,
-                                row_index=row_index,
-                                source_row=source_item,
+                            self._handle_quarantine_row(
+                                recorder,
+                                run_id,
+                                source_id,
+                                source_item,
+                                row_index,
+                                edge_map,
+                                loop_ctx,
                             )
-
-                            # Record source node_state (step_index=0) for quarantine audit lineage.
-                            # Status is FAILED because the source validation rejected this row.
-                            quarantine_data = source_item.row if isinstance(source_item.row, dict) else {"_raw": source_item.row}
-                            quarantine_error_msg = source_item.quarantine_error or "unknown_validation_error"
-                            source_state = recorder.begin_node_state(
-                                token_id=quarantine_token.token_id,
-                                node_id=source_id,
-                                run_id=run_id,
-                                step_index=0,
-                                input_data=quarantine_data,
-                                quarantined=True,
-                            )
-                            recorder.complete_node_state(
-                                state_id=source_state.state_id,
-                                status=NodeStateStatus.FAILED,
-                                duration_ms=0,
-                                error=ExecutionError(
-                                    exception=quarantine_error_msg,
-                                    exception_type="ValidationError",
-                                ),
-                            )
-
-                            # Record DIVERT routing_event for the quarantine edge.
-                            # The __quarantine__ edge MUST exist — DAG creates it in
-                            # the source quarantine edge block of from_plugin_instances().
-                            quarantine_edge_key = (source_id, "__quarantine__")
-                            try:
-                                quarantine_edge_id = edge_map[quarantine_edge_key]
-                            except KeyError:
-                                raise OrchestrationInvariantError(
-                                    f"Quarantine row reached orchestrator but no __quarantine__ "
-                                    f"DIVERT edge exists in DAG for source '{source_id}'. "
-                                    f"This is a DAG construction bug — "
-                                    f"on_validation_failure should have created a DIVERT edge "
-                                    f"in from_plugin_instances()."
-                                ) from None
-                            recorder.record_routing_event(
-                                state_id=source_state.state_id,
-                                edge_id=quarantine_edge_id,
-                                mode=RoutingMode.DIVERT,
-                                reason=SourceQuarantineReason(
-                                    quarantine_error=quarantine_error_msg,
-                                ),
-                            )
-
-                            # Emit RowCreated telemetry AFTER Landscape recording succeeds
-                            # Quarantined rows are Tier-3 data that may contain non-canonical
-                            # values (NaN, Infinity). Use stable_hash when possible, fall back
-                            # to repr_hash for non-canonical data.
-                            try:
-                                quarantine_content_hash = stable_hash(source_item.row)
-                            except (ValueError, TypeError):
-                                quarantine_content_hash = repr_hash(source_item.row)
-                            self._emit_telemetry(
-                                RowCreated(
-                                    timestamp=datetime.now(UTC),
-                                    run_id=run_id,
-                                    row_id=quarantine_token.row_id,
-                                    token_id=quarantine_token.token_id,
-                                    content_hash=quarantine_content_hash,
-                                )
-                            )
-
-                            # Compute error_hash for QUARANTINED outcome audit trail
-                            # Per CLAUDE.md: every row must reach exactly one terminal state
-                            # Fix: P1-2026-01-31 - Do NOT record outcome here!
-                            # Record outcome AFTER sink durability in SinkExecutor.write()
-                            error_detail = source_item.quarantine_error or "unknown_validation_error"
-                            quarantine_error_hash = hashlib.sha256(error_detail.encode()).hexdigest()[:16]
-
-                            # Pass PendingOutcome with error_hash - outcome recorded after sink durability
-                            pending_tokens[quarantine_sink].append(
-                                (quarantine_token, PendingOutcome(RowOutcome.QUARANTINED, quarantine_error_hash))
-                            )
-                            # Emit progress before continue (ensures quarantined rows trigger updates)
+                            # Emit progress for quarantine path
                             # Hybrid timing: emit on first row, every 100 rows, or every 5 seconds
                             current_time = time.perf_counter()
                             time_since_last_progress = current_time - last_progress_time
@@ -1701,8 +1754,7 @@ class Orchestrator:
 
                             # Shutdown check for quarantine path — without this,
                             # a stream of quarantined rows would never hit the
-                            # normal-path shutdown check (line ~1605) because
-                            # `continue` skips it.
+                            # normal-path shutdown check because `continue` skips it.
                             if shutdown_event is not None and shutdown_event.is_set():
                                 interrupted_by_shutdown = True
                                 break
