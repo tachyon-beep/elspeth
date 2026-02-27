@@ -101,6 +101,7 @@ from elspeth.engine.orchestrator.outcomes import (
 from elspeth.engine.orchestrator.types import (
     AggNodeEntry,
     ExecutionCounters,
+    GraphArtifacts,
     PipelineConfig,
     RouteValidationError,
     RowPlugin,
@@ -985,46 +986,31 @@ class Orchestrator:
             # NOTE: Transform/sink/source cleanup is handled by _cleanup_plugins()
             # in _execute_run()'s finally block. No need for separate cleanup here.
 
-    def _execute_run(
+    def _register_graph_nodes_and_edges(
         self,
         recorder: LandscapeRecorder,
         run_id: str,
         config: PipelineConfig,
         graph: ExecutionGraph,
-        settings: ElspethSettings | None = None,
-        batch_checkpoints: dict[str, BatchCheckpointState] | None = None,
-        *,
-        payload_store: PayloadStore,
-        shutdown_event: threading.Event | None = None,
-    ) -> RunResult:
-        """Execute the run using the execution graph.
+    ) -> GraphArtifacts:
+        """Register all graph nodes and edges in Landscape. Returns artifacts for subsequent phases.
 
-        The graph provides:
-        - Node IDs and metadata via topological_order() and get_node_info()
-        - Edges via get_edges()
-        - Explicit ID mappings via get_sink_id_map() and get_transform_id_map()
+        Performs the GRAPH phase:
+        1. Build node_to_plugin mapping from config
+        2. Register each node with Landscape (metadata, determinism, schema)
+        3. Register edges and build edge_map
+        4. Validate route destinations, error sinks, quarantine destinations
 
         Args:
             recorder: LandscapeRecorder for audit trail
             run_id: Run identifier
             config: Pipeline configuration
             graph: Execution graph
-            settings: Full settings (optional)
-            batch_checkpoints: Typed batch checkpoints (maps node_id -> BatchCheckpointState)
-            payload_store: Optional PayloadStore for persisting source row payloads
-            shutdown_event: Optional threading.Event set by signal handler on SIGINT/SIGTERM.
-                When set, the processing loop breaks after the current row completes.
-                All pending work (aggregation flush, sink writes) is still performed.
-        """
-        # Store graph for checkpointing during execution
-        self._current_graph = graph
 
-        # Local imports for telemetry events - consolidated here to avoid repeated imports
-        from elspeth.telemetry import (
-            FieldResolutionApplied,
-            PhaseChanged,
-            RowCreated,
-        )
+        Returns:
+            GraphArtifacts with edge_map, source_id, and all ID mappings
+        """
+        from elspeth.telemetry import PhaseChanged
 
         # Get execution order from graph
         execution_order = graph.topological_order()
@@ -1190,6 +1176,67 @@ class Orchestrator:
         transform_id_map = graph.get_transform_id_map()
         config_gate_id_map = graph.get_config_gate_id_map()
         coalesce_id_map = graph.get_coalesce_id_map()
+
+        return GraphArtifacts(
+            edge_map=edge_map,
+            source_id=source_id,
+            sink_id_map=sink_id_map,
+            transform_id_map=transform_id_map,
+            config_gate_id_map=config_gate_id_map,
+            coalesce_id_map=coalesce_id_map,
+        )
+
+    def _execute_run(
+        self,
+        recorder: LandscapeRecorder,
+        run_id: str,
+        config: PipelineConfig,
+        graph: ExecutionGraph,
+        settings: ElspethSettings | None = None,
+        batch_checkpoints: dict[str, BatchCheckpointState] | None = None,
+        *,
+        payload_store: PayloadStore,
+        shutdown_event: threading.Event | None = None,
+    ) -> RunResult:
+        """Execute the run using the execution graph.
+
+        The graph provides:
+        - Node IDs and metadata via topological_order() and get_node_info()
+        - Edges via get_edges()
+        - Explicit ID mappings via get_sink_id_map() and get_transform_id_map()
+
+        Args:
+            recorder: LandscapeRecorder for audit trail
+            run_id: Run identifier
+            config: Pipeline configuration
+            graph: Execution graph
+            settings: Full settings (optional)
+            batch_checkpoints: Typed batch checkpoints (maps node_id -> BatchCheckpointState)
+            payload_store: Optional PayloadStore for persisting source row payloads
+            shutdown_event: Optional threading.Event set by signal handler on SIGINT/SIGTERM.
+                When set, the processing loop breaks after the current row completes.
+                All pending work (aggregation flush, sink writes) is still performed.
+        """
+        # Store graph for checkpointing during execution
+        self._current_graph = graph
+
+        # Local imports for telemetry events - consolidated here to avoid repeated imports
+        from elspeth.telemetry import (
+            FieldResolutionApplied,
+            PhaseChanged,
+            RowCreated,
+        )
+
+        # 1. Register graph nodes and edges
+        artifacts = self._register_graph_nodes_and_edges(recorder, run_id, config, graph)
+
+        source_id = artifacts.source_id
+        sink_id_map = dict(artifacts.sink_id_map)  # Mutable copy for _write_pending_to_sinks
+        transform_id_map = dict(artifacts.transform_id_map)  # dict for _assign_plugin_node_ids
+        config_gate_id_map = dict(artifacts.config_gate_id_map)  # dict for _build_processor
+        coalesce_id_map = dict(artifacts.coalesce_id_map)  # dict for _build_processor
+        edge_map = dict(artifacts.edge_map)  # Mutable copy for processor
+        route_resolution_map = graph.get_route_resolution_map()
 
         # Assign node_ids to all plugins
         self._assign_plugin_node_ids(
