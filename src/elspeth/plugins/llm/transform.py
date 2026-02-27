@@ -865,11 +865,17 @@ class LLMTransform(BaseTransform, BatchTransformMixin):
             )
 
             # Pydantic output schema with prefixed LLM fields
+            # Build extracted_fields mapping: query_name → prefixed output field names
+            extracted: dict[str, tuple[str, ...]] = {}
+            for spec in query_specs:
+                if spec.output_fields:
+                    extracted[spec.name] = tuple(f"{spec.name}_{f.suffix}" for f in spec.output_fields)
             self.output_schema = _build_multi_query_output_schema(
                 base_schema_config=schema_config,
                 response_field=self._response_field,
                 query_names=tuple(spec.name for spec in query_specs),
                 schema_name=f"{self.name}OutputSchema",
+                extracted_fields=extracted if extracted else None,
             )
         else:
             self._strategy = SingleQueryStrategy(

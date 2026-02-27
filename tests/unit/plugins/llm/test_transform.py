@@ -1059,6 +1059,46 @@ class TestMultiQueryOutputSchemaConfig:
         assert "quality_score" in guaranteed
         assert "quality_label" in guaranteed
 
+    def test_multi_query_output_schema_includes_extracted_output_fields(self) -> None:
+        """Pydantic output_schema must include extracted output_fields for Phase 2 compatibility.
+
+        Bug: _build_multi_query_output_schema only adds LLM metadata fields (usage,
+        model, etc.) but omits structured output_fields (score, label). This means
+        guaranteed_fields advertises fields the Pydantic schema doesn't have, causing
+        Phase 2 type compatibility checks to fail for valid pipelines.
+        """
+        from elspeth.plugins.llm.transform import LLMTransform
+
+        transform = LLMTransform(
+            _make_config(
+                template="Evaluate: {{ row.text_content }}",
+                schema={"mode": "flexible", "fields": ["text: str"]},
+                queries={
+                    "quality": {
+                        "input_fields": {"text_content": "text"},
+                        "output_fields": [
+                            {"suffix": "score", "type": "integer"},
+                            {"suffix": "label", "type": "string"},
+                        ],
+                    },
+                },
+            )
+        )
+
+        model_fields = set(transform.output_schema.model_fields)
+
+        # Extracted output_fields must appear in the Pydantic model
+        assert "quality_score" in model_fields, (
+            f"Extracted field 'quality_score' missing from output_schema. Fields present: {sorted(model_fields)}"
+        )
+        assert "quality_label" in model_fields, (
+            f"Extracted field 'quality_label' missing from output_schema. Fields present: {sorted(model_fields)}"
+        )
+
+        # LLM metadata fields must also still be present
+        assert "quality_llm_response" in model_fields
+        assert "quality_llm_response_usage" in model_fields
+
 
 # ---------------------------------------------------------------------------
 # Bug fix: response_format not passed to providers

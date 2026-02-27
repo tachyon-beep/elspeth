@@ -259,6 +259,7 @@ def _build_multi_query_output_schema(
     response_field: str,
     query_names: tuple[str, ...],
     schema_name: str,
+    extracted_fields: dict[str, tuple[str, ...]] | None = None,
 ) -> type[PluginSchema]:
     """Build an output schema for multi-query mode with prefixed fields.
 
@@ -275,6 +276,9 @@ def _build_multi_query_output_schema(
         response_field: Base field name (e.g., "llm_response").
         query_names: Tuple of query names (e.g., ("quality", "sentiment")).
         schema_name: Name for the generated Pydantic model class.
+        extracted_fields: Mapping of query name to prefixed output field names
+            from structured output_fields config. These are fields extracted from
+            LLM JSON responses (e.g., {"quality": ("quality_score", "quality_label")}).
 
     Returns:
         A PluginSchema subclass with input fields plus prefixed LLM output fields.
@@ -299,6 +303,12 @@ def _build_multi_query_output_schema(
             if name not in existing_names:
                 extra_fields.append(FieldDefinition(name=name, field_type="any", required=False))
                 existing_names.add(name)
+
+        # Add structured output_fields (e.g., quality_score, quality_label)
+        for field_name in (extracted_fields or {}).get(query_name, ()):
+            if field_name not in existing_names:
+                extra_fields.append(FieldDefinition(name=field_name, field_type="any", required=False))
+                existing_names.add(field_name)
 
     augmented_config = _SchemaConfig(
         mode="flexible",
