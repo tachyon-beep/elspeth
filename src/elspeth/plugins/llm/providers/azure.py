@@ -19,9 +19,9 @@ from typing import TYPE_CHECKING, Any, Literal, Self
 import structlog
 from pydantic import Field, model_validator
 
-from elspeth.plugins.clients.llm import AuditedLLMClient
+from elspeth.plugins.clients.llm import AuditedLLMClient, ContentPolicyError, LLMClientError
 from elspeth.plugins.llm.base import LLMConfig
-from elspeth.plugins.llm.provider import LLMQueryResult, parse_finish_reason
+from elspeth.plugins.llm.provider import FinishReason, LLMQueryResult, parse_finish_reason
 from elspeth.plugins.llm.tracing import AzureAITracingConfig, TracingConfig
 
 if TYPE_CHECKING:
@@ -178,6 +178,19 @@ class AzureLLMProvider:
                         "Azure SDK response missing choices — finish_reason unavailable",
                         raw_response_keys=list(response.raw_response.keys()),
                     )
+
+            # Empty/whitespace content — AuditedLLMClient converts None→""
+            # (known fabrication). Detect here and raise typed errors so the
+            # transform's except LLMClientError handler catches them.
+            if not response.content or not response.content.strip():
+                if finish_reason == FinishReason.TOOL_CALLS:
+                    raise LLMClientError(
+                        "Azure returned tool_calls response (not supported by ELSPETH)",
+                        retryable=False,
+                    )
+                raise ContentPolicyError(
+                    f"LLM returned empty content (finish_reason={finish_reason})",
+                )
 
             return LLMQueryResult(
                 content=response.content,

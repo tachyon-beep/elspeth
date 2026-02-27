@@ -245,6 +245,20 @@ class OpenRouterLLMProvider:
                     retryable=False,
                 )
 
+            # Empty/whitespace content — provider returned a string but with no
+            # meaningful text. Raise typed error so the transform's except
+            # LLMClientError handler catches it (not ValueError from LLMQueryResult).
+            if not content.strip():
+                raw_fr = choices[0].get("finish_reason") if isinstance(choices[0], dict) else None
+                if raw_fr == "tool_calls":
+                    raise LLMClientError(
+                        "LLM returned tool_calls response (not supported by ELSPETH)",
+                        retryable=False,
+                    )
+                raise ContentPolicyError(
+                    f"LLM returned empty content (finish_reason={raw_fr})",
+                )
+
             # Validate usage (non-finite rejection)
             raw_usage = data.get("usage") or {}
             if isinstance(raw_usage, dict):

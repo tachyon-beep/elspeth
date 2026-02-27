@@ -68,35 +68,187 @@ def _handle_transform_node(
     """
 ```
 
-**The method body contains (in order):**
-
-1. `self._execute_transform_with_retry()` call (try block)
-2. `self._emit_transform_completed()` call
-3. `except MaxRetriesExceeded` → record FAILED outcome, notify coalesce, return `_TransformTerminal`
-4. Error status check (`transform_result.status == "error"`):
-   - `error_sink == "discard"` → record QUARANTINED, notify coalesce, return `_TransformTerminal`
-   - else → ROUTED to error sink, notify coalesce, return `_TransformTerminal`
-5. `on_success` tracking: update sink if `transform.on_success is not None`
-6. Multi-row check (`transform_result.is_multi_row`):
-   - Validate `creates_tokens` flag
-   - `self._token_manager.expand_token()` with `node_id=node_id` (this is why `node_id` is a required parameter)
-   - Create child work items via `self._nav.create_continuation_work_item()`
-   - Return `_TransformTerminal` with EXPANDED outcome
-7. Single row success: return `_TransformContinue(updated_token=current_token, updated_sink=updated_sink)`
-
-**Critical detail — `updated_sink` logic:**
+**Full method body** (lines 1635-1784 from `_process_single_token()`, with returns wrapped in outcome types):
 
 ```python
-# Inside the method, after error checks pass:
-updated_sink = current_on_success_sink
-if transform.on_success is not None:
-    updated_sink = transform.on_success
+    def _handle_transform_node(
+        self,
+        transform: TransformProtocol,
+        current_token: TokenInfo,
+        ctx: PluginContext,
+        node_id: NodeID,
+        child_items: list[WorkItem],
+        coalesce_node_id: NodeID | None,
+        coalesce_name: CoalesceName | None,
+        current_on_success_sink: str,
+    ) -> _TransformOutcome:
+        """Handle a single transform node: execute with retry, route errors, handle multi-row.
 
-# ... multi-row check returns _TransformTerminal if multi-row ...
+        Args:
+            transform: The transform plugin to execute.
+            current_token: Token being processed through the DAG.
+            ctx: Plugin context for the current run.
+            node_id: Current DAG node ID (needed for deaggregation expand_token() and
+                child work item creation via create_continuation_work_item()).
+            child_items: Mutable list — deaggregation appends child work items here.
+            coalesce_node_id: Coalesce barrier node for fork branches (or None).
+            coalesce_name: Coalesce point name for fork branches (or None).
+            current_on_success_sink: Current sink name, may be updated by transform.on_success.
 
-# Single row:
-return _TransformContinue(updated_token=current_token, updated_sink=updated_sink)
+        Returns:
+            _TransformContinue: Token should advance to next node (updated token + updated sink).
+            _TransformTerminal: Token reached terminal state (FAILED, QUARANTINED, ROUTED, or EXPANDED).
+        """
+        # 1. Execute transform with retry
+        try:
+            transform_result, current_token, error_sink = self._execute_transform_with_retry(
+                transform=transform,
+                token=current_token,
+                ctx=ctx,
+            )
+            # Emit TransformCompleted telemetry AFTER Landscape recording succeeds
+            # (Landscape recording happens inside _execute_transform_with_retry)
+            self._emit_transform_completed(
+                token=current_token,
+                transform=transform,
+                transform_result=transform_result,
+            )
+        except MaxRetriesExceeded as e:
+            # All retries exhausted - return FAILED outcome
+            error_hash = hashlib.sha256(str(e).encode()).hexdigest()[:16]
+            self._recorder.record_token_outcome(
+                run_id=self._run_id,
+                token_id=current_token.token_id,
+                outcome=RowOutcome.FAILED,
+                error_hash=error_hash,
+            )
+            # Emit TokenCompleted telemetry AFTER Landscape recording
+            self._emit_token_completed(current_token, RowOutcome.FAILED)
+            # Notify coalesce if this is a forked branch
+            sibling_results = self._notify_coalesce_of_lost_branch(
+                current_token, f"max_retries_exceeded:{e}", child_items,
+            )
+            current_result = RowResult(
+                token=current_token,
+                final_data=current_token.row_data,
+                outcome=RowOutcome.FAILED,
+                error=FailureInfo.from_max_retries_exceeded(e),
+            )
+            if sibling_results:
+                return _TransformTerminal(result=[current_result, *sibling_results])
+            return _TransformTerminal(result=current_result)
+
+        # 2. Handle error status
+        if transform_result.status == "error":
+            if error_sink == "discard":
+                # Intentionally discarded - QUARANTINED
+                error_detail = str(transform_result.reason) if transform_result.reason else "unknown_error"
+                quarantine_error_hash = hashlib.sha256(error_detail.encode()).hexdigest()[:16]
+                self._recorder.record_token_outcome(
+                    run_id=self._run_id,
+                    token_id=current_token.token_id,
+                    outcome=RowOutcome.QUARANTINED,
+                    error_hash=quarantine_error_hash,
+                )
+                # Emit TokenCompleted telemetry AFTER Landscape recording
+                self._emit_token_completed(current_token, RowOutcome.QUARANTINED)
+                # Notify coalesce if this is a forked branch
+                sibling_results = self._notify_coalesce_of_lost_branch(
+                    current_token, f"quarantined:{error_detail}", child_items,
+                )
+                current_result = RowResult(
+                    token=current_token,
+                    final_data=current_token.row_data,
+                    outcome=RowOutcome.QUARANTINED,
+                )
+                if sibling_results:
+                    return _TransformTerminal(result=[current_result, *sibling_results])
+                return _TransformTerminal(result=current_result)
+            else:
+                # Routed to error sink
+                # NOTE: Do NOT record ROUTED outcome here - the token hasn't been written yet.
+                # SinkExecutor.write() records the outcome AFTER sink durability is achieved.
+                error_detail = str(transform_result.reason) if transform_result.reason else "unknown_error"
+                # Notify coalesce if this is a forked branch
+                sibling_results = self._notify_coalesce_of_lost_branch(
+                    current_token, f"error_routed:{error_detail}", child_items,
+                )
+                current_result = RowResult(
+                    token=current_token,
+                    final_data=current_token.row_data,
+                    outcome=RowOutcome.ROUTED,
+                    sink_name=error_sink,
+                )
+                if sibling_results:
+                    return _TransformTerminal(result=[current_result, *sibling_results])
+                return _TransformTerminal(result=current_result)
+
+        # 3. Track on_success for sink routing at end of chain
+        updated_sink = current_on_success_sink
+        if transform.on_success is not None:
+            updated_sink = transform.on_success
+
+        # 4. Handle multi-row output (deaggregation)
+        # NOTE: This is ONLY for non-aggregation transforms. Aggregation
+        # transforms route through _process_batch_aggregation_node() above.
+        if transform_result.is_multi_row:
+            # Validate transform is allowed to create tokens
+            if not transform.creates_tokens:
+                raise RuntimeError(
+                    f"Transform '{transform.name}' returned multi-row result "
+                    f"but has creates_tokens=False. Either set creates_tokens=True "
+                    f"or return single row via TransformResult.success(row). "
+                    f"(Multi-row is allowed in aggregation passthrough mode.)"
+                )
+
+            # Deaggregation: create child tokens for each output row
+            # NOTE: Parent EXPANDED outcome is recorded atomically in expand_token()
+
+            # is_multi_row check above guarantees rows is not None
+            if transform_result.rows is None:
+                raise OrchestrationInvariantError("is_multi_row guarantees rows is not None")
+            # Contract consistency is enforced by TransformResult.success_multi()
+            output_contract = transform_result.rows[0].contract
+            child_tokens, _expand_group_id = self._token_manager.expand_token(
+                parent_token=current_token,
+                expanded_rows=[r.to_dict() for r in transform_result.rows],
+                output_contract=output_contract,
+                node_id=node_id,
+                run_id=self._run_id,
+            )
+
+            # Queue each child for continued processing.
+            # Pass updated_sink so terminal children inherit the
+            # expanding transform's sink instead of defaulting to source_on_success.
+            for child_token in child_tokens:
+                child_coalesce_name = coalesce_name if coalesce_name is not None and child_token.branch_name is not None else None
+                child_items.append(
+                    self._nav.create_continuation_work_item(
+                        token=child_token,
+                        current_node_id=node_id,
+                        coalesce_name=child_coalesce_name,
+                        on_success_sink=updated_sink,
+                    )
+                )
+
+            # NOTE: Parent EXPANDED outcome is recorded atomically in expand_token()
+            # to eliminate crash window between child creation and outcome recording.
+            return _TransformTerminal(
+                result=RowResult(
+                    token=current_token,
+                    final_data=current_token.row_data,
+                    outcome=RowOutcome.EXPANDED,
+                )
+            )
+
+        # 5. Single row success — continue to next node
+        # (current_token already updated by _execute_transform_with_retry)
+        return _TransformContinue(updated_token=current_token, updated_sink=updated_sink)
 ```
+
+**Key transformation from original code:**
+
+Each `return (result, child_items)` in the original becomes `return _TransformTerminal(result=result)` — the caller unpacks `child_items` from the local variable. For `sibling_results`, `return ([current_result, *sibling_results], child_items)` becomes `return _TransformTerminal(result=[current_result, *sibling_results])`. The multi-row path previously used `last_on_success_sink` — the extracted method uses `updated_sink` (computed from `current_on_success_sink` + `transform.on_success`).
 
 **Step 2: Replace the TransformProtocol branch in `_process_single_token()`**
 
@@ -250,41 +402,158 @@ def _handle_gate_node(
     """
 ```
 
-**The method body contains (in order):**
-
-1. `self._gate_executor.execute_config_gate()` call → produces `outcome` (GateOutcome)
-2. `current_token = outcome.updated_token` — gate always updates token
-3. `self._emit_gate_evaluated()` call
-4. Route to sink check (`outcome.sink_name is not None`):
-   - Notify coalesce of lost branch
-   - Return `_GateTerminal` with ROUTED result
-5. Fork check (`outcome.result.action.kind == RoutingKind.FORK_TO_PATHS`):
-   - Iterate `outcome.child_tokens`, look up coalesce info per branch
-   - Create child work items (branch→sink direct or continuation)
-   - Return `_GateTerminal` with FORKED result
-6. Jump check (`outcome.next_node_id is not None`):
-   - `resolved_sink = self._nav.resolve_jump_target_sink(outcome.next_node_id)`
-   - Update sink if resolved
-   - **Coalesce ordering re-validation** (lines 1867-1879 in current code) — stays inside this method because it's gate-specific. Raises `OrchestrationInvariantError` if jump target is past coalesce node.
-   - Return `_GateContinue(updated_token=current_token, updated_sink=resolved_or_current_sink, next_node_id=outcome.next_node_id)`
-7. Continue (`RoutingKind.CONTINUE`):
-   - Validate kind is CONTINUE (error if unexpected kind)
-   - Return `_GateContinue(updated_token=current_token, updated_sink=current_on_success_sink)`
-
-**Critical detail — sink resolution for jumps:**
+**Full method body** (lines 1785-1891 from `_process_single_token()`, with returns wrapped in outcome types):
 
 ```python
-# Inside the method, for jump path:
-updated_sink = current_on_success_sink
-resolved_sink = self._nav.resolve_jump_target_sink(outcome.next_node_id)
-if resolved_sink is not None:
-    updated_sink = resolved_sink
-return _GateContinue(
-    updated_token=current_token,
-    updated_sink=updated_sink,
-    next_node_id=outcome.next_node_id,
-)
+    def _handle_gate_node(
+        self,
+        gate: GateSettings,
+        current_token: TokenInfo,
+        ctx: PluginContext,
+        node_id: NodeID,
+        child_items: list[WorkItem],
+        coalesce_node_id: NodeID | None,
+        coalesce_name: CoalesceName | None,
+        current_on_success_sink: str,
+    ) -> _GateOutcome:
+        """Handle a gate node: evaluate, then fork/route/divert/continue.
+
+        Args:
+            gate: Gate configuration to evaluate.
+            current_token: Token being processed through the DAG.
+            ctx: Plugin context for the current run.
+            node_id: Current DAG node ID (passed to gate executor and used for
+                fork child work item creation).
+            child_items: Mutable list — fork paths append child work items here.
+            coalesce_node_id: Coalesce barrier node for fork branches (or None).
+            coalesce_name: Coalesce point name for fork branches (or None).
+            current_on_success_sink: Current sink name, carried forward or overridden by jumps.
+
+        Returns:
+            _GateTerminal: Gate routed to sink, forked to paths, or diverted (contains result + child_items populated).
+            _GateContinue: Gate says continue — updated_token, updated_sink, and optional next_node_id for jumps.
+        """
+        # 1. Execute gate
+        outcome = self._gate_executor.execute_config_gate(
+            gate_config=gate,
+            node_id=node_id,
+            token=current_token,
+            ctx=ctx,
+            token_manager=self._token_manager,
+        )
+        current_token = outcome.updated_token
+
+        # 2. Emit GateEvaluated telemetry AFTER Landscape recording succeeds
+        # (Landscape recording happens inside execute_config_gate)
+        self._emit_gate_evaluated(
+            token=current_token,
+            gate_name=gate.name,
+            gate_node_id=node_id,
+            routing_mode=outcome.result.action.mode,
+            destinations=self._get_gate_destinations(outcome),
+        )
+
+        # 3. Check if gate routed to a sink
+        if outcome.sink_name is not None:
+            # NOTE: Do NOT record ROUTED outcome here - the token hasn't been written yet.
+            # SinkExecutor.write() records the outcome AFTER sink durability is achieved.
+            # Notify coalesce if this is a forked branch
+            sibling_results = self._notify_coalesce_of_lost_branch(
+                current_token, f"gate_routed_to_sink:{outcome.sink_name}", child_items,
+            )
+            current_result = RowResult(
+                token=current_token,
+                final_data=current_token.row_data,
+                outcome=RowOutcome.ROUTED,
+                sink_name=outcome.sink_name,
+            )
+            if sibling_results:
+                return _GateTerminal(result=[current_result, *sibling_results])
+            return _GateTerminal(result=current_result)
+
+        # 4. Fork to paths
+        if outcome.result.action.kind == RoutingKind.FORK_TO_PATHS:
+            for child_token in outcome.child_tokens:
+                # Look up coalesce info for this branch
+                cfg_branch_name = child_token.branch_name
+                cfg_coalesce_name: CoalesceName | None = None
+
+                if cfg_branch_name and BranchName(cfg_branch_name) in self._branch_to_coalesce:
+                    cfg_coalesce_name = self._branch_to_coalesce[BranchName(cfg_branch_name)]
+
+                # See plugin gate fork handler above for routing logic.
+                if cfg_coalesce_name is None and cfg_branch_name and BranchName(cfg_branch_name) in self._branch_to_sink:
+                    child_items.append(
+                        self._nav.create_work_item(
+                            token=child_token,
+                            current_node_id=None,
+                        )
+                    )
+                else:
+                    child_items.append(
+                        self._nav.create_continuation_work_item(
+                            token=child_token,
+                            current_node_id=node_id,
+                            coalesce_name=cfg_coalesce_name,
+                        )
+                    )
+
+            # NOTE: Parent FORKED outcome is now recorded atomically in fork_token()
+            # to eliminate crash window between child creation and outcome recording.
+            return _GateTerminal(
+                result=RowResult(
+                    token=current_token,
+                    final_data=current_token.row_data,
+                    outcome=RowOutcome.FORKED,
+                )
+            )
+
+        # 5. Jump to specific node
+        if outcome.next_node_id is not None:
+            updated_sink = current_on_success_sink
+            resolved_sink = self._nav.resolve_jump_target_sink(outcome.next_node_id)
+            if resolved_sink is not None:
+                updated_sink = resolved_sink
+
+            # Re-validate coalesce ordering invariant after gate jump.
+            # The initial check at entry only validates the starting node.
+            # A gate jump can move the token past its coalesce node,
+            # which would silently bypass join handling.
+            #
+            # IMPORTANT: Use outcome.next_node_id (not the caller's node_id param)
+            # because we're validating the JUMP TARGET, not the current position.
+            if coalesce_node_id is not None:
+                jump_target_step = self._node_step_map.get(outcome.next_node_id)
+                coalesce_barrier_step = self._node_step_map.get(coalesce_node_id)
+                if jump_target_step is not None and coalesce_barrier_step is not None and jump_target_step > coalesce_barrier_step:
+                    raise OrchestrationInvariantError(
+                        f"Gate jump moved token '{current_token.token_id}' to node '{outcome.next_node_id}' "
+                        f"(step {jump_target_step}) which is past its coalesce node '{coalesce_node_id}' "
+                        f"(step {coalesce_barrier_step}). This would bypass join handling."
+                    )
+
+            return _GateContinue(
+                updated_token=current_token,
+                updated_sink=updated_sink,
+                next_node_id=outcome.next_node_id,
+            )
+
+        # 6. CONTINUE: config gate says "proceed to next structural node."
+        if outcome.result.action.kind != RoutingKind.CONTINUE:
+            raise OrchestrationInvariantError(
+                f"Unhandled config gate routing kind {outcome.result.action.kind!r} "
+                f"for token {current_token.token_id} at node '{node_id}'. "
+                f"Expected CONTINUE when no sink_name, fork, or next_node_id is set."
+            )
+        return _GateContinue(updated_token=current_token, updated_sink=current_on_success_sink)
 ```
+
+**Key transformation from original code:**
+
+- The `elif` chain (route → fork → jump → continue) becomes an `if` chain with early returns — no `elif` needed since each branch returns.
+- `node_id = outcome.next_node_id` + `continue` (original jump path) becomes `return _GateContinue(next_node_id=outcome.next_node_id)` — the caller handles the `continue`.
+- The coalesce re-validation uses `outcome.next_node_id` directly (in original code, `node_id` was already reassigned to this value at line 1861 before the check at line 1868).
+- `_get_gate_destinations(outcome)` uses the executor's `GateOutcome`, not the extracted method's return type — the executor call is inside this method so `outcome` is local.
 
 **Step 5: Replace the GateSettings branch in `_process_single_token()`**
 
@@ -336,7 +605,7 @@ this field, the extraction would silently lose the updated token."
 
 **Step 1: Add the new method**
 
-Extracts lines 1897-1923 from `_process_single_token()` (the post-while-loop code). Signature:
+Extracts lines 1893-1919 from `_process_single_token()` (the post-while-loop code, including the comment block). Signature:
 
 ```python
 def _handle_terminal_token(
@@ -400,7 +669,7 @@ def _handle_terminal_token(
 
 **Step 2: Replace in `_process_single_token()`**
 
-The post-loop code (lines 1897-1923) becomes:
+The post-loop code (lines 1893-1919) becomes:
 
 ```python
 result = self._handle_terminal_token(current_token, last_on_success_sink)

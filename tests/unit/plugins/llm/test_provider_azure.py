@@ -268,6 +268,68 @@ class TestExecuteQuery:
         assert result.finish_reason is None
         assert result.content == "hi"
 
+    def test_empty_content_raises_content_policy_error(self, provider: AzureLLMProvider) -> None:
+        """Empty string content (from AuditedLLMClient's None→'' conversion)
+        must raise ContentPolicyError, not ValueError from LLMQueryResult invariant."""
+        with patch.object(provider, "_get_llm_client") as mock_get:
+            mock_client = MagicMock()
+            mock_client.chat_completion.return_value = _make_llm_response(
+                content="",
+                finish_reason="content_filter",
+            )
+            mock_get.return_value = mock_client
+
+            with pytest.raises(ContentPolicyError, match="empty content"):
+                provider.execute_query(
+                    messages=[{"role": "user", "content": "hi"}],
+                    model="gpt-4o",
+                    temperature=0.0,
+                    max_tokens=100,
+                    state_id="state-1",
+                    token_id="tok-1",
+                )
+
+    def test_whitespace_only_content_raises_content_policy_error(self, provider: AzureLLMProvider) -> None:
+        """Whitespace-only content from provider must raise ContentPolicyError."""
+        with patch.object(provider, "_get_llm_client") as mock_get:
+            mock_client = MagicMock()
+            mock_client.chat_completion.return_value = _make_llm_response(
+                content="   ",
+                finish_reason="stop",
+            )
+            mock_get.return_value = mock_client
+
+            with pytest.raises(ContentPolicyError, match="empty content"):
+                provider.execute_query(
+                    messages=[{"role": "user", "content": "hi"}],
+                    model="gpt-4o",
+                    temperature=0.0,
+                    max_tokens=100,
+                    state_id="state-1",
+                    token_id="tok-1",
+                )
+
+    def test_empty_content_with_tool_calls_finish_reason(self, provider: AzureLLMProvider) -> None:
+        """Tool-call responses (content=None→'', finish_reason=tool_calls)
+        must raise LLMClientError, not ValueError."""
+        with patch.object(provider, "_get_llm_client") as mock_get:
+            mock_client = MagicMock()
+            mock_client.chat_completion.return_value = _make_llm_response(
+                content="",
+                finish_reason="tool_calls",
+            )
+            mock_get.return_value = mock_client
+
+            with pytest.raises(LLMClientError, match="tool_calls"):
+                provider.execute_query(
+                    messages=[{"role": "user", "content": "hi"}],
+                    model="gpt-4o",
+                    temperature=0.0,
+                    max_tokens=100,
+                    state_id="state-1",
+                    token_id="tok-1",
+                )
+
 
 class TestClientCaching:
     """Tests for client creation and caching."""

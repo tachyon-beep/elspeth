@@ -270,6 +270,67 @@ class TestExecuteQuery:
                     token_id="tok-1",
                 )
 
+    def test_empty_string_content_raises_content_policy_error(self, provider: OpenRouterLLMProvider) -> None:
+        """Empty string content (not null) must raise ContentPolicyError,
+        not ValueError from LLMQueryResult invariant."""
+        with patch.object(provider, "_get_http_client") as mock_get:
+            mock_client = MagicMock()
+            body = json.dumps(
+                {
+                    "choices": [{"message": {"content": ""}, "finish_reason": "content_filter"}],
+                    "model": "gpt-4o",
+                    "usage": {"prompt_tokens": 10, "completion_tokens": 0},
+                }
+            )
+            resp = httpx.Response(
+                status_code=200,
+                content=body.encode(),
+                headers={"content-type": "application/json"},
+                request=httpx.Request("POST", "https://openrouter.ai/api/v1/chat/completions"),
+            )
+            mock_client.post.return_value = resp
+            mock_get.return_value = mock_client
+
+            with pytest.raises(ContentPolicyError, match="empty content"):
+                provider.execute_query(
+                    messages=[{"role": "user", "content": "hi"}],
+                    model="gpt-4o",
+                    temperature=0.0,
+                    max_tokens=100,
+                    state_id="state-1",
+                    token_id="tok-1",
+                )
+
+    def test_whitespace_only_content_raises_content_policy_error(self, provider: OpenRouterLLMProvider) -> None:
+        """Whitespace-only content must raise ContentPolicyError."""
+        with patch.object(provider, "_get_http_client") as mock_get:
+            mock_client = MagicMock()
+            body = json.dumps(
+                {
+                    "choices": [{"message": {"content": "   "}, "finish_reason": "stop"}],
+                    "model": "gpt-4o",
+                    "usage": {"prompt_tokens": 10, "completion_tokens": 1},
+                }
+            )
+            resp = httpx.Response(
+                status_code=200,
+                content=body.encode(),
+                headers={"content-type": "application/json"},
+                request=httpx.Request("POST", "https://openrouter.ai/api/v1/chat/completions"),
+            )
+            mock_client.post.return_value = resp
+            mock_get.return_value = mock_client
+
+            with pytest.raises(ContentPolicyError, match="empty content"):
+                provider.execute_query(
+                    messages=[{"role": "user", "content": "hi"}],
+                    model="gpt-4o",
+                    temperature=0.0,
+                    max_tokens=100,
+                    state_id="state-1",
+                    token_id="tok-1",
+                )
+
     def test_unknown_finish_reason(self, provider: OpenRouterLLMProvider) -> None:
         with patch.object(provider, "_get_http_client") as mock_get:
             mock_client = MagicMock()
