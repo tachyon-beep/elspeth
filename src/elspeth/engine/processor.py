@@ -1515,6 +1515,186 @@ class RowProcessor:
 
         return results
 
+    def _handle_transform_node(
+        self,
+        transform: TransformProtocol,
+        current_token: TokenInfo,
+        ctx: PluginContext,
+        node_id: NodeID,
+        child_items: list[WorkItem],
+        coalesce_node_id: NodeID | None,
+        coalesce_name: CoalesceName | None,
+        current_on_success_sink: str,
+    ) -> _TransformOutcome:
+        """Handle a single transform node: execute with retry, route errors, handle multi-row.
+
+        Args:
+            transform: The transform plugin to execute.
+            current_token: Token being processed through the DAG.
+            ctx: Plugin context for the current run.
+            node_id: Current DAG node ID (needed for deaggregation expand_token() and
+                child work item creation via create_continuation_work_item()).
+            child_items: Mutable list — deaggregation appends child work items here.
+            coalesce_node_id: Coalesce barrier node for fork branches (or None).
+            coalesce_name: Coalesce point name for fork branches (or None).
+            current_on_success_sink: Current sink name, may be updated by transform.on_success.
+
+        Returns:
+            _TransformContinue: Token should advance to next node (updated token + updated sink).
+            _TransformTerminal: Token reached terminal state (FAILED, QUARANTINED, ROUTED, or EXPANDED).
+        """
+        # 1. Execute transform with retry
+        try:
+            transform_result, current_token, error_sink = self._execute_transform_with_retry(
+                transform=transform,
+                token=current_token,
+                ctx=ctx,
+            )
+            # Emit TransformCompleted telemetry AFTER Landscape recording succeeds
+            # (Landscape recording happens inside _execute_transform_with_retry)
+            self._emit_transform_completed(
+                token=current_token,
+                transform=transform,
+                transform_result=transform_result,
+            )
+        except MaxRetriesExceeded as e:
+            # All retries exhausted - return FAILED outcome
+            error_hash = hashlib.sha256(str(e).encode()).hexdigest()[:16]
+            self._recorder.record_token_outcome(
+                run_id=self._run_id,
+                token_id=current_token.token_id,
+                outcome=RowOutcome.FAILED,
+                error_hash=error_hash,
+            )
+            # Emit TokenCompleted telemetry AFTER Landscape recording
+            self._emit_token_completed(current_token, RowOutcome.FAILED)
+            # Notify coalesce if this is a forked branch
+            sibling_results = self._notify_coalesce_of_lost_branch(
+                current_token,
+                f"max_retries_exceeded:{e}",
+                child_items,
+            )
+            current_result = RowResult(
+                token=current_token,
+                final_data=current_token.row_data,
+                outcome=RowOutcome.FAILED,
+                error=FailureInfo.from_max_retries_exceeded(e),
+            )
+            if sibling_results:
+                return _TransformTerminal(result=[current_result, *sibling_results])
+            return _TransformTerminal(result=current_result)
+
+        # 2. Handle error status
+        if transform_result.status == "error":
+            if error_sink == "discard":
+                # Intentionally discarded - QUARANTINED
+                error_detail = str(transform_result.reason) if transform_result.reason else "unknown_error"
+                quarantine_error_hash = hashlib.sha256(error_detail.encode()).hexdigest()[:16]
+                self._recorder.record_token_outcome(
+                    run_id=self._run_id,
+                    token_id=current_token.token_id,
+                    outcome=RowOutcome.QUARANTINED,
+                    error_hash=quarantine_error_hash,
+                )
+                # Emit TokenCompleted telemetry AFTER Landscape recording
+                self._emit_token_completed(current_token, RowOutcome.QUARANTINED)
+                # Notify coalesce if this is a forked branch
+                sibling_results = self._notify_coalesce_of_lost_branch(
+                    current_token,
+                    f"quarantined:{error_detail}",
+                    child_items,
+                )
+                current_result = RowResult(
+                    token=current_token,
+                    final_data=current_token.row_data,
+                    outcome=RowOutcome.QUARANTINED,
+                )
+                if sibling_results:
+                    return _TransformTerminal(result=[current_result, *sibling_results])
+                return _TransformTerminal(result=current_result)
+            else:
+                # Routed to error sink
+                # NOTE: Do NOT record ROUTED outcome here - the token hasn't been written yet.
+                # SinkExecutor.write() records the outcome AFTER sink durability is achieved.
+                error_detail = str(transform_result.reason) if transform_result.reason else "unknown_error"
+                # Notify coalesce if this is a forked branch
+                sibling_results = self._notify_coalesce_of_lost_branch(
+                    current_token,
+                    f"error_routed:{error_detail}",
+                    child_items,
+                )
+                current_result = RowResult(
+                    token=current_token,
+                    final_data=current_token.row_data,
+                    outcome=RowOutcome.ROUTED,
+                    sink_name=error_sink,
+                )
+                if sibling_results:
+                    return _TransformTerminal(result=[current_result, *sibling_results])
+                return _TransformTerminal(result=current_result)
+
+        # 3. Track on_success for sink routing at end of chain
+        updated_sink = current_on_success_sink
+        if transform.on_success is not None:
+            updated_sink = transform.on_success
+
+        # 4. Handle multi-row output (deaggregation)
+        # NOTE: This is ONLY for non-aggregation transforms. Aggregation
+        # transforms route through _process_batch_aggregation_node() above.
+        if transform_result.is_multi_row:
+            # Validate transform is allowed to create tokens
+            if not transform.creates_tokens:
+                raise RuntimeError(
+                    f"Transform '{transform.name}' returned multi-row result "
+                    f"but has creates_tokens=False. Either set creates_tokens=True "
+                    f"or return single row via TransformResult.success(row). "
+                    f"(Multi-row is allowed in aggregation passthrough mode.)"
+                )
+
+            # Deaggregation: create child tokens for each output row
+            # NOTE: Parent EXPANDED outcome is recorded atomically in expand_token()
+
+            # is_multi_row check above guarantees rows is not None
+            if transform_result.rows is None:
+                raise OrchestrationInvariantError("is_multi_row guarantees rows is not None")
+            # Contract consistency is enforced by TransformResult.success_multi()
+            output_contract = transform_result.rows[0].contract
+            child_tokens, _expand_group_id = self._token_manager.expand_token(
+                parent_token=current_token,
+                expanded_rows=[r.to_dict() for r in transform_result.rows],
+                output_contract=output_contract,
+                node_id=node_id,
+                run_id=self._run_id,
+            )
+
+            # Queue each child for continued processing.
+            # Pass updated_sink so terminal children inherit the
+            # expanding transform's sink instead of defaulting to source_on_success.
+            for child_token in child_tokens:
+                child_coalesce_name = coalesce_name if coalesce_name is not None and child_token.branch_name is not None else None
+                child_items.append(
+                    self._nav.create_continuation_work_item(
+                        token=child_token,
+                        current_node_id=node_id,
+                        coalesce_name=child_coalesce_name,
+                        on_success_sink=updated_sink,
+                    )
+                )
+
+            # NOTE: Parent EXPANDED outcome is recorded atomically in expand_token()
+            # to eliminate crash window between child creation and outcome recording.
+            return _TransformTerminal(
+                result=RowResult(
+                    token=current_token,
+                    final_data=current_token.row_data,
+                    outcome=RowOutcome.EXPANDED,
+                )
+            )
+
+        # 5. Single row success — continue to next node
+        # (current_token already updated by _execute_transform_with_retry)
+        return _TransformContinue(updated_token=current_token, updated_sink=updated_sink)
+
     def _process_single_token(
         self,
         token: TokenInfo,
@@ -1628,156 +1808,20 @@ class RowProcessor:
                         coalesce_name=coalesce_name,
                     )
 
-                # Regular transform (with optional retry)
-                try:
-                    transform_result, current_token, error_sink = self._execute_transform_with_retry(
-                        transform=row_transform,
-                        token=current_token,
-                        ctx=ctx,
-                    )
-                    # Emit TransformCompleted telemetry AFTER Landscape recording succeeds
-                    # (Landscape recording happens inside _execute_transform_with_retry)
-                    self._emit_transform_completed(
-                        token=current_token,
-                        transform=row_transform,
-                        transform_result=transform_result,
-                    )
-                except MaxRetriesExceeded as e:
-                    # All retries exhausted - return FAILED outcome
-                    error_hash = hashlib.sha256(str(e).encode()).hexdigest()[:16]
-                    self._recorder.record_token_outcome(
-                        run_id=self._run_id,
-                        token_id=current_token.token_id,
-                        outcome=RowOutcome.FAILED,
-                        error_hash=error_hash,
-                    )
-                    # Emit TokenCompleted telemetry AFTER Landscape recording
-                    self._emit_token_completed(current_token, RowOutcome.FAILED)
-                    # Notify coalesce if this is a forked branch
-                    sibling_results = self._notify_coalesce_of_lost_branch(
-                        current_token,
-                        f"max_retries_exceeded:{e}",
-                        child_items,
-                    )
-                    current_result = RowResult(
-                        token=current_token,
-                        final_data=current_token.row_data,
-                        outcome=RowOutcome.FAILED,
-                        error=FailureInfo.from_max_retries_exceeded(e),
-                    )
-                    if sibling_results:
-                        return ([current_result, *sibling_results], child_items)
-                    return (current_result, child_items)
-
-                if transform_result.status == "error":
-                    # Determine outcome based on error routing
-                    if error_sink == "discard":
-                        # Intentionally discarded - QUARANTINED
-                        error_detail = str(transform_result.reason) if transform_result.reason else "unknown_error"
-                        quarantine_error_hash = hashlib.sha256(error_detail.encode()).hexdigest()[:16]
-                        self._recorder.record_token_outcome(
-                            run_id=self._run_id,
-                            token_id=current_token.token_id,
-                            outcome=RowOutcome.QUARANTINED,
-                            error_hash=quarantine_error_hash,
-                        )
-                        # Emit TokenCompleted telemetry AFTER Landscape recording
-                        self._emit_token_completed(current_token, RowOutcome.QUARANTINED)
-                        # Notify coalesce if this is a forked branch
-                        sibling_results = self._notify_coalesce_of_lost_branch(
-                            current_token,
-                            f"quarantined:{error_detail}",
-                            child_items,
-                        )
-                        current_result = RowResult(
-                            token=current_token,
-                            final_data=current_token.row_data,
-                            outcome=RowOutcome.QUARANTINED,
-                        )
-                        if sibling_results:
-                            return ([current_result, *sibling_results], child_items)
-                        return (current_result, child_items)
-                    else:
-                        # Routed to error sink
-                        # NOTE: Do NOT record ROUTED outcome here - the token hasn't been written yet.
-                        # SinkExecutor.write() records the outcome AFTER sink durability is achieved.
-                        # Notify coalesce if this is a forked branch
-                        error_detail = str(transform_result.reason) if transform_result.reason else "unknown_error"
-                        sibling_results = self._notify_coalesce_of_lost_branch(
-                            current_token,
-                            f"error_routed:{error_detail}",
-                            child_items,
-                        )
-                        current_result = RowResult(
-                            token=current_token,
-                            final_data=current_token.row_data,
-                            outcome=RowOutcome.ROUTED,
-                            sink_name=error_sink,
-                        )
-                        if sibling_results:
-                            return ([current_result, *sibling_results], child_items)
-                        return (current_result, child_items)
-
-                # Track on_success for sink routing at end of chain
-                if row_transform.on_success is not None:
-                    last_on_success_sink = row_transform.on_success
-
-                # Handle multi-row output (deaggregation)
-                # NOTE: This is ONLY for non-aggregation transforms. Aggregation
-                # transforms route through _process_batch_aggregation_node() above.
-                if transform_result.is_multi_row:
-                    # Validate transform is allowed to create tokens
-                    if not row_transform.creates_tokens:
-                        raise RuntimeError(
-                            f"Transform '{row_transform.name}' returned multi-row result "
-                            f"but has creates_tokens=False. Either set creates_tokens=True "
-                            f"or return single row via TransformResult.success(row). "
-                            f"(Multi-row is allowed in aggregation passthrough mode.)"
-                        )
-
-                    # Deaggregation: create child tokens for each output row
-                    # NOTE: Parent EXPANDED outcome is recorded atomically in expand_token()
-
-                    # is_multi_row check above guarantees rows is not None
-                    if transform_result.rows is None:
-                        raise OrchestrationInvariantError("is_multi_row guarantees rows is not None")
-                    # Contract consistency is enforced by TransformResult.success_multi()
-                    output_contract = transform_result.rows[0].contract
-                    child_tokens, _expand_group_id = self._token_manager.expand_token(
-                        parent_token=current_token,
-                        expanded_rows=[r.to_dict() for r in transform_result.rows],
-                        output_contract=output_contract,
-                        node_id=node_id,
-                        run_id=self._run_id,
-                    )
-
-                    # Queue each child for continued processing.
-                    # Pass last_on_success_sink so terminal children inherit the
-                    # expanding transform's sink instead of defaulting to source_on_success.
-                    for child_token in child_tokens:
-                        child_coalesce_name = coalesce_name if coalesce_name is not None and child_token.branch_name is not None else None
-                        child_items.append(
-                            self._nav.create_continuation_work_item(
-                                token=child_token,
-                                current_node_id=node_id,
-                                coalesce_name=child_coalesce_name,
-                                on_success_sink=last_on_success_sink,
-                            )
-                        )
-
-                    # NOTE: Parent EXPANDED outcome is recorded atomically in expand_token()
-                    # to eliminate crash window between child creation and outcome recording.
-                    return (
-                        RowResult(
-                            token=current_token,
-                            final_data=current_token.row_data,
-                            outcome=RowOutcome.EXPANDED,
-                        ),
-                        child_items,
-                    )
-
-                # Single row output (existing logic - current_token already updated
-                # by _execute_transform_with_retry, continues to next transform)
+                transform_outcome = self._handle_transform_node(
+                    row_transform,
+                    current_token,
+                    ctx,
+                    node_id,
+                    child_items,
+                    coalesce_node_id,
+                    coalesce_name,
+                    last_on_success_sink,
+                )
+                if isinstance(transform_outcome, _TransformTerminal):
+                    return transform_outcome.result, child_items
+                current_token = transform_outcome.updated_token
+                last_on_success_sink = transform_outcome.updated_sink
             elif isinstance(plugin, GateSettings):
                 gate_config = plugin
                 outcome = self._gate_executor.execute_config_gate(
