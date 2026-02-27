@@ -1995,6 +1995,136 @@ class Orchestrator:
 
         return interrupted_by_shutdown
 
+    def _run_resume_processing_loop(
+        self,
+        loop_ctx: LoopContext,
+        unprocessed_rows: list[tuple[str, int, dict[str, Any]]],
+        schema_contract: SchemaContract,
+        *,
+        shutdown_event: threading.Event | None = None,
+    ) -> bool:
+        """Run the resume processing loop: iterate unprocessed rows, transform, flush, accumulate.
+
+        Includes end-of-loop aggregation flush and coalesce flush (same as the main
+        loop — these must complete before _flush_and_write_sinks() writes to sinks).
+
+        Simpler than the main loop:
+        - No quarantine handling (rows already validated)
+        - No field resolution (already recorded in original run)
+        - No schema contract recording (passed via parameter)
+        - No operation_id lifecycle (no source track_operation)
+        - No progress emission (known gap — see design doc)
+
+        Returns:
+            True if interrupted by shutdown, False otherwise.
+        """
+        # Destructure loop_ctx for local access
+        config = loop_ctx.config
+        ctx = loop_ctx.ctx
+        processor = loop_ctx.processor
+        counters = loop_ctx.counters
+        pending_tokens = loop_ctx.pending_tokens
+        coalesce_executor = loop_ctx.coalesce_executor
+        coalesce_node_map = dict(loop_ctx.coalesce_node_map)
+        agg_transform_lookup = dict(loop_ctx.agg_transform_lookup)
+
+        interrupted_by_shutdown = False
+
+        # Process each unprocessed row using process_existing_row
+        # (rows already exist in DB, only tokens need to be created)
+        #
+        # NOTE: No checkpointing during resume processing.
+        # This is intentional for the following reasons:
+        # 1. Resume typically handles few rows (those after the original checkpoint)
+        # 2. Adding checkpointing during resume increases complexity significantly
+        # 3. If resume crashes, re-running from the original checkpoint is acceptable
+        # 4. For very large resume scenarios, a future enhancement could add checkpoint
+        #    support, but the current design prioritizes simplicity over edge-case
+        #    optimization
+        for row_id, _row_index, row_data in unprocessed_rows:
+            counters.rows_processed += 1
+
+            # ─────────────────────────────────────────────────────────────────
+            # Check for timed-out aggregations BEFORE processing this row
+            # (BUG FIX: P1-2026-01-22 - ensures timeout flushes OLD batch)
+            # ─────────────────────────────────────────────────────────────────
+            # Call module function directly (no wrapper method)
+            timeout_result = check_aggregation_timeouts(
+                config=config,
+                processor=processor,
+                ctx=ctx,
+                pending_tokens=pending_tokens,
+                agg_transform_lookup=agg_transform_lookup,
+            )
+            counters.accumulate_flush_result(timeout_result)
+
+            # Wrap row_data in PipelineRow with contract (PIPELINEROW MIGRATION)
+            # Row data from resume is a plain dict, but process_existing_row expects PipelineRow
+            pipeline_row = PipelineRow(data=row_data, contract=schema_contract)
+
+            results = processor.process_existing_row(
+                row_id=row_id,
+                row_data=pipeline_row,
+                transforms=config.transforms,
+                ctx=ctx,
+            )
+
+            # Handle all results from this row
+            accumulate_row_outcomes(results, counters, config.sinks, pending_tokens)
+
+            # ─────────────────────────────────────────────────────────────────
+            # Check for timed-out coalesces after processing each row
+            # (BUG FIX: P1-2026-01-22 - check_timeouts was never called)
+            # ─────────────────────────────────────────────────────────────────
+            if coalesce_executor is not None:
+                handle_coalesce_timeouts(
+                    coalesce_executor=coalesce_executor,
+                    coalesce_node_map=coalesce_node_map,
+                    processor=processor,
+                    config_sinks=config.sinks,
+                    ctx=ctx,
+                    counters=counters,
+                    pending_tokens=pending_tokens,
+                )
+
+            # ─────────────────────────────────────────────────────────────
+            # GRACEFUL SHUTDOWN CHECK
+            # Check between row iterations — current row is fully
+            # processed, outcomes recorded, safe to stop here.
+            # No quarantine path in resume (rows already validated).
+            # ─────────────────────────────────────────────────────────────
+            if shutdown_event is not None and shutdown_event.is_set():
+                interrupted_by_shutdown = True
+                break
+
+        # ─────────────────────────────────────────────────────────────────
+        # CRITICAL: Flush remaining aggregation buffers at end-of-source
+        # ─────────────────────────────────────────────────────────────────
+        if config.aggregation_settings:
+            # Call module function directly (no wrapper method)
+            # No checkpointing during resume
+            flush_result = flush_remaining_aggregation_buffers(
+                config=config,
+                processor=processor,
+                ctx=ctx,
+                pending_tokens=pending_tokens,
+            )
+            counters.accumulate_flush_result(flush_result)
+
+        # Flush pending coalesce operations
+        if coalesce_executor is not None:
+            flush_coalesce_pending(
+                coalesce_executor=coalesce_executor,
+                coalesce_node_map=coalesce_node_map,
+                processor=processor,
+                config_sinks=config.sinks,
+                ctx=ctx,
+                counters=counters,
+                pending_tokens=pending_tokens,
+            )
+
+        return interrupted_by_shutdown
+
     def _execute_run(
         self,
         recorder: LandscapeRecorder,
@@ -2442,8 +2572,6 @@ class Orchestrator:
         counters = ExecutionCounters()
         pending_tokens: dict[str, list[tuple[TokenInfo, PendingOutcome | None]]] = {name: [] for name in config.sinks}
 
-        interrupted_by_shutdown = False
-
         # Build LoopContext so extracted methods can share this parameter bundle.
         # Same mutable counters/pending_tokens — mutations visible through both refs.
         loop_ctx = LoopContext(
@@ -2458,98 +2586,12 @@ class Orchestrator:
         )
 
         try:
-            # Process each unprocessed row using process_existing_row
-            # (rows already exist in DB, only tokens need to be created)
-            #
-            # NOTE: No checkpointing during resume processing.
-            # This is intentional for the following reasons:
-            # 1. Resume typically handles few rows (those after the original checkpoint)
-            # 2. Adding checkpointing during resume increases complexity significantly
-            # 3. If resume crashes, re-running from the original checkpoint is acceptable
-            # 4. For very large resume scenarios, a future enhancement could add checkpoint
-            #    support, but the current design prioritizes simplicity over edge-case
-            #    optimization
-            for row_id, _row_index, row_data in unprocessed_rows:
-                counters.rows_processed += 1
-
-                # ─────────────────────────────────────────────────────────────────
-                # Check for timed-out aggregations BEFORE processing this row
-                # (BUG FIX: P1-2026-01-22 - ensures timeout flushes OLD batch)
-                # ─────────────────────────────────────────────────────────────────
-                # Call module function directly (no wrapper method)
-                timeout_result = check_aggregation_timeouts(
-                    config=config,
-                    processor=processor,
-                    ctx=ctx,
-                    pending_tokens=pending_tokens,
-                    agg_transform_lookup=agg_transform_lookup,
-                )
-                counters.accumulate_flush_result(timeout_result)
-
-                # Wrap row_data in PipelineRow with contract (PIPELINEROW MIGRATION)
-                # Row data from resume is a plain dict, but process_existing_row expects PipelineRow
-                pipeline_row = PipelineRow(data=row_data, contract=schema_contract)
-
-                results = processor.process_existing_row(
-                    row_id=row_id,
-                    row_data=pipeline_row,
-                    transforms=config.transforms,
-                    ctx=ctx,
-                )
-
-                # Handle all results from this row
-                accumulate_row_outcomes(results, counters, config.sinks, pending_tokens)
-
-                # ─────────────────────────────────────────────────────────────────
-                # Check for timed-out coalesces after processing each row
-                # (BUG FIX: P1-2026-01-22 - check_timeouts was never called)
-                # ─────────────────────────────────────────────────────────────────
-                if coalesce_executor is not None:
-                    handle_coalesce_timeouts(
-                        coalesce_executor=coalesce_executor,
-                        coalesce_node_map=coalesce_node_map,
-                        processor=processor,
-                        config_sinks=config.sinks,
-                        ctx=ctx,
-                        counters=counters,
-                        pending_tokens=pending_tokens,
-                    )
-
-                # ─────────────────────────────────────────────────────────────
-                # GRACEFUL SHUTDOWN CHECK
-                # Check between row iterations — current row is fully
-                # processed, outcomes recorded, safe to stop here.
-                # No quarantine path in resume (rows already validated).
-                # ─────────────────────────────────────────────────────────────
-                if shutdown_event is not None and shutdown_event.is_set():
-                    interrupted_by_shutdown = True
-                    break
-
-            # ─────────────────────────────────────────────────────────────────
-            # CRITICAL: Flush remaining aggregation buffers at end-of-source
-            # ─────────────────────────────────────────────────────────────────
-            if config.aggregation_settings:
-                # Call module function directly (no wrapper method)
-                # No checkpointing during resume
-                flush_result = flush_remaining_aggregation_buffers(
-                    config=config,
-                    processor=processor,
-                    ctx=ctx,
-                    pending_tokens=pending_tokens,
-                )
-                counters.accumulate_flush_result(flush_result)
-
-            # Flush pending coalesce operations
-            if coalesce_executor is not None:
-                flush_coalesce_pending(
-                    coalesce_executor=coalesce_executor,
-                    coalesce_node_map=coalesce_node_map,
-                    processor=processor,
-                    config_sinks=config.sinks,
-                    ctx=ctx,
-                    counters=counters,
-                    pending_tokens=pending_tokens,
-                )
+            interrupted = self._run_resume_processing_loop(
+                loop_ctx,
+                unprocessed_rows,
+                schema_contract,
+                shutdown_event=shutdown_event,
+            )
 
             # Write to sinks + raise GracefulShutdownError if interrupted
             # (no checkpoint callbacks for resume path)
@@ -2558,7 +2600,7 @@ class Orchestrator:
                 run_id,
                 loop_ctx,
                 artifacts.sink_id_map,
-                interrupted_by_shutdown,
+                interrupted,
             )
 
         finally:
