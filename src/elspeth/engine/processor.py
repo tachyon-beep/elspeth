@@ -133,6 +133,7 @@ type _TransformOutcome = _TransformContinue | _TransformTerminal
 class _GateContinue:
     """Gate says advance to next node (or jump to a specific node)."""
 
+    updated_token: TokenInfo
     updated_sink: str
     next_node_id: NodeID | None = None  # None = next structural node
 
@@ -1695,6 +1696,150 @@ class RowProcessor:
         # (current_token already updated by _execute_transform_with_retry)
         return _TransformContinue(updated_token=current_token, updated_sink=updated_sink)
 
+    def _handle_gate_node(
+        self,
+        gate: GateSettings,
+        current_token: TokenInfo,
+        ctx: PluginContext,
+        node_id: NodeID,
+        child_items: list[WorkItem],
+        coalesce_node_id: NodeID | None,
+        coalesce_name: CoalesceName | None,
+        current_on_success_sink: str,
+    ) -> _GateOutcome:
+        """Handle a gate node: evaluate, then fork/route/divert/continue.
+
+        Args:
+            gate: Gate configuration to evaluate.
+            current_token: Token being processed through the DAG.
+            ctx: Plugin context for the current run.
+            node_id: Current DAG node ID (passed to gate executor and used for
+                fork child work item creation).
+            child_items: Mutable list — fork paths append child work items here.
+            coalesce_node_id: Coalesce barrier node for fork branches (or None).
+            coalesce_name: Coalesce point name for fork branches (or None).
+            current_on_success_sink: Current sink name, carried forward or overridden by jumps.
+
+        Returns:
+            _GateTerminal: Gate routed to sink, forked to paths, or diverted (contains result + child_items populated).
+            _GateContinue: Gate says continue — updated_token, updated_sink, and optional next_node_id for jumps.
+        """
+        # 1. Execute gate
+        outcome = self._gate_executor.execute_config_gate(
+            gate_config=gate,
+            node_id=node_id,
+            token=current_token,
+            ctx=ctx,
+            token_manager=self._token_manager,
+        )
+        current_token = outcome.updated_token
+
+        # 2. Emit GateEvaluated telemetry AFTER Landscape recording succeeds
+        # (Landscape recording happens inside execute_config_gate)
+        self._emit_gate_evaluated(
+            token=current_token,
+            gate_name=gate.name,
+            gate_node_id=node_id,
+            routing_mode=outcome.result.action.mode,
+            destinations=self._get_gate_destinations(outcome),
+        )
+
+        # 3. Check if gate routed to a sink
+        if outcome.sink_name is not None:
+            # NOTE: Do NOT record ROUTED outcome here - the token hasn't been written yet.
+            # SinkExecutor.write() records the outcome AFTER sink durability is achieved.
+            # Notify coalesce if this is a forked branch
+            sibling_results = self._notify_coalesce_of_lost_branch(
+                current_token,
+                f"gate_routed_to_sink:{outcome.sink_name}",
+                child_items,
+            )
+            current_result = RowResult(
+                token=current_token,
+                final_data=current_token.row_data,
+                outcome=RowOutcome.ROUTED,
+                sink_name=outcome.sink_name,
+            )
+            if sibling_results:
+                return _GateTerminal(result=[current_result, *sibling_results])
+            return _GateTerminal(result=current_result)
+
+        # 4. Fork to paths
+        if outcome.result.action.kind == RoutingKind.FORK_TO_PATHS:
+            for child_token in outcome.child_tokens:
+                # Look up coalesce info for this branch
+                cfg_branch_name = child_token.branch_name
+                cfg_coalesce_name: CoalesceName | None = None
+
+                if cfg_branch_name and BranchName(cfg_branch_name) in self._branch_to_coalesce:
+                    cfg_coalesce_name = self._branch_to_coalesce[BranchName(cfg_branch_name)]
+
+                # See plugin gate fork handler above for routing logic.
+                if cfg_coalesce_name is None and cfg_branch_name and BranchName(cfg_branch_name) in self._branch_to_sink:
+                    child_items.append(
+                        self._nav.create_work_item(
+                            token=child_token,
+                            current_node_id=None,
+                        )
+                    )
+                else:
+                    child_items.append(
+                        self._nav.create_continuation_work_item(
+                            token=child_token,
+                            current_node_id=node_id,
+                            coalesce_name=cfg_coalesce_name,
+                        )
+                    )
+
+            # NOTE: Parent FORKED outcome is now recorded atomically in fork_token()
+            # to eliminate crash window between child creation and outcome recording.
+            return _GateTerminal(
+                result=RowResult(
+                    token=current_token,
+                    final_data=current_token.row_data,
+                    outcome=RowOutcome.FORKED,
+                )
+            )
+
+        # 5. Jump to specific node
+        if outcome.next_node_id is not None:
+            updated_sink = current_on_success_sink
+            resolved_sink = self._nav.resolve_jump_target_sink(outcome.next_node_id)
+            if resolved_sink is not None:
+                updated_sink = resolved_sink
+
+            # Re-validate coalesce ordering invariant after gate jump.
+            # The initial check at entry only validates the starting node.
+            # A gate jump can move the token past its coalesce node,
+            # which would silently bypass join handling.
+            #
+            # IMPORTANT: Use outcome.next_node_id (not the caller's node_id param)
+            # because we're validating the JUMP TARGET, not the current position.
+            if coalesce_node_id is not None:
+                jump_target_step = self._node_step_map.get(outcome.next_node_id)
+                coalesce_barrier_step = self._node_step_map.get(coalesce_node_id)
+                if jump_target_step is not None and coalesce_barrier_step is not None and jump_target_step > coalesce_barrier_step:
+                    raise OrchestrationInvariantError(
+                        f"Gate jump moved token '{current_token.token_id}' to node '{outcome.next_node_id}' "
+                        f"(step {jump_target_step}) which is past its coalesce node '{coalesce_node_id}' "
+                        f"(step {coalesce_barrier_step}). This would bypass join handling."
+                    )
+
+            return _GateContinue(
+                updated_token=current_token,
+                updated_sink=updated_sink,
+                next_node_id=outcome.next_node_id,
+            )
+
+        # 6. CONTINUE: config gate says "proceed to next structural node."
+        if outcome.result.action.kind != RoutingKind.CONTINUE:
+            raise OrchestrationInvariantError(
+                f"Unhandled config gate routing kind {outcome.result.action.kind!r} "
+                f"for token {current_token.token_id} at node '{node_id}'. "
+                f"Expected CONTINUE when no sink_name, fork, or next_node_id is set."
+            )
+        return _GateContinue(updated_token=current_token, updated_sink=current_on_success_sink)
+
     def _process_single_token(
         self,
         token: TokenInfo,
@@ -1823,111 +1968,23 @@ class RowProcessor:
                 current_token = transform_outcome.updated_token
                 last_on_success_sink = transform_outcome.updated_sink
             elif isinstance(plugin, GateSettings):
-                gate_config = plugin
-                outcome = self._gate_executor.execute_config_gate(
-                    gate_config=gate_config,
-                    node_id=node_id,
-                    token=current_token,
-                    ctx=ctx,
-                    token_manager=self._token_manager,
+                gate_outcome = self._handle_gate_node(
+                    plugin,
+                    current_token,
+                    ctx,
+                    node_id,
+                    child_items,
+                    coalesce_node_id,
+                    coalesce_name,
+                    last_on_success_sink,
                 )
-                current_token = outcome.updated_token
-
-                # Emit GateEvaluated telemetry AFTER Landscape recording succeeds
-                # (Landscape recording happens inside execute_config_gate)
-                self._emit_gate_evaluated(
-                    token=current_token,
-                    gate_name=gate_config.name,
-                    gate_node_id=node_id,
-                    routing_mode=outcome.result.action.mode,
-                    destinations=self._get_gate_destinations(outcome),
-                )
-
-                # Check if gate routed to a sink
-                if outcome.sink_name is not None:
-                    # NOTE: Do NOT record ROUTED outcome here - the token hasn't been written yet.
-                    # SinkExecutor.write() records the outcome AFTER sink durability is achieved.
-                    # Notify coalesce if this is a forked branch
-                    sibling_results = self._notify_coalesce_of_lost_branch(
-                        current_token,
-                        f"gate_routed_to_sink:{outcome.sink_name}",
-                        child_items,
-                    )
-                    current_result = RowResult(
-                        token=current_token,
-                        final_data=current_token.row_data,
-                        outcome=RowOutcome.ROUTED,
-                        sink_name=outcome.sink_name,
-                    )
-                    if sibling_results:
-                        return ([current_result, *sibling_results], child_items)
-                    return (current_result, child_items)
-                elif outcome.result.action.kind == RoutingKind.FORK_TO_PATHS:
-                    for child_token in outcome.child_tokens:
-                        # Look up coalesce info for this branch
-                        cfg_branch_name = child_token.branch_name
-                        cfg_coalesce_name: CoalesceName | None = None
-
-                        if cfg_branch_name and BranchName(cfg_branch_name) in self._branch_to_coalesce:
-                            cfg_coalesce_name = self._branch_to_coalesce[BranchName(cfg_branch_name)]
-
-                        # See plugin gate fork handler above for routing logic.
-                        if cfg_coalesce_name is None and cfg_branch_name and BranchName(cfg_branch_name) in self._branch_to_sink:
-                            child_items.append(
-                                self._nav.create_work_item(
-                                    token=child_token,
-                                    current_node_id=None,
-                                )
-                            )
-                        else:
-                            child_items.append(
-                                self._nav.create_continuation_work_item(
-                                    token=child_token,
-                                    current_node_id=node_id,
-                                    coalesce_name=cfg_coalesce_name,
-                                )
-                            )
-
-                    # NOTE: Parent FORKED outcome is now recorded atomically in fork_token()
-                    # to eliminate crash window between child creation and outcome recording.
-                    return (
-                        RowResult(
-                            token=current_token,
-                            final_data=current_token.row_data,
-                            outcome=RowOutcome.FORKED,
-                        ),
-                        child_items,
-                    )
-                elif outcome.next_node_id is not None:
-                    resolved_sink = self._nav.resolve_jump_target_sink(outcome.next_node_id)
-                    if resolved_sink is not None:
-                        last_on_success_sink = resolved_sink
-                    node_id = outcome.next_node_id
-
-                    # Re-validate coalesce ordering invariant after gate jump.
-                    # The initial check at entry only validates the starting node.
-                    # A gate jump can move the token past its coalesce node,
-                    # which would silently bypass join handling.
-                    if coalesce_node_id is not None:
-                        jump_target_step = self._node_step_map.get(node_id)
-                        coalesce_barrier_step = self._node_step_map.get(coalesce_node_id)
-                        if jump_target_step is not None and coalesce_barrier_step is not None and jump_target_step > coalesce_barrier_step:
-                            raise OrchestrationInvariantError(
-                                f"Gate jump moved token '{current_token.token_id}' to node '{node_id}' "
-                                f"(step {jump_target_step}) which is past its coalesce node '{coalesce_node_id}' "
-                                f"(step {coalesce_barrier_step}). This would bypass join handling."
-                            )
-
+                if isinstance(gate_outcome, _GateTerminal):
+                    return gate_outcome.result, child_items
+                current_token = gate_outcome.updated_token
+                last_on_success_sink = gate_outcome.updated_sink
+                if gate_outcome.next_node_id is not None:
+                    node_id = gate_outcome.next_node_id
                     continue
-                else:
-                    # CONTINUE: config gate says "proceed to next structural node."
-                    # Falls through to node_id = next_node_id below.
-                    if outcome.result.action.kind != RoutingKind.CONTINUE:
-                        raise OrchestrationInvariantError(
-                            f"Unhandled config gate routing kind {outcome.result.action.kind!r} "
-                            f"for token {current_token.token_id} at node '{node_id}'. "
-                            f"Expected CONTINUE when no sink_name, fork, or next_node_id is set."
-                        )
 
             else:
                 raise TypeError(f"Unknown transform type: {type(plugin).__name__}. Expected TransformProtocol or GateSettings.")

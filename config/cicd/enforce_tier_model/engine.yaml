@@ -149,12 +149,12 @@ allow_hits:
   reason: isinstance(GateSettings) distinguishes fork-gate origin from non-fork continuation to prevent backward routing
   safety: Gate nodes route to branch_first_node; non-gate nodes advance forward via resolve_next_node
   expires: '2026-05-15'
-- key: engine/processor.py:R1:RowProcessor:_process_single_token:fp=eddeaba0ad77cd1a
+- key: engine/processor.py:R1:RowProcessor:_handle_gate_node:fp=82206c1d8d52ff7a
   owner: bugfix
   reason: _node_step_map.get() — gate jump target may not be in step map for pseudo-nodes
   safety: None result skips coalesce check gracefully; structural invariant enforced elsewhere
   expires: '2026-05-15'
-- key: engine/processor.py:R1:RowProcessor:_process_single_token:fp=592ac378217951d4
+- key: engine/processor.py:R1:RowProcessor:_handle_gate_node:fp=feedef3d1635ef8b
   owner: bugfix
   reason: _node_step_map.get() — coalesce node may not be in step map for dynamic topologies
   safety: None result skips coalesce check gracefully; structural invariant enforced elsewhere
@@ -209,18 +209,23 @@ allow_hits:
   reason: Optional edge_id lookup - edge map may not have all node combinations during routing
   safety: Falls back to generating edge_id when not in prebuilt map
   expires: '2026-05-13'
-- key: engine/processor.py:R5:RowProcessor:_process_single_token:fp=e13e9106ba07925f
+- key: engine/processor.py:R5:RowProcessor:_process_single_token:fp=a5d15704bb6466be
   owner: architecture
   reason: Protocol dispatch - isinstance for plugin type routing in unified node traversal
   safety: isinstance for NodeType discrimination - TransformProtocol vs GateSettings
   expires: '2026-05-13'
-- key: engine/processor.py:R5:RowProcessor:_process_single_token:fp=241e91ba4c534dce
-  owner: architecture
-  reason: Protocol dispatch - isinstance for plugin type routing in unified node traversal
-  safety: isinstance for NodeType discrimination - TransformProtocol vs GateSettings
-  expires: '2026-05-13'
-- key: engine/processor.py:R5:RowProcessor:_process_single_token:fp=2f4368a2340a5206
+- key: engine/processor.py:R5:RowProcessor:_process_single_token:fp=e0fd40fcf593dda6
   owner: architecture
   reason: Discriminated union dispatch - isinstance for _TransformOutcome result routing
   safety: isinstance for dataclass variant dispatch after _handle_transform_node extraction
+  expires: '2026-05-13'
+- key: engine/processor.py:R5:RowProcessor:_process_single_token:fp=4b40f610dfab8eef
+  owner: architecture
+  reason: Protocol dispatch - isinstance for plugin type routing in unified node traversal
+  safety: isinstance for NodeType discrimination - TransformProtocol vs GateSettings
+  expires: '2026-05-13'
+- key: engine/processor.py:R5:RowProcessor:_process_single_token:fp=8dd0b6d89611eaf2
+  owner: architecture
+  reason: Discriminated union dispatch - isinstance for _GateOutcome result routing
+  safety: isinstance for dataclass variant dispatch after _handle_gate_node extraction
   expires: '2026-05-13'

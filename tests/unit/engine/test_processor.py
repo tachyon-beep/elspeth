@@ -3539,13 +3539,13 @@ class TestProcessorOutcomeTypes:
     def test_gate_continue_default_next_node(self) -> None:
         from elspeth.engine.processor import _GateContinue
 
-        outcome = _GateContinue(updated_sink="output")
+        outcome = _GateContinue(updated_token=Mock(), updated_sink="output")
         assert outcome.next_node_id is None
 
     def test_gate_continue_explicit_next_node(self) -> None:
         from elspeth.engine.processor import _GateContinue
 
-        outcome = _GateContinue(updated_sink="output", next_node_id=NodeID("jump_target"))
+        outcome = _GateContinue(updated_token=Mock(), updated_sink="output", next_node_id=NodeID("jump_target"))
         assert outcome.next_node_id == NodeID("jump_target")
 
     def test_gate_terminal(self) -> None:
@@ -3558,7 +3558,7 @@ class TestProcessorOutcomeTypes:
     def test_gate_outcome_isinstance_dispatch(self) -> None:
         from elspeth.engine.processor import _GateContinue, _GateTerminal
 
-        continue_outcome = _GateContinue(updated_sink="out")
+        continue_outcome = _GateContinue(updated_token=Mock(), updated_sink="out")
         terminal_outcome = _GateTerminal(result=Mock())
 
         assert isinstance(continue_outcome, _GateContinue)
@@ -3583,7 +3583,7 @@ class TestProcessorOutcomeTypes:
         with pytest.raises(AttributeError):
             tt.result = Mock()  # type: ignore[misc]
 
-        gc = _GateContinue(updated_sink="out")
+        gc = _GateContinue(updated_token=Mock(), updated_sink="out")
         with pytest.raises(AttributeError):
             gc.updated_sink = "other"  # type: ignore[misc]
 
