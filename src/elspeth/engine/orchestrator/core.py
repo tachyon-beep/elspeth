@@ -109,6 +109,7 @@ from elspeth.engine.orchestrator.types import (
     RowPlugin,
     RunContext,
     RunResult,
+    _CheckpointFactory,
 )
 from elspeth.engine.orchestrator.validation import (
     validate_route_destinations,
@@ -1379,6 +1380,52 @@ class Orchestrator:
             coalesce_id_map=coalesce_id_map,
         )
 
+    def _flush_and_write_sinks(
+        self,
+        recorder: LandscapeRecorder,
+        run_id: str,
+        loop_ctx: LoopContext,
+        sink_id_map: Mapping[SinkName, NodeID],
+        interrupted_by_shutdown: bool,
+        *,
+        on_token_written_factory: _CheckpointFactory | None = None,
+    ) -> None:
+        """Write all pending tokens to sinks and handle post-loop bookkeeping.
+
+        IMPORTANT: Aggregation flush and coalesce flush are NOT in this method.
+        They stay inside the processing loop because they must execute inside
+        the track_operation(source_load) context to preserve audit attribution.
+
+        Handles:
+        1. Write pending tokens to sinks (each sink has its own track_operation)
+        2. Raise GracefulShutdownError if interrupted
+        """
+        counters = loop_ctx.counters
+
+        self._write_pending_to_sinks(
+            recorder=recorder,
+            run_id=run_id,
+            config=loop_ctx.config,
+            ctx=loop_ctx.ctx,
+            pending_tokens=loop_ctx.pending_tokens,
+            sink_id_map=dict(sink_id_map),
+            sink_step=loop_ctx.processor.resolve_sink_step(),
+            on_token_written_factory=on_token_written_factory,
+        )
+
+        # If shutdown interrupted the loop, raise after all pending work is flushed.
+        # At this point: aggregation buffers flushed, coalesce flushed, sink writes done.
+        if interrupted_by_shutdown:
+            raise GracefulShutdownError(
+                rows_processed=counters.rows_processed,
+                run_id=run_id,
+                rows_succeeded=counters.rows_succeeded,
+                rows_failed=counters.rows_failed,
+                rows_quarantined=counters.rows_quarantined,
+                rows_routed=counters.rows_routed,
+                routed_destinations=dict(counters.routed_destinations),
+            )
+
     def _handle_quarantine_row(
         self,
         recorder: LandscapeRecorder,
@@ -1585,7 +1632,6 @@ class Orchestrator:
         agg_transform_lookup = dict(run_ctx.agg_transform_lookup)  # dict for aggregation functions
 
         source_id = artifacts.source_id
-        sink_id_map = dict(artifacts.sink_id_map)
         edge_map = dict(artifacts.edge_map)
 
         # Process rows - Buffer TOKENS, not dicts, to preserve identity
@@ -1998,29 +2044,15 @@ class Orchestrator:
 
                 return callback
 
-            self._write_pending_to_sinks(
-                recorder=recorder,
-                run_id=run_id,
-                config=config,
-                ctx=ctx,
-                pending_tokens=pending_tokens,
-                sink_id_map=sink_id_map,
-                sink_step=processor.resolve_sink_step(),
+            # 4. Write sinks + shutdown raise
+            self._flush_and_write_sinks(
+                recorder,
+                run_id,
+                loop_ctx,
+                artifacts.sink_id_map,
+                interrupted_by_shutdown,
                 on_token_written_factory=checkpoint_after_sink,
             )
-
-            # If shutdown interrupted the loop, raise after all pending work is flushed.
-            # At this point: aggregation buffers flushed, coalesce flushed, sink writes done.
-            if interrupted_by_shutdown:
-                raise GracefulShutdownError(
-                    rows_processed=counters.rows_processed,
-                    run_id=run_id,
-                    rows_succeeded=counters.rows_succeeded,
-                    rows_failed=counters.rows_failed,
-                    rows_quarantined=counters.rows_quarantined,
-                    rows_routed=counters.rows_routed,
-                    routed_destinations=dict(counters.routed_destinations),
-                )
 
             # Emit final progress if we haven't emitted recently or row count not on interval
             # (RunSummary will show final summary regardless, but progress shows intermediate state)
@@ -2377,13 +2409,25 @@ class Orchestrator:
         coalesce_executor = run_ctx.coalesce_executor
         coalesce_node_map = dict(run_ctx.coalesce_node_map)
         agg_transform_lookup = dict(run_ctx.agg_transform_lookup)
-        sink_id_map = dict(artifacts.sink_id_map)
 
         # Process rows - counters and pending outcome tokens
         counters = ExecutionCounters()
         pending_tokens: dict[str, list[tuple[TokenInfo, PendingOutcome | None]]] = {name: [] for name in config.sinks}
 
         interrupted_by_shutdown = False
+
+        # Build LoopContext so extracted methods can share this parameter bundle.
+        # Same mutable counters/pending_tokens — mutations visible through both refs.
+        loop_ctx = LoopContext(
+            counters=counters,
+            pending_tokens=pending_tokens,
+            processor=processor,
+            ctx=ctx,
+            config=config,
+            agg_transform_lookup=agg_transform_lookup,
+            coalesce_executor=coalesce_executor,
+            coalesce_node_map=coalesce_node_map,
+        )
 
         try:
             # Process each unprocessed row using process_existing_row
@@ -2479,29 +2523,15 @@ class Orchestrator:
                     pending_tokens=pending_tokens,
                 )
 
-            # Write to sinks (no checkpoint callbacks for resume path)
-            self._write_pending_to_sinks(
-                recorder=recorder,
-                run_id=run_id,
-                config=config,
-                ctx=ctx,
-                pending_tokens=pending_tokens,
-                sink_id_map=sink_id_map,
-                sink_step=processor.resolve_sink_step(),
+            # Write to sinks + raise GracefulShutdownError if interrupted
+            # (no checkpoint callbacks for resume path)
+            self._flush_and_write_sinks(
+                recorder,
+                run_id,
+                loop_ctx,
+                artifacts.sink_id_map,
+                interrupted_by_shutdown,
             )
-
-            # If shutdown interrupted the loop, raise after all pending work is flushed.
-            # At this point: aggregation buffers flushed, coalesce flushed, sink writes done.
-            if interrupted_by_shutdown:
-                raise GracefulShutdownError(
-                    rows_processed=counters.rows_processed,
-                    run_id=run_id,
-                    rows_succeeded=counters.rows_succeeded,
-                    rows_failed=counters.rows_failed,
-                    rows_quarantined=counters.rows_quarantined,
-                    rows_routed=counters.rows_routed,
-                    routed_destinations=dict(counters.routed_destinations),
-                )
 
         finally:
             self._cleanup_plugins(config, ctx, include_source=False)
