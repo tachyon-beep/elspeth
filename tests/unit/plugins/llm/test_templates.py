@@ -324,3 +324,66 @@ class TestPromptTemplateCanonicalSafety:
         # render_with_metadata() fails (computes hash)
         with pytest.raises(TemplateError, match="Cannot compute variables hash"):
             template.render_with_metadata(row)
+
+
+class TestSyntheticContextWithFixedContract:
+    """Regression tests for multi-query template rendering with FIXED contracts.
+
+    Bug: MultiQueryStrategy._execute_one_query passes contract=row.contract to
+    render_with_metadata(). The template context is a synthetic dict built from
+    input_fields (keys are template variable names, not source column names).
+    In FIXED mode, PipelineRow rejects any key not in the contract, causing
+    TemplateError for valid multi-query templates.
+
+    The fix: pass contract=None for synthetic template contexts, since they
+    don't conform to the source row's schema.
+    """
+
+    def test_synthetic_context_without_contract_succeeds(self) -> None:
+        """Synthetic template context renders correctly with contract=None.
+
+        Multi-query template contexts have keys like "text_content" (template
+        variable names from input_fields), not source columns like "cs1_bg".
+        Passing contract=None avoids wrapping in PipelineRow, which would
+        reject these synthetic keys in FIXED mode.
+        """
+        template = PromptTemplate("Evaluate: {{ row.text_content }}")
+
+        # Synthetic context from build_template_context: maps template vars to row values
+        synthetic_ctx = {"text_content": "sample data", "source_row": "ignored"}
+
+        # With contract=None, rendering succeeds (the fix)
+        result = template.render_with_metadata(synthetic_ctx, contract=None)
+        assert "sample data" in result.prompt
+
+    def test_synthetic_context_with_fixed_contract_render(self) -> None:
+        """render() with synthetic context and FIXED contract should also work."""
+        fixed_contract = SchemaContract(
+            mode="FIXED",
+            fields=(make_field("amount", int, required=True, source="declared"),),
+            locked=True,
+        )
+        template = PromptTemplate("Amount is {{ row.value }}")
+        synthetic_ctx = {"value": 42}
+
+        # With contract=None, this works
+        result = template.render(synthetic_ctx, contract=None)
+        assert result == "Amount is 42"
+
+        # With FIXED contract, this WOULD fail because "value" is not in contract
+        with pytest.raises(TemplateError, match="Undefined variable"):
+            template.render(synthetic_ctx, contract=fixed_contract)
+
+    def test_synthetic_context_with_flexible_contract_works(self) -> None:
+        """FLEXIBLE contract allows synthetic keys (extra fields fall through)."""
+        flexible_contract = SchemaContract(
+            mode="FLEXIBLE",
+            fields=(make_field("cs1_bg", str, required=True, source="declared"),),
+            locked=True,
+        )
+        template = PromptTemplate("Evaluate: {{ row.text_content }}")
+        synthetic_ctx = {"text_content": "sample data"}
+
+        # FLEXIBLE mode allows unknown keys — no bug in this mode
+        result = template.render(synthetic_ctx, contract=flexible_contract)
+        assert "sample data" in result

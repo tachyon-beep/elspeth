@@ -195,3 +195,79 @@ class TestMultiQueryDeclaredOutputFields:
         """declared_output_fields is populated for schema evolution recording."""
         transform = LLMTransform(_make_llm_config())
         assert transform.declared_output_fields
+
+
+class TestResolveQueriesDuplicateNames:
+    """Tests for duplicate query name rejection in resolve_queries().
+
+    Bug: list-form configs don't enforce unique spec.name values. If two
+    queries share a name, they emit the same prefixed output keys (e.g.,
+    "{name}_response", "{name}_metadata"), and later dict.update() merges
+    silently overwrite earlier query results, losing data.
+
+    Dict-form configs are naturally protected (Python dict keys are unique),
+    but list-form configs can have duplicate "name" fields.
+    """
+
+    def test_duplicate_names_in_list_form_rejected(self) -> None:
+        """List-form configs with duplicate query names raise ValueError."""
+        from elspeth.plugins.llm.multi_query import resolve_queries
+
+        with pytest.raises(ValueError, match="Duplicate query name"):
+            resolve_queries(
+                [
+                    {
+                        "name": "diagnosis",
+                        "input_fields": {"text": "col_a"},
+                    },
+                    {
+                        "name": "diagnosis",
+                        "input_fields": {"text": "col_b"},
+                    },
+                ]
+            )
+
+    def test_duplicate_names_in_query_spec_list_rejected(self) -> None:
+        """QuerySpec list with duplicate names raises ValueError."""
+        from elspeth.plugins.llm.multi_query import QuerySpec, resolve_queries
+
+        with pytest.raises(ValueError, match="Duplicate query name"):
+            resolve_queries(
+                [
+                    QuerySpec(name="scoring", input_fields={"x": "a"}),
+                    QuerySpec(name="scoring", input_fields={"x": "b"}),
+                ]
+            )
+
+    def test_unique_names_in_list_form_accepted(self) -> None:
+        """List-form configs with unique query names work fine."""
+        from elspeth.plugins.llm.multi_query import resolve_queries
+
+        specs = resolve_queries(
+            [
+                {
+                    "name": "diagnosis_1",
+                    "input_fields": {"text": "col_a"},
+                },
+                {
+                    "name": "diagnosis_2",
+                    "input_fields": {"text": "col_b"},
+                },
+            ]
+        )
+        assert len(specs) == 2
+        assert specs[0].name == "diagnosis_1"
+        assert specs[1].name == "diagnosis_2"
+
+    def test_dict_form_naturally_unique(self) -> None:
+        """Dict-form configs have naturally unique names (sanity check)."""
+        from elspeth.plugins.llm.multi_query import resolve_queries
+
+        # Python dicts can't have duplicate keys, so this is always safe
+        specs = resolve_queries(
+            {
+                "query_a": {"input_fields": {"text": "col_a"}},
+                "query_b": {"input_fields": {"text": "col_b"}},
+            }
+        )
+        assert len(specs) == 2

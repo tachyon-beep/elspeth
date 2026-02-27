@@ -204,6 +204,17 @@ def resolve_queries(
     else:
         raise TypeError(f"queries must be list or dict, got {type(queries).__name__}")
 
+    # Validate: reject duplicate query names.
+    # Dict-form configs are naturally unique (Python dict keys), but list-form
+    # configs can have duplicate "name" fields. Duplicate names cause silent
+    # data loss: per-query output keys ({name}_response, {name}_metadata) collide,
+    # and dict.update() overwrites earlier query results.
+    seen_names: set[str] = set()
+    for spec in specs:
+        if spec.name in seen_names:
+            raise ValueError(f"Duplicate query name '{spec.name}'. Each query must have a unique name to prevent output field collisions.")
+        seen_names.add(spec.name)
+
     # Validate: reject positional template variables
     for spec in specs:
         if spec.template and _POSITIONAL_VAR_PATTERN.search(spec.template):

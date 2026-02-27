@@ -888,3 +888,15 @@ After these 8 commits (#3-#10):
 - Divergence accounting comment block documents all behavioral differences
 
 **Proceed to:** [Part C: Processor Extractions](2026-02-27-t18-part-c-processor-extractions.md)
+
+---
+
+## Post-Implementation Notes
+
+The following deviations from the plan occurred during implementation:
+
+1. **`LoopResult` return type:** The plan shows `_run_main_processing_loop() -> bool` (returning `interrupted`). The implementation returns `-> LoopResult`, a frozen dataclass carrying `(interrupted, start_time, phase_start, last_progress_time)`. This was needed because final progress emission and `PhaseCompleted` must happen AFTER sink writes in `_execute_run()`, not inside the processing loop.
+
+2. **`_flush_and_write_sinks()` scope:** Plan says this method handles progress emission and `PhaseCompleted`. In the implementation, those events are emitted by the caller (`_execute_run()`) using timing data from `LoopResult`, keeping `_flush_and_write_sinks()` focused on sink writes only.
+
+3. **Counter aliasing:** The plan created `counters = ExecutionCounters()` as a bare variable, then passed it into `LoopContext`. Post-review fix inlined the creation directly into `LoopContext(counters=ExecutionCounters(), ...)` and changed all post-construction references to `loop_ctx.counters` to eliminate the aliasing footgun.

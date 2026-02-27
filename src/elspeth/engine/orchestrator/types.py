@@ -278,6 +278,11 @@ class LoopContext:
 
     NOT frozen: ``counters`` and ``pending_tokens`` are mutated in place
     throughout the processing loop.
+
+    Convention: fields below the "Read-only" separator are never reassigned
+    after construction. They are not frozen because ``counters`` and
+    ``pending_tokens`` require in-place mutation. Treat read-only fields as
+    if they were on a frozen dataclass.
     """
 
     # --- Mutable state (updated row-by-row) ---
@@ -293,7 +298,7 @@ class LoopContext:
     coalesce_node_map: Mapping[CoalesceName, NodeID]
 
 
-@dataclass(slots=True)
+@dataclass(frozen=True, slots=True)
 class LoopResult:
     """Return value from _run_main_processing_loop().
 
@@ -308,9 +313,7 @@ class LoopResult:
     last_progress_time: float
 
 
+# Factory that creates a per-sink checkpoint callback.
+# Takes a sink_node_id (str) and returns a callback invoked after each
+# token is written to that sink.
 type _CheckpointFactory = Callable[[str], Callable[[TokenInfo], None]]
-"""Factory that creates a per-sink checkpoint callback.
-
-Takes a sink_node_id (str) and returns a callback invoked after each
-token is written to that sink.
-"""

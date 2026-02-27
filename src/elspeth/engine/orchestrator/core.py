@@ -2161,12 +2161,9 @@ class Orchestrator:
             payload_store,
         )
 
-        counters = ExecutionCounters()
-        pending_tokens: dict[str, list[tuple[TokenInfo, PendingOutcome | None]]] = {name: [] for name in config.sinks}
-
         loop_ctx = LoopContext(
-            counters=counters,
-            pending_tokens=pending_tokens,
+            counters=ExecutionCounters(),
+            pending_tokens={name: [] for name in config.sinks},
             processor=run_ctx.processor,
             ctx=run_ctx.ctx,
             config=config,
@@ -2219,14 +2216,14 @@ class Orchestrator:
             progress_interval = 100
             current_time = time.perf_counter()
             time_since_last_progress = current_time - loop_result.last_progress_time
-            if counters.rows_processed % progress_interval != 0 or time_since_last_progress >= 1.0:
+            if loop_ctx.counters.rows_processed % progress_interval != 0 or time_since_last_progress >= 1.0:
                 elapsed = current_time - loop_result.start_time
                 self._events.emit(
                     ProgressEvent(
-                        rows_processed=counters.rows_processed,
-                        rows_succeeded=counters.rows_succeeded + counters.rows_routed,
-                        rows_failed=counters.rows_failed,
-                        rows_quarantined=counters.rows_quarantined,
+                        rows_processed=loop_ctx.counters.rows_processed,
+                        rows_succeeded=loop_ctx.counters.rows_succeeded + loop_ctx.counters.rows_routed,
+                        rows_failed=loop_ctx.counters.rows_failed,
+                        rows_quarantined=loop_ctx.counters.rows_quarantined,
                         elapsed_seconds=elapsed,
                     )
                 )
@@ -2237,7 +2234,7 @@ class Orchestrator:
             self._cleanup_plugins(config, run_ctx.ctx, include_source=True)
 
         self._current_graph = None
-        return counters.to_run_result(run_id, status=RunStatus.RUNNING)
+        return loop_ctx.counters.to_run_result(run_id, status=RunStatus.RUNNING)
 
     def resume(
         self,
@@ -2554,12 +2551,9 @@ class Orchestrator:
         # Restore contract from parameter (already retrieved by resume() caller)
         run_ctx.ctx.contract = schema_contract
 
-        counters = ExecutionCounters()
-        pending_tokens: dict[str, list[tuple[TokenInfo, PendingOutcome | None]]] = {name: [] for name in config.sinks}
-
         loop_ctx = LoopContext(
-            counters=counters,
-            pending_tokens=pending_tokens,
+            counters=ExecutionCounters(),
+            pending_tokens={name: [] for name in config.sinks},
             processor=run_ctx.processor,
             ctx=run_ctx.ctx,
             config=config,
@@ -2590,4 +2584,4 @@ class Orchestrator:
             self._cleanup_plugins(config, run_ctx.ctx, include_source=False)
 
         self._current_graph = None
-        return counters.to_run_result(run_id, status=RunStatus.RUNNING)
+        return loop_ctx.counters.to_run_result(run_id, status=RunStatus.RUNNING)

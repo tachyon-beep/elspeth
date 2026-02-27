@@ -23,9 +23,12 @@ from elspeth.contracts import (
 )
 from elspeth.contracts.results import SourceRow
 from elspeth.contracts.schema_contract import FieldContract, SchemaContract
+from elspeth.core.config import AggregationSettings, SourceSettings, TriggerConfig
+from elspeth.core.dag import ExecutionGraph
 from elspeth.core.landscape import LandscapeDB
 from elspeth.core.landscape.recorder import LandscapeRecorder
 from elspeth.engine.orchestrator import Orchestrator, PipelineConfig
+from elspeth.plugins.base import BaseTransform
 from elspeth.plugins.results import TransformResult
 from elspeth.testing import make_pipeline_row, make_source_row
 from tests.fixtures.base_classes import (
@@ -36,6 +39,7 @@ from tests.fixtures.base_classes import (
     as_source,
     as_transform,
 )
+from tests.fixtures.factories import wire_transforms
 from tests.fixtures.pipeline import build_production_graph
 from tests.fixtures.plugins import CollectSink, ListSource
 from tests.fixtures.stores import MockPayloadStore
@@ -488,3 +492,198 @@ class TestT18CharacterizationResumePath:
         assert on_start_calls["source"] == 0, "Source on_start should NOT be called during resume"
         assert on_start_calls["transform"] == 1, "Transform on_start should be called during resume"
         assert on_start_calls["sink"] == 1, "Sink on_start should be called during resume"
+
+
+# ---------------------------------------------------------------------------
+# Test fixtures: Batch-aware transform for aggregation characterization
+# ---------------------------------------------------------------------------
+
+
+class SumBatchTransform(BaseTransform):
+    """Batch-aware transform that sums the 'value' field across buffered rows.
+
+    When flushed (receives list[PipelineRow]), produces one aggregated row.
+    This exercises the output_mode="transform" deaggregation path where
+    N input tokens → CONSUMED_IN_BATCH and 1 output token is expanded.
+    """
+
+    name = "sum_batch"
+    input_schema = _TestSchema
+    output_schema = _TestSchema
+    is_batch_aware = True
+    on_success: str | None = "output"
+
+    def __init__(self) -> None:
+        super().__init__({"schema": {"mode": "observed"}})
+
+    def process(self, row: PipelineRow | list[PipelineRow], ctx: Any) -> TransformResult:
+        if isinstance(row, list):
+            total = sum(r.get("value", 0) for r in row)
+            output = {"value": total, "count": len(row)}
+            contract = SchemaContract(
+                mode="OBSERVED",
+                fields=(
+                    FieldContract(normalized_name="value", original_name="value", python_type=int, required=False, source="inferred"),
+                    FieldContract(normalized_name="count", original_name="count", python_type=int, required=False, source="inferred"),
+                ),
+                locked=True,
+            )
+            return TransformResult.success(
+                PipelineRow(output, contract),
+                success_reason={"action": "batch_sum"},
+            )
+        return TransformResult.success(make_pipeline_row(row.to_dict()), success_reason={"action": "buffer"})
+
+
+def _build_aggregation_pipeline() -> tuple[Any, SumBatchTransform, CollectSink, PipelineConfig, ExecutionGraph]:
+    """Build a pipeline with batch-aware aggregation for characterization.
+
+    Pipeline: ListSource → SumBatchTransform → CollectSink("output")
+    Trigger: count=100 (won't trigger mid-stream — only end-of-source flush)
+    Input: 3 rows with values [10, 20, 30]
+    Expected: 1 aggregated output row with value=60, count=3
+    """
+    source = as_source(ListSource([{"value": 10}, {"value": 20}, {"value": 30}], name="agg_source", on_success="source_out"))
+    transform = as_transform(SumBatchTransform())
+    output_sink = as_sink(CollectSink("output"))
+
+    # Build graph via production path
+    graph = ExecutionGraph.from_plugin_instances(
+        source=source,
+        source_settings=SourceSettings(plugin=source.name, on_success="source_out", options={}),
+        transforms=wire_transforms([transform], source_connection="source_out", final_sink="output"),
+        sinks={"output": output_sink},
+        aggregations={},
+        gates=[],
+        coalesce_settings=None,
+    )
+
+    # Map the transform's node ID to aggregation settings
+    transform_id_map = graph.get_transform_id_map()
+    transform_node_id = transform_id_map[0]
+
+    agg_settings = AggregationSettings(
+        name="sum_agg",
+        plugin="sum_batch",
+        input="source_out",
+        on_success="output",
+        on_error="discard",
+        trigger=TriggerConfig(count=100, timeout_seconds=3600),
+        output_mode="transform",
+    )
+
+    config = PipelineConfig(
+        source=source,
+        transforms=[transform],
+        sinks={"output": output_sink},
+        aggregation_settings={transform_node_id: agg_settings},
+    )
+
+    return source, transform, output_sink, config, graph
+
+
+# ---------------------------------------------------------------------------
+# Characterization test: Aggregation (deaggregation) path
+# ---------------------------------------------------------------------------
+
+
+class TestT18CharacterizationAggregation:
+    """Regression oracle for aggregation/deaggregation through _execute_run().
+
+    Exercises end-of-source aggregation flush: rows buffer during processing
+    (count trigger is unreachable) and flush at source completion. This path
+    exercises:
+    - Aggregation buffer setup via aggregation_settings in PipelineConfig
+    - End-of-source flush_remaining_aggregation_buffers()
+    - CONSUMED_IN_BATCH terminal state for input tokens
+    - Expanded output tokens for deaggregation
+    """
+
+    def test_aggregation_counter_values(self) -> None:
+        """Assert exact counter values for end-of-source aggregation flush.
+
+        3 input rows buffer during processing, flush at end-of-source produces
+        1 aggregated row that reaches the output sink.
+        """
+        _source, _transform, output_sink, config, graph = _build_aggregation_pipeline()
+        db = LandscapeDB.in_memory()
+        orchestrator = Orchestrator(db)
+        recorder, run_id, payload_store = _begin_test_run(db)
+
+        result = orchestrator._execute_run(
+            recorder=recorder,
+            run_id=run_id,
+            config=config,
+            graph=graph,
+            payload_store=payload_store,
+        )
+
+        assert result.status == RunStatus.RUNNING
+        assert result.rows_processed == 3
+        assert result.rows_buffered == 3, "All 3 input rows buffered in aggregation"
+        assert result.rows_succeeded == 1, "Aggregated output row counts as succeeded"
+        assert result.rows_failed == 0
+        assert len(output_sink.results) == 1, "One aggregated row in output"
+
+    def test_aggregation_output_content(self) -> None:
+        """Assert the aggregated output row has correct content."""
+        _source, _transform, output_sink, config, graph = _build_aggregation_pipeline()
+        db = LandscapeDB.in_memory()
+        orchestrator = Orchestrator(db)
+        recorder, run_id, payload_store = _begin_test_run(db)
+
+        orchestrator._execute_run(
+            recorder=recorder,
+            run_id=run_id,
+            config=config,
+            graph=graph,
+            payload_store=payload_store,
+        )
+
+        # The single output row should have value=60 (10+20+30) and count=3
+        output_row = output_sink.results[0]
+        assert output_row["value"] == 60
+        assert output_row["count"] == 3
+
+    def test_aggregation_flush_inside_source_load_operation(self) -> None:
+        """Assert aggregation flush happens INSIDE track_operation(source_load).
+
+        The source_load operation must encompass the end-of-source flush.
+        If the flush happened OUTSIDE the operation context, the aggregated
+        output would not reach the sink (it would be lost). The fact that
+        output_sink has results AND the source_load operation completed
+        successfully proves the boundary is correct.
+
+        Additionally, verify the operations table structure:
+        - Exactly one source_load operation
+        - At least one sink_write operation (for the aggregated output)
+        """
+        _source, _transform, output_sink, config, graph = _build_aggregation_pipeline()
+        db = LandscapeDB.in_memory()
+        orchestrator = Orchestrator(db)
+        recorder, run_id, payload_store = _begin_test_run(db)
+
+        orchestrator._execute_run(
+            recorder=recorder,
+            run_id=run_id,
+            config=config,
+            graph=graph,
+            payload_store=payload_store,
+        )
+
+        # Aggregated output reached the sink (proves flush was inside the loop)
+        assert len(output_sink.results) == 1, "Flush must produce output before sink writes"
+
+        # Verify operation attribution in Landscape DB
+        with db._engine.connect() as conn:
+            source_ops = conn.execute(
+                text("SELECT COUNT(*) FROM operations WHERE run_id = :run_id AND operation_type = 'source_load'"),
+                {"run_id": run_id},
+            ).scalar()
+            assert source_ops == 1, f"Expected exactly 1 source_load operation, got {source_ops}"
+
+            sink_ops = conn.execute(
+                text("SELECT COUNT(*) FROM operations WHERE run_id = :run_id AND operation_type = 'sink_write'"),
+                {"run_id": run_id},
+            ).scalar()
+            assert sink_ops >= 1, f"Expected >= 1 sink_write operation, got {sink_ops}"

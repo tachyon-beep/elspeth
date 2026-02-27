@@ -334,11 +334,15 @@ class MultiQueryStrategy:
         if spec.template is not None:
             query_template = PromptTemplate(spec.template)
 
-        # Render template
+        # Render template — use contract=None because template_ctx is a
+        # synthetic dict (keys are template variable names from input_fields,
+        # not source column names). Passing the source row's contract would
+        # wrap template_ctx in a PipelineRow that rejects these synthetic keys
+        # in FIXED schema mode.
         try:
             rendered = query_template.render_with_metadata(
                 template_ctx,
-                contract=row.contract,
+                contract=None,
             )
         except TemplateError as e:
             return TransformResult.error(

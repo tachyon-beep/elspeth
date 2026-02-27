@@ -1112,3 +1112,23 @@ After these 3 commits:
 - `agg_transform_lookup` uses `AggNodeEntry` instead of raw tuples
 
 **Proceed to:** [Part B: Orchestrator Extractions](2026-02-27-t18-part-b-orchestrator-extractions.md)
+
+---
+
+## Post-Implementation Notes
+
+The following deviations from the plan occurred during implementation:
+
+1. **RunStatus.COMPLETED → RUNNING:** The plan's characterization tests assert `RunStatus.COMPLETED`, but `_execute_run()` actually returns `RunStatus.RUNNING` — the public `run()` wrapper transitions to COMPLETED after `finalize_run()`. The committed tests correctly use `RunStatus.RUNNING`.
+
+2. **`_current_graph` on error:** Plan test `test_current_graph_cleared_after_error` asserts `is None`, but the actual behavior is `is not None` (the assignment `_current_graph = None` is outside the `finally` block). The committed test is `test_current_graph_not_cleared_on_error` with the correct assertion.
+
+3. **`LoopResult` type not in Part A:** `LoopResult(frozen=True, slots=True)` was added during Part B when `_run_main_processing_loop()` was extracted and needed a return type to carry timing state. It lives in `types.py` alongside the other T18 types.
+
+4. **PEP 695 `type` statements:** The plan uses `TypeAlias` annotation syntax. The implementation uses PEP 695 `type` statement syntax (Python 3.12+): `type _TransformOutcome = _TransformContinue | _TransformTerminal`.
+
+5. **`_CheckpointFactory`:** Plan uses `TypeAlias` annotation. Implementation uses PEP 695 `type` statement with a comment (not a docstring, since `type` statements don't support docstrings).
+
+6. **`_GateContinue.updated_token`:** Not in the original Part A type definition. Added in Part C Task 12.0 when `_handle_gate_node()` extraction revealed that gate continue also needs to propagate updated token state.
+
+7. **Recorder/run_id setup:** Plan uses `db.recorder()` + `recorder.begin_run(settings_hash=...)`. Implementation uses a `_begin_test_run(db)` helper with `LandscapeRecorder(db, payload_store=...)` + `recorder.begin_run(config=..., canonical_version=...)`, reflecting the current `begin_run()` signature.

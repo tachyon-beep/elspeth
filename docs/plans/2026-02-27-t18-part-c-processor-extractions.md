@@ -885,3 +885,20 @@ git commit -m "refactor(t18): collapse _process_single_token() — T18 extractio
 ```bash
 filigree close elspeth-rapid-cfcbcd --reason="T18 complete: 15 commits, 10 extracted methods, all tests pass"
 ```
+
+---
+
+## Post-Implementation Notes
+
+The following deviations from the plan occurred during implementation:
+
+1. **`_GateContinue.updated_token`:** Added during Task 12.0 extraction. The gate continue path needs to propagate the token's updated state (particularly after coalesce detection modifies the token). This field was not in the original Part A type definition.
+
+2. **`_process_single_token()` final size:** Plan estimated ~70 lines. Actual collapsed method is ~152 lines (lines 1889-2041 in processor.py), as the remaining dispatch logic is denser than anticipated. Still a major improvement from ~400 lines.
+
+3. **Post-review cleanups applied:**
+   - `LoopResult` changed from `@dataclass(slots=True)` to `@dataclass(frozen=True, slots=True)` for consistency with other T18 return types
+   - `LoopContext` docstring expanded with read-only convention note
+   - `_CheckpointFactory` docstring converted to comment (PEP 695 `type` statements don't support docstrings)
+   - Hybrid destructuring `agg_transform, _agg_node_id = entry.transform, entry.node_id` cleaned up to `agg_transform = entry.transform` in aggregation.py
+   - Aggregation/deaggregation characterization tests added to `test_t18_characterization.py`

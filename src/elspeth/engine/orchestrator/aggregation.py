@@ -222,7 +222,7 @@ def check_aggregation_timeouts(
         # Get transform and aggregation node from pre-computed lookup (O(1)) or compute (O(n))
         if agg_transform_lookup and agg_node_id_str in agg_transform_lookup:
             entry = agg_transform_lookup[agg_node_id_str]
-            agg_transform, _agg_node_id = entry.transform, entry.node_id
+            agg_transform = entry.transform
         else:
             # Fallback: use helper method if lookup not provided
             agg_transform, _agg_node_id = find_aggregation_transform(config, agg_node_id_str, agg_settings.name)
