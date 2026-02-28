@@ -179,7 +179,7 @@ class TestResumeGuardrails:
                 "elspeth.core.checkpoint.recovery.RecoveryManager.get_unprocessed_row_data",
                 return_value=[("row-1", 0, {"id": 1, "value": "alpha"})],
             ),
-            pytest.raises(ValueError, match="no edges found in database") as exc_info,
+            pytest.raises(ValueError, match="has no edges registered") as exc_info,
         ):
             orchestrator.resume(
                 resume_point=_make_resume_point(run_id),
@@ -188,8 +188,8 @@ class TestResumeGuardrails:
                 payload_store=resume_test_env["payload_store"],
             )
 
-        assert f"run_id '{run_id}'" in str(exc_info.value)
-        assert "cannot resume without edge data" in str(exc_info.value).lower()
+        assert run_id in str(exc_info.value)
+        assert "cannot build edge map" in str(exc_info.value).lower()
 
     def test_resume_positive_control_succeeds_with_valid_preconditions(self, resume_test_env: dict[str, Any]) -> None:
         """Valid setup still resumes successfully (early exit when no rows remain)."""

@@ -1,17 +1,26 @@
-# src/elspeth/core/landscape/_query_methods.py
-"""Read-only query methods for LandscapeRecorder."""
+# src/elspeth/core/landscape/query_repository.py
+"""QueryRepository: read-only queries for audit trail entities.
+
+Extracted from QueryMethodsMixin as part of T19 (Landscape mixin ->
+composed repository decomposition).
+
+Provides the external read-only API used by MCP server, exporter, CLI,
+and TUI. Does NOT need LandscapeDB -- only DatabaseOps for queries.
+This makes it the lightest-weight repository.
+"""
 
 from __future__ import annotations
 
 import json
 import logging
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
 from sqlalchemy import select
 
 from elspeth.contracts import (
     Call,
     NodeState,
+    RoutingEvent,
     Row,
     RowLineage,
     Token,
@@ -19,6 +28,17 @@ from elspeth.contracts import (
     TokenParent,
 )
 from elspeth.contracts.errors import AuditIntegrityError
+from elspeth.contracts.payload_store import PayloadStore
+from elspeth.core.landscape._database_ops import DatabaseOps
+from elspeth.core.landscape.model_loaders import (
+    CallLoader,
+    NodeStateLoader,
+    RoutingEventLoader,
+    RowLoader,
+    TokenLoader,
+    TokenOutcomeLoader,
+    TokenParentLoader,
+)
 from elspeth.core.landscape.row_data import RowDataResult, RowDataState
 from elspeth.core.landscape.schema import (
     calls_table,
@@ -30,38 +50,34 @@ from elspeth.core.landscape.schema import (
     tokens_table,
 )
 
-if TYPE_CHECKING:
-    from elspeth.contracts import RoutingEvent
-    from elspeth.contracts.payload_store import PayloadStore
-    from elspeth.core.landscape._database_ops import DatabaseOps
-    from elspeth.core.landscape.database import LandscapeDB
-    from elspeth.core.landscape.model_loaders import (
-        CallLoader,
-        NodeStateLoader,
-        RoutingEventLoader,
-        RowLoader,
-        TokenLoader,
-        TokenOutcomeLoader,
-        TokenParentLoader,
-    )
 
-_QUERY_CHUNK_SIZE = 500
+class QueryRepository:
+    """Read-only query repository for audit trail entities."""
 
+    _QUERY_CHUNK_SIZE = 500
 
-class QueryMethodsMixin:
-    """Read-only query methods. Mixed into LandscapeRecorder."""
-
-    # Shared state annotations (set by LandscapeRecorder.__init__)
-    _db: LandscapeDB
-    _ops: DatabaseOps
-    _row_loader: RowLoader
-    _token_loader: TokenLoader
-    _token_parent_loader: TokenParentLoader
-    _call_loader: CallLoader
-    _node_state_loader: NodeStateLoader
-    _routing_event_loader: RoutingEventLoader
-    _token_outcome_loader: TokenOutcomeLoader
-    _payload_store: PayloadStore | None
+    def __init__(
+        self,
+        ops: DatabaseOps,
+        *,
+        row_loader: RowLoader,
+        token_loader: TokenLoader,
+        token_parent_loader: TokenParentLoader,
+        node_state_loader: NodeStateLoader,
+        routing_event_loader: RoutingEventLoader,
+        call_loader: CallLoader,
+        token_outcome_loader: TokenOutcomeLoader,
+        payload_store: PayloadStore | None = None,
+    ) -> None:
+        self._ops = ops
+        self._row_loader = row_loader
+        self._token_loader = token_loader
+        self._token_parent_loader = token_parent_loader
+        self._node_state_loader = node_state_loader
+        self._routing_event_loader = routing_event_loader
+        self._call_loader = call_loader
+        self._token_outcome_loader = token_outcome_loader
+        self._payload_store = payload_store
 
     def get_rows(self, run_id: str) -> list[Row]:
         """Get all rows for a run.
@@ -242,8 +258,8 @@ class QueryMethodsMixin:
             return []
 
         all_db_rows = []
-        for offset in range(0, len(state_ids), _QUERY_CHUNK_SIZE):
-            chunk = state_ids[offset : offset + _QUERY_CHUNK_SIZE]
+        for offset in range(0, len(state_ids), self._QUERY_CHUNK_SIZE):
+            chunk = state_ids[offset : offset + self._QUERY_CHUNK_SIZE]
             query = (
                 select(
                     routing_events_table,
@@ -276,8 +292,8 @@ class QueryMethodsMixin:
             return []
 
         all_db_rows = []
-        for offset in range(0, len(state_ids), _QUERY_CHUNK_SIZE):
-            chunk = state_ids[offset : offset + _QUERY_CHUNK_SIZE]
+        for offset in range(0, len(state_ids), self._QUERY_CHUNK_SIZE):
+            chunk = state_ids[offset : offset + self._QUERY_CHUNK_SIZE]
             query = (
                 select(
                     calls_table,

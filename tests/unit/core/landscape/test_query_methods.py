@@ -1193,7 +1193,7 @@ class TestChunkedQueryMethods:
             )
 
         # Force tiny chunk size to exercise merging
-        with patch("elspeth.core.landscape._query_methods._QUERY_CHUNK_SIZE", 2):
+        with patch("elspeth.core.landscape.query_repository.QueryRepository._QUERY_CHUNK_SIZE", 2):
             events = recorder.get_routing_events_for_states(state_ids)
 
         assert len(events) == 5
@@ -1220,7 +1220,7 @@ class TestChunkedQueryMethods:
             )
 
         # Force tiny chunk size to exercise merging
-        with patch("elspeth.core.landscape._query_methods._QUERY_CHUNK_SIZE", 2):
+        with patch("elspeth.core.landscape.query_repository.QueryRepository._QUERY_CHUNK_SIZE", 2):
             calls = recorder.get_calls_for_states(state_ids)
 
         assert len(calls) == 5

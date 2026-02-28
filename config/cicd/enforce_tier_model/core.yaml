@@ -48,11 +48,11 @@ allow_hits:
   owner: bugfix
   reason: Tier-3 boundary — quarantined row data may contain NaN/Infinity that canonical_json rejects
   safety: Falls back to repr() with logging — audit trail preserved with metadata
-# _query_methods.py explain_row — payload lookup with purge-tolerant exception handling
-- key: core/landscape/_query_methods.py:R6:QueryMethodsMixin:explain_row:fp=18caaa73816a8f05
+# query_repository.py explain_row — payload lookup with purge-tolerant exception handling
+- key: core/landscape/query_repository.py:R6:QueryRepository:explain_row:fp=e7840a5b523c37a3
   owner: architecture
   reason: KeyError from PayloadStore when payload purged by retention policy — expected, not corruption
-- key: core/landscape/_query_methods.py:R6:QueryMethodsMixin:explain_row:fp=da3401c41179ef38
+- key: core/landscape/query_repository.py:R6:QueryRepository:explain_row:fp=b7efc222ade99ab8
   owner: architecture
   reason: OSError from PayloadStore filesystem — purged or inaccessible payload is expected, not corruption
 - key: core/canonical.py:R6:_normalize_value:fp=20ccee9926534392

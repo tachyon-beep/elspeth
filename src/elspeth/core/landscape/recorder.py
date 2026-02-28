@@ -1,18 +1,14 @@
 # src/elspeth/core/landscape/recorder.py
-"""LandscapeRecorder: High-level API for audit recording.
+"""LandscapeRecorder: pure facade for audit trail recording.
 
-This is the main interface for recording audit trail entries during
-pipeline execution. It wraps the low-level database operations.
+Delegates to 4 composed domain repositories:
+- RunLifecycleRepository: run lifecycle, graph registration, export
+- ExecutionRepository: node states, external calls, batch management
+- DataFlowRepository: rows, tokens, errors
+- QueryRepository: read-only queries, bulk retrieval, lineage
 
-Implementation uses two patterns:
-
-Composed repositories (owned instances, injected via __init__):
-- run_lifecycle_repository.py: Run lifecycle (begin, complete, finalize, secrets, contracts)
-- execution_repository.py: Node states, external calls, operations, batches, artifacts
-- data_flow_repository.py: Token/row lifecycle, graph structure, validation/transform errors
-
-Mixins (inherited behavior):
-- _query_methods.py: Read-only entity queries, bulk retrieval, explain
+The public API is 100% unchanged -- all ~91 methods delegate directly
+to the appropriate repository. No logic in this file.
 """
 
 from __future__ import annotations
@@ -46,12 +42,14 @@ if TYPE_CHECKING:
         RoutingReason,
         RoutingSpec,
         Row,
+        RowLineage,
         RowOutcome,
         Run,
         SecretResolution,
         SecretResolutionInput,
         Token,
         TokenOutcome,
+        TokenParent,
         TransformErrorRecord,
         TriggerType,
         ValidationErrorRecord,
@@ -63,9 +61,9 @@ if TYPE_CHECKING:
     from elspeth.contracts.schema import SchemaConfig
     from elspeth.contracts.schema_contract import PipelineRow, SchemaContract
     from elspeth.core.landscape.reproducibility import ReproducibilityGrade
+    from elspeth.core.landscape.row_data import RowDataResult
 
 from elspeth.core.landscape._database_ops import DatabaseOps
-from elspeth.core.landscape._query_methods import QueryMethodsMixin
 from elspeth.core.landscape.data_flow_repository import DataFlowRepository
 from elspeth.core.landscape.database import LandscapeDB
 from elspeth.core.landscape.execution_repository import ExecutionRepository
@@ -87,12 +85,11 @@ from elspeth.core.landscape.model_loaders import (
     TransformErrorLoader,
     ValidationErrorLoader,
 )
+from elspeth.core.landscape.query_repository import QueryRepository
 from elspeth.core.landscape.run_lifecycle_repository import RunLifecycleRepository
 
 
-class LandscapeRecorder(
-    QueryMethodsMixin,
-):
+class LandscapeRecorder:
     """High-level API for recording audit trail entries.
 
     This class provides methods to record:
@@ -168,6 +165,19 @@ class LandscapeRecorder(
             edge_loader=self._edge_loader,
             validation_error_loader=self._validation_error_loader,
             transform_error_loader=self._transform_error_loader,
+            payload_store=payload_store,
+        )
+
+        # Composed repository for read-only queries (extracted from mixin in T19)
+        self._query = QueryRepository(
+            self._ops,
+            row_loader=self._row_loader,
+            token_loader=self._token_loader,
+            token_parent_loader=self._token_parent_loader,
+            node_state_loader=self._node_state_loader,
+            routing_event_loader=self._routing_event_loader,
+            call_loader=self._call_loader,
+            token_outcome_loader=self._token_outcome_loader,
             payload_store=payload_store,
         )
 
@@ -945,3 +955,77 @@ class LandscapeRecorder(
     def get_transform_errors_for_run(self, run_id: str) -> list[TransformErrorRecord]:
         """Get all transform errors for a run. Delegates to DataFlowRepository."""
         return self._data_flow.get_transform_errors_for_run(run_id)
+
+    # ── Query delegation (QueryRepository) ─────────────────────────────
+
+    def get_rows(self, run_id: str) -> list[Row]:
+        """Get all rows for a run. Delegates to QueryRepository."""
+        return self._query.get_rows(run_id)
+
+    def get_tokens(self, row_id: str) -> list[Token]:
+        """Get all tokens for a row. Delegates to QueryRepository."""
+        return self._query.get_tokens(row_id)
+
+    def get_node_states_for_token(self, token_id: str) -> list[NodeState]:
+        """Get all node states for a token. Delegates to QueryRepository."""
+        return self._query.get_node_states_for_token(token_id)
+
+    def get_row(self, row_id: str) -> Row | None:
+        """Get a row by ID. Delegates to QueryRepository."""
+        return self._query.get_row(row_id)
+
+    def get_row_data(self, row_id: str) -> RowDataResult:
+        """Get payload data for a row. Delegates to QueryRepository."""
+        return self._query.get_row_data(row_id)
+
+    def get_token(self, token_id: str) -> Token | None:
+        """Get a token by ID. Delegates to QueryRepository."""
+        return self._query.get_token(token_id)
+
+    def get_token_parents(self, token_id: str) -> list[TokenParent]:
+        """Get parent relationships for a token. Delegates to QueryRepository."""
+        return self._query.get_token_parents(token_id)
+
+    def get_routing_events(self, state_id: str) -> list[RoutingEvent]:
+        """Get routing events for a node state. Delegates to QueryRepository."""
+        return self._query.get_routing_events(state_id)
+
+    def get_calls(self, state_id: str) -> list[Call]:
+        """Get external calls for a node state. Delegates to QueryRepository."""
+        return self._query.get_calls(state_id)
+
+    def get_routing_events_for_states(self, state_ids: list[str]) -> list[RoutingEvent]:
+        """Get routing events for multiple states. Delegates to QueryRepository."""
+        return self._query.get_routing_events_for_states(state_ids)
+
+    def get_calls_for_states(self, state_ids: list[str]) -> list[Call]:
+        """Get external calls for multiple states. Delegates to QueryRepository."""
+        return self._query.get_calls_for_states(state_ids)
+
+    def get_all_tokens_for_run(self, run_id: str) -> list[Token]:
+        """Get all tokens for a run. Delegates to QueryRepository."""
+        return self._query.get_all_tokens_for_run(run_id)
+
+    def get_all_node_states_for_run(self, run_id: str) -> list[NodeState]:
+        """Get all node states for a run. Delegates to QueryRepository."""
+        return self._query.get_all_node_states_for_run(run_id)
+
+    def get_all_routing_events_for_run(self, run_id: str) -> list[RoutingEvent]:
+        """Get all routing events for a run. Delegates to QueryRepository."""
+        return self._query.get_all_routing_events_for_run(run_id)
+
+    def get_all_calls_for_run(self, run_id: str) -> list[Call]:
+        """Get all state-parented calls for a run. Delegates to QueryRepository."""
+        return self._query.get_all_calls_for_run(run_id)
+
+    def get_all_token_parents_for_run(self, run_id: str) -> list[TokenParent]:
+        """Get all token parent relationships for a run. Delegates to QueryRepository."""
+        return self._query.get_all_token_parents_for_run(run_id)
+
+    def get_all_token_outcomes_for_run(self, run_id: str) -> list[TokenOutcome]:
+        """Get all token outcomes for a run. Delegates to QueryRepository."""
+        return self._query.get_all_token_outcomes_for_run(run_id)
+
+    def explain_row(self, run_id: str, row_id: str) -> RowLineage | None:
+        """Get lineage for a row. Delegates to QueryRepository."""
+        return self._query.explain_row(run_id, row_id)
