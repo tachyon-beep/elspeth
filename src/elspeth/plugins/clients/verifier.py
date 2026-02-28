@@ -20,6 +20,7 @@ from typing import TYPE_CHECKING, Any
 
 from deepdiff import DeepDiff
 
+from elspeth.contracts import CallType
 from elspeth.core.canonical import stable_hash
 
 if TYPE_CHECKING:
@@ -161,7 +162,7 @@ class CallVerifier:
 
     def verify(
         self,
-        call_type: str,
+        call_type: CallType,
         request_data: dict[str, Any],
         live_response: dict[str, Any],
     ) -> VerificationResult:

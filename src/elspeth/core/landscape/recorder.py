@@ -21,7 +21,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any, Literal, overload
 
-from elspeth.contracts import RunStatus
+from elspeth.contracts import CallType, RunStatus
 
 if TYPE_CHECKING:
     from elspeth.contracts import (
@@ -31,7 +31,6 @@ if TYPE_CHECKING:
         BatchStatus,
         Call,
         CallStatus,
-        CallType,
         CoalesceFailureReason,
         ExportStatus,
         NodeState,
@@ -513,7 +512,7 @@ class LandscapeRecorder(
     def find_call_by_request_hash(
         self,
         run_id: str,
-        call_type: str,
+        call_type: CallType,
         request_hash: str,
         *,
         sequence_index: int = 0,

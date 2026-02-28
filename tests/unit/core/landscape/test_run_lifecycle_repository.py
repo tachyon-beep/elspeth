@@ -547,11 +547,11 @@ class TestCompleteRunCrashPath:
     def test_nonexistent_run_raises(self) -> None:
         """Completing a nonexistent run must crash.
 
-        Note: DatabaseOps.execute_update raises ValueError on zero rows affected,
+        DatabaseOps.execute_update raises AuditIntegrityError on zero rows affected,
         which fires before the post-update AuditIntegrityError check.
         """
         _, repo = _make_repo()
-        with pytest.raises(ValueError, match="zero rows affected"):
+        with pytest.raises(AuditIntegrityError, match="zero rows affected"):
             repo.complete_run("nonexistent-run", RunStatus.COMPLETED)
 
     def test_complete_preserves_existing_grade_when_none_passed(self) -> None:

@@ -140,7 +140,7 @@ class RunLifecycleRepository:
 
         Raises:
             AuditIntegrityError: If status is not a terminal run status
-            ValueError: If run_id not found (via execute_update zero-rows check)
+            AuditIntegrityError: If run_id not found (via execute_update zero-rows check)
         """
         if status not in _TERMINAL_RUN_STATUSES:
             raise AuditIntegrityError(
@@ -251,8 +251,8 @@ class RunLifecycleRepository:
             self._ops.execute_update(
                 runs_table.update().where(runs_table.c.run_id == run_id).values(source_field_resolution_json=resolution_json)
             )
-        except ValueError as exc:
-            raise ValueError(f"Cannot record source field resolution: run {run_id} not found") from exc
+        except AuditIntegrityError as exc:
+            raise AuditIntegrityError(f"Cannot record source field resolution: run {run_id} not found") from exc
 
     def get_source_field_resolution(self, run_id: str) -> dict[str, str] | None:
         """Get source field resolution mapping for a run.
@@ -594,8 +594,8 @@ class RunLifecycleRepository:
 
         try:
             self._ops.execute_update(runs_table.update().where(runs_table.c.run_id == run_id).values(**updates))
-        except ValueError as exc:
-            raise ValueError(f"Cannot set export status to {status.value!r}: run {run_id} not found") from exc
+        except AuditIntegrityError as exc:
+            raise AuditIntegrityError(f"Cannot set export status to {status.value!r}: run {run_id} not found") from exc
 
     def finalize_run(self, run_id: str, status: RunStatus) -> Run:
         """Finalize a run by computing grade and completing it.

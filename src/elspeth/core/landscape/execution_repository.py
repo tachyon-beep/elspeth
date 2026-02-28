@@ -268,23 +268,32 @@ class ExecutionRepository:
         # Serialize success reason if provided (use canonical_json for audit consistency)
         success_reason_json = canonical_json(success_reason) if success_reason is not None else None
 
-        self._ops.execute_update(
-            node_states_table.update()
-            .where(node_states_table.c.state_id == state_id)
-            .values(
-                status=status.value,
-                output_hash=output_hash,
-                duration_ms=duration_ms,
-                error_json=error_json,
-                success_reason_json=success_reason_json,
-                context_after_json=context_json,
-                completed_at=timestamp,
+        # Single transaction: UPDATE + SELECT-back for atomicity.
+        # Prevents a concurrent reader from seeing the row between states.
+        with self._db.connection() as conn:
+            update_result = conn.execute(
+                node_states_table.update()
+                .where(node_states_table.c.state_id == state_id)
+                .values(
+                    status=status.value,
+                    output_hash=output_hash,
+                    duration_ms=duration_ms,
+                    error_json=error_json,
+                    success_reason_json=success_reason_json,
+                    context_after_json=context_json,
+                    completed_at=timestamp,
+                )
             )
-        )
+            if update_result.rowcount == 0:
+                raise AuditIntegrityError(
+                    f"complete_node_state: zero rows affected for state_id={state_id} — target row does not exist (audit data corruption)"
+                )
 
-        result = self.get_node_state(state_id)
-        if result is None:
-            raise AuditIntegrityError(f"NodeState {state_id} not found after update - database corruption or transaction failure")
+            row = conn.execute(select(node_states_table).where(node_states_table.c.state_id == state_id)).fetchone()
+
+        if row is None:
+            raise AuditIntegrityError(f"NodeState {state_id} not found after update — database corruption or transaction failure")
+        result = self._node_state_loader.load(row)
         # Type narrowing: result is guaranteed to be terminal (PENDING/COMPLETED/FAILED)
         if isinstance(result, NodeStateOpen):
             raise AuditIntegrityError(f"NodeState {state_id} should be terminal after completion but has status OPEN")
@@ -476,13 +485,17 @@ class ExecutionRepository:
         """
         with self._call_index_lock:
             if state_id not in self._call_indices:
-                # Seed from database to survive recorder recreation on resume.
-                # Without this, a new recorder would restart indices at 0 for
-                # any state_id that already has recorded calls, causing
-                # UNIQUE(state_id, call_index) violations.
+                # Slow path (once per state_id): seed from database to survive
+                # recorder recreation on resume. Without this, a new recorder
+                # would restart indices at 0 for any state_id that already has
+                # recorded calls, causing UNIQUE(state_id, call_index) violations.
+                # The DB query is serialized under the lock — acceptable because
+                # it only fires once per state_id per recorder lifetime. All
+                # subsequent allocations hit the fast path (no DB access).
                 row = self._ops.execute_fetchone(select(func.max(calls_table.c.call_index)).where(calls_table.c.state_id == state_id))
                 existing_max = row[0] if row is not None and row[0] is not None else -1
                 self._call_indices[state_id] = existing_max + 1
+            # Fast path: allocate from in-memory counter (no DB access)
             idx = self._call_indices[state_id]
             self._call_indices[state_id] += 1
             return idx
@@ -691,9 +704,15 @@ class ExecutionRepository:
             if output_data is not None and self._payload_store is not None:
                 output_bytes = canonical_json(output_data).encode("utf-8")
                 output_ref = self._payload_store.store(output_bytes)
-                conn.execute(
+                ref_result = conn.execute(
                     operations_table.update().where(operations_table.c.operation_id == operation_id).values(output_data_ref=output_ref)
                 )
+                if ref_result.rowcount == 0:
+                    raise AuditIntegrityError(
+                        f"complete_operation: output_data_ref UPDATE affected zero rows for "
+                        f"operation {operation_id} — row disappeared between status update "
+                        f"and ref update (database corruption)"
+                    )
 
     def allocate_operation_call_index(self, operation_id: str) -> int:
         """Allocate next call index for an operation_id (thread-safe).
@@ -709,12 +728,15 @@ class ExecutionRepository:
         """
         with self._call_index_lock:  # Reuse existing lock
             if operation_id not in self._operation_call_indices:
-                # Seed from database to survive recorder recreation on resume.
+                # Slow path (once per operation_id): seed from database to survive
+                # recorder recreation on resume. Serialized under lock — acceptable
+                # because it fires only once per operation_id per recorder lifetime.
                 row = self._ops.execute_fetchone(
                     select(func.max(calls_table.c.call_index)).where(calls_table.c.operation_id == operation_id)
                 )
                 existing_max = row[0] if row is not None and row[0] is not None else -1
                 self._operation_call_indices[operation_id] = existing_max + 1
+            # Fast path: allocate from in-memory counter (no DB access)
             idx = self._operation_call_indices[operation_id]
             self._operation_call_indices[operation_id] += 1
             return idx
@@ -881,7 +903,7 @@ class ExecutionRepository:
     def find_call_by_request_hash(
         self,
         run_id: str,
-        call_type: str,
+        call_type: CallType,
         request_hash: str,
         *,
         sequence_index: int = 0,
@@ -1072,7 +1094,19 @@ class ExecutionRepository:
             trigger_type: TriggerType enum value
             trigger_reason: Human-readable reason for the trigger
             state_id: Node state for the flush operation
+
+        Raises:
+            AuditIntegrityError: If batch not found or current status is terminal
         """
+        current = self.get_batch(batch_id)
+        if current is None:
+            raise AuditIntegrityError(f"Cannot update batch status: batch {batch_id} not found")
+        if current.status in _TERMINAL_BATCH_STATUSES:
+            raise AuditIntegrityError(
+                f"Cannot transition batch {batch_id} from terminal status {current.status.value!r} "
+                f"to {status.value!r}. Terminal batches are immutable."
+            )
+
         updates: dict[str, Any] = {"status": status.value}
 
         if trigger_type is not None:
@@ -1118,22 +1152,29 @@ class ExecutionRepository:
 
         timestamp = now()
 
-        self._ops.execute_update(
-            batches_table.update()
-            .where(batches_table.c.batch_id == batch_id)
-            .values(
-                status=status.value,
-                trigger_type=trigger_type.value if trigger_type is not None else None,
-                trigger_reason=trigger_reason,
-                aggregation_state_id=state_id,
-                completed_at=timestamp,
+        # Single transaction: UPDATE + SELECT-back for atomicity.
+        with self._db.connection() as conn:
+            update_result = conn.execute(
+                batches_table.update()
+                .where(batches_table.c.batch_id == batch_id)
+                .values(
+                    status=status.value,
+                    trigger_type=trigger_type.value if trigger_type is not None else None,
+                    trigger_reason=trigger_reason,
+                    aggregation_state_id=state_id,
+                    completed_at=timestamp,
+                )
             )
-        )
+            if update_result.rowcount == 0:
+                raise AuditIntegrityError(
+                    f"complete_batch: zero rows affected for batch_id={batch_id} — target row does not exist (audit data corruption)"
+                )
 
-        result = self.get_batch(batch_id)
-        if result is None:
-            raise AuditIntegrityError(f"Batch {batch_id} not found after update - database corruption or transaction failure")
-        return result
+            row = conn.execute(select(batches_table).where(batches_table.c.batch_id == batch_id)).fetchone()
+
+        if row is None:
+            raise AuditIntegrityError(f"Batch {batch_id} not found after update — database corruption or transaction failure")
+        return self._batch_loader.load(row)
 
     def get_batch(self, batch_id: str) -> Batch | None:
         """Get a batch by ID.
@@ -1246,6 +1287,9 @@ class ExecutionRepository:
         already exists for this attempt, returns it without creating
         a duplicate.
 
+        All operations (lookup, create, copy members, read-back) happen
+        in a single transaction for atomicity.
+
         Args:
             batch_id: The failed batch to retry
 
@@ -1255,40 +1299,66 @@ class ExecutionRepository:
         Raises:
             ValueError: If original batch not found or not in failed status
         """
-        original = self.get_batch(batch_id)
-        if original is None:
-            raise ValueError(f"Batch not found: {batch_id}")
-        if original.status != BatchStatus.FAILED:
-            raise ValueError(f"Can only retry failed batches, got status: {original.status}")
+        with self._db.connection() as conn:
+            # 1. Get original batch
+            original_row = conn.execute(select(batches_table).where(batches_table.c.batch_id == batch_id)).fetchone()
+            if original_row is None:
+                raise ValueError(f"Batch not found: {batch_id}")
+            original = self._batch_loader.load(original_row)
+            if original.status != BatchStatus.FAILED:
+                raise ValueError(f"Can only retry failed batches, got status: {original.status}")
 
-        next_attempt = original.attempt + 1
+            next_attempt = original.attempt + 1
 
-        # Idempotency: check if a retry batch already exists for this attempt
-        existing = self._find_batch_by_attempt(
-            run_id=original.run_id,
-            aggregation_node_id=original.aggregation_node_id,
-            attempt=next_attempt,
-        )
-        if existing is not None:
-            return existing
+            # 2. Idempotency: check if a retry batch already exists for this attempt
+            existing_row = conn.execute(
+                select(batches_table)
+                .where(batches_table.c.run_id == original.run_id)
+                .where(batches_table.c.aggregation_node_id == original.aggregation_node_id)
+                .where(batches_table.c.attempt == next_attempt)
+            ).fetchone()
+            if existing_row is not None:
+                return self._batch_loader.load(existing_row)
 
-        # Create new batch with incremented attempt
-        new_batch = self.create_batch(
-            run_id=original.run_id,
-            aggregation_node_id=original.aggregation_node_id,
-            attempt=next_attempt,
-        )
-
-        # Copy members to new batch
-        original_members = self.get_batch_members(batch_id)
-        for member in original_members:
-            self.add_batch_member(
-                batch_id=new_batch.batch_id,
-                token_id=member.token_id,
-                ordinal=member.ordinal,
+            # 3. Create new batch
+            new_batch_id = generate_id()
+            timestamp = now()
+            result = conn.execute(
+                batches_table.insert().values(
+                    batch_id=new_batch_id,
+                    run_id=original.run_id,
+                    aggregation_node_id=original.aggregation_node_id,
+                    attempt=next_attempt,
+                    status=BatchStatus.DRAFT.value,
+                    created_at=timestamp,
+                )
             )
+            if result.rowcount == 0:
+                raise AuditIntegrityError(f"retry_batch: INSERT for new batch affected zero rows (batch_id={new_batch_id})")
 
-        return new_batch
+            # 4. Copy members from original batch
+            member_rows = conn.execute(
+                select(batch_members_table).where(batch_members_table.c.batch_id == batch_id).order_by(batch_members_table.c.ordinal)
+            ).fetchall()
+            for member_row in member_rows:
+                member_result = conn.execute(
+                    batch_members_table.insert().values(
+                        batch_id=new_batch_id,
+                        token_id=member_row.token_id,
+                        ordinal=member_row.ordinal,
+                    )
+                )
+                if member_result.rowcount == 0:
+                    raise AuditIntegrityError(
+                        f"retry_batch: member INSERT affected zero rows (batch={new_batch_id}, token={member_row.token_id})"
+                    )
+
+            # 5. Read back the new batch for return
+            new_row = conn.execute(select(batches_table).where(batches_table.c.batch_id == new_batch_id)).fetchone()
+
+        if new_row is None:
+            raise AuditIntegrityError(f"retry_batch: new batch {new_batch_id} not found after INSERT")
+        return self._batch_loader.load(new_row)
 
     def _find_batch_by_attempt(
         self,

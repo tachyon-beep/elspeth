@@ -19,7 +19,7 @@ from collections import defaultdict
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
-from elspeth.contracts import CallStatus
+from elspeth.contracts import CallStatus, CallType
 from elspeth.core.canonical import stable_hash
 
 if TYPE_CHECKING:
@@ -140,7 +140,7 @@ class CallReplayer:
 
     def replay(
         self,
-        call_type: str,
+        call_type: CallType,
         request_data: dict[str, Any],
     ) -> ReplayedCall:
         """Replay a recorded call.

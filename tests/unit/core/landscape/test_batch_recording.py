@@ -286,6 +286,31 @@ class TestUpdateBatchStatus:
         updated = recorder.get_batch("b-1")
         assert updated.aggregation_state_id == "state-1"
 
+    def test_rejects_transition_from_completed(self):
+        """Terminal status COMPLETED cannot transition to any other status (M2)."""
+        _db, recorder = _setup()
+        recorder.create_batch("run-1", "agg-1", batch_id="b-1")
+        recorder.update_batch_status("b-1", BatchStatus.COMPLETED)
+
+        with pytest.raises(AuditIntegrityError, match="terminal status"):
+            recorder.update_batch_status("b-1", BatchStatus.EXECUTING)
+
+    def test_rejects_transition_from_failed(self):
+        """Terminal status FAILED cannot transition to any other status (M2)."""
+        _db, recorder = _setup()
+        recorder.create_batch("run-1", "agg-1", batch_id="b-1")
+        recorder.update_batch_status("b-1", BatchStatus.FAILED)
+
+        with pytest.raises(AuditIntegrityError, match="terminal status"):
+            recorder.update_batch_status("b-1", BatchStatus.DRAFT)
+
+    def test_rejects_nonexistent_batch(self):
+        """Updating status of nonexistent batch raises AuditIntegrityError (M2)."""
+        _db, recorder = _setup()
+
+        with pytest.raises(AuditIntegrityError, match="not found"):
+            recorder.update_batch_status("nonexistent", BatchStatus.EXECUTING)
+
 
 # ---------------------------------------------------------------------------
 # complete_batch
