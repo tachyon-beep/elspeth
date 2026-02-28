@@ -46,6 +46,7 @@ from elspeth.contracts.enums import (
     RunStatus,
     TriggerType,
 )
+from elspeth.core.landscape.reproducibility import ReproducibilityGrade
 
 
 class RunLoader:
@@ -64,7 +65,8 @@ class RunLoader:
             canonical_version=row.canonical_version,
             status=RunStatus(row.status),  # Convert HERE
             completed_at=row.completed_at,
-            reproducibility_grade=row.reproducibility_grade,
+            # Validate reproducibility_grade on read — crash on invalid values (Tier 1)
+            reproducibility_grade=ReproducibilityGrade(row.reproducibility_grade) if row.reproducibility_grade is not None else None,
             # Use explicit is not None check - empty string should raise, not become None (Tier 1)
             export_status=ExportStatus(row.export_status) if row.export_status is not None else None,
             export_error=row.export_error,

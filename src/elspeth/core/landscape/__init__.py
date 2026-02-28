@@ -69,6 +69,7 @@ from elspeth.core.landscape.reproducibility import (
     update_grade_after_purge,
 )
 from elspeth.core.landscape.row_data import RowDataResult, RowDataState
+from elspeth.core.landscape.run_lifecycle_repository import RunLifecycleRepository
 from elspeth.core.landscape.schema import (
     artifacts_table,
     batch_members_table,
@@ -96,7 +97,6 @@ __all__ = [
     "CallStatus",
     "CallType",
     "Checkpoint",
-    # Schema contract audit records (Phase 5: Audit Trail Integration)
     "ContractAuditRecord",
     "Edge",
     "ExportFormatter",
@@ -121,6 +121,7 @@ __all__ = [
     "RowDataState",
     "RowLineage",
     "Run",
+    "RunLifecycleRepository",
     "RunStatus",
     "SchemaCompatibilityError",
     "Token",

@@ -779,3 +779,24 @@ class SecretResolution:
                 raise ValueError("SecretResolution: vault_url is required when source='keyvault'")
             if not self.secret_name:
                 raise ValueError("SecretResolution: secret_name is required when source='keyvault'")
+
+
+@dataclass(frozen=True, slots=True)
+class SecretResolutionInput:
+    """Write-side DTO for secret resolution records.
+
+    Used at the Tier 1 boundary when recording secret resolutions into the
+    audit trail. Replaces the previous dict[str, Any] pattern with compile-time
+    key validation. The resolution_id and run_id are assigned at record time,
+    not at creation time.
+
+    Follows the TokenUsage precedent (commit dffe74a6) for typed audit inputs.
+    """
+
+    env_var_name: str
+    source: str
+    vault_url: str | None
+    secret_name: str | None
+    timestamp: float
+    latency_ms: float
+    fingerprint: str

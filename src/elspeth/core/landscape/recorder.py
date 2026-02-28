@@ -7,7 +7,7 @@ pipeline execution. It wraps the low-level database operations.
 Implementation uses two patterns:
 
 Composed repository (owned instance, injected via __init__):
-- run_lifecycle_repository.py: Run lifecycle (begin, complete, finalize, secrets, contracts)
+- run_lifecycle_repository.py: Run lifecycle (begin, complete, finalize, secrets, contracts) [composed repository]
 
 Mixins (inherited behavior):
 - _graph_recording.py: Node and edge registration/queries
@@ -27,7 +27,7 @@ from typing import TYPE_CHECKING, Any
 from elspeth.contracts import RunStatus
 
 if TYPE_CHECKING:
-    from elspeth.contracts import ExportStatus, Run, SecretResolution
+    from elspeth.contracts import ExportStatus, Run, SecretResolution, SecretResolutionInput
     from elspeth.contracts.payload_store import PayloadStore
     from elspeth.contracts.schema_contract import SchemaContract
     from elspeth.core.landscape.reproducibility import ReproducibilityGrade
@@ -140,7 +140,7 @@ class LandscapeRecorder(
         canonical_version: str,
         *,
         run_id: str | None = None,
-        reproducibility_grade: str | None = None,
+        reproducibility_grade: ReproducibilityGrade | None = None,
         status: RunStatus = RunStatus.RUNNING,
         source_schema_json: str | None = None,
         schema_contract: SchemaContract | None = None,
@@ -161,7 +161,7 @@ class LandscapeRecorder(
         run_id: str,
         status: RunStatus,
         *,
-        reproducibility_grade: str | None = None,
+        reproducibility_grade: ReproducibilityGrade | None = None,
     ) -> Run:
         """Complete a pipeline run. Delegates to RunLifecycleRepository."""
         return self._run_lifecycle.complete_run(
@@ -210,7 +210,7 @@ class LandscapeRecorder(
     def record_secret_resolutions(
         self,
         run_id: str,
-        resolutions: list[dict[str, Any]],
+        resolutions: list[SecretResolutionInput],
     ) -> None:
         """Record secret resolution events. Delegates to RunLifecycleRepository."""
         self._run_lifecycle.record_secret_resolutions(run_id, resolutions)

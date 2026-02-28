@@ -121,9 +121,6 @@ allowed_dict_patterns:
   # as part of T11 (PluginBundle extraction) — dict[str, Any] replaced with frozen dataclass.
   - "src/elspeth/cli.py:_load_raw_yaml:return"
 
-  # Security - secrets loading from config (Tier 3 external config)
-  - "src/elspeth/core/security/config_secrets.py:load_secrets_from_config:return (list)"
-
   # Config - runtime configuration dicts
   - "src/elspeth/core/config.py:resolve_config:return"
   - "src/elspeth/core/config.py:_expand_env_vars:config"
@@ -169,9 +166,7 @@ allowed_dict_patterns:
 
   # Run lifecycle repository + recorder delegation
   - "src/elspeth/core/landscape/run_lifecycle_repository.py:RunLifecycleRepository.begin_run:config"
-  - "src/elspeth/core/landscape/run_lifecycle_repository.py:RunLifecycleRepository.record_secret_resolutions:resolutions (list)"
   - "src/elspeth/core/landscape/recorder.py:LandscapeRecorder.begin_run:config"
-  - "src/elspeth/core/landscape/recorder.py:LandscapeRecorder.record_secret_resolutions:resolutions (list)"
 
   # Node state recording
   - "src/elspeth/core/landscape/_node_state_recording.py:NodeStateRecordingMixin.begin_node_state:input_data"

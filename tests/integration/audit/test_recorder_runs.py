@@ -223,6 +223,7 @@ class TestFieldResolutionTierOneIntegrity:
         import pytest
         from sqlalchemy import text
 
+        from elspeth.contracts.errors import AuditIntegrityError
         from elspeth.core.landscape.database import LandscapeDB
         from elspeth.core.landscape.recorder import LandscapeRecorder
 
@@ -240,7 +241,7 @@ class TestFieldResolutionTierOneIntegrity:
             )
 
         # Must crash on corruption - not return None
-        with pytest.raises(ValueError, match=r"missing required key.*resolution_mapping"):
+        with pytest.raises(AuditIntegrityError, match=r"missing required key.*resolution_mapping"):
             recorder.get_source_field_resolution(run.run_id)
 
     def test_get_field_resolution_crashes_on_resolution_mapping_wrong_type(self) -> None:
@@ -250,6 +251,7 @@ class TestFieldResolutionTierOneIntegrity:
         import pytest
         from sqlalchemy import text
 
+        from elspeth.contracts.errors import AuditIntegrityError
         from elspeth.core.landscape.database import LandscapeDB
         from elspeth.core.landscape.recorder import LandscapeRecorder
 
@@ -266,7 +268,7 @@ class TestFieldResolutionTierOneIntegrity:
                 {"json": corrupted_json, "run_id": run.run_id},
             )
 
-        with pytest.raises(ValueError, match=r"Corrupt resolution_mapping.*expected dict"):
+        with pytest.raises(AuditIntegrityError, match=r"Corrupt resolution_mapping.*expected dict"):
             recorder.get_source_field_resolution(run.run_id)
 
     def test_get_field_resolution_crashes_on_wrong_entry_types(self) -> None:
@@ -276,6 +278,7 @@ class TestFieldResolutionTierOneIntegrity:
         import pytest
         from sqlalchemy import text
 
+        from elspeth.contracts.errors import AuditIntegrityError
         from elspeth.core.landscape.database import LandscapeDB
         from elspeth.core.landscape.recorder import LandscapeRecorder
 
@@ -292,5 +295,5 @@ class TestFieldResolutionTierOneIntegrity:
                 {"json": corrupted_json, "run_id": run.run_id},
             )
 
-        with pytest.raises(ValueError, match=r"Corrupt resolution_mapping entry.*str->str"):
+        with pytest.raises(AuditIntegrityError, match=r"Corrupt resolution_mapping entry.*str->str"):
             recorder.get_source_field_resolution(run.run_id)

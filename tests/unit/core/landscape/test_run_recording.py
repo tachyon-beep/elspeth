@@ -1,4 +1,4 @@
-"""Tests for RunRecordingMixin — run lifecycle recording.
+"""Tests for run lifecycle recording (via LandscapeRecorder facade).
 
 Tests cover:
 - begin_run (creates run, generates ID, stores config hash, settings JSON)
@@ -19,7 +19,7 @@ import json
 
 import pytest
 
-from elspeth.contracts import ExportStatus, FieldContract, NodeType, RunStatus, SchemaContract
+from elspeth.contracts import ExportStatus, FieldContract, NodeType, RunStatus, SchemaContract, SecretResolutionInput
 from elspeth.contracts.errors import AuditIntegrityError
 from elspeth.contracts.schema import SchemaConfig
 from elspeth.core.landscape import LandscapeDB, LandscapeRecorder
@@ -215,15 +215,15 @@ class TestSecretResolutions:
     def test_roundtrip(self) -> None:
         _db, recorder = _setup()
         resolutions = [
-            {
-                "env_var_name": "API_KEY",
-                "source": "keyvault",
-                "vault_url": "https://vault.example.com",
-                "secret_name": "api-key",
-                "timestamp": 1705320000.0,
-                "latency_ms": 150.0,
-                "fingerprint": "a" * 64,
-            },
+            SecretResolutionInput(
+                env_var_name="API_KEY",
+                source="keyvault",
+                vault_url="https://vault.example.com",
+                secret_name="api-key",
+                timestamp=1705320000.0,
+                latency_ms=150.0,
+                fingerprint="a" * 64,
+            ),
         ]
         recorder.record_secret_resolutions("run-1", resolutions)
         results = recorder.get_secret_resolutions_for_run("run-1")
@@ -364,7 +364,6 @@ class TestGetRunContractHashVerification:
         # Tamper with the stored hash
         with _db.connection() as conn:
             conn.execute(update(runs_table).where(runs_table.c.run_id == "run-1").values(schema_contract_hash="tampered_hash_value"))
-            conn.commit()
 
         with pytest.raises(AuditIntegrityError, match="hash mismatch"):
             recorder.get_run_contract("run-1")

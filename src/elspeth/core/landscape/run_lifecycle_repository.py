@@ -19,6 +19,7 @@ from elspeth.contracts import (
     Run,
     RunStatus,
     SecretResolution,
+    SecretResolutionInput,
 )
 from elspeth.contracts.errors import AuditIntegrityError
 from elspeth.core.canonical import canonical_json, stable_hash
@@ -26,6 +27,7 @@ from elspeth.core.landscape._database_ops import DatabaseOps
 from elspeth.core.landscape._helpers import generate_id, now
 from elspeth.core.landscape.database import LandscapeDB
 from elspeth.core.landscape.model_loaders import RunLoader
+from elspeth.core.landscape.reproducibility import ReproducibilityGrade, compute_grade
 from elspeth.core.landscape.schema import (
     runs_table,
     secret_resolutions_table,
@@ -33,7 +35,6 @@ from elspeth.core.landscape.schema import (
 
 if TYPE_CHECKING:
     from elspeth.contracts.schema_contract import SchemaContract
-    from elspeth.core.landscape.reproducibility import ReproducibilityGrade
 
 
 _TERMINAL_RUN_STATUSES = frozenset({RunStatus.COMPLETED, RunStatus.FAILED, RunStatus.INTERRUPTED})
@@ -57,7 +58,7 @@ class RunLifecycleRepository:
         canonical_version: str,
         *,
         run_id: str | None = None,
-        reproducibility_grade: str | None = None,
+        reproducibility_grade: ReproducibilityGrade | None = None,
         status: RunStatus = RunStatus.RUNNING,
         source_schema_json: str | None = None,
         schema_contract: SchemaContract | None = None,
@@ -124,20 +125,22 @@ class RunLifecycleRepository:
         run_id: str,
         status: RunStatus,
         *,
-        reproducibility_grade: str | None = None,
+        reproducibility_grade: ReproducibilityGrade | None = None,
     ) -> Run:
         """Complete a pipeline run.
 
         Args:
             run_id: Run to complete
             status: Final RunStatus (COMPLETED, FAILED, or INTERRUPTED)
-            reproducibility_grade: Optional final grade
+            reproducibility_grade: Optional final grade. When None, preserves
+                any grade already stored on the run (e.g., from begin_run).
 
         Returns:
             Updated Run model
 
         Raises:
             AuditIntegrityError: If status is not a terminal run status
+            ValueError: If run_id not found (via execute_update zero-rows check)
         """
         if status not in _TERMINAL_RUN_STATUSES:
             raise AuditIntegrityError(
@@ -147,15 +150,16 @@ class RunLifecycleRepository:
 
         timestamp = now()
 
-        self._ops.execute_update(
-            runs_table.update()
-            .where(runs_table.c.run_id == run_id)
-            .values(
-                status=status.value,
-                completed_at=timestamp,
-                reproducibility_grade=reproducibility_grade,
-            )
-        )
+        # Only include reproducibility_grade in UPDATE when explicitly provided.
+        # Passing None would overwrite an existing grade with NULL (Bug 318f74).
+        values: dict[str, Any] = {
+            "status": status.value,
+            "completed_at": timestamp,
+        }
+        if reproducibility_grade is not None:
+            values["reproducibility_grade"] = reproducibility_grade
+
+        self._ops.execute_update(runs_table.update().where(runs_table.c.run_id == run_id).values(**values))
 
         result = self.get_run(run_id)
         if result is None:
@@ -208,9 +212,9 @@ class RunLifecycleRepository:
             )
 
         if type(source_schema_json) is not str:
-            raise ValueError(
+            raise AuditIntegrityError(
                 f"Run {run_id} source_schema_json is {type(source_schema_json).__name__}, "
-                f"expected str - audit data corruption (Tier 1 violation)"
+                f"expected str — audit data corruption (Tier 1 violation)"
             )
         return source_schema_json
 
@@ -243,9 +247,12 @@ class RunLifecycleRepository:
         }
         resolution_json = canonical_json(resolution_data)
 
-        self._ops.execute_update(
-            runs_table.update().where(runs_table.c.run_id == run_id).values(source_field_resolution_json=resolution_json)
-        )
+        try:
+            self._ops.execute_update(
+                runs_table.update().where(runs_table.c.run_id == run_id).values(source_field_resolution_json=resolution_json)
+            )
+        except ValueError:
+            raise ValueError(f"Cannot record source field resolution: run {run_id} not found") from None
 
     def get_source_field_resolution(self, run_id: str) -> dict[str, str] | None:
         """Get source field resolution mapping for a run.
@@ -275,29 +282,35 @@ class RunLifecycleRepository:
             return None
 
         # Parse the stored JSON structure
-        # This is Tier 1 (our data) - crash on any anomaly
+        # This is Tier 1 (our data) — crash on any anomaly
         resolution_data = json.loads(resolution_json)
         if not isinstance(resolution_data, dict):
-            raise ValueError(f"Corrupt field resolution data for run {run_id}: expected dict, got {type(resolution_data).__name__}")
+            raise AuditIntegrityError(
+                f"Corrupt field resolution data for run {run_id}: expected dict, got {type(resolution_data).__name__}"
+            )
 
         # Tier 1: resolution_mapping MUST exist if JSON is stored
         # record_source_field_resolution() always stores this key, so missing = corruption
         if "resolution_mapping" not in resolution_data:
-            raise ValueError(
+            raise AuditIntegrityError(
                 f"Corrupt field resolution data for run {run_id}: "
                 f"missing required key 'resolution_mapping'. "
-                f"This indicates database corruption - record_source_field_resolution() always stores this key."
+                f"This indicates database corruption — record_source_field_resolution() always stores this key."
             )
 
         resolution_mapping = resolution_data["resolution_mapping"]
         if not isinstance(resolution_mapping, dict):
-            raise ValueError(f"Corrupt resolution_mapping for run {run_id}: expected dict, got {type(resolution_mapping).__name__}")
+            raise AuditIntegrityError(
+                f"Corrupt resolution_mapping for run {run_id}: expected dict, got {type(resolution_mapping).__name__}"
+            )
 
-        # Verify all keys and values are strings (Tier 1 - crash on corruption)
+        # Verify all keys and values are strings (Tier 1 — crash on corruption)
+        # Key type check is defense-in-depth: JSON keys are always strings after json.loads(),
+        # but guards against hypothetical non-JSON deserialization paths.
         validated_mapping: dict[str, str] = {}
         for key, value in resolution_mapping.items():
             if not isinstance(key, str) or not isinstance(value, str):
-                raise ValueError(
+                raise AuditIntegrityError(
                     f"Corrupt resolution_mapping entry for run {run_id}: "
                     f"expected str->str, got {type(key).__name__}->{type(value).__name__}"
                 )
@@ -308,17 +321,34 @@ class RunLifecycleRepository:
     def update_run_status(self, run_id: str, status: RunStatus) -> None:
         """Update run status without setting completed_at.
 
-        Used for intermediate status changes (e.g., paused → running during resume).
+        Used for intermediate status changes (e.g., RUNNING during resume).
         For final completion, use complete_run() instead.
 
         Args:
             run_id: Run to update
             status: New RunStatus
 
+        Raises:
+            ValueError: If run_id not found
+            AuditIntegrityError: If current status is COMPLETED (immutable)
+
         Note:
             This encapsulates run status updates for Orchestrator recovery.
-            Only updates status field - does not set completed_at or reproducibility_grade.
+            Only updates status field — does not set completed_at or reproducibility_grade.
+
+            COMPLETED runs are immutable — a completed run succeeded and its audit
+            record is final. FAILED and INTERRUPTED runs CAN be transitioned back
+            to RUNNING during resume (orchestrator recovery path).
         """
+        current = self.get_run(run_id)
+        if current is None:
+            raise ValueError(f"Cannot update run status to {status.value!r}: run {run_id} not found")
+        if current.status == RunStatus.COMPLETED:
+            raise AuditIntegrityError(
+                f"Cannot transition run {run_id} from COMPLETED to {status.value!r}. "
+                f"Completed runs are immutable. "
+                f"FAILED/INTERRUPTED runs can be resumed via update_run_status."
+            )
         self._ops.execute_update(runs_table.update().where(runs_table.c.run_id == run_id).values(status=status.value))
 
     def update_run_contract(self, run_id: str, contract: SchemaContract) -> None:
@@ -331,10 +361,22 @@ class RunLifecycleRepository:
             run_id: Run to update
             contract: SchemaContract with inferred fields (should be locked)
 
+        Raises:
+            AuditIntegrityError: If run already has a contract (overwrite = evidence loss)
+
         Note:
             This is the only way to add a contract after begin_run().
             Used for sources that discover schema during load() rather than from config.
         """
+        # Guard against overwriting an existing contract — evidence contamination
+        existing = self._ops.execute_fetchone(select(runs_table.c.schema_contract_json).where(runs_table.c.run_id == run_id))
+        if existing is not None and existing.schema_contract_json is not None:
+            raise AuditIntegrityError(
+                f"Cannot update schema contract for run {run_id}: "
+                f"contract already exists. update_run_contract is only valid "
+                f"when no contract was set at begin_run()."
+            )
+
         audit_record = ContractAuditRecord.from_contract(contract)
         schema_contract_json = audit_record.to_json()
         schema_contract_hash = contract.version_hash()
@@ -357,19 +399,22 @@ class RunLifecycleRepository:
             run_id: Run to query
 
         Returns:
-            SchemaContract if stored, None if no contract was stored
+            SchemaContract if stored, None if run exists but no contract was stored
 
         Raises:
-            AuditIntegrityError: If stored contract hash doesn't match recomputed hash
+            ValueError: If run_id not found in database
+            AuditIntegrityError: If stored contract hash doesn't match recomputed hash,
+                or if hash is NULL while JSON is present
         """
         query = select(
+            runs_table.c.run_id,
             runs_table.c.schema_contract_json,
             runs_table.c.schema_contract_hash,
         ).where(runs_table.c.run_id == run_id)
         row = self._ops.execute_fetchone(query)
 
         if row is None:
-            return None
+            raise ValueError(f"Run {run_id} not found in database")
 
         schema_contract_json = row.schema_contract_json
         if schema_contract_json is None:
@@ -380,48 +425,60 @@ class RunLifecycleRepository:
         contract = audit_record.to_schema_contract()
 
         # Verify stored hash matches recomputed hash (Tier 1 integrity)
+        # Both begin_run() and update_run_contract() always set JSON and hash together.
+        # NULL hash with non-NULL JSON is itself a corruption signal.
         stored_hash = row.schema_contract_hash
-        if stored_hash is not None:
-            recomputed_hash = contract.version_hash()
-            if recomputed_hash != stored_hash:
-                raise AuditIntegrityError(
-                    f"Schema contract hash mismatch for run {run_id}: "
-                    f"stored={stored_hash}, recomputed={recomputed_hash}. "
-                    f"This indicates database corruption or tampering."
-                )
+        if stored_hash is None:
+            raise AuditIntegrityError(
+                f"Schema contract JSON is present but hash is NULL for run {run_id}. "
+                f"Both fields must be set together — database corruption or tampering."
+            )
+        recomputed_hash = contract.version_hash()
+        if recomputed_hash != stored_hash:
+            raise AuditIntegrityError(
+                f"Schema contract hash mismatch for run {run_id}: "
+                f"stored={stored_hash}, recomputed={recomputed_hash}. "
+                f"This indicates database corruption or tampering."
+            )
 
         return contract
 
     def record_secret_resolutions(
         self,
         run_id: str,
-        resolutions: list[dict[str, Any]],
+        resolutions: list[SecretResolutionInput],
     ) -> None:
         """Record secret resolution events from deferred records.
 
         Called by orchestrator after run is created. The resolution records
         were captured during load_secrets_from_config() before the run existed.
 
+        All inserts are batched in a single transaction for atomicity —
+        either all resolutions are recorded or none are.
+
         Args:
             run_id: The run ID to associate resolutions with
-            resolutions: List of resolution records from load_secrets_from_config().
-                Each record contains: env_var_name, source, vault_url, secret_name,
-                timestamp, latency_ms, fingerprint (pre-computed HMAC-SHA256).
+            resolutions: Typed resolution records from load_secrets_from_config().
         """
-        for rec in resolutions:
-            self._ops.execute_insert(
-                secret_resolutions_table.insert().values(
-                    resolution_id=generate_id(),
-                    run_id=run_id,
-                    timestamp=rec["timestamp"],
-                    env_var_name=rec["env_var_name"],
-                    source=rec["source"],
-                    vault_url=rec["vault_url"],
-                    secret_name=rec["secret_name"],
-                    fingerprint=rec["fingerprint"],
-                    resolution_latency_ms=rec["latency_ms"],
+        if not resolutions:
+            return
+        with self._db.connection() as conn:
+            for rec in resolutions:
+                result = conn.execute(
+                    secret_resolutions_table.insert().values(
+                        resolution_id=generate_id(),
+                        run_id=run_id,
+                        timestamp=rec.timestamp,
+                        env_var_name=rec.env_var_name,
+                        source=rec.source,
+                        vault_url=rec.vault_url,
+                        secret_name=rec.secret_name,
+                        fingerprint=rec.fingerprint,
+                        resolution_latency_ms=rec.latency_ms,
+                    )
                 )
-            )
+                if result.rowcount == 0:
+                    raise ValueError(f"Secret resolution insert failed for run {run_id} — zero rows affected (audit write failure)")
 
     def get_secret_resolutions_for_run(self, run_id: str) -> list[SecretResolution]:
         """Get all secret resolution records for a run.
@@ -494,6 +551,12 @@ class RunLifecycleRepository:
             export_format: Format used (csv, json)
             export_sink: Sink name used for export
         """
+        # Validate error/status consistency — error is only meaningful with FAILED
+        if error is not None and status != ExportStatus.FAILED:
+            raise AuditIntegrityError(
+                f"Cannot set export_error with status={status.value}. Error messages are only valid with FAILED status."
+            )
+
         updates: dict[str, Any] = {"export_status": status.value}
 
         if status == ExportStatus.COMPLETED:
@@ -513,7 +576,10 @@ class RunLifecycleRepository:
         if export_sink is not None:
             updates["export_sink"] = export_sink
 
-        self._ops.execute_update(runs_table.update().where(runs_table.c.run_id == run_id).values(**updates))
+        try:
+            self._ops.execute_update(runs_table.update().where(runs_table.c.run_id == run_id).values(**updates))
+        except ValueError:
+            raise ValueError(f"Cannot set export status to {status.value!r}: run {run_id} not found") from None
 
     def finalize_run(self, run_id: str, status: RunStatus) -> Run:
         """Finalize a run by computing grade and completing it.
@@ -528,9 +594,16 @@ class RunLifecycleRepository:
 
         Returns:
             Updated Run model
+
+        Note:
+            Grade computation and run completion execute in separate transactions.
+            This is an accepted limitation — the invariant that all nodes are registered
+            before finalize_run is called ensures the grade is stable between reads.
+            A single-transaction approach would require refactoring compute_grade's
+            database access (tracked for future consideration).
         """
         grade = self.compute_reproducibility_grade(run_id)
-        return self.complete_run(run_id, status, reproducibility_grade=grade.value)
+        return self.complete_run(run_id, status, reproducibility_grade=grade)
 
     def compute_reproducibility_grade(self, run_id: str) -> ReproducibilityGrade:
         """Compute reproducibility grade for a run based on node determinism.
@@ -545,7 +618,12 @@ class RunLifecycleRepository:
 
         Returns:
             ReproducibilityGrade enum value
-        """
-        from elspeth.core.landscape.reproducibility import compute_grade
 
+        Note:
+            Uses self._db directly (bypassing DatabaseOps) because compute_grade()
+            needs raw connection access for multi-statement reads within a single
+            connection. This dual access pattern (self._ops + self._db) is accepted:
+            future repositories (B2/B3) will also need self._db for atomic
+            multi-table transactions. Both are injected via __init__.
+        """
         return compute_grade(self._db, run_id)

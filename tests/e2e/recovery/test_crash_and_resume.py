@@ -378,8 +378,8 @@ class TestResumeIdempotence:
             mode=RoutingMode.MOVE,
         )
 
-        # Record the contract on the source node for resume
-        recorder.update_run_contract(run_id, source_contract)
+        # Contract already stored via begin_run(schema_contract=...) above.
+        # Record the source node's output contract for resume.
         recorder.update_node_output_contract(run_id, "source", source_contract)
 
         # Create all 5 rows with payloads (create_row auto-stores via payload_store_b)

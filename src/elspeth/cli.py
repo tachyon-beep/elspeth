@@ -20,7 +20,7 @@ from dynaconf.vendor.ruamel.yaml.scanner import ScannerError as YamlScannerError
 from pydantic import ValidationError
 
 from elspeth import __version__
-from elspeth.contracts import ExecutionResult
+from elspeth.contracts import ExecutionResult, SecretResolutionInput
 from elspeth.contracts.errors import GracefulShutdownError
 from elspeth.contracts.types import AggregationName
 from elspeth.core.config import ElspethSettings, SourceSettings, load_settings, resolve_config
@@ -310,7 +310,7 @@ def _load_raw_yaml(config_path: Path) -> dict[str, Any]:
 
 def _load_settings_with_secrets(
     settings_path: Path,
-) -> tuple[ElspethSettings, list[dict[str, Any]]]:
+) -> tuple[ElspethSettings, list[SecretResolutionInput]]:
     """Load settings with Key Vault secret resolution.
 
     Three-phase loading pattern:
@@ -911,7 +911,7 @@ def _execute_pipeline_with_instances(
     plugins: PluginBundle,
     verbose: bool = False,
     output_format: Literal["console", "json"] = "console",
-    secret_resolutions: list[dict[str, Any]] | None = None,
+    secret_resolutions: list[SecretResolutionInput] | None = None,
     passphrase: str | None = None,
 ) -> ExecutionResult:
     """Execute pipeline using pre-instantiated plugin instances.

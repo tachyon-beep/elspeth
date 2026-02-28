@@ -47,6 +47,7 @@ from elspeth.contracts import (
     RowOutcome,
     RunStatus,
     SchemaContract,
+    SecretResolutionInput,
     SourceRow,
     TokenInfo,
 )
@@ -687,7 +688,7 @@ class Orchestrator:
         batch_checkpoints: dict[str, BatchCheckpointState] | None = None,
         *,
         payload_store: PayloadStore,
-        secret_resolutions: list[dict[str, Any]] | None = None,
+        secret_resolutions: list[SecretResolutionInput] | None = None,
         shutdown_event: threading.Event | None = None,
     ) -> RunResult:
         """Execute a pipeline run.
@@ -1665,7 +1666,11 @@ class Orchestrator:
             field_resolution_recorded = False
             # Track whether schema contract has been recorded (must happen after first VALID row)
             # Separate from field_resolution because first row might be quarantined
-            schema_contract_recorded = False
+            # If begin_run already stored a contract (FIXED mode), mark as recorded
+            # to prevent duplicate update_run_contract calls.
+            # Check via recorder (not a local variable) since this method doesn't
+            # have access to the begin_run caller's scope.
+            schema_contract_recorded = recorder.get_run_contract(run_id) is not None
 
             # PROCESS phase - iterate through rows
             phase_start = time.perf_counter()

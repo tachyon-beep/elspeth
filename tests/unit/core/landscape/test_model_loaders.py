@@ -114,7 +114,7 @@ class TestRunLoader:
         sa_row = self._make_run_row(
             status="completed",
             completed_at=LATER,
-            reproducibility_grade="A",
+            reproducibility_grade="full_reproducible",
             export_status="pending",
             export_error="some error",
             exported_at=EVEN_LATER,
@@ -131,7 +131,7 @@ class TestRunLoader:
         assert result.started_at == NOW
         assert result.completed_at == LATER
         assert result.exported_at == EVEN_LATER
-        assert result.reproducibility_grade == "A"
+        assert result.reproducibility_grade == "full_reproducible"
         assert result.export_error == "some error"
         assert result.export_format == "csv"
         assert result.export_sink == "output"

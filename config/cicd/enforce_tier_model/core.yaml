@@ -235,25 +235,25 @@ allow_hits:
   reason: Tier-3 boundary - PayloadStore.delete() is external I/O (filesystem/blob storage)
   safety: Exception caught, ref added to failed_refs, loop continues - explicit failure tracking
   expires: null
-- key: core/landscape/run_lifecycle_repository.py:R5:RunLifecycleRepository:get_source_field_resolution:fp=a666e300c7b01631
+- key: core/landscape/run_lifecycle_repository.py:R5:RunLifecycleRepository:get_source_field_resolution:fp=c6d8d9cd410060a4
   owner: feature
   reason: Tier 1 trust validation - crash on corruption from our own audit database
-  safety: ValueError raised on corrupt data - explicit failure, not silent coercion
+  safety: AuditIntegrityError raised on corrupt data - explicit failure, not silent coercion
   expires: null
-- key: core/landscape/run_lifecycle_repository.py:R5:RunLifecycleRepository:get_source_field_resolution:fp=932c037921085435
+- key: core/landscape/run_lifecycle_repository.py:R5:RunLifecycleRepository:get_source_field_resolution:fp=e75da75f75b37842
   owner: feature
   reason: Tier 1 trust validation - crash on corruption from our own audit database
-  safety: ValueError raised on corrupt data - explicit failure, not silent coercion
+  safety: AuditIntegrityError raised on corrupt data - explicit failure, not silent coercion
   expires: null
-- key: core/landscape/run_lifecycle_repository.py:R5:RunLifecycleRepository:get_source_field_resolution:fp=f23b7a241460df4a
+- key: core/landscape/run_lifecycle_repository.py:R5:RunLifecycleRepository:get_source_field_resolution:fp=f9e7131fea867b5e
   owner: feature
   reason: Tier 1 trust validation - crash on corruption from our own audit database
-  safety: ValueError raised on corrupt data - explicit failure, not silent coercion
+  safety: AuditIntegrityError raised on corrupt data - explicit failure, not silent coercion
   expires: null
-- key: core/landscape/run_lifecycle_repository.py:R5:RunLifecycleRepository:get_source_field_resolution:fp=f1601305125cfe8b
+- key: core/landscape/run_lifecycle_repository.py:R5:RunLifecycleRepository:get_source_field_resolution:fp=3779c606db0e2836
   owner: feature
   reason: Tier 1 trust validation - crash on corruption from our own audit database
-  safety: ValueError raised on corrupt data - explicit failure, not silent coercion
+  safety: AuditIntegrityError raised on corrupt data - explicit failure, not silent coercion
   expires: null
 - key: core/landscape/exporter.py:R1:LandscapeExporter:_iter_records:fp=9ca89eaa0e651dcf
   owner: P2-2026-02-02-76r
