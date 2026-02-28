@@ -333,7 +333,7 @@ The routing trilogy (ADR-004, ADR-005) replaced implicit pipeline wiring with ex
 - [ ] No orphan records
 - [ ] Unique constraints respected
 - [ ] Composite primary key (node_id, run_id) on nodes table handled correctly
-- [ ] NodeRepository schema_fields_json shape validated
+- [ ] NodeLoader schema_fields_json shape validated
 - [ ] Scalar CSV audit validation enforced
 
 ---

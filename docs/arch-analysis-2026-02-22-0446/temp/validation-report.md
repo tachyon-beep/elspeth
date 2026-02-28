@@ -95,7 +95,7 @@ No critical blocking issues were found.
   - The Correctness dimension states "two known P0 gaps (NaN/Infinity in float validation, JSON sink non-atomic writes)" -- this matches MEMORY.md exactly.
   - The Architecture dimension states "orchestrator/core.py (2,364 lines) and processor.py (1,882 lines)" -- these specific line counts match the raw orchestration analysis file inventory.
   - The Type Safety dimension states "16 Tier 1 audit records" remain mutable -- consistent with the discovery findings (but inconsistent with the final report, as noted above).
-  - Note: The quality assessment's "Must Fix Before Release" section includes "Missing OperationRepository" which is P3 in the discovery findings but escalated to "Must Fix" here. This escalation is reasonable given the audit integrity context, but it is a priority difference.
+  - Note: The quality assessment's "Must Fix Before Release" section includes "Missing OperationLoader" which is P3 in the discovery findings but escalated to "Must Fix" here. This escalation is reasonable given the audit integrity context, but it is a priority difference.
   - The debt inventory is comprehensive and well-organized. Each item has a location reference.
 - **Consistency: PASS WITH NOTES** -- The quality assessment's Top 10 is largely consistent with the final report's 12 findings but uses different numbering and slightly different priority ratings. The PluginContext P0 escalation is the most notable difference. The quality assessment lists "openrouter_batch.py:740" for the NaN/Infinity issue, which is a specific line reference not present in other documents.
 - **Actionability: PASS** -- The debt inventory provides specific file locations and brief fix descriptions.

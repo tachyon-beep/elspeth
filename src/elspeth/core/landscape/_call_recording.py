@@ -30,7 +30,7 @@ if TYPE_CHECKING:
     from elspeth.contracts.payload_store import PayloadStore
     from elspeth.core.landscape._database_ops import DatabaseOps
     from elspeth.core.landscape.database import LandscapeDB
-    from elspeth.core.landscape.model_loaders import CallLoader
+    from elspeth.core.landscape.model_loaders import CallLoader, OperationLoader
 
 
 class CallRecordingMixin:
@@ -40,6 +40,7 @@ class CallRecordingMixin:
     _db: LandscapeDB
     _ops: DatabaseOps
     _call_loader: CallLoader
+    _operation_loader: OperationLoader
     _payload_store: PayloadStore | None
     _call_indices: dict[str, int]
     _call_index_lock: Lock
@@ -432,21 +433,7 @@ class CallRecordingMixin:
         if row is None:
             return None
 
-        return Operation(
-            operation_id=row.operation_id,
-            run_id=row.run_id,
-            node_id=row.node_id,
-            operation_type=row.operation_type,
-            started_at=row.started_at,
-            completed_at=row.completed_at,
-            status=row.status,
-            input_data_ref=row.input_data_ref,
-            input_data_hash=row.input_data_hash,
-            output_data_ref=row.output_data_ref,
-            output_data_hash=row.output_data_hash,
-            error_message=row.error_message,
-            duration_ms=row.duration_ms,
-        )
+        return self._operation_loader.load(row)
 
     def get_operation_calls(self, operation_id: str) -> list[Call]:
         """Get external calls for an operation.
@@ -472,24 +459,7 @@ class CallRecordingMixin:
         """
         query = select(operations_table).where(operations_table.c.run_id == run_id).order_by(operations_table.c.started_at)
         db_rows = self._ops.execute_fetchall(query)
-        return [
-            Operation(
-                operation_id=row.operation_id,
-                run_id=row.run_id,
-                node_id=row.node_id,
-                operation_type=row.operation_type,
-                started_at=row.started_at,
-                completed_at=row.completed_at,
-                status=row.status,
-                input_data_ref=row.input_data_ref,
-                input_data_hash=row.input_data_hash,
-                output_data_ref=row.output_data_ref,
-                output_data_hash=row.output_data_hash,
-                error_message=row.error_message,
-                duration_ms=row.duration_ms,
-            )
-            for row in db_rows
-        ]
+        return [self._operation_loader.load(row) for row in db_rows]
 
     def get_all_operation_calls_for_run(self, run_id: str) -> list[Call]:
         """Get all operation-parented calls for a run (batch query).

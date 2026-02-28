@@ -193,20 +193,20 @@ The `core/landscape/` subsystem is the **audit backbone** of ELSPETH. It provide
 
 **Purpose:** Repository layer converting SQLAlchemy rows to domain dataclasses. Enforces Tier 1 invariants during deserialization.
 
-**Key classes (14 repositories):**
-- `RunRepository`, `NodeRepository`, `EdgeRepository`, `RowRepository`, `TokenRepository`, `TokenParentRepository`, `CallRepository`, `RoutingEventRepository`, `BatchRepository`, `NodeStateRepository`, `ValidationErrorRepository`, `TransformErrorRepository`, `TokenOutcomeRepository`, `ArtifactRepository`, `BatchMemberRepository`.
+**Key classes (15 model loaders, renamed from *Repository in T19 Phase A):**
+- `RunLoader`, `NodeLoader`, `EdgeLoader`, `RowLoader`, `TokenLoader`, `TokenParentLoader`, `CallLoader`, `RoutingEventLoader`, `BatchLoader`, `NodeStateLoader`, `ValidationErrorLoader`, `TransformErrorLoader`, `TokenOutcomeLoader`, `ArtifactLoader`, `BatchMemberLoader`.
 
 **Dependencies:** `elspeth.contracts.audit` dataclasses, `elspeth.contracts.enums`.
 
 **Architectural patterns:**
-- **Enum-at-boundary conversion:** Strings from DB are converted to enums in the repository `load()` method. Invalid enum values crash (Tier 1).
-- **Discriminated union for NodeState:** `NodeStateRepository.load()` dispatches on `status` field to construct the correct variant, with extensive invariant validation per status.
+- **Enum-at-boundary conversion:** Strings from DB are converted to enums in the loader `load()` method. Invalid enum values crash (Tier 1).
+- **Discriminated union for NodeState:** `NodeStateLoader.load()` dispatches on `status` field to construct the correct variant, with extensive invariant validation per status.
 - **TokenOutcome cross-validation:** Validates `is_terminal` integer (must be exactly 0 or 1, rejects bools), then cross-checks against `RowOutcome.is_terminal`.
 
 **Concerns:**
-- **(P2) Operation model not through repository:** `get_operation()`, `get_operations_for_run()` in `_call_recording.py` construct `Operation` directly from DB rows without a repository class. This is inconsistent -- Operations bypass the repository pattern that all other models use.
-- **(P3) `NodeRepository.load()` inline `import json`:** The json import is inside the method body rather than at module level. Functional but unusual.
-- **Sound:** Excellent Tier 1 enforcement in `NodeStateRepository` and `TokenOutcomeRepository`. The discriminated union validation is thorough.
+- **(P2) Operation model not through loader:** `get_operation()`, `get_operations_for_run()` in `_call_recording.py` construct `Operation` directly from DB rows without a loader class. This is inconsistent -- Operations bypass the loader pattern that all other models use.
+- **(P3) `NodeLoader.load()` inline `import json`:** The json import is inside the method body rather than at module level. Functional but unusual.
+- **Sound:** Excellent Tier 1 enforcement in `NodeStateLoader` and `TokenOutcomeLoader`. The discriminated union validation is thorough.
 
 ---
 
@@ -508,7 +508,7 @@ The `core/landscape/` subsystem is the **audit backbone** of ELSPETH. It provide
 
 1. **Untyped dict at Tier 1 boundary in `record_secret_resolutions()`** (`_run_recording.py:388-417`): Accepts `list[dict[str, Any]]` and destructures with string keys. Per the open bug pattern in MEMORY.md, this should be a frozen dataclass. A typo in a key name would silently fail or crash at runtime with an unhelpful KeyError.
 
-2. **Missing `OperationRepository`** (`_call_recording.py:426-440, 466-483`): Operations are constructed inline from DB rows without enum validation. If `operation_type` or `status` contains an invalid value, it will not be caught at deserialization. All other models use repositories with Tier 1 validation.
+2. **Missing `OperationLoader`** (`_call_recording.py:426-440, 466-483`): Operations are constructed inline from DB rows without enum validation. If `operation_type` or `status` contains an invalid value, it will not be caught at deserialization. All other models use loaders with Tier 1 validation.
 
 3. **`in_memory()` and `from_url()` bypass `__init__`** (`database.py:388-473`): Both factory methods use `cls.__new__()` and manually set attributes. Adding a new instance variable to `__init__` requires remembering to update two other methods. A refactoring to use a shared `_initialize()` method would eliminate this risk.
 
@@ -548,7 +548,7 @@ The `core/landscape/` subsystem is the **audit backbone** of ELSPETH. It provide
 
 The subsystem demonstrates excellent Tier 1 adherence:
 
-- **Crash on anomaly:** `NodeStateRepository.load()` validates 6+ invariants per status variant and crashes on any violation. `TokenOutcomeRepository.load()` validates `is_terminal` is exactly `int(0)` or `int(1)` and cross-checks against enum. `get_source_field_resolution()` validates every key and value type in the resolution mapping.
+- **Crash on anomaly:** `NodeStateLoader.load()` validates 6+ invariants per status variant and crashes on any violation. `TokenOutcomeLoader.load()` validates `is_terminal` is exactly `int(0)` or `int(1)` and cross-checks against enum. `get_source_field_resolution()` validates every key and value type in the resolution mapping.
 
 - **No coercion:** Enum values are converted via `EnumType(value)` which raises `ValueError` on invalid values. No fallback defaults.
 
@@ -582,8 +582,8 @@ The subsystem correctly handles Tier 3 data at the ingestion boundary:
 - All 21 files were read in their entirety (11,681 lines total).
 - The subsystem has clear architectural patterns (mixins, repositories, Tier 1 enforcement) that are consistently applied.
 - The concerns identified are real but mostly P3/P4 -- the subsystem is fundamentally sound.
-- The most significant issues (untyped dicts, missing OperationRepository, factory method bypass) are real architectural risks but have been stable in practice.
+- The most significant issues (untyped dicts, missing OperationLoader, factory method bypass) are real architectural risks but have been stable in practice.
 - The Tier 1 compliance is strong -- this is one of the most carefully hardened subsystems in the codebase.
 - External dependency analysis confirms Landscape is the most widely imported subsystem, validating the "audit backbone" description.
 
-The primary risk area is the gradual accumulation of P3 concerns (truthiness checks, inconsistent error types, unnecessary joins) that individually are minor but collectively create maintenance burden. The P2 issues (untyped dicts, missing OperationRepository) are concrete and should be addressed in RC3.3.
+The primary risk area is the gradual accumulation of P3 concerns (truthiness checks, inconsistent error types, unnecessary joins) that individually are minor but collectively create maintenance burden. The P2 issues (untyped dicts, missing OperationLoader) are concrete and should be addressed in RC3.3.

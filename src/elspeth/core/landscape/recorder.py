@@ -4,8 +4,12 @@
 This is the main interface for recording audit trail entries during
 pipeline execution. It wraps the low-level database operations.
 
-Implementation is split across mixins for maintainability:
-- run_lifecycle_repository.py: Run lifecycle (begin, complete, finalize, secrets, contracts) [composed repository]
+Implementation uses two patterns:
+
+Composed repository (owned instance, injected via __init__):
+- run_lifecycle_repository.py: Run lifecycle (begin, complete, finalize, secrets, contracts)
+
+Mixins (inherited behavior):
 - _graph_recording.py: Node and edge registration/queries
 - _node_state_recording.py: Node state recording and routing events
 - _token_recording.py: Row/token creation, fork/coalesce/expand, outcomes
@@ -45,6 +49,7 @@ from elspeth.core.landscape.model_loaders import (
     EdgeLoader,
     NodeLoader,
     NodeStateLoader,
+    OperationLoader,
     RoutingEventLoader,
     RowLoader,
     RunLoader,
@@ -108,15 +113,13 @@ class LandscapeRecorder(
 
         # Loader instances for row-to-object conversions
         self._run_loader = RunLoader()
-
-        # Composed repositories (replacing mixins)
-        self._run_lifecycle = RunLifecycleRepository(db, self._ops, self._run_loader)
         self._node_loader = NodeLoader()
         self._edge_loader = EdgeLoader()
         self._row_loader = RowLoader()
         self._token_loader = TokenLoader()
         self._token_parent_loader = TokenParentLoader()
         self._call_loader = CallLoader()
+        self._operation_loader = OperationLoader()
         self._routing_event_loader = RoutingEventLoader()
         self._batch_loader = BatchLoader()
         self._node_state_loader = NodeStateLoader()
@@ -125,6 +128,9 @@ class LandscapeRecorder(
         self._token_outcome_loader = TokenOutcomeLoader()
         self._artifact_loader = ArtifactLoader()
         self._batch_member_loader = BatchMemberLoader()
+
+        # Composed repository for run lifecycle (extracted from mixin in T19)
+        self._run_lifecycle = RunLifecycleRepository(db, self._ops, self._run_loader)
 
     # ── Run lifecycle delegation (RunLifecycleRepository) ──────────────
 

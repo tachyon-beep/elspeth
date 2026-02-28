@@ -220,7 +220,7 @@ Call index is now seeded from `MAX(call_index)` on resume, preventing UNIQUE con
 | Tracing provider validation | `2b947834` | Validate tracing providers and close silent-disable bug |
 | CSV audit validation | `d16f56ab` | Enforce scalar CSV audit validation |
 | PluginContext telemetry snapshots | `3e51467c` | Snapshot PluginContext telemetry payloads |
-| NodeRepository schema fields | `e34d1acb` | Validate `schema_fields_json` shape in NodeRepository |
+| NodeLoader schema fields | `e34d1acb` | Validate `schema_fields_json` shape in NodeLoader |
 | LLM retry classification | `3f94be33` | Fix LLM retry classification false positives |
 | Observed schema mode | `6b6fb334` | Reject non-list fields in observed schema mode |
 | Sink merge failure state | `62cd2bd2` | Fix sink merge failure state closure and prompt shield capacity retries |
@@ -264,7 +264,7 @@ Extensive work on the contracts subsystem throughout the sprint:
 
 ### Unused Session Parameter Removal (ARCH-13)
 
-Removed unused `session` parameter from all Repository classes.
+Removed unused `session` parameter from all Loader classes.
 
 **Commit:** `b60cdcd9`
 

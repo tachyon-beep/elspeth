@@ -8,11 +8,6 @@ ID Generation Properties:
 - IDs are unique (no collisions in reasonable sample)
 - Format is consistent (32 lowercase hex chars)
 
-Enum Coercion Properties (Tier 1 Trust):
-- Valid enum values coerce correctly
-- Enum instances pass through unchanged
-- Invalid strings CRASH (ValueError) - no silent coercion
-
 Timestamp Properties:
 - now() returns UTC timestamps
 - Timestamps are timezone-aware
@@ -22,37 +17,12 @@ Timestamp Properties:
 from __future__ import annotations
 
 from datetime import UTC, timedelta
-from enum import StrEnum
 
 import pytest
 from hypothesis import given, settings
 from hypothesis import strategies as st
 
-from elspeth.core.landscape._helpers import coerce_enum, generate_id, now
-
-# =============================================================================
-# Strategies for generating test data
-# =============================================================================
-
-# Invalid enum value strings (not valid for any enum we'll test)
-invalid_enum_values = st.text(min_size=1, max_size=20).filter(
-    lambda s: s not in ("PENDING", "RUNNING", "COMPLETED", "FAILED", "a", "b", "c")
-)
-
-
-# Sample enum for coercion tests (avoid Test* prefix to prevent pytest collection)
-class SampleStatus(StrEnum):
-    """Sample enum for property tests."""
-
-    PENDING = "pending"
-    RUNNING = "running"
-    COMPLETED = "completed"
-    FAILED = "failed"
-
-
-# All valid sample enum values
-sample_status_values = st.sampled_from(list(SampleStatus))
-
+from elspeth.core.landscape._helpers import generate_id, now
 
 # =============================================================================
 # generate_id() Property Tests
@@ -114,91 +84,6 @@ class TestGenerateIdProperties:
         assert "-" not in id_
         assert "{" not in id_
         assert "}" not in id_
-
-
-# =============================================================================
-# coerce_enum() Property Tests - Tier 1 Trust Model
-# =============================================================================
-
-
-class TestCoerceEnumProperties:
-    """Property tests for coerce_enum() function.
-
-    Per Data Manifesto: This handles Tier 1 data (audit database).
-    Invalid values must CRASH immediately, not silently coerce.
-    """
-
-    @given(status=sample_status_values)
-    @settings(max_examples=50)
-    def test_enum_instance_passthrough(self, status: SampleStatus) -> None:
-        """Property: Enum instances pass through unchanged."""
-        result = coerce_enum(status, SampleStatus)
-
-        assert result is status
-        assert isinstance(result, SampleStatus)
-
-    @given(status=sample_status_values)
-    @settings(max_examples=50)
-    def test_valid_string_coerces_correctly(self, status: SampleStatus) -> None:
-        """Property: Valid string values coerce to correct enum."""
-        string_value = status.value
-        result = coerce_enum(string_value, SampleStatus)
-
-        assert result == status
-        assert isinstance(result, SampleStatus)
-
-    @given(invalid=invalid_enum_values)
-    @settings(max_examples=100)
-    def test_invalid_string_crashes(self, invalid: str) -> None:
-        """Property: Invalid strings raise ValueError (Tier 1 crash semantics).
-
-        This is the core Tier 1 Trust invariant - bad data in our audit
-        trail is evidence of corruption, so we crash immediately rather
-        than silently coercing to some default.
-        """
-        with pytest.raises(ValueError):
-            coerce_enum(invalid, SampleStatus)
-
-    def test_empty_string_crashes(self) -> None:
-        """Property: Empty string is invalid and crashes."""
-        with pytest.raises(ValueError):
-            coerce_enum("", SampleStatus)
-
-    @given(status=sample_status_values)
-    @settings(max_examples=50)
-    def test_coercion_is_idempotent(self, status: SampleStatus) -> None:
-        """Property: Coercing an already-coerced value is idempotent."""
-        once = coerce_enum(status.value, SampleStatus)
-        twice = coerce_enum(once, SampleStatus)
-        thrice = coerce_enum(twice, SampleStatus)
-
-        assert once == twice == thrice
-        assert once is twice is thrice  # Same object (enum identity)
-
-    def test_wrong_enum_type_crashes(self) -> None:
-        """Property: Valid value for wrong enum type crashes.
-
-        Even if 'pending' is a valid SampleStatus value, trying to
-        coerce it as a different enum type should fail.
-        """
-
-        class OtherEnum(StrEnum):
-            ACTIVE = "active"
-            INACTIVE = "inactive"
-
-        with pytest.raises(ValueError):
-            coerce_enum("pending", OtherEnum)
-
-    @given(status=sample_status_values)
-    @settings(max_examples=20)
-    def test_coercion_preserves_enum_semantics(self, status: SampleStatus) -> None:
-        """Property: Coerced values behave like native enum values."""
-        coerced = coerce_enum(status.value, SampleStatus)
-
-        # All enum properties work correctly
-        assert coerced.name == status.name
-        assert coerced.value == status.value
-        assert coerced == status
 
 
 # =============================================================================

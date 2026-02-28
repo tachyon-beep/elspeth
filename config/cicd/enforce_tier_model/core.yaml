@@ -160,11 +160,6 @@ allow_hits:
   reason: List/tuple type detection for canonical JSON serialization after mypy typecheck
   safety: isinstance() required for polymorphic serialization - fundamental to RFC8785 normalization
   expires: null
-- key: core/landscape/_helpers.py:R5:coerce_enum:fp=7aabb8ce0df1d1fd
-  owner: architecture
-  reason: AST/type checking - required for safe parsing or discriminated unions
-  safety: Code reviewed - legitimate pattern
-  expires: '2026-05-02'
 - key: core/landscape/formatters.py:R5:serialize_datetime:fp=8565df78b19e294d
   owner: architecture
   reason: AST/type checking - required for safe parsing or discriminated unions
@@ -307,7 +302,7 @@ allow_hits:
 - key: core/landscape/journal.py:R5:LandscapeJournal:_columns_to_values:fp=8a63a6b78ec0851c
   owner: architecture
   reason: AST/type checking - required for safe parsing or discriminated unions
-- key: core/landscape/_call_recording.py:R6:CallRecordingMixin:get_call_response_data:fp=d41196d451e97b35
+- key: core/landscape/_call_recording.py:R6:CallRecordingMixin:get_call_response_data:fp=836cdb2aba0f256f
   owner: architecture
   reason: Graceful handling of purged payloads - retention policy may have deleted response data
 - key: core/dag/builder.py:R2:build_execution_graph:fp=1473956f4f20f6c8

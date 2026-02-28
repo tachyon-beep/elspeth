@@ -21,7 +21,7 @@ ELSPETH demonstrates strong architectural vision and disciplined implementation 
 
 ### Correctness [A-]
 
-ELSPETH's correctness posture is anchored by the Tier 1 crash-on-anomaly principle, which is applied rigorously throughout the Landscape subsystem. The `NodeStateRepository.load()` validates 6+ invariants per status variant. `TokenOutcomeRepository.load()` validates `is_terminal` is exactly `int(0)` or `int(1)` and cross-checks against the enum. Canonical hashing via RFC 8785 with NaN/Infinity rejection provides tamper-evident integrity. The lineage system (`explain()`) performs bidirectional parent/group consistency validation and crashes on any anomaly.
+ELSPETH's correctness posture is anchored by the Tier 1 crash-on-anomaly principle, which is applied rigorously throughout the Landscape subsystem. The `NodeStateLoader.load()` validates 6+ invariants per status variant. `TokenOutcomeLoader.load()` validates `is_terminal` is exactly `int(0)` or `int(1)` and cross-checks against the enum. Canonical hashing via RFC 8785 with NaN/Infinity rejection provides tamper-evident integrity. The lineage system (`explain()`) performs bidirectional parent/group consistency validation and crashes on any anomaly.
 
 Two known P0 correctness gaps remain:
 1. **NaN/Infinity in float validation**: The float validation path accepts these values, which would violate the RFC 8785 canonical JSON contract if they propagate to the audit trail.
@@ -145,7 +145,7 @@ Gaps: PostgreSQL deployments have no schema validation check (SQLite-only `_vali
 | openrouter_batch NaN/Infinity rejection | `plugins/llm/openrouter_batch.py:740` | Replace response.json() with json.loads(text, parse_constant=_reject_nonfinite_constant) |
 | Freeze 16 mutable Tier 1 audit records | `contracts/audit.py` | Run, Node, Edge, Row, Token, etc. should be frozen=True |
 | Untyped dicts at Tier 1 boundary (10 open bugs) | Multiple locations | Frozen dataclasses for record_secret_resolutions, Operation model, exporter records |
-| Missing OperationRepository | `core/landscape/_call_recording.py` | Operations bypass repository pattern, skip enum validation at deserialization |
+| Missing OperationLoader | `core/landscape/_call_recording.py` | Operations bypass loader pattern, skip enum validation at deserialization |
 
 ### Should Fix Before Release
 

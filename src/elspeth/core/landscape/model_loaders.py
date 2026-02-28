@@ -23,6 +23,7 @@ from elspeth.contracts.audit import (
     NodeStateFailed,
     NodeStateOpen,
     NodeStatePending,
+    Operation,
     RoutingEvent,
     Row,
     Run,
@@ -392,8 +393,8 @@ class NodeStateLoader:
             )
 
         else:
-            # This branch should be unreachable if NodeStateStatus enum is correct
-            # But we include it for defensive completeness - crash on unknown status
+            # Exhaustive match: all 4 NodeStateStatus variants are handled above.
+            # If we reach here, the enum was extended without updating this loader.
             raise ValueError(f"Unknown status {row.status} for state {row.state_id}")
 
 
@@ -560,4 +561,38 @@ class BatchMemberLoader:
             batch_id=row.batch_id,
             token_id=row.token_id,
             ordinal=row.ordinal,
+        )
+
+
+class OperationLoader:
+    """Loader for Operation records (source/sink I/O operations).
+
+    No enum conversion needed — Operation uses Literal types validated
+    by __post_init__(). This loader centralizes the row→dataclass mapping
+    that was previously duplicated in get_operation() and get_operations_for_run().
+    """
+
+    def load(self, row: SARow[Any]) -> Operation:
+        """Load Operation from database row.
+
+        Args:
+            row: Database row from operations table
+
+        Returns:
+            Operation with all fields mapped and lifecycle invariants validated
+        """
+        return Operation(
+            operation_id=row.operation_id,
+            run_id=row.run_id,
+            node_id=row.node_id,
+            operation_type=row.operation_type,
+            started_at=row.started_at,
+            completed_at=row.completed_at,
+            status=row.status,
+            input_data_ref=row.input_data_ref,
+            input_data_hash=row.input_data_hash,
+            output_data_ref=row.output_data_ref,
+            output_data_hash=row.output_data_hash,
+            error_message=row.error_message,
+            duration_ms=row.duration_ms,
         )

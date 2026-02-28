@@ -233,7 +233,7 @@ class NodeStateRecordingMixin:
             state_id: State ID to retrieve
 
         Returns:
-            NodeState (union of Open, Completed, or Failed) or None
+            NodeState (union of Open, Pending, Completed, or Failed) or None
         """
         query = select(node_states_table).where(node_states_table.c.state_id == state_id)
         row = self._ops.execute_fetchone(query)

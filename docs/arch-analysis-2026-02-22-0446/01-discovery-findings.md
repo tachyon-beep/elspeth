@@ -196,7 +196,7 @@ Secret fingerprinting via HMAC (never raw storage in audit trail). URL sanitizat
 | P2 | Split _execute_run into phases; unify with _process_resumed_rows | Medium | Reduces 830-line method, eliminates ~60% structural duplication |
 | P2 | Extract _handle_transform_result / _handle_gate_result from processor | Medium | Reduces 375-line _process_single_token complexity |
 | P2 | Delete orphaned BaseLLMTransform | Trivial | No Legacy Code policy compliance |
-| P3 | Add OperationRepository; type secret_resolutions parameter | Low | Closes remaining untyped-dict-at-Tier-1 gaps in Landscape |
+| P3 | Add OperationLoader; type secret_resolutions parameter | Low | Closes remaining untyped-dict-at-Tier-1 gaps in Landscape |
 | P3 | Split config.py into models/loading/secrets modules | Medium | Reduces 2,073-line file, separates concerns |
 | P3 | Refactor build_execution_graph into DAGBuilder class | High | Enables phase-level testing of 15-phase build |
 | P3 | Standardize Tier 1 error types (ValueError -> AuditIntegrityError) | Low | Consistent error semantics across audit subsystem |

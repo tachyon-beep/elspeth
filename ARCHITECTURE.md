@@ -251,7 +251,7 @@ C4Component
 | **LandscapeRecorder** | `recorder.py` + mixins | ~3,200 | High-level recording API (47+ methods, split into recording mixins) |
 | **LandscapeDB** | `database.py` | ~477 | Connection management, schema validation, SQLCipher support |
 | **Schema** | `schema.py` | ~510 | SQLAlchemy table definitions (21 tables) |
-| **Repositories** | `repositories.py` | ~581 | Row→Object conversion with Tier 1 validation |
+| **Model Loaders** | `model_loaders.py` | ~564 | Row→Object conversion with Tier 1 validation |
 | **Lineage** | `lineage.py` | ~210 | `explain()` queries for complete lineage |
 | **Exporter** | `exporter.py` | ~554 | Audit data export (JSON, CSV) |
 | **Formatters** | `formatters.py` | ~229 | Data serialization, datetime handling |

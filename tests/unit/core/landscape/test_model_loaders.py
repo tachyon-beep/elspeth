@@ -4,12 +4,14 @@ The model loader layer converts SQLAlchemy row objects (where enums are stored
 as strings) into strict domain dataclass objects. This is Tier 1 trust --
 bad data from our own DB must crash, never coerce.
 
-Tests use unittest.mock.Mock objects to simulate SQLAlchemy Row objects.
+Tests use SimpleNamespace to simulate SQLAlchemy Row objects. SimpleNamespace
+raises AttributeError on missing attributes, matching real Row behavior and
+catching field-name typos that bare Mock() would silently accept.
 """
 
 import json
-from datetime import UTC, datetime
-from unittest.mock import Mock
+from datetime import UTC, datetime, timedelta
+from types import SimpleNamespace
 
 import pytest
 
@@ -24,6 +26,7 @@ from elspeth.contracts.audit import (
     NodeStateFailed,
     NodeStateOpen,
     NodeStatePending,
+    Operation,
     RoutingEvent,
     Row,
     Run,
@@ -54,6 +57,7 @@ from elspeth.core.landscape.model_loaders import (
     EdgeLoader,
     NodeLoader,
     NodeStateLoader,
+    OperationLoader,
     RoutingEventLoader,
     RowLoader,
     RunLoader,
@@ -65,15 +69,18 @@ from elspeth.core.landscape.model_loaders import (
 )
 
 
-def _make_sa_row(**kwargs: object) -> Mock:
-    """Create a mock SQLAlchemy Row with named attributes."""
-    row = Mock()
-    for key, value in kwargs.items():
-        setattr(row, key, value)
-    return row
+def _make_sa_row(**kwargs: object) -> SimpleNamespace:
+    """Create a SimpleNamespace simulating a SQLAlchemy Row.
+
+    SimpleNamespace raises AttributeError on missing attributes,
+    matching real Row behavior and catching loader field-name typos.
+    """
+    return SimpleNamespace(**kwargs)
 
 
 NOW = datetime.now(UTC)
+LATER = NOW + timedelta(seconds=1)
+EVEN_LATER = NOW + timedelta(seconds=2)
 
 
 # ---------------------------------------------------------------------------
@@ -84,7 +91,7 @@ NOW = datetime.now(UTC)
 class TestRunLoader:
     """Tests for RunLoader.load()."""
 
-    def _make_run_row(self, **overrides: object) -> Mock:
+    def _make_run_row(self, **overrides: object) -> SimpleNamespace:
         defaults = {
             "run_id": "run-1",
             "started_at": NOW,
@@ -106,11 +113,11 @@ class TestRunLoader:
     def test_valid_load_all_fields(self) -> None:
         sa_row = self._make_run_row(
             status="completed",
-            completed_at=NOW,
+            completed_at=LATER,
             reproducibility_grade="A",
             export_status="pending",
             export_error="some error",
-            exported_at=NOW,
+            exported_at=EVEN_LATER,
             export_format="csv",
             export_sink="output",
         )
@@ -121,7 +128,9 @@ class TestRunLoader:
         assert result.run_id == "run-1"
         assert result.status == RunStatus.COMPLETED
         assert result.export_status == ExportStatus.PENDING
-        assert result.completed_at == NOW
+        assert result.started_at == NOW
+        assert result.completed_at == LATER
+        assert result.exported_at == EVEN_LATER
         assert result.reproducibility_grade == "A"
         assert result.export_error == "some error"
         assert result.export_format == "csv"
@@ -136,10 +145,7 @@ class TestRunLoader:
         assert result.export_status is None
         assert result.completed_at is None
 
-    @pytest.mark.parametrize(
-        "status_value",
-        ["running", "completed", "failed", "interrupted"],
-    )
+    @pytest.mark.parametrize("status_value", [s.value for s in RunStatus])
     def test_valid_run_status_values(self, status_value: str) -> None:
         sa_row = self._make_run_row(status=status_value)
         loader = RunLoader()
@@ -152,10 +158,7 @@ class TestRunLoader:
         with pytest.raises(ValueError):
             loader.load(sa_row)
 
-    @pytest.mark.parametrize(
-        "export_value",
-        ["pending", "completed", "failed"],
-    )
+    @pytest.mark.parametrize("export_value", [s.value for s in ExportStatus])
     def test_valid_export_status_values(self, export_value: str) -> None:
         sa_row = self._make_run_row(export_status=export_value)
         loader = RunLoader()
@@ -190,7 +193,7 @@ class TestRunLoader:
 class TestNodeLoader:
     """Tests for NodeLoader.load()."""
 
-    def _make_node_row(self, **overrides: object) -> Mock:
+    def _make_node_row(self, **overrides: object) -> SimpleNamespace:
         defaults = {
             "node_id": "node-1",
             "run_id": "run-1",
@@ -239,27 +242,14 @@ class TestNodeLoader:
         assert result.determinism == Determinism.DETERMINISTIC
         assert result.schema_fields is None
 
-    @pytest.mark.parametrize(
-        "node_type_value",
-        ["source", "transform", "gate", "aggregation", "coalesce", "sink"],
-    )
+    @pytest.mark.parametrize("node_type_value", [t.value for t in NodeType])
     def test_valid_node_type_values(self, node_type_value: str) -> None:
         sa_row = self._make_node_row(node_type=node_type_value)
         loader = NodeLoader()
         result = loader.load(sa_row)
         assert result.node_type == NodeType(node_type_value)
 
-    @pytest.mark.parametrize(
-        "det_value",
-        [
-            "deterministic",
-            "seeded",
-            "io_read",
-            "io_write",
-            "external_call",
-            "non_deterministic",
-        ],
-    )
+    @pytest.mark.parametrize("det_value", [d.value for d in Determinism])
     def test_valid_determinism_values(self, det_value: str) -> None:
         sa_row = self._make_node_row(determinism=det_value)
         loader = NodeLoader()
@@ -331,7 +321,7 @@ class TestNodeLoader:
 class TestEdgeLoader:
     """Tests for EdgeLoader.load()."""
 
-    def _make_edge_row(self, **overrides: object) -> Mock:
+    def _make_edge_row(self, **overrides: object) -> SimpleNamespace:
         defaults = {
             "edge_id": "edge-1",
             "run_id": "run-1",
@@ -344,7 +334,7 @@ class TestEdgeLoader:
         defaults.update(overrides)
         return _make_sa_row(**defaults)
 
-    @pytest.mark.parametrize("mode_value", ["move", "copy", "divert"])
+    @pytest.mark.parametrize("mode_value", [m.value for m in RoutingMode])
     def test_valid_routing_modes(self, mode_value: str) -> None:
         sa_row = self._make_edge_row(default_mode=mode_value)
         loader = EdgeLoader()
@@ -376,7 +366,7 @@ class TestEdgeLoader:
 class TestRowLoader:
     """Tests for RowLoader.load()."""
 
-    def _make_row_row(self, **overrides: object) -> Mock:
+    def _make_row_row(self, **overrides: object) -> SimpleNamespace:
         defaults = {
             "row_id": "row-1",
             "run_id": "run-1",
@@ -415,7 +405,7 @@ class TestRowLoader:
 class TestTokenLoader:
     """Tests for TokenLoader.load()."""
 
-    def _make_token_row(self, **overrides: object) -> Mock:
+    def _make_token_row(self, **overrides: object) -> SimpleNamespace:
         defaults = {
             "token_id": "tok-1",
             "row_id": "row-1",
@@ -500,7 +490,7 @@ class TestTokenParentLoader:
 class TestCallLoader:
     """Tests for CallLoader.load()."""
 
-    def _make_call_row(self, **overrides: object) -> Mock:
+    def _make_call_row(self, **overrides: object) -> SimpleNamespace:
         defaults = {
             "call_id": "call-1",
             "call_index": 0,
@@ -566,17 +556,14 @@ class TestCallLoader:
         result = loader.load(sa_row)
         assert result.error_json == '{"reason": "timeout"}'
 
-    @pytest.mark.parametrize(
-        "call_type_value",
-        ["llm", "http", "http_redirect", "sql", "filesystem"],
-    )
+    @pytest.mark.parametrize("call_type_value", [t.value for t in CallType])
     def test_valid_call_type_values(self, call_type_value: str) -> None:
         sa_row = self._make_call_row(call_type=call_type_value)
         loader = CallLoader()
         result = loader.load(sa_row)
         assert result.call_type == CallType(call_type_value)
 
-    @pytest.mark.parametrize("status_value", ["success", "error"])
+    @pytest.mark.parametrize("status_value", [s.value for s in CallStatus])
     def test_valid_call_status_values(self, status_value: str) -> None:
         sa_row = self._make_call_row(status=status_value)
         loader = CallLoader()
@@ -604,7 +591,7 @@ class TestCallLoader:
 class TestRoutingEventLoader:
     """Tests for RoutingEventLoader.load()."""
 
-    def _make_routing_row(self, **overrides: object) -> Mock:
+    def _make_routing_row(self, **overrides: object) -> SimpleNamespace:
         defaults = {
             "event_id": "evt-1",
             "state_id": "state-1",
@@ -619,7 +606,7 @@ class TestRoutingEventLoader:
         defaults.update(overrides)
         return _make_sa_row(**defaults)
 
-    @pytest.mark.parametrize("mode_value", ["move", "copy", "divert"])
+    @pytest.mark.parametrize("mode_value", [m.value for m in RoutingMode])
     def test_valid_routing_modes(self, mode_value: str) -> None:
         sa_row = self._make_routing_row(mode=mode_value)
         loader = RoutingEventLoader()
@@ -653,7 +640,7 @@ class TestRoutingEventLoader:
 class TestBatchLoader:
     """Tests for BatchLoader.load()."""
 
-    def _make_batch_row(self, **overrides: object) -> Mock:
+    def _make_batch_row(self, **overrides: object) -> SimpleNamespace:
         defaults = {
             "batch_id": "batch-1",
             "run_id": "run-1",
@@ -669,10 +656,7 @@ class TestBatchLoader:
         defaults.update(overrides)
         return _make_sa_row(**defaults)
 
-    @pytest.mark.parametrize(
-        "status_value",
-        ["draft", "executing", "completed", "failed"],
-    )
+    @pytest.mark.parametrize("status_value", [s.value for s in BatchStatus])
     def test_valid_batch_status_values(self, status_value: str) -> None:
         sa_row = self._make_batch_row(status=status_value)
         loader = BatchLoader()
@@ -686,7 +670,7 @@ class TestBatchLoader:
             aggregation_state_id="agg-state-1",
             trigger_type="count",
             trigger_reason="threshold=10",
-            completed_at=NOW,
+            completed_at=LATER,
         )
         loader = BatchLoader()
         result = loader.load(sa_row)
@@ -695,7 +679,8 @@ class TestBatchLoader:
         assert result.trigger_type == TriggerType.COUNT
         assert isinstance(result.trigger_type, TriggerType)
         assert result.trigger_reason == "threshold=10"
-        assert result.completed_at == NOW
+        assert result.created_at == NOW
+        assert result.completed_at == LATER
 
     def test_invalid_status_raises_value_error(self) -> None:
         sa_row = self._make_batch_row(status="cooking")
@@ -703,10 +688,7 @@ class TestBatchLoader:
         with pytest.raises(ValueError):
             loader.load(sa_row)
 
-    @pytest.mark.parametrize(
-        "trigger_value",
-        ["count", "timeout", "condition", "end_of_source", "manual"],
-    )
+    @pytest.mark.parametrize("trigger_value", [t.value for t in TriggerType])
     def test_valid_trigger_type_values(self, trigger_value: str) -> None:
         sa_row = self._make_batch_row(trigger_type=trigger_value)
         loader = BatchLoader()
@@ -734,7 +716,7 @@ class TestBatchLoader:
 class TestNodeStateLoader:
     """Tests for NodeStateLoader.load() -- discriminated union."""
 
-    def _make_node_state_row(self, **overrides: object) -> Mock:
+    def _make_node_state_row(self, **overrides: object) -> SimpleNamespace:
         """Create a base node state row with all columns present.
 
         All completion-related fields default to None (representing OPEN).
@@ -854,7 +836,7 @@ class TestNodeStateLoader:
     def test_pending_valid(self) -> None:
         sa_row = self._make_node_state_row(
             status="pending",
-            completed_at=NOW,
+            completed_at=LATER,
             duration_ms=150.5,
         )
         loader = NodeStateLoader()
@@ -862,7 +844,8 @@ class TestNodeStateLoader:
 
         assert isinstance(result, NodeStatePending)
         assert result.status == NodeStateStatus.PENDING
-        assert result.completed_at == NOW
+        assert result.started_at == NOW
+        assert result.completed_at == LATER
         assert result.duration_ms == 150.5
 
     def test_pending_with_context_fields(self) -> None:
@@ -938,7 +921,7 @@ class TestNodeStateLoader:
         sa_row = self._make_node_state_row(
             status="completed",
             output_hash="out123",
-            completed_at=NOW,
+            completed_at=LATER,
             duration_ms=200.0,
         )
         loader = NodeStateLoader()
@@ -947,7 +930,8 @@ class TestNodeStateLoader:
         assert isinstance(result, NodeStateCompleted)
         assert result.status == NodeStateStatus.COMPLETED
         assert result.output_hash == "out123"
-        assert result.completed_at == NOW
+        assert result.started_at == NOW
+        assert result.completed_at == LATER
         assert result.duration_ms == 200.0
 
     def test_completed_with_optional_fields(self) -> None:
@@ -1018,7 +1002,7 @@ class TestNodeStateLoader:
     def test_failed_valid(self) -> None:
         sa_row = self._make_node_state_row(
             status="failed",
-            completed_at=NOW,
+            completed_at=LATER,
             duration_ms=50.0,
         )
         loader = NodeStateLoader()
@@ -1026,7 +1010,8 @@ class TestNodeStateLoader:
 
         assert isinstance(result, NodeStateFailed)
         assert result.status == NodeStateStatus.FAILED
-        assert result.completed_at == NOW
+        assert result.started_at == NOW
+        assert result.completed_at == LATER
         assert result.duration_ms == 50.0
         assert result.error_json is None
         assert result.output_hash is None
@@ -1055,6 +1040,21 @@ class TestNodeStateLoader:
         result = loader.load(sa_row)
         assert isinstance(result, NodeStateFailed)
         assert result.output_hash == "partial_out"
+
+    def test_failed_with_output_hash_and_error_json(self) -> None:
+        """FAILED allows both output_hash (partial output) and error_json simultaneously."""
+        sa_row = self._make_node_state_row(
+            status="failed",
+            completed_at=NOW,
+            duration_ms=100.0,
+            output_hash="partial-out",
+            error_json='{"error": "timeout"}',
+        )
+        loader = NodeStateLoader()
+        result = loader.load(sa_row)
+        assert isinstance(result, NodeStateFailed)
+        assert result.output_hash == "partial-out"
+        assert result.error_json == '{"error": "timeout"}'
 
     def test_failed_with_context_fields(self) -> None:
         sa_row = self._make_node_state_row(
@@ -1247,7 +1247,7 @@ class TestTransformErrorLoader:
 class TestTokenOutcomeLoader:
     """Tests for TokenOutcomeLoader.load()."""
 
-    def _make_outcome_row(self, **overrides: object) -> Mock:
+    def _make_outcome_row(self, **overrides: object) -> SimpleNamespace:
         defaults = {
             "outcome_id": "oc-1",
             "run_id": "run-1",
@@ -1292,20 +1292,7 @@ class TestTokenOutcomeLoader:
         assert result.outcome == RowOutcome.BUFFERED
         assert result.is_terminal is False
 
-    @pytest.mark.parametrize(
-        "outcome_value",
-        [
-            "completed",
-            "routed",
-            "forked",
-            "failed",
-            "quarantined",
-            "consumed_in_batch",
-            "coalesced",
-            "expanded",
-            "buffered",
-        ],
-    )
+    @pytest.mark.parametrize("outcome_value", [o.value for o in RowOutcome])
     def test_all_row_outcome_values(self, outcome_value: str) -> None:
         expected_outcome = RowOutcome(outcome_value)
         sa_row = self._make_outcome_row(outcome=outcome_value, is_terminal=1 if expected_outcome.is_terminal else 0)
@@ -1367,6 +1354,13 @@ class TestTokenOutcomeLoader:
         """Bool is a subclass of int in Python, so True == 1.
         But Tier 1 strictness requires exact int type — bool must be rejected."""
         sa_row = self._make_outcome_row(is_terminal=True)
+        loader = TokenOutcomeLoader()
+        with pytest.raises(ValueError, match="invalid is_terminal"):
+            loader.load(sa_row)
+
+    def test_is_terminal_false_bool_raises_value_error(self) -> None:
+        """bool False must be rejected — bool is subclass of int in Python."""
+        sa_row = self._make_outcome_row(is_terminal=False, outcome="buffered")
         loader = TokenOutcomeLoader()
         with pytest.raises(ValueError, match="invalid is_terminal"):
             loader.load(sa_row)
@@ -1511,3 +1505,195 @@ class TestBatchMemberLoader:
         loader = BatchMemberLoader()
         result = loader.load(sa_row)
         assert result.ordinal == 10
+
+
+# ---------------------------------------------------------------------------
+# OperationLoader
+# ---------------------------------------------------------------------------
+
+
+class TestOperationLoader:
+    """Tests for OperationLoader.load().
+
+    Operation uses Literal types validated by __post_init__(), not enums.
+    Tests verify that the loader correctly maps all fields and that
+    __post_init__ lifecycle invariants still fire through the loader path.
+    """
+
+    def _make_operation_row(self, **overrides: object) -> SimpleNamespace:
+        defaults = {
+            "operation_id": "op-1",
+            "run_id": "run-1",
+            "node_id": "node-1",
+            "operation_type": "source_load",
+            "started_at": NOW,
+            "status": "open",
+            "completed_at": None,
+            "input_data_ref": None,
+            "input_data_hash": None,
+            "output_data_ref": None,
+            "output_data_hash": None,
+            "error_message": None,
+            "duration_ms": None,
+        }
+        defaults.update(overrides)
+        return _make_sa_row(**defaults)
+
+    # === Happy paths ===
+
+    def test_open_source_load(self) -> None:
+        sa_row = self._make_operation_row()
+        loader = OperationLoader()
+        result = loader.load(sa_row)
+
+        assert isinstance(result, Operation)
+        assert result.operation_id == "op-1"
+        assert result.run_id == "run-1"
+        assert result.node_id == "node-1"
+        assert result.operation_type == "source_load"
+        assert result.status == "open"
+        assert result.started_at == NOW
+        assert result.completed_at is None
+
+    def test_completed_sink_write(self) -> None:
+        sa_row = self._make_operation_row(
+            operation_type="sink_write",
+            status="completed",
+            completed_at=LATER,
+            duration_ms=250.0,
+            input_data_ref="ref://in/abc",
+            input_data_hash="inhash",
+            output_data_ref="ref://out/xyz",
+            output_data_hash="outhash",
+        )
+        loader = OperationLoader()
+        result = loader.load(sa_row)
+
+        assert result.operation_type == "sink_write"
+        assert result.status == "completed"
+        assert result.started_at == NOW
+        assert result.completed_at == LATER
+        assert result.duration_ms == 250.0
+        assert result.input_data_ref == "ref://in/abc"
+        assert result.output_data_ref == "ref://out/xyz"
+
+    def test_failed_with_error(self) -> None:
+        sa_row = self._make_operation_row(
+            status="failed",
+            completed_at=LATER,
+            duration_ms=100.0,
+            error_message="connection refused",
+        )
+        loader = OperationLoader()
+        result = loader.load(sa_row)
+
+        assert result.status == "failed"
+        assert result.error_message == "connection refused"
+        assert result.completed_at == LATER
+
+    def test_pending_status(self) -> None:
+        sa_row = self._make_operation_row(
+            status="pending",
+            completed_at=LATER,
+            duration_ms=50.0,
+        )
+        loader = OperationLoader()
+        result = loader.load(sa_row)
+
+        assert result.status == "pending"
+        assert result.completed_at == LATER
+
+    # === Lifecycle invariant violations (validated by __post_init__) ===
+
+    def test_invalid_operation_type_raises(self) -> None:
+        sa_row = self._make_operation_row(operation_type="kafka_consume")
+        loader = OperationLoader()
+        with pytest.raises(ValueError, match="operation_type"):
+            loader.load(sa_row)
+
+    def test_invalid_status_raises(self) -> None:
+        sa_row = self._make_operation_row(status="running")
+        loader = OperationLoader()
+        with pytest.raises(ValueError, match="status"):
+            loader.load(sa_row)
+
+    def test_open_with_completed_at_raises(self) -> None:
+        sa_row = self._make_operation_row(status="open", completed_at=NOW)
+        loader = OperationLoader()
+        with pytest.raises(ValueError, match="completed_at"):
+            loader.load(sa_row)
+
+    def test_open_with_duration_ms_raises(self) -> None:
+        sa_row = self._make_operation_row(status="open", duration_ms=100.0)
+        loader = OperationLoader()
+        with pytest.raises(ValueError, match="duration_ms"):
+            loader.load(sa_row)
+
+    def test_open_with_error_message_raises(self) -> None:
+        sa_row = self._make_operation_row(status="open", error_message="bad")
+        loader = OperationLoader()
+        with pytest.raises(ValueError, match="error_message"):
+            loader.load(sa_row)
+
+    def test_completed_with_null_completed_at_raises(self) -> None:
+        sa_row = self._make_operation_row(
+            status="completed",
+            completed_at=None,
+            duration_ms=100.0,
+        )
+        loader = OperationLoader()
+        with pytest.raises(ValueError, match="completed_at"):
+            loader.load(sa_row)
+
+    def test_completed_with_null_duration_ms_raises(self) -> None:
+        sa_row = self._make_operation_row(
+            status="completed",
+            completed_at=LATER,
+            duration_ms=None,
+        )
+        loader = OperationLoader()
+        with pytest.raises(ValueError, match="duration_ms"):
+            loader.load(sa_row)
+
+    def test_completed_with_error_message_raises(self) -> None:
+        sa_row = self._make_operation_row(
+            status="completed",
+            completed_at=LATER,
+            duration_ms=100.0,
+            error_message="should not be here",
+        )
+        loader = OperationLoader()
+        with pytest.raises(ValueError, match="error_message"):
+            loader.load(sa_row)
+
+    def test_failed_with_null_error_message_raises(self) -> None:
+        sa_row = self._make_operation_row(
+            status="failed",
+            completed_at=LATER,
+            duration_ms=100.0,
+            error_message=None,
+        )
+        loader = OperationLoader()
+        with pytest.raises(ValueError, match="error_message"):
+            loader.load(sa_row)
+
+    # === Both operation types accepted ===
+
+    @pytest.mark.parametrize("op_type", ["source_load", "sink_write"])
+    def test_both_operation_types_accepted(self, op_type: str) -> None:
+        sa_row = self._make_operation_row(operation_type=op_type)
+        loader = OperationLoader()
+        result = loader.load(sa_row)
+        assert result.operation_type == op_type
+
+    @pytest.mark.parametrize("status", ["open", "completed", "failed", "pending"])
+    def test_all_valid_statuses_accepted(self, status: str) -> None:
+        extra: dict[str, object] = {}
+        if status in ("completed", "pending"):
+            extra = {"completed_at": LATER, "duration_ms": 100.0}
+        elif status == "failed":
+            extra = {"completed_at": LATER, "duration_ms": 100.0, "error_message": "err"}
+        sa_row = self._make_operation_row(status=status, **extra)
+        loader = OperationLoader()
+        result = loader.load(sa_row)
+        assert result.status == status

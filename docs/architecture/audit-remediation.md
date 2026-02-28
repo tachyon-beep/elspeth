@@ -187,7 +187,7 @@ if quorum_not_met:
 ### Vulnerability 6: Tier 1 Validation Gaps
 
 **Severity: HIGH**
-**Location:** `repositories.py` (multiple load methods)
+**Location:** `model_loaders.py` (multiple load methods)
 
 **Problem:** Falsy checks allow invalid values to pass silently, violating CLAUDE.md Tier 1 principle.
 
@@ -242,8 +242,8 @@ is_terminal = row.is_terminal == 1  # NULL, 2, 99 all become False
 
 | # | Issue | Location | Fix Pattern |
 |---|-------|----------|-------------|
-| 1 | `is_terminal` coercion | `repositories.py:478` | Explicit 0/1 check, crash on other |
-| 2 | `export_status` falsy check | `RunRepository.load()` | `is not None` check |
+| 1 | `is_terminal` coercion | `model_loaders.py:478` | Explicit 0/1 check, crash on other |
+| 2 | `export_status` falsy check | `RunLoader.load()` | `is not None` check |
 | 3 | Missing `__post_init__` | Call, RoutingEvent, Batch, TokenOutcome | Add enum/type validation |
 | 4 | Endpoint NULL handling | `clients/http.py` | Crash on NULL base_url |
 
@@ -315,7 +315,7 @@ is_terminal = row.is_terminal == 1  # NULL, 2, 99 all become False
 - Test: `test_xor_violation_raises_immediately`
 
 #### 1.4 Tier 1 Validation Hardening
-- File: `src/elspeth/core/landscape/repositories.py`
+- File: `src/elspeth/core/landscape/model_loaders.py`
 - Change: Replace falsy checks with `is not None`
 - Change: Add `__post_init__` to Call, RoutingEvent, Batch, TokenOutcome
 - Test: `test_invalid_is_terminal_crashes`, `test_invalid_enum_crashes`
@@ -502,7 +502,7 @@ The codebase was built feature-forward with property-based testing for success p
 | `executors.py` | 843-879 | Config gate error |
 | `coalesce_executor.py` | 421-449 | Failure tokens unrecorded |
 | `recorder.py` | 1875-1920 | XOR validation missing |
-| `repositories.py` | Multiple | Tier 1 validation gaps |
+| `model_loaders.py` | Multiple | Tier 1 validation gaps |
 
 ### Test Files
 

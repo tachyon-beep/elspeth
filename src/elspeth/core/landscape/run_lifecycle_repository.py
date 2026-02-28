@@ -130,7 +130,7 @@ class RunLifecycleRepository:
 
         Args:
             run_id: Run to complete
-            status: Final RunStatus (COMPLETED or FAILED)
+            status: Final RunStatus (COMPLETED, FAILED, or INTERRUPTED)
             reproducibility_grade: Optional final grade
 
         Returns:
@@ -524,7 +524,7 @@ class RunLifecycleRepository:
 
         Args:
             run_id: Run to finalize
-            status: Final RunStatus (COMPLETED or FAILED)
+            status: Final RunStatus (COMPLETED, FAILED, or INTERRUPTED)
 
         Returns:
             Updated Run model
