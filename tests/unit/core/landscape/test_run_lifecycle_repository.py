@@ -643,7 +643,7 @@ class TestFinalizeRunEdgeCases:
         repo = RunLifecycleRepository(db, ops, RunLoader())
         repo.begin_run(config={}, canonical_version="v1", run_id="nd-run")
 
-        # Register a nondeterministic node via the recorder (need GraphRecordingMixin)
+        # Register a nondeterministic node via the recorder (need DataFlowRepository)
         from elspeth.core.landscape.recorder import LandscapeRecorder
 
         recorder = LandscapeRecorder(db)

@@ -58,6 +58,8 @@ from elspeth.core.landscape.schema import (
     validation_errors_table,
 )
 
+logger = logging.getLogger(__name__)
+
 if TYPE_CHECKING:
     from elspeth.contracts.errors import ContractViolation
     from elspeth.contracts.payload_store import PayloadStore
@@ -259,11 +261,15 @@ class DataFlowRepository:
                     "EXPANDED outcome requires expand_group_id but got None. "
                     "Contract violation - see docs/contracts/token-outcomes/00-token-outcome-contract.md"
                 )
-        elif outcome == RowOutcome.BUFFERED and batch_id is None:
+        elif outcome == RowOutcome.BUFFERED:
+            if batch_id is None:
+                raise ValueError(
+                    "BUFFERED outcome requires batch_id but got None. Contract violation - see docs/contracts/token-outcomes/00-token-outcome-contract.md"
+                )
+        else:
             raise ValueError(
-                "BUFFERED outcome requires batch_id but got None. Contract violation - see docs/contracts/token-outcomes/00-token-outcome-contract.md"
+                f"Unhandled RowOutcome variant in validation: {outcome!r}. Add required-field validation for this outcome type."
             )
-        # No else needed - exhaustive enum handling above
 
     # ── Token recording: public methods ──────────────────────────────────
 
@@ -308,6 +314,10 @@ class DataFlowRepository:
             try:
                 data_hash = stable_hash(data)
             except (ValueError, TypeError):
+                logger.warning(
+                    "Quarantined row data not canonically hashable (using repr_hash fallback): %s",
+                    type(data).__name__,
+                )
                 data_hash = repr_hash(data)
         else:
             data_hash = stable_hash(data)
@@ -324,6 +334,10 @@ class DataFlowRepository:
                 try:
                     payload_bytes = canonical_json(data).encode("utf-8")
                 except (ValueError, TypeError):
+                    logger.warning(
+                        "Quarantined row data not canonically serializable (using repr fallback for payload): %s",
+                        type(data).__name__,
+                    )
                     payload_bytes = json.dumps({"_repr": repr(data)}).encode("utf-8")
             else:
                 payload_bytes = canonical_json(data).encode("utf-8")
@@ -1142,7 +1156,9 @@ class DataFlowRepository:
             Dictionary mapping (from_node_id, label) to edge_id
 
         Raises:
-            ValueError: If run has no edges registered (data corruption)
+            ValueError: If run has no edges registered (data corruption).
+                DAG compilation always registers edges, so an empty map
+                indicates the run was never properly initialized.
 
         Note:
             This encapsulates Landscape schema access for Orchestrator resume.
@@ -1154,6 +1170,13 @@ class DataFlowRepository:
         edge_map: dict[tuple[str, str], str] = {}
         for edge in edges:
             edge_map[(edge.from_node_id, edge.label)] = edge.edge_id
+
+        if not edge_map:
+            raise ValueError(
+                f"Run {run_id!r} has no edges registered — cannot build edge map. "
+                f"DAG compilation always registers edges; an empty map indicates "
+                f"the run was never properly initialized or database corruption."
+            )
 
         return edge_map
 
@@ -1218,7 +1241,6 @@ class DataFlowRepository:
         Returns:
             error_id for tracking
         """
-        logger = logging.getLogger(__name__)
         error_id = f"verr_{generate_id()[:12]}"
 
         # Tier-3 (external data) trust boundary: row_data may be non-canonical
@@ -1311,7 +1333,6 @@ class DataFlowRepository:
         self._validate_token_run_ownership(token_id, run_id)
 
         error_id = f"terr_{generate_id()[:12]}"
-        logger = logging.getLogger(__name__)
 
         # error_details may contain NaN/Infinity or non-serializable values
         # (e.g. from exception context in row operations). Wrap in try/except

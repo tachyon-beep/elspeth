@@ -58,7 +58,7 @@ def _make_row(recorder: LandscapeRecorder, *, run_id: str = "run-1", row_index: 
 
 
 class TestCreateRow:
-    """Tests for TokenRecordingMixin.create_row."""
+    """Tests for DataFlowRepository.create_row."""
 
     def test_creates_row_with_generated_id(self):
         _db, recorder = _setup()
@@ -169,7 +169,7 @@ class TestCreateRow:
 
 
 class TestCreateToken:
-    """Tests for TokenRecordingMixin.create_token."""
+    """Tests for DataFlowRepository.create_token."""
 
     def test_creates_token_with_generated_id(self):
         _db, recorder = _setup()
@@ -253,7 +253,7 @@ class TestCreateToken:
 
 
 class TestForkToken:
-    """Tests for TokenRecordingMixin.fork_token."""
+    """Tests for DataFlowRepository.fork_token."""
 
     def test_creates_children_for_each_branch(self):
         _db, recorder = _setup()
@@ -345,7 +345,7 @@ class TestForkToken:
 
 
 class TestCoalesceTokens:
-    """Tests for TokenRecordingMixin.coalesce_tokens."""
+    """Tests for DataFlowRepository.coalesce_tokens."""
 
     def test_creates_merged_token(self):
         _db, recorder = _setup()
@@ -397,7 +397,7 @@ class TestCoalesceTokens:
 
 
 class TestExpandToken:
-    """Tests for TokenRecordingMixin.expand_token."""
+    """Tests for DataFlowRepository.expand_token."""
 
     def test_creates_n_children(self):
         _db, recorder = _setup()
@@ -521,104 +521,208 @@ class TestExpandToken:
 
 
 class TestValidateOutcomeFields:
-    """Tests for DataFlowRepository._validate_outcome_fields."""
+    """Tests for outcome field validation via public record_token_outcome API.
 
-    def _validate(self, recorder, outcome, **kwargs):
-        defaults = {
-            "sink_name": None,
-            "batch_id": None,
-            "fork_group_id": None,
-            "join_group_id": None,
-            "expand_group_id": None,
-            "error_hash": None,
-        }
-        defaults.update(kwargs)
-        recorder._data_flow._validate_outcome_fields(outcome, **defaults)
+    Each outcome variant requires specific companion fields (e.g. COMPLETED
+    requires sink_name). These tests verify that record_token_outcome raises
+    ValueError when required fields are missing and succeeds when they are
+    provided. All assertions go through the public API — no private internals.
+    """
 
     def test_completed_requires_sink_name(self):
         _db, recorder = _setup()
-        with pytest.raises((ValueError, TypeError)):
-            self._validate(recorder, RowOutcome.COMPLETED)
+        _row, token = _make_row(recorder)
+        with pytest.raises(ValueError, match="sink_name"):
+            recorder.record_token_outcome(
+                run_id="run-1",
+                token_id=token.token_id,
+                outcome=RowOutcome.COMPLETED,
+            )
 
     def test_completed_accepts_sink_name(self):
         _db, recorder = _setup()
-        self._validate(recorder, RowOutcome.COMPLETED, sink_name="output")
+        _row, token = _make_row(recorder)
+        outcome_id = recorder.record_token_outcome(
+            run_id="run-1",
+            token_id=token.token_id,
+            outcome=RowOutcome.COMPLETED,
+            sink_name="output",
+        )
+        assert outcome_id is not None
 
     def test_routed_requires_sink_name(self):
         _db, recorder = _setup()
-        with pytest.raises((ValueError, TypeError)):
-            self._validate(recorder, RowOutcome.ROUTED)
+        _row, token = _make_row(recorder)
+        with pytest.raises(ValueError, match="sink_name"):
+            recorder.record_token_outcome(
+                run_id="run-1",
+                token_id=token.token_id,
+                outcome=RowOutcome.ROUTED,
+            )
 
     def test_routed_accepts_sink_name(self):
         _db, recorder = _setup()
-        self._validate(recorder, RowOutcome.ROUTED, sink_name="reject-sink")
+        _row, token = _make_row(recorder)
+        outcome_id = recorder.record_token_outcome(
+            run_id="run-1",
+            token_id=token.token_id,
+            outcome=RowOutcome.ROUTED,
+            sink_name="reject-sink",
+        )
+        assert outcome_id is not None
 
     def test_forked_requires_fork_group_id(self):
         _db, recorder = _setup()
-        with pytest.raises((ValueError, TypeError)):
-            self._validate(recorder, RowOutcome.FORKED)
+        _row, token = _make_row(recorder)
+        with pytest.raises(ValueError, match="fork_group_id"):
+            recorder.record_token_outcome(
+                run_id="run-1",
+                token_id=token.token_id,
+                outcome=RowOutcome.FORKED,
+            )
 
     def test_forked_accepts_fork_group_id(self):
         _db, recorder = _setup()
-        self._validate(recorder, RowOutcome.FORKED, fork_group_id="fg-1")
+        _row, token = _make_row(recorder)
+        outcome_id = recorder.record_token_outcome(
+            run_id="run-1",
+            token_id=token.token_id,
+            outcome=RowOutcome.FORKED,
+            fork_group_id="fg-1",
+        )
+        assert outcome_id is not None
 
     def test_failed_requires_error_hash(self):
         _db, recorder = _setup()
-        with pytest.raises((ValueError, TypeError)):
-            self._validate(recorder, RowOutcome.FAILED)
+        _row, token = _make_row(recorder)
+        with pytest.raises(ValueError, match="error_hash"):
+            recorder.record_token_outcome(
+                run_id="run-1",
+                token_id=token.token_id,
+                outcome=RowOutcome.FAILED,
+            )
 
     def test_failed_accepts_error_hash(self):
         _db, recorder = _setup()
-        self._validate(recorder, RowOutcome.FAILED, error_hash="abc123")
+        _row, token = _make_row(recorder)
+        outcome_id = recorder.record_token_outcome(
+            run_id="run-1",
+            token_id=token.token_id,
+            outcome=RowOutcome.FAILED,
+            error_hash="abc123",
+        )
+        assert outcome_id is not None
 
     def test_quarantined_requires_error_hash(self):
         _db, recorder = _setup()
-        with pytest.raises((ValueError, TypeError)):
-            self._validate(recorder, RowOutcome.QUARANTINED)
+        _row, token = _make_row(recorder)
+        with pytest.raises(ValueError, match="error_hash"):
+            recorder.record_token_outcome(
+                run_id="run-1",
+                token_id=token.token_id,
+                outcome=RowOutcome.QUARANTINED,
+            )
 
     def test_quarantined_accepts_error_hash(self):
         _db, recorder = _setup()
-        self._validate(recorder, RowOutcome.QUARANTINED, error_hash="abc123")
+        _row, token = _make_row(recorder)
+        outcome_id = recorder.record_token_outcome(
+            run_id="run-1",
+            token_id=token.token_id,
+            outcome=RowOutcome.QUARANTINED,
+            error_hash="abc123",
+        )
+        assert outcome_id is not None
 
     def test_consumed_in_batch_requires_batch_id(self):
         _db, recorder = _setup()
-        with pytest.raises((ValueError, TypeError)):
-            self._validate(recorder, RowOutcome.CONSUMED_IN_BATCH)
+        _row, token = _make_row(recorder)
+        with pytest.raises(ValueError, match="batch_id"):
+            recorder.record_token_outcome(
+                run_id="run-1",
+                token_id=token.token_id,
+                outcome=RowOutcome.CONSUMED_IN_BATCH,
+            )
 
     def test_consumed_in_batch_accepts_batch_id(self):
         _db, recorder = _setup()
-        self._validate(recorder, RowOutcome.CONSUMED_IN_BATCH, batch_id="batch-1")
+        batch_id = _make_batch(recorder)
+        _row, token = _make_row(recorder)
+        outcome_id = recorder.record_token_outcome(
+            run_id="run-1",
+            token_id=token.token_id,
+            outcome=RowOutcome.CONSUMED_IN_BATCH,
+            batch_id=batch_id,
+        )
+        assert outcome_id is not None
 
     def test_coalesced_requires_join_group_id(self):
         _db, recorder = _setup()
-        with pytest.raises((ValueError, TypeError)):
-            self._validate(recorder, RowOutcome.COALESCED)
+        _row, token = _make_row(recorder)
+        with pytest.raises(ValueError, match="join_group_id"):
+            recorder.record_token_outcome(
+                run_id="run-1",
+                token_id=token.token_id,
+                outcome=RowOutcome.COALESCED,
+            )
 
     def test_coalesced_accepts_join_group_id(self):
         _db, recorder = _setup()
-        self._validate(recorder, RowOutcome.COALESCED, join_group_id="jg-1")
+        _row, token = _make_row(recorder)
+        outcome_id = recorder.record_token_outcome(
+            run_id="run-1",
+            token_id=token.token_id,
+            outcome=RowOutcome.COALESCED,
+            join_group_id="jg-1",
+        )
+        assert outcome_id is not None
 
     def test_expanded_requires_expand_group_id(self):
         _db, recorder = _setup()
-        with pytest.raises((ValueError, TypeError)):
-            self._validate(recorder, RowOutcome.EXPANDED)
+        _row, token = _make_row(recorder)
+        with pytest.raises(ValueError, match="expand_group_id"):
+            recorder.record_token_outcome(
+                run_id="run-1",
+                token_id=token.token_id,
+                outcome=RowOutcome.EXPANDED,
+            )
 
     def test_expanded_accepts_expand_group_id(self):
         _db, recorder = _setup()
-        self._validate(recorder, RowOutcome.EXPANDED, expand_group_id="eg-1")
+        _row, token = _make_row(recorder)
+        outcome_id = recorder.record_token_outcome(
+            run_id="run-1",
+            token_id=token.token_id,
+            outcome=RowOutcome.EXPANDED,
+            expand_group_id="eg-1",
+        )
+        assert outcome_id is not None
 
     def test_buffered_requires_batch_id(self):
         _db, recorder = _setup()
-        with pytest.raises((ValueError, TypeError)):
-            self._validate(recorder, RowOutcome.BUFFERED)
+        _row, token = _make_row(recorder)
+        with pytest.raises(ValueError, match="batch_id"):
+            recorder.record_token_outcome(
+                run_id="run-1",
+                token_id=token.token_id,
+                outcome=RowOutcome.BUFFERED,
+            )
 
     def test_buffered_accepts_batch_id(self):
         _db, recorder = _setup()
-        self._validate(recorder, RowOutcome.BUFFERED, batch_id="batch-1")
+        batch_id = _make_batch(recorder)
+        _row, token = _make_row(recorder)
+        outcome_id = recorder.record_token_outcome(
+            run_id="run-1",
+            token_id=token.token_id,
+            outcome=RowOutcome.BUFFERED,
+            batch_id=batch_id,
+        )
+        assert outcome_id is not None
 
 
 class TestRecordTokenOutcome:
-    """Tests for TokenRecordingMixin.record_token_outcome."""
+    """Tests for DataFlowRepository.record_token_outcome."""
 
     def test_records_completed_outcome(self):
         _db, recorder = _setup()
@@ -762,7 +866,7 @@ class TestRecordTokenOutcome:
 
 
 class TestGetTokenOutcome:
-    """Tests for TokenRecordingMixin.get_token_outcome."""
+    """Tests for DataFlowRepository.get_token_outcome."""
 
     def test_returns_none_for_unknown_token(self):
         _db, recorder = _setup()
@@ -832,7 +936,7 @@ class TestGetTokenOutcome:
 
 
 class TestGetTokenOutcomesForRow:
-    """Tests for TokenRecordingMixin.get_token_outcomes_for_row."""
+    """Tests for DataFlowRepository.get_token_outcomes_for_row."""
 
     def test_returns_empty_list_when_no_outcomes(self):
         _db, recorder = _setup()

@@ -49,7 +49,7 @@ def _setup_with_token(
 
 
 class TestRecordValidationError:
-    """Tests for ErrorRecordingMixin.record_validation_error."""
+    """Tests for DataFlowRepository.record_validation_error."""
 
     def test_returns_error_id_with_verr_prefix(self):
         _db, recorder = _setup()
@@ -312,7 +312,7 @@ class TestRecordValidationErrorNonCanonicalData:
 
 
 class TestRecordTransformError:
-    """Tests for ErrorRecordingMixin.record_transform_error."""
+    """Tests for DataFlowRepository.record_transform_error."""
 
     def test_returns_error_id_with_terr_prefix(self):
         _db, recorder = _setup_with_token()
@@ -435,7 +435,7 @@ class TestRecordTransformError:
 
 
 class TestGetValidationErrorsForRow:
-    """Tests for ErrorRecordingMixin.get_validation_errors_for_row."""
+    """Tests for DataFlowRepository.get_validation_errors_for_row."""
 
     def test_returns_errors_matching_row_hash(self):
         _db, recorder = _setup()
@@ -523,7 +523,7 @@ class TestGetValidationErrorsForRow:
 
 
 class TestGetValidationErrorsForRun:
-    """Tests for ErrorRecordingMixin.get_validation_errors_for_run."""
+    """Tests for DataFlowRepository.get_validation_errors_for_run."""
 
     def test_returns_all_errors_for_run(self):
         _db, recorder = _setup()
@@ -625,7 +625,7 @@ class TestGetValidationErrorsForRun:
 
 
 class TestGetTransformErrorsForToken:
-    """Tests for ErrorRecordingMixin.get_transform_errors_for_token."""
+    """Tests for DataFlowRepository.get_transform_errors_for_token."""
 
     def test_returns_errors_for_token(self):
         _db, recorder = _setup_with_token()
@@ -689,7 +689,7 @@ class TestGetTransformErrorsForToken:
 
 
 class TestGetTransformErrorsForRun:
-    """Tests for ErrorRecordingMixin.get_transform_errors_for_run."""
+    """Tests for DataFlowRepository.get_transform_errors_for_run."""
 
     def test_returns_all_errors_for_run(self):
         _db, recorder = _setup_with_token()

@@ -51,7 +51,7 @@ def _make_field(
 
 
 class TestRegisterNode:
-    """Tests for GraphRecordingMixin.register_node."""
+    """Tests for DataFlowRepository.register_node."""
 
     def test_creates_node_with_config_hash_and_json(self) -> None:
         _db, recorder = _setup()
@@ -362,7 +362,7 @@ class TestRegisterNode:
 
 
 class TestRegisterEdge:
-    """Tests for GraphRecordingMixin.register_edge."""
+    """Tests for DataFlowRepository.register_edge."""
 
     def test_creates_edge(self) -> None:
         _db, recorder = _setup()
@@ -627,7 +627,7 @@ class TestRegisterEdge:
 
 
 class TestGetNode:
-    """Tests for GraphRecordingMixin.get_node with composite PK."""
+    """Tests for DataFlowRepository.get_node with composite PK."""
 
     def test_roundtrip(self) -> None:
         _db, recorder = _setup()
@@ -716,7 +716,7 @@ class TestGetNode:
 
 
 class TestGetNodes:
-    """Tests for GraphRecordingMixin.get_nodes ordering and completeness."""
+    """Tests for DataFlowRepository.get_nodes ordering and completeness."""
 
     def test_returns_all_nodes_for_run(self) -> None:
         _db, recorder = _setup()
@@ -950,7 +950,7 @@ class TestGetNodes:
 
 
 class TestGetEdges:
-    """Tests for GraphRecordingMixin.get_edges."""
+    """Tests for DataFlowRepository.get_edges."""
 
     def test_returns_all_edges_for_run(self) -> None:
         _db, recorder = _setup()
@@ -1124,7 +1124,7 @@ class TestGetEdges:
 
 
 class TestGetEdge:
-    """Tests for GraphRecordingMixin.get_edge -- Tier 1 audit integrity."""
+    """Tests for DataFlowRepository.get_edge -- Tier 1 audit integrity."""
 
     def test_roundtrip(self) -> None:
         _db, recorder = _setup()
@@ -1179,7 +1179,7 @@ class TestGetEdge:
 
 
 class TestGetEdgeMap:
-    """Tests for GraphRecordingMixin.get_edge_map."""
+    """Tests for DataFlowRepository.get_edge_map."""
 
     def test_returns_correct_mapping(self) -> None:
         _db, recorder = _setup()
@@ -1228,15 +1228,17 @@ class TestGetEdgeMap:
         assert edge_map[("gate", "high_risk")] == edge_a.edge_id
         assert edge_map[("gate", "low_risk")] == edge_b.edge_id
 
-    def test_empty_for_no_edges(self) -> None:
+    def test_raises_for_no_edges(self) -> None:
+        """get_edge_map raises ValueError when run has no edges registered."""
         _db, recorder = _setup()
-        edge_map = recorder.get_edge_map("run-1")
-        assert edge_map == {}
+        with pytest.raises(ValueError, match="no edges registered"):
+            recorder.get_edge_map("run-1")
 
-    def test_empty_for_unknown_run(self) -> None:
+    def test_raises_for_unknown_run(self) -> None:
+        """get_edge_map raises ValueError for unknown run (no edges either)."""
         _db, recorder = _setup()
-        edge_map = recorder.get_edge_map("no-such-run")
-        assert edge_map == {}
+        with pytest.raises(ValueError, match="no edges registered"):
+            recorder.get_edge_map("no-such-run")
 
     def test_multiple_source_nodes_with_different_labels(self) -> None:
         _db, recorder = _setup()
@@ -1310,7 +1312,7 @@ class TestGetEdgeMap:
 
 
 class TestGetNodeContracts:
-    """Tests for GraphRecordingMixin.get_node_contracts."""
+    """Tests for DataFlowRepository.get_node_contracts."""
 
     def test_returns_none_none_when_no_contracts_set(self) -> None:
         _db, recorder = _setup()
@@ -1455,7 +1457,7 @@ class TestGetNodeContracts:
 
 
 class TestUpdateNodeOutputContract:
-    """Tests for GraphRecordingMixin.update_node_output_contract."""
+    """Tests for DataFlowRepository.update_node_output_contract."""
 
     def test_sets_output_contract_on_node_without_one(self) -> None:
         _db, recorder = _setup()
