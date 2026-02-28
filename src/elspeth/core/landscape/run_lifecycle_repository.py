@@ -1,5 +1,10 @@
-# src/elspeth/core/landscape/_run_recording.py
-"""Run lifecycle recording methods for LandscapeRecorder."""
+"""Run lifecycle repository for Landscape audit records.
+
+Owns all run lifecycle operations: begin, complete, finalize, status updates,
+schema contracts, secret resolutions, export status, and reproducibility grading.
+
+Extracted from RunRecordingMixin as part of T19 (mixin → composition).
+"""
 
 from __future__ import annotations
 
@@ -17,32 +22,34 @@ from elspeth.contracts import (
 )
 from elspeth.contracts.errors import AuditIntegrityError
 from elspeth.core.canonical import canonical_json, stable_hash
+from elspeth.core.landscape._database_ops import DatabaseOps
 from elspeth.core.landscape._helpers import generate_id, now
+from elspeth.core.landscape.database import LandscapeDB
+from elspeth.core.landscape.model_loaders import RunLoader
 from elspeth.core.landscape.schema import (
     runs_table,
     secret_resolutions_table,
 )
 
 if TYPE_CHECKING:
-    from elspeth.contracts.payload_store import PayloadStore
     from elspeth.contracts.schema_contract import SchemaContract
-    from elspeth.core.landscape._database_ops import DatabaseOps
-    from elspeth.core.landscape.database import LandscapeDB
-    from elspeth.core.landscape.model_loaders import RunLoader
     from elspeth.core.landscape.reproducibility import ReproducibilityGrade
 
 
 _TERMINAL_RUN_STATUSES = frozenset({RunStatus.COMPLETED, RunStatus.FAILED, RunStatus.INTERRUPTED})
 
 
-class RunRecordingMixin:
-    """Run lifecycle methods. Mixed into LandscapeRecorder."""
+class RunLifecycleRepository:
+    """Run lifecycle operations for the Landscape audit trail.
 
-    # Shared state annotations (set by LandscapeRecorder.__init__)
-    _db: LandscapeDB
-    _ops: DatabaseOps
-    _run_loader: RunLoader
-    _payload_store: PayloadStore | None
+    Handles: begin, complete, finalize, status updates, schema contracts,
+    secret resolutions, export status, and reproducibility grading.
+    """
+
+    def __init__(self, db: LandscapeDB, ops: DatabaseOps, run_loader: RunLoader) -> None:
+        self._db = db
+        self._ops = ops
+        self._run_loader = run_loader
 
     def begin_run(
         self,

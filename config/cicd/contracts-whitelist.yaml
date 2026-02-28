@@ -167,9 +167,11 @@ allowed_dict_patterns:
   # pipeline data from execution.
   # ═══════════════════════════════════════════════════════════════════════════
 
-  # Run recording
-  - "src/elspeth/core/landscape/_run_recording.py:RunRecordingMixin.begin_run:config"
-  - "src/elspeth/core/landscape/_run_recording.py:RunRecordingMixin.record_secret_resolutions:resolutions (list)"
+  # Run lifecycle repository + recorder delegation
+  - "src/elspeth/core/landscape/run_lifecycle_repository.py:RunLifecycleRepository.begin_run:config"
+  - "src/elspeth/core/landscape/run_lifecycle_repository.py:RunLifecycleRepository.record_secret_resolutions:resolutions (list)"
+  - "src/elspeth/core/landscape/recorder.py:LandscapeRecorder.begin_run:config"
+  - "src/elspeth/core/landscape/recorder.py:LandscapeRecorder.record_secret_resolutions:resolutions (list)"
 
   # Node state recording
   - "src/elspeth/core/landscape/_node_state_recording.py:NodeStateRecordingMixin.begin_node_state:input_data"
