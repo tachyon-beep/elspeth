@@ -1,0 +1,1402 @@
+# src/elspeth/core/landscape/execution_repository.py
+"""ExecutionRepository: node state recording, call tracking, and batch management.
+
+Extracted from NodeStateRecordingMixin + CallRecordingMixin + BatchRecordingMixin
+as part of T19 (Landscape mixin -> composed repository decomposition).
+
+Owns thread-safe call index allocation (Lock + per-state and per-operation dicts).
+"""
+
+from __future__ import annotations
+
+import json
+from threading import Lock
+from typing import TYPE_CHECKING, Any, Literal, overload
+
+from sqlalchemy import func, select
+
+from elspeth.contracts import (
+    Artifact,
+    Batch,
+    BatchMember,
+    BatchStatus,
+    Call,
+    CallStatus,
+    CallType,
+    CoalesceFailureReason,
+    FrameworkBugError,
+    NodeState,
+    NodeStateCompleted,
+    NodeStateFailed,
+    NodeStateOpen,
+    NodeStatePending,
+    NodeStateStatus,
+    Operation,
+    RoutingEvent,
+    RoutingMode,
+    RoutingReason,
+    RoutingSpec,
+    TriggerType,
+)
+from elspeth.contracts.call_data import CallPayload
+from elspeth.contracts.errors import AuditIntegrityError, ExecutionError, TransformErrorReason
+from elspeth.contracts.hashing import repr_hash
+from elspeth.core.canonical import canonical_json, stable_hash
+from elspeth.core.landscape._database_ops import DatabaseOps
+from elspeth.core.landscape._helpers import generate_id, now
+from elspeth.core.landscape.database import LandscapeDB
+from elspeth.core.landscape.model_loaders import (
+    ArtifactLoader,
+    BatchLoader,
+    BatchMemberLoader,
+    CallLoader,
+    NodeStateLoader,
+    OperationLoader,
+    RoutingEventLoader,
+)
+from elspeth.core.landscape.schema import (
+    artifacts_table,
+    batch_members_table,
+    batches_table,
+    calls_table,
+    node_states_table,
+    operations_table,
+    routing_events_table,
+)
+
+if TYPE_CHECKING:
+    from elspeth.contracts.errors import TransformSuccessReason
+    from elspeth.contracts.node_state_context import NodeStateContext
+    from elspeth.contracts.payload_store import PayloadStore
+
+
+_TERMINAL_BATCH_STATUSES = frozenset({BatchStatus.COMPLETED, BatchStatus.FAILED})
+
+
+class ExecutionRepository:
+    """Node state recording, external call tracking, and batch management.
+
+    Consolidates three former mixins into a composed repository with
+    explicit constructor injection of all dependencies.
+    """
+
+    def __init__(
+        self,
+        db: LandscapeDB,
+        ops: DatabaseOps,
+        *,
+        node_state_loader: NodeStateLoader,
+        routing_event_loader: RoutingEventLoader,
+        call_loader: CallLoader,
+        operation_loader: OperationLoader,
+        batch_loader: BatchLoader,
+        batch_member_loader: BatchMemberLoader,
+        artifact_loader: ArtifactLoader,
+        payload_store: PayloadStore | None = None,
+    ) -> None:
+        self._db = db
+        self._ops = ops
+        self._node_state_loader = node_state_loader
+        self._routing_event_loader = routing_event_loader
+        self._call_loader = call_loader
+        self._operation_loader = operation_loader
+        self._batch_loader = batch_loader
+        self._batch_member_loader = batch_member_loader
+        self._artifact_loader = artifact_loader
+        self._payload_store = payload_store
+
+        # Thread-safe call index allocation (internal state, not injected)
+        self._call_indices: dict[str, int] = {}
+        self._call_index_lock = Lock()
+        self._operation_call_indices: dict[str, int] = {}
+
+    # ── Node state recording (from NodeStateRecordingMixin) ───────────
+
+    def begin_node_state(
+        self,
+        token_id: str,
+        node_id: str,
+        run_id: str,
+        step_index: int,
+        input_data: dict[str, Any],
+        *,
+        state_id: str | None = None,
+        attempt: int = 0,
+        quarantined: bool = False,
+    ) -> NodeStateOpen:
+        """Begin recording a node state (token visiting a node).
+
+        Args:
+            token_id: Token being processed
+            node_id: Node processing the token
+            run_id: Run ID for composite FK to nodes table
+            step_index: Position in token's execution path
+            input_data: Input data for hashing
+            state_id: Optional state ID (generated if not provided)
+            attempt: Attempt number (0 for first attempt)
+            quarantined: If True, input_data is Tier-3 external data that may
+                contain non-canonical values (NaN, Infinity). Uses repr_hash fallback.
+
+        Returns:
+            NodeStateOpen model with status=OPEN
+        """
+        state_id = state_id or generate_id()
+        if quarantined:
+            try:
+                input_hash = stable_hash(input_data)
+            except (ValueError, TypeError):
+                input_hash = repr_hash(input_data)
+        else:
+            input_hash = stable_hash(input_data)
+        timestamp = now()
+
+        state = NodeStateOpen(
+            state_id=state_id,
+            token_id=token_id,
+            node_id=node_id,
+            step_index=step_index,
+            attempt=attempt,
+            status=NodeStateStatus.OPEN,
+            input_hash=input_hash,
+            context_before_json=None,
+            started_at=timestamp,
+        )
+
+        self._ops.execute_insert(
+            node_states_table.insert().values(
+                state_id=state.state_id,
+                token_id=state.token_id,
+                node_id=state.node_id,
+                run_id=run_id,  # Added for composite FK to nodes
+                step_index=state.step_index,
+                attempt=state.attempt,
+                status=state.status.value,
+                input_hash=state.input_hash,
+                started_at=state.started_at,
+            )
+        )
+
+        return state
+
+    @overload
+    def complete_node_state(
+        self,
+        state_id: str,
+        status: Literal[NodeStateStatus.PENDING],
+        *,
+        output_data: dict[str, Any] | list[dict[str, Any]] | None = None,
+        duration_ms: float | None = None,
+        error: ExecutionError | TransformErrorReason | CoalesceFailureReason | None = None,
+        context_after: NodeStateContext | None = None,
+    ) -> NodeStatePending: ...
+
+    @overload
+    def complete_node_state(
+        self,
+        state_id: str,
+        status: Literal[NodeStateStatus.COMPLETED],
+        *,
+        output_data: dict[str, Any] | list[dict[str, Any]] | None = None,
+        duration_ms: float | None = None,
+        error: ExecutionError | TransformErrorReason | CoalesceFailureReason | None = None,
+        success_reason: TransformSuccessReason | None = None,
+        context_after: NodeStateContext | None = None,
+    ) -> NodeStateCompleted: ...
+
+    @overload
+    def complete_node_state(
+        self,
+        state_id: str,
+        status: Literal[NodeStateStatus.FAILED],
+        *,
+        output_data: dict[str, Any] | list[dict[str, Any]] | None = None,
+        duration_ms: float | None = None,
+        error: ExecutionError | TransformErrorReason | CoalesceFailureReason | None = None,
+        context_after: NodeStateContext | None = None,
+    ) -> NodeStateFailed: ...
+
+    def complete_node_state(
+        self,
+        state_id: str,
+        status: NodeStateStatus,
+        *,
+        output_data: dict[str, Any] | list[dict[str, Any]] | None = None,
+        duration_ms: float | None = None,
+        error: ExecutionError | TransformErrorReason | CoalesceFailureReason | None = None,
+        success_reason: TransformSuccessReason | None = None,
+        context_after: NodeStateContext | None = None,
+    ) -> NodeStatePending | NodeStateCompleted | NodeStateFailed:
+        """Complete a node state.
+
+        Args:
+            state_id: State to complete
+            status: NodeStateStatus (PENDING, COMPLETED, or FAILED)
+            output_data: Output data for hashing (if success)
+            duration_ms: Processing duration (required)
+            error: Error details (if failed)
+            context_after: Optional context snapshot after processing
+
+        Returns:
+            NodeStatePending if status is pending, NodeStateCompleted if completed, NodeStateFailed if failed
+
+        Raises:
+            ValueError: If status is OPEN (not a valid terminal status)
+            ValueError: If duration_ms is not provided
+        """
+        if status == NodeStateStatus.OPEN:
+            raise ValueError("Cannot complete a node state with status OPEN")
+
+        if duration_ms is None:
+            raise ValueError("duration_ms is required when completing a node state")
+
+        if status == NodeStateStatus.COMPLETED and output_data is None:
+            raise ValueError("COMPLETED node state requires output_data (output_hash would be NULL)")
+
+        if status == NodeStateStatus.FAILED and error is None:
+            raise ValueError("FAILED node state requires error details")
+
+        timestamp = now()
+        output_hash = stable_hash(output_data) if output_data is not None else None
+        # ExecutionError and CoalesceFailureReason are frozen dataclasses with
+        # to_dict(); TransformErrorReason is a TypedDict (already a dict).
+        if error is not None:
+            error_data = error.to_dict() if isinstance(error, (ExecutionError, CoalesceFailureReason)) else error
+            error_json = canonical_json(error_data)
+        else:
+            error_json = None
+        context_json = canonical_json(context_after.to_dict()) if context_after is not None else None
+        # Serialize success reason if provided (use canonical_json for audit consistency)
+        success_reason_json = canonical_json(success_reason) if success_reason is not None else None
+
+        self._ops.execute_update(
+            node_states_table.update()
+            .where(node_states_table.c.state_id == state_id)
+            .values(
+                status=status.value,
+                output_hash=output_hash,
+                duration_ms=duration_ms,
+                error_json=error_json,
+                success_reason_json=success_reason_json,
+                context_after_json=context_json,
+                completed_at=timestamp,
+            )
+        )
+
+        result = self.get_node_state(state_id)
+        if result is None:
+            raise AuditIntegrityError(f"NodeState {state_id} not found after update - database corruption or transaction failure")
+        # Type narrowing: result is guaranteed to be terminal (PENDING/COMPLETED/FAILED)
+        if isinstance(result, NodeStateOpen):
+            raise AuditIntegrityError(f"NodeState {state_id} should be terminal after completion but has status OPEN")
+        return result
+
+    def get_node_state(self, state_id: str) -> NodeState | None:
+        """Get a node state by ID.
+
+        Args:
+            state_id: State ID to retrieve
+
+        Returns:
+            NodeState (union of Open, Pending, Completed, or Failed) or None
+        """
+        query = select(node_states_table).where(node_states_table.c.state_id == state_id)
+        row = self._ops.execute_fetchone(query)
+        if row is None:
+            return None
+        return self._node_state_loader.load(row)
+
+    def record_routing_event(
+        self,
+        state_id: str,
+        edge_id: str,
+        mode: RoutingMode,
+        reason: RoutingReason | None = None,
+        *,
+        event_id: str | None = None,
+        routing_group_id: str | None = None,
+        ordinal: int = 0,
+        reason_ref: str | None = None,
+    ) -> RoutingEvent:
+        """Record a single routing event.
+
+        Args:
+            state_id: Node state that made the routing decision
+            edge_id: Edge that was taken
+            mode: RoutingMode enum (MOVE or COPY)
+            reason: Reason for this routing decision
+            event_id: Optional event ID
+            routing_group_id: Group ID (for multi-destination routing)
+            ordinal: Position in routing group
+            reason_ref: Optional payload store reference
+
+        Returns:
+            RoutingEvent model
+        """
+        event_id = event_id or generate_id()
+        routing_group_id = routing_group_id or generate_id()
+        reason_hash = stable_hash(reason) if reason else None
+        timestamp = now()
+
+        # Auto-persist reason to payload store if available and ref not provided
+        # This enables exported audit trails to explain routing decisions
+        if reason is not None and reason_ref is None and self._payload_store is not None:
+            reason_bytes = canonical_json(reason).encode("utf-8")
+            reason_ref = self._payload_store.store(reason_bytes)
+
+        event = RoutingEvent(
+            event_id=event_id,
+            state_id=state_id,
+            edge_id=edge_id,
+            routing_group_id=routing_group_id,
+            ordinal=ordinal,
+            mode=mode,
+            reason_hash=reason_hash,
+            reason_ref=reason_ref,
+            created_at=timestamp,
+        )
+
+        self._ops.execute_insert(
+            routing_events_table.insert().values(
+                event_id=event.event_id,
+                state_id=event.state_id,
+                edge_id=event.edge_id,
+                routing_group_id=event.routing_group_id,
+                ordinal=event.ordinal,
+                mode=event.mode.value,  # Store string in DB
+                reason_hash=event.reason_hash,
+                reason_ref=event.reason_ref,
+                created_at=event.created_at,
+            )
+        )
+
+        return event
+
+    def record_routing_events(
+        self,
+        state_id: str,
+        routes: list[RoutingSpec],
+        reason: RoutingReason | None = None,
+    ) -> list[RoutingEvent]:
+        """Record multiple routing events (fork/multi-destination).
+
+        All events share the same routing_group_id.
+
+        Args:
+            state_id: Node state that made the routing decision
+            routes: List of RoutingSpec objects specifying edge_id and mode
+            reason: Shared reason for all routes
+
+        Returns:
+            List of RoutingEvent models
+        """
+        if not routes:
+            return []
+
+        routing_group_id = generate_id()
+        reason_hash = stable_hash(reason) if reason else None
+        timestamp = now()
+        events = []
+
+        # Auto-persist shared reason to payload store if available
+        # All events in the fork will reference the same reason payload
+        reason_ref = None
+        if reason is not None and self._payload_store is not None:
+            reason_bytes = canonical_json(reason).encode("utf-8")
+            reason_ref = self._payload_store.store(reason_bytes)
+
+        with self._db.connection() as conn:
+            for ordinal, route in enumerate(routes):
+                event_id = generate_id()
+                event = RoutingEvent(
+                    event_id=event_id,
+                    state_id=state_id,
+                    edge_id=route.edge_id,
+                    routing_group_id=routing_group_id,
+                    ordinal=ordinal,
+                    mode=route.mode,  # Already RoutingMode enum from RoutingSpec
+                    reason_hash=reason_hash,
+                    reason_ref=reason_ref,
+                    created_at=timestamp,
+                )
+
+                result = conn.execute(
+                    routing_events_table.insert().values(
+                        event_id=event.event_id,
+                        state_id=event.state_id,
+                        edge_id=event.edge_id,
+                        routing_group_id=event.routing_group_id,
+                        ordinal=event.ordinal,
+                        mode=event.mode.value,  # Store string in DB
+                        reason_hash=event.reason_hash,
+                        reason_ref=event.reason_ref,
+                        created_at=event.created_at,
+                    )
+                )
+                if result.rowcount == 0:
+                    raise AuditIntegrityError(f"Failed to insert routing event {event_id} for state {state_id} - zero rows affected")
+
+                events.append(event)
+
+        return events
+
+    # ── Call recording (from CallRecordingMixin) ──────────────────────
+
+    def allocate_call_index(self, state_id: str) -> int:
+        """Allocate next call index for a state_id (thread-safe).
+
+        Provides centralized call index allocation ensuring UNIQUE(state_id, call_index)
+        across all client types (HTTP, LLM) and retry attempts.
+
+        This is the single source of truth for call numbering. All AuditedClient
+        instances MUST delegate to this method rather than maintaining their own counters.
+
+        Thread Safety:
+            Uses a lock to prevent race conditions when multiple threads allocate
+            indices concurrently. Safe for pooled execution scenarios.
+
+        Persistence:
+            Counter seeds from the database on first access per state_id,
+            so it survives recorder recreation (e.g., on resume). Subsequent
+            allocations are pure in-memory for performance.
+
+        Args:
+            state_id: Node state ID to allocate index for
+
+        Returns:
+            Sequential call index (0-based), unique within this state_id
+
+        Example:
+            # Two different client types, same state_id
+            http_client = AuditedHTTPClient(recorder, state_id="state-001")
+            llm_client = AuditedLLMClient(recorder, state_id="state-001")
+
+            # Both delegate to same recorder - indices coordinate correctly
+            http_client.post(...)  # allocates index 0
+            llm_client.query(...)   # allocates index 1 (not 0!)
+        """
+        with self._call_index_lock:
+            if state_id not in self._call_indices:
+                # Seed from database to survive recorder recreation on resume.
+                # Without this, a new recorder would restart indices at 0 for
+                # any state_id that already has recorded calls, causing
+                # UNIQUE(state_id, call_index) violations.
+                row = self._ops.execute_fetchone(select(func.max(calls_table.c.call_index)).where(calls_table.c.state_id == state_id))
+                existing_max = row[0] if row is not None and row[0] is not None else -1
+                self._call_indices[state_id] = existing_max + 1
+            idx = self._call_indices[state_id]
+            self._call_indices[state_id] += 1
+            return idx
+
+    def record_call(
+        self,
+        state_id: str,
+        call_index: int,
+        call_type: CallType,
+        status: CallStatus,
+        request_data: CallPayload,
+        response_data: CallPayload | None = None,
+        error: CallPayload | None = None,
+        latency_ms: float | None = None,
+        *,
+        request_ref: str | None = None,
+        response_ref: str | None = None,
+    ) -> Call:
+        """Record an external call for a node state.
+
+        Args:
+            state_id: The node_state this call belongs to
+            call_index: 0-based index of this call within the state
+            call_type: Type of external call (LLM, HTTP, SQL, FILESYSTEM)
+            status: Outcome of the call (SUCCESS, ERROR)
+            request_data: Request payload (CallPayload — serialized internally)
+            response_data: Response payload (CallPayload — serialized internally, optional for errors)
+            error: Error payload if status is ERROR (CallPayload — serialized internally)
+            latency_ms: Call duration in milliseconds
+            request_ref: Optional payload store reference for request
+            response_ref: Optional payload store reference for response
+
+        Returns:
+            The recorded Call model
+
+        Note:
+            Duplicate (state_id, call_index) will raise IntegrityError from SQLAlchemy.
+            Invalid state_id will raise IntegrityError due to foreign key constraint.
+            Call indices should be allocated via allocate_call_index() for coordination.
+        """
+        call_id = generate_id()
+        timestamp = now()
+
+        # Serialize CallPayload → dict at the recorder boundary
+        request_dict = request_data.to_dict()
+        response_dict = response_data.to_dict() if response_data is not None else None
+
+        # Hash request (always required)
+        request_hash = stable_hash(request_dict)
+
+        # Hash response (optional - None for errors without response)
+        response_hash = stable_hash(response_dict) if response_dict is not None else None
+
+        # Auto-persist request to payload store if available and ref not provided
+        # This enables replay/verify modes to retrieve the original request
+        if request_ref is None and self._payload_store is not None:
+            request_bytes = canonical_json(request_dict).encode("utf-8")
+            request_ref = self._payload_store.store(request_bytes)
+
+        # Auto-persist response to payload store if available and ref not provided
+        # This enables replay/verify modes to retrieve the original response
+        if response_dict is not None and response_ref is None and self._payload_store is not None:
+            response_bytes = canonical_json(response_dict).encode("utf-8")
+            response_ref = self._payload_store.store(response_bytes)
+
+        # Serialize error if present (CallPayload → dict → JSON)
+        error_json = canonical_json(error.to_dict()) if error is not None else None
+
+        values = {
+            "call_id": call_id,
+            "state_id": state_id,
+            "operation_id": None,  # State call, not operation call
+            "call_index": call_index,
+            "call_type": call_type.value,  # Store enum value
+            "status": status.value,  # Store enum value
+            "request_hash": request_hash,
+            "request_ref": request_ref,
+            "response_hash": response_hash,
+            "response_ref": response_ref,
+            "error_json": error_json,
+            "latency_ms": latency_ms,
+            "created_at": timestamp,
+        }
+
+        self._ops.execute_insert(calls_table.insert().values(**values))
+
+        return Call(
+            call_id=call_id,
+            call_index=call_index,
+            call_type=call_type,  # Pass enum directly per Call contract
+            status=status,  # Pass enum directly per Call contract
+            request_hash=request_hash,
+            created_at=timestamp,
+            state_id=state_id,  # Parent is node_state
+            operation_id=None,  # Not an operation call
+            request_ref=request_ref,
+            response_hash=response_hash,
+            response_ref=response_ref,
+            error_json=error_json,
+            latency_ms=latency_ms,
+        )
+
+    # === Operations (Source/Sink I/O) ===
+
+    def begin_operation(
+        self,
+        run_id: str,
+        node_id: str,
+        operation_type: Literal["source_load", "sink_write"],
+        *,
+        input_data: dict[str, Any] | None = None,
+    ) -> Operation:
+        """Begin an operation for source/sink I/O.
+
+        Operations are the source/sink equivalent of node_states - they provide
+        a parent context for external calls made during load() or write().
+
+        Args:
+            run_id: Run this operation belongs to
+            node_id: Source or sink node performing the operation
+            operation_type: Type of operation
+            input_data: Optional input context (stored via payload store)
+
+        Returns:
+            Operation with operation_id for call attribution
+        """
+        from uuid import uuid4
+
+        # Use pure UUID for operation_id - run_id + node_id can exceed 64 chars
+        # (run_id=36 + node_id=45 + prefixes would be 94+ chars)
+        operation_id = f"op_{uuid4().hex}"  # "op_" + 32 hex = 35 chars, well under 64
+
+        input_ref = None
+        input_hash = None
+        if input_data is not None:
+            input_hash = stable_hash(input_data)
+            if self._payload_store is not None:
+                input_bytes = canonical_json(input_data).encode("utf-8")
+                input_ref = self._payload_store.store(input_bytes)
+
+        timestamp = now()
+        operation = Operation(
+            operation_id=operation_id,
+            run_id=run_id,
+            node_id=node_id,
+            operation_type=operation_type,
+            started_at=timestamp,
+            status="open",
+            input_data_ref=input_ref,
+            input_data_hash=input_hash,
+        )
+
+        self._ops.execute_insert(operations_table.insert().values(**operation.to_dict()))
+        return operation
+
+    def complete_operation(
+        self,
+        operation_id: str,
+        status: Literal["completed", "failed", "pending"],
+        *,
+        output_data: dict[str, Any] | None = None,
+        error: str | None = None,
+        duration_ms: float | None = None,
+    ) -> None:
+        """Complete an operation.
+
+        Args:
+            operation_id: Operation to complete
+            status: Final status ('completed', 'failed', or 'pending' for BatchPendingError)
+            output_data: Optional output context
+            error: Error message if failed
+            duration_ms: Operation duration
+
+        Raises:
+            FrameworkBugError: If operation doesn't exist or is already completed
+        """
+        # Atomic check-and-update: WHERE constrains both identity and status
+        # to eliminate the TOCTOU race between separate SELECT and UPDATE.
+        # Payload storage is deferred until AFTER the status check succeeds
+        # to avoid orphaned blobs on duplicate-completion races or invalid IDs.
+        timestamp = now()
+        output_hash = stable_hash(output_data) if output_data is not None else None
+        stmt = (
+            operations_table.update()
+            .where((operations_table.c.operation_id == operation_id) & (operations_table.c.status == "open"))
+            .values(
+                completed_at=timestamp,
+                status=status,
+                error_message=error,
+                duration_ms=duration_ms,
+                output_data_hash=output_hash,
+            )
+        )
+        with self._db.connection() as conn:
+            result = conn.execute(stmt)
+            if result.rowcount == 0:
+                # Distinguish "doesn't exist" from "already completed" for diagnostics
+                check = conn.execute(select(operations_table.c.status).where(operations_table.c.operation_id == operation_id)).fetchone()
+                if check is None:
+                    raise FrameworkBugError(f"Completing non-existent operation: {operation_id}")
+                raise FrameworkBugError(
+                    f"Completing already-completed operation {operation_id}: current status={check.status}, new status={status}"
+                )
+
+            # Store payload only after confirming the operation row was updated
+            if output_data is not None and self._payload_store is not None:
+                output_bytes = canonical_json(output_data).encode("utf-8")
+                output_ref = self._payload_store.store(output_bytes)
+                conn.execute(
+                    operations_table.update().where(operations_table.c.operation_id == operation_id).values(output_data_ref=output_ref)
+                )
+
+    def allocate_operation_call_index(self, operation_id: str) -> int:
+        """Allocate next call index for an operation_id (thread-safe).
+
+        Provides centralized call index allocation ensuring unique call numbering
+        within each operation. Parallel to allocate_call_index() for node_states.
+
+        Args:
+            operation_id: Operation ID to allocate index for
+
+        Returns:
+            Sequential call index (0-based), unique within this operation_id
+        """
+        with self._call_index_lock:  # Reuse existing lock
+            if operation_id not in self._operation_call_indices:
+                # Seed from database to survive recorder recreation on resume.
+                row = self._ops.execute_fetchone(
+                    select(func.max(calls_table.c.call_index)).where(calls_table.c.operation_id == operation_id)
+                )
+                existing_max = row[0] if row is not None and row[0] is not None else -1
+                self._operation_call_indices[operation_id] = existing_max + 1
+            idx = self._operation_call_indices[operation_id]
+            self._operation_call_indices[operation_id] += 1
+            return idx
+
+    def record_operation_call(
+        self,
+        operation_id: str,
+        call_type: CallType,
+        status: CallStatus,
+        request_data: CallPayload,
+        response_data: CallPayload | None = None,
+        error: CallPayload | None = None,
+        latency_ms: float | None = None,
+        *,
+        request_ref: str | None = None,
+        response_ref: str | None = None,
+        provider: str | None = None,
+    ) -> Call:
+        """Record an external call made during an operation.
+
+        This is the operation equivalent of record_call() - attributes calls
+        to operations instead of node_states.
+
+        Args:
+            operation_id: The operation this call belongs to
+            call_type: Type of external call (LLM, HTTP, SQL, FILESYSTEM)
+            status: Outcome of the call (SUCCESS, ERROR)
+            request_data: Request payload (CallPayload — serialized internally)
+            response_data: Response payload (CallPayload — serialized internally, optional for errors)
+            error: Error details if status is ERROR (stored as JSON)
+            latency_ms: Call duration in milliseconds
+            request_ref: Optional payload store reference for request
+            response_ref: Optional payload store reference for response
+            provider: Optional provider name for telemetry
+
+        Returns:
+            The recorded Call model
+        """
+        call_index = self.allocate_operation_call_index(operation_id)
+        call_id = f"call_{operation_id}_{call_index}"
+        timestamp = now()
+
+        # Serialize CallPayload → dict at the recorder boundary
+        request_dict = request_data.to_dict()
+        response_dict = response_data.to_dict() if response_data is not None else None
+
+        # Hash request (always required)
+        request_hash = stable_hash(request_dict)
+
+        # Hash response (optional - None for errors without response)
+        response_hash = stable_hash(response_dict) if response_dict is not None else None
+
+        # Auto-persist request to payload store if available and ref not provided
+        if request_ref is None and self._payload_store is not None:
+            request_bytes = canonical_json(request_dict).encode("utf-8")
+            request_ref = self._payload_store.store(request_bytes)
+
+        # Auto-persist response to payload store if available and ref not provided
+        if response_dict is not None and response_ref is None and self._payload_store is not None:
+            response_bytes = canonical_json(response_dict).encode("utf-8")
+            response_ref = self._payload_store.store(response_bytes)
+
+        # Serialize error if present (CallPayload → dict → JSON)
+        error_json = canonical_json(error.to_dict()) if error is not None else None
+
+        values = {
+            "call_id": call_id,
+            "state_id": None,  # NOT a node_state call
+            "operation_id": operation_id,  # Operation call
+            "call_index": call_index,
+            "call_type": call_type.value,
+            "status": status.value,
+            "request_hash": request_hash,
+            "request_ref": request_ref,
+            "response_hash": response_hash,
+            "response_ref": response_ref,
+            "error_json": error_json,
+            "latency_ms": latency_ms,
+            "created_at": timestamp,
+        }
+
+        self._ops.execute_insert(calls_table.insert().values(**values))
+
+        return Call(
+            call_id=call_id,
+            call_index=call_index,
+            call_type=call_type,
+            status=status,
+            request_hash=request_hash,
+            created_at=timestamp,
+            state_id=None,  # Not a node_state call
+            operation_id=operation_id,  # Parent is operation
+            request_ref=request_ref,
+            response_hash=response_hash,
+            response_ref=response_ref,
+            error_json=error_json,
+            latency_ms=latency_ms,
+        )
+
+    def get_operation(self, operation_id: str) -> Operation | None:
+        """Get an operation by ID.
+
+        Args:
+            operation_id: Operation ID to retrieve
+
+        Returns:
+            Operation model or None if not found
+        """
+        query = select(operations_table).where(operations_table.c.operation_id == operation_id)
+        row = self._ops.execute_fetchone(query)
+        if row is None:
+            return None
+
+        return self._operation_loader.load(row)
+
+    def get_operation_calls(self, operation_id: str) -> list[Call]:
+        """Get external calls for an operation.
+
+        Args:
+            operation_id: Operation ID
+
+        Returns:
+            List of Call models, ordered by call_index
+        """
+        query = select(calls_table).where(calls_table.c.operation_id == operation_id).order_by(calls_table.c.call_index)
+        db_rows = self._ops.execute_fetchall(query)
+        return [self._call_loader.load(r) for r in db_rows]
+
+    def get_operations_for_run(self, run_id: str) -> list[Operation]:
+        """Get all operations for a run.
+
+        Args:
+            run_id: Run ID
+
+        Returns:
+            List of Operation models, ordered by started_at
+        """
+        query = select(operations_table).where(operations_table.c.run_id == run_id).order_by(operations_table.c.started_at)
+        db_rows = self._ops.execute_fetchall(query)
+        return [self._operation_loader.load(row) for row in db_rows]
+
+    def get_all_operation_calls_for_run(self, run_id: str) -> list[Call]:
+        """Get all operation-parented calls for a run (batch query).
+
+        Fetches all calls where operation_id is NOT NULL and the operation
+        belongs to the given run. This replaces per-operation get_operation_calls()
+        loops in the exporter.
+
+        Args:
+            run_id: Run ID
+
+        Returns:
+            List of Call models, ordered by operation_id then call_index
+        """
+        query = (
+            select(calls_table)
+            .join(operations_table, calls_table.c.operation_id == operations_table.c.operation_id)
+            .where(operations_table.c.run_id == run_id)
+            .order_by(calls_table.c.operation_id, calls_table.c.call_index)
+        )
+        db_rows = self._ops.execute_fetchall(query)
+        return [self._call_loader.load(r) for r in db_rows]
+
+    def find_call_by_request_hash(
+        self,
+        run_id: str,
+        call_type: str,
+        request_hash: str,
+        *,
+        sequence_index: int = 0,
+    ) -> Call | None:
+        """Find a call by its request hash within a run.
+
+        Used for replay mode to look up previously recorded calls by
+        the hash of their request data.
+
+        Args:
+            run_id: Run ID to search within
+            call_type: Type of call (llm, http, etc.)
+            request_hash: SHA-256 hash of the canonical request data
+            sequence_index: 0-based index for duplicate request hashes.
+                When the same request is made multiple times in a run
+                (e.g., retries, loops), use sequence_index to get the
+                Nth occurrence (0=first, 1=second, etc.).
+
+        Returns:
+            Call model if found, None otherwise
+
+        Note:
+            Calls are ordered chronologically by created_at. The sequence_index
+            parameter allows disambiguation when the same request was made
+            multiple times (each returning a different response).
+        """
+        # Join to node_states to filter by run_id
+        # NOTE: Use node_states.run_id directly (denormalized column) instead of
+        # joining through nodes table. The nodes table has composite PK (node_id, run_id),
+        # so joining on node_id alone would be ambiguous when node_id is reused across runs.
+        query = (
+            select(calls_table)
+            .join(
+                node_states_table,
+                calls_table.c.state_id == node_states_table.c.state_id,
+            )
+            .where(node_states_table.c.run_id == run_id)
+            .where(calls_table.c.call_type == call_type)
+            .where(calls_table.c.request_hash == request_hash)
+            .order_by(calls_table.c.created_at)
+            .limit(1)
+            .offset(sequence_index)
+        )
+        row = self._ops.execute_fetchone(query)
+        if row is None:
+            return None
+        return self._call_loader.load(row)
+
+    def get_call_response_data(self, call_id: str) -> dict[str, Any] | None:
+        """Retrieve the response data for a call.
+
+        Fetches response data from the payload store if response_ref is set,
+        otherwise returns None.
+
+        Args:
+            call_id: The call ID to get response data for
+
+        Returns:
+            Response data dict if available, None if no response was recorded
+            or if payload store is not configured
+
+        Note:
+            Returns None if:
+            - Call not found
+            - No response_ref set on the call (error calls may not have response)
+            - Payload store not configured
+            - Response data has been purged from payload store
+        """
+        # Get the call record first
+        query = select(calls_table).where(calls_table.c.call_id == call_id)
+        row = self._ops.execute_fetchone(query)
+
+        if row is None:
+            return None
+
+        if row.response_ref is None:
+            return None
+
+        if self._payload_store is None:
+            return None
+
+        # Retrieve from payload store — KeyError means purged by retention policy
+        try:
+            payload_bytes = self._payload_store.retrieve(row.response_ref)
+        except KeyError:
+            return None
+
+        # Everything below is Tier 1: our data, crash on anomaly
+        decoded = json.loads(payload_bytes.decode("utf-8"))
+        if type(decoded) is not dict:
+            raise AuditIntegrityError(
+                f"Corrupt call response payload (ref={row.response_ref}): expected JSON object, got {type(decoded).__name__}"
+            )
+        return decoded
+
+    # ── Batch recording (from BatchRecordingMixin) ────────────────────
+
+    def create_batch(
+        self,
+        run_id: str,
+        aggregation_node_id: str,
+        *,
+        batch_id: str | None = None,
+        attempt: int = 0,
+    ) -> Batch:
+        """Create a new batch for aggregation.
+
+        Args:
+            run_id: Run this batch belongs to
+            aggregation_node_id: Aggregation node collecting tokens
+            batch_id: Optional batch ID (generated if not provided)
+            attempt: Attempt number (0 for first attempt)
+
+        Returns:
+            Batch model with status="draft"
+        """
+        batch_id = batch_id or generate_id()
+        timestamp = now()
+
+        batch = Batch(
+            batch_id=batch_id,
+            run_id=run_id,
+            aggregation_node_id=aggregation_node_id,
+            attempt=attempt,
+            status=BatchStatus.DRAFT,  # Strict: enum type
+            created_at=timestamp,
+        )
+
+        self._ops.execute_insert(
+            batches_table.insert().values(
+                batch_id=batch.batch_id,
+                run_id=batch.run_id,
+                aggregation_node_id=batch.aggregation_node_id,
+                attempt=batch.attempt,
+                status=batch.status.value,  # Store string in DB
+                created_at=batch.created_at,
+            )
+        )
+
+        return batch
+
+    def add_batch_member(
+        self,
+        batch_id: str,
+        token_id: str,
+        ordinal: int,
+    ) -> BatchMember:
+        """Add a token to a batch.
+
+        Args:
+            batch_id: Batch to add to
+            token_id: Token to add
+            ordinal: Order in batch
+
+        Returns:
+            BatchMember model
+        """
+        member = BatchMember(
+            batch_id=batch_id,
+            token_id=token_id,
+            ordinal=ordinal,
+        )
+
+        self._ops.execute_insert(
+            batch_members_table.insert().values(
+                batch_id=member.batch_id,
+                token_id=member.token_id,
+                ordinal=member.ordinal,
+            )
+        )
+
+        return member
+
+    def update_batch_status(
+        self,
+        batch_id: str,
+        status: BatchStatus,
+        *,
+        trigger_type: TriggerType | None = None,
+        trigger_reason: str | None = None,
+        state_id: str | None = None,
+    ) -> None:
+        """Update batch status.
+
+        Args:
+            batch_id: Batch to update
+            status: New BatchStatus
+            trigger_type: TriggerType enum value
+            trigger_reason: Human-readable reason for the trigger
+            state_id: Node state for the flush operation
+        """
+        updates: dict[str, Any] = {"status": status.value}
+
+        if trigger_type is not None:
+            updates["trigger_type"] = trigger_type.value
+        if trigger_reason is not None:
+            updates["trigger_reason"] = trigger_reason
+        if state_id is not None:
+            updates["aggregation_state_id"] = state_id
+        if status in (BatchStatus.COMPLETED, BatchStatus.FAILED):
+            updates["completed_at"] = now()
+
+        self._ops.execute_update(batches_table.update().where(batches_table.c.batch_id == batch_id).values(**updates))
+
+    def complete_batch(
+        self,
+        batch_id: str,
+        status: BatchStatus,
+        *,
+        trigger_type: TriggerType | None = None,
+        trigger_reason: str | None = None,
+        state_id: str | None = None,
+    ) -> Batch:
+        """Complete a batch.
+
+        Args:
+            batch_id: Batch to complete
+            status: Final BatchStatus (COMPLETED or FAILED)
+            trigger_type: TriggerType enum value
+            trigger_reason: Human-readable reason for the trigger
+            state_id: Optional node state for the aggregation
+
+        Returns:
+            Updated Batch model
+
+        Raises:
+            AuditIntegrityError: If status is not a terminal batch status
+        """
+        if status not in _TERMINAL_BATCH_STATUSES:
+            raise AuditIntegrityError(
+                f"complete_batch() requires terminal status, got {status.value!r}. "
+                f"Valid terminal statuses: {sorted(s.value for s in _TERMINAL_BATCH_STATUSES)}"
+            )
+
+        timestamp = now()
+
+        self._ops.execute_update(
+            batches_table.update()
+            .where(batches_table.c.batch_id == batch_id)
+            .values(
+                status=status.value,
+                trigger_type=trigger_type.value if trigger_type is not None else None,
+                trigger_reason=trigger_reason,
+                aggregation_state_id=state_id,
+                completed_at=timestamp,
+            )
+        )
+
+        result = self.get_batch(batch_id)
+        if result is None:
+            raise AuditIntegrityError(f"Batch {batch_id} not found after update - database corruption or transaction failure")
+        return result
+
+    def get_batch(self, batch_id: str) -> Batch | None:
+        """Get a batch by ID.
+
+        Args:
+            batch_id: Batch ID to retrieve
+
+        Returns:
+            Batch model or None
+        """
+        query = select(batches_table).where(batches_table.c.batch_id == batch_id)
+        row = self._ops.execute_fetchone(query)
+        if row is None:
+            return None
+        return self._batch_loader.load(row)
+
+    def get_batches(
+        self,
+        run_id: str,
+        *,
+        status: BatchStatus | None = None,
+        node_id: str | None = None,
+    ) -> list[Batch]:
+        """Get batches for a run.
+
+        Args:
+            run_id: Run ID
+            status: Optional BatchStatus filter
+            node_id: Optional aggregation node filter
+
+        Returns:
+            List of Batch models, ordered by created_at then batch_id
+            for deterministic export signatures.
+        """
+        query = select(batches_table).where(batches_table.c.run_id == run_id)
+
+        if status is not None:
+            query = query.where(batches_table.c.status == status.value)
+        if node_id is not None:
+            query = query.where(batches_table.c.aggregation_node_id == node_id)
+
+        # Order for deterministic export signatures
+        query = query.order_by(batches_table.c.created_at, batches_table.c.batch_id)
+        rows = self._ops.execute_fetchall(query)
+        return [self._batch_loader.load(row) for row in rows]
+
+    def get_incomplete_batches(self, run_id: str) -> list[Batch]:
+        """Get batches that need recovery (draft, executing, or failed).
+
+        Used during crash recovery to find batches that were:
+        - draft: Still collecting rows when crash occurred
+        - executing: Mid-flush when crash occurred
+        - failed: Flush failed and needs retry
+
+        Args:
+            run_id: The run to query
+
+        Returns:
+            List of Batch objects with status in (draft, executing, failed),
+            ordered by created_at ascending (oldest first for deterministic recovery)
+        """
+        query = (
+            select(batches_table)
+            .where(batches_table.c.run_id == run_id)
+            .where(batches_table.c.status.in_([BatchStatus.DRAFT.value, BatchStatus.EXECUTING.value, BatchStatus.FAILED.value]))
+            .order_by(batches_table.c.created_at.asc())
+        )
+        result = self._ops.execute_fetchall(query)
+        return [self._batch_loader.load(row) for row in result]
+
+    def get_batch_members(self, batch_id: str) -> list[BatchMember]:
+        """Get all members of a batch.
+
+        Args:
+            batch_id: Batch ID
+
+        Returns:
+            List of BatchMember models (ordered by ordinal)
+        """
+        query = select(batch_members_table).where(batch_members_table.c.batch_id == batch_id).order_by(batch_members_table.c.ordinal)
+        rows = self._ops.execute_fetchall(query)
+        return [self._batch_member_loader.load(row) for row in rows]
+
+    def get_all_batch_members_for_run(self, run_id: str) -> list[BatchMember]:
+        """Get all batch members for a run (batch query).
+
+        Fetches all members for all batches in a run in one query,
+        replacing per-batch get_batch_members() loops in the exporter.
+
+        Args:
+            run_id: Run ID
+
+        Returns:
+            List of BatchMember models, ordered by batch_id then ordinal
+        """
+        query = (
+            select(batch_members_table)
+            .join(batches_table, batch_members_table.c.batch_id == batches_table.c.batch_id)
+            .where(batches_table.c.run_id == run_id)
+            .order_by(batch_members_table.c.batch_id, batch_members_table.c.ordinal)
+        )
+        rows = self._ops.execute_fetchall(query)
+        return [self._batch_member_loader.load(row) for row in rows]
+
+    def retry_batch(self, batch_id: str) -> Batch:
+        """Create a new batch attempt from a failed batch (idempotent).
+
+        Copies batch metadata and members to a new batch with
+        incremented attempt counter and draft status. If a retry batch
+        already exists for this attempt, returns it without creating
+        a duplicate.
+
+        Args:
+            batch_id: The failed batch to retry
+
+        Returns:
+            New or existing Batch with attempt = original.attempt + 1
+
+        Raises:
+            ValueError: If original batch not found or not in failed status
+        """
+        original = self.get_batch(batch_id)
+        if original is None:
+            raise ValueError(f"Batch not found: {batch_id}")
+        if original.status != BatchStatus.FAILED:
+            raise ValueError(f"Can only retry failed batches, got status: {original.status}")
+
+        next_attempt = original.attempt + 1
+
+        # Idempotency: check if a retry batch already exists for this attempt
+        existing = self._find_batch_by_attempt(
+            run_id=original.run_id,
+            aggregation_node_id=original.aggregation_node_id,
+            attempt=next_attempt,
+        )
+        if existing is not None:
+            return existing
+
+        # Create new batch with incremented attempt
+        new_batch = self.create_batch(
+            run_id=original.run_id,
+            aggregation_node_id=original.aggregation_node_id,
+            attempt=next_attempt,
+        )
+
+        # Copy members to new batch
+        original_members = self.get_batch_members(batch_id)
+        for member in original_members:
+            self.add_batch_member(
+                batch_id=new_batch.batch_id,
+                token_id=member.token_id,
+                ordinal=member.ordinal,
+            )
+
+        return new_batch
+
+    def _find_batch_by_attempt(
+        self,
+        run_id: str,
+        aggregation_node_id: str,
+        attempt: int,
+    ) -> Batch | None:
+        """Find an existing batch by (run_id, aggregation_node_id, attempt).
+
+        Used for retry idempotency — prevents creating duplicate draft
+        batches when recovery restarts after a mid-recovery crash.
+        """
+        query = (
+            select(batches_table)
+            .where(batches_table.c.run_id == run_id)
+            .where(batches_table.c.aggregation_node_id == aggregation_node_id)
+            .where(batches_table.c.attempt == attempt)
+        )
+        row = self._ops.execute_fetchone(query)
+        if row is None:
+            return None
+        return self._batch_loader.load(row)
+
+    # === Artifact Registration ===
+
+    def register_artifact(
+        self,
+        run_id: str,
+        state_id: str,
+        sink_node_id: str,
+        artifact_type: str,
+        path: str,
+        content_hash: str,
+        size_bytes: int,
+        *,
+        artifact_id: str | None = None,
+        idempotency_key: str | None = None,
+    ) -> Artifact:
+        """Register an artifact produced by a sink.
+
+        Args:
+            run_id: Run that produced this artifact
+            state_id: Node state that produced this artifact
+            sink_node_id: Sink node that wrote the artifact
+            artifact_type: Type of artifact (csv, json, etc.)
+            path: File path or URI
+            content_hash: Hash of artifact content
+            size_bytes: Size of artifact in bytes
+            artifact_id: Optional artifact ID
+            idempotency_key: Optional key for retry deduplication
+
+        Returns:
+            Artifact model
+        """
+        artifact_id = artifact_id or generate_id()
+        timestamp = now()
+
+        artifact = Artifact(
+            artifact_id=artifact_id,
+            run_id=run_id,
+            produced_by_state_id=state_id,
+            sink_node_id=sink_node_id,
+            artifact_type=artifact_type,
+            path_or_uri=path,
+            content_hash=content_hash,
+            size_bytes=size_bytes,
+            created_at=timestamp,
+            idempotency_key=idempotency_key,
+        )
+
+        self._ops.execute_insert(
+            artifacts_table.insert().values(
+                artifact_id=artifact.artifact_id,
+                run_id=artifact.run_id,
+                produced_by_state_id=artifact.produced_by_state_id,
+                sink_node_id=artifact.sink_node_id,
+                artifact_type=artifact.artifact_type,
+                path_or_uri=artifact.path_or_uri,
+                content_hash=artifact.content_hash,
+                size_bytes=artifact.size_bytes,
+                idempotency_key=artifact.idempotency_key,
+                created_at=artifact.created_at,
+            )
+        )
+
+        return artifact
+
+    def get_artifacts(
+        self,
+        run_id: str,
+        *,
+        sink_node_id: str | None = None,
+    ) -> list[Artifact]:
+        """Get artifacts for a run.
+
+        Args:
+            run_id: Run ID
+            sink_node_id: Optional filter by sink
+
+        Returns:
+            List of Artifact models
+        """
+        query = select(artifacts_table).where(artifacts_table.c.run_id == run_id)
+
+        if sink_node_id is not None:
+            query = query.where(artifacts_table.c.sink_node_id == sink_node_id)
+
+        # Order for deterministic export signatures
+        query = query.order_by(artifacts_table.c.created_at, artifacts_table.c.artifact_id)
+        rows = self._ops.execute_fetchall(query)
+        return [self._artifact_loader.load(row) for row in rows]

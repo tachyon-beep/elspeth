@@ -52,6 +52,7 @@ from elspeth.contracts import (
     ValidationErrorWithContract,
 )
 from elspeth.core.landscape.database import LandscapeDB, SchemaCompatibilityError
+from elspeth.core.landscape.execution_repository import ExecutionRepository
 from elspeth.core.landscape.exporter import LandscapeExporter
 from elspeth.core.landscape.formatters import (
     CSVFormatter,
@@ -99,6 +100,7 @@ __all__ = [
     "Checkpoint",
     "ContractAuditRecord",
     "Edge",
+    "ExecutionRepository",
     "ExportFormatter",
     "FieldAuditRecord",
     "JSONFormatter",

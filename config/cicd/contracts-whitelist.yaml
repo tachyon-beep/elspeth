@@ -168,9 +168,18 @@ allowed_dict_patterns:
   - "src/elspeth/core/landscape/run_lifecycle_repository.py:RunLifecycleRepository.begin_run:config"
   - "src/elspeth/core/landscape/recorder.py:LandscapeRecorder.begin_run:config"
 
-  # Node state recording
-  - "src/elspeth/core/landscape/_node_state_recording.py:NodeStateRecordingMixin.begin_node_state:input_data"
-  - "src/elspeth/core/landscape/_node_state_recording.py:NodeStateRecordingMixin.complete_node_state:output_data"
+  # Execution repository (node state, call, batch recording)
+  - "src/elspeth/core/landscape/execution_repository.py:ExecutionRepository.begin_node_state:input_data"
+  - "src/elspeth/core/landscape/execution_repository.py:ExecutionRepository.complete_node_state:output_data"
+  - "src/elspeth/core/landscape/execution_repository.py:ExecutionRepository.begin_operation:input_data"
+  - "src/elspeth/core/landscape/execution_repository.py:ExecutionRepository.complete_operation:output_data"
+  - "src/elspeth/core/landscape/execution_repository.py:ExecutionRepository.get_call_response_data:return"
+  # Recorder delegation signatures (pass-through to ExecutionRepository)
+  - "src/elspeth/core/landscape/recorder.py:LandscapeRecorder.begin_node_state:input_data"
+  - "src/elspeth/core/landscape/recorder.py:LandscapeRecorder.complete_node_state:output_data"
+  - "src/elspeth/core/landscape/recorder.py:LandscapeRecorder.begin_operation:input_data"
+  - "src/elspeth/core/landscape/recorder.py:LandscapeRecorder.complete_operation:output_data"
+  - "src/elspeth/core/landscape/recorder.py:LandscapeRecorder.get_call_response_data:return"
 
   # Token recording
   - "src/elspeth/core/landscape/_token_recording.py:TokenRecordingMixin.create_row:data"
@@ -182,10 +191,7 @@ allowed_dict_patterns:
   # Error recording
   - "src/elspeth/core/landscape/_error_recording.py:ErrorRecordingMixin.record_transform_error:row_data"
 
-  # Call recording (error params are now CallPayload, not dict — removed stale entries)
-  - "src/elspeth/core/landscape/_call_recording.py:CallRecordingMixin.begin_operation:input_data"
-  - "src/elspeth/core/landscape/_call_recording.py:CallRecordingMixin.complete_operation:output_data"
-  - "src/elspeth/core/landscape/_call_recording.py:CallRecordingMixin.get_call_response_data:return"
+  # (Call recording entries moved to Execution repository block above)
 
   # Operations tracking - source/sink I/O audit trail
   - "src/elspeth/core/operations.py:track_operation:input_data"
