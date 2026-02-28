@@ -9,6 +9,15 @@ Delegates to 4 composed domain repositories:
 
 The public API is 100% unchanged -- all ~91 methods delegate directly
 to the appropriate repository. No logic in this file.
+
+Repository split rationale (domain cohesion, not CQRS):
+    The 4 repositories are split by pipeline-phase domain, not by
+    read/write separation. Pure-query methods like get_artifacts() and
+    get_batches() live in ExecutionRepository (not QueryRepository)
+    because they belong to the execution domain. QueryRepository holds
+    only cross-cutting read methods used by external consumers (MCP,
+    exporter, TUI). A CQRS split would be warranted if read and write
+    scaling needs diverge, but that is not the case today.
 """
 
 from __future__ import annotations

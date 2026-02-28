@@ -52,9 +52,6 @@ allow_hits:
 - key: core/landscape/query_repository.py:R6:QueryRepository:explain_row:fp=e7840a5b523c37a3
   owner: architecture
   reason: KeyError from PayloadStore when payload purged by retention policy — expected, not corruption
-- key: core/landscape/query_repository.py:R6:QueryRepository:explain_row:fp=b7efc222ade99ab8
-  owner: architecture
-  reason: OSError from PayloadStore filesystem — purged or inaccessible payload is expected, not corruption
 - key: core/canonical.py:R6:_normalize_value:fp=20ccee9926534392
   owner: architecture
   reason: Silent recovery with explicit error handling path

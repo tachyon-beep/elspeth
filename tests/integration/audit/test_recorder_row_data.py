@@ -170,14 +170,14 @@ class TestGetRowDataTier1Corruption:
     """
 
     def test_integrity_error_propagates(self, tmp_path: Path, payload_store) -> None:
-        """IntegrityError from corrupted payload must propagate (not be swallowed).
+        """IntegrityError from corrupted payload must propagate as AuditIntegrityError.
 
         When payload bytes have been tampered with (hash mismatch),
         FilesystemPayloadStore.retrieve raises IntegrityError.
-        This must propagate to the caller - Tier 1 data corruption
-        is a crash-worthy event.
+        QueryRepository wraps this as AuditIntegrityError with row context —
+        Tier 1 data corruption is a crash-worthy event.
         """
-        from elspeth.contracts.payload_store import IntegrityError
+        from elspeth.contracts.errors import AuditIntegrityError
 
         db = LandscapeDB.in_memory()
         payload_store = FilesystemPayloadStore(tmp_path / "payloads")
@@ -208,20 +208,22 @@ class TestGetRowDataTier1Corruption:
         payload_path = tmp_path / "payloads" / payload_ref[:2] / payload_ref
         payload_path.write_bytes(b"corrupted data that won't match hash")
 
-        # get_row_data must raise IntegrityError, not silently return garbage
+        # get_row_data must raise AuditIntegrityError with row context
         import pytest
 
-        with pytest.raises(IntegrityError):
+        with pytest.raises(AuditIntegrityError, match="Payload integrity check failed"):
             recorder.get_row_data(row.row_id)
 
     def test_invalid_json_propagates(self, tmp_path: Path, payload_store) -> None:
-        """Invalid JSON in payload must propagate JSONDecodeError.
+        """Invalid JSON in payload must propagate as AuditIntegrityError.
 
         When payload bytes are valid (hash matches) but contain non-JSON,
-        the JSON parse failure must propagate - this indicates
-        Tier 1 corruption or a bug in our code.
+        QueryRepository wraps the JSONDecodeError as AuditIntegrityError
+        with row context — Tier 1 corruption is a crash-worthy event.
         """
         import pytest
+
+        from elspeth.contracts.errors import AuditIntegrityError
 
         db = LandscapeDB.in_memory()
         payload_store = FilesystemPayloadStore(tmp_path / "payloads")
@@ -255,8 +257,8 @@ class TestGetRowDataTier1Corruption:
             conn.execute(rows_table.update().where(rows_table.c.row_id == row.row_id).values(source_data_ref=bad_ref))
             conn.commit()
 
-        # get_row_data must raise JSONDecodeError, not return None or garbage
-        with pytest.raises(json.JSONDecodeError):
+        # get_row_data must raise AuditIntegrityError with row context
+        with pytest.raises(AuditIntegrityError, match="Corrupt payload"):
             recorder.get_row_data(row.row_id)
 
     def test_non_object_json_raises_audit_integrity_error(self, tmp_path: Path, payload_store) -> None:

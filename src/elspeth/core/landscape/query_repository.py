@@ -12,7 +12,6 @@ This makes it the lightest-weight repository.
 from __future__ import annotations
 
 import json
-import logging
 from typing import Any
 
 from sqlalchemy import select
@@ -28,6 +27,7 @@ from elspeth.contracts import (
     TokenParent,
 )
 from elspeth.contracts.errors import AuditIntegrityError
+from elspeth.contracts.payload_store import IntegrityError as PayloadIntegrityError
 from elspeth.contracts.payload_store import PayloadStore
 from elspeth.core.landscape._database_ops import DatabaseOps
 from elspeth.core.landscape.model_loaders import (
@@ -176,6 +176,14 @@ class QueryRepository:
             return RowDataResult(state=RowDataState.AVAILABLE, data=data)
         except KeyError:
             return RowDataResult(state=RowDataState.PURGED, data=None)
+        except (json.JSONDecodeError, UnicodeDecodeError) as e:
+            raise AuditIntegrityError(f"Corrupt payload for row {row_id} (ref={row.source_data_ref}): {e}") from e
+        except PayloadIntegrityError as e:
+            raise AuditIntegrityError(f"Payload integrity check failed for row {row_id} (ref={row.source_data_ref}): {e}") from e
+        except OSError as e:
+            raise AuditIntegrityError(
+                f"Payload retrieval failed for row {row_id} (ref={row.source_data_ref}): {type(e).__name__}: {e}"
+            ) from e
 
     def get_token(self, token_id: str) -> Token | None:
         """Get a token by ID.
@@ -247,6 +255,10 @@ class QueryRepository:
         Chunks state_ids to stay within SQLite's SQLITE_MAX_VARIABLE_NUMBER
         limit (default 999).
 
+        Note: Each chunk is a separate query. For completed runs this is safe.
+        For in-progress runs, concurrent writes between chunks could produce
+        inconsistent results. Query only completed runs for reliable results.
+
         Args:
             state_ids: List of state IDs to query
 
@@ -280,6 +292,10 @@ class QueryRepository:
 
         Chunks state_ids to stay within SQLite's SQLITE_MAX_VARIABLE_NUMBER
         limit (default 999).
+
+        Note: Each chunk is a separate query. For completed runs this is safe.
+        For in-progress runs, concurrent writes between chunks could produce
+        inconsistent results. Query only completed runs for reliable results.
 
         Args:
             state_ids: List of state IDs to query
@@ -460,15 +476,20 @@ class QueryRepository:
 
         Returns:
             RowLineage with hash and optionally source data, or None if row not found
-            or if row doesn't belong to the specified run
+
+        Raises:
+            ValueError: If row exists but belongs to a different run
+            AuditIntegrityError: If payload data is corrupt, fails integrity check,
+                or cannot be retrieved due to infrastructure failure
         """
         row = self.get_row(row_id)
         if row is None:
             return None
 
-        # Validate row belongs to the specified run - audit systems must be strict
+        # Validate row belongs to the specified run — cross-run mismatch is a
+        # caller bug or data corruption, not a normal "not found" case
         if row.run_id != run_id:
-            return None
+            raise ValueError(f"Row {row_id} belongs to run {row.run_id}, not {run_id}")
 
         # Try to load payload
         source_data: dict[str, Any] | None = None
@@ -490,18 +511,14 @@ class QueryRepository:
             except KeyError:
                 # Payload purged by retention policy — expected, continue without data
                 pass
-            except json.JSONDecodeError as e:
-                # Tier 1 violation: payload store data is OUR data — corruption is catastrophic
+            except (json.JSONDecodeError, UnicodeDecodeError) as e:
                 raise AuditIntegrityError(f"Corrupt payload for row {row_id} (ref={row.source_data_ref}): {e}") from e
+            except PayloadIntegrityError as e:
+                raise AuditIntegrityError(f"Payload integrity check failed for row {row_id} (ref={row.source_data_ref}): {e}") from e
             except OSError as e:
-                # Infrastructure issue (NFS timeout, disk full) — payload unavailable
-                logging.getLogger(__name__).warning(
-                    "Payload retrieval failed for row %s (ref=%s): %s: %s",
-                    row_id,
-                    row.source_data_ref,
-                    type(e).__name__,
-                    e,
-                )
+                raise AuditIntegrityError(
+                    f"Payload retrieval failed for row {row_id} (ref={row.source_data_ref}): {type(e).__name__}: {e}"
+                ) from e
 
         return RowLineage(
             row_id=row.row_id,

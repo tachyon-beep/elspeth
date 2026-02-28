@@ -1334,16 +1334,6 @@ class Orchestrator:
         raw_edge_map = recorder.get_edge_map(run_id)
         edge_map: dict[tuple[NodeID, str], str] = {(NodeID(k[0]), k[1]): v for k, v in raw_edge_map.items()}
 
-        # Validate: If graph has edges, database MUST have matching edges (Tier 1 trust)
-        # Missing edges = data corruption or incomplete original run registration
-        graph_edges = graph.get_edges()
-        if graph_edges and not edge_map:
-            raise ValueError(
-                f"Resume failed: Graph has {len(graph_edges)} edges but no edges found in database "
-                f"for run_id '{run_id}'. This indicates data corruption or incomplete edge registration "
-                f"in the original run. Cannot resume without edge data."
-            )
-
         # Get route resolution map for validation
         route_resolution_map = graph.get_route_resolution_map()
 

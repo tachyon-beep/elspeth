@@ -64,6 +64,7 @@ from elspeth.core.landscape.formatters import (
     serialize_datetime,
 )
 from elspeth.core.landscape.lineage import LineageResult, explain
+from elspeth.core.landscape.query_repository import QueryRepository
 from elspeth.core.landscape.recorder import LandscapeRecorder
 from elspeth.core.landscape.reproducibility import (
     ReproducibilityGrade,
@@ -117,6 +118,7 @@ __all__ = [
     "NodeStateFailed",
     "NodeStateOpen",
     "NodeStateStatus",
+    "QueryRepository",
     "ReproducibilityGrade",
     "RoutingEvent",
     "RoutingSpec",
