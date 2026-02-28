@@ -305,6 +305,7 @@ allowed_dict_patterns:
   # The input must be dict[str, Any] because it's the unvalidated type before validation.
   - "src/elspeth/tui/widgets/node_detail.py:_validate_execution_error:data"
   - "src/elspeth/tui/widgets/node_detail.py:_validate_transform_error:data"
+  - "src/elspeth/tui/widgets/node_detail.py:_has_full_coalesce_shape:data"
   - "src/elspeth/tui/widgets/node_detail.py:_validate_coalesce_error:data"
   - "src/elspeth/tui/widgets/node_detail.py:_validate_artifact:data"
 
