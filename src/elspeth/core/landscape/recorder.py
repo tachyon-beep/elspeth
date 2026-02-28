@@ -9,11 +9,9 @@ Implementation uses two patterns:
 Composed repositories (owned instances, injected via __init__):
 - run_lifecycle_repository.py: Run lifecycle (begin, complete, finalize, secrets, contracts)
 - execution_repository.py: Node states, external calls, operations, batches, artifacts
+- data_flow_repository.py: Token/row lifecycle, graph structure, validation/transform errors
 
 Mixins (inherited behavior):
-- _graph_recording.py: Node and edge registration/queries
-- _token_recording.py: Row/token creation, fork/coalesce/expand, outcomes
-- _error_recording.py: Validation and transform error recording
 - _query_methods.py: Read-only entity queries, bulk retrieval, explain
 """
 
@@ -21,7 +19,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any, Literal, overload
 
-from elspeth.contracts import CallType, RunStatus
+from elspeth.contracts import CallType, Determinism, RunStatus
 
 if TYPE_CHECKING:
     from elspeth.contracts import (
@@ -32,35 +30,43 @@ if TYPE_CHECKING:
         Call,
         CallStatus,
         CoalesceFailureReason,
+        Edge,
         ExportStatus,
+        Node,
         NodeState,
         NodeStateCompleted,
         NodeStateFailed,
         NodeStateOpen,
         NodeStatePending,
         NodeStateStatus,
+        NodeType,
         Operation,
         RoutingEvent,
         RoutingMode,
         RoutingReason,
         RoutingSpec,
+        Row,
+        RowOutcome,
         Run,
         SecretResolution,
         SecretResolutionInput,
+        Token,
+        TokenOutcome,
+        TransformErrorRecord,
         TriggerType,
+        ValidationErrorRecord,
     )
     from elspeth.contracts.call_data import CallPayload
-    from elspeth.contracts.errors import ExecutionError, TransformErrorReason, TransformSuccessReason
+    from elspeth.contracts.errors import ContractViolation, ExecutionError, TransformErrorReason, TransformSuccessReason
     from elspeth.contracts.node_state_context import NodeStateContext
     from elspeth.contracts.payload_store import PayloadStore
-    from elspeth.contracts.schema_contract import SchemaContract
+    from elspeth.contracts.schema import SchemaConfig
+    from elspeth.contracts.schema_contract import PipelineRow, SchemaContract
     from elspeth.core.landscape.reproducibility import ReproducibilityGrade
 
 from elspeth.core.landscape._database_ops import DatabaseOps
-from elspeth.core.landscape._error_recording import ErrorRecordingMixin
-from elspeth.core.landscape._graph_recording import GraphRecordingMixin
 from elspeth.core.landscape._query_methods import QueryMethodsMixin
-from elspeth.core.landscape._token_recording import TokenRecordingMixin
+from elspeth.core.landscape.data_flow_repository import DataFlowRepository
 from elspeth.core.landscape.database import LandscapeDB
 from elspeth.core.landscape.execution_repository import ExecutionRepository
 from elspeth.core.landscape.model_loaders import (
@@ -85,9 +91,6 @@ from elspeth.core.landscape.run_lifecycle_repository import RunLifecycleReposito
 
 
 class LandscapeRecorder(
-    GraphRecordingMixin,
-    TokenRecordingMixin,
-    ErrorRecordingMixin,
     QueryMethodsMixin,
 ):
     """High-level API for recording audit trail entries.
@@ -153,6 +156,18 @@ class LandscapeRecorder(
             batch_loader=self._batch_loader,
             batch_member_loader=self._batch_member_loader,
             artifact_loader=self._artifact_loader,
+            payload_store=payload_store,
+        )
+
+        # Composed repository for data flow recording (extracted from 3 mixins in T19)
+        self._data_flow = DataFlowRepository(
+            db,
+            self._ops,
+            token_outcome_loader=self._token_outcome_loader,
+            node_loader=self._node_loader,
+            edge_loader=self._edge_loader,
+            validation_error_loader=self._validation_error_loader,
+            transform_error_loader=self._transform_error_loader,
             payload_store=payload_store,
         )
 
@@ -654,3 +669,279 @@ class LandscapeRecorder(
     ) -> list[Artifact]:
         """Get artifacts for a run. Delegates to ExecutionRepository."""
         return self._execution.get_artifacts(run_id, sink_node_id=sink_node_id)
+
+    # ── Data flow delegation (DataFlowRepository) ────────────────────────
+
+    # Token recording
+
+    def create_row(
+        self,
+        run_id: str,
+        source_node_id: str,
+        row_index: int,
+        data: dict[str, Any],
+        *,
+        row_id: str | None = None,
+        quarantined: bool = False,
+    ) -> Row:
+        """Create a source row record. Delegates to DataFlowRepository."""
+        return self._data_flow.create_row(
+            run_id,
+            source_node_id,
+            row_index,
+            data,
+            row_id=row_id,
+            quarantined=quarantined,
+        )
+
+    def create_token(
+        self,
+        row_id: str,
+        *,
+        token_id: str | None = None,
+        branch_name: str | None = None,
+        fork_group_id: str | None = None,
+        join_group_id: str | None = None,
+    ) -> Token:
+        """Create a token. Delegates to DataFlowRepository."""
+        return self._data_flow.create_token(
+            row_id,
+            token_id=token_id,
+            branch_name=branch_name,
+            fork_group_id=fork_group_id,
+            join_group_id=join_group_id,
+        )
+
+    def fork_token(
+        self,
+        parent_token_id: str,
+        row_id: str,
+        branches: list[str],
+        *,
+        run_id: str,
+        step_in_pipeline: int | None = None,
+    ) -> tuple[list[Token], str]:
+        """Fork a token to multiple branches. Delegates to DataFlowRepository."""
+        return self._data_flow.fork_token(
+            parent_token_id,
+            row_id,
+            branches,
+            run_id=run_id,
+            step_in_pipeline=step_in_pipeline,
+        )
+
+    def coalesce_tokens(
+        self,
+        parent_token_ids: list[str],
+        row_id: str,
+        *,
+        step_in_pipeline: int | None = None,
+    ) -> Token:
+        """Coalesce multiple tokens. Delegates to DataFlowRepository."""
+        return self._data_flow.coalesce_tokens(
+            parent_token_ids,
+            row_id,
+            step_in_pipeline=step_in_pipeline,
+        )
+
+    def expand_token(
+        self,
+        parent_token_id: str,
+        row_id: str,
+        count: int,
+        *,
+        run_id: str,
+        step_in_pipeline: int | None = None,
+        record_parent_outcome: bool = True,
+    ) -> tuple[list[Token], str]:
+        """Expand a token into multiple children. Delegates to DataFlowRepository."""
+        return self._data_flow.expand_token(
+            parent_token_id,
+            row_id,
+            count,
+            run_id=run_id,
+            step_in_pipeline=step_in_pipeline,
+            record_parent_outcome=record_parent_outcome,
+        )
+
+    def record_token_outcome(
+        self,
+        run_id: str,
+        token_id: str,
+        outcome: RowOutcome,
+        *,
+        sink_name: str | None = None,
+        batch_id: str | None = None,
+        fork_group_id: str | None = None,
+        join_group_id: str | None = None,
+        expand_group_id: str | None = None,
+        error_hash: str | None = None,
+        context: dict[str, Any] | None = None,
+    ) -> str:
+        """Record a token outcome. Delegates to DataFlowRepository."""
+        return self._data_flow.record_token_outcome(
+            run_id,
+            token_id,
+            outcome,
+            sink_name=sink_name,
+            batch_id=batch_id,
+            fork_group_id=fork_group_id,
+            join_group_id=join_group_id,
+            expand_group_id=expand_group_id,
+            error_hash=error_hash,
+            context=context,
+        )
+
+    def get_token_outcome(self, token_id: str) -> TokenOutcome | None:
+        """Get terminal outcome for a token. Delegates to DataFlowRepository."""
+        return self._data_flow.get_token_outcome(token_id)
+
+    def get_token_outcomes_for_row(self, run_id: str, row_id: str) -> list[TokenOutcome]:
+        """Get all token outcomes for a row. Delegates to DataFlowRepository."""
+        return self._data_flow.get_token_outcomes_for_row(run_id, row_id)
+
+    # Graph recording
+
+    def register_node(
+        self,
+        run_id: str,
+        plugin_name: str,
+        node_type: NodeType,
+        plugin_version: str,
+        config: dict[str, Any],
+        *,
+        node_id: str | None = None,
+        sequence: int | None = None,
+        schema_hash: str | None = None,
+        determinism: Determinism = Determinism.DETERMINISTIC,
+        schema_config: SchemaConfig,
+        input_contract: SchemaContract | None = None,
+        output_contract: SchemaContract | None = None,
+    ) -> Node:
+        """Register a plugin node. Delegates to DataFlowRepository."""
+        return self._data_flow.register_node(
+            run_id,
+            plugin_name,
+            node_type,
+            plugin_version,
+            config,
+            node_id=node_id,
+            sequence=sequence,
+            schema_hash=schema_hash,
+            determinism=determinism,
+            schema_config=schema_config,
+            input_contract=input_contract,
+            output_contract=output_contract,
+        )
+
+    def register_edge(
+        self,
+        run_id: str,
+        from_node_id: str,
+        to_node_id: str,
+        label: str,
+        mode: RoutingMode,
+        *,
+        edge_id: str | None = None,
+    ) -> Edge:
+        """Register an edge. Delegates to DataFlowRepository."""
+        return self._data_flow.register_edge(
+            run_id,
+            from_node_id,
+            to_node_id,
+            label,
+            mode,
+            edge_id=edge_id,
+        )
+
+    def get_node(self, node_id: str, run_id: str) -> Node | None:
+        """Get a node by composite PK. Delegates to DataFlowRepository."""
+        return self._data_flow.get_node(node_id, run_id)
+
+    def get_nodes(self, run_id: str) -> list[Node]:
+        """Get all nodes for a run. Delegates to DataFlowRepository."""
+        return self._data_flow.get_nodes(run_id)
+
+    def get_node_contracts(self, run_id: str, node_id: str) -> tuple[SchemaContract | None, SchemaContract | None]:
+        """Get node contracts. Delegates to DataFlowRepository."""
+        return self._data_flow.get_node_contracts(run_id, node_id)
+
+    def get_edges(self, run_id: str) -> list[Edge]:
+        """Get all edges for a run. Delegates to DataFlowRepository."""
+        return self._data_flow.get_edges(run_id)
+
+    def get_edge(self, edge_id: str) -> Edge:
+        """Get an edge by ID. Delegates to DataFlowRepository."""
+        return self._data_flow.get_edge(edge_id)
+
+    def get_edge_map(self, run_id: str) -> dict[tuple[str, str], str]:
+        """Get edge mapping for a run. Delegates to DataFlowRepository."""
+        return self._data_flow.get_edge_map(run_id)
+
+    def update_node_output_contract(
+        self,
+        run_id: str,
+        node_id: str,
+        contract: SchemaContract,
+    ) -> None:
+        """Update node output contract. Delegates to DataFlowRepository."""
+        self._data_flow.update_node_output_contract(run_id, node_id, contract)
+
+    # Error recording
+
+    def record_validation_error(
+        self,
+        run_id: str,
+        node_id: str | None,
+        row_data: Any,
+        error: str,
+        schema_mode: str,
+        destination: str,
+        *,
+        contract_violation: ContractViolation | None = None,
+    ) -> str:
+        """Record a validation error. Delegates to DataFlowRepository."""
+        return self._data_flow.record_validation_error(
+            run_id,
+            node_id,
+            row_data,
+            error,
+            schema_mode,
+            destination,
+            contract_violation=contract_violation,
+        )
+
+    def record_transform_error(
+        self,
+        run_id: str,
+        token_id: str,
+        transform_id: str,
+        row_data: dict[str, Any] | PipelineRow,
+        error_details: TransformErrorReason,
+        destination: str,
+    ) -> str:
+        """Record a transform error. Delegates to DataFlowRepository."""
+        return self._data_flow.record_transform_error(
+            run_id,
+            token_id,
+            transform_id,
+            row_data,
+            error_details,
+            destination,
+        )
+
+    def get_validation_errors_for_row(self, run_id: str, row_hash: str) -> list[ValidationErrorRecord]:
+        """Get validation errors for a row. Delegates to DataFlowRepository."""
+        return self._data_flow.get_validation_errors_for_row(run_id, row_hash)
+
+    def get_validation_errors_for_run(self, run_id: str) -> list[ValidationErrorRecord]:
+        """Get all validation errors for a run. Delegates to DataFlowRepository."""
+        return self._data_flow.get_validation_errors_for_run(run_id)
+
+    def get_transform_errors_for_token(self, token_id: str) -> list[TransformErrorRecord]:
+        """Get transform errors for a token. Delegates to DataFlowRepository."""
+        return self._data_flow.get_transform_errors_for_token(token_id)
+
+    def get_transform_errors_for_run(self, run_id: str) -> list[TransformErrorRecord]:
+        """Get all transform errors for a run. Delegates to DataFlowRepository."""
+        return self._data_flow.get_transform_errors_for_run(run_id)

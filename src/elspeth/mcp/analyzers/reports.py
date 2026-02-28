@@ -411,12 +411,12 @@ def get_error_analysis(db: LandscapeDB, recorder: LandscapeRecorder, run_id: str
 
     return {
         "run_id": run_id,
-        "validation_errors": {  # type: ignore[typeddict-item]  # structurally correct nested dict literals
+        "validation_errors": {
             "total": sum(r["count"] for r in validation_summary),
             "by_source": validation_summary,  # type: ignore[typeddict-item]
             "sample_data": [json.loads(r[0]) if r[0] else None for r in sample_val],
         },
-        "transform_errors": {  # type: ignore[typeddict-item]  # structurally correct nested dict literals
+        "transform_errors": {
             "total": sum(r["count"] for r in transform_summary),  # type: ignore[misc]  # SA Row attr types
             "by_transform": transform_summary,  # type: ignore[typeddict-item]
             "sample_details": [json.loads(r[0]) if r[0] else None for r in sample_trans],

@@ -521,7 +521,7 @@ class TestExpandToken:
 
 
 class TestValidateOutcomeFields:
-    """Tests for TokenRecordingMixin._validate_outcome_fields."""
+    """Tests for DataFlowRepository._validate_outcome_fields."""
 
     def _validate(self, recorder, outcome, **kwargs):
         defaults = {
@@ -533,7 +533,7 @@ class TestValidateOutcomeFields:
             "error_hash": None,
         }
         defaults.update(kwargs)
-        recorder._validate_outcome_fields(outcome, **defaults)
+        recorder._data_flow._validate_outcome_fields(outcome, **defaults)
 
     def test_completed_requires_sink_name(self):
         _db, recorder = _setup()

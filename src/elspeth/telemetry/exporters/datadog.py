@@ -155,7 +155,7 @@ class DatadogExporter:
             os.environ["DD_TRACE_AGENT_PORT"] = str(agent_port)
 
             try:
-                from ddtrace import tracer  # type: ignore[attr-defined]  # optional dep: ddtrace has incomplete stubs
+                from ddtrace import tracer
             finally:
                 # Always restore original env, regardless of import outcome
                 # (ddtrace caches connection info internally at import time)
@@ -329,7 +329,7 @@ class DatadogExporter:
 
         try:
             # ddtrace tracer has a flush method that sends pending spans
-            self._tracer.flush()  # type: ignore[no-untyped-call]  # ddtrace tracer methods lack type annotations
+            self._tracer.flush()
         except Exception as e:
             logger.warning(
                 "Failed to flush Datadog exporter",
@@ -348,7 +348,7 @@ class DatadogExporter:
         if self._tracer:
             try:
                 # Shutdown the tracer
-                self._tracer.shutdown()  # type: ignore[no-untyped-call]  # ddtrace tracer methods lack type annotations
+                self._tracer.shutdown()
             except Exception as e:
                 logger.warning(
                     "Failed to shutdown Datadog tracer",

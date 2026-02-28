@@ -255,7 +255,7 @@ class RateLimiter:
         # If the internal API changes, we skip graceful cleanup and let the
         # thread die naturally (the custom excepthook is still a safety net).
         try:
-            leaker = self._limiter.bucket_factory._leaker  # type: ignore[union-attr]
+            leaker = self._limiter.bucket_factory._leaker
         except AttributeError:
             leaker = None
         leaker_ident: int | None = None

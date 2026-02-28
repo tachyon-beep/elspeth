@@ -51,6 +51,7 @@ from elspeth.contracts import (
     TokenParent,
     ValidationErrorWithContract,
 )
+from elspeth.core.landscape.data_flow_repository import DataFlowRepository
 from elspeth.core.landscape.database import LandscapeDB, SchemaCompatibilityError
 from elspeth.core.landscape.execution_repository import ExecutionRepository
 from elspeth.core.landscape.exporter import LandscapeExporter
@@ -99,6 +100,7 @@ __all__ = [
     "CallType",
     "Checkpoint",
     "ContractAuditRecord",
+    "DataFlowRepository",
     "Edge",
     "ExecutionRepository",
     "ExportFormatter",

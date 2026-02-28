@@ -255,8 +255,7 @@ warn_unused_configs = true
 warn_unreachable = true
 show_error_codes = true
 plugins = ["pydantic.mypy"]
-# Allow unused ignores - needed for pre-commit which runs in isolated env
-warn_unused_ignores = false
+warn_unused_ignores = true
 
 [[tool.mypy.overrides]]
 module = [
@@ -272,6 +271,7 @@ module = [
     "mcp.*",
     "ddtrace.*",
     "sqlcipher3.*",
+    "langfuse.*",
 ]
 ignore_missing_imports = true
 

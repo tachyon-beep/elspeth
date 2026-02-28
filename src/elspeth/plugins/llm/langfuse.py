@@ -237,7 +237,7 @@ def create_langfuse_tracer(
         return NoOpLangfuseTracer()
 
     try:
-        from langfuse import Langfuse  # type: ignore[import-not-found,import-untyped]
+        from langfuse import Langfuse
 
         client = Langfuse(
             public_key=tracing_config.public_key,

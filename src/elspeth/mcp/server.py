@@ -474,7 +474,7 @@ def create_server(database_url: str, *, passphrase: str | None = None) -> Server
     server = Server("elspeth-landscape")
     analyzer = LandscapeAnalyzer(database_url, passphrase=passphrase)
 
-    @server.list_tools()  # type: ignore[misc, no-untyped-call, untyped-decorator]  # MCP SDK decorators lack type stubs
+    @server.list_tools()  # type: ignore[no-untyped-call,untyped-decorator]
     async def list_tools() -> list[Tool]:
         """List available analysis tools.
 
@@ -494,7 +494,7 @@ def create_server(database_url: str, *, passphrase: str | None = None) -> Server
             for name, defn in _TOOLS.items()
         ]
 
-    @server.call_tool()  # type: ignore[misc, untyped-decorator]  # MCP SDK decorators lack type stubs
+    @server.call_tool()  # type: ignore[untyped-decorator]
     async def call_tool(name: str, arguments: dict[str, Any]) -> CallToolResult | list[TextContent]:
         """Handle tool calls.
 

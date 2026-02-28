@@ -243,7 +243,7 @@ class OTLPExporter:
 
         try:
             spans = [self._event_to_span(e) for e in self._buffer]
-            self._span_exporter.export(spans)  # type: ignore[arg-type]  # _SyntheticReadableSpan duck-types ReadableSpan
+            self._span_exporter.export(spans)
             logger.debug(
                 "OTLP batch exported",
                 span_count=len(spans),

@@ -246,10 +246,10 @@ class AzureLLMProvider:
 # Optional SDK import — module-level so tests can mock it.
 try:
     from azure.monitor.opentelemetry import (
-        configure_azure_monitor,  # type: ignore[import-not-found,import-untyped,attr-defined]  # optional dep: azure-monitor-opentelemetry
+        configure_azure_monitor,
     )
 except ImportError:
-    configure_azure_monitor = None  # type: ignore[assignment,misc]
+    configure_azure_monitor = None  # type: ignore[assignment]
 
 # Module-level idempotency guard — Azure Monitor is process-global.
 _azure_monitor_configured: bool = False
@@ -294,7 +294,7 @@ def _configure_azure_monitor(config: TracingConfig) -> bool:
     # Without this, the config field is accepted and logged but never applied,
     # leaving operators with a false sense of their content recording policy.
     try:
-        from azure.ai.inference.tracing import AIInferenceInstrumentor  # type: ignore[import-not-found,import-untyped]  # optional dep
+        from azure.ai.inference.tracing import AIInferenceInstrumentor
 
         AIInferenceInstrumentor().instrument(enable_content_recording=config.enable_content_recording)
     except ImportError:
