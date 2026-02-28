@@ -138,7 +138,7 @@ class TestRunLoader:
 
     @pytest.mark.parametrize(
         "status_value",
-        ["running", "completed", "failed"],
+        ["running", "completed", "failed", "interrupted"],
     )
     def test_valid_run_status_values(self, status_value: str) -> None:
         sa_row = self._make_run_row(status=status_value)
@@ -315,6 +315,13 @@ class TestNodeLoader:
         with pytest.raises(ValueError, match="must be object/dict"):
             loader.load(sa_row)
 
+    def test_schema_fields_json_unparseable_json_raises(self) -> None:
+        """Corrupt JSON in schema_fields_json crashes per Tier 1 trust model."""
+        sa_row = self._make_node_row(schema_fields_json="[not valid json")
+        loader = NodeLoader()
+        with pytest.raises(json.JSONDecodeError):
+            loader.load(sa_row)
+
 
 # ---------------------------------------------------------------------------
 # EdgeLoader
@@ -412,6 +419,7 @@ class TestTokenLoader:
         defaults = {
             "token_id": "tok-1",
             "row_id": "row-1",
+            "run_id": "run-1",
             "created_at": NOW,
             "fork_group_id": None,
             "join_group_id": None,
@@ -430,6 +438,7 @@ class TestTokenLoader:
         assert isinstance(result, Token)
         assert result.token_id == "tok-1"
         assert result.row_id == "row-1"
+        assert result.run_id == "run-1"
         assert result.fork_group_id is None
         assert result.join_group_id is None
 
@@ -694,6 +703,22 @@ class TestBatchLoader:
         with pytest.raises(ValueError):
             loader.load(sa_row)
 
+    @pytest.mark.parametrize(
+        "trigger_value",
+        ["count", "timeout", "condition", "end_of_source", "manual"],
+    )
+    def test_valid_trigger_type_values(self, trigger_value: str) -> None:
+        sa_row = self._make_batch_row(trigger_type=trigger_value)
+        loader = BatchLoader()
+        result = loader.load(sa_row)
+        assert result.trigger_type == TriggerType(trigger_value)
+
+    def test_none_trigger_type_stays_none(self) -> None:
+        sa_row = self._make_batch_row(trigger_type=None)
+        loader = BatchLoader()
+        result = loader.load(sa_row)
+        assert result.trigger_type is None
+
     def test_invalid_trigger_type_raises_value_error(self) -> None:
         sa_row = self._make_batch_row(trigger_type="not_a_trigger")
         loader = BatchLoader()
@@ -785,6 +810,33 @@ class TestNodeStateLoader:
         with pytest.raises(ValueError, match="non-NULL duration_ms"):
             loader.load(sa_row)
 
+    def test_open_with_non_null_context_after_json_raises(self) -> None:
+        sa_row = self._make_node_state_row(
+            status="open",
+            context_after_json='{"after": true}',
+        )
+        loader = NodeStateLoader()
+        with pytest.raises(ValueError, match="non-NULL context_after_json"):
+            loader.load(sa_row)
+
+    def test_open_with_non_null_error_json_raises(self) -> None:
+        sa_row = self._make_node_state_row(
+            status="open",
+            error_json='{"reason": "unexpected"}',
+        )
+        loader = NodeStateLoader()
+        with pytest.raises(ValueError, match="non-NULL error_json"):
+            loader.load(sa_row)
+
+    def test_open_with_non_null_success_reason_json_raises(self) -> None:
+        sa_row = self._make_node_state_row(
+            status="open",
+            success_reason_json='{"action": "classified"}',
+        )
+        loader = NodeStateLoader()
+        with pytest.raises(ValueError, match="non-NULL success_reason_json"):
+            loader.load(sa_row)
+
     def test_open_with_all_invalid_completion_fields(self) -> None:
         """All three completion fields present on OPEN -- first check fires."""
         sa_row = self._make_node_state_row(
@@ -858,6 +910,28 @@ class TestNodeStateLoader:
         with pytest.raises(ValueError, match="non-NULL output_hash"):
             loader.load(sa_row)
 
+    def test_pending_with_non_null_error_json_raises(self) -> None:
+        sa_row = self._make_node_state_row(
+            status="pending",
+            completed_at=NOW,
+            duration_ms=100.0,
+            error_json='{"reason": "premature"}',
+        )
+        loader = NodeStateLoader()
+        with pytest.raises(ValueError, match="non-NULL error_json"):
+            loader.load(sa_row)
+
+    def test_pending_with_non_null_success_reason_json_raises(self) -> None:
+        sa_row = self._make_node_state_row(
+            status="pending",
+            completed_at=NOW,
+            duration_ms=100.0,
+            success_reason_json='{"action": "premature"}',
+        )
+        loader = NodeStateLoader()
+        with pytest.raises(ValueError, match="non-NULL success_reason_json"):
+            loader.load(sa_row)
+
     # === COMPLETED variant ===
 
     def test_completed_valid(self) -> None:
@@ -924,6 +998,19 @@ class TestNodeStateLoader:
         )
         loader = NodeStateLoader()
         with pytest.raises(ValueError, match="NULL completed_at"):
+            loader.load(sa_row)
+
+    def test_completed_with_non_null_error_json_raises(self) -> None:
+        """COMPLETED + error_json violates mutual exclusivity."""
+        sa_row = self._make_node_state_row(
+            status="completed",
+            output_hash="out123",
+            completed_at=NOW,
+            duration_ms=100.0,
+            error_json='{"reason": "should not be here"}',
+        )
+        loader = NodeStateLoader()
+        with pytest.raises(ValueError, match="non-NULL error_json"):
             loader.load(sa_row)
 
     # === FAILED variant ===
@@ -1001,6 +1088,18 @@ class TestNodeStateLoader:
         )
         loader = NodeStateLoader()
         with pytest.raises(ValueError, match="NULL completed_at"):
+            loader.load(sa_row)
+
+    def test_failed_with_non_null_success_reason_json_raises(self) -> None:
+        """FAILED + success_reason_json violates mutual exclusivity."""
+        sa_row = self._make_node_state_row(
+            status="failed",
+            completed_at=NOW,
+            duration_ms=50.0,
+            success_reason_json='{"action": "should not be here"}',
+        )
+        loader = NodeStateLoader()
+        with pytest.raises(ValueError, match="non-NULL success_reason_json"):
             loader.load(sa_row)
 
     # === Invalid status ===

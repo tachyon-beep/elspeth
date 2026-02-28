@@ -1,7 +1,7 @@
 """Audit trail contracts for Landscape tables.
 
 These are strict contracts - all enum fields use proper enum types.
-Repository layer handles string→enum conversion for DB reads.
+Model loader layer handles string→enum conversion for DB reads.
 
 Per Data Manifesto: The audit database is OUR data. If we read
 garbage from it, something catastrophic happened - crash immediately.

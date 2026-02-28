@@ -255,7 +255,7 @@ class NodeStateLoader:
     - NodeStateCompleted: Finished successfully with output
     - NodeStateFailed: Finished with error
 
-    Each variant has different required fields. This repository validates
+    Each variant has different required fields. This loader validates
     these invariants per the Tier 1 trust model - if invariants are violated,
     we crash immediately (audit integrity violation).
     """
