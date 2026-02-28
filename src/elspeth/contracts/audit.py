@@ -793,10 +793,34 @@ class SecretResolutionInput:
     Follows the TokenUsage precedent (commit dffe74a6) for typed audit inputs.
     """
 
+    _ALLOWED_SOURCES: ClassVar[frozenset[str]] = frozenset({"keyvault"})
+
     env_var_name: str
     source: str
     vault_url: str | None
     secret_name: str | None
     timestamp: float
-    latency_ms: float
+    resolution_latency_ms: float
     fingerprint: str
+
+    def __post_init__(self) -> None:
+        """Validate write-side invariants before audit trail insertion.
+
+        Lightweight checks for security-critical invariants. The full
+        set of business rule validations lives on the read-side
+        SecretResolution. These checks prevent:
+        - Plaintext secrets being written as fingerprints (security)
+        - Invalid source values persisting undetected (Tier 1 integrity)
+        - Non-negative latency invariant (data quality)
+        """
+        if not self.env_var_name:
+            raise ValueError("SecretResolutionInput: env_var_name is required and cannot be empty")
+        if not self.source or self.source not in self._ALLOWED_SOURCES:
+            raise ValueError(f"SecretResolutionInput: source must be one of {sorted(self._ALLOWED_SOURCES)}, got {self.source!r}")
+        if len(self.fingerprint) != 64 or not all(c in "0123456789abcdef" for c in self.fingerprint):
+            raise ValueError(
+                f"SecretResolutionInput: fingerprint must be 64-char lowercase hex (HMAC-SHA256), "
+                f"got {self.fingerprint!r} (length={len(self.fingerprint)})"
+            )
+        if self.resolution_latency_ms < 0:
+            raise ValueError(f"SecretResolutionInput: resolution_latency_ms must be non-negative, got {self.resolution_latency_ms!r}")

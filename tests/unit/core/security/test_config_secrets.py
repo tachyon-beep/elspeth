@@ -105,7 +105,7 @@ class TestKeyVaultSource:
         assert record.vault_url == "https://my-vault.vault.azure.net"
         assert record.secret_name == "my-api-key-secret"
         assert isinstance(record.timestamp, float)
-        assert isinstance(record.latency_ms, float)
+        assert isinstance(record.resolution_latency_ms, float)
 
         # Verify fingerprint is present (not plaintext value)
         assert len(record.fingerprint) == 64  # SHA256 hex digest
@@ -117,7 +117,7 @@ class TestKeyVaultSource:
         assert record.timestamp > time.time() - 60  # Within last minute
 
         # Verify latency is non-negative
-        assert record.latency_ms >= 0
+        assert record.resolution_latency_ms >= 0
 
     def test_keyvault_loads_multiple_secrets(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """Multiple secrets are loaded in a single call."""
@@ -659,7 +659,7 @@ class TestIdempotency:
         for res in [resolutions1[0], resolutions2[0]]:
             assert res.env_var_name
             assert isinstance(res.timestamp, float)
-            assert isinstance(res.latency_ms, float)
+            assert isinstance(res.resolution_latency_ms, float)
 
 
 class TestSecretLoadErrorException:

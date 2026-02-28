@@ -223,6 +223,17 @@ class TestGetSourceFieldResolution:
         with pytest.raises(AuditIntegrityError, match="expected str->str"):
             repo.get_source_field_resolution("run-1")
 
+    def test_corrupt_unparseable_json_raises(self) -> None:
+        """Tier 1: syntactically broken JSON in resolution column must crash.
+
+        This exercises the json.JSONDecodeError catch (Fix 2) — distinct from
+        the structurally-wrong-JSON tests above which test post-parse validation.
+        """
+        db, repo = _make_repo()
+        _corrupt_column(db, "run-1", source_field_resolution_json="{not valid json!!!")
+        with pytest.raises(AuditIntegrityError, match="Corrupt field resolution JSON"):
+            repo.get_source_field_resolution("run-1")
+
 
 # ---------------------------------------------------------------------------
 # get_run_contract — Tier 1 integrity checks
@@ -401,7 +412,7 @@ class TestRecordSecretResolutions:
             vault_url="https://vault.example.com",
             secret_name=f"{env_var.lower()}-secret",
             timestamp=1709100000.0,
-            latency_ms=42.5,
+            resolution_latency_ms=42.5,
             fingerprint="a" * 64,  # Valid 64-char lowercase hex (HMAC-SHA256)
         )
 
@@ -486,6 +497,17 @@ class TestUpdateRunContract:
         result = repo.get_run_contract("run-1")
         assert result is not None
         assert result.mode == "OBSERVED"
+
+    def test_update_nonexistent_run_raises(self) -> None:
+        """Atomic guard: update_run_contract on missing run raises ValueError."""
+        _, repo = _make_repo()
+        contract = SchemaContract(
+            mode="FIXED",
+            fields=(FieldContract(normalized_name="x", original_name="x", python_type=str, required=True, source="declared"),),
+            locked=True,
+        )
+        with pytest.raises(ValueError, match="not found"):
+            repo.update_run_contract("ghost-run", contract)
 
     def test_overwrite_existing_contract_raises(self) -> None:
         """Tier 1: overwriting an existing contract is evidence contamination."""

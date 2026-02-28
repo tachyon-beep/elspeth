@@ -251,8 +251,8 @@ class RunLifecycleRepository:
             self._ops.execute_update(
                 runs_table.update().where(runs_table.c.run_id == run_id).values(source_field_resolution_json=resolution_json)
             )
-        except ValueError:
-            raise ValueError(f"Cannot record source field resolution: run {run_id} not found") from None
+        except ValueError as exc:
+            raise ValueError(f"Cannot record source field resolution: run {run_id} not found") from exc
 
     def get_source_field_resolution(self, run_id: str) -> dict[str, str] | None:
         """Get source field resolution mapping for a run.
@@ -283,7 +283,14 @@ class RunLifecycleRepository:
 
         # Parse the stored JSON structure
         # This is Tier 1 (our data) — crash on any anomaly
-        resolution_data = json.loads(resolution_json)
+        try:
+            resolution_data = json.loads(resolution_json)
+        except json.JSONDecodeError as exc:
+            raise AuditIntegrityError(
+                f"Corrupt field resolution JSON for run {run_id}: "
+                f"failed to parse stored JSON — database corruption (Tier 1 violation). "
+                f"Parse error: {exc}"
+            ) from exc
         if not isinstance(resolution_data, dict):
             raise AuditIntegrityError(
                 f"Corrupt field resolution data for run {run_id}: expected dict, got {type(resolution_data).__name__}"
@@ -368,27 +375,34 @@ class RunLifecycleRepository:
             This is the only way to add a contract after begin_run().
             Used for sources that discover schema during load() rather than from config.
         """
-        # Guard against overwriting an existing contract — evidence contamination
-        existing = self._ops.execute_fetchone(select(runs_table.c.schema_contract_json).where(runs_table.c.run_id == run_id))
-        if existing is not None and existing.schema_contract_json is not None:
-            raise AuditIntegrityError(
-                f"Cannot update schema contract for run {run_id}: "
-                f"contract already exists. update_run_contract is only valid "
-                f"when no contract was set at begin_run()."
-            )
-
         audit_record = ContractAuditRecord.from_contract(contract)
         schema_contract_json = audit_record.to_json()
         schema_contract_hash = contract.version_hash()
 
-        self._ops.execute_update(
-            runs_table.update()
-            .where(runs_table.c.run_id == run_id)
-            .values(
-                schema_contract_json=schema_contract_json,
-                schema_contract_hash=schema_contract_hash,
+        # Atomic guard: conditional UPDATE only sets contract when column is NULL.
+        # This prevents TOCTOU races where a concurrent thread could set the contract
+        # between a check-then-write pair. The WHERE clause makes overwrite impossible.
+        with self._db.connection() as conn:
+            result = conn.execute(
+                runs_table.update()
+                .where(runs_table.c.run_id == run_id)
+                .where(runs_table.c.schema_contract_json.is_(None))
+                .values(
+                    schema_contract_json=schema_contract_json,
+                    schema_contract_hash=schema_contract_hash,
+                )
             )
-        )
+            if result.rowcount == 0:
+                # Zero rows updated — either run doesn't exist or contract already set.
+                # Distinguish the two cases for a clear error message.
+                existing = conn.execute(select(runs_table.c.schema_contract_json).where(runs_table.c.run_id == run_id)).fetchone()
+                if existing is not None and existing.schema_contract_json is not None:
+                    raise AuditIntegrityError(
+                        f"Cannot update schema contract for run {run_id}: "
+                        f"contract already exists. update_run_contract is only valid "
+                        f"when no contract was set at begin_run()."
+                    )
+                raise ValueError(f"Cannot update schema contract: run {run_id} not found")
 
     def get_run_contract(self, run_id: str) -> SchemaContract | None:
         """Get schema contract for a run.
@@ -474,11 +488,13 @@ class RunLifecycleRepository:
                         vault_url=rec.vault_url,
                         secret_name=rec.secret_name,
                         fingerprint=rec.fingerprint,
-                        resolution_latency_ms=rec.latency_ms,
+                        resolution_latency_ms=rec.resolution_latency_ms,
                     )
                 )
                 if result.rowcount == 0:
-                    raise ValueError(f"Secret resolution insert failed for run {run_id} — zero rows affected (audit write failure)")
+                    raise AuditIntegrityError(
+                        f"Secret resolution insert failed for run {run_id} — zero rows affected (audit write failure)"
+                    )
 
     def get_secret_resolutions_for_run(self, run_id: str) -> list[SecretResolution]:
         """Get all secret resolution records for a run.
@@ -578,8 +594,8 @@ class RunLifecycleRepository:
 
         try:
             self._ops.execute_update(runs_table.update().where(runs_table.c.run_id == run_id).values(**updates))
-        except ValueError:
-            raise ValueError(f"Cannot set export status to {status.value!r}: run {run_id} not found") from None
+        except ValueError as exc:
+            raise ValueError(f"Cannot set export status to {status.value!r}: run {run_id} not found") from exc
 
     def finalize_run(self, run_id: str, status: RunStatus) -> Run:
         """Finalize a run by computing grade and completing it.

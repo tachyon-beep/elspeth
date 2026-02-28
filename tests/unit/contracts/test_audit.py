@@ -38,6 +38,7 @@ from elspeth.contracts import (
     RowOutcome,
     Run,
     RunStatus,
+    SecretResolutionInput,
     Token,
     TokenOutcome,
     TokenParent,
@@ -2264,3 +2265,79 @@ class TestOperation:
                 started_at=datetime.now(UTC),
                 status="oops",  # type: ignore[arg-type]
             )
+
+
+# ---------------------------------------------------------------------------
+# SecretResolutionInput — write-side validation (__post_init__)
+# ---------------------------------------------------------------------------
+
+
+class TestSecretResolutionInputValidation:
+    """Tests for SecretResolutionInput __post_init__ write-side validation.
+
+    SecretResolutionInput is the write-side DTO for Key Vault audit records.
+    Validation at construction ensures only well-formed records enter the
+    audit trail (Tier 1 crash-on-anomaly principle).
+    """
+
+    @staticmethod
+    def _valid_kwargs(**overrides: object) -> dict[str, object]:
+        """Build valid SecretResolutionInput kwargs with optional overrides."""
+        defaults: dict[str, object] = {
+            "env_var_name": "API_KEY",
+            "source": "keyvault",
+            "vault_url": "https://vault.example.com",
+            "secret_name": "api-key",
+            "timestamp": 1709100000.0,
+            "resolution_latency_ms": 42.5,
+            "fingerprint": "a" * 64,
+        }
+        defaults.update(overrides)
+        return defaults
+
+    def test_valid_construction_succeeds(self) -> None:
+        """Happy path: valid inputs create the dataclass without error."""
+        sri = SecretResolutionInput(**self._valid_kwargs())  # type: ignore[arg-type]
+        assert sri.env_var_name == "API_KEY"
+        assert sri.fingerprint == "a" * 64
+
+    def test_empty_env_var_name_rejected(self) -> None:
+        with pytest.raises(ValueError, match="env_var_name is required"):
+            SecretResolutionInput(**self._valid_kwargs(env_var_name=""))  # type: ignore[arg-type]
+
+    def test_invalid_source_rejected(self) -> None:
+        with pytest.raises(ValueError, match="source must be one of"):
+            SecretResolutionInput(**self._valid_kwargs(source="s3"))  # type: ignore[arg-type]
+
+    def test_empty_source_rejected(self) -> None:
+        with pytest.raises(ValueError, match="source must be one of"):
+            SecretResolutionInput(**self._valid_kwargs(source=""))  # type: ignore[arg-type]
+
+    def test_short_fingerprint_rejected(self) -> None:
+        with pytest.raises(ValueError, match="64-char lowercase hex"):
+            SecretResolutionInput(**self._valid_kwargs(fingerprint="abc123"))  # type: ignore[arg-type]
+
+    def test_uppercase_fingerprint_rejected(self) -> None:
+        with pytest.raises(ValueError, match="64-char lowercase hex"):
+            SecretResolutionInput(**self._valid_kwargs(fingerprint="A" * 64))  # type: ignore[arg-type]
+
+    def test_non_hex_fingerprint_rejected(self) -> None:
+        with pytest.raises(ValueError, match="64-char lowercase hex"):
+            SecretResolutionInput(**self._valid_kwargs(fingerprint="g" * 64))  # type: ignore[arg-type]
+
+    def test_negative_latency_rejected(self) -> None:
+        with pytest.raises(ValueError, match="non-negative"):
+            SecretResolutionInput(**self._valid_kwargs(resolution_latency_ms=-1.0))  # type: ignore[arg-type]
+
+    def test_zero_latency_accepted(self) -> None:
+        """Zero latency is valid (e.g., cached resolution)."""
+        sri = SecretResolutionInput(**self._valid_kwargs(resolution_latency_ms=0.0))  # type: ignore[arg-type]
+        assert sri.resolution_latency_ms == 0.0
+
+    def test_all_hex_digits_accepted(self) -> None:
+        """Fingerprint using all valid hex chars should pass."""
+        # Use all 16 hex digits repeated to fill 64 chars
+        fingerprint = "0123456789abcdef" * 4
+        assert len(fingerprint) == 64
+        sri = SecretResolutionInput(**self._valid_kwargs(fingerprint=fingerprint))  # type: ignore[arg-type]
+        assert sri.fingerprint == fingerprint

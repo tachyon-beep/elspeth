@@ -718,7 +718,9 @@ If you are proposing a fix that involves "a patch or temporary workaround," STOP
 
 **No git stash.** The stash/pop cycle has caused repeated data loss in this project — pre-commit hooks that stash/unstash silently destroy unstaged work when `stash pop` encounters conflicts. If you need to preserve work, commit it to a branch.
 
-## Prohibition on Defensive Programming Patterns
+## Defensive Programming: Forbidden. Offensive Programming: Encouraged.
+
+### What's Forbidden (Defensive Programming)
 
 Do not use `.get()`, `getattr()`, `hasattr()`, `isinstance()`, or silent exception handling to suppress errors from nonexistent attributes, malformed data, or incorrect types. **Access typed dataclass fields directly** (`obj.field`), not defensively (`obj.get("field")`).
 
@@ -726,14 +728,61 @@ A common anti-pattern: an LLM hallucinates a field name, code fails, and the "fi
 
 Defensive handling IS appropriate at trust boundaries — see the **Coercion Rules** and **Operation Wrapping Rules** tables in the Three-Tier Trust Model section for the complete rules and examples.
 
+### What's Encouraged (Offensive Programming)
+
+**Proactively detect invalid states and throw meaningful exceptions.** Don't wait for code to fail with a cryptic `KeyError` or `NoneType` crash three stack frames later. If you can detect that data is corrupt, a precondition is violated, or an invariant is broken — assert it explicitly and fail with a message that tells the operator *exactly what went wrong and why*.
+
+**Key principle:** The goal is not to prevent crashes — it's to make crashes **maximally informative**. A bare `KeyError: 'tokens'` tells an operator nothing. An `AuditIntegrityError("Corrupt field resolution JSON for run run-42: failed to parse stored JSON — database corruption (Tier 1 violation)")` tells them exactly what happened, which record is affected, and what trust tier was violated.
+
+**Examples of good offensive programming:**
+
+```python
+# Detect corruption at read time — don't let bad data propagate
+try:
+    data = json.loads(stored_json)
+except json.JSONDecodeError as exc:
+    raise AuditIntegrityError(
+        f"Corrupt JSON for run {run_id}: database corruption (Tier 1 violation). "
+        f"Parse error: {exc}"
+    ) from exc
+
+# Validate write-side invariants at construction — reject garbage before it enters the audit trail
+@dataclass(frozen=True)
+class SecretResolutionInput:
+    fingerprint: str
+    def __post_init__(self) -> None:
+        if len(self.fingerprint) != 64 or not all(c in "0123456789abcdef" for c in self.fingerprint):
+            raise ValueError(f"fingerprint must be 64-char lowercase hex, got {self.fingerprint!r}")
+
+# Use atomic guards to prevent TOCTOU races — detect the anomaly, don't just hope it doesn't happen
+result = conn.execute(
+    update(table).where(table.c.id == id).where(table.c.field.is_(None)).values(field=value)
+)
+if result.rowcount == 0:
+    # Distinguish "not found" from "already set" — different operator actions needed
+    existing = conn.execute(select(table.c.field).where(table.c.id == id)).fetchone()
+    if existing is not None and existing.field is not None:
+        raise AuditIntegrityError(f"Cannot overwrite: field already exists for {id}")
+    raise ValueError(f"Record {id} not found")
+```
+
+**When to add offensive checks:**
+
+- **Tier 1 read paths**: Data from our own database should be exactly what we expect. If it isn't, crash immediately with context — this is corruption or tampering.
+- **Write-side DTOs**: Validate invariants at construction (via `__post_init__`) before data enters the audit trail. Cheaper to reject garbage at the door than to discover it on read.
+- **State transitions**: When a method has preconditions (e.g., "contract must not already exist"), assert them with contextual error messages, not silent no-ops.
+- **Exception chains**: Always use `from exc` to preserve the original exception chain. `from None` destroys diagnostic information.
+
 ### The Decision Test
 
 | Question | If Yes | If No |
 |----------|--------|-------|
-| Is this protecting against user-provided data values? | ✅ Wrap it | — |
-| Is this at an external system boundary (API, file, DB)? | ✅ Wrap it | — |
+| Is this protecting against user-provided data values? | ✅ Wrap it (trust boundary) | — |
+| Is this at an external system boundary (API, file, DB)? | ✅ Wrap it (trust boundary) | — |
+| Can I detect an invalid state and throw a meaningful error? | ✅ Assert it (offensive) | — |
 | Would this fail due to a bug in code we control? | — | ❌ Let it crash |
 | Am I adding this because "something might be None"? | — | ❌ Fix the root cause |
+| Am I silently swallowing an error with a default value? | — | ❌ That's defensive — forbidden |
 
 <!-- filigree:instructions:v1.3.0:6bd811c8 -->
 ## Filigree Issue Tracker

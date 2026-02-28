@@ -183,7 +183,7 @@ def load_secrets_from_config(config: SecretsConfig) -> list[SecretResolutionInpu
                     vault_url=config.vault_url,
                     secret_name=keyvault_secret_name,
                     timestamp=start_time,
-                    latency_ms=latency_ms,
+                    resolution_latency_ms=latency_ms,
                     fingerprint=fp,
                 )
             )

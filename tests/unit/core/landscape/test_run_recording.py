@@ -221,7 +221,7 @@ class TestSecretResolutions:
                 vault_url="https://vault.example.com",
                 secret_name="api-key",
                 timestamp=1705320000.0,
-                latency_ms=150.0,
+                resolution_latency_ms=150.0,
                 fingerprint="a" * 64,
             ),
         ]
