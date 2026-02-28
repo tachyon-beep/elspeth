@@ -370,6 +370,8 @@ class CoalesceExecutor:
         key: tuple[str, str],
         step: int,
         failure_reason: str,
+        *,
+        is_timeout: bool = False,
     ) -> CoalesceOutcome:
         """Fail all arrived tokens in a pending coalesce and clean up.
 
@@ -381,6 +383,9 @@ class CoalesceExecutor:
             key: (coalesce_name, row_id) tuple
             step: Resolved audit step index for the coalesce node
             failure_reason: Machine-readable failure reason string
+            is_timeout: Whether this failure was triggered by a timeout.
+                Callers set this explicitly rather than inferring from the
+                failure_reason string.
 
         Returns:
             CoalesceOutcome with failure_reason set and outcomes_recorded=True
@@ -397,9 +402,7 @@ class CoalesceExecutor:
             expected_branches=list(settings.branches),
             branches_arrived=list(pending.branches.keys()),
             merge_policy=settings.merge,
-            timeout_ms=int(settings.timeout_seconds * 1000)
-            if settings.timeout_seconds is not None and "timeout" in failure_reason
-            else None,
+            timeout_ms=int(settings.timeout_seconds * 1000) if is_timeout and settings.timeout_seconds is not None else None,
         )
         for _branch_name, entry in pending.branches.items():
             self._recorder.complete_node_state(
@@ -801,6 +804,7 @@ class CoalesceExecutor:
                             key,
                             step,
                             failure_reason="best_effort_timeout_no_arrivals",
+                            is_timeout=True,
                         )
                     )
 
@@ -828,6 +832,7 @@ class CoalesceExecutor:
                             key,
                             step,
                             failure_reason="quorum_not_met_at_timeout",
+                            is_timeout=True,
                         )
                     )
 
@@ -841,6 +846,7 @@ class CoalesceExecutor:
                         key,
                         step,
                         failure_reason="incomplete_branches",
+                        is_timeout=True,
                     )
                 )
 
