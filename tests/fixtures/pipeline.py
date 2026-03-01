@@ -17,7 +17,7 @@ from elspeth.core.config import SourceSettings
 from elspeth.core.dag import ExecutionGraph
 from elspeth.core.landscape.database import LandscapeDB
 from elspeth.core.landscape.recorder import LandscapeRecorder
-from elspeth.plugins.protocols import SinkProtocol, SourceProtocol
+from elspeth.plugins.infrastructure.protocols import SinkProtocol, SourceProtocol
 from tests.fixtures.factories import wire_transforms
 from tests.fixtures.plugins import CollectSink, ListSource
 
@@ -173,7 +173,7 @@ def build_production_graph(
     Replaces tests/engine/orchestrator_test_helpers.build_production_graph.
     Uses ExecutionGraph.from_plugin_instances() — the real assembly path.
     """
-    from elspeth.plugins.protocols import TransformProtocol
+    from elspeth.plugins.infrastructure.protocols import TransformProtocol
     from tests.fixtures.base_classes import _TestTransformBase
 
     row_transforms: list[TransformProtocol] = []
@@ -216,7 +216,7 @@ def build_production_graph(
             name = agg_settings.plugin
 
             def process(self, row: Any, ctx: Any) -> Any:
-                from elspeth.plugins.results import TransformResult
+                from elspeth.plugins.infrastructure.results import TransformResult
 
                 return TransformResult.success(row, success_reason={"action": "passthrough"})
 

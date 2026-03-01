@@ -21,8 +21,8 @@ from elspeth.contracts import PipelineRow, RunStatus
 from elspeth.core.config import AggregationSettings, CoalesceSettings, ElspethSettings, GateSettings, SourceSettings, TriggerConfig
 from elspeth.core.landscape import LandscapeDB
 from elspeth.engine.orchestrator import Orchestrator, PipelineConfig
-from elspeth.plugins.base import BaseTransform
-from elspeth.plugins.protocols import SinkProtocol, SourceProtocol, TransformProtocol
+from elspeth.plugins.infrastructure.base import BaseTransform
+from elspeth.plugins.infrastructure.protocols import SinkProtocol, SourceProtocol, TransformProtocol
 from elspeth.testing import make_pipeline_row
 from tests.fixtures.base_classes import _TestSchema, as_sink, as_source, as_transform
 from tests.fixtures.factories import wire_transforms
@@ -30,7 +30,7 @@ from tests.fixtures.pipeline import build_production_graph
 from tests.fixtures.plugins import CollectSink, ListSource
 
 if TYPE_CHECKING:
-    from elspeth.plugins.results import TransformResult
+    from elspeth.plugins.infrastructure.results import TransformResult
 
 
 # ---------------------------------------------------------------------------
@@ -49,7 +49,7 @@ class IdentityTransform(BaseTransform):
         super().__init__({"schema": {"mode": "observed"}})
 
     def process(self, row: PipelineRow, ctx: Any) -> TransformResult:
-        from elspeth.plugins.results import TransformResult
+        from elspeth.plugins.infrastructure.results import TransformResult
 
         return TransformResult.success(make_pipeline_row(row.to_dict()), success_reason={"action": "identity"})
 
@@ -67,7 +67,7 @@ class AddFieldTransform(BaseTransform):
         self._field_value = field_value
 
     def process(self, row: PipelineRow, ctx: Any) -> TransformResult:
-        from elspeth.plugins.results import TransformResult
+        from elspeth.plugins.infrastructure.results import TransformResult
 
         output = {**row.to_dict(), self._field_name: self._field_value}
         return TransformResult.success(
@@ -88,7 +88,7 @@ class BatchPassthroughTransform(BaseTransform):
         super().__init__({"schema": {"mode": "observed"}})
 
     def process(self, rows: list[PipelineRow], ctx: Any) -> TransformResult:  # type: ignore[override]  # Batch-aware process takes list[PipelineRow]
-        from elspeth.plugins.results import TransformResult
+        from elspeth.plugins.infrastructure.results import TransformResult
 
         # Sum values from the batch
         total = sum(r["value"] for r in rows)

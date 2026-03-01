@@ -10,9 +10,9 @@ from typing import Any
 from unittest.mock import MagicMock
 
 from elspeth.contracts.token_usage import TokenUsage
-from elspeth.plugins.llm.langfuse import ActiveLangfuseTracer, NoOpLangfuseTracer
-from elspeth.plugins.llm.providers.azure import AzureOpenAIConfig
-from elspeth.plugins.llm.transform import LLMTransform
+from elspeth.plugins.transforms.llm.langfuse import ActiveLangfuseTracer, NoOpLangfuseTracer
+from elspeth.plugins.transforms.llm.providers.azure import AzureOpenAIConfig
+from elspeth.plugins.transforms.llm.transform import LLMTransform
 from elspeth.testing import make_pipeline_row
 
 
@@ -302,7 +302,7 @@ class TestLangfuseFailedCallTracing:
 
     def test_process_row_records_error_trace_on_llm_failure(self) -> None:
         """_process_row records Langfuse trace when LLM call fails."""
-        from elspeth.plugins.clients.llm import LLMClientError
+        from elspeth.plugins.infrastructure.clients.llm import LLMClientError
 
         transform, _mock_langfuse, captured_observations = self._create_transform_with_langfuse()
 
@@ -332,7 +332,7 @@ class TestLangfuseFailedCallTracing:
 
     def test_process_row_records_error_trace_on_retryable_failure(self) -> None:
         """_process_row records Langfuse trace even for retryable errors before re-raising."""
-        from elspeth.plugins.clients.llm import LLMClientError
+        from elspeth.plugins.infrastructure.clients.llm import LLMClientError
 
         transform, _mock_langfuse, captured_observations = self._create_transform_with_langfuse()
 

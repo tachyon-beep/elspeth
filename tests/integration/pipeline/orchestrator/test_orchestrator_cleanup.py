@@ -14,8 +14,8 @@ import pytest
 from elspeth.contracts import PipelineRow, PluginSchema
 from elspeth.core.landscape import LandscapeDB
 from elspeth.engine.orchestrator import Orchestrator, PipelineConfig
-from elspeth.plugins.base import BaseTransform
-from elspeth.plugins.results import TransformResult
+from elspeth.plugins.infrastructure.base import BaseTransform
+from elspeth.plugins.infrastructure.results import TransformResult
 from tests.fixtures.base_classes import as_sink, as_source, as_transform
 from tests.fixtures.pipeline import build_production_graph
 from tests.fixtures.plugins import CollectSink, ListSource

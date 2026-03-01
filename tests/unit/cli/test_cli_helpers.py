@@ -7,7 +7,7 @@ import pytest
 from elspeth.cli_helpers import PluginBundle, instantiate_plugins_from_config
 from elspeth.core.config import load_settings
 from elspeth.core.dag import WiredTransform
-from elspeth.plugins.base import BaseSink, BaseSource, BaseTransform
+from elspeth.plugins.infrastructure.base import BaseSink, BaseSource, BaseTransform
 
 
 def test_instantiate_returns_plugin_bundle(tmp_path: Path):

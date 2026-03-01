@@ -23,8 +23,8 @@ from elspeth.core.landscape.row_data import RowDataState
 from elspeth.core.payload_store import FilesystemPayloadStore
 from elspeth.core.retention.purge import PurgeManager
 from elspeth.engine.orchestrator import Orchestrator, PipelineConfig
-from elspeth.plugins.base import BaseTransform
-from elspeth.plugins.results import TransformResult
+from elspeth.plugins.infrastructure.base import BaseTransform
+from elspeth.plugins.infrastructure.results import TransformResult
 from tests.fixtures.base_classes import _TestSchema, as_sink, as_source, as_transform
 from tests.fixtures.pipeline import build_linear_pipeline
 from tests.fixtures.plugins import CollectSink, PassTransform

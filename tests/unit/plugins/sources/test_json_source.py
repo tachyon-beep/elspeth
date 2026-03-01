@@ -298,7 +298,7 @@ class TestJSONSourceConfigValidation:
 
     def test_missing_path_raises_error(self) -> None:
         """Empty config raises PluginConfigError."""
-        from elspeth.plugins.config_base import PluginConfigError
+        from elspeth.plugins.infrastructure.config_base import PluginConfigError
         from elspeth.plugins.sources.json_source import JSONSource
 
         with pytest.raises(PluginConfigError, match="path"):
@@ -306,7 +306,7 @@ class TestJSONSourceConfigValidation:
 
     def test_empty_path_raises_error(self) -> None:
         """Empty path string raises PluginConfigError."""
-        from elspeth.plugins.config_base import PluginConfigError
+        from elspeth.plugins.infrastructure.config_base import PluginConfigError
         from elspeth.plugins.sources.json_source import JSONSource
 
         with pytest.raises(PluginConfigError, match="path cannot be empty"):
@@ -320,7 +320,7 @@ class TestJSONSourceConfigValidation:
 
     def test_unknown_field_raises_error(self) -> None:
         """Unknown config field raises PluginConfigError."""
-        from elspeth.plugins.config_base import PluginConfigError
+        from elspeth.plugins.infrastructure.config_base import PluginConfigError
         from elspeth.plugins.sources.json_source import JSONSource
 
         with pytest.raises(PluginConfigError, match="Extra inputs"):
@@ -335,7 +335,7 @@ class TestJSONSourceConfigValidation:
 
     def test_missing_schema_raises_error(self) -> None:
         """Missing schema raises PluginConfigError."""
-        from elspeth.plugins.config_base import PluginConfigError
+        from elspeth.plugins.infrastructure.config_base import PluginConfigError
         from elspeth.plugins.sources.json_source import JSONSource
 
         with pytest.raises(PluginConfigError, match=r"schema_config[\s\S]*Field required"):
@@ -343,7 +343,7 @@ class TestJSONSourceConfigValidation:
 
     def test_missing_on_validation_failure_raises_error(self) -> None:
         """Missing on_validation_failure raises PluginConfigError."""
-        from elspeth.plugins.config_base import PluginConfigError
+        from elspeth.plugins.infrastructure.config_base import PluginConfigError
         from elspeth.plugins.sources.json_source import JSONSource
 
         with pytest.raises(PluginConfigError, match="on_validation_failure"):

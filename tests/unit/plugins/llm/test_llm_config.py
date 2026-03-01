@@ -11,7 +11,7 @@ import pytest
 from pydantic import ValidationError
 
 from elspeth.contracts.schema import SchemaConfig
-from elspeth.plugins.llm.base import LLMConfig
+from elspeth.plugins.transforms.llm.base import LLMConfig
 
 # Shared observed schema for test convenience
 _OBSERVED_SCHEMA = SchemaConfig(mode="observed", fields=None)
@@ -93,7 +93,7 @@ class TestAzureOpenAIConfig:
     """Tests for Azure-specific config class."""
 
     def test_requires_deployment_name(self) -> None:
-        from elspeth.plugins.llm.providers.azure import AzureOpenAIConfig
+        from elspeth.plugins.transforms.llm.providers.azure import AzureOpenAIConfig
 
         with pytest.raises((ValidationError, ValueError)):
             AzureOpenAIConfig(
@@ -104,7 +104,7 @@ class TestAzureOpenAIConfig:
             )
 
     def test_model_defaults_to_deployment_name(self) -> None:
-        from elspeth.plugins.llm.providers.azure import AzureOpenAIConfig
+        from elspeth.plugins.transforms.llm.providers.azure import AzureOpenAIConfig
 
         config = AzureOpenAIConfig(
             deployment_name="gpt-4o-deploy",
@@ -118,7 +118,7 @@ class TestAzureOpenAIConfig:
         assert config.model == "gpt-4o-deploy"
 
     def test_tracing_field_on_azure(self) -> None:
-        from elspeth.plugins.llm.providers.azure import AzureOpenAIConfig
+        from elspeth.plugins.transforms.llm.providers.azure import AzureOpenAIConfig
 
         config = AzureOpenAIConfig(
             deployment_name="gpt-4o",
@@ -137,7 +137,7 @@ class TestOpenRouterConfig:
 
     def test_requires_model(self) -> None:
         """OpenRouter requires model to be non-None."""
-        from elspeth.plugins.llm.providers.openrouter import OpenRouterConfig
+        from elspeth.plugins.transforms.llm.providers.openrouter import OpenRouterConfig
 
         # model=None should fail validation
         with pytest.raises((ValidationError, ValueError)):
@@ -150,7 +150,7 @@ class TestOpenRouterConfig:
             )
 
     def test_accepts_explicit_model(self) -> None:
-        from elspeth.plugins.llm.providers.openrouter import OpenRouterConfig
+        from elspeth.plugins.transforms.llm.providers.openrouter import OpenRouterConfig
 
         config = OpenRouterConfig(
             model="openai/gpt-4o",
@@ -166,7 +166,7 @@ class TestOpenRouterBatchConfigModelRequired:
     """OpenRouterBatchConfig must reject model=None."""
 
     def test_rejects_none_model(self) -> None:
-        from elspeth.plugins.llm.openrouter_batch import OpenRouterBatchConfig
+        from elspeth.plugins.transforms.llm.openrouter_batch import OpenRouterBatchConfig
 
         with pytest.raises((ValidationError, ValueError)):
             OpenRouterBatchConfig(
@@ -187,13 +187,13 @@ class TestQuerySpec:
     """Tests for the new domain-agnostic QuerySpec."""
 
     def test_post_init_rejects_empty_name(self) -> None:
-        from elspeth.plugins.llm.multi_query import QuerySpec
+        from elspeth.plugins.transforms.llm.multi_query import QuerySpec
 
         with pytest.raises(ValueError, match="name must be non-empty"):
             QuerySpec(name="", input_fields={"text": "text"})
 
     def test_post_init_rejects_empty_input_fields(self) -> None:
-        from elspeth.plugins.llm.multi_query import QuerySpec
+        from elspeth.plugins.transforms.llm.multi_query import QuerySpec
 
         with pytest.raises(ValueError, match="input_fields must be non-empty"):
             QuerySpec(name="q1", input_fields={})
@@ -201,14 +201,14 @@ class TestQuerySpec:
     def test_frozen(self) -> None:
         from dataclasses import FrozenInstanceError
 
-        from elspeth.plugins.llm.multi_query import QuerySpec
+        from elspeth.plugins.transforms.llm.multi_query import QuerySpec
 
         spec = QuerySpec(name="q1", input_fields={"text": "text_col"})
         with pytest.raises(FrozenInstanceError):
             spec.name = "modified"  # type: ignore[misc]
 
     def test_defaults(self) -> None:
-        from elspeth.plugins.llm.multi_query import QuerySpec, ResponseFormat
+        from elspeth.plugins.transforms.llm.multi_query import QuerySpec, ResponseFormat
 
         spec = QuerySpec(name="q1", input_fields={"text": "text_col"})
         assert spec.response_format == ResponseFormat.STANDARD
@@ -218,7 +218,7 @@ class TestQuerySpec:
 
     def test_build_template_context_named_variables(self) -> None:
         """Named input_fields map to template variables directly."""
-        from elspeth.plugins.llm.multi_query import QuerySpec
+        from elspeth.plugins.transforms.llm.multi_query import QuerySpec
 
         spec = QuerySpec(
             name="q1",
@@ -232,7 +232,7 @@ class TestQuerySpec:
         assert ctx["source_row"] is row
 
     def test_build_template_context_missing_field_raises(self) -> None:
-        from elspeth.plugins.llm.multi_query import QuerySpec
+        from elspeth.plugins.transforms.llm.multi_query import QuerySpec
 
         spec = QuerySpec(
             name="q1",
@@ -251,19 +251,19 @@ class TestResolveQueries:
     """Tests for resolve_queries() normalization."""
 
     def test_empty_list_raises(self) -> None:
-        from elspeth.plugins.llm.multi_query import resolve_queries
+        from elspeth.plugins.transforms.llm.multi_query import resolve_queries
 
         with pytest.raises(ValueError, match="no queries configured"):
             resolve_queries([])
 
     def test_empty_dict_raises(self) -> None:
-        from elspeth.plugins.llm.multi_query import resolve_queries
+        from elspeth.plugins.transforms.llm.multi_query import resolve_queries
 
         with pytest.raises(ValueError, match="no queries configured"):
             resolve_queries({})
 
     def test_dict_to_list_normalization(self) -> None:
-        from elspeth.plugins.llm.multi_query import resolve_queries
+        from elspeth.plugins.transforms.llm.multi_query import resolve_queries
 
         result = resolve_queries(
             {
@@ -280,7 +280,7 @@ class TestResolveQueries:
         assert names == {"q1", "q2"}
 
     def test_list_normalization(self) -> None:
-        from elspeth.plugins.llm.multi_query import QuerySpec, resolve_queries
+        from elspeth.plugins.transforms.llm.multi_query import QuerySpec, resolve_queries
 
         specs = [
             QuerySpec(name="q1", input_fields={"text": "text_col"}),
@@ -297,7 +297,7 @@ class TestResolveQueries:
 
         Both produce the identical full output key, so resolve_queries must raise.
         """
-        from elspeth.plugins.llm.multi_query import resolve_queries
+        from elspeth.plugins.transforms.llm.multi_query import resolve_queries
 
         with pytest.raises(ValueError, match="collision"):
             resolve_queries(
@@ -317,7 +317,7 @@ class TestResolveQueries:
         """Output field with reserved _error suffix logs warning."""
         import logging
 
-        from elspeth.plugins.llm.multi_query import resolve_queries
+        from elspeth.plugins.transforms.llm.multi_query import resolve_queries
 
         with caplog.at_level(logging.WARNING, logger="elspeth.plugins.llm.multi_query"):
             resolve_queries(
@@ -334,7 +334,7 @@ class TestResolveQueries:
         """Output field with suffix derived from LLM_GUARANTEED_SUFFIXES (e.g., 'usage') warns."""
         import logging
 
-        from elspeth.plugins.llm.multi_query import resolve_queries
+        from elspeth.plugins.transforms.llm.multi_query import resolve_queries
 
         with caplog.at_level(logging.WARNING, logger="elspeth.plugins.llm.multi_query"):
             resolve_queries(
@@ -348,7 +348,7 @@ class TestResolveQueries:
         assert any("reserved" in r.message.lower() for r in caplog.records)
 
     def test_single_query_returns_one_element_list(self) -> None:
-        from elspeth.plugins.llm.multi_query import resolve_queries
+        from elspeth.plugins.transforms.llm.multi_query import resolve_queries
 
         result = resolve_queries(
             {
@@ -359,7 +359,7 @@ class TestResolveQueries:
 
     def test_rejects_positional_template_variables(self) -> None:
         """Templates with {{ input_1 }} pattern raise with migration guidance."""
-        from elspeth.plugins.llm.multi_query import resolve_queries
+        from elspeth.plugins.transforms.llm.multi_query import resolve_queries
 
         with pytest.raises(ValueError, match="positional variables"):
             resolve_queries(

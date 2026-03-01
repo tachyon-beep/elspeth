@@ -27,7 +27,7 @@ from typing import Any
 import pytest
 
 from elspeth.contracts.plugin_context import PluginContext
-from elspeth.plugins.llm.transform import LLMTransform
+from elspeth.plugins.transforms.llm.transform import LLMTransform
 
 from .conftest import (
     ChaosLLMHTTPFixture,

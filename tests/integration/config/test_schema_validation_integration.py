@@ -15,7 +15,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from elspeth.plugins.manager import PluginManager
+    from elspeth.plugins.infrastructure.manager import PluginManager
 
 
 def test_schema_validation_end_to_end(tmp_path: Path, plugin_manager: PluginManager) -> None:
@@ -135,7 +135,7 @@ def test_static_schema_validation(plugin_manager: PluginManager) -> None:
     from elspeth.contracts import ArtifactDescriptor, PluginSchema, SourceRow
     from elspeth.core.config import SourceSettings
     from elspeth.core.dag import ExecutionGraph
-    from elspeth.plugins.results import TransformResult
+    from elspeth.plugins.infrastructure.results import TransformResult
     from elspeth.testing import make_pipeline_row
     from tests.fixtures.base_classes import (
         _TestSinkBase,

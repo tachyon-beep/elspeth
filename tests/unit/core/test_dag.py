@@ -3442,7 +3442,7 @@ class TestSchemaValidation:
         from elspeth.contracts import NodeType, PluginSchema, RoutingMode
         from elspeth.contracts.schema import FieldDefinition, SchemaConfig
         from elspeth.core.dag import ExecutionGraph
-        from elspeth.plugins.schema_factory import create_schema_from_config
+        from elspeth.plugins.infrastructure.schema_factory import create_schema_from_config
 
         # Create two STRUCTURALLY IDENTICAL schemas from same config
         # These will be distinct class objects (SchemaA is not SchemaB)
@@ -3522,7 +3522,7 @@ class TestSchemaValidation:
         from elspeth.contracts import NodeType, PluginSchema, RoutingMode
         from elspeth.contracts.schema import SchemaConfig
         from elspeth.core.dag import ExecutionGraph
-        from elspeth.plugins.schema_factory import create_schema_from_config
+        from elspeth.plugins.infrastructure.schema_factory import create_schema_from_config
 
         # Create two observed schemas (accept anything)
         config = SchemaConfig(mode="observed", fields=None)
@@ -3596,7 +3596,7 @@ class TestSchemaValidation:
         from elspeth.contracts import NodeType, PluginSchema, RoutingMode
         from elspeth.contracts.schema import SchemaConfig
         from elspeth.core.dag import ExecutionGraph
-        from elspeth.plugins.schema_factory import create_schema_from_config
+        from elspeth.plugins.infrastructure.schema_factory import create_schema_from_config
 
         # Create a observed schema (no fields, accepts anything)
         DynamicSchema = create_schema_from_config(
@@ -3673,7 +3673,7 @@ class TestSchemaValidation:
         from elspeth.contracts import NodeType, PluginSchema, RoutingMode
         from elspeth.contracts.schema import SchemaConfig
         from elspeth.core.dag import ExecutionGraph
-        from elspeth.plugins.schema_factory import create_schema_from_config
+        from elspeth.plugins.infrastructure.schema_factory import create_schema_from_config
 
         # Create an explicit schema with specific fields
         ExplicitSchema = create_schema_from_config(
@@ -3744,7 +3744,7 @@ class TestSchemaValidation:
         from elspeth.contracts import NodeType, PluginSchema, RoutingMode
         from elspeth.contracts.schema import SchemaConfig
         from elspeth.core.dag import ExecutionGraph
-        from elspeth.plugins.schema_factory import create_schema_from_config
+        from elspeth.plugins.infrastructure.schema_factory import create_schema_from_config
 
         # Create a observed schema
         DynamicSchema = create_schema_from_config(
@@ -4081,7 +4081,7 @@ def test_validate_aggregation_dual_schema():
     from elspeth.contracts import NodeType
     from elspeth.contracts.schema import SchemaConfig
     from elspeth.core.dag import ExecutionGraph
-    from elspeth.plugins.schema_factory import create_schema_from_config
+    from elspeth.plugins.infrastructure.schema_factory import create_schema_from_config
 
     input_schema_config = {"mode": "fixed", "fields": ["value: float"]}
     InputSchema = create_schema_from_config(
@@ -4128,7 +4128,7 @@ def test_validate_aggregation_detects_incompatibility():
     from elspeth.contracts import NodeType
     from elspeth.contracts.schema import SchemaConfig
     from elspeth.core.dag import ExecutionGraph
-    from elspeth.plugins.schema_factory import create_schema_from_config
+    from elspeth.plugins.infrastructure.schema_factory import create_schema_from_config
 
     input_schema_config = {"mode": "fixed", "fields": ["value: float"]}
     InputSchema = create_schema_from_config(
@@ -4191,7 +4191,7 @@ class TestDynamicSchemaDetection:
         from elspeth.contracts import NodeType
         from elspeth.contracts.schema import SchemaConfig
         from elspeth.core.dag import ExecutionGraph
-        from elspeth.plugins.schema_factory import create_schema_from_config
+        from elspeth.plugins.infrastructure.schema_factory import create_schema_from_config
 
         # Create observed schema (no fields, extra='allow')
         DynamicSchema = create_schema_from_config(
@@ -4224,7 +4224,7 @@ class TestDynamicSchemaDetection:
         from elspeth.contracts import NodeType
         from elspeth.contracts.schema import SchemaConfig
         from elspeth.core.dag import ExecutionGraph
-        from elspeth.plugins.schema_factory import create_schema_from_config
+        from elspeth.plugins.infrastructure.schema_factory import create_schema_from_config
 
         # Create specific schema
         SpecificSchema = create_schema_from_config(
@@ -4256,7 +4256,7 @@ class TestDynamicSchemaDetection:
         """
         from elspeth.contracts import PluginSchema
         from elspeth.contracts.schema import SchemaConfig
-        from elspeth.plugins.schema_factory import create_schema_from_config
+        from elspeth.plugins.infrastructure.schema_factory import create_schema_from_config
 
         # Create observed schema
         DynamicSchema = create_schema_from_config(

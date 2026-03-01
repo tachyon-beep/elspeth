@@ -11,7 +11,7 @@ from unittest.mock import MagicMock, patch
 import httpx
 import pytest
 
-from elspeth.plugins.clients.llm import (
+from elspeth.plugins.infrastructure.clients.llm import (
     ContentPolicyError,
     ContextLengthError,
     LLMClientError,
@@ -19,11 +19,11 @@ from elspeth.plugins.clients.llm import (
     RateLimitError,
     ServerError,
 )
-from elspeth.plugins.llm.provider import FinishReason, LLMProvider, LLMQueryResult
-from elspeth.plugins.llm.providers.openrouter import OpenRouterLLMProvider
+from elspeth.plugins.transforms.llm.provider import FinishReason, LLMProvider, LLMQueryResult
+from elspeth.plugins.transforms.llm.providers.openrouter import OpenRouterLLMProvider
 
 if TYPE_CHECKING:
-    from elspeth.plugins.clients.http import AuditedHTTPClient
+    from elspeth.plugins.infrastructure.clients.http import AuditedHTTPClient
 
 
 @pytest.fixture()
@@ -247,7 +247,7 @@ class TestExecuteQuery:
             mock_get.return_value = mock_client
 
             # Inject non-finite value after JSON parse
-            import elspeth.plugins.llm.providers.openrouter as mod
+            import elspeth.plugins.transforms.llm.providers.openrouter as mod
 
             original_loads = json.loads
 

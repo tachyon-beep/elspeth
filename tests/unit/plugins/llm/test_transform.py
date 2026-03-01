@@ -15,7 +15,7 @@ import pytest
 
 from elspeth.contracts.schema_contract import PipelineRow
 from elspeth.contracts.token_usage import TokenUsage
-from elspeth.plugins.clients.llm import (
+from elspeth.plugins.infrastructure.clients.llm import (
     ContentPolicyError,
     ContextLengthError,
     LLMClientError,
@@ -23,7 +23,7 @@ from elspeth.plugins.clients.llm import (
     RateLimitError,
     ServerError,
 )
-from elspeth.plugins.llm.provider import FinishReason, LLMQueryResult
+from elspeth.plugins.transforms.llm.provider import FinishReason, LLMQueryResult
 from elspeth.testing import make_pipeline_row
 
 # ---------------------------------------------------------------------------
@@ -90,7 +90,7 @@ def _make_transform_with_mock_provider(
     config: dict[str, Any] | None = None,
 ) -> tuple[Any, Mock]:
     """Create an LLMTransform with a mocked provider already set."""
-    from elspeth.plugins.llm.transform import LLMTransform
+    from elspeth.plugins.transforms.llm.transform import LLMTransform
 
     transform = LLMTransform(config or _make_config())
     mock_provider = Mock()
@@ -107,7 +107,7 @@ class TestProviderDispatch:
     """Verify correct provider creation based on provider field."""
 
     def test_unknown_provider_raises_with_valid_options(self) -> None:
-        from elspeth.plugins.llm.transform import LLMTransform
+        from elspeth.plugins.transforms.llm.transform import LLMTransform
 
         with pytest.raises(ValueError, match="Unknown LLM provider") as exc_info:
             LLMTransform(_make_config(provider="anthropic"))
@@ -127,8 +127,8 @@ class TestTransformProperties:
 
     def test_llm_transform_uses_process_row_not_process(self) -> None:
         """LLMTransform extends BatchTransformMixin — process() raises NotImplementedError."""
-        from elspeth.plugins.batching import BatchTransformMixin
-        from elspeth.plugins.llm.transform import LLMTransform
+        from elspeth.plugins.infrastructure.batching import BatchTransformMixin
+        from elspeth.plugins.transforms.llm.transform import LLMTransform
 
         assert issubclass(LLMTransform, BatchTransformMixin)
 
@@ -243,7 +243,7 @@ class TestSingleQuerySuccess:
 
     def test_contract_propagation_multi_query(self) -> None:
         """Multi-query mode propagates contract with OBSERVED fields from all queries."""
-        from elspeth.plugins.llm.transform import LLMTransform
+        from elspeth.plugins.transforms.llm.transform import LLMTransform
 
         # Multi-query needs a template that works with build_template_context output.
         # input_fields maps {"text_content": "text"}, meaning row["text"] is accessed
@@ -350,16 +350,16 @@ class TestTracerWiring:
     """Verify tracer selection based on config."""
 
     def test_tracer_is_noop_when_no_tracing_config(self) -> None:
-        from elspeth.plugins.llm.langfuse import NoOpLangfuseTracer
-        from elspeth.plugins.llm.transform import LLMTransform
+        from elspeth.plugins.transforms.llm.langfuse import NoOpLangfuseTracer
+        from elspeth.plugins.transforms.llm.transform import LLMTransform
 
         transform = LLMTransform(_make_config())
         assert isinstance(transform._tracer, NoOpLangfuseTracer)
 
     def test_tracer_is_active_when_langfuse_configured(self) -> None:
         """When Langfuse is configured and importable, ActiveLangfuseTracer is used."""
-        from elspeth.plugins.llm.langfuse import ActiveLangfuseTracer
-        from elspeth.plugins.llm.transform import LLMTransform
+        from elspeth.plugins.transforms.llm.langfuse import ActiveLangfuseTracer
+        from elspeth.plugins.transforms.llm.transform import LLMTransform
 
         # Mock the langfuse package at the import level used by create_langfuse_tracer
         mock_langfuse = Mock()
@@ -388,7 +388,7 @@ class TestMultiQueryPartialFailure:
 
     def test_multi_query_partial_failure_discards_successful_results(self) -> None:
         """4 queries, query 3 fails → ALL results discarded, error has details."""
-        from elspeth.plugins.llm.transform import LLMTransform, MultiQueryStrategy
+        from elspeth.plugins.transforms.llm.transform import LLMTransform, MultiQueryStrategy
 
         config = _make_config(template="Classify: {{ row.text_content }}")
         config["queries"] = {
@@ -443,7 +443,7 @@ class TestMultiQueryJSONExtraction:
 
     def test_output_fields_extracts_typed_fields_from_json(self) -> None:
         """When output_fields is configured, JSON is parsed and fields extracted."""
-        from elspeth.plugins.llm.transform import LLMTransform
+        from elspeth.plugins.transforms.llm.transform import LLMTransform
 
         config = _make_config(
             template="Evaluate: {{ row.text_content }}",
@@ -479,7 +479,7 @@ class TestMultiQueryJSONExtraction:
 
     def test_output_fields_missing_field_returns_error(self) -> None:
         """When a declared field is missing from LLM JSON response, return error."""
-        from elspeth.plugins.llm.transform import LLMTransform
+        from elspeth.plugins.transforms.llm.transform import LLMTransform
 
         config = _make_config(
             template="Evaluate: {{ row.text_content }}",
@@ -512,7 +512,7 @@ class TestMultiQueryJSONExtraction:
 
     def test_output_fields_json_parse_failure_returns_error(self) -> None:
         """When LLM returns invalid JSON and output_fields expects JSON, return error."""
-        from elspeth.plugins.llm.transform import LLMTransform
+        from elspeth.plugins.transforms.llm.transform import LLMTransform
 
         config = _make_config(
             template="Evaluate: {{ row.text_content }}",
@@ -541,7 +541,7 @@ class TestMultiQueryJSONExtraction:
 
     def test_output_fields_json_array_returns_error(self) -> None:
         """When LLM returns a JSON array instead of object, return structured error."""
-        from elspeth.plugins.llm.transform import LLMTransform
+        from elspeth.plugins.transforms.llm.transform import LLMTransform
 
         config = _make_config(
             template="Evaluate: {{ row.text_content }}",
@@ -571,7 +571,7 @@ class TestMultiQueryJSONExtraction:
 
     def test_no_output_fields_stores_raw_content(self) -> None:
         """When output_fields is None, raw content stored (current behavior)."""
-        from elspeth.plugins.llm.transform import LLMTransform
+        from elspeth.plugins.transforms.llm.transform import LLMTransform
 
         config = _make_config(
             template="Classify: {{ row.text_content }}",
@@ -604,7 +604,7 @@ class TestMultiQueryContextLength:
     """Verify ContextLengthError in multi-query returns specific reason."""
 
     def test_context_length_error_returns_specific_reason(self) -> None:
-        from elspeth.plugins.llm.transform import LLMTransform
+        from elspeth.plugins.transforms.llm.transform import LLMTransform
 
         config = _make_config(
             template="Evaluate: {{ row.text_content }}",
@@ -680,7 +680,7 @@ class TestMultiQueryNonFiniteRejection:
 
     def _make_structured_query_transform(self) -> tuple[Any, Mock]:
         """Create a multi-query transform with output_fields (JSON parsing path)."""
-        from elspeth.plugins.llm.transform import LLMTransform
+        from elspeth.plugins.transforms.llm.transform import LLMTransform
 
         config = _make_config(
             template="Evaluate: {{ row.text_content }}",
@@ -772,7 +772,7 @@ class TestLimiterDispatch:
 
     def test_azure_provider_gets_azure_openai_limiter(self) -> None:
         """Azure config should request the 'azure_openai' limiter."""
-        from elspeth.plugins.llm.transform import LLMTransform
+        from elspeth.plugins.transforms.llm.transform import LLMTransform
 
         transform = LLMTransform(_make_config(provider="azure"))
 
@@ -790,7 +790,7 @@ class TestLimiterDispatch:
 
     def test_openrouter_provider_gets_openrouter_limiter(self) -> None:
         """OpenRouter config should request the 'openrouter' limiter, not 'azure_openai'."""
-        from elspeth.plugins.llm.transform import LLMTransform
+        from elspeth.plugins.transforms.llm.transform import LLMTransform
 
         transform = LLMTransform(_make_config(provider="openrouter"))
 
@@ -822,7 +822,7 @@ class TestMultiQueryDeclaredOutputFields:
 
     def test_single_query_declares_base_output_fields(self) -> None:
         """Baseline: single-query mode declares unprefixed fields correctly."""
-        from elspeth.plugins.llm.transform import LLMTransform
+        from elspeth.plugins.transforms.llm.transform import LLMTransform
 
         transform = LLMTransform(_make_config())
         # Should include response field and metadata
@@ -832,7 +832,7 @@ class TestMultiQueryDeclaredOutputFields:
 
     def test_multi_query_declares_prefixed_content_fields(self) -> None:
         """Multi-query mode must declare query-prefixed content fields."""
-        from elspeth.plugins.llm.transform import LLMTransform
+        from elspeth.plugins.transforms.llm.transform import LLMTransform
 
         config = _make_config(
             template="Classify: {{ row.text_content }}",
@@ -849,7 +849,7 @@ class TestMultiQueryDeclaredOutputFields:
 
     def test_multi_query_declares_prefixed_metadata_fields(self) -> None:
         """Multi-query mode must declare query-prefixed metadata fields."""
-        from elspeth.plugins.llm.transform import LLMTransform
+        from elspeth.plugins.transforms.llm.transform import LLMTransform
 
         config = _make_config(
             template="Classify: {{ row.text_content }}",
@@ -866,7 +866,7 @@ class TestMultiQueryDeclaredOutputFields:
 
     def test_multi_query_declares_extracted_output_fields(self) -> None:
         """When output_fields are configured, their prefixed names must be declared."""
-        from elspeth.plugins.llm.transform import LLMTransform
+        from elspeth.plugins.transforms.llm.transform import LLMTransform
 
         config = _make_config(
             template="Evaluate: {{ row.text_content }}",
@@ -888,7 +888,7 @@ class TestMultiQueryDeclaredOutputFields:
 
     def test_multi_query_does_not_declare_unprefixed_single_query_fields(self) -> None:
         """Multi-query mode should NOT declare unprefixed base fields that it doesn't emit."""
-        from elspeth.plugins.llm.transform import LLMTransform
+        from elspeth.plugins.transforms.llm.transform import LLMTransform
 
         config = _make_config(
             template="Classify: {{ row.text_content }}",
@@ -920,7 +920,7 @@ class TestMultiQueryOutputSchemaConfig:
 
     def test_multi_query_guaranteed_fields_are_prefixed(self) -> None:
         """_output_schema_config.guaranteed_fields must contain query-prefixed names."""
-        from elspeth.plugins.llm.transform import LLMTransform
+        from elspeth.plugins.transforms.llm.transform import LLMTransform
 
         transform = LLMTransform(
             _make_config(
@@ -942,7 +942,7 @@ class TestMultiQueryOutputSchemaConfig:
 
     def test_multi_query_audit_fields_are_prefixed(self) -> None:
         """_output_schema_config.audit_fields must contain query-prefixed audit names."""
-        from elspeth.plugins.llm.transform import LLMTransform
+        from elspeth.plugins.transforms.llm.transform import LLMTransform
 
         transform = LLMTransform(
             _make_config(
@@ -963,7 +963,7 @@ class TestMultiQueryOutputSchemaConfig:
         This is the exact regression guard: the old code built _output_schema_config
         once with unprefixed fields and never updated it for multi-query.
         """
-        from elspeth.plugins.llm.transform import LLMTransform
+        from elspeth.plugins.transforms.llm.transform import LLMTransform
 
         transform = LLMTransform(
             _make_config(
@@ -986,7 +986,7 @@ class TestMultiQueryOutputSchemaConfig:
 
     def test_multi_query_output_schema_has_prefixed_model_fields(self) -> None:
         """Pydantic output_schema model must include prefixed fields for explicit schemas."""
-        from elspeth.plugins.llm.transform import LLMTransform
+        from elspeth.plugins.transforms.llm.transform import LLMTransform
 
         transform = LLMTransform(
             _make_config(
@@ -1006,7 +1006,7 @@ class TestMultiQueryOutputSchemaConfig:
 
     def test_single_query_schema_config_uses_unprefixed_fields(self) -> None:
         """Baseline: single-query _output_schema_config uses unprefixed field names."""
-        from elspeth.plugins.llm.transform import LLMTransform
+        from elspeth.plugins.transforms.llm.transform import LLMTransform
 
         transform = LLMTransform(_make_config())
 
@@ -1017,7 +1017,7 @@ class TestMultiQueryOutputSchemaConfig:
 
     def test_schema_config_consistent_with_declared_output_fields(self) -> None:
         """All guaranteed + audit fields in _output_schema_config must appear in declared_output_fields."""
-        from elspeth.plugins.llm.transform import LLMTransform
+        from elspeth.plugins.transforms.llm.transform import LLMTransform
 
         transform = LLMTransform(
             _make_config(
@@ -1038,7 +1038,7 @@ class TestMultiQueryOutputSchemaConfig:
 
     def test_multi_query_with_output_fields_in_schema_config(self) -> None:
         """Extracted output_fields (e.g., score, label) must appear in guaranteed_fields."""
-        from elspeth.plugins.llm.transform import LLMTransform
+        from elspeth.plugins.transforms.llm.transform import LLMTransform
 
         transform = LLMTransform(
             _make_config(
@@ -1067,7 +1067,7 @@ class TestMultiQueryOutputSchemaConfig:
         guaranteed_fields advertises fields the Pydantic schema doesn't have, causing
         Phase 2 type compatibility checks to fail for valid pipelines.
         """
-        from elspeth.plugins.llm.transform import LLMTransform
+        from elspeth.plugins.transforms.llm.transform import LLMTransform
 
         transform = LLMTransform(
             _make_config(
@@ -1115,7 +1115,7 @@ class TestResponseFormatPassthrough:
 
     def test_structured_response_format_passed_to_provider(self) -> None:
         """When response_format=structured, provider must receive response_format."""
-        from elspeth.plugins.llm.transform import LLMTransform
+        from elspeth.plugins.transforms.llm.transform import LLMTransform
 
         config = _make_config(
             template="Evaluate: {{ row.text_content }}",
@@ -1148,7 +1148,7 @@ class TestResponseFormatPassthrough:
 
     def test_standard_response_format_passes_json_object(self) -> None:
         """When response_format=standard with output_fields, use json_object mode."""
-        from elspeth.plugins.llm.transform import LLMTransform
+        from elspeth.plugins.transforms.llm.transform import LLMTransform
 
         config = _make_config(
             template="Evaluate: {{ row.text_content }}",
@@ -1180,7 +1180,7 @@ class TestResponseFormatPassthrough:
 
     def test_no_output_fields_omits_response_format(self) -> None:
         """When no output_fields configured, response_format should not be forced."""
-        from elspeth.plugins.llm.transform import LLMTransform
+        from elspeth.plugins.transforms.llm.transform import LLMTransform
 
         config = _make_config(
             template="Classify: {{ row.text_content }}",
@@ -1220,7 +1220,7 @@ class TestMultiQueryFieldTypeValidation:
 
     def _make_typed_query_transform(self, output_fields: list[dict[str, Any]]) -> tuple[Any, Mock]:
         """Create a multi-query transform with specific output_fields config."""
-        from elspeth.plugins.llm.transform import LLMTransform
+        from elspeth.plugins.transforms.llm.transform import LLMTransform
 
         config = _make_config(
             template="Evaluate: {{ row.text_content }}",
@@ -1360,7 +1360,7 @@ class TestMultiQueryFieldTypeValidation:
 
     def test_field_type_error_includes_query_metadata(self) -> None:
         """Type mismatch error must include query name, index, and discarded count."""
-        from elspeth.plugins.llm.transform import LLMTransform
+        from elspeth.plugins.transforms.llm.transform import LLMTransform
 
         config = _make_config(
             template="Evaluate: {{ row.text_content }}",
@@ -1416,7 +1416,7 @@ class TestMultiQueryExecutionMode:
 
     def test_pool_size_1_uses_sequential_no_executor(self) -> None:
         """pool_size=1 (default) creates no executor — sequential execution."""
-        from elspeth.plugins.llm.transform import LLMTransform, MultiQueryStrategy
+        from elspeth.plugins.transforms.llm.transform import LLMTransform, MultiQueryStrategy
 
         config = _make_config(
             template="Evaluate: {{ row.text_content }}",
@@ -1430,8 +1430,8 @@ class TestMultiQueryExecutionMode:
 
     def test_pool_size_gt_1_creates_executor(self) -> None:
         """pool_size > 1 creates PooledExecutor for parallel multi-query."""
-        from elspeth.plugins.llm.transform import LLMTransform, MultiQueryStrategy
-        from elspeth.plugins.pooling import PooledExecutor
+        from elspeth.plugins.infrastructure.pooling import PooledExecutor
+        from elspeth.plugins.transforms.llm.transform import LLMTransform, MultiQueryStrategy
 
         config = _make_config(
             template="Evaluate: {{ row.text_content }}",
@@ -1447,7 +1447,7 @@ class TestMultiQueryExecutionMode:
 
     def test_single_query_mode_no_executor(self) -> None:
         """Single-query mode (no queries) does not create an executor."""
-        from elspeth.plugins.llm.transform import LLMTransform
+        from elspeth.plugins.transforms.llm.transform import LLMTransform
 
         config = _make_config(pool_size=4)
         transform = LLMTransform(config)
@@ -1469,7 +1469,7 @@ class TestMultiQuerySequentialRetryBehavior:
 
     def test_retryable_error_returns_error_result_not_raises(self) -> None:
         """Sequential mode catches retryable errors as TransformResult.error(retryable=True)."""
-        from elspeth.plugins.llm.transform import LLMTransform
+        from elspeth.plugins.transforms.llm.transform import LLMTransform
 
         config = _make_config(
             template="Evaluate: {{ row.text_content }}",
@@ -1507,7 +1507,7 @@ class TestMultiQuerySequentialRetryBehavior:
 
     def test_non_retryable_error_returns_error_result(self) -> None:
         """Non-retryable errors still return error TransformResult(retryable=False)."""
-        from elspeth.plugins.llm.transform import LLMTransform
+        from elspeth.plugins.transforms.llm.transform import LLMTransform
 
         config = _make_config(
             template="Evaluate: {{ row.text_content }}",
@@ -1529,7 +1529,7 @@ class TestMultiQueryParallelExecution:
 
     def test_parallel_all_succeed(self) -> None:
         """All queries succeed in parallel — results merged correctly."""
-        from elspeth.plugins.llm.transform import LLMTransform
+        from elspeth.plugins.transforms.llm.transform import LLMTransform
 
         config = _make_config(
             template="Evaluate: {{ row.text_content }}",
@@ -1564,7 +1564,7 @@ class TestMultiQueryParallelExecution:
 
     def test_parallel_one_fails_non_retryable(self) -> None:
         """One query fails non-retryable in parallel — row fails atomically."""
-        from elspeth.plugins.llm.transform import LLMTransform
+        from elspeth.plugins.transforms.llm.transform import LLMTransform
 
         config = _make_config(
             template="Evaluate: {{ row.text_content }}",
@@ -1601,7 +1601,7 @@ class TestMultiQueryParallelExecution:
 
     def test_parallel_with_structured_output(self) -> None:
         """Parallel execution with output_fields — JSON parsed and merged."""
-        from elspeth.plugins.llm.transform import LLMTransform
+        from elspeth.plugins.transforms.llm.transform import LLMTransform
 
         config = _make_config(
             template="Evaluate: {{ row.text_content }}",
@@ -1658,7 +1658,7 @@ class TestMultiQueryParallelExecution:
 
     def test_close_shuts_down_executor(self) -> None:
         """LLMTransform.close() shuts down the query executor."""
-        from elspeth.plugins.llm.transform import LLMTransform
+        from elspeth.plugins.transforms.llm.transform import LLMTransform
 
         config = _make_config(
             template="Evaluate: {{ row.text_content }}",
@@ -1689,7 +1689,7 @@ class TestConfigureAzureMonitor:
         Using autouse prevents test contamination if a test fails mid-execution —
         the teardown (after yield) always runs regardless of test outcome.
         """
-        from elspeth.plugins.llm.providers.azure import _reset_azure_monitor_state
+        from elspeth.plugins.transforms.llm.providers.azure import _reset_azure_monitor_state
 
         _reset_azure_monitor_state()
         yield
@@ -1697,8 +1697,8 @@ class TestConfigureAzureMonitor:
 
     def test_returns_false_when_sdk_is_none(self) -> None:
         """_configure_azure_monitor returns False when SDK is None (not installed)."""
-        from elspeth.plugins.llm.providers.azure import _configure_azure_monitor
-        from elspeth.plugins.llm.tracing import AzureAITracingConfig
+        from elspeth.plugins.transforms.llm.providers.azure import _configure_azure_monitor
+        from elspeth.plugins.transforms.llm.tracing import AzureAITracingConfig
 
         config = AzureAITracingConfig(connection_string="InstrumentationKey=test")
         with patch(
@@ -1716,8 +1716,8 @@ class TestConfigureAzureMonitor:
         an incompatible SDK version or a bug in our call, both of which we
         need to know about immediately.
         """
-        from elspeth.plugins.llm.providers.azure import _configure_azure_monitor
-        from elspeth.plugins.llm.tracing import AzureAITracingConfig
+        from elspeth.plugins.transforms.llm.providers.azure import _configure_azure_monitor
+        from elspeth.plugins.transforms.llm.tracing import AzureAITracingConfig
 
         config = AzureAITracingConfig(connection_string="InstrumentationKey=test")
 
@@ -1736,8 +1736,8 @@ class TestConfigureAzureMonitor:
         Directly tests the isinstance guard at the top of the function,
         rather than relying on indirect coverage through on_start().
         """
-        from elspeth.plugins.llm.providers.azure import _configure_azure_monitor
-        from elspeth.plugins.llm.tracing import TracingConfig
+        from elspeth.plugins.transforms.llm.providers.azure import _configure_azure_monitor
+        from elspeth.plugins.transforms.llm.tracing import TracingConfig
 
         config = TracingConfig(provider="none")
         result = _configure_azure_monitor(config)
@@ -1745,8 +1745,8 @@ class TestConfigureAzureMonitor:
 
     def test_idempotency_second_call_returns_true_without_reconfiguring(self) -> None:
         """Second call to _configure_azure_monitor returns True without calling SDK again."""
-        from elspeth.plugins.llm.providers.azure import _configure_azure_monitor
-        from elspeth.plugins.llm.tracing import AzureAITracingConfig
+        from elspeth.plugins.transforms.llm.providers.azure import _configure_azure_monitor
+        from elspeth.plugins.transforms.llm.tracing import AzureAITracingConfig
 
         config = AzureAITracingConfig(connection_string="InstrumentationKey=test")
         with patch(
@@ -1764,8 +1764,8 @@ class TestConfigureAzureMonitor:
 
     def test_idempotency_logs_warning_on_second_call(self) -> None:
         """Second call logs a warning about duplicate initialization."""
-        from elspeth.plugins.llm.providers.azure import _configure_azure_monitor
-        from elspeth.plugins.llm.tracing import AzureAITracingConfig
+        from elspeth.plugins.transforms.llm.providers.azure import _configure_azure_monitor
+        from elspeth.plugins.transforms.llm.tracing import AzureAITracingConfig
 
         config = AzureAITracingConfig(connection_string="InstrumentationKey=test")
         with (
@@ -1787,8 +1787,8 @@ class TestConfigureAzureMonitor:
         with a working SDK should succeed. The idempotency guard must only be set
         on success.
         """
-        from elspeth.plugins.llm.providers.azure import _configure_azure_monitor
-        from elspeth.plugins.llm.tracing import AzureAITracingConfig
+        from elspeth.plugins.transforms.llm.providers.azure import _configure_azure_monitor
+        from elspeth.plugins.transforms.llm.tracing import AzureAITracingConfig
 
         config = AzureAITracingConfig(connection_string="InstrumentationKey=test")
 
@@ -1813,8 +1813,8 @@ class TestAzureAITracingSetup:
         Azure AI tracing is handled separately in on_start(), so the Langfuse
         factory should not warn about it being 'unrecognized'.
         """
-        from elspeth.plugins.llm.langfuse import NoOpLangfuseTracer, create_langfuse_tracer
-        from elspeth.plugins.llm.tracing import AzureAITracingConfig
+        from elspeth.plugins.transforms.llm.langfuse import NoOpLangfuseTracer, create_langfuse_tracer
+        from elspeth.plugins.transforms.llm.tracing import AzureAITracingConfig
 
         config = AzureAITracingConfig(connection_string="InstrumentationKey=test")
         with patch("elspeth.plugins.llm.langfuse.logger") as mock_logger:
@@ -1828,8 +1828,8 @@ class TestAzureAITracingSetup:
         Note: In production, parse_tracing_config() rejects unknown providers
         before this point. This tests the factory's own defensive behavior.
         """
-        from elspeth.plugins.llm.langfuse import NoOpLangfuseTracer, create_langfuse_tracer
-        from elspeth.plugins.llm.tracing import TracingConfig
+        from elspeth.plugins.transforms.llm.langfuse import NoOpLangfuseTracer, create_langfuse_tracer
+        from elspeth.plugins.transforms.llm.tracing import TracingConfig
 
         config = TracingConfig(provider="totally_unknown")
         with patch("elspeth.plugins.llm.langfuse.logger") as mock_logger:
@@ -1843,7 +1843,7 @@ class TestAzureAITracingSetup:
         Azure Monitor auto-instruments the OpenAI SDK. OpenRouter uses httpx
         directly, so Azure AI tracing would silently do nothing.
         """
-        from elspeth.plugins.llm.transform import LLMTransform
+        from elspeth.plugins.transforms.llm.transform import LLMTransform
 
         config = _make_config(
             provider="openrouter",
@@ -1856,8 +1856,8 @@ class TestAzureAITracingSetup:
 
     def test_azure_ai_tracing_accepted_for_azure_provider(self) -> None:
         """azure_ai tracing with azure provider does not raise."""
-        from elspeth.plugins.llm.tracing import AzureAITracingConfig
-        from elspeth.plugins.llm.transform import LLMTransform
+        from elspeth.plugins.transforms.llm.tracing import AzureAITracingConfig
+        from elspeth.plugins.transforms.llm.transform import LLMTransform
 
         config = _make_config(
             provider="azure",
@@ -1890,8 +1890,8 @@ class TestAzureAITracingOnStart:
         Also verifies success-path logging: logger.info is called with
         "Azure AI tracing initialized" and the content_recording value.
         """
-        from elspeth.plugins.llm.tracing import AzureAITracingConfig
-        from elspeth.plugins.llm.transform import LLMTransform
+        from elspeth.plugins.transforms.llm.tracing import AzureAITracingConfig
+        from elspeth.plugins.transforms.llm.transform import LLMTransform
 
         config = _make_config(
             provider="azure",
@@ -1927,7 +1927,7 @@ class TestAzureAITracingOnStart:
 
     def test_on_start_configure_azure_monitor_failure_logs_warning(self) -> None:
         """on_start() logs warning when _configure_azure_monitor returns False."""
-        from elspeth.plugins.llm.transform import LLMTransform
+        from elspeth.plugins.transforms.llm.transform import LLMTransform
 
         config = _make_config(
             provider="azure",
@@ -1945,7 +1945,7 @@ class TestAzureAITracingOnStart:
 
     def test_on_start_skips_azure_monitor_for_langfuse(self) -> None:
         """on_start() does NOT call _configure_azure_monitor for Langfuse tracing."""
-        from elspeth.plugins.llm.transform import LLMTransform
+        from elspeth.plugins.transforms.llm.transform import LLMTransform
 
         config = _make_config(
             provider="azure",
@@ -1964,7 +1964,7 @@ class TestAzureAITracingOnStart:
 
     def test_on_start_skips_azure_monitor_when_no_tracing(self) -> None:
         """on_start() does NOT call _configure_azure_monitor when tracing is None."""
-        from elspeth.plugins.llm.transform import LLMTransform
+        from elspeth.plugins.transforms.llm.transform import LLMTransform
 
         config = _make_config(provider="azure")
         transform = LLMTransform(config)

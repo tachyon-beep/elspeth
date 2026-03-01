@@ -20,7 +20,7 @@ if TYPE_CHECKING:
 
     from elspeth.contracts import PluginSchema
     from elspeth.core.config import TransformSettings
-    from elspeth.plugins.protocols import TransformProtocol
+    from elspeth.plugins.infrastructure.protocols import TransformProtocol
 
 
 class GraphValidationError(ValueError):

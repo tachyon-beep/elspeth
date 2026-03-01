@@ -3,9 +3,9 @@
 
 import pytest
 
-from elspeth.plugins.config_base import PluginConfigError
-from elspeth.plugins.llm.base import LLMConfig
-from elspeth.plugins.pooling import PoolConfig
+from elspeth.plugins.infrastructure.config_base import PluginConfigError
+from elspeth.plugins.infrastructure.pooling import PoolConfig
+from elspeth.plugins.transforms.llm.base import LLMConfig
 
 
 class TestPoolConfigDefaults:
@@ -102,7 +102,7 @@ class TestPoolConfigValidation:
         """min_dispatch_delay_ms must be <= max_dispatch_delay_ms."""
         from pydantic import ValidationError
 
-        from elspeth.plugins.pooling import PoolConfig
+        from elspeth.plugins.infrastructure.pooling import PoolConfig
 
         with pytest.raises(ValidationError) as exc_info:
             PoolConfig(
@@ -117,7 +117,7 @@ class TestPoolConfigValidation:
 
     def test_min_equal_to_max_dispatch_delay_is_allowed(self) -> None:
         """min_dispatch_delay_ms == max_dispatch_delay_ms should be allowed (fixed delay)."""
-        from elspeth.plugins.pooling import PoolConfig
+        from elspeth.plugins.infrastructure.pooling import PoolConfig
 
         # This should NOT raise - equal values are valid (fixed delay)
         config = PoolConfig(

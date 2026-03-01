@@ -121,8 +121,8 @@ class TestGateToGateWithDownstreamTransform:
     def test_transform_then_gate_routes_to_terminal_gate(self, payload_store) -> None:
         """source → transform → gate1 (routes to gate2) → gate2 (routes to sinks)."""
         from elspeth.contracts.schema_contract import PipelineRow
-        from elspeth.plugins.base import BaseTransform
-        from elspeth.plugins.results import TransformResult
+        from elspeth.plugins.infrastructure.base import BaseTransform
+        from elspeth.plugins.infrastructure.results import TransformResult
 
         db = LandscapeDB.in_memory()
 

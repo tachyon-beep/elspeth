@@ -48,7 +48,7 @@ if TYPE_CHECKING:
         SourceSettings,
     )
     from elspeth.core.dag.models import WiredTransform
-    from elspeth.plugins.protocols import SinkProtocol, SourceProtocol, TransformProtocol
+    from elspeth.plugins.infrastructure.protocols import SinkProtocol, SourceProtocol, TransformProtocol
 
 
 class ExecutionGraph:

@@ -3497,7 +3497,7 @@ class TestPluginConfigSchemaValidation:
 
     def test_schema_null_gives_clear_error(self) -> None:
         """schema: null should give a clear error, not TypeError."""
-        from elspeth.plugins.config_base import PluginConfig, PluginConfigError
+        from elspeth.plugins.infrastructure.config_base import PluginConfig, PluginConfigError
 
         with pytest.raises(PluginConfigError) as exc_info:
             PluginConfig.from_dict({"schema": None})
@@ -3508,7 +3508,7 @@ class TestPluginConfigSchemaValidation:
 
     def test_schema_string_gives_clear_error(self) -> None:
         """schema: 'invalid' should give a clear error."""
-        from elspeth.plugins.config_base import PluginConfig, PluginConfigError
+        from elspeth.plugins.infrastructure.config_base import PluginConfig, PluginConfigError
 
         with pytest.raises(PluginConfigError) as exc_info:
             PluginConfig.from_dict({"schema": "invalid"})
@@ -3517,7 +3517,7 @@ class TestPluginConfigSchemaValidation:
 
     def test_schema_list_gives_clear_error(self) -> None:
         """schema: [fields] should give a clear error."""
-        from elspeth.plugins.config_base import PluginConfig, PluginConfigError
+        from elspeth.plugins.infrastructure.config_base import PluginConfig, PluginConfigError
 
         with pytest.raises(PluginConfigError) as exc_info:
             PluginConfig.from_dict({"schema": ["fields"]})
@@ -3526,7 +3526,7 @@ class TestPluginConfigSchemaValidation:
 
     def test_schema_int_gives_clear_error(self) -> None:
         """schema: 123 should give a clear error."""
-        from elspeth.plugins.config_base import PluginConfig, PluginConfigError
+        from elspeth.plugins.infrastructure.config_base import PluginConfig, PluginConfigError
 
         with pytest.raises(PluginConfigError) as exc_info:
             PluginConfig.from_dict({"schema": 123})
@@ -3535,7 +3535,7 @@ class TestPluginConfigSchemaValidation:
 
     def test_valid_schema_dict_works(self) -> None:
         """Valid schema dict should work fine."""
-        from elspeth.plugins.config_base import PluginConfig
+        from elspeth.plugins.infrastructure.config_base import PluginConfig
 
         config = PluginConfig.from_dict({"schema": {"mode": "observed"}})
         assert config.schema_config is not None

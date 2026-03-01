@@ -14,11 +14,11 @@ from pydantic import Field, model_validator
 from elspeth.contracts.contexts import TransformContext
 from elspeth.contracts.contract_propagation import narrow_contract_to_output
 from elspeth.contracts.schema_contract import PipelineRow
-from elspeth.plugins.base import BaseTransform
-from elspeth.plugins.config_base import TransformDataConfig
-from elspeth.plugins.results import TransformResult
-from elspeth.plugins.sentinels import MISSING
-from elspeth.plugins.utils import get_nested_field
+from elspeth.plugins.infrastructure.base import BaseTransform
+from elspeth.plugins.infrastructure.config_base import TransformDataConfig
+from elspeth.plugins.infrastructure.results import TransformResult
+from elspeth.plugins.infrastructure.sentinels import MISSING
+from elspeth.plugins.infrastructure.utils import get_nested_field
 
 
 class FieldMapperConfig(TransformDataConfig):

@@ -153,7 +153,7 @@ class TestCSVSourceConfigValidation:
 
     def test_missing_path_raises_error(self) -> None:
         """Empty config raises PluginConfigError."""
-        from elspeth.plugins.config_base import PluginConfigError
+        from elspeth.plugins.infrastructure.config_base import PluginConfigError
         from elspeth.plugins.sources.csv_source import CSVSource
 
         with pytest.raises(PluginConfigError, match="path"):
@@ -161,7 +161,7 @@ class TestCSVSourceConfigValidation:
 
     def test_empty_path_raises_error(self) -> None:
         """Empty path string raises PluginConfigError."""
-        from elspeth.plugins.config_base import PluginConfigError
+        from elspeth.plugins.infrastructure.config_base import PluginConfigError
         from elspeth.plugins.sources.csv_source import CSVSource
 
         with pytest.raises(PluginConfigError, match="path cannot be empty"):
@@ -175,7 +175,7 @@ class TestCSVSourceConfigValidation:
 
     def test_unknown_field_raises_error(self) -> None:
         """Unknown config field raises PluginConfigError."""
-        from elspeth.plugins.config_base import PluginConfigError
+        from elspeth.plugins.infrastructure.config_base import PluginConfigError
         from elspeth.plugins.sources.csv_source import CSVSource
 
         with pytest.raises(PluginConfigError, match="Extra inputs"):
@@ -190,7 +190,7 @@ class TestCSVSourceConfigValidation:
 
     def test_missing_schema_raises_error(self) -> None:
         """Missing schema raises PluginConfigError."""
-        from elspeth.plugins.config_base import PluginConfigError
+        from elspeth.plugins.infrastructure.config_base import PluginConfigError
         from elspeth.plugins.sources.csv_source import CSVSource
 
         # DataPluginConfig requires schema_config - Pydantic enforces this natively
@@ -199,7 +199,7 @@ class TestCSVSourceConfigValidation:
 
     def test_missing_on_validation_failure_raises_error(self) -> None:
         """Missing on_validation_failure raises PluginConfigError."""
-        from elspeth.plugins.config_base import PluginConfigError
+        from elspeth.plugins.infrastructure.config_base import PluginConfigError
         from elspeth.plugins.sources.csv_source import CSVSource
 
         with pytest.raises(PluginConfigError, match="on_validation_failure"):

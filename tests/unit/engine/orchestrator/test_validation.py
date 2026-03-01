@@ -21,7 +21,7 @@ from elspeth.engine.orchestrator.validation import (
     validate_source_quarantine_destination,
     validate_transform_error_sinks,
 )
-from elspeth.plugins.protocols import TransformProtocol
+from elspeth.plugins.infrastructure.protocols import TransformProtocol
 
 # =============================================================================
 # Helpers

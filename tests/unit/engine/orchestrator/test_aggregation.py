@@ -38,7 +38,7 @@ from elspeth.testing import make_row, make_token_info
 
 def _make_batch_transform(*, node_id: str, is_batch_aware: bool = True) -> Mock:
     """Create a mock transform satisfying TransformProtocol with batch awareness."""
-    from elspeth.plugins.protocols import TransformProtocol
+    from elspeth.plugins.infrastructure.protocols import TransformProtocol
 
     transform = Mock(spec=TransformProtocol)
     transform.node_id = node_id

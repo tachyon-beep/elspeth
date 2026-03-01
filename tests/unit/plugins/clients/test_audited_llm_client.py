@@ -7,7 +7,7 @@ import pytest
 
 from elspeth.contracts import CallStatus, CallType
 from elspeth.contracts.token_usage import TokenUsage
-from elspeth.plugins.clients.llm import (
+from elspeth.plugins.infrastructure.clients.llm import (
     AuditedLLMClient,
     LLMClientError,
     LLMResponse,

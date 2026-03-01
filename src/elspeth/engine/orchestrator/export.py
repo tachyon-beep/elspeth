@@ -31,7 +31,7 @@ from typing import TYPE_CHECKING, Any, cast
 if TYPE_CHECKING:
     from elspeth.core.config import ElspethSettings
     from elspeth.core.landscape import LandscapeDB
-    from elspeth.plugins.protocols import SinkProtocol
+    from elspeth.plugins.infrastructure.protocols import SinkProtocol
 
 from elspeth.contracts.plugin_context import PluginContext
 

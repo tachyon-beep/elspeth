@@ -20,7 +20,7 @@ from typing import TYPE_CHECKING
 from elspeth.contracts.errors import OrchestrationInvariantError
 from elspeth.contracts.types import CoalesceName, NodeID
 from elspeth.core.config import GateSettings
-from elspeth.plugins.protocols import TransformProtocol
+from elspeth.plugins.infrastructure.protocols import TransformProtocol
 
 if TYPE_CHECKING:
     from elspeth.contracts import TokenInfo

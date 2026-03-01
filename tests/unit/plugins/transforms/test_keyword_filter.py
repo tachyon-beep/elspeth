@@ -5,7 +5,7 @@ from unittest.mock import Mock
 
 import pytest
 
-from elspeth.plugins.config_base import PluginConfigError
+from elspeth.plugins.infrastructure.config_base import PluginConfigError
 from elspeth.testing import make_pipeline_row
 
 if TYPE_CHECKING:

@@ -2,7 +2,7 @@
 
 import pytest
 
-from elspeth.plugins.base import BaseSink
+from elspeth.plugins.infrastructure.base import BaseSink
 
 
 def test_base_sink_supports_resume_default_false():

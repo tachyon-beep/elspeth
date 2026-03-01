@@ -36,9 +36,9 @@ from elspeth.core.landscape.schema import (
 )
 from elspeth.core.payload_store import FilesystemPayloadStore
 from elspeth.engine.orchestrator import Orchestrator, PipelineConfig
-from elspeth.plugins.base import BaseTransform
-from elspeth.plugins.protocols import TransformProtocol
-from elspeth.plugins.results import TransformResult
+from elspeth.plugins.infrastructure.base import BaseTransform
+from elspeth.plugins.infrastructure.protocols import TransformProtocol
+from elspeth.plugins.infrastructure.results import TransformResult
 from elspeth.testing import make_pipeline_row
 from tests.fixtures.base_classes import (
     as_sink,

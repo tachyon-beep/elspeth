@@ -39,7 +39,7 @@ from elspeth.contracts import Determinism, PluginSchema, SourceRow
 from elspeth.contracts.plugin_context import PluginContext
 
 if TYPE_CHECKING:
-    from elspeth.plugins.protocols import SourceProtocol
+    from elspeth.plugins.infrastructure.protocols import SourceProtocol
 
 
 class SourceContractTestBase(ABC):

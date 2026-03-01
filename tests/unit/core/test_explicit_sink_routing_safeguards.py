@@ -22,8 +22,8 @@ import pytest
 from elspeth.contracts import RunStatus
 from elspeth.contracts.schema_contract import PipelineRow
 from elspeth.core.config import SourceSettings, TransformSettings
-from elspeth.plugins.base import BaseTransform
-from elspeth.plugins.protocols import SinkProtocol, SourceProtocol, TransformProtocol
+from elspeth.plugins.infrastructure.base import BaseTransform
+from elspeth.plugins.infrastructure.protocols import SinkProtocol, SourceProtocol, TransformProtocol
 from elspeth.testing import make_pipeline_row
 from tests.fixtures.base_classes import _TestSchema, as_sink, as_source, as_transform
 from tests.fixtures.factories import wire_transforms
@@ -107,7 +107,7 @@ class _OnSuccessTracingTransform(BaseTransform):
         super().__init__({"schema": {"mode": "observed"}})
 
     def process(self, row: PipelineRow, ctx: Any) -> Any:
-        from elspeth.plugins.results import TransformResult
+        from elspeth.plugins.infrastructure.results import TransformResult
 
         return TransformResult.success(
             make_pipeline_row(row.to_dict()),

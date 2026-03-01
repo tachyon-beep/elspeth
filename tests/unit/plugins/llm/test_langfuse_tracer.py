@@ -16,13 +16,13 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from elspeth.contracts.token_usage import TokenUsage
-from elspeth.plugins.llm.langfuse import (
+from elspeth.plugins.transforms.llm.langfuse import (
     ActiveLangfuseTracer,
     LangfuseTracer,
     NoOpLangfuseTracer,
     create_langfuse_tracer,
 )
-from elspeth.plugins.llm.tracing import AzureAITracingConfig, LangfuseTracingConfig
+from elspeth.plugins.transforms.llm.tracing import AzureAITracingConfig, LangfuseTracingConfig
 
 # ── Factory tests ──────────────────────────────────────────────────
 
@@ -48,10 +48,10 @@ class TestCreateLangfuseTracer:
     @patch.dict("sys.modules", {"langfuse": MagicMock()})
     def test_create_with_langfuse_config_returns_active_tracer(self) -> None:
         # Must import inside patched context so the langfuse import resolves
-        from elspeth.plugins.llm.langfuse import (
+        from elspeth.plugins.transforms.llm.langfuse import (
             ActiveLangfuseTracer as PatchedActiveTracer,
         )
-        from elspeth.plugins.llm.langfuse import (
+        from elspeth.plugins.transforms.llm.langfuse import (
             create_langfuse_tracer as patched_create,
         )
 

@@ -10,8 +10,8 @@ from typing import Any
 
 import pytest
 
-from elspeth.plugins.config_base import PluginConfigError
-from elspeth.plugins.llm.transform import LLMTransform
+from elspeth.plugins.infrastructure.config_base import PluginConfigError
+from elspeth.plugins.transforms.llm.transform import LLMTransform
 
 # Re-export chaosllm_server fixture for field collision tests
 from tests.fixtures.chaosllm import chaosllm_server  # noqa: F401
@@ -54,7 +54,7 @@ class TestOutputFieldConfig:
 
     def test_string_type_to_json_schema(self) -> None:
         """String type generates correct JSON schema."""
-        from elspeth.plugins.llm.multi_query import OutputFieldConfig
+        from elspeth.plugins.transforms.llm.multi_query import OutputFieldConfig
 
         config = OutputFieldConfig.from_dict({"suffix": "rationale", "type": "string"})
         schema = config.to_json_schema()
@@ -63,7 +63,7 @@ class TestOutputFieldConfig:
 
     def test_integer_type_to_json_schema(self) -> None:
         """Integer type generates correct JSON schema."""
-        from elspeth.plugins.llm.multi_query import OutputFieldConfig
+        from elspeth.plugins.transforms.llm.multi_query import OutputFieldConfig
 
         config = OutputFieldConfig.from_dict({"suffix": "score", "type": "integer"})
         schema = config.to_json_schema()
@@ -72,7 +72,7 @@ class TestOutputFieldConfig:
 
     def test_number_type_to_json_schema(self) -> None:
         """Number type generates correct JSON schema."""
-        from elspeth.plugins.llm.multi_query import OutputFieldConfig
+        from elspeth.plugins.transforms.llm.multi_query import OutputFieldConfig
 
         config = OutputFieldConfig.from_dict({"suffix": "probability", "type": "number"})
         schema = config.to_json_schema()
@@ -81,7 +81,7 @@ class TestOutputFieldConfig:
 
     def test_boolean_type_to_json_schema(self) -> None:
         """Boolean type generates correct JSON schema."""
-        from elspeth.plugins.llm.multi_query import OutputFieldConfig
+        from elspeth.plugins.transforms.llm.multi_query import OutputFieldConfig
 
         config = OutputFieldConfig.from_dict({"suffix": "is_valid", "type": "boolean"})
         schema = config.to_json_schema()
@@ -90,7 +90,7 @@ class TestOutputFieldConfig:
 
     def test_enum_type_to_json_schema(self) -> None:
         """Enum type generates JSON schema with allowed values."""
-        from elspeth.plugins.llm.multi_query import OutputFieldConfig
+        from elspeth.plugins.transforms.llm.multi_query import OutputFieldConfig
 
         config = OutputFieldConfig.from_dict(
             {
@@ -105,21 +105,21 @@ class TestOutputFieldConfig:
 
     def test_enum_requires_values(self) -> None:
         """Enum type without values raises validation error."""
-        from elspeth.plugins.llm.multi_query import OutputFieldConfig
+        from elspeth.plugins.transforms.llm.multi_query import OutputFieldConfig
 
         with pytest.raises(PluginConfigError):
             OutputFieldConfig.from_dict({"suffix": "level", "type": "enum"})
 
     def test_enum_requires_non_empty_values(self) -> None:
         """Enum type with empty values list raises validation error."""
-        from elspeth.plugins.llm.multi_query import OutputFieldConfig
+        from elspeth.plugins.transforms.llm.multi_query import OutputFieldConfig
 
         with pytest.raises(PluginConfigError):
             OutputFieldConfig.from_dict({"suffix": "level", "type": "enum", "values": []})
 
     def test_non_enum_rejects_values(self) -> None:
         """Non-enum types reject values parameter."""
-        from elspeth.plugins.llm.multi_query import OutputFieldConfig
+        from elspeth.plugins.transforms.llm.multi_query import OutputFieldConfig
 
         with pytest.raises(PluginConfigError):
             OutputFieldConfig.from_dict(
@@ -211,7 +211,7 @@ class TestResolveQueriesDuplicateNames:
 
     def test_duplicate_names_in_list_form_rejected(self) -> None:
         """List-form configs with duplicate query names raise ValueError."""
-        from elspeth.plugins.llm.multi_query import resolve_queries
+        from elspeth.plugins.transforms.llm.multi_query import resolve_queries
 
         with pytest.raises(ValueError, match="Duplicate query name"):
             resolve_queries(
@@ -229,7 +229,7 @@ class TestResolveQueriesDuplicateNames:
 
     def test_duplicate_names_in_query_spec_list_rejected(self) -> None:
         """QuerySpec list with duplicate names raises ValueError."""
-        from elspeth.plugins.llm.multi_query import QuerySpec, resolve_queries
+        from elspeth.plugins.transforms.llm.multi_query import QuerySpec, resolve_queries
 
         with pytest.raises(ValueError, match="Duplicate query name"):
             resolve_queries(
@@ -241,7 +241,7 @@ class TestResolveQueriesDuplicateNames:
 
     def test_unique_names_in_list_form_accepted(self) -> None:
         """List-form configs with unique query names work fine."""
-        from elspeth.plugins.llm.multi_query import resolve_queries
+        from elspeth.plugins.transforms.llm.multi_query import resolve_queries
 
         specs = resolve_queries(
             [
@@ -261,7 +261,7 @@ class TestResolveQueriesDuplicateNames:
 
     def test_dict_form_naturally_unique(self) -> None:
         """Dict-form configs have naturally unique names (sanity check)."""
-        from elspeth.plugins.llm.multi_query import resolve_queries
+        from elspeth.plugins.transforms.llm.multi_query import resolve_queries
 
         # Python dicts can't have duplicate keys, so this is always safe
         specs = resolve_queries(

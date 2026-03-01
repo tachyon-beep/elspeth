@@ -16,7 +16,7 @@ from typing import Any
 
 from pydantic import BaseModel, Field
 
-from elspeth.plugins.results import TransformResult
+from elspeth.plugins.infrastructure.results import TransformResult
 from elspeth.plugins.transforms.azure.base import (
     BaseAzureSafetyConfig,
     BaseAzureSafetyTransform,

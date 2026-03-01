@@ -9,7 +9,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from elspeth.contracts.token_usage import TokenUsage
-from elspeth.plugins.clients.llm import (
+from elspeth.plugins.infrastructure.clients.llm import (
     AuditedLLMClient,
     ContentPolicyError,
     ContextLengthError,
@@ -19,8 +19,8 @@ from elspeth.plugins.clients.llm import (
     RateLimitError,
     ServerError,
 )
-from elspeth.plugins.llm.provider import FinishReason, LLMProvider, LLMQueryResult
-from elspeth.plugins.llm.providers.azure import AzureLLMProvider
+from elspeth.plugins.transforms.llm.provider import FinishReason, LLMProvider, LLMQueryResult
+from elspeth.plugins.transforms.llm.providers.azure import AzureLLMProvider
 
 
 @pytest.fixture()

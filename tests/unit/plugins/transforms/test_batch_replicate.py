@@ -295,7 +295,7 @@ class TestBatchReplicateConfigValidation:
 
     def test_default_copies_zero_rejected(self) -> None:
         """Config with default_copies=0 is rejected at validation time."""
-        from elspeth.plugins.config_base import PluginConfigError
+        from elspeth.plugins.infrastructure.config_base import PluginConfigError
         from elspeth.plugins.transforms.batch_replicate import BatchReplicate
 
         with pytest.raises(PluginConfigError, match="default_copies"):
@@ -308,7 +308,7 @@ class TestBatchReplicateConfigValidation:
 
     def test_default_copies_negative_rejected(self) -> None:
         """Config with negative default_copies is rejected at validation time."""
-        from elspeth.plugins.config_base import PluginConfigError
+        from elspeth.plugins.infrastructure.config_base import PluginConfigError
         from elspeth.plugins.transforms.batch_replicate import BatchReplicate
 
         with pytest.raises(PluginConfigError, match="default_copies"):
@@ -321,7 +321,7 @@ class TestBatchReplicateConfigValidation:
 
     def test_default_copies_above_max_rejected(self) -> None:
         """Config with default_copies > max_copies is rejected at validation time."""
-        from elspeth.plugins.config_base import PluginConfigError
+        from elspeth.plugins.infrastructure.config_base import PluginConfigError
         from elspeth.plugins.transforms.batch_replicate import BatchReplicate
 
         with pytest.raises(PluginConfigError, match="exceeds max_copies"):

@@ -36,8 +36,8 @@ from elspeth.engine.clock import DEFAULT_CLOCK
 from elspeth.engine.executors.state_guard import NodeStateGuard
 from elspeth.engine.spans import SpanFactory
 from elspeth.engine.triggers import TriggerEvaluator
-from elspeth.plugins.protocols import BatchTransformProtocol
-from elspeth.plugins.results import TransformResult
+from elspeth.plugins.infrastructure.protocols import BatchTransformProtocol
+from elspeth.plugins.infrastructure.results import TransformResult
 
 if TYPE_CHECKING:
     from elspeth.engine.clock import Clock

@@ -5,7 +5,7 @@ from dataclasses import dataclass, field
 
 from elspeth.contracts import TokenInfo
 from elspeth.contracts.types import NodeID
-from elspeth.plugins.results import GateResult
+from elspeth.plugins.infrastructure.results import GateResult
 
 
 class MissingEdgeError(Exception):

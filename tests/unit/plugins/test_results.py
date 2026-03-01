@@ -12,7 +12,7 @@ class TestRowOutcome:
     """Terminal states for rows."""
 
     def test_all_terminal_states_exist(self) -> None:
-        from elspeth.plugins.results import RowOutcome
+        from elspeth.plugins.infrastructure.results import RowOutcome
 
         # Every row must reach exactly one terminal state
         assert RowOutcome.COMPLETED.value == "completed"
@@ -26,7 +26,7 @@ class TestRowOutcome:
     def test_outcome_is_enum(self) -> None:
         from enum import Enum
 
-        from elspeth.plugins.results import RowOutcome
+        from elspeth.plugins.infrastructure.results import RowOutcome
 
         assert issubclass(RowOutcome, Enum)
 
@@ -35,7 +35,7 @@ class TestRoutingAction:
     """Routing decisions from gates."""
 
     def test_continue_action(self) -> None:
-        from elspeth.plugins.results import RoutingAction
+        from elspeth.plugins.infrastructure.results import RoutingAction
 
         action = RoutingAction.continue_()
         assert action.kind == "continue"
@@ -43,7 +43,7 @@ class TestRoutingAction:
         assert action.mode == "move"
 
     def test_route(self) -> None:
-        from elspeth.plugins.results import RoutingAction
+        from elspeth.plugins.infrastructure.results import RoutingAction
 
         action = RoutingAction.route("suspicious", reason={"rule": "confidence_check", "matched_value": 0.95})
         assert action.kind == "route"
@@ -52,7 +52,7 @@ class TestRoutingAction:
         assert action.reason["matched_value"] == 0.95  # type: ignore[index,typeddict-item]  # Access via mapping
 
     def test_fork_to_paths(self) -> None:
-        from elspeth.plugins.results import RoutingAction
+        from elspeth.plugins.infrastructure.results import RoutingAction
 
         action = RoutingAction.fork_to_paths(["stats", "classifier", "archive"])
         assert action.kind == "fork_to_paths"
@@ -60,7 +60,7 @@ class TestRoutingAction:
         assert action.mode == "copy"
 
     def test_immutable(self) -> None:
-        from elspeth.plugins.results import RoutingAction
+        from elspeth.plugins.infrastructure.results import RoutingAction
 
         action = RoutingAction.continue_()
         with pytest.raises(FrozenInstanceError):
@@ -70,7 +70,7 @@ class TestRoutingAction:
         """Mutating original dict should not affect stored reason (deep copy)."""
         from typing import Any
 
-        from elspeth.plugins.results import RoutingAction
+        from elspeth.plugins.infrastructure.results import RoutingAction
 
         original: dict[str, Any] = {"rule": "score_check", "matched_value": 0.9}
         action = RoutingAction.route("suspicious", reason=original)  # type: ignore[arg-type]
@@ -85,7 +85,7 @@ class TestTransformResult:
     """Results from transform operations."""
 
     def test_success_result(self) -> None:
-        from elspeth.plugins.results import TransformResult
+        from elspeth.plugins.infrastructure.results import TransformResult
 
         result = TransformResult.success(make_pipeline_row({"value": 42}), success_reason={"action": "test"})
         assert result.status == "success"
@@ -94,7 +94,7 @@ class TestTransformResult:
         assert result.retryable is False
 
     def test_error_result(self) -> None:
-        from elspeth.plugins.results import TransformResult
+        from elspeth.plugins.infrastructure.results import TransformResult
 
         result = TransformResult.error(
             reason={"reason": "validation_failed"},
@@ -106,7 +106,7 @@ class TestTransformResult:
 
     def test_has_audit_fields(self) -> None:
         """Phase 3 integration: audit fields must exist."""
-        from elspeth.plugins.results import TransformResult
+        from elspeth.plugins.infrastructure.results import TransformResult
 
         result = TransformResult.success(make_pipeline_row({"x": 1}), success_reason={"action": "test"})
         # These fields are set by the engine in Phase 3
@@ -120,7 +120,7 @@ class TestGateResult:
     """Results from gate transforms."""
 
     def test_gate_result_with_continue(self) -> None:
-        from elspeth.plugins.results import GateResult, RoutingAction
+        from elspeth.plugins.infrastructure.results import GateResult, RoutingAction
 
         result = GateResult(
             row={"value": 42},
@@ -130,7 +130,7 @@ class TestGateResult:
         assert result.action.kind == "continue"
 
     def test_gate_result_with_route(self) -> None:
-        from elspeth.plugins.results import GateResult, RoutingAction
+        from elspeth.plugins.infrastructure.results import GateResult, RoutingAction
 
         result = GateResult(
             row={"value": 42, "flagged": True},
@@ -141,7 +141,7 @@ class TestGateResult:
 
     def test_has_audit_fields(self) -> None:
         """Phase 3 integration: audit fields must exist."""
-        from elspeth.plugins.results import GateResult, RoutingAction
+        from elspeth.plugins.infrastructure.results import GateResult, RoutingAction
 
         result = GateResult(
             row={"x": 1},
@@ -157,7 +157,7 @@ class TestAcceptResultDeleted:
 
     def test_accept_result_deleted_from_plugins_results(self) -> None:
         """AcceptResult should be deleted from plugins.results."""
-        import elspeth.plugins.results as results
+        import elspeth.plugins.infrastructure.results as results
 
         assert not hasattr(results, "AcceptResult"), "AcceptResult should be deleted - aggregation is structural"
 
@@ -174,7 +174,7 @@ class TestRoutingActionEnums:
     def test_continue_uses_routing_kind_enum(self) -> None:
         """continue_() returns RoutingKind enum value."""
         from elspeth.contracts import RoutingKind
-        from elspeth.plugins.results import RoutingAction
+        from elspeth.plugins.infrastructure.results import RoutingAction
 
         action = RoutingAction.continue_()
 
@@ -184,7 +184,7 @@ class TestRoutingActionEnums:
     def test_route_uses_enums(self) -> None:
         """route() uses enum types."""
         from elspeth.contracts import RoutingKind, RoutingMode
-        from elspeth.plugins.results import RoutingAction
+        from elspeth.plugins.infrastructure.results import RoutingAction
 
         action = RoutingAction.route("suspicious", mode=RoutingMode.MOVE)
 
@@ -196,7 +196,7 @@ class TestRoutingActionEnums:
     def test_fork_to_paths_uses_enums(self) -> None:
         """fork_to_paths() uses enum types."""
         from elspeth.contracts import RoutingKind, RoutingMode
-        from elspeth.plugins.results import RoutingAction
+        from elspeth.plugins.infrastructure.results import RoutingAction
 
         action = RoutingAction.fork_to_paths(["path_a", "path_b"])
 
@@ -211,7 +211,7 @@ class TestFreezeDictDefensiveCopy:
         """Mutating original dict doesn't affect frozen result."""
         from typing import Any
 
-        from elspeth.plugins.results import RoutingAction
+        from elspeth.plugins.infrastructure.results import RoutingAction
 
         reason: dict[str, Any] = {"rule": "original_rule", "matched_value": "original_value"}
         action = RoutingAction.continue_(reason=reason)  # type: ignore[arg-type]
@@ -229,7 +229,7 @@ class TestFreezeDictDefensiveCopy:
         """Nested dict mutation doesn't affect frozen result."""
         from typing import Any
 
-        from elspeth.plugins.results import RoutingAction
+        from elspeth.plugins.infrastructure.results import RoutingAction
 
         reason: dict[str, Any] = {"rule": "nested_test", "matched_value": {"value": 1}}
         action = RoutingAction.continue_(reason=reason)  # type: ignore[arg-type]
@@ -247,7 +247,7 @@ class TestSourceRow:
 
     def test_quarantined_factory(self) -> None:
         """quarantined() creates a quarantined row with error info."""
-        from elspeth.plugins.results import SourceRow
+        from elspeth.plugins.infrastructure.results import SourceRow
 
         result = SourceRow.quarantined(
             row={"id": 1, "value": "bad"},
@@ -261,7 +261,7 @@ class TestSourceRow:
 
     def test_quarantined_preserves_original_row(self) -> None:
         """Quarantined rows preserve the original (invalid) data."""
-        from elspeth.plugins.results import SourceRow
+        from elspeth.plugins.infrastructure.results import SourceRow
 
         original = {"score": "not-a-number", "name": "test"}
         result = SourceRow.quarantined(
@@ -276,7 +276,7 @@ class TestSourceRow:
         """SourceRow is a dataclass."""
         from dataclasses import is_dataclass
 
-        from elspeth.plugins.results import SourceRow
+        from elspeth.plugins.infrastructure.results import SourceRow
 
         assert is_dataclass(SourceRow)
 
@@ -291,7 +291,7 @@ class TestPluginsPublicAPI:
     """Public API exports from elspeth.plugins."""
 
     def test_results_importable(self) -> None:
-        from elspeth.plugins import (
+        from elspeth.plugins.infrastructure.results import (
             GateResult,
             RoutingAction,
             RowOutcome,
@@ -307,18 +307,18 @@ class TestPluginsPublicAPI:
         assert TransformResult is not None
 
     def test_context_importable(self) -> None:
-        from elspeth.plugins import PluginContext
+        from elspeth.contracts.plugin_context import PluginContext
 
         assert PluginContext is not None
 
     def test_schemas_importable(self) -> None:
-        from elspeth.plugins import PluginSchema, check_compatibility
+        from elspeth.contracts import PluginSchema, check_compatibility
 
         assert PluginSchema is not None
         assert check_compatibility is not None
 
     def test_protocols_importable(self) -> None:
-        from elspeth.plugins import (
+        from elspeth.plugins.infrastructure.protocols import (
             SinkProtocol,
             SourceProtocol,
             TransformProtocol,
@@ -337,7 +337,7 @@ class TestPluginsPublicAPI:
         assert not hasattr(plugins, "CoalescePolicy"), "CoalescePolicy should be deleted"
 
     def test_base_classes_importable(self) -> None:
-        from elspeth.plugins import (
+        from elspeth.plugins.infrastructure.base import (
             BaseSink,
             BaseSource,
             BaseTransform,
@@ -354,12 +354,12 @@ class TestPluginsPublicAPI:
         assert not hasattr(plugins, "BaseAggregation"), "BaseAggregation should be deleted"
 
     def test_manager_importable(self) -> None:
-        from elspeth.plugins import PluginManager
+        from elspeth.plugins.infrastructure.manager import PluginManager
 
         assert PluginManager is not None
 
     def test_hookspecs_importable(self) -> None:
-        from elspeth.plugins import hookimpl, hookspec
+        from elspeth.plugins.infrastructure.hookspecs import hookimpl, hookspec
 
         assert hookspec is not None
         assert hookimpl is not None

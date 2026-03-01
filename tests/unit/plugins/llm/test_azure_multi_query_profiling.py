@@ -22,8 +22,8 @@ import pytest
 
 from elspeth.contracts import TransformResult
 from elspeth.contracts.token_usage import TokenUsage
-from elspeth.plugins.batching.ports import CollectorOutputPort
-from elspeth.plugins.llm.transform import LLMTransform
+from elspeth.plugins.infrastructure.batching.ports import CollectorOutputPort
+from elspeth.plugins.transforms.llm.transform import LLMTransform
 from elspeth.testing import make_pipeline_row
 
 from .conftest import (
@@ -305,8 +305,8 @@ class TestLoadScenarios:
 
     def test_rate_limit_error_handling(self) -> None:
         """Verify plugin handles rate limit errors correctly via provider mock."""
-        from elspeth.plugins.clients.llm import RateLimitError
-        from elspeth.plugins.llm.provider import LLMQueryResult
+        from elspeth.plugins.infrastructure.clients.llm import RateLimitError
+        from elspeth.plugins.transforms.llm.provider import LLMQueryResult
 
         config = _make_config()
 
@@ -433,8 +433,8 @@ class TestRowAtomicity:
         If any query fails, the ENTIRE row must be marked as failed, not partially
         processed.
         """
-        from elspeth.plugins.clients.llm import RateLimitError
-        from elspeth.plugins.llm.provider import LLMQueryResult
+        from elspeth.plugins.infrastructure.clients.llm import RateLimitError
+        from elspeth.plugins.transforms.llm.provider import LLMQueryResult
 
         config = _make_config()
 
@@ -534,8 +534,8 @@ class TestRowAtomicity:
 
     def test_row_atomicity_high_failure_rate(self) -> None:
         """Verify row atomicity with 80% failure rate (extreme stress test)."""
-        from elspeth.plugins.clients.llm import RateLimitError
-        from elspeth.plugins.llm.provider import LLMQueryResult
+        from elspeth.plugins.infrastructure.clients.llm import RateLimitError
+        from elspeth.plugins.transforms.llm.provider import LLMQueryResult
 
         config = _make_config()
 
@@ -632,8 +632,8 @@ class TestRowAtomicity:
         - Some queries succeed, some fail
         - Plugin must still maintain per-row atomicity
         """
-        from elspeth.plugins.clients.llm import RateLimitError
-        from elspeth.plugins.llm.provider import LLMQueryResult
+        from elspeth.plugins.infrastructure.clients.llm import RateLimitError
+        from elspeth.plugins.transforms.llm.provider import LLMQueryResult
 
         config = _make_config()
 

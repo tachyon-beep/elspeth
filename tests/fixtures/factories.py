@@ -28,7 +28,7 @@ from elspeth.contracts.node_state_context import (
 if TYPE_CHECKING:
     from elspeth.contracts.plugin_context import PluginContext
     from elspeth.core.dag import ExecutionGraph, WiredTransform
-    from elspeth.plugins.protocols import TransformProtocol
+    from elspeth.plugins.infrastructure.protocols import TransformProtocol
 
 # --- Re-export all production factories for single-import convenience ---
 from elspeth.testing import (  # noqa: F401

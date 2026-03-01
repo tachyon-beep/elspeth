@@ -28,7 +28,7 @@ from elspeth.engine.orchestrator.export import (
     export_landscape,
     reconstruct_schema_from_json,
 )
-from elspeth.plugins.protocols import SinkProtocol
+from elspeth.plugins.infrastructure.protocols import SinkProtocol
 
 # =============================================================================
 # export_landscape — JSON format

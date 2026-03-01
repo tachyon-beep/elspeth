@@ -24,7 +24,7 @@ from elspeth.core.landscape.database import LandscapeDB
 from elspeth.core.landscape.recorder import LandscapeRecorder
 from elspeth.engine.executors import TransformExecutor
 from elspeth.engine.spans import SpanFactory
-from elspeth.plugins.llm.transform import LLMTransform
+from elspeth.plugins.transforms.llm.transform import LLMTransform
 from elspeth.testing import make_pipeline_row
 
 DYNAMIC_SCHEMA = {"mode": "observed"}

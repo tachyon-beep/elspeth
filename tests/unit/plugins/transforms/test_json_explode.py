@@ -13,7 +13,7 @@ import pytest
 
 from elspeth.contracts.plugin_context import PluginContext
 from elspeth.contracts.schema_contract import PipelineRow, SchemaContract
-from elspeth.plugins.config_base import PluginConfigError
+from elspeth.plugins.infrastructure.config_base import PluginConfigError
 from elspeth.testing import make_field, make_pipeline_row
 
 # Common schema config for dynamic field handling (accepts any fields)

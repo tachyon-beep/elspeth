@@ -28,8 +28,8 @@ from elspeth.core.dag import ExecutionGraph
 from elspeth.core.dag.models import WiredTransform
 from elspeth.core.landscape import LandscapeDB
 from elspeth.engine.orchestrator import Orchestrator, PipelineConfig
-from elspeth.plugins.base import BaseTransform
-from elspeth.plugins.protocols import SinkProtocol, SourceProtocol
+from elspeth.plugins.infrastructure.base import BaseTransform
+from elspeth.plugins.infrastructure.protocols import SinkProtocol, SourceProtocol
 from elspeth.testing import make_pipeline_row
 from tests.fixtures.base_classes import _TestSchema, as_sink, as_source, as_transform
 from tests.fixtures.factories import wire_transforms
@@ -51,7 +51,7 @@ class EnrichATransform(BaseTransform):
         super().__init__({"schema": {"mode": "observed"}})
 
     def process(self, row: PipelineRow, ctx: Any) -> Any:
-        from elspeth.plugins.results import TransformResult
+        from elspeth.plugins.infrastructure.results import TransformResult
 
         data = row.to_dict()
         data["enriched_a"] = data["value"] * 10
@@ -72,7 +72,7 @@ class EnrichBTransform(BaseTransform):
         super().__init__({"schema": {"mode": "observed"}})
 
     def process(self, row: PipelineRow, ctx: Any) -> Any:
-        from elspeth.plugins.results import TransformResult
+        from elspeth.plugins.infrastructure.results import TransformResult
 
         data = row.to_dict()
         data["enriched_b"] = data["value"] + 100

@@ -235,7 +235,7 @@ class TestFieldMapper:
 
     def test_requires_schema_config(self) -> None:
         """FieldMapper requires schema configuration."""
-        from elspeth.plugins.config_base import PluginConfigError
+        from elspeth.plugins.infrastructure.config_base import PluginConfigError
         from elspeth.plugins.transforms.field_mapper import FieldMapper
 
         with pytest.raises(PluginConfigError, match="schema"):
@@ -313,7 +313,7 @@ class TestFieldMapperDuplicateTargetRejection:
 
     def test_duplicate_targets_rejected_at_config_time(self) -> None:
         """Two sources mapping to the same target raises PluginConfigError."""
-        from elspeth.plugins.config_base import PluginConfigError
+        from elspeth.plugins.infrastructure.config_base import PluginConfigError
         from elspeth.plugins.transforms.field_mapper import FieldMapper
 
         with pytest.raises(PluginConfigError, match="duplicate target"):
@@ -326,7 +326,7 @@ class TestFieldMapperDuplicateTargetRejection:
 
     def test_triple_duplicate_targets_rejected(self) -> None:
         """Three sources mapping to the same target raises PluginConfigError."""
-        from elspeth.plugins.config_base import PluginConfigError
+        from elspeth.plugins.infrastructure.config_base import PluginConfigError
         from elspeth.plugins.transforms.field_mapper import FieldMapper
 
         with pytest.raises(PluginConfigError, match="duplicate target"):
@@ -339,7 +339,7 @@ class TestFieldMapperDuplicateTargetRejection:
 
     def test_multiple_distinct_duplicate_targets_rejected(self) -> None:
         """Multiple groups of duplicate targets are all reported."""
-        from elspeth.plugins.config_base import PluginConfigError
+        from elspeth.plugins.infrastructure.config_base import PluginConfigError
         from elspeth.plugins.transforms.field_mapper import FieldMapper
 
         with pytest.raises(PluginConfigError, match="duplicate target"):
@@ -378,7 +378,7 @@ class TestFieldMapperDuplicateTargetRejection:
 
     def test_error_message_includes_collision_details(self) -> None:
         """Error message includes which sources collide on which target."""
-        from elspeth.plugins.config_base import PluginConfigError
+        from elspeth.plugins.infrastructure.config_base import PluginConfigError
         from elspeth.plugins.transforms.field_mapper import FieldMapper
 
         with pytest.raises(PluginConfigError, match="silent data loss"):

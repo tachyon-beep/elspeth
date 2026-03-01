@@ -19,7 +19,7 @@ from elspeth.core.landscape.database import LandscapeDB
 from elspeth.core.landscape.schema import rows_table, token_outcomes_table
 from elspeth.core.payload_store import FilesystemPayloadStore
 from elspeth.engine.orchestrator import Orchestrator, PipelineConfig
-from elspeth.plugins.protocols import SinkProtocol, SourceProtocol
+from elspeth.plugins.infrastructure.protocols import SinkProtocol, SourceProtocol
 from tests.fixtures.base_classes import as_sink, as_source, as_transform
 from tests.fixtures.factories import wire_transforms
 from tests.fixtures.plugins import CollectSink, ListSource, PassTransform

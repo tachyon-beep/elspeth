@@ -28,7 +28,7 @@ if TYPE_CHECKING:
     from elspeth.contracts.results import RowResult
     from elspeth.core.landscape import LandscapeRecorder
     from elspeth.engine.processor import RowProcessor
-    from elspeth.plugins.protocols import TransformProtocol
+    from elspeth.plugins.infrastructure.protocols import TransformProtocol
 
 
 def _require_sink_name(result: RowResult) -> str:
@@ -90,7 +90,7 @@ def find_aggregation_transform(
     Raises:
         RuntimeError: If no batch-aware transform found for the aggregation
     """
-    from elspeth.plugins.protocols import TransformProtocol
+    from elspeth.plugins.infrastructure.protocols import TransformProtocol
 
     agg_transform: TransformProtocol | None = None
     agg_node_id = NodeID(agg_node_id_str)

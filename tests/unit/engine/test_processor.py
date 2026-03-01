@@ -47,9 +47,9 @@ from elspeth.engine.processor import (
 )
 from elspeth.engine.retry import RetryManager
 from elspeth.engine.spans import SpanFactory
-from elspeth.plugins.clients.llm import LLMClientError
-from elspeth.plugins.pooling import CapacityError
-from elspeth.plugins.protocols import TransformProtocol
+from elspeth.plugins.infrastructure.clients.llm import LLMClientError
+from elspeth.plugins.infrastructure.pooling import CapacityError
+from elspeth.plugins.infrastructure.protocols import TransformProtocol
 from elspeth.testing import make_contract, make_row, make_source_row, make_token_info
 
 # =============================================================================

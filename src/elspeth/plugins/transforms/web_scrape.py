@@ -32,11 +32,11 @@ from elspeth.core.security.web import (
     SSRFSafeRequest,
     validate_url_for_ssrf,
 )
-from elspeth.plugins.base import BaseTransform
-from elspeth.plugins.clients.http import AuditedHTTPClient
-from elspeth.plugins.config_base import TransformDataConfig
-from elspeth.plugins.results import TransformResult
-from elspeth.plugins.schema_factory import create_schema_from_config
+from elspeth.plugins.infrastructure.base import BaseTransform
+from elspeth.plugins.infrastructure.clients.http import AuditedHTTPClient
+from elspeth.plugins.infrastructure.config_base import TransformDataConfig
+from elspeth.plugins.infrastructure.results import TransformResult
+from elspeth.plugins.infrastructure.schema_factory import create_schema_from_config
 from elspeth.plugins.transforms.web_scrape_errors import (
     ForbiddenError,
     InvalidURLError,

@@ -244,7 +244,6 @@ extend-immutable-calls = ["typer.Option", "typer.Argument"]
 "vulture_whitelist.py" = ["B018", "F821"]  # Vulture whitelist uses bare names
 # Package __init__ files use categorical __all__ grouping for readability
 "src/elspeth/contracts/__init__.py" = ["RUF022"]
-"src/elspeth/plugins/__init__.py" = ["RUF022"]
 
 # === Mypy Configuration ===
 [tool.mypy]

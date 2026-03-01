@@ -15,7 +15,7 @@ import respx
 
 from elspeth.contracts.plugin_context import PluginContext
 from elspeth.contracts.schema_contract import SchemaContract
-from elspeth.plugins.config_base import PluginConfigError
+from elspeth.plugins.infrastructure.config_base import PluginConfigError
 from elspeth.plugins.transforms.web_scrape import WebScrapeTransform
 from elspeth.plugins.transforms.web_scrape_errors import (
     NetworkError,

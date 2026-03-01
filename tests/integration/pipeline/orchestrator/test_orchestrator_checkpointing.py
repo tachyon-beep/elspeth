@@ -12,7 +12,7 @@ from typing import TYPE_CHECKING, Any
 import pytest
 
 from elspeth.contracts import GateName, NodeID, NodeType, PipelineRow, RouteDestination, RoutingMode, SinkName
-from elspeth.plugins.base import BaseTransform
+from elspeth.plugins.infrastructure.base import BaseTransform
 from tests.fixtures.base_classes import (
     _TestSchema,
     _TestSinkBase,
@@ -64,7 +64,7 @@ class TestOrchestratorCheckpointing:
         from elspeth.core.checkpoint import CheckpointManager
         from elspeth.core.config import CheckpointSettings
         from elspeth.engine.orchestrator import Orchestrator, PipelineConfig
-        from elspeth.plugins.results import TransformResult
+        from elspeth.plugins.infrastructure.results import TransformResult
 
         checkpoint_mgr = CheckpointManager(landscape_db)
         settings = CheckpointSettings(enabled=True, frequency="every_row")
@@ -119,7 +119,7 @@ class TestOrchestratorCheckpointing:
         from elspeth.core.checkpoint import CheckpointManager
         from elspeth.core.config import CheckpointSettings
         from elspeth.engine.orchestrator import Orchestrator, PipelineConfig
-        from elspeth.plugins.results import TransformResult
+        from elspeth.plugins.infrastructure.results import TransformResult
 
         checkpoint_mgr = CheckpointManager(landscape_db)
         settings = CheckpointSettings(enabled=True, frequency="every_n", checkpoint_interval=3)
@@ -174,7 +174,7 @@ class TestOrchestratorCheckpointing:
         from elspeth.core.checkpoint import CheckpointManager
         from elspeth.core.config import CheckpointSettings
         from elspeth.engine.orchestrator import Orchestrator, PipelineConfig
-        from elspeth.plugins.results import TransformResult
+        from elspeth.plugins.infrastructure.results import TransformResult
 
         checkpoint_mgr = CheckpointManager(landscape_db)
         settings = CheckpointSettings(enabled=True, frequency="every_row")
@@ -222,7 +222,7 @@ class TestOrchestratorCheckpointing:
         from elspeth.core.config import CheckpointSettings, GateSettings
         from elspeth.core.dag import ExecutionGraph
         from elspeth.engine.orchestrator import Orchestrator, PipelineConfig
-        from elspeth.plugins.results import TransformResult
+        from elspeth.plugins.infrastructure.results import TransformResult
 
         checkpoint_mgr = CheckpointManager(landscape_db)
         settings = CheckpointSettings(enabled=True, frequency="every_row")
@@ -354,7 +354,7 @@ class TestOrchestratorCheckpointing:
         from elspeth.core.checkpoint import CheckpointManager
         from elspeth.core.config import CheckpointSettings
         from elspeth.engine.orchestrator import Orchestrator, PipelineConfig
-        from elspeth.plugins.results import TransformResult
+        from elspeth.plugins.infrastructure.results import TransformResult
 
         checkpoint_mgr = CheckpointManager(landscape_db)
         settings = CheckpointSettings(enabled=False)
@@ -407,7 +407,7 @@ class TestOrchestratorCheckpointing:
         from elspeth.contracts.config.runtime import RuntimeCheckpointConfig
         from elspeth.core.config import CheckpointSettings
         from elspeth.engine.orchestrator import Orchestrator, PipelineConfig
-        from elspeth.plugins.results import TransformResult
+        from elspeth.plugins.infrastructure.results import TransformResult
 
         settings = CheckpointSettings(enabled=True, frequency="every_row")
         checkpoint_config = RuntimeCheckpointConfig.from_settings(settings)

@@ -7,7 +7,7 @@ import httpx
 import pytest
 
 from elspeth.contracts import CallStatus, CallType
-from elspeth.plugins.clients.http import AuditedHTTPClient
+from elspeth.plugins.infrastructure.clients.http import AuditedHTTPClient
 
 
 class TestAuditedHTTPClient:

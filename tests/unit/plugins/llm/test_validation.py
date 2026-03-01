@@ -11,9 +11,9 @@ from __future__ import annotations
 
 import pytest
 
-from elspeth.plugins.llm.multi_query import OutputFieldConfig, OutputFieldType
-from elspeth.plugins.llm.templates import PromptTemplate, RenderedPrompt
-from elspeth.plugins.llm.validation import (
+from elspeth.plugins.transforms.llm.multi_query import OutputFieldConfig, OutputFieldType
+from elspeth.plugins.transforms.llm.templates import PromptTemplate, RenderedPrompt
+from elspeth.plugins.transforms.llm.validation import (
     ValidationError,
     ValidationSuccess,
     check_truncation,

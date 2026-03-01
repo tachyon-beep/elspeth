@@ -14,7 +14,7 @@ from elspeth.contracts.plugin_context import PluginContext
 from elspeth.core.dag import ExecutionGraph
 from elspeth.core.landscape import LandscapeDB
 from elspeth.core.landscape.recorder import LandscapeRecorder
-from elspeth.plugins.manager import PluginManager
+from elspeth.plugins.infrastructure.manager import PluginManager
 
 # Dynamic schema config for tests - PathConfig now requires schema
 DYNAMIC_SCHEMA = {"mode": "observed"}

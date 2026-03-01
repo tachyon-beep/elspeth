@@ -7,7 +7,7 @@ from threading import Lock
 from typing import Any
 
 from elspeth.contracts import TransformResult
-from elspeth.plugins.pooling import BufferEntry, CapacityError, PoolConfig, PooledExecutor, RowContext
+from elspeth.plugins.infrastructure.pooling import BufferEntry, CapacityError, PoolConfig, PooledExecutor, RowContext
 from elspeth.testing import make_pipeline_row
 
 

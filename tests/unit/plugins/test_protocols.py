@@ -12,7 +12,7 @@ class TestSourceProtocol:
     """Source plugin protocol."""
 
     def test_source_protocol_definition(self) -> None:
-        from elspeth.plugins.protocols import SourceProtocol
+        from elspeth.plugins.infrastructure.protocols import SourceProtocol
 
         # Should be a Protocol (runtime_checkable protocols have this attribute)
         assert hasattr(SourceProtocol, "__protocol_attrs__")
@@ -20,7 +20,7 @@ class TestSourceProtocol:
     def test_source_implementation(self) -> None:
         from elspeth.contracts import Determinism, PluginSchema
         from elspeth.contracts.plugin_context import PluginContext
-        from elspeth.plugins.protocols import SourceProtocol
+        from elspeth.plugins.infrastructure.protocols import SourceProtocol
 
         class OutputSchema(PluginSchema):
             value: int
@@ -74,19 +74,19 @@ class TestSourceProtocol:
         assert source_rows[0].row == {"value": 0}
 
     def test_source_has_lifecycle_hooks(self) -> None:
-        from elspeth.plugins.protocols import SourceProtocol
+        from elspeth.plugins.infrastructure.protocols import SourceProtocol
 
         # Check protocol has expected methods
         assert hasattr(SourceProtocol, "load")
         assert hasattr(SourceProtocol, "close")
 
     def test_source_has_determinism_attribute(self) -> None:
-        from elspeth.plugins.protocols import SourceProtocol
+        from elspeth.plugins.infrastructure.protocols import SourceProtocol
 
         assert "determinism" in SourceProtocol.__protocol_attrs__  # type: ignore[attr-defined]
 
     def test_source_has_version_attribute(self) -> None:
-        from elspeth.plugins.protocols import SourceProtocol
+        from elspeth.plugins.infrastructure.protocols import SourceProtocol
 
         assert "plugin_version" in SourceProtocol.__protocol_attrs__  # type: ignore[attr-defined]
 
@@ -96,7 +96,7 @@ class TestSourceProtocol:
 
         from elspeth.contracts import Determinism, PluginSchema
         from elspeth.contracts.plugin_context import PluginContext
-        from elspeth.plugins.protocols import SourceProtocol
+        from elspeth.plugins.infrastructure.protocols import SourceProtocol
 
         class OutputSchema(PluginSchema):
             value: int
@@ -143,8 +143,8 @@ class TestTransformProtocol:
     def test_transform_implementation(self) -> None:
         from elspeth.contracts import Determinism, PluginSchema
         from elspeth.contracts.plugin_context import PluginContext
-        from elspeth.plugins.protocols import TransformProtocol
-        from elspeth.plugins.results import TransformResult
+        from elspeth.plugins.infrastructure.protocols import TransformProtocol
+        from elspeth.plugins.infrastructure.results import TransformResult
 
         class InputSchema(PluginSchema):
             value: int
@@ -215,8 +215,8 @@ class TestTransformBatchSupport:
         """Transform.process() accepts single row dict."""
         from elspeth.contracts import Determinism, PluginSchema
         from elspeth.contracts.plugin_context import PluginContext
-        from elspeth.plugins.base import BaseTransform
-        from elspeth.plugins.results import TransformResult
+        from elspeth.plugins.infrastructure.base import BaseTransform
+        from elspeth.plugins.infrastructure.results import TransformResult
 
         class AnySchema(PluginSchema):
             value: int
@@ -241,8 +241,8 @@ class TestTransformBatchSupport:
         """Transform.process() accepts list of row dicts when is_batch_aware=True."""
         from elspeth.contracts import Determinism, PluginSchema
         from elspeth.contracts.plugin_context import PluginContext
-        from elspeth.plugins.base import BaseTransform
-        from elspeth.plugins.results import TransformResult
+        from elspeth.plugins.infrastructure.base import BaseTransform
+        from elspeth.plugins.infrastructure.results import TransformResult
 
         class AnySchema(PluginSchema):
             pass
@@ -277,8 +277,8 @@ class TestTransformBatchSupport:
         """Transforms have is_batch_aware=False by default."""
         from elspeth.contracts import Determinism, PluginSchema
         from elspeth.contracts.plugin_context import PluginContext
-        from elspeth.plugins.base import BaseTransform
-        from elspeth.plugins.results import TransformResult
+        from elspeth.plugins.infrastructure.base import BaseTransform
+        from elspeth.plugins.infrastructure.results import TransformResult
 
         class AnySchema(PluginSchema):
             value: int
@@ -300,8 +300,8 @@ class TestTransformBatchSupport:
         """Transforms can declare is_batch_aware=True for batch support."""
         from elspeth.contracts import Determinism, PluginSchema
         from elspeth.contracts.plugin_context import PluginContext
-        from elspeth.plugins.base import BaseTransform
-        from elspeth.plugins.results import TransformResult
+        from elspeth.plugins.infrastructure.base import BaseTransform
+        from elspeth.plugins.infrastructure.results import TransformResult
 
         class AnySchema(PluginSchema):
             pass
@@ -337,13 +337,13 @@ class TestAggregationProtocolDeleted:
 
     def test_aggregation_protocol_deleted(self) -> None:
         """AggregationProtocol should be deleted (aggregation is structural)."""
-        import elspeth.plugins.protocols as protocols
+        import elspeth.plugins.infrastructure.protocols as protocols
 
         assert not hasattr(protocols, "AggregationProtocol"), "AggregationProtocol should be deleted - aggregation is structural"
 
     def test_base_aggregation_deleted(self) -> None:
         """BaseAggregation should be deleted (aggregation is structural)."""
-        import elspeth.plugins.base as base
+        import elspeth.plugins.infrastructure.base as base
 
         assert not hasattr(base, "BaseAggregation"), "BaseAggregation should be deleted - use is_batch_aware=True on BaseTransform"
 
@@ -360,19 +360,19 @@ class TestCoalesceProtocolDeleted:
 
     def test_coalesce_protocol_deleted(self) -> None:
         """CoalesceProtocol should be deleted (coalesce is structural)."""
-        import elspeth.plugins.protocols as protocols
+        import elspeth.plugins.infrastructure.protocols as protocols
 
         assert not hasattr(protocols, "CoalesceProtocol"), "CoalesceProtocol should be deleted - coalesce is structural"
 
     def test_coalesce_policy_enum_deleted(self) -> None:
         """CoalescePolicy enum should be deleted (superseded by Literal strings in CoalesceSettings)."""
-        import elspeth.plugins.protocols as protocols
+        import elspeth.plugins.infrastructure.protocols as protocols
 
         assert not hasattr(protocols, "CoalescePolicy"), "CoalescePolicy should be deleted - use CoalesceSettings.policy Literal"
 
     def test_plugin_protocol_deleted(self) -> None:
         """PluginProtocol should be deleted (never used)."""
-        import elspeth.plugins.protocols as protocols
+        import elspeth.plugins.infrastructure.protocols as protocols
 
         assert not hasattr(protocols, "PluginProtocol"), "PluginProtocol should be deleted - never imported or used"
 
@@ -384,7 +384,7 @@ class TestSinkProtocol:
         """Sink.write() accepts batch and returns ArtifactDescriptor."""
         import inspect
 
-        from elspeth.plugins.protocols import SinkProtocol
+        from elspeth.plugins.infrastructure.protocols import SinkProtocol
 
         # Get the write method signature
         sig = inspect.signature(SinkProtocol.write)
@@ -409,7 +409,7 @@ class TestSinkProtocol:
         from elspeth.contracts import ArtifactDescriptor, Determinism, PluginSchema
         from elspeth.contracts.plugin_context import PluginContext
         from elspeth.contracts.sink import OutputValidationResult
-        from elspeth.plugins.protocols import SinkProtocol
+        from elspeth.plugins.infrastructure.protocols import SinkProtocol
 
         class InputSchema(PluginSchema):
             value: int
@@ -475,7 +475,7 @@ class TestSinkProtocol:
         from elspeth.contracts import ArtifactDescriptor, Determinism, PluginSchema
         from elspeth.contracts.plugin_context import PluginContext
         from elspeth.contracts.sink import OutputValidationResult
-        from elspeth.plugins.protocols import SinkProtocol
+        from elspeth.plugins.infrastructure.protocols import SinkProtocol
 
         class InputSchema(PluginSchema):
             value: int
@@ -543,7 +543,7 @@ class TestSinkProtocol:
 
     def test_sink_has_idempotency_support(self) -> None:
         """Sinks should support idempotency keys."""
-        from elspeth.plugins.protocols import SinkProtocol
+        from elspeth.plugins.infrastructure.protocols import SinkProtocol
 
         # Protocol should have idempotent attribute
         assert hasattr(SinkProtocol, "__protocol_attrs__")
@@ -553,13 +553,13 @@ class TestProtocolMetadata:
     """Test that protocols include metadata attributes."""
 
     def test_transform_has_determinism_attribute(self) -> None:
-        from elspeth.plugins.protocols import TransformProtocol
+        from elspeth.plugins.infrastructure.protocols import TransformProtocol
 
         # Protocol attributes are tracked in __protocol_attrs__ (runtime Protocol internals)
         assert "determinism" in TransformProtocol.__protocol_attrs__  # type: ignore[attr-defined]
 
     def test_transform_has_version_attribute(self) -> None:
-        from elspeth.plugins.protocols import TransformProtocol
+        from elspeth.plugins.infrastructure.protocols import TransformProtocol
 
         # __protocol_attrs__ is a runtime attribute on @runtime_checkable Protocols
         assert "plugin_version" in TransformProtocol.__protocol_attrs__  # type: ignore[attr-defined]
@@ -567,7 +567,7 @@ class TestProtocolMetadata:
     def test_deterministic_transform(self) -> None:
         from elspeth.contracts import Determinism
         from elspeth.contracts.plugin_context import PluginContext
-        from elspeth.plugins.results import TransformResult
+        from elspeth.plugins.infrastructure.results import TransformResult
 
         class MyTransform:
             name = "my_transform"
@@ -583,7 +583,7 @@ class TestProtocolMetadata:
     def test_nondeterministic_transform(self) -> None:
         from elspeth.contracts import Determinism
         from elspeth.contracts.plugin_context import PluginContext
-        from elspeth.plugins.results import TransformResult
+        from elspeth.plugins.infrastructure.results import TransformResult
 
         class LLMTransform:
             name = "llm_classifier"

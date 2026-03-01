@@ -12,7 +12,7 @@ import pytest
 from elspeth.contracts import CallStatus, CallType
 from elspeth.contracts.call_data import HTTPCallRequest, HTTPCallResponse
 from elspeth.contracts.events import ExternalCallCompleted
-from elspeth.plugins.clients.http import AuditedHTTPClient
+from elspeth.plugins.infrastructure.clients.http import AuditedHTTPClient
 
 
 class TestHTTPClientTelemetry:

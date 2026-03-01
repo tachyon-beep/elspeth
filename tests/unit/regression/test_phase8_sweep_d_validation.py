@@ -39,7 +39,7 @@ class TestAzureAuthPartialSP:
 
     def test_partial_sp_fields_rejected(self) -> None:
         """Providing 3 of 4 SP fields should raise ValueError."""
-        from elspeth.plugins.azure.auth import AzureAuthConfig
+        from elspeth.plugins.infrastructure.azure_auth import AzureAuthConfig
 
         with pytest.raises(ValueError, match="Service Principal auth requires account_url"):
             AzureAuthConfig(
@@ -51,7 +51,7 @@ class TestAzureAuthPartialSP:
 
     def test_all_sp_fields_accepted(self) -> None:
         """All 4 SP fields provided should be accepted."""
-        from elspeth.plugins.azure.auth import AzureAuthConfig
+        from elspeth.plugins.infrastructure.azure_auth import AzureAuthConfig
 
         config = AzureAuthConfig(
             tenant_id="t",
@@ -69,7 +69,7 @@ class TestSinkPathConfigHeaderCollision:
         """Two fields mapping to same output name should raise ValueError."""
         from pydantic import ValidationError
 
-        from elspeth.plugins.config_base import SinkPathConfig
+        from elspeth.plugins.infrastructure.config_base import SinkPathConfig
 
         with pytest.raises(ValidationError, match="Duplicate header mapping targets"):
             SinkPathConfig(
@@ -80,7 +80,7 @@ class TestSinkPathConfigHeaderCollision:
 
     def test_unique_header_targets_accepted(self) -> None:
         """Unique header targets should pass the headers validator."""
-        from elspeth.plugins.config_base import SinkPathConfig
+        from elspeth.plugins.infrastructure.config_base import SinkPathConfig
 
         # Test the validator directly — it's a classmethod field_validator
         result = SinkPathConfig._validate_headers({"field_a": "Column A", "field_b": "Column B"})
@@ -145,7 +145,7 @@ class TestBatchReplicateMaxCopies:
 
     def test_config_rejects_excessive_default_copies(self) -> None:
         """default_copies > 10000 should be rejected."""
-        from elspeth.plugins.config_base import PluginConfigError
+        from elspeth.plugins.infrastructure.config_base import PluginConfigError
         from elspeth.plugins.transforms.batch_replicate import BatchReplicateConfig
 
         with pytest.raises(PluginConfigError, match="less than or equal to 10000"):
@@ -157,14 +157,14 @@ class TestTracingConfigValidation:
 
     def test_unknown_provider_rejected(self) -> None:
         """Unrecognized tracing provider should raise ValueError."""
-        from elspeth.plugins.llm.tracing import parse_tracing_config
+        from elspeth.plugins.transforms.llm.tracing import parse_tracing_config
 
         with pytest.raises(ValueError, match="Unknown tracing provider"):
             parse_tracing_config({"provider": "datadog_magic"})
 
     def test_known_providers_accepted(self) -> None:
         """All known providers should be accepted."""
-        from elspeth.plugins.llm.tracing import parse_tracing_config
+        from elspeth.plugins.transforms.llm.tracing import parse_tracing_config
 
         for provider in ("none", "azure_ai", "langfuse"):
             result = parse_tracing_config({"provider": provider})
@@ -177,7 +177,7 @@ class TestFieldBaseIdentifierValidation:
 
     def test_invalid_response_field_rejected(self) -> None:
         """response_field with spaces/special chars should raise ValueError."""
-        from elspeth.plugins.llm import get_llm_guaranteed_fields
+        from elspeth.plugins.transforms.llm import get_llm_guaranteed_fields
 
         with pytest.raises(ValueError, match="not a valid Python identifier"):
             get_llm_guaranteed_fields("my field")
@@ -187,21 +187,21 @@ class TestFieldBaseIdentifierValidation:
 
     def test_valid_response_field_accepted(self) -> None:
         """Valid Python identifiers should be accepted."""
-        from elspeth.plugins.llm import get_llm_guaranteed_fields
+        from elspeth.plugins.transforms.llm import get_llm_guaranteed_fields
 
         result = get_llm_guaranteed_fields("llm_response")
         assert "llm_response" in result
 
     def test_invalid_output_prefix_rejected(self) -> None:
         """output_prefix with special chars should raise ValueError."""
-        from elspeth.plugins.llm import get_multi_query_guaranteed_fields
+        from elspeth.plugins.transforms.llm import get_multi_query_guaranteed_fields
 
         with pytest.raises(ValueError, match="not a valid Python identifier"):
             get_multi_query_guaranteed_fields("my-prefix")
 
     def test_invalid_audit_field_rejected(self) -> None:
         """response_field in audit function also validated."""
-        from elspeth.plugins.llm import get_llm_audit_fields
+        from elspeth.plugins.transforms.llm import get_llm_audit_fields
 
         with pytest.raises(ValueError, match="not a valid Python identifier"):
             get_llm_audit_fields("has space")

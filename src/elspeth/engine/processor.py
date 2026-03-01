@@ -48,9 +48,9 @@ from elspeth.engine.executors import (
 from elspeth.engine.retry import RetryManager
 from elspeth.engine.spans import SpanFactory
 from elspeth.engine.tokens import TokenManager
-from elspeth.plugins.clients.llm import LLMClientError
-from elspeth.plugins.pooling import CapacityError
-from elspeth.plugins.protocols import BatchTransformProtocol, TransformProtocol
+from elspeth.plugins.infrastructure.clients.llm import LLMClientError
+from elspeth.plugins.infrastructure.pooling import CapacityError
+from elspeth.plugins.infrastructure.protocols import BatchTransformProtocol, TransformProtocol
 
 # Iteration guard to prevent infinite loops from bugs
 MAX_WORK_QUEUE_ITERATIONS = 10_000

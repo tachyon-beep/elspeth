@@ -13,8 +13,8 @@ from pydantic import ConfigDict
 
 from elspeth.contracts import ArtifactDescriptor, Determinism, PluginSchema, SourceRow
 from elspeth.contracts.routing import RoutingAction
-from elspeth.plugins.base import BaseTransform
-from elspeth.plugins.results import TransformResult
+from elspeth.plugins.infrastructure.base import BaseTransform
+from elspeth.plugins.infrastructure.results import TransformResult
 from tests.fixtures.base_classes import _TestSchema, _TestSinkBase, _TestSourceBase
 
 

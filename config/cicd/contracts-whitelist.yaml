@@ -40,13 +40,13 @@ allowed_dict_patterns:
   - "src/elspeth/engine/executors/aggregation.py:AggregationExecutor.get_buffered_rows:return (list)"
 
   # Protocols - row data in plugin interface
-  - "src/elspeth/plugins/protocols.py:SinkProtocol.write:rows (list)"
+  - "src/elspeth/plugins/infrastructure/protocols.py:SinkProtocol.write:rows (list)"
 
   # Base classes - row data in plugin implementations
-  - "src/elspeth/plugins/base.py:BaseSink.write:rows (list)"
+  - "src/elspeth/plugins/infrastructure/base.py:BaseSink.write:rows (list)"
 
   # Plugin utilities
-  - "src/elspeth/plugins/utils.py:get_nested_field:data"
+  - "src/elspeth/plugins/infrastructure/utils.py:get_nested_field:data"
 
   # Sink plugins - row output (batch writes)
   - "src/elspeth/plugins/sinks/database_sink.py:DatabaseSink._ensure_table:row"
@@ -66,8 +66,8 @@ allowed_dict_patterns:
   - "src/elspeth/plugins/sources/json_source.py:JSONSource._validate_and_yield:row"
 
   # Pooling executor - row processing
-  - "src/elspeth/plugins/pooling/executor.py:PooledExecutor.get_stats:return"
-  - "src/elspeth/plugins/pooling/executor.py:PooledExecutor._execute_single:row"
+  - "src/elspeth/plugins/infrastructure/pooling/executor.py:PooledExecutor.get_stats:return"
+  - "src/elspeth/plugins/infrastructure/pooling/executor.py:PooledExecutor._execute_single:row"
 
   # ═══════════════════════════════════════════════════════════════════════════
   # PLUGIN CONFIG (TRUST BOUNDARY)
@@ -77,16 +77,16 @@ allowed_dict_patterns:
   # ═══════════════════════════════════════════════════════════════════════════
 
   # Protocols - config input
-  - "src/elspeth/plugins/protocols.py:SourceProtocol.__init__:config"
-  - "src/elspeth/plugins/protocols.py:TransformProtocol.__init__:config"
-  - "src/elspeth/plugins/protocols.py:SinkProtocol.__init__:config"
-  - "src/elspeth/plugins/protocols.py:BatchTransformProtocol.__init__:config"
+  - "src/elspeth/plugins/infrastructure/protocols.py:SourceProtocol.__init__:config"
+  - "src/elspeth/plugins/infrastructure/protocols.py:TransformProtocol.__init__:config"
+  - "src/elspeth/plugins/infrastructure/protocols.py:SinkProtocol.__init__:config"
+  - "src/elspeth/plugins/infrastructure/protocols.py:BatchTransformProtocol.__init__:config"
 
   # Base classes - config input
-  - "src/elspeth/plugins/base.py:BaseTransform.__init__:config"
-  - "src/elspeth/plugins/base.py:BaseSink.__init__:config"
-  - "src/elspeth/plugins/base.py:BaseSource.__init__:config"
-  - "src/elspeth/plugins/config_base.py:PluginConfig.from_dict:config"
+  - "src/elspeth/plugins/infrastructure/base.py:BaseTransform.__init__:config"
+  - "src/elspeth/plugins/infrastructure/base.py:BaseSink.__init__:config"
+  - "src/elspeth/plugins/infrastructure/base.py:BaseSource.__init__:config"
+  - "src/elspeth/plugins/infrastructure/config_base.py:PluginConfig.from_dict:config"
 
   # Plugin implementations - config input
   - "src/elspeth/plugins/sinks/database_sink.py:DatabaseSink.__init__:config"
@@ -105,15 +105,15 @@ allowed_dict_patterns:
   - "src/elspeth/plugins/sources/null_source.py:NullSource.__init__:config"
 
   # Plugin manager - factory methods for creating plugins from config
-  - "src/elspeth/plugins/manager.py:PluginManager.create_source:config"
-  - "src/elspeth/plugins/manager.py:PluginManager.create_transform:config"
-  - "src/elspeth/plugins/manager.py:PluginManager.create_sink:config"
+  - "src/elspeth/plugins/infrastructure/manager.py:PluginManager.create_source:config"
+  - "src/elspeth/plugins/infrastructure/manager.py:PluginManager.create_transform:config"
+  - "src/elspeth/plugins/infrastructure/manager.py:PluginManager.create_sink:config"
 
   # Plugin validation - config validation before plugin instantiation
-  - "src/elspeth/plugins/validation.py:PluginConfigValidator.validate_source_config:config"
-  - "src/elspeth/plugins/validation.py:PluginConfigValidator.validate_transform_config:config"
-  - "src/elspeth/plugins/validation.py:PluginConfigValidator.validate_sink_config:config"
-  - "src/elspeth/plugins/validation.py:PluginConfigValidator.validate_schema_config:schema_config"
+  - "src/elspeth/plugins/infrastructure/validation.py:PluginConfigValidator.validate_source_config:config"
+  - "src/elspeth/plugins/infrastructure/validation.py:PluginConfigValidator.validate_transform_config:config"
+  - "src/elspeth/plugins/infrastructure/validation.py:PluginConfigValidator.validate_sink_config:config"
+  - "src/elspeth/plugins/infrastructure/validation.py:PluginConfigValidator.validate_schema_config:schema_config"
 
   # CLI - plugin instantiation from configuration
   # NOTE: _build_resume_graphs, _orchestrator_context, _execute_pipeline_with_instances,
@@ -221,61 +221,61 @@ allowed_dict_patterns:
   # ═══════════════════════════════════════════════════════════════════════════
 
   # LLM templates
-  - "src/elspeth/plugins/llm/templates.py:PromptTemplate.__init__:lookup_data"
-  - "src/elspeth/plugins/llm/templates.py:PromptTemplate.render:row"
-  - "src/elspeth/plugins/llm/templates.py:PromptTemplate.render_with_metadata:row"
+  - "src/elspeth/plugins/transforms/llm/templates.py:PromptTemplate.__init__:lookup_data"
+  - "src/elspeth/plugins/transforms/llm/templates.py:PromptTemplate.render:row"
+  - "src/elspeth/plugins/transforms/llm/templates.py:PromptTemplate.render_with_metadata:row"
 
   # LLM multi-query
-  - "src/elspeth/plugins/llm/multi_query.py:QuerySpec.build_template_context:row"
-  - "src/elspeth/plugins/llm/multi_query.py:QuerySpec.build_template_context:return"
-  - "src/elspeth/plugins/llm/multi_query.py:resolve_queries:queries"
+  - "src/elspeth/plugins/transforms/llm/multi_query.py:QuerySpec.build_template_context:row"
+  - "src/elspeth/plugins/transforms/llm/multi_query.py:QuerySpec.build_template_context:return"
+  - "src/elspeth/plugins/transforms/llm/multi_query.py:resolve_queries:queries"
 
   # LLM provider protocol — response_format follows the OpenAI API spec
   # (varies between {"type": "json_object"} and {"type": "json_schema", ...})
-  - "src/elspeth/plugins/llm/provider.py:LLMProvider.execute_query:response_format"
-  - "src/elspeth/plugins/llm/providers/azure.py:AzureLLMProvider.execute_query:response_format"
-  - "src/elspeth/plugins/llm/providers/openrouter.py:OpenRouterLLMProvider.execute_query:response_format"
+  - "src/elspeth/plugins/transforms/llm/provider.py:LLMProvider.execute_query:response_format"
+  - "src/elspeth/plugins/transforms/llm/providers/azure.py:AzureLLMProvider.execute_query:response_format"
+  - "src/elspeth/plugins/transforms/llm/providers/openrouter.py:OpenRouterLLMProvider.execute_query:response_format"
 
   # LLM tracing — extra_metadata is provider-specific (deployment, model, query keys vary per caller)
-  - "src/elspeth/plugins/llm/langfuse.py:LangfuseTracer.record_success:extra_metadata"
-  - "src/elspeth/plugins/llm/langfuse.py:LangfuseTracer.record_error:extra_metadata"
-  - "src/elspeth/plugins/llm/langfuse.py:NoOpLangfuseTracer.record_success:extra_metadata"
-  - "src/elspeth/plugins/llm/langfuse.py:NoOpLangfuseTracer.record_error:extra_metadata"
-  - "src/elspeth/plugins/llm/langfuse.py:ActiveLangfuseTracer.record_success:extra_metadata"
-  - "src/elspeth/plugins/llm/langfuse.py:ActiveLangfuseTracer.record_error:extra_metadata"
+  - "src/elspeth/plugins/transforms/llm/langfuse.py:LangfuseTracer.record_success:extra_metadata"
+  - "src/elspeth/plugins/transforms/llm/langfuse.py:LangfuseTracer.record_error:extra_metadata"
+  - "src/elspeth/plugins/transforms/llm/langfuse.py:NoOpLangfuseTracer.record_success:extra_metadata"
+  - "src/elspeth/plugins/transforms/llm/langfuse.py:NoOpLangfuseTracer.record_error:extra_metadata"
+  - "src/elspeth/plugins/transforms/llm/langfuse.py:ActiveLangfuseTracer.record_success:extra_metadata"
+  - "src/elspeth/plugins/transforms/llm/langfuse.py:ActiveLangfuseTracer.record_error:extra_metadata"
 
   # LLM tracing config
-  - "src/elspeth/plugins/llm/tracing.py:parse_tracing_config:config"
+  - "src/elspeth/plugins/transforms/llm/tracing.py:parse_tracing_config:config"
 
   # Azure batch LLM (checkpoint params typed as BatchCheckpointState — only config/return remain)
-  - "src/elspeth/plugins/llm/azure_batch.py:AzureBatchLLMTransform.__init__:config"
-  - "src/elspeth/plugins/llm/azure_batch.py:AzureBatchLLMTransform.azure_config:return"
+  - "src/elspeth/plugins/transforms/llm/azure_batch.py:AzureBatchLLMTransform.__init__:config"
+  - "src/elspeth/plugins/transforms/llm/azure_batch.py:AzureBatchLLMTransform.azure_config:return"
 
   # Unified LLM transform (T10 consolidation — dispatches to Azure/OpenRouter providers)
-  - "src/elspeth/plugins/llm/transform.py:LLMTransform.__init__:config"
+  - "src/elspeth/plugins/transforms/llm/transform.py:LLMTransform.__init__:config"
   # Multi-query partial output (keys are dynamic: query-spec-dependent field names)
-  - "src/elspeth/plugins/llm/transform.py:MultiQueryStrategy._execute_one_query:return"
+  - "src/elspeth/plugins/transforms/llm/transform.py:MultiQueryStrategy._execute_one_query:return"
   # Pool work context (PooledExecutor row interface is dict[str, Any])
-  - "src/elspeth/plugins/llm/transform.py:MultiQueryStrategy._process_fn:work"
+  - "src/elspeth/plugins/transforms/llm/transform.py:MultiQueryStrategy._process_fn:work"
 
   # Plugin validation dispatcher — config is user YAML (Tier 3 boundary)
-  - "src/elspeth/plugins/validation.py:PluginConfigValidator._get_transform_config_model:config"
+  - "src/elspeth/plugins/infrastructure/validation.py:PluginConfigValidator._get_transform_config_model:config"
 
   # ═══════════════════════════════════════════════════════════════════════════
   # AZURE PLUGINS - External cloud service trust boundary
   # ═══════════════════════════════════════════════════════════════════════════
 
   # Azure blob storage
-  - "src/elspeth/plugins/azure/blob_source.py:AzureBlobSource.__init__:config"
-  - "src/elspeth/plugins/azure/blob_sink.py:AzureBlobSink.__init__:config"
-  - "src/elspeth/plugins/azure/blob_sink.py:AzureBlobSink._serialize_rows:rows (list)"
-  - "src/elspeth/plugins/azure/blob_sink.py:AzureBlobSink._serialize_csv:rows (list)"
-  - "src/elspeth/plugins/azure/blob_sink.py:AzureBlobSink._serialize_json:rows (list)"
-  - "src/elspeth/plugins/azure/blob_sink.py:AzureBlobSink._serialize_jsonl:rows (list)"
-  - "src/elspeth/plugins/azure/blob_sink.py:AzureBlobSink.write:rows (list)"
-  - "src/elspeth/plugins/azure/blob_sink.py:AzureBlobSink._get_field_names_and_display:rows (list)"
-  - "src/elspeth/plugins/azure/blob_sink.py:AzureBlobSink._apply_display_headers:rows (list)"
-  - "src/elspeth/plugins/azure/blob_sink.py:AzureBlobSink._apply_display_headers:return (list)"
+  - "src/elspeth/plugins/sources/azure_blob_source.py:AzureBlobSource.__init__:config"
+  - "src/elspeth/plugins/sinks/azure_blob_sink.py:AzureBlobSink.__init__:config"
+  - "src/elspeth/plugins/sinks/azure_blob_sink.py:AzureBlobSink._serialize_rows:rows (list)"
+  - "src/elspeth/plugins/sinks/azure_blob_sink.py:AzureBlobSink._serialize_csv:rows (list)"
+  - "src/elspeth/plugins/sinks/azure_blob_sink.py:AzureBlobSink._serialize_json:rows (list)"
+  - "src/elspeth/plugins/sinks/azure_blob_sink.py:AzureBlobSink._serialize_jsonl:rows (list)"
+  - "src/elspeth/plugins/sinks/azure_blob_sink.py:AzureBlobSink.write:rows (list)"
+  - "src/elspeth/plugins/sinks/azure_blob_sink.py:AzureBlobSink._get_field_names_and_display:rows (list)"
+  - "src/elspeth/plugins/sinks/azure_blob_sink.py:AzureBlobSink._apply_display_headers:rows (list)"
+  - "src/elspeth/plugins/sinks/azure_blob_sink.py:AzureBlobSink._apply_display_headers:return (list)"
 
   # Azure safety transforms (base + content_safety + prompt_shield)
   - "src/elspeth/plugins/transforms/azure/base.py:BaseAzureSafetyTransform.__init__:config"
@@ -285,14 +285,14 @@ allowed_dict_patterns:
   # ═══════════════════════════════════════════════════════════════════════════
   # HTTP CLIENTS - External API trust boundary
   # ═══════════════════════════════════════════════════════════════════════════
-  - "src/elspeth/plugins/clients/http.py:AuditedHTTPClient._record_and_emit:request_data"
-  - "src/elspeth/plugins/clients/http.py:AuditedHTTPClient._record_and_emit:response_data"
-  - "src/elspeth/plugins/clients/http.py:AuditedHTTPClient._execute_request:json"
-  - "src/elspeth/plugins/clients/http.py:AuditedHTTPClient.post:json"
-  - "src/elspeth/plugins/clients/replayer.py:ReplayMissError.__init__:request_data"
-  - "src/elspeth/plugins/clients/replayer.py:CallReplayer.replay:request_data"
-  - "src/elspeth/plugins/clients/verifier.py:CallVerifier.verify:request_data"
-  - "src/elspeth/plugins/clients/verifier.py:CallVerifier.verify:live_response"
+  - "src/elspeth/plugins/infrastructure/clients/http.py:AuditedHTTPClient._record_and_emit:request_data"
+  - "src/elspeth/plugins/infrastructure/clients/http.py:AuditedHTTPClient._record_and_emit:response_data"
+  - "src/elspeth/plugins/infrastructure/clients/http.py:AuditedHTTPClient._execute_request:json"
+  - "src/elspeth/plugins/infrastructure/clients/http.py:AuditedHTTPClient.post:json"
+  - "src/elspeth/plugins/infrastructure/clients/replayer.py:ReplayMissError.__init__:request_data"
+  - "src/elspeth/plugins/infrastructure/clients/replayer.py:CallReplayer.replay:request_data"
+  - "src/elspeth/plugins/infrastructure/clients/verifier.py:CallVerifier.verify:request_data"
+  - "src/elspeth/plugins/infrastructure/clients/verifier.py:CallVerifier.verify:live_response"
 
   # ═══════════════════════════════════════════════════════════════════════════
   # TUI - Display of dynamic audit data
@@ -435,14 +435,14 @@ allowed_dict_patterns:
   # ═══════════════════════════════════════════════════════════════════════════
   # BATCHING INFRASTRUCTURE - Row buffering for batch operations
   # ═══════════════════════════════════════════════════════════════════════════
-  - "src/elspeth/plugins/batching/row_reorder_buffer.py:RowReorderBuffer.get_metrics:return"
-  - "src/elspeth/plugins/batching/mixin.py:BatchTransformMixin.get_batch_metrics:return"
+  - "src/elspeth/plugins/infrastructure/batching/row_reorder_buffer.py:RowReorderBuffer.get_metrics:return"
+  - "src/elspeth/plugins/infrastructure/batching/mixin.py:BatchTransformMixin.get_batch_metrics:return"
 
   # Azure blob sink - row serialization
-  - "src/elspeth/plugins/azure/blob_sink.py:AzureBlobSink._get_fieldnames_from_schema_or_rows:rows (list)"
+  - "src/elspeth/plugins/sinks/azure_blob_sink.py:AzureBlobSink._get_fieldnames_from_schema_or_rows:rows (list)"
 
   # Multi-query config base (JSON schema building for LLM structured output)
-  - "src/elspeth/plugins/llm/multi_query.py:OutputFieldConfig.to_json_schema:return"
+  - "src/elspeth/plugins/transforms/llm/multi_query.py:OutputFieldConfig.to_json_schema:return"
 
   # OpenRouter batch LLM (async batch API)
-  - "src/elspeth/plugins/llm/openrouter_batch.py:OpenRouterBatchLLMTransform.__init__:config"
+  - "src/elspeth/plugins/transforms/llm/openrouter_batch.py:OpenRouterBatchLLMTransform.__init__:config"

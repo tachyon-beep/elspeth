@@ -3,7 +3,7 @@
 
 import pytest
 
-from elspeth.plugins.config_base import PluginConfigError
+from elspeth.plugins.infrastructure.config_base import PluginConfigError
 
 
 class TestTabularSourceDataConfigValidation:
@@ -11,7 +11,7 @@ class TestTabularSourceDataConfigValidation:
 
     def test_normalize_with_columns_raises(self) -> None:
         """normalize_fields=True with columns raises error."""
-        from elspeth.plugins.config_base import TabularSourceDataConfig
+        from elspeth.plugins.infrastructure.config_base import TabularSourceDataConfig
 
         with pytest.raises(PluginConfigError, match="cannot be used with columns"):
             TabularSourceDataConfig.from_dict(
@@ -26,7 +26,7 @@ class TestTabularSourceDataConfigValidation:
 
     def test_mapping_without_normalize_or_columns_raises(self) -> None:
         """field_mapping without normalize_fields or columns raises error."""
-        from elspeth.plugins.config_base import TabularSourceDataConfig
+        from elspeth.plugins.infrastructure.config_base import TabularSourceDataConfig
 
         with pytest.raises(PluginConfigError, match="requires normalize_fields"):
             TabularSourceDataConfig.from_dict(
@@ -40,7 +40,7 @@ class TestTabularSourceDataConfigValidation:
 
     def test_columns_with_python_keyword_raises(self) -> None:
         """columns entry that is Python keyword raises error."""
-        from elspeth.plugins.config_base import TabularSourceDataConfig
+        from elspeth.plugins.infrastructure.config_base import TabularSourceDataConfig
 
         with pytest.raises(PluginConfigError, match="Python keyword"):
             TabularSourceDataConfig.from_dict(
@@ -54,7 +54,7 @@ class TestTabularSourceDataConfigValidation:
 
     def test_columns_with_invalid_identifier_raises(self) -> None:
         """columns entry that is invalid identifier raises error."""
-        from elspeth.plugins.config_base import TabularSourceDataConfig
+        from elspeth.plugins.infrastructure.config_base import TabularSourceDataConfig
 
         with pytest.raises(PluginConfigError, match=r"valid.*identifier"):
             TabularSourceDataConfig.from_dict(
@@ -68,7 +68,7 @@ class TestTabularSourceDataConfigValidation:
 
     def test_columns_with_duplicates_raises(self) -> None:
         """columns with duplicate entries raises error."""
-        from elspeth.plugins.config_base import TabularSourceDataConfig
+        from elspeth.plugins.infrastructure.config_base import TabularSourceDataConfig
 
         with pytest.raises(PluginConfigError, match=r"[Dd]uplicate"):
             TabularSourceDataConfig.from_dict(
@@ -82,7 +82,7 @@ class TestTabularSourceDataConfigValidation:
 
     def test_field_mapping_value_is_keyword_raises(self) -> None:
         """field_mapping value that is Python keyword raises error."""
-        from elspeth.plugins.config_base import TabularSourceDataConfig
+        from elspeth.plugins.infrastructure.config_base import TabularSourceDataConfig
 
         with pytest.raises(PluginConfigError, match="Python keyword"):
             TabularSourceDataConfig.from_dict(
@@ -97,7 +97,7 @@ class TestTabularSourceDataConfigValidation:
 
     def test_valid_config_with_normalize_fields(self) -> None:
         """Valid config with normalize_fields passes."""
-        from elspeth.plugins.config_base import TabularSourceDataConfig
+        from elspeth.plugins.infrastructure.config_base import TabularSourceDataConfig
 
         cfg = TabularSourceDataConfig.from_dict(
             {
@@ -113,7 +113,7 @@ class TestTabularSourceDataConfigValidation:
 
     def test_valid_config_with_columns(self) -> None:
         """Valid config with columns passes."""
-        from elspeth.plugins.config_base import TabularSourceDataConfig
+        from elspeth.plugins.infrastructure.config_base import TabularSourceDataConfig
 
         cfg = TabularSourceDataConfig.from_dict(
             {
@@ -128,7 +128,7 @@ class TestTabularSourceDataConfigValidation:
 
     def test_valid_config_with_normalize_and_mapping(self) -> None:
         """Valid config with normalize_fields + field_mapping passes."""
-        from elspeth.plugins.config_base import TabularSourceDataConfig
+        from elspeth.plugins.infrastructure.config_base import TabularSourceDataConfig
 
         cfg = TabularSourceDataConfig.from_dict(
             {
@@ -144,7 +144,7 @@ class TestTabularSourceDataConfigValidation:
 
     def test_empty_field_mapping_treated_as_none(self) -> None:
         """Empty field_mapping dict should behave same as None."""
-        from elspeth.plugins.config_base import TabularSourceDataConfig
+        from elspeth.plugins.infrastructure.config_base import TabularSourceDataConfig
 
         cfg = TabularSourceDataConfig.from_dict(
             {
@@ -160,7 +160,7 @@ class TestTabularSourceDataConfigValidation:
 
     def test_single_column_headerless_mode(self) -> None:
         """Columns with single entry should work."""
-        from elspeth.plugins.config_base import TabularSourceDataConfig
+        from elspeth.plugins.infrastructure.config_base import TabularSourceDataConfig
 
         cfg = TabularSourceDataConfig.from_dict(
             {

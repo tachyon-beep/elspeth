@@ -11,9 +11,9 @@ from typing import Any
 from unittest.mock import MagicMock
 
 from elspeth.contracts.token_usage import TokenUsage
-from elspeth.plugins.llm.langfuse import ActiveLangfuseTracer, NoOpLangfuseTracer
-from elspeth.plugins.llm.providers.openrouter import OpenRouterConfig
-from elspeth.plugins.llm.transform import LLMTransform
+from elspeth.plugins.transforms.llm.langfuse import ActiveLangfuseTracer, NoOpLangfuseTracer
+from elspeth.plugins.transforms.llm.providers.openrouter import OpenRouterConfig
+from elspeth.plugins.transforms.llm.transform import LLMTransform
 
 
 def _make_mock_ctx(run_id: str = "test-run") -> MagicMock:

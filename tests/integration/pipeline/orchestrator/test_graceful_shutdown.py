@@ -18,8 +18,8 @@ from elspeth.contracts import PipelineRow, RunStatus
 from elspeth.contracts.enums import Determinism
 from elspeth.contracts.errors import GracefulShutdownError
 from elspeth.contracts.results import SourceRow
-from elspeth.plugins.base import BaseTransform
-from elspeth.plugins.results import TransformResult
+from elspeth.plugins.infrastructure.base import BaseTransform
+from elspeth.plugins.infrastructure.results import TransformResult
 from tests.fixtures.base_classes import (
     _TestSchema,
     as_sink,

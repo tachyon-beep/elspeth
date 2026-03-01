@@ -14,7 +14,7 @@ import pytest
 from hypothesis import given, settings
 from hypothesis import strategies as st
 
-from elspeth.plugins.llm.multi_query import (
+from elspeth.plugins.transforms.llm.multi_query import (
     OutputFieldConfig,
     OutputFieldType,
     QuerySpec,

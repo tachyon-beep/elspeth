@@ -8,7 +8,7 @@ from dataclasses import FrozenInstanceError
 import pytest
 
 from elspeth.contracts.token_usage import TokenUsage
-from elspeth.plugins.llm.provider import (
+from elspeth.plugins.transforms.llm.provider import (
     FinishReason,
     LLMProvider,
     LLMQueryResult,

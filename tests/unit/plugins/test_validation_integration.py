@@ -8,7 +8,7 @@ They serve as completion criteria for the migration.
 
 import pytest
 
-from elspeth.plugins.manager import PluginManager
+from elspeth.plugins.infrastructure.manager import PluginManager
 
 
 def test_plugin_manager_has_validator():

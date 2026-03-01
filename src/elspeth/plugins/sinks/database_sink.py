@@ -24,9 +24,9 @@ from elspeth.contracts import ArtifactDescriptor, CallStatus, CallType, PluginSc
 from elspeth.contracts.contexts import LifecycleContext, SinkContext
 from elspeth.contracts.url import SanitizedDatabaseUrl
 from elspeth.core.canonical import canonical_json
-from elspeth.plugins.base import BaseSink
-from elspeth.plugins.config_base import DataPluginConfig
-from elspeth.plugins.schema_factory import create_schema_from_config
+from elspeth.plugins.infrastructure.base import BaseSink
+from elspeth.plugins.infrastructure.config_base import DataPluginConfig
+from elspeth.plugins.infrastructure.schema_factory import create_schema_from_config
 
 # Map schema field types to SQLAlchemy column types.
 # Text (not String) is used for string columns because String() without a length

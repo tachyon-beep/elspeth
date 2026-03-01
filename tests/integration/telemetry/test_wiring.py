@@ -25,7 +25,7 @@ from elspeth.contracts.events import RunStarted
 from elspeth.contracts.schema_contract import FieldContract, SchemaContract
 from elspeth.core.landscape import LandscapeDB
 from elspeth.engine.orchestrator import Orchestrator, PipelineConfig
-from elspeth.plugins.results import TransformResult
+from elspeth.plugins.infrastructure.results import TransformResult
 from elspeth.telemetry import TelemetryManager
 from tests.fixtures.base_classes import _TestSinkBase, _TestSourceBase, as_sink, as_source, as_transform
 from tests.fixtures.pipeline import build_production_graph

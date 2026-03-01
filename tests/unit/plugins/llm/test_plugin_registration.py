@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import pytest
 
-from elspeth.plugins.validation import PluginConfigValidator
+from elspeth.plugins.infrastructure.validation import PluginConfigValidator
 
 
 class TestLLMPluginConfigDispatch:
@@ -19,7 +19,7 @@ class TestLLMPluginConfigDispatch:
 
     def test_llm_plugin_dispatches_to_azure_config(self) -> None:
         """verify _get_transform_config_model("llm", {"provider": "azure"}) returns AzureOpenAIConfig."""
-        from elspeth.plugins.llm.providers.azure import AzureOpenAIConfig
+        from elspeth.plugins.transforms.llm.providers.azure import AzureOpenAIConfig
 
         validator = PluginConfigValidator()
         config_model = validator._get_transform_config_model("llm", {"provider": "azure"})
@@ -27,7 +27,7 @@ class TestLLMPluginConfigDispatch:
 
     def test_llm_plugin_dispatches_to_openrouter_config(self) -> None:
         """verify _get_transform_config_model("llm", {"provider": "openrouter"}) returns OpenRouterConfig."""
-        from elspeth.plugins.llm.providers.openrouter import OpenRouterConfig
+        from elspeth.plugins.transforms.llm.providers.openrouter import OpenRouterConfig
 
         validator = PluginConfigValidator()
         config_model = validator._get_transform_config_model("llm", {"provider": "openrouter"})
@@ -35,7 +35,7 @@ class TestLLMPluginConfigDispatch:
 
     def test_llm_plugin_missing_provider_falls_back_to_base(self) -> None:
         """verify missing provider key returns LLMConfig (Pydantic catches the Literal validation)."""
-        from elspeth.plugins.llm.base import LLMConfig
+        from elspeth.plugins.transforms.llm.base import LLMConfig
 
         validator = PluginConfigValidator()
         config_model = validator._get_transform_config_model("llm", {})
@@ -49,7 +49,7 @@ class TestLLMPluginConfigDispatch:
 
     def test_llm_plugin_none_config_falls_back_to_base(self) -> None:
         """verify None config falls back to LLMConfig."""
-        from elspeth.plugins.llm.base import LLMConfig
+        from elspeth.plugins.transforms.llm.base import LLMConfig
 
         validator = PluginConfigValidator()
         config_model = validator._get_transform_config_model("llm", None)
@@ -83,14 +83,14 @@ class TestBatchPluginsUnchanged:
     """Verify batch plugin entries are unaffected."""
 
     def test_azure_batch_llm_still_resolves(self) -> None:
-        from elspeth.plugins.llm.azure_batch import AzureBatchConfig
+        from elspeth.plugins.transforms.llm.azure_batch import AzureBatchConfig
 
         validator = PluginConfigValidator()
         config_model = validator._get_transform_config_model("azure_batch_llm")
         assert config_model is AzureBatchConfig
 
     def test_openrouter_batch_llm_still_resolves(self) -> None:
-        from elspeth.plugins.llm.openrouter_batch import OpenRouterBatchConfig
+        from elspeth.plugins.transforms.llm.openrouter_batch import OpenRouterBatchConfig
 
         validator = PluginConfigValidator()
         config_model = validator._get_transform_config_model("openrouter_batch_llm")
@@ -101,7 +101,7 @@ class TestLLMPluginDiscovery:
     """Verify the unified LLMTransform is discovered correctly."""
 
     def test_llm_plugin_discovered_with_correct_name(self) -> None:
-        from elspeth.plugins.discovery import discover_all_plugins
+        from elspeth.plugins.infrastructure.discovery import discover_all_plugins
 
         discovered = discover_all_plugins()
         transform_names = [cls.name for cls in discovered["transforms"]]  # type: ignore[attr-defined]
@@ -109,6 +109,6 @@ class TestLLMPluginDiscovery:
 
     def test_llm_plugin_is_non_deterministic(self) -> None:
         from elspeth.contracts import Determinism
-        from elspeth.plugins.llm.transform import LLMTransform
+        from elspeth.plugins.transforms.llm.transform import LLMTransform
 
         assert LLMTransform.determinism == Determinism.NON_DETERMINISTIC

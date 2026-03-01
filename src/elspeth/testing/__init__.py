@@ -65,7 +65,7 @@ if TYPE_CHECKING:
         RunResult,
     )
     from elspeth.engine.tokens import TokenInfo
-    from elspeth.plugins.results import TransformResult
+    from elspeth.plugins.infrastructure.results import TransformResult
 
 
 # =============================================================================
@@ -233,7 +233,7 @@ def make_success(
         result = make_success(row)  # From existing PipelineRow
         result = make_success({"id": 1}, context_after=pool_ctx)
     """
-    from elspeth.plugins.results import TransformResult
+    from elspeth.plugins.infrastructure.results import TransformResult
 
     if data is None:
         data = kwargs or {"_empty": True}
@@ -265,7 +265,7 @@ def make_success_multi(
     of all keys.  Pre-built PipelineRow instances must already share
     the same contract identity.
     """
-    from elspeth.plugins.results import TransformResult
+    from elspeth.plugins.infrastructure.results import TransformResult
 
     # Build a shared contract from the union of all dict keys if needed.
     if contract is None:
@@ -293,7 +293,7 @@ def make_error(
         result = make_error("llm_timeout")
         result = make_error({"reason": "bad_json", "raw": "..."}, retryable=True)
     """
-    from elspeth.plugins.results import TransformResult
+    from elspeth.plugins.infrastructure.results import TransformResult
 
     if isinstance(reason, str):
         error_reason: TransformErrorReason = {"reason": reason}  # type: ignore[typeddict-item]

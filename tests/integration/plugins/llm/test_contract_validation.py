@@ -17,7 +17,7 @@ class TestLLMContractValidationBasics:
 
     def test_llm_config_accepts_required_input_fields(self) -> None:
         """LLMConfig parses required_input_fields correctly."""
-        from elspeth.plugins.llm.base import LLMConfig
+        from elspeth.plugins.transforms.llm.base import LLMConfig
 
         config = LLMConfig.from_dict(
             {
@@ -33,8 +33,8 @@ class TestLLMContractValidationBasics:
 
     def test_llm_config_validates_required_fields_format(self) -> None:
         """LLMConfig validates required_input_fields are valid identifiers."""
-        from elspeth.plugins.config_base import PluginConfigError
-        from elspeth.plugins.llm.base import LLMConfig
+        from elspeth.plugins.infrastructure.config_base import PluginConfigError
+        from elspeth.plugins.transforms.llm.base import LLMConfig
 
         with pytest.raises(PluginConfigError, match="valid Python identifier"):
             LLMConfig.from_dict(
@@ -52,8 +52,8 @@ class TestLLMTemplateFieldDeclarationRequired:
 
     def test_error_when_template_uses_row_without_declaration(self) -> None:
         """Error raised when template references row fields but required_input_fields not declared."""
-        from elspeth.plugins.config_base import PluginConfigError
-        from elspeth.plugins.llm.base import LLMConfig
+        from elspeth.plugins.infrastructure.config_base import PluginConfigError
+        from elspeth.plugins.transforms.llm.base import LLMConfig
 
         with pytest.raises(PluginConfigError) as exc_info:
             LLMConfig.from_dict(
@@ -73,7 +73,7 @@ class TestLLMTemplateFieldDeclarationRequired:
 
     def test_explicit_empty_list_allows_opt_out(self) -> None:
         """Empty list [] is explicit opt-out - no error raised."""
-        from elspeth.plugins.llm.base import LLMConfig
+        from elspeth.plugins.transforms.llm.base import LLMConfig
 
         # This should NOT raise - empty list is explicit opt-out
         config = LLMConfig.from_dict(
@@ -90,7 +90,7 @@ class TestLLMTemplateFieldDeclarationRequired:
 
     def test_no_error_when_fields_declared(self) -> None:
         """No error when required_input_fields properly declared."""
-        from elspeth.plugins.llm.base import LLMConfig
+        from elspeth.plugins.transforms.llm.base import LLMConfig
 
         # Should not raise
         config = LLMConfig.from_dict(
@@ -107,7 +107,7 @@ class TestLLMTemplateFieldDeclarationRequired:
 
     def test_no_error_for_non_row_templates(self) -> None:
         """No error when template doesn't reference row namespace."""
-        from elspeth.plugins.llm.base import LLMConfig
+        from elspeth.plugins.transforms.llm.base import LLMConfig
 
         # Should not raise - no row references
         config = LLMConfig.from_dict(

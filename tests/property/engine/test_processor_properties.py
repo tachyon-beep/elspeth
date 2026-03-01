@@ -56,7 +56,7 @@ def _build_production_graph(config: PipelineConfig) -> ExecutionGraph:
     Adapter that mirrors production wiring with explicit source settings.
     """
     from elspeth.core.config import AggregationSettings
-    from elspeth.plugins.protocols import TransformProtocol
+    from elspeth.plugins.infrastructure.protocols import TransformProtocol
 
     row_transforms: list[TransformProtocol] = []
     aggregations: dict[str, tuple[TransformProtocol, AggregationSettings]] = {}
@@ -99,7 +99,7 @@ def _build_production_graph(config: PipelineConfig) -> ExecutionGraph:
             name = agg_settings.plugin
 
             def process(self, row: Any, ctx: Any) -> Any:
-                from elspeth.plugins.results import TransformResult
+                from elspeth.plugins.infrastructure.results import TransformResult
 
                 return TransformResult.success(row, success_reason={"action": "test"})
 

@@ -20,7 +20,7 @@ from elspeth.core.config import RateLimitSettings
 from elspeth.core.landscape import LandscapeDB
 from elspeth.core.rate_limit import RateLimitRegistry
 from elspeth.engine import Orchestrator
-from elspeth.plugins.base import BaseTransform
+from elspeth.plugins.infrastructure.base import BaseTransform
 from elspeth.testing import make_pipeline_row
 
 
@@ -268,7 +268,7 @@ class TestAuditedClientRateLimiting:
 
         from elspeth.core.config import RateLimitSettings
         from elspeth.core.rate_limit import RateLimitRegistry
-        from elspeth.plugins.clients.llm import AuditedLLMClient
+        from elspeth.plugins.infrastructure.clients.llm import AuditedLLMClient
 
         settings = RateLimitSettings(enabled=True, default_requests_per_minute=60)
         config = RuntimeRateLimitConfig.from_settings(settings)
@@ -340,7 +340,7 @@ class TestAuditedClientRateLimiting:
 
         from elspeth.core.config import RateLimitSettings
         from elspeth.core.rate_limit import RateLimitRegistry
-        from elspeth.plugins.clients.http import AuditedHTTPClient
+        from elspeth.plugins.infrastructure.clients.http import AuditedHTTPClient
 
         settings = RateLimitSettings(enabled=True, default_requests_per_minute=60)
         config = RuntimeRateLimitConfig.from_settings(settings)
@@ -398,7 +398,7 @@ class TestAuditedClientRateLimiting:
         """AuditedLLMClient works without limiter."""
         from unittest.mock import MagicMock
 
-        from elspeth.plugins.clients.llm import AuditedLLMClient
+        from elspeth.plugins.infrastructure.clients.llm import AuditedLLMClient
 
         # Mock the recorder
         mock_recorder = MagicMock()

@@ -10,11 +10,11 @@ from elspeth.contracts import Determinism, TransformResult
 from elspeth.contracts.identity import TokenInfo
 from elspeth.contracts.plugin_context import PluginContext
 from elspeth.engine.batch_adapter import ExceptionResult
-from elspeth.plugins.batching.ports import CollectorOutputPort
-from elspeth.plugins.clients.llm import RateLimitError
-from elspeth.plugins.config_base import PluginConfigError
-from elspeth.plugins.llm.providers.azure import AzureOpenAIConfig
-from elspeth.plugins.llm.transform import LLMTransform
+from elspeth.plugins.infrastructure.batching.ports import CollectorOutputPort
+from elspeth.plugins.infrastructure.clients.llm import RateLimitError
+from elspeth.plugins.infrastructure.config_base import PluginConfigError
+from elspeth.plugins.transforms.llm.providers.azure import AzureOpenAIConfig
+from elspeth.plugins.transforms.llm.transform import LLMTransform
 from elspeth.testing import make_pipeline_row
 
 from .conftest import chaosllm_azure_openai_client

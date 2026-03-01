@@ -32,7 +32,7 @@ from elspeth.core.landscape import LandscapeRecorder
 from elspeth.engine.executors.state_guard import NodeStateGuard
 from elspeth.engine.executors.types import GateOutcome, MissingEdgeError
 from elspeth.engine.spans import SpanFactory
-from elspeth.plugins.results import GateResult
+from elspeth.plugins.infrastructure.results import GateResult
 
 if TYPE_CHECKING:
     from elspeth.engine.tokens import TokenManager

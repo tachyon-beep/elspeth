@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import pytest
 
-from elspeth.plugins.manager import PluginManager
+from elspeth.plugins.infrastructure.manager import PluginManager
 
 
 @pytest.fixture

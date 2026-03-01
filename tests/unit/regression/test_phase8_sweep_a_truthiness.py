@@ -103,7 +103,7 @@ class TestCallVerifierResponseHash:
         """Verify the verifier source code uses `is not None` for response_hash."""
         import inspect
 
-        from elspeth.plugins.clients.verifier import CallVerifier
+        from elspeth.plugins.infrastructure.clients.verifier import CallVerifier
 
         source = inspect.getsource(CallVerifier.verify)
         assert "response_hash is not None" in source

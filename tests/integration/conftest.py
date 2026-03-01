@@ -15,7 +15,7 @@ import pytest
 from elspeth.contracts.payload_store import PayloadStore
 from elspeth.core.landscape.database import LandscapeDB
 from elspeth.core.landscape.recorder import LandscapeRecorder
-from elspeth.plugins.manager import PluginManager
+from elspeth.plugins.infrastructure.manager import PluginManager
 from tests.fixtures.stores import MockPayloadStore
 
 

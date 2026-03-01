@@ -11,7 +11,7 @@ import pytest
 from elspeth.contracts import CallStatus, CallType, TokenUsage
 from elspeth.contracts.call_data import LLMCallRequest, LLMCallResponse
 from elspeth.contracts.events import ExternalCallCompleted
-from elspeth.plugins.clients.llm import (
+from elspeth.plugins.infrastructure.clients.llm import (
     AuditedLLMClient,
     LLMClientError,
 )

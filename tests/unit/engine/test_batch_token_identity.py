@@ -25,8 +25,8 @@ from elspeth.core.config import AggregationSettings, TriggerConfig
 from elspeth.core.landscape import LandscapeDB, LandscapeRecorder
 from elspeth.engine.processor import DAGTraversalContext, RowProcessor
 from elspeth.engine.spans import SpanFactory
-from elspeth.plugins.base import BaseTransform
-from elspeth.plugins.results import TransformResult
+from elspeth.plugins.infrastructure.base import BaseTransform
+from elspeth.plugins.infrastructure.results import TransformResult
 from elspeth.testing import make_field, make_pipeline_row
 from tests.unit.engine.conftest import DYNAMIC_SCHEMA, _TestSchema
 

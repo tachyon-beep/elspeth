@@ -29,7 +29,7 @@ from elspeth.core.landscape.schema import node_states_table
 from elspeth.engine.executors import TransformExecutor
 from elspeth.engine.retry import RetryManager
 from elspeth.engine.spans import SpanFactory
-from elspeth.plugins.base import BaseTransform
+from elspeth.plugins.infrastructure.base import BaseTransform
 from elspeth.testing import make_pipeline_row
 
 

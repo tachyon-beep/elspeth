@@ -11,8 +11,8 @@ from elspeth.contracts import NodeType, SourceRow
 from elspeth.contracts.plugin_context import PluginContext
 from elspeth.contracts.types import NodeID
 from elspeth.engine.processor import DAGTraversalContext
-from elspeth.plugins.base import BaseTransform
-from elspeth.plugins.results import TransformResult
+from elspeth.plugins.infrastructure.base import BaseTransform
+from elspeth.plugins.infrastructure.results import TransformResult
 from tests.fixtures.base_classes import create_observed_contract
 
 

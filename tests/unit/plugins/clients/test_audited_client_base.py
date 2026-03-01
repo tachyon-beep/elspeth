@@ -6,7 +6,7 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from elspeth.plugins.clients.base import AuditedClientBase
+from elspeth.plugins.infrastructure.clients.base import AuditedClientBase
 
 
 class ConcreteAuditedClient(AuditedClientBase):

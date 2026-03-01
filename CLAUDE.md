@@ -643,13 +643,10 @@ src/elspeth/
 │   ├── clock.py        # Clock abstraction for testing
 │   └── spans.py        # Telemetry span management
 ├── plugins/
+│   ├── infrastructure/ # Shared: base classes, protocols, config, clients, batching, pooling
 │   ├── sources/        # CSVSource, JSONSource, NullSource, AzureBlobSource
-│   ├── transforms/     # FieldMapper, Passthrough, Truncate, etc.
-│   ├── sinks/          # CSVSink, JSONSink, DatabaseSink, BlobSink
-│   ├── llm/            # Unified LLMTransform with provider pattern (azure/openrouter) + batch transforms
-│   ├── clients/        # HTTP, LLM, Replayer, Verifier clients
-│   ├── batching/       # Batch-aware transform adapters
-│   └── pooling/        # Thread pool management for plugins
+│   ├── transforms/     # FieldMapper, Passthrough, Truncate, LLM, Azure safety, etc.
+│   └── sinks/          # CSVSink, JSONSink, DatabaseSink, AzureBlobSink
 ├── telemetry/          # OpenTelemetry exporters and instrumentation
 ├── testing/            # ChaosLLM, ChaosWeb, ChaosEngine test servers
 ├── mcp/                # Landscape MCP analysis server

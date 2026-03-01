@@ -10,7 +10,7 @@ class TestNodeIdProtocol:
 
     def test_source_protocol_has_node_id(self) -> None:
         """SourceProtocol defines node_id attribute."""
-        from elspeth.plugins.protocols import SourceProtocol
+        from elspeth.plugins.infrastructure.protocols import SourceProtocol
 
         # Use __annotations__ to check protocol attributes (avoids forward ref issues)
         annotations = SourceProtocol.__annotations__
@@ -25,7 +25,7 @@ class TestNodeIdProtocol:
 
         from elspeth.contracts import PluginSchema
         from elspeth.contracts.plugin_context import PluginContext
-        from elspeth.plugins.base import BaseSource
+        from elspeth.plugins.infrastructure.base import BaseSource
 
         class TestSchema(PluginSchema):
             pass
@@ -48,7 +48,7 @@ class TestNodeIdProtocol:
 
     def test_transform_protocol_has_node_id(self) -> None:
         """TransformProtocol defines node_id attribute."""
-        from elspeth.plugins.protocols import TransformProtocol
+        from elspeth.plugins.infrastructure.protocols import TransformProtocol
 
         annotations = TransformProtocol.__annotations__
         assert "node_id" in annotations, "TransformProtocol should define node_id"
@@ -59,8 +59,8 @@ class TestNodeIdProtocol:
 
         from elspeth.contracts import PipelineRow, PluginSchema
         from elspeth.contracts.plugin_context import PluginContext
-        from elspeth.plugins.base import BaseTransform
-        from elspeth.plugins.results import TransformResult
+        from elspeth.plugins.infrastructure.base import BaseTransform
+        from elspeth.plugins.infrastructure.results import TransformResult
 
         class TestSchema(PluginSchema):
             pass
@@ -81,25 +81,25 @@ class TestNodeIdProtocol:
 
     def test_aggregation_protocol_deleted(self) -> None:
         """AggregationProtocol should be deleted (aggregation is structural)."""
-        import elspeth.plugins.protocols as protocols
+        import elspeth.plugins.infrastructure.protocols as protocols
 
         assert not hasattr(protocols, "AggregationProtocol"), "AggregationProtocol should be deleted - aggregation is structural"
 
     def test_base_aggregation_deleted(self) -> None:
         """BaseAggregation should be deleted (aggregation is structural)."""
-        import elspeth.plugins.base as base
+        import elspeth.plugins.infrastructure.base as base
 
         assert not hasattr(base, "BaseAggregation"), "BaseAggregation should be deleted - use is_batch_aware=True on BaseTransform"
 
     def test_coalesce_protocol_deleted(self) -> None:
         """CoalesceProtocol should be deleted (coalesce is structural)."""
-        import elspeth.plugins.protocols as protocols
+        import elspeth.plugins.infrastructure.protocols as protocols
 
         assert not hasattr(protocols, "CoalesceProtocol"), "CoalesceProtocol should be deleted - coalesce is structural"
 
     def test_sink_protocol_has_node_id(self) -> None:
         """SinkProtocol defines node_id attribute."""
-        from elspeth.plugins.protocols import SinkProtocol
+        from elspeth.plugins.infrastructure.protocols import SinkProtocol
 
         annotations = SinkProtocol.__annotations__
         assert "node_id" in annotations, "SinkProtocol should define node_id"
@@ -111,7 +111,7 @@ class TestNodeIdProtocol:
 
         from elspeth.contracts import PluginSchema
         from elspeth.contracts.plugin_context import PluginContext
-        from elspeth.plugins.base import BaseSink
+        from elspeth.plugins.infrastructure.base import BaseSink
 
         class TestSchema(PluginSchema):
             pass

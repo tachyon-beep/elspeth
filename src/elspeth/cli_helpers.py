@@ -9,7 +9,7 @@ if TYPE_CHECKING:
     from elspeth.core.config import AggregationSettings, ElspethSettings, LandscapeSettings, SourceSettings
     from elspeth.core.dag import WiredTransform
     from elspeth.core.landscape.recorder import LandscapeRecorder
-    from elspeth.plugins.protocols import SinkProtocol, SourceProtocol, TransformProtocol
+    from elspeth.plugins.infrastructure.protocols import SinkProtocol, SourceProtocol, TransformProtocol
 
 
 @dataclass(frozen=True, slots=True)

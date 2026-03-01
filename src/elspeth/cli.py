@@ -35,8 +35,8 @@ if TYPE_CHECKING:
     from elspeth.core.landscape import LandscapeDB
     from elspeth.engine import Orchestrator, PipelineConfig
     from elspeth.engine.orchestrator import RowPlugin
-    from elspeth.plugins.manager import PluginManager
-    from elspeth.plugins.protocols import SinkProtocol, SourceProtocol
+    from elspeth.plugins.infrastructure.manager import PluginManager
+    from elspeth.plugins.infrastructure.protocols import SinkProtocol, SourceProtocol
 
 __all__ = [
     "app",
@@ -55,7 +55,7 @@ def _get_plugin_manager() -> PluginManager:
     """
     global _plugin_manager_cache
 
-    from elspeth.plugins.manager import PluginManager
+    from elspeth.plugins.infrastructure.manager import PluginManager
 
     if _plugin_manager_cache is None:
         manager = PluginManager()
@@ -1201,7 +1201,7 @@ def _build_plugin_registry() -> dict[str, list[PluginInfo]]:
     Returns:
         Dict mapping plugin type to list of PluginInfo for each plugin.
     """
-    from elspeth.plugins.discovery import get_plugin_description
+    from elspeth.plugins.infrastructure.discovery import get_plugin_description
 
     manager = _get_plugin_manager()
 

@@ -28,7 +28,7 @@ from elspeth.contracts.schema import SchemaConfig
 from elspeth.core.landscape.database import LandscapeDB
 from elspeth.core.landscape.recorder import LandscapeRecorder
 from elspeth.core.landscape.schema import calls_table
-from elspeth.plugins.llm.openrouter_batch import OpenRouterBatchLLMTransform
+from elspeth.plugins.transforms.llm.openrouter_batch import OpenRouterBatchLLMTransform
 from elspeth.testing import make_pipeline_row
 from tests.unit.plugins.llm.conftest import chaosllm_openrouter_http_responses
 

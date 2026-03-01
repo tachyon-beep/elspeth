@@ -9,8 +9,8 @@ import pytest
 from elspeth.contracts import TransformResult
 from elspeth.contracts.identity import TokenInfo
 from elspeth.contracts.plugin_context import PluginContext
-from elspeth.plugins.batching.ports import CollectorOutputPort
-from elspeth.plugins.config_base import PluginConfigError
+from elspeth.plugins.infrastructure.batching.ports import CollectorOutputPort
+from elspeth.plugins.infrastructure.config_base import PluginConfigError
 from elspeth.testing import make_pipeline_row
 
 if TYPE_CHECKING:
@@ -1130,7 +1130,7 @@ class TestContentSafetyInternalProcessing:
         """Rate limit (429) triggers CapacityError for AIMD retry."""
         import httpx
 
-        from elspeth.plugins.pooling import CapacityError
+        from elspeth.plugins.infrastructure.pooling import CapacityError
         from elspeth.plugins.transforms.azure.content_safety import AzureContentSafety
 
         mock_httpx_client.post.side_effect = httpx.HTTPStatusError(

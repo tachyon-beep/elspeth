@@ -6,7 +6,7 @@ after calling manager.register_builtin_plugins().
 
 import pytest
 
-from elspeth.plugins.manager import PluginManager
+from elspeth.plugins.infrastructure.manager import PluginManager
 
 
 class TestBuiltinPluginDiscovery:

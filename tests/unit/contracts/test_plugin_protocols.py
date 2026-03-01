@@ -5,7 +5,7 @@ import pytest
 
 def test_source_validates_output_schema_on_init() -> None:
     """Sources should validate output schema during construction."""
-    from elspeth.plugins.config_base import PluginConfigError
+    from elspeth.plugins.infrastructure.config_base import PluginConfigError
     from elspeth.plugins.sources.csv_source import CSVSource
 
     # Valid schema - should succeed

@@ -18,7 +18,7 @@ from elspeth.contracts.plugin_context import PluginContext
 from elspeth.core.landscape import LandscapeRecorder
 from elspeth.core.operations import track_operation
 from elspeth.engine.spans import SpanFactory
-from elspeth.plugins.protocols import SinkProtocol
+from elspeth.plugins.infrastructure.protocols import SinkProtocol
 
 logger = logging.getLogger(__name__)
 

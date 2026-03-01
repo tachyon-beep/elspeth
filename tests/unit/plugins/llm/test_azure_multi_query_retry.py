@@ -17,8 +17,8 @@ import pytest
 from elspeth.contracts import TransformResult
 from elspeth.contracts.plugin_context import PluginContext
 from elspeth.engine.batch_adapter import ExceptionResult
-from elspeth.plugins.batching.ports import CollectorOutputPort
-from elspeth.plugins.llm.transform import LLMTransform
+from elspeth.plugins.infrastructure.batching.ports import CollectorOutputPort
+from elspeth.plugins.transforms.llm.transform import LLMTransform
 from elspeth.testing import make_pipeline_row
 
 from .conftest import (

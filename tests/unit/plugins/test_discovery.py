@@ -6,8 +6,8 @@ from typing import Any
 import pytest
 
 from elspeth.contracts import Determinism
-from elspeth.plugins.base import BaseSink, BaseSource, BaseTransform
-from elspeth.plugins.discovery import discover_plugins_in_directory
+from elspeth.plugins.infrastructure.base import BaseSink, BaseSource, BaseTransform
+from elspeth.plugins.infrastructure.discovery import discover_plugins_in_directory
 
 
 class TestDiscoverPlugins:
@@ -69,7 +69,7 @@ class TestDiscoverPlugins:
         """Concrete plugin without name must fail discovery."""
         plugin_file = tmp_path / "missing_name.py"
         plugin_file.write_text("""
-from elspeth.plugins.base import BaseSource
+from elspeth.plugins.infrastructure.base import BaseSource
 
 class MissingNameSource(BaseSource):
     output_schema = None
@@ -104,7 +104,7 @@ class TestDiscoverAllPlugins:
 
     def test_discover_all_sources(self) -> None:
         """Verify all sources are discovered including azure."""
-        from elspeth.plugins.discovery import discover_all_plugins
+        from elspeth.plugins.infrastructure.discovery import discover_all_plugins
 
         discovered = discover_all_plugins()
 
@@ -117,7 +117,7 @@ class TestDiscoverAllPlugins:
 
     def test_discover_all_transforms(self) -> None:
         """Verify all transforms are discovered including llm/ and transforms/azure/."""
-        from elspeth.plugins.discovery import discover_all_plugins
+        from elspeth.plugins.infrastructure.discovery import discover_all_plugins
 
         discovered = discover_all_plugins()
 
@@ -134,7 +134,7 @@ class TestDiscoverAllPlugins:
 
     def test_discover_all_sinks(self) -> None:
         """Verify all sinks are discovered including azure."""
-        from elspeth.plugins.discovery import discover_all_plugins
+        from elspeth.plugins.infrastructure.discovery import discover_all_plugins
 
         discovered = discover_all_plugins()
 
@@ -145,7 +145,7 @@ class TestDiscoverAllPlugins:
 
     def test_no_duplicate_names_within_type(self) -> None:
         """Verify no duplicate plugin names within same type."""
-        from elspeth.plugins.discovery import discover_all_plugins
+        from elspeth.plugins.infrastructure.discovery import discover_all_plugins
 
         discovered = discover_all_plugins()
 
@@ -162,7 +162,7 @@ class TestDiscoverAllPlugins:
 
         If a new plugin is added, update these counts.
         """
-        from elspeth.plugins.discovery import discover_all_plugins
+        from elspeth.plugins.infrastructure.discovery import discover_all_plugins
 
         # Expected counts verified during migration from hookimpl files
         EXPECTED_SOURCE_COUNT = 4  # csv, json, null, azure_blob
@@ -190,7 +190,7 @@ class TestGetPluginDescription:
 
     def test_extracts_first_line_of_docstring(self) -> None:
         """Verify first docstring line is extracted."""
-        from elspeth.plugins.discovery import get_plugin_description
+        from elspeth.plugins.infrastructure.discovery import get_plugin_description
         from elspeth.plugins.transforms.passthrough import PassThrough
 
         description = get_plugin_description(PassThrough)
@@ -200,7 +200,7 @@ class TestGetPluginDescription:
 
     def test_handles_missing_docstring(self) -> None:
         """Verify fallback for classes without docstrings."""
-        from elspeth.plugins.discovery import get_plugin_description
+        from elspeth.plugins.infrastructure.discovery import get_plugin_description
 
         class NoDocPlugin:
             name = "no_doc"
@@ -211,7 +211,7 @@ class TestGetPluginDescription:
 
     def test_strips_whitespace(self) -> None:
         """Verify whitespace is stripped from description."""
-        from elspeth.plugins.discovery import get_plugin_description
+        from elspeth.plugins.infrastructure.discovery import get_plugin_description
 
         class WhitespaceDocPlugin:
             """Lots of whitespace here."""
@@ -233,12 +233,12 @@ class TestDuplicatePluginDetection:
         share a name, that's a bug in our codebase that should surface immediately.
         """
 
-        from elspeth.plugins.discovery import discover_plugins_in_directory
+        from elspeth.plugins.infrastructure.discovery import discover_plugins_in_directory
 
         # Create two plugin files with same name attribute
         plugin1 = tmp_path / "plugin_one.py"
         plugin1.write_text("""
-from elspeth.plugins.base import BaseSource
+from elspeth.plugins.infrastructure.base import BaseSource
 
 class SourceOne(BaseSource):
     name = "duplicate_name"
@@ -265,7 +265,7 @@ class SourceOne(BaseSource):
 
         plugin2 = tmp_path / "plugin_two.py"
         plugin2.write_text("""
-from elspeth.plugins.base import BaseSource
+from elspeth.plugins.infrastructure.base import BaseSource
 
 class SourceTwo(BaseSource):
     name = "duplicate_name"  # Same name - this is the bug!
@@ -291,7 +291,7 @@ class SourceTwo(BaseSource):
 """)
 
         # Discover plugins - both files have same name
-        from elspeth.plugins.base import BaseSource
+        from elspeth.plugins.infrastructure.base import BaseSource
 
         discovered = discover_plugins_in_directory(tmp_path, BaseSource)
 
@@ -306,8 +306,8 @@ class SourceTwo(BaseSource):
         This tests the actual deduplication code in discover_all_plugins by mocking
         discover_plugins_in_directory to return duplicate plugins.
         """
-        from elspeth.plugins import discovery
-        from elspeth.plugins.base import BaseSource
+        from elspeth.plugins.infrastructure import discovery
+        from elspeth.plugins.infrastructure.base import BaseSource
 
         # Create fake plugin classes with same name
         class FakeSource1(BaseSource):
@@ -395,7 +395,7 @@ class TestCreateDynamicHookimpl:
 
     def test_creates_hookimpl_with_correct_method(self) -> None:
         """Verify hookimpl has correct method name."""
-        from elspeth.plugins.discovery import create_dynamic_hookimpl
+        from elspeth.plugins.infrastructure.discovery import create_dynamic_hookimpl
 
         class FakePlugin:
             name = "fake"
@@ -406,7 +406,7 @@ class TestCreateDynamicHookimpl:
 
     def test_hookimpl_returns_plugin_list(self) -> None:
         """Verify hookimpl method returns the plugin classes."""
-        from elspeth.plugins.discovery import create_dynamic_hookimpl
+        from elspeth.plugins.infrastructure.discovery import create_dynamic_hookimpl
 
         class FakePlugin1:
             name = "fake1"
@@ -424,8 +424,8 @@ class TestCreateDynamicHookimpl:
         from collections.abc import Iterator
         from typing import Any
 
-        from elspeth.plugins.discovery import create_dynamic_hookimpl
-        from elspeth.plugins.manager import PluginManager
+        from elspeth.plugins.infrastructure.discovery import create_dynamic_hookimpl
+        from elspeth.plugins.infrastructure.manager import PluginManager
 
         class TestSource:
             name = "test_dynamic"

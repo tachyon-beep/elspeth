@@ -20,8 +20,8 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from elspeth.contracts.token_usage import TokenUsage
-from elspeth.plugins.llm.langfuse import ActiveLangfuseTracer, NoOpLangfuseTracer
-from elspeth.plugins.llm.transform import LLMTransform
+from elspeth.plugins.transforms.llm.langfuse import ActiveLangfuseTracer, NoOpLangfuseTracer
+from elspeth.plugins.transforms.llm.transform import LLMTransform
 
 
 def _make_azure_config(**overrides: Any) -> dict[str, Any]:

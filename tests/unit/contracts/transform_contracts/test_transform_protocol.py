@@ -42,12 +42,12 @@ from elspeth.testing import make_pipeline_row
 
 if TYPE_CHECKING:
     from elspeth.contracts.plugin_context import PluginContext
-    from elspeth.plugins.protocols import TransformProtocol
+    from elspeth.plugins.infrastructure.protocols import TransformProtocol
 
 
 def _is_batch_transform(transform: TransformProtocol) -> bool:
     """Return True when transform uses BatchTransformMixin and lacks process()."""
-    from elspeth.plugins.batching.mixin import BatchTransformMixin
+    from elspeth.plugins.infrastructure.batching.mixin import BatchTransformMixin
 
     return isinstance(transform, BatchTransformMixin)
 

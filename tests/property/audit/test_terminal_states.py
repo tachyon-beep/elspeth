@@ -139,7 +139,7 @@ def _build_production_graph(config: PipelineConfig) -> ExecutionGraph:
     Auto-sets on_success on terminal transform for linear pipelines.
     """
     from elspeth.core.config import SourceSettings
-    from elspeth.plugins.protocols import TransformProtocol
+    from elspeth.plugins.infrastructure.protocols import TransformProtocol
     from tests.fixtures.factories import wire_transforms
 
     row_transforms: list[TransformProtocol] = []

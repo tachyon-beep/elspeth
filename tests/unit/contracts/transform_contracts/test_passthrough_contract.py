@@ -22,7 +22,7 @@ from .test_transform_protocol import (
 )
 
 if TYPE_CHECKING:
-    from elspeth.plugins.protocols import TransformProtocol
+    from elspeth.plugins.infrastructure.protocols import TransformProtocol
 
 
 class TestPassThroughContract(TransformContractPropertyTestBase):

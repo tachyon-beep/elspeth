@@ -13,7 +13,7 @@ import pytest
 
 from elspeth.cli_helpers import instantiate_plugins_from_config
 from elspeth.contracts import Determinism, NodeType, PipelineRow, RoutingMode, RunStatus, SinkName
-from elspeth.plugins.base import BaseTransform
+from elspeth.plugins.infrastructure.base import BaseTransform
 from elspeth.testing import make_pipeline_row
 from tests.fixtures.base_classes import _TestSchema, as_sink, as_source, as_transform
 from tests.fixtures.pipeline import build_production_graph
@@ -39,7 +39,7 @@ class DoubleTransform(BaseTransform):
         super().__init__({"schema": {"mode": "observed"}})
 
     def process(self, row: PipelineRow, ctx: Any) -> TransformResult:
-        from elspeth.plugins.results import TransformResult
+        from elspeth.plugins.infrastructure.results import TransformResult
 
         return TransformResult.success(
             make_pipeline_row({"value": row["value"], "doubled": row["value"] * 2}),
@@ -58,7 +58,7 @@ class AddOneTransform(BaseTransform):
         super().__init__({"schema": {"mode": "observed"}})
 
     def process(self, row: PipelineRow, ctx: Any) -> TransformResult:
-        from elspeth.plugins.results import TransformResult
+        from elspeth.plugins.infrastructure.results import TransformResult
 
         return TransformResult.success(make_pipeline_row({"value": row["value"] + 1}), success_reason={"action": "add_one"})
 
@@ -74,7 +74,7 @@ class MultiplyTwoTransform(BaseTransform):
         super().__init__({"schema": {"mode": "observed"}})
 
     def process(self, row: PipelineRow, ctx: Any) -> TransformResult:
-        from elspeth.plugins.results import TransformResult
+        from elspeth.plugins.infrastructure.results import TransformResult
 
         return TransformResult.success(make_pipeline_row({"value": row["value"] * 2}), success_reason={"action": "multiply_two"})
 
@@ -90,7 +90,7 @@ class IdentityTransform(BaseTransform):
         super().__init__({"schema": {"mode": "observed"}})
 
     def process(self, row: PipelineRow, ctx: Any) -> TransformResult:
-        from elspeth.plugins.results import TransformResult
+        from elspeth.plugins.infrastructure.results import TransformResult
 
         return TransformResult.success(make_pipeline_row(row.to_dict()), success_reason={"action": "identity"})
 

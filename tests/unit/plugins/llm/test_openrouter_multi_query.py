@@ -18,8 +18,8 @@ from elspeth.contracts.identity import TokenInfo
 from elspeth.contracts.plugin_context import PluginContext
 from elspeth.contracts.schema_contract import FieldContract, PipelineRow, SchemaContract
 from elspeth.contracts.token_usage import TokenUsage
-from elspeth.plugins.batching.ports import CollectorOutputPort
-from elspeth.plugins.clients.llm import (
+from elspeth.plugins.infrastructure.batching.ports import CollectorOutputPort
+from elspeth.plugins.infrastructure.clients.llm import (
     ContentPolicyError,
     ContextLengthError,
     LLMClientError,
@@ -27,8 +27,8 @@ from elspeth.plugins.clients.llm import (
     RateLimitError,
     ServerError,
 )
-from elspeth.plugins.llm.provider import FinishReason, LLMQueryResult
-from elspeth.plugins.llm.transform import LLMTransform
+from elspeth.plugins.transforms.llm.provider import FinishReason, LLMQueryResult
+from elspeth.plugins.transforms.llm.transform import LLMTransform
 from elspeth.testing import make_pipeline_row
 
 # Common schema config
@@ -160,7 +160,7 @@ class TestOpenRouterMultiQueryInit:
 
     def test_transform_expands_queries_on_init(self) -> None:
         """Transform pre-computes query specs on initialization."""
-        from elspeth.plugins.llm.transform import MultiQueryStrategy
+        from elspeth.plugins.transforms.llm.transform import MultiQueryStrategy
 
         transform = LLMTransform(make_config())
         assert isinstance(transform._strategy, MultiQueryStrategy)

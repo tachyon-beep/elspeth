@@ -11,7 +11,7 @@ from tests.fixtures.plugins import CollectSink, PassTransform
 
 from elspeth.contracts.routing import RouteDestinationKind
 from elspeth.core.config import AggregationSettings, CoalesceSettings, GateSettings, TriggerConfig
-from elspeth.plugins.protocols import TransformProtocol
+from elspeth.plugins.infrastructure.protocols import TransformProtocol
 
 
 def test_wire_transforms_single_transform() -> None:

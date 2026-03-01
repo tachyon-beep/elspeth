@@ -22,9 +22,9 @@ if TYPE_CHECKING:
     from elspeth.contracts.sink import OutputValidationResult
 from elspeth.contracts.contexts import LifecycleContext, SinkContext
 from elspeth.contracts.header_modes import HeaderMode, resolve_headers
-from elspeth.plugins.base import BaseSink
-from elspeth.plugins.config_base import SinkPathConfig
-from elspeth.plugins.schema_factory import create_schema_from_config
+from elspeth.plugins.infrastructure.base import BaseSink
+from elspeth.plugins.infrastructure.config_base import SinkPathConfig
+from elspeth.plugins.infrastructure.schema_factory import create_schema_from_config
 
 
 class JSONSinkConfig(SinkPathConfig):

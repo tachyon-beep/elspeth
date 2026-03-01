@@ -165,7 +165,7 @@ rmdir src/elspeth/plugins/azure 2>/dev/null || true
 
 ## Task 5: Strip plugins/__init__.py
 
-**Context:** The top-level `__init__.py` currently re-exports 30+ symbols. Per the design decision, it becomes a bare package marker. The census confirmed no external code uses `from elspeth.plugins import X` — all callers already use specific submodule paths.
+**Context:** The top-level `__init__.py` currently re-exports 30+ symbols. Per the design decision, it becomes a bare package marker. **Note:** 13 instances of `from elspeth.plugins import X` exist in 4 test files — these are handled in Task 11 using the per-symbol routing table.
 
 **Files:**
 - Modify: `src/elspeth/plugins/__init__.py`
@@ -449,6 +449,39 @@ from elspeth.plugins.schema_factory import create_schema_from_config → from el
 from elspeth.plugins.llm.transform import LLMTransform → from elspeth.plugins.transforms.llm.transform import LLMTransform
 ```
 
+**CRITICAL — `from elspeth.plugins import X` rewrites (13 instances in 4 files):**
+
+The `plugins/__init__.py` re-exports are being stripped (Task 5). These 4 test files use `from elspeth.plugins import X` and must be rewritten to canonical module paths:
+
+| File | Instances |
+|---|---|
+| `tests/unit/plugins/test_results.py` | 7 |
+| `tests/unit/plugins/test_manager.py` | 3 |
+| `tests/unit/plugins/test_integration.py` | 2 |
+| `tests/unit/plugins/test_discovery.py` | 1 |
+
+**Per-symbol routing table for `from elspeth.plugins import X`:**
+
+| Symbol | Canonical import |
+|---|---|
+| `PluginContext` | `from elspeth.contracts.plugin_context import PluginContext` |
+| `CompatibilityResult` | `from elspeth.contracts import CompatibilityResult` |
+| `Determinism` | `from elspeth.contracts import Determinism` |
+| `NodeType` | `from elspeth.contracts import NodeType` |
+| `PluginSchema` | `from elspeth.contracts import PluginSchema` |
+| `RoutingKind` | `from elspeth.contracts import RoutingKind` |
+| `RoutingMode` | `from elspeth.contracts import RoutingMode` |
+| `SchemaValidationError` | `from elspeth.contracts import SchemaValidationError` |
+| `check_compatibility` | `from elspeth.contracts import check_compatibility` |
+| `validate_row` | `from elspeth.contracts import validate_row` |
+| `BaseSink`, `BaseSource`, `BaseTransform` | `from elspeth.plugins.infrastructure.base import ...` |
+| `DataPluginConfig`, `PathConfig`, `PluginConfig`, `PluginConfigError`, `SourceDataConfig`, `TransformDataConfig` | `from elspeth.plugins.infrastructure.config_base import ...` |
+| `hookimpl`, `hookspec` | `from elspeth.plugins.infrastructure.hookspecs import ...` |
+| `PluginManager` | `from elspeth.plugins.infrastructure.manager import PluginManager` |
+| `SinkProtocol`, `SourceProtocol`, `TransformProtocol` | `from elspeth.plugins.infrastructure.protocols import ...` |
+| `GateResult`, `RoutingAction`, `RowOutcome`, `SourceRow`, `TransformResult` | `from elspeth.plugins.infrastructure.results import ...` |
+| `discovery` (submodule) | `from elspeth.plugins.infrastructure import discovery` |
+
 ---
 
 ## Task 12: Rewrite imports in tests/integration/, e2e/, property/, performance/
@@ -470,26 +503,51 @@ from elspeth.plugins.llm.transform import LLMTransform → from elspeth.plugins.
 **Context:** Several non-Python files reference plugin paths as strings and need updating.
 
 **Files:**
-- `config/cicd/enforce_tier_model/plugins.yaml` — ~40 file path entries and 3 wildcard patterns
-- `config/cicd/contracts-whitelist.yaml` — ~80 path-string references (if this file exists)
+- `config/cicd/enforce_tier_model/plugins.yaml` — 4 `per_file_rules` patterns + **63 `allow_hits` key entries** with path prefixes
+- `config/cicd/contracts-whitelist.yaml` — 95 path-string references (format: `src/elspeth/plugins/path:Class.method:param`)
 - `pyproject.toml` — 1 entry: `"src/elspeth/plugins/__init__.py" = ["RUF022"]`
 - `CLAUDE.md` — Source Layout section showing plugins/ structure
 
 **Step 1: Update enforce_tier_model/plugins.yaml**
 
-Update all path prefixes. Key changes:
+This file has TWO sections that need updating:
+
+**1a. `per_file_rules` patterns (4 entries):**
 ```
-plugins/batching/    → plugins/infrastructure/batching/
-plugins/discovery.py → plugins/infrastructure/discovery.py
-plugins/utils.py     → plugins/infrastructure/utils.py
 plugins/config_base.py → plugins/infrastructure/config_base.py
-plugins/clients/     → plugins/infrastructure/clients/
-plugins/pooling/     → plugins/infrastructure/pooling/
-plugins/llm/*        → plugins/transforms/llm/*
-plugins/azure/*      → split (sources/azure_blob_source, sinks/azure_blob_sink, infrastructure/azure_auth)
-plugins/sources/*    → plugins/sources/* (unchanged)
-plugins/sinks/*      → plugins/sinks/* (unchanged)
-plugins/transforms/* → plugins/transforms/* (unchanged)
+plugins/llm/*          → plugins/transforms/llm/*
+plugins/azure/*        → split: remove this pattern, azure transforms stay at plugins/transforms/azure/*
+plugins/sources/*      → plugins/sources/* (unchanged)
+```
+
+**1b. `allow_hits` key entries (63 entries, ~30 need path changes):**
+
+The `key:` field format is `path:rule:class:method:fp=hash`. The path prefix must match the actual file location. Apply these prefix replacements to ALL `allow_hits` keys:
+
+```
+plugins/batching/      → plugins/infrastructure/batching/       (~10 entries)
+plugins/clients/       → plugins/infrastructure/clients/        (~15 entries)
+plugins/pooling/       → plugins/infrastructure/pooling/        (~5 entries)
+plugins/discovery.py   → plugins/infrastructure/discovery.py    (2 entries)
+plugins/utils.py       → plugins/infrastructure/utils.py        (1 entry)
+plugins/sources/*      → plugins/sources/* (unchanged)
+plugins/sinks/*        → plugins/sinks/* (unchanged)
+plugins/transforms/*   → plugins/transforms/* (unchanged)
+```
+
+**Step 1c: Update contracts-whitelist.yaml**
+
+95 path-string references in format `src/elspeth/plugins/path:Class.method:param`. Apply prefix replacements:
+
+```
+src/elspeth/plugins/protocols.py    → src/elspeth/plugins/infrastructure/protocols.py
+src/elspeth/plugins/base.py         → src/elspeth/plugins/infrastructure/base.py
+src/elspeth/plugins/utils.py        → src/elspeth/plugins/infrastructure/utils.py
+src/elspeth/plugins/pooling/        → src/elspeth/plugins/infrastructure/pooling/
+src/elspeth/plugins/clients/        → src/elspeth/plugins/infrastructure/clients/
+src/elspeth/plugins/sources/*       → src/elspeth/plugins/sources/* (unchanged)
+src/elspeth/plugins/sinks/*         → src/elspeth/plugins/sinks/* (unchanged)
+src/elspeth/plugins/transforms/*    → src/elspeth/plugins/transforms/* (unchanged)
 ```
 
 **Step 2: Update pyproject.toml**

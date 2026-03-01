@@ -364,7 +364,7 @@ def test_two_phase_validation_separates_self_and_compatibility_errors(plugin_man
     - PHASE 1: Self-validation during plugin construction (malformed schemas)
     - PHASE 2: Compatibility validation during graph construction (incompatible connections)
     """
-    from elspeth.plugins.config_base import PluginConfigError
+    from elspeth.plugins.infrastructure.config_base import PluginConfigError
 
     # PHASE 1 should fail: Malformed schema in plugin config
     bad_self_config = {

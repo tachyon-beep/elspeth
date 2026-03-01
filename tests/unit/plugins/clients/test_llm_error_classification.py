@@ -9,7 +9,7 @@ import pytest
 
 from elspeth.contracts import CallStatus
 from elspeth.core.landscape.recorder import LandscapeRecorder
-from elspeth.plugins.clients.llm import (
+from elspeth.plugins.infrastructure.clients.llm import (
     AuditedLLMClient,
     ContentPolicyError,
     ContextLengthError,

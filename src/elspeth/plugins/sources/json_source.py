@@ -18,9 +18,9 @@ from pydantic import ValidationError
 
 from elspeth.contracts import PluginSchema, SourceRow
 from elspeth.contracts.contexts import SourceContext
-from elspeth.plugins.base import BaseSource
-from elspeth.plugins.config_base import SourceDataConfig
-from elspeth.plugins.schema_factory import create_schema_from_config
+from elspeth.plugins.infrastructure.base import BaseSource
+from elspeth.plugins.infrastructure.config_base import SourceDataConfig
+from elspeth.plugins.infrastructure.schema_factory import create_schema_from_config
 
 
 def _reject_nonfinite_constant(value: str) -> None:

@@ -33,13 +33,13 @@ if TYPE_CHECKING:
     from elspeth.core.config import AggregationSettings, CoalesceSettings, GateSettings
     from elspeth.engine.coalesce_executor import CoalesceExecutor
     from elspeth.engine.processor import RowProcessor
-    from elspeth.plugins.protocols import SinkProtocol, SourceProtocol
+    from elspeth.plugins.infrastructure.protocols import SinkProtocol, SourceProtocol
 
 from elspeth.contracts import RunStatus
 
 # Import protocols at runtime (not TYPE_CHECKING) because RowPlugin type alias
 # is used in runtime annotations and isinstance() checks
-from elspeth.plugins.protocols import TransformProtocol
+from elspeth.plugins.infrastructure.protocols import TransformProtocol
 
 # Type alias for row-processing plugins in the transforms pipeline
 # NOTE: BaseAggregation was DELETED - aggregation is now handled by

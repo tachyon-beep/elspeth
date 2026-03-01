@@ -13,8 +13,8 @@ from elspeth.contracts.contexts import (
     TransformContext,
 )
 from elspeth.contracts.schema_contract import PipelineRow
-from elspeth.plugins.base import BaseSink, BaseSource, BaseTransform
-from elspeth.plugins.results import TransformResult
+from elspeth.plugins.infrastructure.base import BaseSink, BaseSource, BaseTransform
+from elspeth.plugins.infrastructure.results import TransformResult
 
 
 class TestBaseClassSignatures:

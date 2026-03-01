@@ -21,10 +21,10 @@ if TYPE_CHECKING:
 from elspeth.contracts import CallStatus, CallType
 from elspeth.contracts.plugin_context import PluginContext
 from elspeth.contracts.schema import SchemaConfig
-from elspeth.plugins.llm import (
+from elspeth.plugins.transforms.llm import (
     _build_augmented_output_schema,
 )
-from elspeth.plugins.llm.transform import LLMTransform
+from elspeth.plugins.transforms.llm.transform import LLMTransform
 from elspeth.testing import make_pipeline_row
 
 from .conftest import DYNAMIC_SCHEMA, make_plugin_context, make_token
@@ -97,7 +97,7 @@ class TestOpenRouterBatchClientEviction:
 
     def test_client_evicted_after_batch_success(self, chaosllm_server: Any) -> None:
         """HTTP client is evicted from cache after successful batch processing."""
-        from elspeth.plugins.llm.openrouter_batch import OpenRouterBatchLLMTransform
+        from elspeth.plugins.transforms.llm.openrouter_batch import OpenRouterBatchLLMTransform
 
         from .conftest import chaosllm_openrouter_http_responses
 
@@ -141,7 +141,7 @@ class TestOpenRouterBatchClientEviction:
         """HTTP client is evicted from cache even when batch encounters errors."""
         import httpx
 
-        from elspeth.plugins.llm.openrouter_batch import OpenRouterBatchLLMTransform
+        from elspeth.plugins.transforms.llm.openrouter_batch import OpenRouterBatchLLMTransform
 
         from .conftest import chaosllm_openrouter_http_responses
 
@@ -193,7 +193,7 @@ class TestOpenRouterBatchClientEviction:
 
     def test_multiple_batches_dont_accumulate_clients(self, chaosllm_server: Any) -> None:
         """Multiple batches with different state_ids don't grow the client cache."""
-        from elspeth.plugins.llm.openrouter_batch import OpenRouterBatchLLMTransform
+        from elspeth.plugins.transforms.llm.openrouter_batch import OpenRouterBatchLLMTransform
 
         from .conftest import chaosllm_openrouter_http_responses
 
@@ -297,7 +297,7 @@ class TestAzureBatchTerminalFailureCallRecording:
 
     def _make_transform_and_ctx(self) -> tuple[Any, Mock]:
         """Create an AzureBatchLLMTransform and mock context for testing."""
-        from elspeth.plugins.llm.azure_batch import AzureBatchLLMTransform
+        from elspeth.plugins.transforms.llm.azure_batch import AzureBatchLLMTransform
 
         config = {
             "deployment_name": "test-batch",
@@ -543,11 +543,11 @@ class TestEnableContentRecording:
         """enable_content_recording is passed to AIInferenceInstrumentor when available."""
         import sys
 
-        from elspeth.plugins.llm.providers.azure import (
+        from elspeth.plugins.transforms.llm.providers.azure import (
             _configure_azure_monitor,
             _reset_azure_monitor_state,
         )
-        from elspeth.plugins.llm.tracing import AzureAITracingConfig
+        from elspeth.plugins.transforms.llm.tracing import AzureAITracingConfig
 
         _reset_azure_monitor_state()
 
@@ -586,11 +586,11 @@ class TestEnableContentRecording:
         """enable_content_recording=False is correctly passed through."""
         import sys
 
-        from elspeth.plugins.llm.providers.azure import (
+        from elspeth.plugins.transforms.llm.providers.azure import (
             _configure_azure_monitor,
             _reset_azure_monitor_state,
         )
-        from elspeth.plugins.llm.tracing import AzureAITracingConfig
+        from elspeth.plugins.transforms.llm.tracing import AzureAITracingConfig
 
         _reset_azure_monitor_state()
 
@@ -628,11 +628,11 @@ class TestEnableContentRecording:
         """
         import os
 
-        from elspeth.plugins.llm.providers.azure import (
+        from elspeth.plugins.transforms.llm.providers.azure import (
             _configure_azure_monitor,
             _reset_azure_monitor_state,
         )
-        from elspeth.plugins.llm.tracing import AzureAITracingConfig
+        from elspeth.plugins.transforms.llm.tracing import AzureAITracingConfig
 
         _reset_azure_monitor_state()
 
@@ -666,11 +666,11 @@ class TestEnableContentRecording:
         """
         import sys
 
-        from elspeth.plugins.llm.providers.azure import (
+        from elspeth.plugins.transforms.llm.providers.azure import (
             _configure_azure_monitor,
             _reset_azure_monitor_state,
         )
-        from elspeth.plugins.llm.tracing import AzureAITracingConfig
+        from elspeth.plugins.transforms.llm.tracing import AzureAITracingConfig
 
         _reset_azure_monitor_state()
 
@@ -705,11 +705,11 @@ class TestEnableContentRecording:
         """enable_content_recording=False sets env var to 'false'."""
         import os
 
-        from elspeth.plugins.llm.providers.azure import (
+        from elspeth.plugins.transforms.llm.providers.azure import (
             _configure_azure_monitor,
             _reset_azure_monitor_state,
         )
-        from elspeth.plugins.llm.tracing import AzureAITracingConfig
+        from elspeth.plugins.transforms.llm.tracing import AzureAITracingConfig
 
         _reset_azure_monitor_state()
 

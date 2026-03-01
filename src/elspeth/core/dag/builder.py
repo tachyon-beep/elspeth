@@ -46,7 +46,7 @@ if TYPE_CHECKING:
     )
     from elspeth.core.dag.graph import ExecutionGraph
     from elspeth.core.dag.models import NodeConfig, WiredTransform
-    from elspeth.plugins.protocols import SinkProtocol, SourceProtocol, TransformProtocol
+    from elspeth.plugins.infrastructure.protocols import SinkProtocol, SourceProtocol, TransformProtocol
 
 
 def _field_name_type(field_spec: Any) -> tuple[str, str]:

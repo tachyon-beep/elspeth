@@ -17,8 +17,8 @@ from unittest.mock import Mock, patch
 import pytest
 
 from elspeth.contracts.plugin_context import PluginContext
-from elspeth.plugins.batching.mixin import BatchTransformMixin
-from elspeth.plugins.llm.transform import LLMTransform
+from elspeth.plugins.infrastructure.batching.mixin import BatchTransformMixin
+from elspeth.plugins.transforms.llm.transform import LLMTransform
 
 from .test_batch_transform_protocol import BatchTransformContractTestBase
 

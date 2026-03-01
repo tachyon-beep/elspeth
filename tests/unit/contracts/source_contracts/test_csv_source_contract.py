@@ -21,7 +21,7 @@ from elspeth.plugins.sources.csv_source import CSVSource
 from .test_source_protocol import SourceContractPropertyTestBase
 
 if TYPE_CHECKING:
-    from elspeth.plugins.protocols import SourceProtocol
+    from elspeth.plugins.infrastructure.protocols import SourceProtocol
 
 
 class TestCSVSourceContract(SourceContractPropertyTestBase):

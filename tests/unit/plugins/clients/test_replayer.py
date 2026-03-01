@@ -10,7 +10,7 @@ import pytest
 
 from elspeth.contracts import Call, CallStatus, CallType
 from elspeth.core.canonical import stable_hash
-from elspeth.plugins.clients.replayer import (
+from elspeth.plugins.infrastructure.clients.replayer import (
     CallReplayer,
     ReplayedCall,
     ReplayMissError,

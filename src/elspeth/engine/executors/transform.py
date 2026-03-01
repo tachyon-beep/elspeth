@@ -22,9 +22,9 @@ from elspeth.core.canonical import stable_hash
 from elspeth.core.landscape import LandscapeRecorder
 from elspeth.engine.executors.state_guard import NodeStateGuard
 from elspeth.engine.spans import SpanFactory
-from elspeth.plugins.batching.mixin import BatchTransformMixin
-from elspeth.plugins.protocols import TransformProtocol
-from elspeth.plugins.results import TransformResult
+from elspeth.plugins.infrastructure.batching.mixin import BatchTransformMixin
+from elspeth.plugins.infrastructure.protocols import TransformProtocol
+from elspeth.plugins.infrastructure.results import TransformResult
 
 if TYPE_CHECKING:
     from elspeth.engine.batch_adapter import SharedBatchAdapter

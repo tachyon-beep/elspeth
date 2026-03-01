@@ -330,7 +330,7 @@ class TestCSVSink:
 
         This prevents typos like 'apend' from silently truncating files.
         """
-        from elspeth.plugins.config_base import PluginConfigError
+        from elspeth.plugins.infrastructure.config_base import PluginConfigError
         from elspeth.plugins.sinks.csv_sink import CSVSinkConfig
 
         with pytest.raises(PluginConfigError, match=r"'write'.*'append'"):

@@ -33,7 +33,7 @@ from elspeth.core.config import CoalesceSettings, GateSettings, SourceSettings
 from elspeth.core.dag import ExecutionGraph, GraphValidationError
 from elspeth.core.landscape import LandscapeDB
 from elspeth.engine.orchestrator import Orchestrator, PipelineConfig
-from elspeth.plugins.protocols import TransformProtocol
+from elspeth.plugins.infrastructure.protocols import TransformProtocol
 from tests.fixtures.base_classes import (
     as_sink,
     as_source,

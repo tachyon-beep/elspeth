@@ -10,8 +10,8 @@ from elspeth.contracts import TransformResult
 from elspeth.contracts.identity import TokenInfo
 from elspeth.contracts.plugin_context import PluginContext
 from elspeth.contracts.schema_contract import SchemaContract
-from elspeth.plugins.batching.ports import CollectorOutputPort
-from elspeth.plugins.config_base import PluginConfigError
+from elspeth.plugins.infrastructure.batching.ports import CollectorOutputPort
+from elspeth.plugins.infrastructure.config_base import PluginConfigError
 from elspeth.testing import make_pipeline_row, make_row
 
 if TYPE_CHECKING:
@@ -1084,7 +1084,7 @@ class TestPromptShieldBatchProcessing:
         import httpx
 
         from elspeth.engine.batch_adapter import SharedBatchAdapter
-        from elspeth.plugins.pooling import CapacityError
+        from elspeth.plugins.infrastructure.pooling import CapacityError
         from elspeth.plugins.transforms.azure.prompt_shield import AzurePromptShield
 
         mock_httpx_client.post.side_effect = httpx.HTTPStatusError(
@@ -1133,7 +1133,7 @@ class TestPromptShieldInternalProcessing:
         """Rate limit errors (HTTP 429) raise CapacityError for retry."""
         import httpx
 
-        from elspeth.plugins.pooling import CapacityError
+        from elspeth.plugins.infrastructure.pooling import CapacityError
         from elspeth.plugins.transforms.azure.prompt_shield import AzurePromptShield
 
         mock_httpx_client.post.side_effect = httpx.HTTPStatusError(

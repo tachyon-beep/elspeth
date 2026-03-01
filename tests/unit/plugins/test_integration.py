@@ -13,18 +13,13 @@ class TestPluginSystemIntegration:
 
     def test_full_plugin_workflow(self) -> None:
         """Test source -> transform -> sink workflow."""
-        from elspeth.contracts import ArtifactDescriptor, SourceRow
+        from elspeth.contracts import ArtifactDescriptor, PluginSchema, SourceRow
+        from elspeth.contracts.plugin_context import PluginContext
         from elspeth.contracts.schema_contract import SchemaContract
-        from elspeth.plugins import (
-            BaseSink,
-            BaseSource,
-            BaseTransform,
-            PluginContext,
-            PluginManager,
-            PluginSchema,
-            TransformResult,
-            hookimpl,
-        )
+        from elspeth.plugins.infrastructure.base import BaseSink, BaseSource, BaseTransform
+        from elspeth.plugins.infrastructure.hookspecs import hookimpl
+        from elspeth.plugins.infrastructure.manager import PluginManager
+        from elspeth.plugins.infrastructure.results import TransformResult
 
         # Define schemas
         class InputSchema(PluginSchema):
@@ -143,7 +138,7 @@ class TestPluginSystemIntegration:
 
     def test_schema_validation_in_pipeline(self) -> None:
         """Test that schema compatibility is checked."""
-        from elspeth.plugins import PluginSchema, check_compatibility
+        from elspeth.contracts import PluginSchema, check_compatibility
 
         class SourceOutput(PluginSchema):
             a: int
@@ -165,6 +160,6 @@ class TestPluginSystemIntegration:
         NEW: Aggregation is engine-controlled via batch-aware transforms
              with is_batch_aware=True, no plugin-level aggregation interface.
         """
-        import elspeth.plugins.base as base
+        import elspeth.plugins.infrastructure.base as base
 
         assert not hasattr(base, "BaseAggregation"), "BaseAggregation should be deleted - use is_batch_aware=True on BaseTransform"

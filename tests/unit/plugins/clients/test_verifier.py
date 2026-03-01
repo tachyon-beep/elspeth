@@ -7,7 +7,7 @@ from unittest.mock import MagicMock
 
 from elspeth.contracts import Call, CallStatus, CallType
 from elspeth.core.canonical import stable_hash
-from elspeth.plugins.clients.verifier import (
+from elspeth.plugins.infrastructure.clients.verifier import (
     CallVerifier,
     VerificationReport,
     VerificationResult,

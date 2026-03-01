@@ -44,7 +44,7 @@ from elspeth.contracts.events import ExternalCallCompleted
 from elspeth.contracts.schema_contract import PipelineRow, SchemaContract
 from elspeth.core.landscape import LandscapeDB
 from elspeth.engine.orchestrator import Orchestrator, PipelineConfig
-from elspeth.plugins.results import TransformResult
+from elspeth.plugins.infrastructure.results import TransformResult
 from elspeth.telemetry import TelemetryManager
 from elspeth.testing import make_field
 from tests.fixtures.base_classes import _TestSinkBase, _TestSourceBase, as_sink, as_source, as_transform
@@ -153,7 +153,7 @@ def _create_test_graph(config: PipelineConfig) -> ExecutionGraph:
     """
     from elspeth.core.config import SourceSettings
     from elspeth.core.dag import ExecutionGraph
-    from elspeth.plugins.protocols import TransformProtocol
+    from elspeth.plugins.infrastructure.protocols import TransformProtocol
     from tests.fixtures.factories import wire_transforms
 
     # Separate transforms (only TransformProtocol instances)
@@ -235,7 +235,7 @@ class TestAuditedLLMClientTelemetryContract:
 
     def test_llm_client_emits_external_call_completed_on_success(self) -> None:
         """AuditedLLMClient emits ExternalCallCompleted on successful call."""
-        from elspeth.plugins.clients.llm import AuditedLLMClient
+        from elspeth.plugins.infrastructure.clients.llm import AuditedLLMClient
 
         recorder = self._create_mock_recorder()
         openai_client = self._create_mock_openai_client()
@@ -284,7 +284,7 @@ class TestAuditedLLMClientTelemetryContract:
 
     def test_llm_client_emits_external_call_completed_on_error(self) -> None:
         """AuditedLLMClient emits ExternalCallCompleted on failed call."""
-        from elspeth.plugins.clients.llm import AuditedLLMClient, LLMClientError
+        from elspeth.plugins.infrastructure.clients.llm import AuditedLLMClient, LLMClientError
 
         recorder = self._create_mock_recorder()
         openai_client = MagicMock()
@@ -344,7 +344,7 @@ class TestAuditedHTTPClientTelemetryContract:
 
     def test_http_client_emits_external_call_completed_on_success(self) -> None:
         """AuditedHTTPClient emits ExternalCallCompleted on successful POST."""
-        from elspeth.plugins.clients.http import AuditedHTTPClient
+        from elspeth.plugins.infrastructure.clients.http import AuditedHTTPClient
 
         recorder = self._create_mock_recorder()
 
@@ -393,7 +393,7 @@ class TestAuditedHTTPClientTelemetryContract:
         """AuditedHTTPClient emits ExternalCallCompleted on network error."""
         import httpx
 
-        from elspeth.plugins.clients.http import AuditedHTTPClient
+        from elspeth.plugins.infrastructure.clients.http import AuditedHTTPClient
 
         recorder = self._create_mock_recorder()
 
@@ -428,7 +428,7 @@ class TestAuditedHTTPClientTelemetryContract:
 
     def test_http_client_emits_external_call_completed_on_get(self) -> None:
         """AuditedHTTPClient emits ExternalCallCompleted on GET request."""
-        from elspeth.plugins.clients.http import AuditedHTTPClient
+        from elspeth.plugins.infrastructure.clients.http import AuditedHTTPClient
 
         recorder = self._create_mock_recorder()
 
@@ -593,7 +593,7 @@ class TestPluginTelemetryThroughAuditedClients:
         This verifies that when a plugin creates an AuditedLLMClient with
         the telemetry_emit callback from PluginContext, events are emitted.
         """
-        from elspeth.plugins.clients.llm import AuditedLLMClient
+        from elspeth.plugins.infrastructure.clients.llm import AuditedLLMClient
 
         recorder = MagicMock()
         recorder.record_call.return_value = MagicMock(
@@ -644,7 +644,7 @@ class TestPluginTelemetryThroughAuditedClients:
         This verifies that when a plugin creates an AuditedHTTPClient with
         the telemetry_emit callback from PluginContext, events are emitted.
         """
-        from elspeth.plugins.clients.http import AuditedHTTPClient
+        from elspeth.plugins.infrastructure.clients.http import AuditedHTTPClient
 
         recorder = MagicMock()
         recorder.record_call.return_value = MagicMock(
@@ -701,7 +701,7 @@ class TestTelemetryEmissionOrderContract:
 
     def test_llm_client_emits_telemetry_after_landscape(self) -> None:
         """AuditedLLMClient emits telemetry AFTER Landscape recording."""
-        from elspeth.plugins.clients.llm import AuditedLLMClient
+        from elspeth.plugins.infrastructure.clients.llm import AuditedLLMClient
 
         call_order: list[str] = []
 
@@ -744,7 +744,7 @@ class TestTelemetryEmissionOrderContract:
 
     def test_http_client_emits_telemetry_after_landscape(self) -> None:
         """AuditedHTTPClient emits telemetry AFTER Landscape recording."""
-        from elspeth.plugins.clients.http import AuditedHTTPClient
+        from elspeth.plugins.infrastructure.clients.http import AuditedHTTPClient
 
         call_order: list[str] = []
 
@@ -788,7 +788,7 @@ class TestTelemetryEmissionOrderContract:
         This is critical: If Landscape fails, the event wasn't properly
         recorded. Emitting telemetry would be misleading.
         """
-        from elspeth.plugins.clients.llm import AuditedLLMClient
+        from elspeth.plugins.infrastructure.clients.llm import AuditedLLMClient
 
         recorder = MagicMock()
         recorder.record_call.side_effect = Exception("Database error")
@@ -843,7 +843,7 @@ class TestTelemetryFailureIsolationContract:
 
     def test_llm_client_isolates_telemetry_failure(self) -> None:
         """AuditedLLMClient isolates telemetry failure from call result."""
-        from elspeth.plugins.clients.llm import AuditedLLMClient
+        from elspeth.plugins.infrastructure.clients.llm import AuditedLLMClient
 
         recorder = MagicMock()
         recorder.record_call.return_value = MagicMock(
@@ -889,7 +889,7 @@ class TestTelemetryFailureIsolationContract:
 
     def test_http_client_isolates_telemetry_failure(self) -> None:
         """AuditedHTTPClient isolates telemetry failure from call result."""
-        from elspeth.plugins.clients.http import AuditedHTTPClient
+        from elspeth.plugins.infrastructure.clients.http import AuditedHTTPClient
 
         recorder = MagicMock()
         recorder.record_call.return_value = MagicMock(

@@ -17,9 +17,9 @@ from elspeth.contracts import PluginSchema, SourceRow
 from elspeth.contracts.contexts import SourceContext
 from elspeth.contracts.contract_builder import ContractBuilder
 from elspeth.contracts.schema_contract_factory import create_contract_from_config
-from elspeth.plugins.base import BaseSource
-from elspeth.plugins.config_base import TabularSourceDataConfig
-from elspeth.plugins.schema_factory import create_schema_from_config
+from elspeth.plugins.infrastructure.base import BaseSource
+from elspeth.plugins.infrastructure.config_base import TabularSourceDataConfig
+from elspeth.plugins.infrastructure.schema_factory import create_schema_from_config
 from elspeth.plugins.sources.field_normalization import FieldResolution, resolve_field_names
 
 

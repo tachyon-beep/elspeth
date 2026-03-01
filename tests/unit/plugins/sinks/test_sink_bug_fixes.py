@@ -493,7 +493,7 @@ class TestAzureBlobSinkFieldValidation:
 
     def test_csv_extra_fields_rejected_in_fixed_mode(self, mock_container_client: MagicMock, ctx: PluginContext) -> None:
         """Extra fields in fixed-mode CSV are rejected before serialization."""
-        from elspeth.plugins.azure.blob_sink import AzureBlobSink
+        from elspeth.plugins.sinks.azure_blob_sink import AzureBlobSink
 
         mock_blob_client = MagicMock()
         mock_container = MagicMock()
@@ -524,7 +524,7 @@ class TestAzureBlobSinkFieldValidation:
 
     def test_csv_valid_rows_still_upload(self, mock_container_client: MagicMock, ctx: PluginContext) -> None:
         """Valid rows in fixed mode still upload successfully."""
-        from elspeth.plugins.azure.blob_sink import AzureBlobSink
+        from elspeth.plugins.sinks.azure_blob_sink import AzureBlobSink
 
         mock_blob_client = MagicMock()
         mock_container = MagicMock()
@@ -546,7 +546,7 @@ class TestAzureBlobSinkFieldValidation:
 
     def test_declared_required_fields_populated(self) -> None:
         """AzureBlobSink populates declared_required_fields from schema."""
-        from elspeth.plugins.azure.blob_sink import AzureBlobSink
+        from elspeth.plugins.sinks.azure_blob_sink import AzureBlobSink
 
         with patch("elspeth.plugins.azure.blob_sink.AzureBlobSink._get_container_client"):
             sink = AzureBlobSink(

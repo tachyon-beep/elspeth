@@ -16,14 +16,14 @@ class TestCreateSchemaFromConfig:
 
     def test_factory_exists(self) -> None:
         """Factory function can be imported."""
-        from elspeth.plugins.schema_factory import create_schema_from_config
+        from elspeth.plugins.infrastructure.schema_factory import create_schema_from_config
 
         assert create_schema_from_config is not None
 
     def test_dynamic_schema_accepts_anything(self) -> None:
         """Dynamic schema accepts arbitrary fields."""
         from elspeth.contracts.schema import SchemaConfig
-        from elspeth.plugins.schema_factory import create_schema_from_config
+        from elspeth.plugins.infrastructure.schema_factory import create_schema_from_config
 
         config = SchemaConfig.from_dict({"mode": "observed"})
         Schema = create_schema_from_config(config, "TestSchema")
@@ -35,7 +35,7 @@ class TestCreateSchemaFromConfig:
     def test_strict_schema_rejects_extra_fields(self) -> None:
         """Strict schema rejects extra fields."""
         from elspeth.contracts.schema import SchemaConfig
-        from elspeth.plugins.schema_factory import create_schema_from_config
+        from elspeth.plugins.infrastructure.schema_factory import create_schema_from_config
 
         config = SchemaConfig.from_dict(
             {
@@ -56,7 +56,7 @@ class TestCreateSchemaFromConfig:
     def test_strict_schema_requires_all_fields(self) -> None:
         """Strict schema requires all non-optional fields."""
         from elspeth.contracts.schema import SchemaConfig
-        from elspeth.plugins.schema_factory import create_schema_from_config
+        from elspeth.plugins.infrastructure.schema_factory import create_schema_from_config
 
         config = SchemaConfig.from_dict(
             {
@@ -73,7 +73,7 @@ class TestCreateSchemaFromConfig:
     def test_free_schema_allows_extra_fields(self) -> None:
         """Free schema allows extra fields."""
         from elspeth.contracts.schema import SchemaConfig
-        from elspeth.plugins.schema_factory import create_schema_from_config
+        from elspeth.plugins.infrastructure.schema_factory import create_schema_from_config
 
         config = SchemaConfig.from_dict(
             {
@@ -93,7 +93,7 @@ class TestCreateSchemaFromConfig:
     def test_free_schema_requires_specified_fields(self) -> None:
         """Free schema still requires specified fields."""
         from elspeth.contracts.schema import SchemaConfig
-        from elspeth.plugins.schema_factory import create_schema_from_config
+        from elspeth.plugins.infrastructure.schema_factory import create_schema_from_config
 
         config = SchemaConfig.from_dict(
             {
@@ -110,7 +110,7 @@ class TestCreateSchemaFromConfig:
     def test_optional_field_can_be_missing(self) -> None:
         """Optional fields (?) can be missing or None."""
         from elspeth.contracts.schema import SchemaConfig
-        from elspeth.plugins.schema_factory import create_schema_from_config
+        from elspeth.plugins.infrastructure.schema_factory import create_schema_from_config
 
         config = SchemaConfig.from_dict(
             {
@@ -135,7 +135,7 @@ class TestCreateSchemaFromConfig:
     def test_type_coercion_int_to_float(self) -> None:
         """Int values coerce to float fields."""
         from elspeth.contracts.schema import SchemaConfig
-        from elspeth.plugins.schema_factory import create_schema_from_config
+        from elspeth.plugins.infrastructure.schema_factory import create_schema_from_config
 
         config = SchemaConfig.from_dict(
             {
@@ -152,7 +152,7 @@ class TestCreateSchemaFromConfig:
     def test_type_coercion_string_to_int(self) -> None:
         """String numeric values coerce to int fields."""
         from elspeth.contracts.schema import SchemaConfig
-        from elspeth.plugins.schema_factory import create_schema_from_config
+        from elspeth.plugins.infrastructure.schema_factory import create_schema_from_config
 
         config = SchemaConfig.from_dict(
             {
@@ -169,7 +169,7 @@ class TestCreateSchemaFromConfig:
     def test_type_coercion_string_to_float(self) -> None:
         """String numeric values coerce to float fields."""
         from elspeth.contracts.schema import SchemaConfig
-        from elspeth.plugins.schema_factory import create_schema_from_config
+        from elspeth.plugins.infrastructure.schema_factory import create_schema_from_config
 
         config = SchemaConfig.from_dict(
             {
@@ -185,7 +185,7 @@ class TestCreateSchemaFromConfig:
     def test_type_coercion_string_to_bool(self) -> None:
         """String boolean values coerce to bool fields."""
         from elspeth.contracts.schema import SchemaConfig
-        from elspeth.plugins.schema_factory import create_schema_from_config
+        from elspeth.plugins.infrastructure.schema_factory import create_schema_from_config
 
         config = SchemaConfig.from_dict(
             {
@@ -210,7 +210,7 @@ class TestCreateSchemaFromConfig:
     def test_any_type_accepts_anything(self) -> None:
         """'any' type accepts any value without coercion."""
         from elspeth.contracts.schema import SchemaConfig
-        from elspeth.plugins.schema_factory import create_schema_from_config
+        from elspeth.plugins.infrastructure.schema_factory import create_schema_from_config
 
         config = SchemaConfig.from_dict(
             {
@@ -229,7 +229,7 @@ class TestCreateSchemaFromConfig:
     def test_invalid_type_not_coercible(self) -> None:
         """Non-coercible values raise ValidationError."""
         from elspeth.contracts.schema import SchemaConfig
-        from elspeth.plugins.schema_factory import create_schema_from_config
+        from elspeth.plugins.infrastructure.schema_factory import create_schema_from_config
 
         config = SchemaConfig.from_dict(
             {
@@ -249,7 +249,7 @@ class TestCoercionControl:
     def test_coercion_enabled_by_default(self) -> None:
         """Default behavior allows coercion (for sources)."""
         from elspeth.contracts.schema import SchemaConfig
-        from elspeth.plugins.schema_factory import create_schema_from_config
+        from elspeth.plugins.infrastructure.schema_factory import create_schema_from_config
 
         config = SchemaConfig.from_dict(
             {
@@ -267,7 +267,7 @@ class TestCoercionControl:
     def test_coercion_disabled_rejects_string_to_int(self) -> None:
         """With coercion disabled, string '42' is rejected for int field."""
         from elspeth.contracts.schema import SchemaConfig
-        from elspeth.plugins.schema_factory import create_schema_from_config
+        from elspeth.plugins.infrastructure.schema_factory import create_schema_from_config
 
         config = SchemaConfig.from_dict(
             {
@@ -285,7 +285,7 @@ class TestCoercionControl:
     def test_coercion_disabled_rejects_string_to_float(self) -> None:
         """With coercion disabled, string '3.14' is rejected for float field."""
         from elspeth.contracts.schema import SchemaConfig
-        from elspeth.plugins.schema_factory import create_schema_from_config
+        from elspeth.plugins.infrastructure.schema_factory import create_schema_from_config
 
         config = SchemaConfig.from_dict(
             {
@@ -301,7 +301,7 @@ class TestCoercionControl:
     def test_coercion_disabled_still_accepts_correct_types(self) -> None:
         """With coercion disabled, correct types are still accepted."""
         from elspeth.contracts.schema import SchemaConfig
-        from elspeth.plugins.schema_factory import create_schema_from_config
+        from elspeth.plugins.infrastructure.schema_factory import create_schema_from_config
 
         config = SchemaConfig.from_dict(
             {
@@ -320,7 +320,7 @@ class TestCoercionControl:
     def test_coercion_disabled_allows_int_to_float(self) -> None:
         """Int -> float is allowed even without coercion (numeric widening)."""
         from elspeth.contracts.schema import SchemaConfig
-        from elspeth.plugins.schema_factory import create_schema_from_config
+        from elspeth.plugins.infrastructure.schema_factory import create_schema_from_config
 
         config = SchemaConfig.from_dict(
             {
@@ -337,7 +337,7 @@ class TestCoercionControl:
     def test_dynamic_schema_with_coercion_disabled(self) -> None:
         """Dynamic schema with coercion disabled still accepts any types."""
         from elspeth.contracts.schema import SchemaConfig
-        from elspeth.plugins.schema_factory import create_schema_from_config
+        from elspeth.plugins.infrastructure.schema_factory import create_schema_from_config
 
         config = SchemaConfig.from_dict({"mode": "observed"})
         Schema = create_schema_from_config(config, "DynamicSchema", allow_coercion=False)
@@ -363,7 +363,7 @@ class TestNonFiniteFloatRejection:
         hashing. Must be caught at source validation, not downstream.
         """
         from elspeth.contracts.schema import SchemaConfig
-        from elspeth.plugins.schema_factory import create_schema_from_config
+        from elspeth.plugins.infrastructure.schema_factory import create_schema_from_config
 
         config = SchemaConfig.from_dict(
             {
@@ -380,7 +380,7 @@ class TestNonFiniteFloatRejection:
     def test_infinity_string_rejected_in_float_field(self) -> None:
         """Source schema rejects 'inf' string for float fields."""
         from elspeth.contracts.schema import SchemaConfig
-        from elspeth.plugins.schema_factory import create_schema_from_config
+        from elspeth.plugins.infrastructure.schema_factory import create_schema_from_config
 
         config = SchemaConfig.from_dict(
             {
@@ -396,7 +396,7 @@ class TestNonFiniteFloatRejection:
     def test_negative_infinity_rejected_in_float_field(self) -> None:
         """Source schema rejects '-inf' string for float fields."""
         from elspeth.contracts.schema import SchemaConfig
-        from elspeth.plugins.schema_factory import create_schema_from_config
+        from elspeth.plugins.infrastructure.schema_factory import create_schema_from_config
 
         config = SchemaConfig.from_dict(
             {
@@ -412,7 +412,7 @@ class TestNonFiniteFloatRejection:
     def test_actual_nan_float_rejected(self) -> None:
         """Source schema rejects actual float('nan') value."""
         from elspeth.contracts.schema import SchemaConfig
-        from elspeth.plugins.schema_factory import create_schema_from_config
+        from elspeth.plugins.infrastructure.schema_factory import create_schema_from_config
 
         config = SchemaConfig.from_dict(
             {
@@ -428,7 +428,7 @@ class TestNonFiniteFloatRejection:
     def test_actual_infinity_float_rejected(self) -> None:
         """Source schema rejects actual float('inf') value."""
         from elspeth.contracts.schema import SchemaConfig
-        from elspeth.plugins.schema_factory import create_schema_from_config
+        from elspeth.plugins.infrastructure.schema_factory import create_schema_from_config
 
         config = SchemaConfig.from_dict(
             {
@@ -444,7 +444,7 @@ class TestNonFiniteFloatRejection:
     def test_optional_float_still_rejects_nan(self) -> None:
         """Optional float fields also reject NaN."""
         from elspeth.contracts.schema import SchemaConfig
-        from elspeth.plugins.schema_factory import create_schema_from_config
+        from elspeth.plugins.infrastructure.schema_factory import create_schema_from_config
 
         config = SchemaConfig.from_dict(
             {
@@ -465,7 +465,7 @@ class TestNonFiniteFloatRejection:
     def test_finite_floats_still_accepted(self) -> None:
         """Normal finite floats are still accepted."""
         from elspeth.contracts.schema import SchemaConfig
-        from elspeth.plugins.schema_factory import create_schema_from_config
+        from elspeth.plugins.infrastructure.schema_factory import create_schema_from_config
 
         config = SchemaConfig.from_dict(
             {
@@ -484,7 +484,7 @@ class TestNonFiniteFloatRejection:
     def test_observed_schema_rejects_nan(self) -> None:
         """Observed schemas reject NaN values before contract inference."""
         from elspeth.contracts.schema import SchemaConfig
-        from elspeth.plugins.schema_factory import create_schema_from_config
+        from elspeth.plugins.infrastructure.schema_factory import create_schema_from_config
 
         config = SchemaConfig.from_dict({"mode": "observed"})
         Schema = create_schema_from_config(config, "ObservedSchema")
@@ -495,7 +495,7 @@ class TestNonFiniteFloatRejection:
     def test_observed_schema_rejects_nested_infinity(self) -> None:
         """Observed schemas reject nested Infinity values."""
         from elspeth.contracts.schema import SchemaConfig
-        from elspeth.plugins.schema_factory import create_schema_from_config
+        from elspeth.plugins.infrastructure.schema_factory import create_schema_from_config
 
         config = SchemaConfig.from_dict({"mode": "observed"})
         Schema = create_schema_from_config(config, "ObservedSchema")
@@ -510,7 +510,7 @@ class TestNonFiniteFloatRejection:
         schemas because only observed schemas had the non-finite validator.
         """
         from elspeth.contracts.schema import SchemaConfig
-        from elspeth.plugins.schema_factory import create_schema_from_config
+        from elspeth.plugins.infrastructure.schema_factory import create_schema_from_config
 
         config = SchemaConfig.from_dict({"mode": "fixed", "fields": ["data: any"]})
         Schema = create_schema_from_config(config, "SourceSchema", allow_coercion=True)
@@ -521,7 +521,7 @@ class TestNonFiniteFloatRejection:
     def test_explicit_any_field_rejects_infinity_at_source_boundary(self) -> None:
         """Explicit schema with 'any' field rejects Infinity at source boundary."""
         from elspeth.contracts.schema import SchemaConfig
-        from elspeth.plugins.schema_factory import create_schema_from_config
+        from elspeth.plugins.infrastructure.schema_factory import create_schema_from_config
 
         config = SchemaConfig.from_dict({"mode": "fixed", "fields": ["data: any"]})
         Schema = create_schema_from_config(config, "SourceSchema", allow_coercion=True)
@@ -532,7 +532,7 @@ class TestNonFiniteFloatRejection:
     def test_flexible_extras_reject_nan_at_source_boundary(self) -> None:
         """Flexible schema rejects NaN in extra fields at source boundary."""
         from elspeth.contracts.schema import SchemaConfig
-        from elspeth.plugins.schema_factory import create_schema_from_config
+        from elspeth.plugins.infrastructure.schema_factory import create_schema_from_config
 
         config = SchemaConfig.from_dict({"mode": "flexible", "fields": ["id: int"]})
         Schema = create_schema_from_config(config, "SourceSchema", allow_coercion=True)
@@ -543,7 +543,7 @@ class TestNonFiniteFloatRejection:
     def test_explicit_any_nested_nan_rejected_at_source_boundary(self) -> None:
         """Nested NaN in any-typed field is rejected at source boundary."""
         from elspeth.contracts.schema import SchemaConfig
-        from elspeth.plugins.schema_factory import create_schema_from_config
+        from elspeth.plugins.infrastructure.schema_factory import create_schema_from_config
 
         config = SchemaConfig.from_dict({"mode": "fixed", "fields": ["data: any"]})
         Schema = create_schema_from_config(config, "SourceSchema", allow_coercion=True)
@@ -558,7 +558,7 @@ class TestNonFiniteFloatRejection:
         and should crash downstream (per trust model), not silently validate.
         """
         from elspeth.contracts.schema import SchemaConfig
-        from elspeth.plugins.schema_factory import create_schema_from_config
+        from elspeth.plugins.infrastructure.schema_factory import create_schema_from_config
 
         config = SchemaConfig.from_dict({"mode": "fixed", "fields": ["data: any"]})
         Schema = create_schema_from_config(config, "TransformSchema", allow_coercion=False)
@@ -575,7 +575,7 @@ class TestSchemaPluginSchemaCompliance:
         """Generated schema is a PluginSchema subclass."""
         from elspeth.contracts import PluginSchema
         from elspeth.contracts.schema import SchemaConfig
-        from elspeth.plugins.schema_factory import create_schema_from_config
+        from elspeth.plugins.infrastructure.schema_factory import create_schema_from_config
 
         config = SchemaConfig.from_dict({"mode": "observed"})
         Schema = create_schema_from_config(config, "TestSchema")
@@ -585,7 +585,7 @@ class TestSchemaPluginSchemaCompliance:
     def test_to_row_returns_all_fields(self) -> None:
         """to_row() returns all fields including extras in free mode."""
         from elspeth.contracts.schema import SchemaConfig
-        from elspeth.plugins.schema_factory import create_schema_from_config
+        from elspeth.plugins.infrastructure.schema_factory import create_schema_from_config
 
         config = SchemaConfig.from_dict(
             {

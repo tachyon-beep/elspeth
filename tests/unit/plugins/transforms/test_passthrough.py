@@ -86,7 +86,7 @@ class TestPassThrough:
 
     def test_requires_schema_config(self) -> None:
         """PassThrough requires schema configuration."""
-        from elspeth.plugins.config_base import PluginConfigError
+        from elspeth.plugins.infrastructure.config_base import PluginConfigError
         from elspeth.plugins.transforms.passthrough import PassThrough
 
         with pytest.raises(PluginConfigError, match="schema"):

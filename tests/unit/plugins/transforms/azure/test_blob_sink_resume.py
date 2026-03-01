@@ -5,14 +5,14 @@ import pytest
 
 def test_azure_blob_sink_does_not_support_resume():
     """AzureBlobSink should declare supports_resume=False."""
-    from elspeth.plugins.azure.blob_sink import AzureBlobSink
+    from elspeth.plugins.sinks.azure_blob_sink import AzureBlobSink
 
     assert AzureBlobSink.supports_resume is False
 
 
 def test_azure_blob_sink_configure_for_resume_raises():
     """AzureBlobSink.configure_for_resume should raise NotImplementedError."""
-    from elspeth.plugins.azure.blob_sink import AzureBlobSink
+    from elspeth.plugins.sinks.azure_blob_sink import AzureBlobSink
 
     # Create minimal sink - we just need to test the method, not actual Azure connection
     # Use a mock connection string format that passes validation

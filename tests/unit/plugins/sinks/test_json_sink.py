@@ -9,7 +9,7 @@ from unittest.mock import patch
 import pytest
 
 from elspeth.contracts.plugin_context import PluginContext
-from elspeth.plugins.config_base import PluginConfigError
+from elspeth.plugins.infrastructure.config_base import PluginConfigError
 
 # Dynamic schema config for tests - PathConfig now requires schema
 DYNAMIC_SCHEMA = {"mode": "observed"}

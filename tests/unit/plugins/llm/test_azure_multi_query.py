@@ -16,9 +16,9 @@ from elspeth.contracts import Determinism, TransformResult
 from elspeth.contracts.plugin_context import PluginContext
 from elspeth.contracts.schema_contract import FieldContract, PipelineRow, SchemaContract
 from elspeth.contracts.token_usage import TokenUsage
-from elspeth.plugins.batching.ports import CollectorOutputPort
-from elspeth.plugins.llm.provider import FinishReason, LLMQueryResult
-from elspeth.plugins.llm.transform import LLMTransform
+from elspeth.plugins.infrastructure.batching.ports import CollectorOutputPort
+from elspeth.plugins.transforms.llm.provider import FinishReason, LLMQueryResult
+from elspeth.plugins.transforms.llm.transform import LLMTransform
 from elspeth.testing import make_pipeline_row
 
 from .conftest import (
@@ -175,14 +175,14 @@ class TestLLMTransformMultiQueryInit:
 
     def test_transform_selects_multi_query_strategy(self) -> None:
         """Transform selects MultiQueryStrategy when queries provided."""
-        from elspeth.plugins.llm.transform import MultiQueryStrategy
+        from elspeth.plugins.transforms.llm.transform import MultiQueryStrategy
 
         transform = LLMTransform(_make_config())
         assert isinstance(transform._strategy, MultiQueryStrategy)
 
     def test_transform_resolves_query_specs_on_init(self) -> None:
         """Transform resolves query specs from queries config on init."""
-        from elspeth.plugins.llm.transform import MultiQueryStrategy
+        from elspeth.plugins.transforms.llm.transform import MultiQueryStrategy
 
         transform = LLMTransform(_make_config())
         assert isinstance(transform._strategy, MultiQueryStrategy)
@@ -191,7 +191,7 @@ class TestLLMTransformMultiQueryInit:
 
     def test_transform_requires_queries_for_multi_query(self) -> None:
         """Transform with no queries selects SingleQueryStrategy."""
-        from elspeth.plugins.llm.transform import SingleQueryStrategy
+        from elspeth.plugins.transforms.llm.transform import SingleQueryStrategy
 
         config = _make_config()
         del config["queries"]
@@ -307,7 +307,7 @@ class TestSingleQueryProcessing:
         """Template rendering errors return error result with details."""
         from unittest.mock import patch as mock_patch
 
-        from elspeth.plugins.llm.templates import TemplateError
+        from elspeth.plugins.transforms.llm.templates import TemplateError
 
         transform = LLMTransform(_make_config())
         mock_provider = _make_mock_provider()

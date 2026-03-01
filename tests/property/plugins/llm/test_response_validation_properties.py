@@ -25,7 +25,7 @@ import pytest
 from hypothesis import given, settings
 from hypothesis import strategies as st
 
-from elspeth.plugins.llm.validation import (
+from elspeth.plugins.transforms.llm.validation import (
     ValidationError,
     ValidationSuccess,
     validate_json_object_response,

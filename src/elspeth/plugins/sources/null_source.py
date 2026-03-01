@@ -13,7 +13,7 @@ from pydantic import ConfigDict
 
 from elspeth.contracts import Determinism, PluginSchema, SourceRow
 from elspeth.contracts.contexts import SourceContext
-from elspeth.plugins.base import BaseSource
+from elspeth.plugins.infrastructure.base import BaseSource
 
 
 class NullSourceSchema(PluginSchema):

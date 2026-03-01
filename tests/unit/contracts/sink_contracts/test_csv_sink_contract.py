@@ -21,7 +21,7 @@ from elspeth.plugins.sinks.csv_sink import CSVSink
 from .test_sink_protocol import SinkContractTestBase, SinkDeterminismContractTestBase
 
 if TYPE_CHECKING:
-    from elspeth.plugins.protocols import SinkProtocol
+    from elspeth.plugins.infrastructure.protocols import SinkProtocol
 
 
 class TestCSVSinkContract(SinkContractTestBase):

@@ -19,7 +19,7 @@ from elspeth.plugins.transforms.web_scrape import WebScrapeTransform
 from .test_transform_protocol import TransformContractPropertyTestBase
 
 if TYPE_CHECKING:
-    from elspeth.plugins.protocols import TransformProtocol
+    from elspeth.plugins.infrastructure.protocols import TransformProtocol
 
 
 def _create_mock_http_response() -> Mock:

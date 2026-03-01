@@ -15,10 +15,10 @@ from elspeth.contracts.identity import TokenInfo
 from elspeth.contracts.plugin_context import PluginContext
 from elspeth.contracts.schema_contract import SchemaContract
 from elspeth.engine.batch_adapter import ExceptionResult
-from elspeth.plugins.batching.ports import CollectorOutputPort
-from elspeth.plugins.config_base import PluginConfigError
-from elspeth.plugins.llm.providers.openrouter import OpenRouterConfig
-from elspeth.plugins.llm.transform import LLMTransform
+from elspeth.plugins.infrastructure.batching.ports import CollectorOutputPort
+from elspeth.plugins.infrastructure.config_base import PluginConfigError
+from elspeth.plugins.transforms.llm.providers.openrouter import OpenRouterConfig
+from elspeth.plugins.transforms.llm.transform import LLMTransform
 from elspeth.testing import make_pipeline_row, make_row
 
 from .conftest import chaosllm_openrouter_http_responses, chaosllm_openrouter_httpx_response
@@ -422,7 +422,7 @@ class TestLLMTransformOpenRouterPipelining:
 
         Regression test for P2-2026-01-31-openrouter-retry-semantics.
         """
-        from elspeth.plugins.clients.llm import ServerError
+        from elspeth.plugins.infrastructure.clients.llm import ServerError
 
         with mock_httpx_client(
             chaosllm_server,
@@ -452,7 +452,7 @@ class TestLLMTransformOpenRouterPipelining:
 
         Regression test for P2-2026-01-31-openrouter-retry-semantics.
         """
-        from elspeth.plugins.clients.llm import RateLimitError
+        from elspeth.plugins.infrastructure.clients.llm import RateLimitError
 
         with mock_httpx_client(
             chaosllm_server,
@@ -482,7 +482,7 @@ class TestLLMTransformOpenRouterPipelining:
 
         Regression test for P2-2026-01-31-openrouter-retry-semantics.
         """
-        from elspeth.plugins.clients.llm import ServerError
+        from elspeth.plugins.infrastructure.clients.llm import ServerError
 
         with mock_httpx_client(
             chaosllm_server,
@@ -512,7 +512,7 @@ class TestLLMTransformOpenRouterPipelining:
 
         Regression test for P2-2026-01-31-openrouter-retry-semantics.
         """
-        from elspeth.plugins.clients.llm import ServerError
+        from elspeth.plugins.infrastructure.clients.llm import ServerError
 
         with mock_httpx_client(
             chaosllm_server,
@@ -543,7 +543,7 @@ class TestLLMTransformOpenRouterPipelining:
         Regression test for P2-2026-01-31-openrouter-retry-semantics:
         Network errors are transient and should be retried.
         """
-        from elspeth.plugins.clients.llm import NetworkError
+        from elspeth.plugins.infrastructure.clients.llm import NetworkError
 
         with mock_httpx_client(chaosllm_server, side_effect=httpx.ConnectError("Connection refused")):
             transform.accept(make_pipeline_row({"text": "hello"}), ctx)
@@ -880,7 +880,7 @@ class TestLLMTransformOpenRouterIntegration:
 
         Regression test for P2-2026-01-31-openrouter-retry-semantics.
         """
-        from elspeth.plugins.clients.llm import NetworkError
+        from elspeth.plugins.infrastructure.clients.llm import NetworkError
 
         transform = LLMTransform(_openrouter_config(model="openai/gpt-4", template="{{ row.text }}"))
         init_ctx = PluginContext(run_id="test", config={}, landscape=mock_recorder)

@@ -78,7 +78,7 @@ class TestAssertToRaiseConversions:
         The guard fires when the transform is used without on_start() having
         been called (i.e. without the engine setting up the recorder).
         """
-        from elspeth.plugins.llm.transform import LLMTransform
+        from elspeth.plugins.transforms.llm.transform import LLMTransform
 
         transform = LLMTransform(_LLM_AZURE_CONFIG)
 
@@ -126,7 +126,7 @@ class TestAssertToRaiseConversions:
         A second call must be rejected — the BatchTransformMixin is already
         running, and reinitialisation would corrupt internal state.
         """
-        from elspeth.plugins.batching.ports import CollectorOutputPort
+        from elspeth.plugins.infrastructure.batching.ports import CollectorOutputPort
         from elspeth.plugins.transforms.azure.content_safety import AzureContentSafety
 
         transform = AzureContentSafety(_CONTENT_SAFETY_CONFIG)

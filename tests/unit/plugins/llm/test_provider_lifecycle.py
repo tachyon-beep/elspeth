@@ -14,13 +14,13 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from elspeth.plugins.llm.provider import LLMProvider
-from elspeth.plugins.llm.providers.azure import AzureLLMProvider, AzureOpenAIConfig
-from elspeth.plugins.llm.providers.openrouter import (
+from elspeth.plugins.transforms.llm.provider import LLMProvider
+from elspeth.plugins.transforms.llm.providers.azure import AzureLLMProvider, AzureOpenAIConfig
+from elspeth.plugins.transforms.llm.providers.openrouter import (
     OpenRouterConfig,
     OpenRouterLLMProvider,
 )
-from elspeth.plugins.llm.transform import LLMTransform
+from elspeth.plugins.transforms.llm.transform import LLMTransform
 
 # ---------------------------------------------------------------------------
 # Helpers

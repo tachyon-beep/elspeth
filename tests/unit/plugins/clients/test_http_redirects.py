@@ -14,7 +14,7 @@ import pytest
 
 from elspeth.contracts import CallStatus, CallType
 from elspeth.core.security.web import SSRFSafeRequest
-from elspeth.plugins.clients.http import AuditedHTTPClient
+from elspeth.plugins.infrastructure.clients.http import AuditedHTTPClient
 
 
 @pytest.fixture

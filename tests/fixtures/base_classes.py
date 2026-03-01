@@ -15,7 +15,7 @@ from elspeth.contracts import Determinism, PluginSchema, SourceRow
 if TYPE_CHECKING:
     from elspeth.contracts import TransformResult
     from elspeth.contracts.schema_contract import SchemaContract
-    from elspeth.plugins.protocols import (
+    from elspeth.plugins.infrastructure.protocols import (
         BatchTransformProtocol,
         SinkProtocol,
         SourceProtocol,

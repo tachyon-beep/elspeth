@@ -12,8 +12,8 @@ import pytest
 from elspeth.contracts import BatchPendingError, Determinism
 from elspeth.contracts.batch_checkpoint import BatchCheckpointState, RowMappingEntry
 from elspeth.contracts.plugin_context import PluginContext
-from elspeth.plugins.config_base import PluginConfigError
-from elspeth.plugins.llm.azure_batch import AzureBatchConfig, AzureBatchLLMTransform
+from elspeth.plugins.infrastructure.config_base import PluginConfigError
+from elspeth.plugins.transforms.llm.azure_batch import AzureBatchConfig, AzureBatchLLMTransform
 from elspeth.testing import make_pipeline_row
 
 # Common schema config for dynamic field handling
