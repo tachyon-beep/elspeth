@@ -761,3 +761,20 @@ Stale doc references to `PipelineResult` and `run_pipeline()` updated in `docs/g
 - pytest: 10,366 passed, 17 skipped, 3 xfailed, 0 failures
 - mypy: clean (no errors)
 - ruff: clean (import sorting fixed)
+
+**2026-03-01 — P0.5b implementation: COMPLETE**
+
+All 3 scope items implemented and verified:
+
+| # | Scope Item | Status | Details |
+|---|-----------|--------|---------|
+| 1 | Refactor `make_source_context()` to delegate to `make_recorder_with_run()` | ✅ Done | `tests/fixtures/factories.py` — clean delegation, removed 4 function-level imports |
+| 2 | Refactor `make_operation_context()` to delegate to `make_recorder_with_run()` | ✅ Done | `tests/fixtures/factories.py` — SOURCE path delegates directly, non-SOURCE path uses `register_test_node()` for the actual node with throwaway source |
+| 3 | Add regression tests for refactored factories | ✅ Done | `tests/fixtures/test_factories.py` — 4 tests: `test_landscape_is_real_recorder`, `test_create_row_round_trip`, `test_record_call_round_trip`, `test_sink_record_call_round_trip` |
+
+Code review finding: mypy type narrowing added to `test_create_row_round_trip` (`assert ctx.landscape is not None` / `assert ctx.node_id is not None`) — consistent with offensive programming patterns.
+
+**Verification:**
+- pytest: 10,370 passed, 17 skipped, 3 xfailed, 0 failures (4 new tests)
+- mypy (`src/`): clean (no errors)
+- ruff: clean

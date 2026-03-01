@@ -95,6 +95,29 @@ class TestMakeSourceContext:
         # Should not raise — plugin registered successfully
         assert ctx.run_id == "test-run"
 
+    def test_landscape_is_real_recorder(self) -> None:
+        """Verify delegated factory produces a real LandscapeRecorder, not a Mock."""
+        from elspeth.core.landscape.recorder import LandscapeRecorder
+        from tests.fixtures.factories import make_source_context
+
+        ctx = make_source_context()
+        assert isinstance(ctx.landscape, LandscapeRecorder)
+
+    def test_create_row_round_trip(self) -> None:
+        """Prove FK chain is intact: run -> node -> row."""
+        from tests.fixtures.factories import make_source_context
+
+        ctx = make_source_context()
+        assert ctx.landscape is not None
+        assert ctx.node_id is not None
+        row = ctx.landscape.create_row(
+            run_id=ctx.run_id,
+            source_node_id=ctx.node_id,
+            row_index=0,
+            data={"field": "value"},
+        )
+        assert row.row_id is not None
+
 
 # =============================================================================
 # make_operation_context() — PluginContext with operation records
@@ -122,6 +145,42 @@ class TestMakeOperationContext:
         )
         assert ctx.node_id == "sink"
         assert ctx.operation_id is not None
+
+    def test_record_call_round_trip(self) -> None:
+        """Prove FK chain is intact for SOURCE: run -> node -> operation -> call."""
+        from elspeth.contracts.enums import CallStatus, CallType
+        from tests.fixtures.factories import make_operation_context
+
+        ctx = make_operation_context()
+        # Must not raise — proves operation_id FK chain is valid
+        call = ctx.record_call(
+            call_type=CallType.HTTP,
+            status=CallStatus.SUCCESS,
+            request_data={"url": "https://example.com"},
+            response_data={"status": 200},
+            latency_ms=50.0,
+        )
+        assert call is not None
+
+    def test_sink_record_call_round_trip(self) -> None:
+        """Prove FK chain is intact for SINK path via register_test_node()."""
+        from elspeth.contracts.enums import CallStatus, CallType
+        from tests.fixtures.factories import make_operation_context
+
+        ctx = make_operation_context(
+            operation_type="sink_write",
+            node_id="sink",
+            node_type="SINK",
+        )
+        # Must not raise — proves the SINK node's operation_id FK chain is valid
+        call = ctx.record_call(
+            call_type=CallType.HTTP,
+            status=CallStatus.SUCCESS,
+            request_data={"url": "https://example.com"},
+            response_data={"status": 200},
+            latency_ms=50.0,
+        )
+        assert call is not None
 
 
 # =============================================================================

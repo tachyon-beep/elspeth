@@ -116,6 +116,8 @@ def make_source_context(
 ) -> PluginContext:
     """Build a PluginContext with run and node records for validation error recording.
 
+    Internally delegates to make_recorder_with_run() for DB/recorder/run/node setup.
+
     For testing source plugins that call ctx.record_validation_error().
     Creates the FK chain: run → node → PluginContext.
 
@@ -126,29 +128,19 @@ def make_source_context(
         ctx = make_source_context()                         # CSV source default
         ctx = make_source_context(plugin_name="json")       # JSON source
     """
-    from elspeth.contracts import NodeType
     from elspeth.contracts.plugin_context import PluginContext
-    from elspeth.contracts.schema import SchemaConfig
-    from elspeth.core.landscape.database import LandscapeDB
-    from elspeth.core.landscape.recorder import LandscapeRecorder
+    from tests.fixtures.landscape import make_recorder_with_run
 
-    db = LandscapeDB.in_memory()
-    recorder = LandscapeRecorder(db)
-    recorder.begin_run(config={}, canonical_version="v1", run_id=run_id)
-    recorder.register_node(
+    setup = make_recorder_with_run(
         run_id=run_id,
-        plugin_name=plugin_name,
-        node_type=NodeType.SOURCE,
-        plugin_version="1.0",
-        config={},
-        node_id=node_id,
-        schema_config=SchemaConfig.from_dict({"mode": "observed"}),
+        source_node_id=node_id,
+        source_plugin_name=plugin_name,
     )
     return PluginContext(
-        run_id=run_id,
-        node_id=node_id,
+        run_id=setup.run_id,
+        node_id=setup.source_node_id,
         config={},
-        landscape=recorder,
+        landscape=setup.recorder,
     )
 
 
@@ -161,6 +153,8 @@ def make_operation_context(
     operation_type: str = "source_load",
 ) -> PluginContext:
     """Build a PluginContext with real landscape and operation records.
+
+    Internally delegates to make_recorder_with_run() for DB/recorder/run setup.
 
     For testing source/sink plugins that call ctx.record_call().
     Creates the full FK chain: run → node → operation → PluginContext.
@@ -175,28 +169,35 @@ def make_operation_context(
     """
     from elspeth.contracts import NodeType
     from elspeth.contracts.plugin_context import PluginContext
-    from elspeth.contracts.schema import SchemaConfig
-    from elspeth.core.landscape.database import LandscapeDB
-    from elspeth.core.landscape.recorder import LandscapeRecorder
+    from tests.fixtures.landscape import make_recorder_with_run, register_test_node
 
-    db = LandscapeDB.in_memory()
-    recorder = LandscapeRecorder(db)
-    recorder.begin_run(config={}, canonical_version="v1", run_id=run_id)
-    recorder.register_node(
-        run_id=run_id,
-        plugin_name=plugin_name,
-        node_type=NodeType[node_type],
-        plugin_version="1.0",
-        config={},
-        node_id=node_id,
-        schema_config=SchemaConfig.from_dict({"mode": "observed"}),
-    )
-    op = recorder.begin_operation(run_id, node_id, operation_type)
+    if node_type == "SOURCE":
+        # Source node: delegate directly — make_recorder_with_run creates a SOURCE node
+        setup = make_recorder_with_run(
+            run_id=run_id,
+            source_node_id=node_id,
+            source_plugin_name=plugin_name,
+        )
+        actual_node_id = setup.source_node_id
+    else:
+        # Non-source node (SINK, TRANSFORM, etc.): create throwaway source,
+        # then register the actual node type needed
+        setup = make_recorder_with_run(run_id=run_id)
+        register_test_node(
+            setup.recorder,
+            setup.run_id,
+            node_id,
+            node_type=NodeType[node_type],
+            plugin_name=plugin_name,
+        )
+        actual_node_id = node_id
+
+    op = setup.recorder.begin_operation(setup.run_id, actual_node_id, operation_type)
     return PluginContext(
-        run_id=run_id,
-        node_id=node_id,
+        run_id=setup.run_id,
+        node_id=actual_node_id,
         config={},
-        landscape=recorder,
+        landscape=setup.recorder,
         operation_id=op.operation_id,
     )
 
