@@ -1,4 +1,3 @@
-# src/elspeth/plugins/llm/langfuse.py
 """Langfuse tracing utilities for LLM transforms.
 
 Extracts the Langfuse v3 span/generation recording pattern that was duplicated
@@ -23,7 +22,7 @@ from typing import Any, Protocol
 import structlog
 
 from elspeth.contracts.token_usage import TokenUsage
-from elspeth.plugins.transforms.llm.tracing import AzureAITracingConfig, LangfuseTracingConfig, TracingConfig
+from elspeth.plugins.transforms.llm.tracing import LangfuseTracingConfig, TracingConfig
 
 logger = structlog.get_logger(__name__)
 
@@ -227,13 +226,10 @@ def create_langfuse_tracer(
     if tracing_config is None:
         return NoOpLangfuseTracer()
     if not isinstance(tracing_config, LangfuseTracingConfig):
-        # Azure AI tracing is handled in LLMTransform.on_start() — no warning needed.
-        # Only warn for truly unrecognized providers (e.g. typo in config).
-        if not isinstance(tracing_config, AzureAITracingConfig):
-            logger.warning(
-                "Tracing config provided but not recognized as Langfuse or Azure AI — tracing disabled",
-                tracing_provider=tracing_config.provider,
-            )
+        # Non-Langfuse configs are valid no-ops for the Langfuse factory:
+        # - AzureAITracingConfig: handled separately in LLMTransform.on_start()
+        # - TracingConfig(provider="none"): documented no-tracing setting
+        # Unknown providers are rejected by parse_tracing_config() at parse time.
         return NoOpLangfuseTracer()
 
     try:

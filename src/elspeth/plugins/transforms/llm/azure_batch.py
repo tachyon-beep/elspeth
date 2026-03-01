@@ -1,4 +1,3 @@
-# src/elspeth/plugins/llm/azure_batch.py
 """Azure OpenAI Batch API transform - 50% cost savings for high volume.
 
 Uses two-phase checkpoint approach:
@@ -248,27 +247,26 @@ class AzureBatchLLMTransform(BaseTransform):
         # Validate configuration completeness
         errors = validate_tracing_config(self._tracing_config)
         if errors:
-            for error in errors:
-                logger.warning("Tracing configuration error", error=error)
-            return
+            raise ValueError(
+                f"Tracing configuration errors: {'; '.join(errors)}"
+            )
 
         match self._tracing_config.provider:
             case "azure_ai":
                 # Azure AI tracing NOT supported for batch API
-                logger.warning(
-                    "Azure AI tracing not supported for Azure Batch API",
-                    provider="azure_ai",
-                    hint="Azure Batch jobs run asynchronously in Azure infrastructure - use Langfuse for job-level tracing instead",
+                raise ValueError(
+                    "Azure AI tracing is not supported for Azure Batch API. "
+                    "Azure Batch jobs run asynchronously in Azure infrastructure — "
+                    "use Langfuse for job-level tracing instead (provider: langfuse)."
                 )
-                return
             case "langfuse":
                 pass  # Handled by create_langfuse_tracer() in __init__
             case "none":
                 pass  # No tracing
             case _:
-                logger.warning(
-                    "Unknown tracing provider encountered after validation - tracing disabled",
-                    provider=self._tracing_config.provider,
+                raise ValueError(
+                    f"Unknown tracing provider '{self._tracing_config.provider}' "
+                    f"after validation. Supported: azure_ai, langfuse, none."
                 )
 
     def _record_langfuse_batch_job(
@@ -568,28 +566,22 @@ class AzureBatchLLMTransform(BaseTransform):
             "content_size": len(jsonl_bytes),
             "row_count": len(requests),
         }
+        # Upload file — external API call (Tier 3 boundary)
         start = time.perf_counter()
         try:
             batch_file = client.files.create(
                 file=("batch_input.jsonl", file_bytes),
                 purpose="batch",
             )
-            ctx.record_call(
-                call_type=CallType.HTTP,
-                status=CallStatus.SUCCESS,
-                request_data=upload_request,
-                response_data={"file_id": batch_file.id, "status": batch_file.status},
-                latency_ms=(time.perf_counter() - start) * 1000,
-                provider="azure",
-            )
         except Exception as e:
-            # External API failure - record error and return structured result
+            # External API failure — record and return structured error
+            upload_latency = (time.perf_counter() - start) * 1000
             ctx.record_call(
                 call_type=CallType.HTTP,
                 status=CallStatus.ERROR,
                 request_data=upload_request,
                 response_data={"error": str(e), "error_type": type(e).__name__},
-                latency_ms=(time.perf_counter() - start) * 1000,
+                latency_ms=upload_latency,
                 provider="azure",
             )
             return TransformResult.error(
@@ -600,8 +592,19 @@ class AzureBatchLLMTransform(BaseTransform):
                 },
                 retryable=True,  # Network/auth errors are retryable
             )
+        upload_latency = (time.perf_counter() - start) * 1000
 
-        # Create batch job (with audit recording)
+        # Record successful upload — our code, must not be caught
+        ctx.record_call(
+            call_type=CallType.HTTP,
+            status=CallStatus.SUCCESS,
+            request_data=upload_request,
+            response_data={"file_id": batch_file.id, "status": batch_file.status},
+            latency_ms=upload_latency,
+            provider="azure",
+        )
+
+        # Create batch job — external API call (Tier 3 boundary)
         batch_request = {
             "operation": "batches.create",
             "input_file_id": batch_file.id,
@@ -615,22 +618,15 @@ class AzureBatchLLMTransform(BaseTransform):
                 endpoint="/chat/completions",
                 completion_window="24h",
             )
-            ctx.record_call(
-                call_type=CallType.HTTP,
-                status=CallStatus.SUCCESS,
-                request_data=batch_request,
-                response_data={"batch_id": batch.id, "status": batch.status},
-                latency_ms=(time.perf_counter() - start) * 1000,
-                provider="azure",
-            )
         except Exception as e:
-            # External API failure - record error and return structured result
+            # External API failure — record and return structured error
+            batch_latency = (time.perf_counter() - start) * 1000
             ctx.record_call(
                 call_type=CallType.HTTP,
                 status=CallStatus.ERROR,
                 request_data=batch_request,
                 response_data={"error": str(e), "error_type": type(e).__name__},
-                latency_ms=(time.perf_counter() - start) * 1000,
+                latency_ms=batch_latency,
                 provider="azure",
             )
             return TransformResult.error(
@@ -641,6 +637,17 @@ class AzureBatchLLMTransform(BaseTransform):
                 },
                 retryable=True,  # Network/auth errors are retryable
             )
+        batch_latency = (time.perf_counter() - start) * 1000
+
+        # Record successful batch creation — our code, must not be caught
+        ctx.record_call(
+            call_type=CallType.HTTP,
+            status=CallStatus.SUCCESS,
+            request_data=batch_request,
+            response_data={"batch_id": batch.id, "status": batch.status},
+            latency_ms=batch_latency,
+            provider="azure",
+        )
 
         # 4. CHECKPOINT immediately after submit
         checkpoint_state = BatchCheckpointState(
@@ -738,30 +745,19 @@ class AzureBatchLLMTransform(BaseTransform):
             "operation": "batches.retrieve",
             "batch_id": batch_id,
         }
+        # Retrieve batch status — external API call (Tier 3 boundary)
         start = time.perf_counter()
         try:
             batch = client.batches.retrieve(batch_id)
-            ctx.record_call(
-                call_type=CallType.HTTP,
-                status=CallStatus.SUCCESS,
-                request_data=retrieve_request,
-                response_data={
-                    "batch_id": batch.id,
-                    "status": batch.status,
-                    "output_file_id": getattr(batch, "output_file_id", None),  # Tier 3: SDK attr may vary by version
-                    "error_file_id": getattr(batch, "error_file_id", None),  # Tier 3: SDK attr may vary by version
-                },
-                latency_ms=(time.perf_counter() - start) * 1000,
-                provider="azure",
-            )
         except Exception as e:
-            # External API failure - record error and return structured result
+            # External API failure — record and return structured error
+            retrieve_latency = (time.perf_counter() - start) * 1000
             ctx.record_call(
                 call_type=CallType.HTTP,
                 status=CallStatus.ERROR,
                 request_data=retrieve_request,
                 response_data={"error": str(e), "error_type": type(e).__name__},
-                latency_ms=(time.perf_counter() - start) * 1000,
+                latency_ms=retrieve_latency,
                 provider="azure",
             )
             # DON'T clear checkpoint - batch exists on Azure, retry should resume checking
@@ -774,6 +770,22 @@ class AzureBatchLLMTransform(BaseTransform):
                 },
                 retryable=True,  # Transient failure - retry status check
             )
+        retrieve_latency = (time.perf_counter() - start) * 1000
+
+        # Record successful retrieve — our code, must not be caught
+        ctx.record_call(
+            call_type=CallType.HTTP,
+            status=CallStatus.SUCCESS,
+            request_data=retrieve_request,
+            response_data={
+                "batch_id": batch.id,
+                "status": batch.status,
+                "output_file_id": getattr(batch, "output_file_id", None),  # Tier 3: SDK attr may vary by version
+                "error_file_id": getattr(batch, "error_file_id", None),  # Tier 3: SDK attr may vary by version
+            },
+            latency_ms=retrieve_latency,
+            provider="azure",
+        )
 
         if batch.status == "completed":
             # Calculate latency from submission to completion
@@ -925,31 +937,20 @@ class AzureBatchLLMTransform(BaseTransform):
             "operation": "files.content",
             "file_id": output_file_id,
         }
+        # Download output file — external API call (Tier 3 boundary)
         start = time.perf_counter()
         try:
             output_content = client.files.content(output_file_id)
             output_text = output_content.text
-            output_hash = hashlib.sha256(output_text.encode("utf-8")).hexdigest()
-            ctx.record_call(
-                call_type=CallType.HTTP,
-                status=CallStatus.SUCCESS,
-                request_data=download_request,
-                response_data={
-                    "file_id": output_file_id,
-                    "content_sha256": output_hash,
-                    "content_length": len(output_text),
-                },
-                latency_ms=(time.perf_counter() - start) * 1000,
-                provider="azure",
-            )
         except Exception as e:
-            # External API failure - record error and return structured result
+            # External API failure — record and return structured error
+            download_latency = (time.perf_counter() - start) * 1000
             ctx.record_call(
                 call_type=CallType.HTTP,
                 status=CallStatus.ERROR,
                 request_data=download_request,
                 response_data={"error": str(e), "error_type": type(e).__name__},
-                latency_ms=(time.perf_counter() - start) * 1000,
+                latency_ms=download_latency,
                 provider="azure",
             )
             # DON'T clear checkpoint - batch completed on Azure, retry should re-attempt download
@@ -962,6 +963,22 @@ class AzureBatchLLMTransform(BaseTransform):
                 },
                 retryable=True,  # Transient failure - retry download
             )
+        download_latency = (time.perf_counter() - start) * 1000
+
+        # Record successful download — our code, must not be caught
+        output_hash = hashlib.sha256(output_text.encode("utf-8")).hexdigest()
+        ctx.record_call(
+            call_type=CallType.HTTP,
+            status=CallStatus.SUCCESS,
+            request_data=download_request,
+            response_data={
+                "file_id": output_file_id,
+                "content_sha256": output_hash,
+                "content_length": len(output_text),
+            },
+            latency_ms=download_latency,
+            provider="azure",
+        )
 
         # Download error file if present (partial batch failures)
         # Azure Batch API puts per-request errors in a separate error_file_id
@@ -980,10 +997,27 @@ class AzureBatchLLMTransform(BaseTransform):
                 "file_id": error_file_id,
                 "file_type": "error",
             }
+            # Download error file — external API call (Tier 3 boundary)
             start = time.perf_counter()
             try:
                 error_content = client.files.content(error_file_id)
                 error_text = error_content.text
+            except Exception as e:
+                # Error file download failed — log but don't fail the batch
+                # The output file was already downloaded successfully
+                error_latency = (time.perf_counter() - start) * 1000
+                ctx.record_call(
+                    call_type=CallType.HTTP,
+                    status=CallStatus.ERROR,
+                    request_data=error_download_request,
+                    response_data={"error": str(e), "error_type": type(e).__name__},
+                    latency_ms=error_latency,
+                    provider="azure",
+                )
+                error_text = None
+            else:
+                # Record successful download — our code, must not be caught
+                error_latency = (time.perf_counter() - start) * 1000
                 error_hash = hashlib.sha256(error_text.encode("utf-8")).hexdigest()
                 ctx.record_call(
                     call_type=CallType.HTTP,
@@ -994,21 +1028,9 @@ class AzureBatchLLMTransform(BaseTransform):
                         "content_sha256": error_hash,
                         "content_length": len(error_text),
                     },
-                    latency_ms=(time.perf_counter() - start) * 1000,
+                    latency_ms=error_latency,
                     provider="azure",
                 )
-            except Exception as e:
-                # Error file download failed - log but don't fail the batch
-                # The output file was already downloaded successfully
-                ctx.record_call(
-                    call_type=CallType.HTTP,
-                    status=CallStatus.ERROR,
-                    request_data=error_download_request,
-                    response_data={"error": str(e), "error_type": type(e).__name__},
-                    latency_ms=(time.perf_counter() - start) * 1000,
-                    provider="azure",
-                )
-                error_text = None
         else:
             error_text = None
 

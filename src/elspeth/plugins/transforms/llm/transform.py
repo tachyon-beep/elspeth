@@ -1,4 +1,3 @@
-# src/elspeth/plugins/llm/transform.py
 """Unified LLM transform with strategy pattern (Task 9 of T10).
 
 LLMTransform dispatches to SingleQueryStrategy or MultiQueryStrategy
@@ -952,15 +951,12 @@ class LLMTransform(BaseTransform, BatchTransformMixin):
         # Initialize Azure AI tracing (process-level OpenTelemetry auto-instrumentation).
         # Must happen after provider creation — the OpenAI SDK must be available.
         if isinstance(self._tracing_config, AzureAITracingConfig):
-            success = _configure_azure_monitor(self._tracing_config)
-            if success:
-                logger.info(
-                    "Azure AI tracing initialized",
-                    provider="azure_ai",
-                    content_recording=self._tracing_config.enable_content_recording,
-                )
-            else:
-                logger.warning("Azure AI tracing setup failed — tracing inactive")
+            _configure_azure_monitor(self._tracing_config)
+            logger.info(
+                "Azure AI tracing initialized",
+                provider="azure_ai",
+                content_recording=self._tracing_config.enable_content_recording,
+            )
 
     def _create_provider(self) -> LLMProvider:
         """Instantiate the provider with all required dependencies.

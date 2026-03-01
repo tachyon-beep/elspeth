@@ -66,8 +66,11 @@ def discover_plugins_in_directory(
     discovered: list[type] = []
 
     if not directory.exists():
-        logger.warning("Plugin directory does not exist: %s", directory)
-        return discovered
+        raise FileNotFoundError(
+            f"Plugin directory does not exist: {directory}. "
+            f"This indicates a broken installation — the plugins/ directory "
+            f"structure is required."
+        )
 
     for py_file in sorted(directory.glob("*.py")):
         if py_file.name in EXCLUDED_FILES:

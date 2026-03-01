@@ -1,4 +1,3 @@
-# src/elspeth/plugins/llm/providers/azure.py
 """Azure OpenAI LLM provider.
 
 Thin wrapper over AuditedLLMClient that normalizes LLMResponse into
@@ -240,6 +239,8 @@ class AzureLLMProvider:
         with self._llm_clients_lock:
             self._llm_clients.clear()
         with self._underlying_client_lock:
+            if self._underlying_client is not None:
+                self._underlying_client.close()
             self._underlying_client = None
 
 
@@ -279,11 +280,11 @@ def _configure_azure_monitor(config: TracingConfig) -> bool:
         return True
 
     if configure_azure_monitor is None:
-        logger.warning(  # type: ignore[unreachable]  # runtime fallback when SDK not installed (see line 239)
-            "azure-monitor-opentelemetry is not installed — Azure AI tracing inactive",
-            hint="Install with: uv pip install 'elspeth[azure]'",
+        raise ImportError(  # type: ignore[unreachable]  # runtime fallback when SDK not installed (see line 249)
+            "azure-monitor-opentelemetry is not installed but azure_ai tracing was configured. "
+            "This should not happen — the SDK is bundled with elspeth[azure]. "
+            "Reinstall with: uv pip install 'elspeth[azure]'"
         )
-        return False
 
     configure_azure_monitor(
         connection_string=config.connection_string,

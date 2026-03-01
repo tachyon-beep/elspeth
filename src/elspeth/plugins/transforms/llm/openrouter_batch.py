@@ -1,4 +1,3 @@
-# src/elspeth/plugins/llm/openrouter_batch.py
 """OpenRouter batch LLM transform for aggregation pipelines.
 
 Batch-aware transform that processes multiple rows in parallel via OpenRouter API.
@@ -284,27 +283,26 @@ class OpenRouterBatchLLMTransform(BaseTransform):
         # Validate configuration completeness
         errors = validate_tracing_config(self._tracing_config)
         if errors:
-            for error in errors:
-                logger.warning("Tracing configuration error", error=error)
-            return
+            raise ValueError(
+                f"Tracing configuration errors: {'; '.join(errors)}"
+            )
 
         match self._tracing_config.provider:
             case "azure_ai":
                 # Azure AI tracing NOT supported for OpenRouter
-                logger.warning(
-                    "Azure AI tracing not supported for OpenRouter - use Langfuse instead",
-                    provider="azure_ai",
-                    hint="Azure AI auto-instruments the OpenAI SDK; OpenRouter uses HTTP directly",
+                raise ValueError(
+                    "Azure AI tracing is not supported for OpenRouter. "
+                    "Azure AI auto-instruments the OpenAI SDK; OpenRouter uses HTTP directly — "
+                    "use Langfuse instead (provider: langfuse)."
                 )
-                return
             case "langfuse":
                 pass  # Handled by create_langfuse_tracer() in __init__
             case "none":
                 pass  # No tracing
             case _:
-                logger.warning(
-                    "Unknown tracing provider encountered after validation - tracing disabled",
-                    provider=self._tracing_config.provider,
+                raise ValueError(
+                    f"Unknown tracing provider '{self._tracing_config.provider}' "
+                    f"after validation. Supported: azure_ai, langfuse, none."
                 )
 
     def process(
