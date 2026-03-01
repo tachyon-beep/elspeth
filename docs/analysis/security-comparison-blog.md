@@ -2,15 +2,79 @@
 
 **Date:** 2026-03-01
 **Framework Version:** 0.3.0 (RC-3.3)
+**Measurements as of:** commit `ab9e2648` (2026-03-01, branch `RC3.3-architectural-remediation`)
 **Author:** Architecture analysis, synthesized from CLAUDE.md, ARCHITECTURE.md, requirements, CI tooling, and test suite
 
 ---
 
 ## Executive Summary
 
-ELSPETH is an 80,435-line Python framework for auditable data pipelines, built with AI-assisted development (Claude Code) but governed by a rigorous engineering discipline that neither "vibe coding" nor traditional waterfall typically achieve. The project has **10,439 automated tests** across 621 test files (232K lines of test code — a **2.9:1 test-to-production ratio**), **6 Architecture Decision Records**, **323 tracked requirements**, and a custom 1,117-line AST-based static analysis tool that enforces trust model compliance on every commit with **361 individually justified allowlist entries**.
-
 The key differentiator is not any single practice, but the **interlocking system of constraints** that make insecure code structurally difficult to write, merge, or deploy — combined with an **incident-driven hardening cycle** where every real bug generates a structural countermeasure that prevents the entire class of bug from recurring.
+
+ELSPETH is an ~80,400-line Python framework for auditable data pipelines, built with AI-assisted development (Claude Code) but governed by a rigorous engineering discipline that neither "vibe coding" nor traditional waterfall typically achieve.
+
+Key metrics:
+
+- **~10,400 automated tests** across 622 test files (231K lines of test code — a **2.9:1 test-to-production ratio**)
+- **6 Architecture Decision Records** with rationale, alternatives considered, and consequences
+- **390 tracked requirements** with implementation status and evidence (343 implemented, 14 partial, 6 deferred — each with a traceability link)
+- **1,117-line custom AST-based static analysis tool** enforcing trust model compliance on every commit
+- **361 individually justified allowlist entries** with owner, reason, safety, and expiration
+
+### Terminology: Two Baselines
+
+This report measures ELSPETH against two development methodologies:
+
+- **"Vibe coding"** refers to AI-assisted development without engineering constraints — prompting an LLM to generate code and shipping whatever compiles, with minimal or no testing, architecture, or specification. The term (coined by Andrej Karpathy in early 2025) describes a workflow where the developer "gives in to the vibes" and accepts AI output with little scrutiny. It is fast, accessible, and produces code that often works — until it doesn't. This is not a hypothetical baseline: a 2025 METR study found that AI-assisted developers in controlled trials produced code with more security vulnerabilities than unassisted developers, and GitClear's 2024 analysis of 153M lines of changed code found that "code churn" (code rewritten within two weeks of being authored) rose 39% year-over-year as AI adoption increased — suggesting that AI-generated code is being accepted and then immediately corrected at rising rates. Vibe coding is the default mode of AI-assisted development; engineering discipline is the exception.
+
+- **"Waterfall"** refers to traditional plan-driven development with sequential phases (requirements → design → implementation → testing → deployment). Mature waterfall organizations (CMMI Level 3+) do have configuration management, test strategies, and traceability matrices. The comparison here is fair but honest: many of the gaps identified are not inherent to waterfall *methodology* but are common in waterfall *practice*, where specifications rot, test teams are siloed, and architectural enforcement is periodic rather than continuous.
+
+### At a Glance
+
+| Dimension | Vibe-Coded | Waterfall | ELSPETH |
+|-----------|------------|-----------|---------|
+| **Data trust model** | None | In requirements doc | 3-tier, CI-enforced via custom AST analysis |
+| **Error handling** | `try/except: pass` | Defensive ("resilient") | Offensive — crash on system bugs, quarantine user data |
+| **Test strategy** | Ad hoc | Separate team, late | 6-layer pyramid, 2.9:1 ratio, property fuzzing, chaos testing, mutation testing |
+| **Architecture enforcement** | None | Design doc (drifts) | 4-layer model, CI-enforced, 0 violations |
+| **Audit trail** | Logging | Logging + compliance checklist | 19-table audit DB, HMAC exports, RFC 8785 hashing, SQLCipher |
+| **Known vulnerabilities** | Unknown unknowns | Found by pentest, deferred | Continuously discovered, tracked, publicly documented |
+| **Engineering spec** | None | Written once, ignored | Machine-consumed every session, CI-verified every commit |
+
+The full comparative summary with 17 dimensions is in the [final section](#comparative-summary).
+
+Perhaps the most novel finding (detailed in section 13) is that ELSPETH's engineering specification — the `CLAUDE.md` file — is not documentation *about* the code but the specification *for* the code, loaded into the AI development agent's context at the start of every session and verified against the codebase by CI on every commit. This creates a form of institutional knowledge that is resistant to team turnover, resistant to "developers didn't read the email," and resistant to specification drift — three failure modes that plague both vibe-coded and waterfall projects alike.
+
+---
+
+## Scope and Threat Model
+
+Before the detailed comparison, it's worth stating explicitly what ELSPETH's security posture is designed to protect, what it does not claim to protect against, and what trust assumptions underpin the architecture.
+
+### What We Protect
+
+- **Audit trail integrity** — the Landscape database is the legal record. Corruption, silent mutation, or fabricated entries would undermine the entire purpose of the framework.
+- **Pipeline correctness** — every row must reach exactly one terminal state, every routing decision must be recorded, and no data may be silently dropped or duplicated.
+- **Secret confidentiality** — API keys, vault credentials, and signing keys must never appear in the audit trail or logs. Only HMAC fingerprints are persisted.
+- **External boundary safety** — data from external systems (CSVs, APIs, LLM responses) must be validated at the trust boundary before entering the pipeline.
+
+### What We Do Not Claim
+
+- **Not a sandbox for untrusted code.** All 25 plugins are system-owned. ELSPETH uses pluggy for clean architecture, not for executing arbitrary user-provided code. There is no plugin sandbox because there is no untrusted plugin code.
+- **Not hardened against a hostile operator with full host access.** If an attacker has root access to the machine running the pipeline, they can modify the binary, the database, or the configuration. ELSPETH's integrity guarantees assume the execution environment itself is not compromised.
+- **Not a network security tool.** SSRF prevention and URL validation are defense-in-depth measures for external HTTP calls, not a replacement for network-level controls (firewalls, egress filtering).
+
+### Trust Assumptions
+
+| Actor | Trust Level | Rationale |
+|-------|-------------|-----------|
+| **Pipeline operator** (writes YAML config, runs CLI) | Trusted | Operators define what data to process and where to send it. Malicious config = malicious pipeline. |
+| **ELSPETH codebase** (plugins, engine, contracts) | Fully trusted | All code is system-owned, tested, and CI-gated. A bug is a defect to fix, not an attack to defend against. |
+| **External data sources** (CSV files, API responses, LLM outputs) | Zero trust | Anything from outside the system boundary may be malformed, malicious, or missing. Validated at ingestion. |
+| **Audit database contents** | Fully trusted on read | We wrote it; if it's corrupt, that's a system failure (crash immediately), not a data quality issue. |
+| **Host environment** | Trusted | File system, network, Python runtime assumed to be non-hostile. |
+
+These assumptions make the Tier 1/2/3 error handling strategy feel inevitable rather than arbitrary: if you trust your own database completely, crashing on anomalies is the only correct response. If you trust nothing from external systems, validating at the boundary is the only correct response.
 
 ---
 
@@ -71,6 +135,8 @@ except json.JSONDecodeError as exc:
     ) from exc
 ```
 
+The discipline extends to exception chains: ELSPETH requires `from exc` to preserve the original exception when re-raising, and explicitly forbids `from None` (which destroys diagnostic information). This matters for security incident investigation — a broken exception chain means lost context about what actually failed and why.
+
 The decision test is codified:
 - **Our data is wrong?** → Crash immediately (it's corruption)
 - **User data is wrong?** → Quarantine the row, keep processing
@@ -92,19 +158,34 @@ The decision test is codified:
 - **R4:** Detects `except BaseException` (overly broad exception handling)
 - **R5:** Detects `isinstance()`/`hasattr()` checks on system-owned objects
 - **R6:** Detects silent exception handling with fallback values
+- **R7:** Detects `contextlib.suppress()` usage (silently swallowing exceptions)
 - **R8:** Detects `dict.setdefault()` on Tier 1 data
+- **R9:** Detects `dict.pop(key, default)` with implicit defaults on missing keys
 
 ### The Allowlist: 361 Individually Justified Entries
 
 Every finding that is *not* a true violation (e.g., `isinstance()` in an AST walker that *must* dispatch on node types) requires an explicit allowlist entry with four mandatory fields:
 
 ```yaml
-- key: core/canonical.py:R5:_normalize_value:fp=e3d4fea25757a57b
+# Real entry from core.yaml — payload store idempotent delete
+- key: core/payload_store.py:R6:FilesystemPayloadStore:delete:fp=6467dcaaf8795f52
   owner: architecture
-  reason: AST/type checking - required for safe parsing or discriminated unions
-  safety: Code reviewed - legitimate pattern
-  expires: '2026-05-02'
+  reason: Idempotent delete — FileNotFoundError means content already deleted (retention purge or duplicate call)
+  safety: Returns False on missing file — caller informed, no silent data loss
+  expires: null
 ```
+
+Additionally, entire modules can be exempted at the per-file level when they sit at a trust boundary. For example, source plugins — which ingest external data (Tier 3) — are exempted from all defensive-pattern rules, because defensive programming *is* the correct strategy at the external data boundary:
+
+```yaml
+# Real entry from plugins.yaml — source plugins are Tier 3 boundaries
+- pattern: plugins/sources/*
+  rules: [R1, R2, R3, R4, R5, R6, R9]
+  reason: Source plugins ingest external data (Tier 3) - all defensive patterns legitimate
+  expires: null
+```
+
+This demonstrates the trust model's nuance: the same pattern (`.get()` with a default) is a **bug** in Tier 1 code and a **correct implementation** in Tier 3 code. The allowlist captures this distinction.
 
 The project currently has **361 such entries** across 10 per-module YAML files (`config/cicd/enforce_tier_model/`). Each entry specifies:
 
@@ -134,14 +215,14 @@ Pre-commit hooks run **12 checks** on the **full codebase** (not just staged fil
 
 **What vibe-coded projects do:** Maybe a handful of unit tests. "It works on my machine" is the primary test strategy.
 
-**What waterfall projects do:** A test team writes tests after implementation, typically focused on happy paths. Integration testing happens late, in a separate environment, by a separate team. Test coverage is a metric that's gamed (testing getters/setters to hit coverage numbers).
+**What waterfall projects do:** A separate test team writes tests after implementation. Mature waterfall organizations (CMMI Level 3+) achieve good unit test coverage and have dedicated QA phases. The best (Level 4-5) apply statistical process control to defect rates and conduct formal causal analysis. But three structural weaknesses persist even in well-run waterfall organizations: (1) integration testing happens late, in a separate environment, by a team that didn't write the code — so integration bugs are discovered at the highest-cost point in the lifecycle; (2) test coverage is measured quantitatively but the *quality* of test assertions is rarely verified (testing getters/setters to hit numbers); and (3) test infrastructure itself — the factories, fixtures, and helpers — is rarely treated as a first-class engineering concern subject to its own quality audits.
 
-**What ELSPETH does:** A six-layer test pyramid that was designed as a cohesive system, with each layer serving a specific verification purpose:
+**What ELSPETH does:** A six-layer test pyramid that was designed as a cohesive system, with each layer serving a specific verification purpose. The raw 2.9:1 test-to-code ratio tells part of the story, but the *quality* of the testing matters more than the line count: 1,173 of those tests are property-based (generating thousands of randomized inputs at runtime), chaos testing exercises real failure modes against production code paths, mutation testing verifies that tests actually catch bugs (not just execute code), and the test suite itself was subjected to a 630-line infrastructure audit (see below).
 
 | Layer | Count | Purpose |
 |-------|-------|---------|
 | **Unit** | ~7,100 | Component-level correctness |
-| **Property** | ~1,057 | Hypothesis-based fuzzing — finds edge cases humans miss |
+| **Property** | ~1,173 | Hypothesis-based fuzzing — finds edge cases humans miss |
 | **Integration** | ~482 | Cross-subsystem interactions through real code paths |
 | **E2E** | ~48 | Full pipeline execution (source → transform → sink) |
 | **Performance** | ~67 | Benchmarks, stress tests, scalability, memory profiling |
@@ -155,22 +236,33 @@ Integration tests are required to use `ExecutionGraph.from_plugin_instances()` a
 
 ### Property-Based Fuzzing of Security Boundaries
 
-1,057 tests use Hypothesis to generate randomized inputs. Two examples illustrate why this matters for security:
+1,173 tests across 64 files use Hypothesis to generate randomized inputs. Two examples illustrate why this matters for security:
 
-**SSRF prevention fuzzing** (`test_ssrf_properties.py`): Generates thousands of IP addresses from every blocked range (private networks, link-local, loopback), including IPv4-mapped IPv6 bypass attempts (`::ffff:10.0.0.1`), zone-scoped IPv6, and multi-homed hostname resolution — testing that the SSRF filter is fail-closed against all known bypass vectors.
+**SSRF prevention fuzzing** (`test_ssrf_properties.py`): Generates thousands of IP addresses from every blocked range (private networks, link-local, loopback), including IPv4-mapped IPv6 bypass attempts (`::ffff:10.0.0.1`), zone-scoped IPv6, and multi-homed hostname resolution — testing that the SSRF filter is fail-closed (defaults to blocking when uncertain) against all known bypass vectors.
 
 **Expression injection fuzzing** (`test_expression_safety.py`): Generates arbitrary Python expressions including function calls, lambdas, comprehensions, assignment expressions, `await`/`yield`, f-strings, and attribute access — testing that the AST-based expression parser rejects every forbidden construct while accepting all valid gate conditions.
 
 These aren't tests of specific known attack patterns — they're *generative* tests that discover attack patterns the developer hasn't thought of.
 
-### Chaos Testing Infrastructure
+### Chaos Testing Infrastructure: Bespoke Failure Simulation
 
-Two dedicated test servers simulate external API failures without mocks:
+Most projects test external integrations with mocks — fake objects that return canned responses. Mocks verify that your code *calls* the API correctly, but they don't test what happens when the API misbehaves. ELSPETH instead runs **real HTTP servers** (~9,500 lines of testing infrastructure) that simulate the full spectrum of external failure modes:
 
-- **ChaosLLM**: Fake LLM server with configurable error injection (429 rate limits, 5xx errors, timeouts, disconnects, malformed JSON), latency simulation, and response modes (random, template, echo, preset bank)
-- **ChaosWeb**: Fake web server with HTTP error injection, configurable failure profiles (`gentle`, `realistic`, `stress_extreme`), slow responses, and encoding variations
+**ChaosLLM** (`testing/chaosllm/`) is a fake LLM server compatible with both OpenAI and Azure OpenAI chat completion endpoints. It's not a mock — it's a running HTTP server that your pipeline connects to exactly as it would connect to a real LLM provider:
 
-These exercise the same code paths as production external calls — the retry logic, rate limiting, timeout handling, and error recording are all tested against realistic failure modes.
+- **Error injection**: Configurable rates of 429 rate limits, 5xx server errors, timeouts, mid-response disconnects, and malformed JSON responses
+- **Latency simulation**: Burst patterns for AIMD (Additive Increase / Multiplicative Decrease) testing of the rate limiter
+- **Response modes**: Random generation, Jinja2 template-based, echo (return the prompt), and preset bank (serve responses from a JSONL file)
+- **SQLite metrics database** with an MCP analysis server for querying request/response patterns
+- **Named presets** (`stress_aimd`, etc.) for reproducible test scenarios
+
+**ChaosWeb** (`testing/chaosweb/`) is a fake web server for testing the `web_scrape` transform:
+
+- **HTTP error injection**: 4xx/5xx codes, timeouts, connection resets, slow responses (configurable per-request latency)
+- **Content generation**: HTML pages with configurable structure, encoding variations (UTF-8, Latin-1, etc.), and content types
+- **Failure profiles**: `gentle` (5% error rate), `realistic` (15%), `silent` (errors but no HTTP error codes — the hardest to detect), `stress_scraping` (30%), `stress_extreme` (50%)
+
+**Why this matters for security:** These servers exercise the same production code paths as real external calls — the retry logic, rate limiting, timeout handling, error recording, and Tier 3 boundary validation are all tested against realistic failure modes. A mock that returns `{"error": "rate_limited"}` doesn't test whether your retry logic actually backs off correctly under sustained 429 responses. A ChaosLLM server running at 20% rate-limit injection does.
 
 ### Test Infrastructure as a First-Class Concern
 
@@ -179,6 +271,28 @@ The project produced a **630-line infrastructure audit of its own test suite** (
 The audit identified **900+ violations** across 120+ test files where tests constructed objects directly instead of using centralized factories. The remediation plan has 5 priority tiers, 6 new factory functions, and a CI enforcement script to prevent regression — applying the same rigor to test infrastructure as to production code.
 
 Neither vibe-coded projects (no tests to audit) nor waterfall projects (test infrastructure is typically not treated as a first-class concern) invest in this kind of self-assessment.
+
+### Mutation Testing: Verifying That Tests Actually Catch Bugs
+
+Test coverage measures whether tests *execute* code, not whether they *verify* it. A test that calls a function but never asserts on its output achieves 100% coverage while catching 0% of bugs. **Mutation testing** addresses this by introducing artificial bugs (mutants) into the production code and checking whether any test fails. A mutant that survives means a real bug in that location would also survive.
+
+ELSPETH runs mutation testing (via mutmut) as a weekly CI workflow with explicit target scores by subsystem, prioritized by security impact:
+
+| Subsystem | Target Mutation Score | Rationale |
+|-----------|----------------------|-----------|
+| `canonical.py` | 95%+ | Hash integrity is foundational — a missed mutation here could corrupt the audit trail |
+| `landscape/` | 90%+ | Audit trail is the legal record — silent data loss is unacceptable |
+| `engine/` | 85%+ | Orchestration correctness affects routing and lineage accuracy |
+
+These are targets for the next mutation run, scheduled under the RC3.3 architectural remediation. The preceding architecture refactoring (31 tasks, including complete repository pattern extraction and typed context boundaries) was a prerequisite — running mutation testing against code that is being structurally reorganized produces noise rather than signal. Actual achieved scores will be published once the RC3.3 run completes.
+
+This is a direct response to the waterfall weakness of "tests that pass but don't verify behavior." Vibe-coded projects rarely have tests at all; waterfall projects rarely verify that their tests are effective. Mutation testing closes the loop.
+
+### The Test Suite Rewrite as a Security Event
+
+The project performed a **complete test suite rewrite** (v1→v2), deleting 222,000 lines of tests and replacing them with 231,000 lines of new tests — applying the same trust model rigor to test code as to production code. This was driven by the discovery that the test infrastructure itself had become a security liability: tests were constructing objects that bypassed production invariants, creating a false sense of verification.
+
+The old suite was deleted in a single commit — not deprecated, not dual-maintained. This is the no-legacy-code policy (section 8) applied to tests: dead test code is worse than no test code, because it provides false confidence.
 
 ---
 
@@ -190,14 +304,44 @@ Neither vibe-coded projects (no tests to audit) nor waterfall projects (test inf
 
 **What ELSPETH does:** The **Landscape** audit subsystem is the architectural backbone, not an afterthought:
 
-- **21 database tables** recording complete lineage: runs, nodes, edges, rows, tokens, parent lineage, node states, routing events, external calls, batch operations, artifacts, errors, secret resolutions, field resolutions
+- **19 database tables** recording complete lineage: runs, nodes, edges, rows, tokens, token parents, token outcomes, node states, operations, calls, artifacts, routing events, batches, batch members, batch outputs, validation errors, transform errors, checkpoints, secret resolutions
 - **Every decision is traceable:** `elspeth explain --run <id> --row <id>` reconstructs the complete path any row took through the pipeline, including every transform applied, every gate evaluation, every external API call, and the final destination
-- **HMAC-signed exports** for legal-grade integrity verification with manifest hash chains
-- **RFC 8785 (JCS) canonical JSON** for deterministic hashing — NaN and Infinity are strictly rejected (not silently converted), because silent conversion would make two different inputs produce the same hash
-- **SQLCipher encryption at rest** for the audit database
+- **HMAC-signed exports** for tamper-evident integrity verification with manifest hash chains, suitable for external review
+- **RFC 8785 canonical JSON** (JSON Canonicalization Scheme — a standard for producing byte-identical JSON from equivalent inputs) for deterministic hashing — NaN and Infinity are strictly rejected (not silently converted), because silent conversion would make two different inputs produce the same hash
+- **SQLCipher encryption at rest** for the audit database, configured via passphrase or environment variable. This means the audit trail — the legal record — is encrypted on disk even if the storage medium is compromised
 - **Secret fingerprinting** — secrets are never stored in the audit trail; instead, HMAC fingerprints are recorded so you can verify "was this the same key?" without exposing the key itself
-- **Frozen dataclasses for all audit records** — the 16 audit record types in `contracts/audit.py` are `frozen=True, slots=True`, so any attempt to mutate an audit record after construction crashes at the mutation site rather than silently corrupting Tier 1 data
+- **25 frozen dataclasses for all audit records** — every audit record type in `contracts/audit.py` is `frozen=True, slots=True` (including 4 node state variants: Open, Pending, Completed, Failed). This is a **language-level immutability guarantee**, not a convention. Any attempt to mutate an audit record after construction raises `FrozenInstanceError` at the mutation site — the Python runtime *won't let* you corrupt Tier 1 data, even by accident. Combined with `slots=True`, these objects also reject arbitrary attribute assignment (`obj.typo_field = value` crashes immediately). This is defense-in-depth that works even when a developer is careless.
+- **Read-only forensic tooling** — the Landscape MCP server provides read-only access to the audit database for post-hoc investigation. The investigation tool architecturally *cannot* mutate the evidence it's investigating — a basic forensic principle that's enforced by the tool's design, not by policy.
 - **"I don't know what happened" is never acceptable** — this is a stated design principle, not aspirational. Every output must be provably traceable to its source data, configuration, and code version
+
+### Requirements Traceability Matrix
+
+**What vibe-coded projects do:** No requirements exist. Features are described in chat messages or issue titles. Whether a feature is "done" is determined by whether it seems to work.
+
+**What waterfall projects do:** Requirements are documented in a traceability matrix (RTM) linking requirements to design, implementation, and test cases. This is a strength of mature waterfall — CMMI Level 3+ organizations often maintain RTMs as a process requirement. The weakness is maintenance: as implementation progresses, the RTM typically lags behind the code, and by release the matrix reflects what was *planned*, not what was *built*.
+
+**What ELSPETH does:** Maintains a **390-requirement traceability matrix** (`docs/architecture/requirements.md`) where each requirement has:
+
+| Column | Purpose | Example |
+|--------|---------|---------|
+| **Requirement ID** | Unique identifier with domain prefix | `CFG-017`, `CLI-003`, `LND-042` |
+| **Requirement** | What the system must do | "Pipeline configuration shall support multi-source precedence" |
+| **Source** | Where the requirement originated | `CLAUDE.md §Configuration`, `ADR-003` |
+| **Status** | Current implementation state | IMPLEMENTED, PARTIAL, DIVERGED, DEFERRED, NOT IMPLEMENTED |
+| **Evidence** | Proof of implementation | Code path, test file, or configuration reference |
+
+The status breakdown is honest:
+
+| Status | Count | Meaning |
+|--------|-------|---------|
+| **IMPLEMENTED** | 343 | Fully built and verified |
+| **PARTIAL** | 14 | Partially implemented with known gaps |
+| **DEFERRED** | 6 | Consciously deferred to a later release |
+| **NOT IMPLEMENTED** | 15 | Not yet built |
+| **DIVERGED** | 3 | Implemented differently than specified, with documented justification |
+| **NEW** | 6 | Capabilities discovered during implementation (not in original spec) |
+
+The "DIVERGED" status is particularly notable — it acknowledges that implementation sometimes legitimately departs from the original spec, but requires the departure to be documented rather than silent. This is more honest than waterfall's typical binary "compliant / non-compliant" and more rigorous than vibe coding's "whatever works."
 
 ---
 
@@ -205,7 +349,7 @@ Neither vibe-coded projects (no tests to audit) nor waterfall projects (test inf
 
 **What vibe-coded projects do:** No architecture. Everything imports everything. Circular dependencies are "fixed" with lazy imports.
 
-**What waterfall projects do:** Architecture is designed upfront in a document. Implementation drifts from the design over time. By release, the actual dependency graph bears little resemblance to the architecture diagram. Nobody checks.
+**What waterfall projects do:** Architecture is designed upfront in a document. Mature organizations (CMMI Level 3+) conduct periodic architecture reviews that may catch drift. But enforcement is human-driven and episodic — a quarterly review can't catch the lazy import added last Tuesday. By release, the actual dependency graph has typically drifted from the design, and the gap is discovered (if at all) during integration testing or a compliance audit.
 
 **What ELSPETH does:** A strict 4-layer model enforced by CI:
 
@@ -240,7 +384,7 @@ in contracts/            →    import workaround     →   increases
                restructuring is too big now"
 ```
 
-The intervention was designed to break the feedback loop: fix the stock (10 violations → 0) AND add a balancing loop (CI enforcement that prevents new violations from forming). This is applying formal systems dynamics to software architecture — not something you see in either vibe-coded or waterfall projects, where architectural drift is typically treated as an inevitable cost of development rather than a diagnosable systems pathology.
+The pattern is self-reinforcing: each workaround makes the *next* structural fix harder, which makes the *next* workaround more tempting. This is the same feedback loop that causes technical debt to accumulate in every project. The intervention was designed to break it at two points: fix the stock (10 violations → 0) AND add a balancing loop (CI enforcement that prevents new violations from forming). The fix was verified: violation count went from 10 to 0 in a single remediation pass, and CI enforcement has maintained 0 violations across all subsequent development. This is applying formal systems dynamics to software architecture — not something you see in either vibe-coded or waterfall projects, where architectural drift is typically treated as an inevitable cost of development rather than a diagnosable systems pathology.
 
 ### Architecture Decision Records
 
@@ -276,7 +420,7 @@ The "leaf module principle" (contracts/ has zero outbound dependencies) means al
    - **AST checker** (`scripts/check_contracts`) verifies `from_settings()` uses all Settings fields
    - **Alignment tests** verify field mappings are correct and complete
 
-This exists because of a real bug (P2-2026-01-21): `exponential_base` was added to `RetrySettings`, Pydantic validated it, users configured it, but it was **silently ignored at runtime** because the mapping to the engine was never updated. The contract system makes this class of bug structurally impossible.
+This exists because of a real bug (P2-2026-01-21): `exponential_base` was added to `RetrySettings`, Pydantic validated it, users configured it, but it was **silently ignored at runtime** because the mapping to the engine was never updated. The contract system makes this class of bug difficult to introduce and likely to be caught pre-merge — mypy catches missing protocol fields, the AST checker catches unmapped settings fields, and alignment tests catch incorrect mappings.
 
 ---
 
@@ -303,7 +447,7 @@ This matters for security because **dead code is attack surface** — every line
 
 **What waterfall projects do:** A custom expression parser, or eval() with a restricted globals/locals dict (which is [famously bypassable](https://nedbatchelder.com/blog/201206/eval_really_is_dangerous.html)).
 
-**What ELSPETH does:** Gate conditions are parsed using Python's `ast` module into an AST, then evaluated against a restricted visitor that only allows safe operations (comparisons, boolean logic, arithmetic, string methods, field access). No `eval()`, no `exec()`, no `compile()`. The expression parser lives in `core/expression_parser.py` (652 lines) and is property-tested with Hypothesis (`test_expression_safety.py`) to fuzz for bypass vectors.
+**What ELSPETH does:** Gate conditions are parsed using Python's `ast` module into an AST, then evaluated against a restricted visitor that only allows safe operations (comparisons, boolean logic, arithmetic, string methods, field access). No `eval()`, no `exec()`, no `compile()`. The expression parser lives in `core/expression_parser.py` (655 lines) and is property-tested with Hypothesis (`test_expression_safety.py`) to fuzz for bypass vectors.
 
 The security model is whitelist-based:
 
@@ -326,7 +470,10 @@ Beyond the systemic practices above, ELSPETH has purpose-built security infrastr
 | **Config secrets** (`core/security/config_secrets.py`) | Two-phase fingerprinting — runtime uses real values, audit trail stores HMAC |
 | **Fail-closed design** | Missing fingerprint key + secrets in config = startup failure (not silent degradation) |
 | **Content safety screening** | Azure Content Safety + Prompt Shield plugins for LLM pipelines, hardened to fail-closed after P0 bugs found where they originally failed-open |
-| **Frozen audit records** | 16 dataclass types with `frozen=True, slots=True` — mutation crashes at the mutation site |
+| **Frozen audit records** | 25 immutable dataclass types — language-level mutation prevention (detailed in section 5) |
+| **Rate limiting** (`core/rate_limit/`) | Per-service rate limiting with `pyrate-limiter`, preventing resource exhaustion against external APIs. All plugins sharing a service share the bucket. Vibe-coded projects hit API rate limits and either crash or silently drop requests; ELSPETH throttles proactively with configurable backpressure (block or drop). |
+| **Crash recovery with topology validation** (`core/checkpoint/`) | Checkpointing for interrupted runs — but the resume path validates that the pipeline DAG topology hash matches the checkpoint. Resuming against a different pipeline configuration would corrupt the audit trail; ELSPETH detects this and refuses to resume. |
+| **Plugin ownership** | All 25 plugins are system-owned code, not user-provided extensions. ELSPETH uses pluggy for clean architecture, not to accept arbitrary user code. This is a deliberate trust surface reduction — there is no plugin sandbox to escape from because there is no untrusted plugin code to sandbox. |
 
 ---
 
@@ -334,7 +481,7 @@ Beyond the systemic practices above, ELSPETH has purpose-built security infrastr
 
 **What vibe-coded projects do:** Bugs are fixed in isolation. The same class of bug recurs because there's no structural countermeasure.
 
-**What waterfall projects do:** Bugs go into a defect tracker, get prioritized against feature work, and maybe get fixed in the next release. Root cause analysis is rare. Structural countermeasures are rarer.
+**What waterfall projects do:** Bugs go into a defect tracker, get prioritized against feature work, and get fixed in a subsequent release. Mature waterfall organizations (CMMI Level 4-5) *do* conduct formal causal analysis and require structural countermeasures — this is an explicit process area (CAR) in the CMMI model. The gap is not methodological but operational: causal analysis requires human discipline and organizational commitment. When schedules compress, it's the first practice to be skipped. And even when practiced, the countermeasure typically takes the form of a new process rule or code review checklist item — not a CI gate that automatically enforces it.
 
 **What ELSPETH does:** Every significant bug generates a **structural countermeasure** that makes the entire *class* of bug impossible, not just the specific instance. The hardening cycle is:
 
@@ -366,7 +513,7 @@ A security report that claims perfection is not credible. ELSPETH has known weak
 
 | Issue | Impact | Status |
 |-------|--------|--------|
-| **DNS rebinding TOCTOU** in SSRF prevention | `validate_url_for_ssrf()` validates the IP, but `httpx` re-resolves the hostname — an attacker could change DNS between validation and connection | Tracked, property-tested for known bypass vectors, architectural fix requires custom DNS resolver |
+| **DNS rebinding TOCTOU** (time-of-check/time-of-use race condition) in SSRF prevention | `validate_url_for_ssrf()` validates the IP, but `httpx` re-resolves the hostname — an attacker could change DNS between validation and connection | Tracked, property-tested for known bypass vectors, architectural fix requires custom DNS resolver |
 | **JSON sink non-atomic write** | `json_sink.py` truncates then writes — crash during write loses data | Tracked, affects data durability (not confidentiality) |
 | **NaN/Infinity in float validation** | Accepted by source validation, undermines RFC 8785 canonicalization | Tracked, sanitization layer added for quarantine paths, full fix requires source-level rejection |
 
@@ -378,14 +525,18 @@ A security report that claims perfection is not credible. ELSPETH has known weak
 | **Untyped dicts at Tier 1 boundary** | 10 open bugs — `dict[str, Any]` crossing into audit trail where frozen dataclasses should be used | Fix pattern established (TokenUsage precedent), each being addressed individually |
 | **Unsandboxed Jinja2** | blob_sink template rendering, ChaosLLM test server | ChaosLLM is testing-only; blob_sink requires user-authored templates |
 
-### Why This Section Strengthens the Report
+### Detection Method
 
 These weaknesses are known because **the same detection system that found and fixed the P0 Content Safety and Prompt Shield bugs also found these**. The DNS rebinding TOCTOU was discovered during a systematic security analysis. The untyped dict pattern was identified by applying the trust model to the entire codebase.
 
 Compare:
-- **Vibe-coded projects**: Vulnerabilities exist but are undiscovered — no systematic way to find them
+- **Vibe-coded projects**: Vulnerabilities likely exist undiscovered — no systematic discovery mechanism is in place
 - **Waterfall projects**: Vulnerabilities may be found by a penetration test at the end, but there's no budget to fix them before release
 - **ELSPETH**: Vulnerabilities are found by the same continuous analysis that enforces the trust model, tracked in the issue tracker with priority and root cause, and fixed through the incident-driven hardening cycle
+
+### External Validation
+
+No independent penetration test or external security audit has been performed to date. The findings in this report are the product of internal analysis: systematic codebase review, property-based fuzzing of security boundaries, custom static analysis, and the incident-driven hardening cycle described in section 11. External validation is a planned step before production release. This is stated explicitly because a security report should be transparent about the scope of its evidence — and because the absence of external review is itself a known limitation.
 
 ---
 
@@ -397,13 +548,13 @@ Compare:
 
 **What ELSPETH does:** The `CLAUDE.md` file (884 lines) is not documentation *about* the code — it is the **specification *for* the code**, consumed by the AI development agent at the start of every session. This has profound implications:
 
-1. **The spec can't be ignored.** In a traditional project, a developer might not read the security guidelines. In ELSPETH, the trust model, the error handling rules, the coercion rules, and the offensive programming requirements are literally in the AI's context window for every code change.
+1. **The spec can't be ignored.** In a traditional project, a developer might not read the security guidelines. In ELSPETH, the trust model, the error handling rules, the coercion rules, and the offensive programming requirements are literally in the AI's context window for every code change. And even if the AI were to deviate from the spec, CI enforcement (tier model checker, config contract verifier, mypy strict mode) blocks the commit — the specification is verified by machine, not just consumed by one.
 
 2. **The spec updates propagate instantly.** When a P0 bug leads to a new rule (e.g., "Content Safety plugins must be fail-closed"), the rule is added to CLAUDE.md and *every subsequent development session* automatically uses the updated rules. There's no "training" gap, no "developers didn't read the email" gap.
 
-3. **The spec is continuously verified.** CI runs the tier model enforcer and config contract checker on every commit, verifying that the codebase actually conforms to what CLAUDE.md specifies. The spec and the code cannot drift apart.
+3. **The spec is continuously verified.** CI runs the tier model enforcer and config contract checker on every commit, verifying that the codebase actually conforms to what CLAUDE.md specifies. Drift between the spec and the code is caught at the pre-commit gate rather than discovered during a quarterly review or compliance audit.
 
-4. **The spec encodes institutional memory.** The `MEMORY.md` development memory file contains "HARD PROHIBITIONS" — permanent rules derived from catastrophic incidents. These are immune to the knowledge loss that happens when team members leave in traditional projects. Examples:
+4. **The spec encodes institutional memory.** The `MEMORY.md` development memory file contains "HARD PROHIBITIONS" — permanent rules derived from catastrophic incidents. These are resistant to the knowledge loss that happens when team members leave in traditional projects. Examples:
    - *"SUBAGENTS MUST NEVER EXECUTE GIT COMMANDS"* — from a data loss incident
    - *"NO GATE PLUGINS"* — from a deliberate architectural removal (3,000 lines deleted)
    - *"NO git stash"* — from repeated data loss during pre-commit hooks
@@ -417,34 +568,43 @@ Compare:
 |-------------------|------------|-----------|---------|
 | **Data trust model** | None | In requirements doc, inconsistently applied | 3-tier model, CI-enforced via custom AST analysis |
 | **Error handling** | `try/except: pass` | Defensive programming ("resilient") | Offensive programming — crash on system bugs, quarantine user data |
-| **Test strategy** | Ad hoc, if any | Separate test team, late, happy-path focused | 6-layer pyramid, 2.9:1 ratio, property fuzzing, chaos testing |
+| **Test strategy** | Ad hoc, if any | Separate test team, late, happy-path focused | 6-layer pyramid, 2.9:1 ratio, property fuzzing, chaos testing, mutation testing |
 | **Architecture enforcement** | None | Design doc (drifts over time) | 4-layer model, CI-enforced, 0 violations, ADRs with systems analysis |
-| **Audit trail** | Logging | Logging framework + compliance checklist | 21-table audit DB, HMAC-signed exports, RFC 8785 canonical hashing |
+| **Audit trail** | Logging | Logging framework + compliance checklist | 19-table audit DB, HMAC-signed exports, RFC 8785 canonical hashing, SQLCipher encryption at rest |
 | **Config safety** | Env vars, no validation | Pydantic/schema validation | Two-layer settings→runtime with protocol enforcement and AST checking |
 | **Expression safety** | `eval()` | Restricted `eval()` | AST-parsed, whitelist-based, property-fuzzed, no eval |
 | **Legacy code** | Accumulates forever | Deprecation cycles | Strictly forbidden — delete immediately |
 | **Secret handling** | Plaintext in config | Env vars or vault | HMAC fingerprinting, Key Vault, fail-closed on missing key |
 | **Pre-commit checks** | None or formatting only | Linting + maybe type checking | 12 hooks: lint, types, tier model, contracts, hygiene — full codebase scan |
-| **Requirements traceability** | None | Requirements doc → implementation gap | 323 tracked requirements with implementation status and evidence |
+| **Requirements traceability** | None | RTM maintained but drifts from implementation | 390 requirements with status (IMPLEMENTED/PARTIAL/DIVERGED/DEFERRED), each with evidence link |
+| **Test effectiveness** | Untested | Coverage metrics (gameable) | Mutation testing with per-subsystem score targets* (95%/90%/85% by criticality) |
 | **Architecture decisions** | Tribal knowledge | Design doc (forgotten) | 6 ADRs with rationale, alternatives considered, consequences |
 | **Bug feedback loop** | Fix the instance | Defect tracker, triage, maybe fix next release | Every bug → structural countermeasure → CI enforcement |
 | **Known vulnerabilities** | Unknown unknowns | Found by pentest, deferred to next release | Continuously discovered, tracked, prioritized, publicly documented |
+| **Data immutability** | Mutable objects everywhere | Immutable by convention (not enforced) | 25 frozen dataclasses — language-level `FrozenInstanceError` on mutation |
+| **Rate limiting** | None (crash on API limits) | Per-service config, maybe | Per-service shared buckets, SQLite-persisted, configurable backpressure |
+| **Crash recovery** | None (restart from scratch) | Checkpoint files (no validation) | Checkpoints with DAG topology hash validation — refuses to resume against wrong pipeline |
+| **Plugin trust surface** | npm install anything | Vendor-approved libraries | All 25 plugins are system-owned code — no untrusted plugin execution |
 | **Engineering specification** | None | Written once, progressively ignored | Machine-consumed on every session, verified by CI on every commit |
+
+*Mutation testing targets are for the next scheduled run, pending completion of the RC3.3 architectural remediation. Achieved scores will be published separately.
 
 ---
 
-## The Meta-Insight: Why AI-Assisted Development Can Be *More* Rigorous
+## Observations: AI-Assisted Development and Engineering Rigor
 
 The counterintuitive finding is that ELSPETH, built with AI assistance, has **more rigorous security practices** than most manually-developed projects — not despite the AI assistance, but partly because of it:
 
 1. **The CLAUDE.md file is a living, machine-enforced engineering standard.** It codifies every architectural decision, every error-handling rule, every trust boundary. In a traditional project, this knowledge lives in developers' heads and decays over time. Here, it's the *literal input* to every development session, verified against the codebase by CI on every commit.
 
-2. **AI can enforce consistency at scale.** Writing 1,057 property tests by hand is impractical for most teams. Having AI generate them from clear specifications (the trust model, the protocol definitions, the DAG invariants) makes exhaustive testing economically feasible. Similarly, auditing 900+ test infrastructure violations across 120+ files and designing a phased remediation plan is the kind of work that traditional teams defer forever.
+2. **AI can enforce consistency at scale.** Writing 1,173 property tests by hand is impractical for most teams. Having AI generate them from clear specifications (the trust model, the protocol definitions, the DAG invariants) makes exhaustive testing economically feasible. Similarly, auditing 900+ test infrastructure violations across 120+ files and designing a phased remediation plan is the kind of work that traditional teams defer forever.
 
 3. **The development loop is faster, so more iterations of "find bug → harden" are possible.** ELSPETH went through a 178-bug triage, a complete test suite rewrite (v1→v2, with full deletion of the 222K-line v1), and a full architectural remediation (RC3.3, 31 tasks, systems dynamics analysis) — each cycle tightening the security posture. Traditional projects rarely have budget for this many hardening passes.
 
 4. **Custom CI tooling is cheap to build.** The `enforce_tier_model.py` AST analyzer — a bespoke 1,117-line static analysis tool with a 361-entry allowlist that understands the project's specific security model — would be an expensive custom tooling investment in a traditional project. With AI assistance, it was built and iterated on as a natural part of development.
 
-5. **Institutional memory doesn't decay.** CLAUDE.md and MEMORY.md create a form of institutional knowledge that is immune to team turnover — the hard-won lessons from every incident are permanently encoded in the development process, not in the heads of engineers who might leave.
+5. **Institutional memory is durable.** CLAUDE.md and MEMORY.md create a form of institutional knowledge that is resistant to team turnover — the hard-won lessons from every incident are permanently encoded in the development process, not in the heads of engineers who might leave.
 
 The risk with AI-assisted development is doing it without constraints — "vibe coding." The risk with waterfall is that constraints exist on paper but erode during implementation. ELSPETH's approach is constraints that are **machine-enforced, continuously verified, and structurally embedded** in the architecture itself.
+
+The transferable insight is that none of these practices are specific to ELSPETH's domain. The three-tier trust model is a policy; the AST enforcer is a pattern; the CLAUDE.md-as-specification approach works for any AI-assisted project with a clear engineering standard. What *is* specific to ELSPETH is the audit domain's low tolerance for silent failure, which created the pressure to build these systems in the first place. The methodology generalizes; the motivation was domain-driven.

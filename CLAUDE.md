@@ -294,7 +294,7 @@ class RetryManager:
 | `contracts/config/runtime.py` | Runtime*Config dataclasses with `from_settings()` |
 | `contracts/config/alignment.py` | Field mapping documentation (`FIELD_MAPPINGS`) |
 | `contracts/config/defaults.py` | Default values (`POLICY_DEFAULTS`, `INTERNAL_DEFAULTS`) |
-| `tests/core/test_config_alignment.py` | Comprehensive alignment verification |
+| `tests/unit/core/test_config_alignment.py` | Comprehensive alignment verification |
 
 **Adding a new Settings field (checklist):**
 
@@ -303,7 +303,7 @@ class RetryManager:
 3. Map in `from_settings()` method (explicit assignment)
 4. If renamed: document in `FIELD_MAPPINGS` in `alignment.py`
 5. If internal-only: document in `INTERNAL_DEFAULTS` in `defaults.py`
-6. Run `.venv/bin/python -m scripts.check_contracts` and `pytest tests/core/test_config_alignment.py`
+6. Run `.venv/bin/python -m scripts.check_contracts` and `pytest tests/unit/core/test_config_alignment.py`
 
 ### Tier Model Enforcement Allowlist
 
@@ -476,6 +476,7 @@ elspeth-mcp --database sqlite:///./examples/my_pipeline/runs/audit.db  # Explici
 | Database | SQLAlchemy Core | Multi-backend without ORM overhead |
 | Migrations | Alembic | Schema versioning |
 | Retries | tenacity | Industry standard backoff |
+| Telemetry | OpenTelemetry (api, sdk, otlp exporter) | Distributed tracing and metrics |
 
 ### Acceleration Stack (avoid reinventing)
 
@@ -493,9 +494,11 @@ elspeth-mcp --database sqlite:///./examples/my_pipeline/runs/audit.db  # Explici
 | Pack | Technology | Use Case |
 | ---- | ---------- | -------- |
 | LLM | LiteLLM | 100+ LLM providers unified |
-| ML | scikit-learn, ONNX | Traditional ML inference |
-| Azure | azure-storage-blob | Azure cloud integration |
-| Telemetry | OpenTelemetry, ddtrace | Observability platform integration |
+| Azure | azure-storage-blob, azure-identity, azure-keyvault-secrets | Azure cloud integration |
+| Telemetry | ddtrace | Datadog APM integration |
+| Web | beautifulsoup4, html2text | Web scraping transforms |
+| Security | sqlcipher3 | Audit database encryption at rest |
+| MCP | mcp | Landscape analysis server protocol |
 
 ## Telemetry (Operational Visibility)
 
@@ -550,8 +553,8 @@ Every row reaches exactly one terminal state - no silent drops:
 
 ### Retry Semantics
 
-- `(run_id, row_id, transform_seq, attempt)` is unique
-- Each attempt recorded separately
+- `(token_id, node_id, attempt)` is unique in the `node_states` table (also `(token_id, step_index, attempt)`)
+- Each attempt recorded as a separate `node_states` row
 - Backoff metadata captured
 
 ### Secret Handling
@@ -604,7 +607,10 @@ graph = ExecutionGraph.from_plugin_instances(source=source, transforms=transform
 For any output, the system must prove complete lineage:
 
 ```python
-lineage = landscape.explain(run_id, token_id=token_id, field=field)
+from elspeth.core.landscape.lineage import explain
+
+lineage = explain(recorder, run_id, token_id=token_id)
+assert lineage is not None
 assert lineage.source_row is not None
 assert len(lineage.node_states) > 0
 ```
@@ -649,12 +655,19 @@ src/elspeth/
 │   └── sinks/          # CSVSink, JSONSink, DatabaseSink, AzureBlobSink
 ├── telemetry/          # OpenTelemetry exporters and instrumentation
 ├── testing/            # ChaosLLM, ChaosWeb, ChaosEngine test servers
+│   ├── chaosllm/       # Fake OpenAI/Azure LLM server with error/latency injection
+│   ├── chaosweb/       # Fake web server with failure profiles
+│   ├── chaosengine/    # Engine-level test utilities
 │   └── chaosllm_mcp/   # MCP server for ChaosLLM metrics and control
 ├── mcp/                # Landscape MCP analysis server
-│   └── analyzers/      # Domain-specific analysis tools (contracts, diagnostics, queries, reports)
+│   ├── analyzers/      # Domain-specific analysis tools (contracts, diagnostics, queries, reports)
+│   ├── server.py       # MCP server implementation
+│   └── types.py        # MCP type definitions
 ├── tui/                # Terminal UI (Textual) - explain screens and widgets
 │   ├── screens/        # TUI screen implementations
-│   └── widgets/        # TUI widget components
+│   ├── widgets/        # TUI widget components
+│   ├── explain_app.py  # Explain TUI application entry point
+│   └── constants.py    # TUI constants
 ├── cli.py              # Typer CLI
 ├── cli_helpers.py      # CLI utility functions
 └── cli_formatters.py   # Event formatting for CLI output
