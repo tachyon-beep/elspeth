@@ -163,20 +163,14 @@ class QueryRepository:
         try:
             payload_bytes = self._payload_store.retrieve(source_data_ref)
         except PayloadIntegrityError as e:
-            raise AuditIntegrityError(
-                f"Payload integrity check failed for row {row_id} (ref={source_data_ref}): {e}"
-            ) from e
+            raise AuditIntegrityError(f"Payload integrity check failed for row {row_id} (ref={source_data_ref}): {e}") from e
         except OSError as e:
-            raise AuditIntegrityError(
-                f"Payload retrieval failed for row {row_id} (ref={source_data_ref}): {type(e).__name__}: {e}"
-            ) from e
+            raise AuditIntegrityError(f"Payload retrieval failed for row {row_id} (ref={source_data_ref}): {type(e).__name__}: {e}") from e
 
         try:
             decoded_data = json.loads(payload_bytes.decode("utf-8"))
         except (json.JSONDecodeError, UnicodeDecodeError) as e:
-            raise AuditIntegrityError(
-                f"Corrupt payload for row {row_id} (ref={source_data_ref}): {e}"
-            ) from e
+            raise AuditIntegrityError(f"Corrupt payload for row {row_id} (ref={source_data_ref}): {e}") from e
 
         match decoded_data:
             case dict() as data:
@@ -184,8 +178,7 @@ class QueryRepository:
             case _:
                 actual_type = type(decoded_data).__name__
                 raise AuditIntegrityError(
-                    f"Corrupt payload for row {row_id} (ref={source_data_ref}): "
-                    f"expected JSON object, got {actual_type}"
+                    f"Corrupt payload for row {row_id} (ref={source_data_ref}): expected JSON object, got {actual_type}"
                 )
 
     def get_row_data(self, row_id: str) -> RowDataResult:

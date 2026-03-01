@@ -39,12 +39,12 @@ per_file_rules:
   reason: Azure API responses are external data (Tier 3) - all defensive patterns legitimate
   expires: null
 allow_hits:
-- key: plugins/infrastructure/batching/mixin.py:R6:BatchTransformMixin:_release_loop:fp=1354b5a5a2a3ca27
+- key: plugins/infrastructure/batching/mixin.py:R6:BatchTransformMixin:_release_loop:fp=e4d9d56404402b3d
   owner: architecture
   reason: Silent recovery with explicit error handling path
   safety: Code reviewed - legitimate pattern
   expires: '2026-05-02'
-- key: plugins/infrastructure/batching/mixin.py:R6:BatchTransformMixin:_release_loop:fp=c59b28f42a9b6dd3
+- key: plugins/infrastructure/batching/mixin.py:R6:BatchTransformMixin:_release_loop:fp=87f604a1cbe3da51
   owner: architecture
   reason: Silent recovery with explicit error handling path
   safety: Code reviewed - legitimate pattern
@@ -126,32 +126,32 @@ allow_hits:
   reason: AST/type checking - required for safe parsing or discriminated unions
   safety: Code reviewed - legitimate pattern
   expires: '2026-05-02'
-- key: plugins/infrastructure/batching/mixin.py:R4:BatchTransformMixin:_process_and_complete:fp=d4e6055c5d8f51b2
+- key: plugins/infrastructure/batching/mixin.py:R4:BatchTransformMixin:_process_and_complete:fp=be288a5ada050286
   owner: architecture
   reason: Broad exception handling at external boundary with logging
   safety: Code reviewed - legitimate pattern
   expires: '2026-05-02'
-- key: plugins/infrastructure/batching/mixin.py:R7:BatchTransformMixin:_process_and_complete:fp=c6fcb5c8ffb813fa
+- key: plugins/infrastructure/batching/mixin.py:R7:BatchTransformMixin:_process_and_complete:fp=e6255759dac3493f
   owner: architecture
   reason: contextlib.suppress for expected exceptions
   safety: Code reviewed - legitimate pattern
   expires: '2026-05-02'
-- key: plugins/infrastructure/batching/mixin.py:R7:BatchTransformMixin:_process_and_complete:fp=03c17e4a2a2b4f61
+- key: plugins/infrastructure/batching/mixin.py:R7:BatchTransformMixin:_process_and_complete:fp=281e59ace7ae2d0b
   owner: architecture
   reason: contextlib.suppress for expected exceptions
   safety: Code reviewed - legitimate pattern
   expires: '2026-05-02'
-- key: plugins/infrastructure/batching/mixin.py:R9:BatchTransformMixin:_release_loop:fp=353ea75e2e1045c1
+- key: plugins/infrastructure/batching/mixin.py:R9:BatchTransformMixin:_release_loop:fp=9f4094bfaee40f43
   owner: architecture
   reason: Cleanup/pop with default - key may not exist in race or optional scenarios
   safety: Code reviewed - legitimate pattern
   expires: '2026-05-02'
-- key: plugins/infrastructure/batching/mixin.py:R4:BatchTransformMixin:_release_loop:fp=67b74383a3990f5e
+- key: plugins/infrastructure/batching/mixin.py:R4:BatchTransformMixin:_release_loop:fp=e64b46ff93a6d7d2
   owner: architecture
   reason: Broad exception handling at external boundary with logging
   safety: Code reviewed - legitimate pattern
   expires: '2026-05-02'
-- key: plugins/infrastructure/batching/mixin.py:R9:BatchTransformMixin:evict_submission:fp=d64346e2eacd33f3
+- key: plugins/infrastructure/batching/mixin.py:R9:BatchTransformMixin:evict_submission:fp=c8e9f311ac82979e
   owner: architecture
   reason: Cleanup/pop with default - key may not exist in race or optional scenarios
   safety: Code reviewed - legitimate pattern

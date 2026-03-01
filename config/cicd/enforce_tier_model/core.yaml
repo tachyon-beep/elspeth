@@ -287,16 +287,16 @@ allow_hits:
 - key: core/landscape/exporter.py:R5:LandscapeExporter:_iter_records:fp=eb69593d0ee95c0e
   owner: P2-2026-02-02-76r
   reason: Discriminated union — NodeState is union of Open/Pending/Completed/Failed with different fields
-- key: core/landscape/journal.py:R5:LandscapeJournal:_normalize_parameters:fp=cd7ae9f783e16f59
+- key: core/landscape/journal.py:R5:LandscapeJournal:_normalize_parameters:fp=a8eecdfe02f32738
   owner: architecture
   reason: AST/type checking - required for safe parsing or discriminated unions
-- key: core/landscape/journal.py:R5:LandscapeJournal:_normalize_parameters:fp=25eb43eaa792a88a
+- key: core/landscape/journal.py:R5:LandscapeJournal:_normalize_parameters:fp=30e81a11356063ef
   owner: architecture
   reason: AST/type checking - required for safe parsing or discriminated unions
-- key: core/landscape/journal.py:R5:LandscapeJournal:_normalize_parameters:fp=13a240c282634e6a
+- key: core/landscape/journal.py:R5:LandscapeJournal:_normalize_parameters:fp=bec5e576ce178fe6
   owner: architecture
   reason: AST/type checking - required for safe parsing or discriminated unions
-- key: core/landscape/journal.py:R5:LandscapeJournal:_columns_to_values:fp=8a63a6b78ec0851c
+- key: core/landscape/journal.py:R5:LandscapeJournal:_columns_to_values:fp=7e00fb4cf94c9274
   owner: architecture
   reason: AST/type checking - required for safe parsing or discriminated unions
 - key: core/landscape/execution_repository.py:R6:ExecutionRepository:get_call_response_data:fp=4c5bf20fee5e4d80

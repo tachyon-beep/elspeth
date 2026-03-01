@@ -2009,9 +2009,7 @@ class TestAggregationExecutor:
         assert isinstance(checkpoint, AggregationCheckpointState)
         node_checkpoint = checkpoint.nodes[str(nid)]
         assert node_checkpoint.contract is not None
-        assert all(t.contract_version for t in node_checkpoint.tokens), (
-            "Checkpoint must include contract info for PipelineRow restoration"
-        )
+        assert all(t.contract_version for t in node_checkpoint.tokens), "Checkpoint must include contract info for PipelineRow restoration"
 
     def test_restore_from_checkpoint_creates_pipeline_row(self) -> None:
         """restore_from_checkpoint should reconstruct TokenInfo with PipelineRow."""
@@ -2028,13 +2026,15 @@ class TestAggregationExecutor:
             _make_span_factory(),
             _make_step_resolver(),
             run_id="test-run",
-            aggregation_settings={nid: AggregationSettings(
-                name="test_agg",
-                plugin="batch_stats",
-                input="default",
-                on_error="discard",
-                trigger=TriggerConfig(count=10),
-            )},
+            aggregation_settings={
+                nid: AggregationSettings(
+                    name="test_agg",
+                    plugin="batch_stats",
+                    input="default",
+                    on_error="discard",
+                    trigger=TriggerConfig(count=10),
+                )
+            },
         )
         new_executor.restore_from_checkpoint(checkpoint)
 
@@ -2060,13 +2060,15 @@ class TestAggregationExecutor:
             _make_span_factory(),
             _make_step_resolver(),
             run_id="test-run",
-            aggregation_settings={nid: AggregationSettings(
-                name="test_agg",
-                plugin="batch_stats",
-                input="default",
-                on_error="discard",
-                trigger=TriggerConfig(count=10),
-            )},
+            aggregation_settings={
+                nid: AggregationSettings(
+                    name="test_agg",
+                    plugin="batch_stats",
+                    input="default",
+                    on_error="discard",
+                    trigger=TriggerConfig(count=10),
+                )
+            },
         )
         new_executor.restore_from_checkpoint(checkpoint)
 

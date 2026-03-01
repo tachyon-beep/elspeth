@@ -3,13 +3,11 @@
 
 from typing import TYPE_CHECKING
 
-from tests.fixtures.factories import make_source_context
-
 from elspeth.core.landscape.database import LandscapeDB
 from elspeth.core.landscape.recorder import LandscapeRecorder
+from tests.fixtures.factories import make_source_context
 
 if TYPE_CHECKING:
-
     from elspeth.contracts.batch_checkpoint import BatchCheckpointState
 
 
@@ -260,7 +258,7 @@ class TestValidationErrorRecording:
 
         ctx = PluginContext(run_id="test-run", config={}, node_id="source_node")
 
-        with pytest.raises(FrameworkBugError, match="record_validation_error.*without landscape"):
+        with pytest.raises(FrameworkBugError, match=r"record_validation_error.*without landscape"):
             ctx.record_validation_error(
                 row={"id": 42, "invalid": "data"},
                 error="validation failed",
@@ -493,7 +491,7 @@ class TestTransformErrorRecording:
 
         ctx = PluginContext(run_id="test-run", config={}, node_id="transform_node")
 
-        with pytest.raises(FrameworkBugError, match="record_transform_error.*without landscape"):
+        with pytest.raises(FrameworkBugError, match=r"record_transform_error.*without landscape"):
             ctx.record_transform_error(
                 token_id="tok_123",
                 transform_id="field_mapper",

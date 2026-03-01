@@ -408,9 +408,7 @@ class TestInterruptAndResume:
         # Build graph via production path — prevents BUG-LINEAGE-01
         source_data = [{"value": i} for i in range(num_rows)]
         transform = PassTransform()
-        _, _, _, graph = build_linear_pipeline(
-            source_data, transforms=[as_transform(transform)]
-        )
+        _, _, _, graph = build_linear_pipeline(source_data, transforms=[as_transform(transform)])
 
         # Extract production-generated node IDs
         source_nid = graph.get_source()

@@ -938,9 +938,7 @@ class TestCSVSourceSkipRowsAudit:
         """Create a plugin context with real landscape and source node records."""
         return make_source_context(plugin_name="csv")
 
-    def test_skip_rows_exceeds_file_records_validation_error(
-        self, tmp_path: Path, ctx: PluginContext
-    ) -> None:
+    def test_skip_rows_exceeds_file_records_validation_error(self, tmp_path: Path, ctx: PluginContext) -> None:
         """skip_rows > available rows records validation error, not silent empty."""
         from elspeth.plugins.sources.csv_source import CSVSource
 

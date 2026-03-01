@@ -18,9 +18,8 @@ from types import TracebackType
 from typing import TYPE_CHECKING, Any
 
 from elspeth.contracts import ExecutionError, NodeStateOpen
-from elspeth.contracts.errors import AuditIntegrityError, FrameworkBugError
 from elspeth.contracts.enums import NodeStateStatus
-from elspeth.contracts.errors import OrchestrationInvariantError
+from elspeth.contracts.errors import AuditIntegrityError, FrameworkBugError, OrchestrationInvariantError
 from elspeth.core.landscape import LandscapeRecorder
 
 if TYPE_CHECKING:

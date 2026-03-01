@@ -23,16 +23,16 @@ from elspeth.contracts.enums import (
 )
 from elspeth.contracts.errors import OrchestrationInvariantError
 from elspeth.contracts.node_state_context import GateEvaluationContext
-from elspeth.core.expression_parser import (
-    ExpressionEvaluationError,
-    ExpressionSecurityError,
-    ExpressionSyntaxError,
-)
 from elspeth.contracts.plugin_context import PluginContext
 from elspeth.contracts.types import NodeID, StepResolver
 from elspeth.core.canonical import stable_hash
 from elspeth.core.config import GateSettings
-from elspeth.core.expression_parser import ExpressionParser
+from elspeth.core.expression_parser import (
+    ExpressionEvaluationError,
+    ExpressionParser,
+    ExpressionSecurityError,
+    ExpressionSyntaxError,
+)
 from elspeth.core.landscape import LandscapeRecorder
 from elspeth.engine.executors.state_guard import NodeStateGuard
 from elspeth.engine.executors.types import GateOutcome, MissingEdgeError

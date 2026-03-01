@@ -1071,9 +1071,7 @@ class TestJSONSourceDataKeyStructuralErrors:
         # No rows yielded - structural error discarded
         assert len(results) == 0
 
-    def test_data_key_structural_error_records_validation_error(
-        self, tmp_path: Path, ctx: PluginContext
-    ) -> None:
+    def test_data_key_structural_error_records_validation_error(self, tmp_path: Path, ctx: PluginContext) -> None:
         """Structural errors are recorded via ctx.record_validation_error().
 
         With a real Landscape recorder, the validation error is persisted
@@ -1107,11 +1105,7 @@ class TestJSONSourceDataKeyStructuralErrors:
         from elspeth.core.landscape.schema import validation_errors_table
 
         with ctx.landscape._db.engine.connect() as conn:
-            rows = conn.execute(
-                select(validation_errors_table).where(
-                    validation_errors_table.c.run_id == ctx.run_id
-                )
-            ).fetchall()
+            rows = conn.execute(select(validation_errors_table).where(validation_errors_table.c.run_id == ctx.run_id)).fetchall()
 
         assert len(rows) == 1
         assert "results" in rows[0].error  # The missing data_key

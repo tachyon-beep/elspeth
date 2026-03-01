@@ -1702,7 +1702,7 @@ class TestExecuteTransformNoRetry:
 
     def test_retryable_llm_error_with_on_error_discard(self) -> None:
         """Retryable LLMClientError with on_error='discard' returns error result (no re-raise)."""
-        _, recorder, processor = self._setup()
+        _, _recorder, processor = self._setup()
         transform = _make_mock_transform(node_id="t1", on_error="discard")
         token = make_token_info(data={"value": 42})
         ctx = PluginContext(run_id="test-run", config={}, landscape=Mock())
@@ -1729,7 +1729,7 @@ class TestExecuteTransformNoRetry:
         requires on_error, so every transform has a valid error route. This test
         documents the invariant by verifying 'discard' (minimum valid value) works.
         """
-        _, recorder, processor = self._setup()
+        _, _recorder, processor = self._setup()
         transform = _make_mock_transform(node_id="t1", on_error="discard")
         token = make_token_info(data={"value": 42})
         ctx = PluginContext(run_id="test-run", config={}, landscape=Mock())
@@ -1751,7 +1751,7 @@ class TestExecuteTransformNoRetry:
 
     def test_non_retryable_llm_error_reraises(self) -> None:
         """Non-retryable LLMClientError is re-raised directly."""
-        _, recorder, processor = self._setup()
+        _, _recorder, processor = self._setup()
         transform = _make_mock_transform(node_id="t1", on_error="discard")
         token = make_token_info(data={"value": 42})
         ctx = PluginContext(run_id="test-run", config={}, landscape=Mock())
@@ -1773,7 +1773,7 @@ class TestExecuteTransformNoRetry:
 
     def test_transient_connection_error_with_on_error(self) -> None:
         """ConnectionError with on_error returns error result (no re-raise)."""
-        _, recorder, processor = self._setup()
+        _, _recorder, processor = self._setup()
         transform = _make_mock_transform(node_id="t1", on_error="discard")
         token = make_token_info(data={"value": 42})
         ctx = PluginContext(run_id="test-run", config={}, landscape=Mock())
@@ -1794,7 +1794,7 @@ class TestExecuteTransformNoRetry:
 
     def test_transient_timeout_error_with_on_error(self) -> None:
         """TimeoutError with on_error returns error result."""
-        _, recorder, processor = self._setup()
+        _, _recorder, processor = self._setup()
         transform = _make_mock_transform(node_id="t1", on_error="discard")
         token = make_token_info(data={"value": 42})
         ctx = PluginContext(run_id="test-run", config={}, landscape=Mock())
@@ -1815,7 +1815,7 @@ class TestExecuteTransformNoRetry:
 
     def test_capacity_error_with_on_error_returns_row_scoped_error(self) -> None:
         """CapacityError with no retry manager returns retryable row error."""
-        _, recorder, processor = self._setup()
+        _, _recorder, processor = self._setup()
         transform = _make_mock_transform(node_id="t1", on_error="discard")
         token = make_token_info(data={"value": 42})
         ctx = PluginContext(run_id="test-run", config={}, landscape=Mock())
@@ -1842,7 +1842,7 @@ class TestExecuteTransformNoRetry:
         Now TransformSettings requires on_error, so every transform has a valid
         error route. This test documents the invariant.
         """
-        _, recorder, processor = self._setup()
+        _, _recorder, processor = self._setup()
         transform = _make_mock_transform(node_id="t1", on_error="discard")
         token = make_token_info(data={"value": 42})
         ctx = PluginContext(run_id="test-run", config={}, landscape=Mock())
@@ -1889,7 +1889,7 @@ class TestExecuteTransformNoRetry:
 
     def test_retryable_llm_error_with_missing_error_edge_raises(self) -> None:
         """Retryable error with named sink but no DIVERT edge → OrchestrationInvariantError."""
-        _, recorder, processor = self._setup()
+        _, _recorder, processor = self._setup()
         # No error edges configured
         processor._error_edge_ids = {}
 

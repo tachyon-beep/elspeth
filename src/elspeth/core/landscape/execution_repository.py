@@ -999,9 +999,7 @@ class ExecutionRepository:
         try:
             decoded = json.loads(payload_bytes.decode("utf-8"))
         except (json.JSONDecodeError, UnicodeDecodeError) as e:
-            raise AuditIntegrityError(
-                f"Corrupt call response payload for call_id={call_id} (ref={row.response_ref}): {e}"
-            ) from e
+            raise AuditIntegrityError(f"Corrupt call response payload for call_id={call_id} (ref={row.response_ref}): {e}") from e
         if type(decoded) is not dict:
             raise AuditIntegrityError(
                 f"Corrupt call response payload for call_id={call_id} (ref={row.response_ref}): "

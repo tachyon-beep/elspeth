@@ -237,19 +237,13 @@ class AzureBatchLLMTransform(BaseTransform):
         is NOT supported because the OpenAI SDK isn't used for the actual
         LLM inference (that happens in Azure's batch infrastructure).
         """
-        import structlog
-
-        logger = structlog.get_logger(__name__)
-
         if self._tracing_config is None:
             return
 
         # Validate configuration completeness
         errors = validate_tracing_config(self._tracing_config)
         if errors:
-            raise ValueError(
-                f"Tracing configuration errors: {'; '.join(errors)}"
-            )
+            raise ValueError(f"Tracing configuration errors: {'; '.join(errors)}")
 
         match self._tracing_config.provider:
             case "azure_ai":
@@ -265,8 +259,7 @@ class AzureBatchLLMTransform(BaseTransform):
                 pass  # No tracing
             case _:
                 raise ValueError(
-                    f"Unknown tracing provider '{self._tracing_config.provider}' "
-                    f"after validation. Supported: azure_ai, langfuse, none."
+                    f"Unknown tracing provider '{self._tracing_config.provider}' after validation. Supported: azure_ai, langfuse, none."
                 )
 
     def _record_langfuse_batch_job(

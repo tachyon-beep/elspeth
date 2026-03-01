@@ -1696,12 +1696,14 @@ class TestConfigureAzureMonitor:
         from elspeth.plugins.transforms.llm.tracing import AzureAITracingConfig
 
         config = AzureAITracingConfig(connection_string="InstrumentationKey=test")
-        with patch(
-            "elspeth.plugins.transforms.llm.providers.azure.configure_azure_monitor",
-            None,  # Simulate missing SDK: configure_azure_monitor is None
+        with (
+            patch(
+                "elspeth.plugins.transforms.llm.providers.azure.configure_azure_monitor",
+                None,  # Simulate missing SDK: configure_azure_monitor is None
+            ),
+            pytest.raises(ImportError, match="azure-monitor-opentelemetry is not installed"),
         ):
-            with pytest.raises(ImportError, match="azure-monitor-opentelemetry is not installed"):
-                _configure_azure_monitor(config)
+            _configure_azure_monitor(config)
 
     def test_real_sdk_typeerror_propagates(self) -> None:
         """Real TypeError from SDK (e.g., bad keyword arg) propagates as crash.
@@ -1787,9 +1789,11 @@ class TestConfigureAzureMonitor:
         config = AzureAITracingConfig(connection_string="InstrumentationKey=test")
 
         # First call with None SDK — should raise ImportError
-        with patch("elspeth.plugins.transforms.llm.providers.azure.configure_azure_monitor", None):
-            with pytest.raises(ImportError, match="azure-monitor-opentelemetry is not installed"):
-                _configure_azure_monitor(config)
+        with (
+            patch("elspeth.plugins.transforms.llm.providers.azure.configure_azure_monitor", None),
+            pytest.raises(ImportError, match="azure-monitor-opentelemetry is not installed"),
+        ):
+            _configure_azure_monitor(config)
 
         # Second call with working SDK — should succeed (not blocked by idempotency)
         with patch("elspeth.plugins.transforms.llm.providers.azure.configure_azure_monitor") as mock_sdk:
@@ -1930,12 +1934,14 @@ class TestAzureAITracingOnStart:
         transform = LLMTransform(config)
         ctx = _make_lifecycle_ctx()
 
-        with patch(
-            "elspeth.plugins.transforms.llm.transform._configure_azure_monitor",
-            side_effect=ImportError("azure-monitor-opentelemetry is not installed"),
+        with (
+            patch(
+                "elspeth.plugins.transforms.llm.transform._configure_azure_monitor",
+                side_effect=ImportError("azure-monitor-opentelemetry is not installed"),
+            ),
+            pytest.raises(ImportError, match="azure-monitor-opentelemetry is not installed"),
         ):
-            with pytest.raises(ImportError, match="azure-monitor-opentelemetry is not installed"):
-                transform.on_start(ctx)
+            transform.on_start(ctx)
 
     def test_on_start_skips_azure_monitor_for_langfuse(self) -> None:
         """on_start() does NOT call _configure_azure_monitor for Langfuse tracing."""

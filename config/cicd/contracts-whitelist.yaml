@@ -164,6 +164,9 @@ allowed_dict_patterns:
   # pipeline data from execution.
   # ═══════════════════════════════════════════════════════════════════════════
 
+  # Query repository - returns deserialized user row data (dynamic per-pipeline schema)
+  - "src/elspeth/core/landscape/query_repository.py:QueryRepository._retrieve_and_parse_payload:return"
+
   # Run lifecycle repository + recorder delegation
   - "src/elspeth/core/landscape/run_lifecycle_repository.py:RunLifecycleRepository.begin_run:config"
   - "src/elspeth/core/landscape/recorder.py:LandscapeRecorder.begin_run:config"

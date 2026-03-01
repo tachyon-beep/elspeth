@@ -96,12 +96,14 @@ class TestMultiQueryLLMSpecific:
         # Observable: declared_output_fields contains prefixed fields for each query
         declared = transform.declared_output_fields
         expected_fields = {
-            "cs1_crit1_score", "cs1_crit2_rating", "cs1_crit3_grade",
-            "cs2_crit1_eval_score", "cs2_crit2_eval_rating", "cs2_crit3_eval_grade",
+            "cs1_crit1_score",
+            "cs1_crit2_rating",
+            "cs1_crit3_grade",
+            "cs2_crit1_eval_score",
+            "cs2_crit2_eval_rating",
+            "cs2_crit3_eval_grade",
         }
-        assert expected_fields.issubset(declared), (
-            f"Missing expected output fields: {expected_fields - declared}"
-        )
+        assert expected_fields.issubset(declared), f"Missing expected output fields: {expected_fields - declared}"
 
     def test_creates_tokens_false(self) -> None:
         transform = LLMTransform(

@@ -280,7 +280,7 @@ def _configure_azure_monitor(config: TracingConfig) -> bool:
         return True
 
     if configure_azure_monitor is None:
-        raise ImportError(  # type: ignore[unreachable]  # runtime fallback when SDK not installed (see line 249)
+        raise ImportError(
             "azure-monitor-opentelemetry is not installed but azure_ai tracing was configured. "
             "This should not happen — the SDK is bundled with elspeth[azure]. "
             "Reinstall with: uv pip install 'elspeth[azure]'"

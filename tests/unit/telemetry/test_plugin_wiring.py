@@ -110,8 +110,7 @@ class TestLLMTransformTelemetryWiring:
         # telemetry_emit must have been invoked with an LLM call event
         llm_events = [e for e in events if isinstance(e, ExternalCallCompleted) and e.call_type == CallType.LLM]
         assert len(llm_events) >= 1, (
-            f"Expected ExternalCallCompleted(LLM) event from telemetry_emit, "
-            f"got: {[type(e).__name__ for e in events]}"
+            f"Expected ExternalCallCompleted(LLM) event from telemetry_emit, got: {[type(e).__name__ for e in events]}"
         )
 
         transform.close()
@@ -170,8 +169,7 @@ class TestAzureSafetyTelemetryWiring:
         # telemetry_emit must have been invoked with an HTTP call event
         http_events = [e for e in events if isinstance(e, ExternalCallCompleted) and e.call_type == CallType.HTTP]
         assert len(http_events) >= 1, (
-            f"Expected ExternalCallCompleted(HTTP) event from telemetry_emit, "
-            f"got: {[type(e).__name__ for e in events]}"
+            f"Expected ExternalCallCompleted(HTTP) event from telemetry_emit, got: {[type(e).__name__ for e in events]}"
         )
 
         transform.close()
@@ -257,8 +255,7 @@ class TestWebScrapeTelemetryWiring:
         # telemetry_emit must have been invoked with an HTTP call event
         http_events = [e for e in events if isinstance(e, ExternalCallCompleted) and e.call_type == CallType.HTTP]
         assert len(http_events) >= 1, (
-            f"Expected ExternalCallCompleted(HTTP) event from telemetry_emit, "
-            f"got: {[type(e).__name__ for e in events]}"
+            f"Expected ExternalCallCompleted(HTTP) event from telemetry_emit, got: {[type(e).__name__ for e in events]}"
         )
 
         transform.close()
