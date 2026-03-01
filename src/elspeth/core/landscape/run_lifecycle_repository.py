@@ -153,7 +153,7 @@ class RunLifecycleRepository:
         # Only include reproducibility_grade in UPDATE when explicitly provided.
         # Passing None would overwrite an existing grade with NULL (Bug 318f74).
         values: dict[str, Any] = {
-            "status": status.value,
+            "status": status,
             "completed_at": timestamp,
         }
         if reproducibility_grade is not None:
@@ -356,7 +356,7 @@ class RunLifecycleRepository:
                 f"Completed runs are immutable. "
                 f"FAILED/INTERRUPTED runs can be resumed via update_run_status."
             )
-        self._ops.execute_update(runs_table.update().where(runs_table.c.run_id == run_id).values(status=status.value))
+        self._ops.execute_update(runs_table.update().where(runs_table.c.run_id == run_id).values(status=status))
 
     def update_run_contract(self, run_id: str, contract: SchemaContract) -> None:
         """Update run with schema contract after first-row inference.
@@ -541,7 +541,7 @@ class RunLifecycleRepository:
         query = select(runs_table).order_by(runs_table.c.started_at.desc())
 
         if status is not None:
-            query = query.where(runs_table.c.status == status.value)
+            query = query.where(runs_table.c.status == status)
 
         rows = self._ops.execute_fetchall(query)
         return [self._run_loader.load(row) for row in rows]
@@ -573,7 +573,7 @@ class RunLifecycleRepository:
                 f"Cannot set export_error with status={status.value}. Error messages are only valid with FAILED status."
             )
 
-        updates: dict[str, Any] = {"export_status": status.value}
+        updates: dict[str, Any] = {"export_status": status}
 
         if status == ExportStatus.COMPLETED:
             updates["exported_at"] = now()

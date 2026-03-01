@@ -582,7 +582,7 @@ class TestAtomicTokenOperations:
         # Verify parent has FORKED outcome recorded atomically
         outcome = recorder.get_token_outcome(parent_token.token_id)
         assert outcome is not None, "Parent token should have FORKED outcome"
-        assert outcome.outcome == RowOutcome.FORKED.value
+        assert outcome.outcome == RowOutcome.FORKED
         assert outcome.fork_group_id == fork_group_id
         assert outcome.is_terminal == 1
 
@@ -665,7 +665,7 @@ class TestAtomicTokenOperations:
         # Verify parent has EXPANDED outcome recorded atomically
         outcome = recorder.get_token_outcome(parent_token.token_id)
         assert outcome is not None, "Parent token should have EXPANDED outcome"
-        assert outcome.outcome == RowOutcome.EXPANDED.value
+        assert outcome.outcome == RowOutcome.EXPANDED
         assert outcome.expand_group_id == expand_group_id
         assert outcome.is_terminal == 1
 
@@ -812,7 +812,7 @@ class TestAtomicTokenOperations:
         for child in children:
             outcome = recorder.get_token_outcome(child.token_id)
             assert outcome is not None, f"Parent {child.token_id} should have COALESCED outcome"
-            assert outcome.outcome == RowOutcome.COALESCED.value
+            assert outcome.outcome == RowOutcome.COALESCED
             assert outcome.join_group_id == merged.join_group_id
             assert outcome.is_terminal == 1
 

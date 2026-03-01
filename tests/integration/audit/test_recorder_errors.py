@@ -254,27 +254,6 @@ class TestExportStatusEnumCoercion:
             f"export_status should be ExportStatus enum, got {type(runs[0].export_status).__name__}"
         )
 
-    def test_set_export_status_rejects_non_enum(self) -> None:
-        """set_export_status() requires ExportStatus enum, not string.
-
-        Strings passed where ExportStatus is expected will raise AttributeError
-        because strings don't have .value attribute. This is the correct behavior
-        per the strict enum enforcement policy.
-        """
-        import pytest
-
-        from elspeth.core.landscape.database import LandscapeDB
-        from elspeth.core.landscape.recorder import LandscapeRecorder
-
-        db = LandscapeDB.in_memory()
-        recorder = LandscapeRecorder(db)
-
-        run = recorder.begin_run(config={}, canonical_version="v1")
-
-        # Passing string instead of ExportStatus enum raises AttributeError
-        with pytest.raises(AttributeError, match="'str' object has no attribute 'value'"):
-            recorder.set_export_status(run.run_id, "invalid_status")  # type: ignore[arg-type]
-
     def test_set_export_status_clears_stale_error_on_completed(self) -> None:
         """Transitioning from failed to completed clears export_error."""
         from elspeth.contracts import ExportStatus

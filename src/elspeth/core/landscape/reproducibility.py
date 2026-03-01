@@ -1,4 +1,3 @@
-# src/elspeth/core/landscape/reproducibility.py
 """Reproducibility grade computation for completed pipeline runs.
 
 This module computes and manages the reproducibility_grade field on the runs
@@ -87,10 +86,10 @@ def compute_grade(db: "LandscapeDB", run_id: str) -> ReproducibilityGrade:
     # Determinism values that require replay (cannot reproduce from inputs alone)
     # IO_READ/IO_WRITE are external/side-effectful - require captured data for replay
     non_reproducible = {
-        Determinism.EXTERNAL_CALL.value,
-        Determinism.NON_DETERMINISTIC.value,
-        Determinism.IO_READ.value,
-        Determinism.IO_WRITE.value,
+        Determinism.EXTERNAL_CALL,
+        Determinism.NON_DETERMINISTIC,
+        Determinism.IO_READ,
+        Determinism.IO_WRITE,
     }
 
     # Check if any non-reproducible determinism values exist
@@ -143,6 +142,6 @@ def update_grade_after_purge(db: "LandscapeDB", run_id: str) -> None:
         conn.execute(
             runs_table.update()
             .where(runs_table.c.run_id == run_id)
-            .where(runs_table.c.reproducibility_grade == ReproducibilityGrade.REPLAY_REPRODUCIBLE.value)
-            .values(reproducibility_grade=ReproducibilityGrade.ATTRIBUTABLE_ONLY.value)
+            .where(runs_table.c.reproducibility_grade == ReproducibilityGrade.REPLAY_REPRODUCIBLE)
+            .values(reproducibility_grade=ReproducibilityGrade.ATTRIBUTABLE_ONLY)
         )

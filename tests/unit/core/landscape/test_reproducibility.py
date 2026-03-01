@@ -178,7 +178,7 @@ class TestUpdateGradeAfterPurge:
         update_grade_after_purge(db, "run-1")
         run = recorder.get_run("run-1")
         assert run is not None
-        assert run.reproducibility_grade == ReproducibilityGrade.ATTRIBUTABLE_ONLY.value
+        assert run.reproducibility_grade == ReproducibilityGrade.ATTRIBUTABLE_ONLY
 
     def test_full_unchanged_after_purge(self) -> None:
         db, recorder = _setup()
@@ -186,7 +186,7 @@ class TestUpdateGradeAfterPurge:
         update_grade_after_purge(db, "run-1")
         run = recorder.get_run("run-1")
         assert run is not None
-        assert run.reproducibility_grade == ReproducibilityGrade.FULL_REPRODUCIBLE.value
+        assert run.reproducibility_grade == ReproducibilityGrade.FULL_REPRODUCIBLE
 
     def test_attributable_unchanged_after_purge(self) -> None:
         db, recorder = _setup()
@@ -194,7 +194,7 @@ class TestUpdateGradeAfterPurge:
         update_grade_after_purge(db, "run-1")
         run = recorder.get_run("run-1")
         assert run is not None
-        assert run.reproducibility_grade == ReproducibilityGrade.ATTRIBUTABLE_ONLY.value
+        assert run.reproducibility_grade == ReproducibilityGrade.ATTRIBUTABLE_ONLY
 
     def test_nonexistent_run_is_noop(self) -> None:
         db, _recorder = _setup()

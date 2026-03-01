@@ -1,4 +1,3 @@
-# src/elspeth/core/landscape/execution_repository.py
 """ExecutionRepository: node state recording, call tracking, and batch management.
 
 Extracted from NodeStateRecordingMixin + CallRecordingMixin + BatchRecordingMixin
@@ -170,7 +169,7 @@ class ExecutionRepository:
                 run_id=run_id,  # Added for composite FK to nodes
                 step_index=state.step_index,
                 attempt=state.attempt,
-                status=state.status.value,
+                status=state.status,
                 input_hash=state.input_hash,
                 started_at=state.started_at,
             )
@@ -275,7 +274,7 @@ class ExecutionRepository:
                 node_states_table.update()
                 .where(node_states_table.c.state_id == state_id)
                 .values(
-                    status=status.value,
+                    status=status,
                     output_hash=output_hash,
                     duration_ms=duration_ms,
                     error_json=error_json,
@@ -371,7 +370,7 @@ class ExecutionRepository:
                 edge_id=event.edge_id,
                 routing_group_id=event.routing_group_id,
                 ordinal=event.ordinal,
-                mode=event.mode.value,  # Store string in DB
+                mode=event.mode,
                 reason_hash=event.reason_hash,
                 reason_ref=event.reason_ref,
                 created_at=event.created_at,
@@ -435,7 +434,7 @@ class ExecutionRepository:
                         edge_id=event.edge_id,
                         routing_group_id=event.routing_group_id,
                         ordinal=event.ordinal,
-                        mode=event.mode.value,  # Store string in DB
+                        mode=event.mode,
                         reason_hash=event.reason_hash,
                         reason_ref=event.reason_ref,
                         created_at=event.created_at,
@@ -569,8 +568,8 @@ class ExecutionRepository:
             "state_id": state_id,
             "operation_id": None,  # State call, not operation call
             "call_index": call_index,
-            "call_type": call_type.value,  # Store enum value
-            "status": status.value,  # Store enum value
+            "call_type": call_type,
+            "status": status,
             "request_hash": request_hash,
             "request_ref": request_ref,
             "response_hash": response_hash,
@@ -807,8 +806,8 @@ class ExecutionRepository:
             "state_id": None,  # NOT a node_state call
             "operation_id": operation_id,  # Operation call
             "call_index": call_index,
-            "call_type": call_type.value,
-            "status": status.value,
+            "call_type": call_type,
+            "status": status,
             "request_hash": request_hash,
             "request_ref": request_ref,
             "response_hash": response_hash,
@@ -985,17 +984,28 @@ class ExecutionRepository:
         if self._payload_store is None:
             return None
 
-        # Retrieve from payload store — KeyError means purged by retention policy
+        # Retrieve from payload store — KeyError means purged by retention policy,
+        # OSError means storage backend failure (permissions, disk, etc.)
         try:
             payload_bytes = self._payload_store.retrieve(row.response_ref)
         except KeyError:
             return None
+        except OSError as e:
+            raise AuditIntegrityError(
+                f"Payload retrieval failed for call_id={call_id} (ref={row.response_ref}): {type(e).__name__}: {e}"
+            ) from e
 
         # Everything below is Tier 1: our data, crash on anomaly
-        decoded = json.loads(payload_bytes.decode("utf-8"))
+        try:
+            decoded = json.loads(payload_bytes.decode("utf-8"))
+        except (json.JSONDecodeError, UnicodeDecodeError) as e:
+            raise AuditIntegrityError(
+                f"Corrupt call response payload for call_id={call_id} (ref={row.response_ref}): {e}"
+            ) from e
         if type(decoded) is not dict:
             raise AuditIntegrityError(
-                f"Corrupt call response payload (ref={row.response_ref}): expected JSON object, got {type(decoded).__name__}"
+                f"Corrupt call response payload for call_id={call_id} (ref={row.response_ref}): "
+                f"expected JSON object, got {type(decoded).__name__}"
             )
         return decoded
 
@@ -1038,7 +1048,7 @@ class ExecutionRepository:
                 run_id=batch.run_id,
                 aggregation_node_id=batch.aggregation_node_id,
                 attempt=batch.attempt,
-                status=batch.status.value,  # Store string in DB
+                status=batch.status,
                 created_at=batch.created_at,
             )
         )
@@ -1107,10 +1117,10 @@ class ExecutionRepository:
                 f"to {status.value!r}. Terminal batches are immutable."
             )
 
-        updates: dict[str, Any] = {"status": status.value}
+        updates: dict[str, Any] = {"status": status}
 
         if trigger_type is not None:
-            updates["trigger_type"] = trigger_type.value
+            updates["trigger_type"] = trigger_type
         if trigger_reason is not None:
             updates["trigger_reason"] = trigger_reason
         if state_id is not None:
@@ -1158,8 +1168,8 @@ class ExecutionRepository:
                 batches_table.update()
                 .where(batches_table.c.batch_id == batch_id)
                 .values(
-                    status=status.value,
-                    trigger_type=trigger_type.value if trigger_type is not None else None,
+                    status=status,
+                    trigger_type=trigger_type if trigger_type is not None else None,
                     trigger_reason=trigger_reason,
                     aggregation_state_id=state_id,
                     completed_at=timestamp,
@@ -1212,7 +1222,7 @@ class ExecutionRepository:
         query = select(batches_table).where(batches_table.c.run_id == run_id)
 
         if status is not None:
-            query = query.where(batches_table.c.status == status.value)
+            query = query.where(batches_table.c.status == status)
         if node_id is not None:
             query = query.where(batches_table.c.aggregation_node_id == node_id)
 
@@ -1239,7 +1249,7 @@ class ExecutionRepository:
         query = (
             select(batches_table)
             .where(batches_table.c.run_id == run_id)
-            .where(batches_table.c.status.in_([BatchStatus.DRAFT.value, BatchStatus.EXECUTING.value, BatchStatus.FAILED.value]))
+            .where(batches_table.c.status.in_([BatchStatus.DRAFT, BatchStatus.EXECUTING, BatchStatus.FAILED]))
             .order_by(batches_table.c.created_at.asc())
         )
         result = self._ops.execute_fetchall(query)
@@ -1329,7 +1339,7 @@ class ExecutionRepository:
                     run_id=original.run_id,
                     aggregation_node_id=original.aggregation_node_id,
                     attempt=next_attempt,
-                    status=BatchStatus.DRAFT.value,
+                    status=BatchStatus.DRAFT,
                     created_at=timestamp,
                 )
             )

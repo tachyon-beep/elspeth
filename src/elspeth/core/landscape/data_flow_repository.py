@@ -1,4 +1,3 @@
-# src/elspeth/core/landscape/data_flow_repository.py
 """DataFlowRepository: token/row lifecycle, graph structure, and error recording.
 
 Extracted from TokenRecordingMixin + GraphRecordingMixin + ErrorRecordingMixin
@@ -517,7 +516,7 @@ class DataFlowRepository:
                     outcome_id=outcome_id,
                     run_id=run_id,
                     token_id=parent_token_id,
-                    outcome=RowOutcome.FORKED.value,
+                    outcome=RowOutcome.FORKED,
                     is_terminal=1,
                     recorded_at=now(),
                     fork_group_id=fork_group_id,
@@ -711,7 +710,7 @@ class DataFlowRepository:
                         outcome_id=outcome_id,
                         run_id=run_id,
                         token_id=parent_token_id,
-                        outcome=RowOutcome.EXPANDED.value,
+                        outcome=RowOutcome.EXPANDED,
                         is_terminal=1,
                         recorded_at=now(),
                         expand_group_id=expand_group_id,
@@ -789,7 +788,7 @@ class DataFlowRepository:
                 outcome_id=outcome_id,
                 run_id=run_id,
                 token_id=token_id,
-                outcome=outcome.value,
+                outcome=outcome,
                 is_terminal=1 if is_terminal else 0,
                 recorded_at=now(),
                 sink_name=sink_name,
@@ -958,9 +957,9 @@ class DataFlowRepository:
                 node_id=node.node_id,
                 run_id=node.run_id,
                 plugin_name=node.plugin_name,
-                node_type=node.node_type.value,  # Store string in DB
+                node_type=node.node_type,
                 plugin_version=node.plugin_version,
-                determinism=node.determinism.value,  # Store string in DB
+                determinism=node.determinism,
                 config_hash=node.config_hash,
                 config_json=node.config_json,
                 schema_hash=node.schema_hash,
@@ -1018,7 +1017,7 @@ class DataFlowRepository:
                 from_node_id=edge.from_node_id,
                 to_node_id=edge.to_node_id,
                 label=edge.label,
-                default_mode=edge.default_mode.value,  # Store string in DB
+                default_mode=edge.default_mode,
                 created_at=edge.created_at,
             )
         )

@@ -1,4 +1,3 @@
-# src/elspeth/mcp/analyzers/reports.py
 """Computed analysis report functions for the Landscape audit database.
 
 Functions: get_run_summary, get_dag_structure, get_performance_report,
@@ -540,7 +539,7 @@ def get_llm_usage_report(db: LandscapeDB, recorder: LandscapeRecorder, run_id: s
         stats = llm_by_plugin[plugin]
         call_count: int = row.count  # type: ignore[assignment]  # SA Row attribute from COUNT() aggregate; typed as Any
         stats["total_calls"] += call_count
-        if row.status == CallStatus.SUCCESS.value:
+        if row.status == CallStatus.SUCCESS:
             stats["successful"] += call_count
         else:
             stats["failed"] += call_count

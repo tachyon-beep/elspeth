@@ -345,8 +345,8 @@ class RecoveryManager:
                 .where(
                     token_outcomes_table.c.outcome.in_(
                         [
-                            RowOutcome.FORKED.value,
-                            RowOutcome.EXPANDED.value,
+                            RowOutcome.FORKED,
+                            RowOutcome.EXPANDED,
                         ]
                     )
                 )
@@ -355,12 +355,12 @@ class RecoveryManager:
             # Terminal outcomes that indicate row processing is complete
             # (excludes FORKED and EXPANDED which are delegation markers)
             terminal_outcome_values = [
-                RowOutcome.COMPLETED.value,
-                RowOutcome.ROUTED.value,
-                RowOutcome.QUARANTINED.value,
-                RowOutcome.FAILED.value,
-                RowOutcome.CONSUMED_IN_BATCH.value,
-                RowOutcome.COALESCED.value,
+                RowOutcome.COMPLETED,
+                RowOutcome.ROUTED,
+                RowOutcome.QUARANTINED,
+                RowOutcome.FAILED,
+                RowOutcome.CONSUMED_IN_BATCH,
+                RowOutcome.COALESCED,
             ]
 
             # Subquery: Tokens with terminal outcomes

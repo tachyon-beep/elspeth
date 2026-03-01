@@ -539,7 +539,7 @@ class TestTokenOutcomeProperties:
         # Verify persisted
         outcome = recorder.get_token_outcome(token.token_id)
         assert outcome is not None
-        assert outcome.outcome == RowOutcome.COMPLETED.value
+        assert outcome.outcome == RowOutcome.COMPLETED
         assert outcome.is_terminal is True
         assert outcome.sink_name == "default"
 
@@ -582,7 +582,7 @@ class TestTokenOutcomeProperties:
         # Verify persisted
         outcome = recorder.get_token_outcome(token.token_id)
         assert outcome is not None
-        assert outcome.outcome == RowOutcome.QUARANTINED.value
+        assert outcome.outcome == RowOutcome.QUARANTINED
         assert outcome.is_terminal is True
         assert outcome.error_hash == error_hash
 

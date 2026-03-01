@@ -527,7 +527,7 @@ class TokenLifecycleStateMachine(RuleBasedStateMachine):
                     ).fetchone()
 
                     assert result is not None, f"Forked parent {token_id} has no FORKED outcome"
-                    assert result[0] == RowOutcome.FORKED.value, f"Wrong outcome for forked token: {result[0]}"
+                    assert result[0] == RowOutcome.FORKED, f"Wrong outcome for forked token: {result[0]}"
 
                 elif model.state == TokenState.COALESCED:
                     # COALESCED tokens have outcome recorded by coalesce rule
@@ -537,7 +537,7 @@ class TokenLifecycleStateMachine(RuleBasedStateMachine):
                     ).fetchone()
 
                     assert result is not None, f"Coalesced token {token_id} has no COALESCED outcome"
-                    assert result[0] == RowOutcome.COALESCED.value, f"Wrong outcome for coalesced token: {result[0]}"
+                    assert result[0] == RowOutcome.COALESCED, f"Wrong outcome for coalesced token: {result[0]}"
 
     @invariant()
     def coalesce_merged_tokens_have_parent_links(self) -> None:
@@ -666,7 +666,7 @@ class TestTokenLifecycleInvariants:
                 ).fetchone()
 
                 assert result is not None, "Parent token missing outcome after fork"
-                assert result[0] == RowOutcome.FORKED.value, f"Wrong outcome: {result[0]}"
+                assert result[0] == RowOutcome.FORKED, f"Wrong outcome: {result[0]}"
 
             # Verify children exist with parent links
             assert len(children) == branch_count
