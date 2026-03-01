@@ -240,7 +240,7 @@ class TestLLMTransformAzureInit:
         transform = LLMTransform(_make_azure_config(template="{{ row.text }}"))
         db = LandscapeDB.in_memory()
         recorder = LandscapeRecorder(db)
-        ctx = PluginContext(run_id="test-run", config={}, landscape=recorder)
+        ctx = make_context(landscape=recorder)
 
         with pytest.raises(NotImplementedError, match="row-level pipelining"):
             transform.process(make_pipeline_row({"text": "hello"}), ctx)
@@ -586,9 +586,7 @@ class TestLLMTransformAzurePipelining:
         token = make_token("row-1")
         db = LandscapeDB.in_memory()
         recorder = LandscapeRecorder(db)
-        ctx = PluginContext(
-            run_id="test-run",
-            config={},
+        ctx = make_context(
             landscape=recorder,
             state_id="test-state-id",
             token=token,

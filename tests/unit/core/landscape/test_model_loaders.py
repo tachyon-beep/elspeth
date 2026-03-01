@@ -12,8 +12,10 @@ catching field-name typos that bare Mock() would silently accept.
 import json
 from datetime import UTC, datetime, timedelta
 from types import SimpleNamespace
+from typing import Any, cast
 
 import pytest
+from sqlalchemy.engine import Row as SARow
 
 from elspeth.contracts.audit import (
     Artifact,
@@ -69,13 +71,14 @@ from elspeth.core.landscape.model_loaders import (
 )
 
 
-def _make_sa_row(**kwargs: object) -> SimpleNamespace:
+def _make_sa_row(**kwargs: object) -> SARow[Any]:
     """Create a SimpleNamespace simulating a SQLAlchemy Row.
 
     SimpleNamespace raises AttributeError on missing attributes,
     matching real Row behavior and catching loader field-name typos.
+    Cast to SARow[Any] so loaders accept it without type errors.
     """
-    return SimpleNamespace(**kwargs)
+    return cast(SARow[Any], SimpleNamespace(**kwargs))
 
 
 NOW = datetime.now(UTC)
@@ -91,7 +94,7 @@ EVEN_LATER = NOW + timedelta(seconds=2)
 class TestRunLoader:
     """Tests for RunLoader.load()."""
 
-    def _make_run_row(self, **overrides: object) -> SimpleNamespace:
+    def _make_run_row(self, **overrides: object) -> SARow[Any]:
         defaults = {
             "run_id": "run-1",
             "started_at": NOW,
@@ -193,7 +196,7 @@ class TestRunLoader:
 class TestNodeLoader:
     """Tests for NodeLoader.load()."""
 
-    def _make_node_row(self, **overrides: object) -> SimpleNamespace:
+    def _make_node_row(self, **overrides: object) -> SARow[Any]:
         defaults = {
             "node_id": "node-1",
             "run_id": "run-1",
@@ -321,7 +324,7 @@ class TestNodeLoader:
 class TestEdgeLoader:
     """Tests for EdgeLoader.load()."""
 
-    def _make_edge_row(self, **overrides: object) -> SimpleNamespace:
+    def _make_edge_row(self, **overrides: object) -> SARow[Any]:
         defaults = {
             "edge_id": "edge-1",
             "run_id": "run-1",
@@ -366,7 +369,7 @@ class TestEdgeLoader:
 class TestRowLoader:
     """Tests for RowLoader.load()."""
 
-    def _make_row_row(self, **overrides: object) -> SimpleNamespace:
+    def _make_row_row(self, **overrides: object) -> SARow[Any]:
         defaults = {
             "row_id": "row-1",
             "run_id": "run-1",
@@ -405,7 +408,7 @@ class TestRowLoader:
 class TestTokenLoader:
     """Tests for TokenLoader.load()."""
 
-    def _make_token_row(self, **overrides: object) -> SimpleNamespace:
+    def _make_token_row(self, **overrides: object) -> SARow[Any]:
         defaults = {
             "token_id": "tok-1",
             "row_id": "row-1",
@@ -490,7 +493,7 @@ class TestTokenParentLoader:
 class TestCallLoader:
     """Tests for CallLoader.load()."""
 
-    def _make_call_row(self, **overrides: object) -> SimpleNamespace:
+    def _make_call_row(self, **overrides: object) -> SARow[Any]:
         defaults = {
             "call_id": "call-1",
             "call_index": 0,
@@ -591,7 +594,7 @@ class TestCallLoader:
 class TestRoutingEventLoader:
     """Tests for RoutingEventLoader.load()."""
 
-    def _make_routing_row(self, **overrides: object) -> SimpleNamespace:
+    def _make_routing_row(self, **overrides: object) -> SARow[Any]:
         defaults = {
             "event_id": "evt-1",
             "state_id": "state-1",
@@ -640,7 +643,7 @@ class TestRoutingEventLoader:
 class TestBatchLoader:
     """Tests for BatchLoader.load()."""
 
-    def _make_batch_row(self, **overrides: object) -> SimpleNamespace:
+    def _make_batch_row(self, **overrides: object) -> SARow[Any]:
         defaults = {
             "batch_id": "batch-1",
             "run_id": "run-1",
@@ -716,7 +719,7 @@ class TestBatchLoader:
 class TestNodeStateLoader:
     """Tests for NodeStateLoader.load() -- discriminated union."""
 
-    def _make_node_state_row(self, **overrides: object) -> SimpleNamespace:
+    def _make_node_state_row(self, **overrides: object) -> SARow[Any]:
         """Create a base node state row with all columns present.
 
         All completion-related fields default to None (representing OPEN).
@@ -1247,7 +1250,7 @@ class TestTransformErrorLoader:
 class TestTokenOutcomeLoader:
     """Tests for TokenOutcomeLoader.load()."""
 
-    def _make_outcome_row(self, **overrides: object) -> SimpleNamespace:
+    def _make_outcome_row(self, **overrides: object) -> SARow[Any]:
         defaults = {
             "outcome_id": "oc-1",
             "run_id": "run-1",
@@ -1520,7 +1523,7 @@ class TestOperationLoader:
     __post_init__ lifecycle invariants still fire through the loader path.
     """
 
-    def _make_operation_row(self, **overrides: object) -> SimpleNamespace:
+    def _make_operation_row(self, **overrides: object) -> SARow[Any]:
         defaults = {
             "operation_id": "op-1",
             "run_id": "run-1",

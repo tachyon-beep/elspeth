@@ -1,6 +1,8 @@
 """Tests for AzurePromptShield transform with BatchTransformMixin."""
 
-from typing import Any
+from __future__ import annotations
+
+from typing import TYPE_CHECKING, Any
 from unittest.mock import MagicMock, Mock, patch
 
 import pytest
@@ -12,6 +14,9 @@ from elspeth.plugins.infrastructure.batching.ports import CollectorOutputPort
 from elspeth.plugins.infrastructure.config_base import PluginConfigError
 from elspeth.testing import make_pipeline_row, make_row
 from tests.fixtures.factories import make_context
+
+if TYPE_CHECKING:
+    pass
 
 
 def make_token(row_id: str = "row-1", token_id: str | None = None) -> TokenInfo:
@@ -1045,8 +1050,10 @@ class TestPromptShieldBatchProcessing:
             transform.accept(row, ctx)
             transform.flush_batch_processing(timeout=10.0)
 
-            # Verify record_call was invoked
-            assert ctx.landscape.record_call.call_count == 1
+            # Verify record_call was invoked (landscape is a Mock in this test)
+            recorder = ctx.landscape
+            assert isinstance(recorder, Mock)
+            assert recorder.record_call.call_count == 1
         finally:
             transform.close()
 
@@ -1085,6 +1092,8 @@ class TestPromptShieldBatchProcessing:
         transform.connect_output(adapter, max_pending=10)
 
         try:
+            assert ctx.token is not None
+            assert ctx.state_id is not None
             waiter = adapter.register(ctx.token.token_id, ctx.state_id)
             transform.accept(make_pipeline_row({"prompt": "test", "id": 1}), ctx)
             with pytest.raises(CapacityError) as exc_info:
@@ -1343,7 +1352,9 @@ class TestPromptShieldEmptyDocumentsAnalysis:
 
             assert len(collector.results) == 1
             _, result, _ = collector.results[0]
+            assert isinstance(result, TransformResult)
             assert result.status == "error"
+            assert isinstance(result.reason, dict)
             assert result.reason["error_type"] == "malformed_response"
             assert "exactly 1 entry" in result.reason["message"]
             assert result.retryable is False
@@ -1372,7 +1383,9 @@ class TestPromptShieldEmptyDocumentsAnalysis:
 
             assert len(collector.results) == 1
             _, result, _ = collector.results[0]
+            assert isinstance(result, TransformResult)
             assert result.status == "error"
+            assert isinstance(result.reason, dict)
             assert result.reason["error_type"] == "malformed_response"
             assert "exactly 1 entry" in result.reason["message"]
         finally:
@@ -1404,6 +1417,7 @@ class TestPromptShieldEmptyDocumentsAnalysis:
 
             assert len(collector.results) == 1
             _, result, _ = collector.results[0]
+            assert isinstance(result, TransformResult)
             assert result.status == "success"
         finally:
             transform.close()
@@ -1430,6 +1444,7 @@ class TestPromptShieldEmptyDocumentsAnalysis:
 
             assert len(collector.results) == 1
             _, result, _ = collector.results[0]
+            assert isinstance(result, TransformResult)
             assert result.status == "success"
         finally:
             transform.close()

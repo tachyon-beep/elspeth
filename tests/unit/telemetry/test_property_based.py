@@ -10,6 +10,7 @@ Test categories:
 3. Event Ordering: FIFO ordering preservation through the pipeline
 """
 
+from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from typing import Any, ClassVar
@@ -93,7 +94,7 @@ class MockExporter:
     def name(self) -> str:
         return self._name
 
-    def configure(self, config: dict[str, Any]) -> None:
+    def configure(self, config: Mapping[str, Any]) -> None:
         pass
 
     def export(self, event: TelemetryEvent) -> None:

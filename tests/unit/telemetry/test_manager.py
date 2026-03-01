@@ -452,13 +452,13 @@ class TestDropBackpressure:
 
         replacement_event = _row_event()
 
-        class BlockingReplacementQueue(queue.Queue):
+        class BlockingReplacementQueue(queue.Queue[object]):
             def __init__(self) -> None:
                 super().__init__(maxsize=1)
                 self.replacement_put_entered = threading.Event()
                 self.allow_replacement_put = threading.Event()
 
-            def put_nowait(self, item):
+            def put_nowait(self, item: object) -> None:
                 if item is replacement_event:
                     self.replacement_put_entered.set()
                     assert self.allow_replacement_put.wait(timeout=2.0), "Timed out waiting to release replacement put"
@@ -525,12 +525,12 @@ class TestDropBackpressure:
         incoming_event = _row_event()
         interloper_event = _lifecycle_event()
 
-        class SentinelContentionQueue(queue.Queue):
+        class SentinelContentionQueue(queue.Queue[object]):
             def __init__(self) -> None:
                 super().__init__(maxsize=1)
                 self._sentinel_requeue_attempts = 0
 
-            def put_nowait(self, item):
+            def put_nowait(self, item: object) -> None:
                 if item is None:
                     self._sentinel_requeue_attempts += 1
                     if self._sentinel_requeue_attempts == 1:
@@ -557,7 +557,7 @@ class TestDropBackpressure:
         dummy = DummyManager(q)
         queue.Queue.put_nowait(q, None)
 
-        TelemetryManager._drop_oldest_and_enqueue_newest(dummy, incoming_event)
+        TelemetryManager._drop_oldest_and_enqueue_newest(dummy, incoming_event)  # type: ignore[arg-type]  # DummyManager duck-types TelemetryManager for isolated unit test
 
         queued = q.get_nowait()
         assert queued is None
@@ -572,7 +572,7 @@ class TestDropBackpressure:
         class DummyManager:
             _LOG_INTERVAL = 100
 
-            def __init__(self, q: queue.Queue) -> None:
+            def __init__(self, q: queue.Queue[object]) -> None:
                 self._queue = q
                 self._dropped_lock = threading.Lock()
                 self._events_dropped = 0
@@ -582,7 +582,7 @@ class TestDropBackpressure:
                 if self._events_dropped - self._last_logged_drop_count >= self._LOG_INTERVAL:
                     self._last_logged_drop_count = self._events_dropped
 
-        q: queue.Queue = queue.Queue(maxsize=1)
+        q: queue.Queue[object] = queue.Queue(maxsize=1)
         dummy = DummyManager(q)
         q.put_nowait(None)
 
@@ -592,7 +592,7 @@ class TestDropBackpressure:
         monkeypatch.setattr(TelemetryManager, "_requeue_shutdown_sentinel_or_raise", _raise_requeue_failure)
 
         # Must NOT raise — telemetry failures never propagate to callers
-        TelemetryManager._drop_oldest_and_enqueue_newest(dummy, incoming_event)
+        TelemetryManager._drop_oldest_and_enqueue_newest(dummy, incoming_event)  # type: ignore[arg-type]  # DummyManager duck-types TelemetryManager for isolated unit test
 
         # Critical regression guard: queue task accounting must remain balanced.
         assert q.unfinished_tasks == 0

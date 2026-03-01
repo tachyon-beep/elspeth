@@ -2,8 +2,6 @@
 
 import pytest
 
-from elspeth.core.landscape.database import LandscapeDB
-from elspeth.core.landscape.recorder import LandscapeRecorder
 from elspeth.plugins.infrastructure.config_base import PluginConfigError
 from elspeth.testing import make_pipeline_row
 from tests.fixtures.factories import make_context
@@ -211,7 +209,6 @@ class TestKeywordFilterInstantiation:
 
     def test_transform_compiles_patterns_at_init(self) -> None:
         """Patterns are compiled at init — matching works immediately without lazy init."""
-        from elspeth.contracts.plugin_context import PluginContext
         from elspeth.contracts.schema_contract import SchemaContract
         from elspeth.plugins.transforms.keyword_filter import KeywordFilter
         from elspeth.testing import make_field, make_row
@@ -228,9 +225,7 @@ class TestKeywordFilterInstantiation:
         fields = tuple(make_field(k, object, original_name=k, required=False, source="inferred") for k in ["content"])
         contract = SchemaContract(mode="OBSERVED", fields=fields, locked=True)
         row = make_row({"content": "my password is 123"}, contract=contract)
-        db = LandscapeDB.in_memory()
-        recorder = LandscapeRecorder(db)
-        ctx = PluginContext(run_id="test-run", config={}, landscape=recorder)
+        ctx = make_context()
         result = transform.process(row, ctx)
         assert result.status == "error"
 

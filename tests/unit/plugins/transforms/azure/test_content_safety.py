@@ -1,6 +1,9 @@
 """Tests for AzureContentSafety transform with BatchTransformMixin."""
 
-from typing import Any
+from __future__ import annotations
+
+from collections.abc import Generator
+from typing import TYPE_CHECKING, Any
 from unittest.mock import MagicMock, Mock, patch
 
 import pytest
@@ -11,6 +14,9 @@ from elspeth.plugins.infrastructure.batching.ports import CollectorOutputPort
 from elspeth.plugins.infrastructure.config_base import PluginConfigError
 from elspeth.testing import make_pipeline_row
 from tests.fixtures.factories import make_context
+
+if TYPE_CHECKING:
+    from elspeth.plugins.transforms.azure.content_safety import AzureContentSafety
 
 
 def make_token(row_id: str = "row-1", token_id: str | None = None) -> TokenInfo:
@@ -1298,14 +1304,14 @@ class TestContentSafetySeverityValidation:
     """
 
     @pytest.fixture(autouse=True)
-    def mock_httpx_client(self):
+    def mock_httpx_client(self) -> Generator[MagicMock, None, None]:
         """Patch httpx.Client to prevent real HTTP calls."""
         with patch("httpx.Client") as mock_client_class:
             mock_instance = MagicMock()
             mock_client_class.return_value = mock_instance
             yield mock_instance
 
-    def _make_transform(self):
+    def _make_transform(self) -> AzureContentSafety:
         """Create a Content Safety transform for testing."""
         from elspeth.plugins.transforms.azure.content_safety import AzureContentSafety
 
@@ -1354,7 +1360,9 @@ class TestContentSafetySeverityValidation:
 
             assert len(collector.results) == 1
             _, result, _ = collector.results[0]
+            assert isinstance(result, TransformResult)
             assert result.status == "error"
+            assert isinstance(result.reason, dict)
             assert result.reason["error_type"] == "malformed_response"
             assert "severity" in result.reason["message"].lower()
         finally:
@@ -1390,7 +1398,9 @@ class TestContentSafetySeverityValidation:
 
             assert len(collector.results) == 1
             _, result, _ = collector.results[0]
+            assert isinstance(result, TransformResult)
             assert result.status == "error"
+            assert isinstance(result.reason, dict)
             assert result.reason["error_type"] == "malformed_response"
         finally:
             transform.close()
@@ -1421,7 +1431,9 @@ class TestContentSafetySeverityValidation:
 
             assert len(collector.results) == 1
             _, result, _ = collector.results[0]
+            assert isinstance(result, TransformResult)
             assert result.status == "error"
+            assert isinstance(result.reason, dict)
             assert result.reason["error_type"] == "malformed_response"
             assert "-1" in result.reason["message"]
         finally:
@@ -1453,7 +1465,9 @@ class TestContentSafetySeverityValidation:
 
             assert len(collector.results) == 1
             _, result, _ = collector.results[0]
+            assert isinstance(result, TransformResult)
             assert result.status == "error"
+            assert isinstance(result.reason, dict)
             assert result.reason["error_type"] == "malformed_response"
         finally:
             transform.close()
@@ -1484,7 +1498,9 @@ class TestContentSafetySeverityValidation:
 
             assert len(collector.results) == 1
             _, result, _ = collector.results[0]
+            assert isinstance(result, TransformResult)
             assert result.status == "error"
+            assert isinstance(result.reason, dict)
             assert result.reason["error_type"] == "malformed_response"
         finally:
             transform.close()
@@ -1516,12 +1532,14 @@ class TestContentSafetySeverityValidation:
 
             assert len(collector.results) == 1
             _, result, _ = collector.results[0]
+            assert isinstance(result, TransformResult)
             # valid_severity <= 2 (threshold) passes; > 2 is a content violation
             # Both are valid API responses — not malformed_response errors
             if valid_severity <= 2:
                 assert result.status == "success"
             else:
                 assert result.status == "error"
+                assert isinstance(result.reason, dict)
                 assert result.reason["reason"] == "content_safety_violation"
         finally:
             transform.close()
@@ -1552,7 +1570,9 @@ class TestContentSafetySeverityValidation:
 
             assert len(collector.results) == 1
             _, result, _ = collector.results[0]
+            assert isinstance(result, TransformResult)
             assert result.status == "error"
+            assert isinstance(result.reason, dict)
             assert result.reason["error_type"] == "malformed_response"
         finally:
             transform.close()
@@ -1583,7 +1603,9 @@ class TestContentSafetySeverityValidation:
 
             assert len(collector.results) == 1
             _, result, _ = collector.results[0]
+            assert isinstance(result, TransformResult)
             assert result.status == "error"
+            assert isinstance(result.reason, dict)
             assert result.reason["error_type"] == "malformed_response"
         finally:
             transform.close()
@@ -1614,7 +1636,9 @@ class TestContentSafetySeverityValidation:
 
             assert len(collector.results) == 1
             _, result, _ = collector.results[0]
+            assert isinstance(result, TransformResult)
             assert result.status == "error"
+            assert isinstance(result.reason, dict)
             assert result.reason["error_type"] == "malformed_response"
         finally:
             transform.close()
@@ -1630,7 +1654,7 @@ class TestContentSafetyRetryRaceCondition:
     """
 
     @pytest.fixture(autouse=True)
-    def mock_httpx_client(self):
+    def mock_httpx_client(self) -> Generator[MagicMock, None, None]:
         """Patch httpx.Client to prevent real HTTP calls."""
         with patch("httpx.Client") as mock_client_class:
             mock_instance = MagicMock()

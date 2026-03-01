@@ -32,7 +32,6 @@ import pytest
 
 from elspeth.contracts import NodeType, PipelineRow, TransformErrorReason, TransformResult
 from elspeth.contracts.identity import TokenInfo
-from elspeth.contracts.plugin_context import PluginContext
 from elspeth.contracts.schema import SchemaConfig
 from elspeth.contracts.schema_contract import FieldContract, SchemaContract
 from elspeth.core.landscape.database import LandscapeDB
@@ -43,6 +42,7 @@ from elspeth.testing.chaosllm.server import ChaosLLMServer
 if TYPE_CHECKING:
     import httpx
 
+    from elspeth.contracts.plugin_context import PluginContext
     from elspeth.engine.batch_adapter import ExceptionResult
 
 # Dynamic schema for LLM transforms
@@ -655,6 +655,8 @@ def make_plugin_context(
 ) -> PluginContext:
     """Create a PluginContext with real landscape.
 
+    Delegates to the shared make_context() factory.
+
     Args:
         landscape: LandscapeRecorder for audit trail
         run_id: Run ID for context
@@ -664,16 +666,17 @@ def make_plugin_context(
     Returns:
         PluginContext ready for use
     """
+    from tests.fixtures.factories import make_context
+
     if state_id is None:
         state_id = f"state-{uuid.uuid4().hex[:12]}"
     if token is None:
         token = make_token()
 
-    return PluginContext(
+    return make_context(
         run_id=run_id,
         landscape=landscape,
         state_id=state_id,
-        config={},
         token=token,
     )
 

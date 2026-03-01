@@ -26,8 +26,8 @@ from typing import Any
 
 import pytest
 
-from elspeth.contracts.plugin_context import PluginContext
 from elspeth.plugins.transforms.llm.transform import LLMTransform
+from tests.fixtures.factories import make_context
 
 from .conftest import (
     ChaosLLMHTTPFixture,
@@ -89,11 +89,10 @@ def _feed_rows(
             input_data=row,
         )
 
-        ctx = PluginContext(
+        ctx = make_context(
             run_id=run_id,
-            landscape=recorder,  # type: ignore[arg-type]
+            landscape=recorder,
             state_id=state.state_id,
-            config={},
             token=token,
         )
         input_order.append(row["id"])
@@ -136,7 +135,7 @@ class TestAzureLLMStress:
         output = CollectingOutputPort()
         transform.connect_output(output, max_pending=30)
 
-        start_ctx = PluginContext(run_id=run_id, landscape=recorder, config={})
+        start_ctx = make_context(run_id=run_id, landscape=recorder)
         transform.on_start(start_ctx)
 
         rows = generate_test_rows(100)
@@ -179,7 +178,7 @@ class TestAzureLLMStress:
         output = CollectingOutputPort()
         transform.connect_output(output, max_pending=20)
 
-        start_ctx = PluginContext(run_id=run_id, landscape=recorder, config={})
+        start_ctx = make_context(run_id=run_id, landscape=recorder)
         transform.on_start(start_ctx)
 
         rows = generate_test_rows(50)
@@ -224,7 +223,7 @@ class TestAzureLLMStress:
         output = CollectingOutputPort()
         transform.connect_output(output, max_pending=15)
 
-        start_ctx = PluginContext(run_id=run_id, landscape=recorder, config={})
+        start_ctx = make_context(run_id=run_id, landscape=recorder)
         transform.on_start(start_ctx)
 
         rows = generate_test_rows(75)
@@ -264,7 +263,7 @@ class TestAzureLLMStress:
         output = CollectingOutputPort()
         transform.connect_output(output, max_pending=32)
 
-        start_ctx = PluginContext(run_id=run_id, landscape=recorder, config={})
+        start_ctx = make_context(run_id=run_id, landscape=recorder)
         transform.on_start(start_ctx)
 
         rows = generate_test_rows(100)
@@ -330,7 +329,7 @@ class TestAzureMultiQueryStress:
         output = CollectingOutputPort()
         transform.connect_output(output, max_pending=20)
 
-        start_ctx = PluginContext(run_id=run_id, landscape=recorder, config={})
+        start_ctx = make_context(run_id=run_id, landscape=recorder)
         transform.on_start(start_ctx)
 
         rows = generate_multi_query_rows(50)
@@ -386,7 +385,7 @@ class TestAzureMultiQueryStress:
         output = CollectingOutputPort()
         transform.connect_output(output, max_pending=20)
 
-        start_ctx = PluginContext(run_id=run_id, landscape=recorder, config={})
+        start_ctx = make_context(run_id=run_id, landscape=recorder)
         transform.on_start(start_ctx)
 
         rows = generate_multi_query_rows(30)
@@ -436,7 +435,7 @@ class TestAzureMultiQueryStress:
         output = CollectingOutputPort()
         transform.connect_output(output, max_pending=20)
 
-        start_ctx = PluginContext(run_id=run_id, landscape=recorder, config={})
+        start_ctx = make_context(run_id=run_id, landscape=recorder)
         transform.on_start(start_ctx)
 
         rows = generate_multi_query_rows(50)
@@ -490,7 +489,7 @@ class TestOpenRouterLLMStress:
         output = CollectingOutputPort()
         transform.connect_output(output, max_pending=30)
 
-        start_ctx = PluginContext(run_id=run_id, landscape=recorder, config={})
+        start_ctx = make_context(run_id=run_id, landscape=recorder)
         transform.on_start(start_ctx)
 
         rows = generate_test_rows(100)
@@ -536,7 +535,7 @@ class TestOpenRouterLLMStress:
         output = CollectingOutputPort()
         transform.connect_output(output, max_pending=20)
 
-        start_ctx = PluginContext(run_id=run_id, landscape=recorder, config={})
+        start_ctx = make_context(run_id=run_id, landscape=recorder)
         transform.on_start(start_ctx)
 
         rows = generate_test_rows(50)
@@ -578,7 +577,7 @@ class TestOpenRouterLLMStress:
         output = CollectingOutputPort()
         transform.connect_output(output, max_pending=20)
 
-        start_ctx = PluginContext(run_id=run_id, landscape=recorder, config={})
+        start_ctx = make_context(run_id=run_id, landscape=recorder)
         transform.on_start(start_ctx)
 
         rows = generate_test_rows(75)
@@ -633,7 +632,7 @@ class TestOpenRouterMultiQueryStress:
         output = CollectingOutputPort()
         transform.connect_output(output, max_pending=20)
 
-        start_ctx = PluginContext(run_id=run_id, landscape=recorder, config={})
+        start_ctx = make_context(run_id=run_id, landscape=recorder)
         transform.on_start(start_ctx)
 
         rows = generate_multi_query_rows(50)
@@ -685,7 +684,7 @@ class TestOpenRouterMultiQueryStress:
         output = CollectingOutputPort()
         transform.connect_output(output, max_pending=20)
 
-        start_ctx = PluginContext(run_id=run_id, landscape=recorder, config={})
+        start_ctx = make_context(run_id=run_id, landscape=recorder)
         transform.on_start(start_ctx)
 
         rows = generate_multi_query_rows(30)
@@ -733,7 +732,7 @@ class TestOpenRouterMultiQueryStress:
         output = CollectingOutputPort()
         transform.connect_output(output, max_pending=20)
 
-        start_ctx = PluginContext(run_id=run_id, landscape=recorder, config={})
+        start_ctx = make_context(run_id=run_id, landscape=recorder)
         transform.on_start(start_ctx)
 
         rows = generate_multi_query_rows(50)
@@ -775,7 +774,7 @@ class TestOpenRouterMultiQueryStress:
         output = CollectingOutputPort()
         transform.connect_output(output, max_pending=20)
 
-        start_ctx = PluginContext(run_id=run_id, landscape=recorder, config={})
+        start_ctx = make_context(run_id=run_id, landscape=recorder)
         transform.on_start(start_ctx)
 
         rows = generate_multi_query_rows(50)
@@ -839,7 +838,7 @@ class TestMixedErrors:
         output = CollectingOutputPort()
         transform.connect_output(output, max_pending=30)
 
-        start_ctx = PluginContext(run_id=run_id, landscape=recorder, config={})
+        start_ctx = make_context(run_id=run_id, landscape=recorder)
         transform.on_start(start_ctx)
 
         rows = generate_test_rows(100)
@@ -889,7 +888,7 @@ class TestMixedErrors:
         output = CollectingOutputPort()
         transform.connect_output(output, max_pending=30)
 
-        start_ctx = PluginContext(run_id=run_id, landscape=recorder, config={})
+        start_ctx = make_context(run_id=run_id, landscape=recorder)
         transform.on_start(start_ctx)
 
         rows = generate_test_rows(100)
@@ -939,7 +938,7 @@ class TestMixedErrors:
         output = CollectingOutputPort()
         transform.connect_output(output, max_pending=20)
 
-        start_ctx = PluginContext(run_id=run_id, landscape=recorder, config={})
+        start_ctx = make_context(run_id=run_id, landscape=recorder)
         transform.on_start(start_ctx)
 
         rows = generate_test_rows(50)
@@ -967,11 +966,10 @@ class TestMixedErrors:
                 input_data=row,
             )
 
-            ctx = PluginContext(
+            ctx = make_context(
                 run_id=run_id,
                 landscape=recorder,
                 state_id=state.state_id,
-                config={},
                 token=token,
             )
             transform.accept(make_pipeline_row(row), ctx)
@@ -1022,7 +1020,7 @@ class TestMixedErrors:
         output = CollectingOutputPort()
         transform.connect_output(output, max_pending=20)
 
-        start_ctx = PluginContext(run_id=run_id, landscape=recorder, config={})
+        start_ctx = make_context(run_id=run_id, landscape=recorder)
         transform.on_start(start_ctx)
 
         rows = generate_test_rows(100)
@@ -1055,11 +1053,10 @@ class TestMixedErrors:
                 input_data=row,
             )
 
-            ctx = PluginContext(
+            ctx = make_context(
                 run_id=run_id,
                 landscape=recorder,
                 state_id=state.state_id,
-                config={},
                 token=token,
             )
             transform.accept(make_pipeline_row(row), ctx)
@@ -1098,7 +1095,7 @@ class TestMixedErrors:
         output = CollectingOutputPort()
         transform.connect_output(output, max_pending=20)
 
-        start_ctx = PluginContext(run_id=run_id, landscape=recorder, config={})
+        start_ctx = make_context(run_id=run_id, landscape=recorder)
         transform.on_start(start_ctx)
 
         rows = generate_test_rows(75)

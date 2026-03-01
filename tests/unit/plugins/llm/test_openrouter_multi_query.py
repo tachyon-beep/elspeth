@@ -488,7 +488,7 @@ class TestRowProcessingWithPipelining:
             call_count[0] += 1
             return responses[idx]
 
-        transform._provider.execute_query.side_effect = side_effect
+        transform._provider.execute_query.side_effect = side_effect  # type: ignore[union-attr]
 
         row = make_pipeline_row(
             {
@@ -509,7 +509,7 @@ class TestRowProcessingWithPipelining:
         assert isinstance(result, TransformResult), f"Expected TransformResult, got {type(result)}"
 
         assert result.status == "success"
-        assert transform._provider.execute_query.call_count == 4
+        assert transform._provider.execute_query.call_count == 4  # type: ignore[union-attr]
 
     def test_process_row_merges_all_results(
         self,
@@ -531,7 +531,7 @@ class TestRowProcessingWithPipelining:
             call_count[0] += 1
             return responses[idx]
 
-        transform._provider.execute_query.side_effect = side_effect
+        transform._provider.execute_query.side_effect = side_effect  # type: ignore[union-attr]
 
         row = make_pipeline_row(
             {
@@ -653,7 +653,7 @@ class TestRowProcessingWithPipelining:
                 return make_query_result("not valid json")
             return make_query_result({"score": 85, "rationale": "ok"})
 
-        transform._provider.execute_query.side_effect = side_effect
+        transform._provider.execute_query.side_effect = side_effect  # type: ignore[union-attr]
 
         row = make_pipeline_row(
             {
@@ -697,7 +697,7 @@ class TestRowProcessingWithPipelining:
             call_count[0] += 1
             return responses[idx]
 
-        transform._provider.execute_query.side_effect = side_effect
+        transform._provider.execute_query.side_effect = side_effect  # type: ignore[union-attr]
 
         row = make_pipeline_row(
             {
@@ -893,7 +893,7 @@ class TestHTTPSpecificBehavior:
         """Server errors (retryable) re-raise through pipelining as error results."""
         # ServerError is retryable so it re-raises; BatchTransformMixin catches
         # and converts it to an error result in the collector
-        transform._provider.execute_query.side_effect = LLMClientError(
+        transform._provider.execute_query.side_effect = LLMClientError(  # type: ignore[union-attr]
             "HTTP 500: Internal Server Error",
             retryable=False,
         )
@@ -925,7 +925,7 @@ class TestHTTPSpecificBehavior:
         collector: CollectorOutputPort,
     ) -> None:
         """Content policy error from provider returns error result."""
-        transform._provider.execute_query.side_effect = ContentPolicyError(
+        transform._provider.execute_query.side_effect = ContentPolicyError(  # type: ignore[union-attr]
             "LLM returned null content (likely content-filtered by provider)"
         )
 
@@ -961,7 +961,7 @@ class TestHTTPSpecificBehavior:
         the provider raises ContentPolicyError. Multi-query wraps this as
         a non-retryable error result.
         """
-        transform._provider.execute_query.side_effect = ContentPolicyError(
+        transform._provider.execute_query.side_effect = ContentPolicyError(  # type: ignore[union-attr]
             "LLM returned null content (likely content-filtered by provider)"
         )
 
@@ -996,7 +996,7 @@ class TestHTTPSpecificBehavior:
         """Missing expected field in LLM JSON response is an error, not silent None."""
         # Response has 'score' but missing 'rationale' — field presence is
         # validated at the Tier 3 boundary, producing a clear error.
-        transform._provider.execute_query.return_value = make_query_result(
+        transform._provider.execute_query.return_value = make_query_result(  # type: ignore[union-attr]
             {"score": 85}  # Missing 'rationale'
         )
 
@@ -1035,7 +1035,7 @@ class TestHTTPSpecificBehavior:
         TransformResult.error(retryable=True) instead of re-raising, to avoid
         wastefully re-executing successful queries on engine retry.
         """
-        transform._provider.execute_query.side_effect = NetworkError("Connection refused")
+        transform._provider.execute_query.side_effect = NetworkError("Connection refused")  # type: ignore[union-attr]
 
         row = make_pipeline_row(
             {
@@ -1083,7 +1083,7 @@ class TestResourceCleanup:
         transform.close()
 
         assert transform._provider is None
-        mock_provider.close.assert_called_once()
+        mock_provider.close.assert_called_once()  # type: ignore[unreachable]
 
     def test_on_start_captures_recorder(self) -> None:
         """on_start() captures recorder reference for provider creation."""

@@ -524,7 +524,7 @@ class TestDatadogExporterTagSerialization:
         exporter, _mock_tracer, mock_span = self._create_configured_exporter()
 
         # Build a dict nested deeper than _MAX_TAG_DEPTH (5)
-        deep = {"leaf": "value"}
+        deep: dict[str, object] = {"leaf": "value"}
         for i in range(8):
             deep = {f"level_{i}": deep}
 

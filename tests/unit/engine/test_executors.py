@@ -70,7 +70,7 @@ from elspeth.contracts.enums import (
     RowOutcome,
     TriggerType,
 )
-from elspeth.contracts.errors import ContractMergeError, OrchestrationInvariantError, PluginContractViolation
+from elspeth.contracts.errors import ContractMergeError, OrchestrationInvariantError, PluginContractViolation, TransformErrorReason
 from elspeth.contracts.results import ArtifactDescriptor, GateResult
 from elspeth.contracts.routing import RouteDestination, RoutingAction
 from elspeth.contracts.schema_contract import PipelineRow, SchemaContract
@@ -564,7 +564,7 @@ class TestTransformExecutor:
         )
         token = _make_token()
         ctx = make_context()
-        ctx.record_transform_error = MagicMock()
+        ctx.record_transform_error = MagicMock()  # type: ignore[method-assign]
 
         executor.execute_transform(transform, token, ctx)
 
@@ -664,7 +664,7 @@ class TestTransformExecutor:
         recorder = _make_recorder()
         executor = TransformExecutor(recorder, _make_span_factory(), _make_step_resolver())
         transform = _make_transform(on_error="discard")
-        error_reason = {"reason": "content_filtered", "provider": "azure", "code": "CF-01"}
+        error_reason: TransformErrorReason = {"reason": "content_filtered", "provider": "azure", "code": "CF-01"}  # type: ignore[typeddict-unknown-key]
         transform.process.return_value = TransformResult.error(reason=error_reason)
         token = _make_token()
         ctx = make_context(landscape=recorder)
@@ -690,7 +690,7 @@ class TestTransformExecutor:
         )
         token = _make_token()
         ctx = make_context()
-        ctx.record_transform_error = MagicMock()
+        ctx.record_transform_error = MagicMock()  # type: ignore[method-assign]
 
         executor.execute_transform(transform, token, ctx)
 
@@ -823,7 +823,7 @@ class TestTransformExecutor:
         input_data = recorder.begin_node_state.call_args[1]["input_data"]
         assert isinstance(input_data, dict)
         assert type(input_data) is not PipelineRow  # type: ignore[comparison-overlap, unreachable]
-        assert input_data == {"value": "test"}  # type: ignore[unreachable]
+        assert input_data == {"value": "test"}
 
     def test_sets_ctx_contract_from_token(self) -> None:
         """TransformExecutor should set ctx.contract from token.row_data.contract."""
@@ -842,7 +842,7 @@ class TestTransformExecutor:
             )
 
         transform = _make_transform()
-        transform.process = capture_ctx  # type: ignore[assignment]
+        transform.process = capture_ctx
         token = _make_token(contract=contract)
         ctx = make_context()
         assert ctx.contract is None
@@ -1438,13 +1438,13 @@ class TestGateExecutor:
 
         import elspeth.engine.executors.gate as gate_mod
 
-        original_ref = gate_mod.stable_hash
-        gate_mod.stable_hash = failing_hash
+        original_ref = gate_mod.stable_hash  # type: ignore[attr-defined]
+        gate_mod.stable_hash = failing_hash  # type: ignore[attr-defined, assignment]
         try:
             with pytest.raises(ValueError, match="Simulated output hash failure"):
                 executor.execute_config_gate(config, "cg_1", token, ctx)
         finally:
-            gate_mod.stable_hash = original_ref
+            gate_mod.stable_hash = original_ref  # type: ignore[attr-defined]
 
         # State must be FAILED (auto-completed by guard), not orphan OPEN
         completed_calls = [c for c in recorder.complete_node_state.call_args_list if c.kwargs.get("status") == NodeStateStatus.FAILED]
@@ -1908,7 +1908,7 @@ class TestAggregationExecutor:
 
     def test_restore_state_and_get(self) -> None:
         executor, _, nid = self._make_agg_executor()
-        state = {"key": "value"}
+        state = AggregationCheckpointState(version="3.0", nodes={})
         executor.restore_state(nid, state)
         assert executor.get_restored_state(nid) == state
 
@@ -1933,7 +1933,7 @@ class TestAggregationExecutor:
         assert len(buffered) == 1
         assert isinstance(buffered[0], dict)
         assert type(buffered[0]) is not PipelineRow  # type: ignore[comparison-overlap, unreachable]
-        assert buffered[0] == {"value": "test"}  # type: ignore[unreachable]
+        assert buffered[0] == {"value": "test"}
 
     def test_buffer_row_extracts_dict_from_pipeline_row(self) -> None:
         """buffer_row should extract dict from PipelineRow, preserving all fields."""
@@ -2066,7 +2066,7 @@ class TestAggregationExecutor:
         assert len(restored_rows) == 1
         assert isinstance(restored_rows[0], dict)
         assert type(restored_rows[0]) is not PipelineRow  # type: ignore[comparison-overlap, unreachable]
-        assert restored_rows[0] == {"value": "test"}  # type: ignore[unreachable]
+        assert restored_rows[0] == {"value": "test"}
 
 
 # =============================================================================
@@ -2638,7 +2638,7 @@ class TestSinkExecutor:
         input_data = call_kwargs["input_data"]
         assert isinstance(input_data, dict)
         assert type(input_data) is not PipelineRow  # type: ignore[comparison-overlap, unreachable]
-        assert input_data == {"value": "test"}  # type: ignore[unreachable]
+        assert input_data == {"value": "test"}
 
     def test_sink_extracts_dict_for_landscape_output(self) -> None:
         """SinkExecutor should extract dict (not PipelineRow) for Landscape output_data recording."""
@@ -2664,7 +2664,7 @@ class TestSinkExecutor:
         row_in_output = output_data["row"]
         assert isinstance(row_in_output, dict)
         assert type(row_in_output) is not PipelineRow  # type: ignore[comparison-overlap, unreachable]
-        assert row_in_output == {"value": "test"}  # type: ignore[unreachable]
+        assert row_in_output == {"value": "test"}
 
     def test_sink_preserves_all_fields_in_dict(self) -> None:
         """Sink should receive all fields, including extras not in contract."""
@@ -3081,13 +3081,13 @@ class TestTransformExecutorTerminality:
 
         import elspeth.engine.executors.transform as transform_mod
 
-        original_ref = transform_mod.stable_hash
-        transform_mod.stable_hash = failing_hash
+        original_ref = transform_mod.stable_hash  # type: ignore[attr-defined]
+        transform_mod.stable_hash = failing_hash  # type: ignore[attr-defined, assignment]
         try:
             with pytest.raises(PluginContractViolation, match="non-canonical data"):
                 executor.execute_transform(transform, token, ctx)
         finally:
-            transform_mod.stable_hash = original_ref
+            transform_mod.stable_hash = original_ref  # type: ignore[attr-defined]
 
         # State must be FAILED (auto-completed by guard), not OPEN
         recorder.complete_node_state.assert_called_once()
@@ -3212,7 +3212,7 @@ class TestAggregationExecutorTerminality:
         # Make output hash fail (simulating NaN in transform output)
         import elspeth.engine.executors.aggregation as agg_mod
 
-        original_hash = agg_mod.stable_hash
+        original_hash = agg_mod.stable_hash  # type: ignore[attr-defined]
         call_count = 0
 
         def failing_hash(data: Any) -> str:
@@ -3222,12 +3222,12 @@ class TestAggregationExecutorTerminality:
                 return original_hash(data)  # input hash succeeds
             raise ValueError("NaN detected in output")
 
-        agg_mod.stable_hash = failing_hash
+        agg_mod.stable_hash = failing_hash  # type: ignore[attr-defined, assignment]
         try:
             with pytest.raises(PluginContractViolation, match="non-canonical data"):
                 executor.execute_flush(nid, transform, ctx, TriggerType.COUNT)
         finally:
-            agg_mod.stable_hash = original_hash
+            agg_mod.stable_hash = original_hash  # type: ignore[attr-defined]
 
         # Node state: FAILED (auto-completed by guard)
         # Find the FAILED call — guard auto-completes with phase="executor_post_process"

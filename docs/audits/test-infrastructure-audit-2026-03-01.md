@@ -800,18 +800,17 @@ Code review finding: mypy type narrowing added to `test_create_row_round_trip` (
 | `tests/fixtures/factories.py` | Factory implementation (EXEMPT) | 3 |
 | `tests/unit/plugins/test_context.py` | Tests PluginContext behavior directly (EXEMPT) | all |
 | `tests/unit/contracts/test_context_protocols.py` | Protocol compliance tests (EXEMPT) | all |
-| `tests/performance/stress/conftest.py` | ChaosLLM-integrated setup with real recorder (EXEMPT) | 1 |
-| `tests/performance/stress/test_llm_retry.py` | Performance tier (EXEMPT) | all |
+| `tests/performance/stress/conftest.py` | `make_plugin_context()` delegates to `make_context()` — no direct `PluginContext()` construction remains (MIGRATED in supplementary fix) | 0 |
 | `tests/property/core/test_operations_properties.py` | Uses `FakePluginContext` (local dataclass, not PluginContext) | 0 (false positive) |
 | `tests/unit/plugins/sinks/test_sink_display_headers.py:142` | Intentional `landscape=None` error path test | 1 |
 | `tests/unit/plugins/sinks/test_csv_sink_headers.py:234` | Intentional `landscape=None` error path test | 1 |
 | `tests/unit/plugins/batching/test_batch_transform_mixin.py:105` | Intentional `token=None` contract violation test — `make_context()` always creates a default token | 1 |
 | `tests/unit/plugins/llm/test_azure.py:439,460` | Intentional `state_id=None` and `token=None` error path tests | 2 |
-| `tests/unit/plugins/llm/test_azure.py:243,589` | Real `LandscapeRecorder` needed for FK chain operations | 2 |
+| `tests/unit/plugins/llm/test_azure.py:243,589` | MIGRATED in supplementary fix — `make_context(landscape=recorder)` handles FK chain | 0 |
 | `tests/unit/plugins/llm/test_openrouter.py:576` | Intentional `state_id=None` error path test | 1 |
 | `tests/unit/plugins/llm/test_azure_batch.py:66` | `_make_batch_ctx()` uses real `LandscapeRecorder` with full FK chain | 1 |
 | `tests/unit/plugins/llm/test_azure_batch.py:1487,1591` | `MagicMock` landscape + no token — `make_context()` injects default token causing `record_call()` token mismatch validation failure. Reverted to direct construction. | 2 |
-| `tests/unit/plugins/transforms/test_keyword_filter.py:233` | Direct construction inside `test_transform_compiles_patterns_at_init` — not a helper call site | 1 |
+| `tests/unit/plugins/transforms/test_keyword_filter.py:233` | MIGRATED in supplementary fix — replaced with `make_context()` | 0 |
 | `tests/unit/plugins/transforms/test_field_mapper.py:577` | Uses `contract=` parameter not supported by `make_context()` | 1 |
 | `tests/unit/plugins/transforms/test_web_scrape.py` | Uses `rate_limit_registry=` and `payload_store=` params not supported by `make_context()` | 2 |
 | `tests/unit/plugins/transforms/test_web_scrape_security.py` | Uses `rate_limit_registry=` and `payload_store=` params not supported by `make_context()` | 2 |
@@ -819,7 +818,7 @@ Code review finding: mypy type narrowing added to `test_create_row_round_trip` (
 | `tests/integration/rate_limit/test_integration.py` | Uses `rate_limit_registry=` param not supported by `make_context()` | all |
 | `tests/integration/plugins/sources/test_contract.py` | Uses `_TestablePluginContext(PluginContext)` subclass | all |
 | `tests/integration/plugins/transforms/test_contract.py` | Uses `_TestablePluginContext(PluginContext)` subclass | all |
-| `tests/integration/plugins/sources/test_trust_boundary.py` | Uses `_TestablePluginContext` + real recorder for audit trail tests | all |
+| `tests/integration/plugins/sources/test_trust_boundary.py` | `_TestablePluginContext` subclass remains (custom `__init__` + overridden methods); `_make_audited_context` delegates to `make_context()` (MIGRATED in supplementary fix) | subclass only |
 | `tests/integration/plugins/llm/test_openrouter_batch_integration.py` | Real `LandscapeRecorder` needed for audit trail | all |
 
 **Bug found and fixed during migration:**
@@ -922,3 +921,35 @@ Three P2 entry prerequisites resolved. All are analysis/documentation — no cod
 | `unit/core/landscape/` | ~130 | ~130 | Requires per-file scoping (some may be EXEMPT) |
 | Other directories | ~100 | ~100 | Unchanged |
 | **Total** | **~442** | **~290** | **34% reduction** |
+
+**2026-03-02 — P1 supplementary fix: 27 missed instances across 5 files**
+
+Independent 4-agent verification audit (Explore agents searching from different angles: remaining `PluginContext(` patterns, `PluginContext` imports in tests, `make_context(` adoption completeness, and audit report exception claims) identified 27 `PluginContext(...)` constructions that survived the initial P1 migration. 22 of 27 were concentrated in the performance stress tier (`test_llm_retry.py`), which was marked EXEMPT in the original P1 but contained simple `make_context()`-compatible patterns.
+
+**Files fixed (27 instances total):**
+
+| File | Instances | Pattern |
+|---|---|---|
+| `tests/performance/stress/test_llm_retry.py` | 22 | 14 identical `start_ctx` lines, 2 inline ctx blocks, 1 `_feed_rows` helper, removed `# type: ignore[arg-type]` |
+| `tests/unit/plugins/llm/test_azure.py` | 2 | Lines 243, 589 — `make_context(landscape=recorder)` handles FK chain |
+| `tests/performance/stress/conftest.py` | 1 | `make_plugin_context()` body now delegates to `make_context()` via local import; `PluginContext` moved to `TYPE_CHECKING` |
+| `tests/unit/plugins/transforms/test_keyword_filter.py` | 1 | Line 233 — replaced with `make_context()`, removed unused `LandscapeDB`/`LandscapeRecorder` imports |
+| `tests/integration/plugins/sources/test_trust_boundary.py` | 1 | `_make_audited_context()` body now delegates to `make_context()` via local import |
+
+**Exceptions table updated:** 4 entries changed from preserved to MIGRATED; `test_trust_boundary.py` updated to reflect that only `_TestablePluginContext` subclass remains (not `_make_audited_context`).
+
+**Code review (1 agent, 32 tool calls):**
+
+| Reviewer | Scope | Verdict | Issues Found |
+|---|---|---|---|
+| Independent code reviewer | 5 files, 27 substitutions | Clean | None — all parameter mappings correct, import changes verified, intentionally unmigrated calls confirmed (test_azure.py:439,460 error paths, _TestablePluginContext subclass) |
+
+Semantic preservation confirmed: `config={}` correctly dropped (factory default), `run_id` forwarded where non-default, `state_id`/`token`/`landscape`/`node_id` all correctly mapped. `# type: ignore[arg-type]` on `landscape=recorder` correctly removed (factory accepts `Any`).
+
+**Verification:**
+- pytest (non-stress): 107 passed, 0 failures
+- pytest (stress collection): 19 tests collected successfully
+- ruff: clean
+- mypy: pre-existing errors only (5 in factories.py/test_azure.py — none introduced)
+
+**Updated P1 totals:** ~377 `PluginContext(...)` constructions replaced across 58 files (original 350+ across 53, plus supplementary 27 across 5).
