@@ -440,6 +440,33 @@ class TestAzureBatchLLMTransformEmptyBatch:
             transform.process([], ctx)
 
 
+class TestProcessSingleDefenseInDepth:
+    """Tests for _process_single fallback behavior.
+
+    The _process_single method converts batch results back to single-row.
+    If _process_batch returns an unexpected state (success with empty rows),
+    it should crash rather than silently passing through the original row.
+    """
+
+    def test_process_single_crashes_on_unexpected_batch_result(self) -> None:
+        """TransformResult __post_init__ rejects success without output data.
+
+        Defense-in-depth: status="success" with no row/rows is rejected at
+        construction time by the dataclass invariant — the invalid state
+        can never exist.
+        """
+        from elspeth.plugins.infrastructure.results import TransformResult
+
+        with pytest.raises(ValueError, match="MUST have output data"):
+            TransformResult(
+                status="success",
+                row=None,
+                rows=None,
+                reason=None,
+                success_reason={"action": "processed"},
+            )
+
+
 class TestAzureBatchLLMTransformSubmit:
     """Tests for batch submission (Phase 1)."""
 

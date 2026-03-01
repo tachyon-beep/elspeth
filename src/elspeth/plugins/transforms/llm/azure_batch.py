@@ -402,11 +402,16 @@ class AzureBatchLLMTransform(BaseTransform):
         elif result.status == "error":
             return result
         else:
-            # Empty rows from empty batch - shouldn't happen for single row
-            # row is already PipelineRow (the input)
-            return TransformResult.success(
-                row,
-                success_reason={"action": "passthrough"},
+            # Defense-in-depth: _process_batch() should always return either:
+            # - success_multi(rows) with non-empty rows
+            # - error()
+            # If we reach here, something unexpected happened - crash rather than
+            # silently passing through the original row unprocessed.
+            raise RuntimeError(
+                f"Unexpected result from _process_batch: status={result.status}, "
+                f"row={result.row}, rows={result.rows}. "
+                f"Expected success with rows or error. This indicates a bug in "
+                f"_process_batch or an upstream change that broke the contract."
             )
 
     def _process_batch(
