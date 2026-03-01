@@ -1,4 +1,3 @@
-# src/elspeth/engine/spans.py
 """OpenTelemetry span factory for SDA Engine.
 
 Provides structured span creation for pipeline execution.
@@ -193,7 +192,7 @@ class SpanFactory:
         """Create a span for a gate operation.
 
         Args:
-            gate_name: Name of the gate plugin
+            gate_name: Name of the gate (from GateSettings)
             node_id: Unique node identifier for disambiguation (P2-2026-01-21 fix)
             input_hash: Optional input data hash
             token_id: Token identifier for the token being evaluated (P2-2026-01-21 fix)

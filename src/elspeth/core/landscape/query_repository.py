@@ -1,4 +1,3 @@
-# src/elspeth/core/landscape/query_repository.py
 """QueryRepository: read-only queries for audit trail entities.
 
 Extracted from QueryMethodsMixin as part of T19 (Landscape mixin ->
@@ -140,6 +139,55 @@ class QueryRepository:
             return None
         return self._row_loader.load(r)
 
+    def _retrieve_and_parse_payload(self, row_id: str, source_data_ref: str) -> dict[str, Any]:
+        """Retrieve and parse a payload, returning the validated dict.
+
+        Shared by get_row_data() and explain_row() to eliminate duplication
+        of retrieval + JSON parse + dict validation + error wrapping.
+
+        Args:
+            row_id: Row ID (for error context)
+            source_data_ref: Payload store reference key
+
+        Returns:
+            Parsed dict from the payload store
+
+        Raises:
+            KeyError: Payload was purged by retention policy (caller decides handling)
+            AuditIntegrityError: Payload is corrupt, fails integrity check,
+                or cannot be retrieved due to infrastructure failure
+        """
+        if self._payload_store is None:
+            raise ValueError("Cannot retrieve payload: payload store not configured")
+
+        try:
+            payload_bytes = self._payload_store.retrieve(source_data_ref)
+        except PayloadIntegrityError as e:
+            raise AuditIntegrityError(
+                f"Payload integrity check failed for row {row_id} (ref={source_data_ref}): {e}"
+            ) from e
+        except OSError as e:
+            raise AuditIntegrityError(
+                f"Payload retrieval failed for row {row_id} (ref={source_data_ref}): {type(e).__name__}: {e}"
+            ) from e
+
+        try:
+            decoded_data = json.loads(payload_bytes.decode("utf-8"))
+        except (json.JSONDecodeError, UnicodeDecodeError) as e:
+            raise AuditIntegrityError(
+                f"Corrupt payload for row {row_id} (ref={source_data_ref}): {e}"
+            ) from e
+
+        match decoded_data:
+            case dict() as data:
+                return data
+            case _:
+                actual_type = type(decoded_data).__name__
+                raise AuditIntegrityError(
+                    f"Corrupt payload for row {row_id} (ref={source_data_ref}): "
+                    f"expected JSON object, got {actual_type}"
+                )
+
     def get_row_data(self, row_id: str) -> RowDataResult:
         """Get the payload data for a row with explicit state.
 
@@ -163,27 +211,10 @@ class QueryRepository:
             return RowDataResult(state=RowDataState.STORE_NOT_CONFIGURED, data=None)
 
         try:
-            payload_bytes = self._payload_store.retrieve(row.source_data_ref)
-            decoded_data = json.loads(payload_bytes.decode("utf-8"))
-            match decoded_data:
-                case dict() as data:
-                    pass
-                case _:
-                    actual_type = type(decoded_data).__name__
-                    raise AuditIntegrityError(
-                        f"Corrupt payload for row {row_id} (ref={row.source_data_ref}): expected JSON object, got {actual_type}"
-                    )
+            data = self._retrieve_and_parse_payload(row_id, row.source_data_ref)
             return RowDataResult(state=RowDataState.AVAILABLE, data=data)
         except KeyError:
             return RowDataResult(state=RowDataState.PURGED, data=None)
-        except (json.JSONDecodeError, UnicodeDecodeError) as e:
-            raise AuditIntegrityError(f"Corrupt payload for row {row_id} (ref={row.source_data_ref}): {e}") from e
-        except PayloadIntegrityError as e:
-            raise AuditIntegrityError(f"Payload integrity check failed for row {row_id} (ref={row.source_data_ref}): {e}") from e
-        except OSError as e:
-            raise AuditIntegrityError(
-                f"Payload retrieval failed for row {row_id} (ref={row.source_data_ref}): {type(e).__name__}: {e}"
-            ) from e
 
     def get_token(self, token_id: str) -> Token | None:
         """Get a token by ID.
@@ -497,28 +528,11 @@ class QueryRepository:
 
         if row.source_data_ref is not None and self._payload_store is not None:
             try:
-                payload_bytes = self._payload_store.retrieve(row.source_data_ref)
-                decoded_source_data = json.loads(payload_bytes.decode("utf-8"))
-                match decoded_source_data:
-                    case dict() as source_data_dict:
-                        source_data = source_data_dict
-                    case _:
-                        actual_type = type(decoded_source_data).__name__
-                        raise AuditIntegrityError(
-                            f"Corrupt payload for row {row_id} (ref={row.source_data_ref}): expected JSON object, got {actual_type}"
-                        )
+                source_data = self._retrieve_and_parse_payload(row_id, row.source_data_ref)
                 payload_available = True
             except KeyError:
                 # Payload purged by retention policy — expected, continue without data
                 pass
-            except (json.JSONDecodeError, UnicodeDecodeError) as e:
-                raise AuditIntegrityError(f"Corrupt payload for row {row_id} (ref={row.source_data_ref}): {e}") from e
-            except PayloadIntegrityError as e:
-                raise AuditIntegrityError(f"Payload integrity check failed for row {row_id} (ref={row.source_data_ref}): {e}") from e
-            except OSError as e:
-                raise AuditIntegrityError(
-                    f"Payload retrieval failed for row {row_id} (ref={row.source_data_ref}): {type(e).__name__}: {e}"
-                ) from e
 
         return RowLineage(
             row_id=row.row_id,
