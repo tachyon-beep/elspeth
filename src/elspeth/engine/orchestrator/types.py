@@ -1,4 +1,3 @@
-# src/elspeth/engine/orchestrator/types.py
 """Pipeline configuration and result types.
 
 These types define the interface for pipeline execution:
@@ -27,19 +26,16 @@ from types import MappingProxyType
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
-    from elspeth.contracts import PendingOutcome, TokenInfo
+    from elspeth.contracts import PendingOutcome, SinkProtocol, SourceProtocol, TokenInfo
     from elspeth.contracts.plugin_context import PluginContext
     from elspeth.contracts.types import CoalesceName, GateName, NodeID, SinkName
     from elspeth.core.config import AggregationSettings, CoalesceSettings, GateSettings
     from elspeth.engine.coalesce_executor import CoalesceExecutor
     from elspeth.engine.processor import RowProcessor
-    from elspeth.plugins.infrastructure.protocols import SinkProtocol, SourceProtocol
-
-from elspeth.contracts import RunStatus
 
 # Import protocols at runtime (not TYPE_CHECKING) because RowPlugin type alias
 # is used in runtime annotations and isinstance() checks
-from elspeth.plugins.infrastructure.protocols import TransformProtocol
+from elspeth.contracts import RunStatus, TransformProtocol
 
 # Type alias for row-processing plugins in the transforms pipeline
 # NOTE: BaseAggregation was DELETED - aggregation is now handled by
@@ -57,7 +53,7 @@ class PipelineConfig:
 
     Attributes:
         source: Source plugin instance
-        transforms: List of transform/gate plugin instances (processed first)
+        transforms: List of transform plugin instances (processed in DAG order)
         sinks: Dict of sink_name -> sink plugin instance
         config: Additional run configuration
         gates: Config-driven gates (processed AFTER transforms, BEFORE sinks)

@@ -40,7 +40,7 @@ allowed_dict_patterns:
   - "src/elspeth/engine/executors/aggregation.py:AggregationExecutor.get_buffered_rows:return (list)"
 
   # Protocols - row data in plugin interface
-  - "src/elspeth/plugins/infrastructure/protocols.py:SinkProtocol.write:rows (list)"
+  - "src/elspeth/contracts/plugin_protocols.py:SinkProtocol.write:rows (list)"
 
   # Base classes - row data in plugin implementations
   - "src/elspeth/plugins/infrastructure/base.py:BaseSink.write:rows (list)"
@@ -77,10 +77,10 @@ allowed_dict_patterns:
   # ═══════════════════════════════════════════════════════════════════════════
 
   # Protocols - config input
-  - "src/elspeth/plugins/infrastructure/protocols.py:SourceProtocol.__init__:config"
-  - "src/elspeth/plugins/infrastructure/protocols.py:TransformProtocol.__init__:config"
-  - "src/elspeth/plugins/infrastructure/protocols.py:SinkProtocol.__init__:config"
-  - "src/elspeth/plugins/infrastructure/protocols.py:BatchTransformProtocol.__init__:config"
+  - "src/elspeth/contracts/plugin_protocols.py:SourceProtocol.__init__:config"
+  - "src/elspeth/contracts/plugin_protocols.py:TransformProtocol.__init__:config"
+  - "src/elspeth/contracts/plugin_protocols.py:SinkProtocol.__init__:config"
+  - "src/elspeth/contracts/plugin_protocols.py:BatchTransformProtocol.__init__:config"
 
   # Base classes - config input
   - "src/elspeth/plugins/infrastructure/base.py:BaseTransform.__init__:config"

@@ -23,6 +23,7 @@ from elspeth.contracts import (
     PluginSchema,
     RowOutcome,
     RunStatus,
+    TransformProtocol,
 )
 from elspeth.core.config import SourceSettings
 from elspeth.core.dag import ExecutionGraph
@@ -37,7 +38,6 @@ from elspeth.core.landscape.schema import (
 from elspeth.core.payload_store import FilesystemPayloadStore
 from elspeth.engine.orchestrator import Orchestrator, PipelineConfig
 from elspeth.plugins.infrastructure.base import BaseTransform
-from elspeth.plugins.infrastructure.protocols import TransformProtocol
 from elspeth.plugins.infrastructure.results import TransformResult
 from elspeth.testing import make_pipeline_row
 from tests.fixtures.base_classes import (
@@ -178,7 +178,7 @@ class TestPartialFailure:
         assert len(outcomes) == 10
         outcome_values = {o.outcome for o in outcomes}
         # Should contain both COMPLETED and QUARANTINED/FAILED outcomes
-        assert RowOutcome.COMPLETED.value in outcome_values
+        assert RowOutcome.COMPLETED in outcome_values
 
         # 5. Explain query works for both successful and failed rows
         recorder = LandscapeRecorder(db, payload_store=payload_store)

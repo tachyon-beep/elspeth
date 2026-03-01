@@ -117,10 +117,10 @@ class TestTransformResult:
 
 
 class TestGateResult:
-    """Results from gate transforms."""
+    """Results from config-driven gates (not plugins — gates are engine-owned)."""
 
     def test_gate_result_with_continue(self) -> None:
-        from elspeth.plugins.infrastructure.results import GateResult, RoutingAction
+        from elspeth.contracts import GateResult, RoutingAction
 
         result = GateResult(
             row={"value": 42},
@@ -130,7 +130,7 @@ class TestGateResult:
         assert result.action.kind == "continue"
 
     def test_gate_result_with_route(self) -> None:
-        from elspeth.plugins.infrastructure.results import GateResult, RoutingAction
+        from elspeth.contracts import GateResult, RoutingAction
 
         result = GateResult(
             row={"value": 42, "flagged": True},
@@ -141,7 +141,7 @@ class TestGateResult:
 
     def test_has_audit_fields(self) -> None:
         """Phase 3 integration: audit fields must exist."""
-        from elspeth.plugins.infrastructure.results import GateResult, RoutingAction
+        from elspeth.contracts import GateResult, RoutingAction
 
         result = GateResult(
             row={"x": 1},
@@ -153,19 +153,45 @@ class TestGateResult:
 
 
 class TestAcceptResultDeleted:
-    """Verify AcceptResult was deleted in aggregation structural cleanup."""
+    """Guard against AcceptResult reintroduction.
+
+    AcceptResult was removed as part of the aggregation structural cleanup.
+    These tests exist per the no-legacy-code policy: if someone accidentally
+    re-adds AcceptResult, these tests will fail and surface the violation.
+    """
 
     def test_accept_result_deleted_from_plugins_results(self) -> None:
-        """AcceptResult should be deleted from plugins.results."""
+        """AcceptResult must not exist in plugins.infrastructure.results."""
         import elspeth.plugins.infrastructure.results as results
 
-        assert not hasattr(results, "AcceptResult"), "AcceptResult should be deleted - aggregation is structural"
+        assert "AcceptResult" not in dir(results), "AcceptResult should be deleted - aggregation is structural"
 
     def test_accept_result_not_exported_from_plugins(self) -> None:
-        """AcceptResult should NOT be exported from elspeth.plugins."""
+        """AcceptResult must not be exported from elspeth.plugins."""
         import elspeth.plugins as plugins
 
-        assert not hasattr(plugins, "AcceptResult"), "AcceptResult should not be exported - aggregation is structural"
+        assert "AcceptResult" not in dir(plugins), "AcceptResult should not be exported - aggregation is structural"
+
+
+class TestGateResultNotInPluginAPI:
+    """Guard against GateResult reintroduction to plugin public API.
+
+    GateResult was removed from plugins.infrastructure.results because gates
+    are config-driven engine operations, not plugins. GateResult lives in
+    elspeth.contracts and engine code imports it directly from there.
+    """
+
+    def test_gate_result_not_in_plugin_results_all(self) -> None:
+        """GateResult must not be in plugins.infrastructure.results.__all__."""
+        import elspeth.plugins.infrastructure.results as results
+
+        assert "GateResult" not in results.__all__, "GateResult should not be in plugin public API — gates are not plugins"
+
+    def test_gate_result_importable_from_contracts(self) -> None:
+        """GateResult must be importable from elspeth.contracts."""
+        from elspeth.contracts import GateResult
+
+        assert GateResult is not None
 
 
 class TestRoutingActionEnums:
@@ -292,7 +318,6 @@ class TestPluginsPublicAPI:
 
     def test_results_importable(self) -> None:
         from elspeth.plugins.infrastructure.results import (
-            GateResult,
             RoutingAction,
             RowOutcome,
             SourceRow,
@@ -300,7 +325,7 @@ class TestPluginsPublicAPI:
         )
 
         # NOTE: AcceptResult deleted in aggregation structural cleanup
-        assert GateResult is not None
+        # NOTE: GateResult removed — gates are config-driven, not plugins
         assert RoutingAction is not None
         assert RowOutcome is not None
         assert SourceRow is not None
@@ -318,7 +343,7 @@ class TestPluginsPublicAPI:
         assert check_compatibility is not None
 
     def test_protocols_importable(self) -> None:
-        from elspeth.plugins.infrastructure.protocols import (
+        from elspeth.contracts import (
             SinkProtocol,
             SourceProtocol,
             TransformProtocol,

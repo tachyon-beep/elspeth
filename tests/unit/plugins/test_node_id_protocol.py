@@ -10,7 +10,7 @@ class TestNodeIdProtocol:
 
     def test_source_protocol_has_node_id(self) -> None:
         """SourceProtocol defines node_id attribute."""
-        from elspeth.plugins.infrastructure.protocols import SourceProtocol
+        from elspeth.contracts import SourceProtocol
 
         # Use __annotations__ to check protocol attributes (avoids forward ref issues)
         annotations = SourceProtocol.__annotations__
@@ -48,7 +48,7 @@ class TestNodeIdProtocol:
 
     def test_transform_protocol_has_node_id(self) -> None:
         """TransformProtocol defines node_id attribute."""
-        from elspeth.plugins.infrastructure.protocols import TransformProtocol
+        from elspeth.contracts import TransformProtocol
 
         annotations = TransformProtocol.__annotations__
         assert "node_id" in annotations, "TransformProtocol should define node_id"
@@ -81,7 +81,7 @@ class TestNodeIdProtocol:
 
     def test_aggregation_protocol_deleted(self) -> None:
         """AggregationProtocol should be deleted (aggregation is structural)."""
-        import elspeth.plugins.infrastructure.protocols as protocols
+        import elspeth.contracts.plugin_protocols as protocols
 
         assert not hasattr(protocols, "AggregationProtocol"), "AggregationProtocol should be deleted - aggregation is structural"
 
@@ -93,13 +93,13 @@ class TestNodeIdProtocol:
 
     def test_coalesce_protocol_deleted(self) -> None:
         """CoalesceProtocol should be deleted (coalesce is structural)."""
-        import elspeth.plugins.infrastructure.protocols as protocols
+        import elspeth.contracts.plugin_protocols as protocols
 
         assert not hasattr(protocols, "CoalesceProtocol"), "CoalesceProtocol should be deleted - coalesce is structural"
 
     def test_sink_protocol_has_node_id(self) -> None:
         """SinkProtocol defines node_id attribute."""
-        from elspeth.plugins.infrastructure.protocols import SinkProtocol
+        from elspeth.contracts import SinkProtocol
 
         annotations = SinkProtocol.__annotations__
         assert "node_id" in annotations, "SinkProtocol should define node_id"

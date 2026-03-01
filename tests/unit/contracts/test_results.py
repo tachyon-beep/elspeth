@@ -375,10 +375,15 @@ class TestGateResult:
 
 
 class TestAcceptResultDeleted:
-    """Verify AcceptResult was deleted in aggregation structural cleanup."""
+    """Guard against AcceptResult reintroduction.
+
+    AcceptResult was removed as part of the aggregation structural cleanup.
+    These tests exist per the no-legacy-code policy: if someone accidentally
+    re-adds AcceptResult, these tests will fail and surface the violation.
+    """
 
     def test_accept_result_deleted_from_contracts(self) -> None:
-        """AcceptResult should be deleted from contracts.results."""
+        """AcceptResult must not exist in contracts.results."""
         with pytest.raises(ImportError):
             from elspeth.contracts.results import AcceptResult  # type: ignore[attr-defined] # noqa: F401
 

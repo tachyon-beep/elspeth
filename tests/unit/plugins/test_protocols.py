@@ -5,6 +5,8 @@ from collections.abc import Iterator
 from typing import Any, ClassVar
 
 from elspeth.contracts import PipelineRow, SourceRow
+from elspeth.core.landscape.database import LandscapeDB
+from elspeth.core.landscape.recorder import LandscapeRecorder
 from elspeth.testing import make_pipeline_row
 
 
@@ -12,15 +14,14 @@ class TestSourceProtocol:
     """Source plugin protocol."""
 
     def test_source_protocol_definition(self) -> None:
-        from elspeth.plugins.infrastructure.protocols import SourceProtocol
+        from elspeth.contracts import SourceProtocol
 
         # Should be a Protocol (runtime_checkable protocols have this attribute)
         assert hasattr(SourceProtocol, "__protocol_attrs__")
 
     def test_source_implementation(self) -> None:
-        from elspeth.contracts import Determinism, PluginSchema
+        from elspeth.contracts import Determinism, PluginSchema, SourceProtocol
         from elspeth.contracts.plugin_context import PluginContext
-        from elspeth.plugins.infrastructure.protocols import SourceProtocol
 
         class OutputSchema(PluginSchema):
             value: int
@@ -67,26 +68,28 @@ class TestSourceProtocol:
             SourceProtocol,
         ), "Source must conform to SourceProtocol"
 
-        ctx = PluginContext(run_id="test", config={})  # type: ignore[unreachable]
+        db = LandscapeDB.in_memory()
+        recorder = LandscapeRecorder(db)
+        ctx = PluginContext(run_id="test", config={}, landscape=recorder)  # type: ignore[unreachable]
 
         source_rows = list(source.load(ctx))
         assert len(source_rows) == 3
         assert source_rows[0].row == {"value": 0}
 
     def test_source_has_lifecycle_hooks(self) -> None:
-        from elspeth.plugins.infrastructure.protocols import SourceProtocol
+        from elspeth.contracts import SourceProtocol
 
         # Check protocol has expected methods
         assert hasattr(SourceProtocol, "load")
         assert hasattr(SourceProtocol, "close")
 
     def test_source_has_determinism_attribute(self) -> None:
-        from elspeth.plugins.infrastructure.protocols import SourceProtocol
+        from elspeth.contracts import SourceProtocol
 
         assert "determinism" in SourceProtocol.__protocol_attrs__  # type: ignore[attr-defined]
 
     def test_source_has_version_attribute(self) -> None:
-        from elspeth.plugins.infrastructure.protocols import SourceProtocol
+        from elspeth.contracts import SourceProtocol
 
         assert "plugin_version" in SourceProtocol.__protocol_attrs__  # type: ignore[attr-defined]
 
@@ -94,9 +97,8 @@ class TestSourceProtocol:
         from collections.abc import Iterator
         from typing import Any
 
-        from elspeth.contracts import Determinism, PluginSchema
+        from elspeth.contracts import Determinism, PluginSchema, SourceProtocol
         from elspeth.contracts.plugin_context import PluginContext
-        from elspeth.plugins.infrastructure.protocols import SourceProtocol
 
         class OutputSchema(PluginSchema):
             value: int
@@ -141,9 +143,8 @@ class TestTransformProtocol:
     """Transform plugin protocol (stateless row processing)."""
 
     def test_transform_implementation(self) -> None:
-        from elspeth.contracts import Determinism, PluginSchema
+        from elspeth.contracts import Determinism, PluginSchema, TransformProtocol
         from elspeth.contracts.plugin_context import PluginContext
-        from elspeth.plugins.infrastructure.protocols import TransformProtocol
         from elspeth.plugins.infrastructure.results import TransformResult
 
         class InputSchema(PluginSchema):
@@ -168,6 +169,7 @@ class TestTransformProtocol:
             on_error: str | None = None  # Error routing (WP-11.99b)
             on_success: str | None = None  # Success routing
             validate_input: bool = False  # Centralized in executor
+            _on_start_called: bool = False  # Lifecycle guard (managed by BaseTransform)
 
             def __init__(self, config: dict[str, Any]) -> None:
                 self.config = config
@@ -200,7 +202,9 @@ class TestTransformProtocol:
             TransformProtocol,
         ), "Must conform to TransformProtocol"
 
-        ctx = PluginContext(run_id="test", config={})  # type: ignore[unreachable]
+        db = LandscapeDB.in_memory()
+        recorder = LandscapeRecorder(db)
+        ctx = PluginContext(run_id="test", config={}, landscape=recorder)  # type: ignore[unreachable]
 
         result = transform.process(make_pipeline_row({"value": 21}), ctx)
         assert result.status == "success"
@@ -232,7 +236,9 @@ class TestTransformBatchSupport:
                 return TransformResult.success(make_pipeline_row({"processed": row["value"]}), success_reason={"action": "test"})
 
         transform = SingleTransform({})
-        ctx = PluginContext(run_id="test", config={})
+        db = LandscapeDB.in_memory()
+        recorder = LandscapeRecorder(db)
+        ctx = PluginContext(run_id="test", config={}, landscape=recorder)
         result = transform.process(make_pipeline_row({"value": 1}), ctx)
         assert result.row is not None
         assert result.row.to_dict() == {"processed": 1}
@@ -266,7 +272,9 @@ class TestTransformBatchSupport:
                 return TransformResult.success(make_pipeline_row({"value": row["value"]}), success_reason={"action": "test"})
 
         transform = BatchTransform({})
-        ctx = PluginContext(run_id="test", config={})
+        db = LandscapeDB.in_memory()
+        recorder = LandscapeRecorder(db)
+        ctx = PluginContext(run_id="test", config={}, landscape=recorder)
 
         # Batch mode
         result = transform.process([make_pipeline_row({"value": 1}), make_pipeline_row({"value": 2}), make_pipeline_row({"value": 3})], ctx)
@@ -337,7 +345,7 @@ class TestAggregationProtocolDeleted:
 
     def test_aggregation_protocol_deleted(self) -> None:
         """AggregationProtocol should be deleted (aggregation is structural)."""
-        import elspeth.plugins.infrastructure.protocols as protocols
+        import elspeth.contracts.plugin_protocols as protocols
 
         assert not hasattr(protocols, "AggregationProtocol"), "AggregationProtocol should be deleted - aggregation is structural"
 
@@ -360,19 +368,19 @@ class TestCoalesceProtocolDeleted:
 
     def test_coalesce_protocol_deleted(self) -> None:
         """CoalesceProtocol should be deleted (coalesce is structural)."""
-        import elspeth.plugins.infrastructure.protocols as protocols
+        import elspeth.contracts.plugin_protocols as protocols
 
         assert not hasattr(protocols, "CoalesceProtocol"), "CoalesceProtocol should be deleted - coalesce is structural"
 
     def test_coalesce_policy_enum_deleted(self) -> None:
         """CoalescePolicy enum should be deleted (superseded by Literal strings in CoalesceSettings)."""
-        import elspeth.plugins.infrastructure.protocols as protocols
+        import elspeth.contracts.plugin_protocols as protocols
 
         assert not hasattr(protocols, "CoalescePolicy"), "CoalescePolicy should be deleted - use CoalesceSettings.policy Literal"
 
     def test_plugin_protocol_deleted(self) -> None:
         """PluginProtocol should be deleted (never used)."""
-        import elspeth.plugins.infrastructure.protocols as protocols
+        import elspeth.contracts.plugin_protocols as protocols
 
         assert not hasattr(protocols, "PluginProtocol"), "PluginProtocol should be deleted - never imported or used"
 
@@ -384,7 +392,7 @@ class TestSinkProtocol:
         """Sink.write() accepts batch and returns ArtifactDescriptor."""
         import inspect
 
-        from elspeth.plugins.infrastructure.protocols import SinkProtocol
+        from elspeth.contracts import SinkProtocol
 
         # Get the write method signature
         sig = inspect.signature(SinkProtocol.write)
@@ -406,10 +414,9 @@ class TestSinkProtocol:
 
     def test_batch_sink_implementation(self) -> None:
         """Test sink with batch write returning ArtifactDescriptor."""
-        from elspeth.contracts import ArtifactDescriptor, Determinism, PluginSchema
+        from elspeth.contracts import ArtifactDescriptor, Determinism, PluginSchema, SinkProtocol
         from elspeth.contracts.plugin_context import PluginContext
         from elspeth.contracts.sink import OutputValidationResult
-        from elspeth.plugins.infrastructure.protocols import SinkProtocol
 
         class InputSchema(PluginSchema):
             value: int
@@ -462,7 +469,9 @@ class TestSinkProtocol:
         sink = BatchMemorySink({})
         assert isinstance(sink, SinkProtocol)  # type: ignore[unreachable]
 
-        ctx = PluginContext(run_id="test", config={})  # type: ignore[unreachable]
+        db = LandscapeDB.in_memory()
+        recorder = LandscapeRecorder(db)
+        ctx = PluginContext(run_id="test", config={}, landscape=recorder)  # type: ignore[unreachable]
         artifact = sink.write([{"value": 1}, {"value": 2}], ctx)
 
         assert isinstance(artifact, ArtifactDescriptor)
@@ -472,10 +481,9 @@ class TestSinkProtocol:
     def test_sink_implementation(self) -> None:
         """Test sink conforming to updated batch protocol."""
 
-        from elspeth.contracts import ArtifactDescriptor, Determinism, PluginSchema
+        from elspeth.contracts import ArtifactDescriptor, Determinism, PluginSchema, SinkProtocol
         from elspeth.contracts.plugin_context import PluginContext
         from elspeth.contracts.sink import OutputValidationResult
-        from elspeth.plugins.infrastructure.protocols import SinkProtocol
 
         class InputSchema(PluginSchema):
             value: int
@@ -532,7 +540,9 @@ class TestSinkProtocol:
         # IMPORTANT: Verify protocol conformance at runtime
         assert isinstance(sink, SinkProtocol), "Must conform to SinkProtocol"  # type: ignore[unreachable]
 
-        ctx = PluginContext(run_id="test", config={})  # type: ignore[unreachable]
+        db = LandscapeDB.in_memory()
+        recorder = LandscapeRecorder(db)
+        ctx = PluginContext(run_id="test", config={}, landscape=recorder)  # type: ignore[unreachable]
 
         # Batch write
         artifact = sink.write([{"value": 1}, {"value": 2}], ctx)
@@ -543,7 +553,7 @@ class TestSinkProtocol:
 
     def test_sink_has_idempotency_support(self) -> None:
         """Sinks should support idempotency keys."""
-        from elspeth.plugins.infrastructure.protocols import SinkProtocol
+        from elspeth.contracts import SinkProtocol
 
         # Protocol should have idempotent attribute
         assert hasattr(SinkProtocol, "__protocol_attrs__")
@@ -553,13 +563,13 @@ class TestProtocolMetadata:
     """Test that protocols include metadata attributes."""
 
     def test_transform_has_determinism_attribute(self) -> None:
-        from elspeth.plugins.infrastructure.protocols import TransformProtocol
+        from elspeth.contracts import TransformProtocol
 
         # Protocol attributes are tracked in __protocol_attrs__ (runtime Protocol internals)
         assert "determinism" in TransformProtocol.__protocol_attrs__  # type: ignore[attr-defined]
 
     def test_transform_has_version_attribute(self) -> None:
-        from elspeth.plugins.infrastructure.protocols import TransformProtocol
+        from elspeth.contracts import TransformProtocol
 
         # __protocol_attrs__ is a runtime attribute on @runtime_checkable Protocols
         assert "plugin_version" in TransformProtocol.__protocol_attrs__  # type: ignore[attr-defined]

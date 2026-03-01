@@ -1,4 +1,3 @@
-# src/elspeth/engine/dag_navigator.py
 """DAGNavigator: Pure topology queries for DAG traversal.
 
 Extracted from RowProcessor to create a clean service boundary for
@@ -17,10 +16,10 @@ from dataclasses import dataclass
 from types import MappingProxyType
 from typing import TYPE_CHECKING
 
+from elspeth.contracts import TransformProtocol
 from elspeth.contracts.errors import OrchestrationInvariantError
 from elspeth.contracts.types import CoalesceName, NodeID
 from elspeth.core.config import GateSettings
-from elspeth.plugins.infrastructure.protocols import TransformProtocol
 
 if TYPE_CHECKING:
     from elspeth.contracts import TokenInfo

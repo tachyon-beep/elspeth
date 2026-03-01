@@ -37,7 +37,7 @@ def _build_production_graph(config: PipelineConfig) -> ExecutionGraph:
 
     Uses explicit source settings + wired transforms.
     """
-    from elspeth.plugins.infrastructure.protocols import TransformProtocol
+    from elspeth.contracts import TransformProtocol
 
     row_transforms: list[TransformProtocol] = []
 

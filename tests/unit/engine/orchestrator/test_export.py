@@ -22,13 +22,13 @@ from uuid import UUID
 import pytest
 from pydantic import ValidationError
 
+from elspeth.contracts import SinkProtocol
 from elspeth.engine.orchestrator.export import (
     _export_csv_multifile,
     _json_schema_to_python_type,
     export_landscape,
     reconstruct_schema_from_json,
 )
-from elspeth.plugins.infrastructure.protocols import SinkProtocol
 
 # =============================================================================
 # export_landscape — JSON format

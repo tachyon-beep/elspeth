@@ -26,9 +26,9 @@ from elspeth.contracts.node_state_context import (
 )
 
 if TYPE_CHECKING:
+    from elspeth.contracts import TransformProtocol
     from elspeth.contracts.plugin_context import PluginContext
     from elspeth.core.dag import ExecutionGraph, WiredTransform
-    from elspeth.plugins.infrastructure.protocols import TransformProtocol
 
 # --- Re-export all production factories for single-import convenience ---
 from elspeth.testing import (  # noqa: F401
@@ -102,6 +102,99 @@ def make_context(
         state_id=state_id,
         config=config or {},
         token=token,
+    )
+
+
+def make_source_context(
+    *,
+    run_id: str = "test-run",
+    node_id: str = "source",
+    plugin_name: str = "csv",
+) -> PluginContext:
+    """Build a PluginContext with run and node records for validation error recording.
+
+    For testing source plugins that call ctx.record_validation_error().
+    Creates the FK chain: run → node → PluginContext.
+
+    Use make_operation_context() instead when the plugin also makes external
+    calls and records them via ctx.record_call().
+
+    Usage:
+        ctx = make_source_context()                         # CSV source default
+        ctx = make_source_context(plugin_name="json")       # JSON source
+    """
+    from elspeth.contracts import NodeType
+    from elspeth.contracts.plugin_context import PluginContext
+    from elspeth.contracts.schema import SchemaConfig
+    from elspeth.core.landscape.database import LandscapeDB
+    from elspeth.core.landscape.recorder import LandscapeRecorder
+
+    db = LandscapeDB.in_memory()
+    recorder = LandscapeRecorder(db)
+    recorder.begin_run(config={}, canonical_version="v1", run_id=run_id)
+    recorder.register_node(
+        run_id=run_id,
+        plugin_name=plugin_name,
+        node_type=NodeType.SOURCE,
+        plugin_version="1.0",
+        config={},
+        node_id=node_id,
+        schema_config=SchemaConfig.from_dict({"mode": "observed"}),
+    )
+    return PluginContext(
+        run_id=run_id,
+        node_id=node_id,
+        config={},
+        landscape=recorder,
+    )
+
+
+def make_operation_context(
+    *,
+    run_id: str = "test-run",
+    node_id: str = "source",
+    plugin_name: str = "azure_blob",
+    node_type: str = "SOURCE",
+    operation_type: str = "source_load",
+) -> PluginContext:
+    """Build a PluginContext with real landscape and operation records.
+
+    For testing source/sink plugins that call ctx.record_call().
+    Creates the full FK chain: run → node → operation → PluginContext.
+
+    Use this instead of make_context() when the plugin under test makes
+    external calls and records them via ctx.record_call().
+
+    Usage:
+        ctx = make_operation_context()                                  # Source default
+        ctx = make_operation_context(operation_type="sink_write",       # Sink context
+                                     node_id="sink", node_type="SINK")
+    """
+    from elspeth.contracts import NodeType
+    from elspeth.contracts.plugin_context import PluginContext
+    from elspeth.contracts.schema import SchemaConfig
+    from elspeth.core.landscape.database import LandscapeDB
+    from elspeth.core.landscape.recorder import LandscapeRecorder
+
+    db = LandscapeDB.in_memory()
+    recorder = LandscapeRecorder(db)
+    recorder.begin_run(config={}, canonical_version="v1", run_id=run_id)
+    recorder.register_node(
+        run_id=run_id,
+        plugin_name=plugin_name,
+        node_type=NodeType[node_type],
+        plugin_version="1.0",
+        config={},
+        node_id=node_id,
+        schema_config=SchemaConfig.from_dict({"mode": "observed"}),
+    )
+    op = recorder.begin_operation(run_id, node_id, operation_type)
+    return PluginContext(
+        run_id=run_id,
+        node_id=node_id,
+        config={},
+        landscape=recorder,
+        operation_id=op.operation_id,
     )
 
 

@@ -11,8 +11,7 @@ from typing import Any, ClassVar
 
 from pydantic import ConfigDict
 
-from elspeth.contracts import ArtifactDescriptor, Determinism, PluginSchema, SourceRow
-from elspeth.contracts.routing import RoutingAction
+from elspeth.contracts import ArtifactDescriptor, PluginSchema, SourceRow
 from elspeth.plugins.infrastructure.base import BaseTransform
 from elspeth.plugins.infrastructure.results import TransformResult
 from tests.fixtures.base_classes import _TestSchema, _TestSinkBase, _TestSourceBase
@@ -279,45 +278,3 @@ class ErrorOnNthTransform(BaseTransform):
         if self._call_count == self._error_on:
             return TransformResult.error({"reason": "simulated_failure", "error": f"nth_error_{self._error_on}"}, retryable=True)
         return TransformResult.success(row, success_reason={"action": "passed"})
-
-
-class RoutingGate:
-    """Gate that routes based on a field value.
-
-    Usage:
-        gate = RoutingGate("category", {"A": "sink_a", "B": "sink_b"})
-    """
-
-    name = "routing_gate"
-    input_schema: type[PluginSchema] = _TestSchema
-    output_schema: type[PluginSchema] = _TestSchema
-    node_id: str | None = None
-    determinism = Determinism.DETERMINISTIC
-    plugin_version = "1.0.0"
-
-    def __init__(self, field: str, route_map: dict[str, str], default: str = "continue") -> None:
-        self.config: dict[str, Any] = {"schema": {"mode": "observed"}}
-        self._field = field
-        self._route_map = route_map
-        self._default = default
-        self.routes = dict(route_map)
-        self.fork_to: list[str] = []
-
-    def evaluate(self, row: Any, ctx: Any) -> Any:
-        from elspeth.contracts.results import GateResult
-
-        row_dict = row if isinstance(row, dict) else row.to_dict()
-        value = row_dict[self._field]
-        sink = self._route_map.get(str(value))
-        if sink:
-            return GateResult(row=row_dict, action=RoutingAction.route(sink))
-        return GateResult(row=row_dict, action=RoutingAction.continue_())
-
-    def on_start(self, ctx: Any) -> None:
-        pass
-
-    def on_complete(self, ctx: Any) -> None:
-        pass
-
-    def close(self) -> None:
-        pass

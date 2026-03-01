@@ -16,7 +16,7 @@ from __future__ import annotations
 
 from typing import Any, cast
 
-from elspeth.contracts import PipelineRow, RunStatus
+from elspeth.contracts import PipelineRow, RunStatus, SinkProtocol, SourceProtocol
 from elspeth.core.config import (
     CoalesceSettings,
     ElspethSettings,
@@ -29,7 +29,6 @@ from elspeth.core.dag.models import WiredTransform
 from elspeth.core.landscape import LandscapeDB
 from elspeth.engine.orchestrator import Orchestrator, PipelineConfig
 from elspeth.plugins.infrastructure.base import BaseTransform
-from elspeth.plugins.infrastructure.protocols import SinkProtocol, SourceProtocol
 from elspeth.testing import make_pipeline_row
 from tests.fixtures.base_classes import _TestSchema, as_sink, as_source, as_transform
 from tests.fixtures.factories import wire_transforms

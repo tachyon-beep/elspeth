@@ -1,4 +1,3 @@
-# src/elspeth/engine/orchestrator/core.py
 """Core Orchestrator class for pipeline execution.
 
 Coordinates:
@@ -48,8 +47,11 @@ from elspeth.contracts import (
     RunStatus,
     SchemaContract,
     SecretResolutionInput,
+    SinkProtocol,
+    SourceProtocol,
     SourceRow,
     TokenInfo,
+    TransformProtocol,
 )
 from elspeth.contracts.cli import ProgressEvent
 from elspeth.contracts.config import RuntimeRetryConfig
@@ -121,7 +123,6 @@ from elspeth.engine.orchestrator.validation import (
 from elspeth.engine.processor import DAGTraversalContext, RowProcessor, make_step_resolver
 from elspeth.engine.retry import RetryManager
 from elspeth.engine.spans import SpanFactory
-from elspeth.plugins.infrastructure.protocols import SinkProtocol, SourceProtocol, TransformProtocol
 
 if TYPE_CHECKING:
     from elspeth.contracts import ResumePoint

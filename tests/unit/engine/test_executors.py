@@ -73,9 +73,10 @@ from elspeth.contracts.enums import (
 from elspeth.contracts.errors import ContractMergeError, OrchestrationInvariantError, PluginContractViolation
 from elspeth.contracts.results import ArtifactDescriptor, GateResult
 from elspeth.contracts.routing import RouteDestination, RoutingAction
-from elspeth.contracts.schema_contract import SchemaContract
+from elspeth.contracts.schema_contract import PipelineRow, SchemaContract
 from elspeth.contracts.types import NodeID, SinkName
 from elspeth.core.config import AggregationSettings, GateSettings, TriggerConfig
+from elspeth.core.landscape import LandscapeDB, LandscapeRecorder
 from elspeth.engine.executors import (
     AGGREGATION_CHECKPOINT_VERSION,
     AggregationExecutor,
@@ -101,6 +102,30 @@ def _make_contract() -> SchemaContract:
                 "value",
                 python_type=str,
                 original_name="value",
+                required=True,
+                source="declared",
+            ),
+        ),
+        mode="FLEXIBLE",
+        locked=True,
+    )
+
+
+def _make_output_contract() -> SchemaContract:
+    """Create a contract for transform output (different from input)."""
+    return SchemaContract(
+        fields=(
+            make_field(
+                "value",
+                python_type=str,
+                original_name="value",
+                required=True,
+                source="declared",
+            ),
+            make_field(
+                "processed",
+                python_type=bool,
+                original_name="processed",
                 required=True,
                 source="declared",
             ),
@@ -184,11 +209,14 @@ def _make_sink(
     return sink
 
 
-def _make_ctx(run_id: str = "test-run") -> Any:
+def _make_ctx(run_id: str = "test-run", landscape: Any = None) -> Any:
     """Create a PluginContext for testing."""
     from elspeth.contracts.plugin_context import PluginContext
 
-    return PluginContext(run_id=run_id, config={})
+    if landscape is None:
+        db = LandscapeDB.in_memory()
+        landscape = LandscapeRecorder(db)
+    return PluginContext(run_id=run_id, config={}, landscape=landscape)
 
 
 # =============================================================================
@@ -466,7 +494,7 @@ class TestTransformExecutor:
             reason={"reason": "test_error"},
         )
         token = _make_token()
-        ctx = _make_ctx()
+        ctx = _make_ctx(landscape=recorder)
 
         result, updated_token, error_sink = executor.execute_transform(
             transform,
@@ -488,7 +516,7 @@ class TestTransformExecutor:
             reason={"reason": "test_error"},
         )
         token = _make_token()
-        ctx = _make_ctx()
+        ctx = _make_ctx(landscape=recorder)
 
         _, _, error_sink = executor.execute_transform(
             transform,
@@ -514,7 +542,7 @@ class TestTransformExecutor:
             reason={"reason": "test_error"},
         )
         token = _make_token()
-        ctx = _make_ctx()
+        ctx = _make_ctx(landscape=recorder)
 
         _, _, error_sink = executor.execute_transform(transform, token, ctx)
         assert error_sink == "discard"
@@ -528,7 +556,7 @@ class TestTransformExecutor:
             reason={"reason": "test_error"},
         )
         token = _make_token()
-        ctx = _make_ctx()
+        ctx = _make_ctx(landscape=recorder)
 
         executor.execute_transform(transform, token, ctx)
 
@@ -562,7 +590,7 @@ class TestTransformExecutor:
             reason={"reason": "test_error"},
         )
         token = _make_token()
-        ctx = _make_ctx()
+        ctx = _make_ctx(landscape=recorder)
 
         executor.execute_transform(transform, token, ctx)
 
@@ -581,7 +609,7 @@ class TestTransformExecutor:
             reason={"reason": "test_error"},
         )
         token = _make_token()
-        ctx = _make_ctx()
+        ctx = _make_ctx(landscape=recorder)
 
         with pytest.raises(OrchestrationInvariantError, match="DIVERT edge"):
             executor.execute_transform(transform, token, ctx)
@@ -635,7 +663,7 @@ class TestTransformExecutor:
             reason={"reason": "test_error"},
         )
         token = _make_token()
-        ctx = _make_ctx()
+        ctx = _make_ctx(landscape=recorder)
 
         executor.execute_transform(transform, token, ctx)
 
@@ -649,7 +677,7 @@ class TestTransformExecutor:
         error_reason = {"reason": "content_filtered", "provider": "azure", "code": "CF-01"}
         transform.process.return_value = TransformResult.error(reason=error_reason)
         token = _make_token()
-        ctx = _make_ctx()
+        ctx = _make_ctx(landscape=recorder)
 
         executor.execute_transform(transform, token, ctx)
 
@@ -763,6 +791,121 @@ class TestTransformExecutor:
 
         assert result.status == "success"
         transform.process.assert_called_once()
+
+    # --- PipelineRow handling (merged from test_executor_pipeline_row.py) ---
+
+    def test_passes_pipeline_row_to_plugin(self) -> None:
+        """TransformExecutor should pass PipelineRow (not dict) to transform.process()."""
+        recorder = _make_recorder()
+        executor = TransformExecutor(recorder, _make_span_factory(), _make_step_resolver())
+        contract = _make_contract()
+        transform = _make_transform()
+        transform.process.return_value = TransformResult.success(
+            make_row({"value": "processed"}, contract=contract),
+            success_reason={"action": "test"},
+        )
+        token = _make_token(contract=contract)
+        ctx = _make_ctx()
+
+        executor.execute_transform(transform, token, ctx)
+
+        transform.process.assert_called_once()
+        passed_row = transform.process.call_args[0][0]
+        assert isinstance(passed_row, PipelineRow), f"Expected PipelineRow, got {type(passed_row)}"
+        assert passed_row["value"] == "test"
+
+    def test_extracts_dict_for_landscape_recording(self) -> None:
+        """Landscape recording should receive plain dict, not PipelineRow."""
+        recorder = _make_recorder()
+        executor = TransformExecutor(recorder, _make_span_factory(), _make_step_resolver())
+        contract = _make_contract()
+        transform = _make_transform()
+        transform.process.return_value = TransformResult.success(
+            make_row({"value": "processed"}, contract=contract),
+            success_reason={"action": "test"},
+        )
+        token = _make_token(contract=contract)
+        ctx = _make_ctx()
+
+        executor.execute_transform(transform, token, ctx)
+
+        recorder.begin_node_state.assert_called_once()
+        input_data = recorder.begin_node_state.call_args[1]["input_data"]
+        assert isinstance(input_data, dict)
+        assert type(input_data) is not PipelineRow  # type: ignore[comparison-overlap, unreachable]
+        assert input_data == {"value": "test"}  # type: ignore[unreachable]
+
+    def test_sets_ctx_contract_from_token(self) -> None:
+        """TransformExecutor should set ctx.contract from token.row_data.contract."""
+        recorder = _make_recorder()
+        executor = TransformExecutor(recorder, _make_span_factory(), _make_step_resolver())
+        contract = _make_contract()
+
+        captured_ctx = None
+
+        def capture_ctx(row_data: Any, ctx: Any) -> TransformResult:
+            nonlocal captured_ctx
+            captured_ctx = ctx
+            return TransformResult.success(
+                make_row({"value": "processed"}, contract=contract),
+                success_reason={"action": "test"},
+            )
+
+        transform = _make_transform()
+        transform.process = capture_ctx  # type: ignore[assignment]
+        token = _make_token(contract=contract)
+        ctx = _make_ctx()
+        assert ctx.contract is None
+
+        executor.execute_transform(transform, token, ctx)
+
+        assert captured_ctx is not None
+        assert captured_ctx.contract is contract
+
+    def test_creates_pipeline_row_from_result(self) -> None:
+        """Updated token should have PipelineRow with output contract."""
+        recorder = _make_recorder()
+        executor = TransformExecutor(recorder, _make_span_factory(), _make_step_resolver())
+        input_contract = _make_contract()
+        output_contract = SchemaContract(
+            fields=(
+                make_field("value", python_type=str, original_name="'value'", required=True, source="declared"),
+                make_field("processed", python_type=bool, original_name="'processed'", required=True, source="declared"),
+            ),
+            mode="FLEXIBLE",
+            locked=True,
+        )
+        transform = _make_transform()
+        transform.process.return_value = TransformResult.success(
+            make_row({"value": "processed", "processed": True}, contract=output_contract),
+            success_reason={"action": "test"},
+        )
+        token = _make_token(contract=input_contract)
+        ctx = _make_ctx()
+
+        _result, updated_token, _error_sink = executor.execute_transform(transform, token, ctx)
+
+        assert isinstance(updated_token.row_data, PipelineRow)
+        assert updated_token.row_data["value"] == "processed"
+        assert updated_token.row_data["processed"] is True
+        assert updated_token.row_data.contract is output_contract
+
+    def test_error_preserves_original_token(self) -> None:
+        """When transform returns error, token should be unchanged."""
+        recorder = _make_recorder()
+        executor = TransformExecutor(recorder, _make_span_factory(), _make_step_resolver())
+        contract = _make_contract()
+        transform = _make_transform(on_error="discard")
+        transform.process.return_value = TransformResult.error(
+            reason={"reason": "test_error"},
+        )
+        token = _make_token(contract=contract)
+        ctx = _make_ctx(landscape=recorder)
+
+        _result, updated_token, _error_sink = executor.execute_transform(transform, token, ctx)
+
+        assert updated_token is token
+        assert updated_token.row_data is token.row_data
 
 
 # =============================================================================
@@ -1783,6 +1926,156 @@ class TestAggregationExecutor:
         executor, _, nid = self._make_agg_executor()
         assert executor.get_restored_state(nid) is None
 
+    # --- PipelineRow handling (merged from test_executor_pipeline_row.py) ---
+
+    def test_buffer_row_stores_dict_not_pipeline_row(self) -> None:
+        """AggregationExecutor should store dicts in buffer, not PipelineRow.
+
+        Internal buffer must be JSON-serializable for checkpoints.
+        """
+        executor, _, nid = self._make_agg_executor(count=10)
+        contract = _make_contract()
+        token = _make_token(data={"value": "test"}, contract=contract)
+
+        executor.buffer_row(nid, token)
+
+        buffered = executor.get_buffered_rows(nid)
+        assert len(buffered) == 1
+        assert isinstance(buffered[0], dict)
+        assert type(buffered[0]) is not PipelineRow  # type: ignore[comparison-overlap, unreachable]
+        assert buffered[0] == {"value": "test"}  # type: ignore[unreachable]
+
+    def test_buffer_row_extracts_dict_from_pipeline_row(self) -> None:
+        """buffer_row should extract dict from PipelineRow, preserving all fields."""
+        executor, _, nid = self._make_agg_executor(count=10)
+        contract = _make_contract()
+        row_data = {"value": "test", "extra": "field", "number": 42}
+        token = _make_token(data=row_data, contract=contract)
+
+        executor.buffer_row(nid, token)
+
+        buffered = executor.get_buffered_rows(nid)
+        assert buffered[0] == {"value": "test", "extra": "field", "number": 42}
+
+    def test_buffer_tokens_preserves_pipeline_row(self) -> None:
+        """TokenInfo in buffer_tokens should keep PipelineRow as row_data."""
+        executor, _, nid = self._make_agg_executor(count=10)
+        contract = _make_contract()
+        token = _make_token(data={"value": "test"}, contract=contract)
+
+        executor.buffer_row(nid, token)
+
+        buffered_tokens = executor.get_buffered_tokens(nid)
+        assert len(buffered_tokens) == 1
+        assert isinstance(buffered_tokens[0].row_data, PipelineRow)
+        assert buffered_tokens[0].row_data.contract is contract
+
+    def test_checkpoint_contains_dicts_not_pipeline_row(self) -> None:
+        """get_checkpoint_state() should return typed DTO with JSON-serializable to_dict()."""
+        import json
+
+        executor, _, nid = self._make_agg_executor(count=10)
+        contract = _make_contract()
+        token = _make_token(data={"value": "test"}, contract=contract)
+
+        executor.buffer_row(nid, token)
+
+        checkpoint = executor.get_checkpoint_state()
+        assert isinstance(checkpoint, AggregationCheckpointState)
+
+        # Verify to_dict() output is JSON-serializable
+        checkpoint_dict = checkpoint.to_dict()
+        try:
+            serialized = json.dumps(checkpoint_dict)
+            assert len(serialized) > 0
+        except (TypeError, ValueError) as e:
+            pytest.fail(f"Checkpoint to_dict() should be JSON-serializable but got error: {e}")
+
+        # Verify row_data is stored as dict in checkpoint token
+        node_checkpoint = checkpoint.nodes[str(nid)]
+        token_ckpt = node_checkpoint.tokens[0]
+        assert isinstance(token_ckpt.row_data, dict)
+        assert token_ckpt.row_data == {"value": "test"}
+
+    def test_checkpoint_includes_contract_for_restore(self) -> None:
+        """Checkpoint should include contract info to enable PipelineRow restoration."""
+        executor, _, nid = self._make_agg_executor(count=10)
+        contract = _make_contract()
+        token = _make_token(data={"value": "test"}, contract=contract)
+
+        executor.buffer_row(nid, token)
+
+        checkpoint = executor.get_checkpoint_state()
+        assert isinstance(checkpoint, AggregationCheckpointState)
+        node_checkpoint = checkpoint.nodes[str(nid)]
+        assert node_checkpoint.contract is not None
+        assert all(t.contract_version for t in node_checkpoint.tokens), (
+            "Checkpoint must include contract info for PipelineRow restoration"
+        )
+
+    def test_restore_from_checkpoint_creates_pipeline_row(self) -> None:
+        """restore_from_checkpoint should reconstruct TokenInfo with PipelineRow."""
+        executor, recorder, nid = self._make_agg_executor(count=10)
+        contract = _make_contract()
+        token = _make_token(data={"value": "test"}, contract=contract)
+
+        executor.buffer_row(nid, token)
+        checkpoint = executor.get_checkpoint_state()
+
+        # Create new executor and restore from checkpoint
+        new_executor = AggregationExecutor(
+            recorder,
+            _make_span_factory(),
+            _make_step_resolver(),
+            run_id="test-run",
+            aggregation_settings={nid: AggregationSettings(
+                name="test_agg",
+                plugin="batch_stats",
+                input="default",
+                on_error="discard",
+                trigger=TriggerConfig(count=10),
+            )},
+        )
+        new_executor.restore_from_checkpoint(checkpoint)
+
+        restored_tokens = new_executor.get_buffered_tokens(nid)
+        assert len(restored_tokens) == 1
+        assert isinstance(restored_tokens[0].row_data, PipelineRow)
+        assert restored_tokens[0].row_data["value"] == "test"
+        assert restored_tokens[0].row_data.contract is not None
+        assert restored_tokens[0].row_data.contract.mode == "FLEXIBLE"
+
+    def test_restore_from_checkpoint_buffer_has_dicts(self) -> None:
+        """After restore, _buffers should contain dicts (not PipelineRow)."""
+        executor, recorder, nid = self._make_agg_executor(count=10)
+        contract = _make_contract()
+        token = _make_token(data={"value": "test"}, contract=contract)
+
+        executor.buffer_row(nid, token)
+        checkpoint = executor.get_checkpoint_state()
+
+        # Create new executor and restore from checkpoint
+        new_executor = AggregationExecutor(
+            recorder,
+            _make_span_factory(),
+            _make_step_resolver(),
+            run_id="test-run",
+            aggregation_settings={nid: AggregationSettings(
+                name="test_agg",
+                plugin="batch_stats",
+                input="default",
+                on_error="discard",
+                trigger=TriggerConfig(count=10),
+            )},
+        )
+        new_executor.restore_from_checkpoint(checkpoint)
+
+        restored_rows = new_executor.get_buffered_rows(nid)
+        assert len(restored_rows) == 1
+        assert isinstance(restored_rows[0], dict)
+        assert type(restored_rows[0]) is not PipelineRow  # type: ignore[comparison-overlap, unreachable]
+        assert restored_rows[0] == {"value": "test"}  # type: ignore[unreachable]
+
 
 # =============================================================================
 # TestSinkExecutor
@@ -2327,6 +2620,214 @@ class TestSinkExecutor:
         assert len(completed_calls) == 1
         # With 1 token, amortized = total (no division effect)
         assert completed_calls[0][1]["duration_ms"] > 0
+
+    # --- PipelineRow extraction (merged from test_executor_pipeline_row.py) ---
+
+    def test_sink_extracts_dict_for_landscape_input(self) -> None:
+        """SinkExecutor should extract dict (not PipelineRow) for Landscape input_data recording."""
+        recorder = _make_recorder()
+        executor = SinkExecutor(recorder, _make_span_factory(), run_id="test-run")
+        token = _make_token(data={"value": "test"})
+        sink = _make_sink()
+        ctx = _make_ctx()
+        pending = PendingOutcome(outcome=RowOutcome.COMPLETED)
+
+        executor.write(
+            sink,
+            [token],
+            ctx,
+            step_in_pipeline=5,
+            sink_name="out",
+            pending_outcome=pending,
+        )
+
+        recorder.begin_node_state.assert_called_once()
+        call_kwargs = recorder.begin_node_state.call_args[1]
+        input_data = call_kwargs["input_data"]
+        assert isinstance(input_data, dict)
+        assert type(input_data) is not PipelineRow  # type: ignore[comparison-overlap, unreachable]
+        assert input_data == {"value": "test"}  # type: ignore[unreachable]
+
+    def test_sink_extracts_dict_for_landscape_output(self) -> None:
+        """SinkExecutor should extract dict (not PipelineRow) for Landscape output_data recording."""
+        recorder = _make_recorder()
+        executor = SinkExecutor(recorder, _make_span_factory(), run_id="test-run")
+        token = _make_token(data={"value": "test"})
+        sink = _make_sink()
+        ctx = _make_ctx()
+        pending = PendingOutcome(outcome=RowOutcome.COMPLETED)
+
+        executor.write(
+            sink,
+            [token],
+            ctx,
+            step_in_pipeline=5,
+            sink_name="out",
+            pending_outcome=pending,
+        )
+
+        complete_calls = [c for c in recorder.complete_node_state.call_args_list if c[1].get("output_data") is not None]
+        assert len(complete_calls) == 1
+        output_data = complete_calls[0][1]["output_data"]
+        row_in_output = output_data["row"]
+        assert isinstance(row_in_output, dict)
+        assert type(row_in_output) is not PipelineRow  # type: ignore[comparison-overlap, unreachable]
+        assert row_in_output == {"value": "test"}  # type: ignore[unreachable]
+
+    def test_sink_preserves_all_fields_in_dict(self) -> None:
+        """Sink should receive all fields, including extras not in contract."""
+        recorder = _make_recorder()
+        executor = SinkExecutor(recorder, _make_span_factory(), run_id="test-run")
+        contract = _make_contract()
+        row_data = {"value": "test", "extra_field": "extra_value", "another": 123}
+        token = _make_token(data=row_data, contract=contract)
+        sink = _make_sink()
+        ctx = _make_ctx()
+        pending = PendingOutcome(outcome=RowOutcome.COMPLETED)
+
+        executor.write(
+            sink,
+            [token],
+            ctx,
+            step_in_pipeline=5,
+            sink_name="out",
+            pending_outcome=pending,
+        )
+
+        sink.write.assert_called_once()
+        rows = sink.write.call_args[0][0]
+        assert len(rows) == 1
+        assert rows[0] == {"value": "test", "extra_field": "extra_value", "another": 123}
+
+    def test_sink_updates_ctx_contract_from_tokens(self) -> None:
+        """SinkExecutor should synchronize ctx.contract to sink token contracts."""
+        recorder = _make_recorder()
+        executor = SinkExecutor(recorder, _make_span_factory(), run_id="test-run")
+
+        stale_contract = _make_contract()
+        sink_contract = SchemaContract(
+            fields=(
+                make_field(
+                    "value",
+                    python_type=str,
+                    original_name="Value Renamed",
+                    required=True,
+                    source="declared",
+                ),
+            ),
+            mode="FLEXIBLE",
+            locked=True,
+        )
+        token = _make_token(data={"value": "test"}, contract=sink_contract)
+
+        captured_contract = None
+
+        def capture_write(_rows, call_ctx):
+            nonlocal captured_contract
+            captured_contract = call_ctx.contract
+            return ArtifactDescriptor(
+                artifact_type="file",
+                path_or_uri="file:///output/test.csv",
+                content_hash="abc123",
+                size_bytes=100,
+            )
+
+        sink = _make_sink()
+        sink.write.side_effect = capture_write
+
+        ctx = _make_ctx()
+        ctx.contract = stale_contract
+        pending = PendingOutcome(outcome=RowOutcome.COMPLETED)
+
+        executor.write(
+            sink,
+            [token],
+            ctx,
+            step_in_pipeline=5,
+            sink_name="out",
+            pending_outcome=pending,
+        )
+
+        assert captured_contract is sink_contract
+        assert ctx.contract is sink_contract
+
+    def test_sink_merges_mixed_token_contracts_for_context(self) -> None:
+        """SinkExecutor should merge mixed token contracts before sink.write()."""
+        recorder = _make_recorder()
+        executor = SinkExecutor(recorder, _make_span_factory(), run_id="test-run")
+
+        contract_a = SchemaContract(
+            fields=(
+                make_field(
+                    "value",
+                    python_type=str,
+                    original_name="Value",
+                    required=True,
+                    source="declared",
+                ),
+            ),
+            mode="FLEXIBLE",
+            locked=True,
+        )
+        contract_b = SchemaContract(
+            fields=(
+                make_field(
+                    "value",
+                    python_type=str,
+                    original_name="Value",
+                    required=True,
+                    source="declared",
+                ),
+                make_field(
+                    "extra",
+                    python_type=str,
+                    original_name="Extra Field",
+                    required=False,
+                    source="inferred",
+                ),
+            ),
+            mode="FLEXIBLE",
+            locked=True,
+        )
+        expected_merged = contract_a.merge(contract_b)
+
+        tokens = [
+            _make_token(data={"value": "a"}, contract=contract_a, token_id="t1"),
+            _make_token(data={"value": "b", "extra": "x"}, contract=contract_b, token_id="t2"),
+        ]
+
+        captured_contract = None
+
+        def capture_write(_rows, call_ctx):
+            nonlocal captured_contract
+            captured_contract = call_ctx.contract
+            return ArtifactDescriptor(
+                artifact_type="file",
+                path_or_uri="file:///output/test.csv",
+                content_hash="abc123",
+                size_bytes=100,
+            )
+
+        sink = _make_sink()
+        sink.write.side_effect = capture_write
+
+        ctx = _make_ctx()
+        ctx.contract = _make_contract()
+        pending = PendingOutcome(outcome=RowOutcome.COMPLETED)
+
+        executor.write(
+            sink,
+            tokens,
+            ctx,
+            step_in_pipeline=5,
+            sink_name="out",
+            pending_outcome=pending,
+        )
+
+        assert captured_contract is not None
+        assert captured_contract == expected_merged
+        assert captured_contract.get_field("extra") is not None
+        assert ctx.contract == expected_merged
 
 
 # =============================================================================

@@ -158,12 +158,12 @@ allow_hits:
   expires: '2026-05-02'
 # azure/base.py, content_safety.py, prompt_shield.py — covered by per_file_rules wildcard
 # (14 individual allow_hits removed: fingerprints changed after import rewrite, per_file_rules covers all)
-- key: plugins/infrastructure/clients/llm.py:R4:AuditedLLMClient:chat_completion:fp=fd9c6003d4bbf429
+- key: plugins/infrastructure/clients/llm.py:R4:AuditedLLMClient:chat_completion:fp=9ca32dec0e12da22
   owner: architecture
   reason: Telemetry emission failure - must not crash main LLM call flow
   safety: Logged and continues - telemetry is non-critical to LLM processing
   expires: '2026-05-02'
-- key: plugins/infrastructure/clients/llm.py:R4:AuditedLLMClient:chat_completion:fp=7118dea7e5b614a4
+- key: plugins/infrastructure/clients/llm.py:R4:AuditedLLMClient:chat_completion:fp=ff320ab13f5aa31f
   owner: architecture
   reason: Telemetry emission failure — must not crash main LLM call flow
   safety: Logged and continues — telemetry is non-critical to LLM processing
@@ -198,17 +198,17 @@ allow_hits:
   reason: Tier 2 overflow guard — only float sums can overflow to Infinity (int sums use arbitrary precision)
   safety: Returns TransformResult.error() on overflow; int path cannot trigger this
   expires: null
-- key: plugins/infrastructure/clients/http.py:R5:_contains_non_finite:fp=ec8ef6841191eb46
+- key: plugins/infrastructure/clients/http.py:R5:_contains_non_finite:fp=d10b793e18bb7929
   owner: architecture
   reason: isinstance() on float to detect NaN/Infinity in JSON - type discrimination for serialization
   safety: Rejects non-finite values that would break RFC 8785 canonicalization
   expires: '2026-05-02'
-- key: plugins/infrastructure/clients/http.py:R5:_contains_non_finite:fp=2e60dcd470c35cc8
+- key: plugins/infrastructure/clients/http.py:R5:_contains_non_finite:fp=ac06b528e07d46ec
   owner: architecture
   reason: isinstance() on dict for recursive NaN/Infinity scan - type discrimination for serialization
   safety: Traverses JSON structure to find non-finite floats before audit recording
   expires: '2026-05-02'
-- key: plugins/infrastructure/clients/http.py:R5:_contains_non_finite:fp=662d86119a323435
+- key: plugins/infrastructure/clients/http.py:R5:_contains_non_finite:fp=9946aa209328d775
   owner: architecture
   reason: isinstance() on list for recursive NaN/Infinity scan - type discrimination for serialization
   safety: Traverses JSON structure to find non-finite floats before audit recording
@@ -219,58 +219,58 @@ allow_hits:
   reason: Tier 3 boundary — response.text is external data, extract_content() can fail unpredictably
   safety: Returns TransformResult.error() for quarantine with reason, error_type, and URL
 # Refactored: post()/get() shared logic now in _execute_request/_parse_response_body/_record_and_emit
-- key: plugins/infrastructure/clients/http.py:R1:AuditedHTTPClient:_filter_request_headers:fp=5565ae22ee269a37
+- key: plugins/infrastructure/clients/http.py:R1:AuditedHTTPClient:_filter_request_headers:fp=ded76dbbb1479f9c
   owner: architecture
   reason: os.environ.get() for optional ELSPETH_ALLOW_RAW_SECRETS override
   safety: Environment variable access with default - not a dict.get() on data
   expires: '2026-05-02'
-- key: plugins/infrastructure/clients/http.py:R6:AuditedHTTPClient:_filter_request_headers:fp=c4240c22a0b2ccd0
+- key: plugins/infrastructure/clients/http.py:R6:AuditedHTTPClient:_filter_request_headers:fp=8e6fe9689cede063
   owner: architecture
   reason: except ValueError on HMAC fingerprinting - external secret may be invalid bytes
   safety: Falls back to [REDACTED] placeholder instead of crashing on malformed secrets
   expires: '2026-05-02'
-- key: plugins/infrastructure/clients/http.py:R1:AuditedHTTPClient:_parse_response_body:fp=7241966800ad60bd
+- key: plugins/infrastructure/clients/http.py:R1:AuditedHTTPClient:_parse_response_body:fp=df1154a7e3a315ad
   owner: architecture
   reason: HTTP response content-type header - external system boundary, header may be missing
   safety: Falls back to binary encoding if content-type absent
   expires: '2026-05-02'
-- key: plugins/infrastructure/clients/http.py:R4:AuditedHTTPClient:_record_and_emit:fp=44106e3b2d0ceec6
+- key: plugins/infrastructure/clients/http.py:R4:AuditedHTTPClient:_record_and_emit:fp=e14aa43d9db1c890
   owner: architecture
   reason: Telemetry emission failure - must not crash main request flow
   safety: Logged and continues - telemetry is non-critical to HTTP processing
   expires: '2026-05-02'
-- key: plugins/infrastructure/clients/http.py:R1:AuditedHTTPClient:_execute_request:fp=46f23020fa886ed5
+- key: plugins/infrastructure/clients/http.py:R1:AuditedHTTPClient:_execute_request:fp=5039a2d920d07c4b
   owner: architecture
   reason: httpx Client.get() method call - dispatched based on HTTP method
   safety: This is the actual external HTTP call, not a defensive dict access
   expires: '2026-05-02'
-- key: plugins/infrastructure/clients/http.py:R1:AuditedHTTPClient:get_ssrf_safe:fp=3fc1325dc2cf23cf
+- key: plugins/infrastructure/clients/http.py:R1:AuditedHTTPClient:get_ssrf_safe:fp=7d29973950e45976
   owner: architecture
   reason: httpx Client.get() method call - ephemeral client for TLS/SNI isolation
   safety: This is the actual external HTTP call with IP pinning
   expires: '2026-05-02'
-- key: plugins/infrastructure/clients/http.py:R1:AuditedHTTPClient:get_ssrf_safe:fp=a7a5cc981783d794
+- key: plugins/infrastructure/clients/http.py:R1:AuditedHTTPClient:get_ssrf_safe:fp=bc217a157b57dee9
   owner: architecture
   reason: HTTP response content-type header - external system boundary, header may be missing
   safety: Falls back to binary encoding if content-type absent
   expires: '2026-05-02'
-- key: plugins/infrastructure/clients/http.py:R4:AuditedHTTPClient:get_ssrf_safe:fp=a8a0b11177ad4077
+- key: plugins/infrastructure/clients/http.py:R4:AuditedHTTPClient:get_ssrf_safe:fp=06a1d98c7c83a107
   owner: architecture
   reason: Telemetry emission failure - must not crash main request flow
   safety: Logged and continues - telemetry is non-critical to HTTP processing
   expires: '2026-05-02'
-- key: plugins/infrastructure/clients/http.py:R4:AuditedHTTPClient:get_ssrf_safe:fp=c04b3947d563909c
+- key: plugins/infrastructure/clients/http.py:R4:AuditedHTTPClient:get_ssrf_safe:fp=1a4cad31efb5b07e
   owner: architecture
   reason: Telemetry emission failure - must not crash main request flow
   safety: Logged and continues - telemetry is non-critical to HTTP processing
   expires: '2026-05-02'
-- key: plugins/infrastructure/clients/http.py:R1:AuditedHTTPClient:_follow_redirects_safe:fp=10ab112db646388f
+- key: plugins/infrastructure/clients/http.py:R1:AuditedHTTPClient:_follow_redirects_safe:fp=5ef0154f8de4066c
   owner: architecture
   reason: HTTP redirect Location header - external system boundary, header may be absent
   safety: Missing Location header breaks redirect loop naturally (no redirect target)
   expires: '2026-05-02'
 # http.py — redirect hop client.get() method call
-- key: plugins/infrastructure/clients/http.py:R1:AuditedHTTPClient:_follow_redirects_safe:fp=33ff38535520c932
+- key: plugins/infrastructure/clients/http.py:R1:AuditedHTTPClient:_follow_redirects_safe:fp=612c0a827c6a7dec
   owner: architecture
   reason: httpx Client.get() method call — ephemeral client per redirect hop for TLS isolation
   safety: This is the actual external HTTP call, not a defensive dict access

@@ -1,4 +1,3 @@
-# src/elspeth/engine/executors/gate.py
 """GateExecutor - wraps config-driven gates with audit recording and routing."""
 
 import logging
@@ -10,6 +9,7 @@ import structlog
 
 from elspeth.contracts import (
     ConfigGateReason,
+    GateResult,
     RouteDestination,
     RouteDestinationKind,
     RoutingAction,
@@ -23,6 +23,11 @@ from elspeth.contracts.enums import (
 )
 from elspeth.contracts.errors import OrchestrationInvariantError
 from elspeth.contracts.node_state_context import GateEvaluationContext
+from elspeth.core.expression_parser import (
+    ExpressionEvaluationError,
+    ExpressionSecurityError,
+    ExpressionSyntaxError,
+)
 from elspeth.contracts.plugin_context import PluginContext
 from elspeth.contracts.types import NodeID, StepResolver
 from elspeth.core.canonical import stable_hash
@@ -32,7 +37,6 @@ from elspeth.core.landscape import LandscapeRecorder
 from elspeth.engine.executors.state_guard import NodeStateGuard
 from elspeth.engine.executors.types import GateOutcome, MissingEdgeError
 from elspeth.engine.spans import SpanFactory
-from elspeth.plugins.infrastructure.results import GateResult
 
 if TYPE_CHECKING:
     from elspeth.engine.tokens import TokenManager
@@ -52,16 +56,16 @@ class _RouteDispatchOutcome:
 
 
 class GateExecutor:
-    """Executes gates with audit recording and routing.
+    """Executes config-driven gates with audit recording and routing.
 
-    Wraps gate.evaluate() to:
-    1. Record node state start
-    2. Time the operation
-    3. Populate audit fields in result
-    4. Record routing events
-    5. Create child tokens for fork operations
-    6. Record node state completion
-    7. Emit OpenTelemetry span
+    Evaluates gate conditions via ExpressionParser and:
+    1. Records node state start
+    2. Times the operation
+    3. Populates audit fields in result
+    4. Records routing events
+    5. Creates child tokens for fork operations
+    6. Records node state completion
+    7. Emits OpenTelemetry span
 
     CRITICAL: Status is always "completed" for successful gate execution.
     Terminal state (ROUTED, FORKED) is DERIVED from routing_events/token_parents,
@@ -247,7 +251,7 @@ class GateExecutor:
                     # This preserves dual-name access (normalized and original field names)
                     eval_result = parser.evaluate(token.row_data)
                     duration_ms = (time.perf_counter() - start) * 1000
-                except Exception:
+                except (ExpressionEvaluationError, ExpressionSecurityError, ExpressionSyntaxError):
                     duration_ms = (time.perf_counter() - start) * 1000
                     raise
 

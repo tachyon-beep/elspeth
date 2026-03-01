@@ -1,7 +1,7 @@
 per_file_rules:
 - pattern: "engine/*"
   rules: ["L1"]
-  reason: "Engine orchestrates plugins — structural coupling via protocols/results. Separate refactoring to move protocols to contracts."
+  reason: "Engine imports plugin infrastructure: TransformResult (results.py), BatchTransformMixin (batching/mixin.py), LLMClientError (clients/llm.py), CapacityError (pooling/). Protocols moved to contracts/ (2026-03-01)."
   expires: "2026-09-01"
 allow_hits:
 - key: engine/orchestrator/types.py:R5:AggregationFlushResult:__post_init__:fp=84d6c2fc1218a9d6
@@ -48,11 +48,6 @@ allow_hits:
   owner: architecture
   reason: isinstance() check required to find batch-aware transforms - protocol contract verification
   safety: BatchTransformMixin is system-owned; isinstance replaces prior hasattr checks for type safety
-  expires: '2026-05-02'
-- key: engine/executors/transform.py:R2:TransformExecutor:execute_transform:fp=df2a6deffd9fa500
-  owner: architecture
-  reason: getattr() for lifecycle guard — graceful for non-BaseTransform protocol implementations
-  safety: Default True skips check for third-party implementations; only enforces on BaseTransform subclasses
   expires: '2026-05-02'
 - key: engine/executors/transform.py:R5:TransformExecutor:execute_transform:fp=54664f4255eaeb4c
   owner: architecture
@@ -161,7 +156,7 @@ allow_hits:
   expires: '2026-03-11'
 - key: engine/orchestrator/core.py:R5:Orchestrator:_initialize_run_context:fp=100c8dd7a53c0cba
   owner: architecture
-  reason: Type dispatch - RowPlugin is union of TransformProtocol|GateProtocol, must distinguish to access is_batch_aware
+  reason: Type dispatch - RowPlugin is TransformProtocol, isinstance check filters GateSettings from transforms list to access is_batch_aware
   safety: Crashes on type mismatch - no silent fallback
   expires: '2026-03-09'
 - key: engine/orchestrator/core.py:R5:Orchestrator:_handle_quarantine_row:fp=8447320f92fc115f
@@ -179,22 +174,22 @@ allow_hits:
   reason: isinstance() check required to find batch-aware transforms - protocol contract verification
   safety: Crashes on type mismatch - no silent fallback
   expires: '2026-03-09'
-- key: engine/executors/gate.py:R5:GateExecutor:execute_config_gate:fp=dbab5031bc8455e6
+- key: engine/executors/gate.py:R5:GateExecutor:execute_config_gate:fp=68ff7b444bed568c
   owner: architecture
   reason: AST/type checking - ExpressionParser returns Any; must distinguish bool/str for route label conversion
   safety: Explicit isinstance branching for AST eval result types
   expires: '2026-05-13'
-- key: engine/executors/gate.py:R5:GateExecutor:execute_config_gate:fp=e4da19eafad3a5d7
+- key: engine/executors/gate.py:R5:GateExecutor:execute_config_gate:fp=89678e9942929fa8
   owner: architecture
   reason: AST/type checking - ExpressionParser returns Any; must distinguish bool/str for route label conversion
   safety: Explicit isinstance branching for AST eval result types
   expires: '2026-05-13'
-- key: engine/executors/gate.py:R1:GateExecutor:_record_routing:fp=6338dc38fa0ad392
+- key: engine/executors/gate.py:R1:GateExecutor:_record_routing:fp=7957c7b3993f565b
   owner: architecture
   reason: Optional edge_id lookup - edge map may not have all node combinations during routing
   safety: Falls back to generating edge_id when not in prebuilt map
   expires: '2026-05-13'
-- key: engine/executors/gate.py:R1:GateExecutor:_record_routing:fp=cbd0e2550e4db9d2
+- key: engine/executors/gate.py:R1:GateExecutor:_record_routing:fp=38dabd7f2719bfd0
   owner: architecture
   reason: Optional edge_id lookup - edge map may not have all node combinations during routing
   safety: Falls back to generating edge_id when not in prebuilt map

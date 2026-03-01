@@ -1,5 +1,4 @@
-# src/elspeth/plugins/protocols.py
-"""Plugin protocols defining the contracts for each plugin type.
+"""Plugin protocols — structural contracts for Source, Transform, Sink plugins.
 
 These protocols define what methods plugins must implement.
 They're used for type checking, not runtime enforcement (that's pluggy's job).
@@ -13,14 +12,14 @@ Plugin Types:
 from collections.abc import Iterator
 from typing import TYPE_CHECKING, Any, Protocol, runtime_checkable
 
-from elspeth.contracts import Determinism
+from elspeth.contracts.enums import Determinism
 
 if TYPE_CHECKING:
-    from elspeth.contracts import ArtifactDescriptor, PluginSchema, SourceRow
     from elspeth.contracts.contexts import LifecycleContext, SinkContext, SourceContext, TransformContext
+    from elspeth.contracts.data import PluginSchema
+    from elspeth.contracts.results import ArtifactDescriptor, SourceRow, TransformResult
     from elspeth.contracts.schema_contract import PipelineRow
     from elspeth.contracts.sink import OutputValidationResult
-    from elspeth.plugins.infrastructure.results import TransformResult
 
 
 # NOTE: PluginProtocol was DELETED. It was a speculative base protocol
@@ -190,6 +189,11 @@ class TransformProtocol(Protocol):
     # Metadata for Phase 3 audit/reproducibility
     determinism: Determinism
     plugin_version: str
+
+    # Lifecycle guard (set by BaseTransform.on_start()).
+    # The TransformExecutor checks this before process() to ensure on_start()
+    # was called. All transforms must inherit BaseTransform which manages this.
+    _on_start_called: bool
 
     # Batch support flag (must be False for TransformProtocol)
     # When True, transform must implement BatchTransformProtocol instead

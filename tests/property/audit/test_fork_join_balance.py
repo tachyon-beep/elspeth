@@ -27,13 +27,12 @@ from hypothesis import given, settings
 from hypothesis import strategies as st
 from sqlalchemy import text
 
-from elspeth.contracts import CoalesceName, GateName, RoutingAction, RoutingMode, SinkName
+from elspeth.contracts import CoalesceName, GateName, RoutingAction, RoutingMode, SinkName, TransformProtocol
 from elspeth.contracts.enums import RowOutcome
 from elspeth.core.config import CoalesceSettings, GateSettings, SourceSettings
 from elspeth.core.dag import ExecutionGraph, GraphValidationError
 from elspeth.core.landscape import LandscapeDB
 from elspeth.engine.orchestrator import Orchestrator, PipelineConfig
-from elspeth.plugins.infrastructure.protocols import TransformProtocol
 from tests.fixtures.base_classes import (
     as_sink,
     as_source,

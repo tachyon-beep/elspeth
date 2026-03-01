@@ -13,7 +13,7 @@ from .test_transform_protocol import (
 )
 
 if TYPE_CHECKING:
-    from elspeth.plugins.infrastructure.protocols import TransformProtocol
+    from elspeth.contracts import TransformProtocol
 
 
 class TestKeywordFilterContract(TransformContractPropertyTestBase):

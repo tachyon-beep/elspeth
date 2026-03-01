@@ -1,4 +1,3 @@
-# src/elspeth/core/dag/models.py
 """Types, constants, and exceptions for DAG operations.
 
 Leaf module — no intra-package imports (prevents import cycles).
@@ -18,9 +17,8 @@ from elspeth.core.landscape.schema import NODE_ID_COLUMN_LENGTH
 if TYPE_CHECKING:
     from types import MappingProxyType
 
-    from elspeth.contracts import PluginSchema
+    from elspeth.contracts import PluginSchema, TransformProtocol
     from elspeth.core.config import TransformSettings
-    from elspeth.plugins.infrastructure.protocols import TransformProtocol
 
 
 class GraphValidationError(ValueError):

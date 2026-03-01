@@ -201,20 +201,20 @@ allow_hits:
   reason: Tier 1 boundary — .get() for optional condition_fire_offset (may be absent in older checkpoints)
   safety: None default is correct — absent offset means "no offset recorded"
   expires: null
-- key: contracts/plugin_context.py:R1:PluginContext:record_call:fp=4f0e218bd642c90d
+- key: contracts/plugin_context.py:R1:PluginContext:record_call:fp=4bcfbddc7c8fb688
   owner: architecture
   reason: Tier 3 boundary — .get() on serialized LLM response dict to extract optional usage data
   safety: Missing key returns None; no fabrication
   expires: null
-- key: contracts/plugin_context.py:R5:PluginContext:record_call:fp=a9b4db7453f27ce6
+- key: contracts/plugin_context.py:R5:PluginContext:record_call:fp=df23c1c8c7e94509
   owner: architecture
   reason: Tier 3 boundary — isinstance() validates usage is dict before TokenUsage.from_dict() coercion
   safety: Type dispatch for external data validation, not masking bugs
   expires: null
-- key: contracts/plugin_context.py:R4:PluginContext:record_call:fp=68315a95c7d71e70
+- key: contracts/plugin_context.py:R4:PluginContext:record_call:fp=b165ec2950e261e0
   owner: architecture
-  reason: Broad exception handling — telemetry failure must not corrupt the audit call recording
-  safety: Warning logged with error details; Landscape recording already succeeded
+  reason: Broad exception handling — telemetry failure must not corrupt the audit call recording; FrameworkBugError/AuditIntegrityError re-raised before this handler
+  safety: Warning logged with error details; Landscape recording already succeeded; system errors propagate
   expires: null
 - key: contracts/plugin_context.py:R5:PluginContext:record_validation_error:fp=4f4efcff4e768b32
   owner: architecture

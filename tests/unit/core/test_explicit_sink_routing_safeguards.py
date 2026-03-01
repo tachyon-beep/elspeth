@@ -19,11 +19,10 @@ from typing import Any, cast
 
 import pytest
 
-from elspeth.contracts import RunStatus
+from elspeth.contracts import RunStatus, SinkProtocol, SourceProtocol, TransformProtocol
 from elspeth.contracts.schema_contract import PipelineRow
 from elspeth.core.config import SourceSettings, TransformSettings
 from elspeth.plugins.infrastructure.base import BaseTransform
-from elspeth.plugins.infrastructure.protocols import SinkProtocol, SourceProtocol, TransformProtocol
 from elspeth.testing import make_pipeline_row
 from tests.fixtures.base_classes import _TestSchema, as_sink, as_source, as_transform
 from tests.fixtures.factories import wire_transforms

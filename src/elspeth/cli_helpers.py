@@ -6,10 +6,10 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
+    from elspeth.contracts import SinkProtocol, SourceProtocol, TransformProtocol
     from elspeth.core.config import AggregationSettings, ElspethSettings, LandscapeSettings, SourceSettings
     from elspeth.core.dag import WiredTransform
     from elspeth.core.landscape.recorder import LandscapeRecorder
-    from elspeth.plugins.infrastructure.protocols import SinkProtocol, SourceProtocol, TransformProtocol
 
 
 @dataclass(frozen=True, slots=True)

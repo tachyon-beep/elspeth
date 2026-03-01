@@ -18,10 +18,10 @@ from typing import cast
 from hypothesis import given, settings
 from hypothesis import strategies as st
 
+from elspeth.contracts import SinkProtocol, SourceProtocol
 from elspeth.core.config import CoalesceSettings, GateSettings, SourceSettings
 from elspeth.core.dag import ExecutionGraph
 from elspeth.core.dag.models import WiredTransform
-from elspeth.plugins.infrastructure.protocols import SinkProtocol, SourceProtocol
 from elspeth.testing import make_pipeline_row, make_token_info
 from tests.fixtures.factories import wire_transforms
 from tests.fixtures.plugins import CollectSink, ListSource, PassTransform

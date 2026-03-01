@@ -13,7 +13,7 @@ from unittest.mock import Mock
 
 import pytest
 
-from elspeth.contracts import RouteDestination
+from elspeth.contracts import RouteDestination, TransformProtocol
 from elspeth.contracts.types import GateName, NodeID, SinkName
 from elspeth.engine.orchestrator.types import RouteValidationError
 from elspeth.engine.orchestrator.validation import (
@@ -21,7 +21,6 @@ from elspeth.engine.orchestrator.validation import (
     validate_source_quarantine_destination,
     validate_transform_error_sinks,
 )
-from elspeth.plugins.infrastructure.protocols import TransformProtocol
 
 # =============================================================================
 # Helpers

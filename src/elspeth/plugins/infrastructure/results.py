@@ -1,4 +1,3 @@
-# src/elspeth/plugins/results.py
 """Result types for plugin operations.
 
 These types define the contracts between plugins and the SDA engine.
@@ -11,7 +10,6 @@ Aggregation is now engine-controlled via batch-aware transforms.
 """
 
 from elspeth.contracts import (
-    GateResult,
     RoutingAction,
     RowOutcome,
     SourceRow,
@@ -19,9 +17,10 @@ from elspeth.contracts import (
 )
 
 # Re-export types as part of public plugin API
+# NOTE: GateResult removed — gates are config-driven (not plugins),
+# so GateResult is not part of the plugin API. Engine code imports
+# it directly from elspeth.contracts.
 __all__ = [
-    # NOTE: AcceptResult deleted in aggregation structural cleanup
-    "GateResult",
     "RoutingAction",
     "RowOutcome",
     "SourceRow",

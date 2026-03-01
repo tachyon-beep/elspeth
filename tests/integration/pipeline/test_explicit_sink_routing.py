@@ -17,12 +17,11 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any, cast
 
-from elspeth.contracts import PipelineRow, RunStatus
+from elspeth.contracts import PipelineRow, RunStatus, SinkProtocol, SourceProtocol, TransformProtocol
 from elspeth.core.config import AggregationSettings, CoalesceSettings, ElspethSettings, GateSettings, SourceSettings, TriggerConfig
 from elspeth.core.landscape import LandscapeDB
 from elspeth.engine.orchestrator import Orchestrator, PipelineConfig
 from elspeth.plugins.infrastructure.base import BaseTransform
-from elspeth.plugins.infrastructure.protocols import SinkProtocol, SourceProtocol, TransformProtocol
 from elspeth.testing import make_pipeline_row
 from tests.fixtures.base_classes import _TestSchema, as_sink, as_source, as_transform
 from tests.fixtures.factories import wire_transforms

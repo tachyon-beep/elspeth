@@ -1,4 +1,3 @@
-# src/elspeth/engine/executors/transform.py
 """TransformExecutor - wraps transform.process() with audit recording."""
 
 import logging
@@ -10,6 +9,7 @@ import structlog
 from elspeth.contracts import (
     ExecutionError,
     TokenInfo,
+    TransformProtocol,
 )
 from elspeth.contracts.enums import (
     NodeStateStatus,
@@ -23,7 +23,6 @@ from elspeth.core.landscape import LandscapeRecorder
 from elspeth.engine.executors.state_guard import NodeStateGuard
 from elspeth.engine.spans import SpanFactory
 from elspeth.plugins.infrastructure.batching.mixin import BatchTransformMixin
-from elspeth.plugins.infrastructure.protocols import TransformProtocol
 from elspeth.plugins.infrastructure.results import TransformResult
 
 if TYPE_CHECKING:
@@ -201,8 +200,9 @@ class TransformExecutor:
         ) as guard:
             # --- LIFECYCLE GUARD (pre-execution) ---
             # Centralized check: ensure on_start() was called before process().
-            # Uses getattr with True default for non-BaseTransform implementations.
-            if not getattr(transform, "_on_start_called", True):
+            # All transforms are system-owned and must inherit BaseTransform.
+            # AttributeError here means a transform violates the interface contract.
+            if not transform._on_start_called:
                 raise PluginContractViolation(
                     f"Transform '{transform.name}' was called before on_start(). "
                     f"This is an engine lifecycle bug — on_start() must be called "

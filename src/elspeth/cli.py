@@ -1,4 +1,3 @@
-# src/elspeth/cli.py
 """ELSPETH Command Line Interface.
 
 Entry point for the elspeth CLI tool.
@@ -31,12 +30,12 @@ from elspeth.testing.chaosllm.cli import mcp_app as chaosllm_mcp_app
 
 if TYPE_CHECKING:
     from elspeth.cli_helpers import PluginBundle
+    from elspeth.contracts import SinkProtocol, SourceProtocol
     from elspeth.contracts.payload_store import PayloadStore
     from elspeth.core.landscape import LandscapeDB
     from elspeth.engine import Orchestrator, PipelineConfig
     from elspeth.engine.orchestrator import RowPlugin
     from elspeth.plugins.infrastructure.manager import PluginManager
-    from elspeth.plugins.infrastructure.protocols import SinkProtocol, SourceProtocol
 
 __all__ = [
     "app",

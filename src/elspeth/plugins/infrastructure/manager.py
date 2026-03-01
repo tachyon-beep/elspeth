@@ -1,4 +1,3 @@
-# src/elspeth/plugins/manager.py
 """Plugin manager for discovery, registration, and lifecycle.
 
 Uses pluggy for hook-based plugin registration.
@@ -8,16 +7,16 @@ from typing import Any
 
 import pluggy
 
+from elspeth.contracts import (
+    SinkProtocol,
+    SourceProtocol,
+    TransformProtocol,
+)
 from elspeth.plugins.infrastructure.hookspecs import (
     PROJECT_NAME,
     ElspethSinkSpec,
     ElspethSourceSpec,
     ElspethTransformSpec,
-)
-from elspeth.plugins.infrastructure.protocols import (
-    SinkProtocol,
-    SourceProtocol,
-    TransformProtocol,
 )
 from elspeth.plugins.infrastructure.validation import PluginConfigValidator
 

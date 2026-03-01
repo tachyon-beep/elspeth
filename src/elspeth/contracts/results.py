@@ -292,10 +292,11 @@ class TransformResult:
 
 @dataclass
 class GateResult:
-    """Result of a gate evaluation.
+    """Result of a config-driven gate evaluation.
 
     Contains the (possibly modified) row and routing action.
-    Audit fields are populated by GateExecutor, not by plugin.
+    Constructed entirely by GateExecutor — gates are config-driven,
+    not plugin-based.
     """
 
     row: dict[str, Any]
@@ -305,7 +306,7 @@ class GateResult:
     # Enables conversion to PipelineRow via to_pipeline_row()
     contract: SchemaContract | None = field(default=None, repr=False)
 
-    # Audit fields - set by executor, not by plugin
+    # Audit fields - set by GateExecutor
     input_hash: str | None = field(default=None, repr=False)
     output_hash: str | None = field(default=None, repr=False)
     duration_ms: float | None = field(default=None, repr=False)

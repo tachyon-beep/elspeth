@@ -13,11 +13,11 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, cast
 
+from elspeth.contracts import SinkProtocol, SourceProtocol
 from elspeth.core.config import SourceSettings
 from elspeth.core.dag import ExecutionGraph
 from elspeth.core.landscape.database import LandscapeDB
 from elspeth.core.landscape.recorder import LandscapeRecorder
-from elspeth.plugins.infrastructure.protocols import SinkProtocol, SourceProtocol
 from tests.fixtures.factories import wire_transforms
 from tests.fixtures.plugins import CollectSink, ListSource
 
@@ -173,7 +173,7 @@ def build_production_graph(
     Replaces tests/engine/orchestrator_test_helpers.build_production_graph.
     Uses ExecutionGraph.from_plugin_instances() — the real assembly path.
     """
-    from elspeth.plugins.infrastructure.protocols import TransformProtocol
+    from elspeth.contracts import TransformProtocol
     from tests.fixtures.base_classes import _TestTransformBase
 
     row_transforms: list[TransformProtocol] = []
@@ -224,7 +224,7 @@ def build_production_graph(
         if agg_settings.on_success is None:
             agg_settings = agg_settings.model_copy(update={"on_success": default_sink})
         _set_transform_routing(agg_transform, on_success=agg_settings.on_success)
-        aggregations[agg_name] = (agg_transform, agg_settings)  # type: ignore[assignment]
+        aggregations[agg_name] = (agg_transform, agg_settings)
 
     return ExecutionGraph.from_plugin_instances(
         source=config.source,

@@ -1,4 +1,3 @@
-# src/elspeth/engine/orchestrator/validation.py
 """Pipeline configuration validation functions.
 
 These functions validate route configurations at pipeline initialization,
@@ -28,10 +27,10 @@ from elspeth.contracts.types import GateName
 from elspeth.engine.orchestrator.types import RouteValidationError
 
 if TYPE_CHECKING:
+    from elspeth.contracts import SourceProtocol
     from elspeth.contracts.types import NodeID
     from elspeth.core.config import GateSettings
     from elspeth.engine.orchestrator.types import RowPlugin
-    from elspeth.plugins.infrastructure.protocols import SourceProtocol
 
 
 def validate_route_destinations(

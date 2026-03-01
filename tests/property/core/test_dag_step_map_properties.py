@@ -12,10 +12,10 @@ from typing import Any, cast
 from hypothesis import given, settings
 from hypothesis import strategies as st
 
+from elspeth.contracts import SinkProtocol, SourceProtocol, TransformProtocol
 from elspeth.contracts.types import AggregationName, GateName
 from elspeth.core.config import AggregationSettings, CoalesceSettings, GateSettings, SourceSettings
 from elspeth.core.dag import ExecutionGraph
-from elspeth.plugins.infrastructure.protocols import SinkProtocol, SourceProtocol, TransformProtocol
 from elspeth.plugins.infrastructure.results import TransformResult
 from tests.fixtures.base_classes import _TestTransformBase
 from tests.fixtures.factories import wire_transforms

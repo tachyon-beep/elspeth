@@ -16,12 +16,12 @@ from unittest.mock import Mock
 
 import pytest
 
+from elspeth.contracts import TransformProtocol
 from elspeth.contracts.errors import OrchestrationInvariantError
 from elspeth.contracts.types import CoalesceName, NodeID
 from elspeth.core.config import GateSettings
 from elspeth.engine.dag_navigator import DAGNavigator, WorkItem
 from elspeth.engine.processor import DAGTraversalContext
-from elspeth.plugins.infrastructure.protocols import TransformProtocol
 from elspeth.testing import make_token_info
 
 # =============================================================================

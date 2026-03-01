@@ -35,7 +35,6 @@ from elspeth.contracts import (
     ArtifactDescriptor,
     CallStatus,
     CallType,
-    Determinism,
     PluginSchema,
     SourceRow,
 )
@@ -47,7 +46,7 @@ from elspeth.engine.orchestrator import Orchestrator, PipelineConfig
 from elspeth.plugins.infrastructure.results import TransformResult
 from elspeth.telemetry import TelemetryManager
 from elspeth.testing import make_field
-from tests.fixtures.base_classes import _TestSinkBase, _TestSourceBase, as_sink, as_source, as_transform
+from tests.fixtures.base_classes import _TestSinkBase, _TestSourceBase, _TestTransformBase, as_sink, as_source, as_transform
 from tests.fixtures.telemetry import MockTelemetryConfig, TelemetryTestExporter
 
 if TYPE_CHECKING:
@@ -105,22 +104,14 @@ class SimpleSink(_TestSinkBase):
         )
 
 
-class PassthroughTransform:
+class PassthroughTransform(_TestTransformBase):
     """Transform that passes through rows unchanged."""
 
     name = "passthrough"
     input_schema = DynamicSchema
     output_schema = DynamicSchema
-    plugin_version = "1.0.0"
-    determinism = Determinism.DETERMINISTIC
-    config: ClassVar[dict[str, Any]] = {"schema": {"mode": "observed"}}
-    node_id: str | None = None
-    is_batch_aware = False
-    creates_tokens = False
     on_error: str | None = "discard"
     on_success: str | None = "output"
-    validate_input: bool = False
-    declared_output_fields: frozenset[str] = frozenset()
 
     def process(self, row: Any, ctx: Any) -> TransformResult:
         if isinstance(row, PipelineRow):
@@ -134,15 +125,6 @@ class PassthroughTransform:
             success_reason={"action": "passthrough"},
         )
 
-    def on_start(self, ctx: Any) -> None:
-        pass
-
-    def on_complete(self, ctx: Any) -> None:
-        pass
-
-    def close(self) -> None:
-        pass
-
 
 def _create_test_graph(config: PipelineConfig) -> ExecutionGraph:
     """Build a graph using the production factory path.
@@ -151,9 +133,9 @@ def _create_test_graph(config: PipelineConfig) -> ExecutionGraph:
     ExecutionGraph.from_plugin_instances() directly for production-path
     fidelity (see BUG-LINEAGE-01).
     """
+    from elspeth.contracts import TransformProtocol
     from elspeth.core.config import SourceSettings
     from elspeth.core.dag import ExecutionGraph
-    from elspeth.plugins.infrastructure.protocols import TransformProtocol
     from tests.fixtures.factories import wire_transforms
 
     # Separate transforms (only TransformProtocol instances)
@@ -503,6 +485,7 @@ class TestOrchestratorTelemetryWiringContract:
             name = "telemetry_capturing"
 
             def on_start(self, ctx: Any) -> None:
+                super().on_start(ctx)
                 nonlocal captured_callback
                 captured_callback = ctx.telemetry_emit
 

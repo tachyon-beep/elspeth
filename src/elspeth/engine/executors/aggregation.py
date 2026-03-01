@@ -1,4 +1,3 @@
-# src/elspeth/engine/executors/aggregation.py
 """AggregationExecutor - manages batch lifecycle with audit recording."""
 
 import logging
@@ -10,6 +9,7 @@ import structlog
 
 from elspeth.contracts import (
     BatchPendingError,
+    BatchTransformProtocol,
     ExecutionError,
     PipelineRow,
     SchemaContract,
@@ -25,7 +25,12 @@ from elspeth.contracts.enums import (
     NodeStateStatus,
     TriggerType,
 )
-from elspeth.contracts.errors import OrchestrationInvariantError, PluginContractViolation
+from elspeth.contracts.errors import (
+    AuditIntegrityError,
+    FrameworkBugError,
+    OrchestrationInvariantError,
+    PluginContractViolation,
+)
 from elspeth.contracts.node_state_context import AggregationFlushContext
 from elspeth.contracts.plugin_context import PluginContext
 from elspeth.contracts.types import NodeID, StepResolver
@@ -36,7 +41,6 @@ from elspeth.engine.clock import DEFAULT_CLOCK
 from elspeth.engine.executors.state_guard import NodeStateGuard
 from elspeth.engine.spans import SpanFactory
 from elspeth.engine.triggers import TriggerEvaluator
-from elspeth.plugins.infrastructure.protocols import BatchTransformProtocol
 from elspeth.plugins.infrastructure.results import TransformResult
 
 if TYPE_CHECKING:
@@ -477,7 +481,7 @@ class AggregationExecutor:
                         )
 
                     flush_context = AggregationFlushContext(
-                        trigger_type=trigger_type.value,
+                        trigger_type=trigger_type,
                         buffer_size=len(buffered_rows),
                         batch_id=batch_id,
                     )
@@ -541,6 +545,8 @@ class AggregationExecutor:
                             trigger_type=trigger_type,
                             state_id=guard.state_id,
                         )
+                    except (FrameworkBugError, AuditIntegrityError):
+                        raise  # System bugs and audit corruption must crash immediately
                     except Exception:
                         logger.error(
                             "Failed to mark batch %s as FAILED during error cleanup",

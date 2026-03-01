@@ -1,4 +1,3 @@
-# src/elspeth/plugins/hookspecs.py
 """pluggy hook specifications for Elspeth plugins.
 
 Plugins implement these hooks to register themselves with the framework.
@@ -21,7 +20,7 @@ from typing import TYPE_CHECKING
 import pluggy
 
 if TYPE_CHECKING:
-    from elspeth.plugins.infrastructure.protocols import (
+    from elspeth.contracts import (
         SinkProtocol,
         SourceProtocol,
         TransformProtocol,

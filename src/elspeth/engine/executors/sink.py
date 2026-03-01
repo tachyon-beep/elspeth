@@ -1,4 +1,3 @@
-# src/elspeth/engine/executors/sink.py
 """SinkExecutor - wraps sink.write() with artifact recording."""
 
 import logging
@@ -10,15 +9,20 @@ from elspeth.contracts import (
     ExecutionError,
     NodeStateOpen,
     PendingOutcome,
+    SinkProtocol,
     TokenInfo,
 )
 from elspeth.contracts.enums import NodeStateStatus
-from elspeth.contracts.errors import OrchestrationInvariantError, PluginContractViolation
+from elspeth.contracts.errors import (
+    AuditIntegrityError,
+    FrameworkBugError,
+    OrchestrationInvariantError,
+    PluginContractViolation,
+)
 from elspeth.contracts.plugin_context import PluginContext
 from elspeth.core.landscape import LandscapeRecorder
 from elspeth.core.operations import track_operation
 from elspeth.engine.spans import SpanFactory
-from elspeth.plugins.infrastructure.protocols import SinkProtocol
 
 logger = logging.getLogger(__name__)
 
@@ -369,6 +373,8 @@ class SinkExecutor:
             for token in tokens:
                 try:
                     on_token_written(token)
+                except (FrameworkBugError, AuditIntegrityError):
+                    raise  # System bugs and audit corruption must crash immediately
                 except Exception as e:
                     # Sink write is durable, can't undo. Log error and continue.
                     # Operator must manually clean up checkpoint inconsistency.

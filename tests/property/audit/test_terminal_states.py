@@ -138,8 +138,8 @@ def _build_production_graph(config: PipelineConfig) -> ExecutionGraph:
     Replacement for v1 build_production_graph, inlined to avoid v1 imports.
     Auto-sets on_success on terminal transform for linear pipelines.
     """
+    from elspeth.contracts import TransformProtocol
     from elspeth.core.config import SourceSettings
-    from elspeth.plugins.infrastructure.protocols import TransformProtocol
     from tests.fixtures.factories import wire_transforms
 
     row_transforms: list[TransformProtocol] = []

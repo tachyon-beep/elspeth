@@ -214,6 +214,12 @@ from elspeth.contracts.plugin_context import (
     TransformErrorToken,
     ValidationErrorToken,
 )
+from elspeth.contracts.plugin_protocols import (
+    BatchTransformProtocol,
+    SinkProtocol,
+    SourceProtocol,
+    TransformProtocol,
+)
 from elspeth.contracts.results import (
     ArtifactDescriptor,
     ExceptionResult,
@@ -420,6 +426,11 @@ __all__ = [  # Grouped by category for readability
     "PluginContext",
     "TransformErrorToken",
     "ValidationErrorToken",
+    # plugin protocols
+    "BatchTransformProtocol",
+    "SinkProtocol",
+    "SourceProtocol",
+    "TransformProtocol",
     # events
     "ExternalCallCompleted",
     "FieldResolutionApplied",

@@ -55,8 +55,8 @@ def _build_production_graph(config: PipelineConfig) -> ExecutionGraph:
 
     Adapter that mirrors production wiring with explicit source settings.
     """
+    from elspeth.contracts import TransformProtocol
     from elspeth.core.config import AggregationSettings
-    from elspeth.plugins.infrastructure.protocols import TransformProtocol
 
     row_transforms: list[TransformProtocol] = []
     aggregations: dict[str, tuple[TransformProtocol, AggregationSettings]] = {}

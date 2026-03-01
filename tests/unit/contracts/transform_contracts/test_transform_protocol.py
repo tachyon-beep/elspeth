@@ -41,8 +41,8 @@ from elspeth.contracts.schema_contract import PipelineRow
 from elspeth.testing import make_pipeline_row
 
 if TYPE_CHECKING:
+    from elspeth.contracts import TransformProtocol
     from elspeth.contracts.plugin_context import PluginContext
-    from elspeth.plugins.infrastructure.protocols import TransformProtocol
 
 
 def _is_batch_transform(transform: TransformProtocol) -> bool:

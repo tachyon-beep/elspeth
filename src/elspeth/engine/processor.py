@@ -1,10 +1,9 @@
-# src/elspeth/engine/processor.py
 """RowProcessor: Orchestrates row processing through pipeline.
 
 Coordinates:
 - Token creation
 - Transform execution
-- Gate evaluation (plugin and config-driven)
+- Gate evaluation (config-driven)
 - Aggregation handling
 - Final outcome recording
 """
@@ -33,6 +32,7 @@ if TYPE_CHECKING:
     from elspeth.engine.orchestrator.types import RowPlugin
     from elspeth.telemetry import TelemetryManager
 
+from elspeth.contracts import BatchTransformProtocol, TransformProtocol
 from elspeth.contracts.enums import NodeStateStatus, OutputMode, RoutingKind, RoutingMode, TriggerType
 from elspeth.contracts.errors import MaxRetriesExceeded, OrchestrationInvariantError, TransformErrorReason
 from elspeth.contracts.plugin_context import PluginContext
@@ -50,7 +50,6 @@ from elspeth.engine.spans import SpanFactory
 from elspeth.engine.tokens import TokenManager
 from elspeth.plugins.infrastructure.clients.llm import LLMClientError
 from elspeth.plugins.infrastructure.pooling import CapacityError
-from elspeth.plugins.infrastructure.protocols import BatchTransformProtocol, TransformProtocol
 
 # Iteration guard to prevent infinite loops from bugs
 MAX_WORK_QUEUE_ITERATIONS = 10_000
@@ -434,7 +433,7 @@ class RowProcessor:
 
         Args:
             token: Token that was routed
-            gate_name: Name of the gate plugin
+            gate_name: Name of the gate (from GateSettings)
             gate_node_id: Node ID of the gate
             routing_mode: How routing was performed (move, copy)
             destinations: Destination node/sink names
@@ -1774,7 +1773,7 @@ class RowProcessor:
                 if cfg_branch_name and BranchName(cfg_branch_name) in self._branch_to_coalesce:
                     cfg_coalesce_name = self._branch_to_coalesce[BranchName(cfg_branch_name)]
 
-                # See plugin gate fork handler above for routing logic.
+                # See config gate fork handler above for routing logic.
                 if cfg_coalesce_name is None and cfg_branch_name and BranchName(cfg_branch_name) in self._branch_to_sink:
                     child_items.append(
                         self._nav.create_work_item(
