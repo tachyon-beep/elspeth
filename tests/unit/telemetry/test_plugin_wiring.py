@@ -19,18 +19,18 @@ import pytest
 EXTERNAL_CALL_PLUGINS: dict[str, dict[str, Any]] = {
     # Unified LLM transform — dispatches to providers which create audited clients.
     # Captures run_id/telemetry_emit in on_start() and passes to provider constructors.
-    "src/elspeth/plugins/llm/transform.py": {
+    "src/elspeth/plugins/transforms/llm/transform.py": {
         "class": "LLMTransform",
         "client_type": "AzureLLMProvider",  # One of the provider constructors in source
         "pattern": "on_start_capture",  # Captures in on_start, passes to providers
     },
     # Provider implementations (Phase B of T10 LLM consolidation)
-    "src/elspeth/plugins/llm/providers/azure.py": {
+    "src/elspeth/plugins/transforms/llm/providers/azure.py": {
         "class": "AzureLLMProvider",
         "client_type": "AuditedLLMClient",
         "pattern": "init_capture",  # Receives run_id/telemetry_emit in __init__
     },
-    "src/elspeth/plugins/llm/providers/openrouter.py": {
+    "src/elspeth/plugins/transforms/llm/providers/openrouter.py": {
         "class": "OpenRouterLLMProvider",
         "client_type": "AuditedHTTPClient",
         "pattern": "init_capture",  # Receives run_id/telemetry_emit in __init__
@@ -51,21 +51,21 @@ EXTERNAL_CALL_PLUGINS: dict[str, dict[str, Any]] = {
 
 # Plugins that are EXEMPT from telemetry (with reason)
 TELEMETRY_EXEMPT_PLUGINS: dict[str, str] = {
-    "src/elspeth/plugins/llm/azure_batch.py": "Batch API - uses file uploads, not per-row calls",
-    "src/elspeth/plugins/llm/openrouter_batch.py": "Batch API - uses file uploads, not per-row calls",
+    "src/elspeth/plugins/transforms/llm/azure_batch.py": "Batch API - uses file uploads, not per-row calls",
+    "src/elspeth/plugins/transforms/llm/openrouter_batch.py": "Batch API - uses file uploads, not per-row calls",
     # Legacy individual transforms — deprecated by unified LLMTransform (T10 Phase B).
     # These files still exist during the transition period and will be deleted in Task 12.
-    "src/elspeth/plugins/llm/azure.py": "Legacy — deprecated by unified LLMTransform, pending deletion in Task 12",
-    "src/elspeth/plugins/llm/azure_multi_query.py": "Legacy — deprecated by unified LLMTransform, pending deletion in Task 12",
-    "src/elspeth/plugins/llm/openrouter.py": "Legacy — deprecated by unified LLMTransform, pending deletion in Task 12",
-    "src/elspeth/plugins/llm/openrouter_multi_query.py": "Legacy — deprecated by unified LLMTransform, pending deletion in Task 12",
+    "src/elspeth/plugins/transforms/llm/azure.py": "Legacy — deprecated by unified LLMTransform, pending deletion in Task 12",
+    "src/elspeth/plugins/transforms/llm/azure_multi_query.py": "Legacy — deprecated by unified LLMTransform, pending deletion in Task 12",
+    "src/elspeth/plugins/transforms/llm/openrouter.py": "Legacy — deprecated by unified LLMTransform, pending deletion in Task 12",
+    "src/elspeth/plugins/transforms/llm/openrouter_multi_query.py": "Legacy — deprecated by unified LLMTransform, pending deletion in Task 12",
 }
 
 # Files that define audited clients (not plugins that USE them)
 CLIENT_DEFINITION_FILES: set[str] = {
-    "src/elspeth/plugins/clients/llm.py",  # Defines AuditedLLMClient
-    "src/elspeth/plugins/clients/http.py",  # Defines AuditedHTTPClient
-    "src/elspeth/plugins/llm/base.py",  # Base class with AuditedLLMClient factory
+    "src/elspeth/plugins/infrastructure/clients/llm.py",  # Defines AuditedLLMClient
+    "src/elspeth/plugins/infrastructure/clients/http.py",  # Defines AuditedHTTPClient
+    "src/elspeth/plugins/transforms/llm/base.py",  # Base class with AuditedLLMClient factory
 }
 
 

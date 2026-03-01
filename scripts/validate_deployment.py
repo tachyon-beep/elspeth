@@ -38,7 +38,7 @@ def _validate_field_normalization_at_path(base: Path) -> None:
     # Check what's deployed
     field_norm_exists = (base / "plugins/sources/field_normalization.py").exists()
 
-    config_base_path = base / "plugins/config_base.py"
+    config_base_path = base / "plugins/infrastructure/config_base.py"
     tabular_config_exists = config_base_path.exists() and "TabularSourceDataConfig" in config_base_path.read_text()
 
     identifiers_exists = (base / "core/identifiers.py").exists()
