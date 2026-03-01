@@ -184,6 +184,11 @@ RULES = {
         "description": "Broad exception handling can suppress bugs",
         "remediation": "Catch specific exceptions, or re-raise after logging/quarantining",
     },
+    "TC": {
+        "name": "type-checking-layer",
+        "description": "TYPE_CHECKING import crosses layer boundary (annotation-only, no runtime coupling)",
+        "remediation": "Allowlist if the dependency is accepted, or move the type to a lower layer",
+    },
     "R5": {
         "name": "isinstance",
         "description": "isinstance() checks can mask contract violations outside explicit trust boundaries",
@@ -570,12 +575,12 @@ def scan_directory(
 def scan_layer_imports_file(
     file_path: Path,
     root: Path,
-) -> tuple[list[Finding], list[str]]:
+) -> tuple[list[Finding], list[Finding]]:
     """Scan a single file for upward layer imports.
 
     Returns:
         violations: Findings for runtime upward imports (fail CI unless allowlisted)
-        warnings: Formatted strings for TYPE_CHECKING upward imports (informational)
+        tc_findings: Findings for TYPE_CHECKING upward imports (warnings, allowlistable)
     """
     try:
         source = file_path.read_text(encoding="utf-8")
@@ -597,7 +602,7 @@ def scan_layer_imports_file(
 
     tc_lines = _find_type_checking_lines(tree)
     violations: list[Finding] = []
-    warnings: list[str] = []
+    tc_findings: list[Finding] = []
 
     for node in ast.walk(tree):
         # Collect (module_name, line, col) targets from import nodes
@@ -618,7 +623,20 @@ def scan_layer_imports_file(
             to_name = LAYER_NAMES[target_layer]
 
             if line in tc_lines:
-                warnings.append(f"  {relative_path}:{line} — TYPE_CHECKING import from {to_name} in {from_name}: {snippet}")
+                tc_payload = f"TC|{relative_path}|{module_name}"
+                tc_fp = hashlib.sha256(tc_payload.encode()).hexdigest()[:16]
+                tc_findings.append(
+                    Finding(
+                        rule_id="TC",
+                        file_path=relative_path,
+                        line=line,
+                        col=col,
+                        symbol_context=(),
+                        fingerprint=tc_fp,
+                        code_snippet=snippet,
+                        message=f"TYPE_CHECKING import: {from_name} annotates with {to_name} ({module_name})",
+                    )
+                )
             else:
                 # Fingerprint: keyed on file + imported module (stable across reformatting)
                 payload = f"L1|{relative_path}|{module_name}"
@@ -637,17 +655,17 @@ def scan_layer_imports_file(
                     )
                 )
 
-    return violations, warnings
+    return violations, tc_findings
 
 
 def scan_layer_imports_directory(
     root: Path,
     exclude_patterns: list[str] | None = None,
-) -> tuple[list[Finding], list[str]]:
+) -> tuple[list[Finding], list[Finding]]:
     """Scan all Python files for upward layer imports."""
     exclude_patterns = exclude_patterns or []
     all_violations: list[Finding] = []
-    all_warnings: list[str] = []
+    all_tc_findings: list[Finding] = []
 
     for py_file in root.rglob("*.py"):
         relative = py_file.relative_to(root)
@@ -659,11 +677,11 @@ def scan_layer_imports_directory(
         if skip:
             continue
 
-        violations, file_warnings = scan_layer_imports_file(py_file, root)
+        violations, tc_findings = scan_layer_imports_file(py_file, root)
         all_violations.extend(violations)
-        all_warnings.extend(file_warnings)
+        all_tc_findings.extend(tc_findings)
 
-    return all_violations, all_warnings
+    return all_violations, all_tc_findings
 
 
 # =============================================================================
@@ -853,7 +871,7 @@ def report_json(
     expired_entries: list[AllowlistEntry],
     expired_file_rules: list[PerFileRule] | None = None,
     unused_file_rules: list[PerFileRule] | None = None,
-    layer_warnings: list[str] | None = None,
+    layer_warnings: list[Finding] | None = None,
 ) -> str:
     """Generate JSON report."""
     result: dict[str, Any] = {
@@ -881,7 +899,16 @@ def report_json(
     if unused_file_rules:
         result["unused_file_rules"] = [{"pattern": r.pattern, "rules": r.rules, "reason": r.reason} for r in unused_file_rules]
     if layer_warnings:
-        result["layer_warnings"] = layer_warnings
+        result["layer_warnings"] = [
+            {
+                "rule_id": f.rule_id,
+                "file": f.file_path,
+                "line": f.line,
+                "message": f.message,
+                "key": f.canonical_key,
+            }
+            for f in layer_warnings
+        ]
     return json.dumps(result, indent=2)
 
 
@@ -956,7 +983,7 @@ def run_check(args: argparse.Namespace) -> int:
     allowlist = load_allowlist(allowlist_path)
 
     # Scan for findings - either specific files or whole directory
-    layer_warnings: list[str] = []
+    all_tc_findings: list[Finding] = []
     if args.files:
         # Pre-commit mode: only scan the provided files that are under root
         all_findings = []
@@ -966,24 +993,30 @@ def run_check(args: argparse.Namespace) -> int:
             try:
                 resolved.relative_to(root)
                 all_findings.extend(scan_file(resolved, root))
-                layer_v, layer_w = scan_layer_imports_file(resolved, root)
+                layer_v, layer_tc = scan_layer_imports_file(resolved, root)
                 all_findings.extend(layer_v)
-                layer_warnings.extend(layer_w)
+                all_tc_findings.extend(layer_tc)
             except ValueError:
                 # File is not under root, skip it
                 pass
     else:
         # Full directory scan mode
         all_findings = scan_directory(root, args.exclude)
-        layer_v, layer_w = scan_layer_imports_directory(root, args.exclude)
+        layer_v, layer_tc = scan_layer_imports_directory(root, args.exclude)
         all_findings.extend(layer_v)
-        layer_warnings.extend(layer_w)
+        all_tc_findings.extend(layer_tc)
 
     # Filter out allowlisted findings
     violations: list[Finding] = []
     for finding in all_findings:
         if allowlist.match(finding) is None:
             violations.append(finding)
+
+    # Filter TYPE_CHECKING findings through allowlist (unmatched remain as warnings)
+    layer_warnings: list[Finding] = []
+    for tc_finding in all_tc_findings:
+        if allowlist.match(tc_finding) is None:
+            layer_warnings.append(tc_finding)
 
     # Check for stale/expired allowlist entries (only in full-scan mode)
     # In file-specific mode (pre-commit), we only scan a subset of files,
@@ -1018,10 +1051,12 @@ def run_check(args: argparse.Namespace) -> int:
         if layer_warnings:
             print(f"\n{'=' * 60}")
             print(f"LAYER WARNINGS (TYPE_CHECKING imports): {len(layer_warnings)}")
-            print("(Architecturally impure but pragmatically acceptable — not a failure)")
+            print("(Allowlist with rule TC to suppress — not a failure)")
             print("=" * 60)
             for w in layer_warnings:
-                print(w)
+                print(f"  {w.file_path}:{w.line} — {w.message}")
+                print(f"    Code: {w.code_snippet}")
+                print(f"    Allowlist key: {w.canonical_key}")
 
         if stale_entries:
             print(f"\n{'=' * 60}")

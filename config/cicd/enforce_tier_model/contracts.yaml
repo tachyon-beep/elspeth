@@ -276,3 +276,29 @@ allow_hits:
   reason: Tier 3 boundary — from_dict() validates completion_tokens is int before accepting
   safety: Non-int values coerced to None (unknown); no fabrication, no crash
   expires: null
+# TYPE_CHECKING layer imports (L0→L1 annotation dependencies)
+- key: contracts/plugin_context.py:TC:_module_:fp=2281c9d4d4f9c832
+  owner: architecture
+  reason: TYPE_CHECKING import of LandscapeRecorder — PluginContext type annotations need L1 recorder type
+  safety: No runtime coupling — annotation-only import behind TYPE_CHECKING guard
+  expires: null
+- key: contracts/plugin_context.py:TC:_module_:fp=5dfc642462528293
+  owner: architecture
+  reason: TYPE_CHECKING import of RateLimitRegistry — PluginContext type annotations need L1 rate limiter type
+  safety: No runtime coupling — annotation-only import behind TYPE_CHECKING guard
+  expires: null
+- key: contracts/contexts.py:TC:_module_:fp=fe23a281512d9222
+  owner: architecture
+  reason: TYPE_CHECKING import of LandscapeRecorder — context protocols declare landscape property type
+  safety: No runtime coupling — annotation-only import behind TYPE_CHECKING guard
+  expires: null
+- key: contracts/contexts.py:TC:_module_:fp=b29b41656c78b873
+  owner: architecture
+  reason: TYPE_CHECKING import of RateLimitRegistry — context protocols declare rate_limiter property type
+  safety: No runtime coupling — annotation-only import behind TYPE_CHECKING guard
+  expires: null
+- key: contracts/config/runtime.py:TC:_module_:fp=07abedf4392ba82e
+  owner: architecture
+  reason: TYPE_CHECKING import of Settings models — Runtime*Config.from_settings() type annotations
+  safety: No runtime coupling — annotation-only import behind TYPE_CHECKING guard
+  expires: null
