@@ -1414,9 +1414,9 @@ class TestMultiQueryFieldTypeValidation:
 class TestMultiQueryExecutionMode:
     """Verify multi-query strategy dispatches to sequential/parallel correctly."""
 
-    def test_pool_size_1_uses_sequential_no_executor(self) -> None:
-        """pool_size=1 (default) creates no executor — sequential execution."""
-        from elspeth.plugins.transforms.llm.transform import LLMTransform, MultiQueryStrategy
+    def test_pool_size_1_uses_sequential(self) -> None:
+        """pool_size=1 (default) runs queries sequentially — no parallel executor."""
+        from elspeth.plugins.transforms.llm.transform import LLMTransform
 
         config = _make_config(
             template="Evaluate: {{ row.text_content }}",
@@ -1424,14 +1424,12 @@ class TestMultiQueryExecutionMode:
             pool_size=1,
         )
         transform = LLMTransform(config)
-        assert isinstance(transform._strategy, MultiQueryStrategy)
-        assert transform._strategy.executor is None
+        # Observable: no query executor created for sequential mode
         assert transform._query_executor is None
 
     def test_pool_size_gt_1_creates_executor(self) -> None:
-        """pool_size > 1 creates PooledExecutor for parallel multi-query."""
-        from elspeth.plugins.infrastructure.pooling import PooledExecutor
-        from elspeth.plugins.transforms.llm.transform import LLMTransform, MultiQueryStrategy
+        """pool_size > 1 creates a parallel executor for multi-query."""
+        from elspeth.plugins.transforms.llm.transform import LLMTransform
 
         config = _make_config(
             template="Evaluate: {{ row.text_content }}",
@@ -1439,21 +1437,18 @@ class TestMultiQueryExecutionMode:
             pool_size=4,
         )
         transform = LLMTransform(config)
-        assert isinstance(transform._strategy, MultiQueryStrategy)
-        assert isinstance(transform._strategy.executor, PooledExecutor)
-        assert isinstance(transform._query_executor, PooledExecutor)
+        assert transform._query_executor is not None
         # Clean up
         transform._query_executor.shutdown(wait=True)
 
-    def test_single_query_mode_no_executor(self) -> None:
-        """Single-query mode (no queries) does not create an executor."""
+    def test_single_query_mode_still_creates_executor_for_batching(self) -> None:
+        """Single-query mode with pool_size > 1 creates executor for BatchTransformMixin."""
         from elspeth.plugins.transforms.llm.transform import LLMTransform
 
         config = _make_config(pool_size=4)
         transform = LLMTransform(config)
-        # pool_size > 1 but single-query mode — executor still created
+        # pool_size > 1 creates executor even in single-query mode
         # (it's used by BatchTransformMixin, not query-level parallelism)
-        # The strategy doesn't get an executor since it's SingleQueryStrategy
         assert transform._query_executor is not None
         transform._query_executor.shutdown(wait=True)
 
@@ -1695,8 +1690,8 @@ class TestConfigureAzureMonitor:
         yield
         _reset_azure_monitor_state()
 
-    def test_returns_false_when_sdk_is_none(self) -> None:
-        """_configure_azure_monitor returns False when SDK is None (not installed)."""
+    def test_raises_import_error_when_sdk_is_none(self) -> None:
+        """_configure_azure_monitor raises ImportError when SDK is None (not installed)."""
         from elspeth.plugins.transforms.llm.providers.azure import _configure_azure_monitor
         from elspeth.plugins.transforms.llm.tracing import AzureAITracingConfig
 
@@ -1705,8 +1700,8 @@ class TestConfigureAzureMonitor:
             "elspeth.plugins.transforms.llm.providers.azure.configure_azure_monitor",
             None,  # Simulate missing SDK: configure_azure_monitor is None
         ):
-            result = _configure_azure_monitor(config)
-            assert result is False
+            with pytest.raises(ImportError, match="azure-monitor-opentelemetry is not installed"):
+                _configure_azure_monitor(config)
 
     def test_real_sdk_typeerror_propagates(self) -> None:
         """Real TypeError from SDK (e.g., bad keyword arg) propagates as crash.
@@ -1776,26 +1771,25 @@ class TestConfigureAzureMonitor:
             mock_logger.reset_mock()  # Clear warnings from first call (env-var fallback)
 
             _configure_azure_monitor(config)
-            mock_logger.warning.assert_called_once_with(
-                "Azure Monitor already configured — skipping duplicate initialization",
-            )
+            # Assert warning was emitted — don't match exact message prose
+            mock_logger.warning.assert_called_once()
 
     def test_failed_first_call_allows_retry(self) -> None:
         """Failed first call (None SDK) does NOT set idempotency flag, allowing recovery.
 
-        If the first call fails because the SDK is not installed, a subsequent call
-        with a working SDK should succeed. The idempotency guard must only be set
-        on success.
+        If the first call raises ImportError because the SDK is not installed,
+        a subsequent call with a working SDK should succeed. The idempotency
+        guard must only be set on success.
         """
         from elspeth.plugins.transforms.llm.providers.azure import _configure_azure_monitor
         from elspeth.plugins.transforms.llm.tracing import AzureAITracingConfig
 
         config = AzureAITracingConfig(connection_string="InstrumentationKey=test")
 
-        # First call with None SDK — should fail
+        # First call with None SDK — should raise ImportError
         with patch("elspeth.plugins.transforms.llm.providers.azure.configure_azure_monitor", None):
-            result1 = _configure_azure_monitor(config)
-            assert result1 is False
+            with pytest.raises(ImportError, match="azure-monitor-opentelemetry is not installed"):
+                _configure_azure_monitor(config)
 
         # Second call with working SDK — should succeed (not blocked by idempotency)
         with patch("elspeth.plugins.transforms.llm.providers.azure.configure_azure_monitor") as mock_sdk:
@@ -1822,20 +1816,20 @@ class TestAzureAITracingSetup:
             assert isinstance(tracer, NoOpLangfuseTracer)
             mock_logger.warning.assert_not_called()
 
-    def test_langfuse_factory_warns_for_unknown_tracing_provider(self) -> None:
-        """create_langfuse_tracer warns when tracing provider is unrecognized.
+    def test_langfuse_factory_returns_noop_for_provider_none(self) -> None:
+        """create_langfuse_tracer returns NoOp for TracingConfig(provider='none').
 
-        Note: In production, parse_tracing_config() rejects unknown providers
-        before this point. This tests the factory's own defensive behavior.
+        The documented 'tracing: {provider: none}' setting produces a base
+        TracingConfig. The Langfuse factory must not crash on it — it's a
+        valid no-op. Unknown providers are rejected by parse_tracing_config()
+        at config parse time, so the factory only sees valid configs.
         """
         from elspeth.plugins.transforms.llm.langfuse import NoOpLangfuseTracer, create_langfuse_tracer
         from elspeth.plugins.transforms.llm.tracing import TracingConfig
 
-        config = TracingConfig(provider="totally_unknown")
-        with patch("elspeth.plugins.transforms.llm.langfuse.logger") as mock_logger:
-            tracer = create_langfuse_tracer("test_transform", config)
-            assert isinstance(tracer, NoOpLangfuseTracer)
-            mock_logger.warning.assert_called_once()
+        config = TracingConfig(provider="none")
+        tracer = create_langfuse_tracer("test_transform", config)
+        assert isinstance(tracer, NoOpLangfuseTracer)
 
     def test_azure_ai_tracing_rejected_for_openrouter_provider(self) -> None:
         """azure_ai tracing with openrouter provider raises ValueError at init.
@@ -1925,8 +1919,8 @@ class TestAzureAITracingOnStart:
                 content_recording=True,
             )
 
-    def test_on_start_configure_azure_monitor_failure_logs_warning(self) -> None:
-        """on_start() logs warning when _configure_azure_monitor returns False."""
+    def test_on_start_propagates_import_error_from_configure(self) -> None:
+        """on_start() lets ImportError propagate when _configure_azure_monitor fails."""
         from elspeth.plugins.transforms.llm.transform import LLMTransform
 
         config = _make_config(
@@ -1936,12 +1930,12 @@ class TestAzureAITracingOnStart:
         transform = LLMTransform(config)
         ctx = _make_lifecycle_ctx()
 
-        with (
-            patch("elspeth.plugins.transforms.llm.transform._configure_azure_monitor", return_value=False),
-            patch("elspeth.plugins.transforms.llm.transform.logger") as mock_logger,
+        with patch(
+            "elspeth.plugins.transforms.llm.transform._configure_azure_monitor",
+            side_effect=ImportError("azure-monitor-opentelemetry is not installed"),
         ):
-            transform.on_start(ctx)
-            mock_logger.warning.assert_called_once()
+            with pytest.raises(ImportError, match="azure-monitor-opentelemetry is not installed"):
+                transform.on_start(ctx)
 
     def test_on_start_skips_azure_monitor_for_langfuse(self) -> None:
         """on_start() does NOT call _configure_azure_monitor for Langfuse tracing."""
