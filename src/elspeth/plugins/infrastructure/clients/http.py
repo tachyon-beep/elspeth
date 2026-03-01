@@ -1,4 +1,3 @@
-# src/elspeth/plugins/clients/http.py
 """Audited HTTP client with automatic call recording.
 
 Provides SSRF-safe HTTP methods via get_ssrf_safe() which uses IP pinning
@@ -22,6 +21,7 @@ import structlog
 
 from elspeth.contracts import CallStatus, CallType
 from elspeth.contracts.call_data import CallPayload, HTTPCallError, HTTPCallRequest, HTTPCallResponse
+from elspeth.contracts.errors import AuditIntegrityError, FrameworkBugError
 from elspeth.contracts.events import ExternalCallCompleted
 from elspeth.core.canonical import stable_hash
 from elspeth.core.security.web import (
@@ -410,6 +410,8 @@ class AuditedHTTPClient(AuditedClientBase):
                     token_usage=None,
                 )
             )
+        except (FrameworkBugError, AuditIntegrityError):
+            raise  # System bugs and audit integrity violations must crash
         except Exception as tel_err:
             logger.warning(
                 "telemetry_emit_failed",
@@ -530,6 +532,11 @@ class AuditedHTTPClient(AuditedClientBase):
 
             return response
 
+        except (FrameworkBugError, AuditIntegrityError):
+            # Telemetry re-raise after successful Landscape record_call.
+            # The SUCCESS record already exists — do NOT record a second
+            # ERROR call with the same call_index (unique constraint).
+            raise
         except Exception as e:
             latency_ms = (time.perf_counter() - start) * 1000
 
@@ -785,6 +792,8 @@ class AuditedHTTPClient(AuditedClientBase):
                         token_usage=None,
                     )
                 )
+            except (FrameworkBugError, AuditIntegrityError):
+                raise  # System bugs and audit integrity violations must crash
             except Exception as tel_err:
                 logger.warning(
                     "telemetry_emit_failed",
@@ -797,6 +806,11 @@ class AuditedHTTPClient(AuditedClientBase):
 
             return response
 
+        except (FrameworkBugError, AuditIntegrityError):
+            # Telemetry re-raise after successful Landscape record_call.
+            # The SUCCESS record already exists — do NOT record a second
+            # ERROR call with the same call_index (unique constraint).
+            raise
         except Exception as e:
             latency_ms = (time.perf_counter() - start) * 1000
 
@@ -832,6 +846,8 @@ class AuditedHTTPClient(AuditedClientBase):
                         token_usage=None,
                     )
                 )
+            except (FrameworkBugError, AuditIntegrityError):
+                raise  # System bugs and audit integrity violations must crash
             except Exception as tel_err:
                 logger.warning(
                     "telemetry_emit_failed",

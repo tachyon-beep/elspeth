@@ -1,4 +1,3 @@
-# src/elspeth/engine/executors/state_guard.py
 """NodeStateGuard — structural guarantee that node states reach terminal status.
 
 The invariant "every token reaches exactly one terminal state" is central to
@@ -19,6 +18,7 @@ from types import TracebackType
 from typing import TYPE_CHECKING, Any
 
 from elspeth.contracts import ExecutionError, NodeStateOpen
+from elspeth.contracts.errors import AuditIntegrityError, FrameworkBugError
 from elspeth.contracts.enums import NodeStateStatus
 from elspeth.contracts.errors import OrchestrationInvariantError
 from elspeth.core.landscape import LandscapeRecorder
@@ -124,6 +124,8 @@ class NodeStateGuard:
                     duration_ms=duration_ms,
                     error=error,
                 )
+            except (FrameworkBugError, AuditIntegrityError):
+                raise  # System bugs and audit corruption must crash immediately
             except Exception:
                 logger.error(
                     "NodeStateGuard: failed to record FAILED for state %s after missing complete()",
@@ -150,6 +152,8 @@ class NodeStateGuard:
                 duration_ms=duration_ms,
                 error=exc_error,
             )
+        except (FrameworkBugError, AuditIntegrityError):
+            raise  # System bugs and audit corruption must crash immediately
         except Exception:
             # If we cannot record the failure (e.g. DB is down), log but don't
             # mask the original exception — the caller needs to see it.

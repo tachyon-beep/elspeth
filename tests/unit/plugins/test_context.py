@@ -3,8 +3,12 @@
 
 from typing import TYPE_CHECKING
 
+from tests.fixtures.factories import make_source_context
+
+from elspeth.core.landscape.database import LandscapeDB
+from elspeth.core.landscape.recorder import LandscapeRecorder
+
 if TYPE_CHECKING:
-    import pytest
 
     from elspeth.contracts.batch_checkpoint import BatchCheckpointState
 
@@ -15,16 +19,18 @@ class TestPluginContext:
     def test_minimal_context(self) -> None:
         from elspeth.contracts.plugin_context import PluginContext
 
-        ctx = PluginContext(run_id="run-001", config={})
+        db = LandscapeDB.in_memory()
+        recorder = LandscapeRecorder(db)
+        ctx = PluginContext(run_id="run-001", config={}, landscape=recorder)
         assert ctx.run_id == "run-001"
         assert ctx.config == {}
 
     def test_optional_integrations_default_none(self) -> None:
         from elspeth.contracts.plugin_context import PluginContext
 
-        ctx = PluginContext(run_id="run-001", config={})
-        # Phase 3 integration points - optional in Phase 2
-        assert ctx.landscape is None
+        db = LandscapeDB.in_memory()
+        recorder = LandscapeRecorder(db)
+        ctx = PluginContext(run_id="run-001", config={}, landscape=recorder)
         assert ctx.payload_store is None
 
 
@@ -52,14 +58,18 @@ class TestCheckpointAPI:
         """Empty checkpoint returns None."""
         from elspeth.contracts.plugin_context import PluginContext
 
-        ctx = PluginContext(run_id="run-001", config={})
+        db = LandscapeDB.in_memory()
+        recorder = LandscapeRecorder(db)
+        ctx = PluginContext(run_id="run-001", config={}, landscape=recorder)
         assert ctx.get_checkpoint() is None
 
     def test_set_checkpoint_stores_data(self) -> None:
         """set_checkpoint stores data accessible via get_checkpoint."""
         from elspeth.contracts.plugin_context import PluginContext
 
-        ctx = PluginContext(run_id="run-001", config={})
+        db = LandscapeDB.in_memory()
+        recorder = LandscapeRecorder(db)
+        ctx = PluginContext(run_id="run-001", config={}, landscape=recorder)
         state = _make_checkpoint(batch_id="batch-123", row_count=5)
         ctx.set_checkpoint(state)
 
@@ -72,7 +82,9 @@ class TestCheckpointAPI:
         """set_checkpoint replaces the previous checkpoint state."""
         from elspeth.contracts.plugin_context import PluginContext
 
-        ctx = PluginContext(run_id="run-001", config={})
+        db = LandscapeDB.in_memory()
+        recorder = LandscapeRecorder(db)
+        ctx = PluginContext(run_id="run-001", config={}, landscape=recorder)
         ctx.set_checkpoint(_make_checkpoint(batch_id="batch-old"))
         ctx.set_checkpoint(_make_checkpoint(batch_id="batch-new"))
 
@@ -84,7 +96,9 @@ class TestCheckpointAPI:
         """clear_checkpoint removes all checkpoint data."""
         from elspeth.contracts.plugin_context import PluginContext
 
-        ctx = PluginContext(run_id="run-001", config={})
+        db = LandscapeDB.in_memory()
+        recorder = LandscapeRecorder(db)
+        ctx = PluginContext(run_id="run-001", config={}, landscape=recorder)
         ctx.set_checkpoint(_make_checkpoint())
         assert ctx.get_checkpoint() is not None
 
@@ -95,7 +109,9 @@ class TestCheckpointAPI:
         """Checkpoint API supports typical batch transform workflow."""
         from elspeth.contracts.plugin_context import PluginContext
 
-        ctx = PluginContext(run_id="run-001", config={})
+        db = LandscapeDB.in_memory()
+        recorder = LandscapeRecorder(db)
+        ctx = PluginContext(run_id="run-001", config={}, landscape=recorder)
 
         # Phase 1: Submit - no existing checkpoint
         assert ctx.get_checkpoint() is None
@@ -219,9 +235,9 @@ class TestValidationErrorRecording:
 
     def test_record_validation_error_returns_quarantine_token(self) -> None:
         """record_validation_error returns token for tracking quarantined row."""
-        from elspeth.contracts.plugin_context import PluginContext, ValidationErrorToken
+        from elspeth.contracts.plugin_context import ValidationErrorToken
 
-        ctx = PluginContext(run_id="test-run", config={}, node_id="source_node")
+        ctx = make_source_context(node_id="source_node")
 
         token = ctx.record_validation_error(
             row={"id": 42, "invalid": "data"},
@@ -235,33 +251,26 @@ class TestValidationErrorRecording:
         assert token.row_id is not None
         assert token.node_id == "source_node"
 
-    def test_record_validation_error_without_landscape_logs_warning(self, caplog: "pytest.LogCaptureFixture") -> None:
-        """record_validation_error logs warning when no landscape configured."""
-        import logging
+    def test_record_validation_error_without_landscape_raises(self) -> None:
+        """record_validation_error raises FrameworkBugError when no landscape configured."""
+        import pytest
 
+        from elspeth.contracts.errors import FrameworkBugError
         from elspeth.contracts.plugin_context import PluginContext
 
         ctx = PluginContext(run_id="test-run", config={}, node_id="source_node")
 
-        with caplog.at_level(logging.WARNING):
-            token = ctx.record_validation_error(
+        with pytest.raises(FrameworkBugError, match="record_validation_error.*without landscape"):
+            ctx.record_validation_error(
                 row={"id": 42, "invalid": "data"},
                 error="validation failed",
                 schema_mode="fixed",
                 destination="discard",
             )
 
-        # Should still return a token even without landscape
-        assert token is not None
-        assert token.error_id is None  # Not recorded to landscape
-        # Check that warning was logged
-        assert "no landscape" in caplog.text.lower()
-
     def test_record_validation_error_uses_id_field_as_row_id(self) -> None:
         """record_validation_error uses row's id field if present."""
-        from elspeth.contracts.plugin_context import PluginContext
-
-        ctx = PluginContext(run_id="test-run", config={}, node_id="source_node")
+        ctx = make_source_context(node_id="source_node")
 
         token = ctx.record_validation_error(
             row={"id": "row-42", "invalid": "data"},
@@ -274,9 +283,7 @@ class TestValidationErrorRecording:
 
     def test_record_validation_error_generates_row_id_from_hash(self) -> None:
         """record_validation_error generates row_id from content hash if no id field."""
-        from elspeth.contracts.plugin_context import PluginContext
-
-        ctx = PluginContext(run_id="test-run", config={}, node_id="source_node")
+        ctx = make_source_context(node_id="source_node")
 
         token = ctx.record_validation_error(
             row={"no_id_field": "data"},
@@ -422,9 +429,7 @@ class TestValidationErrorDestination:
 
     def test_record_validation_error_requires_destination(self) -> None:
         """record_validation_error requires destination parameter."""
-        from elspeth.contracts.plugin_context import PluginContext
-
-        ctx = PluginContext(run_id="test-run", config={}, node_id="source_node")
+        ctx = make_source_context(node_id="source_node")
 
         # Should work with destination
         token = ctx.record_validation_error(
@@ -438,9 +443,7 @@ class TestValidationErrorDestination:
 
     def test_record_validation_error_with_discard_destination(self) -> None:
         """record_validation_error accepts 'discard' as destination."""
-        from elspeth.contracts.plugin_context import PluginContext
-
-        ctx = PluginContext(run_id="test-run", config={}, node_id="source_node")
+        ctx = make_source_context(node_id="source_node")
 
         token = ctx.record_validation_error(
             row={"id": 1, "bad": "data"},
@@ -481,34 +484,16 @@ class TestTransformErrorRecording:
 
         assert token.destination == "discard"
 
-    def test_record_transform_error_without_landscape(self) -> None:
-        """record_transform_error works without landscape (logs warning)."""
+    def test_record_transform_error_without_landscape_raises(self) -> None:
+        """record_transform_error raises FrameworkBugError when no landscape configured."""
+        import pytest
+
+        from elspeth.contracts.errors import FrameworkBugError
         from elspeth.contracts.plugin_context import PluginContext
 
         ctx = PluginContext(run_id="test-run", config={}, node_id="transform_node")
 
-        token = ctx.record_transform_error(
-            token_id="tok_123",
-            transform_id="field_mapper",
-            row={"id": 1, "data": "test"},
-            error_details={"reason": "validation_failed", "error": "Cannot process"},
-            destination="error_sink",
-        )
-
-        assert token.token_id == "tok_123"
-        assert token.transform_id == "field_mapper"
-        assert token.destination == "error_sink"
-        assert token.error_id is None  # No landscape
-
-    def test_record_transform_error_without_landscape_logs_warning(self, caplog: "pytest.LogCaptureFixture") -> None:
-        """record_transform_error logs warning when no landscape configured."""
-        import logging
-
-        from elspeth.contracts.plugin_context import PluginContext
-
-        ctx = PluginContext(run_id="test-run", config={}, node_id="transform_node")
-
-        with caplog.at_level(logging.WARNING):
+        with pytest.raises(FrameworkBugError, match="record_transform_error.*without landscape"):
             ctx.record_transform_error(
                 token_id="tok_123",
                 transform_id="field_mapper",
@@ -516,9 +501,6 @@ class TestTransformErrorRecording:
                 error_details={"reason": "validation_failed", "error": "Cannot process"},
                 destination="error_sink",
             )
-
-        # Check that warning was logged
-        assert "no landscape" in caplog.text.lower()
 
     def test_record_transform_error_with_landscape(self) -> None:
         """record_transform_error stores in audit trail via mock."""
@@ -567,7 +549,9 @@ class TestTokenField:
         """PluginContext.token defaults to None."""
         from elspeth.contracts.plugin_context import PluginContext
 
-        ctx = PluginContext(run_id="test-run", config={})
+        db = LandscapeDB.in_memory()
+        recorder = LandscapeRecorder(db)
+        ctx = PluginContext(run_id="test-run", config={}, landscape=recorder)
         assert ctx.token is None
 
     def test_token_accepts_token_info(self) -> None:
@@ -586,7 +570,9 @@ class TestTokenField:
         row_data = make_row({"x": 1}, contract=contract)
 
         token = TokenInfo(row_id="row-1", token_id="token-row-1", row_data=row_data)
-        ctx = PluginContext(run_id="test-run", config={}, token=token)
+        db = LandscapeDB.in_memory()
+        recorder = LandscapeRecorder(db)
+        ctx = PluginContext(run_id="test-run", config={}, landscape=recorder, token=token)
 
         assert ctx.token is not None
         assert ctx.token is token  # Same object reference
@@ -610,7 +596,9 @@ class TestTokenField:
         row_data = make_row({"value": 100}, contract=contract)
 
         token = TokenInfo(row_id="row-42", token_id="token-42", row_data=row_data)
-        ctx = PluginContext(run_id="test-run", config={}, token=token)
+        db = LandscapeDB.in_memory()
+        recorder = LandscapeRecorder(db)
+        ctx = PluginContext(run_id="test-run", config={}, landscape=recorder, token=token)
 
         # Multiple accesses should return the exact same object
         access1 = ctx.token
@@ -625,7 +613,9 @@ class TestTokenField:
         from elspeth.contracts.schema_contract import SchemaContract
         from elspeth.testing import make_field, make_row
 
-        ctx = PluginContext(run_id="test-run", config={})
+        db = LandscapeDB.in_memory()
+        recorder = LandscapeRecorder(db)
+        ctx = PluginContext(run_id="test-run", config={}, landscape=recorder)
         assert ctx.token is None
 
         # Create PipelineRow for TokenInfo

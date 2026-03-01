@@ -1,4 +1,3 @@
-# src/elspeth/plugins/clients/llm.py
 """Audited LLM client with automatic call recording."""
 
 from __future__ import annotations
@@ -13,6 +12,7 @@ import structlog
 
 from elspeth.contracts import CallStatus, CallType
 from elspeth.contracts.call_data import LLMCallError, LLMCallRequest, LLMCallResponse
+from elspeth.contracts.errors import AuditIntegrityError, FrameworkBugError
 from elspeth.contracts.events import ExternalCallCompleted
 from elspeth.contracts.token_usage import TokenUsage
 from elspeth.core.canonical import stable_hash
@@ -363,6 +363,8 @@ class AuditedLLMClient(AuditedClientBase):
                         token_usage=None,
                     )
                 )
+            except (FrameworkBugError, AuditIntegrityError):
+                raise  # System bugs and audit integrity violations must crash
             except Exception as tel_err:
                 # Telemetry failure must not corrupt the error handling flow
                 logger.warning(
@@ -448,6 +450,8 @@ class AuditedLLMClient(AuditedClientBase):
                     token_usage=usage_snapshot,
                 )
             )
+        except (FrameworkBugError, AuditIntegrityError):
+            raise  # System bugs and audit integrity violations must crash
         except Exception as tel_err:
             # Telemetry failure must not corrupt the successful call
             # Landscape has the record - telemetry is operational visibility only

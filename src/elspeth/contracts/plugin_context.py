@@ -1,4 +1,3 @@
-# src/elspeth/contracts/plugin_context.py
 """Plugin execution context.
 
 The PluginContext carries everything a plugin needs during execution:
@@ -32,11 +31,12 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
-@dataclass
+@dataclass(frozen=True, slots=True)
 class ValidationErrorToken:
     """Token returned when recording a validation error.
 
     Allows tracking the quarantined row through the audit trail.
+    Frozen because these are Tier 1 audit records — immutable after creation.
     """
 
     row_id: str
@@ -45,12 +45,13 @@ class ValidationErrorToken:
     destination: str = "discard"  # Sink name or "discard"
 
 
-@dataclass
+@dataclass(frozen=True, slots=True)
 class TransformErrorToken:
     """Token returned when recording a transform error.
 
     Allows tracking the errored row through the audit trail.
     This is for LEGITIMATE processing errors, not transform bugs.
+    Frozen because these are Tier 1 audit records — immutable after creation.
     """
 
     token_id: str
@@ -221,10 +222,15 @@ class PluginContext:
             FrameworkBugError: If neither or both of state_id and operation_id are set
         """
         from elspeth.contracts import FrameworkBugError
+        from elspeth.contracts.errors import AuditIntegrityError
 
         if self.landscape is None:
-            logger.warning("External call not recorded (no landscape)")
-            return None
+            raise FrameworkBugError(
+                f"record_call() called without landscape. "
+                f"Context state: run_id={self.run_id}, state_id={self.state_id}, "
+                f"operation_id={self.operation_id}. "
+                f"This is a framework bug — orchestrator must inject landscape before plugin execution."
+            )
 
         # Enforce XOR: exactly one of state_id or operation_id must be set
         has_state = self.state_id is not None
@@ -354,6 +360,8 @@ class PluginContext:
                     token_usage=token_usage,
                 )
             )
+        except (FrameworkBugError, AuditIntegrityError):
+            raise  # System bugs and audit integrity violations must crash
         except Exception as tel_err:
             # Telemetry failure must not corrupt the call recording
             logger.warning(
@@ -417,15 +425,22 @@ class PluginContext:
                 )
                 row_id = repr_hash(row)[:16]
 
-        if self.landscape is None:
-            logger.warning(
-                "Validation error not recorded (no landscape): %s",
-                error,
+        if self.node_id is None:
+            from elspeth.contracts import FrameworkBugError
+
+            raise FrameworkBugError(
+                f"record_validation_error() called without node_id. "
+                f"Context state: run_id={self.run_id}. "
+                f"This is a framework bug — orchestrator must set node_id before validation."
             )
-            return ValidationErrorToken(
-                row_id=row_id,
-                node_id=self.node_id or "unknown",
-                destination=destination,
+
+        if self.landscape is None:
+            from elspeth.contracts import FrameworkBugError
+
+            raise FrameworkBugError(
+                f"record_validation_error() called without landscape. "
+                f"Context state: run_id={self.run_id}, node_id={self.node_id}. "
+                f"This is a framework bug — orchestrator must inject landscape before source validation."
             )
 
         # Record to landscape audit trail
@@ -441,7 +456,7 @@ class PluginContext:
 
         return ValidationErrorToken(
             row_id=row_id,
-            node_id=self.node_id or "unknown",
+            node_id=self.node_id,
             error_id=error_id,
             destination=destination,
         )
@@ -470,15 +485,12 @@ class PluginContext:
             TransformErrorToken for tracking
         """
         if self.landscape is None:
-            logger.warning(
-                "Transform error not recorded (no landscape): %s - %s",
-                transform_id,
-                error_details,
-            )
-            return TransformErrorToken(
-                token_id=token_id,
-                transform_id=transform_id,
-                destination=destination,
+            from elspeth.contracts import FrameworkBugError
+
+            raise FrameworkBugError(
+                f"record_transform_error() called without landscape. "
+                f"Context state: run_id={self.run_id}, node_id={self.node_id}. "
+                f"This is a framework bug — orchestrator must inject landscape before transform execution."
             )
 
         error_id = self.landscape.record_transform_error(
