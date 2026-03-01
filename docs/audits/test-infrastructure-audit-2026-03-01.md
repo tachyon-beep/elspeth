@@ -837,3 +837,88 @@ The `test_azure_batch.py::TestAzureBatchLLMTransformMissingResults` tests (2 tes
 **Verification:**
 - pytest: 10,370 passed, 17 skipped, 87 deselected, 3 xfailed, 0 failures
 - Test count: unchanged from P0.5b baseline (10,370)
+
+**2026-03-02 — P2 prerequisites: COMPLETE (3 scoping deliverables)**
+
+Three P2 entry prerequisites resolved. All are analysis/documentation — no code changes required.
+
+#### Prerequisite 1: `integration/audit/` Scoping Pass
+
+**Result: All 14 `test_recorder_*.py` files classified as EXEMPT.** Every file's primary assertions exercise `LandscapeRecorder` methods directly — the inline `LandscapeDB.in_memory() → LandscapeRecorder(db)` construction IS the system under test. This confirms the audit's prediction ("most or all 16 exempt") and drops P2's effective Category B count from ~442 to ~290 (a 34% reduction).
+
+| File | Classification | `in_memory()` | `Recorder(` | Justification |
+|---|---|---|---|---|
+| `test_recorder_contracts.py` | EXEMPT | 18 | 18 | Asserts on `begin_run` with schema_contract, `update_run_contract`, `get_run_contract`, `get_node_contracts`, contract hash integrity |
+| `test_recorder_batches.py` | EXEMPT | 0 | 12 | Asserts on `create_batch`, `add_batch_member`, `complete_batch`, `get_batches_by_status`, `retry_batch`. Uses `landscape_db` fixture for DB, inline `Recorder()` |
+| `test_recorder_artifacts.py` | EXEMPT | 7 | 7 | Asserts on `register_artifact`, `get_artifacts`, `get_rows`, `get_tokens`, `get_node_states`, idempotency keys |
+| `test_recorder_queries.py` | EXEMPT | 7 | 7 | Asserts on `get_row`, `get_token`, `get_token_parents`, `get_routing_events`, `get_row_data` return values |
+| `test_recorder_nodes.py` | EXEMPT | 12 | 12 | Asserts on `register_node`, `register_edge`, `get_nodes`, `get_edges`, schema recording |
+| `test_recorder_routing_events.py` | EXEMPT | 4 | 4 | Asserts on `record_routing_event` persistence and reason payload storage |
+| `test_recorder_node_states.py` | EXEMPT | 14 | 14 | Asserts on `begin_node_state`, `complete_node_state`, retry increments, hash correctness, integrity validation, `context_after` round-trip |
+| `test_recorder_calls.py` | EXEMPT | 8 | 8 | Asserts on `record_call` field persistence, payload refs, duplicate rejection, request hash determinism, cross-run isolation |
+| `test_recorder_runs.py` | EXEMPT | 14 | 14 | Asserts on `begin_run`, `complete_run`, `get_run`, `list_runs`, field resolution JSON Tier-1 integrity |
+| `test_recorder_explain.py` | EXEMPT | 9 | 9 | Asserts on `explain_row` graceful degradation, payload status, run_id mismatch rejection |
+| `test_recorder_row_data.py` | EXEMPT | 8 | 9 | Asserts on `get_row_data` across 5 explicit states + Tier-1 corruption handling |
+| `test_recorder_tokens.py` | EXEMPT | 23 | 23 | Asserts on `create_row`, `create_token`, `fork_token`, `coalesce_tokens`, `expand_token`, hash correctness, atomic outcomes |
+| `test_recorder_grades.py` | EXEMPT | 9 | 8 | Asserts on `compute_reproducibility_grade`, `finalize_run`, grade degradation after purge |
+| `test_recorder_errors.py` | EXEMPT | 9 | 9 | Asserts on `record_transform_error` return values and persistence, `set_export_status` enum coercion |
+| **TOTAL** | **14 EXEMPT** | **142** | **154** | |
+
+**Non-recorder files in `integration/audit/` (MIGRATE candidates):**
+
+| File | `in_memory()` | `Recorder(` | Classification | Notes |
+|---|---|---|---|---|
+| `test_contract_audit.py` | 7 | 7 | MIGRATE | Recorder is dependency for CSVSource contract audit trail testing |
+| `test_fixes.py` | 2 | 2 | MIGRATE | Broader integration tests; only 2 of 8 tests use inline construction |
+| `test_export.py` | 1 | 1 | MIGRATE | SUT is export system, not recorder |
+| `test_error_persistence.py` | 0 | 0 | N/A | Already uses `landscape_db`/`recorder` fixtures |
+| `test_tier1_integrity.py` | 0 | 0 | EXEMPT | Uses fixtures but asserts directly on recorder Tier-1 behavior |
+| `test_sqlcipher_pipeline.py` | 0 | 1 | MIGRATE | Uses `LandscapeDB.from_url()`, not `.in_memory()` |
+| `test_not_null_constraints.py` | 0 | 0 | N/A | Tests raw schema constraints, no recorder usage |
+
+#### Prerequisite 2: `canonical_version` Pre-Audit
+
+**Result: `canonical_version` is stored metadata, not an input to hash computation.** The `stable_hash()` and `canonical_json()` functions use the hardcoded `"sha256-rfc8785-v1"` algorithm regardless of what is stored in `runs.canonical_version`. Migration risk is limited to tests that assert on the stored `canonical_version` value itself.
+
+**Factory default mismatch (informational):** `make_recorder_with_run()` defaults to `canonical_version="v1"`, while production uses `CANONICAL_VERSION = "sha256-rfc8785-v1"` (from `contracts/hashing.py:26`). The other factory `make_run_record()` defaults to `"sha256-rfc8785-v1"`. The ~300 existing `make_recorder_with_run()` call sites already run with the non-production `"v1"` value without affecting hash correctness.
+
+**Distinct `canonical_version` values found in test suite:**
+
+| Value | Occurrences | Matches factory default? |
+|---|---|---|
+| `"v1"` | ~300 | Yes |
+| `"1.0"` | ~74 | No |
+| `"sha256-rfc8785-v1"` | ~32 | No (matches production constant) |
+| `"1.0.0"` | ~8 | No |
+| `"test-v1"` | 4 | No |
+| `"v2"` | 1 | No |
+| `"test"` | 1 | No |
+| `CANONICAL_VERSION` (variable) | ~12 | No (resolves to `"sha256-rfc8785-v1"`) |
+| Hypothesis-generated | ~2 tests | No (random values) |
+
+**Files requiring explicit `canonical_version` parameter if migrated to `make_recorder_with_run()`:**
+
+| File | Current Value | Why Explicit Required |
+|---|---|---|
+| `tests/unit/core/landscape/test_run_lifecycle_repository.py` | `"v2"` | Line 68 asserts `canonical_version == "v2"` — tests non-default storage |
+| `tests/property/core/test_landscape_recording_properties.py` | Hypothesis-generated | Line 97 asserts round-trip fidelity of arbitrary values |
+| `tests/integration/audit/test_tier1_integrity.py` | `CANONICAL_VERSION` | Line 294 asserts `canonical_version == CANONICAL_VERSION` — verifies production constant (EXEMPT file) |
+| `tests/fixtures/test_factories.py` | `"sha256-rfc8785-v1"` | Line 238 tests factory parameter passthrough (EXEMPT — factory tests) |
+
+**All other files:** `canonical_version` is passed to `begin_run()` as metadata but never asserted against a specific literal value. Hash-sensitive assertions in these files compare computed-vs-computed (e.g., `assert config_hash_1 == config_hash_2`), not against literal hash strings. Safe to migrate without explicit `canonical_version` parameter.
+
+#### Prerequisite 3: `make_landscape_db()` Argument Forwarding Gap
+
+**Result: No gap exists.** `LandscapeDB.in_memory()` accepts zero user-facing parameters (only `cls`). All 533 calls across 98 test files use the bare `LandscapeDB.in_memory()` form with no arguments. `make_landscape_db()` is a drop-in replacement for every existing call site. No factory modifications needed.
+
+**Updated P2 effective scope:**
+
+| Cluster | Original Count | Adjusted Count | Notes |
+|---|---|---|---|
+| `integration/audit/test_recorder_*.py` | ~152 | **0** | All 14 files EXEMPT |
+| `integration/audit/` (other) | ~10 | **~10** | 3 MIGRATE files |
+| `unit/plugins/` | ~90 | ~90 | Unchanged |
+| `unit/engine/` | ~70 | ~70 | Unchanged |
+| `unit/core/landscape/` | ~130 | ~130 | Requires per-file scoping (some may be EXEMPT) |
+| Other directories | ~100 | ~100 | Unchanged |
+| **Total** | **~442** | **~290** | **34% reduction** |
