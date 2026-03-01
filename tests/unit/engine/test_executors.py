@@ -76,7 +76,6 @@ from elspeth.contracts.routing import RouteDestination, RoutingAction
 from elspeth.contracts.schema_contract import PipelineRow, SchemaContract
 from elspeth.contracts.types import NodeID, SinkName
 from elspeth.core.config import AggregationSettings, GateSettings, TriggerConfig
-from elspeth.core.landscape import LandscapeDB, LandscapeRecorder
 from elspeth.engine.executors import (
     AGGREGATION_CHECKPOINT_VERSION,
     AggregationExecutor,
@@ -87,6 +86,7 @@ from elspeth.engine.executors import (
     TransformExecutor,
 )
 from elspeth.testing import make_field, make_row
+from tests.fixtures.factories import make_context
 from tests.unit.engine.conftest import make_test_step_resolver as _make_step_resolver
 
 # =============================================================================
@@ -209,16 +209,6 @@ def _make_sink(
     return sink
 
 
-def _make_ctx(run_id: str = "test-run", landscape: Any = None) -> Any:
-    """Create a PluginContext for testing."""
-    from elspeth.contracts.plugin_context import PluginContext
-
-    if landscape is None:
-        db = LandscapeDB.in_memory()
-        landscape = LandscapeRecorder(db)
-    return PluginContext(run_id=run_id, config={}, landscape=landscape)
-
-
 # =============================================================================
 # TestMissingEdgeError
 # =============================================================================
@@ -290,7 +280,7 @@ class TestTransformExecutor:
         executor = TransformExecutor(recorder, _make_span_factory(), _make_step_resolver())
         transform = _make_transform(node_id=None)
         token = _make_token()
-        ctx = _make_ctx()
+        ctx = make_context()
 
         with pytest.raises(OrchestrationInvariantError, match="without node_id"):
             executor.execute_transform(transform, token, ctx)
@@ -311,7 +301,7 @@ class TestTransformExecutor:
 
         transform.input_schema = StrictSchema
         token = _make_token(data={"count": "not_an_int"})
-        ctx = _make_ctx()
+        ctx = make_context()
 
         with pytest.raises(PluginContractViolation, match="input validation failed"):
             executor.execute_transform(transform, token, ctx)
@@ -330,7 +320,7 @@ class TestTransformExecutor:
             success_reason={"action": "test"},
         )
         token = _make_token(data={"count": "not_an_int"}, contract=contract)
-        ctx = _make_ctx()
+        ctx = make_context()
 
         result, _, _ = executor.execute_transform(transform, token, ctx)
 
@@ -350,7 +340,7 @@ class TestTransformExecutor:
             make_row({"value": "processed"}, contract=contract),
             success_reason={"action": "test"},
         )
-        ctx = _make_ctx()
+        ctx = make_context()
 
         result, updated_token, error_sink = executor.execute_transform(
             transform,
@@ -373,7 +363,7 @@ class TestTransformExecutor:
             make_row({"value": "out"}, contract=contract),
             success_reason={"action": "test"},
         )
-        ctx = _make_ctx()
+        ctx = make_context()
 
         executor.execute_transform(transform, token, ctx, attempt=2)
 
@@ -397,7 +387,7 @@ class TestTransformExecutor:
             make_row({"value": "out"}, contract=contract),
             success_reason={"action": "test"},
         )
-        ctx = _make_ctx()
+        ctx = make_context()
 
         executor.execute_transform(transform, token, ctx)
 
@@ -417,7 +407,7 @@ class TestTransformExecutor:
             make_row({"value": "out"}, contract=contract),
             success_reason={"action": "test"},
         )
-        ctx = _make_ctx()
+        ctx = make_context()
 
         result, _, _ = executor.execute_transform(
             transform,
@@ -441,7 +431,7 @@ class TestTransformExecutor:
             make_row({"value": "modified"}, contract=contract),
             success_reason={"action": "test"},
         )
-        ctx = _make_ctx()
+        ctx = make_context()
 
         _, updated_token, _ = executor.execute_transform(
             transform,
@@ -475,7 +465,7 @@ class TestTransformExecutor:
 
         transform = _make_transform()
         transform.process = capturing_process
-        ctx = _make_ctx()
+        ctx = make_context()
 
         executor.execute_transform(transform, token, ctx)
 
@@ -494,7 +484,7 @@ class TestTransformExecutor:
             reason={"reason": "test_error"},
         )
         token = _make_token()
-        ctx = _make_ctx(landscape=recorder)
+        ctx = make_context(landscape=recorder)
 
         result, updated_token, error_sink = executor.execute_transform(
             transform,
@@ -516,7 +506,7 @@ class TestTransformExecutor:
             reason={"reason": "test_error"},
         )
         token = _make_token()
-        ctx = _make_ctx(landscape=recorder)
+        ctx = make_context(landscape=recorder)
 
         _, _, error_sink = executor.execute_transform(
             transform,
@@ -542,7 +532,7 @@ class TestTransformExecutor:
             reason={"reason": "test_error"},
         )
         token = _make_token()
-        ctx = _make_ctx(landscape=recorder)
+        ctx = make_context(landscape=recorder)
 
         _, _, error_sink = executor.execute_transform(transform, token, ctx)
         assert error_sink == "discard"
@@ -556,7 +546,7 @@ class TestTransformExecutor:
             reason={"reason": "test_error"},
         )
         token = _make_token()
-        ctx = _make_ctx(landscape=recorder)
+        ctx = make_context(landscape=recorder)
 
         executor.execute_transform(transform, token, ctx)
 
@@ -573,7 +563,7 @@ class TestTransformExecutor:
             reason={"reason": "test_error"},
         )
         token = _make_token()
-        ctx = _make_ctx()
+        ctx = make_context()
         ctx.record_transform_error = MagicMock()
 
         executor.execute_transform(transform, token, ctx)
@@ -590,7 +580,7 @@ class TestTransformExecutor:
             reason={"reason": "test_error"},
         )
         token = _make_token()
-        ctx = _make_ctx(landscape=recorder)
+        ctx = make_context(landscape=recorder)
 
         executor.execute_transform(transform, token, ctx)
 
@@ -609,7 +599,7 @@ class TestTransformExecutor:
             reason={"reason": "test_error"},
         )
         token = _make_token()
-        ctx = _make_ctx(landscape=recorder)
+        ctx = make_context(landscape=recorder)
 
         with pytest.raises(OrchestrationInvariantError, match="DIVERT edge"):
             executor.execute_transform(transform, token, ctx)
@@ -623,7 +613,7 @@ class TestTransformExecutor:
         transform = _make_transform()
         transform.process.side_effect = ValueError("plugin bug")
         token = _make_token()
-        ctx = _make_ctx()
+        ctx = make_context()
 
         with pytest.raises(ValueError, match="plugin bug"):
             executor.execute_transform(transform, token, ctx)
@@ -640,7 +630,7 @@ class TestTransformExecutor:
         transform = _make_transform()
         transform.process.side_effect = RuntimeError("crash")
         token = _make_token()
-        ctx = _make_ctx()
+        ctx = make_context()
 
         with pytest.raises(RuntimeError):
             executor.execute_transform(transform, token, ctx)
@@ -663,7 +653,7 @@ class TestTransformExecutor:
             reason={"reason": "test_error"},
         )
         token = _make_token()
-        ctx = _make_ctx(landscape=recorder)
+        ctx = make_context(landscape=recorder)
 
         executor.execute_transform(transform, token, ctx)
 
@@ -677,7 +667,7 @@ class TestTransformExecutor:
         error_reason = {"reason": "content_filtered", "provider": "azure", "code": "CF-01"}
         transform.process.return_value = TransformResult.error(reason=error_reason)
         token = _make_token()
-        ctx = _make_ctx(landscape=recorder)
+        ctx = make_context(landscape=recorder)
 
         executor.execute_transform(transform, token, ctx)
 
@@ -699,7 +689,7 @@ class TestTransformExecutor:
             reason={"reason": "api_error"},
         )
         token = _make_token()
-        ctx = _make_ctx()
+        ctx = make_context()
         ctx.record_transform_error = MagicMock()
 
         executor.execute_transform(transform, token, ctx)
@@ -725,7 +715,7 @@ class TestTransformExecutor:
         )
         # Input row already has "llm_response" — collision!
         token = _make_token(data={"value": "test", "llm_response": "pre-existing"})
-        ctx = _make_ctx()
+        ctx = make_context()
 
         with pytest.raises(PluginContractViolation, match="would overwrite existing input fields"):
             executor.execute_transform(transform, token, ctx)
@@ -745,7 +735,7 @@ class TestTransformExecutor:
             success_reason={"action": "test"},
         )
         token = _make_token(contract=contract)
-        ctx = _make_ctx()
+        ctx = make_context()
 
         result, updated_token, _error_sink = executor.execute_transform(transform, token, ctx)
 
@@ -764,7 +754,7 @@ class TestTransformExecutor:
             declared_output_fields=frozenset({"value"}),
         )
         token = _make_token(data={"value": "test"})
-        ctx = _make_ctx()
+        ctx = make_context()
 
         with pytest.raises(PluginContractViolation):
             executor.execute_transform(transform, token, ctx)
@@ -785,7 +775,7 @@ class TestTransformExecutor:
             success_reason={"action": "test"},
         )
         token = _make_token(contract=contract)
-        ctx = _make_ctx()
+        ctx = make_context()
 
         result, _, _ = executor.execute_transform(transform, token, ctx)
 
@@ -805,7 +795,7 @@ class TestTransformExecutor:
             success_reason={"action": "test"},
         )
         token = _make_token(contract=contract)
-        ctx = _make_ctx()
+        ctx = make_context()
 
         executor.execute_transform(transform, token, ctx)
 
@@ -825,7 +815,7 @@ class TestTransformExecutor:
             success_reason={"action": "test"},
         )
         token = _make_token(contract=contract)
-        ctx = _make_ctx()
+        ctx = make_context()
 
         executor.execute_transform(transform, token, ctx)
 
@@ -854,7 +844,7 @@ class TestTransformExecutor:
         transform = _make_transform()
         transform.process = capture_ctx  # type: ignore[assignment]
         token = _make_token(contract=contract)
-        ctx = _make_ctx()
+        ctx = make_context()
         assert ctx.contract is None
 
         executor.execute_transform(transform, token, ctx)
@@ -881,7 +871,7 @@ class TestTransformExecutor:
             success_reason={"action": "test"},
         )
         token = _make_token(contract=input_contract)
-        ctx = _make_ctx()
+        ctx = make_context()
 
         _result, updated_token, _error_sink = executor.execute_transform(transform, token, ctx)
 
@@ -900,7 +890,7 @@ class TestTransformExecutor:
             reason={"reason": "test_error"},
         )
         token = _make_token(contract=contract)
-        ctx = _make_ctx(landscape=recorder)
+        ctx = make_context(landscape=recorder)
 
         _result, updated_token, _error_sink = executor.execute_transform(transform, token, ctx)
 
@@ -938,7 +928,7 @@ class TestGateExecutor:
         )
         contract = _make_contract()
         token = _make_token(contract=contract)
-        ctx = _make_ctx()
+        ctx = make_context()
 
         outcome = executor.execute_config_gate(
             config,
@@ -971,7 +961,7 @@ class TestGateExecutor:
         )
         contract = _make_contract()
         token = _make_token(contract=contract)
-        ctx = _make_ctx()
+        ctx = make_context()
 
         outcome = executor.execute_config_gate(
             config,
@@ -1002,7 +992,7 @@ class TestGateExecutor:
         )
         contract = _make_contract()
         token = _make_token(contract=contract)
-        ctx = _make_ctx()
+        ctx = make_context()
 
         outcome = executor.execute_config_gate(
             config,
@@ -1034,7 +1024,7 @@ class TestGateExecutor:
         )
         contract = _make_contract()
         token = _make_token(contract=contract)
-        ctx = _make_ctx()
+        ctx = make_context()
 
         outcome = executor.execute_config_gate(
             config,
@@ -1058,7 +1048,7 @@ class TestGateExecutor:
         )
         contract = _make_contract()
         token = _make_token(contract=contract)
-        ctx = _make_ctx()
+        ctx = make_context()
 
         with pytest.raises(ValueError, match="unknown_label"):
             executor.execute_config_gate(
@@ -1105,7 +1095,7 @@ class TestGateExecutor:
 
         contract = _make_contract()
         token = _make_token(contract=contract)
-        ctx = _make_ctx()
+        ctx = make_context()
 
         outcome = executor.execute_config_gate(
             config,
@@ -1146,7 +1136,7 @@ class TestGateExecutor:
             fork_to=["path_a", "path_b"],
         )
         token = _make_token(contract=_make_contract())
-        ctx = _make_ctx()
+        ctx = make_context()
 
         with pytest.raises(OrchestrationInvariantError, match="no TokenManager"):
             executor.execute_config_gate(
@@ -1173,7 +1163,7 @@ class TestGateExecutor:
         )
         contract = _make_contract()
         token = _make_token(contract=contract)
-        ctx = _make_ctx()
+        ctx = make_context()
 
         with pytest.raises(MissingEdgeError, match="cg_1"):
             executor.execute_config_gate(
@@ -1205,7 +1195,7 @@ class TestGateExecutor:
         )
         contract = _make_contract()
         token = _make_token(contract=contract)
-        ctx = _make_ctx()
+        ctx = make_context()
 
         from elspeth.core.expression_parser import ExpressionEvaluationError
 
@@ -1256,7 +1246,7 @@ class TestGateExecutor:
         )
         contract = _make_contract()
         token = _make_token(contract=contract)
-        ctx = _make_ctx()
+        ctx = make_context()
 
         # This raises OrchestrationInvariantError (a subclass of Exception but
         # NOT MissingEdgeError). Before the fix, this would NOT be caught by
@@ -1295,7 +1285,7 @@ class TestGateExecutor:
         )
         contract = _make_contract()
         token = _make_token(contract=contract)
-        ctx = _make_ctx()
+        ctx = make_context()
 
         with pytest.raises(ValueError, match="None"):
             executor.execute_config_gate(config, "cg_1", token, ctx)
@@ -1321,7 +1311,7 @@ class TestGateExecutor:
         )
         contract = _make_contract()
         token = _make_token(contract=contract)
-        ctx = _make_ctx()
+        ctx = make_context()
 
         with pytest.raises(ValueError, match="'42'"):
             executor.execute_config_gate(config, "cg_1", token, ctx)
@@ -1351,7 +1341,7 @@ class TestGateExecutor:
         )
         contract = _make_contract()
         token = _make_token(contract=contract)
-        ctx = _make_ctx()
+        ctx = make_context()
 
         executor.execute_config_gate(config, "cg_1", token, ctx)
 
@@ -1390,7 +1380,7 @@ class TestGateExecutor:
         )
         contract = _make_contract()
         token = _make_token(contract=contract)
-        ctx = _make_ctx()
+        ctx = make_context()
 
         # This will fail because no route_resolution_map for "true" label
         with pytest.raises(MissingEdgeError):
@@ -1430,7 +1420,7 @@ class TestGateExecutor:
         )
         contract = _make_contract()
         token = _make_token(contract=contract)
-        ctx = _make_ctx()
+        ctx = make_context()
 
         # Monkey-patch stable_hash to fail on the second call (output_hash).
         # First call is input_hash (succeeds), second is output_hash (fails).
@@ -1640,7 +1630,7 @@ class TestAggregationExecutor:
         """Flushing without a batch raises RuntimeError."""
         executor, _, nid = self._make_agg_executor()
         transform = MagicMock()
-        ctx = _make_ctx()
+        ctx = make_context()
 
         with pytest.raises(RuntimeError, match="No batch exists"):
             executor.execute_flush(nid, transform, ctx, TriggerType.COUNT)
@@ -1674,7 +1664,7 @@ class TestAggregationExecutor:
             make_row({"value": "aggregated"}, contract=contract),
             success_reason={"action": "aggregated"},
         )
-        ctx = _make_ctx()
+        ctx = make_context()
 
         result, tokens, batch_id = executor.execute_flush(
             nid,
@@ -1709,7 +1699,7 @@ class TestAggregationExecutor:
             make_row({"value": "aggregated"}, contract=contract),
             success_reason={"action": "aggregated"},
         )
-        ctx = _make_ctx()
+        ctx = make_context()
 
         executor.execute_flush(nid, transform, ctx, TriggerType.COUNT)
 
@@ -1736,7 +1726,7 @@ class TestAggregationExecutor:
         transform.process.return_value = TransformResult.error(
             reason={"reason": "test_error"},
         )
-        ctx = _make_ctx()
+        ctx = make_context()
 
         result, _tokens, _batch_id = executor.execute_flush(
             nid,
@@ -1762,7 +1752,7 @@ class TestAggregationExecutor:
         transform = MagicMock()
         transform.name = "agg_transform"
         transform.process.side_effect = RuntimeError("transform crash")
-        ctx = _make_ctx()
+        ctx = make_context()
 
         with pytest.raises(RuntimeError, match="transform crash"):
             executor.execute_flush(nid, transform, ctx, TriggerType.COUNT)
@@ -1788,7 +1778,7 @@ class TestAggregationExecutor:
         transform = MagicMock()
         transform.name = "agg"
         transform.process.side_effect = RuntimeError("boom")
-        ctx = _make_ctx()
+        ctx = make_context()
 
         with pytest.raises(RuntimeError, match="boom"):
             executor.execute_flush(nid, transform, ctx, TriggerType.COUNT)
@@ -1813,7 +1803,7 @@ class TestAggregationExecutor:
         transform = MagicMock()
         transform.name = "agg"
         transform.process.side_effect = BatchPendingError("batch-123", "submitted")
-        ctx = _make_ctx()
+        ctx = make_context()
 
         with pytest.raises(BatchPendingError):
             executor.execute_flush(nid, transform, ctx, TriggerType.COUNT)
@@ -1846,7 +1836,7 @@ class TestAggregationExecutor:
         transform = MagicMock()
         transform.name = "agg"
         transform.process.side_effect = BatchPendingError("batch-123", "submitted")
-        ctx = _make_ctx()
+        ctx = make_context()
 
         batch_id_before = executor.get_batch_id(nid)
         assert batch_id_before is not None
@@ -1872,7 +1862,7 @@ class TestAggregationExecutor:
             make_row({"value": "agg"}, contract=contract),
             success_reason={"action": "agg"},
         )
-        ctx = _make_ctx()
+        ctx = make_context()
 
         executor.execute_flush(nid, transform, ctx, TriggerType.COUNT)
 
@@ -2094,7 +2084,7 @@ class TestSinkExecutor:
         recorder = _make_recorder()
         executor = SinkExecutor(recorder, _make_span_factory(), run_id="test-run")
         sink = _make_sink()
-        ctx = _make_ctx()
+        ctx = make_context()
         pending = PendingOutcome(outcome=RowOutcome.COMPLETED)
 
         result = executor.write(
@@ -2116,7 +2106,7 @@ class TestSinkExecutor:
         executor = SinkExecutor(recorder, _make_span_factory(), run_id="test-run")
         sink = _make_sink(node_id=None)
         token = _make_token()
-        ctx = _make_ctx()
+        ctx = make_context()
         pending = PendingOutcome(outcome=RowOutcome.COMPLETED)
 
         with pytest.raises(OrchestrationInvariantError, match="without node_id"):
@@ -2144,7 +2134,7 @@ class TestSinkExecutor:
         sink = _make_sink()
         sink.validate_input = True
         sink.input_schema = StrictSinkSchema
-        ctx = _make_ctx()
+        ctx = make_context()
         pending = PendingOutcome(outcome=RowOutcome.COMPLETED)
 
         with pytest.raises(PluginContractViolation, match="input validation failed"):
@@ -2168,7 +2158,7 @@ class TestSinkExecutor:
         token = _make_token(data={"id": "1"})  # Missing 'name' field
         sink = _make_sink()
         sink.declared_required_fields = frozenset({"id", "name"})
-        ctx = _make_ctx()
+        ctx = make_context()
         pending = PendingOutcome(outcome=RowOutcome.COMPLETED)
 
         with pytest.raises(PluginContractViolation, match=r"missing required fields.*name"):
@@ -2195,7 +2185,7 @@ class TestSinkExecutor:
         ]
         sink = _make_sink()
         sink.declared_required_fields = frozenset({"id", "name"})
-        ctx = _make_ctx()
+        ctx = make_context()
         pending = PendingOutcome(outcome=RowOutcome.COMPLETED)
 
         with pytest.raises(PluginContractViolation, match=r"row 1.*missing required fields.*name"):
@@ -2222,7 +2212,7 @@ class TestSinkExecutor:
             _make_token(data={"value": "b"}, token_id="t2", contract=contract),
         ]
         sink = _make_sink()
-        ctx = _make_ctx()
+        ctx = make_context()
         pending = PendingOutcome(outcome=RowOutcome.COMPLETED)
 
         artifact = executor.write(
@@ -2254,7 +2244,7 @@ class TestSinkExecutor:
         executor = SinkExecutor(recorder, _make_span_factory(), run_id="test-run")
         token = _make_token()
         sink = _make_sink()
-        ctx = _make_ctx()
+        ctx = make_context()
         pending = PendingOutcome(outcome=RowOutcome.COMPLETED)
 
         executor.write(
@@ -2275,7 +2265,7 @@ class TestSinkExecutor:
         executor = SinkExecutor(recorder, _make_span_factory(), run_id="test-run")
         token = _make_token(data={"value": "test"})
         sink = _make_sink()
-        ctx = _make_ctx()
+        ctx = make_context()
         pending = PendingOutcome(outcome=RowOutcome.COMPLETED)
 
         executor.write(
@@ -2316,7 +2306,7 @@ class TestSinkExecutor:
             _make_token(data={"value": 1}, token_id="t2", contract=contract_b),
         ]
         sink = _make_sink()
-        ctx = _make_ctx()
+        ctx = make_context()
         pending = PendingOutcome(outcome=RowOutcome.COMPLETED)
 
         with pytest.raises(ContractMergeError):
@@ -2350,7 +2340,7 @@ class TestSinkExecutor:
         ]
         sink = _make_sink()
         sink.write.side_effect = OSError("disk full")
-        ctx = _make_ctx()
+        ctx = make_context()
         pending = PendingOutcome(outcome=RowOutcome.COMPLETED)
 
         with pytest.raises(OSError, match="disk full"):
@@ -2376,7 +2366,7 @@ class TestSinkExecutor:
         tokens = [_make_token()]
         sink = _make_sink()
         sink.flush.side_effect = OSError("flush failed")
-        ctx = _make_ctx()
+        ctx = make_context()
         pending = PendingOutcome(outcome=RowOutcome.COMPLETED)
 
         with pytest.raises(OSError, match="flush failed"):
@@ -2404,7 +2394,7 @@ class TestSinkExecutor:
             _make_token(token_id="t2", contract=contract),
         ]
         sink = _make_sink()
-        ctx = _make_ctx()
+        ctx = make_context()
         pending = PendingOutcome(outcome=RowOutcome.COMPLETED)
         callback = MagicMock()
 
@@ -2429,7 +2419,7 @@ class TestSinkExecutor:
         executor = SinkExecutor(recorder, _make_span_factory(), run_id="test-run")
         token = _make_token()
         sink = _make_sink()
-        ctx = _make_ctx()
+        ctx = make_context()
         pending = PendingOutcome(outcome=RowOutcome.COMPLETED)
         callback = MagicMock(side_effect=RuntimeError("checkpoint failed"))
 
@@ -2454,7 +2444,7 @@ class TestSinkExecutor:
         executor = SinkExecutor(recorder, _make_span_factory(), run_id="test-run")
         token = _make_token()
         sink = _make_sink()
-        ctx = _make_ctx()
+        ctx = make_context()
         pending = PendingOutcome(outcome=RowOutcome.QUARANTINED, error_hash="err_hash_123")
 
         executor.write(
@@ -2488,7 +2478,7 @@ class TestSinkExecutor:
             _make_token(token_id="t2", contract=contract),
         ]
         sink = _make_sink()
-        ctx = _make_ctx()
+        ctx = make_context()
         pending = PendingOutcome(outcome=RowOutcome.COMPLETED)
 
         executor.write(
@@ -2517,7 +2507,7 @@ class TestSinkExecutor:
             _make_token(data={"value": "c"}, token_id="t3", contract=contract),
         ]
         sink = _make_sink()
-        ctx = _make_ctx()
+        ctx = make_context()
         pending = PendingOutcome(outcome=RowOutcome.COMPLETED)
 
         executor.write(
@@ -2551,7 +2541,7 @@ class TestSinkExecutor:
         ]
         sink = _make_sink()
         sink.write.side_effect = OSError("disk full")
-        ctx = _make_ctx()
+        ctx = make_context()
         pending = PendingOutcome(outcome=RowOutcome.COMPLETED)
 
         with pytest.raises(OSError):
@@ -2581,7 +2571,7 @@ class TestSinkExecutor:
         ]
         sink = _make_sink()
         sink.flush.side_effect = OSError("flush failed")
-        ctx = _make_ctx()
+        ctx = make_context()
         pending = PendingOutcome(outcome=RowOutcome.COMPLETED)
 
         with pytest.raises(OSError):
@@ -2606,7 +2596,7 @@ class TestSinkExecutor:
         executor = SinkExecutor(recorder, _make_span_factory(), run_id="test-run")
         token = _make_token()
         sink = _make_sink()
-        ctx = _make_ctx()
+        ctx = make_context()
         pending = PendingOutcome(outcome=RowOutcome.COMPLETED)
 
         executor.write(
@@ -2631,7 +2621,7 @@ class TestSinkExecutor:
         executor = SinkExecutor(recorder, _make_span_factory(), run_id="test-run")
         token = _make_token(data={"value": "test"})
         sink = _make_sink()
-        ctx = _make_ctx()
+        ctx = make_context()
         pending = PendingOutcome(outcome=RowOutcome.COMPLETED)
 
         executor.write(
@@ -2656,7 +2646,7 @@ class TestSinkExecutor:
         executor = SinkExecutor(recorder, _make_span_factory(), run_id="test-run")
         token = _make_token(data={"value": "test"})
         sink = _make_sink()
-        ctx = _make_ctx()
+        ctx = make_context()
         pending = PendingOutcome(outcome=RowOutcome.COMPLETED)
 
         executor.write(
@@ -2684,7 +2674,7 @@ class TestSinkExecutor:
         row_data = {"value": "test", "extra_field": "extra_value", "another": 123}
         token = _make_token(data=row_data, contract=contract)
         sink = _make_sink()
-        ctx = _make_ctx()
+        ctx = make_context()
         pending = PendingOutcome(outcome=RowOutcome.COMPLETED)
 
         executor.write(
@@ -2737,7 +2727,7 @@ class TestSinkExecutor:
         sink = _make_sink()
         sink.write.side_effect = capture_write
 
-        ctx = _make_ctx()
+        ctx = make_context()
         ctx.contract = stale_contract
         pending = PendingOutcome(outcome=RowOutcome.COMPLETED)
 
@@ -2813,7 +2803,7 @@ class TestSinkExecutor:
         sink = _make_sink()
         sink.write.side_effect = capture_write
 
-        ctx = _make_ctx()
+        ctx = make_context()
         ctx.contract = _make_contract()
         pending = PendingOutcome(outcome=RowOutcome.COMPLETED)
 
@@ -3075,7 +3065,7 @@ class TestTransformExecutorTerminality:
         )
 
         token = _make_token()
-        ctx = _make_ctx()
+        ctx = make_context()
 
         # Monkey-patch stable_hash to fail on the second call (output hash)
         # First call is input_hash (succeeds), second is output_hash (fails)
@@ -3125,7 +3115,7 @@ class TestTransformExecutorTerminality:
         )
 
         token = _make_token()
-        ctx = _make_ctx()
+        ctx = make_context()
 
         # Make contract propagation fail
         recorder.update_node_output_contract.side_effect = RuntimeError("contract evolution failed")
@@ -3150,7 +3140,7 @@ class TestTransformExecutorTerminality:
             success_reason={"action": "tested"},
         )
         token = _make_token()
-        ctx = _make_ctx()
+        ctx = make_context()
 
         result, _updated_token, error_sink = executor.execute_transform(transform, token, ctx)
 
@@ -3217,7 +3207,7 @@ class TestAggregationExecutorTerminality:
             make_row({"value": "aggregated"}, contract=contract),
             success_reason={"action": "aggregated"},
         )
-        ctx = _make_ctx()
+        ctx = make_context()
 
         # Make output hash fail (simulating NaN in transform output)
         import elspeth.engine.executors.aggregation as agg_mod
@@ -3270,7 +3260,7 @@ class TestAggregationExecutorTerminality:
         transform.name = "agg_transform"
         # Transform crashes — inner except completes guard, then outer except cleans up
         transform.process.side_effect = RuntimeError("plugin crash")
-        ctx = _make_ctx()
+        ctx = make_context()
 
         # Make complete_batch fail (DB is down during cleanup)
         recorder.complete_batch.side_effect = RuntimeError("DB down")
@@ -3295,7 +3285,7 @@ class TestAggregationExecutorTerminality:
             make_row({"value": "aggregated"}, contract=contract),
             success_reason={"action": "aggregated"},
         )
-        ctx = _make_ctx()
+        ctx = make_context()
 
         result, tokens, _batch_id = executor.execute_flush(nid, transform, ctx, TriggerType.COUNT)
 
@@ -3339,7 +3329,7 @@ class TestSinkExecutorTerminality:
             _make_token(data={"value": "b"}, token_id="t2", contract=contract),
         ]
         sink = _make_sink()
-        ctx = _make_ctx()
+        ctx = make_context()
         pending = PendingOutcome(outcome=RowOutcome.COMPLETED)
 
         with pytest.raises(RuntimeError, match="DB connection lost"):
@@ -3373,7 +3363,7 @@ class TestSinkExecutorTerminality:
         executor = SinkExecutor(recorder, _make_span_factory(), run_id="test-run")
         token = _make_token()
         sink = _make_sink()
-        ctx = _make_ctx()
+        ctx = make_context()
         pending = PendingOutcome(outcome=RowOutcome.COMPLETED)
 
         with pytest.raises(RuntimeError, match="DB down from start"):
@@ -3409,7 +3399,7 @@ class TestSinkExecutorTerminality:
             _make_token(data={"value": "c"}, token_id="t3", contract=contract),
         ]
         sink = _make_sink()
-        ctx = _make_ctx()
+        ctx = make_context()
         pending = PendingOutcome(outcome=RowOutcome.COMPLETED)
 
         with pytest.raises(RuntimeError, match="out of IDs"):
@@ -3463,7 +3453,7 @@ class TestGateExecutorExecutionErrorFieldRename:
         )
         contract = _make_contract()
         token = _make_token(contract=contract)
-        ctx = _make_ctx()
+        ctx = make_context()
 
         # Trigger an expression evaluation error
         with pytest.raises(ExpressionEvaluationError):
@@ -3505,7 +3495,7 @@ class TestGateExecutorExecutionErrorFieldRename:
         )
         contract = _make_contract()
         token = _make_token(contract=contract)
-        ctx = _make_ctx()
+        ctx = make_context()
 
         # "None" is not in routes, so this raises ValueError
         with pytest.raises(ValueError, match="None"):

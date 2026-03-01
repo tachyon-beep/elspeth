@@ -30,7 +30,6 @@ from elspeth.contracts.enums import (
     TriggerType,
 )
 from elspeth.contracts.errors import MaxRetriesExceeded, OrchestrationInvariantError
-from elspeth.contracts.plugin_context import PluginContext
 from elspeth.contracts.results import GateResult
 from elspeth.contracts.routing import RoutingAction
 from elspeth.contracts.schema import SchemaConfig
@@ -50,6 +49,7 @@ from elspeth.engine.spans import SpanFactory
 from elspeth.plugins.infrastructure.clients.llm import LLMClientError
 from elspeth.plugins.infrastructure.pooling import CapacityError
 from elspeth.testing import make_contract, make_row, make_source_row, make_token_info
+from tests.fixtures.factories import make_context
 
 # =============================================================================
 # Helpers
@@ -277,7 +277,7 @@ class TestTraversalNextNodeInvariants:
         """Processing nodes must have explicit next-node entries (None for terminal)."""
         _db, recorder = _make_recorder()
         source_row = _make_source_row()
-        ctx = PluginContext(run_id="test-run", config={}, landscape=recorder)
+        ctx = make_context(landscape=recorder)
         transform = _make_mock_transform()
         source_node = NodeID("source-0")
         transform_node = NodeID(transform.node_id)
@@ -443,7 +443,7 @@ class TestProcessRowNoTransforms:
 
         processor = _make_processor(recorder)
         source_row = _make_source_row()
-        ctx = PluginContext(run_id="test-run", config={}, landscape=recorder)
+        ctx = make_context(landscape=recorder)
 
         results = processor.process_row(
             row_index=0,
@@ -463,7 +463,7 @@ class TestProcessRowNoTransforms:
 
         processor = _make_processor(recorder)
         source_row = _make_source_row()
-        ctx = PluginContext(run_id="test-run", config={}, landscape=recorder)
+        ctx = make_context(landscape=recorder)
 
         results = processor.process_row(
             row_index=0,
@@ -483,7 +483,7 @@ class TestProcessRowNoTransforms:
 
         processor = _make_processor(recorder)
         source_row = _make_source_row()
-        ctx = PluginContext(run_id="test-run", config={}, landscape=recorder)
+        ctx = make_context(landscape=recorder)
 
         processor.process_row(
             row_index=0,
@@ -533,7 +533,7 @@ class TestProcessRowSingleTransform:
         transform = _make_mock_transform()
         _db, recorder, processor = self._setup(transform)
         source_row = _make_source_row({"value": 10})
-        ctx = PluginContext(run_id="test-run", config={}, landscape=recorder)
+        ctx = make_context(landscape=recorder)
 
         output_data = make_row({"value": 10, "enriched": True})
         success_result = TransformResult.success(
@@ -566,7 +566,7 @@ class TestProcessRowSingleTransform:
         transform = _make_mock_transform(on_error="discard")
         _db, recorder, processor = self._setup(transform)
         source_row = _make_source_row()
-        ctx = PluginContext(run_id="test-run", config={}, landscape=recorder)
+        ctx = make_context(landscape=recorder)
 
         error_result = TransformResult.error(
             {"reason": "test_error"},
@@ -596,7 +596,7 @@ class TestProcessRowSingleTransform:
         transform = _make_mock_transform(on_error="errors")
         _db, recorder, processor = self._setup(transform)
         source_row = _make_source_row()
-        ctx = PluginContext(run_id="test-run", config={}, landscape=recorder)
+        ctx = make_context(landscape=recorder)
 
         error_result = TransformResult.error(
             {"reason": "test_error"},
@@ -627,7 +627,7 @@ class TestProcessRowSingleTransform:
         transform = _make_mock_transform()
         _db, recorder, processor = self._setup(transform)
         source_row = _make_source_row()
-        ctx = PluginContext(run_id="test-run", config={}, landscape=recorder)
+        ctx = make_context(landscape=recorder)
 
         with patch.object(
             processor._transform_executor,
@@ -703,7 +703,7 @@ class TestAggregationFailureMatrix:
         """Passthrough flush failure records FAILED terminal outcomes for buffered tokens."""
         _db, recorder, processor, transform, _agg_node = self._setup_batch_processor(output_mode="passthrough")
         source_row = _make_source_row({"value": 10})
-        ctx = PluginContext(run_id="test-run", config={}, landscape=recorder)
+        ctx = make_context(landscape=recorder)
         captured: dict[str, TokenInfo] = {}
 
         def buffer_row_side_effect(node_id: NodeID, token: TokenInfo) -> None:
@@ -748,7 +748,7 @@ class TestAggregationFailureMatrix:
         """
         _db, recorder, processor, transform, _agg_node = self._setup_batch_processor(output_mode="transform")
         source_row = _make_source_row({"value": 10})
-        ctx = PluginContext(run_id="test-run", config={}, landscape=recorder)
+        ctx = make_context(landscape=recorder)
         captured: dict[str, TokenInfo] = {}
 
         def buffer_row_side_effect(node_id: NodeID, token: TokenInfo) -> None:
@@ -786,7 +786,7 @@ class TestAggregationFailureMatrix:
         """Passthrough flush requires rows list; rows=None is an invariant violation."""
         _db, recorder, processor, transform, _agg_node = self._setup_batch_processor(output_mode="passthrough")
         source_row = _make_source_row({"value": 10})
-        ctx = PluginContext(run_id="test-run", config={}, landscape=recorder)
+        ctx = make_context(landscape=recorder)
         captured: dict[str, TokenInfo] = {}
 
         bad_result = Mock()
@@ -821,7 +821,7 @@ class TestAggregationFailureMatrix:
         """Passthrough flush must return one output row per buffered input token."""
         _db, recorder, processor, transform, _agg_node = self._setup_batch_processor(output_mode="passthrough")
         source_row = _make_source_row({"value": 10})
-        ctx = PluginContext(run_id="test-run", config={}, landscape=recorder)
+        ctx = make_context(landscape=recorder)
         captured: dict[str, TokenInfo] = {}
 
         mismatch_result = TransformResult.success_multi(
@@ -861,7 +861,7 @@ class TestAggregationFailureMatrix:
             output_mode="passthrough",
             node_to_next={NodeID("source-0"): agg_node, agg_node: downstream_node, downstream_node: None},
         )
-        ctx = PluginContext(run_id="test-run", config={}, landscape=recorder)
+        ctx = make_context(landscape=recorder)
 
         result = TransformResult.success_multi(
             [make_row({"value": 11}, contract=_make_contract())],
@@ -888,7 +888,7 @@ class TestAggregationFailureMatrix:
     def test_timeout_flush_passthrough_terminal_returns_completed(self) -> None:
         """Timeout flush returns terminal COMPLETED results when no downstream/coalesce exists."""
         _db, recorder, processor, transform, agg_node = self._setup_batch_processor(output_mode="passthrough")
-        ctx = PluginContext(run_id="test-run", config={}, landscape=recorder)
+        ctx = make_context(landscape=recorder)
 
         result = TransformResult.success_multi(
             [make_row({"value": 11}, contract=_make_contract())],
@@ -923,7 +923,7 @@ class TestAggregationFailureMatrix:
         """
         _db, recorder, processor, transform, _agg_node = self._setup_batch_processor(output_mode="transform")
         source_row = _make_source_row({"value": 10})
-        ctx = PluginContext(run_id="test-run", config={}, landscape=recorder)
+        ctx = make_context(landscape=recorder)
         captured: dict[str, TokenInfo] = {}
 
         # The triggering token is the only buffered token (count=1 trigger).
@@ -979,7 +979,7 @@ class TestAggregationFailureMatrix:
         """
         _db, recorder, processor, transform, _agg_node = self._setup_batch_processor(output_mode="transform")
         source_row = _make_source_row({"value": 10})
-        ctx = PluginContext(run_id="test-run", config={}, landscape=recorder)
+        ctx = make_context(landscape=recorder)
         captured: dict[str, TokenInfo] = {}
 
         # No quarantined_indices — all tokens are consumed normally.
@@ -1030,7 +1030,7 @@ class TestProcessRowGateBranching:
         """Config gate PROCESSING_NODE jumps should refresh inherited sink from jumped subchain."""
         _db, recorder = _make_recorder()
         source_row = _make_source_row({"value": 10})
-        ctx = PluginContext(run_id="test-run", config={}, landscape=recorder)
+        ctx = make_context(landscape=recorder)
 
         gate_node = NodeID("cfg-gate-1")
         expander_node = NodeID("expander-2")
@@ -1208,7 +1208,7 @@ class TestProcessRowGateBranching:
     def test_branch_to_sink_routing_applies_for_terminal_fork_children(self) -> None:
         """Branch-routed tokens bypassing coalesce should resolve sink via branch_to_sink."""
         _db, recorder = _make_recorder()
-        ctx = PluginContext(run_id="test-run", config={}, landscape=recorder)
+        ctx = make_context(landscape=recorder)
         token = TokenInfo(
             row_id="row-1",
             token_id="token-branch-1",
@@ -1246,7 +1246,7 @@ class TestProcessRowGateBranching:
         With fix: children get current_node_id=None, skip the loop, resolve via _branch_to_sink.
         """
         _db, recorder = _make_recorder()
-        ctx = PluginContext(run_id="test-run", config={}, landscape=recorder)
+        ctx = make_context(landscape=recorder)
 
         gate_node = NodeID("gate-1")
         transform_node = NodeID("transform-1")
@@ -1378,7 +1378,7 @@ class TestProcessRowMultiRowOutput:
         """Transform with creates_tokens=True returning multi-row → EXPANDED."""
         _db, recorder = _make_recorder()
         source_row = _make_source_row()
-        ctx = PluginContext(run_id="test-run", config={}, landscape=recorder)
+        ctx = make_context(landscape=recorder)
 
         contract = _make_contract()
         output_rows = [
@@ -1425,7 +1425,7 @@ class TestProcessRowMultiRowOutput:
         """Transform returning multi-row without creates_tokens=True → RuntimeError."""
         _db, recorder = _make_recorder()
         source_row = _make_source_row()
-        ctx = PluginContext(run_id="test-run", config={}, landscape=recorder)
+        ctx = make_context(landscape=recorder)
 
         contract = _make_contract()
         output_rows = [
@@ -1503,7 +1503,7 @@ class TestProcessExistingRow:
 
         contract = _make_contract()
         row_data = make_row({"value": 42}, contract=contract)
-        ctx = PluginContext(run_id="test-run", config={}, landscape=recorder)
+        ctx = make_context(landscape=recorder)
 
         # We need a pre-existing row. Create one via process_row first.
         source_row = _make_source_row({"value": 42})
@@ -1543,7 +1543,7 @@ class TestProcessToken:
         _db, recorder = _make_recorder()
 
         processor = _make_processor(recorder)
-        ctx = PluginContext(run_id="test-run", config={}, landscape=recorder)
+        ctx = make_context(landscape=recorder)
 
         # Create a token to process
         token = make_token_info(data={"value": 42})
@@ -1570,7 +1570,7 @@ class TestProcessToken:
             node_step_map={NodeID("coalesce::merge"): 1},
             node_to_next={NodeID("coalesce::merge"): None},
         )
-        ctx = PluginContext(run_id="test-run", config={}, landscape=recorder)
+        ctx = make_context(landscape=recorder)
         token = make_token_info(data={"value": 42})
 
         results = processor.process_token(
@@ -1601,7 +1601,7 @@ class TestProcessToken:
             first_transform_node_id=NodeID("transform-1"),
             node_to_plugin={NodeID("transform-1"): transform},
         )
-        ctx = PluginContext(run_id="test-run", config={}, landscape=recorder)
+        ctx = make_context(landscape=recorder)
         token = make_token_info(data={"value": 42})
 
         with patch.object(
@@ -1639,7 +1639,7 @@ class TestDrainWorkQueueIterationGuard:
         _db, recorder = _make_recorder()
 
         processor = _make_processor(recorder)
-        ctx = PluginContext(run_id="test-run", config={}, landscape=recorder)
+        ctx = make_context(landscape=recorder)
         token = make_token_info(data={"value": 1})
 
         # Mock _process_single_token to always produce more work
@@ -1680,7 +1680,7 @@ class TestExecuteTransformNoRetry:
         _, recorder, processor = self._setup()
         transform = _make_mock_transform()
         token = make_token_info(data={"value": 42})
-        ctx = PluginContext(run_id="test-run", config={}, landscape=recorder)
+        ctx = make_context(landscape=recorder)
         expected_result = TransformResult.success(
             make_row({"value": 42}),
             success_reason={"action": "test"},
@@ -1705,7 +1705,7 @@ class TestExecuteTransformNoRetry:
         _, _recorder, processor = self._setup()
         transform = _make_mock_transform(node_id="t1", on_error="discard")
         token = make_token_info(data={"value": 42})
-        ctx = PluginContext(run_id="test-run", config={}, landscape=Mock())
+        ctx = make_context()
 
         llm_error = LLMClientError("rate limited", retryable=True)
         with patch.object(
@@ -1732,7 +1732,7 @@ class TestExecuteTransformNoRetry:
         _, _recorder, processor = self._setup()
         transform = _make_mock_transform(node_id="t1", on_error="discard")
         token = make_token_info(data={"value": 42})
-        ctx = PluginContext(run_id="test-run", config={}, landscape=Mock())
+        ctx = make_context()
 
         llm_error = LLMClientError("rate limited", retryable=True)
         with patch.object(
@@ -1754,7 +1754,7 @@ class TestExecuteTransformNoRetry:
         _, _recorder, processor = self._setup()
         transform = _make_mock_transform(node_id="t1", on_error="discard")
         token = make_token_info(data={"value": 42})
-        ctx = PluginContext(run_id="test-run", config={}, landscape=Mock())
+        ctx = make_context()
 
         llm_error = LLMClientError("content policy", retryable=False)
         with (
@@ -1776,7 +1776,7 @@ class TestExecuteTransformNoRetry:
         _, _recorder, processor = self._setup()
         transform = _make_mock_transform(node_id="t1", on_error="discard")
         token = make_token_info(data={"value": 42})
-        ctx = PluginContext(run_id="test-run", config={}, landscape=Mock())
+        ctx = make_context()
 
         with patch.object(
             processor._transform_executor,
@@ -1797,7 +1797,7 @@ class TestExecuteTransformNoRetry:
         _, _recorder, processor = self._setup()
         transform = _make_mock_transform(node_id="t1", on_error="discard")
         token = make_token_info(data={"value": 42})
-        ctx = PluginContext(run_id="test-run", config={}, landscape=Mock())
+        ctx = make_context()
 
         with patch.object(
             processor._transform_executor,
@@ -1818,7 +1818,7 @@ class TestExecuteTransformNoRetry:
         _, _recorder, processor = self._setup()
         transform = _make_mock_transform(node_id="t1", on_error="discard")
         token = make_token_info(data={"value": 42})
-        ctx = PluginContext(run_id="test-run", config={}, landscape=Mock())
+        ctx = make_context()
 
         with patch.object(
             processor._transform_executor,
@@ -1845,7 +1845,7 @@ class TestExecuteTransformNoRetry:
         _, _recorder, processor = self._setup()
         transform = _make_mock_transform(node_id="t1", on_error="discard")
         token = make_token_info(data={"value": 42})
-        ctx = PluginContext(run_id="test-run", config={}, landscape=Mock())
+        ctx = make_context()
 
         with patch.object(
             processor._transform_executor,
@@ -1869,8 +1869,7 @@ class TestExecuteTransformNoRetry:
 
         transform = _make_mock_transform(node_id="t1", on_error="error-sink")
         token = make_token_info(data={"value": 42})
-        ctx = PluginContext(run_id="test-run", config={}, landscape=Mock())
-        ctx.state_id = "state-123"
+        ctx = make_context(state_id="state-123")
 
         llm_error = LLMClientError("rate limited", retryable=True)
         # Mock record_routing_event since we don't have a real state_id in DB
@@ -1895,8 +1894,7 @@ class TestExecuteTransformNoRetry:
 
         transform = _make_mock_transform(node_id="t1", on_error="error-sink")
         token = make_token_info(data={"value": 42})
-        ctx = PluginContext(run_id="test-run", config={}, landscape=Mock())
-        ctx.state_id = "state-123"
+        ctx = make_context(state_id="state-123")
 
         llm_error = LLMClientError("rate limited", retryable=True)
         with (
@@ -1938,7 +1936,7 @@ class TestExecuteTransformWithRetry:
 
         transform = _make_mock_transform()
         token = make_token_info(data={"value": 42})
-        ctx = PluginContext(run_id="test-run", config={}, landscape=recorder)
+        ctx = make_context(landscape=recorder)
 
         result = processor._execute_transform_with_retry(
             transform=transform,
@@ -1965,7 +1963,7 @@ class TestExecuteTransformWithRetry:
 
         transform = _make_mock_transform()
         token = make_token_info()
-        ctx = PluginContext(run_id="test-run", config={}, landscape=recorder)
+        ctx = make_context(landscape=recorder)
 
         processor._execute_transform_with_retry(
             transform=transform,
@@ -2492,7 +2490,7 @@ class TestUnknownTransformType:
         """Transform that is neither TransformProtocol nor GateSettings raises TypeError."""
         _db, recorder = _make_recorder()
         source_row = _make_source_row()
-        ctx = PluginContext(run_id="test-run", config={}, landscape=recorder)
+        ctx = make_context(landscape=recorder)
 
         # Create an object that is NOT a transform or gate
         class FakePlugin:
@@ -2525,7 +2523,7 @@ class TestRoutingInvariantFailures:
         """Config gate branch must fail closed when CONTINUE invariants are violated."""
         _db, recorder = _make_recorder()
         source_row = _make_source_row({"value": 10})
-        ctx = PluginContext(run_id="test-run", config={}, landscape=recorder)
+        ctx = make_context(landscape=recorder)
 
         source_node = NodeID("source-0")
         gate_node = NodeID("cfg-gate-1")
@@ -2571,7 +2569,7 @@ class TestRoutingInvariantFailures:
         """Terminal completion must not fall back when no sink can be resolved."""
         _db, recorder = _make_recorder()
         source_row = _make_source_row({"value": 10})
-        ctx = PluginContext(run_id="test-run", config={}, landscape=recorder)
+        ctx = make_context(landscape=recorder)
 
         processor = _make_processor(
             recorder,
@@ -2698,7 +2696,7 @@ class TestTerminalDeaggregationSinkRouting:
         """Children of a terminal multi-row transform must route to transform's on_success."""
         _db, recorder = _make_recorder()
         source_row = _make_source_row()
-        ctx = PluginContext(run_id="test-run", config={}, landscape=recorder)
+        ctx = make_context(landscape=recorder)
 
         contract = _make_contract()
         output_rows = [
@@ -2759,7 +2757,7 @@ class TestTerminalDeaggregationSinkRouting:
         """Mid-chain multi-row expansion: children continue to downstream transforms."""
         _db, recorder = _make_recorder()
         source_row = _make_source_row()
-        ctx = PluginContext(run_id="test-run", config={}, landscape=recorder)
+        ctx = make_context(landscape=recorder)
 
         contract = _make_contract()
         output_rows = [
@@ -2842,7 +2840,7 @@ class TestCoalesceTraversalInvariant:
     def test_work_item_downstream_of_coalesce_raises_invariant_error(self) -> None:
         """A work item starting past the coalesce node must raise OrchestrationInvariantError."""
         _db, recorder = _make_recorder()
-        ctx = PluginContext(run_id="test-run", config={}, landscape=recorder)
+        ctx = make_context(landscape=recorder)
 
         # Build DAG: source → transform → coalesce → downstream
         source_node = NodeID("source-0")
@@ -2915,7 +2913,7 @@ class TestCoalesceTraversalInvariant:
     def test_work_item_at_coalesce_does_not_raise(self) -> None:
         """A work item starting exactly at the coalesce node should not raise."""
         _db, recorder = _make_recorder()
-        ctx = PluginContext(run_id="test-run", config={}, landscape=recorder)
+        ctx = make_context(landscape=recorder)
 
         source_node = NodeID("source-0")
         coalesce_node = NodeID("coalesce-1")
@@ -2966,7 +2964,7 @@ class TestTerminalWorkItemInvariant:
     def test_none_current_node_without_sink_context_raises(self) -> None:
         """None current_node_id must not default to source_on_success silently."""
         _db, recorder = _make_recorder()
-        ctx = PluginContext(run_id="test-run", config={}, landscape=recorder)
+        ctx = make_context(landscape=recorder)
         processor = _make_processor(recorder, source_on_success="source_sink")
         token = make_token_info(data={"value": 1})
 
@@ -2980,7 +2978,7 @@ class TestTerminalWorkItemInvariant:
     def test_none_current_node_with_inherited_sink_is_allowed(self) -> None:
         """Explicit on_success_sink context allows terminal completion with None node."""
         _db, recorder = _make_recorder()
-        ctx = PluginContext(run_id="test-run", config={}, landscape=recorder)
+        ctx = make_context(landscape=recorder)
         processor = _make_processor(recorder, source_on_success="source_sink")
         token = make_token_info(data={"value": 1})
 
@@ -3015,7 +3013,7 @@ class TestGateSinkRoutingNotifiesCoalesce:
         After fix: coalesce is notified with reason 'gate_routed_to_sink:<sink_name>'.
         """
         _db, recorder = _make_recorder()
-        ctx = PluginContext(run_id="test-run", config={}, landscape=recorder)
+        ctx = make_context(landscape=recorder)
 
         source_node = NodeID("source-0")
         gate_node = NodeID("gate-1")
@@ -3106,7 +3104,7 @@ class TestGateSinkRoutingNotifiesCoalesce:
     def test_gate_sink_route_with_coalesce_failure_returns_sibling_results(self) -> None:
         """Gate sink routing that triggers coalesce failure returns sibling FAILED results."""
         _db, recorder = _make_recorder()
-        ctx = PluginContext(run_id="test-run", config={}, landscape=recorder)
+        ctx = make_context(landscape=recorder)
 
         source_node = NodeID("source-0")
         gate_node = NodeID("gate-1")
@@ -3193,7 +3191,7 @@ class TestGateSinkRoutingNotifiesCoalesce:
     def test_gate_sink_route_without_branch_skips_coalesce(self) -> None:
         """Gate sink routing a non-fork token does not attempt coalesce notification."""
         _db, recorder = _make_recorder()
-        ctx = PluginContext(run_id="test-run", config={}, landscape=recorder)
+        ctx = make_context(landscape=recorder)
 
         source_node = NodeID("source-0")
         gate_node = NodeID("gate-1")
@@ -3288,7 +3286,7 @@ class TestGateJumpPastCoalesceInvariant:
         This must raise because the token would never hit the coalesce barrier.
         """
         _db, recorder = _make_recorder()
-        ctx = PluginContext(run_id="test-run", config={}, landscape=recorder)
+        ctx = make_context(landscape=recorder)
 
         source_node = NodeID("source-0")
         gate_node = NodeID("gate-1")
@@ -3381,7 +3379,7 @@ class TestGateJumpPastCoalesceInvariant:
         This is fine — the token still has to pass through the coalesce.
         """
         _db, recorder = _make_recorder()
-        ctx = PluginContext(run_id="test-run", config={}, landscape=recorder)
+        ctx = make_context(landscape=recorder)
 
         source_node = NodeID("source-0")
         gate_node = NodeID("gate-1")

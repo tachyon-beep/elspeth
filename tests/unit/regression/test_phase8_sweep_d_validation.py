@@ -11,11 +11,11 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from elspeth.contracts.plugin_context import PluginContext
 from elspeth.contracts.schema_contract import SchemaContract
 from elspeth.core.landscape.database import LandscapeDB
 from elspeth.core.landscape.recorder import LandscapeRecorder
 from elspeth.testing import make_field, make_row
+from tests.fixtures.factories import make_context
 
 DYNAMIC_SCHEMA = {"mode": "observed"}
 
@@ -99,7 +99,7 @@ class TestBatchStatsAggregateOverwrite:
         transform = BatchStats({"schema": DYNAMIC_SCHEMA, "value_field": "amount", "group_by": "count"})
         db = LandscapeDB.in_memory()
         recorder = LandscapeRecorder(db)
-        ctx = PluginContext(run_id="test", config={}, landscape=recorder)
+        ctx = make_context(run_id="test", landscape=recorder)
         rows = [_make_row({"amount": 10, "count": "group_a"})]
 
         with pytest.raises(ValueError, match="collides with aggregate output key"):
@@ -112,7 +112,7 @@ class TestBatchStatsAggregateOverwrite:
         transform = BatchStats({"schema": DYNAMIC_SCHEMA, "value_field": "amount", "group_by": "category"})
         db = LandscapeDB.in_memory()
         recorder = LandscapeRecorder(db)
-        ctx = PluginContext(run_id="test", config={}, landscape=recorder)
+        ctx = make_context(run_id="test", landscape=recorder)
         rows = [_make_row({"amount": 10, "category": "A"})]
         result = transform.process(rows, ctx)
         assert result.status == "success"
@@ -142,7 +142,7 @@ class TestBatchReplicateMaxCopies:
         transform = BatchReplicate({"schema": DYNAMIC_SCHEMA, "max_copies": 5})
         db = LandscapeDB.in_memory()
         recorder = LandscapeRecorder(db)
-        ctx = PluginContext(run_id="test", config={}, landscape=recorder)
+        ctx = make_context(run_id="test", landscape=recorder)
         # Single row exceeding max_copies — all rows quarantined → error result
         rows = [_make_row({"copies": 10, "data": "value"})]
         result = transform.process(rows, ctx)
@@ -289,7 +289,7 @@ class TestBoolExcludedFromInt:
         transform = BatchStats({"schema": DYNAMIC_SCHEMA, "value_field": "flag"})
         db = LandscapeDB.in_memory()
         recorder = LandscapeRecorder(db)
-        ctx = PluginContext(run_id="test", config={}, landscape=recorder)
+        ctx = make_context(run_id="test", landscape=recorder)
         rows = [_make_row({"flag": True})]
 
         with pytest.raises(TypeError, match="must be numeric"):
@@ -302,7 +302,7 @@ class TestBoolExcludedFromInt:
         transform = BatchStats({"schema": DYNAMIC_SCHEMA, "value_field": "amount"})
         db = LandscapeDB.in_memory()
         recorder = LandscapeRecorder(db)
-        ctx = PluginContext(run_id="test", config={}, landscape=recorder)
+        ctx = make_context(run_id="test", landscape=recorder)
         rows = [_make_row({"amount": 42})]
         result = transform.process(rows, ctx)
         assert result.status == "success"

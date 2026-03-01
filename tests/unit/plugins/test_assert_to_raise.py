@@ -26,6 +26,7 @@ import pytest
 
 from elspeth.core.landscape.database import LandscapeDB
 from elspeth.core.landscape.recorder import LandscapeRecorder
+from tests.fixtures.factories import make_context
 
 # ---------------------------------------------------------------------------
 # Shared config helpers
@@ -162,7 +163,6 @@ class TestAssertToRaiseConversions:
         import tempfile
         from pathlib import Path
 
-        from elspeth.contracts.plugin_context import PluginContext
         from elspeth.plugins.sinks.csv_sink import CSVSink
 
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -175,7 +175,7 @@ class TestAssertToRaiseConversions:
             )
             db = LandscapeDB.in_memory()
             recorder = LandscapeRecorder(db)
-            ctx = PluginContext(run_id="test-run", config={}, landscape=recorder)
+            ctx = make_context(run_id="test-run", landscape=recorder)
 
             # Patch _open_file so it opens _file but leaves _writer as None.
             # This simulates partial initialisation — the exact state the guard
@@ -213,7 +213,6 @@ class TestAssertToRaiseConversions:
         import tempfile
         from pathlib import Path
 
-        from elspeth.contracts.plugin_context import PluginContext
         from elspeth.plugins.sinks.csv_sink import CSVSink
 
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -226,7 +225,7 @@ class TestAssertToRaiseConversions:
             )
             db = LandscapeDB.in_memory()
             recorder = LandscapeRecorder(db)
-            ctx = PluginContext(run_id="test-run", config={}, landscape=recorder)
+            ctx = make_context(run_id="test-run", landscape=recorder)
 
             mock_writer = MagicMock()
 

@@ -25,10 +25,10 @@ from elspeth.contracts.token_usage import TokenUsage
 from elspeth.plugins.infrastructure.batching.ports import CollectorOutputPort
 from elspeth.plugins.transforms.llm.transform import LLMTransform
 from elspeth.testing import make_pipeline_row
+from tests.fixtures.factories import make_context
 
 from .conftest import (
     chaosllm_azure_openai_sequence,
-    make_plugin_context,
     make_token,
 )
 
@@ -118,7 +118,7 @@ class TestLoadScenarios:
             config = _make_config()
 
             transform = LLMTransform(config)
-            init_ctx = make_plugin_context()
+            init_ctx = make_context()
             transform.on_start(init_ctx)
 
             collector = CollectorOutputPort()
@@ -133,7 +133,7 @@ class TestLoadScenarios:
                         "cs2_bg": f"patient_{i}_cs2_bg",
                     }
                     token = make_token(f"row-{i}")
-                    ctx = make_plugin_context(state_id=f"batch-load-{i}", token=token)
+                    ctx = make_context(state_id=f"batch-load-{i}", token=token)
                     transform.accept(make_pipeline_row(row), ctx)
 
                 transform.flush_batch_processing(timeout=60.0)
@@ -193,7 +193,7 @@ class TestLoadScenarios:
             config = _make_config()
 
             transform = LLMTransform(config)
-            init_ctx = make_plugin_context()
+            init_ctx = make_context()
             transform.on_start(init_ctx)
 
             collector = CollectorOutputPort()
@@ -208,7 +208,7 @@ class TestLoadScenarios:
                         "cs2_bg": f"data_{i}",
                     }
                     token = make_token(f"row-{i}")
-                    ctx = make_plugin_context(state_id=f"state-{i}", token=token)
+                    ctx = make_context(state_id=f"state-{i}", token=token)
                     transform.accept(make_pipeline_row(row), ctx)
 
                 transform.flush_batch_processing(timeout=30.0)
@@ -260,7 +260,7 @@ class TestLoadScenarios:
             config = _make_config()
 
             transform = LLMTransform(config)
-            init_ctx = make_plugin_context()
+            init_ctx = make_context()
             transform.on_start(init_ctx)
 
             collector = CollectorOutputPort()
@@ -277,7 +277,7 @@ class TestLoadScenarios:
                         "cs2_bg": f"data_{i}",
                     }
                     token = make_token(f"row-{i}")
-                    ctx = make_plugin_context(state_id=f"batch-mem-{i}", token=token)
+                    ctx = make_context(state_id=f"batch-mem-{i}", token=token)
                     transform.accept(make_pipeline_row(row), ctx)
 
                 transform.flush_batch_processing(timeout=60.0)
@@ -311,7 +311,7 @@ class TestLoadScenarios:
         config = _make_config()
 
         transform = LLMTransform(config)
-        init_ctx = make_plugin_context()
+        init_ctx = make_context()
         transform.on_start(init_ctx)
 
         collector = CollectorOutputPort()
@@ -350,7 +350,7 @@ class TestLoadScenarios:
                 "cs2_bg": "data",
             }
             token = make_token("row-rate-limit")
-            ctx = make_plugin_context(state_id="rate-limit-test", token=token)
+            ctx = make_context(state_id="rate-limit-test", token=token)
             transform.accept(make_pipeline_row(row), ctx)
             transform.flush_batch_processing(timeout=10.0)
 
@@ -383,7 +383,7 @@ class TestLoadScenarios:
             config = _make_config()
 
             transform = LLMTransform(config)
-            init_ctx = make_plugin_context()
+            init_ctx = make_context()
             transform.on_start(init_ctx)
 
             collector = CollectorOutputPort()
@@ -401,7 +401,7 @@ class TestLoadScenarios:
                     }
                     token = make_token(f"row-{i}")
                     # Use same state_id to test client caching per state
-                    ctx = make_plugin_context(state_id="shared-state", token=token)
+                    ctx = make_context(state_id="shared-state", token=token)
                     transform.accept(make_pipeline_row(row), ctx)
 
                 transform.flush_batch_processing(timeout=10.0)
@@ -439,7 +439,7 @@ class TestRowAtomicity:
         config = _make_config()
 
         transform = LLMTransform(config)
-        init_ctx = make_plugin_context()
+        init_ctx = make_context()
         transform.on_start(init_ctx)
 
         collector = CollectorOutputPort()
@@ -481,7 +481,7 @@ class TestRowAtomicity:
                     "cs2_bg": f"data_{i}",
                 }
                 token = make_token(f"row-{i}")
-                ctx = make_plugin_context(state_id=f"atomicity-{i}", token=token)
+                ctx = make_context(state_id=f"atomicity-{i}", token=token)
                 transform.accept(make_pipeline_row(row), ctx)
 
             transform.flush_batch_processing(timeout=30.0)
@@ -540,7 +540,7 @@ class TestRowAtomicity:
         config = _make_config()
 
         transform = LLMTransform(config)
-        init_ctx = make_plugin_context()
+        init_ctx = make_context()
         transform.on_start(init_ctx)
 
         collector = CollectorOutputPort()
@@ -583,7 +583,7 @@ class TestRowAtomicity:
                     "cs2_bg": f"data_{i}",
                 }
                 token = make_token(f"row-{i}")
-                ctx = make_plugin_context(state_id=f"high-failure-{i}", token=token)
+                ctx = make_context(state_id=f"high-failure-{i}", token=token)
                 transform.accept(make_pipeline_row(row), ctx)
 
             transform.flush_batch_processing(timeout=30.0)
@@ -638,7 +638,7 @@ class TestRowAtomicity:
         config = _make_config()
 
         transform = LLMTransform(config)
-        init_ctx = make_plugin_context()
+        init_ctx = make_context()
         transform.on_start(init_ctx)
 
         collector = CollectorOutputPort()
@@ -681,7 +681,7 @@ class TestRowAtomicity:
                     "cs2_bg": f"data_{i}",
                 }
                 token = make_token(f"row-{i}")
-                ctx = make_plugin_context(state_id=f"concurrent-{i}", token=token)
+                ctx = make_context(state_id=f"concurrent-{i}", token=token)
                 transform.accept(make_pipeline_row(row), ctx)
 
             transform.flush_batch_processing(timeout=30.0)
@@ -743,7 +743,7 @@ class TestProfilingInstrumentation:
             config = _make_config()
 
             transform = LLMTransform(config)
-            init_ctx = make_plugin_context()
+            init_ctx = make_context()
             transform.on_start(init_ctx)
 
             collector = CollectorOutputPort()
@@ -757,7 +757,7 @@ class TestProfilingInstrumentation:
                         "cs2_bg": f"data_{i}",
                     }
                     token = make_token(f"row-{i}")
-                    ctx = make_plugin_context(state_id=f"timing-{i}", token=token)
+                    ctx = make_context(state_id=f"timing-{i}", token=token)
                     transform.accept(make_pipeline_row(row), ctx)
 
                 transform.flush_batch_processing(timeout=30.0)
@@ -800,7 +800,7 @@ class TestProfilingInstrumentation:
             config = _make_config()
 
             transform = LLMTransform(config)
-            init_ctx = make_plugin_context()
+            init_ctx = make_context()
             transform.on_start(init_ctx)
 
             collector = CollectorOutputPort()
@@ -816,7 +816,7 @@ class TestProfilingInstrumentation:
                         "cs2_bg": f"data_{i}",
                     }
                     token = make_token(f"row-{i}")
-                    ctx = make_plugin_context(state_id=f"overhead-{i}", token=token)
+                    ctx = make_context(state_id=f"overhead-{i}", token=token)
                     transform.accept(make_pipeline_row(row), ctx)
 
                 transform.flush_batch_processing(timeout=30.0)

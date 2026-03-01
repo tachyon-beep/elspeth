@@ -20,9 +20,9 @@ from elspeth.plugins.infrastructure.batching.ports import CollectorOutputPort
 from elspeth.plugins.transforms.llm.provider import FinishReason, LLMQueryResult
 from elspeth.plugins.transforms.llm.transform import LLMTransform
 from elspeth.testing import make_pipeline_row
+from tests.fixtures.factories import make_context
 
 from .conftest import (
-    make_plugin_context,
     make_token,
 )
 
@@ -201,7 +201,7 @@ class TestLLMTransformMultiQueryInit:
     def test_process_raises_not_implemented(self) -> None:
         """process() raises NotImplementedError directing to accept()."""
         transform = LLMTransform(_make_config())
-        ctx = make_plugin_context()
+        ctx = make_context()
 
         with pytest.raises(NotImplementedError, match="accept"):
             transform.process(make_pipeline_row({"text": "hello"}), ctx)
@@ -240,7 +240,7 @@ class TestSingleQueryProcessing:
                 "cs2_hist": "data",
             }
         )
-        ctx = make_plugin_context()
+        ctx = make_context()
         result = transform._process_row(row, ctx)
 
         assert result.status == "success"
@@ -272,7 +272,7 @@ class TestSingleQueryProcessing:
                 "cs2_hist": "data",
             }
         )
-        ctx = make_plugin_context()
+        ctx = make_context()
         result = transform._process_row(row, ctx)
 
         assert result.status == "success"
@@ -296,7 +296,7 @@ class TestSingleQueryProcessing:
                 "cs2_hist": "data",
             }
         )
-        ctx = make_plugin_context()
+        ctx = make_context()
         result = transform._process_row(row, ctx)
 
         assert result.status == "error"
@@ -323,7 +323,7 @@ class TestSingleQueryProcessing:
                 "cs2_hist": "data",
             }
         )
-        ctx = make_plugin_context()
+        ctx = make_context()
 
         # Mock the template on the strategy to raise TemplateError
         with mock_patch.object(
@@ -376,9 +376,8 @@ class TestRowProcessingWithPipelining:
     def ctx(self, mock_recorder: Mock) -> PluginContext:
         """Create plugin context with landscape, state_id, and token."""
         token = make_token("row-1")
-        return PluginContext(
+        return make_context(
             run_id="run-123",
-            config={},
             landscape=mock_recorder,
             state_id="state-123",
             token=token,
@@ -393,7 +392,7 @@ class TestRowProcessingWithPipelining:
         """Create and initialize LLMTransform with multi-query and pipelining."""
         t = LLMTransform(_make_config())
         # Initialize with recorder reference
-        init_ctx = PluginContext(run_id="test", config={}, landscape=mock_recorder)
+        init_ctx = make_context(run_id="test", landscape=mock_recorder)
         t.on_start(init_ctx)
         # Replace provider with mock
         t._provider = _make_mock_provider()
@@ -506,7 +505,7 @@ class TestRowProcessingWithPipelining:
             },
         )
         transform = LLMTransform(config)
-        init_ctx = PluginContext(run_id="test", config={}, landscape=mock_recorder)
+        init_ctx = make_context(run_id="test", landscape=mock_recorder)
         transform.on_start(init_ctx)
         transform._provider = _make_mock_provider([{"score": 85, "rationale": "Looks consistent"}])
         transform.connect_output(collector, max_pending=10)
@@ -599,9 +598,8 @@ class TestRowProcessingWithPipelining:
         transform = LLMTransform(_make_config())
 
         token = make_token("row-1")
-        ctx = PluginContext(
+        ctx = make_context(
             run_id="test-run",
-            config={},
             state_id="test-state-id",
             token=token,
         )
@@ -616,7 +614,7 @@ class TestRowProcessingWithPipelining:
     ) -> None:
         """connect_output() raises if called more than once."""
         transform = LLMTransform(_make_config())
-        init_ctx = PluginContext(run_id="test", config={}, landscape=mock_recorder)
+        init_ctx = make_context(run_id="test", landscape=mock_recorder)
         transform.on_start(init_ctx)
         transform.connect_output(collector, max_pending=10)
 
@@ -654,7 +652,7 @@ class TestMultiRowPipelining:
         config = _make_config()
 
         transform = LLMTransform(config)
-        init_ctx = PluginContext(run_id="test", config={}, landscape=mock_recorder)
+        init_ctx = make_context(run_id="test", landscape=mock_recorder)
         transform.on_start(init_ctx)
         transform._provider = _make_mock_provider()
         transform.connect_output(collector, max_pending=10)
@@ -671,9 +669,8 @@ class TestMultiRowPipelining:
                     "cs2_hist": f"r{i}",
                 }
                 token = make_token(f"row-{i}")
-                ctx = PluginContext(
+                ctx = make_context(
                     run_id="run-123",
-                    config={},
                     landscape=mock_recorder,
                     state_id=f"state-{i}",
                     token=token,
@@ -699,9 +696,8 @@ class TestMultiRowPipelining:
         # Verify _recorder starts as None
         assert transform._recorder is None
 
-        ctx = PluginContext(
+        ctx = make_context(
             run_id="test-run",
-            config={},
             landscape=mock_recorder,
             state_id="test-state-id",
         )
@@ -717,7 +713,7 @@ class TestMultiRowPipelining:
     ) -> None:
         """close() clears recorder reference and provider."""
         transform = LLMTransform(_make_config())
-        init_ctx = PluginContext(run_id="test", config={}, landscape=mock_recorder)
+        init_ctx = make_context(run_id="test", landscape=mock_recorder)
         transform.on_start(init_ctx)
         transform._provider = _make_mock_provider()
         transform.connect_output(collector, max_pending=10)
@@ -758,7 +754,7 @@ class TestMultiQueryWithMockProvider:
         """
         config = _make_config(pool_size=4)
         transform = LLMTransform(config)
-        init_ctx = PluginContext(run_id="test", config={}, landscape=mock_recorder)
+        init_ctx = make_context(run_id="test", landscape=mock_recorder)
         transform.on_start(init_ctx)
         transform._provider = _make_mock_provider([{"score": i, "rationale": f"R{i}"} for i in range(4)])
         transform.connect_output(collector, max_pending=10)
@@ -773,9 +769,8 @@ class TestMultiQueryWithMockProvider:
                 "cs2_hist": "hist2",
             }
             token = make_token("row-1")
-            ctx = PluginContext(
+            ctx = make_context(
                 run_id="run-123",
-                config={},
                 landscape=mock_recorder,
                 state_id="state-pool-001",
                 token=token,
@@ -804,7 +799,7 @@ class TestMultiQueryWithMockProvider:
         del config["pool_size"]
 
         transform = LLMTransform(config)
-        init_ctx = PluginContext(run_id="test", config={}, landscape=mock_recorder)
+        init_ctx = make_context(run_id="test", landscape=mock_recorder)
         transform.on_start(init_ctx)
         transform._provider = _make_mock_provider([{"score": i, "rationale": f"R{i}"} for i in range(4)])
         transform.connect_output(collector, max_pending=10)
@@ -819,9 +814,8 @@ class TestMultiQueryWithMockProvider:
                 "cs2_hist": "r1",
             }
             token = make_token("row-1")
-            ctx = PluginContext(
+            ctx = make_context(
                 run_id="run-123",
-                config={},
                 landscape=mock_recorder,
                 state_id="batch-seq-001",
                 token=token,
@@ -855,7 +849,7 @@ class TestBug4_1_KeyErrorInBuildTemplateContext:
 
         # Row is missing cs1_bg, cs1_sym, cs1_hist — required by first query
         row = make_pipeline_row({"cs2_bg": "bg", "cs2_sym": "sym", "cs2_hist": "hist"})
-        ctx = make_plugin_context()
+        ctx = make_context()
 
         result = transform._process_row(row, ctx)
 

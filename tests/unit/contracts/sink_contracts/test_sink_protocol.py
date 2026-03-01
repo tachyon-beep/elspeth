@@ -40,6 +40,7 @@ import pytest
 
 from elspeth.contracts import ArtifactDescriptor, Determinism, PluginSchema
 from elspeth.contracts.plugin_context import PluginContext
+from tests.fixtures.factories import make_context
 
 if TYPE_CHECKING:
     from elspeth.contracts import SinkProtocol
@@ -74,11 +75,7 @@ class SinkContractTestBase(ABC):
     @pytest.fixture
     def ctx(self) -> PluginContext:
         """Provide a PluginContext for testing."""
-        return PluginContext(
-            run_id="test-run-001",
-            config={},
-            node_id="test-sink",
-        )
+        return make_context(run_id="test-run-001", node_id="test-sink")
 
     # =========================================================================
     # Protocol Attribute Contracts

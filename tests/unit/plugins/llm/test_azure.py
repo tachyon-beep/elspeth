@@ -18,6 +18,7 @@ from elspeth.plugins.infrastructure.config_base import PluginConfigError
 from elspeth.plugins.transforms.llm.providers.azure import AzureOpenAIConfig
 from elspeth.plugins.transforms.llm.transform import LLMTransform
 from elspeth.testing import make_pipeline_row
+from tests.fixtures.factories import make_context
 
 from .conftest import chaosllm_azure_openai_client
 
@@ -282,20 +283,14 @@ class TestLLMTransformAzurePipelining:
     def ctx(self, mock_recorder: Mock) -> PluginContext:
         """Create plugin context with landscape, state_id, and token."""
         token = make_token("row-1")
-        return PluginContext(
-            run_id="test-run",
-            config={},
-            landscape=mock_recorder,
-            state_id="test-state-id",
-            token=token,
-        )
+        return make_context(state_id="test-state-id", token=token, landscape=mock_recorder)
 
     @pytest.fixture
     def transform(self, collector: CollectorOutputPort, mock_recorder: Mock) -> Generator[LLMTransform, None, None]:
         """Create and initialize LLMTransform with Azure provider and pipelining."""
         t = LLMTransform(_make_azure_config(template="Analyze: {{ row.text }}"))
         # Initialize with recorder reference
-        init_ctx = PluginContext(run_id="test", config={}, landscape=mock_recorder)
+        init_ctx = make_context(run_id="test", landscape=mock_recorder)
         t.on_start(init_ctx)
         # Connect output port
         t.connect_output(collector, max_pending=10)
@@ -486,18 +481,12 @@ class TestLLMTransformAzurePipelining:
                 system_prompt="You are a helpful assistant.",
             )
         )
-        init_ctx = PluginContext(run_id="test", config={}, landscape=mock_recorder)
+        init_ctx = make_context(run_id="test", landscape=mock_recorder)
         transform.on_start(init_ctx)
         transform.connect_output(collector, max_pending=10)
 
         token = make_token("row-1")
-        ctx = PluginContext(
-            run_id="test-run",
-            config={},
-            landscape=mock_recorder,
-            state_id="test-state-id",
-            token=token,
-        )
+        ctx = make_context(state_id="test-state-id", token=token, landscape=mock_recorder)
 
         try:
             with chaosllm_azure_openai_client(chaosllm_server) as mock_client:
@@ -528,18 +517,12 @@ class TestLLMTransformAzurePipelining:
                 max_tokens=500,
             )
         )
-        init_ctx = PluginContext(run_id="test", config={}, landscape=mock_recorder)
+        init_ctx = make_context(run_id="test", landscape=mock_recorder)
         transform.on_start(init_ctx)
         transform.connect_output(collector, max_pending=10)
 
         token = make_token("row-1")
-        ctx = PluginContext(
-            run_id="test-run",
-            config={},
-            landscape=mock_recorder,
-            state_id="test-state-id",
-            token=token,
-        )
+        ctx = make_context(state_id="test-state-id", token=token, landscape=mock_recorder)
 
         try:
             with chaosllm_azure_openai_client(chaosllm_server) as mock_client:
@@ -566,18 +549,12 @@ class TestLLMTransformAzurePipelining:
                 response_field="analysis",
             )
         )
-        init_ctx = PluginContext(run_id="test", config={}, landscape=mock_recorder)
+        init_ctx = make_context(run_id="test", landscape=mock_recorder)
         transform.on_start(init_ctx)
         transform.connect_output(collector, max_pending=10)
 
         token = make_token("row-1")
-        ctx = PluginContext(
-            run_id="test-run",
-            config={},
-            landscape=mock_recorder,
-            state_id="test-state-id",
-            token=token,
-        )
+        ctx = make_context(state_id="test-state-id", token=token, landscape=mock_recorder)
 
         try:
             with chaosllm_azure_openai_client(
@@ -623,7 +600,7 @@ class TestLLMTransformAzurePipelining:
     def test_connect_output_cannot_be_called_twice(self, collector: CollectorOutputPort, mock_recorder: Mock) -> None:
         """connect_output() raises if called more than once."""
         transform = LLMTransform(_make_azure_config(template="{{ row.text }}"))
-        init_ctx = PluginContext(run_id="test", config={}, landscape=mock_recorder)
+        init_ctx = make_context(run_id="test", landscape=mock_recorder)
         transform.on_start(init_ctx)
         transform.connect_output(collector, max_pending=10)
 
@@ -704,18 +681,12 @@ class TestLLMTransformAzureIntegration:
                 """,
             )
         )
-        init_ctx = PluginContext(run_id="test", config={}, landscape=mock_recorder)
+        init_ctx = make_context(run_id="test", landscape=mock_recorder)
         transform.on_start(init_ctx)
         transform.connect_output(collector, max_pending=10)
 
         token = make_token("row-1")
-        ctx = PluginContext(
-            run_id="test-run",
-            config={},
-            landscape=mock_recorder,
-            state_id="test-state-id",
-            token=token,
-        )
+        ctx = make_context(state_id="test-state-id", token=token, landscape=mock_recorder)
 
         try:
             with chaosllm_azure_openai_client(chaosllm_server) as mock_client:
@@ -748,18 +719,12 @@ class TestLLMTransformAzureIntegration:
     ) -> None:
         """LLM calls are recorded via AuditedLLMClient."""
         transform = LLMTransform(_make_azure_config(template="{{ row.text }}"))
-        init_ctx = PluginContext(run_id="test", config={}, landscape=mock_recorder)
+        init_ctx = make_context(run_id="test", landscape=mock_recorder)
         transform.on_start(init_ctx)
         transform.connect_output(collector, max_pending=10)
 
         token = make_token("row-1")
-        ctx = PluginContext(
-            run_id="test-run",
-            config={},
-            landscape=mock_recorder,
-            state_id="test-state-id",
-            token=token,
-        )
+        ctx = make_context(state_id="test-state-id", token=token, landscape=mock_recorder)
 
         try:
             with chaosllm_azure_openai_client(chaosllm_server):
@@ -795,7 +760,7 @@ class TestLLMTransformAzureConcurrency:
     ) -> None:
         """Multiple rows are emitted in submission order (FIFO)."""
         transform = LLMTransform(_make_azure_config(template="{{ row.text }}"))
-        init_ctx = PluginContext(run_id="test", config={}, landscape=mock_recorder)
+        init_ctx = make_context(run_id="test", landscape=mock_recorder)
         transform.on_start(init_ctx)
         transform.connect_output(collector, max_pending=10)
 
@@ -809,12 +774,11 @@ class TestLLMTransformAzureConcurrency:
             with chaosllm_azure_openai_client(chaosllm_server):
                 for i, row in enumerate(rows):
                     token = make_token(f"row-{i}")
-                    ctx = PluginContext(
+                    ctx = make_context(
                         run_id="test-run",
-                        config={},
-                        landscape=mock_recorder,
                         state_id=f"state-{i}",
                         token=token,
+                        landscape=mock_recorder,
                     )
                     transform.accept(make_pipeline_row(row), ctx)
 
@@ -837,12 +801,7 @@ class TestLLMTransformAzureConcurrency:
         # Verify _recorder starts as None
         assert transform._recorder is None
 
-        ctx = PluginContext(
-            run_id="test-run",
-            config={},
-            landscape=mock_recorder,
-            state_id="test-state-id",
-        )
+        ctx = make_context(state_id="test-state-id", landscape=mock_recorder)
         transform.on_start(ctx)
 
         # Verify recorder was captured
@@ -851,7 +810,7 @@ class TestLLMTransformAzureConcurrency:
     def test_close_clears_recorder(self, mock_recorder: Mock, collector: CollectorOutputPort) -> None:
         """close() clears recorder reference."""
         transform = LLMTransform(_make_azure_config(template="{{ row.text }}"))
-        init_ctx = PluginContext(run_id="test", config={}, landscape=mock_recorder)
+        init_ctx = make_context(run_id="test", landscape=mock_recorder)
         transform.on_start(init_ctx)
         transform.connect_output(collector, max_pending=10)
 

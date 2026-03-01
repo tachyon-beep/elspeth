@@ -5,7 +5,7 @@
 **Framework version:** 0.3.0 (RC-3.3)
 **Measurements as of:** commit `ab9e2648` (2026-03-01, branch `RC3.3-architectural-remediation`)
 **Prepared by:** Architecture analysis, synthesized from engineering specification, requirements, CI tooling, and test suite
-**Intended audience:** CISO's and other security evaluators assessing the framework's suitability for use in auditable data processing environments
+**Intended audience:** CISOs and other security evaluators assessing the framework's suitability for use in auditable data processing environments
 
 ---
 
@@ -53,17 +53,17 @@ ELSPETH is a Python framework for auditable Sense/Decide/Act (SDA) data pipeline
 Security posture summary:
 
 - **~80,400 lines** of production code across 243 Python files
-- **~10,400 automated tests** across 622 test files (231K lines of test code — a 2.9:1 test-to-production ratio)
+- **10,476 automated tests** across 622 test files (231K lines of test code — a 2.9:1 test-to-production ratio). The default CI run executes ~10,400; performance benchmarks and stress tests (71 tests) run on a separate schedule.
 - **6-layer test pyramid** including 1,173 property-based (fuzz) tests and bespoke chaos testing infrastructure
 - **3-tier data trust model** with distinct error handling strategies per trust level, enforced by custom AST-based static analysis in CI
 - **19-table audit database** with HMAC-signed exports, RFC 8785 canonical hashing, and SQLCipher encryption at rest
 - **25 frozen (immutable) dataclass types** for all audit records — language-level mutation prevention
 - **4-layer architecture model** with 0 violations, enforced by CI on every commit
-- **390 tracked requirements** with implementation status and evidence links
+- **374 tracked requirements** with implementation status and evidence links
 - **6 Architecture Decision Records** with rationale, alternatives, and consequences
 - **361 individually justified static analysis allowlist entries**, each with owner, reason, safety rationale, and expiration date
 
-No independent penetration test or external security audit has been performed to date. This document presents internal assurance evidence only. External validation is planned before production release.
+No independent penetration test or external security audit has been performed to date. This document presents internal assurance evidence for external evaluation. For protected workloads, the platform is intended to undergo an IRAP assessment when an appropriate candidate workload is identified.
 
 ---
 
@@ -181,13 +181,7 @@ The framework explicitly forbids defensive programming patterns against system-o
 
 Rationale: in an auditable pipeline, a silent wrong result — data that flows through and gets recorded as "correct" when it isn't — is a worse outcome than a crash. A crash stops the pipeline and triggers investigation. A silent wrong result contaminates the audit trail.
 
-Forbidden patterns (enforced by CI):
-
-- `getattr(obj, "field", default)` on typed dataclasses
-- `.get()` with default values on system-owned data structures
-- Bare `except Exception` that swallows errors without re-raising
-- `contextlib.suppress()` on non-boundary code
-- `hasattr()` / `isinstance()` checks on system-owned objects
+Forbidden patterns include defensive access on typed objects (`.get()`, `getattr()` with defaults, `hasattr()`, `isinstance()` on system-owned code), broad exception suppression, and silent fallback values. These are enforced by the 9-rule CI checker described in section 4.3.
 
 Required patterns:
 
@@ -357,14 +351,14 @@ A six-layer test pyramid, with each layer serving a specific verification purpos
 
 | Layer | Count | Purpose |
 |-------|-------|---------|
-| Unit | ~7,100 | Component-level correctness |
-| Property | ~1,173 | Hypothesis-based fuzzing — generates randomised inputs at runtime |
-| Integration | ~482 | Cross-subsystem interactions through production code paths |
-| End-to-end | ~48 | Full pipeline execution (source → transform → sink) |
-| Performance | ~67 | Benchmarks, stress tests, scalability, memory profiling |
-| Core alignment | varies | Configuration contract verification (Settings ↔ Runtime mapping) |
+| Unit | ~8,500 | Component-level correctness (includes core alignment / configuration contract verification) |
+| Property | 1,173 | Hypothesis-based fuzzing — generates randomised inputs at runtime |
+| Integration | ~610 | Cross-subsystem interactions through production code paths |
+| End-to-end | ~60 | Full pipeline execution (source → transform → sink) |
+| Performance | 71 | Benchmarks, stress tests, scalability, memory profiling (excluded from default CI run) |
+| Fixtures | 37 | Test infrastructure verification (factory and fixture correctness) |
 
-**Total:** ~10,400 tests across 622 test files (231K lines of test code).
+**Total:** 10,476 tests across 622 test files (231K lines of test code). The default CI run executes ~10,400 tests; performance benchmarks and stress tests are marked and run on a separate schedule.
 
 Integration tests are required to use production factory methods (`ExecutionGraph.from_plugin_instances()`, `instantiate_plugins_from_config()`). This rule was established after defect BUG-LINEAGE-01, where tests that manually constructed graph objects passed while the production factory method had a different (incorrect) node mapping. The test suite was audited to ensure compliance (see section 5.8).
 
@@ -400,23 +394,23 @@ These servers exercise the same production code paths as real external calls —
 
 Mutation testing (via mutmut) is configured as a weekly CI workflow. It introduces artificial bugs into production code and verifies that the test suite detects them. Target scores by subsystem, prioritised by security impact:
 
-| Subsystem | Target | Rationale |
-|-----------|--------|-----------|
+| Subsystem | Target* | Rationale |
+|-----------|---------|-----------|
 | `canonical.py` | 95%+ | Hash integrity is foundational to audit trail |
 | `landscape/` | 90%+ | Audit trail is the legal record |
 | `engine/` | 85%+ | Orchestration correctness affects routing and lineage |
 
-**Status:** These are targets for the next scheduled run, pending completion of the RC3.3 architectural remediation (a prerequisite — mutation testing against code undergoing structural reorganisation produces unreliable results). Achieved scores will be published separately. The mutation testing framework and CI integration are in place.
+*These are targets for the next scheduled run, not achieved scores. The mutation testing framework and CI integration are in place; the run is pending completion of the RC3.3 architectural remediation (mutation testing against code undergoing structural reorganisation produces unreliable results). Achieved scores will be published separately.
 
 ### 5.5 Requirements Traceability
 
-A 390-requirement traceability matrix (`docs/architecture/requirements.md`) where each requirement has:
+A 374-requirement traceability matrix (`docs/architecture/requirements.md`) where each requirement has:
 
 | Field | Purpose |
 |-------|---------|
 | Requirement ID | Unique identifier with domain prefix (e.g., `CFG-017`, `LND-042`) |
-| Requirement | What the system must do |
-| Source | Where the requirement originated (specification section, ADR, etc.) |
+| Requirement | What the system must do (🆕 prefix marks requirements discovered during implementation, not in original spec) |
+| Source | Where the requirement originated (specification section, ADR, bug analysis, etc.) |
 | Status | Implementation state |
 | Evidence | Code path, test file, or configuration reference |
 
@@ -424,13 +418,15 @@ Status breakdown:
 
 | Status | Count | Meaning |
 |--------|-------|---------|
-| IMPLEMENTED | 343 | Fully built and verified |
-| PARTIAL | 14 | Partially implemented with known gaps |
+| IMPLEMENTED | 327 | Fully built and verified |
+| FIXED | 10 | Bug-driven requirements — discovered via defect analysis, implemented and closed |
+| PARTIAL | 11 | Partially implemented with known gaps |
 | DEFERRED | 6 | Consciously deferred to a later release |
-| NOT IMPLEMENTED | 15 | Not yet built |
-| DIVERGED | 3 | Implemented differently than specified, with documented justification |
+| NOT IMPLEMENTED | 14 | Not yet built |
+| DIVERGED | 2 | Implemented differently than specified, with documented justification |
+| IMPROVED / EXTENDED / CHANGED | 4 | Variants of DIVERGED — implemented with enhancements beyond the original specification |
 
-The DIVERGED status acknowledges that implementation sometimes legitimately departs from the original specification, and requires the departure to be documented.
+The DIVERGED family of statuses (DIVERGED, IMPROVED, EXTENDED, CHANGED) acknowledges that implementation sometimes legitimately departs from the original specification, and requires the departure to be documented rather than silent.
 
 ### 5.6 Architecture Decision Records
 
@@ -461,7 +457,7 @@ The hardening cycle compounds: each incident reduces the surface area for the ne
 
 ### 5.8 Test Infrastructure Audit
 
-A 630-line audit of the test suite (`docs/audits/test-infrastructure-audit-2026-03-01.md`) was conducted after a test was found constructing a `PluginContext` with an invalid `operation_id`, bypassing the foreign key chain required by the audit database.
+A 763-line audit of the test suite (`docs/audits/test-infrastructure-audit-2026-03-01.md`) was conducted after a test was found constructing a `PluginContext` with an invalid `operation_id`, bypassing the foreign key chain required by the audit database.
 
 The audit identified 900+ violations across 120+ test files where tests constructed objects directly instead of using centralised factories. The remediation plan specifies 5 priority tiers, 6 new factory functions, and a CI enforcement script.
 
@@ -469,7 +465,7 @@ Additionally, the project performed a complete test suite rewrite (v1→v2), del
 
 ### 5.9 Engineering Specification
 
-The `CLAUDE.md` file (884 lines) is a machine-readable engineering specification loaded into the AI development agent's context at the start of every session. It codifies the trust model, error handling rules, coercion rules, and architectural constraints.
+The `CLAUDE.md` file (897 lines) is a machine-readable engineering specification loaded into the AI development agent's context at the start of every session. It codifies the trust model, error handling rules, coercion rules, and architectural constraints.
 
 This creates three properties relevant to security assurance:
 
@@ -490,16 +486,14 @@ The specification is version-controlled alongside the code it governs.
 | **NaN/Infinity in float validation** — Accepted by source validation, undermines RFC 8785 canonicalisation guarantees. | Low (specific float values required) | Medium (hash integrity for affected rows) | Sanitisation layer added for quarantine paths. | Full fix requires source-level rejection. |
 | **Untyped dicts at Tier 1 boundary** — 10 open defects where `dict[str, Any]` crosses into the audit trail where frozen dataclasses should be used. | Medium (existing code paths) | Low (data is correct but not type-guaranteed) | Fix pattern established (TokenUsage precedent). | Each being addressed individually. |
 | **Unsandboxed Jinja2 templates** — blob_sink template rendering and ChaosLLM test server use unsandboxed Jinja2. | Low (templates are operator-authored or test-only) | Medium (template injection if operator is untrusted — but operator is in trust boundary) | ChaosLLM is testing-only. blob_sink templates are written by trusted operators. | Tracked. |
-| **No external security audit** | N/A | N/A | Internal analysis only to date. | Planned before production release. |
+| **No external security audit** | N/A | N/A | Internal analysis only to date. This document provides assurance evidence for external evaluation. | IRAP assessment intended for protected workloads when candidate workload identified. |
 | **Mutation testing scores not yet baselined** | N/A | N/A | Framework and CI integration in place. Run pending completion of RC3.3 remediation. | Scheduled. |
 
 ---
 
 ## 7. External Validation Status
 
-No independent penetration test or external security audit has been performed to date.
-
-The findings in this document are the product of internal analysis:
+No independent penetration test or external security audit has been performed to date. The findings in this document are the product of internal analysis:
 
 - Systematic codebase review
 - Property-based fuzzing of security boundaries
@@ -507,7 +501,7 @@ The findings in this document are the product of internal analysis:
 - Incident-driven hardening cycle (178 defects triaged to date)
 - Test infrastructure audit
 
-External validation is planned before production release.
+This document is intended to provide assurance evidence suitable for external evaluation. For protected workloads, the platform is intended to undergo an IRAP (Information Security Registered Assessors Program) assessment when an appropriate candidate workload is identified. The internal controls, verification procedures (Annex A), and residual risk disclosures documented here are designed to support that assessment process.
 
 ---
 
@@ -517,7 +511,7 @@ The following commands can be executed in the project root to independently veri
 
 | Claim | Verification Command | Expected Output |
 |-------|---------------------|-----------------|
-| ~10,400 automated tests | `.venv/bin/python -m pytest tests/ --co -q 2>/dev/null \| tail -3` | ~10,400 tests collected |
+| 10,476 automated tests | `.venv/bin/python -m pytest tests/ --co -q -o "addopts=" 2>/dev/null \| tail -3` | 10,476 tests collected (default run without `-o` flag shows ~10,400 after marker deselection) |
 | Tier model enforcement, 0 new violations | `python scripts/cicd/enforce_tier_model.py check --root src/elspeth --allowlist config/cicd/enforce_tier_model` | Exit code 0, 0 new findings |
 | 361 allowlist entries | `grep -r "^- key:" config/cicd/enforce_tier_model/ \| wc -l` | 361 |
 | 25 frozen audit dataclasses | `grep -c "frozen=True" src/elspeth/contracts/audit.py` | 25 |
@@ -527,8 +521,8 @@ The following commands can be executed in the project root to independently veri
 | ~80,400 lines of production code | `find src/elspeth -name '*.py' \| xargs wc -l \| tail -1` | ~80,400 total |
 | RFC 8785 canonical JSON (no custom serialisation) | `grep -r "import rfc8785" src/elspeth/` | Import present in `core/canonical.py` |
 | All pre-commit hooks present | `cat .pre-commit-config.yaml` | 12 hook entries visible |
-| Requirements traceability matrix | `wc -l docs/architecture/requirements.md` | ~500 lines (390 requirements + headers) |
-| 6 ADRs | `ls docs/architecture/adr/0*.md \| wc -l` | 6 |
+| 374 tracked requirements | `grep -cP '^\| [A-Z]{2,5}-\d{3}' docs/architecture/requirements.md` | 374 |
+| 6 ADRs | `ls docs/architecture/adr/00[1-9]*.md \| wc -l` | 6 |
 | Property tests exist and pass | `.venv/bin/python -m pytest tests/property/ -q` | ~1,173 tests passed |
 | Test-to-production ratio | Compare `find src/elspeth -name '*.py' \| xargs wc -l \| tail -1` with `find tests -name '*.py' \| xargs wc -l \| tail -1` | ~231K test lines / ~80K production lines ≈ 2.9:1 |
 
@@ -551,7 +545,14 @@ Properties of this approach relevant to assurance:
 
 ## Annex C: Comparative Context
 
-For readers interested in how ELSPETH's security controls compare to common development methodologies, the following table provides context. "Ad-hoc AI-assisted" refers to AI-assisted development without engineering constraints. "Plan-driven (waterfall)" refers to traditional sequential development.
+For readers interested in how ELSPETH's security controls compare to common development methodologies, the following table provides simplified context against two baselines:
+
+- **"Ad-hoc AI-assisted"** (colloquially known as "vibe coding") refers to AI-assisted development without engineering constraints — prompting an LLM to generate code and shipping whatever compiles, with minimal testing or specification. This is the default mode of unstructured AI-assisted development.
+- **"Plan-driven (waterfall)"** refers to traditional sequential development. Mature waterfall organisations (CMMI Level 3+) do have configuration management, traceability, and test strategies; the characterisations below reflect common *practice* gaps rather than inherent methodology limitations. In many cases, waterfall can achieve equivalent outcomes — the constraint is typically economic (the human labour cost of sustaining these practices at scale) rather than methodological.
+
+Agile/DevOps is not included as a separate baseline. Mature Agile teams already practice many of the same feedback loops; the meaningful differences narrow to enforcement mechanism (code review vs. CI gates) and specification durability (tribal knowledge vs. machine-consumed specification).
+
+A more detailed comparative analysis is available in the companion document (`security-comparison-blog.md`).
 
 | Security Dimension | Ad-hoc AI-assisted | Plan-driven (waterfall) | ELSPETH |
 |-------------------|-------------------|------------------------|---------|
@@ -564,7 +565,7 @@ For readers interested in how ELSPETH's security controls compare to common deve
 | Expression safety | `eval()` | Restricted `eval()` | AST-parsed, whitelist-based, property-fuzzed |
 | Secret handling | Plaintext in config | Env vars or vault | HMAC fingerprinting, Key Vault, fail-closed |
 | Pre-commit checks | None or formatting | Linting + maybe types | 12 hooks: lint, types, tier model, contracts, hygiene |
-| Requirements traceability | None | RTM (maintained, drifts) | 390 requirements with status and evidence links |
+| Requirements traceability | None | RTM (maintained, drifts) | 374 requirements with status and evidence links |
 | Test effectiveness verification | None | Coverage metrics | Mutation testing framework (targets set, baseline pending) |
 | Bug feedback loop | Fix the instance | Defect tracker, triage | Every defect → structural countermeasure → CI enforcement |
 | Known vulnerabilities | Undiscovered | Found by pentest, deferred | Continuously discovered, tracked, prioritised |

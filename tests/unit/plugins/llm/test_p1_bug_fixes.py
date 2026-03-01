@@ -26,8 +26,9 @@ from elspeth.plugins.transforms.llm import (
 )
 from elspeth.plugins.transforms.llm.transform import LLMTransform
 from elspeth.testing import make_pipeline_row
+from tests.fixtures.factories import make_context
 
-from .conftest import DYNAMIC_SCHEMA, make_plugin_context, make_token
+from .conftest import DYNAMIC_SCHEMA, make_token
 
 # ---------------------------------------------------------------------------
 # Bug 1: Azure process_row uses mutable ctx.state_id in cleanup
@@ -64,7 +65,7 @@ class TestAzureStateIdSnapshot:
 
         with chaosllm_azure_openai_client(chaosllm_server, mode="echo"):
             transform = LLMTransform(config)
-            ctx = make_plugin_context(state_id="state-A")
+            ctx = make_context(state_id="state-A")
             transform.on_start(ctx)
 
             row = make_pipeline_row({"text": "test"})

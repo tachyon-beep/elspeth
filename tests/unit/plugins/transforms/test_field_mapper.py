@@ -9,6 +9,7 @@ from elspeth.contracts.schema_contract import PipelineRow, SchemaContract
 from elspeth.core.landscape.database import LandscapeDB
 from elspeth.core.landscape.recorder import LandscapeRecorder
 from elspeth.testing import make_field, make_pipeline_row
+from tests.fixtures.factories import make_context
 
 # Common schema config for dynamic field handling (accepts any fields)
 DYNAMIC_SCHEMA = {"mode": "observed"}
@@ -20,9 +21,7 @@ class TestFieldMapper:
     @pytest.fixture
     def ctx(self) -> PluginContext:
         """Create minimal plugin context."""
-        db = LandscapeDB.in_memory()
-        recorder = LandscapeRecorder(db)
-        return PluginContext(run_id="test-run", config={}, landscape=recorder)
+        return make_context()
 
     def test_has_required_attributes(self) -> None:
         """FieldMapper has name and schemas."""
@@ -439,9 +438,7 @@ class TestFieldMapperContractPropagation:
     @pytest.fixture
     def ctx(self) -> PluginContext:
         """Create minimal plugin context."""
-        db = LandscapeDB.in_memory()
-        recorder = LandscapeRecorder(db)
-        return PluginContext(run_id="test-run", config={}, landscape=recorder)
+        return make_context()
 
     def test_contract_contains_renamed_field(self, ctx: PluginContext) -> None:
         """Output contract contains renamed field, not original field name."""

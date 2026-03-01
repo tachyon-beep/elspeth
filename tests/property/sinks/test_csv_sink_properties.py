@@ -11,10 +11,10 @@ from pathlib import Path
 from hypothesis import given
 from hypothesis import strategies as st
 
-from elspeth.contracts.plugin_context import PluginContext
 from elspeth.core.landscape.database import LandscapeDB
 from elspeth.core.landscape.recorder import LandscapeRecorder
 from elspeth.plugins.sinks.csv_sink import CSVSink
+from tests.fixtures.factories import make_context
 from tests.strategies.settings import SLOW_SETTINGS
 
 # =============================================================================
@@ -70,7 +70,7 @@ class TestCSVSinkProperties:
             )
             db = LandscapeDB.in_memory()
             recorder = LandscapeRecorder(db)
-            ctx = PluginContext(run_id="test-run", config={}, landscape=recorder)
+            ctx = make_context(landscape=recorder)
 
             descriptor = sink.write(rows, ctx)
             sink.close()
@@ -104,7 +104,7 @@ class TestCSVSinkProperties:
             )
             db = LandscapeDB.in_memory()
             recorder = LandscapeRecorder(db)
-            ctx = PluginContext(run_id="test-run", config={}, landscape=recorder)
+            ctx = make_context(landscape=recorder)
 
             sink.write([row], ctx)
             sink.close()

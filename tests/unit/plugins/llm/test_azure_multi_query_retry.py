@@ -15,16 +15,15 @@ from unittest.mock import Mock
 import pytest
 
 from elspeth.contracts import TransformResult
-from elspeth.contracts.plugin_context import PluginContext
 from elspeth.engine.batch_adapter import ExceptionResult
 from elspeth.plugins.infrastructure.batching.ports import CollectorOutputPort
 from elspeth.plugins.transforms.llm.transform import LLMTransform
 from elspeth.testing import make_pipeline_row
+from tests.fixtures.factories import make_context
 
 from .conftest import (
     chaosllm_azure_openai_responses,
     chaosllm_azure_openai_sequence,
-    make_plugin_context,
     make_token,
 )
 
@@ -181,7 +180,7 @@ class TestRetryBehavior:
             failure_condition,
         ) as (_mock_client, _call_count):
             transform = LLMTransform(_make_config())
-            init_ctx = PluginContext(run_id="test", config={}, landscape=mock_recorder)
+            init_ctx = make_context(landscape=mock_recorder)
             transform.on_start(init_ctx)
             transform.connect_output(collector, max_pending=10)
 
@@ -191,7 +190,7 @@ class TestRetryBehavior:
                     "cs2_bg": "data",
                 }
                 token = make_token("row-retry-1")
-                ctx = make_plugin_context(state_id="state-retry-1", token=token)
+                ctx = make_context(state_id="state-retry-1", token=token)
 
                 transform.accept(make_pipeline_row(row), ctx)
                 transform.flush_batch_processing(timeout=10.0)
@@ -232,7 +231,7 @@ class TestRetryBehavior:
             always_fail,
         ):
             transform = LLMTransform(_make_config())
-            init_ctx = PluginContext(run_id="test", config={}, landscape=mock_recorder)
+            init_ctx = make_context(landscape=mock_recorder)
             transform.on_start(init_ctx)
             transform.connect_output(collector, max_pending=10)
 
@@ -242,7 +241,7 @@ class TestRetryBehavior:
                     "cs2_bg": "data",
                 }
                 token = make_token("row-timeout-1")
-                ctx = make_plugin_context(state_id="state-timeout-1", token=token)
+                ctx = make_context(state_id="state-timeout-1", token=token)
 
                 transform.accept(make_pipeline_row(row), ctx)
                 transform.flush_batch_processing(timeout=10.0)
@@ -288,7 +287,7 @@ class TestRetryBehavior:
             intermittent_failure,
         ):
             transform = LLMTransform(_make_config())
-            init_ctx = PluginContext(run_id="test", config={}, landscape=mock_recorder)
+            init_ctx = make_context(landscape=mock_recorder)
             transform.on_start(init_ctx)
             transform.connect_output(collector, max_pending=10)
 
@@ -298,7 +297,7 @@ class TestRetryBehavior:
                     "cs2_bg": "data",
                 }
                 token = make_token("row-mixed-1")
-                ctx = make_plugin_context(state_id="state-mixed-1", token=token)
+                ctx = make_context(state_id="state-mixed-1", token=token)
 
                 transform.accept(make_pipeline_row(row), ctx)
                 transform.flush_batch_processing(timeout=10.0)
@@ -353,7 +352,7 @@ class TestConcurrentRowProcessing:
 
         with chaosllm_azure_openai_responses(chaosllm_server, responses) as mock_client:
             transform = LLMTransform(config)
-            init_ctx = PluginContext(run_id="test", config={}, landscape=mock_recorder)
+            init_ctx = make_context(landscape=mock_recorder)
             transform.on_start(init_ctx)
             transform.connect_output(collector, max_pending=100)
 
@@ -366,7 +365,7 @@ class TestConcurrentRowProcessing:
                         "cs2_bg": f"data_{i}",
                     }
                     token = make_token(f"row-{i}")
-                    ctx = make_plugin_context(state_id=f"batch-100-{i}", token=token)
+                    ctx = make_context(state_id=f"batch-100-{i}", token=token)
                     transform.accept(make_pipeline_row(row), ctx)
 
                 transform.flush_batch_processing(timeout=30.0)
@@ -417,7 +416,7 @@ class TestConcurrentRowProcessing:
             every_7th_fails,
         ):
             transform = LLMTransform(config)
-            init_ctx = PluginContext(run_id="test", config={}, landscape=mock_recorder)
+            init_ctx = make_context(landscape=mock_recorder)
             transform.on_start(init_ctx)
             transform.connect_output(collector, max_pending=100)
 
@@ -431,7 +430,7 @@ class TestConcurrentRowProcessing:
                         "cs2_bg": f"data_{i}",
                     }
                     token = make_token(f"row-{i}")
-                    ctx = make_plugin_context(state_id=f"concurrent-atomicity-{i}", token=token)
+                    ctx = make_context(state_id=f"concurrent-atomicity-{i}", token=token)
                     transform.accept(make_pipeline_row(row), ctx)
 
                 transform.flush_batch_processing(timeout=30.0)
@@ -483,7 +482,7 @@ class TestConcurrentRowProcessing:
             _mock_azure_class,
         ):
             transform = LLMTransform(_make_config())
-            init_ctx = PluginContext(run_id="test", config={}, landscape=mock_recorder)
+            init_ctx = make_context(landscape=mock_recorder)
             transform.on_start(init_ctx)
             transform.connect_output(collector, max_pending=10)
 
@@ -494,7 +493,7 @@ class TestConcurrentRowProcessing:
                     "cs2_bg": "data",
                 }
                 token = make_token("row-0")
-                ctx = make_plugin_context(state_id="seq-exec-0", token=token)
+                ctx = make_context(state_id="seq-exec-0", token=token)
                 transform.accept(make_pipeline_row(row), ctx)
 
                 transform.flush_batch_processing(timeout=30.0)
@@ -553,7 +552,7 @@ class TestSequentialFallback:
         ) as (_mock_client, _call_count):
             config = _make_config()
             transform = LLMTransform(config)
-            init_ctx = PluginContext(run_id="test", config={}, landscape=mock_recorder)
+            init_ctx = make_context(landscape=mock_recorder)
             transform.on_start(init_ctx)
             transform.connect_output(collector, max_pending=10)
 
@@ -563,7 +562,7 @@ class TestSequentialFallback:
                     "cs2_bg": "data",
                 }
                 token = make_token("row-seq-1")
-                ctx = make_plugin_context(state_id="state-seq-1", token=token)
+                ctx = make_context(state_id="state-seq-1", token=token)
 
                 transform.accept(make_pipeline_row(row), ctx)
                 transform.flush_batch_processing(timeout=10.0)
@@ -613,7 +612,7 @@ class TestProviderClientLifecycle:
 
         with chaosllm_azure_openai_responses(chaosllm_server, responses) as _mock_client:
             transform = LLMTransform(config)
-            init_ctx = PluginContext(run_id="test", config={}, landscape=mock_recorder)
+            init_ctx = make_context(landscape=mock_recorder)
             transform.on_start(init_ctx)
             transform.connect_output(collector, max_pending=100)
 
@@ -626,7 +625,7 @@ class TestProviderClientLifecycle:
                         "cs2_bg": f"data_{i}",
                     }
                     token = make_token(f"row-{i}")
-                    ctx = make_plugin_context(state_id=f"batch-lifecycle-{i}", token=token)
+                    ctx = make_context(state_id=f"batch-lifecycle-{i}", token=token)
                     transform.accept(make_pipeline_row(row), ctx)
 
                 transform.flush_batch_processing(timeout=30.0)
@@ -683,7 +682,7 @@ class TestLLMErrorRetry:
         ) as (_mock_client, _call_count):
             config = _make_config()
             transform = LLMTransform(config)
-            init_ctx = PluginContext(run_id="test", config={}, landscape=mock_recorder)
+            init_ctx = make_context(landscape=mock_recorder)
             transform.on_start(init_ctx)
             transform.connect_output(collector, max_pending=10)
 
@@ -693,7 +692,7 @@ class TestLLMErrorRetry:
                     "cs2_bg": "data",
                 }
                 token = make_token("row-network-error-1")
-                ctx = make_plugin_context(state_id="network-error-retry", token=token)
+                ctx = make_context(state_id="network-error-retry", token=token)
                 transform.accept(make_pipeline_row(row), ctx)
                 transform.flush_batch_processing(timeout=30.0)
             finally:
@@ -735,7 +734,7 @@ class TestLLMErrorRetry:
         ) as (_mock_client, call_count):
             config = _make_config()
             transform = LLMTransform(config)
-            init_ctx = PluginContext(run_id="test", config={}, landscape=mock_recorder)
+            init_ctx = make_context(landscape=mock_recorder)
             transform.on_start(init_ctx)
             transform.connect_output(collector, max_pending=10)
 
@@ -745,7 +744,7 @@ class TestLLMErrorRetry:
                     "cs2_bg": "data",
                 }
                 token = make_token("row-content-policy-1")
-                ctx = make_plugin_context(state_id="content-policy-no-retry", token=token)
+                ctx = make_context(state_id="content-policy-no-retry", token=token)
                 transform.accept(make_pipeline_row(row), ctx)
                 transform.flush_batch_processing(timeout=10.0)
             finally:

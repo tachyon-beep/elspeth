@@ -13,10 +13,9 @@ import pytest
 
 from elspeth.contracts.plugin_context import PluginContext
 from elspeth.contracts.schema_contract import PipelineRow, SchemaContract
-from elspeth.core.landscape.database import LandscapeDB
-from elspeth.core.landscape.recorder import LandscapeRecorder
 from elspeth.plugins.infrastructure.config_base import PluginConfigError
 from elspeth.testing import make_field, make_pipeline_row
+from tests.fixtures.factories import make_context
 
 # Common schema config for dynamic field handling (accepts any fields)
 DYNAMIC_SCHEMA = {"mode": "observed"}
@@ -28,9 +27,7 @@ class TestJSONExplodeHappyPath:
     @pytest.fixture
     def ctx(self) -> PluginContext:
         """Create minimal plugin context."""
-        db = LandscapeDB.in_memory()
-        recorder = LandscapeRecorder(db)
-        return PluginContext(run_id="test-run", config={}, landscape=recorder)
+        return make_context()
 
     def test_explodes_array_into_multiple_rows(self, ctx: PluginContext) -> None:
         """JSONExplode expands array field into multiple rows."""
@@ -223,9 +220,7 @@ class TestJSONExplodeTypeViolations:
     @pytest.fixture
     def ctx(self) -> PluginContext:
         """Create minimal plugin context."""
-        db = LandscapeDB.in_memory()
-        recorder = LandscapeRecorder(db)
-        return PluginContext(run_id="test-run", config={}, landscape=recorder)
+        return make_context()
 
     def test_missing_field_crashes(self, ctx: PluginContext) -> None:
         """Missing array field is upstream bug - should crash (KeyError)."""
@@ -435,9 +430,7 @@ class TestJSONExplodeContractPropagation:
     @pytest.fixture
     def ctx(self) -> PluginContext:
         """Create minimal plugin context."""
-        db = LandscapeDB.in_memory()
-        recorder = LandscapeRecorder(db)
-        return PluginContext(run_id="test-run", config={}, landscape=recorder)
+        return make_context()
 
     def test_contract_contains_output_field_not_array_field(self, ctx: PluginContext) -> None:
         """Output contract contains output_field and item_index, not array_field."""
@@ -560,9 +553,7 @@ class TestJSONExplodeHeterogeneousTypes:
     @pytest.fixture
     def ctx(self) -> PluginContext:
         """Create minimal plugin context."""
-        db = LandscapeDB.in_memory()
-        recorder = LandscapeRecorder(db)
-        return PluginContext(run_id="test-run", config={}, landscape=recorder)
+        return make_context()
 
     def test_mixed_str_and_dict_uses_object_type(self, ctx: PluginContext) -> None:
         """Array with str and dict elements gets output_field type=object."""
@@ -715,9 +706,7 @@ class TestJSONExplodeCopyIsolation:
 
     @pytest.fixture
     def ctx(self) -> PluginContext:
-        db = LandscapeDB.in_memory()
-        recorder = LandscapeRecorder(db)
-        return PluginContext(run_id="test-run", config={}, landscape=recorder)
+        return make_context()
 
     def test_nested_dict_mutation_does_not_corrupt_siblings(self, ctx: PluginContext) -> None:
         """Mutating a nested dict in one exploded row must not affect others."""

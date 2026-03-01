@@ -9,6 +9,7 @@ import pytest
 from elspeth.contracts.plugin_context import PluginContext
 from elspeth.core.landscape.database import LandscapeDB
 from elspeth.core.landscape.recorder import LandscapeRecorder
+from tests.fixtures.factories import make_context
 
 # Strict schema config for tests - PathConfig now requires schema
 # CSVSink requires fixed-column structure, so we use strict mode
@@ -24,7 +25,7 @@ class TestCSVSink:
         """Create a minimal plugin context."""
         db = LandscapeDB.in_memory()
         recorder = LandscapeRecorder(db)
-        return PluginContext(run_id="test-run", config={}, landscape=recorder)
+        return make_context(landscape=recorder)
 
     def test_write_creates_file(self, tmp_path: Path, ctx: PluginContext) -> None:
         """write() creates CSV file with headers."""
@@ -414,7 +415,7 @@ class TestCSVSinkSchemaValidation:
 
         db = LandscapeDB.in_memory()
         recorder = LandscapeRecorder(db)
-        ctx = PluginContext(run_id="test-run", config={}, landscape=recorder)
+        ctx = make_context(landscape=recorder)
         sink = CSVSink(
             {
                 "path": str(tmp_path / "output.csv"),
@@ -437,7 +438,7 @@ class TestCSVSinkSchemaValidation:
 
         db = LandscapeDB.in_memory()
         recorder = LandscapeRecorder(db)
-        ctx = PluginContext(run_id="test-run", config={}, landscape=recorder)
+        ctx = make_context(landscape=recorder)
         sink = CSVSink(
             {
                 "path": str(tmp_path / "output.csv"),
@@ -464,7 +465,7 @@ class TestCSVSinkSchemaValidation:
 
         db = LandscapeDB.in_memory()
         recorder = LandscapeRecorder(db)
-        ctx = PluginContext(run_id="test-run", config={}, landscape=recorder)
+        ctx = make_context(landscape=recorder)
         # Schema declares only 'id', but first row has 'id', 'name', 'extra'
         flexible_schema = {"mode": "flexible", "fields": ["id: int"]}
         sink = CSVSink(
@@ -501,7 +502,7 @@ class TestCSVSinkSchemaValidation:
 
         db = LandscapeDB.in_memory()
         recorder = LandscapeRecorder(db)
-        ctx = PluginContext(run_id="test-run", config={}, landscape=recorder)
+        ctx = make_context(landscape=recorder)
         # Schema declares 'id' and 'name'
         flexible_schema = {"mode": "flexible", "fields": ["id: int", "name: str"]}
         sink = CSVSink(

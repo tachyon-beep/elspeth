@@ -22,6 +22,7 @@ from elspeth.plugins.infrastructure.config_base import PluginConfigError
 from elspeth.plugins.transforms.llm.providers.openrouter import OpenRouterConfig
 from elspeth.plugins.transforms.llm.transform import LLMTransform
 from elspeth.testing import make_pipeline_row, make_row
+from tests.fixtures.factories import make_context
 
 from .conftest import chaosllm_openrouter_http_responses, chaosllm_openrouter_httpx_response
 
@@ -269,7 +270,7 @@ class TestLLMTransformOpenRouterInit:
         transform = LLMTransform(_openrouter_config(template="{{ row.text }}"))
         db = LandscapeDB.in_memory()
         recorder = LandscapeRecorder(db)
-        ctx = PluginContext(run_id="test-run", config={}, landscape=recorder)
+        ctx = make_context(run_id="test-run", landscape=recorder)
 
         with pytest.raises(NotImplementedError, match="row-level pipelining"):
             transform.process(make_pipeline_row({"text": "hello"}), ctx)
@@ -312,12 +313,10 @@ class TestLLMTransformOpenRouterPipelining:
     def ctx(self, mock_recorder: Mock) -> PluginContext:
         """Create plugin context with landscape, state_id, and token."""
         token = make_token("row-1")
-        return PluginContext(
-            run_id="test-run",
-            config={},
-            landscape=mock_recorder,
+        return make_context(
             state_id="test-state-id",
             token=token,
+            landscape=mock_recorder,
         )
 
     @pytest.fixture
@@ -325,7 +324,7 @@ class TestLLMTransformOpenRouterPipelining:
         """Create and initialize LLMTransform (OpenRouter) with pipelining."""
         t = LLMTransform(_openrouter_config())
         # Initialize with recorder reference
-        init_ctx = PluginContext(run_id="test", config={}, landscape=mock_recorder)
+        init_ctx = make_context(landscape=mock_recorder)
         t.on_start(init_ctx)
         # Connect output port
         t.connect_output(collector, max_pending=10)
@@ -601,17 +600,15 @@ class TestLLMTransformOpenRouterPipelining:
                 system_prompt="You are a helpful assistant.",
             )
         )
-        init_ctx = PluginContext(run_id="test", config={}, landscape=mock_recorder)
+        init_ctx = make_context(landscape=mock_recorder)
         transform.on_start(init_ctx)
         transform.connect_output(collector, max_pending=10)
 
         token = make_token("row-1")
-        ctx = PluginContext(
-            run_id="test-run",
-            config={},
-            landscape=mock_recorder,
+        ctx = make_context(
             state_id="test-state-id",
             token=token,
+            landscape=mock_recorder,
         )
 
         try:
@@ -662,17 +659,15 @@ class TestLLMTransformOpenRouterPipelining:
                 response_field="analysis",
             )
         )
-        init_ctx = PluginContext(run_id="test", config={}, landscape=mock_recorder)
+        init_ctx = make_context(landscape=mock_recorder)
         transform.on_start(init_ctx)
         transform.connect_output(collector, max_pending=10)
 
         token = make_token("row-1")
-        ctx = PluginContext(
-            run_id="test-run",
-            config={},
-            landscape=mock_recorder,
+        ctx = make_context(
             state_id="test-state-id",
             token=token,
+            landscape=mock_recorder,
         )
 
         try:
@@ -743,9 +738,8 @@ class TestLLMTransformOpenRouterPipelining:
         transform = LLMTransform(_openrouter_config(template="{{ row.text }}"))
 
         token = make_token("row-1")
-        ctx = PluginContext(
+        ctx = make_context(
             run_id="test-run",
-            config={},
             state_id="test-state-id",
             token=token,
         )
@@ -756,7 +750,7 @@ class TestLLMTransformOpenRouterPipelining:
     def test_connect_output_cannot_be_called_twice(self, collector: CollectorOutputPort, mock_recorder: Mock) -> None:
         """connect_output() raises if called more than once."""
         transform = LLMTransform(_openrouter_config(template="{{ row.text }}"))
-        init_ctx = PluginContext(run_id="test", config={}, landscape=mock_recorder)
+        init_ctx = make_context(landscape=mock_recorder)
         transform.on_start(init_ctx)
         transform.connect_output(collector, max_pending=10)
 
@@ -802,17 +796,15 @@ class TestLLMTransformOpenRouterIntegration:
                 """,
             )
         )
-        init_ctx = PluginContext(run_id="test", config={}, landscape=mock_recorder)
+        init_ctx = make_context(landscape=mock_recorder)
         transform.on_start(init_ctx)
         transform.connect_output(collector, max_pending=10)
 
         token = make_token("row-1")
-        ctx = PluginContext(
-            run_id="test-run",
-            config={},
-            landscape=mock_recorder,
+        ctx = make_context(
             state_id="test-state-id",
             token=token,
+            landscape=mock_recorder,
         )
 
         try:
@@ -841,17 +833,15 @@ class TestLLMTransformOpenRouterIntegration:
     def test_empty_usage_handled_gracefully(self, mock_recorder: Mock, collector: CollectorOutputPort, chaosllm_server) -> None:
         """Empty usage dict from API is handled."""
         transform = LLMTransform(_openrouter_config(model="openai/gpt-4", template="{{ row.text }}"))
-        init_ctx = PluginContext(run_id="test", config={}, landscape=mock_recorder)
+        init_ctx = make_context(landscape=mock_recorder)
         transform.on_start(init_ctx)
         transform.connect_output(collector, max_pending=10)
 
         token = make_token("row-1")
-        ctx = PluginContext(
-            run_id="test-run",
-            config={},
-            landscape=mock_recorder,
+        ctx = make_context(
             state_id="test-state-id",
             token=token,
+            landscape=mock_recorder,
         )
 
         response = _create_mock_response(
@@ -887,17 +877,15 @@ class TestLLMTransformOpenRouterIntegration:
         from elspeth.plugins.infrastructure.clients.llm import NetworkError
 
         transform = LLMTransform(_openrouter_config(model="openai/gpt-4", template="{{ row.text }}"))
-        init_ctx = PluginContext(run_id="test", config={}, landscape=mock_recorder)
+        init_ctx = make_context(landscape=mock_recorder)
         transform.on_start(init_ctx)
         transform.connect_output(collector, max_pending=10)
 
         token = make_token("row-1")
-        ctx = PluginContext(
-            run_id="test-run",
-            config={},
-            landscape=mock_recorder,
+        ctx = make_context(
             state_id="test-state-id",
             token=token,
+            landscape=mock_recorder,
         )
 
         try:
@@ -926,17 +914,15 @@ class TestLLMTransformOpenRouterIntegration:
         # The transform stores the timeout in its config
         assert transform._config.timeout_seconds == 120.0
 
-        init_ctx = PluginContext(run_id="test", config={}, landscape=mock_recorder)
+        init_ctx = make_context(landscape=mock_recorder)
         transform.on_start(init_ctx)
         transform.connect_output(collector, max_pending=10)
 
         token = make_token("row-1")
-        ctx = PluginContext(
-            run_id="test-run",
-            config={},
-            landscape=mock_recorder,
+        ctx = make_context(
             state_id="test-state-id",
             token=token,
+            landscape=mock_recorder,
         )
 
         try:
@@ -959,17 +945,15 @@ class TestLLMTransformOpenRouterIntegration:
         empty choices, which the strategy catches as 'llm_call_failed'.
         """
         transform = LLMTransform(_openrouter_config(model="openai/gpt-4", template="{{ row.text }}"))
-        init_ctx = PluginContext(run_id="test", config={}, landscape=mock_recorder)
+        init_ctx = make_context(landscape=mock_recorder)
         transform.on_start(init_ctx)
         transform.connect_output(collector, max_pending=10)
 
         token = make_token("row-1")
-        ctx = PluginContext(
-            run_id="test-run",
-            config={},
-            landscape=mock_recorder,
+        ctx = make_context(
             state_id="test-state-id",
             token=token,
+            landscape=mock_recorder,
         )
 
         response = _create_mock_response(
@@ -1008,17 +992,15 @@ class TestLLMTransformOpenRouterIntegration:
         as a non-retryable 'llm_call_failed'.
         """
         transform = LLMTransform(_openrouter_config(model="openai/gpt-4", template="{{ row.text }}"))
-        init_ctx = PluginContext(run_id="test", config={}, landscape=mock_recorder)
+        init_ctx = make_context(landscape=mock_recorder)
         transform.on_start(init_ctx)
         transform.connect_output(collector, max_pending=10)
 
         token = make_token("row-1")
-        ctx = PluginContext(
-            run_id="test-run",
-            config={},
-            landscape=mock_recorder,
+        ctx = make_context(
             state_id="test-state-id",
             token=token,
+            landscape=mock_recorder,
         )
 
         response = _create_mock_response(
@@ -1054,17 +1036,15 @@ class TestLLMTransformOpenRouterIntegration:
         missing choices, which the strategy catches as 'llm_call_failed'.
         """
         transform = LLMTransform(_openrouter_config(model="openai/gpt-4", template="{{ row.text }}"))
-        init_ctx = PluginContext(run_id="test", config={}, landscape=mock_recorder)
+        init_ctx = make_context(landscape=mock_recorder)
         transform.on_start(init_ctx)
         transform.connect_output(collector, max_pending=10)
 
         token = make_token("row-1")
-        ctx = PluginContext(
-            run_id="test-run",
-            config={},
-            landscape=mock_recorder,
+        ctx = make_context(
             state_id="test-state-id",
             token=token,
+            landscape=mock_recorder,
         )
 
         response = _create_mock_response(
@@ -1099,17 +1079,15 @@ class TestLLMTransformOpenRouterIntegration:
         malformed response structure, which the strategy catches as 'llm_call_failed'.
         """
         transform = LLMTransform(_openrouter_config(model="openai/gpt-4", template="{{ row.text }}"))
-        init_ctx = PluginContext(run_id="test", config={}, landscape=mock_recorder)
+        init_ctx = make_context(landscape=mock_recorder)
         transform.on_start(init_ctx)
         transform.connect_output(collector, max_pending=10)
 
         token = make_token("row-1")
-        ctx = PluginContext(
-            run_id="test-run",
-            config={},
-            landscape=mock_recorder,
+        ctx = make_context(
             state_id="test-state-id",
             token=token,
+            landscape=mock_recorder,
         )
 
         response = _create_mock_response(
@@ -1145,17 +1123,15 @@ class TestLLMTransformOpenRouterIntegration:
         invalid JSON, which the strategy catches as 'llm_call_failed'.
         """
         transform = LLMTransform(_openrouter_config(model="openai/gpt-4", template="{{ row.text }}"))
-        init_ctx = PluginContext(run_id="test", config={}, landscape=mock_recorder)
+        init_ctx = make_context(landscape=mock_recorder)
         transform.on_start(init_ctx)
         transform.connect_output(collector, max_pending=10)
 
         token = make_token("row-1")
-        ctx = PluginContext(
-            run_id="test-run",
-            config={},
-            landscape=mock_recorder,
+        ctx = make_context(
             state_id="test-state-id",
             token=token,
+            landscape=mock_recorder,
         )
 
         response = _create_mock_response(
@@ -1203,17 +1179,15 @@ class TestOpenRouterTemplateFeatures:
                 lookup={"categories": ["positive", "negative"]},
             )
         )
-        init_ctx = PluginContext(run_id="test", config={}, landscape=mock_recorder)
+        init_ctx = make_context(landscape=mock_recorder)
         transform.on_start(init_ctx)
         transform.connect_output(collector, max_pending=10)
 
         token = make_token("row-1")
-        ctx = PluginContext(
-            run_id="test-run",
-            config={},
-            landscape=mock_recorder,
+        ctx = make_context(
             state_id="test-state-id",
             token=token,
+            landscape=mock_recorder,
         )
 
         try:
@@ -1244,17 +1218,15 @@ class TestOpenRouterTemplateFeatures:
                 lookup={"tones": {"formal": "professional", "casual": "friendly"}},
             )
         )
-        init_ctx = PluginContext(run_id="test", config={}, landscape=mock_recorder)
+        init_ctx = make_context(landscape=mock_recorder)
         transform.on_start(init_ctx)
         transform.connect_output(collector, max_pending=10)
 
         token = make_token("row-1")
-        ctx = PluginContext(
-            run_id="test-run",
-            config={},
-            landscape=mock_recorder,
+        ctx = make_context(
             state_id="test-state-id",
             token=token,
+            landscape=mock_recorder,
         )
 
         try:
@@ -1283,17 +1255,15 @@ class TestOpenRouterTemplateFeatures:
                 lookup={"cats": ["A", "B", "C"]},
             )
         )
-        init_ctx = PluginContext(run_id="test", config={}, landscape=mock_recorder)
+        init_ctx = make_context(landscape=mock_recorder)
         transform.on_start(init_ctx)
         transform.connect_output(collector, max_pending=10)
 
         token = make_token("row-1")
-        ctx = PluginContext(
-            run_id="test-run",
-            config={},
-            landscape=mock_recorder,
+        ctx = make_context(
             state_id="test-state-id",
             token=token,
+            landscape=mock_recorder,
         )
 
         try:
@@ -1324,17 +1294,15 @@ class TestOpenRouterTemplateFeatures:
                 template_source="prompts/analysis.j2",
             )
         )
-        init_ctx = PluginContext(run_id="test", config={}, landscape=mock_recorder)
+        init_ctx = make_context(landscape=mock_recorder)
         transform.on_start(init_ctx)
         transform.connect_output(collector, max_pending=10)
 
         token = make_token("row-1")
-        ctx = PluginContext(
-            run_id="test-run",
-            config={},
-            landscape=mock_recorder,
+        ctx = make_context(
             state_id="test-state-id",
             token=token,
+            landscape=mock_recorder,
         )
 
         try:
@@ -1363,17 +1331,15 @@ class TestOpenRouterTemplateFeatures:
                 lookup_source="prompts/lookups.yaml",
             )
         )
-        init_ctx = PluginContext(run_id="test", config={}, landscape=mock_recorder)
+        init_ctx = make_context(landscape=mock_recorder)
         transform.on_start(init_ctx)
         transform.connect_output(collector, max_pending=10)
 
         token = make_token("row-1")
-        ctx = PluginContext(
-            run_id="test-run",
-            config={},
-            landscape=mock_recorder,
+        ctx = make_context(
             state_id="test-state-id",
             token=token,
+            landscape=mock_recorder,
         )
 
         try:
@@ -1412,17 +1378,15 @@ class TestOpenRouterTemplateFeatures:
                 # No lookup configured
             )
         )
-        init_ctx = PluginContext(run_id="test", config={}, landscape=mock_recorder)
+        init_ctx = make_context(landscape=mock_recorder)
         transform.on_start(init_ctx)
         transform.connect_output(collector, max_pending=10)
 
         token = make_token("row-1")
-        ctx = PluginContext(
-            run_id="test-run",
-            config={},
-            landscape=mock_recorder,
+        ctx = make_context(
             state_id="test-state-id",
             token=token,
+            landscape=mock_recorder,
         )
 
         try:
@@ -1462,17 +1426,15 @@ Text: {{ row.text }}""",
                 },
             )
         )
-        init_ctx = PluginContext(run_id="test", config={}, landscape=mock_recorder)
+        init_ctx = make_context(landscape=mock_recorder)
         transform.on_start(init_ctx)
         transform.connect_output(collector, max_pending=10)
 
         token = make_token("row-1")
-        ctx = PluginContext(
-            run_id="test-run",
-            config={},
-            landscape=mock_recorder,
+        ctx = make_context(
             state_id="test-state-id",
             token=token,
+            landscape=mock_recorder,
         )
 
         try:
@@ -1502,17 +1464,15 @@ Text: {{ row.text }}""",
                 template_source="prompts/requires_field.j2",
             )
         )
-        init_ctx = PluginContext(run_id="test", config={}, landscape=mock_recorder)
+        init_ctx = make_context(landscape=mock_recorder)
         transform.on_start(init_ctx)
         transform.connect_output(collector, max_pending=10)
 
         token = make_token("row-1")
-        ctx = PluginContext(
-            run_id="test-run",
-            config={},
-            landscape=mock_recorder,
+        ctx = make_context(
             state_id="test-state-id",
             token=token,
+            landscape=mock_recorder,
         )
 
         try:
@@ -1549,7 +1509,7 @@ class TestOpenRouterConcurrency:
     def test_multiple_rows_processed_in_fifo_order(self, mock_recorder: Mock, collector: CollectorOutputPort, chaosllm_server) -> None:
         """Multiple rows are emitted in submission order (FIFO)."""
         transform = LLMTransform(_openrouter_config(template="{{ row.text }}"))
-        init_ctx = PluginContext(run_id="test", config={}, landscape=mock_recorder)
+        init_ctx = make_context(landscape=mock_recorder)
         transform.on_start(init_ctx)
         transform.connect_output(collector, max_pending=10)
 
@@ -1564,12 +1524,10 @@ class TestOpenRouterConcurrency:
             with mock_httpx_client(chaosllm_server, response=mock_response):
                 for i, row in enumerate(rows):
                     token = make_token(f"row-{i}")
-                    ctx = PluginContext(
-                        run_id="test-run",
-                        config={},
-                        landscape=mock_recorder,
+                    ctx = make_context(
                         state_id=f"state-{i}",
                         token=token,
+                        landscape=mock_recorder,
                     )
                     transform.accept(make_pipeline_row(row), ctx)
 
@@ -1592,11 +1550,9 @@ class TestOpenRouterConcurrency:
         # Verify _recorder starts as None
         assert transform._recorder is None
 
-        ctx = PluginContext(
-            run_id="test-run",
-            config={},
-            landscape=mock_recorder,
+        ctx = make_context(
             state_id="test-state-id",
+            landscape=mock_recorder,
         )
         transform.on_start(ctx)
 
@@ -1606,7 +1562,7 @@ class TestOpenRouterConcurrency:
     def test_close_clears_recorder(self, mock_recorder: Mock, collector: CollectorOutputPort) -> None:
         """close() clears recorder reference."""
         transform = LLMTransform(_openrouter_config(template="{{ row.text }}"))
-        init_ctx = PluginContext(run_id="test", config={}, landscape=mock_recorder)
+        init_ctx = make_context(landscape=mock_recorder)
         transform.on_start(init_ctx)
         transform.connect_output(collector, max_pending=10)
 
@@ -1645,17 +1601,16 @@ class TestOpenRouterNanRejection:
         response = _create_mock_response(chaosllm_server, raw_body=nan_body, status_code=200, headers={"content-type": "application/json"})
 
         transform = LLMTransform(_openrouter_config(model="openai/gpt-4", template="{{ row.text }}"))
-        init_ctx = PluginContext(run_id="test", config={}, landscape=mock_recorder)
+        init_ctx = make_context(landscape=mock_recorder)
         transform.on_start(init_ctx)
         transform.connect_output(collector, max_pending=10)
 
         token = make_token("row-1")
-        ctx = PluginContext(
+        ctx = make_context(
             run_id="test",
-            config={},
-            landscape=mock_recorder,
             state_id="test-state",
             token=token,
+            landscape=mock_recorder,
         )
 
         try:
@@ -1677,17 +1632,16 @@ class TestOpenRouterNanRejection:
         response = _create_mock_response(chaosllm_server, raw_body=inf_body, status_code=200, headers={"content-type": "application/json"})
 
         transform = LLMTransform(_openrouter_config(model="openai/gpt-4", template="{{ row.text }}"))
-        init_ctx = PluginContext(run_id="test", config={}, landscape=mock_recorder)
+        init_ctx = make_context(landscape=mock_recorder)
         transform.on_start(init_ctx)
         transform.connect_output(collector, max_pending=10)
 
         token = make_token("row-1")
-        ctx = PluginContext(
+        ctx = make_context(
             run_id="test",
-            config={},
-            landscape=mock_recorder,
             state_id="test-state",
             token=token,
+            landscape=mock_recorder,
         )
 
         try:
@@ -1738,17 +1692,16 @@ class TestOpenRouterMalformedUtf8:
         )
 
         transform = LLMTransform(_openrouter_config(model="openai/gpt-4", template="{{ row.text }}"))
-        init_ctx = PluginContext(run_id="test", config={}, landscape=mock_recorder)
+        init_ctx = make_context(landscape=mock_recorder)
         transform.on_start(init_ctx)
         transform.connect_output(collector, max_pending=10)
 
         token = make_token("row-1")
-        ctx = PluginContext(
+        ctx = make_context(
             run_id="test",
-            config={},
-            landscape=mock_recorder,
             state_id="test-state",
             token=token,
+            landscape=mock_recorder,
         )
 
         try:

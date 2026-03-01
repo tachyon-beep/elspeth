@@ -1,24 +1,12 @@
 """Tests for KeywordFilter transform."""
 
-from typing import TYPE_CHECKING
-from unittest.mock import Mock
-
 import pytest
 
 from elspeth.core.landscape.database import LandscapeDB
 from elspeth.core.landscape.recorder import LandscapeRecorder
 from elspeth.plugins.infrastructure.config_base import PluginConfigError
 from elspeth.testing import make_pipeline_row
-
-if TYPE_CHECKING:
-    from elspeth.contracts.plugin_context import PluginContext
-
-
-def make_mock_context() -> "PluginContext":
-    """Create a mock PluginContext for testing."""
-    from elspeth.contracts.plugin_context import PluginContext
-
-    return Mock(spec=PluginContext, run_id="test-run")
+from tests.fixtures.factories import make_context
 
 
 class TestKeywordFilterConfig:
@@ -278,7 +266,7 @@ class TestKeywordFilterProcessing:
         )
 
         row = {"content": "Hello world", "id": 1}
-        result = transform.process(make_pipeline_row(row), make_mock_context())
+        result = transform.process(make_pipeline_row(row), make_context())
 
         assert result.status == "success"
         assert result.row is not None
@@ -297,7 +285,7 @@ class TestKeywordFilterProcessing:
         )
 
         row = {"content": "My password is secret", "id": 1}
-        result = transform.process(make_pipeline_row(row), make_mock_context())
+        result = transform.process(make_pipeline_row(row), make_context())
 
         assert result.status == "error"
         assert result.reason is not None
@@ -318,7 +306,7 @@ class TestKeywordFilterProcessing:
         )
 
         row = {"content": "Please provide your ssn for verification purposes"}
-        result = transform.process(make_pipeline_row(row), make_mock_context())
+        result = transform.process(make_pipeline_row(row), make_context())
 
         assert result.status == "error"
         assert result.reason is not None
@@ -340,7 +328,7 @@ class TestKeywordFilterProcessing:
 
         # Match in second field
         row = {"subject": "Hello", "body": "This is CONFIDENTIAL"}
-        result = transform.process(make_pipeline_row(row), make_mock_context())
+        result = transform.process(make_pipeline_row(row), make_context())
 
         assert result.status == "error"
         assert result.reason is not None
@@ -359,7 +347,7 @@ class TestKeywordFilterProcessing:
         )
 
         row = {"name": "test", "data": "contains secret", "count": 42}
-        result = transform.process(make_pipeline_row(row), make_mock_context())
+        result = transform.process(make_pipeline_row(row), make_context())
 
         assert result.status == "error"
         assert result.reason is not None
@@ -378,7 +366,7 @@ class TestKeywordFilterProcessing:
         )
 
         row = {"name": "safe", "count": 42, "active": True}
-        result = transform.process(make_pipeline_row(row), make_mock_context())
+        result = transform.process(make_pipeline_row(row), make_context())
 
         assert result.status == "success"
 
@@ -395,7 +383,7 @@ class TestKeywordFilterProcessing:
         )
 
         row = {"content": "my password is..."}  # lowercase
-        result = transform.process(make_pipeline_row(row), make_mock_context())
+        result = transform.process(make_pipeline_row(row), make_context())
 
         assert result.status == "success"  # No match - case matters
 
@@ -412,7 +400,7 @@ class TestKeywordFilterProcessing:
         )
 
         row = {"content": "my PASSWORD is..."}
-        result = transform.process(make_pipeline_row(row), make_mock_context())
+        result = transform.process(make_pipeline_row(row), make_context())
 
         assert result.status == "error"
 
@@ -430,7 +418,7 @@ class TestKeywordFilterProcessing:
 
         # Row is missing "optional_field" but has "content"
         row = {"content": "safe data", "id": 1}
-        result = transform.process(make_pipeline_row(row), make_mock_context())
+        result = transform.process(make_pipeline_row(row), make_context())
 
         assert result.status == "success"
 
@@ -448,7 +436,7 @@ class TestKeywordFilterProcessing:
 
         # Row is missing "optional_field" but "content" has blocked pattern
         row = {"content": "contains secret data", "id": 1}
-        result = transform.process(make_pipeline_row(row), make_mock_context())
+        result = transform.process(make_pipeline_row(row), make_context())
 
         assert result.status == "error"
         assert result.reason is not None
@@ -482,7 +470,7 @@ class TestKeywordFilterProcessing:
         )
         row = PipelineRow({"amount_usd": "contains secret value"}, contract)
 
-        result = transform.process(row, make_mock_context())
+        result = transform.process(row, make_context())
 
         assert result.status == "error"
         assert result.reason is not None
@@ -679,7 +667,7 @@ class TestKeywordFilterNonStringFailClosed:
         )
 
         row = {"amount": 42, "content": "safe text"}
-        result = transform.process(make_pipeline_row(row), make_mock_context())
+        result = transform.process(make_pipeline_row(row), make_context())
 
         assert result.status == "error", "Non-string value in named field must fail-closed"
         assert result.reason is not None
@@ -699,7 +687,7 @@ class TestKeywordFilterNonStringFailClosed:
         )
 
         row = {"score": 3.14}
-        result = transform.process(make_pipeline_row(row), make_mock_context())
+        result = transform.process(make_pipeline_row(row), make_context())
 
         assert result.status == "error"
         assert result.reason is not None
@@ -718,7 +706,7 @@ class TestKeywordFilterNonStringFailClosed:
         )
 
         row = {"active": True}
-        result = transform.process(make_pipeline_row(row), make_mock_context())
+        result = transform.process(make_pipeline_row(row), make_context())
 
         assert result.status == "error"
         assert result.reason is not None
@@ -737,7 +725,7 @@ class TestKeywordFilterNonStringFailClosed:
         )
 
         row = {"content": None}
-        result = transform.process(make_pipeline_row(row), make_mock_context())
+        result = transform.process(make_pipeline_row(row), make_context())
 
         assert result.status == "error"
         assert result.reason is not None
@@ -756,7 +744,7 @@ class TestKeywordFilterNonStringFailClosed:
         )
 
         row = {"tags": ["a", "b"]}
-        result = transform.process(make_pipeline_row(row), make_mock_context())
+        result = transform.process(make_pipeline_row(row), make_context())
 
         assert result.status == "error"
         assert result.reason is not None
@@ -775,7 +763,7 @@ class TestKeywordFilterNonStringFailClosed:
         )
 
         row = {"count": 99}
-        result = transform.process(make_pipeline_row(row), make_mock_context())
+        result = transform.process(make_pipeline_row(row), make_context())
 
         assert result.status == "error"
         assert result.retryable is False
@@ -797,7 +785,7 @@ class TestKeywordFilterNonStringFailClosed:
         )
 
         row = {"amount": 42, "content": "safe text"}
-        result = transform.process(make_pipeline_row(row), make_mock_context())
+        result = transform.process(make_pipeline_row(row), make_context())
 
         assert result.status == "error", "Must error on non-string 'amount' even though 'content' is scannable"
         assert result.reason is not None
@@ -822,7 +810,7 @@ class TestKeywordFilterNonStringFailClosed:
 
         # Only non-string fields — should pass through, not error
         row = {"count": 42, "active": True, "score": 3.14}
-        result = transform.process(make_pipeline_row(row), make_mock_context())
+        result = transform.process(make_pipeline_row(row), make_context())
 
         assert result.status == "success", "'all' mode must still skip non-string fields"
 
@@ -839,7 +827,7 @@ class TestKeywordFilterNonStringFailClosed:
         )
 
         row = {"content": "contains secret data"}
-        result = transform.process(make_pipeline_row(row), make_mock_context())
+        result = transform.process(make_pipeline_row(row), make_context())
 
         assert result.status == "error"
         assert result.reason is not None

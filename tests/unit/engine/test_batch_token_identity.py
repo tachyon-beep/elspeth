@@ -28,6 +28,7 @@ from elspeth.engine.spans import SpanFactory
 from elspeth.plugins.infrastructure.base import BaseTransform
 from elspeth.plugins.infrastructure.results import TransformResult
 from elspeth.testing import make_field, make_pipeline_row
+from tests.fixtures.factories import make_context
 from tests.unit.engine.conftest import DYNAMIC_SCHEMA, _TestSchema
 
 # ---------------------------------------------------------------------------
@@ -178,7 +179,7 @@ class TestBatchTokenIdentity:
             traversal=_single_node_traversal(NodeID(agg_node.node_id), transform),
             aggregation_settings=aggregation_settings,
         )
-        ctx = PluginContext(run_id=run.run_id, config={}, landscape=recorder)
+        ctx = make_context(run_id=run.run_id, landscape=recorder)
 
         # Process 3 rows to trigger batch flush
         all_results = []
@@ -273,7 +274,7 @@ class TestBatchTokenIdentity:
             traversal=_single_node_traversal(NodeID(agg_node.node_id), transform),
             aggregation_settings=aggregation_settings,
         )
-        ctx = PluginContext(run_id=run.run_id, config={}, landscape=recorder)
+        ctx = make_context(run_id=run.run_id, landscape=recorder)
 
         # Process row 0 - buffered, returns BUFFERED (T26: non-terminal at buffer time)
         pipeline_row_0 = make_pipeline_row({"value": 10})
@@ -368,7 +369,7 @@ class TestBatchTokenIdentity:
             traversal=_single_node_traversal(NodeID(agg_node.node_id), transform),
             aggregation_settings=aggregation_settings,
         )
-        ctx = PluginContext(run_id=run.run_id, config={}, landscape=recorder)
+        ctx = make_context(run_id=run.run_id, landscape=recorder)
 
         # Process 3 rows to trigger batch flush
         all_results = []

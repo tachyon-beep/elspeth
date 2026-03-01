@@ -9,6 +9,7 @@ from elspeth.contracts import PipelineRow
 from elspeth.core.landscape.database import LandscapeDB
 from elspeth.core.landscape.recorder import LandscapeRecorder
 from elspeth.testing import make_pipeline_row
+from tests.fixtures.factories import make_context
 
 
 class TestBaseTransform:
@@ -59,7 +60,6 @@ class TestBaseTransform:
         batch transforms to override process() with different signatures. Subclasses
         must still implement process() - the base implementation raises NotImplementedError.
         """
-        from elspeth.contracts.plugin_context import PluginContext
         from elspeth.plugins.infrastructure.base import BaseTransform
 
         # Create a minimal concrete subclass that doesn't override process()
@@ -71,7 +71,7 @@ class TestBaseTransform:
         transform = IncompleteTransform({})
         db = LandscapeDB.in_memory()
         recorder = LandscapeRecorder(db)
-        ctx = PluginContext(run_id="test", config={}, landscape=recorder)
+        ctx = make_context(landscape=recorder)
         row = make_pipeline_row({"x": 1})
 
         # Calling process() should raise NotImplementedError
@@ -112,7 +112,7 @@ class TestBaseTransform:
         transform = DoubleTransform({"some": "config"})
         db = LandscapeDB.in_memory()
         recorder = LandscapeRecorder(db)
-        ctx = PluginContext(run_id="test", config={}, landscape=recorder)
+        ctx = make_context(landscape=recorder)
 
         result = transform.process(make_pipeline_row({"x": 21}), ctx)
         assert result.row is not None
@@ -173,7 +173,7 @@ class TestBaseSink:
         sink = MemorySink({})
         db = LandscapeDB.in_memory()
         recorder = LandscapeRecorder(db)
-        ctx = PluginContext(run_id="test", config={}, landscape=recorder)
+        ctx = make_context(landscape=recorder)
 
         artifact = sink.write([{"value": 1}, {"value": 2}], ctx)
 
@@ -228,7 +228,7 @@ class TestBaseSink:
         sink = BatchMemorySink({})
         db = LandscapeDB.in_memory()
         recorder = LandscapeRecorder(db)
-        ctx = PluginContext(run_id="test", config={}, landscape=recorder)
+        ctx = make_context(landscape=recorder)
 
         artifact = sink.write([{"value": 1}, {"value": 2}, {"value": 3}], ctx)
 
@@ -275,7 +275,7 @@ class TestBaseSource:
         source = ListSource({"data": [{"value": 1}, {"value": 2}]})
         db = LandscapeDB.in_memory()
         recorder = LandscapeRecorder(db)
-        ctx = PluginContext(run_id="test", config={}, landscape=recorder)
+        ctx = make_context(landscape=recorder)
 
         rows = list(source.load(ctx))
         assert len(rows) == 2

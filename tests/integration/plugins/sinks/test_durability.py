@@ -14,7 +14,6 @@ from unittest.mock import Mock, patch
 import pytest
 
 from elspeth.contracts import Determinism, NodeType, PendingOutcome, RowOutcome, TokenInfo
-from elspeth.contracts.plugin_context import PluginContext
 from elspeth.contracts.schema_contract import FieldContract, SchemaContract
 from elspeth.core.checkpoint import CheckpointManager
 from elspeth.core.dag import ExecutionGraph
@@ -23,6 +22,7 @@ from elspeth.core.landscape.recorder import LandscapeRecorder
 from elspeth.core.payload_store import FilesystemPayloadStore
 from elspeth.engine.executors import SinkExecutor
 from elspeth.engine.spans import SpanFactory
+from tests.fixtures.factories import make_context
 
 
 def _make_contract(data: dict[str, Any]) -> SchemaContract:
@@ -189,11 +189,7 @@ class TestSinkDurability:
         )
 
         # Create context
-        ctx = PluginContext(
-            run_id=run.run_id,
-            config={},
-        )
-        ctx.node_id = "sink"
+        ctx = make_context(run_id=run.run_id, node_id="sink")
 
         # Create checkpoint callback
         checkpoint_created = False
@@ -288,11 +284,7 @@ class TestSinkDurability:
         )
 
         # Create context
-        ctx = PluginContext(
-            run_id=run.run_id,
-            config={},
-        )
-        ctx.node_id = "sink"
+        ctx = make_context(run_id=run.run_id, node_id="sink")
 
         # Create checkpoint callback that fails
         def failing_checkpoint_callback(token_info):
@@ -380,11 +372,7 @@ class TestSinkDurability:
         )
 
         # Create context
-        ctx = PluginContext(
-            run_id=run.run_id,
-            config={},
-        )
-        ctx.node_id = "sink"
+        ctx = make_context(run_id=run.run_id, node_id="sink")
 
         # Track call order
         call_order = []

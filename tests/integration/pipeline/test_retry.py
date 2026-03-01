@@ -31,6 +31,7 @@ from elspeth.engine.retry import RetryManager
 from elspeth.engine.spans import SpanFactory
 from elspeth.plugins.infrastructure.base import BaseTransform
 from elspeth.testing import make_pipeline_row
+from tests.fixtures.factories import make_context
 
 
 def _make_contract(data: dict[str, Any]) -> SchemaContract:
@@ -230,7 +231,7 @@ class TestRetryAuditTrail:
         # Create retry manager with 3 attempts (enough to succeed)
         retry_manager = RetryManager(RuntimeRetryConfig(max_attempts=3, base_delay=0.001, max_delay=60.0, jitter=0.0, exponential_base=2.0))
 
-        ctx = PluginContext(run_id=run_id, config={}, landscape=recorder)
+        ctx = make_context(run_id=run_id, landscape=recorder)
         transform.on_start(ctx)
 
         # Track attempt number manually since _execute_transform_with_retry
@@ -331,7 +332,7 @@ class TestRetryAuditTrail:
         # Create retry manager with only 2 attempts
         retry_manager = RetryManager(RuntimeRetryConfig(max_attempts=2, base_delay=0.001, max_delay=60.0, jitter=0.0, exponential_base=2.0))
 
-        ctx = PluginContext(run_id=run_id, config={}, landscape=recorder)
+        ctx = make_context(run_id=run_id, landscape=recorder)
         transform.on_start(ctx)
 
         # Track attempt number
@@ -432,7 +433,7 @@ class TestRetryAuditTrail:
         step_resolver = lambda node_id: 1  # noqa: E731
         transform_executor = TransformExecutor(recorder, span_factory, step_resolver)
 
-        ctx = PluginContext(run_id=run_id, config={}, landscape=recorder)
+        ctx = make_context(run_id=run_id, landscape=recorder)
         transform.on_start(ctx)
 
         # Execute without retry manager (single attempt)

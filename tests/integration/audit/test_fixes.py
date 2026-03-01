@@ -10,11 +10,11 @@ Migrated from tests/integration/test_audit_integration_fixes.py
 import pytest
 
 from elspeth.contracts import EdgeInfo, ExecutionError, NodeType, RoutingMode, RunStatus
-from elspeth.contracts.plugin_context import PluginContext
 from elspeth.core.dag import ExecutionGraph
 from elspeth.core.landscape import LandscapeDB
 from elspeth.core.landscape.recorder import LandscapeRecorder
 from elspeth.plugins.infrastructure.manager import PluginManager
+from tests.fixtures.factories import make_context
 
 # Dynamic schema config for tests - PathConfig now requires schema
 DYNAMIC_SCHEMA = {"mode": "observed"}
@@ -118,9 +118,8 @@ class TestIntegrationAuditFixes:
             canonical_version="1.0.0",
         )
 
-        ctx = PluginContext(
+        ctx = make_context(
             run_id=run.run_id,
-            config={},
             landscape=recorder,
         )
 
@@ -227,9 +226,8 @@ class TestIntegrationAuditFixes:
         )
 
         # Create context with recorder
-        ctx = PluginContext(
+        ctx = make_context(
             run_id=run.run_id,
-            config={},
             landscape=recorder,
         )
 

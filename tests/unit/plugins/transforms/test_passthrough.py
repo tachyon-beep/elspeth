@@ -5,9 +5,8 @@ from typing import Any
 import pytest
 
 from elspeth.contracts.plugin_context import PluginContext
-from elspeth.core.landscape.database import LandscapeDB
-from elspeth.core.landscape.recorder import LandscapeRecorder
 from elspeth.testing import make_pipeline_row
+from tests.fixtures.factories import make_source_context
 
 # Common schema config for dynamic field handling (accepts any fields)
 DYNAMIC_SCHEMA = {"mode": "observed"}
@@ -19,9 +18,7 @@ class TestPassThrough:
     @pytest.fixture
     def ctx(self) -> PluginContext:
         """Create minimal plugin context."""
-        db = LandscapeDB.in_memory()
-        recorder = LandscapeRecorder(db)
-        return PluginContext(run_id="test-run", config={}, landscape=recorder)
+        return make_source_context()
 
     def test_has_required_attributes(self) -> None:
         """PassThrough has name."""

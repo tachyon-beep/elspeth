@@ -8,6 +8,7 @@ from elspeth.contracts import PipelineRow, SourceRow
 from elspeth.core.landscape.database import LandscapeDB
 from elspeth.core.landscape.recorder import LandscapeRecorder
 from elspeth.testing import make_pipeline_row
+from tests.fixtures.factories import make_context
 
 
 class TestSourceProtocol:
@@ -70,7 +71,7 @@ class TestSourceProtocol:
 
         db = LandscapeDB.in_memory()
         recorder = LandscapeRecorder(db)
-        ctx = PluginContext(run_id="test", config={}, landscape=recorder)  # type: ignore[unreachable]
+        ctx = make_context(landscape=recorder)  # type: ignore[unreachable]
 
         source_rows = list(source.load(ctx))
         assert len(source_rows) == 3
@@ -204,7 +205,7 @@ class TestTransformProtocol:
 
         db = LandscapeDB.in_memory()
         recorder = LandscapeRecorder(db)
-        ctx = PluginContext(run_id="test", config={}, landscape=recorder)  # type: ignore[unreachable]
+        ctx = make_context(landscape=recorder)  # type: ignore[unreachable]
 
         result = transform.process(make_pipeline_row({"value": 21}), ctx)
         assert result.status == "success"
@@ -238,7 +239,7 @@ class TestTransformBatchSupport:
         transform = SingleTransform({})
         db = LandscapeDB.in_memory()
         recorder = LandscapeRecorder(db)
-        ctx = PluginContext(run_id="test", config={}, landscape=recorder)
+        ctx = make_context(landscape=recorder)
         result = transform.process(make_pipeline_row({"value": 1}), ctx)
         assert result.row is not None
         assert result.row.to_dict() == {"processed": 1}
@@ -274,7 +275,7 @@ class TestTransformBatchSupport:
         transform = BatchTransform({})
         db = LandscapeDB.in_memory()
         recorder = LandscapeRecorder(db)
-        ctx = PluginContext(run_id="test", config={}, landscape=recorder)
+        ctx = make_context(landscape=recorder)
 
         # Batch mode
         result = transform.process([make_pipeline_row({"value": 1}), make_pipeline_row({"value": 2}), make_pipeline_row({"value": 3})], ctx)
@@ -471,7 +472,7 @@ class TestSinkProtocol:
 
         db = LandscapeDB.in_memory()
         recorder = LandscapeRecorder(db)
-        ctx = PluginContext(run_id="test", config={}, landscape=recorder)  # type: ignore[unreachable]
+        ctx = make_context(landscape=recorder)  # type: ignore[unreachable]
         artifact = sink.write([{"value": 1}, {"value": 2}], ctx)
 
         assert isinstance(artifact, ArtifactDescriptor)
@@ -542,7 +543,7 @@ class TestSinkProtocol:
 
         db = LandscapeDB.in_memory()
         recorder = LandscapeRecorder(db)
-        ctx = PluginContext(run_id="test", config={}, landscape=recorder)  # type: ignore[unreachable]
+        ctx = make_context(landscape=recorder)  # type: ignore[unreachable]
 
         # Batch write
         artifact = sink.write([{"value": 1}, {"value": 2}], ctx)

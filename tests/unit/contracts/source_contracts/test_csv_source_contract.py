@@ -12,16 +12,17 @@ from typing import TYPE_CHECKING
 import pytest
 
 from elspeth.contracts import NodeType, SourceRow
-from elspeth.contracts.plugin_context import PluginContext
 from elspeth.contracts.schema import SchemaConfig
 from elspeth.core.canonical import CANONICAL_VERSION, stable_hash
 from elspeth.core.landscape import LandscapeDB, LandscapeRecorder
 from elspeth.plugins.sources.csv_source import CSVSource
+from tests.fixtures.factories import make_context
 
 from .test_source_protocol import SourceContractPropertyTestBase
 
 if TYPE_CHECKING:
     from elspeth.contracts import SourceProtocol
+    from elspeth.contracts.plugin_context import PluginContext
 
 
 class TestCSVSourceContract(SourceContractPropertyTestBase):
@@ -65,7 +66,7 @@ class TestCSVSourceContract(SourceContractPropertyTestBase):
         source.on_success = "output"
         db = LandscapeDB.in_memory()
         recorder = LandscapeRecorder(db)
-        ctx = PluginContext(run_id="test", config={}, landscape=recorder)
+        ctx = make_context(landscape=recorder)
 
         rows = list(source.load(ctx))
         assert len(rows) == 2
@@ -96,7 +97,7 @@ class TestCSVSourceContract(SourceContractPropertyTestBase):
         source.on_success = "output"
         db = LandscapeDB.in_memory()
         recorder = LandscapeRecorder(db)
-        ctx = PluginContext(run_id="test", config={}, landscape=recorder)
+        ctx = make_context(landscape=recorder)
 
         # Empty file returns no rows gracefully (no error)
         rows = list(source.load(ctx))
@@ -117,7 +118,7 @@ class TestCSVSourceContract(SourceContractPropertyTestBase):
         source.on_success = "output"
         db = LandscapeDB.in_memory()
         recorder = LandscapeRecorder(db)
-        ctx = PluginContext(run_id="test", config={}, landscape=recorder)
+        ctx = make_context(landscape=recorder)
 
         rows = list(source.load(ctx))
         assert rows == []
@@ -146,9 +147,8 @@ class TestCSVSourceQuarantineContract(SourceContractPropertyTestBase):
             node_id="test-source",
             sequence=0,
         )
-        return PluginContext(
+        return make_context(
             run_id="test-run-001",
-            config={},
             landscape=recorder,
             node_id="test-source",
         )
@@ -193,9 +193,8 @@ class TestCSVSourceQuarantineContract(SourceContractPropertyTestBase):
             sequence=0,
         )
 
-        ctx = PluginContext(
+        ctx = make_context(
             run_id=run.run_id,
-            config={},
             landscape=recorder,
             node_id="csv_source",
         )
@@ -263,9 +262,8 @@ class TestCSVSourceDiscardContract:
             }
         )
         source.on_success = "output"
-        ctx = PluginContext(
+        ctx = make_context(
             run_id=run.run_id,
-            config={},
             landscape=recorder,
             node_id="csv_source",
         )
@@ -298,7 +296,7 @@ class TestCSVSourceFileNotFoundContract:
         source.on_success = "output"
         db = LandscapeDB.in_memory()
         recorder = LandscapeRecorder(db)
-        ctx = PluginContext(run_id="test", config={}, landscape=recorder)
+        ctx = make_context(landscape=recorder)
 
         with pytest.raises(FileNotFoundError):
             list(source.load(ctx))

@@ -16,7 +16,6 @@ if TYPE_CHECKING:
     import httpx
 
 from elspeth.contracts.identity import TokenInfo
-from elspeth.contracts.plugin_context import PluginContext
 from elspeth.testing import make_pipeline_row
 
 # Re-export chaosllm_server fixture so LLM tests can use it
@@ -33,23 +32,6 @@ def make_token(row_id: str = "row-1", token_id: str | None = None) -> TokenInfo:
         row_id=row_id,
         token_id=token_id or f"token-{row_id}",
         row_data=make_pipeline_row({}),
-    )
-
-
-def make_plugin_context(
-    state_id: str = "state-123",
-    token: TokenInfo | None = None,
-) -> PluginContext:
-    """Create a PluginContext with mocked landscape."""
-    mock_landscape = Mock()
-    mock_landscape.record_external_call = Mock()
-    mock_landscape.record_call = Mock()
-    return PluginContext(
-        run_id="run-123",
-        landscape=mock_landscape,
-        state_id=state_id,
-        config={},
-        token=token or make_token("row-1"),
     )
 
 

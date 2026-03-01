@@ -14,6 +14,7 @@ from elspeth.engine.processor import DAGTraversalContext
 from elspeth.plugins.infrastructure.base import BaseTransform
 from elspeth.plugins.infrastructure.results import TransformResult
 from tests.fixtures.base_classes import create_observed_contract
+from tests.fixtures.factories import make_context
 
 
 def _single_node_traversal(node_id: NodeID, plugin: Any) -> DAGTraversalContext:
@@ -130,7 +131,7 @@ class TestProcessorRejectsDuckTypedPlugins:
             traversal=_single_node_traversal(duck_node_id, duck),
         )
 
-        ctx = PluginContext(run_id=run.run_id, config={}, landscape=recorder)
+        ctx = make_context(run_id=run.run_id, landscape=recorder)
 
         with pytest.raises(TypeError, match="Unknown transform type"):
             processor.process_row(

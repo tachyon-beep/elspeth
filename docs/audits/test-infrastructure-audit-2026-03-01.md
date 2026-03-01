@@ -778,3 +778,62 @@ Code review finding: mypy type narrowing added to `test_create_row_round_trip` (
 - pytest: 10,370 passed, 17 skipped, 3 xfailed, 0 failures (4 new tests)
 - mypy (`src/`): clean (no errors)
 - ruff: clean
+
+**2026-03-01 — P1 implementation: COMPLETE**
+
+53 test files modified, 735 insertions, 1,038 deletions (net -303 lines). 21 parallel subagents + 3 code review agents.
+
+| Metric | Count |
+|---|---|
+| Files modified | 53 (55 total incl. 2 pre-existing doc changes) |
+| `PluginContext(...)` constructions replaced | ~350+ |
+| Category D helpers deleted | 7 (`make_plugin_context` x3, `make_mock_context` x2, `_make_ctx` x2) |
+| Category D call sites replaced | ~100+ |
+| Import additions (`from tests.fixtures.factories import make_context`) | 48 files |
+| Import removals (`PluginContext`, `Mock`, `LandscapeDB`, `LandscapeRecorder`) | ~30 files |
+| Dead `if TYPE_CHECKING: pass` blocks removed | 2 files |
+
+**Exceptions — files with `PluginContext(...)` intentionally preserved:**
+
+| File | Reason | Count |
+|---|---|---|
+| `tests/fixtures/factories.py` | Factory implementation (EXEMPT) | 3 |
+| `tests/unit/plugins/test_context.py` | Tests PluginContext behavior directly (EXEMPT) | all |
+| `tests/unit/contracts/test_context_protocols.py` | Protocol compliance tests (EXEMPT) | all |
+| `tests/performance/stress/conftest.py` | ChaosLLM-integrated setup with real recorder (EXEMPT) | 1 |
+| `tests/performance/stress/test_llm_retry.py` | Performance tier (EXEMPT) | all |
+| `tests/property/core/test_operations_properties.py` | Uses `FakePluginContext` (local dataclass, not PluginContext) | 0 (false positive) |
+| `tests/unit/plugins/sinks/test_sink_display_headers.py:142` | Intentional `landscape=None` error path test | 1 |
+| `tests/unit/plugins/sinks/test_csv_sink_headers.py:234` | Intentional `landscape=None` error path test | 1 |
+| `tests/unit/plugins/batching/test_batch_transform_mixin.py:105` | Intentional `token=None` contract violation test — `make_context()` always creates a default token | 1 |
+| `tests/unit/plugins/llm/test_azure.py:439,460` | Intentional `state_id=None` and `token=None` error path tests | 2 |
+| `tests/unit/plugins/llm/test_azure.py:243,589` | Real `LandscapeRecorder` needed for FK chain operations | 2 |
+| `tests/unit/plugins/llm/test_openrouter.py:576` | Intentional `state_id=None` error path test | 1 |
+| `tests/unit/plugins/llm/test_azure_batch.py:66` | `_make_batch_ctx()` uses real `LandscapeRecorder` with full FK chain | 1 |
+| `tests/unit/plugins/llm/test_azure_batch.py:1487,1591` | `MagicMock` landscape + no token — `make_context()` injects default token causing `record_call()` token mismatch validation failure. Reverted to direct construction. | 2 |
+| `tests/unit/plugins/transforms/test_keyword_filter.py:233` | Direct construction inside `test_transform_compiles_patterns_at_init` — not a helper call site | 1 |
+| `tests/unit/plugins/transforms/test_field_mapper.py:577` | Uses `contract=` parameter not supported by `make_context()` | 1 |
+| `tests/unit/plugins/transforms/test_web_scrape.py` | Uses `rate_limit_registry=` and `payload_store=` params not supported by `make_context()` | 2 |
+| `tests/unit/plugins/transforms/test_web_scrape_security.py` | Uses `rate_limit_registry=` and `payload_store=` params not supported by `make_context()` | 2 |
+| `tests/unit/contracts/transform_contracts/test_web_scrape_contract.py` | Uses `payload_store=` param not supported by `make_context()` | 1 |
+| `tests/integration/rate_limit/test_integration.py` | Uses `rate_limit_registry=` param not supported by `make_context()` | all |
+| `tests/integration/plugins/sources/test_contract.py` | Uses `_TestablePluginContext(PluginContext)` subclass | all |
+| `tests/integration/plugins/transforms/test_contract.py` | Uses `_TestablePluginContext(PluginContext)` subclass | all |
+| `tests/integration/plugins/sources/test_trust_boundary.py` | Uses `_TestablePluginContext` + real recorder for audit trail tests | all |
+| `tests/integration/plugins/llm/test_openrouter_batch_integration.py` | Real `LandscapeRecorder` needed for audit trail | all |
+
+**Bug found and fixed during migration:**
+
+The `test_azure_batch.py::TestAzureBatchLLMTransformMissingResults` tests (2 tests) created `PluginContext(...)` without a `token` parameter (defaulting to `None`). `make_context()` always creates a default token via `make_token_info()`. The `PluginContext.record_call()` method (added in P2-2026-02-14) validates `ctx.token.token_id` against `landscape.get_node_state(state_id).token_id` — with a `MagicMock` landscape, the auto-generated `.token_id` attribute is a Mock object, not a string, causing `FrameworkBugError`. These 2 tests were reverted to direct `PluginContext(...)` construction. They are candidates for P2 migration when the landscape mocking is replaced with real recorders.
+
+**Code review results (3 agents):**
+
+| Reviewer | Scope | Verdict | Issues Found |
+|---|---|---|---|
+| Engine reviewer | 6 files, 269 tests | Clean | None — all parameter mappings correct |
+| LLM reviewer | 9 files | 1 critical | `test_azure_batch.py` token injection (fixed above) |
+| Plugin/sink/transform reviewer | 25 files, 548 tests | 1 minor | Unused `PluginContext` import in `test_base.py` (fixed) |
+
+**Verification:**
+- pytest: 10,370 passed, 17 skipped, 87 deselected, 3 xfailed, 0 failures
+- Test count: unchanged from P0.5b baseline (10,370)

@@ -30,6 +30,7 @@ from elspeth.plugins.infrastructure.clients.llm import (
 from elspeth.plugins.transforms.llm.provider import FinishReason, LLMQueryResult
 from elspeth.plugins.transforms.llm.transform import LLMTransform
 from elspeth.testing import make_pipeline_row
+from tests.fixtures.factories import make_context
 
 # Common schema config
 DYNAMIC_SCHEMA = {"mode": "observed"}
@@ -116,25 +117,6 @@ def make_token(row_id: str = "row-1", token_id: str | None = None) -> TokenInfo:
     )
 
 
-def make_plugin_context(
-    state_id: str = "state-123",
-    token: TokenInfo | None = None,
-) -> PluginContext:
-    """Create a PluginContext with mocked landscape."""
-    mock_landscape = Mock()
-    mock_landscape.record_external_call = Mock()
-    mock_landscape.record_call = Mock()
-    if token is None:
-        token = make_token("row-1")
-    return PluginContext(
-        run_id="run-123",
-        landscape=mock_landscape,
-        state_id=state_id,
-        config={},
-        token=token,
-    )
-
-
 def _make_transform_with_mock_provider(
     config: dict[str, Any] | None = None,
 ) -> tuple[LLMTransform, Mock]:
@@ -177,7 +159,7 @@ class TestOpenRouterMultiQueryInit:
     def test_process_raises_not_implemented(self) -> None:
         """process() raises NotImplementedError directing to accept()."""
         transform = LLMTransform(make_config())
-        ctx = make_plugin_context()
+        ctx = make_context()
 
         with pytest.raises(NotImplementedError, match="row-level pipelining"):
             transform.process(make_pipeline_row({"text": "hello"}), ctx)
@@ -227,7 +209,7 @@ class TestSingleQueryProcessing:
                 "cs1_hist": "family history",
             }
         )
-        ctx = make_plugin_context()
+        ctx = make_context()
 
         result = transform._process_row(row, ctx)
 
@@ -247,7 +229,7 @@ class TestSingleQueryProcessing:
         mock_provider.execute_query.return_value = make_query_result({"score": 85, "rationale": "Excellent assessment"})
 
         row = make_pipeline_row({"cs1_bg": "data", "cs1_sym": "data", "cs1_hist": "data"})
-        ctx = make_plugin_context()
+        ctx = make_context()
 
         result = transform._process_row(row, ctx)
 
@@ -265,7 +247,7 @@ class TestSingleQueryProcessing:
         mock_provider.execute_query.return_value = make_query_result("not json")
 
         row = make_pipeline_row({"cs1_bg": "data", "cs1_sym": "data", "cs1_hist": "data"})
-        ctx = make_plugin_context()
+        ctx = make_context()
 
         result = transform._process_row(row, ctx)
 
@@ -286,7 +268,7 @@ class TestSingleQueryProcessing:
         mock_provider.execute_query.side_effect = RateLimitError("Rate limit exceeded")
 
         row = make_pipeline_row({"cs1_bg": "data", "cs1_sym": "data", "cs1_hist": "data"})
-        ctx = make_plugin_context()
+        ctx = make_context()
 
         result = transform._process_row(row, ctx)
         assert result.status == "error"
@@ -307,7 +289,7 @@ class TestSingleQueryProcessing:
         mock_provider.execute_query.side_effect = ServerError("503 Service Unavailable")
 
         row = make_pipeline_row({"cs1_bg": "data", "cs1_sym": "data", "cs1_hist": "data"})
-        ctx = make_plugin_context()
+        ctx = make_context()
 
         result = transform._process_row(row, ctx)
         assert result.status == "error"
@@ -328,7 +310,7 @@ class TestSingleQueryProcessing:
         mock_provider.execute_query.side_effect = NetworkError("Connection refused")
 
         row = make_pipeline_row({"cs1_bg": "data", "cs1_sym": "data", "cs1_hist": "data"})
-        ctx = make_plugin_context()
+        ctx = make_context()
 
         result = transform._process_row(row, ctx)
         assert result.status == "error"
@@ -344,7 +326,7 @@ class TestSingleQueryProcessing:
         mock_provider.execute_query.side_effect = LLMClientError("Bad Request", retryable=False)
 
         row = make_pipeline_row({"cs1_bg": "data", "cs1_sym": "data", "cs1_hist": "data"})
-        ctx = make_plugin_context()
+        ctx = make_context()
 
         result = transform._process_row(row, ctx)
 
@@ -360,7 +342,7 @@ class TestSingleQueryProcessing:
         mock_provider.execute_query.side_effect = ContextLengthError("Context too long")
 
         row = make_pipeline_row({"cs1_bg": "data", "cs1_sym": "data", "cs1_hist": "data"})
-        ctx = make_plugin_context()
+        ctx = make_context()
 
         result = transform._process_row(row, ctx)
 
@@ -382,7 +364,7 @@ class TestSingleQueryProcessing:
         transform, _mock_provider = _make_transform_with_mock_provider(config)
 
         row = make_pipeline_row({"cs1_bg": "data", "cs1_sym": "data", "cs1_hist": "data"})
-        ctx = make_plugin_context()
+        ctx = make_context()
 
         result = transform._process_row(row, ctx)
 
@@ -415,7 +397,7 @@ class TestSingleQueryProcessing:
         mock_provider.execute_query.return_value = make_query_result(content_with_fence)
 
         row = make_pipeline_row({"cs1_bg": "data", "cs1_sym": "data", "cs1_hist": "data"})
-        ctx = make_plugin_context()
+        ctx = make_context()
 
         result = transform._process_row(row, ctx)
 
@@ -432,7 +414,7 @@ class TestSingleQueryProcessing:
         mock_provider.execute_query.return_value = make_query_result("[1, 2, 3]")
 
         row = make_pipeline_row({"cs1_bg": "data", "cs1_sym": "data", "cs1_hist": "data"})
-        ctx = make_plugin_context()
+        ctx = make_context()
 
         result = transform._process_row(row, ctx)
 
@@ -462,12 +444,11 @@ class TestRowProcessingWithPipelining:
     def ctx(self, mock_recorder: Mock) -> PluginContext:
         """Create plugin context with landscape, state_id, and token."""
         token = make_token("row-1")
-        return PluginContext(
+        return make_context(
             run_id="test-run",
-            config={},
-            landscape=mock_recorder,
             state_id="test-state-id",
             token=token,
+            landscape=mock_recorder,
         )
 
     @pytest.fixture()
@@ -811,12 +792,11 @@ class TestMultiRowPipelining:
         try:
             for i, row in enumerate(rows):
                 token = make_token(f"row-{i}")
-                ctx = PluginContext(
+                ctx = make_context(
                     run_id="test-run",
-                    config={},
-                    landscape=mock_recorder,
                     state_id=f"state-{i}",
                     token=token,
+                    landscape=mock_recorder,
                 )
                 transform.accept(make_pipeline_row(row), ctx)
 
@@ -837,9 +817,8 @@ class TestMultiRowPipelining:
         transform = LLMTransform(make_config())
 
         token = make_token("row-1")
-        ctx = PluginContext(
+        ctx = make_context(
             run_id="test-run",
-            config={},
             state_id="test-state-id",
             token=token,
         )
@@ -850,7 +829,7 @@ class TestMultiRowPipelining:
     def test_connect_output_cannot_be_called_twice(self, collector: CollectorOutputPort, mock_recorder: Mock) -> None:
         """connect_output() raises if called more than once."""
         transform = LLMTransform(make_config())
-        init_ctx = PluginContext(run_id="test", config={}, landscape=mock_recorder)
+        init_ctx = make_context(run_id="test", landscape=mock_recorder)
         transform.on_start(init_ctx)
         transform.connect_output(collector, max_pending=10)
 
@@ -885,12 +864,11 @@ class TestHTTPSpecificBehavior:
     def ctx(self, mock_recorder: Mock) -> PluginContext:
         """Create plugin context with landscape, state_id, and token."""
         token = make_token("row-1")
-        return PluginContext(
+        return make_context(
             run_id="test-run",
-            config={},
-            landscape=mock_recorder,
             state_id="test-state-id",
             token=token,
+            landscape=mock_recorder,
         )
 
     @pytest.fixture()
@@ -1115,11 +1093,10 @@ class TestResourceCleanup:
         # Verify _recorder starts as None
         assert transform._recorder is None
 
-        ctx = PluginContext(
+        ctx = make_context(
             run_id="test-run",
-            config={},
-            landscape=mock_recorder,
             state_id="test-state-id",
+            landscape=mock_recorder,
         )
         transform.on_start(ctx)
 
@@ -1165,7 +1142,7 @@ class TestNanInJsonParsing:
         mock_provider.execute_query.side_effect = LLMClientError("Response is not valid JSON: NaN is not valid JSON", retryable=False)
 
         row = make_pipeline_row({"cs1_bg": "data", "cs1_sym": "data", "cs1_hist": "data"})
-        ctx = make_plugin_context()
+        ctx = make_context()
 
         result = transform._process_row(row, ctx)
 
@@ -1196,7 +1173,7 @@ class TestNanInJsonParsing:
         mock_provider.execute_query.side_effect = LLMClientError("Response is not valid JSON: Infinity is not valid JSON", retryable=False)
 
         row = make_pipeline_row({"cs1_bg": "data", "cs1_sym": "data", "cs1_hist": "data"})
-        ctx = make_plugin_context()
+        ctx = make_context()
 
         result = transform._process_row(row, ctx)
 
@@ -1236,7 +1213,7 @@ class TestBug4_3_Tier3BoundaryTypeChecks:
         mock_provider.execute_query.side_effect = LLMClientError("Expected string content, got list", retryable=False)
 
         row = make_pipeline_row({"cs1_bg": "data", "cs1_sym": "data", "cs1_hist": "data"})
-        ctx = make_plugin_context()
+        ctx = make_context()
 
         result = transform._process_row(row, ctx)
 
@@ -1278,7 +1255,7 @@ class TestBug4_3_Tier3BoundaryTypeChecks:
         )
 
         row = make_pipeline_row({"cs1_bg": "data", "cs1_sym": "data", "cs1_hist": "data"})
-        ctx = make_plugin_context()
+        ctx = make_context()
 
         result = transform._process_row(row, ctx)
 
@@ -1317,7 +1294,7 @@ class TestBug4_3_Tier3BoundaryTypeChecks:
         )
 
         row = make_pipeline_row({"cs1_bg": "data", "cs1_sym": "data", "cs1_hist": "data"})
-        ctx = make_plugin_context()
+        ctx = make_context()
 
         # Should not crash
         result = transform._process_row(row, ctx)

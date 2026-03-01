@@ -10,19 +10,10 @@ output rows, not just the first one (first-element bias fix).
 from __future__ import annotations
 
 from elspeth.contracts import PipelineRow
-from elspeth.contracts.plugin_context import PluginContext
 from elspeth.contracts.schema_contract import SchemaContract
-from elspeth.core.landscape.database import LandscapeDB
-from elspeth.core.landscape.recorder import LandscapeRecorder
 from elspeth.plugins.transforms.batch_replicate import BatchReplicate
 from elspeth.testing import make_field, make_row
-
-
-def _make_ctx() -> PluginContext:
-    """Create a PluginContext with in-memory landscape recorder."""
-    db = LandscapeDB.in_memory()
-    recorder = LandscapeRecorder(db)
-    return PluginContext(run_id="test-run", config={}, landscape=recorder)
+from tests.fixtures.factories import make_context
 
 
 def test_batch_replicate_returns_contract_with_multi_row_output():
@@ -56,7 +47,7 @@ def test_batch_replicate_returns_contract_with_multi_row_output():
         pipeline_rows.append(make_row(row, contract=contract))
 
     # Process batch
-    ctx = _make_ctx()
+    ctx = make_context()
     result = transform.process(pipeline_rows, ctx)
 
     # Verify multi-row result
@@ -115,7 +106,7 @@ def test_batch_replicate_contract_covers_all_output_shapes():
         make_row(row2_data, contract=SchemaContract(mode="OBSERVED", fields=fields2, locked=True)),
     ]
 
-    ctx = _make_ctx()
+    ctx = make_context()
     result = transform.process(pipeline_rows, ctx)
 
     assert result.is_multi_row
@@ -139,7 +130,7 @@ def test_batch_replicate_contract_empty_output():
     )
 
     # Empty batch
-    ctx = _make_ctx()
+    ctx = make_context()
     result = transform.process([], ctx)
 
     # Empty batches return a marker row (single-row success), not multi-row
@@ -173,7 +164,7 @@ def test_batch_replicate_all_invalid_returns_error():
         contract = SchemaContract(mode="OBSERVED", fields=fields, locked=True)
         pipeline_rows.append(make_row(row, contract=contract))
 
-    ctx = _make_ctx()
+    ctx = make_context()
     result = transform.process(pipeline_rows, ctx)
 
     assert result.status == "error"
@@ -208,7 +199,7 @@ def test_batch_replicate_mixed_valid_invalid_excludes_quarantined():
         contract = SchemaContract(mode="OBSERVED", fields=fields, locked=True)
         pipeline_rows.append(make_row(row, contract=contract))
 
-    ctx = _make_ctx()
+    ctx = make_context()
     result = transform.process(pipeline_rows, ctx)
 
     assert result.status == "success"
@@ -257,7 +248,7 @@ def test_batch_replicate_quarantined_indices_in_success_reason():
         contract = SchemaContract(mode="OBSERVED", fields=fields, locked=True)
         pipeline_rows.append(make_row(row, contract=contract))
 
-    ctx = _make_ctx()
+    ctx = make_context()
     result = transform.process(pipeline_rows, ctx)
 
     assert result.status == "success"
@@ -288,7 +279,7 @@ def test_batch_replicate_no_quarantine_no_indices():
         contract = SchemaContract(mode="OBSERVED", fields=fields, locked=True)
         pipeline_rows.append(make_row(row, contract=contract))
 
-    ctx = _make_ctx()
+    ctx = make_context()
     result = transform.process(pipeline_rows, ctx)
 
     assert result.status == "success"

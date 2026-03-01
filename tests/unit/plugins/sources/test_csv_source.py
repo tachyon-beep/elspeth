@@ -6,7 +6,7 @@ from pathlib import Path
 import pytest
 
 from elspeth.contracts.plugin_context import PluginContext
-from tests.fixtures.factories import make_source_context
+from tests.fixtures.factories import make_context, make_source_context
 
 # Dynamic schema config for tests - SourceDataConfig requires schema
 DYNAMIC_SCHEMA = {"mode": "observed"}
@@ -975,9 +975,8 @@ class TestCSVSourceSkipRowsAudit:
 
         mock_landscape = MagicMock()
         mock_landscape.record_validation_error.return_value = "verr_test"
-        ctx = PluginContext(
+        ctx = make_context(
             run_id="test-run",
-            config={},
             node_id="source_csv",
             landscape=mock_landscape,
         )
@@ -1113,9 +1112,8 @@ class TestCSVSourceSkipRowsAudit:
 
         mock_landscape = MagicMock()
         mock_landscape.record_validation_error.return_value = "verr_test"
-        ctx = PluginContext(
+        ctx = make_context(
             run_id="test-run",
-            config={},
             node_id="source_csv",
             landscape=mock_landscape,
         )
@@ -1172,9 +1170,8 @@ class TestCSVSourceSkipRowsAudit:
 
         mock_landscape = MagicMock()
         mock_landscape.record_validation_error.return_value = "verr_test"
-        ctx = PluginContext(
+        ctx = make_context(
             run_id="test-run",
-            config={},
             node_id="source_csv",
             landscape=mock_landscape,
         )

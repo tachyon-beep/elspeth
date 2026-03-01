@@ -39,6 +39,7 @@ from hypothesis import strategies as st
 from elspeth.contracts import Determinism, PluginSchema, TransformResult
 from elspeth.contracts.schema_contract import PipelineRow
 from elspeth.testing import make_pipeline_row
+from tests.fixtures.factories import make_context
 
 if TYPE_CHECKING:
     from elspeth.contracts import TransformProtocol
@@ -82,13 +83,7 @@ class TransformContractTestBase(ABC):
     @pytest.fixture
     def ctx(self) -> PluginContext:
         """Provide a PluginContext for testing."""
-        from elspeth.contracts.plugin_context import PluginContext
-
-        return PluginContext(
-            run_id="test-run-001",
-            config={},
-            node_id="test-transform",
-        )
+        return make_context(run_id="test-run-001", node_id="test-transform")
 
     # =========================================================================
     # Protocol Attribute Contracts

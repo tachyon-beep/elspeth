@@ -8,6 +8,7 @@ from elspeth.contracts.schema_contract import PipelineRow
 from elspeth.core.landscape.database import LandscapeDB
 from elspeth.core.landscape.recorder import LandscapeRecorder
 from elspeth.testing import make_field, make_pipeline_row
+from tests.fixtures.factories import make_context
 
 
 class TestPluginSystemIntegration:
@@ -106,7 +107,7 @@ class TestPluginSystemIntegration:
         # Create instances and process
         db = LandscapeDB.in_memory()
         recorder = LandscapeRecorder(db)
-        ctx = PluginContext(run_id="test-001", config={}, landscape=recorder)
+        ctx = make_context(run_id="test-001", landscape=recorder)
 
         source_cls = manager.get_source_by_name("list")
         transform_cls = manager.get_transform_by_name("double")

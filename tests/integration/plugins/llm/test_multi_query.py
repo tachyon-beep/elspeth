@@ -18,7 +18,6 @@ import pytest
 
 from elspeth.contracts import NodeType, TransformResult
 from elspeth.contracts.identity import TokenInfo
-from elspeth.contracts.plugin_context import PluginContext
 from elspeth.contracts.schema import SchemaConfig
 from elspeth.core.landscape.database import LandscapeDB
 from elspeth.core.landscape.recorder import LandscapeRecorder
@@ -26,6 +25,7 @@ from elspeth.engine.executors import TransformExecutor
 from elspeth.engine.spans import SpanFactory
 from elspeth.plugins.transforms.llm.transform import LLMTransform
 from elspeth.testing import make_pipeline_row
+from tests.fixtures.factories import make_context
 
 DYNAMIC_SCHEMA = {"mode": "observed"}
 
@@ -328,9 +328,8 @@ class TestMultiQueryIntegration:
             transform = LLMTransform(make_full_config())
             transform.node_id = node_id
 
-            ctx = PluginContext(
+            ctx = make_context(
                 run_id=run_id,
-                config={},
                 landscape=recorder,
             )
             transform.on_start(ctx)
@@ -450,9 +449,8 @@ class TestMultiQueryIntegration:
             transform = LLMTransform(config)
             transform.node_id = node_id
 
-            ctx = PluginContext(
+            ctx = make_context(
                 run_id=run_id,
-                config={},
                 landscape=recorder,
             )
             transform.on_start(ctx)
