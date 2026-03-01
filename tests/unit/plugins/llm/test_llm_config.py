@@ -319,7 +319,7 @@ class TestResolveQueries:
 
         from elspeth.plugins.transforms.llm.multi_query import resolve_queries
 
-        with caplog.at_level(logging.WARNING, logger="elspeth.plugins.llm.multi_query"):
+        with caplog.at_level(logging.WARNING, logger="elspeth.plugins.transforms.llm.multi_query"):
             resolve_queries(
                 {
                     "q1": {
@@ -336,7 +336,7 @@ class TestResolveQueries:
 
         from elspeth.plugins.transforms.llm.multi_query import resolve_queries
 
-        with caplog.at_level(logging.WARNING, logger="elspeth.plugins.llm.multi_query"):
+        with caplog.at_level(logging.WARNING, logger="elspeth.plugins.transforms.llm.multi_query"):
             resolve_queries(
                 {
                     "q1": {

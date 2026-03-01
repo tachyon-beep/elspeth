@@ -38,7 +38,7 @@ def ctx() -> PluginContext:
 @pytest.fixture
 def mock_container_client() -> Generator[MagicMock, None, None]:
     """Create a mock container client for testing."""
-    with patch("elspeth.plugins.azure.blob_sink.AzureBlobSink._get_container_client") as mock:
+    with patch("elspeth.plugins.sinks.azure_blob_sink.AzureBlobSink._get_container_client") as mock:
         yield mock
 
 

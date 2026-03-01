@@ -350,7 +350,7 @@ class TestClientCaching:
         )
 
         # Mock the underlying client creation
-        with patch("elspeth.plugins.llm.providers.azure.AzureLLMProvider._get_underlying_client") as mock_uc:
+        with patch("elspeth.plugins.transforms.llm.providers.azure.AzureLLMProvider._get_underlying_client") as mock_uc:
             mock_uc.return_value = MagicMock()
 
             client1 = provider._get_llm_client("state-a", token_id="tok-1")
@@ -378,7 +378,7 @@ class TestClientCaching:
             telemetry_emit=mock_telemetry_emit,
         )
 
-        with patch("elspeth.plugins.llm.providers.azure.AzureLLMProvider._get_underlying_client") as mock_uc:
+        with patch("elspeth.plugins.transforms.llm.providers.azure.AzureLLMProvider._get_underlying_client") as mock_uc:
             mock_uc.return_value = MagicMock()
 
             clients: list[AuditedLLMClient] = []
@@ -416,7 +416,7 @@ class TestClientCaching:
             telemetry_emit=mock_telemetry_emit,
         )
 
-        with patch("elspeth.plugins.llm.providers.azure.AzureLLMProvider._get_underlying_client") as mock_uc:
+        with patch("elspeth.plugins.transforms.llm.providers.azure.AzureLLMProvider._get_underlying_client") as mock_uc:
             mock_uc.return_value = MagicMock()
             provider._get_llm_client("state-1", token_id="tok-1")
 

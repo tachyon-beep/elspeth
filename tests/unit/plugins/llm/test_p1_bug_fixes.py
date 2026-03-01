@@ -530,7 +530,7 @@ class TestEnableContentRecording:
     - `from azure.ai.inference.tracing import AIInferenceInstrumentor` is a local import
 
     We must patch the already-imported reference at
-    ``elspeth.plugins.llm.providers.azure.configure_azure_monitor``, NOT the
+    ``elspeth.plugins.transforms.llm.providers.azure.configure_azure_monitor``, NOT the
     source module ``azure.monitor.opentelemetry.configure_azure_monitor``.
     For AIInferenceInstrumentor, we inject a mock module into sys.modules
     since the real package is not installed.
@@ -566,7 +566,7 @@ class TestEnableContentRecording:
 
         try:
             with (
-                patch("elspeth.plugins.llm.providers.azure.configure_azure_monitor") as mock_az_monitor,
+                patch("elspeth.plugins.transforms.llm.providers.azure.configure_azure_monitor") as mock_az_monitor,
                 patch.dict(sys.modules, {"azure.ai.inference.tracing": mock_tracing_module}),
             ):
                 result = _configure_azure_monitor(config)
@@ -608,7 +608,7 @@ class TestEnableContentRecording:
 
         try:
             with (
-                patch("elspeth.plugins.llm.providers.azure.configure_azure_monitor"),
+                patch("elspeth.plugins.transforms.llm.providers.azure.configure_azure_monitor"),
                 patch.dict(sys.modules, {"azure.ai.inference.tracing": mock_tracing_module}),
             ):
                 _configure_azure_monitor(config)
@@ -646,7 +646,7 @@ class TestEnableContentRecording:
         env_key = "AZURE_TRACING_GEN_AI_CONTENT_RECORDING_ENABLED"
         old_value = os.environ.pop(env_key, None)
         try:
-            with patch("elspeth.plugins.llm.providers.azure.configure_azure_monitor"):
+            with patch("elspeth.plugins.transforms.llm.providers.azure.configure_azure_monitor"):
                 _configure_azure_monitor(config)
 
             assert os.environ.get(env_key) == "true"
@@ -688,7 +688,7 @@ class TestEnableContentRecording:
 
         try:
             with (
-                patch("elspeth.plugins.llm.providers.azure.configure_azure_monitor") as mock_az_monitor,
+                patch("elspeth.plugins.transforms.llm.providers.azure.configure_azure_monitor") as mock_az_monitor,
                 patch.dict(sys.modules, {"azure.ai.inference.tracing": mock_tracing_module}),
             ):
                 result = _configure_azure_monitor(config)
@@ -722,7 +722,7 @@ class TestEnableContentRecording:
         env_key = "AZURE_TRACING_GEN_AI_CONTENT_RECORDING_ENABLED"
         old_value = os.environ.pop(env_key, None)
         try:
-            with patch("elspeth.plugins.llm.providers.azure.configure_azure_monitor"):
+            with patch("elspeth.plugins.transforms.llm.providers.azure.configure_azure_monitor"):
                 _configure_azure_monitor(config)
 
             assert os.environ.get(env_key) == "false"

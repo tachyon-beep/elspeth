@@ -488,7 +488,7 @@ class TestAzureBlobSinkFieldValidation:
     @pytest.fixture
     def mock_container_client(self):
         """Create a mock container client for testing."""
-        with patch("elspeth.plugins.azure.blob_sink.AzureBlobSink._get_container_client") as mock:
+        with patch("elspeth.plugins.sinks.azure_blob_sink.AzureBlobSink._get_container_client") as mock:
             yield mock
 
     def test_csv_extra_fields_rejected_in_fixed_mode(self, mock_container_client: MagicMock, ctx: PluginContext) -> None:
@@ -548,7 +548,7 @@ class TestAzureBlobSinkFieldValidation:
         """AzureBlobSink populates declared_required_fields from schema."""
         from elspeth.plugins.sinks.azure_blob_sink import AzureBlobSink
 
-        with patch("elspeth.plugins.azure.blob_sink.AzureBlobSink._get_container_client"):
+        with patch("elspeth.plugins.sinks.azure_blob_sink.AzureBlobSink._get_container_client"):
             sink = AzureBlobSink(
                 {
                     "connection_string": TEST_CONNECTION_STRING,

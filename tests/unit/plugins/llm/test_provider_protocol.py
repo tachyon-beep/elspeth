@@ -123,7 +123,7 @@ class TestParseFinishReason:
     ) -> None:
         import logging
 
-        with caplog.at_level(logging.WARNING, logger="elspeth.plugins.llm.provider"):
+        with caplog.at_level(logging.WARNING, logger="elspeth.plugins.transforms.llm.provider"):
             result = parse_finish_reason("end_turn")
         assert result is None
         # structlog routes to stdout (PrintLogger) in isolation or stdlib logging
@@ -139,7 +139,7 @@ class TestParseFinishReason:
     ) -> None:
         import logging
 
-        with caplog.at_level(logging.WARNING, logger="elspeth.plugins.llm.provider"):
+        with caplog.at_level(logging.WARNING, logger="elspeth.plugins.transforms.llm.provider"):
             result = parse_finish_reason("")
         assert result is None
         stdout_has_it = "finish_reason" in capsys.readouterr().out.lower()

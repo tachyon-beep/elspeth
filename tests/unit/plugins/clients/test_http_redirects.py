@@ -31,7 +31,7 @@ def http_client():
     ephemeral_mock.__enter__ = Mock(return_value=ephemeral_mock)
     ephemeral_mock.__exit__ = Mock(return_value=False)
 
-    with patch("elspeth.plugins.clients.http.httpx.Client") as MockClient:
+    with patch("elspeth.plugins.infrastructure.clients.http.httpx.Client") as MockClient:
         # First call: shared client in __init__
         # Subsequent calls: ephemeral clients in get_ssrf_safe / _follow_redirects_safe
         shared_mock = MagicMock()
@@ -85,7 +85,7 @@ def _make_ssrf_request(url: str, ip: str = "93.184.216.34") -> SSRFSafeRequest:
 class TestRelativeRedirectResolution:
     """Relative redirects must resolve against hostname, not IP."""
 
-    @patch("elspeth.plugins.clients.http.validate_url_for_ssrf")
+    @patch("elspeth.plugins.infrastructure.clients.http.validate_url_for_ssrf")
     def test_relative_redirect_resolves_against_hostname(self, mock_validate, http_client):
         """Location: /new-path should produce https://example.com/new-path, not https://93.184.216.34/new-path."""
         redirect_response = _make_redirect_response("/new-path")
@@ -107,7 +107,7 @@ class TestRelativeRedirectResolution:
         assert result.status_code == 200
         assert count == 1
 
-    @patch("elspeth.plugins.clients.http.validate_url_for_ssrf")
+    @patch("elspeth.plugins.infrastructure.clients.http.validate_url_for_ssrf")
     def test_relative_redirect_preserves_scheme_and_host(self, mock_validate, http_client):
         """Relative redirect should preserve scheme and host from original URL."""
         redirect_response = _make_redirect_response("/api/v2/resource")
@@ -130,7 +130,7 @@ class TestRelativeRedirectResolution:
 class TestAbsoluteRedirectResolution:
     """Absolute redirects carry their own hostname — should work regardless."""
 
-    @patch("elspeth.plugins.clients.http.validate_url_for_ssrf")
+    @patch("elspeth.plugins.infrastructure.clients.http.validate_url_for_ssrf")
     def test_absolute_redirect_to_different_host(self, mock_validate, http_client):
         """Location: https://other.com/page should use other.com, not original host."""
         redirect_response = _make_redirect_response("https://other.com/page")
@@ -153,7 +153,7 @@ class TestAbsoluteRedirectResolution:
 class TestChainedRedirects:
     """Redirect chains must track hostname through each hop."""
 
-    @patch("elspeth.plugins.clients.http.validate_url_for_ssrf")
+    @patch("elspeth.plugins.infrastructure.clients.http.validate_url_for_ssrf")
     def test_chained_relative_redirects_track_hostname(self, mock_validate, http_client):
         """Relative -> relative should keep resolving against the logical hostname."""
         redirect1 = _make_redirect_response("/step2")
@@ -180,7 +180,7 @@ class TestChainedRedirects:
         assert result.status_code == 200
         assert count == 2
 
-    @patch("elspeth.plugins.clients.http.validate_url_for_ssrf")
+    @patch("elspeth.plugins.infrastructure.clients.http.validate_url_for_ssrf")
     def test_absolute_redirect_updates_hostname_for_subsequent_relative(self, mock_validate, http_client):
         """Absolute redirect to new.com, then relative /page, should resolve as https://new.com/page."""
         redirect1 = _make_redirect_response("https://new.com/")
@@ -211,7 +211,7 @@ class TestChainedRedirects:
 class TestHostHeaderAndSNI:
     """Host header and SNI must use hostname from validate_url_for_ssrf, not IP."""
 
-    @patch("elspeth.plugins.clients.http.validate_url_for_ssrf")
+    @patch("elspeth.plugins.infrastructure.clients.http.validate_url_for_ssrf")
     def test_host_header_uses_hostname_not_ip(self, mock_validate, http_client):
         """Host header on redirect hop should be the hostname, not the resolved IP."""
         redirect_response = _make_redirect_response("/new-path")
@@ -234,7 +234,7 @@ class TestHostHeaderAndSNI:
         headers = call_kwargs.kwargs.get("headers") or call_kwargs[1].get("headers")
         assert headers["Host"] == "example.com"
 
-    @patch("elspeth.plugins.clients.http.validate_url_for_ssrf")
+    @patch("elspeth.plugins.infrastructure.clients.http.validate_url_for_ssrf")
     def test_sni_hostname_set_for_https_redirect(self, mock_validate, http_client):
         """TLS SNI should use the hostname from the redirect target, not IP."""
         redirect_response = _make_redirect_response("/secure-path")
@@ -280,7 +280,7 @@ class TestNonRedirectPassthrough:
 class TestRedirectAuditRecording:
     """Each redirect hop must be individually recorded in the audit trail."""
 
-    @patch("elspeth.plugins.clients.http.validate_url_for_ssrf")
+    @patch("elspeth.plugins.infrastructure.clients.http.validate_url_for_ssrf")
     def test_single_redirect_records_one_hop(self, mock_validate, http_client):
         """A single redirect should produce exactly one HTTP_REDIRECT record_call."""
         redirect_response = _make_redirect_response("/new-path")
@@ -307,7 +307,7 @@ class TestRedirectAuditRecording:
         assert kw["request_data"].to_dict()["hop_number"] == 1
         assert kw["response_data"].to_dict()["status_code"] == 200
 
-    @patch("elspeth.plugins.clients.http.validate_url_for_ssrf")
+    @patch("elspeth.plugins.infrastructure.clients.http.validate_url_for_ssrf")
     def test_chained_redirects_record_multiple_hops(self, mock_validate, http_client):
         """Two redirects should produce two HTTP_REDIRECT record_call invocations."""
         redirect1 = _make_redirect_response("/step2")
@@ -343,7 +343,7 @@ class TestRedirectAuditRecording:
         assert kw2["request_data"].to_dict()["hop_number"] == 2
         assert kw2["request_data"].to_dict()["url"] == "https://example.com/step3"
 
-    @patch("elspeth.plugins.clients.http.validate_url_for_ssrf")
+    @patch("elspeth.plugins.infrastructure.clients.http.validate_url_for_ssrf")
     def test_hop_records_include_redirect_from(self, mock_validate, http_client):
         """redirect_from captures the URL we're redirecting FROM (lineage within chain)."""
         redirect_response = _make_redirect_response("https://other.com/page")
@@ -364,7 +364,7 @@ class TestRedirectAuditRecording:
         assert kw["request_data"].to_dict()["redirect_from"] == "https://example.com/start"
         assert kw["request_data"].to_dict()["url"] == "https://other.com/page"
 
-    @patch("elspeth.plugins.clients.http.validate_url_for_ssrf")
+    @patch("elspeth.plugins.infrastructure.clients.http.validate_url_for_ssrf")
     def test_hop_records_include_resolved_ip(self, mock_validate, http_client):
         """Each hop record must include the resolved IP from SSRF validation."""
         redirect_response = _make_redirect_response("/new-path")
@@ -384,7 +384,7 @@ class TestRedirectAuditRecording:
         kw = http_client._recorder.record_call.call_args.kwargs
         assert kw["request_data"].to_dict()["resolved_ip"] == "93.184.216.34"
 
-    @patch("elspeth.plugins.clients.http.validate_url_for_ssrf")
+    @patch("elspeth.plugins.infrastructure.clients.http.validate_url_for_ssrf")
     def test_hop_records_have_latency(self, mock_validate, http_client):
         """Each hop record must include latency_ms."""
         redirect_response = _make_redirect_response("/new-path")
@@ -430,7 +430,7 @@ class TestBug4_7_FailedHopRecordsAuditTrail:
     the failed hop with CallStatus.ERROR before re-raising the exception.
     """
 
-    @patch("elspeth.plugins.clients.http.validate_url_for_ssrf")
+    @patch("elspeth.plugins.infrastructure.clients.http.validate_url_for_ssrf")
     def test_failed_hop_recorded_with_error_status(self, mock_validate, http_client):
         """Redirect hop that raises exception is still recorded in audit trail."""
         redirect_response = _make_redirect_response("/new-path")

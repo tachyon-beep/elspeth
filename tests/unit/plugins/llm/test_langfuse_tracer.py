@@ -296,7 +296,7 @@ class TestActiveLangfuseTracer:
 
         tracer = ActiveLangfuseTracer(transform_name="test_transform", client=mock_client)
 
-        with patch("elspeth.plugins.llm.langfuse._handle_trace_failure") as mock_handler:
+        with patch("elspeth.plugins.transforms.llm.langfuse._handle_trace_failure") as mock_handler:
             tracer.record_success(
                 token_id="tok-1",
                 query_name="classify",
@@ -323,7 +323,7 @@ class TestActiveLangfuseTracer:
 
         tracer = ActiveLangfuseTracer(transform_name="test_transform", client=mock_client)
 
-        with patch("elspeth.plugins.llm.langfuse._handle_trace_failure") as mock_handler:
+        with patch("elspeth.plugins.transforms.llm.langfuse._handle_trace_failure") as mock_handler:
             tracer.flush()
             mock_handler.assert_called_once()
             assert mock_handler.call_args[0][0] == "langfuse_flush_failed"

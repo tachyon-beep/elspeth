@@ -1702,7 +1702,7 @@ class TestConfigureAzureMonitor:
 
         config = AzureAITracingConfig(connection_string="InstrumentationKey=test")
         with patch(
-            "elspeth.plugins.llm.providers.azure.configure_azure_monitor",
+            "elspeth.plugins.transforms.llm.providers.azure.configure_azure_monitor",
             None,  # Simulate missing SDK: configure_azure_monitor is None
         ):
             result = _configure_azure_monitor(config)
@@ -1725,7 +1725,7 @@ class TestConfigureAzureMonitor:
             raise TypeError("unexpected keyword argument 'enable_live_metrics'")
 
         with (
-            patch("elspeth.plugins.llm.providers.azure.configure_azure_monitor", broken_sdk),
+            patch("elspeth.plugins.transforms.llm.providers.azure.configure_azure_monitor", broken_sdk),
             pytest.raises(TypeError, match="unexpected keyword argument"),
         ):
             _configure_azure_monitor(config)
@@ -1750,7 +1750,7 @@ class TestConfigureAzureMonitor:
 
         config = AzureAITracingConfig(connection_string="InstrumentationKey=test")
         with patch(
-            "elspeth.plugins.llm.providers.azure.configure_azure_monitor",
+            "elspeth.plugins.transforms.llm.providers.azure.configure_azure_monitor",
         ) as mock_sdk:
             # First call — configures
             result1 = _configure_azure_monitor(config)
@@ -1769,8 +1769,8 @@ class TestConfigureAzureMonitor:
 
         config = AzureAITracingConfig(connection_string="InstrumentationKey=test")
         with (
-            patch("elspeth.plugins.llm.providers.azure.configure_azure_monitor"),
-            patch("elspeth.plugins.llm.providers.azure.logger") as mock_logger,
+            patch("elspeth.plugins.transforms.llm.providers.azure.configure_azure_monitor"),
+            patch("elspeth.plugins.transforms.llm.providers.azure.logger") as mock_logger,
         ):
             _configure_azure_monitor(config)
             mock_logger.reset_mock()  # Clear warnings from first call (env-var fallback)
@@ -1793,12 +1793,12 @@ class TestConfigureAzureMonitor:
         config = AzureAITracingConfig(connection_string="InstrumentationKey=test")
 
         # First call with None SDK — should fail
-        with patch("elspeth.plugins.llm.providers.azure.configure_azure_monitor", None):
+        with patch("elspeth.plugins.transforms.llm.providers.azure.configure_azure_monitor", None):
             result1 = _configure_azure_monitor(config)
             assert result1 is False
 
         # Second call with working SDK — should succeed (not blocked by idempotency)
-        with patch("elspeth.plugins.llm.providers.azure.configure_azure_monitor") as mock_sdk:
+        with patch("elspeth.plugins.transforms.llm.providers.azure.configure_azure_monitor") as mock_sdk:
             result2 = _configure_azure_monitor(config)
             assert result2 is True
             mock_sdk.assert_called_once()
@@ -1817,7 +1817,7 @@ class TestAzureAITracingSetup:
         from elspeth.plugins.transforms.llm.tracing import AzureAITracingConfig
 
         config = AzureAITracingConfig(connection_string="InstrumentationKey=test")
-        with patch("elspeth.plugins.llm.langfuse.logger") as mock_logger:
+        with patch("elspeth.plugins.transforms.llm.langfuse.logger") as mock_logger:
             tracer = create_langfuse_tracer("test_transform", config)
             assert isinstance(tracer, NoOpLangfuseTracer)
             mock_logger.warning.assert_not_called()
@@ -1832,7 +1832,7 @@ class TestAzureAITracingSetup:
         from elspeth.plugins.transforms.llm.tracing import TracingConfig
 
         config = TracingConfig(provider="totally_unknown")
-        with patch("elspeth.plugins.llm.langfuse.logger") as mock_logger:
+        with patch("elspeth.plugins.transforms.llm.langfuse.logger") as mock_logger:
             tracer = create_langfuse_tracer("test_transform", config)
             assert isinstance(tracer, NoOpLangfuseTracer)
             mock_logger.warning.assert_called_once()
@@ -1906,10 +1906,10 @@ class TestAzureAITracingOnStart:
 
         with (
             patch(
-                "elspeth.plugins.llm.transform._configure_azure_monitor",
+                "elspeth.plugins.transforms.llm.transform._configure_azure_monitor",
                 return_value=True,
             ) as mock_configure,
-            patch("elspeth.plugins.llm.transform.logger") as mock_logger,
+            patch("elspeth.plugins.transforms.llm.transform.logger") as mock_logger,
         ):
             transform.on_start(ctx)
 
@@ -1937,8 +1937,8 @@ class TestAzureAITracingOnStart:
         ctx = _make_lifecycle_ctx()
 
         with (
-            patch("elspeth.plugins.llm.transform._configure_azure_monitor", return_value=False),
-            patch("elspeth.plugins.llm.transform.logger") as mock_logger,
+            patch("elspeth.plugins.transforms.llm.transform._configure_azure_monitor", return_value=False),
+            patch("elspeth.plugins.transforms.llm.transform.logger") as mock_logger,
         ):
             transform.on_start(ctx)
             mock_logger.warning.assert_called_once()
@@ -1952,12 +1952,12 @@ class TestAzureAITracingOnStart:
             tracing={"provider": "langfuse", "public_key": "pk", "secret_key": "sk"},
         )
         # Langfuse client creation will fail (no real server), but we mock the tracer
-        with patch("elspeth.plugins.llm.transform.create_langfuse_tracer"):
+        with patch("elspeth.plugins.transforms.llm.transform.create_langfuse_tracer"):
             transform = LLMTransform(config)
 
         ctx = _make_lifecycle_ctx()
         with patch(
-            "elspeth.plugins.llm.transform._configure_azure_monitor",
+            "elspeth.plugins.transforms.llm.transform._configure_azure_monitor",
         ) as mock_configure:
             transform.on_start(ctx)
             mock_configure.assert_not_called()
@@ -1971,7 +1971,7 @@ class TestAzureAITracingOnStart:
         ctx = _make_lifecycle_ctx()
 
         with patch(
-            "elspeth.plugins.llm.transform._configure_azure_monitor",
+            "elspeth.plugins.transforms.llm.transform._configure_azure_monitor",
         ) as mock_configure:
             transform.on_start(ctx)
             mock_configure.assert_not_called()
