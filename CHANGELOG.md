@@ -100,6 +100,19 @@ Reorganized the flat `plugins/` directory into 4 SDA-aligned subfolders matching
 - `plugins/__init__.py` stripped from 113-line re-export facade to bare package marker
 - Tier-model allowlist, contracts whitelist, and `pyproject.toml` scan groups updated
 
+### Protocol Relocation (L3→L0)
+
+Moved `SourceProtocol`, `TransformProtocol`, `SinkProtocol`, `BatchTransformProtocol`, and `GateResult` from `plugins/infrastructure/` (L3) to `contracts/` (L0). Eliminates the engine→plugins layer violation that forced L2 code to import from L3. 64 files updated across source, tests, and config.
+
+### Hardening Sweep
+
+Systematic review and remediation of defensive-pattern violations across the codebase:
+
+- **FrameworkBugError/AuditIntegrityError re-raise** — Added explicit `except (FrameworkBugError, AuditIntegrityError): raise` before all broad `except Exception` handlers in 7 files (13 re-raise sites). System-level errors now always propagate instead of being caught by generic handlers.
+- **Silent warnings → errors** — 6 files converted silent fallbacks to proper exceptions: missing `langfuse` raises `RuntimeError` (not silent NoOp), unrecognized tracing config raises `ValueError`, unregistered plugin types raise `ImportError`.
+- **azure_batch silent passthrough** — `_process_single` else branch replaced silent `TransformResult.success(row)` passthrough with `RuntimeError`, matching the hardened pattern in `openrouter_batch`. Prevents unprocessed rows from entering the audit trail as "processed".
+- **QueryRepository deduplication** — Extracted `_retrieve_and_parse_payload()` eliminating ~40 lines of duplicated payload retrieval logic between `get_row_data()` and `explain_row()`.
+
 ### Fixed
 
 - **Silent failure remediation (10 findings)** — Comprehensive review of LLM plugin error handling:
