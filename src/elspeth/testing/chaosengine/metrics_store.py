@@ -1,4 +1,3 @@
-# src/elspeth/testing/chaosengine/metrics_store.py
 """Thread-safe SQLite metrics storage with schema-driven DDL.
 
 The MetricsStore is a composable utility that handles all SQLite

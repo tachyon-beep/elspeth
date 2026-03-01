@@ -1,4 +1,3 @@
-# src/elspeth/telemetry/manager.py
 """TelemetryManager coordinates event emission to configured exporters.
 
 The TelemetryManager is the central hub for telemetry:

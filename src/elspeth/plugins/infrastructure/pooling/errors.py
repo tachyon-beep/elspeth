@@ -1,4 +1,3 @@
-# src/elspeth/plugins/pooling/errors.py
 """Capacity error classification for pooled API transforms.
 
 Capacity errors are transient overload conditions that should be retried

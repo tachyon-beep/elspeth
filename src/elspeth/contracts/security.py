@@ -1,4 +1,3 @@
-# src/elspeth/contracts/security.py
 """Secret fingerprinting primitives.
 
 These are stdlib-only (hashlib, hmac, os) and belong in the contracts layer

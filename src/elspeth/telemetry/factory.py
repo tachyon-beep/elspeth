@@ -1,4 +1,3 @@
-# src/elspeth/telemetry/factory.py
 """Factory functions for creating TelemetryManager from configuration.
 
 This module provides the glue between configuration (RuntimeTelemetryConfig)

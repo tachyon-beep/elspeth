@@ -1,4 +1,3 @@
-# src/elspeth/engine/batch_adapter.py
 """Adapter for batch transform integration with TransformExecutor.
 
 Allows TransformExecutor to call accept() and wait for results while

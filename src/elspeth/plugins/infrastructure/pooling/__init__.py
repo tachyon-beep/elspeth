@@ -1,4 +1,3 @@
-# src/elspeth/plugins/pooling/__init__.py
 """Shared pooling infrastructure for parallel API transforms."""
 
 from elspeth.contracts.engine import BufferEntry

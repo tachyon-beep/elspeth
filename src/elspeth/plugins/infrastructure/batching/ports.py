@@ -1,4 +1,3 @@
-# src/elspeth/plugins/batching/ports.py
 """Port abstractions for pipeline stages.
 
 Every pipeline stage has input and output ports. Data flows through ports,

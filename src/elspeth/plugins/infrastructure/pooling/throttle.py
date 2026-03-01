@@ -1,4 +1,3 @@
-# src/elspeth/plugins/pooling/throttle.py
 """AIMD (Additive Increase, Multiplicative Decrease) throttle for API calls.
 
 Implements TCP-style congestion control:

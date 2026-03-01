@@ -1,4 +1,3 @@
-# src/elspeth/testing/chaosllm/error_injector.py
 """Error injection logic for ChaosLLM.
 
 The ErrorInjector decides per-request whether to inject an error based on

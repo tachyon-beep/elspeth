@@ -1,4 +1,3 @@
-# src/elspeth/telemetry/exporters/azure_monitor.py
 """Azure Monitor exporter for telemetry events.
 
 Exports telemetry events to Azure Monitor / Application Insights using

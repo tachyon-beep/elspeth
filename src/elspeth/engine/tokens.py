@@ -1,4 +1,3 @@
-# src/elspeth/engine/tokens.py
 """TokenManager: High-level token operations for the SDA engine.
 
 Provides a simplified interface over LandscapeRecorder for managing

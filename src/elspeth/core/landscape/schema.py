@@ -1,4 +1,3 @@
-# src/elspeth/core/landscape/schema.py
 """SQLAlchemy table definitions for Landscape.
 
 Uses SQLAlchemy Core (not ORM) for explicit control over queries

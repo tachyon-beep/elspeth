@@ -1,4 +1,3 @@
-# src/elspeth/contracts/config/defaults.py
 """Default value registries for runtime configuration.
 
 Two categories of defaults:

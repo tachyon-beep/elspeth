@@ -1,4 +1,3 @@
-# src/elspeth/plugins/batching/row_reorder_buffer.py
 """Row-level reorder buffer with backpressure support.
 
 Extends the ReorderBuffer pattern to row-level pipelining:

@@ -1,4 +1,3 @@
-# src/elspeth/core/landscape/recorder.py
 """LandscapeRecorder: pure facade for audit trail recording.
 
 Delegates to 4 composed domain repositories:

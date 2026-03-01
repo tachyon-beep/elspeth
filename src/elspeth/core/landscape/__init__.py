@@ -1,4 +1,3 @@
-# src/elspeth/core/landscape/__init__.py
 """Landscape: The audit backbone for complete traceability.
 
 This module provides the audit infrastructure for ELSPETH's SDA pipelines.

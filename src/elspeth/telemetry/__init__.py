@@ -1,4 +1,3 @@
-# src/elspeth/telemetry/__init__.py
 """Telemetry subsystem for pipeline observability.
 
 This package provides Tier 1 (global) telemetry - framework-level audit events

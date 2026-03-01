@@ -1,4 +1,3 @@
-# src/elspeth/plugins/pooling/reorder_buffer.py
 """Reorder buffer for maintaining strict submission order with timing.
 
 Results may complete out of order (due to varying API latencies),

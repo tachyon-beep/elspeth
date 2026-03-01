@@ -1,4 +1,3 @@
-# src/elspeth/plugins/sinks/csv_sink.py
 """CSV sink plugin for ELSPETH.
 
 Writes rows to CSV files with content hashing for audit integrity.

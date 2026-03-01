@@ -1,4 +1,3 @@
-# src/elspeth/plugins/pooling/config.py
 """Pool configuration for concurrent API transforms."""
 
 from __future__ import annotations

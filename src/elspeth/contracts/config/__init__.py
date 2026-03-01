@@ -1,4 +1,3 @@
-# src/elspeth/contracts/config/__init__.py
 """Configuration contracts subpackage.
 
 This subpackage contains:

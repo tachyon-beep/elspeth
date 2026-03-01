@@ -1,4 +1,3 @@
-# src/elspeth/plugins/clients/replayer.py
 """Call replayer for replay mode - returns recorded responses.
 
 In replay mode, instead of making live external calls, the CallReplayer

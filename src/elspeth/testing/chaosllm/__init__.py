@@ -1,4 +1,3 @@
-# src/elspeth/testing/chaosllm/__init__.py
 """ChaosLLM: Fake LLM server for load testing and fault injection.
 
 ChaosLLM provides:

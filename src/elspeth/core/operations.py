@@ -1,4 +1,3 @@
-# src/elspeth/core/operations.py
 """Operation lifecycle management for source/sink I/O.
 
 Operations are the source/sink equivalent of node_states - they provide

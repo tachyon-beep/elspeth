@@ -1,4 +1,3 @@
-# src/elspeth/testing/chaosllm/config.py
 """Configuration schema and loading for ChaosLLM server.
 
 Uses Pydantic for validation with frozen (immutable) models.

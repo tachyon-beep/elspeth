@@ -1,4 +1,3 @@
-# src/elspeth/plugins/sinks/json_sink.py
 """JSON sink plugin for ELSPETH.
 
 Writes rows to JSON files. Supports JSON array and JSONL formats.

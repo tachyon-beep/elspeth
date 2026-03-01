@@ -1,4 +1,3 @@
-# src/elspeth/plugins/llm/__init__.py
 """LLM transform plugins for ELSPETH.
 
 Provides transforms for Azure OpenAI, OpenRouter, and other LLM providers.

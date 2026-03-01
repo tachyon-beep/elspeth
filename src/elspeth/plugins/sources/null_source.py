@@ -1,4 +1,3 @@
-# src/elspeth/plugins/sources/null_source.py
 """NullSource - a source that yields nothing.
 
 Used by resume operations where row data comes from the payload store,

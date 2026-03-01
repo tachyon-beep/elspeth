@@ -1,4 +1,3 @@
-# src/elspeth/plugins/base.py
 """Base classes for plugin implementations.
 
 These provide common functionality and ensure proper interface compliance.

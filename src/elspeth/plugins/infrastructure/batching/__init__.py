@@ -1,4 +1,3 @@
-# src/elspeth/plugins/batching/__init__.py
 """Plugin-level pipelining for concurrent row processing with FIFO ordering.
 
 This module enables transforms to process multiple rows concurrently while

@@ -1,4 +1,3 @@
-# src/elspeth/plugins/llm/base.py
 """LLM configuration model.
 
 Provides LLMConfig extending TransformDataConfig with LLM-specific fields:

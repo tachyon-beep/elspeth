@@ -1,4 +1,3 @@
-# src/elspeth/contracts/batch_checkpoint.py
 """Typed batch checkpoint state for Azure Batch LLM transforms.
 
 Replaces the untyped dict[str, Any] that previously flowed through

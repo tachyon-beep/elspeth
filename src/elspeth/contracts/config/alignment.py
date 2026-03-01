@@ -1,4 +1,3 @@
-# src/elspeth/contracts/config/alignment.py
 """Field alignment documentation for Settings -> Runtime mapping.
 
 This module provides machine-readable documentation of how Settings fields

@@ -1,4 +1,3 @@
-# src/elspeth/mcp/analyzers/contracts.py
 """Schema contract query functions for the Landscape audit database.
 
 Functions: get_run_contract, explain_field, list_contract_violations.

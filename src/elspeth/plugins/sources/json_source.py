@@ -1,4 +1,3 @@
-# src/elspeth/plugins/sources/json_source.py
 """JSON source plugin for ELSPETH.
 
 Loads rows from JSON files. Supports JSON array and JSONL formats.

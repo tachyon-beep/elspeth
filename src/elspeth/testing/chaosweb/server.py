@@ -1,4 +1,3 @@
-# src/elspeth/testing/chaosweb/server.py
 """Starlette ASGI application for ChaosWeb fake web server.
 
 Provides multi-path HTTP serving with configurable error injection,

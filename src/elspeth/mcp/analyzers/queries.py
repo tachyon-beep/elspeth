@@ -1,4 +1,3 @@
-# src/elspeth/mcp/analyzers/queries.py
 """Core CRUD query functions for the Landscape audit database.
 
 Functions: list_runs, get_run, list_rows, list_nodes, list_tokens,

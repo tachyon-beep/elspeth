@@ -1,4 +1,3 @@
-# src/elspeth/mcp/server.py
 """MCP server for ELSPETH Landscape audit database analysis.
 
 A lightweight read-only server that exposes tools for querying

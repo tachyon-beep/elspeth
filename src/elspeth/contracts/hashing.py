@@ -1,4 +1,3 @@
-# src/elspeth/contracts/hashing.py
 """Primitive-only canonical hashing for the contracts layer.
 
 Provides canonical JSON serialization (RFC 8785/JCS) and stable hashing

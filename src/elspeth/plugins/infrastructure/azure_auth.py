@@ -1,4 +1,3 @@
-# src/elspeth/plugins/azure/auth.py
 """Azure authentication configuration for ELSPETH Azure plugins.
 
 Supports four authentication methods (mutually exclusive):

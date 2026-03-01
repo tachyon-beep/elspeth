@@ -1,4 +1,3 @@
-# src/elspeth/testing/chaosllm/server.py
 """Starlette ASGI application for ChaosLLM fake LLM server.
 
 Provides OpenAI and Azure OpenAI compatible endpoints with configurable

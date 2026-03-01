@@ -1,4 +1,3 @@
-# src/elspeth/plugins/llm/provider.py
 """LLM provider protocol and response DTOs.
 
 The LLMProvider protocol defines the narrow interface between LLMTransform

@@ -1,4 +1,3 @@
-# src/elspeth/tui/types.py
 """Type definitions for TUI data contracts.
 
 These TypedDicts define the exact shape of data passed between

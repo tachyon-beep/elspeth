@@ -1,4 +1,3 @@
-# src/elspeth/testing/chaosllm/cli.py
 """CLI for ChaosLLM fake LLM server.
 
 Provides command-line interface for starting and managing the ChaosLLM

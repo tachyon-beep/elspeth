@@ -1,4 +1,3 @@
-# src/elspeth/engine/__init__.py
 """SDA Engine: Orchestration with complete audit trails.
 
 This module provides the execution engine for ELSPETH pipelines:

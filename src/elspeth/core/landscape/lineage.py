@@ -1,4 +1,3 @@
-# src/elspeth/core/landscape/lineage.py
 """Lineage query functionality for ELSPETH Landscape.
 
 Provides the explain() function to compose query results into

@@ -1,4 +1,3 @@
-# src/elspeth/mcp/analyzers/diagnostics.py
 """Emergency diagnostic functions for the Landscape audit database.
 
 Functions: diagnose, get_failure_context, get_recent_activity.

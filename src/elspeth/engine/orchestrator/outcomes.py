@@ -1,4 +1,3 @@
-# src/elspeth/engine/orchestrator/outcomes.py
 """Row outcome accumulation functions for the orchestrator.
 
 This module contains functions for:

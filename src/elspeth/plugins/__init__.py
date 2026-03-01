@@ -1,4 +1,3 @@
-# src/elspeth/plugins/__init__.py
 """Plugin system: Sources, Transforms, Sinks via pluggy.
 
 Subpackages:

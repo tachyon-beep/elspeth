@@ -1,4 +1,3 @@
-# src/elspeth/plugins/sources/csv_source.py
 """CSV source plugin for ELSPETH.
 
 Loads rows from CSV files using csv.reader for proper multiline quoted field support.

@@ -1,4 +1,3 @@
-# src/elspeth/testing/chaosllm/metrics.py
 """Metrics storage and aggregation for ChaosLLM server.
 
 The MetricsRecorder provides typed wrappers around the shared MetricsStore

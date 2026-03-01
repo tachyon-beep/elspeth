@@ -1,4 +1,3 @@
-# src/elspeth/core/canonical.py
 """
 Canonical JSON serialization for deterministic hashing.
 

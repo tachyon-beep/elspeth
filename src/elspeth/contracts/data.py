@@ -1,4 +1,3 @@
-# src/elspeth/contracts/data.py
 """Pydantic-based schema system for plugins.
 
 This is the ONLY location for PluginSchema - import from elspeth.contracts.

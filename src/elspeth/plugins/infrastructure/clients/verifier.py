@@ -1,4 +1,3 @@
-# src/elspeth/plugins/clients/verifier.py
 """Call verifier for verify mode - compares live vs recorded responses.
 
 In verify mode, instead of simply replaying recorded responses, the CallVerifier

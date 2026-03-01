@@ -1,4 +1,3 @@
-# src/elspeth/plugins/azure/blob_sink.py
 """Azure Blob Storage sink plugin for ELSPETH.
 
 Writes rows to Azure Blob containers. Supports CSV, JSON array, and JSONL formats.

@@ -1,4 +1,3 @@
-# src/elspeth/testing/chaosllm/response_generator.py
 """Response generation logic for ChaosLLM.
 
 The ResponseGenerator creates fake LLM responses in OpenAI-compatible format.

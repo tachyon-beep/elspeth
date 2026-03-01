@@ -1,4 +1,3 @@
-# src/elspeth/plugins/llm/validation.py
 """LLM response validation utilities.
 
 Per ELSPETH's Three-Tier Trust Model:

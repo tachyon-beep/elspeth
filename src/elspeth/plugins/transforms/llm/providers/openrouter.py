@@ -1,4 +1,3 @@
-# src/elspeth/plugins/llm/providers/openrouter.py
 """OpenRouter LLM provider.
 
 Handles raw HTTP transport with full Tier 3 boundary validation:

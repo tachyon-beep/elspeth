@@ -1,4 +1,3 @@
-# src/elspeth/telemetry/exporters/otlp.py
 """OTLP exporter for telemetry events.
 
 Exports telemetry events via OpenTelemetry Protocol (OTLP) to any compatible

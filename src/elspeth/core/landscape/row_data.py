@@ -1,4 +1,3 @@
-# src/elspeth/core/landscape/row_data.py
 """Row data retrieval types with explicit state discrimination.
 
 Replaces the ambiguous `dict | None` return from get_row_data() with

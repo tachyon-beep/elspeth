@@ -1,4 +1,3 @@
-# src/elspeth/core/landscape/database.py
 """Database connection management for Landscape.
 
 Handles SQLite (development) and PostgreSQL (production) backends

@@ -1,4 +1,3 @@
-# src/elspeth/plugins/clients/__init__.py
 """Audited clients that automatically record external calls to the audit trail.
 
 These clients wrap external service calls (LLM, HTTP) and ensure every

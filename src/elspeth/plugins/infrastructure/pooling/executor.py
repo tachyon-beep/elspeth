@@ -1,4 +1,3 @@
-# src/elspeth/plugins/pooling/executor.py
 """Pooled executor for parallel API calls with AIMD throttling.
 
 Manages concurrent requests while:

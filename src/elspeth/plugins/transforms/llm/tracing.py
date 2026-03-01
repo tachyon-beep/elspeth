@@ -1,4 +1,3 @@
-# src/elspeth/plugins/llm/tracing.py
 """Tier 2 tracing configuration models for LLM plugins.
 
 This module provides configuration dataclasses for plugin-internal tracing.

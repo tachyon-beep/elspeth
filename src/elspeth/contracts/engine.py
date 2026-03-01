@@ -1,4 +1,3 @@
-# src/elspeth/contracts/engine.py
 """Engine-related type contracts."""
 
 from dataclasses import dataclass

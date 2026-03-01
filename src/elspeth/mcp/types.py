@@ -1,4 +1,3 @@
-# src/elspeth/mcp/types.py
 """TypedDict definitions for MCP server return types.
 
 These TypedDicts give static structure to the dicts returned by

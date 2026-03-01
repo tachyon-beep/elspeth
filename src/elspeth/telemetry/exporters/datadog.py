@@ -1,4 +1,3 @@
-# src/elspeth/telemetry/exporters/datadog.py
 """Datadog exporter for telemetry events.
 
 Exports telemetry events to Datadog via the ddtrace library. Uses native

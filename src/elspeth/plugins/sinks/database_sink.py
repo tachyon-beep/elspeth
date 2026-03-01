@@ -1,4 +1,3 @@
-# src/elspeth/plugins/sinks/database_sink.py
 """Database sink plugin for ELSPETH.
 
 Writes rows to a database table using SQLAlchemy Core.

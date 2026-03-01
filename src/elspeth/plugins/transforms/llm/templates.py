@@ -1,4 +1,3 @@
-# src/elspeth/plugins/llm/templates.py
 """Jinja2-based prompt templating with audit support."""
 
 from __future__ import annotations

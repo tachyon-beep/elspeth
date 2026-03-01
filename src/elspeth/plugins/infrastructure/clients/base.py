@@ -1,4 +1,3 @@
-# src/elspeth/plugins/clients/base.py
 """Base class for audited clients."""
 
 from __future__ import annotations

@@ -1,4 +1,3 @@
-# src/elspeth/plugins/azure/blob_source.py
 """Azure Blob Storage source plugin for ELSPETH.
 
 Loads rows from Azure Blob containers. Supports CSV, JSON array, and JSONL formats.

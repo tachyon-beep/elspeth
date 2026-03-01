@@ -1,4 +1,3 @@
-# src/elspeth/contracts/payload_store.py
 """PayloadStore protocol for content-addressable blob storage.
 
 This protocol defines the interface for payload storage backends used by:

@@ -1,4 +1,3 @@
-# src/elspeth/core/security/fingerprint.py
 """Secret fingerprinting using HMAC-SHA256.
 
 The canonical implementation lives in contracts/security.py (stdlib-only,

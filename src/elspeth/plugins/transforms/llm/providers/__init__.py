@@ -1,4 +1,3 @@
-# src/elspeth/plugins/llm/providers/__init__.py
 """LLM provider implementations.
 
 Each provider wraps a specific transport (Azure SDK, OpenRouter HTTP) and

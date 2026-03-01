@@ -1,4 +1,3 @@
-# src/elspeth/testing/chaosengine/types.py
 """Shared types for chaos testing infrastructure.
 
 Contains configuration models shared across all chaos plugins (ServerConfig,

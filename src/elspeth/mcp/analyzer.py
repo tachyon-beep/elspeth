@@ -1,4 +1,3 @@
-# src/elspeth/mcp/analyzer.py
 """Thin facade for the Landscape audit database analyzer.
 
 LandscapeAnalyzer keeps its public API but delegates every method

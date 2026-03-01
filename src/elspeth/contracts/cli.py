@@ -1,4 +1,3 @@
-# src/elspeth/contracts/cli.py
 """CLI-related type contracts."""
 
 from dataclasses import dataclass

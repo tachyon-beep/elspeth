@@ -1,4 +1,3 @@
-# src/elspeth/contracts/config/runtime.py
 """Runtime configuration dataclasses.
 
 These dataclasses implement the Runtime*Protocol interfaces and provide

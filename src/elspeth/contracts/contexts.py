@@ -1,4 +1,3 @@
-# src/elspeth/contracts/contexts.py
 """Phase-based protocol interfaces for PluginContext decomposition.
 
 These protocols define what each plugin category actually needs from the

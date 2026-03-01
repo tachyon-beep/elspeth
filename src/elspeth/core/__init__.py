@@ -1,4 +1,3 @@
-# src/elspeth/core/__init__.py
 """Core infrastructure: Landscape, Canonical, Configuration, Checkpoint, DAG, Logging."""
 
 from elspeth.contracts import IntegrityError, PayloadStore

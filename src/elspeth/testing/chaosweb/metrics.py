@@ -1,4 +1,3 @@
-# src/elspeth/testing/chaosweb/metrics.py
 """Metrics storage and aggregation for ChaosWeb server.
 
 The WebMetricsRecorder provides typed wrappers around the shared MetricsStore

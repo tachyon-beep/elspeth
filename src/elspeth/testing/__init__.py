@@ -1,4 +1,3 @@
-# src/elspeth/testing/__init__.py
 """Test infrastructure for ELSPETH pipelines.
 
 Factories for constructing production types with sensible defaults.

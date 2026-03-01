@@ -1,4 +1,3 @@
-# src/elspeth/core/config.py
 """
 Configuration schema and loading for Elspeth pipelines.
 

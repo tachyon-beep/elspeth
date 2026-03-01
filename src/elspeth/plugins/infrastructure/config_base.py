@@ -1,4 +1,3 @@
-# src/elspeth/plugins/config_base.py
 """Base classes for typed plugin configurations.
 
 This module provides base classes that plugins inherit from to get:

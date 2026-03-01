@@ -1,4 +1,3 @@
-# src/elspeth/core/retention/__init__.py
 """Retention management for PayloadStore content.
 
 Provides PurgeManager for identifying and deleting expired payloads

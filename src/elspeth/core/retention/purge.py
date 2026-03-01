@@ -1,4 +1,3 @@
-# src/elspeth/core/retention/purge.py
 """Purge manager for PayloadStore content based on retention policy.
 
 Identifies payloads eligible for deletion based on run completion time

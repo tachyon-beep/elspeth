@@ -1,4 +1,3 @@
-# src/elspeth/core/security/config_secrets.py
 """Config-based secret loading from Azure Key Vault.
 
 This module loads secrets specified in pipeline configuration and injects
