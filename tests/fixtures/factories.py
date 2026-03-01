@@ -78,6 +78,7 @@ def make_context(
     token: Any | None = None,
     config: dict[str, Any] | None = None,
     landscape: Any | None = None,
+    node_id: str | None = None,
 ) -> PluginContext:
     """Build a PluginContext with sensible test defaults.
 
@@ -85,6 +86,7 @@ def make_context(
         ctx = make_context()                            # Minimal (mock landscape)
         ctx = make_context(state_id="state-retry-3")    # Custom state_id
         ctx = make_context(landscape=recorder)           # Real landscape recorder
+        ctx = make_context(node_id="source")            # With explicit node_id
     """
     from elspeth.contracts.plugin_context import PluginContext
 
@@ -102,6 +104,7 @@ def make_context(
         state_id=state_id,
         config=config or {},
         token=token,
+        node_id=node_id,
     )
 
 

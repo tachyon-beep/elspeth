@@ -1559,8 +1559,9 @@ Contains:
 - `build_linear_pipeline(source_data, transforms, sink)` -> `(source, transforms, sinks, graph)`
 - `build_fork_pipeline(source_data, gate, branch_transforms, sinks)` -> full pipeline
 - `build_aggregation_pipeline(source_data, trigger, sink)` -> full pipeline
-- `run_pipeline(source, transforms, sinks, graph, **kwargs)` -> RunResult
-- `PipelineResult` dataclass: `run_id`, `sink_results`, `landscape_db`, `recorder`
+- `run_audit_pipeline(tmp_path, source_data, transforms)` -> `AuditPipelineResult`
+- `AuditPipelineResult` dataclass: `run_id`, `db`, `payload_store`, `sink`
+- `build_production_graph(config)` -> `ExecutionGraph`
 
 ### 8. `fixtures/chaosllm.py`
 
@@ -1747,8 +1748,9 @@ conftest.py (root)
 │   ├── build_linear_pipeline()
 │   ├── build_fork_pipeline()
 │   ├── build_aggregation_pipeline()
-│   ├── run_pipeline()
-│   └── PipelineResult
+│   ├── run_audit_pipeline()
+│   ├── AuditPipelineResult
+│   └── build_production_graph()
 │
 ├── fixtures/chaosllm.py
 │   ├── ChaosLLMFixture

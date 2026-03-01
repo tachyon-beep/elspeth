@@ -311,8 +311,14 @@ class FailingSource(ListSource):
 **Proposed:**
 
 ```python
-@dataclass(frozen=True, slots=True)
+@dataclass
 class RecorderSetup:
+    """Test scaffolding — plain @dataclass (not frozen) to match PipelineResult convention.
+
+    Note: db and recorder are mutable objects; frozen=True would only prevent
+    reference reassignment without providing an immutability guarantee.
+    """
+
     db: LandscapeDB
     recorder: LandscapeRecorder
     run_id: str
@@ -324,6 +330,7 @@ def make_recorder_with_run(
     run_id: str | None = None,
     source_node_id: str | None = None,
     source_plugin_name: str = "source",
+    canonical_version: str = "v1",
 ) -> RecorderSetup:
     """Create LandscapeDB + Recorder + run + source node in one call.
 
@@ -335,12 +342,14 @@ def make_recorder_with_run(
         run_id: Explicit run ID for deterministic tests. Auto-generated if None.
         source_node_id: Explicit source node ID. Auto-generated if None.
         source_plugin_name: Plugin name for the source node (default "source").
+        canonical_version: Version string for begin_run (default "v1").
+            Some tests (e.g., test_processor.py) use "sha256-rfc8785-v1".
     """
 ```
 
 **Design rationale:** The factory covers the common 4-step boilerplate but does NOT register transforms/gates/sinks — those are test-specific. Tests needing multi-node setups call `recorder.register_node()` on the returned recorder with the same `run_id`.
 
-**Internal deduplication:** After `make_recorder_with_run()` is implemented, `make_source_context()` and `make_operation_context()` in `tests/fixtures/factories.py` should be refactored to delegate to it internally. Both currently duplicate the same 4-step boilerplate. Without this consolidation, a change to `begin_run()` or `register_node()` signatures would need updating in three factories independently — the exact class of breakage this audit exists to prevent.
+**Internal deduplication (P0.5b):** After `make_recorder_with_run()` is implemented (P0.5a), `make_source_context()` and `make_operation_context()` in `tests/fixtures/factories.py` should be refactored to delegate to it internally in a **separate PR** (P0.5b). Both currently duplicate the same 4-step boilerplate. Without this consolidation, a change to `begin_run()` or `register_node()` signatures would need updating in three factories independently — the exact class of breakage this audit exists to prevent. The separate PR isolates the risk: if the delegation introduces a regression, it affects only the 44 existing callers of these two factories, not the new factories.
 
 **Companion helper for multi-node setup (the 20% pattern):**
 
@@ -372,9 +381,13 @@ This completes the solution for the 20% variant pattern where tests need 2-5 add
 **Proposed:**
 
 ```python
-@dataclass(frozen=True, slots=True)
+@dataclass
 class AuditPipelineResult:
-    """Result from run_audit_pipeline() for e2e audit verification."""
+    """Result from run_audit_pipeline() for e2e audit verification.
+
+    Plain @dataclass (not frozen) — test scaffolding, not audit records.
+    Matches PipelineResult convention in pipeline.py.
+    """
 
     run_id: str
     db: LandscapeDB
@@ -422,30 +435,50 @@ def run_audit_pipeline(
 
 3 non-exempt `ExecutionGraph()` manual constructions in integration tests. All fixed.
 
-### P0.5 — Prerequisite (Create factories before bulk remediation)
+### P0.5a — Prerequisite (Create new factories + smoke tests)
 
-Create all new factories (F2, F3, F5–F7), extend `make_context()` with `node_id`, add factory smoke tests, and refactor existing factories to delegate to `make_recorder_with_run()`. This is a small PR (~200 lines of new factory code + ~50 lines of factory tests) that unblocks all downstream work.
+Add all new factories, extend `make_context()`, and create comprehensive smoke tests. This PR adds new code without modifying existing factories. **Hard gate: P0.5a must be merged before any P1 PR can land.** This is enforced by PR review, not CI — reviewers must verify `tests/fixtures/test_factories.py` exists before approving any P1 PR.
 
 Without this step, P1 remediation will stall on the ~10 tests that need `node_id` and the Category C deduplication will have nowhere to point.
 
 **Scope:**
 1. Extend `make_context()` with `node_id` parameter
 2. Add `FailingSink`, `FailingSource` to `tests/fixtures/plugins.py`
-3. Add `RecorderSetup` dataclass (frozen), `make_recorder_with_run()`, and `register_test_node()` to `tests/fixtures/landscape.py`
+3. Add `RecorderSetup` dataclass, `make_recorder_with_run()`, and `register_test_node()` to `tests/fixtures/landscape.py`
 4. Add `AuditPipelineResult` dataclass and `run_audit_pipeline()` to `tests/fixtures/pipeline.py`
-5. Refactor `make_source_context()` and `make_operation_context()` to delegate to `make_recorder_with_run()` internally
-6. Add `tests/fixtures/test_factories.py` — smoke tests for every new factory (see Factory Testing below)
+5. Delete unused `PipelineResult` dataclass from `tests/fixtures/pipeline.py` (zero callers — dead code under no-legacy-code policy)
+6. Add `tests/fixtures/test_factories.py` — comprehensive factory tests (see Factory Testing below)
+
+### P0.5b — Prerequisite (Refactor existing factories to delegate)
+
+Refactor `make_source_context()` and `make_operation_context()` to delegate to `make_recorder_with_run()` internally. **Separate PR from P0.5a** because this changes the internal implementation of two factories already used in ~44 locations across ~15 files. Bundling with new factory creation would make regressions hard to localize.
+
+**Scope:**
+1. Refactor `make_source_context()` to use `make_recorder_with_run()` internally
+2. Refactor `make_operation_context()` to use `make_recorder_with_run()` internally
+3. Add regression tests for both refactored factories to `tests/fixtures/test_factories.py` (see Factory Testing below)
 
 **Factory Testing (`tests/fixtures/test_factories.py`):**
 
-Factory smoke tests MUST be created before any migration begins. A bug in a centralized factory would silently corrupt every downstream test, producing hundreds of failures with no signal about the root cause. Each factory needs:
+Factory tests MUST be created before any migration begins. A bug in a centralized factory would silently corrupt every downstream test, producing hundreds of failures with no signal about the root cause.
+
+**P0.5a tests (new factories):**
 
 - `make_context(node_id="x")` — verify `node_id` passes through to PluginContext
-- `make_recorder_with_run()` — verify: (a) returned `run_id` matches what's in the DB, (b) `source_node_id` is registered in the DB, (c) calling `recorder.register_node()` on the returned recorder succeeds
-- `register_test_node()` — verify registered node exists in DB
+- `make_context(run_id="my-run")` — verify explicit `run_id` passes through
+- `make_recorder_with_run()` — verify: (a) returned `run_id` is identical to what `begin_run()` stored (round-trip invariant), (b) `source_node_id` is registered in the DB, (c) calling `recorder.register_node()` on the returned recorder succeeds
+- `make_recorder_with_run(canonical_version="sha256-rfc8785-v1")` — verify non-default `canonical_version` passes through
+- `make_recorder_with_run(source_plugin_name="custom")` — verify non-default plugin name is stored
+- `register_test_node()` — verify registered node exists in DB with correct `node_type`
 - `FailingSink.write()` — verify it raises `RuntimeError`
 - `FailingSource.load()` — verify it raises `RuntimeError`
 - `run_audit_pipeline()` — verify it returns a completed run with rows in the sink
+- `make_recorder_with_run()` internal assertion — factory includes a self-check (`assert setup.run_id == ...`) consistent with CLAUDE.md offensive programming patterns, so factory bugs crash immediately with context
+
+**P0.5b tests (refactored factories):**
+
+- `make_source_context()` — verify returned PluginContext has a real landscape (not Mock), correct `run_id`, correct `node_id`, and that `ctx.landscape.create_row()` succeeds (round-trip through delegated `make_recorder_with_run()`)
+- `make_operation_context()` — verify returned PluginContext has `operation_id`, and that `ctx.landscape.record_call()` succeeds on the returned context
 
 ### P1 — High (FK chain violations like the triggering incident)
 
@@ -457,12 +490,21 @@ Factory smoke tests MUST be created before any migration begins. A bug in a cent
 
 ~442 inline `LandscapeDB.in_memory()` + `LandscapeRecorder(...)` constructions across ~92 non-property files (550 total minus ~108 property occurrences).
 
-**Prerequisite — `integration/audit/` scoping pass:** Before migrating the `integration/audit/test_recorder_*.py` cluster (~152 occurrences across 16 files), audit each file and split into:
+**Prerequisite — `integration/audit/` scoping pass:** Before migrating the `integration/audit/test_recorder_*.py` cluster (~152 occurrences across 16 files), a scoping pass must classify each file as EXEMPT or MIGRATE.
 
-- **(a) Tests where inline construction is the subject under test (EXEMPT).** In recorder tests like `test_recorder_tokens.py`, the explicit `db = LandscapeDB.in_memory(); recorder = LandscapeRecorder(db)` construction IS the test setup for testing recorder behavior. Replacing it with `make_recorder_with_run()` would obscure what the test is testing and mask recorder bugs. These should remain verbose and be added to the CI enforcement allowlist with justification.
-- **(b) Tests where it is pure boilerplate (MIGRATE).** Recorder tests where the setup is incidental (e.g., creating a recorder just to have a landscape for an unrelated assertion) should use the factory.
+**Owner:** The scoping pass is performed during P0.5a (before any migration begins) and committed as part of the CI enforcer allowlist YAML. This is not deferred to P2 — an unresolved prerequisite with no owner or criteria is a stall point, not a prerequisite.
+
+**Classification criteria:**
+- **EXEMPT:** The test's primary assertion exercises `begin_run()`, `register_node()`, `create_row()`, `create_token()`, or other `LandscapeRecorder` methods directly. The inline `LandscapeDB.in_memory() → LandscapeRecorder(db)` construction IS the system under test. Criterion: does the test assert on recorder return values, DB state after recorder calls, or recorder error behavior?
+- **MIGRATE:** The test uses the recorder only as a dependency for testing something else (e.g., creating a landscape context for an executor test). The recorder setup is incidental boilerplate.
+
+**Expected outcome:** Based on examination of `test_recorder_tokens.py`, the likely result is that most or all 16 files are EXEMPT — because `begin_run()` / `register_node()` / `create_row()` ARE the subject of every recorder test. The scoping pass will confirm this. If the outcome is "all 16 exempt," the audit's effective Category B count for P2 drops from ~442 to ~290 (a 34% reduction). This is fine — the accurate count matters more than a large number.
+
+**Deliverable:** A committed `config/cicd/enforce_test_factories/integration_audit.yaml` (or equivalent) with per-file EXEMPT entries and inline justification, before P2 begins.
 
 This distinction does not apply to other P2 clusters (`unit/plugins/`, `unit/engine/`, etc.) where the landscape is always a dependency, never the system under test.
+
+**Additional P2 scoping requirement:** Before migrating Category B targets, audit all `canonical_version` values. The proposed `make_recorder_with_run()` defaults to `canonical_version="v1"`, but `test_processor.py:_make_recorder()` uses `"sha256-rfc8785-v1"`. Tests with non-default `canonical_version` must use the explicit parameter (`make_recorder_with_run(canonical_version="sha256-rfc8785-v1")`) to avoid silently changing hash-sensitive assertions. Similarly, check for non-default arguments to `LandscapeDB.in_memory()` — `make_landscape_db()` does not forward arguments, so any non-default call sites must be documented.
 
 ### P3 — Medium (Inline plugin class deduplication)
 
@@ -517,15 +559,23 @@ For ~900 violations, manual file-by-file editing is impractical. The recommended
    - `.venv/bin/python -m pytest tests/` — 0 failures (xfails allowed)
    - `.venv/bin/python -m mypy src/` — no new errors
    - `.venv/bin/python -m ruff check src/` — clean
+   - **Test count baseline:** Run `.venv/bin/python -m pytest --co -q` before and after the migration PR. The collected test count must not decrease. A decrease indicates a silently deleted or merged test. This catches the scenario where a migration PR accidentally drops an assertion or merges two test methods.
 
 ### What NOT to Automate
 
 - Tests where `PluginContext` is constructed with unusual field combinations (manual review needed — see decision checklist below)
 - Tests where the inline plugin class has behavioral differences from the fixture (noted in Category C tables)
 - Category D helpers in conftest files (deletion requires verifying all importers)
-- Performance tests (`tests/performance/`) that use `Mock()` landscape — these intentionally avoid real DB overhead to measure plugin/transform speed. Migrating to `make_recorder_with_run()` would introduce SQLite I/O into benchmarks, changing what they measure. These should be added to the CI enforcement allowlist.
+- Performance tests (`tests/performance/`) — these have custom multi-step setup integrated with ChaosLLM infrastructure (real `LandscapeRecorder` with full FK chain, ChaosLLM server lifecycle, profiling hooks) that cannot be trivially replaced with `make_recorder_with_run()`. The `tests/performance/stress/conftest.py:make_plugin_context()` uses a real recorder, not a Mock — the exemption is for setup complexity, not Mock avoidance. These should be added to the CI enforcement allowlist with this accurate rationale.
+- Tests that pass `landscape=None` intentionally to test null-landscape error paths (see decision checklist item 5)
 
 **Category D atomic PR constraint:** The deletion of a conftest helper and ALL of its call-site replacements MUST be in a single PR. `tests/unit/plugins/llm/conftest.py:make_plugin_context()` is imported by files across `tests/unit/plugins/llm/` — deleting the definition before all importers are updated breaks test collection for the entire LLM test cluster.
+
+**Conftest surgery clarification:** Only the `make_plugin_context()` function is deleted from the conftest — NOT the entire file. The LLM conftest also exports `make_token`, `DYNAMIC_SCHEMA`, `chaosllm_server`, and `_build_chaosllm_response`, all of which remain needed. The conftest file itself persists; only the redundant helper is removed.
+
+**LLM directory single-PR commitment:** The `unit/plugins/llm/` directory (160+ violations) MUST be processed as a single PR, not split, because the Category D conftest helper deletion is atomic with all importers. If the diff exceeds reviewable size, the PR can be split into two sequential sub-PRs: (1) update all LLM test files to import `make_context` from `tests.fixtures.factories` alongside the existing conftest import; (2) delete `make_plugin_context()` from conftest and remove the now-unused imports. This preserves test collection at every intermediate commit.
+
+**Factory scoping guidance:** `make_recorder_with_run()` is a plain function, not a pytest fixture. Tests using `setup_class()` that call it at class scope will share a single `LandscapeDB` across all test methods, creating ordering-dependent failures. Always call `make_recorder_with_run()` inside individual test methods or `setup_method()`, never `setup_class()`. For class-based tests that currently use `setup_class()`, continue using direct construction or convert to `setup_method()`.
 
 **Decision checklist for Category A manual review:**
 
@@ -534,6 +584,9 @@ When migrating a `PluginContext(...)` call, check:
 2. Does the test pass `ctx` to production code that reads `ctx.node_id`? → Use `make_context(node_id="...")`
 3. Does the test assert on error messages containing `ctx.run_id`? → Keep explicit `run_id` to avoid breaking message assertions
 4. Does the test use `ctx.landscape` for direct DB queries after pipeline execution? → Use `make_source_context()` or `make_operation_context()` (real recorder, not mock)
+5. Does the test pass `landscape=None` intentionally to test a null-landscape error path? → Do NOT migrate — add to CI enforcer allowlist. `make_context()` unconditionally replaces `None` with a `Mock()` (factories.py lines 91–95), which would silently invalidate the test. Known instances: `test_sink_display_headers.py:145`, `test_csv_sink_headers.py:233`.
+6. Does the test verify behavior when a required field is _absent_ (e.g., testing `FrameworkBugError` when `node_id is None`)? → Use explicit construction with the field absent, or use `make_context(node_id=None)` to preserve visible intent. Tests that assert on missing-field error paths must not have their intent obscured by factory defaults.
+7. Does the test pass a specific `config={"key": "value"}` that affects behavior? → Carry the override through: `make_context(config={"key": "value"})`
 
 ---
 
@@ -541,15 +594,18 @@ When migrating a `PluginContext(...)` call, check:
 
 After remediation, new violations must be prevented from being introduced. The following measures should be added:
 
-1. **AST-based CI enforcement.** Add a lightweight Python script at `scripts/cicd/enforce_test_factories.py`, modeled on the existing `enforce_tier_model.py`. The script should:
+1. **AST-based CI enforcement.** Add a Python script at `scripts/cicd/enforce_test_factories.py`, modeled on the existing `enforce_tier_model.py`. The script should:
    - Walk `tests/**/*.py` with Python `ast`
    - Detect `PluginContext(` call nodes (not string/comment matches — grep has false positives)
    - Detect `LandscapeDB.in_memory()` and `LandscapeRecorder(` call nodes outside `tests/fixtures/`
    - Detect inline plugin class definitions that duplicate existing fixtures (Category C)
    - Support an explicit allowlist of `(file, function/class)` pairs for legitimate direct construction
+   - Support stale/expired entry detection matching `enforce_tier_model.py`'s allowlist lifecycle management (prevents allowlist from becoming permanent technical debt)
    - Fail if any non-allowlisted match is found
 
-   **Why AST over grep:** The project already uses AST-based enforcement for the tier model (`enforce_tier_model.py`). Grep-based checks have known failure modes: false positives from comments/strings/docstrings, no per-site allowlist mechanism (only whole-file exclusion), and false negatives via import aliasing (`from ... import PluginContext as PC`). An AST walker is ~100-150 lines and provides the same allowlist expressiveness as `enforce_tier_model.py`.
+   **Why AST over grep:** The project already uses AST-based enforcement for the tier model (`enforce_tier_model.py`). Grep-based checks have known failure modes: false positives from comments/strings/docstrings, no per-site allowlist mechanism (only whole-file exclusion), and false negatives via import aliasing (`from ... import PluginContext as PC`). The existing `enforce_tier_model.py` is ~1,100 lines (including allowlist YAML loading, fingerprint-based keying, expiry dates, stale detection, AST visitor classes, and multi-format output). A comparable enforcer for test factories will be **~300-500 lines** — smaller because it has fewer rule types, but still substantial if it supports per-site allowlist with fingerprints. This is a realistic scope for a single focused PR.
+
+   **Known limitation: import aliasing.** Static AST analysis cannot resolve `from ... import PluginContext as PC; ctx = PC(...)` — the enforcer detects call sites by name node, not resolved binding. This is documented as a known blind spot. The pragmatic mitigation is code review: aliasing `PluginContext` to bypass the enforcer requires deliberate intent, which code review catches. If aliasing becomes a pattern, a follow-up pass using `ast` import tracking can be added.
 
    **Initial allowlist entries:**
    - `tests/unit/plugins/test_context.py` — tests PluginContext behavior directly
@@ -557,8 +613,10 @@ After remediation, new violations must be prevented from being introduced. The f
    - `tests/fixtures/factories.py` — factory implementations
    - `tests/fixtures/landscape.py` — factory implementations
    - `tests/fixtures/test_factories.py` — factory smoke tests
-   - `tests/performance/` — benchmark tests that intentionally use Mock landscape
-   - Exempt `integration/audit/test_recorder_*.py` entries identified during P2 scoping pass
+   - `tests/performance/` — custom ChaosLLM-integrated setup (not simple Mock avoidance)
+   - `tests/unit/plugins/sinks/test_sink_display_headers.py:145` — intentional `landscape=None` test
+   - `tests/unit/plugins/sinks/test_csv_sink_headers.py:233` — intentional `landscape=None` test
+   - Exempt `integration/audit/test_recorder_*.py` entries from P0.5a scoping pass deliverable
 
 2. **Convention documentation.** Add a `tests/fixtures/README.md` documenting which factory to use for each scenario:
    - "I need a PluginContext for a transform test" → `make_context()`
@@ -568,11 +626,20 @@ After remediation, new violations must be prevented from being introduced. The f
    - "I need additional nodes after `make_recorder_with_run()`" → `register_test_node()`
    - "I need a full e2e pipeline with audit trail" → `run_audit_pipeline()`
    - "I need a test source/sink/transform" → use `tests/fixtures/plugins.py`
+   - "I need `landscape=None` to test a null-landscape error path" → construct `PluginContext` directly (add to CI allowlist)
+
+   **Scoping guidance:** `make_recorder_with_run()` is a plain function, not a pytest fixture. Always call it inside individual test methods or `setup_method()`, never `setup_class()`. Class-scope calls share a single `LandscapeDB` across test methods, creating ordering-dependent failures.
 
 3. **Enforcement rollout timing.** The enforcement script should be deployed in two phases:
    - **During P1-P2 remediation:** Run in "audit mode" (`--audit`) — reports violations but does not fail CI. This allows migration PRs to land without fighting the ratchet.
-   - **After P2 completes:** Switch to "enforce mode" (`--enforce`) — fails CI on any non-allowlisted violation. The switch must happen in the same PR as the final P2 remediation to prevent a gap where violations can be reintroduced.
+   - **After P2 completes:** Switch to "enforce mode" (`--enforce`) — fails CI on any non-allowlisted violation.
    - This mirrors the rollout pattern used for `enforce_tier_model.py`.
+
+   **Enforce mode switch trigger:** The switch happens when Category A+B violations in non-exempt, non-property files reach zero, as verified by the enforcer's own audit output. This is defined by the enforcer's output, not by a specific PR boundary — the trigger is "zero violations reported" regardless of which PR achieves it. The switch PR adds `--enforce` to `ci.yaml` and must itself pass the enforcer.
+
+   **In-flight PR freeze protocol:** Before the enforce-mode activation PR is merged, all open migration PRs (P1/P2) must be merged or closed. An open P1 PR that lands after enforce mode activates will fail CI if it contains any remaining violations. The migration author must coordinate: announce "freeze — no new migration PRs until enforce switch lands" for the final transition.
+
+   **Audit mode monitoring:** During P1-P2, the enforcer's audit output is included in each migration PR's CI log. The migration author reviews the audit report on each PR merge to catch new violations introduced by concurrent feature work. If new violations accumulate during the migration period, they are resolved in the next migration PR rather than deferred to the enforce switch.
 
 ---
 
@@ -593,8 +660,9 @@ After remediation, new violations must be prevented from being introduced. The f
 | Category D (local mock context helpers) | 6 definitions, 20+ downstream calls |
 | Category E (manual ExecutionGraph) | 3 non-exempt (FIXED) |
 | New factories to create | 5 (F2, F3, F5–F7) + `register_test_node()` + 1 `make_context()` extension |
-| Factory smoke tests | `tests/fixtures/test_factories.py` — smoke tests for all new factories |
-| Internal factory refactor | `make_source_context()` + `make_operation_context()` delegate to `make_recorder_with_run()` |
+| Factory tests | `tests/fixtures/test_factories.py` — smoke + regression tests for all new and refactored factories |
+| Internal factory refactor | `make_source_context()` + `make_operation_context()` delegate to `make_recorder_with_run()` (separate PR from new factories) |
+| Dead code removal | `PipelineResult` dataclass (zero callers) |
 | Estimated lines of churn | 1,800–2,700 (replaced by factory calls) |
 
 ---
@@ -611,7 +679,7 @@ Changes made from review:
 |---|--------|--------|
 | B1 | F6 (`run_audit_pipeline`) fully specified: `AuditPipelineResult` dataclass, complete function signature, design rationale | Architecture + Quality |
 | B2 | Factory smoke tests (`tests/fixtures/test_factories.py`) added to P0.5 scope | Quality + Systems |
-| B3 | `RecorderSetup` changed to `@dataclass(frozen=True, slots=True)` | Architecture |
+| B3 | `RecorderSetup` proposed as `@dataclass(frozen=True, slots=True)` (later reverted to plain `@dataclass` in review #2 — W1) | Architecture |
 | B4 | CI enforcement rollout timing specified: audit mode during P1-P2, enforce mode after P2 | Systems + Quality |
 | B5 | `integration/audit/` scoping pass added as P2 prerequisite — split exempt vs. migrate | Systems |
 | W1 | CI grep checks replaced with AST-based enforcement (`enforce_test_factories.py`) | Architecture |
@@ -628,6 +696,37 @@ Changes made from review:
 | — | Migration ordering updated: `unit/plugins/llm/` first, `integration/audit/` third (after scoping) | Systems |
 | — | PRs must be sequential (conftest conflict risk documented) | Architecture |
 
+**2026-03-01 — 4-agent review #2 (Reality, Architecture, Quality, Systems)**
+
+Verdict: CHANGES_REQUESTED → resolved. 4 blocking issues, 13 warnings addressed in-document.
+
+| # | Change | Source |
+|---|--------|--------|
+| B1 | Decision checklist extended: items 5 (landscape=None), 6 (missing-field error paths), 7 (explicit config) | Quality + Systems |
+| B2 | P0.5a/P0.5b hard gate: `test_factories.py` must exist before any P1 PR lands (PR review enforced) | Quality |
+| B3 | Regression tests for `make_source_context()`/`make_operation_context()` refactoring added to P0.5b scope | Quality |
+| B4 | `integration/audit/` scoping pass: owner (migration author), criteria (subject-under-test vs boilerplate), deliverable (committed allowlist YAML), timing (during P0.5a) | Systems |
+| W1 | `RecorderSetup` and `AuditPipelineResult` changed from `frozen=True, slots=True` to plain `@dataclass` — test scaffolding, not audit records | Architecture |
+| W2 | P0.5 split into P0.5a (new factories + tests) and P0.5b (refactor existing factories + regression tests) | Architecture |
+| W3 | CI enforcer complexity estimate revised: ~100-150 lines → ~300-500 lines (realistic for per-site allowlist) | Architecture |
+| W4 | `canonical_version` parameter added to `make_recorder_with_run()` — `test_processor.py` uses `"sha256-rfc8785-v1"` | Systems |
+| W5 | Performance test exemption rationale corrected: ChaosLLM-integrated setup, not Mock avoidance | Systems |
+| W6 | Factory smoke tests expanded: round-trip invariant, non-default parameters, internal assertions | Quality + Systems |
+| W7 | Factory scoping guidance added: never call `make_recorder_with_run()` at class scope | Quality |
+| W8 | `landscape=None` tests added to CI enforcer initial allowlist (`test_sink_display_headers.py:145`, `test_csv_sink_headers.py:233`) | Quality |
+| W9 | Import aliasing documented as known CI enforcer limitation | Quality + Architecture |
+| W10 | Stale entry detection added to CI enforcer requirements | Systems |
+| W11 | Test count baseline (`--co -q` comparison) added to per-PR validation | Quality |
+| W12 | Enforce mode switch trigger defined by enforcer output (zero violations), not PR boundary | Systems |
+| W13 | In-flight PR freeze protocol added for enforce-mode transition | Quality + Systems |
+| W14 | Audit mode monitoring: migration author reviews audit reports on each merge | Systems |
+| W15 | LLM directory single-PR commitment with safe two-phase alternative documented | Systems |
+| W16 | Conftest surgery clarification: only `make_plugin_context()` deleted, not entire conftest | Architecture |
+| W17 | Convention documentation expanded: `landscape=None` scenario, scoping guidance | Quality |
+| W18 | `PipelineResult` dead code deletion added to P0.5a scope | Architecture |
+| W19 | `canonical_version` pre-audit added to P2 scoping requirements | Systems |
+| W20 | `make_landscape_db()` argument forwarding gap documented in P2 scoping | Quality |
+
 **2026-03-01 — Post-review: `populate_run()` deletion (Architecture finding)**
 
 The 4-agent review identified `populate_run()` in `tests/fixtures/factories.py` as a BUG-LINEAGE-01-class violation: it bypassed `LandscapeRecorder` entirely, inserting directly into `runs_table`, `nodes_table`, `rows_table`, `tokens_table`, and `token_outcomes_table` via raw SQL. This is the same architectural anti-pattern (bypassing production code paths in test infrastructure) that this audit exists to prevent.
@@ -642,3 +741,23 @@ Investigation found `populate_run()` was **dead code** — zero callers across t
 | 2 | Removed `populate_run()` definition from docs (92 lines), replaced with 2-line removal note | `docs/guides/test-system.md` |
 | 3 | Removed references to non-existent `populate_fork_run()` and `assert_lineage_complete()` | `docs/guides/test-system.md` |
 | 4 | Updated 3 remaining doc references (table row, tree diagram, description list) | `docs/guides/test-system.md` |
+
+**2026-03-01 — P0.5a implementation: COMPLETE**
+
+All 6 scope items implemented and verified:
+
+| # | Scope Item | Status | Details |
+|---|-----------|--------|---------|
+| 1 | Extend `make_context()` with `node_id` | ✅ Done | `tests/fixtures/factories.py` — additive, non-breaking |
+| 2 | Add `FailingSink`, `FailingSource` | ✅ Done | `tests/fixtures/plugins.py` — `FailingSink(_TestSinkBase)`, `FailingSource(ListSource)` |
+| 3 | Add `RecorderSetup`, `make_recorder_with_run()`, `register_test_node()` | ✅ Done | `tests/fixtures/landscape.py` — plain `@dataclass`, `canonical_version` param, offensive assertions |
+| 4 | Add `AuditPipelineResult`, `run_audit_pipeline()` | ✅ Done | `tests/fixtures/pipeline.py` — file-based SQLite + FilesystemPayloadStore, asserts COMPLETED |
+| 5 | Delete `PipelineResult` dead code | ✅ Done | `tests/fixtures/pipeline.py` — zero callers confirmed via grep |
+| 6 | Add `tests/fixtures/test_factories.py` | ✅ Done | 33 smoke tests covering all 10 plan items (lines 466-476) |
+
+Stale doc references to `PipelineResult` and `run_pipeline()` updated in `docs/guides/test-system.md`.
+
+**Verification:**
+- pytest: 10,366 passed, 17 skipped, 3 xfailed, 0 failures
+- mypy: clean (no errors)
+- ruff: clean (import sorting fixed)

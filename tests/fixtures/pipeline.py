@@ -6,20 +6,27 @@ path. This prevents BUG-LINEAGE-01 from hiding in test infrastructure.
 
 For unit/property tests that need lightweight graph construction,
 use make_graph_linear/make_graph_fork from fixtures/factories.py instead.
+
+Factory hierarchy:
+    build_linear_pipeline()      → (source, transforms, sinks, graph) tuple
+    build_fork_pipeline()        → fork/join pipeline
+    build_aggregation_pipeline() → aggregation pipeline
+    run_audit_pipeline()         → full e2e execution with file-based audit trail
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass
+from pathlib import Path
 from typing import TYPE_CHECKING, Any, cast
 
-from elspeth.contracts import SinkProtocol, SourceProtocol
+from elspeth.contracts import RunStatus, SinkProtocol, SourceProtocol
 from elspeth.core.config import SourceSettings
 from elspeth.core.dag import ExecutionGraph
 from elspeth.core.landscape.database import LandscapeDB
-from elspeth.core.landscape.recorder import LandscapeRecorder
+from elspeth.core.payload_store import FilesystemPayloadStore
 from tests.fixtures.factories import wire_transforms
-from tests.fixtures.plugins import CollectSink, ListSource
+from tests.fixtures.plugins import CollectSink, ListSource, PassTransform
 
 if TYPE_CHECKING:
     from elspeth.core.config import AggregationSettings, GateSettings
@@ -27,14 +34,82 @@ if TYPE_CHECKING:
     from elspeth.engine.orchestrator import PipelineConfig
 
 
+# =============================================================================
+# E2E audit pipeline factory
+# =============================================================================
+
+
 @dataclass
-class PipelineResult:
-    """Result from run_pipeline() helper."""
+class AuditPipelineResult:
+    """Result from run_audit_pipeline() for e2e audit verification.
+
+    Plain @dataclass — test scaffolding, not audit records.
+    Matches convention in this file (no frozen=True on mutable wrappers).
+    """
 
     run_id: str
-    sink_results: dict[str, list[dict[str, Any]]]
-    landscape_db: LandscapeDB
-    recorder: LandscapeRecorder
+    db: LandscapeDB
+    payload_store: FilesystemPayloadStore
+    sink: CollectSink
+
+
+def run_audit_pipeline(
+    tmp_path: Path,
+    source_data: list[dict[str, Any]],
+    transforms: list[Any] | None = None,
+) -> AuditPipelineResult:
+    """Execute a linear pipeline with file-based audit trail for e2e verification.
+
+    Creates a file-based SQLite DB (not in-memory) and FilesystemPayloadStore,
+    builds a production-path pipeline via build_linear_pipeline(), runs it via
+    Orchestrator.run(), and asserts RunStatus.COMPLETED.
+
+    For tests that need the pipeline to fail, call build_linear_pipeline() and
+    Orchestrator directly — this factory is for the success path only.
+
+    Args:
+        tmp_path: Pytest tmp_path fixture for DB and payload files.
+        source_data: Rows to feed through the pipeline.
+        transforms: Optional transforms (default: [PassTransform()]).
+
+    Returns:
+        AuditPipelineResult with run_id, db, payload_store, and sink.
+    """
+    # Lazy import to avoid circular dependency at module load
+    from elspeth.engine.orchestrator import Orchestrator
+    from elspeth.engine.orchestrator import PipelineConfig as _PipelineConfig
+    from tests.fixtures.base_classes import as_sink, as_source, as_transform
+
+    db = LandscapeDB(f"sqlite:///{tmp_path}/audit.db")
+    payload_store = FilesystemPayloadStore(tmp_path / "payloads")
+
+    if transforms is None:
+        transforms = [PassTransform()]
+
+    source, tx_list, sinks, graph = build_linear_pipeline(source_data, transforms=transforms)
+    sink = sinks["default"]
+
+    config = _PipelineConfig(
+        source=as_source(source),
+        transforms=[as_transform(t) for t in tx_list],
+        sinks={"default": as_sink(sink)},
+    )
+
+    orchestrator = Orchestrator(db)
+    result = orchestrator.run(config, graph=graph, payload_store=payload_store)
+    assert result.status == RunStatus.COMPLETED, f"run_audit_pipeline expected COMPLETED, got {result.status}"
+
+    return AuditPipelineResult(
+        run_id=result.run_id,
+        db=db,
+        payload_store=payload_store,
+        sink=sink,
+    )
+
+
+# =============================================================================
+# Pipeline builders
+# =============================================================================
 
 
 def build_linear_pipeline(

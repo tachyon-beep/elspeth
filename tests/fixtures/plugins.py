@@ -89,6 +89,66 @@ class CollectSink(_TestSinkBase):
         pass
 
 
+class FailingSink(_TestSinkBase):
+    """Sink whose write() always raises RuntimeError.
+
+    For testing error handling in orchestrator, executors, and outcome recording.
+
+    Usage:
+        sink = FailingSink()
+        sink = FailingSink("broken_sink")
+        sink = FailingSink(error_message="Custom error")
+    """
+
+    def __init__(
+        self,
+        name: str = "failing_sink",
+        *,
+        node_id: str | None = None,
+        error_message: str = "Sink write failed",
+    ) -> None:
+        super().__init__()
+        self.name = name
+        self.node_id = node_id
+        self._error_message = error_message
+
+    def on_start(self, ctx: Any) -> None:
+        pass
+
+    def on_complete(self, ctx: Any) -> None:
+        pass
+
+    def write(self, rows: Any, ctx: Any) -> ArtifactDescriptor:
+        raise RuntimeError(self._error_message)
+
+    def close(self) -> None:
+        pass
+
+
+class FailingSource(ListSource):
+    """Source whose load() always raises RuntimeError.
+
+    For testing error handling during source loading (orchestrator cleanup,
+    export partial semantics, etc.).
+
+    Usage:
+        source = FailingSource()
+        source = FailingSource(error_message="Custom load failure")
+    """
+
+    def __init__(
+        self,
+        *,
+        name: str = "failing_source",
+        error_message: str = "Source failed intentionally",
+    ) -> None:
+        super().__init__(data=[], name=name)
+        self._error_message = error_message
+
+    def load(self, ctx: Any) -> Iterator[SourceRow]:
+        raise RuntimeError(self._error_message)
+
+
 class PassTransform(BaseTransform):
     """Identity transform — passes rows through unchanged."""
 
