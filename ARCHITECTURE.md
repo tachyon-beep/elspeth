@@ -2,7 +2,7 @@
 
 C4 model documentation for the ELSPETH auditable pipeline framework.
 
-**Last Updated:** 2026-02-26 (synchronized with RC-3.3 branch)
+**Last Updated:** 2026-03-01 (synchronized with RC-3.3 branch)
 **Framework Version:** 0.3.0 (RC-3.3)
 **Architecture Grade:** A- (Production Ready)
 
@@ -13,12 +13,12 @@ C4 model documentation for the ELSPETH auditable pipeline framework.
 | Question | Answer |
 |----------|--------|
 | **What is ELSPETH?** | Auditable Sense/Decide/Act pipeline framework |
-| **Core subsystems?** | 20 subsystems across 5 architectural tiers |
+| **Core subsystems?** | 11 major subsystems (20+ including sub-components) across 5 architectural tiers |
 | **Data flow?** | Source → Transforms/Gates → Sinks (all recorded) |
 | **Audit storage?** | SQLite/SQLCipher (dev) / PostgreSQL (prod) |
 | **Extension model?** | pluggy-based plugin system |
-| **Production LOC** | ~76,000 Python lines |
-| **Test LOC** | ~207,000 Python lines (2.7:1 ratio) |
+| **Production LOC** | ~80,400 Python lines (243 files) |
+| **Test LOC** | ~232,100 Python lines (624 files, 2.9:1 ratio) |
 | **Architecture Grade** | A- (Production Ready) |
 
 ---
@@ -74,13 +74,13 @@ C4Context
 
     System_Ext(datasources, "Data Sources", "CSV, JSON, APIs, databases")
     System_Ext(destinations, "Data Destinations", "Files, databases, message queues")
-    System_Ext(llm, "LLM Providers", "OpenAI, Anthropic, etc. (Phase 6)")
+    System_Ext(llm, "LLM Providers", "Azure OpenAI, OpenRouter")
 
     Rel(operator, elspeth, "Configures and executes pipelines", "CLI/YAML")
     Rel(auditor, elspeth, "Queries lineage", "CLI/TUI")
     Rel(elspeth, datasources, "Reads data from", "Various protocols")
     Rel(elspeth, destinations, "Writes data to", "Various protocols")
-    Rel(elspeth, llm, "Calls for decisions", "HTTP/API (Phase 6)")
+    Rel(elspeth, llm, "Calls for decisions", "HTTP/API")
 ```
 
 **Key relationships:**
@@ -91,7 +91,7 @@ C4Context
 | Auditor | Queries lineage via CLI/TUI, verifies decisions |
 | Data Sources | CSV, JSON, APIs - read by Source plugins |
 | Data Destinations | Files, databases - written by Sink plugins |
-| LLM Providers | External calls for classification (Phase 6) |
+| LLM Providers | External calls for classification via LLM pack |
 
 ---
 
@@ -156,7 +156,7 @@ C4Container
 | **MCP Server** | Python | ~3,600 | Read-only analysis API with domain-specific analyzers |
 | **Engine** | Python | ~12,000 | Run lifecycle, row processing, DAG execution |
 | **Plugins** | pluggy | ~20,600 | Extensible sources, transforms, sinks, LLM, clients |
-| **Landscape** | SQLAlchemy Core | ~7,000 | Audit recording and querying, SQLCipher support |
+| **Landscape** | SQLAlchemy Core | ~8,300 | Audit recording (facade + 4 repositories) and querying, SQLCipher support |
 | **Testing** | Python | ~9,500 | ChaosLLM, ChaosWeb, ChaosEngine test servers |
 | **Telemetry** | Python | ~1,200 | Real-time event export (OTLP, Datadog, Azure Monitor) |
 | **Checkpoint** | Python | ~600 | Crash recovery with topology validation |
@@ -166,7 +166,7 @@ C4Container
 | **Audit DB** | SQLite/SQLCipher/PostgreSQL | — | Complete audit trail storage (21 tables) |
 | **Payload Store** | Filesystem | — | Content-addressable blob storage with retention |
 
-**Total Production LOC:** ~74,000 | **Total Test LOC:** ~207,000 | **Test Ratio:** 2.7:1
+**Total Production LOC:** ~80,400 (243 files) | **Total Test LOC:** ~232,100 (624 files) | **Test Ratio:** 2.9:1
 
 ---
 
@@ -226,7 +226,11 @@ C4Component
     title Landscape Component Diagram
 
     Container_Boundary(landscape, "Landscape Subsystem") {
-        Component(recorder, "LandscapeRecorder", "Python Class", "High-level audit API")
+        Component(recorder, "LandscapeRecorder", "Python Class", "Pure facade delegating to repositories")
+        Component(lifecycle_repo, "RunLifecycleRepository", "Python Class", "Run creation, node/edge registration")
+        Component(execution_repo, "ExecutionRepository", "Python Class", "Node states, routing, outcomes")
+        Component(dataflow_repo, "DataFlowRepository", "Python Class", "Rows, tokens, calls, artifacts")
+        Component(query_repo, "QueryRepository", "Python Class", "explain(), lineage queries")
         Component(database, "LandscapeDB", "SQLAlchemy Core", "Connection management")
         Component(schema, "Schema", "SQLAlchemy Tables", "Table definitions")
         Component(lineage, "Lineage", "Python", "explain() query implementation")
@@ -237,10 +241,16 @@ C4Component
 
     ContainerDb_Ext(db, "SQLite/SQLCipher/PostgreSQL")
 
-    Rel(recorder, database, "Uses for operations")
-    Rel(recorder, schema, "Inserts/updates via")
+    Rel(recorder, lifecycle_repo, "Delegates run lifecycle")
+    Rel(recorder, execution_repo, "Delegates execution recording")
+    Rel(recorder, dataflow_repo, "Delegates data flow recording")
+    Rel(recorder, query_repo, "Delegates queries")
+    Rel(lifecycle_repo, database, "Uses for operations")
+    Rel(execution_repo, database, "Uses for operations")
+    Rel(dataflow_repo, database, "Uses for operations")
+    Rel(query_repo, database, "Uses for operations")
     Rel(database, db, "Connects to")
-    Rel(lineage, recorder, "Queries via")
+    Rel(lineage, query_repo, "Queries via")
     Rel(exporter, recorder, "Reads from")
     Rel(exporter, formatters, "Uses for output")
     Rel(recorder, reproducibility, "Computes grade via")
@@ -248,15 +258,19 @@ C4Component
 
 | Component | File | LOC | Responsibility |
 |-----------|------|-----|----------------|
-| **LandscapeRecorder** | `recorder.py` + mixins | ~3,200 | High-level recording API (47+ methods, split into recording mixins) |
-| **LandscapeDB** | `database.py` | ~477 | Connection management, schema validation, SQLCipher support |
-| **Schema** | `schema.py` | ~510 | SQLAlchemy table definitions (21 tables) |
-| **Model Loaders** | `model_loaders.py` | ~564 | Row→Object conversion with Tier 1 validation |
-| **Lineage** | `lineage.py` | ~210 | `explain()` queries for complete lineage |
-| **Exporter** | `exporter.py` | ~554 | Audit data export (JSON, CSV) |
-| **Formatters** | `formatters.py` | ~229 | Data serialization, datetime handling |
-| **Journal** | `journal.py` | ~290 | JSONL change journaling backup stream |
-| **Reproducibility** | `reproducibility.py` | ~153 | Grade computation (FULL → ATTRIBUTABLE_ONLY) |
+| **LandscapeRecorder** | `recorder.py` | ~1,040 | Pure facade (89 methods) delegating to 4 repositories |
+| **RunLifecycleRepository** | `run_lifecycle_repository.py` | ~645 | Run creation/completion, node/edge registration, config recording |
+| **ExecutionRepository** | `execution_repository.py` | ~1,480 | Node states, routing events, outcomes, batches |
+| **DataFlowRepository** | `data_flow_repository.py` | ~1,430 | Rows, tokens, calls, artifacts, validation/transform errors |
+| **QueryRepository** | `query_repository.py` | ~530 | `explain()`, row data retrieval, lineage queries |
+| **LandscapeDB** | `database.py` | ~500 | Connection management, schema validation, SQLCipher support |
+| **Schema** | `schema.py` | ~520 | SQLAlchemy table definitions (21 tables) |
+| **Model Loaders** | `model_loaders.py` | ~600 | Row→Object conversion with Tier 1 validation |
+| **Lineage** | `lineage.py` | ~235 | `explain()` queries for complete lineage |
+| **Exporter** | `exporter.py` | ~594 | Audit data export (JSON, CSV) |
+| **Formatters** | `formatters.py` | ~246 | Data serialization, datetime handling |
+| **Journal** | `journal.py` | ~286 | JSONL change journaling backup stream |
+| **Reproducibility** | `reproducibility.py` | ~147 | Grade computation (FULL → ATTRIBUTABLE_ONLY) |
 
 ### Audit Trail Tables (21 Total)
 
@@ -306,7 +320,7 @@ C4Component
         Component(null_source, "NullSource", "Python", "Empty source for testing")
     }
 
-    Container_Boundary(transforms, "Transforms (11+)") {
+    Container_Boundary(transforms, "Transforms (13)") {
         Component(passthrough, "PassThrough", "Python", "Identity transform")
         Component(field_mapper, "FieldMapper", "Python", "Rename/select fields")
         Component(batch_stats, "BatchStats", "Python", "Aggregation statistics")
@@ -315,6 +329,8 @@ C4Component
         Component(truncate, "Truncate", "Python", "String truncation")
         Component(keyword_filter, "KeywordFilter", "Python", "Keyword-based filtering")
         Component(web_scrape, "WebScrape", "Python", "HTML extraction")
+        Component(content_safety, "ContentSafety", "Python", "Azure Content Safety screening")
+        Component(prompt_shield, "PromptShield", "Python", "Azure Prompt Shield detection")
     }
 
     Container_Boundary(llm, "LLM Transforms") {
@@ -346,6 +362,8 @@ C4Component
     Rel(batch_stats, base, "Extends BaseTransform")
     Rel(json_explode, base, "Extends BaseTransform")
     Rel(web_scrape, base, "Extends BaseTransform")
+    Rel(content_safety, base, "Extends BaseTransform")
+    Rel(prompt_shield, base, "Extends BaseTransform")
     Rel(llm_transform, base, "Extends BaseTransform")
     Rel(llm_transform, llm_client, "Uses")
     Rel(web_scrape, http_client, "Uses")
@@ -363,12 +381,12 @@ C4Component
 | **PluginContext** | Runtime context passed to all plugin methods — phase-typed via `SourceContext`, `TransformContext`, `SinkContext`, `LifecycleContext` protocols (defined in `contracts/contexts.py`) |
 | **PluginManager** | pluggy-based discovery and registration |
 | **Sources** | 4 plugins (csv, json, azure_blob, null) |
-| **Transforms** | 11+ plugins (field_mapper, passthrough, truncate, batch_stats, web_scrape, etc.) |
+| **Transforms** | 13 plugins (field_mapper, passthrough, truncate, keyword_filter, batch_stats, batch_replicate, json_explode, web_scrape, content_safety, prompt_shield, LLM, azure_batch, openrouter_batch) |
 | **LLM Transforms** | Unified LLMTransform (azure/openrouter providers, single/multi-query strategies) + azure_batch + openrouter_batch |
 | **Sinks** | 4 plugins (csv, json, database, azure_blob) |
 | **Clients** | 4 audited clients (HTTP, LLM, Replayer, Verifier) |
 
-**Total Plugin Ecosystem:** 29+ plugins across 4 categories
+**Total Plugin Ecosystem:** 25 plugins across 4 categories (organized into `infrastructure/`, `sources/`, `transforms/`, `sinks/`)
 
 #### Plugin Context Protocols
 
@@ -694,11 +712,10 @@ graph LR
     end
 
     subgraph Plugins[plugins/]
-        Manager[manager.py]
+        Infra[infrastructure/]
         Sources[sources/]
         Transforms[transforms/]
         Sinks[sinks/]
-        Clients[clients/]
     end
 
     subgraph Telemetry[telemetry/]
@@ -891,14 +908,14 @@ ELSPETH uses ADRs to document significant architectural choices.
 
 ## Quality Assessment
 
-Based on comprehensive analysis (2026-02-02), ELSPETH demonstrates exceptional architectural quality.
+Based on comprehensive analysis (2026-03-01, RC-3.3), ELSPETH demonstrates exceptional architectural quality.
 
 ### Quality Scores
 
 | Dimension | Grade | Status |
 |-----------|-------|--------|
 | **Maintainability** | A | Excellent - Clean modules, consistent patterns |
-| **Testability** | A+ | Exceptional - 2.7:1 test ratio, mutation testing |
+| **Testability** | A+ | Exceptional - 2.9:1 test ratio, mutation testing |
 | **Type Safety** | A | Excellent - mypy strict, protocols, NewType aliases |
 | **Documentation** | A- | Very Good - CLAUDE.md (10K+ words), ADRs, runbooks |
 | **Error Handling** | A | Excellent - Three-tier trust model |
@@ -914,7 +931,7 @@ Based on comprehensive analysis (2026-02-02), ELSPETH demonstrates exceptional a
 2. **Three-Tier Trust Model** - Clear rules for data handling at each boundary
 3. **Clean Layering** - Contracts as leaf module, clear separation of concerns
 4. **Protocol-Based Design** - Runtime-checkable interfaces, structural typing
-5. **Comprehensive Testing** - 201K test LOC vs 74K production LOC (2.7:1 ratio)
+5. **Comprehensive Testing** - 232K test LOC vs 80K production LOC (2.9:1 ratio)
 6. **No Legacy Code Policy** - Clean evolution, no backwards compatibility shims
 
 ### Areas for Future Improvement
@@ -932,7 +949,7 @@ Based on comprehensive analysis (2026-02-02), ELSPETH demonstrates exceptional a
 |----------|--------|----------|
 | **Audit Integrity** | ✅ Low Risk | Tier 1 crash policy, NaN/Infinity rejected |
 | **Type Safety** | ✅ Low Risk | mypy strict, runtime protocol verification |
-| **Test Coverage** | ✅ Low Risk | 2.7:1 ratio, mutation testing, property tests |
+| **Test Coverage** | ✅ Low Risk | 2.9:1 ratio, mutation testing, property tests |
 | **Resume Safety** | ✅ Low Risk | Full topology hash (BUG-COMPAT-01 fix applied) |
 
 ---
@@ -967,10 +984,10 @@ Based on comprehensive analysis (2026-02-02), ELSPETH demonstrates exceptional a
 
 **Key Metrics:**
 
-- Production LOC: ~76,000 (234 Python files)
-- Test LOC: ~201,000 (2.7:1 ratio)
-- Subsystems: 22
-- Plugins: 29+
+- Production LOC: ~80,400 (243 Python files)
+- Test LOC: ~232,100 (624 Python files, 2.9:1 ratio)
+- Subsystems: 11 major (20+ including sub-components)
+- Plugins: 25
 - ADRs: 6
 - Architecture Grade: A-
 

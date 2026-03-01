@@ -49,7 +49,7 @@ allow_hits:
   reason: Tier-3 boundary — quarantined row data may contain NaN/Infinity that canonical_json rejects
   safety: Falls back to repr() with logging — audit trail preserved with metadata
 # query_repository.py explain_row — payload lookup with purge-tolerant exception handling
-- key: core/landscape/query_repository.py:R6:QueryRepository:explain_row:fp=e7840a5b523c37a3
+- key: core/landscape/query_repository.py:R6:QueryRepository:explain_row:fp=b2c9221a83ad28a8
   owner: architecture
   reason: KeyError from PayloadStore when payload purged by retention policy — expected, not corruption
 - key: core/canonical.py:R6:_normalize_value:fp=20ccee9926534392
@@ -333,17 +333,17 @@ allow_hits:
   safety: Crashes on type mismatch - no silent fallback
   expires: '2026-03-13'
 # ARCH-15: select merge trace-back in get_effective_producer_schema
-- key: core/dag/graph.py:R1:ExecutionGraph:get_effective_producer_schema:fp=5c55d56e9f1566f6
+- key: core/dag/graph.py:R1:ExecutionGraph:get_effective_producer_schema:fp=6e8f8bd2c9d97e9f
   owner: ARCH-15
   reason: Optional select_branch config lookup — not all coalesce nodes have select_branch
   safety: Falls through to return None if missing — conservative (skips type validation)
   expires: '2026-05-13'
-- key: core/dag/graph.py:R1:ExecutionGraph:get_effective_producer_schema:fp=54611abcd9a72839
+- key: core/dag/graph.py:R1:ExecutionGraph:get_effective_producer_schema:fp=9900ca6379659d09
   owner: ARCH-15
   reason: Optional select_branch config lookup for select-merge schema trace-back
   safety: Falls through to return None if missing — conservative (skips type validation)
   expires: '2026-05-13'
-- key: core/dag/graph.py:R1:ExecutionGraph:get_effective_producer_schema:fp=7eab2f6f6ee63862
+- key: core/dag/graph.py:R1:ExecutionGraph:get_effective_producer_schema:fp=c0543d79766b3f28
   owner: ARCH-15
   reason: Edge mode/label lookup to identify identity branch's COPY edge
   safety: Falls through to transform-branch trace if no match — no silent fallback

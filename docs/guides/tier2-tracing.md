@@ -74,8 +74,8 @@ transforms:
 ### Required Dependency
 
 ```bash
-uv pip install elspeth[tracing-azure]
-# Or manually: uv pip install azure-monitor-opentelemetry
+uv pip install elspeth[azure]
+# azure-monitor-opentelemetry is bundled with the azure extras
 ```
 
 ### Finding Your Connection String

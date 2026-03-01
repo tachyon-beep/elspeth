@@ -31,6 +31,75 @@ Collapsed 6 LLM transform classes (~4,950 lines) into a unified `LLMTransform` w
 - Deleted 5 old source files: `azure.py`, `openrouter.py`, `base_multi_query.py`, `azure_multi_query.py`, `openrouter_multi_query.py`
 - Cleaned 12 stale contracts-whitelist entries and updated scan groups
 
+### T17: PluginContext Protocol Split
+
+Decomposed the god-object `PluginContext` (20+ fields) into 4 phase-based protocols in `contracts/contexts.py`, narrowing plugin method signatures to only the fields each pipeline phase actually needs. Three independent code analyses mapped 42 plugin files to confirm actual usage patterns before design.
+
+- **`SourceContext`** (11 fields): `run_id`, `node_id`, `operation_id`, `landscape`, `telemetry_emit`, `record_validation_error()`, `record_call()` — used by `load()` methods
+- **`TransformContext`** (12 fields): `run_id`, `state_id`, `node_id`, `token`, `batch_token_ids`, `contract`, checkpoint API (`get/set/clear_checkpoint`), `record_call()` — used by `process()` / `accept()` methods
+- **`SinkContext`** (7 fields): `run_id`, `contract`, `landscape`, `operation_id`, `record_call()` — used by `write()` methods
+- **`LifecycleContext`** (7 fields): `run_id`, `node_id`, `landscape`, `rate_limit_registry`, `telemetry_emit`, `payload_store`, `concurrency_config` — used by `on_start()` / `on_complete()` methods
+- 23 plugin files updated to use narrowed protocol types instead of full `PluginContext`
+- Concrete `PluginContext` structurally satisfies all 4 protocols; engine executors mutate concrete fields between pipeline steps while plugins see read-only views via protocol typing
+- Removed 4 dead fields and 2 unused methods from `PluginContext`
+
+### T18: Orchestrator/Processor Decomposition
+
+Pure extract-method refactoring of the two largest engine files, reducing maximum method size to ≤150 lines with no behavior change.
+
+**Orchestrator extractions (from `orchestrator/core.py`):**
+- `_register_graph_nodes_and_edges()` — graph construction + node/edge recording
+- `_initialize_run_context()` — plugin context + processor setup
+- `_setup_resume_context()` — resume-path graph initialization
+- `_handle_quarantine_row()` — quarantine handling in processing loop
+- `_flush_and_write_sinks()` — shared sink write + shutdown raise handling (used by both main and resume paths)
+- `_run_main_processing_loop()` — highest-risk extraction (~200 lines → ~90 lines)
+- `_run_resume_processing_loop()` — resumed row processing
+
+**Processor extractions (from `processor.py`):**
+- `_handle_transform_node()` — transform execution with retry
+- `_handle_gate_node()` — gate evaluation and routing
+- `_handle_terminal_token()` — outcome recording at DAG leaf nodes
+
+**New typed infrastructure:**
+- `GraphArtifacts` frozen dataclass with `MappingProxyType` fields for immutable graph config
+- `RunContext` bundles 5 run-initialization objects
+- `LoopContext` parameter bundle for processing loops (shared between main and resume paths)
+- Discriminated union types for transform/gate outcomes
+
+### T19: Landscape Repository Pattern
+
+Refactored `LandscapeRecorder` from 8 mixins into 4 composed domain repositories, converting the recorder into a pure delegation facade.
+
+**4 repositories (split by pipeline-phase domain):**
+- **`RunLifecycleRepository`** (645 lines) — run lifecycle, graph registration, export, secret resolution, reproducibility grading
+- **`ExecutionRepository`** (1,472 lines) — node states, call tracking, batch management (thread-safe call index allocation via `Lock`)
+- **`DataFlowRepository`** (1,435 lines) — rows, tokens, errors, graph structure (atomic fork/coalesce/expand via direct connection)
+- **`QueryRepository`** (532 lines) — read-only cross-cutting queries used by MCP server, exporter, CLI, and TUI
+
+**Recorder as pure facade:**
+- `LandscapeRecorder` (1,040 lines) is now 100% delegation — all ~91 public methods delegate directly to the appropriate repository with zero logic in the facade itself
+
+**Model loader rename:**
+- Renamed 15 DTO mapper classes from `*Repository` to `*Loader` (e.g., `RunRepository` → `RunLoader`) to avoid confusion with the new domain repositories
+- `repositories.py` → `model_loaders.py`
+
+### Plugins Restructure (SDA Alignment)
+
+Reorganized the flat `plugins/` directory into 4 SDA-aligned subfolders matching ELSPETH's Sense/Decide/Act architecture model.
+
+**New structure:**
+- `plugins/infrastructure/` — shared base classes, protocols, config, discovery, clients, batching, pooling (29 files)
+- `plugins/sources/` — CSVSource, JSONSource, NullSource, AzureBlobSource (4 plugins)
+- `plugins/transforms/` — all transform plugins including LLM and Azure safety subdirectories (12+ plugins)
+- `plugins/sinks/` — CSVSink, JSONSink, DatabaseSink, AzureBlobSink (4 plugins)
+
+**Impact:**
+- 247 files changed (70+ via `git mv`, ~200 imports rewritten)
+- ~460 test files updated with new `plugins.infrastructure` import paths
+- `plugins/__init__.py` stripped from 113-line re-export facade to bare package marker
+- Tier-model allowlist, contracts whitelist, and `pyproject.toml` scan groups updated
+
 ### Fixed
 
 - **Silent failure remediation (10 findings)** — Comprehensive review of LLM plugin error handling:
@@ -45,7 +114,7 @@ Collapsed 6 LLM transform classes (~4,950 lines) into a unified `LLMTransform` w
   - Null LLM content (content-filtered) now returns error with `content_filtered` reason instead of storing `None`
 - **Unified LLM transform bugs** — Fixed four bugs in `LLMTransform`: limiter dispatch used wrong config attribute, `response_format` not passed to provider, declared `output_fields` not extracted from multi-query responses, NaN/Infinity values in LLM JSON responses not rejected
 - **Aggregation `on_error` required** — `on_error` is now required for aggregation transforms; converted multi-query examples to unified LLM format
-- **T1: Frozen audit records** — Added `frozen=True` to all 16 mutable audit record dataclasses (`Run`, `Node`, `Edge`, `Row`, `Token`, `TokenParent`, `Call`, `Artifact`, `RoutingEvent`, `Batch`, `BatchMember`, `BatchOutput`, `Checkpoint`, `RowLineage`, `ValidationErrorRecord`, `TransformErrorRecord`). All 24 dataclasses in `contracts/audit.py` are now frozen. Mutations crash at the mutation site instead of silently corrupting the Tier 1 audit trail.
+- **T1: Frozen audit records** — Added `frozen=True` to all 16 mutable audit record dataclasses (`Run`, `Node`, `Edge`, `Row`, `Token`, `TokenParent`, `Call`, `Artifact`, `RoutingEvent`, `Batch`, `BatchMember`, `BatchOutput`, `Checkpoint`, `RowLineage`, `ValidationErrorRecord`, `TransformErrorRecord`). All 25 dataclasses in `contracts/audit.py` are now frozen. Mutations crash at the mutation site instead of silently corrupting the Tier 1 audit trail.
 - **T2: Assert removal** — Replaced 18 `assert` statements across 10 plugin files with explicit `if/raise RuntimeError` patterns. Asserts are stripped by `python -O`, silently removing safety checks. Files: `web_scrape.py` (5), `azure.py` (2), `openrouter.py` (1), `openrouter_batch.py` (2), `azure_multi_query.py` (2), `openrouter_multi_query.py` (2), `content_safety.py` (1), `pooling/executor.py` (1), `csv_sink.py` (1), `base_multi_query.py` (1).
 - **T3: Truthiness checks** — Fixed 21 truthiness checks across 8 files. Python's `if x:` and `x or default` silently exclude valid zero values (`0`, `0.0`) and empty strings (`""`). All replaced with explicit `is not None` checks:
   - `reports.py`: High-variance node filter now includes 0-duration nodes
@@ -68,18 +137,18 @@ Collapsed 6 LLM transform classes (~4,950 lines) into a unified `LLMTransform` w
 ### Added
 
 - **ADR-006**: Layer Dependency Remediation — documents the strict 4-layer model (`contracts → core → engine → plugins`) and the 10→0 violation fix strategy
-- Full architecture analysis (`docs/arch-analysis-2026-02-22-0446/`) — 26 documents covering subsystem catalog, dependency matrix, C4 diagrams, architect handover brief, and per-subsystem analysis for all 13 subsystems
+- Full architecture analysis (`docs/arch-analysis-2026-02-22-0446/`) — 23 documents covering subsystem catalog, dependency matrix, C4 diagrams, architect handover brief, and per-subsystem analysis for all 13 subsystems
 - Freeze audit dataclasses plan (`docs/plans/2026-02-22-freeze-audit-dataclasses.md`)
 - `TestFrozenDataclassImmutability` extended to cover all 22 frozen types (6 existing + 16 newly frozen)
 - 10 new truthiness regression tests across `test_reports.py`, `test_spans.py`, `test_node_detail.py`
-- T17 PluginContext protocol split design doc and hierarchical implementation plan (master + 5 sub-plans)
+- T17 PluginContext protocol split — 4 phase-based protocols (`SourceContext`, `TransformContext`, `SinkContext`, `LifecycleContext`) in `contracts/contexts.py`, 23 plugin files updated to narrowed protocol types
 - Backpressure modes and import hierarchy documentation in architecture docs
 - `available_fields` key in `TransformErrorReason` TypedDict for LLM output field mismatch diagnostics
 - 65 new tests for review-identified coverage gaps: error serialization dispatch (33), provider lifecycle (9), JSON validation (16), PluginContext record_call wrapping (5), GateExecutor error field rename (2)
 
 ### Tests
 
-- Full suite: 10,040 tests passing, 16 skipped, 3 xfailed — mypy/ruff/contracts all clean
+- Full suite: 10,482 tests collected, 16 skipped, 3 xfailed — mypy/ruff/contracts all clean
 - T10: 10 test files updated with import path migrations from old modules to `providers/`
 - T10: `test_discovery.py` updated — plugin count 17→13, assertions reference unified `llm` + batch plugins
 - T10: `test_contract_validation.py` updated — 5 plugin name references migrated to `"llm"`

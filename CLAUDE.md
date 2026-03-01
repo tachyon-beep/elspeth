@@ -649,8 +649,12 @@ src/elspeth/
 │   └── sinks/          # CSVSink, JSONSink, DatabaseSink, AzureBlobSink
 ├── telemetry/          # OpenTelemetry exporters and instrumentation
 ├── testing/            # ChaosLLM, ChaosWeb, ChaosEngine test servers
+│   └── chaosllm_mcp/   # MCP server for ChaosLLM metrics and control
 ├── mcp/                # Landscape MCP analysis server
+│   └── analyzers/      # Domain-specific analysis tools (contracts, diagnostics, queries, reports)
 ├── tui/                # Terminal UI (Textual) - explain screens and widgets
+│   ├── screens/        # TUI screen implementations
+│   └── widgets/        # TUI widget components
 ├── cli.py              # Typer CLI
 ├── cli_helpers.py      # CLI utility functions
 └── cli_formatters.py   # Event formatting for CLI output

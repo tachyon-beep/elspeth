@@ -37,17 +37,13 @@ Use it to locate the source of any audit gap.
 
 - Path: Gate returns RoutingAction.route
 - Recorder: RowProcessor
-- Primary locations:
-  - `src/elspeth/engine/processor.py` (plugin gates)
-  - `src/elspeth/engine/processor.py` (config-driven gates)
+- Primary location: `src/elspeth/engine/processor.py` (config-driven gates)
 
 ## Gate fork (FORKED)
 
 - Path: Gate returns RoutingAction.fork_to_paths
 - Recorder: RowProcessor
-- Primary locations:
-  - `src/elspeth/engine/processor.py` (plugin gates)
-  - `src/elspeth/engine/processor.py` (config-driven gates)
+- Primary location: `src/elspeth/engine/processor.py` (config-driven gates)
 
 - Children creation: `TokenManager.fork_token` -> `LandscapeRecorder.fork_token`
   - Child tokens get fork_group_id and token_parents links.
