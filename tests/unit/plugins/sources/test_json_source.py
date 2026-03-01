@@ -7,6 +7,7 @@ from pathlib import Path
 import pytest
 
 from elspeth.contracts.plugin_context import PluginContext
+from tests.fixtures.factories import make_source_context
 
 # Dynamic schema config for tests - SourceDataConfig requires schema
 DYNAMIC_SCHEMA = {"mode": "observed"}
@@ -20,8 +21,8 @@ class TestJSONSource:
 
     @pytest.fixture
     def ctx(self) -> PluginContext:
-        """Create a minimal plugin context."""
-        return PluginContext(run_id="test-run", config={})
+        """Create a plugin context with proper FK records for validation error recording."""
+        return make_source_context(plugin_name="json")
 
     def test_has_required_attributes(self) -> None:
         """JSONSource has name and output_schema."""
@@ -225,8 +226,8 @@ class TestJSONSourceFlexibleContract:
 
     @pytest.fixture
     def ctx(self) -> PluginContext:
-        """Create a minimal plugin context."""
-        return PluginContext(run_id="test-run", config={})
+        """Create a plugin context with proper FK records for validation error recording."""
+        return make_source_context(plugin_name="json")
 
     def test_flexible_infers_extra_field_and_quarantines_type_drift(self, tmp_path: Path, ctx: PluginContext) -> None:
         """First valid row infers extras; subsequent rows with type drift are quarantined."""
@@ -355,8 +356,8 @@ class TestJSONSourceQuarantineYielding:
 
     @pytest.fixture
     def ctx(self) -> PluginContext:
-        """Create a minimal plugin context."""
-        return PluginContext(run_id="test-run", config={})
+        """Create a plugin context with proper FK records for validation error recording."""
+        return make_source_context(plugin_name="json")
 
     def test_invalid_row_yields_quarantined_source_row(self, tmp_path: Path, ctx: PluginContext) -> None:
         """Invalid row yields SourceRow.quarantined() with error info."""
@@ -479,8 +480,8 @@ class TestJSONSourceParseErrors:
 
     @pytest.fixture
     def ctx(self) -> PluginContext:
-        """Create a minimal plugin context."""
-        return PluginContext(run_id="test-run", config={})
+        """Create a plugin context with proper FK records for validation error recording."""
+        return make_source_context(plugin_name="json")
 
     def test_jsonl_malformed_line_quarantined_not_crash(self, tmp_path: Path, ctx: PluginContext) -> None:
         """Malformed JSONL line is quarantined, not crash the pipeline.
@@ -772,8 +773,8 @@ class TestJSONSourceNonFiniteConstants:
 
     @pytest.fixture
     def ctx(self) -> PluginContext:
-        """Create a minimal plugin context."""
-        return PluginContext(run_id="test-run", config={})
+        """Create a plugin context with proper FK records for validation error recording."""
+        return make_source_context(plugin_name="json")
 
     def test_jsonl_nan_constant_quarantined_not_crash(self, tmp_path: Path, ctx: PluginContext) -> None:
         """JSONL with NaN constant is quarantined at parse time.
@@ -943,8 +944,8 @@ class TestJSONSourceDataKeyStructuralErrors:
 
     @pytest.fixture
     def ctx(self) -> PluginContext:
-        """Create a minimal plugin context."""
-        return PluginContext(run_id="test-run", config={})
+        """Create a plugin context with proper FK records for validation error recording."""
+        return make_source_context(plugin_name="json")
 
     def test_data_key_on_list_root_quarantined_not_crash(self, tmp_path: Path, ctx: PluginContext) -> None:
         """data_key configured but JSON root is a list - quarantine, not TypeError.
@@ -1070,16 +1071,14 @@ class TestJSONSourceDataKeyStructuralErrors:
         # No rows yielded - structural error discarded
         assert len(results) == 0
 
-    def test_data_key_structural_error_logs_validation_error(
-        self, tmp_path: Path, ctx: PluginContext, caplog: pytest.LogCaptureFixture
+    def test_data_key_structural_error_records_validation_error(
+        self, tmp_path: Path, ctx: PluginContext
     ) -> None:
         """Structural errors are recorded via ctx.record_validation_error().
 
-        Without a Landscape connection, PluginContext logs a warning instead
-        of persisting. This test verifies the recording path is called.
+        With a real Landscape recorder, the validation error is persisted
+        to the database. This test verifies the recording path succeeds.
         """
-        import logging
-
         from elspeth.plugins.sources.json_source import JSONSource
 
         json_file = tmp_path / "data.json"
@@ -1095,14 +1094,27 @@ class TestJSONSourceDataKeyStructuralErrors:
             }
         )
 
-        # Execute with log capture
-        with caplog.at_level(logging.WARNING, logger="elspeth.contracts.plugin_context"):
-            list(source.load(ctx))
+        results = list(source.load(ctx))
 
-        # Verify validation error was logged (no Landscape in test context)
-        assert len(caplog.records) == 1
-        assert "Validation error not recorded" in caplog.records[0].message
-        assert "results" in caplog.records[0].message  # The missing key
+        # Structural error yields a quarantined SourceRow
+        assert len(results) == 1
+        assert results[0].quarantine_destination == "quarantine"
+        assert "results" in results[0].quarantine_error  # The missing data_key
+
+        # Verify validation error was recorded to Landscape
+        from sqlalchemy import select
+
+        from elspeth.core.landscape.schema import validation_errors_table
+
+        with ctx.landscape._db.engine.connect() as conn:
+            rows = conn.execute(
+                select(validation_errors_table).where(
+                    validation_errors_table.c.run_id == ctx.run_id
+                )
+            ).fetchall()
+
+        assert len(rows) == 1
+        assert "results" in rows[0].error  # The missing data_key
 
     def test_data_key_structural_error_uses_parse_schema_mode(self, tmp_path: Path) -> None:
         """Structural data_key errors record contract-valid schema_mode='parse'."""
@@ -1150,8 +1162,8 @@ class TestJSONSourceArrayModeUnicodeDecodeError:
 
     @pytest.fixture
     def ctx(self) -> PluginContext:
-        """Create a minimal plugin context."""
-        return PluginContext(run_id="test-run", config={})
+        """Create a plugin context with proper FK records for validation error recording."""
+        return make_source_context(plugin_name="json")
 
     def test_invalid_utf8_bytes_quarantined_not_crash(self, tmp_path: Path, ctx: PluginContext) -> None:
         """Invalid UTF-8 byte sequences in JSON array file are quarantined, not crash."""

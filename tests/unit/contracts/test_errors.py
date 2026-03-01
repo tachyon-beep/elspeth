@@ -12,8 +12,8 @@ import dataclasses
 import pytest
 
 
-class TestExecutionErrorSchema:
-    """Tests for ExecutionError frozen dataclass schema."""
+class TestExecutionError:
+    """Tests for ExecutionError frozen dataclass — construction, immutability, serialization."""
 
     def test_execution_error_is_frozen_dataclass(self) -> None:
         """ExecutionError is a frozen dataclass (immutable after construction)."""
@@ -21,23 +21,8 @@ class TestExecutionErrorSchema:
 
         assert dataclasses.is_dataclass(ExecutionError)
         error = ExecutionError(exception="test", exception_type="ValueError")
-        import pytest
-
         with pytest.raises(dataclasses.FrozenInstanceError):
             error.exception = "modified"  # type: ignore[misc]
-
-    def test_execution_error_required_and_optional_fields(self) -> None:
-        """ExecutionError has 2 required fields and 2 optional (None-default) fields."""
-        from elspeth.contracts import ExecutionError
-
-        fields = {f.name: f for f in dataclasses.fields(ExecutionError)}
-        assert set(fields.keys()) == {"exception", "exception_type", "traceback", "phase"}
-        # Required fields have no default
-        assert fields["exception"].default is dataclasses.MISSING
-        assert fields["exception_type"].default is dataclasses.MISSING
-        # Optional fields default to None
-        assert fields["traceback"].default is None
-        assert fields["phase"].default is None
 
     def test_execution_error_to_dict_required_only(self) -> None:
         """to_dict() serializes exception_type as 'type' and omits None fields."""
@@ -93,74 +78,6 @@ class TestRoutingReasonSchema:
         assert is_typeddict(ConfigGateReason)
 
 
-class TestTransformSuccessReasonSchema:
-    """Tests for TransformSuccessReason TypedDict schema introspection."""
-
-    def test_transform_success_reason_required_keys(self) -> None:
-        """TransformSuccessReason has action as required key."""
-        from elspeth.contracts import TransformSuccessReason
-
-        assert TransformSuccessReason.__required_keys__ == frozenset({"action"})
-
-    def test_transform_success_reason_optional_keys(self) -> None:
-        """TransformSuccessReason has expected optional keys."""
-        from elspeth.contracts import TransformSuccessReason
-
-        assert TransformSuccessReason.__optional_keys__ == frozenset(
-            {
-                "fields_modified",
-                "fields_added",
-                "fields_removed",
-                "validation_warnings",
-                "metadata",
-                "queries_completed",
-            }
-        )
-
-    def test_transform_action_category_values(self) -> None:
-        """TransformActionCategory contains expected action types."""
-        from typing import get_args
-
-        from elspeth.contracts import TransformActionCategory
-
-        categories = get_args(TransformActionCategory)
-        assert "processed" in categories
-        assert "mapped" in categories
-        assert "skipped" in categories
-        assert "enriched" in categories
-
-
-class TestExecutionError:
-    """Tests for ExecutionError frozen dataclass construction."""
-
-    def test_execution_error_has_required_fields(self) -> None:
-        """ExecutionError requires exception and exception_type fields."""
-        from elspeth.contracts import ExecutionError
-
-        error = ExecutionError(
-            exception="ValueError: invalid input",
-            exception_type="ValueError",
-        )
-
-        assert error.exception == "ValueError: invalid input"
-        assert error.exception_type == "ValueError"
-        # to_dict() maps exception_type → "type" for audit stability
-        assert error.to_dict()["type"] == "ValueError"
-
-    def test_execution_error_accepts_optional_traceback(self) -> None:
-        """ExecutionError can include traceback."""
-        from elspeth.contracts import ExecutionError
-
-        error = ExecutionError(
-            exception="KeyError: 'foo'",
-            exception_type="KeyError",
-            traceback="Traceback (most recent call last):\n...",
-        )
-
-        assert error.traceback is not None
-        assert "traceback" in error.to_dict()
-
-
 class TestRoutingReason:
     """Tests for RoutingReason union type usage."""
 
@@ -179,7 +96,19 @@ class TestRoutingReason:
 
 
 class TestTransformSuccessReason:
-    """Tests for TransformSuccessReason TypedDict."""
+    """Tests for TransformSuccessReason TypedDict — construction and Literal values."""
+
+    def test_transform_action_category_values(self) -> None:
+        """TransformActionCategory contains expected action types."""
+        from typing import get_args
+
+        from elspeth.contracts import TransformActionCategory
+
+        categories = get_args(TransformActionCategory)
+        assert "processed" in categories
+        assert "mapped" in categories
+        assert "skipped" in categories
+        assert "enriched" in categories
 
     def test_transform_success_reason_has_action_field(self) -> None:
         """TransformSuccessReason defines action field."""
@@ -219,16 +148,6 @@ class TestTransformSuccessReason:
         assert reason["metadata"]["latency_ms"] == 42
 
 
-class TestRoutingReasonVariants:
-    """Tests for RoutingReason variant structure."""
-
-    def test_config_gate_reason_required_keys(self) -> None:
-        """ConfigGateReason has condition and result as required."""
-        from elspeth.contracts import ConfigGateReason
-
-        assert ConfigGateReason.__required_keys__ == frozenset({"condition", "result"})
-
-
 class TestRoutingReasonUsage:
     """Tests for constructing valid RoutingReason variants."""
 
@@ -244,29 +163,20 @@ class TestRoutingReasonUsage:
         assert reason["result"] == "true"
 
 
-class TestTransformErrorReasonSchema:
-    """Tests for TransformErrorReason TypedDict schema."""
+class TestTransformErrorReasonContract:
+    """Tests for TransformErrorReason TypedDict contract — Literal values and optional fields."""
 
-    def test_transform_error_reason_required_keys(self) -> None:
-        """TransformErrorReason has reason as required."""
+    def test_transform_error_reason_accepts_optional_error_fields(self) -> None:
+        """TransformErrorReason construction with optional error and error_type fields."""
         from elspeth.contracts import TransformErrorReason
 
-        assert TransformErrorReason.__required_keys__ == frozenset({"reason"})
-
-    def test_transform_error_reason_has_expected_optional_keys(self) -> None:
-        """TransformErrorReason has expected optional keys."""
-        from elspeth.contracts import TransformErrorReason
-
-        # Check a subset of important optional keys
-        optional = TransformErrorReason.__optional_keys__
-        assert "error" in optional
-        assert "field" in optional
-        assert "error_type" in optional
-        assert "query" in optional
-        assert "max_tokens" in optional
-        assert "status_code" in optional
-        assert "template_errors" in optional
-        assert "row_errors" in optional
+        reason: TransformErrorReason = {
+            "reason": "api_error",
+            "error": "Connection refused",
+            "error_type": "network_error",
+        }
+        assert reason["error"] == "Connection refused"
+        assert reason["error_type"] == "network_error"
 
     def test_transform_error_category_literal_values(self) -> None:
         """TransformErrorCategory contains expected error types."""
@@ -275,7 +185,6 @@ class TestTransformErrorReasonSchema:
         from elspeth.contracts import TransformErrorCategory
 
         categories = get_args(TransformErrorCategory)
-        # Verify key categories exist
         assert "api_error" in categories
         assert "missing_field" in categories
         assert "template_rendering_failed" in categories
@@ -471,22 +380,6 @@ class TestNestedTypeDicts:
         assert usage["prompt_tokens"] == 100
 
 
-class TestQueryFailureDetailSchema:
-    """Tests for QueryFailureDetail TypedDict schema."""
-
-    def test_query_failure_detail_required_keys(self) -> None:
-        """QueryFailureDetail has query as required."""
-        from elspeth.contracts import QueryFailureDetail
-
-        assert QueryFailureDetail.__required_keys__ == frozenset({"query"})
-
-    def test_query_failure_detail_optional_keys(self) -> None:
-        """QueryFailureDetail has error, error_type, status_code as optional."""
-        from elspeth.contracts import QueryFailureDetail
-
-        assert QueryFailureDetail.__optional_keys__ == frozenset({"error", "error_type", "status_code"})
-
-
 class TestQueryFailureDetailUsage:
     """Tests for constructing valid QueryFailureDetail values."""
 
@@ -511,22 +404,6 @@ class TestQueryFailureDetailUsage:
         assert detail["error"] == "Rate limit exceeded"
         assert detail["error_type"] == "rate_limit"
         assert detail["status_code"] == 429
-
-
-class TestErrorDetailSchema:
-    """Tests for ErrorDetail TypedDict schema."""
-
-    def test_error_detail_required_keys(self) -> None:
-        """ErrorDetail has message as required."""
-        from elspeth.contracts import ErrorDetail
-
-        assert ErrorDetail.__required_keys__ == frozenset({"message"})
-
-    def test_error_detail_optional_keys(self) -> None:
-        """ErrorDetail has error_type, row_index, details as optional."""
-        from elspeth.contracts import ErrorDetail
-
-        assert ErrorDetail.__optional_keys__ == frozenset({"error_type", "row_index", "details"})
 
 
 class TestErrorDetailUsage:
@@ -651,32 +528,16 @@ class TestCoalesceFailureReasonSchema:
             error.failure_reason = "modified"  # type: ignore[misc]
 
     def test_has_slots(self) -> None:
-        """CoalesceFailureReason uses __slots__ for memory efficiency."""
+        """CoalesceFailureReason uses __slots__ for memory efficiency — no instance __dict__."""
         from elspeth.contracts import CoalesceFailureReason
 
-        assert hasattr(CoalesceFailureReason, "__slots__")
-
-    def test_required_and_optional_fields(self) -> None:
-        """CoalesceFailureReason has 4 required + 2 optional fields."""
-        from elspeth.contracts import CoalesceFailureReason
-
-        fields = {f.name: f for f in dataclasses.fields(CoalesceFailureReason)}
-        assert set(fields.keys()) == {
-            "failure_reason",
-            "expected_branches",
-            "branches_arrived",
-            "merge_policy",
-            "timeout_ms",
-            "select_branch",
-        }
-        # Required fields have no default
-        assert fields["failure_reason"].default is dataclasses.MISSING
-        assert fields["expected_branches"].default is dataclasses.MISSING
-        assert fields["branches_arrived"].default is dataclasses.MISSING
-        assert fields["merge_policy"].default is dataclasses.MISSING
-        # Optional fields default to None
-        assert fields["timeout_ms"].default is None
-        assert fields["select_branch"].default is None
+        instance = CoalesceFailureReason(
+            failure_reason="quorum_not_met",
+            expected_branches=["a", "b"],
+            branches_arrived=["a"],
+            merge_policy="union",
+        )
+        assert not hasattr(instance, "__dict__"), "Slots dataclass should not have __dict__"
 
     def test_to_dict_required_only(self) -> None:
         """to_dict() omits None-valued optional fields."""

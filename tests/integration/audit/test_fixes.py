@@ -33,15 +33,17 @@ class TestIntegrationAuditFixes:
         manager = PluginManager()
         manager.register_builtin_plugins()
 
-        # All built-in plugins discoverable
-        assert len(manager.get_sources()) >= 2
-        assert len(manager.get_transforms()) >= 2
-        assert len(manager.get_sinks()) >= 3
+        # All built-in plugins discoverable — check concrete counts
+        sources = manager.get_sources()
+        transforms = manager.get_transforms()
+        sinks = manager.get_sinks()
+        assert len(sources) >= 2
+        assert len(transforms) >= 2
+        assert len(sinks) >= 3
 
-        # Instantiate a plugin and verify node_id
+        # Instantiate a plugin and verify node_id round-trip
         csv_source_cls = manager.get_source_by_name("csv")
         assert csv_source_cls is not None
-        # Protocols don't define __init__ but concrete classes do
         source = csv_source_cls(
             {
                 "path": "test.csv",
@@ -101,23 +103,30 @@ class TestIntegrationAuditFixes:
         assert error_with_traceback.traceback is not None
         assert "traceback" in error_with_traceback.to_dict()
 
-    def test_plugin_context_accepts_real_recorder(self) -> None:
-        """PluginContext accepts LandscapeRecorder without type issues.
+    def test_plugin_context_recorder_can_record(self) -> None:
+        """PluginContext with real LandscapeRecorder can begin and complete a run.
 
         Verifies:
         - Task 6: PluginContext.landscape type fix
+        - Recording actually works through the context
         """
         db = LandscapeDB.in_memory()
         recorder = LandscapeRecorder(db)
 
+        run = recorder.begin_run(
+            config={"source": {"plugin": "csv"}},
+            canonical_version="1.0.0",
+        )
+
         ctx = PluginContext(
-            run_id="test-run",
+            run_id=run.run_id,
             config={},
             landscape=recorder,
         )
 
-        assert ctx.landscape is recorder
-        assert ctx.run_id == "test-run"
+        # Verify recording works through the context's recorder
+        completed = ctx.landscape.complete_run(run.run_id, RunStatus.COMPLETED)
+        assert completed.run_id == run.run_id
 
         # Cleanup
         db.close()
@@ -172,10 +181,9 @@ class TestIntegrationAuditFixes:
         manager = PluginManager()
         manager.register_builtin_plugins()
 
-        # Test source
+        # Test source — node_id starts None, can be set
         csv_source_cls = manager.get_source_by_name("csv")
         assert csv_source_cls is not None
-        # Protocols don't define __init__ but concrete classes do
         source = csv_source_cls(
             {
                 "path": "test.csv",
@@ -183,35 +191,31 @@ class TestIntegrationAuditFixes:
                 "schema": DYNAMIC_SCHEMA,
             }
         )  # type: ignore[call-arg]
-        assert hasattr(source, "node_id")
+        assert source.node_id is None
         source.node_id = "source-001"
         assert source.node_id == "source-001"
 
         # Test transform
         passthrough_cls = manager.get_transform_by_name("passthrough")
         assert passthrough_cls is not None
-        # Protocols don't define __init__ but concrete classes do
         transform = passthrough_cls({"schema": DYNAMIC_SCHEMA})  # type: ignore[call-arg]
-        assert hasattr(transform, "node_id")
+        assert transform.node_id is None
         transform.node_id = "transform-001"
         assert transform.node_id == "transform-001"
-
-        # Test gate - SKIPPED: Gate plugins removed in WP-02
-        # Protocol/base class still supports node_id, but no concrete implementations exist
 
         # Test sink (use JSONSink which accepts dynamic schemas)
         json_sink_cls = manager.get_sink_by_name("json")
         assert json_sink_cls is not None
-        # Protocols don't define __init__ but concrete classes do
         sink = json_sink_cls({"path": "/tmp/test.json", "schema": DYNAMIC_SCHEMA, "format": "jsonl"})  # type: ignore[call-arg]
-        assert hasattr(sink, "node_id")
+        assert sink.node_id is None
         sink.node_id = "sink-001"
         assert sink.node_id == "sink-001"
 
-    def test_landscape_recorder_integration(self) -> None:
-        """LandscapeRecorder works with PluginContext in realistic scenario.
+    def test_landscape_recorder_run_lifecycle(self) -> None:
+        """LandscapeRecorder records complete run lifecycle through PluginContext.
 
-        End-to-end test combining multiple fixes.
+        End-to-end test combining multiple fixes — verifies the recorder
+        actually persists data, not just that assignment works.
         """
         db = LandscapeDB.in_memory()
         recorder = LandscapeRecorder(db)
@@ -229,13 +233,10 @@ class TestIntegrationAuditFixes:
             landscape=recorder,
         )
 
-        # Verify context has the recorder
-        assert ctx.landscape is recorder
-        assert ctx.run_id == run.run_id
-
-        # Complete the run
-        completed = recorder.complete_run(run.run_id, RunStatus.COMPLETED)
+        # Complete the run through the context's recorder
+        completed = ctx.landscape.complete_run(run.run_id, RunStatus.COMPLETED)
         assert completed.run_id == run.run_id
+        assert completed.status == RunStatus.COMPLETED
 
         # Cleanup
         db.close()

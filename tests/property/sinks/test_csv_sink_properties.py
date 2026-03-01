@@ -12,6 +12,8 @@ from hypothesis import given
 from hypothesis import strategies as st
 
 from elspeth.contracts.plugin_context import PluginContext
+from elspeth.core.landscape.database import LandscapeDB
+from elspeth.core.landscape.recorder import LandscapeRecorder
 from elspeth.plugins.sinks.csv_sink import CSVSink
 from tests.strategies.settings import SLOW_SETTINGS
 
@@ -66,7 +68,9 @@ class TestCSVSinkProperties:
                     "schema": {"mode": "fixed", "fields": ["id: int", "name: str", "score: float?"]},
                 }
             )
-            ctx = PluginContext(run_id="test-run", config={})
+            db = LandscapeDB.in_memory()
+            recorder = LandscapeRecorder(db)
+            ctx = PluginContext(run_id="test-run", config={}, landscape=recorder)
 
             descriptor = sink.write(rows, ctx)
             sink.close()
@@ -98,7 +102,9 @@ class TestCSVSinkProperties:
                     "schema": {"mode": "fixed", "fields": schema_fields},
                 }
             )
-            ctx = PluginContext(run_id="test-run", config={})
+            db = LandscapeDB.in_memory()
+            recorder = LandscapeRecorder(db)
+            ctx = PluginContext(run_id="test-run", config={}, landscape=recorder)
 
             sink.write([row], ctx)
             sink.close()

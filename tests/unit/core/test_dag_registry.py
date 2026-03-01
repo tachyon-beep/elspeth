@@ -197,11 +197,10 @@ class TestOrphanedConsumer:
 class TestNamespaceCollision:
     """Connection name = sink name must fail."""
 
-    def test_connection_name_equals_sink_name_rejected(self) -> None:
-        """Connection names and sink names must be disjoint."""
-        # t1 produces to "output" as a connection, but "output" is also a sink name.
-        # Since on_success="output" goes to the sink directly (valid), let's make
-        # two transforms both try to use a sink name as a connection.
+    def test_connection_name_distinct_from_sink_name_accepted(self) -> None:
+        """Connection names distinct from sink names are accepted."""
+        # t1 produces to "flagged_conn" as a connection (not a sink name),
+        # t2 consumes it and routes to "output" sink. This should succeed.
         config = ElspethSettings(
             source=_observed_source(on_success="src_out"),
             sinks={"output": _observed_sink(), "flagged": _observed_sink(options={"path": "flagged.json", "schema": {"mode": "observed"}})},

@@ -19,10 +19,17 @@ from elspeth.contracts import TransformResult
 from elspeth.contracts.identity import TokenInfo
 from elspeth.contracts.plugin_context import PluginContext
 from elspeth.contracts.schema_contract import PipelineRow
+from elspeth.core.landscape.database import LandscapeDB
+from elspeth.core.landscape.recorder import LandscapeRecorder
 from elspeth.plugins.infrastructure.base import BaseTransform
 from elspeth.plugins.infrastructure.batching import BatchTransformMixin
 from elspeth.plugins.infrastructure.batching.ports import CollectorOutputPort
 from elspeth.testing import make_pipeline_row
+
+
+def _make_recorder() -> LandscapeRecorder:
+    """Create an in-memory LandscapeRecorder for testing."""
+    return LandscapeRecorder(LandscapeDB.in_memory())
 
 
 def make_token(row_id: str, token_id: str | None = None, row_data: dict[str, Any] | None = None) -> TokenInfo:
@@ -97,6 +104,7 @@ class TestBatchTransformMixinTokenValidation:
         ctx = PluginContext(
             run_id="test-run",
             config={},
+            landscape=_make_recorder(),
             token=None,  # Explicitly None - contract violation
         )
 
@@ -109,6 +117,7 @@ class TestBatchTransformMixinTokenValidation:
         ctx = PluginContext(
             run_id="test-run",
             config={},
+            landscape=_make_recorder(),
             token=token,
             state_id="test-state-1",  # Required for batch processing
         )
@@ -144,7 +153,7 @@ class TestBatchTransformMixinTokenIdentity:
         2. Audit attribution - the token tracks row lineage through the DAG
         """
         input_token = make_token("row-42", row_data={"value": 100})
-        ctx = PluginContext(run_id="test-run", config={}, token=input_token, state_id="test-state-1")
+        ctx = PluginContext(run_id="test-run", config={}, landscape=_make_recorder(), token=input_token, state_id="test-state-1")
 
         transform.accept({"value": 100}, ctx)
         transform.flush_batch_processing(timeout=10.0)
@@ -162,7 +171,7 @@ class TestBatchTransformMixinTokenIdentity:
         tokens = [make_token(f"row-{i}") for i in range(3)]
 
         for i, token in enumerate(tokens):
-            ctx = PluginContext(run_id="test-run", config={}, token=token, state_id=f"state-{i}")
+            ctx = PluginContext(run_id="test-run", config={}, landscape=_make_recorder(), token=token, state_id=f"state-{i}")
             transform.accept({"index": i}, ctx)
 
         transform.flush_batch_processing(timeout=10.0)
@@ -207,7 +216,7 @@ class TestStaleTokenDetection:
         reused across multiple rows, with ctx.token updated per-row.
         """
         # Create a single context (engine pattern)
-        ctx = PluginContext(run_id="test-run", config={})
+        ctx = PluginContext(run_id="test-run", config={}, landscape=_make_recorder())
 
         # Process row 1 with token 1
         token1 = make_token("row-1")
@@ -239,7 +248,7 @@ class TestStaleTokenDetection:
         update ctx.token, they would see the SAME token for multiple rows,
         which is detectable in tests.
         """
-        ctx = PluginContext(run_id="test-run", config={})
+        ctx = PluginContext(run_id="test-run", config={}, landscape=_make_recorder())
 
         # Process 3 rows, each with a unique token
         tokens = []
@@ -271,7 +280,7 @@ class TestStaleTokenDetection:
         This verifies the synchronization contract: the executor sets
         ctx.token, then calls accept(), and accept() sees the updated value.
         """
-        ctx = PluginContext(run_id="test-run", config={})
+        ctx = PluginContext(run_id="test-run", config={}, landscape=_make_recorder())
 
         # Initial token
         initial_token = make_token("initial")
@@ -389,7 +398,7 @@ class TestBatchTransformMixinEviction:
         4. Retry can proceed without FIFO blocking
         """
         token = make_token("row-1")
-        ctx = PluginContext(run_id="test-run", config={}, token=token, state_id="state-attempt-1")
+        ctx = PluginContext(run_id="test-run", config={}, landscape=_make_recorder(), token=token, state_id="state-attempt-1")
 
         # Submit the row (will block in worker)
         blocking_transform.accept({"value": 1}, ctx)
@@ -429,7 +438,7 @@ class TestBatchTransformMixinEviction:
         token = make_token("row-1")
 
         # Original attempt
-        ctx1 = PluginContext(run_id="test-run", config={}, token=token, state_id="state-attempt-1")
+        ctx1 = PluginContext(run_id="test-run", config={}, landscape=_make_recorder(), token=token, state_id="state-attempt-1")
         transform.accept({"attempt": 1}, ctx1)
 
         # Evict original (simulating timeout)
@@ -437,7 +446,7 @@ class TestBatchTransformMixinEviction:
         transform.evict_submission(token.token_id, ctx1.state_id)
 
         # Retry attempt with new state_id
-        ctx2 = PluginContext(run_id="test-run", config={}, token=token, state_id="state-attempt-2")
+        ctx2 = PluginContext(run_id="test-run", config={}, landscape=_make_recorder(), token=token, state_id="state-attempt-2")
         transform.accept({"attempt": 2}, ctx2)
 
         # Flush and verify retry result is released
@@ -527,7 +536,7 @@ class TestShutdownDrainsInFlightRows:
         num_rows = 3
         for i in range(num_rows):
             token = make_token(f"row-{i}")
-            ctx = PluginContext(run_id="test-run", config={}, token=token, state_id=f"state-{i}")
+            ctx = PluginContext(run_id="test-run", config={}, landscape=_make_recorder(), token=token, state_id=f"state-{i}")
             transform.accept({"idx": i}, ctx)
 
         # Shutdown while workers are still processing
@@ -563,7 +572,7 @@ class TestShutdownDrainsInFlightRows:
         num_rows = 4
         for i in range(num_rows):
             token = make_token(f"row-{i}")
-            ctx = PluginContext(run_id="test-run", config={}, token=token, state_id=f"state-{i}")
+            ctx = PluginContext(run_id="test-run", config={}, landscape=_make_recorder(), token=token, state_id=f"state-{i}")
             transform.accept({"idx": i}, ctx)
 
         transform.flush_batch_processing(timeout=10.0)
@@ -624,7 +633,7 @@ class TestReleaseLoopStaleTokenDetection:
 
         try:
             token = make_token("row-0")
-            ctx = PluginContext(run_id="test-run", config={}, token=token, state_id="state-0")
+            ctx = PluginContext(run_id="test-run", config={}, landscape=_make_recorder(), token=token, state_id="state-0")
             transform.accept({"data": "test"}, ctx)
 
             # Wait for processing to complete and release loop to handle the failure
@@ -668,7 +677,7 @@ class TestReleaseLoopStaleTokenDetection:
             for i in range(3):
                 token = make_token(f"row-{i}")
                 tokens.append(token)
-                ctx = PluginContext(run_id="test-run", config={}, token=token, state_id=f"state-{i}")
+                ctx = PluginContext(run_id="test-run", config={}, landscape=_make_recorder(), token=token, state_id=f"state-{i}")
                 transform.accept({"idx": i}, ctx)
 
             import time

@@ -6,6 +6,8 @@ import pytest
 
 from elspeth.contracts.plugin_context import PluginContext
 from elspeth.contracts.schema_contract import PipelineRow, SchemaContract
+from elspeth.core.landscape.database import LandscapeDB
+from elspeth.core.landscape.recorder import LandscapeRecorder
 from elspeth.testing import make_field, make_pipeline_row
 
 # Common schema config for dynamic field handling (accepts any fields)
@@ -18,7 +20,9 @@ class TestFieldMapper:
     @pytest.fixture
     def ctx(self) -> PluginContext:
         """Create minimal plugin context."""
-        return PluginContext(run_id="test-run", config={})
+        db = LandscapeDB.in_memory()
+        recorder = LandscapeRecorder(db)
+        return PluginContext(run_id="test-run", config={}, landscape=recorder)
 
     def test_has_required_attributes(self) -> None:
         """FieldMapper has name and schemas."""
@@ -435,7 +439,9 @@ class TestFieldMapperContractPropagation:
     @pytest.fixture
     def ctx(self) -> PluginContext:
         """Create minimal plugin context."""
-        return PluginContext(run_id="test-run", config={})
+        db = LandscapeDB.in_memory()
+        recorder = LandscapeRecorder(db)
+        return PluginContext(run_id="test-run", config={}, landscape=recorder)
 
     def test_contract_contains_renamed_field(self, ctx: PluginContext) -> None:
         """Output contract contains renamed field, not original field name."""
@@ -569,9 +575,12 @@ class TestFieldMapperContractPropagation:
                 "headers": "original",
             }
         )
+        sink_db = LandscapeDB.in_memory()
+        sink_recorder = LandscapeRecorder(sink_db)
         sink_ctx = PluginContext(
             run_id="test-run",
             config={},
+            landscape=sink_recorder,
             contract=result.row.contract,
         )
         sink.write([result.row.to_dict()], sink_ctx)

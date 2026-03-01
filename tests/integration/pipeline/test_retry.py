@@ -230,7 +230,7 @@ class TestRetryAuditTrail:
         # Create retry manager with 3 attempts (enough to succeed)
         retry_manager = RetryManager(RuntimeRetryConfig(max_attempts=3, base_delay=0.001, max_delay=60.0, jitter=0.0, exponential_base=2.0))
 
-        ctx = PluginContext(run_id=run_id, config={})
+        ctx = PluginContext(run_id=run_id, config={}, landscape=recorder)
         transform.on_start(ctx)
 
         # Track attempt number manually since _execute_transform_with_retry
@@ -331,7 +331,7 @@ class TestRetryAuditTrail:
         # Create retry manager with only 2 attempts
         retry_manager = RetryManager(RuntimeRetryConfig(max_attempts=2, base_delay=0.001, max_delay=60.0, jitter=0.0, exponential_base=2.0))
 
-        ctx = PluginContext(run_id=run_id, config={})
+        ctx = PluginContext(run_id=run_id, config={}, landscape=recorder)
         transform.on_start(ctx)
 
         # Track attempt number
@@ -432,7 +432,7 @@ class TestRetryAuditTrail:
         step_resolver = lambda node_id: 1  # noqa: E731
         transform_executor = TransformExecutor(recorder, span_factory, step_resolver)
 
-        ctx = PluginContext(run_id=run_id, config={})
+        ctx = PluginContext(run_id=run_id, config={}, landscape=recorder)
         transform.on_start(ctx)
 
         # Execute without retry manager (single attempt)
@@ -568,48 +568,6 @@ class TestRetryExponentialBackoff:
         assert config.exponential_base == 3.0, (
             "exponential_base not mapped from RetrySettings to RetryConfig. This is the P2-2026-01-21 bug."
         )
-
-    def test_retry_manager_uses_exponential_base(self) -> None:
-        """Verify RetryManager passes exponential_base to tenacity.
-
-        Tests the full chain:
-        RetrySettings -> RetryConfig -> RetryManager -> wait_exponential_jitter
-
-        If exponential_base is not passed to tenacity, backoff uses default (2.0).
-        """
-        from elspeth.contracts.config import RuntimeRetryConfig
-        from elspeth.core.config import RetrySettings
-        from elspeth.engine.retry import RetryManager
-
-        # Create config with large exponential_base
-        settings = RetrySettings(
-            max_attempts=2,
-            initial_delay_seconds=0.01,
-            max_delay_seconds=10.0,
-            exponential_base=10.0,  # Very high base - should cause noticeable delay
-        )
-        config = RuntimeRetryConfig.from_settings(settings)
-        manager = RetryManager(config)
-
-        # Verify config has the exponential_base
-        assert config.exponential_base == 10.0
-
-        # The actual tenacity usage is tested in test_exponential_base_affects_backoff_timing
-        # This test just verifies the wiring is complete
-        call_count = 0
-
-        def always_succeeds() -> str:
-            nonlocal call_count
-            call_count += 1
-            return "ok"
-
-        result = manager.execute_with_retry(
-            always_succeeds,
-            is_retryable=lambda e: True,
-        )
-
-        assert result == "ok"
-        assert call_count == 1  # No retries needed
 
 
 class TestExponentialBaseRegressionP2_2026_01_21:

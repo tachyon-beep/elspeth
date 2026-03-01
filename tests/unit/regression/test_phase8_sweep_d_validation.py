@@ -13,6 +13,8 @@ import pytest
 
 from elspeth.contracts.plugin_context import PluginContext
 from elspeth.contracts.schema_contract import SchemaContract
+from elspeth.core.landscape.database import LandscapeDB
+from elspeth.core.landscape.recorder import LandscapeRecorder
 from elspeth.testing import make_field, make_row
 
 DYNAMIC_SCHEMA = {"mode": "observed"}
@@ -95,7 +97,9 @@ class TestBatchStatsAggregateOverwrite:
         from elspeth.plugins.transforms.batch_stats import BatchStats
 
         transform = BatchStats({"schema": DYNAMIC_SCHEMA, "value_field": "amount", "group_by": "count"})
-        ctx = PluginContext(run_id="test", config={})
+        db = LandscapeDB.in_memory()
+        recorder = LandscapeRecorder(db)
+        ctx = PluginContext(run_id="test", config={}, landscape=recorder)
         rows = [_make_row({"amount": 10, "count": "group_a"})]
 
         with pytest.raises(ValueError, match="collides with aggregate output key"):
@@ -106,7 +110,9 @@ class TestBatchStatsAggregateOverwrite:
         from elspeth.plugins.transforms.batch_stats import BatchStats
 
         transform = BatchStats({"schema": DYNAMIC_SCHEMA, "value_field": "amount", "group_by": "category"})
-        ctx = PluginContext(run_id="test", config={})
+        db = LandscapeDB.in_memory()
+        recorder = LandscapeRecorder(db)
+        ctx = PluginContext(run_id="test", config={}, landscape=recorder)
         rows = [_make_row({"amount": 10, "category": "A"})]
         result = transform.process(rows, ctx)
         assert result.status == "success"
@@ -134,7 +140,9 @@ class TestBatchReplicateMaxCopies:
         from elspeth.plugins.transforms.batch_replicate import BatchReplicate
 
         transform = BatchReplicate({"schema": DYNAMIC_SCHEMA, "max_copies": 5})
-        ctx = PluginContext(run_id="test", config={})
+        db = LandscapeDB.in_memory()
+        recorder = LandscapeRecorder(db)
+        ctx = PluginContext(run_id="test", config={}, landscape=recorder)
         # Single row exceeding max_copies — all rows quarantined → error result
         rows = [_make_row({"copies": 10, "data": "value"})]
         result = transform.process(rows, ctx)
@@ -279,7 +287,9 @@ class TestBoolExcludedFromInt:
         from elspeth.plugins.transforms.batch_stats import BatchStats
 
         transform = BatchStats({"schema": DYNAMIC_SCHEMA, "value_field": "flag"})
-        ctx = PluginContext(run_id="test", config={})
+        db = LandscapeDB.in_memory()
+        recorder = LandscapeRecorder(db)
+        ctx = PluginContext(run_id="test", config={}, landscape=recorder)
         rows = [_make_row({"flag": True})]
 
         with pytest.raises(TypeError, match="must be numeric"):
@@ -290,7 +300,9 @@ class TestBoolExcludedFromInt:
         from elspeth.plugins.transforms.batch_stats import BatchStats
 
         transform = BatchStats({"schema": DYNAMIC_SCHEMA, "value_field": "amount"})
-        ctx = PluginContext(run_id="test", config={})
+        db = LandscapeDB.in_memory()
+        recorder = LandscapeRecorder(db)
+        ctx = PluginContext(run_id="test", config={}, landscape=recorder)
         rows = [_make_row({"amount": 42})]
         result = transform.process(rows, ctx)
         assert result.status == "success"

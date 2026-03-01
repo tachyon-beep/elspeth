@@ -10,6 +10,8 @@ the Tier 2 trust model - transforms must not coerce pipeline data types.
 import pytest
 
 from elspeth.contracts.plugin_context import PluginContext
+from elspeth.core.landscape.database import LandscapeDB
+from elspeth.core.landscape.recorder import LandscapeRecorder
 from elspeth.testing import make_pipeline_row
 
 # Common schema config for dynamic field handling (accepts any fields)
@@ -22,7 +24,9 @@ class TestBatchReplicateHappyPath:
     @pytest.fixture
     def ctx(self) -> PluginContext:
         """Create minimal plugin context."""
-        return PluginContext(run_id="test-run", config={})
+        db = LandscapeDB.in_memory()
+        recorder = LandscapeRecorder(db)
+        return PluginContext(run_id="test-run", config={}, landscape=recorder)
 
     def test_has_required_attributes(self) -> None:
         """BatchReplicate has name and is_batch_aware."""
@@ -112,7 +116,9 @@ class TestBatchReplicateTypeEnforcement:
     @pytest.fixture
     def ctx(self) -> PluginContext:
         """Create minimal plugin context."""
-        return PluginContext(run_id="test-run", config={})
+        db = LandscapeDB.in_memory()
+        recorder = LandscapeRecorder(db)
+        return PluginContext(run_id="test-run", config={}, landscape=recorder)
 
     def test_string_copies_raises_type_error(self, ctx: PluginContext) -> None:
         """String value in copies field raises TypeError (no coercion)."""
@@ -376,7 +382,9 @@ class TestBatchReplicateDeepCopy:
 
     @pytest.fixture
     def ctx(self) -> PluginContext:
-        return PluginContext(run_id="test-run", config={})
+        db = LandscapeDB.in_memory()
+        recorder = LandscapeRecorder(db)
+        return PluginContext(run_id="test-run", config={}, landscape=recorder)
 
     def test_nested_list_mutation_does_not_cross_contaminate(self, ctx: PluginContext) -> None:
         """Mutating a nested list in one copy must not affect other copies."""

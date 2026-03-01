@@ -7,6 +7,7 @@ import pytest
 
 from elspeth.contracts.schema_contract import PipelineRow, SchemaContract
 from elspeth.contracts.types import NodeID
+from elspeth.core.landscape import LandscapeDB, LandscapeRecorder
 from elspeth.engine.processor import DAGTraversalContext
 from elspeth.testing import make_field, make_row, make_source_row
 
@@ -78,7 +79,9 @@ class TestRowProcessorPipelineRow:
         )
 
         source_row = make_source_row({"amount": 100}, contract=contract)
-        ctx = PluginContext(run_id="run_001", config={})
+        landscape_db = LandscapeDB.in_memory()
+        landscape_recorder = LandscapeRecorder(landscape_db)
+        ctx = PluginContext(run_id="run_001", config={}, landscape=landscape_recorder)
 
         # No transforms - token should be created and completed immediately
         processor.process_row(
@@ -111,7 +114,9 @@ class TestRowProcessorPipelineRow:
         )
 
         source_row = make_source_row({"amount": 100}, contract=contract)
-        ctx = PluginContext(run_id="run_001", config={})
+        landscape_db = LandscapeDB.in_memory()
+        landscape_recorder = LandscapeRecorder(landscape_db)
+        ctx = PluginContext(run_id="run_001", config={}, landscape=landscape_recorder)
 
         results = processor.process_row(
             row_index=0,
@@ -153,7 +158,9 @@ class TestRowProcessorPipelineRow:
         from elspeth.contracts import SourceRow
 
         source_row = SourceRow.valid({"amount": 100}, contract=None)
-        ctx = PluginContext(run_id="run_001", config={})
+        landscape_db = LandscapeDB.in_memory()
+        landscape_recorder = LandscapeRecorder(landscape_db)
+        ctx = PluginContext(run_id="run_001", config={}, landscape=landscape_recorder)
 
         with pytest.raises(ValueError, match="must have contract"):
             processor.process_row(
@@ -187,7 +194,9 @@ class TestRowProcessorExistingRow:
 
         # PipelineRow for resume (row already exists in database)
         row_data = make_row({"amount": 100}, contract=contract)
-        ctx = PluginContext(run_id="run_001", config={})
+        landscape_db = LandscapeDB.in_memory()
+        landscape_recorder = LandscapeRecorder(landscape_db)
+        ctx = PluginContext(run_id="run_001", config={}, landscape=landscape_recorder)
 
         results = processor.process_existing_row(
             row_id="existing_row_001",

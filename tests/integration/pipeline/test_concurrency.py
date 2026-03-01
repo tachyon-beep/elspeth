@@ -18,6 +18,33 @@ from elspeth.engine.executors import TransformExecutor
 from elspeth.engine.orchestrator import Orchestrator
 from elspeth.engine.processor import DAGTraversalContext, RowProcessor
 from elspeth.engine.spans import SpanFactory
+from tests.fixtures.pipeline import build_linear_pipeline
+
+
+def _build_traversal_from_graph() -> tuple[NodeID, str, DAGTraversalContext]:
+    """Build a DAGTraversalContext from a production-path graph.
+
+    Returns (source_node_id, source_on_success, traversal_context).
+    Uses build_linear_pipeline -> ExecutionGraph.from_plugin_instances()
+    to avoid BUG-LINEAGE-01 manual construction.
+    """
+    source, _, _, graph = build_linear_pipeline([{"id": 1}])
+    source_node_id = graph.get_source()
+    assert source_node_id is not None
+
+    node_to_next: dict[NodeID, NodeID | None] = {}
+    for nid in graph.get_pipeline_node_sequence():
+        node_to_next[nid] = graph.get_next_node(nid)
+
+    traversal = DAGTraversalContext(
+        node_step_map=graph.build_step_map(),
+        node_to_plugin={},
+        first_transform_node_id=graph.get_first_transform_node(),
+        node_to_next=node_to_next,
+        coalesce_node_map=graph.get_coalesce_id_map(),
+        branch_first_node=graph.get_branch_first_nodes(),
+    )
+    return source_node_id, source.on_success, traversal
 
 
 class TestConcurrencyConfigInOrchestrator:
@@ -90,21 +117,16 @@ class TestConcurrencyConfigInRowProcessor:
         db = LandscapeDB.in_memory()
         recorder = LandscapeRecorder(db)
         span_factory = SpanFactory()
+        source_node_id, source_on_success, traversal = _build_traversal_from_graph()
 
         try:
             processor = RowProcessor(
                 recorder=recorder,
                 span_factory=span_factory,
                 run_id="test-run",
-                source_node_id=NodeID("source-1"),
-                source_on_success="default",
-                traversal=DAGTraversalContext(
-                    node_step_map={},
-                    node_to_plugin={},
-                    first_transform_node_id=None,
-                    node_to_next={},
-                    coalesce_node_map={},
-                ),
+                source_node_id=source_node_id,
+                source_on_success=source_on_success,
+                traversal=traversal,
                 max_workers=4,
             )
             # Verify max_workers was passed to TransformExecutor
@@ -117,21 +139,16 @@ class TestConcurrencyConfigInRowProcessor:
         db = LandscapeDB.in_memory()
         recorder = LandscapeRecorder(db)
         span_factory = SpanFactory()
+        source_node_id, source_on_success, traversal = _build_traversal_from_graph()
 
         try:
             processor = RowProcessor(
                 recorder=recorder,
                 span_factory=span_factory,
                 run_id="test-run",
-                source_node_id=NodeID("source-1"),
-                source_on_success="default",
-                traversal=DAGTraversalContext(
-                    node_step_map={},
-                    node_to_plugin={},
-                    first_transform_node_id=None,
-                    node_to_next={},
-                    coalesce_node_map={},
-                ),
+                source_node_id=source_node_id,
+                source_on_success=source_on_success,
+                traversal=traversal,
             )
             # No max_workers means no cap
             assert processor._transform_executor._max_workers is None

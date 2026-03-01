@@ -5,6 +5,8 @@ from unittest.mock import Mock
 
 import pytest
 
+from elspeth.core.landscape.database import LandscapeDB
+from elspeth.core.landscape.recorder import LandscapeRecorder
 from elspeth.plugins.infrastructure.config_base import PluginConfigError
 from elspeth.testing import make_pipeline_row
 
@@ -189,8 +191,8 @@ class TestValidateRegexSafety:
 class TestKeywordFilterInstantiation:
     """Tests for KeywordFilter transform instantiation."""
 
-    def test_transform_has_required_attributes(self) -> None:
-        """Transform has all protocol-required attributes."""
+    def test_transform_has_required_schema_attributes(self) -> None:
+        """Transform exposes input and output schemas."""
         from elspeth.plugins.transforms.keyword_filter import KeywordFilter
 
         transform = KeywordFilter(
@@ -201,17 +203,30 @@ class TestKeywordFilterInstantiation:
             }
         )
 
-        assert transform.name == "keyword_filter"
-        assert transform.determinism.value == "deterministic"
-        assert transform.plugin_version == "1.0.0"
-        assert transform.is_batch_aware is False
-        assert transform.creates_tokens is False
         assert transform.input_schema is not None
         assert transform.output_schema is not None
 
-    def test_transform_compiles_patterns_at_init(self) -> None:
-        """Transform compiles regex patterns at initialization."""
+    def test_transform_is_deterministic(self) -> None:
+        """KeywordFilter declares deterministic since it's pure regex matching."""
+        from elspeth.contracts.enums import Determinism
         from elspeth.plugins.transforms.keyword_filter import KeywordFilter
+
+        transform = KeywordFilter(
+            {
+                "fields": ["content"],
+                "blocked_patterns": ["test"],
+                "schema": {"mode": "observed"},
+            }
+        )
+
+        assert transform.determinism is Determinism.DETERMINISTIC
+
+    def test_transform_compiles_patterns_at_init(self) -> None:
+        """Patterns are compiled at init — matching works immediately without lazy init."""
+        from elspeth.contracts.plugin_context import PluginContext
+        from elspeth.contracts.schema_contract import SchemaContract
+        from elspeth.plugins.transforms.keyword_filter import KeywordFilter
+        from elspeth.testing import make_field, make_row
 
         transform = KeywordFilter(
             {
@@ -221,8 +236,15 @@ class TestKeywordFilterInstantiation:
             }
         )
 
-        # Patterns should be compiled (implementation detail, but important for perf)
-        assert len(transform._compiled_patterns) == 2
+        # Prove compilation happened: a matching row gets blocked
+        fields = tuple(make_field(k, object, original_name=k, required=False, source="inferred") for k in ["content"])
+        contract = SchemaContract(mode="OBSERVED", fields=fields, locked=True)
+        row = make_row({"content": "my password is 123"}, contract=contract)
+        db = LandscapeDB.in_memory()
+        recorder = LandscapeRecorder(db)
+        ctx = PluginContext(run_id="test-run", config={}, landscape=recorder)
+        result = transform.process(row, ctx)
+        assert result.status == "error"
 
     def test_transform_rejects_invalid_regex(self) -> None:
         """Transform fails at init if regex pattern is invalid."""

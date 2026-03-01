@@ -22,15 +22,16 @@ class TestBufferEntry:
             entry.submit_index = 99  # type: ignore[misc]
 
     def test_slots(self) -> None:
-        """BufferEntry must use slots — verified by __slots__ presence."""
-        # Direct check: slots=True generates __slots__ on the class.
-        # (With PEP 695 generics + frozen + slots, the error type on
-        # arbitrary-attribute assignment is TypeError rather than
-        # AttributeError due to a super() resolution quirk, so we
-        # verify the mechanism directly instead.)
-        assert hasattr(BufferEntry, "__slots__")
-        expected_slots = {"submit_index", "complete_index", "result", "submit_timestamp", "complete_timestamp", "buffer_wait_ms"}
-        assert set(BufferEntry.__slots__) == expected_slots
+        """BufferEntry uses __slots__ for memory efficiency — no instance __dict__."""
+        entry = BufferEntry(
+            submit_index=0,
+            complete_index=0,
+            result="test",
+            submit_timestamp=1.0,
+            complete_timestamp=2.0,
+            buffer_wait_ms=0.5,
+        )
+        assert not hasattr(entry, "__dict__"), "Slots dataclass should not have __dict__"
 
     def test_construction_with_all_fields(self) -> None:
         """BufferEntry should accept all fields at construction."""

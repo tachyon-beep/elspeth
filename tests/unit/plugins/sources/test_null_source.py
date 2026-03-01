@@ -3,6 +3,8 @@
 import pytest
 
 from elspeth.contracts.plugin_context import PluginContext
+from elspeth.core.landscape.database import LandscapeDB
+from elspeth.core.landscape.recorder import LandscapeRecorder
 
 
 class TestNullSource:
@@ -11,7 +13,9 @@ class TestNullSource:
     @pytest.fixture
     def ctx(self) -> PluginContext:
         """Create a minimal plugin context."""
-        return PluginContext(run_id="test-run", config={})
+        db = LandscapeDB.in_memory()
+        recorder = LandscapeRecorder(db)
+        return PluginContext(run_id="test-run", node_id="source", config={}, landscape=recorder)
 
     def test_null_source_yields_nothing(self, ctx: PluginContext) -> None:
         """NullSource.load() yields no rows."""

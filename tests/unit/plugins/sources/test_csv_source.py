@@ -6,6 +6,7 @@ from pathlib import Path
 import pytest
 
 from elspeth.contracts.plugin_context import PluginContext
+from tests.fixtures.factories import make_source_context
 
 # Dynamic schema config for tests - SourceDataConfig requires schema
 DYNAMIC_SCHEMA = {"mode": "observed"}
@@ -26,8 +27,8 @@ class TestCSVSource:
 
     @pytest.fixture
     def ctx(self) -> PluginContext:
-        """Create a minimal plugin context."""
-        return PluginContext(run_id="test-run", config={})
+        """Create a plugin context with real landscape and source node records."""
+        return make_source_context(plugin_name="csv")
 
     def test_has_required_attributes(self) -> None:
         """CSVSource has name and output_schema."""
@@ -211,8 +212,8 @@ class TestCSVSourceQuarantineYielding:
 
     @pytest.fixture
     def ctx(self) -> PluginContext:
-        """Create a minimal plugin context."""
-        return PluginContext(run_id="test-run", config={})
+        """Create a plugin context with real landscape and source node records."""
+        return make_source_context(plugin_name="csv")
 
     def test_invalid_row_yields_quarantined_source_row(self, tmp_path: Path, ctx: PluginContext) -> None:
         """Invalid row yields SourceRow.quarantined() with error info."""
@@ -663,8 +664,8 @@ class TestCSVSourceFieldNormalization:
 
     @pytest.fixture
     def ctx(self) -> PluginContext:
-        """Create a minimal plugin context."""
-        return PluginContext(run_id="test-run", config={})
+        """Create a plugin context with real landscape and source node records."""
+        return make_source_context(plugin_name="csv")
 
     def test_normalize_fields_transforms_headers(self, tmp_path: Path, ctx: PluginContext) -> None:
         """normalize_fields=True transforms messy headers to identifiers."""
@@ -934,15 +935,13 @@ class TestCSVSourceSkipRowsAudit:
 
     @pytest.fixture
     def ctx(self) -> PluginContext:
-        """Create a minimal plugin context."""
-        return PluginContext(run_id="test-run", config={})
+        """Create a plugin context with real landscape and source node records."""
+        return make_source_context(plugin_name="csv")
 
     def test_skip_rows_exceeds_file_records_validation_error(
-        self, tmp_path: Path, ctx: PluginContext, caplog: pytest.LogCaptureFixture
+        self, tmp_path: Path, ctx: PluginContext
     ) -> None:
         """skip_rows > available rows records validation error, not silent empty."""
-        import logging
-
         from elspeth.plugins.sources.csv_source import CSVSource
 
         csv_file = tmp_path / "small.csv"
@@ -957,16 +956,15 @@ class TestCSVSourceSkipRowsAudit:
             }
         )
 
-        with caplog.at_level(logging.WARNING, logger="elspeth.contracts.plugin_context"):
-            results = list(source.load(ctx))
+        results = list(source.load(ctx))
 
         # No data rows yielded (file exhausted during skip)
         assert len(results) == 0
 
-        # But the validation error was recorded (logged since no Landscape)
-        assert len(caplog.records) >= 1
-        error_record = caplog.records[0].message
-        assert "skip_rows" in error_record or "exhausted" in error_record
+        # Validation error recorded in landscape DB
+        errors = ctx.landscape.get_validation_errors_for_run(ctx.run_id)
+        assert len(errors) >= 1
+        assert "skip_rows" in errors[0].error or "exhausted" in errors[0].error
 
     def test_skip_rows_equals_file_length_records_validation_error(self, tmp_path: Path) -> None:
         """skip_rows consuming all rows records via landscape."""

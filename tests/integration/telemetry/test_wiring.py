@@ -19,7 +19,7 @@ from typing import TYPE_CHECKING, Any, ClassVar
 
 from pydantic import ConfigDict
 
-from elspeth.contracts import ArtifactDescriptor, Determinism, PluginSchema, SourceRow
+from elspeth.contracts import ArtifactDescriptor, PluginSchema, SourceRow
 from elspeth.contracts.enums import RunStatus, TelemetryGranularity
 from elspeth.contracts.events import RunStarted
 from elspeth.contracts.schema_contract import FieldContract, SchemaContract
@@ -27,7 +27,7 @@ from elspeth.core.landscape import LandscapeDB
 from elspeth.engine.orchestrator import Orchestrator, PipelineConfig
 from elspeth.plugins.infrastructure.results import TransformResult
 from elspeth.telemetry import TelemetryManager
-from tests.fixtures.base_classes import _TestSinkBase, _TestSourceBase, as_sink, as_source, as_transform
+from tests.fixtures.base_classes import _TestSinkBase, _TestSourceBase, _TestTransformBase, as_sink, as_source, as_transform
 from tests.fixtures.pipeline import build_production_graph
 from tests.unit.telemetry.fixtures import MockTelemetryConfig, TelemetryTestExporter
 
@@ -77,34 +77,17 @@ class SimpleSource(_TestSourceBase):
             yield SourceRow.valid(row, contract=_make_contract(row))
 
 
-class SimpleTransform:
+class SimpleTransform(_TestTransformBase):
     """Transform that passes through rows unchanged."""
 
     name = "simple_transform"
     input_schema = DynamicSchema
     output_schema = DynamicSchema
-    plugin_version = "1.0.0"
-    determinism = Determinism.DETERMINISTIC
-    config: ClassVar[dict[str, Any]] = {"schema": {"mode": "observed"}}
-    node_id: str | None = None
-    is_batch_aware = False
-    creates_tokens = False
     on_error: str | None = "discard"
     on_success: str | None = "output"
-    validate_input: bool = False
-    declared_output_fields: frozenset[str] = frozenset()
 
     def process(self, row: Any, ctx: Any) -> TransformResult:
         return TransformResult.success(row, success_reason={"action": "passthrough"})
-
-    def on_start(self, ctx: Any) -> None:
-        pass
-
-    def on_complete(self, ctx: Any) -> None:
-        pass
-
-    def close(self) -> None:
-        pass
 
 
 class SimpleSink(_TestSinkBase):
@@ -206,6 +189,7 @@ class TestOrchestratorWiresTelemetryToContext:
                 return TransformResult.success(row, success_reason={"action": "passthrough"})
 
             def on_start(self, ctx: Any) -> None:
+                super().on_start(ctx)
                 nonlocal captured_callback
                 captured_callback = ctx.telemetry_emit
 
@@ -319,6 +303,7 @@ class TestNoTelemetryWithoutManager:
             name = "callback_capturing"
 
             def on_start(self, ctx: Any) -> None:
+                super().on_start(ctx)
                 nonlocal captured_callback
                 captured_callback = ctx.telemetry_emit
 

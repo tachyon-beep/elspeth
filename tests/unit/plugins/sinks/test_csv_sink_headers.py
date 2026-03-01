@@ -12,6 +12,8 @@ import pytest
 
 from elspeth.contracts.plugin_context import PluginContext
 from elspeth.contracts.schema_contract import SchemaContract
+from elspeth.core.landscape.database import LandscapeDB
+from elspeth.core.landscape.recorder import LandscapeRecorder
 from elspeth.plugins.sinks.csv_sink import CSVSink
 from elspeth.testing import make_field
 
@@ -42,7 +44,9 @@ class TestCSVSinkContractSupport:
     @pytest.fixture
     def ctx(self) -> PluginContext:
         """Create a minimal plugin context."""
-        return PluginContext(run_id="test-run", config={})
+        db = LandscapeDB.in_memory()
+        recorder = LandscapeRecorder(db)
+        return PluginContext(run_id="test-run", config={}, landscape=recorder)
 
     def test_set_output_contract(self, output_path: Path, sample_contract: SchemaContract) -> None:
         """set_output_contract stores contract for header resolution."""
@@ -106,7 +110,9 @@ class TestCSVSinkHeaderModes:
     @pytest.fixture
     def ctx(self) -> PluginContext:
         """Create a minimal plugin context."""
-        return PluginContext(run_id="test-run", config={})
+        db = LandscapeDB.in_memory()
+        recorder = LandscapeRecorder(db)
+        return PluginContext(run_id="test-run", config={}, landscape=recorder)
 
     def test_normalized_headers_default(self, output_path: Path, ctx: PluginContext) -> None:
         """Default mode uses normalized (Python identifier) headers."""
@@ -209,7 +215,7 @@ class TestCSVSinkHeaderModes:
         assert "AMOUNT" in header_line
         assert "CUST_ID" in header_line
 
-    def test_original_headers_without_contract_or_landscape_errors(self, output_path: Path, ctx: PluginContext) -> None:
+    def test_original_headers_without_contract_or_landscape_errors(self, output_path: Path) -> None:
         """headers: original without contract or Landscape raises ValueError.
 
         When the user explicitly requests original headers but no source of
@@ -224,9 +230,10 @@ class TestCSVSinkHeaderModes:
             }
         )
         # Deliberately NOT setting a contract or landscape
+        ctx_no_landscape = PluginContext(run_id="test-run", config={}, landscape=None)
 
         with pytest.raises(ValueError, match="requires Landscape"):
-            sink.write([{"amount_usd": 100, "customer_id": "C001"}], ctx)
+            sink.write([{"amount_usd": 100, "customer_id": "C001"}], ctx_no_landscape)
 
 
 class TestCSVSinkHeaderModeInteraction:
@@ -252,7 +259,9 @@ class TestCSVSinkHeaderModeInteraction:
     @pytest.fixture
     def ctx(self) -> PluginContext:
         """Create a minimal plugin context."""
-        return PluginContext(run_id="test-run", config={})
+        db = LandscapeDB.in_memory()
+        recorder = LandscapeRecorder(db)
+        return PluginContext(run_id="test-run", config={}, landscape=recorder)
 
     def test_headers_mode_attribute_stored(self, output_path: Path) -> None:
         """CSVSink stores headers_mode from config."""

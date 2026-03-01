@@ -52,7 +52,8 @@ def mock_azure_openai():
 
 
 class TestMultiQueryLLMSpecific:
-    def test_query_expansion_matches_configured_queries(self) -> None:
+    def test_query_expansion_produces_expected_output_fields(self) -> None:
+        """6 configured queries produce 6 sets of prefixed output fields."""
         transform = LLMTransform(
             {
                 "provider": "azure",
@@ -92,19 +93,15 @@ class TestMultiQueryLLMSpecific:
         )
         transform.on_error = "quarantine_sink"
 
-        # Strategy holds the query specs in the unified architecture
-        assert hasattr(transform._strategy, "query_specs")
-        assert len(transform._strategy.query_specs) == 6
-
-        names = {s.name for s in transform._strategy.query_specs}
-        assert names == {
-            "cs1_crit1",
-            "cs1_crit2",
-            "cs1_crit3",
-            "cs2_crit1",
-            "cs2_crit2",
-            "cs2_crit3",
+        # Observable: declared_output_fields contains prefixed fields for each query
+        declared = transform.declared_output_fields
+        expected_fields = {
+            "cs1_crit1_score", "cs1_crit2_rating", "cs1_crit3_grade",
+            "cs2_crit1_eval_score", "cs2_crit2_eval_rating", "cs2_crit3_eval_grade",
         }
+        assert expected_fields.issubset(declared), (
+            f"Missing expected output fields: {expected_fields - declared}"
+        )
 
     def test_creates_tokens_false(self) -> None:
         transform = LLMTransform(

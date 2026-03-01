@@ -512,6 +512,7 @@ class TestT18CharacterizationResumePath:
             output_schema = _TestSchema
 
             def on_start(self, ctx: Any) -> None:
+                super().on_start(ctx)
                 on_start_calls["transform"] += 1
 
             def process(self, row: PipelineRow, ctx: Any) -> TransformResult:

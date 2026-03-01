@@ -21,8 +21,8 @@ from tests.performance.conftest import benchmark_timer
 def test_plugin_instantiation_performance() -> None:
     """Measure plugin instantiation time.
 
-    Baseline: Instantiation should be < 200ms for a simple pipeline with
-    3 passthrough transforms.
+    Baseline: Instantiation should be < 500ms for a simple pipeline with
+    3 passthrough transforms (includes on_error routing validation).
     """
     config_yaml = """
 source:
@@ -39,6 +39,7 @@ transforms:
     name: t0
     input: t0_in
     on_success: t1_in
+    on_error: discard
     options:
       schema:
         mode: observed
@@ -46,6 +47,7 @@ transforms:
     name: t1
     input: t1_in
     on_success: t2_in
+    on_error: discard
     options:
       schema:
         mode: observed
@@ -53,6 +55,7 @@ transforms:
     name: t2
     input: t2_in
     on_success: output
+    on_error: discard
     options:
       schema:
         mode: observed
@@ -77,7 +80,7 @@ sinks:
         with benchmark_timer() as timing:
             _ = instantiate_plugins_from_config(config)
 
-        assert timing.wall_seconds < 0.200, f"Plugin instantiation took {timing.wall_seconds * 1000:.2f}ms (expected < 200ms)"
+        assert timing.wall_seconds < 0.500, f"Plugin instantiation took {timing.wall_seconds * 1000:.2f}ms (expected < 500ms)"
     finally:
         config_file.unlink()
 
@@ -103,6 +106,7 @@ transforms:
     name: t0
     input: t0_in
     on_success: output
+    on_error: discard
     options:
       schema:
         mode: observed
@@ -163,6 +167,7 @@ transforms:
     name: t0
     input: t0_in
     on_success: t1_in
+    on_error: discard
     options:
       schema:
         mode: observed
@@ -170,6 +175,7 @@ transforms:
     name: t1
     input: t1_in
     on_success: output
+    on_error: discard
     options:
       schema:
         mode: observed

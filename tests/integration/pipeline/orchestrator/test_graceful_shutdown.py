@@ -15,18 +15,18 @@ from typing import TYPE_CHECKING, Any
 import pytest
 
 from elspeth.contracts import PipelineRow, RunStatus
-from elspeth.contracts.enums import Determinism
 from elspeth.contracts.errors import GracefulShutdownError
 from elspeth.contracts.results import SourceRow
 from elspeth.plugins.infrastructure.base import BaseTransform
 from elspeth.plugins.infrastructure.results import TransformResult
 from tests.fixtures.base_classes import (
     _TestSchema,
+    _TestSourceBase,
     as_sink,
     as_source,
     as_transform,
 )
-from tests.fixtures.pipeline import build_production_graph
+from tests.fixtures.pipeline import build_linear_pipeline, build_production_graph
 from tests.fixtures.plugins import CollectSink, ListSource
 
 if TYPE_CHECKING:
@@ -53,26 +53,19 @@ class InterruptAfterN(BaseTransform):
         return TransformResult.success(row, success_reason={"action": "processed"})
 
 
-class QuarantineSource:
+class QuarantineSource(_TestSourceBase):
     """Source that emits quarantined rows, setting shutdown event after N."""
 
     name = "quarantine_source"
     output_schema = _TestSchema
-    node_id: str | None = None
-    determinism = Determinism.DETERMINISTIC
-    plugin_version = "1.0.0"
     _on_validation_failure: str = "quarantine"
-    on_success: str = "default"
 
     def __init__(self, total: int, interrupt_after: int, shutdown_event: threading.Event) -> None:
-        self.config: dict[str, Any] = {"schema": {"mode": "observed"}}
+        super().__init__()
         self._total = total
         self._interrupt_after = interrupt_after
         self._event = shutdown_event
         self._count = 0
-
-    def on_start(self, ctx: Any) -> None:
-        pass
 
     def load(self, ctx: Any) -> Iterator[SourceRow]:
         for i in range(self._total):
@@ -84,18 +77,6 @@ class QuarantineSource:
                 error=f"validation_error_{i}",
                 destination="quarantine",
             )
-
-    def on_complete(self, ctx: Any) -> None:
-        pass
-
-    def close(self) -> None:
-        pass
-
-    def get_field_resolution(self) -> tuple[dict[str, str], str | None] | None:
-        return None
-
-    def get_schema_contract(self) -> None:
-        return None
 
 
 class TestShutdownBreaksLoop:
@@ -389,7 +370,9 @@ class TestInterruptAndResume:
         """Set up a failed run with some rows processed and others pending.
 
         Creates DB records manually so resume has unprocessed rows to work with.
-        Uses the same pattern as TestResumeComprehensive._setup_failed_run.
+        Graph is built via production path (ExecutionGraph.from_plugin_instances)
+        to prevent BUG-LINEAGE-01; node IDs are extracted from the graph for
+        the manual SQL inserts.
 
         Args:
             db: LandscapeDB connection
@@ -399,7 +382,7 @@ class TestInterruptAndResume:
             processed_count: Number of rows already processed (with terminal outcomes)
 
         Returns:
-            ExecutionGraph for the run
+            ExecutionGraph for the run (with sink/transform ID maps already set)
         """
         import json as json_mod
 
@@ -410,7 +393,6 @@ class TestInterruptAndResume:
         from elspeth.contracts.enums import Determinism, RoutingMode
         from elspeth.contracts.schema_contract import FieldContract, SchemaContract
         from elspeth.core.checkpoint import CheckpointManager
-        from elspeth.core.dag import ExecutionGraph
         from elspeth.core.landscape.recorder import LandscapeRecorder
         from elspeth.core.landscape.schema import (
             edges_table,
@@ -419,16 +401,24 @@ class TestInterruptAndResume:
             runs_table,
             tokens_table,
         )
+        from tests.fixtures.plugins import PassTransform
 
         now = datetime.now(UTC)
 
-        graph = ExecutionGraph()
-        schema_config = {"schema": {"mode": "observed"}}
-        graph.add_node("src", node_type=NodeType.SOURCE, plugin_name="null", config=schema_config)
-        graph.add_node("xform", node_type=NodeType.TRANSFORM, plugin_name="passthrough", config=schema_config)
-        graph.add_node("sink", node_type=NodeType.SINK, plugin_name="collect", config=schema_config)
-        graph.add_edge("src", "xform", label="continue")
-        graph.add_edge("xform", "sink", label="continue")
+        # Build graph via production path — prevents BUG-LINEAGE-01
+        source_data = [{"value": i} for i in range(num_rows)]
+        transform = PassTransform()
+        _, _, _, graph = build_linear_pipeline(
+            source_data, transforms=[as_transform(transform)]
+        )
+
+        # Extract production-generated node IDs
+        source_nid = graph.get_source()
+        assert source_nid is not None
+        transform_id_map = graph.get_transform_id_map()
+        sink_id_map = graph.get_sink_id_map()
+        xform_nid = str(transform_id_map[0])
+        sink_nid = str(next(iter(sink_id_map.values())))
 
         source_schema_json = json_mod.dumps({"properties": {"value": {"type": "integer"}}, "required": ["value"]})
 
@@ -465,9 +455,9 @@ class TestInterruptAndResume:
             )
 
             for node_id, plugin_name, node_type in [
-                ("src", "null", NodeType.SOURCE),
-                ("xform", "passthrough", NodeType.TRANSFORM),
-                ("sink", "collect", NodeType.SINK),
+                (source_nid, "list_source", NodeType.SOURCE),
+                (xform_nid, "passthrough", NodeType.TRANSFORM),
+                (sink_nid, "collect_sink", NodeType.SINK),
             ]:
                 conn.execute(
                     insert(nodes_table).values(
@@ -484,8 +474,8 @@ class TestInterruptAndResume:
                 )
 
             for edge_id, from_node, to_node in [
-                ("e1", "src", "xform"),
-                ("e2", "xform", "sink"),
+                ("e1", source_nid, xform_nid),
+                ("e2", xform_nid, sink_nid),
             ]:
                 conn.execute(
                     insert(edges_table).values(
@@ -506,7 +496,7 @@ class TestInterruptAndResume:
                     insert(rows_table).values(
                         row_id=f"r{i}",
                         run_id=run_id,
-                        source_node_id="src",
+                        source_node_id=source_nid,
                         row_index=i,
                         source_data_hash=f"h{i}",
                         source_data_ref=ref,
@@ -529,7 +519,7 @@ class TestInterruptAndResume:
                 run_id=run_id,
                 token_id=f"t{i}",
                 outcome=RowOutcome.COMPLETED,
-                sink_name="sink",
+                sink_name="default",
             )
 
         # Create checkpoint at last processed row
@@ -538,7 +528,7 @@ class TestInterruptAndResume:
             checkpoint_mgr.create_checkpoint(
                 run_id=run_id,
                 token_id=f"t{processed_count - 1}",
-                node_id="xform",
+                node_id=xform_nid,
                 sequence_number=processed_count - 1,
                 graph=graph,
             )
@@ -550,7 +540,6 @@ class TestInterruptAndResume:
         from sqlalchemy import select
 
         from elspeth.contracts.config.runtime import RuntimeCheckpointConfig
-        from elspeth.contracts.types import NodeID, SinkName
         from elspeth.core.checkpoint import CheckpointManager, RecoveryManager
         from elspeth.core.config import CheckpointSettings
         from elspeth.core.landscape.schema import runs_table
@@ -562,6 +551,7 @@ class TestInterruptAndResume:
         processed_count = 3
 
         # Set up failed run: 10 rows, 3 processed, 7 remaining
+        # Graph is built via production path; ID maps are already set.
         graph = self._setup_failed_run(
             landscape_db,
             payload_store,
@@ -569,8 +559,6 @@ class TestInterruptAndResume:
             num_rows=total_rows,
             processed_count=processed_count,
         )
-        graph.set_sink_id_map({SinkName("default"): NodeID("sink")})
-        graph.set_transform_id_map({0: NodeID("xform")})
 
         checkpoint_mgr = CheckpointManager(landscape_db)
         settings = CheckpointSettings(enabled=True, frequency="every_row")
@@ -627,7 +615,6 @@ class TestInterruptAndResume:
         from sqlalchemy import select
 
         from elspeth.contracts.config.runtime import RuntimeCheckpointConfig
-        from elspeth.contracts.types import NodeID, SinkName
         from elspeth.core.checkpoint import CheckpointManager, RecoveryManager
         from elspeth.core.config import CheckpointSettings
         from elspeth.core.landscape.schema import runs_table
@@ -640,6 +627,7 @@ class TestInterruptAndResume:
         processed_count = 5
 
         # Set up failed run: 10 rows, 5 processed, 5 remaining
+        # Graph is built via production path; ID maps are already set.
         graph = self._setup_failed_run(
             landscape_db,
             payload_store,
@@ -647,8 +635,6 @@ class TestInterruptAndResume:
             num_rows=total_rows,
             processed_count=processed_count,
         )
-        graph.set_sink_id_map({SinkName("default"): NodeID("sink")})
-        graph.set_transform_id_map({0: NodeID("xform")})
 
         checkpoint_mgr = CheckpointManager(landscape_db)
         settings = CheckpointSettings(enabled=True, frequency="every_row")

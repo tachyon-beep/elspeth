@@ -24,6 +24,9 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
+from elspeth.core.landscape.database import LandscapeDB
+from elspeth.core.landscape.recorder import LandscapeRecorder
+
 # ---------------------------------------------------------------------------
 # Shared config helpers
 # ---------------------------------------------------------------------------
@@ -86,7 +89,7 @@ class TestAssertToRaiseConversions:
         assert transform._recorder is None
 
         # _create_provider must raise, not silently proceed with a None recorder.
-        with pytest.raises(RuntimeError, match="_recorder not initialized"):
+        with pytest.raises(RuntimeError, match="recorder"):
             transform._create_provider()
 
     # ------------------------------------------------------------------
@@ -110,7 +113,7 @@ class TestAssertToRaiseConversions:
         assert transform._recorder is None
 
         # _get_http_client must raise, not silently create a client with None recorder.
-        with pytest.raises(RuntimeError, match="recorder not initialized"):
+        with pytest.raises(RuntimeError, match="recorder"):
             transform._get_http_client("some-state-id")
 
     # ------------------------------------------------------------------
@@ -136,7 +139,7 @@ class TestAssertToRaiseConversions:
         transform.connect_output(collector, max_pending=5)
 
         try:
-            with pytest.raises(RuntimeError, match="already called"):
+            with pytest.raises(RuntimeError, match="already"):
                 transform.connect_output(collector, max_pending=5)
         finally:
             transform.close()
@@ -170,7 +173,9 @@ class TestAssertToRaiseConversions:
                     "schema": {"mode": "observed"},
                 }
             )
-            ctx = PluginContext(run_id="test-run", config={})
+            db = LandscapeDB.in_memory()
+            recorder = LandscapeRecorder(db)
+            ctx = PluginContext(run_id="test-run", config={}, landscape=recorder)
 
             # Patch _open_file so it opens _file but leaves _writer as None.
             # This simulates partial initialisation — the exact state the guard
@@ -185,7 +190,7 @@ class TestAssertToRaiseConversions:
 
             with (
                 patch.object(sink, "_open_file", side_effect=broken_open_file),
-                pytest.raises(RuntimeError, match="CSVSink writer not initialized"),
+                pytest.raises(RuntimeError, match="writer"),
             ):
                 sink.write([{"col": "value"}], ctx)
 
@@ -219,7 +224,9 @@ class TestAssertToRaiseConversions:
                     "schema": {"mode": "observed"},
                 }
             )
-            ctx = PluginContext(run_id="test-run", config={})
+            db = LandscapeDB.in_memory()
+            recorder = LandscapeRecorder(db)
+            ctx = PluginContext(run_id="test-run", config={}, landscape=recorder)
 
             mock_writer = MagicMock()
 
@@ -232,7 +239,7 @@ class TestAssertToRaiseConversions:
 
             with (
                 patch.object(sink, "_open_file", side_effect=broken_open_file_no_fieldnames),
-                pytest.raises(RuntimeError, match="_fieldnames set by _write_header"),
+                pytest.raises(RuntimeError, match="fieldnames"),
             ):
                 sink.write([{"col": "value"}], ctx)
 

@@ -15,6 +15,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from elspeth.contracts.plugin_context import PluginContext
+from tests.fixtures.factories import make_operation_context
 
 # === Shared fixtures and schemas ===
 
@@ -30,8 +31,13 @@ TEST_BLOB_PATH = "results/output.csv"
 
 @pytest.fixture
 def ctx() -> PluginContext:
-    """Create a minimal plugin context."""
-    return PluginContext(run_id="test-run", config={})
+    """Create a plugin context with real landscape and operation records."""
+    return make_operation_context(
+        node_id="sink",
+        plugin_name="database_sink",
+        node_type="SINK",
+        operation_type="sink_write",
+    )
 
 
 # =============================================================================

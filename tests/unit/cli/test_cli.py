@@ -17,11 +17,9 @@ runner = CliRunner()
 class TestCLIBasics:
     """Test basic CLI functionality."""
 
-    def test_cli_exists(self) -> None:
-        """CLI app can be imported."""
-        from elspeth.cli import app
-
-        assert app is not None
+    def test_cli_importable(self) -> None:
+        """CLI app module can be imported without errors."""
+        from elspeth.cli import app  # noqa: F401
 
     def test_version_flag(self) -> None:
         """--version shows version info."""

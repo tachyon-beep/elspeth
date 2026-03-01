@@ -13,6 +13,8 @@ from elspeth.contracts.contexts import (
     SourceContext,
     TransformContext,
 )
+from elspeth.core.landscape.database import LandscapeDB
+from elspeth.core.landscape.recorder import LandscapeRecorder
 
 
 class TestPluginContextSatisfiesProtocols:
@@ -25,7 +27,9 @@ class TestPluginContextSatisfiesProtocols:
     def _make_ctx(self) -> object:
         from elspeth.contracts.plugin_context import PluginContext
 
-        return PluginContext(run_id="test", config={})
+        db = LandscapeDB.in_memory()
+        recorder = LandscapeRecorder(db)
+        return PluginContext(run_id="test", config={}, landscape=recorder)
 
     def test_satisfies_source_context(self) -> None:
         ctx = self._make_ctx()
@@ -150,7 +154,9 @@ class TestProtocolFieldCoverage:
         """Every field/method declared in any protocol must exist on PluginContext."""
         from elspeth.contracts.plugin_context import PluginContext
 
-        ctx = PluginContext(run_id="test", config={})
+        db = LandscapeDB.in_memory()
+        recorder = LandscapeRecorder(db)
+        ctx = PluginContext(run_id="test", config={}, landscape=recorder)
         all_protocols = [SourceContext, TransformContext, SinkContext, LifecycleContext]
         for protocol in all_protocols:
             for member in self._get_protocol_members(protocol):
@@ -207,20 +213,17 @@ class TestProtocolOverlapDocumentation:
 
     EXPECTED_UNIVERSAL: frozenset[str] = frozenset({"run_id"})  # In all protocols by design
 
+    @staticmethod
+    def _protocol_properties(cls: type) -> set[str]:
+        """Extract @property names defined directly on a Protocol class."""
+        return {name for name, val in vars(cls).items() if not name.startswith("_") and isinstance(val, property)}
+
     def test_universal_fields_are_only_run_id(self) -> None:
         """Only run_id should appear in all 4 protocols."""
-        source_fields = {"run_id", "node_id", "operation_id", "landscape", "telemetry_emit"}
-        transform_fields = {"run_id", "state_id", "node_id", "token", "batch_token_ids", "contract"}
-        sink_fields = {"run_id", "contract", "landscape", "operation_id"}
-        lifecycle_fields = {
-            "run_id",
-            "node_id",
-            "landscape",
-            "rate_limit_registry",
-            "telemetry_emit",
-            "payload_store",
-            "concurrency_config",
-        }
+        source_fields = self._protocol_properties(SourceContext)
+        transform_fields = self._protocol_properties(TransformContext)
+        sink_fields = self._protocol_properties(SinkContext)
+        lifecycle_fields = self._protocol_properties(LifecycleContext)
 
         universal = source_fields & transform_fields & sink_fields & lifecycle_fields
         assert universal == self.EXPECTED_UNIVERSAL, f"Expected only {self.EXPECTED_UNIVERSAL} in all protocols, got {universal}"

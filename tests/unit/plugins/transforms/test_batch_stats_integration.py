@@ -8,7 +8,16 @@ from __future__ import annotations
 
 from elspeth.contracts.plugin_context import PluginContext
 from elspeth.contracts.schema_contract import PipelineRow
+from elspeth.core.landscape.database import LandscapeDB
+from elspeth.core.landscape.recorder import LandscapeRecorder
 from elspeth.plugins.transforms.batch_stats import BatchStats
+
+
+def _make_ctx() -> PluginContext:
+    """Create a PluginContext with in-memory landscape recorder."""
+    db = LandscapeDB.in_memory()
+    recorder = LandscapeRecorder(db)
+    return PluginContext(run_id="test-run", config={}, landscape=recorder)
 
 
 def test_batch_stats_returns_contract_in_transform_mode():
@@ -42,7 +51,7 @@ def test_batch_stats_returns_contract_in_transform_mode():
     ]
 
     # Process batch
-    ctx = PluginContext(run_id="test-run", config={})
+    ctx = _make_ctx()
     result = transform.process(rows, ctx)
 
     # Verify single-row aggregated result
@@ -85,7 +94,7 @@ def test_batch_stats_contract_empty_batch():
     )
 
     # Empty batch
-    ctx = PluginContext(run_id="test-run", config={})
+    ctx = _make_ctx()
     result = transform.process([], ctx)
 
     # Should return aggregated result with zeros
@@ -115,7 +124,7 @@ def test_batch_stats_contract_without_mean():
     )
 
     rows = [{"amount": 100}, {"amount": 200}]
-    ctx = PluginContext(run_id="test-run", config={})
+    ctx = _make_ctx()
     result = transform.process(rows, ctx)
 
     # Verify mean is not in output
@@ -138,7 +147,7 @@ def test_batch_stats_contract_empty_batch_without_mean():
         }
     )
 
-    ctx = PluginContext(run_id="test-run", config={})
+    ctx = _make_ctx()
     result = transform.process([], ctx)
 
     assert not result.is_multi_row

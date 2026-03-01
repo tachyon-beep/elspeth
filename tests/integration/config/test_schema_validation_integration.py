@@ -111,10 +111,10 @@ def test_schema_validation_end_to_end(tmp_path: Path, plugin_manager: PluginMana
     transform_node = transform_nodes[0]
     sink_node = sink_nodes[0]
 
-    assert hasattr(source_node, "output_schema"), "Source node should have output_schema"
-    assert hasattr(transform_node, "input_schema"), "Transform node should have input_schema"
-    assert hasattr(transform_node, "output_schema"), "Transform node should have output_schema"
-    assert hasattr(sink_node, "input_schema"), "Sink node should have input_schema"
+    assert source_node.output_schema is not None, "Source node should have output_schema"
+    assert transform_node.input_schema is not None, "Transform node should have input_schema"
+    assert transform_node.output_schema is not None, "Transform node should have output_schema"
+    assert sink_node.input_schema is not None, "Sink node should have input_schema"
 
 
 def test_static_schema_validation(plugin_manager: PluginManager) -> None:

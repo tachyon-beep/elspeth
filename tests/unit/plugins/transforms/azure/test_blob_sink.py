@@ -11,6 +11,7 @@ from elspeth.contracts import ArtifactDescriptor
 from elspeth.contracts.plugin_context import PluginContext
 from elspeth.plugins.infrastructure.config_base import PluginConfigError
 from elspeth.plugins.sinks.azure_blob_sink import AzureBlobSink
+from tests.fixtures.factories import make_operation_context
 
 # Dynamic schema config for tests - DataPluginConfig requires schema
 DYNAMIC_SCHEMA = {"mode": "observed"}
@@ -31,8 +32,14 @@ TEST_CLIENT_SECRET = "test-secret-value"
 
 @pytest.fixture
 def ctx() -> PluginContext:
-    """Create a minimal plugin context."""
-    return PluginContext(run_id="test-run-123", config={})
+    """Create a plugin context with proper operation records for Azure blob audit trail."""
+    return make_operation_context(
+        run_id="test-run-123",
+        node_id="sink",
+        plugin_name="azure_blob_sink",
+        node_type="SINK",
+        operation_type="sink_write",
+    )
 
 
 @pytest.fixture
