@@ -4,40 +4,20 @@ import pytest
 
 from elspeth.contracts import CallStatus, CallType, FrameworkBugError, NodeType
 from elspeth.contracts.call_data import RawCallPayload
-from elspeth.contracts.schema import SchemaConfig
 from elspeth.core.canonical import stable_hash
 from elspeth.core.landscape import LandscapeDB, LandscapeRecorder
 from elspeth.core.landscape.schema import operations_table
-
-_DYNAMIC_SCHEMA = SchemaConfig.from_dict({"mode": "observed"})
+from tests.fixtures.landscape import make_landscape_db, make_recorder, make_recorder_with_run, register_test_node
 
 
 def _setup(*, run_id: str = "run-1") -> tuple[LandscapeDB, LandscapeRecorder, str]:
     """Create DB, recorder, run, nodes, row, token, and node_state. Returns (db, recorder, state_id)."""
-    db = LandscapeDB.in_memory()
-    recorder = LandscapeRecorder(db)
-    recorder.begin_run(config={}, canonical_version="v1", run_id=run_id)
-    recorder.register_node(
-        run_id=run_id,
-        plugin_name="csv",
-        node_type=NodeType.SOURCE,
-        plugin_version="1.0",
-        config={},
-        node_id="source-0",
-        schema_config=_DYNAMIC_SCHEMA,
-    )
-    recorder.register_node(
-        run_id=run_id,
-        plugin_name="transform",
-        node_type=NodeType.TRANSFORM,
-        plugin_version="1.0",
-        config={},
-        node_id="transform-1",
-        schema_config=_DYNAMIC_SCHEMA,
-    )
-    recorder.create_row(run_id, "source-0", 0, {"name": "test"}, row_id="row-1")
+    setup = make_recorder_with_run(run_id=run_id, source_node_id="source-0", source_plugin_name="csv")
+    db, recorder, run_id_ = setup.db, setup.recorder, setup.run_id
+    register_test_node(recorder, run_id_, "transform-1", plugin_name="transform")
+    recorder.create_row(run_id_, "source-0", 0, {"name": "test"}, row_id="row-1")
     recorder.create_token("row-1", token_id="tok-1")
-    state = recorder.begin_node_state("tok-1", "transform-1", run_id, 0, {"name": "test"}, state_id="state-1")
+    state = recorder.begin_node_state("tok-1", "transform-1", run_id_, 0, {"name": "test"}, state_id="state-1")
     return db, recorder, state.state_id
 
 
@@ -66,41 +46,15 @@ class TestAllocateCallIndex:
         assert idx2 == 2
 
     def test_independent_per_state_id(self):
-        db = LandscapeDB.in_memory()
-        recorder = LandscapeRecorder(db)
-        recorder.begin_run(config={}, canonical_version="v1", run_id="run-1")
-        recorder.register_node(
-            run_id="run-1",
-            plugin_name="csv",
-            node_type=NodeType.SOURCE,
-            plugin_version="1.0",
-            config={},
-            node_id="source-0",
-            schema_config=_DYNAMIC_SCHEMA,
-        )
-        recorder.register_node(
-            run_id="run-1",
-            plugin_name="t1",
-            node_type=NodeType.TRANSFORM,
-            plugin_version="1.0",
-            config={},
-            node_id="transform-1",
-            schema_config=_DYNAMIC_SCHEMA,
-        )
-        recorder.register_node(
-            run_id="run-1",
-            plugin_name="t2",
-            node_type=NodeType.TRANSFORM,
-            plugin_version="1.0",
-            config={},
-            node_id="transform-2",
-            schema_config=_DYNAMIC_SCHEMA,
-        )
-        recorder.create_row("run-1", "source-0", 0, {"x": 1}, row_id="row-1")
+        setup = make_recorder_with_run(run_id="run-1", source_node_id="source-0", source_plugin_name="csv")
+        recorder, run_id = setup.recorder, setup.run_id
+        register_test_node(recorder, run_id, "transform-1", plugin_name="t1")
+        register_test_node(recorder, run_id, "transform-2", plugin_name="t2")
+        recorder.create_row(run_id, "source-0", 0, {"x": 1}, row_id="row-1")
         recorder.create_token("row-1", token_id="tok-a")
         recorder.create_token("row-1", token_id="tok-b")
-        state_a = recorder.begin_node_state("tok-a", "transform-1", "run-1", 0, {"x": 1}, state_id="state-a")
-        state_b = recorder.begin_node_state("tok-b", "transform-2", "run-1", 0, {"x": 1}, state_id="state-b")
+        state_a = recorder.begin_node_state("tok-a", "transform-1", run_id, 0, {"x": 1}, state_id="state-a")
+        state_b = recorder.begin_node_state("tok-b", "transform-2", run_id, 0, {"x": 1}, state_id="state-b")
 
         assert recorder.allocate_call_index(state_a.state_id) == 0
         assert recorder.allocate_call_index(state_b.state_id) == 0
@@ -131,7 +85,7 @@ class TestAllocateCallIndex:
             )
 
         # Create a NEW recorder on the same DB (simulates resume)
-        recorder2 = LandscapeRecorder(db)
+        recorder2 = make_recorder(db)
 
         # New recorder should seed from DB and continue at index 3
         idx = recorder2.allocate_call_index(state_id)
@@ -155,7 +109,7 @@ class TestAllocateCallIndex:
             )
 
         # Create a NEW recorder on the same DB (simulates resume)
-        recorder2 = LandscapeRecorder(db)
+        recorder2 = make_recorder(db)
 
         # New recorder should seed from DB and continue at index 2
         idx = recorder2.allocate_operation_call_index(operation_id)
@@ -307,20 +261,11 @@ class TestBeginOperation:
         assert op1.operation_id != op2.operation_id
 
     def test_sink_write_operation(self):
-        db = LandscapeDB.in_memory()
-        recorder = LandscapeRecorder(db)
-        recorder.begin_run(config={}, canonical_version="v1", run_id="run-1")
-        recorder.register_node(
-            run_id="run-1",
-            plugin_name="csv_sink",
-            node_type=NodeType.SINK,
-            plugin_version="1.0",
-            config={},
-            node_id="sink-0",
-            schema_config=_DYNAMIC_SCHEMA,
-        )
+        setup = make_recorder_with_run(run_id="run-1")
+        recorder, run_id = setup.recorder, setup.run_id
+        register_test_node(recorder, run_id, "sink-0", node_type=NodeType.SINK, plugin_name="csv_sink")
 
-        op = recorder.begin_operation("run-1", "sink-0", "sink_write")
+        op = recorder.begin_operation(run_id, "sink-0", "sink_write")
 
         assert op.operation_type == "sink_write"
         assert op.status == "open"
@@ -351,18 +296,8 @@ class TestBeginOperation:
 
     def test_input_hash_persisted_without_payload_store(self):
         """Hash must be computed even when no payload store is configured."""
-        db = LandscapeDB.in_memory()
-        recorder = LandscapeRecorder(db)  # No payload_store
-        recorder.begin_run(config={}, canonical_version="v1", run_id="run-1")
-        recorder.register_node(
-            run_id="run-1",
-            plugin_name="csv",
-            node_type=NodeType.SOURCE,
-            plugin_version="1.0",
-            config={},
-            node_id="source-0",
-            schema_config=SchemaConfig.from_dict({"mode": "observed"}),
-        )
+        setup = make_recorder_with_run(run_id="run-1", source_node_id="source-0", source_plugin_name="csv")
+        recorder = setup.recorder
 
         op = recorder.begin_operation("run-1", "source-0", "source_load", input_data={"file": "data.csv"})
 
@@ -441,18 +376,8 @@ class TestCompleteOperation:
 
     def test_output_hash_persisted_without_payload_store(self):
         """Output hash must be computed even when no payload store is configured."""
-        db = LandscapeDB.in_memory()
-        recorder = LandscapeRecorder(db)  # No payload_store
-        recorder.begin_run(config={}, canonical_version="v1", run_id="run-1")
-        recorder.register_node(
-            run_id="run-1",
-            plugin_name="csv",
-            node_type=NodeType.SOURCE,
-            plugin_version="1.0",
-            config={},
-            node_id="source-0",
-            schema_config=SchemaConfig.from_dict({"mode": "observed"}),
-        )
+        setup = make_recorder_with_run(run_id="run-1", source_node_id="source-0", source_plugin_name="csv")
+        recorder = setup.recorder
         op = recorder.begin_operation("run-1", "source-0", "source_load")
 
         recorder.complete_operation(op.operation_id, "completed", output_data={"count": 42}, duration_ms=100)
@@ -478,19 +403,11 @@ class TestCompleteOperation:
         """Payload must not be stored when operation is already completed."""
         from elspeth.core.payload_store import FilesystemPayloadStore
 
-        db = LandscapeDB.in_memory()
+        db = make_landscape_db()
         store = FilesystemPayloadStore(tmp_path / "payloads")
         recorder = LandscapeRecorder(db, payload_store=store)
         recorder.begin_run(config={}, canonical_version="v1", run_id="run-1")
-        recorder.register_node(
-            run_id="run-1",
-            plugin_name="csv",
-            node_type=NodeType.SOURCE,
-            plugin_version="1.0",
-            config={},
-            node_id="source-0",
-            schema_config=SchemaConfig.from_dict({"mode": "observed"}),
-        )
+        register_test_node(recorder, "run-1", "source-0", node_type=NodeType.SOURCE, plugin_name="csv")
         op = recorder.begin_operation("run-1", "source-0", "source_load")
 
         # First completion succeeds
@@ -515,7 +432,7 @@ class TestCompleteOperation:
         """Payload must not be stored when operation_id is invalid."""
         from elspeth.core.payload_store import FilesystemPayloadStore
 
-        db = LandscapeDB.in_memory()
+        db = make_landscape_db()
         store = FilesystemPayloadStore(tmp_path / "payloads")
         recorder = LandscapeRecorder(db, payload_store=store)
         recorder.begin_run(config={}, canonical_version="v1", run_id="run-1")
@@ -531,19 +448,11 @@ class TestCompleteOperation:
         """When payload store is configured, output_data_ref must be set on success."""
         from elspeth.core.payload_store import FilesystemPayloadStore
 
-        db = LandscapeDB.in_memory()
+        db = make_landscape_db()
         store = FilesystemPayloadStore(tmp_path / "payloads")
         recorder = LandscapeRecorder(db, payload_store=store)
         recorder.begin_run(config={}, canonical_version="v1", run_id="run-1")
-        recorder.register_node(
-            run_id="run-1",
-            plugin_name="csv",
-            node_type=NodeType.SOURCE,
-            plugin_version="1.0",
-            config={},
-            node_id="source-0",
-            schema_config=SchemaConfig.from_dict({"mode": "observed"}),
-        )
+        register_test_node(recorder, "run-1", "source-0", node_type=NodeType.SOURCE, plugin_name="csv")
         op = recorder.begin_operation("run-1", "source-0", "source_load")
 
         recorder.complete_operation(op.operation_id, "completed", output_data={"rows_loaded": 42}, duration_ms=100)
@@ -556,19 +465,11 @@ class TestCompleteOperation:
     def test_empty_output_data_ref_set_with_payload_store(self, tmp_path):
         from elspeth.core.payload_store import FilesystemPayloadStore
 
-        db = LandscapeDB.in_memory()
+        db = make_landscape_db()
         store = FilesystemPayloadStore(tmp_path / "payloads")
         recorder = LandscapeRecorder(db, payload_store=store)
         recorder.begin_run(config={}, canonical_version="v1", run_id="run-1")
-        recorder.register_node(
-            run_id="run-1",
-            plugin_name="csv",
-            node_type=NodeType.SOURCE,
-            plugin_version="1.0",
-            config={},
-            node_id="source-0",
-            schema_config=SchemaConfig.from_dict({"mode": "observed"}),
-        )
+        register_test_node(recorder, "run-1", "source-0", node_type=NodeType.SOURCE, plugin_name="csv")
         op = recorder.begin_operation("run-1", "source-0", "source_load")
 
         recorder.complete_operation(op.operation_id, "completed", output_data={}, duration_ms=100)
@@ -793,28 +694,12 @@ class TestGetOperationsForRun:
         assert ops == []
 
     def test_does_not_include_operations_from_other_runs(self):
-        db = LandscapeDB.in_memory()
-        recorder = LandscapeRecorder(db)
+        db = make_landscape_db()
+        recorder = make_recorder(db)
         recorder.begin_run(config={}, canonical_version="v1", run_id="run-a")
-        recorder.register_node(
-            run_id="run-a",
-            plugin_name="csv",
-            node_type=NodeType.SOURCE,
-            plugin_version="1.0",
-            config={},
-            node_id="source-0",
-            schema_config=_DYNAMIC_SCHEMA,
-        )
+        register_test_node(recorder, "run-a", "source-0", node_type=NodeType.SOURCE, plugin_name="csv")
         recorder.begin_run(config={}, canonical_version="v1", run_id="run-b")
-        recorder.register_node(
-            run_id="run-b",
-            plugin_name="csv",
-            node_type=NodeType.SOURCE,
-            plugin_version="1.0",
-            config={},
-            node_id="source-0",
-            schema_config=_DYNAMIC_SCHEMA,
-        )
+        register_test_node(recorder, "run-b", "source-0", node_type=NodeType.SOURCE, plugin_name="csv")
         recorder.begin_operation("run-a", "source-0", "source_load")
         recorder.begin_operation("run-b", "source-0", "source_load")
 
@@ -992,28 +877,12 @@ class TestGetCallResponseData:
         from elspeth.contracts.errors import AuditIntegrityError
         from elspeth.core.payload_store import FilesystemPayloadStore
 
-        db = LandscapeDB.in_memory()
+        db = make_landscape_db()
         store = FilesystemPayloadStore(tmp_path / "payloads")
         recorder = LandscapeRecorder(db, payload_store=store)
         recorder.begin_run(config={}, canonical_version="v1", run_id="run-1")
-        recorder.register_node(
-            run_id="run-1",
-            plugin_name="csv",
-            node_type=NodeType.SOURCE,
-            plugin_version="1.0",
-            config={},
-            node_id="source-0",
-            schema_config=SchemaConfig.from_dict({"mode": "observed"}),
-        )
-        recorder.register_node(
-            run_id="run-1",
-            plugin_name="transform",
-            node_type=NodeType.TRANSFORM,
-            plugin_version="1.0",
-            config={},
-            node_id="transform-1",
-            schema_config=SchemaConfig.from_dict({"mode": "observed"}),
-        )
+        register_test_node(recorder, "run-1", "source-0", node_type=NodeType.SOURCE, plugin_name="csv")
+        register_test_node(recorder, "run-1", "transform-1", plugin_name="transform")
         recorder.create_row("run-1", "source-0", 0, {"name": "test"}, row_id="row-1")
         recorder.create_token("row-1", token_id="tok-1")
         state = recorder.begin_node_state("tok-1", "transform-1", "run-1", 0, {"name": "test"}, state_id="state-1")
@@ -1040,28 +909,12 @@ class TestGetCallResponseData:
         """Bug gxan: valid dict payload should return correctly."""
         from elspeth.core.payload_store import FilesystemPayloadStore
 
-        db = LandscapeDB.in_memory()
+        db = make_landscape_db()
         store = FilesystemPayloadStore(tmp_path / "payloads")
         recorder = LandscapeRecorder(db, payload_store=store)
         recorder.begin_run(config={}, canonical_version="v1", run_id="run-1")
-        recorder.register_node(
-            run_id="run-1",
-            plugin_name="csv",
-            node_type=NodeType.SOURCE,
-            plugin_version="1.0",
-            config={},
-            node_id="source-0",
-            schema_config=SchemaConfig.from_dict({"mode": "observed"}),
-        )
-        recorder.register_node(
-            run_id="run-1",
-            plugin_name="transform",
-            node_type=NodeType.TRANSFORM,
-            plugin_version="1.0",
-            config={},
-            node_id="transform-1",
-            schema_config=SchemaConfig.from_dict({"mode": "observed"}),
-        )
+        register_test_node(recorder, "run-1", "source-0", node_type=NodeType.SOURCE, plugin_name="csv")
+        register_test_node(recorder, "run-1", "transform-1", plugin_name="transform")
         recorder.create_row("run-1", "source-0", 0, {"name": "test"}, row_id="row-1")
         recorder.create_token("row-1", token_id="tok-1")
         state = recorder.begin_node_state("tok-1", "transform-1", "run-1", 0, {"name": "test"}, state_id="state-1")

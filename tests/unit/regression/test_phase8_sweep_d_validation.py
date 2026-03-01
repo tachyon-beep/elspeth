@@ -12,10 +12,9 @@ from unittest.mock import MagicMock
 import pytest
 
 from elspeth.contracts.schema_contract import SchemaContract
-from elspeth.core.landscape.database import LandscapeDB
-from elspeth.core.landscape.recorder import LandscapeRecorder
 from elspeth.testing import make_field, make_row
 from tests.fixtures.factories import make_context
+from tests.fixtures.landscape import make_landscape_db, make_recorder
 
 DYNAMIC_SCHEMA = {"mode": "observed"}
 
@@ -97,8 +96,8 @@ class TestBatchStatsAggregateOverwrite:
         from elspeth.plugins.transforms.batch_stats import BatchStats
 
         transform = BatchStats({"schema": DYNAMIC_SCHEMA, "value_field": "amount", "group_by": "count"})
-        db = LandscapeDB.in_memory()
-        recorder = LandscapeRecorder(db)
+        db = make_landscape_db()
+        recorder = make_recorder(db)
         ctx = make_context(run_id="test", landscape=recorder)
         rows = [_make_row({"amount": 10, "count": "group_a"})]
 
@@ -110,8 +109,8 @@ class TestBatchStatsAggregateOverwrite:
         from elspeth.plugins.transforms.batch_stats import BatchStats
 
         transform = BatchStats({"schema": DYNAMIC_SCHEMA, "value_field": "amount", "group_by": "category"})
-        db = LandscapeDB.in_memory()
-        recorder = LandscapeRecorder(db)
+        db = make_landscape_db()
+        recorder = make_recorder(db)
         ctx = make_context(run_id="test", landscape=recorder)
         rows = [_make_row({"amount": 10, "category": "A"})]
         result = transform.process(rows, ctx)
@@ -140,8 +139,8 @@ class TestBatchReplicateMaxCopies:
         from elspeth.plugins.transforms.batch_replicate import BatchReplicate
 
         transform = BatchReplicate({"schema": DYNAMIC_SCHEMA, "max_copies": 5})
-        db = LandscapeDB.in_memory()
-        recorder = LandscapeRecorder(db)
+        db = make_landscape_db()
+        recorder = make_recorder(db)
         ctx = make_context(run_id="test", landscape=recorder)
         # Single row exceeding max_copies — all rows quarantined → error result
         rows = [_make_row({"copies": 10, "data": "value"})]
@@ -287,8 +286,8 @@ class TestBoolExcludedFromInt:
         from elspeth.plugins.transforms.batch_stats import BatchStats
 
         transform = BatchStats({"schema": DYNAMIC_SCHEMA, "value_field": "flag"})
-        db = LandscapeDB.in_memory()
-        recorder = LandscapeRecorder(db)
+        db = make_landscape_db()
+        recorder = make_recorder(db)
         ctx = make_context(run_id="test", landscape=recorder)
         rows = [_make_row({"flag": True})]
 
@@ -300,8 +299,8 @@ class TestBoolExcludedFromInt:
         from elspeth.plugins.transforms.batch_stats import BatchStats
 
         transform = BatchStats({"schema": DYNAMIC_SCHEMA, "value_field": "amount"})
-        db = LandscapeDB.in_memory()
-        recorder = LandscapeRecorder(db)
+        db = make_landscape_db()
+        recorder = make_recorder(db)
         ctx = make_context(run_id="test", landscape=recorder)
         rows = [_make_row({"amount": 42})]
         result = transform.process(rows, ctx)

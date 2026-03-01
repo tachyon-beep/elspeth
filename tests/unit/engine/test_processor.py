@@ -50,6 +50,7 @@ from elspeth.plugins.infrastructure.clients.llm import LLMClientError
 from elspeth.plugins.infrastructure.pooling import CapacityError
 from elspeth.testing import make_contract, make_row, make_source_row, make_token_info
 from tests.fixtures.factories import make_context
+from tests.fixtures.landscape import make_recorder_with_run
 
 # =============================================================================
 # Helpers
@@ -78,19 +79,12 @@ def _make_recorder(
 
     This satisfies FK constraints: rows table references nodes(node_id, run_id).
     """
-    db = LandscapeDB.in_memory()
-    recorder = LandscapeRecorder(db)
-    recorder.begin_run(config={}, canonical_version="v1", run_id=run_id)
-    recorder.register_node(
+    setup = make_recorder_with_run(
         run_id=run_id,
-        plugin_name="test-source",
-        node_type=NodeType.SOURCE,
-        plugin_version="1.0",
-        config={},
-        node_id=source_node_id,
-        schema_config=_DYNAMIC_SCHEMA,
+        source_node_id=source_node_id,
+        source_plugin_name="test-source",
     )
-    return db, recorder
+    return setup.db, setup.recorder
 
 
 def _make_processor(

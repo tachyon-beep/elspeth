@@ -12,11 +12,10 @@ import pytest
 
 from elspeth.contracts.plugin_context import PluginContext
 from elspeth.contracts.schema_contract import SchemaContract
-from elspeth.core.landscape.database import LandscapeDB
-from elspeth.core.landscape.recorder import LandscapeRecorder
 from elspeth.plugins.sinks.csv_sink import CSVSink
 from elspeth.testing import make_field
 from tests.fixtures.factories import make_context
+from tests.fixtures.landscape import make_landscape_db, make_recorder
 
 # CSVSink requires fixed-column structure (strict mode)
 STRICT_SCHEMA = {"mode": "fixed", "fields": ["amount_usd: int", "customer_id: str"]}
@@ -45,8 +44,8 @@ class TestCSVSinkContractSupport:
     @pytest.fixture
     def ctx(self) -> PluginContext:
         """Create a minimal plugin context."""
-        db = LandscapeDB.in_memory()
-        recorder = LandscapeRecorder(db)
+        db = make_landscape_db()
+        recorder = make_recorder(db)
         return make_context(landscape=recorder)
 
     def test_set_output_contract(self, output_path: Path, sample_contract: SchemaContract) -> None:
@@ -111,8 +110,8 @@ class TestCSVSinkHeaderModes:
     @pytest.fixture
     def ctx(self) -> PluginContext:
         """Create a minimal plugin context."""
-        db = LandscapeDB.in_memory()
-        recorder = LandscapeRecorder(db)
+        db = make_landscape_db()
+        recorder = make_recorder(db)
         return make_context(landscape=recorder)
 
     def test_normalized_headers_default(self, output_path: Path, ctx: PluginContext) -> None:
@@ -260,8 +259,8 @@ class TestCSVSinkHeaderModeInteraction:
     @pytest.fixture
     def ctx(self) -> PluginContext:
         """Create a minimal plugin context."""
-        db = LandscapeDB.in_memory()
-        recorder = LandscapeRecorder(db)
+        db = make_landscape_db()
+        recorder = make_recorder(db)
         return make_context(landscape=recorder)
 
     def test_headers_mode_attribute_stored(self, output_path: Path) -> None:

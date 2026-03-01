@@ -26,6 +26,7 @@ from elspeth.plugins.infrastructure.base import BaseTransform
 from elspeth.testing import make_pipeline_row
 from tests.fixtures.base_classes import _TestSchema, as_sink, as_source, as_transform
 from tests.fixtures.factories import wire_transforms
+from tests.fixtures.landscape import make_landscape_db
 from tests.fixtures.pipeline import build_production_graph
 from tests.fixtures.plugins import CollectSink, ListSource
 
@@ -131,10 +132,9 @@ class TestOnSuccessConfigAlignment:
 
     def test_on_success_from_transform_reaches_row_result(self, payload_store) -> None:
         """Terminal transform on_success flows through to RowResult sink_name."""
-        from elspeth.core.landscape import LandscapeDB
         from elspeth.engine.orchestrator import Orchestrator, PipelineConfig
 
-        db = LandscapeDB.in_memory()
+        db = make_landscape_db()
         source = ListSource([{"value": 42}], on_success="target_sink")
         transform = _OnSuccessTracingTransform()
         transform.on_success = "target_sink"
@@ -155,10 +155,9 @@ class TestOnSuccessConfigAlignment:
 
     def test_on_success_from_source_reaches_row_result_no_transforms(self, payload_store) -> None:
         """Source on_success flows through to RowResult when no transforms exist."""
-        from elspeth.core.landscape import LandscapeDB
         from elspeth.engine.orchestrator import Orchestrator, PipelineConfig
 
-        db = LandscapeDB.in_memory()
+        db = make_landscape_db()
         source = ListSource([{"value": 99}], on_success="direct_sink")
         sink = CollectSink(name="direct_sink")
 
@@ -223,10 +222,9 @@ class TestOnSuccessConfigAlignment:
     def test_multiple_sinks_routes_to_correct_one(self, payload_store) -> None:
         """With multiple sinks, rows route to the on_success-declared sink."""
         from elspeth.core.dag import ExecutionGraph
-        from elspeth.core.landscape import LandscapeDB
         from elspeth.engine.orchestrator import Orchestrator, PipelineConfig
 
-        db = LandscapeDB.in_memory()
+        db = make_landscape_db()
         source = ListSource([{"value": 1}], on_success="source_out")
         transform = _OnSuccessTracingTransform()
         transform.on_success = "sink_b"

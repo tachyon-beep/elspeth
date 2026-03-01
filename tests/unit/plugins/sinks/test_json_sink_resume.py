@@ -6,17 +6,16 @@ from pathlib import Path
 import pytest
 
 from elspeth.contracts.plugin_context import PluginContext
-from elspeth.core.landscape.database import LandscapeDB
-from elspeth.core.landscape.recorder import LandscapeRecorder
 from elspeth.plugins.sinks.json_sink import JSONSink
 from tests.fixtures.factories import make_context
+from tests.fixtures.landscape import make_landscape_db, make_recorder
 
 
 @pytest.fixture
 def ctx() -> PluginContext:
     """Create test context."""
-    db = LandscapeDB.in_memory()
-    recorder = LandscapeRecorder(db)
+    db = make_landscape_db()
+    recorder = make_recorder(db)
     return make_context(landscape=recorder)
 
 

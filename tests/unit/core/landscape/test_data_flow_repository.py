@@ -49,6 +49,7 @@ from elspeth.core.landscape.schema import (
     token_parents_table,
     tokens_table,
 )
+from tests.fixtures.landscape import make_landscape_db, make_recorder
 
 _DYNAMIC_SCHEMA = SchemaConfig.from_dict({"mode": "observed"})
 
@@ -62,7 +63,7 @@ def _make_repo(
 
     Returns (db, repo, recorder) — recorder is for graph setup only.
     """
-    db = LandscapeDB.in_memory()
+    db = make_landscape_db()
     ops = DatabaseOps(db)
     repo = DataFlowRepository(
         db,
@@ -74,7 +75,7 @@ def _make_repo(
         transform_error_loader=TransformErrorLoader(),
         payload_store=payload_store,
     )
-    recorder = LandscapeRecorder(db)
+    recorder = make_recorder(db)
     recorder.begin_run(config={}, canonical_version="v1", run_id=run_id)
     recorder.register_node(
         run_id=run_id,

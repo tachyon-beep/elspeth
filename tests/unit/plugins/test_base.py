@@ -6,10 +6,9 @@ from typing import Any
 import pytest
 
 from elspeth.contracts import PipelineRow
-from elspeth.core.landscape.database import LandscapeDB
-from elspeth.core.landscape.recorder import LandscapeRecorder
 from elspeth.testing import make_pipeline_row
 from tests.fixtures.factories import make_context
+from tests.fixtures.landscape import make_recorder
 
 
 class TestBaseTransform:
@@ -69,8 +68,7 @@ class TestBaseTransform:
             output_schema = None  # type: ignore[assignment]
 
         transform = IncompleteTransform({})
-        db = LandscapeDB.in_memory()
-        recorder = LandscapeRecorder(db)
+        recorder = make_recorder()
         ctx = make_context(landscape=recorder)
         row = make_pipeline_row({"x": 1})
 
@@ -110,8 +108,7 @@ class TestBaseTransform:
                 )
 
         transform = DoubleTransform({"some": "config"})
-        db = LandscapeDB.in_memory()
-        recorder = LandscapeRecorder(db)
+        recorder = make_recorder()
         ctx = make_context(landscape=recorder)
 
         result = transform.process(make_pipeline_row({"x": 21}), ctx)
@@ -171,8 +168,7 @@ class TestBaseSink:
                 pass
 
         sink = MemorySink({})
-        db = LandscapeDB.in_memory()
-        recorder = LandscapeRecorder(db)
+        recorder = make_recorder()
         ctx = make_context(landscape=recorder)
 
         artifact = sink.write([{"value": 1}, {"value": 2}], ctx)
@@ -226,8 +222,7 @@ class TestBaseSink:
                 pass
 
         sink = BatchMemorySink({})
-        db = LandscapeDB.in_memory()
-        recorder = LandscapeRecorder(db)
+        recorder = make_recorder()
         ctx = make_context(landscape=recorder)
 
         artifact = sink.write([{"value": 1}, {"value": 2}, {"value": 3}], ctx)
@@ -273,8 +268,7 @@ class TestBaseSource:
                 pass
 
         source = ListSource({"data": [{"value": 1}, {"value": 2}]})
-        db = LandscapeDB.in_memory()
-        recorder = LandscapeRecorder(db)
+        recorder = make_recorder()
         ctx = make_context(landscape=recorder)
 
         rows = list(source.load(ctx))

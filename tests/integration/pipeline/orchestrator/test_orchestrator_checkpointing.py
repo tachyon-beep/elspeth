@@ -334,9 +334,9 @@ class TestOrchestratorCheckpointing:
         with pytest.raises(RuntimeError, match="Bad sink failure"):
             orchestrator.run(config, graph=graph, payload_store=payload_store)
 
-        from elspeth.core.landscape import LandscapeRecorder
+        from tests.fixtures.landscape import make_recorder
 
-        recorder = LandscapeRecorder(landscape_db)
+        recorder = make_recorder(landscape_db)
         runs = recorder.list_runs()
         assert len(runs) >= 1
         run_id = sorted(runs, key=lambda r: r.started_at, reverse=True)[0].run_id

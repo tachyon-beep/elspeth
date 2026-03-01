@@ -7,10 +7,10 @@ import pytest
 
 from elspeth.contracts.schema_contract import PipelineRow, SchemaContract
 from elspeth.contracts.types import NodeID
-from elspeth.core.landscape import LandscapeDB, LandscapeRecorder
 from elspeth.engine.processor import DAGTraversalContext
 from elspeth.testing import make_field, make_row, make_source_row
 from tests.fixtures.factories import make_context
+from tests.fixtures.landscape import make_landscape_db, make_recorder
 
 
 def _make_contract() -> SchemaContract:
@@ -79,8 +79,8 @@ class TestRowProcessorPipelineRow:
         )
 
         source_row = make_source_row({"amount": 100}, contract=contract)
-        landscape_db = LandscapeDB.in_memory()
-        landscape_recorder = LandscapeRecorder(landscape_db)
+        landscape_db = make_landscape_db()
+        landscape_recorder = make_recorder(landscape_db)
         ctx = make_context(run_id="run_001", landscape=landscape_recorder)
 
         # No transforms - token should be created and completed immediately
@@ -113,8 +113,8 @@ class TestRowProcessorPipelineRow:
         )
 
         source_row = make_source_row({"amount": 100}, contract=contract)
-        landscape_db = LandscapeDB.in_memory()
-        landscape_recorder = LandscapeRecorder(landscape_db)
+        landscape_db = make_landscape_db()
+        landscape_recorder = make_recorder(landscape_db)
         ctx = make_context(run_id="run_001", landscape=landscape_recorder)
 
         results = processor.process_row(
@@ -156,8 +156,8 @@ class TestRowProcessorPipelineRow:
         from elspeth.contracts import SourceRow
 
         source_row = SourceRow.valid({"amount": 100}, contract=None)
-        landscape_db = LandscapeDB.in_memory()
-        landscape_recorder = LandscapeRecorder(landscape_db)
+        landscape_db = make_landscape_db()
+        landscape_recorder = make_recorder(landscape_db)
         ctx = make_context(run_id="run_001", landscape=landscape_recorder)
 
         with pytest.raises(ValueError, match="must have contract"):
@@ -191,8 +191,8 @@ class TestRowProcessorExistingRow:
 
         # PipelineRow for resume (row already exists in database)
         row_data = make_row({"amount": 100}, contract=contract)
-        landscape_db = LandscapeDB.in_memory()
-        landscape_recorder = LandscapeRecorder(landscape_db)
+        landscape_db = make_landscape_db()
+        landscape_recorder = make_recorder(landscape_db)
         ctx = make_context(run_id="run_001", landscape=landscape_recorder)
 
         results = processor.process_existing_row(

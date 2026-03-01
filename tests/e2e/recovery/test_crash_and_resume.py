@@ -62,6 +62,7 @@ from tests.fixtures.base_classes import (
     as_sink,
     as_source,
 )
+from tests.fixtures.landscape import make_recorder
 
 # ---------------------------------------------------------------------------
 # Shared helpers
@@ -908,7 +909,7 @@ class TestAggregationRecovery:
         db = LandscapeDB(f"sqlite:///{tmp_path}/test.db")
         checkpoint_mgr = CheckpointManager(db)
         recovery_mgr = RecoveryManager(db, checkpoint_mgr)
-        recorder = LandscapeRecorder(db)
+        recorder = make_recorder(db)
 
         return {
             "db": db,

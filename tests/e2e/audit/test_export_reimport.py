@@ -14,10 +14,10 @@ from typing import Any
 from elspeth.contracts import RunStatus
 from elspeth.core.landscape.database import LandscapeDB
 from elspeth.core.landscape.exporter import LandscapeExporter
-from elspeth.core.landscape.recorder import LandscapeRecorder
 from elspeth.core.payload_store import FilesystemPayloadStore
 from elspeth.engine.orchestrator import Orchestrator, PipelineConfig
 from tests.fixtures.base_classes import as_sink, as_source, as_transform
+from tests.fixtures.landscape import make_recorder
 from tests.fixtures.pipeline import build_linear_pipeline
 from tests.fixtures.plugins import CollectSink, PassTransform
 
@@ -135,7 +135,7 @@ class TestExportReimport:
         run_id, db, _payload_store, _sink = _run_pipeline(tmp_path, source_data)
 
         # Get counts from direct recorder queries
-        recorder = LandscapeRecorder(db)
+        recorder = make_recorder(db)
         direct_rows = recorder.get_rows(run_id)
         direct_nodes = recorder.get_nodes(run_id)
         direct_edges = recorder.get_edges(run_id)

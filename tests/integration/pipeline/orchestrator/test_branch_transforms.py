@@ -26,12 +26,12 @@ from elspeth.core.config import (
 )
 from elspeth.core.dag import ExecutionGraph
 from elspeth.core.dag.models import WiredTransform
-from elspeth.core.landscape import LandscapeDB
 from elspeth.engine.orchestrator import Orchestrator, PipelineConfig
 from elspeth.plugins.infrastructure.base import BaseTransform
 from elspeth.testing import make_pipeline_row
 from tests.fixtures.base_classes import _TestSchema, as_sink, as_source, as_transform
 from tests.fixtures.factories import wire_transforms
+from tests.fixtures.landscape import make_landscape_db
 from tests.fixtures.plugins import CollectSink, FailTransform, ListSource
 
 # ---------------------------------------------------------------------------
@@ -171,7 +171,7 @@ class TestBranchTransforms:
         Each branch's transform adds a distinct field, verifying that data
         flows through the correct branch transform before coalescing.
         """
-        db = LandscapeDB.in_memory()
+        db = make_landscape_db()
 
         gate = GateSettings(
             name="fork_gate",
@@ -236,7 +236,7 @@ class TestBranchTransforms:
         Overlapping fields (like 'value') come from one branch; unique fields
         ('enriched_a', 'enriched_b') are combined.
         """
-        db = LandscapeDB.in_memory()
+        db = make_landscape_db()
 
         gate = GateSettings(
             name="fork_gate",
@@ -290,7 +290,7 @@ class TestBranchTransforms:
         (direct COPY edge to coalesce). Verifies the builder correctly handles
         both COPY and connection-system edges on the same coalesce node.
         """
-        db = LandscapeDB.in_memory()
+        db = make_landscape_db()
 
         gate = GateSettings(
             name="fork_gate",
@@ -348,7 +348,7 @@ class TestBranchTransforms:
         quarantine sink. The coalesce's best_effort policy proceeds with only
         path_b's data in the merged output.
         """
-        db = LandscapeDB.in_memory()
+        db = make_landscape_db()
 
         gate = GateSettings(
             name="fork_gate",
@@ -404,7 +404,7 @@ class TestBranchTransforms:
         delivered to the configured on_error sink (quarantine), and the
         error data is recorded.
         """
-        db = LandscapeDB.in_memory()
+        db = make_landscape_db()
 
         gate = GateSettings(
             name="fork_gate",

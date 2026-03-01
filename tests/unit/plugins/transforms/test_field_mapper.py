@@ -6,10 +6,9 @@ import pytest
 
 from elspeth.contracts.plugin_context import PluginContext
 from elspeth.contracts.schema_contract import PipelineRow, SchemaContract
-from elspeth.core.landscape.database import LandscapeDB
-from elspeth.core.landscape.recorder import LandscapeRecorder
 from elspeth.testing import make_field, make_pipeline_row
 from tests.fixtures.factories import make_context
+from tests.fixtures.landscape import make_recorder
 
 # Common schema config for dynamic field handling (accepts any fields)
 DYNAMIC_SCHEMA = {"mode": "observed"}
@@ -572,8 +571,7 @@ class TestFieldMapperContractPropagation:
                 "headers": "original",
             }
         )
-        sink_db = LandscapeDB.in_memory()
-        sink_recorder = LandscapeRecorder(sink_db)
+        sink_recorder = make_recorder()
         sink_ctx = PluginContext(
             run_id="test-run",
             config={},

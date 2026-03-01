@@ -11,10 +11,9 @@ import pytest
 
 from elspeth.contracts import EdgeInfo, ExecutionError, NodeType, RoutingMode, RunStatus
 from elspeth.core.dag import ExecutionGraph
-from elspeth.core.landscape import LandscapeDB
-from elspeth.core.landscape.recorder import LandscapeRecorder
 from elspeth.plugins.infrastructure.manager import PluginManager
 from tests.fixtures.factories import make_context
+from tests.fixtures.landscape import make_landscape_db, make_recorder
 
 # Dynamic schema config for tests - PathConfig now requires schema
 DYNAMIC_SCHEMA = {"mode": "observed"}
@@ -110,8 +109,8 @@ class TestIntegrationAuditFixes:
         - Task 6: PluginContext.landscape type fix
         - Recording actually works through the context
         """
-        db = LandscapeDB.in_memory()
-        recorder = LandscapeRecorder(db)
+        db = make_landscape_db()
+        recorder = make_recorder(db)
 
         run = recorder.begin_run(
             config={"source": {"plugin": "csv"}},
@@ -216,8 +215,8 @@ class TestIntegrationAuditFixes:
         End-to-end test combining multiple fixes — verifies the recorder
         actually persists data, not just that assignment works.
         """
-        db = LandscapeDB.in_memory()
-        recorder = LandscapeRecorder(db)
+        db = make_landscape_db()
+        recorder = make_recorder(db)
 
         # Begin a run
         run = recorder.begin_run(

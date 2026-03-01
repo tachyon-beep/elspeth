@@ -26,6 +26,7 @@ from elspeth.engine.spans import SpanFactory
 from elspeth.plugins.transforms.llm.transform import LLMTransform
 from elspeth.testing import make_pipeline_row
 from tests.fixtures.factories import make_context
+from tests.fixtures.landscape import make_recorder
 
 DYNAMIC_SCHEMA = {"mode": "observed"}
 
@@ -246,7 +247,7 @@ def recorder(tmp_path) -> LandscapeRecorder:
     A file-based temp DB is shared across threads correctly.
     """
     db = LandscapeDB.from_url(f"sqlite:///{tmp_path / 'audit.db'}")
-    return LandscapeRecorder(db)
+    return make_recorder(db)
 
 
 @pytest.fixture

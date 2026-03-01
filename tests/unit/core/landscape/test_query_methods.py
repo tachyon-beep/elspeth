@@ -30,32 +30,15 @@ from elspeth.core.landscape.model_loaders import (
     TokenParentLoader,
 )
 from elspeth.core.landscape.row_data import RowDataResult, RowDataState
+from tests.fixtures.landscape import make_landscape_db, make_recorder, make_recorder_with_run, register_test_node
 
 _DYNAMIC_SCHEMA = SchemaConfig.from_dict({"mode": "observed"})
 
 
 def _setup(*, run_id: str = "run-1") -> tuple[LandscapeDB, LandscapeRecorder]:
-    db = LandscapeDB.in_memory()
-    recorder = LandscapeRecorder(db)
-    recorder.begin_run(config={}, canonical_version="v1", run_id=run_id)
-    recorder.register_node(
-        run_id=run_id,
-        plugin_name="csv",
-        node_type=NodeType.SOURCE,
-        plugin_version="1.0",
-        config={},
-        node_id="source-0",
-        schema_config=_DYNAMIC_SCHEMA,
-    )
-    recorder.register_node(
-        run_id=run_id,
-        plugin_name="transform",
-        node_type=NodeType.TRANSFORM,
-        plugin_version="1.0",
-        config={},
-        node_id="transform-1",
-        schema_config=_DYNAMIC_SCHEMA,
-    )
+    setup = make_recorder_with_run(run_id=run_id, source_node_id="source-0", source_plugin_name="csv")
+    db, recorder = setup.db, setup.recorder
+    register_test_node(recorder, run_id, "transform-1", plugin_name="transform")
     return db, recorder
 
 
@@ -102,8 +85,8 @@ class TestGetRows:
         assert rows[0].row_index == 0
 
     def test_rows_scoped_to_run(self):
-        db = LandscapeDB.in_memory()
-        recorder = LandscapeRecorder(db)
+        db = make_landscape_db()
+        recorder = make_recorder(db)
         recorder.begin_run(config={}, canonical_version="v1", run_id="run-a")
         recorder.register_node(
             run_id="run-a",
@@ -287,19 +270,9 @@ class TestGetRowData:
 
     def test_never_stored_when_no_payload_ref(self):
         """Row without source_data_ref → NEVER_STORED."""
-        db = LandscapeDB.in_memory()
         # Recorder with no payload store — create_row will not store payload
-        recorder = LandscapeRecorder(db)
-        recorder.begin_run(config={}, canonical_version="v1", run_id="run-1")
-        recorder.register_node(
-            run_id="run-1",
-            plugin_name="csv",
-            node_type=NodeType.SOURCE,
-            plugin_version="1.0",
-            config={},
-            node_id="source-0",
-            schema_config=_DYNAMIC_SCHEMA,
-        )
+        setup = make_recorder_with_run(run_id="run-1", source_node_id="source-0", source_plugin_name="csv")
+        recorder = setup.recorder
         recorder.create_row("run-1", "source-0", 0, {"x": 1}, row_id="row-1")
 
         # Verify the row has no source_data_ref
@@ -318,7 +291,7 @@ class TestGetRowData:
 
     def test_store_not_configured_when_ref_exists_but_no_store(self):
         """Row has source_data_ref but QueryRepository has no payload_store → STORE_NOT_CONFIGURED."""
-        db = LandscapeDB.in_memory()
+        db = make_landscape_db()
         # Create a recorder WITH a payload store so the row gets a ref
         mock_store = MagicMock()
         mock_store.store.return_value = "abc123"
@@ -675,8 +648,8 @@ class TestGetAllTokensForRun:
         assert tokens == []
 
     def test_scoped_to_run(self):
-        db = LandscapeDB.in_memory()
-        recorder = LandscapeRecorder(db)
+        db = make_landscape_db()
+        recorder = make_recorder(db)
         recorder.begin_run(config={}, canonical_version="v1", run_id="run-a")
         recorder.register_node(
             run_id="run-a",
@@ -735,8 +708,8 @@ class TestGetAllNodeStatesForRun:
         assert states == []
 
     def test_scoped_to_run(self):
-        db = LandscapeDB.in_memory()
-        recorder = LandscapeRecorder(db)
+        db = make_landscape_db()
+        recorder = make_recorder(db)
 
         recorder.begin_run(config={}, canonical_version="v1", run_id="run-a")
         recorder.register_node(
@@ -1018,36 +991,10 @@ class TestRoutingEventsOrderedByExecution:
         is the *reverse* of execution order (step=0/att=0, step=0/att=1, step=1/att=0).
         If the query still sorts by state_id, the test will fail.
         """
-        db = LandscapeDB.in_memory()
-        recorder = LandscapeRecorder(db)
-        recorder.begin_run(config={}, canonical_version="v1", run_id="run-1")
-        recorder.register_node(
-            run_id="run-1",
-            plugin_name="csv",
-            node_type=NodeType.SOURCE,
-            plugin_version="1.0",
-            config={},
-            node_id="source-0",
-            schema_config=_DYNAMIC_SCHEMA,
-        )
-        recorder.register_node(
-            run_id="run-1",
-            plugin_name="t1",
-            node_type=NodeType.TRANSFORM,
-            plugin_version="1.0",
-            config={},
-            node_id="transform-1",
-            schema_config=_DYNAMIC_SCHEMA,
-        )
-        recorder.register_node(
-            run_id="run-1",
-            plugin_name="t2",
-            node_type=NodeType.TRANSFORM,
-            plugin_version="1.0",
-            config={},
-            node_id="transform-2",
-            schema_config=_DYNAMIC_SCHEMA,
-        )
+        setup = make_recorder_with_run(run_id="run-1", source_node_id="source-0", source_plugin_name="csv")
+        recorder = setup.recorder
+        register_test_node(recorder, "run-1", "transform-1", plugin_name="t1")
+        register_test_node(recorder, "run-1", "transform-2", plugin_name="t2")
         recorder.register_edge("run-1", "source-0", "transform-1", "continue", RoutingMode.MOVE, edge_id="edge-1")
         recorder.register_edge("run-1", "transform-1", "transform-2", "continue", RoutingMode.MOVE, edge_id="edge-2")
         recorder.create_row("run-1", "source-0", 0, {"x": 1}, row_id="row-1")
@@ -1100,36 +1047,10 @@ class TestCallsOrderedByExecution:
 
     def _setup_three_states(self):
         """Create 3 node states with state_ids that sort opposite to execution order."""
-        db = LandscapeDB.in_memory()
-        recorder = LandscapeRecorder(db)
-        recorder.begin_run(config={}, canonical_version="v1", run_id="run-1")
-        recorder.register_node(
-            run_id="run-1",
-            plugin_name="csv",
-            node_type=NodeType.SOURCE,
-            plugin_version="1.0",
-            config={},
-            node_id="source-0",
-            schema_config=_DYNAMIC_SCHEMA,
-        )
-        recorder.register_node(
-            run_id="run-1",
-            plugin_name="t1",
-            node_type=NodeType.TRANSFORM,
-            plugin_version="1.0",
-            config={},
-            node_id="transform-1",
-            schema_config=_DYNAMIC_SCHEMA,
-        )
-        recorder.register_node(
-            run_id="run-1",
-            plugin_name="t2",
-            node_type=NodeType.TRANSFORM,
-            plugin_version="1.0",
-            config={},
-            node_id="transform-2",
-            schema_config=_DYNAMIC_SCHEMA,
-        )
+        setup = make_recorder_with_run(run_id="run-1", source_node_id="source-0", source_plugin_name="csv")
+        recorder = setup.recorder
+        register_test_node(recorder, "run-1", "transform-1", plugin_name="t1")
+        register_test_node(recorder, "run-1", "transform-2", plugin_name="t2")
         recorder.register_edge("run-1", "source-0", "transform-1", "continue", RoutingMode.MOVE, edge_id="edge-1")
         recorder.register_edge("run-1", "transform-1", "transform-2", "continue", RoutingMode.MOVE, edge_id="edge-2")
         recorder.create_row("run-1", "source-0", 0, {"x": 1}, row_id="row-1")
@@ -1313,7 +1234,9 @@ def _make_repo(
 
     Returns (db, repo, recorder) — recorder is for graph setup only.
     """
-    db = LandscapeDB.in_memory()
+    setup = make_recorder_with_run(run_id=run_id, source_node_id="source-0", source_plugin_name="csv")
+    db, recorder = setup.db, setup.recorder
+    register_test_node(recorder, run_id, "transform-1", plugin_name="transform")
     ops = DatabaseOps(db)
     repo = QueryRepository(
         ops,
@@ -1325,26 +1248,6 @@ def _make_repo(
         call_loader=CallLoader(),
         token_outcome_loader=TokenOutcomeLoader(),
         payload_store=payload_store,
-    )
-    recorder = LandscapeRecorder(db)
-    recorder.begin_run(config={}, canonical_version="v1", run_id=run_id)
-    recorder.register_node(
-        run_id=run_id,
-        plugin_name="csv",
-        node_type=NodeType.SOURCE,
-        plugin_version="1.0",
-        config={},
-        node_id="source-0",
-        schema_config=_DYNAMIC_SCHEMA,
-    )
-    recorder.register_node(
-        run_id=run_id,
-        plugin_name="transform",
-        node_type=NodeType.TRANSFORM,
-        plugin_version="1.0",
-        config={},
-        node_id="transform-1",
-        schema_config=_DYNAMIC_SCHEMA,
     )
     return db, repo, recorder
 
@@ -1364,7 +1267,7 @@ class TestDirectQueryRepositoryConstruction:
         mock_store = MagicMock()
         mock_store.store.return_value = "ref-hash"
         # Create recorder WITH payload store so create_row sets source_data_ref
-        db = LandscapeDB.in_memory()
+        db = make_landscape_db()
         recorder = LandscapeRecorder(db, payload_store=mock_store)
         recorder.begin_run(config={}, canonical_version="v1", run_id="run-1")
         recorder.register_node(
@@ -1400,7 +1303,7 @@ class TestDirectQueryRepositoryConstruction:
         mock_store.store.return_value = "ref-hash"
         payload = json.dumps({"key": "value"}).encode("utf-8")
         mock_store.retrieve.return_value = payload
-        db = LandscapeDB.in_memory()
+        db = make_landscape_db()
         recorder = LandscapeRecorder(db, payload_store=mock_store)
         recorder.begin_run(config={}, canonical_version="v1", run_id="run-1")
         recorder.register_node(
@@ -1491,7 +1394,7 @@ class TestGetRowDataErrorHandling:
         and the QueryRepository (so retrieval goes through the mock).
         """
         mock_store.store.return_value = "ref-hash"
-        db = LandscapeDB.in_memory()
+        db = make_landscape_db()
         # Recorder WITH payload store — so create_row sets source_data_ref
         recorder = LandscapeRecorder(db, payload_store=mock_store)
         recorder.begin_run(config={}, canonical_version="v1", run_id="run-1")
@@ -1581,7 +1484,7 @@ class TestExplainRowErrorHandling:
     def _make_repo_with_row(self, mock_store: MagicMock) -> QueryRepository:
         """Create a repo+row where the row has a source_data_ref."""
         mock_store.store.return_value = "ref-hash"
-        db = LandscapeDB.in_memory()
+        db = make_landscape_db()
         recorder = LandscapeRecorder(db, payload_store=mock_store)
         recorder.begin_run(config={}, canonical_version="v1", run_id="run-1")
         recorder.register_node(
@@ -1693,8 +1596,8 @@ class TestGetAllTokenOutcomesForRun:
 
     def test_run_isolation(self):
         """Outcomes from other runs must not leak."""
-        db = LandscapeDB.in_memory()
-        recorder = LandscapeRecorder(db)
+        db = make_landscape_db()
+        recorder = make_recorder(db)
 
         recorder.begin_run(config={}, canonical_version="v1", run_id="run-a")
         recorder.register_node(

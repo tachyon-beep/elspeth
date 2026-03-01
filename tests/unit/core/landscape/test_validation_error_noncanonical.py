@@ -12,16 +12,16 @@ import pytest
 
 from elspeth.contracts import NodeType
 from elspeth.contracts.schema import SchemaConfig
-from elspeth.core.landscape.database import LandscapeDB
 from elspeth.core.landscape.recorder import LandscapeRecorder
 from tests.fixtures.factories import make_context
+from tests.fixtures.landscape import make_landscape_db, make_recorder
 
 
 @pytest.fixture
 def recorder() -> LandscapeRecorder:
     """Create in-memory recorder with a registered run."""
-    db = LandscapeDB("sqlite:///:memory:")
-    rec = LandscapeRecorder(db)
+    db = make_landscape_db()
+    rec = make_recorder(db)
 
     # Create a run for foreign key constraint
     rec.begin_run(

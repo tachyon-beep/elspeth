@@ -17,9 +17,9 @@ from elspeth.contracts.results import SourceRow
 from elspeth.core.checkpoint import CheckpointManager
 from elspeth.core.dag import ExecutionGraph
 from elspeth.core.landscape.database import LandscapeDB
-from elspeth.core.landscape.recorder import LandscapeRecorder
 from elspeth.core.payload_store import FilesystemPayloadStore
 from elspeth.plugins.infrastructure.base import BaseSource
+from tests.fixtures.landscape import make_recorder
 
 
 class SourceWithoutSchema(BaseSource):
@@ -58,7 +58,7 @@ class TestResumeSchemaRequired:
         db = LandscapeDB(f"sqlite:///{tmp_path}/test.db")
         payload_store = FilesystemPayloadStore(tmp_path / "payloads")
         checkpoint_mgr = CheckpointManager(db)
-        recorder = LandscapeRecorder(db)
+        recorder = make_recorder(db)
 
         return {
             "db": db,

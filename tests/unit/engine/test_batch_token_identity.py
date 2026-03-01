@@ -22,14 +22,15 @@ from elspeth.contracts.plugin_context import PluginContext
 from elspeth.contracts.schema_contract import PipelineRow, SchemaContract
 from elspeth.contracts.types import NodeID
 from elspeth.core.config import AggregationSettings, TriggerConfig
-from elspeth.core.landscape import LandscapeDB, LandscapeRecorder
+from elspeth.core.landscape.recorder import LandscapeRecorder
 from elspeth.engine.processor import DAGTraversalContext, RowProcessor
 from elspeth.engine.spans import SpanFactory
 from elspeth.plugins.infrastructure.base import BaseTransform
 from elspeth.plugins.infrastructure.results import TransformResult
 from elspeth.testing import make_field, make_pipeline_row
 from tests.fixtures.factories import make_context
-from tests.unit.engine.conftest import DYNAMIC_SCHEMA, _TestSchema
+from tests.fixtures.landscape import make_recorder_with_run, register_test_node
+from tests.unit.engine.conftest import _TestSchema
 
 # ---------------------------------------------------------------------------
 # Audit assertion helpers (inlined from tests/helpers/audit_assertions.py)
@@ -137,29 +138,13 @@ class TestBatchTokenIdentity:
         The bug was that the triggering token (last in batch) got
         COMPLETED instead of CONSUMED_IN_BATCH.
         """
-        db = LandscapeDB.in_memory()
-        recorder = LandscapeRecorder(db)
-        run = recorder.begin_run(config={}, canonical_version="v1")
-
-        source_node = recorder.register_node(
-            run_id=run.run_id,
-            plugin_name="source",
-            node_type=NodeType.SOURCE,
-            plugin_version="1.0",
-            config={},
-            schema_config=DYNAMIC_SCHEMA,
-        )
-        agg_node = recorder.register_node(
-            run_id=run.run_id,
-            plugin_name="summer",
-            node_type=NodeType.AGGREGATION,
-            plugin_version="1.0",
-            config={},
-            schema_config=DYNAMIC_SCHEMA,
-        )
+        setup = make_recorder_with_run()
+        recorder, run_id = setup.recorder, setup.run_id
+        source_node_id = setup.source_node_id
+        agg_node_id = register_test_node(recorder, run_id, "agg", node_type=NodeType.AGGREGATION, plugin_name="summer")
 
         aggregation_settings = {
-            NodeID(agg_node.node_id): AggregationSettings(
+            NodeID(agg_node_id): AggregationSettings(
                 name="batch_sum",
                 plugin="summer",
                 input="default",
@@ -169,17 +154,17 @@ class TestBatchTokenIdentity:
             ),
         }
 
-        transform = SumTransform(agg_node.node_id)
+        transform = SumTransform(agg_node_id)
         processor = RowProcessor(
             recorder=recorder,
             span_factory=SpanFactory(),
-            run_id=run.run_id,
-            source_node_id=NodeID(source_node.node_id),
+            run_id=run_id,
+            source_node_id=NodeID(source_node_id),
             source_on_success="default",
-            traversal=_single_node_traversal(NodeID(agg_node.node_id), transform),
+            traversal=_single_node_traversal(NodeID(agg_node_id), transform),
             aggregation_settings=aggregation_settings,
         )
-        ctx = make_context(run_id=run.run_id, landscape=recorder)
+        ctx = make_context(run_id=run_id, landscape=recorder)
 
         # Process 3 rows to trigger batch flush
         all_results = []
@@ -207,12 +192,12 @@ class TestBatchTokenIdentity:
         from elspeth.core.landscape.schema import batches_table
 
         with recorder._db.connection() as conn:
-            batch = conn.execute(select(batches_table).where(batches_table.c.run_id == run.run_id)).fetchone()
+            batch = conn.execute(select(batches_table).where(batches_table.c.run_id == run_id)).fetchone()
             assert batch is not None, "Batch record should exist"
             batch_id = batch.batch_id
 
         # CRITICAL ASSERTION: All batch members must be CONSUMED_IN_BATCH
-        _assert_all_batch_members_consumed(recorder, run.run_id, batch_id)
+        _assert_all_batch_members_consumed(recorder, run_id, batch_id)
 
         # Get output token
         completed = [r for r in all_results if r.outcome == RowOutcome.COMPLETED]
@@ -232,29 +217,13 @@ class TestBatchTokenIdentity:
         This specifically tests the bug scenario: the 2nd row triggers
         the batch flush. Its token_id must NOT appear in the output.
         """
-        db = LandscapeDB.in_memory()
-        recorder = LandscapeRecorder(db)
-        run = recorder.begin_run(config={}, canonical_version="v1")
-
-        source_node = recorder.register_node(
-            run_id=run.run_id,
-            plugin_name="source",
-            node_type=NodeType.SOURCE,
-            plugin_version="1.0",
-            config={},
-            schema_config=DYNAMIC_SCHEMA,
-        )
-        agg_node = recorder.register_node(
-            run_id=run.run_id,
-            plugin_name="summer",
-            node_type=NodeType.AGGREGATION,
-            plugin_version="1.0",
-            config={},
-            schema_config=DYNAMIC_SCHEMA,
-        )
+        setup = make_recorder_with_run()
+        recorder, run_id = setup.recorder, setup.run_id
+        source_node_id = setup.source_node_id
+        agg_node_id = register_test_node(recorder, run_id, "agg", node_type=NodeType.AGGREGATION, plugin_name="summer")
 
         aggregation_settings = {
-            NodeID(agg_node.node_id): AggregationSettings(
+            NodeID(agg_node_id): AggregationSettings(
                 name="batch_sum",
                 plugin="summer",
                 input="default",
@@ -264,17 +233,17 @@ class TestBatchTokenIdentity:
             ),
         }
 
-        transform = SumTransform(agg_node.node_id)
+        transform = SumTransform(agg_node_id)
         processor = RowProcessor(
             recorder=recorder,
             span_factory=SpanFactory(),
-            run_id=run.run_id,
-            source_node_id=NodeID(source_node.node_id),
+            run_id=run_id,
+            source_node_id=NodeID(source_node_id),
             source_on_success="default",
-            traversal=_single_node_traversal(NodeID(agg_node.node_id), transform),
+            traversal=_single_node_traversal(NodeID(agg_node_id), transform),
             aggregation_settings=aggregation_settings,
         )
-        ctx = make_context(run_id=run.run_id, landscape=recorder)
+        ctx = make_context(run_id=run_id, landscape=recorder)
 
         # Process row 0 - buffered, returns BUFFERED (T26: non-terminal at buffer time)
         pipeline_row_0 = make_pipeline_row({"value": 10})
@@ -327,29 +296,13 @@ class TestBatchTokenIdentity:
         This verifies that the batch membership is correctly recorded
         in the audit trail, which is essential for explaining lineage.
         """
-        db = LandscapeDB.in_memory()
-        recorder = LandscapeRecorder(db)
-        run = recorder.begin_run(config={}, canonical_version="v1")
-
-        source_node = recorder.register_node(
-            run_id=run.run_id,
-            plugin_name="source",
-            node_type=NodeType.SOURCE,
-            plugin_version="1.0",
-            config={},
-            schema_config=DYNAMIC_SCHEMA,
-        )
-        agg_node = recorder.register_node(
-            run_id=run.run_id,
-            plugin_name="summer",
-            node_type=NodeType.AGGREGATION,
-            plugin_version="1.0",
-            config={},
-            schema_config=DYNAMIC_SCHEMA,
-        )
+        setup = make_recorder_with_run()
+        recorder, run_id = setup.recorder, setup.run_id
+        source_node_id = setup.source_node_id
+        agg_node_id = register_test_node(recorder, run_id, "agg", node_type=NodeType.AGGREGATION, plugin_name="summer")
 
         aggregation_settings = {
-            NodeID(agg_node.node_id): AggregationSettings(
+            NodeID(agg_node_id): AggregationSettings(
                 name="batch_sum",
                 plugin="summer",
                 input="default",
@@ -359,17 +312,17 @@ class TestBatchTokenIdentity:
             ),
         }
 
-        transform = SumTransform(agg_node.node_id)
+        transform = SumTransform(agg_node_id)
         processor = RowProcessor(
             recorder=recorder,
             span_factory=SpanFactory(),
-            run_id=run.run_id,
-            source_node_id=NodeID(source_node.node_id),
+            run_id=run_id,
+            source_node_id=NodeID(source_node_id),
             source_on_success="default",
-            traversal=_single_node_traversal(NodeID(agg_node.node_id), transform),
+            traversal=_single_node_traversal(NodeID(agg_node_id), transform),
             aggregation_settings=aggregation_settings,
         )
-        ctx = make_context(run_id=run.run_id, landscape=recorder)
+        ctx = make_context(run_id=run_id, landscape=recorder)
 
         # Process 3 rows to trigger batch flush
         all_results = []
@@ -401,7 +354,7 @@ class TestBatchTokenIdentity:
 
         with recorder._db.connection() as conn:
             # Find the batch
-            batch = conn.execute(select(batches_table).where(batches_table.c.run_id == run.run_id)).fetchone()
+            batch = conn.execute(select(batches_table).where(batches_table.c.run_id == run_id)).fetchone()
             assert batch is not None, "Batch should exist in audit trail"
 
             # Check batch_members contains all input tokens

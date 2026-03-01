@@ -17,11 +17,11 @@ from elspeth.contracts.config.runtime import RuntimeRateLimitConfig
 from elspeth.contracts.plugin_context import PluginContext
 from elspeth.contracts.schema_contract import PipelineRow
 from elspeth.core.config import RateLimitSettings
-from elspeth.core.landscape import LandscapeDB
 from elspeth.core.rate_limit import RateLimitRegistry
 from elspeth.engine import Orchestrator
 from elspeth.plugins.infrastructure.base import BaseTransform
 from elspeth.testing import make_pipeline_row
+from tests.fixtures.landscape import make_landscape_db
 
 
 class RateLimitAwareTransform(BaseTransform):
@@ -56,7 +56,7 @@ class TestRateLimitRegistryInOrchestrator:
 
     def test_orchestrator_accepts_rate_limit_registry(self) -> None:
         """Orchestrator constructor accepts rate_limit_registry parameter."""
-        db = LandscapeDB.in_memory()
+        db = make_landscape_db()
         settings = RateLimitSettings(enabled=True, default_requests_per_minute=60)
         config = RuntimeRateLimitConfig.from_settings(settings)
         registry = RateLimitRegistry(config)
@@ -71,7 +71,7 @@ class TestRateLimitRegistryInOrchestrator:
 
     def test_orchestrator_accepts_none_registry(self) -> None:
         """Orchestrator works without rate limit registry."""
-        db = LandscapeDB.in_memory()
+        db = make_landscape_db()
 
         try:
             orchestrator = Orchestrator(db, rate_limit_registry=None)

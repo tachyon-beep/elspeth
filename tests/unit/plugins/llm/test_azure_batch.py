@@ -13,11 +13,10 @@ from elspeth.contracts import BatchPendingError, Determinism, NodeType
 from elspeth.contracts.batch_checkpoint import BatchCheckpointState, RowMappingEntry
 from elspeth.contracts.plugin_context import PluginContext
 from elspeth.contracts.schema import SchemaConfig
-from elspeth.core.landscape.database import LandscapeDB
-from elspeth.core.landscape.recorder import LandscapeRecorder
 from elspeth.plugins.infrastructure.config_base import PluginConfigError
 from elspeth.plugins.transforms.llm.azure_batch import AzureBatchConfig, AzureBatchLLMTransform
 from elspeth.testing import make_pipeline_row
+from tests.fixtures.landscape import make_landscape_db, make_recorder
 
 # Common schema config for dynamic field handling
 DYNAMIC_SCHEMA = {"mode": "observed"}
@@ -29,8 +28,8 @@ def _make_batch_ctx(*, run_id: str = "test-run") -> PluginContext:
     Sets up: run → source node → transform node → row → token → node_state,
     satisfying all FK constraints for record_call().
     """
-    db = LandscapeDB.in_memory()
-    recorder = LandscapeRecorder(db)
+    db = make_landscape_db()
+    recorder = make_recorder(db)
     run = recorder.begin_run(config={}, canonical_version="test", run_id=run_id)
     recorder.register_node(
         run_id=run.run_id,

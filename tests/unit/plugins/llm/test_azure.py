@@ -9,8 +9,6 @@ import pytest
 from elspeth.contracts import Determinism, TransformResult
 from elspeth.contracts.identity import TokenInfo
 from elspeth.contracts.plugin_context import PluginContext
-from elspeth.core.landscape.database import LandscapeDB
-from elspeth.core.landscape.recorder import LandscapeRecorder
 from elspeth.engine.batch_adapter import ExceptionResult
 from elspeth.plugins.infrastructure.batching.ports import CollectorOutputPort
 from elspeth.plugins.infrastructure.clients.llm import RateLimitError
@@ -19,6 +17,7 @@ from elspeth.plugins.transforms.llm.providers.azure import AzureOpenAIConfig
 from elspeth.plugins.transforms.llm.transform import LLMTransform
 from elspeth.testing import make_pipeline_row
 from tests.fixtures.factories import make_context
+from tests.fixtures.landscape import make_recorder
 
 from .conftest import chaosllm_azure_openai_client
 
@@ -238,8 +237,7 @@ class TestLLMTransformAzureInit:
     def test_process_raises_not_implemented(self) -> None:
         """process() raises NotImplementedError directing to accept()."""
         transform = LLMTransform(_make_azure_config(template="{{ row.text }}"))
-        db = LandscapeDB.in_memory()
-        recorder = LandscapeRecorder(db)
+        recorder = make_recorder()
         ctx = make_context(landscape=recorder)
 
         with pytest.raises(NotImplementedError, match="row-level pipelining"):
@@ -584,8 +582,7 @@ class TestLLMTransformAzurePipelining:
         transform = LLMTransform(_make_azure_config(template="{{ row.text }}"))
 
         token = make_token("row-1")
-        db = LandscapeDB.in_memory()
-        recorder = LandscapeRecorder(db)
+        recorder = make_recorder()
         ctx = make_context(
             landscape=recorder,
             state_id="test-state-id",

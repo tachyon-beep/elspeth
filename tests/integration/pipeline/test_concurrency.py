@@ -13,11 +13,11 @@ STATUS: IMPLEMENTED
 from elspeth.contracts.config import RuntimeConcurrencyConfig
 from elspeth.contracts.types import NodeID
 from elspeth.core.config import ConcurrencySettings, SourceSettings
-from elspeth.core.landscape import LandscapeDB, LandscapeRecorder
 from elspeth.engine.executors import TransformExecutor
 from elspeth.engine.orchestrator import Orchestrator
 from elspeth.engine.processor import DAGTraversalContext, RowProcessor
 from elspeth.engine.spans import SpanFactory
+from tests.fixtures.landscape import make_landscape_db, make_recorder
 from tests.fixtures.pipeline import build_linear_pipeline
 
 
@@ -52,7 +52,7 @@ class TestConcurrencyConfigInOrchestrator:
 
     def test_orchestrator_accepts_concurrency_config(self) -> None:
         """Orchestrator constructor accepts concurrency_config parameter."""
-        db = LandscapeDB.in_memory()
+        db = make_landscape_db()
         config = RuntimeConcurrencyConfig(max_workers=8)
 
         try:
@@ -65,7 +65,7 @@ class TestConcurrencyConfigInOrchestrator:
 
     def test_orchestrator_accepts_none_config(self) -> None:
         """Orchestrator works without concurrency config."""
-        db = LandscapeDB.in_memory()
+        db = make_landscape_db()
 
         try:
             orchestrator = Orchestrator(db, concurrency_config=None)
@@ -86,8 +86,8 @@ class TestConcurrencyConfigInTransformExecutor:
 
     def test_executor_accepts_max_workers(self) -> None:
         """TransformExecutor constructor accepts max_workers parameter."""
-        db = LandscapeDB.in_memory()
-        recorder = LandscapeRecorder(db)
+        db = make_landscape_db()
+        recorder = make_recorder(db)
         span_factory = SpanFactory()
 
         try:
@@ -98,8 +98,8 @@ class TestConcurrencyConfigInTransformExecutor:
 
     def test_executor_without_max_workers(self) -> None:
         """TransformExecutor works without max_workers (no cap)."""
-        db = LandscapeDB.in_memory()
-        recorder = LandscapeRecorder(db)
+        db = make_landscape_db()
+        recorder = make_recorder(db)
         span_factory = SpanFactory()
 
         try:
@@ -114,8 +114,8 @@ class TestConcurrencyConfigInRowProcessor:
 
     def test_processor_accepts_max_workers(self) -> None:
         """RowProcessor constructor accepts and forwards max_workers."""
-        db = LandscapeDB.in_memory()
-        recorder = LandscapeRecorder(db)
+        db = make_landscape_db()
+        recorder = make_recorder(db)
         span_factory = SpanFactory()
         source_node_id, source_on_success, traversal = _build_traversal_from_graph()
 
@@ -136,8 +136,8 @@ class TestConcurrencyConfigInRowProcessor:
 
     def test_processor_without_max_workers(self) -> None:
         """RowProcessor works without max_workers."""
-        db = LandscapeDB.in_memory()
-        recorder = LandscapeRecorder(db)
+        db = make_landscape_db()
+        recorder = make_recorder(db)
         span_factory = SpanFactory()
         source_node_id, source_on_success, traversal = _build_traversal_from_graph()
 
@@ -186,7 +186,7 @@ class TestConcurrencyConfigProtocolCompliance:
         assert isinstance(custom_config, RuntimeConcurrencyProtocol)
 
         # Verify Orchestrator accepts it
-        db = LandscapeDB.in_memory()
+        db = make_landscape_db()
         try:
             orchestrator = Orchestrator(db, concurrency_config=custom_config)  # type: ignore[arg-type]
             assert orchestrator._concurrency_config is not None
@@ -223,7 +223,7 @@ class TestOrchestratorThreadsMaxWorkersThroughRowProcessor:
             as_source,
         )
 
-        db = LandscapeDB.in_memory()
+        db = make_landscape_db()
         concurrency_config = RuntimeConcurrencyConfig(max_workers=5)
         orchestrator = Orchestrator(db, concurrency_config=concurrency_config)
 

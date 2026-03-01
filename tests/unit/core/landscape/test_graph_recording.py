@@ -9,13 +9,14 @@ from elspeth.contracts import Determinism, NodeType, RoutingMode
 from elspeth.contracts.schema import SchemaConfig
 from elspeth.contracts.schema_contract import FieldContract, SchemaContract
 from elspeth.core.landscape import LandscapeDB, LandscapeRecorder
+from tests.fixtures.landscape import make_landscape_db, make_recorder
 
 _DYNAMIC_SCHEMA = SchemaConfig.from_dict({"mode": "observed"})
 
 
 def _setup(*, run_id: str = "run-1") -> tuple[LandscapeDB, LandscapeRecorder]:
-    db = LandscapeDB.in_memory()
-    recorder = LandscapeRecorder(db)
+    db = make_landscape_db()
+    recorder = make_recorder(db)
     recorder.begin_run(config={}, canonical_version="v1", run_id=run_id)
     return db, recorder
 
@@ -670,8 +671,8 @@ class TestGetNode:
         assert result is None
 
     def test_same_node_id_in_different_runs(self) -> None:
-        db = LandscapeDB.in_memory()
-        recorder = LandscapeRecorder(db)
+        db = make_landscape_db()
+        recorder = make_recorder(db)
         recorder.begin_run(config={}, canonical_version="v1", run_id="run-A")
         recorder.begin_run(config={}, canonical_version="v1", run_id="run-B")
 
@@ -832,8 +833,8 @@ class TestGetNodes:
         assert nodes == []
 
     def test_does_not_return_nodes_from_other_runs(self) -> None:
-        db = LandscapeDB.in_memory()
-        recorder = LandscapeRecorder(db)
+        db = make_landscape_db()
+        recorder = make_recorder(db)
         recorder.begin_run(config={}, canonical_version="v1", run_id="run-A")
         recorder.begin_run(config={}, canonical_version="v1", run_id="run-B")
 
@@ -1018,8 +1019,8 @@ class TestGetEdges:
         assert edges == []
 
     def test_does_not_return_edges_from_other_runs(self) -> None:
-        db = LandscapeDB.in_memory()
-        recorder = LandscapeRecorder(db)
+        db = make_landscape_db()
+        recorder = make_recorder(db)
         recorder.begin_run(config={}, canonical_version="v1", run_id="run-A")
         recorder.begin_run(config={}, canonical_version="v1", run_id="run-B")
 

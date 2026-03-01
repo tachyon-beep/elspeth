@@ -23,14 +23,15 @@ from elspeth.contracts import ExportStatus, FieldContract, NodeType, RunStatus, 
 from elspeth.contracts.errors import AuditIntegrityError
 from elspeth.contracts.schema import SchemaConfig
 from elspeth.core.landscape import LandscapeDB, LandscapeRecorder
+from tests.fixtures.landscape import make_landscape_db, make_recorder
 
 _DYNAMIC_SCHEMA = SchemaConfig.from_dict({"mode": "observed"})
 
 
 def _setup(*, run_id: str = "run-1") -> tuple[LandscapeDB, LandscapeRecorder]:
     """Create in-memory DB with a run."""
-    db = LandscapeDB.in_memory()
-    recorder = LandscapeRecorder(db)
+    db = make_landscape_db()
+    recorder = make_recorder(db)
     recorder.begin_run(config={"key": "value"}, canonical_version="v1", run_id=run_id)
     return db, recorder
 
@@ -39,41 +40,41 @@ class TestBeginRun:
     """Tests for begin_run — creates a new run record."""
 
     def test_returns_run_with_id(self) -> None:
-        db = LandscapeDB.in_memory()
-        recorder = LandscapeRecorder(db)
+        db = make_landscape_db()
+        recorder = make_recorder(db)
         run = recorder.begin_run(config={}, canonical_version="v1", run_id="my-run")
         assert run.run_id == "my-run"
 
     def test_generates_id_if_not_provided(self) -> None:
-        db = LandscapeDB.in_memory()
-        recorder = LandscapeRecorder(db)
+        db = make_landscape_db()
+        recorder = make_recorder(db)
         run = recorder.begin_run(config={}, canonical_version="v1")
         assert run.run_id is not None
         assert len(run.run_id) == 32  # UUID hex
 
     def test_stores_config_hash(self) -> None:
-        db = LandscapeDB.in_memory()
-        recorder = LandscapeRecorder(db)
+        db = make_landscape_db()
+        recorder = make_recorder(db)
         run = recorder.begin_run(config={"key": "value"}, canonical_version="v1", run_id="r1")
         assert run.config_hash is not None
         assert len(run.config_hash) > 0
 
     def test_stores_settings_json(self) -> None:
-        db = LandscapeDB.in_memory()
-        recorder = LandscapeRecorder(db)
+        db = make_landscape_db()
+        recorder = make_recorder(db)
         run = recorder.begin_run(config={"key": "value"}, canonical_version="v1", run_id="r1")
         settings = json.loads(run.settings_json)
         assert settings == {"key": "value"}
 
     def test_initial_status_is_running(self) -> None:
-        db = LandscapeDB.in_memory()
-        recorder = LandscapeRecorder(db)
+        db = make_landscape_db()
+        recorder = make_recorder(db)
         run = recorder.begin_run(config={}, canonical_version="v1")
         assert run.status == RunStatus.RUNNING
 
     def test_stores_reproducibility_grade(self) -> None:
-        db = LandscapeDB.in_memory()
-        recorder = LandscapeRecorder(db)
+        db = make_landscape_db()
+        recorder = make_recorder(db)
         run = recorder.begin_run(
             config={},
             canonical_version="v1",
@@ -147,8 +148,8 @@ class TestGetSourceSchema:
     """Tests for get_source_schema — retrieves source schema for resume."""
 
     def test_returns_schema_json(self) -> None:
-        db = LandscapeDB.in_memory()
-        recorder = LandscapeRecorder(db)
+        db = make_landscape_db()
+        recorder = make_recorder(db)
         schema_json = '{"type": "object", "properties": {"id": {"type": "integer"}}}'
         recorder.begin_run(
             config={},
@@ -242,16 +243,16 @@ class TestListRuns:
     """Tests for list_runs — lists runs with optional filter."""
 
     def test_lists_all_runs(self) -> None:
-        db = LandscapeDB.in_memory()
-        recorder = LandscapeRecorder(db)
+        db = make_landscape_db()
+        recorder = make_recorder(db)
         recorder.begin_run(config={}, canonical_version="v1", run_id="r1")
         recorder.begin_run(config={}, canonical_version="v1", run_id="r2")
         runs = recorder.list_runs()
         assert len(runs) == 2
 
     def test_filter_by_status(self) -> None:
-        db = LandscapeDB.in_memory()
-        recorder = LandscapeRecorder(db)
+        db = make_landscape_db()
+        recorder = make_recorder(db)
         recorder.begin_run(config={}, canonical_version="v1", run_id="r1")
         recorder.begin_run(config={}, canonical_version="v1", run_id="r2")
         recorder.complete_run("r1", RunStatus.COMPLETED)

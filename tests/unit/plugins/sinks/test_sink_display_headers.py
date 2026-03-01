@@ -12,9 +12,8 @@ from unittest.mock import MagicMock
 import pytest
 
 from elspeth.contracts.plugin_context import PluginContext
-from elspeth.core.landscape.database import LandscapeDB
-from elspeth.core.landscape.recorder import LandscapeRecorder
 from tests.fixtures.factories import make_context
+from tests.fixtures.landscape import make_recorder
 
 
 class TestCSVSinkHeaders:
@@ -23,8 +22,7 @@ class TestCSVSinkHeaders:
     @pytest.fixture
     def ctx(self) -> PluginContext:
         """Create a minimal plugin context."""
-        db = LandscapeDB.in_memory()
-        recorder = LandscapeRecorder(db)
+        recorder = make_recorder()
         return make_context(landscape=recorder)
 
     def test_explicit_custom_headers(self, tmp_path: Path, ctx: PluginContext) -> None:
@@ -237,8 +235,7 @@ class TestJSONSinkHeaders:
     @pytest.fixture
     def ctx(self) -> PluginContext:
         """Create a minimal plugin context."""
-        db = LandscapeDB.in_memory()
-        recorder = LandscapeRecorder(db)
+        recorder = make_recorder()
         return make_context(landscape=recorder)
 
     def test_explicit_custom_headers_jsonl(self, tmp_path: Path, ctx: PluginContext) -> None:
@@ -403,8 +400,7 @@ class TestCSVCustomHeadersAppendMode:
     @pytest.fixture
     def ctx(self) -> PluginContext:
         """Create a minimal plugin context."""
-        db = LandscapeDB.in_memory()
-        recorder = LandscapeRecorder(db)
+        recorder = make_recorder()
         return make_context(landscape=recorder)
 
     def test_append_with_custom_headers(self, tmp_path: Path, ctx: PluginContext) -> None:
@@ -455,8 +451,7 @@ class TestCSVCustomHeadersSpecialCharacters:
     @pytest.fixture
     def ctx(self) -> PluginContext:
         """Create a minimal plugin context."""
-        db = LandscapeDB.in_memory()
-        recorder = LandscapeRecorder(db)
+        recorder = make_recorder()
         return make_context(landscape=recorder)
 
     def test_header_with_comma(self, tmp_path: Path, ctx: PluginContext) -> None:
@@ -544,8 +539,7 @@ class TestJSONLCustomHeadersAppendMode:
     @pytest.fixture
     def ctx(self) -> PluginContext:
         """Create a minimal plugin context."""
-        db = LandscapeDB.in_memory()
-        recorder = LandscapeRecorder(db)
+        recorder = make_recorder()
         return make_context(landscape=recorder)
 
     def test_append_with_custom_headers(self, tmp_path: Path, ctx: PluginContext) -> None:

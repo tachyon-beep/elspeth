@@ -21,12 +21,9 @@ import pytest
 
 from elspeth.contracts import NodeStateFailed, NodeStateStatus, NodeType
 from elspeth.contracts.errors import CoalesceFailureReason, ExecutionError, TransformErrorReason
-from elspeth.contracts.schema import SchemaConfig
 from elspeth.core.canonical import canonical_json, stable_hash
 from elspeth.core.landscape import LandscapeDB, LandscapeRecorder
-
-_DYNAMIC_SCHEMA = SchemaConfig.from_dict({"mode": "observed"})
-
+from tests.fixtures.landscape import make_recorder_with_run, register_test_node
 
 # ---------------------------------------------------------------------------
 # Helper: replicate the dispatch from _node_state_recording.py:199
@@ -50,27 +47,9 @@ def _setup_with_token(
     *,
     run_id: str = "run-1",
 ) -> tuple[LandscapeDB, LandscapeRecorder, str, str]:
-    db = LandscapeDB.in_memory()
-    recorder = LandscapeRecorder(db)
-    recorder.begin_run(config={}, canonical_version="v1", run_id=run_id)
-    recorder.register_node(
-        run_id=run_id,
-        plugin_name="csv",
-        node_type=NodeType.SOURCE,
-        plugin_version="1.0",
-        config={},
-        node_id="source-0",
-        schema_config=_DYNAMIC_SCHEMA,
-    )
-    recorder.register_node(
-        run_id=run_id,
-        plugin_name="transform",
-        node_type=NodeType.TRANSFORM,
-        plugin_version="1.0",
-        config={},
-        node_id="transform-1",
-        schema_config=_DYNAMIC_SCHEMA,
-    )
+    setup = make_recorder_with_run(run_id=run_id, source_node_id="source-0")
+    db, recorder, run_id = setup.db, setup.recorder, setup.run_id
+    register_test_node(recorder, run_id, "transform-1", node_type=NodeType.TRANSFORM, plugin_name="transform")
     row = recorder.create_row(run_id, "source-0", 0, {"name": "test"}, row_id="row-1")
     token = recorder.create_token("row-1", token_id="tok-1")
     return db, recorder, row.row_id, token.token_id

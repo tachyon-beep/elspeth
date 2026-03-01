@@ -5,10 +5,9 @@ from collections.abc import Iterator
 from typing import Any, ClassVar
 
 from elspeth.contracts import PipelineRow, SourceRow
-from elspeth.core.landscape.database import LandscapeDB
-from elspeth.core.landscape.recorder import LandscapeRecorder
 from elspeth.testing import make_pipeline_row
 from tests.fixtures.factories import make_context
+from tests.fixtures.landscape import make_recorder
 
 
 class TestSourceProtocol:
@@ -69,8 +68,7 @@ class TestSourceProtocol:
             SourceProtocol,
         ), "Source must conform to SourceProtocol"
 
-        db = LandscapeDB.in_memory()
-        recorder = LandscapeRecorder(db)
+        recorder = make_recorder()
         ctx = make_context(landscape=recorder)  # type: ignore[unreachable]
 
         source_rows = list(source.load(ctx))
@@ -203,8 +201,7 @@ class TestTransformProtocol:
             TransformProtocol,
         ), "Must conform to TransformProtocol"
 
-        db = LandscapeDB.in_memory()
-        recorder = LandscapeRecorder(db)
+        recorder = make_recorder()
         ctx = make_context(landscape=recorder)  # type: ignore[unreachable]
 
         result = transform.process(make_pipeline_row({"value": 21}), ctx)
@@ -237,8 +234,7 @@ class TestTransformBatchSupport:
                 return TransformResult.success(make_pipeline_row({"processed": row["value"]}), success_reason={"action": "test"})
 
         transform = SingleTransform({})
-        db = LandscapeDB.in_memory()
-        recorder = LandscapeRecorder(db)
+        recorder = make_recorder()
         ctx = make_context(landscape=recorder)
         result = transform.process(make_pipeline_row({"value": 1}), ctx)
         assert result.row is not None
@@ -273,8 +269,7 @@ class TestTransformBatchSupport:
                 return TransformResult.success(make_pipeline_row({"value": row["value"]}), success_reason={"action": "test"})
 
         transform = BatchTransform({})
-        db = LandscapeDB.in_memory()
-        recorder = LandscapeRecorder(db)
+        recorder = make_recorder()
         ctx = make_context(landscape=recorder)
 
         # Batch mode
@@ -470,8 +465,7 @@ class TestSinkProtocol:
         sink = BatchMemorySink({})
         assert isinstance(sink, SinkProtocol)  # type: ignore[unreachable]
 
-        db = LandscapeDB.in_memory()
-        recorder = LandscapeRecorder(db)
+        recorder = make_recorder()
         ctx = make_context(landscape=recorder)  # type: ignore[unreachable]
         artifact = sink.write([{"value": 1}, {"value": 2}], ctx)
 
@@ -541,8 +535,7 @@ class TestSinkProtocol:
         # IMPORTANT: Verify protocol conformance at runtime
         assert isinstance(sink, SinkProtocol), "Must conform to SinkProtocol"  # type: ignore[unreachable]
 
-        db = LandscapeDB.in_memory()
-        recorder = LandscapeRecorder(db)
+        recorder = make_recorder()
         ctx = make_context(landscape=recorder)  # type: ignore[unreachable]
 
         # Batch write

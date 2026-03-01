@@ -217,16 +217,14 @@ class TestExplainPassphraseResolution:
     def test_explain_exits_on_malformed_settings_yaml(self, tmp_path: Path) -> None:
         """explain --settings with malformed YAML exits with code 1."""
         from elspeth.cli import app
+        from elspeth.contracts import RunStatus
         from elspeth.core.landscape import LandscapeDB
+        from tests.fixtures.landscape import make_recorder
 
         # Create a valid Landscape database with one run
         db_path = tmp_path / "audit.db"
         db = LandscapeDB.from_url(f"sqlite:///{db_path}")
-        from elspeth.core.landscape.recorder import LandscapeRecorder
-
-        recorder = LandscapeRecorder(db)
-        from elspeth.contracts import RunStatus
-
+        recorder = make_recorder(db)
         recorder.begin_run(config={}, canonical_version="v1", run_id="run-1")
         recorder.complete_run("run-1", RunStatus.COMPLETED)
         db.close()
@@ -261,16 +259,14 @@ class TestExplainPassphraseResolution:
     def test_explain_succeeds_without_settings(self, tmp_path: Path) -> None:
         """explain --database without --settings should work (passphrase=None)."""
         from elspeth.cli import app
+        from elspeth.contracts import RunStatus
         from elspeth.core.landscape import LandscapeDB
+        from tests.fixtures.landscape import make_recorder
 
         # Create a valid Landscape database with one run
         db_path = tmp_path / "audit.db"
         db = LandscapeDB.from_url(f"sqlite:///{db_path}")
-        from elspeth.core.landscape.recorder import LandscapeRecorder
-
-        recorder = LandscapeRecorder(db)
-        from elspeth.contracts import RunStatus
-
+        recorder = make_recorder(db)
         recorder.begin_run(config={}, canonical_version="v1", run_id="run-1")
         recorder.complete_run("run-1", RunStatus.COMPLETED)
         db.close()

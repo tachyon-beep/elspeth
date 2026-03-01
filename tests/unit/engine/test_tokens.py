@@ -5,11 +5,11 @@ from typing import Any
 
 import pytest
 
-from elspeth.contracts import NodeType, SourceRow
+from elspeth.contracts import SourceRow
 from elspeth.contracts.schema_contract import PipelineRow, SchemaContract
 from elspeth.contracts.types import NodeID
 from elspeth.testing import make_field
-from tests.unit.engine.conftest import DYNAMIC_SCHEMA
+from tests.fixtures.landscape import make_recorder_with_run
 from tests.unit.engine.conftest import make_test_step_resolver as _make_step_resolver
 
 
@@ -36,48 +36,27 @@ def _make_pipeline_row(data: dict[str, Any], contract: SchemaContract | None = N
 
 def _make_manager_context() -> tuple[Any, Any, str, str]:
     """Create TokenManager + recorder context for unit tests."""
-    from elspeth.core.landscape import LandscapeDB, LandscapeRecorder
     from elspeth.engine.tokens import TokenManager
 
-    db = LandscapeDB.in_memory()
-    recorder = LandscapeRecorder(db)
-    run = recorder.begin_run(config={}, canonical_version="v1")
-    source = recorder.register_node(
-        run_id=run.run_id,
-        plugin_name="source",
-        node_type=NodeType.SOURCE,
-        plugin_version="1.0",
-        config={},
-        schema_config=DYNAMIC_SCHEMA,
-    )
-    manager = TokenManager(recorder, step_resolver=_make_step_resolver())
-    return manager, recorder, run.run_id, source.node_id
+    setup = make_recorder_with_run()
+    manager = TokenManager(setup.recorder, step_resolver=_make_step_resolver())
+    return manager, setup.recorder, setup.run_id, setup.source_node_id
 
 
 class TestTokenManager:
     """High-level token management."""
 
     def test_create_initial_token(self) -> None:
-        from elspeth.core.landscape import LandscapeDB, LandscapeRecorder
         from elspeth.engine.tokens import TokenManager
 
-        db = LandscapeDB.in_memory()
-        recorder = LandscapeRecorder(db)
-        run = recorder.begin_run(config={}, canonical_version="v1")
-        source = recorder.register_node(
-            run_id=run.run_id,
-            plugin_name="source",
-            node_type=NodeType.SOURCE,
-            plugin_version="1.0",
-            config={},
-            schema_config=DYNAMIC_SCHEMA,
-        )
+        setup = make_recorder_with_run()
+        recorder, run_id, source_node_id = setup.recorder, setup.run_id, setup.source_node_id
 
         manager = TokenManager(recorder, step_resolver=_make_step_resolver())
 
         token_info = manager.create_initial_token(
-            run_id=run.run_id,
-            source_node_id=source.node_id,
+            run_id=run_id,
+            source_node_id=source_node_id,
             row_index=0,
             source_row=_make_source_row({"value": 42}),
         )
@@ -88,25 +67,15 @@ class TestTokenManager:
         assert token_info.row_data.to_dict() == {"value": 42}
 
     def test_fork_token(self) -> None:
-        from elspeth.core.landscape import LandscapeDB, LandscapeRecorder
         from elspeth.engine.tokens import TokenManager
 
-        db = LandscapeDB.in_memory()
-        recorder = LandscapeRecorder(db)
-        run = recorder.begin_run(config={}, canonical_version="v1")
-        source = recorder.register_node(
-            run_id=run.run_id,
-            plugin_name="source",
-            node_type=NodeType.SOURCE,
-            plugin_version="1.0",
-            config={},
-            schema_config=DYNAMIC_SCHEMA,
-        )
+        setup = make_recorder_with_run()
+        recorder, run_id, source_node_id = setup.recorder, setup.run_id, setup.source_node_id
 
         manager = TokenManager(recorder, step_resolver=_make_step_resolver())
         initial = manager.create_initial_token(
-            run_id=run.run_id,
-            source_node_id=source.node_id,
+            run_id=run_id,
+            source_node_id=source_node_id,
             row_index=0,
             source_row=_make_source_row({"value": 42}),
         )
@@ -115,7 +84,7 @@ class TestTokenManager:
             parent_token=initial,
             branches=["stats", "classifier"],
             node_id=NodeID("gate_node"),
-            run_id=run.run_id,
+            run_id=run_id,
         )
 
         assert len(children) == 2
@@ -125,25 +94,15 @@ class TestTokenManager:
         assert children[0].row_data.to_dict() == {"value": 42}
 
     def test_update_row_data(self) -> None:
-        from elspeth.core.landscape import LandscapeDB, LandscapeRecorder
         from elspeth.engine.tokens import TokenManager
 
-        db = LandscapeDB.in_memory()
-        recorder = LandscapeRecorder(db)
-        run = recorder.begin_run(config={}, canonical_version="v1")
-        source = recorder.register_node(
-            run_id=run.run_id,
-            plugin_name="source",
-            node_type=NodeType.SOURCE,
-            plugin_version="1.0",
-            config={},
-            schema_config=DYNAMIC_SCHEMA,
-        )
+        setup = make_recorder_with_run()
+        recorder, run_id, source_node_id = setup.recorder, setup.run_id, setup.source_node_id
 
         manager = TokenManager(recorder, step_resolver=_make_step_resolver())
         token_info = manager.create_initial_token(
-            run_id=run.run_id,
-            source_node_id=source.node_id,
+            run_id=run_id,
+            source_node_id=source_node_id,
             row_index=0,
             source_row=_make_source_row({"x": 1}),
         )
@@ -160,26 +119,16 @@ class TestTokenManagerCoalesce:
     """Test token coalescing (join operations)."""
 
     def test_coalesce_tokens(self) -> None:
-        from elspeth.core.landscape import LandscapeDB, LandscapeRecorder
         from elspeth.engine.tokens import TokenManager
 
-        db = LandscapeDB.in_memory()
-        recorder = LandscapeRecorder(db)
-        run = recorder.begin_run(config={}, canonical_version="v1")
-        source = recorder.register_node(
-            run_id=run.run_id,
-            plugin_name="source",
-            node_type=NodeType.SOURCE,
-            plugin_version="1.0",
-            config={},
-            schema_config=DYNAMIC_SCHEMA,
-        )
+        setup = make_recorder_with_run()
+        recorder, run_id, source_node_id = setup.recorder, setup.run_id, setup.source_node_id
 
         manager = TokenManager(recorder, step_resolver=_make_step_resolver())
 
         initial = manager.create_initial_token(
-            run_id=run.run_id,
-            source_node_id=source.node_id,
+            run_id=run_id,
+            source_node_id=source_node_id,
             row_index=0,
             source_row=_make_source_row({"value": 42}),
         )
@@ -188,7 +137,7 @@ class TestTokenManagerCoalesce:
             parent_token=initial,
             branches=["stats", "classifier"],
             node_id=NodeID("gate_node"),
-            run_id=run.run_id,
+            run_id=run_id,
         )
 
         stats_token = manager.update_row_data(
@@ -262,26 +211,16 @@ class TestTokenManagerForkIsolation:
     """Test that forked tokens have isolated row_data (no shared mutable objects)."""
 
     def test_fork_nested_data_isolation(self) -> None:
-        from elspeth.core.landscape import LandscapeDB, LandscapeRecorder
         from elspeth.engine.tokens import TokenManager
 
-        db = LandscapeDB.in_memory()
-        recorder = LandscapeRecorder(db)
-        run = recorder.begin_run(config={}, canonical_version="v1")
-        source = recorder.register_node(
-            run_id=run.run_id,
-            plugin_name="source",
-            node_type=NodeType.SOURCE,
-            plugin_version="1.0",
-            config={},
-            schema_config=DYNAMIC_SCHEMA,
-        )
+        setup = make_recorder_with_run()
+        run_id, source_node_id = setup.run_id, setup.source_node_id
 
-        manager = TokenManager(recorder, step_resolver=_make_step_resolver())
+        manager = TokenManager(setup.recorder, step_resolver=_make_step_resolver())
 
         initial = manager.create_initial_token(
-            run_id=run.run_id,
-            source_node_id=source.node_id,
+            run_id=run_id,
+            source_node_id=source_node_id,
             row_index=0,
             source_row=_make_source_row({"payload": {"x": 1, "y": 2}, "items": [1, 2, 3]}),
         )
@@ -290,7 +229,7 @@ class TestTokenManagerForkIsolation:
             parent_token=initial,
             branches=["branch_a", "branch_b"],
             node_id=NodeID("gate_node"),
-            run_id=run.run_id,
+            run_id=run_id,
         )
 
         child_a = children[0]
@@ -305,25 +244,15 @@ class TestTokenManagerForkIsolation:
         assert dict_b_fresh["items"] == [1, 2, 3], "Nested list mutation leaked to sibling!"
 
     def test_fork_with_custom_nested_data_isolation(self) -> None:
-        from elspeth.core.landscape import LandscapeDB, LandscapeRecorder
         from elspeth.engine.tokens import TokenManager
 
-        db = LandscapeDB.in_memory()
-        recorder = LandscapeRecorder(db)
-        run = recorder.begin_run(config={}, canonical_version="v1")
-        source = recorder.register_node(
-            run_id=run.run_id,
-            plugin_name="source",
-            node_type=NodeType.SOURCE,
-            plugin_version="1.0",
-            config={},
-            schema_config=DYNAMIC_SCHEMA,
-        )
+        setup = make_recorder_with_run()
+        run_id, source_node_id = setup.run_id, setup.source_node_id
 
-        manager = TokenManager(recorder, step_resolver=_make_step_resolver())
+        manager = TokenManager(setup.recorder, step_resolver=_make_step_resolver())
         initial = manager.create_initial_token(
-            run_id=run.run_id,
-            source_node_id=source.node_id,
+            run_id=run_id,
+            source_node_id=source_node_id,
             row_index=0,
             source_row=_make_source_row({"value": 1}),
         )
@@ -333,7 +262,7 @@ class TestTokenManagerForkIsolation:
             parent_token=initial,
             branches=["a", "b"],
             node_id=NodeID("gate_node"),
-            run_id=run.run_id,
+            run_id=run_id,
             row_data=custom_data,
         )
 
@@ -348,26 +277,16 @@ class TestTokenManagerExpandIsolation:
     """Test that expanded tokens have isolated row_data (no shared mutable objects)."""
 
     def test_expand_nested_data_isolation(self) -> None:
-        from elspeth.core.landscape import LandscapeDB, LandscapeRecorder
         from elspeth.engine.tokens import TokenManager
 
-        db = LandscapeDB.in_memory()
-        recorder = LandscapeRecorder(db)
-        run = recorder.begin_run(config={}, canonical_version="v1")
-        source = recorder.register_node(
-            run_id=run.run_id,
-            plugin_name="source",
-            node_type=NodeType.SOURCE,
-            plugin_version="1.0",
-            config={},
-            schema_config=DYNAMIC_SCHEMA,
-        )
+        setup = make_recorder_with_run()
+        run_id, source_node_id = setup.run_id, setup.source_node_id
 
-        manager = TokenManager(recorder, step_resolver=_make_step_resolver())
+        manager = TokenManager(setup.recorder, step_resolver=_make_step_resolver())
 
         parent = manager.create_initial_token(
-            run_id=run.run_id,
-            source_node_id=source.node_id,
+            run_id=run_id,
+            source_node_id=source_node_id,
             row_index=0,
             source_row=_make_source_row({"original": "data"}),
         )
@@ -382,7 +301,7 @@ class TestTokenManagerExpandIsolation:
             expanded_rows=expanded_rows,
             output_contract=_make_observed_contract(*expanded_rows[0].keys()),
             node_id=NodeID("gate_node"),
-            run_id=run.run_id,
+            run_id=run_id,
         )
 
         child_a = children[0]
@@ -397,25 +316,15 @@ class TestTokenManagerExpandIsolation:
         assert dict_b["items"] == [10, 20, 30], "Nested list mutation leaked to sibling!"
 
     def test_expand_shared_input_isolation(self) -> None:
-        from elspeth.core.landscape import LandscapeDB, LandscapeRecorder
         from elspeth.engine.tokens import TokenManager
 
-        db = LandscapeDB.in_memory()
-        recorder = LandscapeRecorder(db)
-        run = recorder.begin_run(config={}, canonical_version="v1")
-        source = recorder.register_node(
-            run_id=run.run_id,
-            plugin_name="source",
-            node_type=NodeType.SOURCE,
-            plugin_version="1.0",
-            config={},
-            schema_config=DYNAMIC_SCHEMA,
-        )
+        setup = make_recorder_with_run()
+        run_id, source_node_id = setup.run_id, setup.source_node_id
 
-        manager = TokenManager(recorder, step_resolver=_make_step_resolver())
+        manager = TokenManager(setup.recorder, step_resolver=_make_step_resolver())
         parent = manager.create_initial_token(
-            run_id=run.run_id,
-            source_node_id=source.node_id,
+            run_id=run_id,
+            source_node_id=source_node_id,
             row_index=0,
             source_row=_make_source_row({"value": 1}),
         )
@@ -431,7 +340,7 @@ class TestTokenManagerExpandIsolation:
             expanded_rows=expanded_rows,
             output_contract=_make_observed_contract(*expanded_rows[0].keys()),
             node_id=NodeID("gate_node"),
-            run_id=run.run_id,
+            run_id=run_id,
         )
 
         dict_0 = children[0].row_data.to_dict()
@@ -443,25 +352,15 @@ class TestTokenManagerExpandIsolation:
         assert dict_1["meta"]["tags"] == ["a", "b"], "Shared list mutation leaked!"
 
     def test_expand_deep_nesting_isolation(self) -> None:
-        from elspeth.core.landscape import LandscapeDB, LandscapeRecorder
         from elspeth.engine.tokens import TokenManager
 
-        db = LandscapeDB.in_memory()
-        recorder = LandscapeRecorder(db)
-        run = recorder.begin_run(config={}, canonical_version="v1")
-        source = recorder.register_node(
-            run_id=run.run_id,
-            plugin_name="source",
-            node_type=NodeType.SOURCE,
-            plugin_version="1.0",
-            config={},
-            schema_config=DYNAMIC_SCHEMA,
-        )
+        setup = make_recorder_with_run()
+        run_id, source_node_id = setup.run_id, setup.source_node_id
 
-        manager = TokenManager(recorder, step_resolver=_make_step_resolver())
+        manager = TokenManager(setup.recorder, step_resolver=_make_step_resolver())
         parent = manager.create_initial_token(
-            run_id=run.run_id,
-            source_node_id=source.node_id,
+            run_id=run_id,
+            source_node_id=source_node_id,
             row_index=0,
             source_row=_make_source_row({"value": 1}),
         )
@@ -476,7 +375,7 @@ class TestTokenManagerExpandIsolation:
             expanded_rows=expanded_rows,
             output_contract=_make_observed_contract(*expanded_rows[0].keys()),
             node_id=NodeID("gate_node"),
-            run_id=run.run_id,
+            run_id=run_id,
         )
 
         dict_0 = children[0].row_data.to_dict()
@@ -490,25 +389,15 @@ class TestTokenManagerEdgeCases:
     """Test edge cases and error handling."""
 
     def test_fork_with_custom_row_data(self) -> None:
-        from elspeth.core.landscape import LandscapeDB, LandscapeRecorder
         from elspeth.engine.tokens import TokenManager
 
-        db = LandscapeDB.in_memory()
-        recorder = LandscapeRecorder(db)
-        run = recorder.begin_run(config={}, canonical_version="v1")
-        source = recorder.register_node(
-            run_id=run.run_id,
-            plugin_name="source",
-            node_type=NodeType.SOURCE,
-            plugin_version="1.0",
-            config={},
-            schema_config=DYNAMIC_SCHEMA,
-        )
+        setup = make_recorder_with_run()
+        run_id, source_node_id = setup.run_id, setup.source_node_id
 
-        manager = TokenManager(recorder, step_resolver=_make_step_resolver())
+        manager = TokenManager(setup.recorder, step_resolver=_make_step_resolver())
         initial = manager.create_initial_token(
-            run_id=run.run_id,
-            source_node_id=source.node_id,
+            run_id=run_id,
+            source_node_id=source_node_id,
             row_index=0,
             source_row=_make_source_row({"value": 42}),
         )
@@ -517,32 +406,22 @@ class TestTokenManagerEdgeCases:
             parent_token=initial,
             branches=["branch_a"],
             node_id=NodeID("gate_node"),
-            run_id=run.run_id,
+            run_id=run_id,
             row_data=_make_pipeline_row({"value": 42, "forked": True}),
         )
 
         assert children[0].row_data.to_dict() == {"value": 42, "forked": True}
 
     def test_update_preserves_branch_name(self) -> None:
-        from elspeth.core.landscape import LandscapeDB, LandscapeRecorder
         from elspeth.engine.tokens import TokenManager
 
-        db = LandscapeDB.in_memory()
-        recorder = LandscapeRecorder(db)
-        run = recorder.begin_run(config={}, canonical_version="v1")
-        source = recorder.register_node(
-            run_id=run.run_id,
-            plugin_name="source",
-            node_type=NodeType.SOURCE,
-            plugin_version="1.0",
-            config={},
-            schema_config=DYNAMIC_SCHEMA,
-        )
+        setup = make_recorder_with_run()
+        run_id, source_node_id = setup.run_id, setup.source_node_id
 
-        manager = TokenManager(recorder, step_resolver=_make_step_resolver())
+        manager = TokenManager(setup.recorder, step_resolver=_make_step_resolver())
         initial = manager.create_initial_token(
-            run_id=run.run_id,
-            source_node_id=source.node_id,
+            run_id=run_id,
+            source_node_id=source_node_id,
             row_index=0,
             source_row=_make_source_row({"x": 1}),
         )
@@ -551,7 +430,7 @@ class TestTokenManagerEdgeCases:
             parent_token=initial,
             branches=["my_branch"],
             node_id=NodeID("gate_node"),
-            run_id=run.run_id,
+            run_id=run_id,
         )
 
         updated = manager.update_row_data(
@@ -562,25 +441,15 @@ class TestTokenManagerEdgeCases:
         assert updated.branch_name == "my_branch"
 
     def test_update_preserves_all_lineage_fields(self) -> None:
-        from elspeth.core.landscape import LandscapeDB, LandscapeRecorder
         from elspeth.engine.tokens import TokenManager
 
-        db = LandscapeDB.in_memory()
-        recorder = LandscapeRecorder(db)
-        run = recorder.begin_run(config={}, canonical_version="v1")
-        source = recorder.register_node(
-            run_id=run.run_id,
-            plugin_name="source",
-            node_type=NodeType.SOURCE,
-            plugin_version="1.0",
-            config={},
-            schema_config=DYNAMIC_SCHEMA,
-        )
+        setup = make_recorder_with_run()
+        run_id, source_node_id = setup.run_id, setup.source_node_id
 
-        manager = TokenManager(recorder, step_resolver=_make_step_resolver())
+        manager = TokenManager(setup.recorder, step_resolver=_make_step_resolver())
         initial = manager.create_initial_token(
-            run_id=run.run_id,
-            source_node_id=source.node_id,
+            run_id=run_id,
+            source_node_id=source_node_id,
             row_index=0,
             source_row=_make_source_row({"x": 1}),
         )
@@ -589,7 +458,7 @@ class TestTokenManagerEdgeCases:
             parent_token=initial,
             branches=["stats_branch"],
             node_id=NodeID("gate_node"),
-            run_id=run.run_id,
+            run_id=run_id,
         )
         forked_token = forked_children[0]
 
@@ -608,25 +477,15 @@ class TestTokenManagerEdgeCases:
         assert updated.fork_group_id == fork_group_id, "fork_group_id must be preserved"
 
     def test_update_preserves_expand_group_id(self) -> None:
-        from elspeth.core.landscape import LandscapeDB, LandscapeRecorder
         from elspeth.engine.tokens import TokenManager
 
-        db = LandscapeDB.in_memory()
-        recorder = LandscapeRecorder(db)
-        run = recorder.begin_run(config={}, canonical_version="v1")
-        source = recorder.register_node(
-            run_id=run.run_id,
-            plugin_name="source",
-            node_type=NodeType.SOURCE,
-            plugin_version="1.0",
-            config={},
-            schema_config=DYNAMIC_SCHEMA,
-        )
+        setup = make_recorder_with_run()
+        run_id, source_node_id = setup.run_id, setup.source_node_id
 
-        manager = TokenManager(recorder, step_resolver=_make_step_resolver())
+        manager = TokenManager(setup.recorder, step_resolver=_make_step_resolver())
         parent = manager.create_initial_token(
-            run_id=run.run_id,
-            source_node_id=source.node_id,
+            run_id=run_id,
+            source_node_id=source_node_id,
             row_index=0,
             source_row=_make_source_row({"original": "data"}),
         )
@@ -636,7 +495,7 @@ class TestTokenManagerEdgeCases:
             expanded_rows=[{"id": 1}, {"id": 2}],
             output_contract=_make_observed_contract("id"),
             node_id=NodeID("expand_node"),
-            run_id=run.run_id,
+            run_id=run_id,
         )
         expanded_token = expanded_children[0]
 
@@ -650,25 +509,15 @@ class TestTokenManagerEdgeCases:
         assert updated.expand_group_id == expand_group_id, "expand_group_id must be preserved"
 
     def test_update_preserves_join_group_id(self) -> None:
-        from elspeth.core.landscape import LandscapeDB, LandscapeRecorder
         from elspeth.engine.tokens import TokenManager
 
-        db = LandscapeDB.in_memory()
-        recorder = LandscapeRecorder(db)
-        run = recorder.begin_run(config={}, canonical_version="v1")
-        source = recorder.register_node(
-            run_id=run.run_id,
-            plugin_name="source",
-            node_type=NodeType.SOURCE,
-            plugin_version="1.0",
-            config={},
-            schema_config=DYNAMIC_SCHEMA,
-        )
+        setup = make_recorder_with_run()
+        run_id, source_node_id = setup.run_id, setup.source_node_id
 
-        manager = TokenManager(recorder, step_resolver=_make_step_resolver())
+        manager = TokenManager(setup.recorder, step_resolver=_make_step_resolver())
         initial = manager.create_initial_token(
-            run_id=run.run_id,
-            source_node_id=source.node_id,
+            run_id=run_id,
+            source_node_id=source_node_id,
             row_index=0,
             source_row=_make_source_row({"value": 42}),
         )
@@ -677,7 +526,7 @@ class TestTokenManagerEdgeCases:
             parent_token=initial,
             branches=["a", "b"],
             node_id=NodeID("gate_node"),
-            run_id=run.run_id,
+            run_id=run_id,
         )
 
         merged = manager.coalesce_tokens(
@@ -696,32 +545,22 @@ class TestTokenManagerEdgeCases:
         assert updated.join_group_id == merged.join_group_id, "join_group_id must be preserved"
 
     def test_multiple_rows_different_tokens(self) -> None:
-        from elspeth.core.landscape import LandscapeDB, LandscapeRecorder
         from elspeth.engine.tokens import TokenManager
 
-        db = LandscapeDB.in_memory()
-        recorder = LandscapeRecorder(db)
-        run = recorder.begin_run(config={}, canonical_version="v1")
-        source = recorder.register_node(
-            run_id=run.run_id,
-            plugin_name="source",
-            node_type=NodeType.SOURCE,
-            plugin_version="1.0",
-            config={},
-            schema_config=DYNAMIC_SCHEMA,
-        )
+        setup = make_recorder_with_run()
+        run_id, source_node_id = setup.run_id, setup.source_node_id
 
-        manager = TokenManager(recorder, step_resolver=_make_step_resolver())
+        manager = TokenManager(setup.recorder, step_resolver=_make_step_resolver())
 
         token1 = manager.create_initial_token(
-            run_id=run.run_id,
-            source_node_id=source.node_id,
+            run_id=run_id,
+            source_node_id=source_node_id,
             row_index=0,
             source_row=_make_source_row({"id": 1}),
         )
         token2 = manager.create_initial_token(
-            run_id=run.run_id,
-            source_node_id=source.node_id,
+            run_id=run_id,
+            source_node_id=source_node_id,
             row_index=1,
             source_row=_make_source_row({"id": 2}),
         )
@@ -734,25 +573,15 @@ class TestTokenManagerStepInPipeline:
     """Test that step_in_pipeline flows through to audit trail."""
 
     def test_fork_stores_step_in_pipeline(self) -> None:
-        from elspeth.core.landscape import LandscapeDB, LandscapeRecorder
         from elspeth.engine.tokens import TokenManager
 
-        db = LandscapeDB.in_memory()
-        recorder = LandscapeRecorder(db)
-        run = recorder.begin_run(config={}, canonical_version="v1")
-        source = recorder.register_node(
-            run_id=run.run_id,
-            plugin_name="source",
-            node_type=NodeType.SOURCE,
-            plugin_version="1.0",
-            config={},
-            schema_config=DYNAMIC_SCHEMA,
-        )
+        setup = make_recorder_with_run()
+        recorder, run_id, source_node_id = setup.recorder, setup.run_id, setup.source_node_id
 
         manager = TokenManager(recorder, step_resolver=_make_step_resolver({"fork_gate": 2}))
         initial = manager.create_initial_token(
-            run_id=run.run_id,
-            source_node_id=source.node_id,
+            run_id=run_id,
+            source_node_id=source_node_id,
             row_index=0,
             source_row=_make_source_row({"value": 42}),
         )
@@ -761,7 +590,7 @@ class TestTokenManagerStepInPipeline:
             parent_token=initial,
             branches=["a", "b"],
             node_id=NodeID("fork_gate"),
-            run_id=run.run_id,
+            run_id=run_id,
         )
 
         token_a = recorder.get_token(children[0].token_id)
@@ -772,25 +601,15 @@ class TestTokenManagerStepInPipeline:
         assert token_b.step_in_pipeline == 2
 
     def test_coalesce_stores_step_in_pipeline(self) -> None:
-        from elspeth.core.landscape import LandscapeDB, LandscapeRecorder
         from elspeth.engine.tokens import TokenManager
 
-        db = LandscapeDB.in_memory()
-        recorder = LandscapeRecorder(db)
-        run = recorder.begin_run(config={}, canonical_version="v1")
-        source = recorder.register_node(
-            run_id=run.run_id,
-            plugin_name="source",
-            node_type=NodeType.SOURCE,
-            plugin_version="1.0",
-            config={},
-            schema_config=DYNAMIC_SCHEMA,
-        )
+        setup = make_recorder_with_run()
+        recorder, run_id, source_node_id = setup.recorder, setup.run_id, setup.source_node_id
 
         manager = TokenManager(recorder, step_resolver=_make_step_resolver({"gate_node": 1, "coalesce_node": 3}))
         initial = manager.create_initial_token(
-            run_id=run.run_id,
-            source_node_id=source.node_id,
+            run_id=run_id,
+            source_node_id=source_node_id,
             row_index=0,
             source_row=_make_source_row({"value": 42}),
         )
@@ -799,7 +618,7 @@ class TestTokenManagerStepInPipeline:
             parent_token=initial,
             branches=["a", "b"],
             node_id=NodeID("gate_node"),
-            run_id=run.run_id,
+            run_id=run_id,
         )
 
         merged = manager.coalesce_tokens(
@@ -817,26 +636,16 @@ class TestTokenManagerExpand:
     """Test token expansion (deaggregation: 1 input -> N outputs)."""
 
     def test_expand_token_creates_children(self) -> None:
-        from elspeth.core.landscape import LandscapeDB, LandscapeRecorder
         from elspeth.engine.tokens import TokenManager
 
-        db = LandscapeDB.in_memory()
-        recorder = LandscapeRecorder(db)
-        run = recorder.begin_run(config={}, canonical_version="v1")
-        source = recorder.register_node(
-            run_id=run.run_id,
-            plugin_name="source",
-            node_type=NodeType.SOURCE,
-            plugin_version="1.0",
-            config={},
-            schema_config=DYNAMIC_SCHEMA,
-        )
+        setup = make_recorder_with_run()
+        recorder, run_id, source_node_id = setup.recorder, setup.run_id, setup.source_node_id
 
         manager = TokenManager(recorder, step_resolver=_make_step_resolver())
 
         parent = manager.create_initial_token(
-            run_id=run.run_id,
-            source_node_id=source.node_id,
+            run_id=run_id,
+            source_node_id=source_node_id,
             row_index=0,
             source_row=_make_source_row({"original": "data"}),
         )
@@ -852,7 +661,7 @@ class TestTokenManagerExpand:
             expanded_rows=expanded_rows,
             output_contract=_make_observed_contract(*expanded_rows[0].keys()),
             node_id=NodeID("expand_node"),
-            run_id=run.run_id,
+            run_id=run_id,
         )
 
         assert len(children) == 3
@@ -873,26 +682,16 @@ class TestTokenManagerExpand:
             assert parents[0].ordinal == i
 
     def test_expand_token_inherits_branch_name(self) -> None:
-        from elspeth.core.landscape import LandscapeDB, LandscapeRecorder
         from elspeth.engine.tokens import TokenManager
 
-        db = LandscapeDB.in_memory()
-        recorder = LandscapeRecorder(db)
-        run = recorder.begin_run(config={}, canonical_version="v1")
-        source = recorder.register_node(
-            run_id=run.run_id,
-            plugin_name="source",
-            node_type=NodeType.SOURCE,
-            plugin_version="1.0",
-            config={},
-            schema_config=DYNAMIC_SCHEMA,
-        )
+        setup = make_recorder_with_run()
+        run_id, source_node_id = setup.run_id, setup.source_node_id
 
-        manager = TokenManager(recorder, step_resolver=_make_step_resolver())
+        manager = TokenManager(setup.recorder, step_resolver=_make_step_resolver())
 
         initial = manager.create_initial_token(
-            run_id=run.run_id,
-            source_node_id=source.node_id,
+            run_id=run_id,
+            source_node_id=source_node_id,
             row_index=0,
             source_row=_make_source_row({}),
         )
@@ -901,7 +700,7 @@ class TestTokenManagerExpand:
             parent_token=initial,
             branches=["stats_branch"],
             node_id=NodeID("gate_node"),
-            run_id=run.run_id,
+            run_id=run_id,
         )
         parent = forked[0]
 
@@ -910,31 +709,21 @@ class TestTokenManagerExpand:
             expanded_rows=[{"a": 1}, {"a": 2}],
             output_contract=_make_observed_contract("a"),
             node_id=NodeID("expand_node"),
-            run_id=run.run_id,
+            run_id=run_id,
         )
 
         assert all(c.branch_name == "stats_branch" for c in children)
 
     def test_expand_token_stores_step_in_pipeline(self) -> None:
-        from elspeth.core.landscape import LandscapeDB, LandscapeRecorder
         from elspeth.engine.tokens import TokenManager
 
-        db = LandscapeDB.in_memory()
-        recorder = LandscapeRecorder(db)
-        run = recorder.begin_run(config={}, canonical_version="v1")
-        source = recorder.register_node(
-            run_id=run.run_id,
-            plugin_name="source",
-            node_type=NodeType.SOURCE,
-            plugin_version="1.0",
-            config={},
-            schema_config=DYNAMIC_SCHEMA,
-        )
+        setup = make_recorder_with_run()
+        recorder, run_id, source_node_id = setup.recorder, setup.run_id, setup.source_node_id
 
         manager = TokenManager(recorder, step_resolver=_make_step_resolver({"expand_node": 5}))
         parent = manager.create_initial_token(
-            run_id=run.run_id,
-            source_node_id=source.node_id,
+            run_id=run_id,
+            source_node_id=source_node_id,
             row_index=0,
             source_row=_make_source_row({"x": 1}),
         )
@@ -944,7 +733,7 @@ class TestTokenManagerExpand:
             expanded_rows=[{"a": 1}, {"a": 2}],
             output_contract=_make_observed_contract("a"),
             node_id=NodeID("expand_node"),
-            run_id=run.run_id,
+            run_id=run_id,
         )
 
         for child in children:

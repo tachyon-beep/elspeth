@@ -6,33 +6,15 @@ from elspeth.contracts import BatchStatus, NodeType, TriggerType
 from elspeth.contracts.errors import AuditIntegrityError
 from elspeth.contracts.schema import SchemaConfig
 from elspeth.core.landscape import LandscapeDB, LandscapeRecorder
+from tests.fixtures.landscape import make_landscape_db, make_recorder, make_recorder_with_run, register_test_node
 
 _DYNAMIC_SCHEMA = SchemaConfig.from_dict({"mode": "observed"})
 
 
 def _setup(*, run_id: str = "run-1") -> tuple[LandscapeDB, LandscapeRecorder]:
-    db = LandscapeDB.in_memory()
-    recorder = LandscapeRecorder(db)
-    recorder.begin_run(config={}, canonical_version="v1", run_id=run_id)
-    recorder.register_node(
-        run_id=run_id,
-        plugin_name="csv",
-        node_type=NodeType.SOURCE,
-        plugin_version="1.0",
-        config={},
-        node_id="source-0",
-        schema_config=_DYNAMIC_SCHEMA,
-    )
-    recorder.register_node(
-        run_id=run_id,
-        plugin_name="aggregator",
-        node_type=NodeType.AGGREGATION,
-        plugin_version="1.0",
-        config={},
-        node_id="agg-1",
-        schema_config=_DYNAMIC_SCHEMA,
-    )
-    return db, recorder
+    setup = make_recorder_with_run(run_id=run_id, source_node_id="source-0", source_plugin_name="csv")
+    register_test_node(setup.recorder, setup.run_id, "agg-1", node_type=NodeType.AGGREGATION, plugin_name="aggregator")
+    return setup.db, setup.recorder
 
 
 def _setup_with_token(
@@ -544,8 +526,8 @@ class TestGetBatches:
         assert result[0].batch_id == "b-1"
 
     def test_does_not_return_batches_from_other_runs(self):
-        db = LandscapeDB.in_memory()
-        recorder = LandscapeRecorder(db)
+        db = make_landscape_db()
+        recorder = make_recorder(db)
         recorder.begin_run(config={}, canonical_version="v1", run_id="run-1")
         recorder.register_node(
             run_id="run-1",
@@ -724,8 +706,8 @@ class TestGetAllBatchMembersForRun:
         assert all_members == []
 
     def test_does_not_include_members_from_other_runs(self):
-        db = LandscapeDB.in_memory()
-        recorder = LandscapeRecorder(db)
+        db = make_landscape_db()
+        recorder = make_recorder(db)
 
         # Run 1
         recorder.begin_run(config={}, canonical_version="v1", run_id="run-1")
@@ -1171,8 +1153,8 @@ class TestGetArtifacts:
         assert json_artifacts[0].artifact_id == "art-json"
 
     def test_does_not_return_artifacts_from_other_runs(self):
-        db = LandscapeDB.in_memory()
-        recorder = LandscapeRecorder(db)
+        db = make_landscape_db()
+        recorder = make_recorder(db)
 
         # Run 1
         recorder.begin_run(config={}, canonical_version="v1", run_id="run-1")

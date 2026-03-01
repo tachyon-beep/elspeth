@@ -9,10 +9,9 @@ from unittest.mock import patch
 import pytest
 
 from elspeth.contracts.plugin_context import PluginContext
-from elspeth.core.landscape.database import LandscapeDB
-from elspeth.core.landscape.recorder import LandscapeRecorder
 from elspeth.plugins.infrastructure.config_base import PluginConfigError
 from tests.fixtures.factories import make_context
+from tests.fixtures.landscape import make_landscape_db, make_recorder
 
 # Dynamic schema config for tests - PathConfig now requires schema
 DYNAMIC_SCHEMA = {"mode": "observed"}
@@ -24,8 +23,8 @@ class TestJSONSink:
     @pytest.fixture
     def ctx(self) -> PluginContext:
         """Create a minimal plugin context."""
-        db = LandscapeDB.in_memory()
-        recorder = LandscapeRecorder(db)
+        db = make_landscape_db()
+        recorder = make_recorder(db)
         return make_context(landscape=recorder)
 
     def test_write_json_array(self, tmp_path: Path, ctx: PluginContext) -> None:

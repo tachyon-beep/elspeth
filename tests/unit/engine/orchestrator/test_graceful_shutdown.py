@@ -87,10 +87,10 @@ class TestShutdownHandlerContext:
 
     def test_handler_restores_original_signals(self) -> None:
         """After context exits, signal handlers are restored."""
-        from elspeth.core.landscape import LandscapeDB
         from elspeth.engine.orchestrator import Orchestrator
+        from tests.fixtures.landscape import make_landscape_db
 
-        db = LandscapeDB.in_memory()
+        db = make_landscape_db()
         try:
             orchestrator = Orchestrator(db=db)
 
@@ -111,10 +111,10 @@ class TestShutdownHandlerContext:
 
     def test_context_yields_unset_event(self) -> None:
         """Context manager yields a threading.Event that starts unset."""
-        from elspeth.core.landscape import LandscapeDB
         from elspeth.engine.orchestrator import Orchestrator
+        from tests.fixtures.landscape import make_landscape_db
 
-        db = LandscapeDB.in_memory()
+        db = make_landscape_db()
         try:
             orchestrator = Orchestrator(db=db)
             with orchestrator._shutdown_handler_context() as event:
@@ -125,10 +125,10 @@ class TestShutdownHandlerContext:
 
     def test_handler_sets_event_on_signal(self) -> None:
         """Signal handler sets the event when invoked."""
-        from elspeth.core.landscape import LandscapeDB
         from elspeth.engine.orchestrator import Orchestrator
+        from tests.fixtures.landscape import make_landscape_db
 
-        db = LandscapeDB.in_memory()
+        db = make_landscape_db()
         try:
             orchestrator = Orchestrator(db=db)
             with orchestrator._shutdown_handler_context() as event:
@@ -142,10 +142,10 @@ class TestShutdownHandlerContext:
 
     def test_second_signal_restores_default_handler(self) -> None:
         """After first signal, SIGINT handler is restored to default (force-kill)."""
-        from elspeth.core.landscape import LandscapeDB
         from elspeth.engine.orchestrator import Orchestrator
+        from tests.fixtures.landscape import make_landscape_db
 
-        db = LandscapeDB.in_memory()
+        db = make_landscape_db()
         try:
             orchestrator = Orchestrator(db=db)
             with orchestrator._shutdown_handler_context():

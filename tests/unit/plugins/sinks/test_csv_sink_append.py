@@ -5,10 +5,9 @@ from pathlib import Path
 import pytest
 
 from elspeth.contracts.plugin_context import PluginContext
-from elspeth.core.landscape.database import LandscapeDB
-from elspeth.core.landscape.recorder import LandscapeRecorder
 from elspeth.plugins.sinks.csv_sink import CSVSink
 from tests.fixtures.factories import make_context
+from tests.fixtures.landscape import make_landscape_db, make_recorder
 
 # Strict schema config for tests - CSVSink requires fixed columns
 STRICT_SCHEMA = {"mode": "fixed", "fields": ["id: int", "value: str"]}
@@ -17,8 +16,8 @@ STRICT_SCHEMA = {"mode": "fixed", "fields": ["id: int", "value: str"]}
 @pytest.fixture
 def ctx() -> PluginContext:
     """Create test context."""
-    db = LandscapeDB.in_memory()
-    recorder = LandscapeRecorder(db)
+    db = make_landscape_db()
+    recorder = make_recorder(db)
     return make_context(landscape=recorder)
 
 

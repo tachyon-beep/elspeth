@@ -32,7 +32,6 @@ from elspeth.contracts import (
     SourceRow,
 )
 from elspeth.contracts.errors import OrchestrationInvariantError
-from elspeth.core.landscape import LandscapeDB
 from elspeth.core.landscape.schema import (
     edges_table,
     node_states_table,
@@ -43,6 +42,7 @@ from elspeth.core.landscape.schema import (
 from elspeth.engine.orchestrator import Orchestrator, PipelineConfig
 from elspeth.engine.orchestrator.types import RouteValidationError
 from tests.fixtures.base_classes import _TestSchema, _TestSourceBase, as_sink, as_source
+from tests.fixtures.landscape import make_landscape_db
 from tests.fixtures.pipeline import build_production_graph
 from tests.fixtures.plugins import CollectSink
 
@@ -155,7 +155,7 @@ class TestQuarantineRouteValidation:
 
     def test_missing_quarantine_destination_raises_route_validation_error(self, payload_store) -> None:
         """Missing quarantine_destination is a plugin bug — must crash, not drop silently."""
-        db = LandscapeDB.in_memory()
+        db = make_landscape_db()
         source = MissingDestinationSource(on_validation_failure="quarantine")
         default_sink = CollectSink("default")
         quarantine_sink = CollectSink("quarantine")
@@ -180,7 +180,7 @@ class TestQuarantineRouteValidation:
         The pre-run validation in orchestrator/validation.py catches this before
         the row-level quarantine code at core.py:1275 ever runs.
         """
-        db = LandscapeDB.in_memory()
+        db = make_landscape_db()
         # Source says destination is "nonexistent_sink" but only "default" exists
         source = InvalidDestinationSource(on_validation_failure="nonexistent_sink")
         default_sink = CollectSink("default")
@@ -204,7 +204,7 @@ class TestQuarantineRouteValidation:
         (on_validation_failure="quarantine" matches a real sink), but yields a quarantined
         row whose destination field points to a different, non-existent sink.
         """
-        db = LandscapeDB.in_memory()
+        db = make_landscape_db()
 
         class MismatchDestSource(_TestSourceBase):
             """Source that passes pre-run validation but yields quarantine rows with wrong dest."""
@@ -244,7 +244,7 @@ class TestQuarantineRouteValidation:
 
     def test_missing_quarantine_edge_raises_orchestration_invariant_error(self, payload_store) -> None:
         """If the DAG lacks the __quarantine__ DIVERT edge, OrchestrationInvariantError."""
-        db = LandscapeDB.in_memory()
+        db = make_landscape_db()
 
         # Build a source that yields quarantined rows with valid destination
         source = QuarantineSource(
@@ -280,7 +280,7 @@ class TestQuarantineHappyPath:
 
     def test_quarantine_creates_failed_source_node_state(self, payload_store) -> None:
         """Quarantined rows get a FAILED node_state at step_index=0 (source)."""
-        db = LandscapeDB.in_memory()
+        db = make_landscape_db()
         source = QuarantineSource(
             valid_rows=[],
             quarantine_rows=[({"x": "bad"}, "field 'x' type mismatch")],
@@ -316,7 +316,7 @@ class TestQuarantineHappyPath:
 
     def test_quarantine_creates_divert_routing_event(self, payload_store) -> None:
         """Quarantined rows get a DIVERT routing_event linking source to quarantine sink."""
-        db = LandscapeDB.in_memory()
+        db = make_landscape_db()
         source = QuarantineSource(
             valid_rows=[],
             quarantine_rows=[({"x": 1}, "invalid value")],
@@ -359,7 +359,7 @@ class TestQuarantineHappyPath:
 
     def test_quarantine_outcome_recorded_after_sink_write(self, payload_store) -> None:
         """QUARANTINED outcome must only be recorded after sink durability (not eagerly)."""
-        db = LandscapeDB.in_memory()
+        db = make_landscape_db()
         source = QuarantineSource(
             valid_rows=[],
             quarantine_rows=[({"bad": True}, "schema violation")],
@@ -398,7 +398,7 @@ class TestQuarantineHappyPath:
 
     def test_mixed_valid_and_quarantined_rows_full_audit(self, payload_store) -> None:
         """Both valid and quarantined rows get complete audit trails, routed correctly."""
-        db = LandscapeDB.in_memory()
+        db = make_landscape_db()
         source = QuarantineSource(
             valid_rows=[{"value": 1}, {"value": 2}],
             quarantine_rows=[
@@ -469,7 +469,7 @@ class TestQuarantineHappyPath:
 
     def test_quarantine_non_dict_row_data(self, payload_store) -> None:
         """Quarantined rows with non-dict data (e.g., JSON primitives) route correctly."""
-        db = LandscapeDB.in_memory()
+        db = make_landscape_db()
         source = QuarantineSource(
             valid_rows=[{"value": 1}],
             # Non-dict quarantine data — simulates malformed JSON input
@@ -509,7 +509,7 @@ class TestQuarantineHappyPath:
 
     def test_quarantine_counter_reflected_in_run_result(self, payload_store) -> None:
         """RunResult.rows_quarantined accurately counts quarantined rows."""
-        db = LandscapeDB.in_memory()
+        db = make_landscape_db()
         source = QuarantineSource(
             valid_rows=[{"v": i} for i in range(5)],
             quarantine_rows=[({"bad": i}, f"error_{i}") for i in range(3)],
@@ -547,7 +547,7 @@ class TestQuarantineNonCanonicalData:
 
     def test_quarantined_row_with_nan_does_not_crash(self, payload_store) -> None:
         """Quarantined row containing NaN should route to quarantine sink, not crash."""
-        db = LandscapeDB.in_memory()
+        db = make_landscape_db()
         source = QuarantineSource(
             valid_rows=[{"value": 1}],
             quarantine_rows=[
@@ -575,7 +575,7 @@ class TestQuarantineNonCanonicalData:
 
     def test_quarantined_row_with_infinity_does_not_crash(self, payload_store) -> None:
         """Quarantined row containing Infinity should route to quarantine sink, not crash."""
-        db = LandscapeDB.in_memory()
+        db = make_landscape_db()
         source = QuarantineSource(
             valid_rows=[],
             quarantine_rows=[
@@ -605,7 +605,7 @@ class TestQuarantineNonCanonicalData:
         """Quarantined rows with canonical data should still use stable_hash (not repr_hash)
         so hashes are consistent with non-quarantined rows containing the same data.
         """
-        db = LandscapeDB.in_memory()
+        db = make_landscape_db()
         # Normal dict data that IS canonical — should use stable_hash
         source = QuarantineSource(
             valid_rows=[{"value": 42}],

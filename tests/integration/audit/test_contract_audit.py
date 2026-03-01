@@ -30,10 +30,9 @@ from elspeth.contracts import (
     TypeMismatchViolation,
 )
 from elspeth.contracts.schema import SchemaConfig
-from elspeth.core.landscape.database import LandscapeDB
-from elspeth.core.landscape.recorder import LandscapeRecorder
 from elspeth.core.landscape.schema import validation_errors_table
 from elspeth.plugins.sources.csv_source import CSVSource
+from tests.fixtures.landscape import make_landscape_db, make_recorder, make_recorder_with_run
 
 if TYPE_CHECKING:
     from elspeth.contracts.plugin_context import PluginContext
@@ -113,8 +112,8 @@ class TestFullAuditTrailWithContracts:
         assert customer_field.source == "inferred"
 
         # Store contract in audit trail via LandscapeRecorder
-        db = LandscapeDB.in_memory()
-        recorder = LandscapeRecorder(db)
+        db = make_landscape_db()
+        recorder = make_recorder(db)
 
         # Begin run with contract
         run = recorder.begin_run(
@@ -162,8 +161,8 @@ class TestFullAuditTrailWithContracts:
         ctx = MockContext()
 
         # Begin run without contract (simulates dynamic schema)
-        db = LandscapeDB.in_memory()
-        recorder = LandscapeRecorder(db)
+        db = make_landscape_db()
+        recorder = make_recorder(db)
 
         run = recorder.begin_run(
             config={"test": "config"},
@@ -240,13 +239,9 @@ class TestValidationErrorWithContractDetails:
         assert "not_int" in str(error) or "amount" in str(error)
 
         # Now test storing validation error with contract violation in audit trail
-        db = LandscapeDB.in_memory()
-        recorder = LandscapeRecorder(db)
-
-        run = recorder.begin_run(
-            config={"test": "config"},
-            canonical_version="sha256-rfc8785-v1",
-        )
+        setup = make_recorder_with_run(canonical_version="sha256-rfc8785-v1")
+        db, recorder, run_id = setup.db, setup.recorder, setup.run_id
+        source_node_id = setup.source_node_id
 
         # Create a contract violation for testing
         violation = TypeMismatchViolation(
@@ -257,21 +252,10 @@ class TestValidationErrorWithContractDetails:
             actual_value="not_int",
         )
 
-        # Register a source node
-        schema_config = SchemaConfig(mode="fixed", fields=None)
-        node = recorder.register_node(
-            run_id=run.run_id,
-            plugin_name="csv",
-            node_type=NodeType.SOURCE,
-            plugin_version="1.0.0",
-            config={},
-            schema_config=schema_config,
-        )
-
         # Record validation error with contract violation
         error_id = recorder.record_validation_error(
-            run_id=run.run_id,
-            node_id=node.node_id,
+            run_id=run_id,
+            node_id=source_node_id,
             row_data={"id": 2, "amount": "not_int"},
             error="Type mismatch: expected int, got str for field 'amount'",
             schema_mode="fixed",
@@ -295,8 +279,8 @@ class TestValidationErrorWithContractDetails:
 
     def test_validation_error_without_contract_violation(self) -> None:
         """Validation errors work without contract violation."""
-        db = LandscapeDB.in_memory()
-        recorder = LandscapeRecorder(db)
+        db = make_landscape_db()
+        recorder = make_recorder(db)
 
         run = recorder.begin_run(
             config={"test": "config"},
@@ -368,8 +352,8 @@ class TestContractSurvivesAuditRoundTrip:
         original_hash = original_contract.version_hash()
 
         # Store contract in audit trail
-        db = LandscapeDB.in_memory()
-        recorder = LandscapeRecorder(db)
+        db = make_landscape_db()
+        recorder = make_recorder(db)
 
         run = recorder.begin_run(
             config={"test": "config"},
@@ -481,8 +465,8 @@ class TestContractSurvivesAuditRoundTrip:
 
     def test_node_contracts_round_trip(self) -> None:
         """Node input/output contracts survive audit trail round-trip."""
-        db = LandscapeDB.in_memory()
-        recorder = LandscapeRecorder(db)
+        db = make_landscape_db()
+        recorder = make_recorder(db)
 
         run = recorder.begin_run(
             config={"test": "config"},
@@ -609,8 +593,8 @@ class TestContractWithCheckpointRegistry:
     def test_contract_registry_from_audit_trail(self, tmp_path: Path) -> None:
         """Contract registry can be built from audit trail for checkpoint restore."""
         # Create and store multiple contracts
-        db = LandscapeDB.in_memory()
-        recorder = LandscapeRecorder(db)
+        db = make_landscape_db()
+        recorder = make_recorder(db)
 
         contract1 = SchemaContract(
             mode="OBSERVED",

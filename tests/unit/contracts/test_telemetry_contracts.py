@@ -47,6 +47,7 @@ from elspeth.plugins.infrastructure.results import TransformResult
 from elspeth.telemetry import TelemetryManager
 from elspeth.testing import make_field
 from tests.fixtures.base_classes import _TestSinkBase, _TestSourceBase, _TestTransformBase, as_sink, as_source, as_transform
+from tests.fixtures.landscape import make_landscape_db
 from tests.fixtures.telemetry import MockTelemetryConfig, TelemetryTestExporter
 
 if TYPE_CHECKING:
@@ -464,7 +465,7 @@ class TestOrchestratorTelemetryWiringContract:
     @pytest.fixture
     def landscape_db(self) -> LandscapeDB:
         """Fresh in-memory database for each test."""
-        return LandscapeDB.in_memory()
+        return make_landscape_db()
 
     def test_orchestrator_wires_telemetry_emit_to_context(
         self,

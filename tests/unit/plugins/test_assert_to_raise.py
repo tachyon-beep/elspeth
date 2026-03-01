@@ -24,9 +24,8 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from elspeth.core.landscape.database import LandscapeDB
-from elspeth.core.landscape.recorder import LandscapeRecorder
 from tests.fixtures.factories import make_context
+from tests.fixtures.landscape import make_recorder
 
 # ---------------------------------------------------------------------------
 # Shared config helpers
@@ -173,8 +172,7 @@ class TestAssertToRaiseConversions:
                     "schema": {"mode": "observed"},
                 }
             )
-            db = LandscapeDB.in_memory()
-            recorder = LandscapeRecorder(db)
+            recorder = make_recorder()
             ctx = make_context(run_id="test-run", landscape=recorder)
 
             # Patch _open_file so it opens _file but leaves _writer as None.
@@ -223,8 +221,7 @@ class TestAssertToRaiseConversions:
                     "schema": {"mode": "observed"},
                 }
             )
-            db = LandscapeDB.in_memory()
-            recorder = LandscapeRecorder(db)
+            recorder = make_recorder()
             ctx = make_context(run_id="test-run", landscape=recorder)
 
             mock_writer = MagicMock()

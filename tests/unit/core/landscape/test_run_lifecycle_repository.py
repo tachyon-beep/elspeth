@@ -26,11 +26,12 @@ from elspeth.core.landscape.database import LandscapeDB
 from elspeth.core.landscape.model_loaders import RunLoader
 from elspeth.core.landscape.run_lifecycle_repository import RunLifecycleRepository
 from elspeth.core.landscape.schema import runs_table
+from tests.fixtures.landscape import make_landscape_db, make_recorder
 
 
 def _make_repo(*, run_id: str = "run-1") -> tuple[LandscapeDB, RunLifecycleRepository]:
     """Create in-memory DB + repository with a pre-existing run."""
-    db = LandscapeDB.in_memory()
+    db = make_landscape_db()
     ops = DatabaseOps(db)
     repo = RunLifecycleRepository(db, ops, RunLoader())
     repo.begin_run(config={"key": "value"}, canonical_version="v1", run_id=run_id)
@@ -53,7 +54,7 @@ class TestBeginRunDirect:
 
     def test_begin_run_returns_run_with_correct_fields(self) -> None:
         """Verify begin_run stores and returns correct field values."""
-        db = LandscapeDB.in_memory()
+        db = make_landscape_db()
         ops = DatabaseOps(db)
         repo = RunLifecycleRepository(db, ops, RunLoader())
         run = repo.begin_run(
@@ -69,7 +70,7 @@ class TestBeginRunDirect:
         assert run.started_at is not None
 
     def test_begin_run_generates_id_when_not_provided(self) -> None:
-        db = LandscapeDB.in_memory()
+        db = make_landscape_db()
         ops = DatabaseOps(db)
         repo = RunLifecycleRepository(db, ops, RunLoader())
         run = repo.begin_run(config={}, canonical_version="v1")
@@ -113,7 +114,7 @@ class TestGetSourceSchema:
 
     def test_returns_stored_schema(self) -> None:
         """Happy path: schema stored via begin_run is retrievable."""
-        db = LandscapeDB.in_memory()
+        db = make_landscape_db()
         ops = DatabaseOps(db)
         repo = RunLifecycleRepository(db, ops, RunLoader())
         schema_json = '{"type": "object", "properties": {}}'
@@ -511,7 +512,7 @@ class TestUpdateRunContract:
 
     def test_overwrite_existing_contract_raises(self) -> None:
         """Tier 1: overwriting an existing contract is evidence contamination."""
-        db = LandscapeDB.in_memory()
+        db = make_landscape_db()
         ops = DatabaseOps(db)
         repo = RunLifecycleRepository(db, ops, RunLoader())
         # Create run WITH a contract via begin_run
@@ -638,15 +639,13 @@ class TestFinalizeRunEdgeCases:
         from elspeth.contracts import Determinism, NodeType
         from elspeth.contracts.schema import SchemaConfig
 
-        db = LandscapeDB.in_memory()
+        db = make_landscape_db()
         ops = DatabaseOps(db)
         repo = RunLifecycleRepository(db, ops, RunLoader())
         repo.begin_run(config={}, canonical_version="v1", run_id="nd-run")
 
         # Register a nondeterministic node via the recorder (need DataFlowRepository)
-        from elspeth.core.landscape.recorder import LandscapeRecorder
-
-        recorder = LandscapeRecorder(db)
+        recorder = make_recorder(db)
         recorder.register_node(
             run_id="nd-run",
             plugin_name="llm_transform",
@@ -673,7 +672,7 @@ class TestListRuns:
 
     def test_returns_newest_first(self) -> None:
         """list_runs returns runs ordered by started_at descending."""
-        db = LandscapeDB.in_memory()
+        db = make_landscape_db()
         ops = DatabaseOps(db)
         repo = RunLifecycleRepository(db, ops, RunLoader())
         repo.begin_run(config={}, canonical_version="v1", run_id="run-1")
@@ -688,7 +687,7 @@ class TestListRuns:
 
     def test_filter_by_status(self) -> None:
         """list_runs with status filter only returns matching runs."""
-        db = LandscapeDB.in_memory()
+        db = make_landscape_db()
         ops = DatabaseOps(db)
         repo = RunLifecycleRepository(db, ops, RunLoader())
         repo.begin_run(config={}, canonical_version="v1", run_id="r1")

@@ -104,10 +104,10 @@ class TestOrchestrator:
     """Full run orchestration."""
 
     def test_run_simple_pipeline(self, payload_store) -> None:
-        from elspeth.core.landscape import LandscapeDB
         from elspeth.engine.orchestrator import Orchestrator, PipelineConfig
+        from tests.fixtures.landscape import make_landscape_db
 
-        db = LandscapeDB.in_memory()
+        db = make_landscape_db()
         source = ListSource([{"value": 1}, {"value": 2}, {"value": 3}])
         transform = DoubleTransform()
         transform.on_success = "default"
@@ -129,10 +129,10 @@ class TestOrchestrator:
 
     def test_run_with_gate_routing(self, payload_store) -> None:
         from elspeth.core.config import GateSettings
-        from elspeth.core.landscape import LandscapeDB
         from elspeth.engine.orchestrator import Orchestrator, PipelineConfig
+        from tests.fixtures.landscape import make_landscape_db
 
-        db = LandscapeDB.in_memory()
+        db = make_landscape_db()
 
         # Config-driven gate: routes values > 50 to "high" sink, else to "default"
         threshold_gate = GateSettings(
@@ -164,10 +164,10 @@ class TestOrchestrator:
     def test_nonterminal_coalesce_continues_to_downstream_gate(self, payload_store) -> None:
         """Merged fork paths at a non-terminal coalesce must continue downstream."""
         from elspeth.core.config import CoalesceSettings, ElspethSettings, GateSettings
-        from elspeth.core.landscape import LandscapeDB
         from elspeth.engine.orchestrator import Orchestrator, PipelineConfig
+        from tests.fixtures.landscape import make_landscape_db
 
-        db = LandscapeDB.in_memory()
+        db = make_landscape_db()
         source = ListSource([{"value": 1}, {"value": 2}], on_success="source_sink")
         transform = IdentityTransform()
         output_sink = CollectSink(name="output")
@@ -228,10 +228,10 @@ class TestOrchestrator:
         """Traversal context must preserve graph step order for non-terminal coalesce nodes."""
         from elspeth.contracts.types import CoalesceName, GateName
         from elspeth.core.config import CoalesceSettings, GateSettings
-        from elspeth.core.landscape import LandscapeDB
         from elspeth.engine.orchestrator import Orchestrator, PipelineConfig
+        from tests.fixtures.landscape import make_landscape_db
 
-        db = LandscapeDB.in_memory()
+        db = make_landscape_db()
         source = ListSource([{"value": 1}], on_success="source_sink")
         transform = IdentityTransform()
         output_sink = CollectSink(name="output")
@@ -302,10 +302,10 @@ class TestOrchestratorMultipleTransforms:
 
     def test_run_multiple_transforms_in_sequence(self, payload_store) -> None:
         """Test that multiple transforms execute in order."""
-        from elspeth.core.landscape import LandscapeDB
         from elspeth.engine.orchestrator import Orchestrator, PipelineConfig
+        from tests.fixtures.landscape import make_landscape_db
 
-        db = LandscapeDB.in_memory()
+        db = make_landscape_db()
         source = ListSource([{"value": 5}])
         transform1 = AddOneTransform()
         transform2 = MultiplyTwoTransform()
@@ -332,10 +332,10 @@ class TestOrchestratorEmptyPipeline:
 
     def test_run_no_transforms(self, payload_store) -> None:
         """Test pipeline with source directly to sink."""
-        from elspeth.core.landscape import LandscapeDB
         from elspeth.engine.orchestrator import Orchestrator, PipelineConfig
+        from tests.fixtures.landscape import make_landscape_db
 
-        db = LandscapeDB.in_memory()
+        db = make_landscape_db()
         source = ListSource([{"value": 99}])
         sink = CollectSink()
 
@@ -355,10 +355,10 @@ class TestOrchestratorEmptyPipeline:
 
     def test_run_empty_source(self, payload_store) -> None:
         """Test pipeline with no rows from source."""
-        from elspeth.core.landscape import LandscapeDB
         from elspeth.engine.orchestrator import Orchestrator, PipelineConfig
+        from tests.fixtures.landscape import make_landscape_db
 
-        db = LandscapeDB.in_memory()
+        db = make_landscape_db()
         source = ListSource([])  # Empty source
         transform = IdentityTransform()
         transform.on_success = "default"
@@ -379,14 +379,14 @@ class TestOrchestratorEmptyPipeline:
 
     def test_flexible_source_contract_persisted_when_all_rows_quarantined(self, tmp_path, payload_store) -> None:
         """All-invalid FLEXIBLE runs still persist declared run contract."""
-        from elspeth.core.landscape import LandscapeDB, LandscapeRecorder
         from elspeth.engine.orchestrator import Orchestrator, PipelineConfig
         from elspeth.plugins.sources.json_source import JSONSource
+        from tests.fixtures.landscape import make_landscape_db, make_recorder
 
         json_file = tmp_path / "all_invalid.json"
         json_file.write_text('[{"id": "bad"}, {"id": "still_bad"}]')
 
-        db = LandscapeDB.in_memory()
+        db = make_landscape_db()
         source = JSONSource(
             {
                 "path": str(json_file),
@@ -415,7 +415,7 @@ class TestOrchestratorEmptyPipeline:
         assert len(default_sink.results) == 0
         assert len(quarantine_sink.results) == 2
 
-        recorder = LandscapeRecorder(db)
+        recorder = make_recorder(db)
         contract = recorder.get_run_contract(run_result.run_id)
         assert contract is not None
         assert contract.mode == "FLEXIBLE"
@@ -432,10 +432,10 @@ class TestOrchestratorAcceptsGraph:
 
         from elspeth.core.config import ElspethSettings, SinkSettings, SourceSettings
         from elspeth.core.dag import ExecutionGraph
-        from elspeth.core.landscape import LandscapeDB
         from elspeth.engine.orchestrator import Orchestrator, PipelineConfig
+        from tests.fixtures.landscape import make_landscape_db
 
-        db = LandscapeDB.in_memory()
+        db = make_landscape_db()
 
         # Build config and graph from settings
         settings = ElspethSettings(
@@ -515,10 +515,10 @@ class TestOrchestratorAcceptsGraph:
 
         from elspeth.core.config import ElspethSettings, SinkSettings, SourceSettings
         from elspeth.core.dag import ExecutionGraph
-        from elspeth.core.landscape import LandscapeDB
         from elspeth.engine.orchestrator import Orchestrator, PipelineConfig
+        from tests.fixtures.landscape import make_landscape_db
 
-        db = LandscapeDB.in_memory()
+        db = make_landscape_db()
 
         # Build config with MULTIPLE sinks
         settings = ElspethSettings(
@@ -614,10 +614,10 @@ class TestOrchestratorAcceptsGraph:
         import inspect
 
         from elspeth.core.dag import ExecutionGraph
-        from elspeth.core.landscape import LandscapeDB
         from elspeth.engine.orchestrator import Orchestrator
+        from tests.fixtures.landscape import make_landscape_db
 
-        db = LandscapeDB.in_memory()
+        db = make_landscape_db()
 
         # Build a simple graph
         graph = ExecutionGraph()
@@ -634,10 +634,10 @@ class TestOrchestratorAcceptsGraph:
 
     def test_orchestrator_run_requires_graph(self, payload_store) -> None:
         """Orchestrator.run() raises ValueError if graph is None."""
-        from elspeth.core.landscape import LandscapeDB
         from elspeth.engine.orchestrator import Orchestrator, PipelineConfig
+        from tests.fixtures.landscape import make_landscape_db
 
-        db = LandscapeDB.in_memory()
+        db = make_landscape_db()
         source = ListSource([])
         sink = CollectSink()
 

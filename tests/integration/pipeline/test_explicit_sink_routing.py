@@ -19,12 +19,12 @@ from typing import TYPE_CHECKING, Any, cast
 
 from elspeth.contracts import PipelineRow, RunStatus, SinkProtocol, SourceProtocol, TransformProtocol
 from elspeth.core.config import AggregationSettings, CoalesceSettings, ElspethSettings, GateSettings, SourceSettings, TriggerConfig
-from elspeth.core.landscape import LandscapeDB
 from elspeth.engine.orchestrator import Orchestrator, PipelineConfig
 from elspeth.plugins.infrastructure.base import BaseTransform
 from elspeth.testing import make_pipeline_row
 from tests.fixtures.base_classes import _TestSchema, as_sink, as_source, as_transform
 from tests.fixtures.factories import wire_transforms
+from tests.fixtures.landscape import make_landscape_db
 from tests.fixtures.pipeline import build_production_graph
 from tests.fixtures.plugins import CollectSink, ListSource
 
@@ -112,7 +112,7 @@ class TestExplicitSinkRouting:
         Setup: source → transform(on_success=output) → output sink
         Verify: Completed rows arrive at the declared on_success sink.
         """
-        db = LandscapeDB.in_memory()
+        db = make_landscape_db()
 
         source = ListSource([{"value": 1}, {"value": 2}], on_success="output")
         transform = IdentityTransform()
@@ -143,7 +143,7 @@ class TestExplicitSinkRouting:
         Terminal fork gates must route all paths to named sinks (no "continue").
         The "false" route goes to sink_a (never fires since condition=True).
         """
-        db = LandscapeDB.in_memory()
+        db = make_landscape_db()
 
         source = ListSource([{"value": 1}, {"value": 2}], on_success="sink_a")
 
@@ -190,7 +190,7 @@ class TestExplicitSinkRouting:
         Uses a terminal gate after coalesce (same pattern as
         test_nonterminal_coalesce_continues_to_downstream_gate).
         """
-        db = LandscapeDB.in_memory()
+        db = make_landscape_db()
 
         source = ListSource([{"value": 1}, {"value": 2}], on_success="source_sink")
 
@@ -269,7 +269,7 @@ class TestExplicitSinkRouting:
         """
         from elspeth.core.dag import ExecutionGraph
 
-        db = LandscapeDB.in_memory()
+        db = make_landscape_db()
 
         source = ListSource([{"value": 1}, {"value": 2}, {"value": 3}], on_success="output")
         transform = BatchPassthroughTransform()
@@ -331,7 +331,7 @@ class TestExplicitSinkRouting:
         from elspeth.core.config import CheckpointSettings
         from elspeth.core.dag import ExecutionGraph
 
-        db = LandscapeDB.in_memory()
+        db = make_landscape_db()
         checkpoint_mgr = CheckpointManager(db)
         settings = CheckpointSettings(enabled=True, frequency="every_row")
         checkpoint_config = RuntimeCheckpointConfig.from_settings(settings)
@@ -413,7 +413,7 @@ class TestExplicitSinkRoutingEdgeCases:
 
     def test_source_on_success_used_when_no_transforms(self, payload_store) -> None:
         """Source on_success routes directly to sink when no transforms exist."""
-        db = LandscapeDB.in_memory()
+        db = make_landscape_db()
 
         source = ListSource([{"value": 1}], on_success="direct_sink")
         sink = CollectSink(name="direct_sink")
@@ -442,7 +442,7 @@ class TestExplicitSinkRoutingEdgeCases:
         """
         from tests.fixtures.factories import wire_transforms
 
-        db = LandscapeDB.in_memory()
+        db = make_landscape_db()
 
         source = ListSource([{"value": 1}], on_success="sink_b")
 
@@ -501,7 +501,7 @@ class TestExplicitSinkRoutingEdgeCases:
         """
         from elspeth.core.dag import ExecutionGraph
 
-        db = LandscapeDB.in_memory()
+        db = make_landscape_db()
 
         source = ListSource([{"value": 10}, {"value": 20}], on_success="gate_in")
         transform = AddFieldTransform("routed", True)

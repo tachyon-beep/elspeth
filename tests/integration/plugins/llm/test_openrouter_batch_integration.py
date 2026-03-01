@@ -30,6 +30,7 @@ from elspeth.core.landscape.recorder import LandscapeRecorder
 from elspeth.core.landscape.schema import calls_table
 from elspeth.plugins.transforms.llm.openrouter_batch import OpenRouterBatchLLMTransform
 from elspeth.testing import make_pipeline_row
+from tests.fixtures.landscape import make_recorder
 from tests.unit.plugins.llm.conftest import chaosllm_openrouter_http_responses
 
 # Common schema config for dynamic field handling
@@ -148,7 +149,7 @@ class TestThreadSafetyConcurrentWorkers:
 
     @pytest.fixture
     def recorder(self, db: LandscapeDB) -> LandscapeRecorder:
-        return LandscapeRecorder(db)
+        return make_recorder(db)
 
     def test_concurrent_workers_produce_unique_call_indices(self, chaosllm_server, recorder: LandscapeRecorder) -> None:
         """Multiple workers sharing one recorder produce unique call indices.
@@ -238,7 +239,7 @@ class TestStreamErrorBatchHandling:
 
     @pytest.fixture
     def recorder(self, db: LandscapeDB) -> LandscapeRecorder:
-        return LandscapeRecorder(db)
+        return make_recorder(db)
 
     def test_stream_error_produces_error_marker_not_crash(self, chaosllm_server, recorder: LandscapeRecorder) -> None:
         """StreamError during response streaming produces per-row error marker.
@@ -378,7 +379,7 @@ class TestContentFilteredNoneResponse:
 
     @pytest.fixture
     def recorder(self, db: LandscapeDB) -> LandscapeRecorder:
-        return LandscapeRecorder(db)
+        return make_recorder(db)
 
     def test_null_content_detected_as_content_filtered(self, chaosllm_server, recorder: LandscapeRecorder) -> None:
         """Content-filtered response with null content produces error row.
@@ -474,7 +475,7 @@ class TestRateLimiterWiring:
 
     @pytest.fixture
     def recorder(self, db: LandscapeDB) -> LandscapeRecorder:
-        return LandscapeRecorder(db)
+        return make_recorder(db)
 
     def test_rate_limiter_invoked_during_processing(self, chaosllm_server, recorder: LandscapeRecorder) -> None:
         """Rate limiter from registry is invoked when processing rows.
@@ -555,7 +556,7 @@ class TestOnStartWiring:
 
     @pytest.fixture
     def recorder(self, db: LandscapeDB) -> LandscapeRecorder:
-        return LandscapeRecorder(db)
+        return make_recorder(db)
 
     def test_on_start_wires_recorder_for_audit_recording(self, chaosllm_server, recorder: LandscapeRecorder) -> None:
         """After on_start + process, recorder receives call records.
@@ -647,7 +648,7 @@ class TestBatchOrderPreservation:
 
     @pytest.fixture
     def recorder(self, db: LandscapeDB) -> LandscapeRecorder:
-        return LandscapeRecorder(db)
+        return make_recorder(db)
 
     def test_output_order_matches_input_order_with_delays(self, chaosllm_server, recorder: LandscapeRecorder) -> None:
         """Results reassembled in input order even when workers finish out-of-order.

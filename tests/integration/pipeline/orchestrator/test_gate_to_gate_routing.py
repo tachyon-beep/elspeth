@@ -23,10 +23,10 @@ from typing import Any
 
 from elspeth.contracts import RunStatus
 from elspeth.core.config import GateSettings
-from elspeth.core.landscape import LandscapeDB
 from elspeth.engine.orchestrator import Orchestrator, PipelineConfig
 from elspeth.testing import make_pipeline_row
 from tests.fixtures.base_classes import _TestSchema, as_sink, as_source, as_transform
+from tests.fixtures.landscape import make_landscape_db
 from tests.fixtures.pipeline import build_production_graph
 from tests.fixtures.plugins import CollectSink, ListSource
 
@@ -36,7 +36,7 @@ class TestConfigGateToConfigGate:
 
     def test_gate_routes_to_terminal_gate(self, payload_store) -> None:
         """gate1 routes to gate2, gate2 routes to sinks — must not crash."""
-        db = LandscapeDB.in_memory()
+        db = make_landscape_db()
 
         # gate1: routes "forward" to gate2's input connection
         gate1 = GateSettings(
@@ -75,7 +75,7 @@ class TestConfigGateToConfigGate:
 
     def test_gate_chain_three_deep(self, payload_store) -> None:
         """gate1 → gate2 → gate3, all config gates, gate3 terminal."""
-        db = LandscapeDB.in_memory()
+        db = make_landscape_db()
 
         gate1 = GateSettings(
             name="gate1",
@@ -124,7 +124,7 @@ class TestGateToGateWithDownstreamTransform:
         from elspeth.plugins.infrastructure.base import BaseTransform
         from elspeth.plugins.infrastructure.results import TransformResult
 
-        db = LandscapeDB.in_memory()
+        db = make_landscape_db()
 
         class TagTransform(BaseTransform):
             """Adds a 'tagged' field to prove the transform ran."""
@@ -183,7 +183,7 @@ class TestGateRouteToTransformChain:
 
     def test_gate_routes_to_sink_directly(self, payload_store) -> None:
         """Config gate routes to sinks without jump — baseline test."""
-        db = LandscapeDB.in_memory()
+        db = make_landscape_db()
 
         gate = GateSettings(
             name="router",

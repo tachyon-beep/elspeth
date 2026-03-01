@@ -14,8 +14,6 @@ from elspeth.contracts import Determinism, TransformResult
 from elspeth.contracts.identity import TokenInfo
 from elspeth.contracts.plugin_context import PluginContext
 from elspeth.contracts.schema_contract import SchemaContract
-from elspeth.core.landscape.database import LandscapeDB
-from elspeth.core.landscape.recorder import LandscapeRecorder
 from elspeth.engine.batch_adapter import ExceptionResult
 from elspeth.plugins.infrastructure.batching.ports import CollectorOutputPort
 from elspeth.plugins.infrastructure.config_base import PluginConfigError
@@ -23,6 +21,7 @@ from elspeth.plugins.transforms.llm.providers.openrouter import OpenRouterConfig
 from elspeth.plugins.transforms.llm.transform import LLMTransform
 from elspeth.testing import make_pipeline_row, make_row
 from tests.fixtures.factories import make_context
+from tests.fixtures.landscape import make_recorder
 
 from .conftest import chaosllm_openrouter_http_responses, chaosllm_openrouter_httpx_response
 
@@ -268,8 +267,7 @@ class TestLLMTransformOpenRouterInit:
     def test_process_raises_not_implemented(self) -> None:
         """process() raises NotImplementedError directing to accept()."""
         transform = LLMTransform(_openrouter_config(template="{{ row.text }}"))
-        db = LandscapeDB.in_memory()
-        recorder = LandscapeRecorder(db)
+        recorder = make_recorder()
         ctx = make_context(run_id="test-run", landscape=recorder)
 
         with pytest.raises(NotImplementedError, match="row-level pipelining"):

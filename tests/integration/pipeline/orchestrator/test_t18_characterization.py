@@ -40,6 +40,7 @@ from tests.fixtures.base_classes import (
     as_transform,
 )
 from tests.fixtures.factories import wire_transforms
+from tests.fixtures.landscape import make_landscape_db
 from tests.fixtures.pipeline import build_production_graph
 from tests.fixtures.plugins import CollectSink, ListSource
 from tests.fixtures.stores import MockPayloadStore
@@ -171,7 +172,7 @@ class TestT18CharacterizationExecuteRun:
         sets COMPLETED after finalize_run()). This is the current behavior.
         """
         _source, _transform, _output_sink, _error_sink, config = self._build_pipeline()
-        db = LandscapeDB.in_memory()
+        db = make_landscape_db()
         orchestrator = Orchestrator(db)
 
         graph = build_production_graph(config)
@@ -197,7 +198,7 @@ class TestT18CharacterizationExecuteRun:
     def test_sink_contents(self) -> None:
         """Assert sink contents match expected routing."""
         _source, _transform, output_sink, error_sink, config = self._build_pipeline()
-        db = LandscapeDB.in_memory()
+        db = make_landscape_db()
         orchestrator = Orchestrator(db)
 
         graph = build_production_graph(config)
@@ -224,7 +225,7 @@ class TestT18CharacterizationExecuteRun:
         execute. If extraction breaks the operation_id lifecycle, this catches it.
         """
         _source, transform, _output_sink, _error_sink, config = self._build_pipeline()
-        db = LandscapeDB.in_memory()
+        db = make_landscape_db()
         orchestrator = Orchestrator(db)
 
         graph = build_production_graph(config)
@@ -261,7 +262,7 @@ class TestT18CharacterizationExecuteRun:
         on the runs table.
         """
         _source, _transform, _output_sink, _error_sink, config = self._build_pipeline()
-        db = LandscapeDB.in_memory()
+        db = make_landscape_db()
         orchestrator = Orchestrator(db)
 
         graph = build_production_graph(config)
@@ -293,7 +294,7 @@ class TestT18CharacterizationExecuteRun:
         - routing_events should have DIVERT entries for quarantined rows
         """
         _source, _transform, _output_sink, _error_sink, config = self._build_pipeline()
-        db = LandscapeDB.in_memory()
+        db = make_landscape_db()
         orchestrator = Orchestrator(db)
 
         graph = build_production_graph(config)
@@ -335,7 +336,7 @@ class TestT18CharacterizationExecuteRun:
         behavior — if a future extraction moves cleanup into the finally block,
         this test should be updated to expect None.
         """
-        db = LandscapeDB.in_memory()
+        db = make_landscape_db()
         orchestrator = Orchestrator(db)
 
         class ErrorTransform(_TestTransformBase):
@@ -396,7 +397,7 @@ class TestT18CharacterizationResumePath:
         resume with one of those rows and spy on the transform to capture
         ctx.contract during process(). Verify it matches the passed contract.
         """
-        db = LandscapeDB.in_memory()
+        db = make_landscape_db()
         orchestrator = Orchestrator(db)
 
         captured_contracts: list[SchemaContract | None] = []
@@ -490,7 +491,7 @@ class TestT18CharacterizationResumePath:
         Strategy: First do a full _execute_run() to populate DB with nodes/edges,
         then call _process_resumed_rows() with empty rows on the same run.
         """
-        db = LandscapeDB.in_memory()
+        db = make_landscape_db()
         orchestrator = Orchestrator(db)
 
         on_start_calls: dict[str, int] = {"source": 0, "transform": 0, "sink": 0}
@@ -702,7 +703,7 @@ class TestT18CharacterizationAggregation:
         1 aggregated row that reaches the output sink.
         """
         _source, _transform, output_sink, config, graph = _build_aggregation_pipeline()
-        db = LandscapeDB.in_memory()
+        db = make_landscape_db()
         orchestrator = Orchestrator(db)
         recorder, run_id, payload_store = _begin_test_run(db)
 
@@ -724,7 +725,7 @@ class TestT18CharacterizationAggregation:
     def test_aggregation_output_content(self) -> None:
         """Assert the aggregated output row has correct content."""
         _source, _transform, output_sink, config, graph = _build_aggregation_pipeline()
-        db = LandscapeDB.in_memory()
+        db = make_landscape_db()
         orchestrator = Orchestrator(db)
         recorder, run_id, payload_store = _begin_test_run(db)
 
@@ -755,7 +756,7 @@ class TestT18CharacterizationAggregation:
         - At least one sink_write operation (for the aggregated output)
         """
         _source, _transform, output_sink, config, graph = _build_aggregation_pipeline()
-        db = LandscapeDB.in_memory()
+        db = make_landscape_db()
         orchestrator = Orchestrator(db)
         recorder, run_id, payload_store = _begin_test_run(db)
 

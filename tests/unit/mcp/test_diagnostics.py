@@ -11,6 +11,7 @@ from elspeth.core.landscape.database import LandscapeDB
 from elspeth.core.landscape.recorder import LandscapeRecorder
 from elspeth.core.landscape.schema import runs_table
 from elspeth.mcp.analyzers.diagnostics import diagnose
+from tests.fixtures.landscape import make_landscape_db, make_recorder
 
 _DYNAMIC_SCHEMA = SchemaConfig.from_dict({"mode": "observed"})
 
@@ -78,8 +79,8 @@ def _get_problem(report: dict[str, object], problem_type: str) -> dict[str, obje
 
 def test_diagnose_does_not_flag_recent_running_run_as_stuck() -> None:
     """A newly started run should not appear in stuck_runs."""
-    db = LandscapeDB.in_memory()
-    recorder = LandscapeRecorder(db)
+    db = make_landscape_db()
+    recorder = make_recorder(db)
     _create_running_run(recorder)
 
     report = diagnose(db, recorder)
@@ -89,8 +90,8 @@ def test_diagnose_does_not_flag_recent_running_run_as_stuck() -> None:
 
 def test_diagnose_flags_old_running_run_as_stuck() -> None:
     """A running run older than one hour should appear in stuck_runs."""
-    db = LandscapeDB.in_memory()
-    recorder = LandscapeRecorder(db)
+    db = make_landscape_db()
+    recorder = make_recorder(db)
     run_id = _create_running_run(recorder)
 
     _set_run_started_at(db, run_id, datetime.now(UTC) - timedelta(hours=2))
@@ -104,8 +105,8 @@ def test_diagnose_flags_old_running_run_as_stuck() -> None:
 
 def test_diagnose_reports_only_old_runs_in_mixed_running_set() -> None:
     """Only runs beyond the stuck threshold should be reported."""
-    db = LandscapeDB.in_memory()
-    recorder = LandscapeRecorder(db)
+    db = make_landscape_db()
+    recorder = make_recorder(db)
     recent_run_id = _create_running_run(recorder)
     old_run_id = _create_running_run(recorder)
 
@@ -124,8 +125,8 @@ def test_diagnose_reports_only_old_runs_in_mixed_running_set() -> None:
 
 def test_diagnose_quarantine_count_excludes_old_runs() -> None:
     """Quarantine count should only reflect recent runs, not all history."""
-    db = LandscapeDB.in_memory()
-    recorder = LandscapeRecorder(db)
+    db = make_landscape_db()
+    recorder = make_recorder(db)
 
     # Old run (30 days ago) with quarantined row
     _create_completed_run_with_quarantine(
@@ -149,8 +150,8 @@ def test_diagnose_quarantine_count_excludes_old_runs() -> None:
 
 def test_diagnose_quarantine_count_includes_recent_runs() -> None:
     """Quarantine count should include quarantines from recent runs."""
-    db = LandscapeDB.in_memory()
-    recorder = LandscapeRecorder(db)
+    db = make_landscape_db()
+    recorder = make_recorder(db)
 
     # Recent run with quarantined row
     _create_completed_run_with_quarantine(
@@ -168,8 +169,8 @@ def test_diagnose_quarantine_count_includes_recent_runs() -> None:
 
 def test_diagnose_quarantine_count_scoped_to_recent_runs_only() -> None:
     """With both old and recent quarantines, only recent ones counted."""
-    db = LandscapeDB.in_memory()
-    recorder = LandscapeRecorder(db)
+    db = make_landscape_db()
+    recorder = make_recorder(db)
 
     # Old run with 1 quarantine
     _create_completed_run_with_quarantine(

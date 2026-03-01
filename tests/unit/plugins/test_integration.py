@@ -5,10 +5,9 @@ from collections.abc import Iterator
 from typing import Any, ClassVar
 
 from elspeth.contracts.schema_contract import PipelineRow
-from elspeth.core.landscape.database import LandscapeDB
-from elspeth.core.landscape.recorder import LandscapeRecorder
 from elspeth.testing import make_field, make_pipeline_row
 from tests.fixtures.factories import make_context
+from tests.fixtures.landscape import make_recorder
 
 
 class TestPluginSystemIntegration:
@@ -105,8 +104,7 @@ class TestPluginSystemIntegration:
         assert len(manager.get_sinks()) == 1
 
         # Create instances and process
-        db = LandscapeDB.in_memory()
-        recorder = LandscapeRecorder(db)
+        recorder = make_recorder()
         ctx = make_context(run_id="test-001", landscape=recorder)
 
         source_cls = manager.get_source_by_name("list")

@@ -23,7 +23,6 @@ from elspeth.contracts.config import RuntimeRetryConfig
 from elspeth.contracts.errors import MaxRetriesExceeded
 from elspeth.contracts.plugin_context import PluginContext
 from elspeth.contracts.schema_contract import FieldContract, PipelineRow, SchemaContract
-from elspeth.core.landscape.database import LandscapeDB
 from elspeth.core.landscape.recorder import LandscapeRecorder
 from elspeth.core.landscape.schema import node_states_table
 from elspeth.engine.executors import TransformExecutor
@@ -32,6 +31,7 @@ from elspeth.engine.spans import SpanFactory
 from elspeth.plugins.infrastructure.base import BaseTransform
 from elspeth.testing import make_pipeline_row
 from tests.fixtures.factories import make_context
+from tests.fixtures.landscape import make_landscape_db, make_recorder
 
 
 def _make_contract(data: dict[str, Any]) -> SchemaContract:
@@ -101,8 +101,8 @@ class TestRetryAuditTrail:
     @pytest.fixture
     def test_env(self) -> dict[str, Any]:
         """Set up test environment with in-memory database."""
-        db = LandscapeDB.in_memory()
-        recorder = LandscapeRecorder(db)
+        db = make_landscape_db()
+        recorder = make_recorder(db)
 
         # Create a noop span factory
         span_factory = Mock(spec=SpanFactory)

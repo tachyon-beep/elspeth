@@ -15,10 +15,9 @@ import pytest
 from hypothesis import HealthCheck, given, settings
 from hypothesis import strategies as st
 
-from elspeth.core.landscape.database import LandscapeDB
-from elspeth.core.landscape.recorder import LandscapeRecorder
 from elspeth.plugins.sinks.csv_sink import CSVSink
 from tests.fixtures.factories import make_context
+from tests.fixtures.landscape import make_landscape_db, make_recorder
 
 from .test_sink_protocol import SinkContractTestBase, SinkDeterminismContractTestBase
 
@@ -89,8 +88,8 @@ class TestCSVSinkHashVerification:
     def test_content_hash_matches_file_content(self, tmp_path: Path) -> None:
         """Contract: content_hash MUST match SHA-256 of actual file bytes."""
         csv_path = tmp_path / "hash_verify.csv"
-        db = LandscapeDB.in_memory()
-        recorder = LandscapeRecorder(db)
+        db = make_landscape_db()
+        recorder = make_recorder(db)
         ctx = make_context(landscape=recorder)
 
         rows = [{"id": 1, "name": "Alice"}, {"id": 2, "name": "Bob"}]
@@ -106,8 +105,8 @@ class TestCSVSinkHashVerification:
     def test_size_bytes_matches_file_size(self, tmp_path: Path) -> None:
         """Contract: size_bytes MUST match actual file size."""
         csv_path = tmp_path / "size_verify.csv"
-        db = LandscapeDB.in_memory()
-        recorder = LandscapeRecorder(db)
+        db = make_landscape_db()
+        recorder = make_recorder(db)
         ctx = make_context(landscape=recorder)
 
         rows = [{"id": 1, "name": "Alice"}, {"id": 2, "name": "Bob"}]
@@ -127,8 +126,8 @@ class TestCSVSinkAppendMode:
     def test_append_mode_adds_rows(self, tmp_path: Path) -> None:
         """Append mode MUST add rows to existing file."""
         csv_path = tmp_path / "append_test.csv"
-        db = LandscapeDB.in_memory()
-        recorder = LandscapeRecorder(db)
+        db = make_landscape_db()
+        recorder = make_recorder(db)
         ctx = make_context(landscape=recorder)
 
         sink1 = CSVSink(
@@ -161,8 +160,8 @@ class TestCSVSinkAppendMode:
     def test_append_to_nonexistent_creates_file(self, tmp_path: Path) -> None:
         """Append mode on non-existent file MUST create it with header."""
         csv_path = tmp_path / "new_file.csv"
-        db = LandscapeDB.in_memory()
-        recorder = LandscapeRecorder(db)
+        db = make_landscape_db()
+        recorder = make_recorder(db)
         ctx = make_context(landscape=recorder)
 
         assert not csv_path.exists()
@@ -215,8 +214,8 @@ class TestCSVSinkPropertyBased:
                 "schema": {"mode": "fixed", "fields": ["id: int", "name: str", "value: int"]},
             }
         )
-        db = LandscapeDB.in_memory()
-        recorder = LandscapeRecorder(db)
+        db = make_landscape_db()
+        recorder = make_recorder(db)
         ctx = make_context(landscape=recorder)
 
         result = sink.write(rows, ctx)
@@ -243,8 +242,8 @@ class TestCSVSinkPropertyBased:
         """Property: Same rows always produce same hash."""
         import uuid
 
-        db = LandscapeDB.in_memory()
-        recorder = LandscapeRecorder(db)
+        db = make_landscape_db()
+        recorder = make_recorder(db)
         ctx = make_context(landscape=recorder)
 
         path1 = tmp_path / f"test1_{uuid.uuid4().hex[:8]}.csv"
@@ -269,8 +268,8 @@ class TestCSVSinkQuotingCharacters:
         import csv
 
         csv_path = tmp_path / "quoting_commas.csv"
-        db = LandscapeDB.in_memory()
-        recorder = LandscapeRecorder(db)
+        db = make_landscape_db()
+        recorder = make_recorder(db)
         ctx = make_context(landscape=recorder)
 
         rows = [{"id": 1, "data": "value with, comma"}]
@@ -290,8 +289,8 @@ class TestCSVSinkQuotingCharacters:
         import csv
 
         csv_path = tmp_path / "quoting_quotes.csv"
-        db = LandscapeDB.in_memory()
-        recorder = LandscapeRecorder(db)
+        db = make_landscape_db()
+        recorder = make_recorder(db)
         ctx = make_context(landscape=recorder)
 
         rows = [{"id": 1, "data": 'value with "quotes"'}]
@@ -311,8 +310,8 @@ class TestCSVSinkQuotingCharacters:
         import csv
 
         csv_path = tmp_path / "quoting_newlines.csv"
-        db = LandscapeDB.in_memory()
-        recorder = LandscapeRecorder(db)
+        db = make_landscape_db()
+        recorder = make_recorder(db)
         ctx = make_context(landscape=recorder)
 
         rows = [{"id": 1, "data": "value with\nnewline"}]
@@ -332,8 +331,8 @@ class TestCSVSinkQuotingCharacters:
         import csv
 
         csv_path = tmp_path / "quoting_all.csv"
-        db = LandscapeDB.in_memory()
-        recorder = LandscapeRecorder(db)
+        db = make_landscape_db()
+        recorder = make_recorder(db)
         ctx = make_context(landscape=recorder)
 
         rows = [{"id": 1, "data": 'value with "quotes" and, commas\nand newlines'}]
@@ -350,8 +349,8 @@ class TestCSVSinkQuotingCharacters:
 
     def test_csv_quoting_roundtrip_determinism(self, tmp_path: Path) -> None:
         """CSVSink MUST produce deterministic output with special characters."""
-        db = LandscapeDB.in_memory()
-        recorder = LandscapeRecorder(db)
+        db = make_landscape_db()
+        recorder = make_recorder(db)
         ctx = make_context(landscape=recorder)
 
         rows = [

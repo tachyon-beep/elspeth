@@ -953,3 +953,61 @@ Semantic preservation confirmed: `config={}` correctly dropped (factory default)
 - mypy: pre-existing errors only (5 in factories.py/test_azure.py — none introduced)
 
 **Updated P1 totals:** ~377 `PluginContext(...)` constructions replaced across 58 files (original 350+ across 53, plus supplementary 27 across 5).
+
+**2026-03-02 — P2: Inline landscape setup replacement — COMPLETE**
+
+Replaced inline `LandscapeDB.in_memory()` and `LandscapeRecorder(...)` constructions with centralized factory calls across 76 files. Net: 685 insertions, 1,400 deletions (−715 lines).
+
+**Scope:** 76 non-property, non-exempt test files. Excluded: 14 EXEMPT `test_recorder_*.py` files, property tests (out of P2 scope), `test_context.py`/`test_context_protocols.py` (test PluginContext directly), factory infrastructure files.
+
+**Replacement patterns applied:**
+
+| Pattern | Description | Count |
+|---|---|---|
+| Pattern 1 | `LandscapeDB.in_memory()` → `make_landscape_db()` | 177 |
+| Pattern 2 | `LandscapeRecorder(db)` → `make_recorder(db)` | 156 |
+| Pattern 3 | 4-step boilerplate → `make_recorder_with_run()` | 45 |
+| Pattern 4 | Helper body → delegates to `make_recorder_with_run()` | ~10 (subset of Pattern 3) |
+| `register_test_node()` | Additional node registration after Pattern 3 | 30 |
+
+**Execution:** 29 subagents, each assigned 1–3 files (≤20 tests). Written instructions at `.claude/prompts/p2-migration-instructions.md` defined all 4 patterns, import changes, exempt criteria, and factory API reference. Each agent made mechanical replacements only.
+
+**Residual (intentionally not migrated):**
+
+| Category | Remaining | Files | Reason |
+|---|---|---|---|
+| `payload_store=` kwarg | 27 | 9 files | `make_recorder()` does not accept `payload_store` — factory gap |
+| `performance/` tests | 16 `in_memory()` + 6 `Recorder(` | 8 files | Out of P2 scope (performance tests — different lifecycle) |
+| EXEMPT recorder tests | 142 `in_memory()` + 154 `Recorder(` | 14 files | SUT is recorder itself — Pattern 3 would hide the code being tested |
+| EXEMPT context/factory tests | 14 `in_memory()` + 4 `Recorder(` | 3 files | SUT is context/factory infrastructure |
+| Property tests | 80 `in_memory()` + 58 `Recorder(` | 12 files | Out of P2 scope |
+| `test_processor.py` docstring | 1 | 1 file | Comment, not code |
+
+**Issues found and fixed during migration:**
+
+1. **Import sorting (9 files):** Subagents inserted `tests.fixtures.landscape` imports between `elspeth.*` imports. Auto-fixed with `ruff check tests/ --fix`.
+2. **Unused `db` variable (1 file, 3 occurrences):** `test_batch_token_identity.py` destructured `db` from `RecorderSetup` but never used it. Fixed by removing `db` from destructuring.
+
+**Code review results (4 agents):**
+
+| Reviewer | Scope | Verdict | Issues Found |
+|---|---|---|---|
+| High-density reviewer | 3 files, 193 tests | Clean | None |
+| Medium-density reviewer | 4 files, 158 tests | Clean | None — EXEMPT files correctly Pattern 1+2 only |
+| Engine/processor reviewer | 5 files, 101 tests | Clean | None — `payload_store` calls correctly preserved |
+| Integration/E2E reviewer | 10 files | Clean | None — `payload_store` calls correctly left untouched |
+
+**Verification:**
+- pytest: 10,370 passed, 17 skipped, 87 deselected, 3 xfailed, 0 failures
+- Test count: unchanged from P1 baseline (10,370)
+- ruff: all checks passed
+- mypy: no new errors introduced (pre-existing only)
+
+**P2 coverage summary:**
+
+| Metric | Before P2 | After P2 | Delta |
+|---|---|---|---|
+| `LandscapeDB.in_memory()` in migrateable scope | ~251 | 0 | −251 |
+| `LandscapeRecorder(` in migrateable scope (excl. `payload_store`) | ~201 | 0 | −201 |
+| Files touched | — | 76 | — |
+| Net lines | — | −715 | — |

@@ -233,11 +233,11 @@ class TestSignedExportDeterminism:
         We run ONE pipeline, then export the audit trail TWICE via the exporter
         directly (not via CLI, which creates new runs each time).
         """
-        from elspeth.core.landscape import LandscapeDB, LandscapeRecorder
         from elspeth.core.landscape.exporter import LandscapeExporter
+        from tests.fixtures.landscape import make_landscape_db, make_recorder
 
-        db = LandscapeDB.in_memory()
-        recorder = LandscapeRecorder(db)
+        db = make_landscape_db()
+        recorder = make_recorder(db)
 
         # Create a run with multiple records of each type
         run = recorder.begin_run(config={"test": True}, canonical_version="v1")

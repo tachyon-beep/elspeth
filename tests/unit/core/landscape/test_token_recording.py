@@ -6,33 +6,15 @@ from elspeth.contracts import NodeType, RowOutcome
 from elspeth.contracts.errors import AuditIntegrityError
 from elspeth.contracts.schema import SchemaConfig
 from elspeth.core.landscape import LandscapeDB, LandscapeRecorder
+from tests.fixtures.landscape import make_landscape_db, make_recorder, make_recorder_with_run, register_test_node
 
 _DYNAMIC_SCHEMA = SchemaConfig.from_dict({"mode": "observed"})
 
 
 def _setup(*, run_id: str = "run-1") -> tuple[LandscapeDB, LandscapeRecorder]:
-    db = LandscapeDB.in_memory()
-    recorder = LandscapeRecorder(db)
-    recorder.begin_run(config={}, canonical_version="v1", run_id=run_id)
-    recorder.register_node(
-        run_id=run_id,
-        plugin_name="csv",
-        node_type=NodeType.SOURCE,
-        plugin_version="1.0",
-        config={},
-        node_id="source-0",
-        schema_config=_DYNAMIC_SCHEMA,
-    )
-    recorder.register_node(
-        run_id=run_id,
-        plugin_name="count_agg",
-        node_type=NodeType.AGGREGATION,
-        plugin_version="1.0",
-        config={},
-        node_id="agg-0",
-        schema_config=_DYNAMIC_SCHEMA,
-    )
-    return db, recorder
+    setup = make_recorder_with_run(run_id=run_id, source_node_id="source-0", source_plugin_name="csv")
+    register_test_node(setup.recorder, setup.run_id, "agg-0", node_type=NodeType.AGGREGATION, plugin_name="count_agg")
+    return setup.db, setup.recorder
 
 
 def _make_batch(recorder: LandscapeRecorder, *, run_id: str = "run-1", batch_id: str = "batch-1") -> str:
@@ -1031,8 +1013,8 @@ class TestGetTokenOutcomesForRow:
 
 def _setup_two_runs() -> tuple[LandscapeDB, LandscapeRecorder]:
     """Set up a shared database with two runs, each with a source and aggregation node."""
-    db = LandscapeDB.in_memory()
-    recorder = LandscapeRecorder(db)
+    db = make_landscape_db()
+    recorder = make_recorder(db)
 
     # Run A
     recorder.begin_run(config={}, canonical_version="v1", run_id="run-A")
@@ -1424,8 +1406,8 @@ class TestTokenRunIdConsistency:
         from elspeth.core.landscape._helpers import generate_id, now
         from elspeth.core.landscape.schema import token_outcomes_table
 
-        db = LandscapeDB.in_memory()
-        recorder = LandscapeRecorder(db)
+        db = make_landscape_db()
+        recorder = make_recorder(db)
 
         # Set up run-A with row + token
         recorder.begin_run(config={}, canonical_version="v1", run_id="run-A")
