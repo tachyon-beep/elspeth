@@ -12,7 +12,7 @@ from typing import Any
 import pytest
 
 from elspeth.contracts import Determinism, NodeType, RunStatus
-from elspeth.contracts.plugin_context import PluginContext
+from elspeth.contracts.contexts import LifecycleContext, SourceContext
 from elspeth.contracts.results import SourceRow
 from elspeth.core.checkpoint import CheckpointManager
 from elspeth.core.dag import ExecutionGraph
@@ -34,15 +34,15 @@ class SourceWithoutSchema(BaseSource):
         # Intentionally do NOT set self._schema_class
         # This simulates old source plugins that don't support type fidelity
 
-    def load(self, ctx: PluginContext) -> Iterator[SourceRow]:
+    def load(self, ctx: SourceContext) -> Iterator[SourceRow]:
         """Yield test rows."""
         yield SourceRow.valid({"id": 1, "value": "row1"})
         yield SourceRow.valid({"id": 2, "value": "row2"})
 
-    def on_start(self, ctx: PluginContext) -> None:
+    def on_start(self, ctx: LifecycleContext) -> None:
         pass
 
-    def on_complete(self, ctx: PluginContext) -> None:
+    def on_complete(self, ctx: LifecycleContext) -> None:
         pass
 
     def close(self) -> None:

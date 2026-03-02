@@ -4,7 +4,7 @@
 from typing import Any
 
 from elspeth.contracts import ArtifactDescriptor
-from elspeth.contracts.plugin_context import PluginContext
+from elspeth.contracts.contexts import SinkContext
 from elspeth.contracts.schema_contract import SchemaContract
 from elspeth.plugins.infrastructure.base import BaseSink
 from elspeth.testing import make_field
@@ -19,7 +19,7 @@ class StubSink(BaseSink):
     def write(
         self,
         rows: list[dict[str, Any]],
-        ctx: PluginContext,
+        ctx: SinkContext,
     ) -> ArtifactDescriptor:
         return ArtifactDescriptor(
             artifact_type="file",

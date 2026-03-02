@@ -205,6 +205,7 @@ class TestLLMTransformAzureInit:
                 api_version="2023-12-01-preview",
             )
         )
+        assert isinstance(transform._config, AzureOpenAIConfig)
         assert transform._config.endpoint == "https://my-resource.openai.azure.com"
         assert transform._config.api_key == "azure-api-key"
         assert transform._config.api_version == "2023-12-01-preview"
@@ -655,6 +656,7 @@ class TestLLMTransformAzureIntegration:
     def test_azure_config_with_default_api_version(self) -> None:
         """LLMTransform with Azure provider uses default api_version when not specified."""
         transform = LLMTransform(_make_azure_config(template="{{ row.text }}"))
+        assert isinstance(transform._config, AzureOpenAIConfig)
         assert transform._config.api_version == "2024-10-21"
 
     def test_complex_template_with_multiple_variables(

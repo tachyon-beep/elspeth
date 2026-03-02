@@ -155,7 +155,7 @@ class TestNowProperties:
         naive = datetime(2020, 1, 1, 12, 0, 0)  # noqa: DTZ001 - intentionally naive
 
         with pytest.raises(TypeError):
-            _ = ts < naive  # type: ignore[operator]
+            _ = ts < naive
 
 
 # =============================================================================

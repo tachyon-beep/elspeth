@@ -44,7 +44,7 @@ class TrackingTransform(BaseTransform):
 
     def __init__(self, name: str = "tracking") -> None:
         super().__init__({"schema": {"mode": "observed"}})
-        self.name = name  # type: ignore[misc]
+        self.name = name
         self.close_called = False
         self.close_call_count = 0
 

@@ -718,6 +718,8 @@ class TestCoalesceMetadataProperties:
         assert metadata is not None
         assert metadata.policy == "require_all"
         assert metadata.merge_strategy == "nested"
+        assert metadata.expected_branches is not None
+        assert metadata.branches_arrived is not None
         assert set(metadata.expected_branches) == set(branches)
         assert set(metadata.branches_arrived) == set(branches)
 
@@ -745,6 +747,7 @@ class TestCoalesceMetadataProperties:
 
         assert outcome.coalesce_metadata is not None
         arrival_order = outcome.coalesce_metadata.arrival_order
+        assert arrival_order is not None
 
         # Verify chronological order
         offsets = [entry.arrival_offset_ms for entry in arrival_order]

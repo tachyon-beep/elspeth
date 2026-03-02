@@ -191,8 +191,10 @@ class TestCheckpointRestoredBehavior:
             _batch_checkpoints={"node_1": restored},
         )
 
-        assert ctx.get_checkpoint() is restored
-        assert ctx.get_checkpoint().batch_id == "batch-restored"
+        checkpoint = ctx.get_checkpoint()
+        assert checkpoint is restored
+        assert checkpoint is not None
+        assert checkpoint.batch_id == "batch-restored"
 
     def test_set_checkpoint_without_node_id_uses_local(self) -> None:
         """set_checkpoint uses local checkpoint when node_id is None."""
@@ -654,8 +656,8 @@ class TestRecordCallTelemetryPayloadSnapshot:
         def capture_telemetry(event):
             emitted_events.append(event)
 
-        request_data = {"a": 1, "nested": {"x": 2}}
-        expected_request = {"a": 1, "nested": {"x": 2}}
+        request_data: dict[str, Any] = {"a": 1, "nested": {"x": 2}}
+        expected_request: dict[str, Any] = {"a": 1, "nested": {"x": 2}}
 
         mock_landscape = MagicMock()
         mock_landscape.record_call.return_value = MagicMock(

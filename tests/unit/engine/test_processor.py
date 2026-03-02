@@ -16,13 +16,13 @@ This avoids the anti-pattern of testing mocks instead of behavior.
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, cast
 from unittest.mock import Mock, patch
 
 import pytest
 
 # For node registration
-from elspeth.contracts import NodeType, RouteDestination, RowOutcome, SourceRow, TokenInfo, TransformProtocol, TransformResult
+from elspeth.contracts import NodeType, RouteDestination, RowOutcome, RowResult, SourceRow, TokenInfo, TransformProtocol, TransformResult
 from elspeth.contracts.aggregation_checkpoint import AggregationCheckpointState
 from elspeth.contracts.enums import (
     NodeStateStatus,
@@ -48,7 +48,7 @@ from elspeth.engine.retry import RetryManager
 from elspeth.engine.spans import SpanFactory
 from elspeth.plugins.infrastructure.clients.llm import LLMClientError
 from elspeth.plugins.infrastructure.pooling import CapacityError
-from elspeth.testing import make_contract, make_row, make_source_row, make_token_info
+from elspeth.testing import make_contract, make_pipeline_row, make_row, make_source_row, make_token_info
 from tests.fixtures.factories import make_context
 from tests.fixtures.landscape import make_recorder_with_run
 
@@ -1213,7 +1213,7 @@ class TestProcessRowGateBranching:
         processor = _make_processor(
             recorder,
             source_on_success="source_sink",
-            branch_to_sink={"path_a": "branch_sink"},
+            branch_to_sink={BranchName("path_a"): "branch_sink"},
             sink_names=frozenset({"source_sink", "branch_sink"}),
             node_step_map={NodeID("source-0"): 0},
             node_to_next={NodeID("source-0"): None},
@@ -1223,7 +1223,7 @@ class TestProcessRowGateBranching:
         results = processor.process_token(
             token=token,
             ctx=ctx,
-            current_node_id=None,
+            current_node_id=None,  # type: ignore[arg-type]  # Intentional: tests branch routing when fork child has no starting node
         )
 
         assert len(results) == 1
@@ -1277,13 +1277,13 @@ class TestProcessRowGateBranching:
         # Transform is the gate's continuation successor — must NOT execute for fork children
         transform = _make_mock_transform(
             node_id="transform-1",
-            result=TransformResult.success({"value": 99, "transformed": True}, success_reason={"action": "test"}),
+            result=TransformResult.success(make_pipeline_row({"value": 99, "transformed": True}), success_reason={"action": "test"}),
         )
 
         processor = _make_processor(
             recorder,
             source_on_success="sink_c",
-            branch_to_sink={"sink_a": "sink_a", "sink_b": "sink_b"},
+            branch_to_sink={BranchName("sink_a"): "sink_a", BranchName("sink_b"): "sink_b"},
             sink_names=frozenset({"sink_a", "sink_b", "sink_c"}),
             node_step_map={gate_node: 1, transform_node: 2},
             node_to_next={gate_node: transform_node, transform_node: None},
@@ -1321,7 +1321,7 @@ class TestProcessRowGateBranching:
                 child_tokens=[child_a, child_b],
             )
 
-        processor._gate_executor.execute_config_gate = mock_execute_config_gate
+        processor._gate_executor.execute_config_gate = mock_execute_config_gate  # type: ignore[method-assign]
 
         source_row = _make_source_row()
         results = processor.process_row(
@@ -1338,7 +1338,7 @@ class TestProcessRowGateBranching:
         # Fork children should complete at their branch sinks
         completed = [r for r in results if r.outcome == RowOutcome.COMPLETED]
         assert len(completed) == 2
-        sink_names = sorted(r.sink_name for r in completed)
+        sink_names = sorted(r.sink_name for r in completed if r.sink_name is not None)
         assert sink_names == ["sink_a", "sink_b"]
 
         # Downstream transform must NOT have been called for fork children
@@ -1351,8 +1351,8 @@ class TestProcessRowGateBranching:
             _make_processor(
                 recorder,
                 source_on_success="output",
-                branch_to_coalesce={"path_a": CoalesceName("merge_point")},
-                branch_to_sink={"path_a": "direct_sink"},
+                branch_to_coalesce={BranchName("path_a"): CoalesceName("merge_point")},
+                branch_to_sink={BranchName("path_a"): "direct_sink"},
                 coalesce_node_ids={CoalesceName("merge_point"): NodeID("coalesce-0")},
                 sink_names=frozenset({"output", "direct_sink"}),
                 node_step_map={NodeID("source-0"): 0, NodeID("coalesce-0"): 1},
@@ -2647,7 +2647,9 @@ class TestAggregationFacades:
         ):
             result = processor.get_aggregation_checkpoint_state()
 
-        assert result == checkpoint
+        # Mock returns raw dict; runtime return type is AggregationCheckpointState.
+        # Comparing across types is intentional — verifying pass-through delegation.
+        assert result == checkpoint  # type: ignore[comparison-overlap]
 
 
 # =============================================================================
@@ -3511,8 +3513,9 @@ class TestProcessorOutcomeTypes:
     def test_transform_terminal_list(self) -> None:
         from elspeth.engine.processor import _TransformTerminal
 
-        mock_results = [Mock(), Mock()]
+        mock_results = cast("list[RowResult]", [Mock(spec=RowResult), Mock(spec=RowResult)])
         outcome = _TransformTerminal(result=mock_results)
+        assert isinstance(outcome.result, list)
         assert len(outcome.result) == 2
 
     def test_transform_outcome_isinstance_dispatch(self) -> None:
@@ -3523,9 +3526,9 @@ class TestProcessorOutcomeTypes:
         terminal_outcome = _TransformTerminal(result=Mock())
 
         assert isinstance(continue_outcome, _TransformContinue)
-        assert not isinstance(continue_outcome, _TransformTerminal)
+        assert not isinstance(continue_outcome, _TransformTerminal)  # type: ignore[unreachable]  # exhaustiveness verification — disjoint dataclasses
         assert isinstance(terminal_outcome, _TransformTerminal)
-        assert not isinstance(terminal_outcome, _TransformContinue)
+        assert not isinstance(terminal_outcome, _TransformContinue)  # type: ignore[unreachable]  # exhaustiveness verification — disjoint dataclasses
 
     def test_gate_continue_default_next_node(self) -> None:
         from elspeth.engine.processor import _GateContinue
@@ -3553,9 +3556,9 @@ class TestProcessorOutcomeTypes:
         terminal_outcome = _GateTerminal(result=Mock())
 
         assert isinstance(continue_outcome, _GateContinue)
-        assert not isinstance(continue_outcome, _GateTerminal)
+        assert not isinstance(continue_outcome, _GateTerminal)  # type: ignore[unreachable]  # exhaustiveness verification — disjoint dataclasses
         assert isinstance(terminal_outcome, _GateTerminal)
-        assert not isinstance(terminal_outcome, _GateContinue)
+        assert not isinstance(terminal_outcome, _GateContinue)  # type: ignore[unreachable]  # exhaustiveness verification — disjoint dataclasses
 
     def test_all_outcome_types_are_frozen(self) -> None:
         from elspeth.engine.processor import (

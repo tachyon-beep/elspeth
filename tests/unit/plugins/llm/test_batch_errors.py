@@ -9,6 +9,7 @@ the engine to schedule retry checks later. These tests verify:
 """
 
 from elspeth.contracts import BatchPendingError
+from elspeth.contracts.batch_checkpoint import BatchCheckpointState, RowMappingEntry
 
 
 class TestBatchPendingErrorConstruction:
@@ -26,7 +27,18 @@ class TestBatchPendingErrorConstruction:
 
     def test_full_construction(self) -> None:
         """BatchPendingError accepts all optional parameters."""
-        checkpoint_data = {"batch_id": "batch-123", "row_mapping": {"r1": 0, "r2": 1}}
+        checkpoint_data = BatchCheckpointState(
+            batch_id="batch-123",
+            input_file_id="file-001",
+            row_mapping={
+                "r1": RowMappingEntry(index=0, variables_hash="aaa"),
+                "r2": RowMappingEntry(index=1, variables_hash="bbb"),
+            },
+            template_errors=[],
+            submitted_at="2026-01-21T12:00:00Z",
+            row_count=2,
+            requests={},
+        )
         error = BatchPendingError(
             "batch-123",
             "in_progress",
@@ -47,19 +59,25 @@ class TestBatchPendingErrorConstruction:
 
         assert error.check_after_seconds == 60
 
-    def test_checkpoint_can_be_any_dict(self) -> None:
-        """Checkpoint can contain arbitrary data for caller persistence."""
-        complex_checkpoint = {
-            "batch_id": "batch-123",
-            "row_mapping": {"token_1": 0, "token_2": 1},
-            "submission_time": "2026-01-21T12:00:00Z",
-            "model": "gpt-4",
-            "nested": {"a": [1, 2, 3]},
-        }
-        error = BatchPendingError("batch-123", "submitted", checkpoint=complex_checkpoint)
+    def test_checkpoint_carries_typed_state(self) -> None:
+        """Checkpoint carries BatchCheckpointState for caller persistence."""
+        checkpoint = BatchCheckpointState(
+            batch_id="batch-123",
+            input_file_id="file-001",
+            row_mapping={
+                "token_1": RowMappingEntry(index=0, variables_hash="aaa"),
+                "token_2": RowMappingEntry(index=1, variables_hash="bbb"),
+            },
+            template_errors=[],
+            submitted_at="2026-01-21T12:00:00Z",
+            row_count=2,
+            requests={"token_1": {"model": "gpt-4"}, "token_2": {"model": "gpt-4"}},
+        )
+        error = BatchPendingError("batch-123", "submitted", checkpoint=checkpoint)
 
-        assert error.checkpoint == complex_checkpoint
-        assert error.checkpoint["nested"]["a"] == [1, 2, 3]
+        assert error.checkpoint == checkpoint
+        assert error.checkpoint.row_mapping["token_1"].index == 0
+        assert error.checkpoint.row_mapping["token_2"].index == 1
 
 
 class TestBatchPendingErrorMessage:
@@ -109,13 +127,22 @@ class TestBatchPendingErrorInheritance:
 
     def test_catchable_as_batch_pending_error(self) -> None:
         """BatchPendingError can be caught specifically."""
+        checkpoint = BatchCheckpointState(
+            batch_id="batch-123",
+            input_file_id="file-001",
+            row_mapping={},
+            template_errors=[],
+            submitted_at="2026-01-21T12:00:00Z",
+            row_count=0,
+            requests={},
+        )
         caught_error = None
         try:
             raise BatchPendingError(
                 "batch-123",
                 "in_progress",
                 check_after_seconds=600,
-                checkpoint={"batch_id": "batch-123"},
+                checkpoint=checkpoint,
                 node_id="my_transform",
             )
         except BatchPendingError as e:
@@ -125,7 +152,7 @@ class TestBatchPendingErrorInheritance:
         assert caught_error.batch_id == "batch-123"
         assert caught_error.status == "in_progress"
         assert caught_error.check_after_seconds == 600
-        assert caught_error.checkpoint == {"batch_id": "batch-123"}
+        assert caught_error.checkpoint == checkpoint
         assert caught_error.node_id == "my_transform"
 
 
@@ -136,10 +163,19 @@ class TestBatchPendingErrorUsagePatterns:
         """Demonstrates Phase 1: submit batch and signal pending."""
         # Simulating batch submission
         batch_id = "batch-2026-01-21-001"
-        checkpoint_data = {
-            "batch_id": batch_id,
-            "row_mapping": {"token_a": 0, "token_b": 1, "token_c": 2},
-        }
+        checkpoint_data = BatchCheckpointState(
+            batch_id=batch_id,
+            input_file_id="file-001",
+            row_mapping={
+                "token_a": RowMappingEntry(index=0, variables_hash="aaa"),
+                "token_b": RowMappingEntry(index=1, variables_hash="bbb"),
+                "token_c": RowMappingEntry(index=2, variables_hash="ccc"),
+            },
+            template_errors=[],
+            submitted_at="2026-01-21T12:00:00Z",
+            row_count=3,
+            requests={},
+        )
 
         error = BatchPendingError(
             batch_id,
@@ -151,13 +187,21 @@ class TestBatchPendingErrorUsagePatterns:
 
         # Caller would persist checkpoint and schedule retry
         assert error.checkpoint is not None
-        assert error.checkpoint["batch_id"] == batch_id
-        assert len(error.checkpoint["row_mapping"]) == 3
+        assert error.checkpoint.batch_id == batch_id
+        assert len(error.checkpoint.row_mapping) == 3
 
     def test_check_phase_pattern_still_pending(self) -> None:
         """Demonstrates Phase 2: check and still pending."""
         # Simulating status check where batch is still running
-        persisted_checkpoint = {"batch_id": "batch-123", "row_mapping": {"t1": 0}}
+        persisted_checkpoint = BatchCheckpointState(
+            batch_id="batch-123",
+            input_file_id="file-001",
+            row_mapping={"t1": RowMappingEntry(index=0, variables_hash="aaa")},
+            template_errors=[],
+            submitted_at="2026-01-21T12:00:00Z",
+            row_count=1,
+            requests={},
+        )
 
         # Check status... still in progress
         error = BatchPendingError(

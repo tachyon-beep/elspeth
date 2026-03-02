@@ -166,7 +166,7 @@ class TestThreadSafetyConcurrentWorkers:
         transform.on_start(ctx)
 
         rows = [make_pipeline_row({"text": f"Row {i}"}) for i in range(batch_size)]
-        responses = [_create_mock_response(chaosllm_server, content=f"Result {i}") for i in range(batch_size)]
+        responses: list[dict[str, Any] | str | httpx.Response] = [_create_mock_response(chaosllm_server, content=f"Result {i}") for i in range(batch_size)]
 
         with chaosllm_openrouter_http_responses(chaosllm_server, responses):
             result = transform.process(rows, ctx)
@@ -203,7 +203,7 @@ class TestThreadSafetyConcurrentWorkers:
         transform.on_start(ctx)
 
         rows = [make_pipeline_row({"text": f"Row {i}"}) for i in range(batch_size)]
-        responses = [_create_mock_response(chaosllm_server, content=f"Result {i}") for i in range(batch_size)]
+        responses: list[dict[str, Any] | str | httpx.Response] = [_create_mock_response(chaosllm_server, content=f"Result {i}") for i in range(batch_size)]
 
         with chaosllm_openrouter_http_responses(chaosllm_server, responses):
             result = transform.process(rows, ctx)
@@ -506,7 +506,7 @@ class TestRateLimiterWiring:
         mock_registry.get_limiter.assert_called_once_with("openrouter")
 
         rows = [make_pipeline_row({"text": "Test row"})]
-        responses = [_create_mock_response(chaosllm_server, content="Result")]
+        responses: list[dict[str, Any] | str | httpx.Response] = [_create_mock_response(chaosllm_server, content="Result")]
 
         with chaosllm_openrouter_http_responses(chaosllm_server, responses):
             result = transform.process(rows, ctx)
@@ -527,7 +527,7 @@ class TestRateLimiterWiring:
         transform.on_start(ctx)
 
         rows = [make_pipeline_row({"text": "Test row"})]
-        responses = [_create_mock_response(chaosllm_server, content="Result")]
+        responses: list[dict[str, Any] | str | httpx.Response] = [_create_mock_response(chaosllm_server, content="Result")]
 
         with chaosllm_openrouter_http_responses(chaosllm_server, responses):
             result = transform.process(rows, ctx)
@@ -570,7 +570,7 @@ class TestOnStartWiring:
         transform.on_start(ctx)
 
         rows = [make_pipeline_row({"text": "Test row"})]
-        responses = [_create_mock_response(chaosllm_server, content="Result")]
+        responses: list[dict[str, Any] | str | httpx.Response] = [_create_mock_response(chaosllm_server, content="Result")]
 
         with chaosllm_openrouter_http_responses(chaosllm_server, responses):
             result = transform.process(rows, ctx)
@@ -599,7 +599,7 @@ class TestOnStartWiring:
         transform.on_start(ctx)
 
         rows = [make_pipeline_row({"text": "Test row"})]
-        responses = [_create_mock_response(chaosllm_server, content="Result")]
+        responses: list[dict[str, Any] | str | httpx.Response] = [_create_mock_response(chaosllm_server, content="Result")]
 
         with chaosllm_openrouter_http_responses(chaosllm_server, responses):
             transform.process(rows, ctx)

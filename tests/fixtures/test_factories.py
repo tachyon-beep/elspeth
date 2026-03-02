@@ -59,9 +59,10 @@ class TestMakeContext:
         from tests.fixtures.factories import make_context
 
         ctx = make_context()
-        # These must be callable without raising
-        ctx.landscape.record_external_call()
-        ctx.landscape.record_call()
+        # These must be callable without raising (landscape is a MagicMock)
+        assert ctx.landscape is not None
+        ctx.landscape.record_external_call()  # type: ignore[attr-defined]  # MagicMock
+        ctx.landscape.record_call()  # type: ignore[call-arg]  # MagicMock accepts any args
 
     def test_explicit_landscape_replaces_mock(self) -> None:
         from unittest.mock import Mock
@@ -245,6 +246,7 @@ class TestMakeRecorderWithRun:
             source_node_id="csv-node",
         )
         node = setup.recorder.get_node(setup.source_node_id, setup.run_id)
+        assert node is not None
         assert node.plugin_name == "csv_source"
 
     def test_each_call_creates_fresh_db(self) -> None:
@@ -312,6 +314,7 @@ class TestRegisterTestNode:
         )
         assert node_id == "my-sink"
         node = setup.recorder.get_node(node_id, setup.run_id)
+        assert node is not None
         assert node.plugin_name == "csv_sink"
 
     def test_multiple_nodes_in_same_run(self) -> None:

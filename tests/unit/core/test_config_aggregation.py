@@ -235,7 +235,7 @@ class TestAggregationSettings:
                 name="batch_stats",
                 plugin="stats_aggregation",
                 trigger=TriggerConfig(count=100),
-                output_mode="invalid",  # type: ignore[arg-type]
+                output_mode="invalid",
                 input="source_out",
                 on_error="discard",
             )

@@ -11,6 +11,7 @@ from elspeth.core.landscape.database import LandscapeDB
 from elspeth.core.landscape.recorder import LandscapeRecorder
 from elspeth.core.landscape.schema import runs_table
 from elspeth.mcp.analyzers.diagnostics import diagnose
+from elspeth.mcp.types import DiagnosticProblem, DiagnosticReport
 from tests.fixtures.landscape import make_landscape_db, make_recorder
 
 _DYNAMIC_SCHEMA = SchemaConfig.from_dict({"mode": "observed"})
@@ -67,12 +68,9 @@ def _create_completed_run_with_quarantine(
     return run_id
 
 
-def _get_problem(report: dict[str, object], problem_type: str) -> dict[str, object] | None:
-    problems = report.get("problems")
-    if not isinstance(problems, list):
-        return None
-    for problem in problems:
-        if isinstance(problem, dict) and problem.get("type") == problem_type:
+def _get_problem(report: DiagnosticReport, problem_type: str) -> DiagnosticProblem | None:
+    for problem in report["problems"]:
+        if problem.get("type") == problem_type:
             return problem
     return None
 

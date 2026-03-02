@@ -534,7 +534,7 @@ class TestCheckpointTopologyHashAtomicity:
                 token_id=token.token_id,
                 node_id="test_node",
                 sequence_number=0,
-                graph=None,  # type: ignore
+                graph=None,
             )
 
     def test_checkpoint_validates_node_exists_in_graph(self, test_env: dict[str, Any]) -> None:

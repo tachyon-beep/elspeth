@@ -13,7 +13,7 @@ Usage:
 from __future__ import annotations
 
 from datetime import UTC, datetime
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Literal
 from unittest.mock import Mock
 from uuid import uuid4
 
@@ -150,7 +150,7 @@ def make_operation_context(
     node_id: str = "source",
     plugin_name: str = "azure_blob",
     node_type: str = "SOURCE",
-    operation_type: str = "source_load",
+    operation_type: Literal["source_load", "sink_write"] = "source_load",
 ) -> PluginContext:
     """Build a PluginContext with real landscape and operation records.
 

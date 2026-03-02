@@ -64,7 +64,7 @@ class TestLLMCallRequest:
     """LLMCallRequest.to_dict() produces identical hashes to old dict."""
 
     def test_basic_request_hash_stability(self) -> None:
-        old_dict: dict = {
+        old_dict: dict[str, object] = {
             "model": "gpt-4",
             "messages": [{"role": "user", "content": "Hello"}],
             "temperature": 0.0,
@@ -80,7 +80,7 @@ class TestLLMCallRequest:
         assert stable_hash(new_dict) == stable_hash(old_dict)
 
     def test_request_with_max_tokens_hash_stability(self) -> None:
-        old_dict: dict = {
+        old_dict: dict[str, object] = {
             "model": "gpt-4",
             "messages": [{"role": "user", "content": "Hello"}],
             "temperature": 0.7,
@@ -100,7 +100,7 @@ class TestLLMCallRequest:
 
     def test_request_with_extra_kwargs_hash_stability(self) -> None:
         kwargs = {"top_p": 0.9, "frequency_penalty": 0.5}
-        old_dict: dict = {
+        old_dict: dict[str, object] = {
             "model": "gpt-4",
             "messages": [{"role": "user", "content": "Test"}],
             "temperature": 0.0,
@@ -268,7 +268,7 @@ class TestHTTPCallRequest:
     """HTTPCallRequest.to_dict() produces identical hashes to old dict."""
 
     def test_standard_post_hash_stability(self) -> None:
-        old_dict: dict = {
+        old_dict: dict[str, object] = {
             "method": "POST",
             "url": "https://api.example.com/v1/data",
             "headers": {"Content-Type": "application/json"},
@@ -285,7 +285,7 @@ class TestHTTPCallRequest:
         assert stable_hash(new_dict) == stable_hash(old_dict)
 
     def test_standard_get_hash_stability(self) -> None:
-        old_dict: dict = {
+        old_dict: dict[str, object] = {
             "method": "GET",
             "url": "https://api.example.com/v1/data",
             "headers": {"Accept": "application/json"},
@@ -428,7 +428,7 @@ class TestHTTPCallResponse:
         assert stable_hash(new_dict) == stable_hash(old_dict)
 
     def test_ssrf_response_with_redirects_hash_stability(self) -> None:
-        old_dict: dict = {
+        old_dict: dict[str, object] = {
             "status_code": 200,
             "headers": {"content-type": "text/html"},
             "body_size": 1024,

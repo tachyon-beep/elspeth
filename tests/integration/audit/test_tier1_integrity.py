@@ -21,6 +21,7 @@ from sqlalchemy import select
 
 from elspeth.contracts import (
     Determinism,
+    Node,
     NodeType,
     Run,
     RunStatus,
@@ -45,7 +46,7 @@ def _begin_run(recorder: LandscapeRecorder) -> Run:
     return recorder.begin_run(config={"test": True}, canonical_version=CANONICAL_VERSION)
 
 
-def _register_source(recorder: LandscapeRecorder, run_id: str) -> object:
+def _register_source(recorder: LandscapeRecorder, run_id: str) -> Node:
     """Register a minimal source node for tests that need one."""
     return recorder.register_node(
         run_id=run_id,
@@ -124,7 +125,7 @@ class TestRecorderCrashesOnInvalidEnums:
         A raw string has neither attribute.
         """
         run = _begin_run(recorder)
-        source = _register_source(recorder, run.run_id)
+        source: Node = _register_source(recorder, run.run_id)
         row = recorder.create_row(
             run_id=run.run_id,
             source_node_id=source.node_id,
@@ -250,7 +251,7 @@ class TestRecorderCrashesOnWrongTypes:
         must raise TypeError or ValueError, not silently store garbage.
         """
         run = _begin_run(recorder)
-        source = _register_source(recorder, run.run_id)
+        source: Node = _register_source(recorder, run.run_id)
 
         with pytest.raises((TypeError, ValueError)):
             recorder.create_row(
@@ -334,7 +335,7 @@ class TestRecorderPositiveAuditIntegrity:
         The hash stored in the rows table must equal stable_hash(data).
         """
         run = _begin_run(recorder)
-        source = _register_source(recorder, run.run_id)
+        source: Node = _register_source(recorder, run.run_id)
         data = {"customer_id": "C-123", "amount": 99.95, "currency": "USD"}
 
         row = recorder.create_row(
@@ -365,7 +366,7 @@ class TestRecorderPositiveAuditIntegrity:
         comparison impossible -- a direct audit integrity failure.
         """
         run = _begin_run(recorder)
-        source = _register_source(recorder, run.run_id)
+        source: Node = _register_source(recorder, run.run_id)
         row = recorder.create_row(
             run_id=run.run_id,
             source_node_id=source.node_id,
@@ -443,7 +444,7 @@ class TestRecorderHashIntegrity:
         source loaded.  It must exactly match canonical_json(data) hashed.
         """
         run = _begin_run(recorder)
-        source = _register_source(recorder, run.run_id)
+        source: Node = _register_source(recorder, run.run_id)
         data = {
             "id": 42,
             "name": "Alice",

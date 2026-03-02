@@ -5,7 +5,7 @@ from collections.abc import Iterator
 from typing import Any
 
 from elspeth.contracts import SourceRow
-from elspeth.contracts.plugin_context import PluginContext
+from elspeth.contracts.contexts import SourceContext
 from elspeth.contracts.schema_contract import SchemaContract
 from elspeth.plugins.infrastructure.base import BaseSource
 from elspeth.testing import make_field
@@ -24,7 +24,7 @@ class StubSource(BaseSource):
 
         self.output_schema = PluginSchema
 
-    def load(self, ctx: PluginContext) -> Iterator[SourceRow]:
+    def load(self, ctx: SourceContext) -> Iterator[SourceRow]:
         yield SourceRow.valid({"id": 1})
 
     def close(self) -> None:

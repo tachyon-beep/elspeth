@@ -535,7 +535,8 @@ class TestAzureBatchLLMTransformSubmit:
             transform.process([make_pipeline_row(d) for d in rows], ctx)
 
         # Verify checkpoint was saved as typed BatchCheckpointState
-        checkpoint = ctx._checkpoint  # type: ignore[attr-defined]
+        checkpoint = ctx._checkpoint
+        assert checkpoint is not None
         assert checkpoint.batch_id == "batch-456"
         assert checkpoint.input_file_id == "file-123"
         assert checkpoint.row_mapping  # non-empty
@@ -663,7 +664,7 @@ class TestAzureBatchLLMTransformSubmit:
             transform.process([make_pipeline_row(d) for d in rows], ctx)
 
         # Verify checkpoint includes requests as typed BatchCheckpointState
-        checkpoint = ctx._checkpoint  # type: ignore[attr-defined]
+        checkpoint = ctx._checkpoint
         assert checkpoint is not None
         assert len(checkpoint.requests) == 2
 
@@ -742,7 +743,8 @@ class TestAzureBatchLLMTransformTemplateErrors:
             transform.process([make_pipeline_row(d) for d in rows], ctx)
 
         # Checkpoint should have template_errors
-        checkpoint = ctx._checkpoint  # type: ignore[attr-defined]
+        checkpoint = ctx._checkpoint
+        assert checkpoint is not None
         assert len(checkpoint.template_errors) == 1
         assert checkpoint.template_errors[0][0] == 1  # Index of failed row
 
@@ -942,7 +944,7 @@ class TestAzureBatchLLMTransformResume:
         transform.process([make_pipeline_row(d) for d in rows], ctx_with_checkpoint)
 
         # Checkpoint should be cleared (None after clear_checkpoint)
-        assert ctx_with_checkpoint._checkpoint is None  # type: ignore[attr-defined]
+        assert ctx_with_checkpoint._checkpoint is None
 
 
 class TestAzureBatchLLMTransformTimeout:

@@ -29,7 +29,7 @@ from datetime import UTC, date, datetime
 from pathlib import Path
 from typing import Any
 
-import yaml  # type: ignore[import-untyped]
+import yaml
 
 # =============================================================================
 # Data Structures

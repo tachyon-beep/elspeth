@@ -74,7 +74,9 @@ class TestExplainRowSourceDataRef:
         """None source_data_ref should skip payload lookup."""
         source_data_ref = None
         payload_store = MagicMock()
-        should_lookup = source_data_ref is not None and payload_store is not None
+        # Intentional: mypy knows the right operand is never evaluated because
+        # source_data_ref is None (short-circuit). That's exactly what this test verifies.
+        should_lookup = source_data_ref is not None and payload_store is not None  # type: ignore[unreachable]
         assert should_lookup is False
 
 

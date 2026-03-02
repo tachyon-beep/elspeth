@@ -517,6 +517,7 @@ class TestCSVSourceQuarantineYielding:
         # csv.Error during skip now quarantines and stops (no data rows)
         assert len(results) == 1
         assert results[0].is_quarantined is True
+        assert results[0].quarantine_error is not None
         assert "skip_rows" in results[0].quarantine_error
 
     def test_skip_rows_csv_error_on_first_skip_stops_immediately(self, tmp_path: Path, ctx: PluginContext) -> None:
@@ -960,6 +961,7 @@ class TestCSVSourceSkipRowsAudit:
         assert len(results) == 0
 
         # Validation error recorded in landscape DB
+        assert ctx.landscape is not None
         errors = ctx.landscape.get_validation_errors_for_run(ctx.run_id)
         assert len(errors) >= 1
         assert "skip_rows" in errors[0].error or "exhausted" in errors[0].error

@@ -192,7 +192,7 @@ def test_narrow_contract_preserves_mode():
     """Test that contract mode is preserved from input."""
     for mode in ["FIXED", "FLEXIBLE", "OBSERVED"]:
         input_contract = SchemaContract(
-            mode=mode,  # type: ignore[arg-type]
+            mode=mode,
             fields=(make_field("a", str, original_name="a", required=True, source="declared"),),
             locked=True,
         )

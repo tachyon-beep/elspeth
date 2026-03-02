@@ -98,7 +98,7 @@ class TestAzureOpenAIConfig:
         from elspeth.plugins.transforms.llm.providers.azure import AzureOpenAIConfig
 
         with pytest.raises((ValidationError, ValueError)):
-            AzureOpenAIConfig(
+            AzureOpenAIConfig(  # type: ignore[call-arg]  # intentionally missing required args
                 template="hello",
                 schema_config=_OBSERVED_SCHEMA,
                 required_input_fields=[],
@@ -230,7 +230,7 @@ class TestOpenRouterConfig:
 
         # model=None should fail validation
         with pytest.raises((ValidationError, ValueError)):
-            OpenRouterConfig(
+            OpenRouterConfig(  # type: ignore[call-arg]  # intentionally missing model
                 api_key="key",
                 template="hello",
                 schema_config=_OBSERVED_SCHEMA,
@@ -258,7 +258,7 @@ class TestOpenRouterBatchConfigModelRequired:
         from elspeth.plugins.transforms.llm.openrouter_batch import OpenRouterBatchConfig
 
         with pytest.raises((ValidationError, ValueError)):
-            OpenRouterBatchConfig(
+            OpenRouterBatchConfig(  # type: ignore[call-arg]  # intentionally missing model
                 api_key="key",
                 template="hello",
                 schema_config=_OBSERVED_SCHEMA,

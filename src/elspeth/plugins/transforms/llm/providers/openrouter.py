@@ -13,7 +13,7 @@ for audit recording and telemetry.
 
 from __future__ import annotations
 
-import json
+import json as json
 import math
 from threading import Lock
 from typing import TYPE_CHECKING, Any, Literal
@@ -39,6 +39,12 @@ from elspeth.plugins.transforms.llm.validation import reject_nonfinite_constant
 if TYPE_CHECKING:
     from elspeth.core.landscape.recorder import LandscapeRecorder
     from elspeth.plugins.infrastructure.clients.base import TelemetryEmitCallback
+
+__all__ = [
+    "OpenRouterConfig",
+    "OpenRouterLLMProvider",
+    "json",
+]
 
 logger = structlog.get_logger(__name__)
 

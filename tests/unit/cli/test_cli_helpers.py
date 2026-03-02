@@ -93,7 +93,7 @@ sinks:
     bundle = instantiate_plugins_from_config(config)
 
     with pytest.raises(AttributeError, match="cannot assign to field"):
-        bundle.source = None  # type: ignore[misc]
+        bundle.source = None  # type: ignore[assignment,misc]
 
 
 def test_plugin_bundle_attribute_access(tmp_path: Path):

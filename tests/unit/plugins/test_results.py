@@ -43,13 +43,15 @@ class TestRoutingAction:
         assert action.mode == "move"
 
     def test_route(self) -> None:
+        from elspeth.contracts.errors import ConfigGateReason
         from elspeth.plugins.infrastructure.results import RoutingAction
 
-        action = RoutingAction.route("suspicious", reason={"rule": "confidence_check", "matched_value": 0.95})
+        reason = ConfigGateReason(condition="confidence_check", result="suspicious")
+        action = RoutingAction.route("suspicious", reason=reason)
         assert action.kind == "route"
         assert action.destinations == ("suspicious",)  # Tuple - route label, not sink name
         assert action.reason is not None
-        assert action.reason["matched_value"] == 0.95  # type: ignore[index,typeddict-item]  # Access via mapping
+        assert action.reason["condition"] == "confidence_check"  # type: ignore[typeddict-item]
 
     def test_fork_to_paths(self) -> None:
         from elspeth.plugins.infrastructure.results import RoutingAction
@@ -131,10 +133,12 @@ class TestGateResult:
 
     def test_gate_result_with_route(self) -> None:
         from elspeth.contracts import GateResult, RoutingAction
+        from elspeth.contracts.errors import ConfigGateReason
 
+        reason = ConfigGateReason(condition="score_check", result="suspicious")
         result = GateResult(
             row={"value": 42, "flagged": True},
-            action=RoutingAction.route("suspicious", reason={"rule": "score_check", "matched_value": 0.9}),
+            action=RoutingAction.route("suspicious", reason=reason),
         )
         assert result.action.kind == "route"
         assert result.action.destinations == ("suspicious",)  # Route label, not sink name
@@ -248,8 +252,8 @@ class TestFreezeDictDefensiveCopy:
 
         # Frozen reason should be unchanged
         assert action.reason is not None
-        assert action.reason["rule"] == "original_rule"  # type: ignore[index,typeddict-item]
-        assert "new_key" not in action.reason  # type: ignore[operator]
+        assert action.reason["rule"] == "original_rule"  # type: ignore[typeddict-item]
+        assert "new_key" not in action.reason
 
     def test_nested_dict_mutation_not_visible(self) -> None:
         """Nested dict mutation doesn't affect frozen result."""
@@ -265,7 +269,7 @@ class TestFreezeDictDefensiveCopy:
 
         # Frozen reason should be unchanged
         assert action.reason is not None
-        assert action.reason["matched_value"]["value"] == 1  # type: ignore[index,typeddict-item]
+        assert action.reason["matched_value"]["value"] == 1  # type: ignore[typeddict-item]
 
 
 class TestSourceRow:

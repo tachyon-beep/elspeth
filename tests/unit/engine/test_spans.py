@@ -1,7 +1,14 @@
 # tests/unit/engine/test_spans.py
 """Tests for OpenTelemetry span factory."""
 
+from __future__ import annotations
+
+from typing import TYPE_CHECKING, Any
+
 import pytest
+
+if TYPE_CHECKING:
+    from elspeth.engine.spans import SpanFactory
 
 
 class TestSpanFactory:
@@ -846,7 +853,7 @@ class TestTruthinessChecks:
     Should be `if node_id is not None:` — only exclude None, not falsy values.
     """
 
-    def _make_factory(self):
+    def _make_factory(self) -> tuple[SpanFactory, Any]:
         """Create a SpanFactory with in-memory exporter for attribute inspection."""
         pytest.importorskip("opentelemetry")
         from opentelemetry.sdk.trace import TracerProvider

@@ -278,7 +278,7 @@ class TestContractAuditRecord:
         from elspeth.contracts.contract_records import ContractAuditRecord
 
         for mode in ("FIXED", "FLEXIBLE", "OBSERVED"):
-            contract = SchemaContract(mode=mode, fields=(), locked=True)  # type: ignore[arg-type]
+            contract = SchemaContract(mode=mode, fields=(), locked=True)
             record = ContractAuditRecord.from_contract(contract)
             assert record.mode == mode
 

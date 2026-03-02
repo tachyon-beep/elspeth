@@ -16,7 +16,7 @@ class TestPluginSystemIntegration:
     def test_full_plugin_workflow(self) -> None:
         """Test source -> transform -> sink workflow."""
         from elspeth.contracts import ArtifactDescriptor, PluginSchema, SourceRow
-        from elspeth.contracts.plugin_context import PluginContext
+        from elspeth.contracts.contexts import SinkContext, SourceContext, TransformContext
         from elspeth.contracts.schema_contract import SchemaContract
         from elspeth.plugins.infrastructure.base import BaseSink, BaseSource, BaseTransform
         from elspeth.plugins.infrastructure.hookspecs import hookimpl
@@ -36,7 +36,7 @@ class TestPluginSystemIntegration:
             name = "list"
             output_schema = InputSchema
 
-            def load(self, ctx: PluginContext) -> Iterator[SourceRow]:
+            def load(self, ctx: SourceContext) -> Iterator[SourceRow]:
                 # Create schema contract for output
                 contract = SchemaContract(
                     mode="FIXED",
@@ -54,7 +54,7 @@ class TestPluginSystemIntegration:
             input_schema = InputSchema
             output_schema = EnrichedSchema
 
-            def process(self, row: PipelineRow, ctx: PluginContext) -> TransformResult:
+            def process(self, row: PipelineRow, ctx: TransformContext) -> TransformResult:
                 row_dict = row.to_dict()
                 return TransformResult.success(
                     make_pipeline_row(
@@ -71,7 +71,7 @@ class TestPluginSystemIntegration:
             input_schema = EnrichedSchema
             collected: ClassVar[list[dict[str, Any]]] = []
 
-            def write(self, rows: list[dict[str, Any]], ctx: PluginContext) -> ArtifactDescriptor:
+            def write(self, rows: list[dict[str, Any]], ctx: SinkContext) -> ArtifactDescriptor:
                 MemorySink.collected.extend(rows)
                 return ArtifactDescriptor.for_file(path="memory://collected", content_hash="test", size_bytes=0)
 
@@ -116,9 +116,9 @@ class TestPluginSystemIntegration:
         assert sink_cls is not None
 
         # Protocols don't define __init__ but concrete classes do
-        source = source_cls({"values": [10, 50, 100]})  # type: ignore[call-arg]
-        transform = transform_cls({})  # type: ignore[call-arg]
-        sink = sink_cls({})  # type: ignore[call-arg]
+        source = source_cls({"values": [10, 50, 100]})
+        transform = transform_cls({})
+        sink = sink_cls({})
 
         MemorySink.collected = []  # Reset
 

@@ -212,7 +212,7 @@ class TestOnSuccessConfigAlignment:
         from pydantic import ValidationError
 
         with pytest.raises(ValidationError):
-            TransformSettings(
+            TransformSettings(  # type: ignore[call-arg]  # intentionally missing on_success
                 name="tracer_0",
                 plugin="on_success_tracer",
                 input="source_out",

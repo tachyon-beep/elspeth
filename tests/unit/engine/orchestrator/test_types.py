@@ -168,7 +168,7 @@ class TestGraphArtifacts:
         from elspeth.engine.orchestrator.types import GraphArtifacts
 
         artifacts = GraphArtifacts(
-            edge_map={("node1", "continue"): "edge1"},
+            edge_map={(NodeID("node1"), "continue"): "edge1"},
             source_id=NodeID("source"),
             sink_id_map={SinkName("output"): NodeID("sink1")},
             transform_id_map={0: NodeID("t0")},

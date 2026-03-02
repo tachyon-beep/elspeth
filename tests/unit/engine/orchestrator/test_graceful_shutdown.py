@@ -74,11 +74,11 @@ class TestRunStatusInterrupted:
     """Tests for INTERRUPTED enum values."""
 
     def test_run_status_has_interrupted(self) -> None:
-        assert RunStatus.INTERRUPTED == "interrupted"
+        assert RunStatus.INTERRUPTED == RunStatus.INTERRUPTED
         assert RunStatus.INTERRUPTED.value == "interrupted"
 
     def test_run_completion_status_has_interrupted(self) -> None:
-        assert RunCompletionStatus.INTERRUPTED == "interrupted"
+        assert RunCompletionStatus.INTERRUPTED == RunCompletionStatus.INTERRUPTED
         assert RunCompletionStatus.INTERRUPTED.value == "interrupted"
 
 
@@ -135,7 +135,8 @@ class TestShutdownHandlerContext:
                 assert not event.is_set()
                 # Simulate signal by calling the handler directly
                 handler = signal.getsignal(signal.SIGINT)
-                handler(signal.SIGINT, None)  # type: ignore[operator]
+                assert callable(handler)
+                handler(signal.SIGINT, None)
                 assert event.is_set()
         finally:
             db.close()
@@ -150,7 +151,8 @@ class TestShutdownHandlerContext:
             orchestrator = Orchestrator(db=db)
             with orchestrator._shutdown_handler_context():
                 handler = signal.getsignal(signal.SIGINT)
-                handler(signal.SIGINT, None)  # type: ignore[operator]
+                assert callable(handler)
+                handler(signal.SIGINT, None)
 
                 # After first signal, SIGINT should now be default_int_handler
                 assert signal.getsignal(signal.SIGINT) == signal.default_int_handler

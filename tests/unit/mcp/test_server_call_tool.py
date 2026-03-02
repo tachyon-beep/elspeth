@@ -54,7 +54,9 @@ class TestCallToolErrorSignaling:
         )
         assert result.isError is True
         assert len(result.content) == 1
-        assert "Invalid arguments" in result.content[0].text
+        first_content = result.content[0]
+        assert isinstance(first_content, TextContent)
+        assert "Invalid arguments" in first_content.text
 
     def test_success_result_has_is_error_false(self) -> None:
         """Normal tool results have isError=False by default."""

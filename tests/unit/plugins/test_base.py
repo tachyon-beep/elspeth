@@ -16,7 +16,7 @@ class TestBaseTransform:
 
     def test_base_transform_creates_tokens_default_false(self) -> None:
         """BaseTransform.creates_tokens defaults to False."""
-        from elspeth.contracts.plugin_context import PluginContext
+        from elspeth.contracts.contexts import TransformContext
         from elspeth.plugins.infrastructure.base import BaseTransform
         from elspeth.plugins.infrastructure.results import TransformResult
 
@@ -25,7 +25,7 @@ class TestBaseTransform:
             input_schema = None  # type: ignore[assignment]  # Not needed for this test
             output_schema = None  # type: ignore[assignment]
 
-            def process(self, row: PipelineRow, ctx: PluginContext) -> TransformResult:
+            def process(self, row: PipelineRow, ctx: TransformContext) -> TransformResult:
                 return TransformResult.success(make_pipeline_row(row.to_dict()), success_reason={"action": "test"})
 
         transform = SimpleTransform({})
@@ -33,7 +33,7 @@ class TestBaseTransform:
 
     def test_base_transform_creates_tokens_settable(self) -> None:
         """BaseTransform.creates_tokens can be overridden to True."""
-        from elspeth.contracts.plugin_context import PluginContext
+        from elspeth.contracts.contexts import TransformContext
         from elspeth.plugins.infrastructure.base import BaseTransform
         from elspeth.plugins.infrastructure.results import TransformResult
 
@@ -43,7 +43,7 @@ class TestBaseTransform:
             input_schema = None  # type: ignore[assignment]
             output_schema = None  # type: ignore[assignment]
 
-            def process(self, row: PipelineRow, ctx: PluginContext) -> TransformResult:
+            def process(self, row: PipelineRow, ctx: TransformContext) -> TransformResult:
                 row_dict = row.to_dict()
                 return TransformResult.success_multi(
                     [make_pipeline_row(row_dict), make_pipeline_row(row_dict)], success_reason={"action": "expand"}
@@ -80,7 +80,7 @@ class TestBaseTransform:
 
     def test_subclass_implementation(self) -> None:
         from elspeth.contracts import PluginSchema
-        from elspeth.contracts.plugin_context import PluginContext
+        from elspeth.contracts.contexts import TransformContext
         from elspeth.plugins.infrastructure.base import BaseTransform
         from elspeth.plugins.infrastructure.results import TransformResult
 
@@ -96,7 +96,7 @@ class TestBaseTransform:
             input_schema = InputSchema
             output_schema = OutputSchema
 
-            def process(self, row: PipelineRow, ctx: PluginContext) -> TransformResult:
+            def process(self, row: PipelineRow, ctx: TransformContext) -> TransformResult:
                 return TransformResult.success(
                     make_pipeline_row(
                         {
@@ -138,7 +138,7 @@ class TestBaseSink:
 
     def test_base_sink_implementation(self) -> None:
         from elspeth.contracts import ArtifactDescriptor, PluginSchema
-        from elspeth.contracts.plugin_context import PluginContext
+        from elspeth.contracts.contexts import SinkContext
         from elspeth.plugins.infrastructure.base import BaseSink
 
         class InputSchema(PluginSchema):
@@ -153,7 +153,7 @@ class TestBaseSink:
                 super().__init__(config)
                 self.rows: list[dict[str, Any]] = []
 
-            def write(self, rows: list[dict[str, Any]], ctx: PluginContext) -> ArtifactDescriptor:
+            def write(self, rows: list[dict[str, Any]], ctx: SinkContext) -> ArtifactDescriptor:
                 self.rows.extend(rows)
                 return ArtifactDescriptor.for_file(
                     path="/tmp/memory",
@@ -192,7 +192,7 @@ class TestBaseSink:
     def test_base_sink_batch_implementation(self) -> None:
         """Test BaseSink subclass with batch write."""
         from elspeth.contracts import ArtifactDescriptor, PluginSchema
-        from elspeth.contracts.plugin_context import PluginContext
+        from elspeth.contracts.contexts import SinkContext
         from elspeth.plugins.infrastructure.base import BaseSink
 
         class InputSchema(PluginSchema):
@@ -207,7 +207,7 @@ class TestBaseSink:
                 super().__init__(config)
                 self.rows: list[dict[str, Any]] = []
 
-            def write(self, rows: list[dict[str, Any]], ctx: PluginContext) -> ArtifactDescriptor:
+            def write(self, rows: list[dict[str, Any]], ctx: SinkContext) -> ArtifactDescriptor:
                 self.rows.extend(rows)
                 return ArtifactDescriptor.for_file(
                     path="/tmp/batch",
@@ -246,7 +246,7 @@ class TestBaseSource:
         from collections.abc import Iterator
 
         from elspeth.contracts import PluginSchema, SourceRow
-        from elspeth.contracts.plugin_context import PluginContext
+        from elspeth.contracts.contexts import SourceContext
         from elspeth.plugins.infrastructure.base import BaseSource
 
         class OutputSchema(PluginSchema):
@@ -260,7 +260,7 @@ class TestBaseSource:
                 super().__init__(config)
                 self._data = config["data"]
 
-            def load(self, ctx: PluginContext) -> Iterator[SourceRow]:
+            def load(self, ctx: SourceContext) -> Iterator[SourceRow]:
                 for _row in self._data:
                     yield SourceRow.valid(_row)
 
@@ -289,7 +289,7 @@ class TestBaseSource:
         from collections.abc import Iterator
 
         from elspeth.contracts import Determinism, PluginSchema
-        from elspeth.contracts.plugin_context import PluginContext
+        from elspeth.contracts.contexts import SourceContext
         from elspeth.plugins.infrastructure.base import BaseSource
 
         class OutputSchema(PluginSchema):
@@ -301,7 +301,7 @@ class TestBaseSource:
             determinism = Determinism.DETERMINISTIC
             plugin_version = "2.0.0"
 
-            def load(self, ctx: PluginContext) -> Iterator[dict[str, Any]]:  # type: ignore[override]
+            def load(self, ctx: SourceContext) -> Iterator[dict[str, Any]]:  # type: ignore[override]
                 yield {"value": 1}
 
             def close(self) -> None:
@@ -322,7 +322,7 @@ class TestNoValidationEnforcement:
         not during construction (__init__ calling _validate_self_consistency).
         """
         from elspeth.contracts import PluginSchema
-        from elspeth.contracts.plugin_context import PluginContext
+        from elspeth.contracts.contexts import TransformContext
         from elspeth.plugins.infrastructure.base import BaseTransform
         from elspeth.plugins.infrastructure.results import TransformResult
 
@@ -338,7 +338,7 @@ class TestNoValidationEnforcement:
                 super().__init__(config)
                 # NOT calling self._validate_self_consistency()
 
-            def process(self, row: PipelineRow, ctx: PluginContext) -> TransformResult:
+            def process(self, row: PipelineRow, ctx: TransformContext) -> TransformResult:
                 return TransformResult.success(make_pipeline_row(row.to_dict()), success_reason={"action": "test"})
 
         # Should instantiate without RuntimeError

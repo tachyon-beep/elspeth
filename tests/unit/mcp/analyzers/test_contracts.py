@@ -7,13 +7,17 @@ Bug fix covered:
 
 from __future__ import annotations
 
+from typing import Literal, cast
 from unittest.mock import MagicMock
 
 from elspeth.contracts.schema_contract import FieldContract, SchemaContract
 from elspeth.mcp.analyzers.contracts import explain_field
+from elspeth.mcp.types import FieldNotFoundError
+
+SchemaMode = Literal["FIXED", "FLEXIBLE", "OBSERVED"]
 
 
-def _make_contract(*fields: FieldContract, mode: str = "OBSERVED") -> SchemaContract:
+def _make_contract(*fields: FieldContract, mode: SchemaMode = "OBSERVED") -> SchemaContract:
     """Create a SchemaContract from field specs."""
     return SchemaContract(mode=mode, fields=tuple(fields), locked=True)
 
@@ -57,6 +61,7 @@ class TestExplainFieldPrecedence:
         recorder.get_run_contract.return_value = contract
 
         result = explain_field(db, recorder, "run-123", "x")
+        assert "error" not in result
 
         # Must return field_x (normalized_name='x'), not field_a (original_name='x')
         assert result["normalized_name"] == "x"
@@ -81,6 +86,7 @@ class TestExplainFieldPrecedence:
         recorder.get_run_contract.return_value = contract
 
         result = explain_field(db, recorder, "run-123", "Original A")
+        assert "error" not in result
 
         assert result["normalized_name"] == "normalized_a"
         assert result["original_name"] == "Original A"
@@ -102,9 +108,7 @@ class TestExplainFieldPrecedence:
         recorder.get_run.return_value = MagicMock()
         recorder.get_run_contract.return_value = contract
 
-        result = explain_field(db, recorder, "run-123", "nonexistent")
-
-        assert "error" in result
+        raw_result = explain_field(db, recorder, "run-123", "nonexistent")
+        result = cast(FieldNotFoundError, raw_result)
         assert "nonexistent" in result["error"]
-        assert "available_fields" in result
         assert "amount" in result["available_fields"]

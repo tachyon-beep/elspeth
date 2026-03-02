@@ -23,6 +23,7 @@ from elspeth.contracts import ExportStatus, FieldContract, NodeType, RunStatus, 
 from elspeth.contracts.errors import AuditIntegrityError
 from elspeth.contracts.schema import SchemaConfig
 from elspeth.core.landscape import LandscapeDB, LandscapeRecorder
+from elspeth.core.landscape.reproducibility import ReproducibilityGrade
 from tests.fixtures.landscape import make_landscape_db, make_recorder
 
 _DYNAMIC_SCHEMA = SchemaConfig.from_dict({"mode": "observed"})
@@ -78,7 +79,7 @@ class TestBeginRun:
         run = recorder.begin_run(
             config={},
             canonical_version="v1",
-            reproducibility_grade="full_reproducible",
+            reproducibility_grade=ReproducibilityGrade.FULL_REPRODUCIBLE,
         )
         assert run.reproducibility_grade == "full_reproducible"
 
@@ -116,7 +117,7 @@ class TestCompleteRun:
         run = recorder.complete_run(
             "run-1",
             RunStatus.COMPLETED,
-            reproducibility_grade="full_reproducible",
+            reproducibility_grade=ReproducibilityGrade.FULL_REPRODUCIBLE,
         )
         assert run.reproducibility_grade == "full_reproducible"
 

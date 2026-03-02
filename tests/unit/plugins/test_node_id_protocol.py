@@ -24,7 +24,7 @@ class TestNodeIdProtocol:
         from typing import Any
 
         from elspeth.contracts import PluginSchema
-        from elspeth.contracts.plugin_context import PluginContext
+        from elspeth.contracts.contexts import SourceContext
         from elspeth.plugins.infrastructure.base import BaseSource
 
         class TestSchema(PluginSchema):
@@ -34,7 +34,7 @@ class TestNodeIdProtocol:
             name = "test"
             output_schema = TestSchema
 
-            def load(self, ctx: PluginContext) -> Iterator[dict[str, Any]]:  # type: ignore[override]
+            def load(self, ctx: SourceContext) -> Iterator[dict[str, Any]]:  # type: ignore[override]
                 yield {}
 
             def close(self) -> None:
@@ -58,7 +58,7 @@ class TestNodeIdProtocol:
         """BaseTransform has node_id attribute with default None."""
 
         from elspeth.contracts import PipelineRow, PluginSchema
-        from elspeth.contracts.plugin_context import PluginContext
+        from elspeth.contracts.contexts import TransformContext
         from elspeth.plugins.infrastructure.base import BaseTransform
         from elspeth.plugins.infrastructure.results import TransformResult
 
@@ -70,7 +70,7 @@ class TestNodeIdProtocol:
             input_schema = TestSchema
             output_schema = TestSchema
 
-            def process(self, row: PipelineRow, ctx: PluginContext) -> TransformResult:
+            def process(self, row: PipelineRow, ctx: TransformContext) -> TransformResult:
                 return TransformResult.success(row, success_reason={"action": "test"})
 
         transform = TestTransform({})
@@ -110,7 +110,7 @@ class TestNodeIdProtocol:
         from typing import Any
 
         from elspeth.contracts import PluginSchema
-        from elspeth.contracts.plugin_context import PluginContext
+        from elspeth.contracts.contexts import SinkContext
         from elspeth.plugins.infrastructure.base import BaseSink
 
         class TestSchema(PluginSchema):
@@ -120,7 +120,7 @@ class TestNodeIdProtocol:
             name = "test"
             input_schema = TestSchema
 
-            def write(self, row: dict[str, Any], ctx: PluginContext) -> None:  # type: ignore[override]
+            def write(self, row: dict[str, Any], ctx: SinkContext) -> None:  # type: ignore[override]
                 pass
 
             def flush(self) -> None:

@@ -537,7 +537,7 @@ class TestExcepthookSuppression:
 
         # Get leaker ident before close (framework boundary — private attr)
         try:
-            leaker = limiter._limiter.bucket_factory._leaker  # type: ignore[union-attr]
+            leaker = limiter._limiter.bucket_factory._leaker
         except AttributeError:
             leaker = None
         leaker_ident = leaker.ident if leaker is not None else None

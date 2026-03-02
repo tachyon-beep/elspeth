@@ -37,7 +37,7 @@ def test_row_data_result_allows_available_with_data() -> None:
 @pytest.mark.parametrize("non_dict_data", [[1, 2, 3], "payload", 42, 3.14, True])
 def test_row_data_result_available_rejects_non_dict_data(non_dict_data: Any) -> None:
     with pytest.raises(TypeError, match="AVAILABLE state requires dict data"):
-        RowDataResult(state=RowDataState.AVAILABLE, data=non_dict_data)  # type: ignore[arg-type]
+        RowDataResult(state=RowDataState.AVAILABLE, data=non_dict_data)
 
 
 def test_row_data_result_allows_non_available_with_none() -> None:

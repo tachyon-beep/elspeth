@@ -9,7 +9,7 @@ Migrated from tests/integration/test_audit_integration_fixes.py
 
 import pytest
 
-from elspeth.contracts import EdgeInfo, ExecutionError, NodeType, RoutingMode, RunStatus
+from elspeth.contracts import EdgeInfo, ExecutionError, NodeID, NodeType, RoutingMode, RunStatus
 from elspeth.core.dag import ExecutionGraph
 from elspeth.plugins.infrastructure.manager import PluginManager
 from tests.fixtures.factories import make_context
@@ -49,7 +49,7 @@ class TestIntegrationAuditFixes:
                 "on_validation_failure": "discard",
                 "schema": DYNAMIC_SCHEMA,
             }
-        )  # type: ignore[call-arg]
+        )
         assert source.node_id is None  # Not yet set
 
         source.node_id = "node-123"
@@ -123,6 +123,7 @@ class TestIntegrationAuditFixes:
         )
 
         # Verify recording works through the context's recorder
+        assert ctx.landscape is not None
         completed = ctx.landscape.complete_run(run.run_id, RunStatus.COMPLETED)
         assert completed.run_id == run.run_id
 
@@ -135,15 +136,15 @@ class TestIntegrationAuditFixes:
         Verifies EdgeInfo contract integrity.
         """
         edge = EdgeInfo(
-            from_node="a",
-            to_node="b",
+            from_node=NodeID("a"),
+            to_node=NodeID("b"),
             label="continue",
             mode=RoutingMode.MOVE,
         )
 
         # Should be immutable
         with pytest.raises(AttributeError):
-            edge.from_node = "c"  # type: ignore[misc]
+            edge.from_node = NodeID("c")  # type: ignore[misc]
 
     def test_routing_mode_is_enum_throughout_dag(self) -> None:
         """RoutingMode stays as enum through DAG operations.
@@ -188,7 +189,7 @@ class TestIntegrationAuditFixes:
                 "on_validation_failure": "discard",
                 "schema": DYNAMIC_SCHEMA,
             }
-        )  # type: ignore[call-arg]
+        )
         assert source.node_id is None
         source.node_id = "source-001"
         assert source.node_id == "source-001"
@@ -196,7 +197,7 @@ class TestIntegrationAuditFixes:
         # Test transform
         passthrough_cls = manager.get_transform_by_name("passthrough")
         assert passthrough_cls is not None
-        transform = passthrough_cls({"schema": DYNAMIC_SCHEMA})  # type: ignore[call-arg]
+        transform = passthrough_cls({"schema": DYNAMIC_SCHEMA})
         assert transform.node_id is None
         transform.node_id = "transform-001"
         assert transform.node_id == "transform-001"
@@ -204,7 +205,7 @@ class TestIntegrationAuditFixes:
         # Test sink (use JSONSink which accepts dynamic schemas)
         json_sink_cls = manager.get_sink_by_name("json")
         assert json_sink_cls is not None
-        sink = json_sink_cls({"path": "/tmp/test.json", "schema": DYNAMIC_SCHEMA, "format": "jsonl"})  # type: ignore[call-arg]
+        sink = json_sink_cls({"path": "/tmp/test.json", "schema": DYNAMIC_SCHEMA, "format": "jsonl"})
         assert sink.node_id is None
         sink.node_id = "sink-001"
         assert sink.node_id == "sink-001"
@@ -231,6 +232,7 @@ class TestIntegrationAuditFixes:
         )
 
         # Complete the run through the context's recorder
+        assert ctx.landscape is not None
         completed = ctx.landscape.complete_run(run.run_id, RunStatus.COMPLETED)
         assert completed.run_id == run.run_id
         assert completed.status == RunStatus.COMPLETED

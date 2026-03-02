@@ -19,7 +19,7 @@ from __future__ import annotations
 import inspect
 import json
 from contextlib import contextmanager
-from typing import Any, ClassVar
+from typing import Any, ClassVar, cast
 from unittest.mock import MagicMock
 
 import pytest
@@ -359,7 +359,7 @@ class TestRecordTransformErrorDirect:
             token_id=tok,
             transform_id="transform-1",
             row_data={"name": "test"},
-            error_details={"reason": "division_by_zero", "field": "amount", "error": "ZeroDivisionError"},
+            error_details={"reason": "test_error", "field": "amount", "error": "ZeroDivisionError"},
             destination="quarantine",
         )
         assert error_id.startswith("terr_")
@@ -384,7 +384,7 @@ class TestRecordTransformErrorDirect:
                 token_id=tok,
                 transform_id="transform-1",
                 row_data={"name": "test"},
-                error_details={"reason": "test", "field": "f", "error": "E"},
+                error_details={"reason": "test_error", "field": "f", "error": "E"},
                 destination="quarantine",
             )
 
@@ -402,7 +402,7 @@ class TestValidateOutcomeFieldsExhaustive:
         _db, repo, _rec = _make_repo()
         with pytest.raises(ValueError, match="Unhandled RowOutcome"):
             repo._validate_outcome_fields(
-                "IMAGINARY_OUTCOME",
+                cast(RowOutcome, "IMAGINARY_OUTCOME"),
                 sink_name=None,
                 batch_id=None,
                 fork_group_id=None,
@@ -520,10 +520,10 @@ class TestForkTokenAtomicity:
                         raise RuntimeError("Injected failure mid-transaction")
                     return original_execute(stmt, *args, **kwargs)
 
-                conn.execute = patched_execute  # type: ignore[assignment]
+                conn.execute = patched_execute
                 yield conn
 
-        repo._db.connection = failing_connection  # type: ignore[assignment]
+        repo._db.connection = failing_connection  # type: ignore[method-assign]
 
         with pytest.raises(RuntimeError, match="Injected failure"):
             repo.fork_token(
@@ -577,10 +577,10 @@ class TestCoalesceTokensAtomicity:
                         raise RuntimeError("Injected failure mid-transaction")
                     return original_execute(stmt, *args, **kwargs)
 
-                conn.execute = patched_execute  # type: ignore[assignment]
+                conn.execute = patched_execute
                 yield conn
 
-        repo._db.connection = failing_connection  # type: ignore[assignment]
+        repo._db.connection = failing_connection  # type: ignore[method-assign]
 
         with pytest.raises(RuntimeError, match="Injected failure"):
             repo.coalesce_tokens(
@@ -623,10 +623,10 @@ class TestExpandTokenAtomicity:
                         raise RuntimeError("Injected failure mid-transaction")
                     return original_execute(stmt, *args, **kwargs)
 
-                conn.execute = patched_execute  # type: ignore[assignment]
+                conn.execute = patched_execute
                 yield conn
 
-        repo._db.connection = failing_connection  # type: ignore[assignment]
+        repo._db.connection = failing_connection  # type: ignore[method-assign]
 
         with pytest.raises(RuntimeError, match="Injected failure"):
             repo.expand_token(

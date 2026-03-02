@@ -260,7 +260,7 @@ class TestLineageResultStructureProperties:
             if field_obj.name in optional_with_defaults:
                 # Field should have a default or default_factory
                 assert (
-                    field_obj.default is not None or field_obj.default_factory is not None  # type: ignore[arg-type]
+                    field_obj.default is not None or field_obj.default_factory is not None
                 )
 
     def test_error_lists_default_to_empty(self) -> None:

@@ -642,7 +642,7 @@ class TestExecutionGraphAccessors:
 
     def test_get_edges(self) -> None:
         """Get all edges with data."""
-        from elspeth.contracts import EdgeInfo, NodeType, RoutingMode
+        from elspeth.contracts import EdgeInfo, NodeID, NodeType, RoutingMode
         from elspeth.core.dag import ExecutionGraph
 
         graph = ExecutionGraph()
@@ -656,8 +656,8 @@ class TestExecutionGraphAccessors:
 
         assert len(edges) == 2
         # Each edge is EdgeInfo (not tuple)
-        assert EdgeInfo(from_node="a", to_node="b", label="continue", mode=RoutingMode.MOVE) in edges
-        assert EdgeInfo(from_node="b", to_node="c", label="output", mode=RoutingMode.COPY) in edges
+        assert EdgeInfo(from_node=NodeID("a"), to_node=NodeID("b"), label="continue", mode=RoutingMode.MOVE) in edges
+        assert EdgeInfo(from_node=NodeID("b"), to_node=NodeID("c"), label="output", mode=RoutingMode.COPY) in edges
 
     def test_get_edges_empty_graph(self) -> None:
         """Empty graph returns empty list."""
@@ -1029,7 +1029,7 @@ class TestExecutionGraphFromConfig:
         from elspeth.core.config import TransformSettings
 
         with pytest.raises(ValidationError, match="on_success"):
-            TransformSettings(
+            TransformSettings(  # type: ignore[call-arg]  # intentionally missing on_success
                 name="passthrough_0",
                 plugin="passthrough",
                 input="source_out",
@@ -5387,10 +5387,13 @@ class TestNodeInfoImmutability:
         frozen_count = 0
         for info in graph.get_nodes():
             if info.config:
-                assert isinstance(info.config, MappingProxyType), (
+                # config is typed as dict[str, Any] but frozen to MappingProxyType
+                # by the builder at runtime. Mypy considers this unreachable because
+                # dict and MappingProxyType are disjoint final types.
+                assert isinstance(info.config, MappingProxyType), (  # type: ignore[unreachable]
                     f"Node '{info.node_id}' config should be MappingProxyType after construction, got {type(info.config).__name__}"
                 )
-                with pytest.raises(TypeError):
-                    info.config["injected_key"] = "should_fail"  # type: ignore[index]
+                with pytest.raises(TypeError):  # type: ignore[unreachable]
+                    info.config["injected_key"] = "should_fail"
                 frozen_count += 1
         assert frozen_count > 0, "Expected at least one node with non-empty config"

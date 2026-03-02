@@ -6,6 +6,7 @@ from unittest.mock import MagicMock, Mock
 import pytest
 
 from elspeth.contracts import CallStatus, CallType
+from elspeth.contracts.events import ExternalCallCompleted
 from elspeth.contracts.token_usage import TokenUsage
 from elspeth.plugins.infrastructure.clients.llm import (
     AuditedLLMClient,
@@ -170,7 +171,7 @@ class TestAuditedLLMClient:
         """Telemetry event should carry token_id when provided."""
         recorder = self._create_mock_recorder()
         openai_client = self._create_mock_openai_client()
-        emitted_events: list[object] = []
+        emitted_events: list[ExternalCallCompleted] = []
 
         client = AuditedLLMClient(
             recorder=recorder,
@@ -193,7 +194,7 @@ class TestAuditedLLMClient:
         """Telemetry event should allow token_id=None when not provided."""
         recorder = self._create_mock_recorder()
         openai_client = self._create_mock_openai_client()
-        emitted_events: list[object] = []
+        emitted_events: list[ExternalCallCompleted] = []
 
         client = AuditedLLMClient(
             recorder=recorder,

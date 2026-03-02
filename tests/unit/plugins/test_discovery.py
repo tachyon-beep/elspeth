@@ -321,16 +321,16 @@ class SourceTwo(BaseSource):
             def __init__(self, config: dict[str, Any]) -> None:
                 pass
 
-            def load(self, ctx):  # type: ignore[no-untyped-def]
+            def load(self, ctx):
                 return iter([])
 
             def close(self) -> None:
                 pass
 
-            def on_start(self, ctx) -> None:  # type: ignore[no-untyped-def]
+            def on_start(self, ctx) -> None:
                 pass
 
-            def on_complete(self, ctx) -> None:  # type: ignore[no-untyped-def]
+            def on_complete(self, ctx) -> None:
                 pass
 
         class FakeSource2(BaseSource):
@@ -344,16 +344,16 @@ class SourceTwo(BaseSource):
             def __init__(self, config: dict[str, Any]) -> None:
                 pass
 
-            def load(self, ctx):  # type: ignore[no-untyped-def]
+            def load(self, ctx):
                 return iter([])
 
             def close(self) -> None:
                 pass
 
-            def on_start(self, ctx) -> None:  # type: ignore[no-untyped-def]
+            def on_start(self, ctx) -> None:
                 pass
 
-            def on_complete(self, ctx) -> None:  # type: ignore[no-untyped-def]
+            def on_complete(self, ctx) -> None:
                 pass
 
         # Track call count to return different results per directory

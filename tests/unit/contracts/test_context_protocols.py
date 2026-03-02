@@ -71,8 +71,11 @@ class TestProtocolDiscrimination:
             def record_call(self, *a: object, **kw: object) -> None: ...
 
         obj = MinimalSource()
-        assert isinstance(obj, SourceContext), "MinimalSource should satisfy SourceContext"
-        assert not isinstance(obj, TransformContext), "MinimalSource should NOT satisfy TransformContext"
+        # Intentional runtime protocol structural subtyping checks — mypy considers
+        # these unreachable because the concrete class doesn't nominally inherit
+        # from the protocol, but that's exactly what we're verifying at runtime.
+        assert isinstance(obj, SourceContext), "MinimalSource should satisfy SourceContext"  # type: ignore[unreachable]
+        assert not isinstance(obj, TransformContext), "MinimalSource should NOT satisfy TransformContext"  # type: ignore[unreachable]
 
     def test_minimal_transform_does_not_satisfy_source(self) -> None:
         """A minimal TransformContext-only object should not satisfy SourceContext."""
@@ -95,8 +98,9 @@ class TestProtocolDiscrimination:
             def clear_checkpoint(self) -> None: ...
 
         obj = MinimalTransform()
-        assert isinstance(obj, TransformContext), "MinimalTransform should satisfy TransformContext"
-        assert not isinstance(obj, SourceContext), "MinimalTransform should NOT satisfy SourceContext"
+        # Intentional runtime protocol structural subtyping checks (see above).
+        assert isinstance(obj, TransformContext), "MinimalTransform should satisfy TransformContext"  # type: ignore[unreachable]
+        assert not isinstance(obj, SourceContext), "MinimalTransform should NOT satisfy SourceContext"  # type: ignore[unreachable]
 
     def test_minimal_sink_does_not_satisfy_lifecycle(self) -> None:
         """A minimal SinkContext-only object should not satisfy LifecycleContext."""
@@ -111,8 +115,9 @@ class TestProtocolDiscrimination:
             def record_call(self, *a: object, **kw: object) -> None: ...
 
         obj = MinimalSink()
-        assert isinstance(obj, SinkContext), "MinimalSink should satisfy SinkContext"
-        assert not isinstance(obj, LifecycleContext), "MinimalSink should NOT satisfy LifecycleContext"
+        # Intentional runtime protocol structural subtyping checks (see above).
+        assert isinstance(obj, SinkContext), "MinimalSink should satisfy SinkContext"  # type: ignore[unreachable]
+        assert not isinstance(obj, LifecycleContext), "MinimalSink should NOT satisfy LifecycleContext"  # type: ignore[unreachable]
 
 
 # [R3] Executor-only fields: on PluginContext but intentionally NOT in any protocol.

@@ -760,7 +760,7 @@ class TestElspethSettingsArchitecture:
             ElspethSettings(
                 source=SourceSettings(plugin="csv", on_success="results"),
                 sinks={"results": SinkSettings(plugin="csv")},
-                **{"default_sink": "results"},  # type: ignore[arg-type]  # testing rejected field
+                **{"default_sink": "results"},  # testing rejected field
             )
 
         assert "default_sink" in str(exc_info.value)
@@ -3467,7 +3467,7 @@ class TestSinkNameCasing:
             ElspethSettings(
                 source={"plugin": "csv"},
                 sinks={"output": {"plugin": "csv"}},
-                **{"default_sink": "nonexistent"},  # type: ignore[arg-type]  # testing rejected field
+                **{"default_sink": "nonexistent"},  # testing rejected field
             )
         assert "default_sink" in str(exc_info.value)
         assert "on_success" in str(exc_info.value)

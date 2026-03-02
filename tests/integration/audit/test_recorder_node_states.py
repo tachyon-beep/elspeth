@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from elspeth.contracts import NodeStateStatus, NodeType
+from elspeth.contracts.audit import NodeStateCompleted
 from elspeth.contracts.schema import SchemaConfig
 
 # Dynamic schema for tests that don't care about specific fields
@@ -318,6 +319,7 @@ class TestLandscapeRecorderNodeStates:
             duration_ms=1.0,
         )
 
+        assert completed.error_json is not None
         stored = json.loads(completed.error_json)
         # Only required fields present — None-valued optional fields omitted
         assert set(stored.keys()) == {"exception", "type"}
@@ -406,10 +408,10 @@ class TestLandscapeRecorderNodeStates:
         )
 
         # Empty error={} should be serialized, not dropped
-        completed = recorder.complete_node_state(
+        completed = recorder.complete_node_state(  # type: ignore[call-overload]  # Empty dict tests serialization
             state_id=state.state_id,
             status=NodeStateStatus.FAILED,
-            error={},  # Empty dict error
+            error={},
             duration_ms=1.0,
         )
 
@@ -449,7 +451,7 @@ class TestLandscapeRecorderNodeStates:
             input_data={},
             attempt=0,
         )
-        recorder.complete_node_state(state1.state_id, status=NodeStateStatus.FAILED, error={}, duration_ms=1.0)
+        recorder.complete_node_state(state1.state_id, status=NodeStateStatus.FAILED, error={}, duration_ms=1.0)  # type: ignore[call-overload]  # Empty dict tests serialization
 
         # Second attempt
         state2 = recorder.begin_node_state(
@@ -775,6 +777,7 @@ class TestContextAfterRoundTrip:
 
         fetched = recorder.get_node_state(state.state_id)
         assert fetched is not None
+        assert isinstance(fetched, NodeStateCompleted)
         assert fetched.context_after_json is not None
         assert json.loads(fetched.context_after_json) == metadata.to_dict()
 
@@ -847,5 +850,6 @@ class TestContextAfterRoundTrip:
 
         fetched = recorder.get_node_state(state.state_id)
         assert fetched is not None
+        assert isinstance(fetched, NodeStateCompleted)
         assert fetched.context_after_json is not None
         assert json.loads(fetched.context_after_json) == ctx.to_dict()

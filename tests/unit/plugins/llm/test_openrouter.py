@@ -36,7 +36,7 @@ def _create_mock_response(
     usage: dict[str, int] | None = None,
     status_code: int = 200,
     headers: dict[str, str] | None = None,
-    raw_body: str | None = None,
+    raw_body: str | bytes | None = None,
     raise_for_status_error: Exception | None = None,
 ) -> httpx.Response:
     """Create an httpx.Response using ChaosLLM response generation."""
@@ -250,6 +250,7 @@ class TestLLMTransformOpenRouterInit:
         )
 
         assert transform._model == "anthropic/claude-3-opus"
+        assert isinstance(transform._config, OpenRouterConfig)
         assert transform._config.api_key == "sk-test-key"
         assert transform._config.base_url == "https://custom.example.com/api/v1"
         assert transform._config.timeout_seconds == 90.0
@@ -910,6 +911,7 @@ class TestLLMTransformOpenRouterIntegration:
         )
 
         # The transform stores the timeout in its config
+        assert isinstance(transform._config, OpenRouterConfig)
         assert transform._config.timeout_seconds == 120.0
 
         init_ctx = make_context(landscape=mock_recorder)
@@ -1618,6 +1620,7 @@ class TestOpenRouterNanRejection:
 
             assert len(collector.results) == 1
             _, result, _ = collector.results[0]
+            assert isinstance(result, TransformResult)
             assert result.status == "error"
             assert result.reason is not None
             assert result.reason["reason"] == "llm_call_failed"
@@ -1649,6 +1652,7 @@ class TestOpenRouterNanRejection:
 
             assert len(collector.results) == 1
             _, result, _ = collector.results[0]
+            assert isinstance(result, TransformResult)
             assert result.status == "error"
             assert result.reason is not None
             assert result.reason["reason"] == "llm_call_failed"
@@ -1709,6 +1713,7 @@ class TestOpenRouterMalformedUtf8:
 
             assert len(collector.results) == 1
             _, result, _ = collector.results[0]
+            assert isinstance(result, TransformResult)
             assert result.status == "error"
             assert result.reason is not None
             assert result.reason["reason"] == "llm_call_failed"

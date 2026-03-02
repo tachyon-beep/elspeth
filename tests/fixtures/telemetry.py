@@ -8,6 +8,7 @@ dependency on old test conftest.
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
@@ -38,7 +39,7 @@ class TelemetryTestExporter:
     def name(self) -> str:
         return self._name
 
-    def configure(self, config: dict[str, Any]) -> None:
+    def configure(self, config: Mapping[str, Any]) -> None:
         self._configured = True
 
     def export(self, event: TelemetryEvent) -> None:

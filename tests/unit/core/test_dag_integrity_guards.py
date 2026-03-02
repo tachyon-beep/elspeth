@@ -2,7 +2,7 @@
 
 import pytest
 
-from elspeth.contracts import RouteDestination, RoutingMode
+from elspeth.contracts import NodeType, RouteDestination, RoutingMode
 from elspeth.contracts.types import NodeID, SinkName
 from elspeth.core.dag import ExecutionGraph, GraphValidationError
 
@@ -12,8 +12,8 @@ class TestDAGEdgeDataIntegrity:
 
     def test_get_branch_to_sink_map_raises_on_missing_mode(self) -> None:
         graph = ExecutionGraph()
-        graph.add_node("gate_1", node_type="gate", plugin_name="gate", config={"routes": {"branch_a": "out"}})
-        graph.add_node("sink_1", node_type="sink", plugin_name="json")
+        graph.add_node("gate_1", node_type=NodeType.GATE, plugin_name="gate", config={"routes": {"branch_a": "out"}})
+        graph.add_node("sink_1", node_type=NodeType.SINK, plugin_name="json")
         graph.set_sink_id_map({SinkName("out"): NodeID("sink_1")})
         graph.add_edge("gate_1", "sink_1", label="branch_a", mode=RoutingMode.COPY)
 
@@ -27,8 +27,8 @@ class TestDAGEdgeDataIntegrity:
 
     def test_get_terminal_sink_map_raises_on_missing_label(self) -> None:
         graph = ExecutionGraph()
-        graph.add_node("transform_1", node_type="transform", plugin_name="passthrough")
-        graph.add_node("sink_1", node_type="sink", plugin_name="json")
+        graph.add_node("transform_1", node_type=NodeType.TRANSFORM, plugin_name="passthrough")
+        graph.add_node("sink_1", node_type=NodeType.SINK, plugin_name="json")
         graph.set_sink_id_map({SinkName("out"): NodeID("sink_1")})
         graph.add_edge("transform_1", "sink_1", label="on_success", mode=RoutingMode.MOVE)
 
@@ -42,7 +42,7 @@ class TestDAGEdgeDataIntegrity:
 
     def test_is_sink_node_raises_on_missing_node(self) -> None:
         graph = ExecutionGraph()
-        graph.add_node("sink_1", node_type="sink", plugin_name="json")
+        graph.add_node("sink_1", node_type=NodeType.SINK, plugin_name="json")
 
         with pytest.raises(KeyError, match="Node not found"):
             graph.is_sink_node(NodeID("missing_node"))
@@ -55,7 +55,7 @@ class TestRouteResolutionIntegrity:
         graph = ExecutionGraph()
         graph.add_node(
             "gate_1",
-            node_type="gate",
+            node_type=NodeType.GATE,
             plugin_name="config_gate:router",
             config={"routes": {"true": "output", "false": "output"}},
         )

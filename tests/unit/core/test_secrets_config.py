@@ -118,6 +118,6 @@ class TestSecretsConfigValidation:
         with pytest.raises(ValidationError, match="str"):
             SecretsConfig(
                 source="keyvault",
-                vault_url=123,  # type: ignore[arg-type]  # Integer instead of string
+                vault_url=123,  # Integer instead of string
                 mapping={"KEY": "key"},
             )

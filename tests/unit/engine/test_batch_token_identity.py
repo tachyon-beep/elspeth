@@ -17,8 +17,8 @@ tokens get wrong outcomes but counts still match.
 from typing import Any
 
 from elspeth.contracts import Determinism, NodeType, SourceRow
+from elspeth.contracts.contexts import TransformContext
 from elspeth.contracts.enums import RowOutcome
-from elspeth.contracts.plugin_context import PluginContext
 from elspeth.contracts.schema_contract import PipelineRow, SchemaContract
 from elspeth.contracts.types import NodeID
 from elspeth.core.config import AggregationSettings, TriggerConfig
@@ -117,7 +117,7 @@ class SumTransform(BaseTransform):
         self.node_id = node_id
         self.on_success = "output"
 
-    def process(self, rows: list[dict[str, Any]] | PipelineRow, ctx: PluginContext) -> TransformResult:
+    def process(self, rows: list[dict[str, Any]] | PipelineRow, ctx: TransformContext) -> TransformResult:
         if isinstance(rows, list):
             total = sum(r.get("value", 0) for r in rows)
             output_row = {"total": total}

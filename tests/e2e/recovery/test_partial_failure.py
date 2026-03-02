@@ -13,7 +13,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
-from typing import Any, cast
+from typing import Any
 
 from sqlalchemy import select
 
@@ -23,7 +23,6 @@ from elspeth.contracts import (
     PluginSchema,
     RowOutcome,
     RunStatus,
-    TransformProtocol,
 )
 from elspeth.core.config import SourceSettings
 from elspeth.core.dag import ExecutionGraph
@@ -100,7 +99,7 @@ def _build_linear_graph(config: PipelineConfig) -> ExecutionGraph:
     source_settings = SourceSettings(plugin=config.source.name, on_success=source_connection, options={})
 
     # Wire transforms with explicit routing
-    wired = wire_transforms(cast("list[TransformProtocol]", transforms), source_connection=source_connection, final_sink=sink_name)
+    wired = wire_transforms(transforms, source_connection=source_connection, final_sink=sink_name)
 
     graph = ExecutionGraph.from_plugin_instances(
         source=config.source,

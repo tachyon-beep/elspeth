@@ -286,10 +286,10 @@ class TestRecordRoutingEventsRowcount:
                         return mock_result
                     return result
 
-                conn.execute = patched_execute  # type: ignore[assignment]
+                conn.execute = patched_execute
                 yield conn
 
-        repo._db.connection = mock_connection  # type: ignore[assignment]
+        repo._db.connection = mock_connection  # type: ignore[method-assign]
 
         with pytest.raises(AuditIntegrityError, match="zero rows affected"):
             repo.record_routing_events(state.state_id, routes)

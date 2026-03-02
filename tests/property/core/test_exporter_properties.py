@@ -260,5 +260,5 @@ def _make_exporter_with_data(
     def _mock_iter(run_id: str):
         yield from test_records
 
-    exporter._iter_records = _mock_iter  # type: ignore[assignment]
+    exporter._iter_records = _mock_iter  # type: ignore[method-assign]
     return exporter

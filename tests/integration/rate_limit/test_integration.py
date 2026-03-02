@@ -14,6 +14,7 @@ import pytest
 
 from elspeth.contracts import TransformResult
 from elspeth.contracts.config.runtime import RuntimeRateLimitConfig
+from elspeth.contracts.contexts import LifecycleContext, TransformContext
 from elspeth.contracts.plugin_context import PluginContext
 from elspeth.contracts.schema_contract import PipelineRow
 from elspeth.core.config import RateLimitSettings
@@ -25,7 +26,11 @@ from tests.fixtures.landscape import make_landscape_db
 
 
 class RateLimitAwareTransform(BaseTransform):
-    """Test transform that uses rate limiting from context."""
+    """Test transform that uses rate limiting from context.
+
+    Follows the designed architecture: captures rate_limit_registry in
+    on_start() from LifecycleContext and uses it from self in process().
+    """
 
     name = "rate_limit_test"
 
@@ -33,11 +38,17 @@ class RateLimitAwareTransform(BaseTransform):
         super().__init__(config)
         self._service_name = config.get("service_name", "test_service")
         self._call_times: list[float] = []
+        self._registry: RateLimitRegistry | None = None
 
-    def process(self, row: PipelineRow, ctx: PluginContext) -> TransformResult:
+    def on_start(self, ctx: LifecycleContext) -> None:
+        """Capture rate_limit_registry from lifecycle context."""
+        super().on_start(ctx)
+        self._registry = ctx.rate_limit_registry
+
+    def process(self, row: PipelineRow, ctx: TransformContext) -> TransformResult:
         """Process row, using rate limiter if available."""
-        if ctx.rate_limit_registry is not None:
-            limiter = ctx.rate_limit_registry.get_limiter(self._service_name)
+        if self._registry is not None:
+            limiter = self._registry.get_limiter(self._service_name)
             limiter.acquire()
 
         # Record the time of this call
@@ -188,6 +199,9 @@ class TestRateLimitThrottling:
                 config={},
                 rate_limit_registry=registry,
             )
+
+            # Lifecycle: on_start captures rate_limit_registry from context
+            transform.on_start(ctx)
 
             # Process 10 rows — all should succeed (fills bucket)
             for i in range(10):

@@ -125,7 +125,7 @@ class TestJsonSinkHeaderCollision:
         from elspeth.plugins.sinks.json_sink import JSONSink
 
         sink = JSONSink.__new__(JSONSink)
-        sink._get_effective_display_headers = MagicMock(return_value={"field_a": "Output", "field_b": "Output"})
+        sink._get_effective_display_headers = MagicMock(return_value={"field_a": "Output", "field_b": "Output"})  # type: ignore[method-assign]
 
         with pytest.raises(ValueError, match="Header collision"):
             sink._apply_display_headers([{"field_a": 1, "field_b": 2}])

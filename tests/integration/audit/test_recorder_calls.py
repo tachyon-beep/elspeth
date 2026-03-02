@@ -672,7 +672,7 @@ class TestFindCallByRequestHashRunIsolation:
         # Query for Run B's call
         result = recorder.find_call_by_request_hash(
             run_id=run_b_id,
-            call_type="llm",
+            call_type=CallType.LLM,
             request_hash=request_hash,
         )
 
@@ -727,7 +727,7 @@ class TestFindCallByRequestHashRunIsolation:
         # Query for Run B's call (should not find Run A's)
         result = recorder.find_call_by_request_hash(
             run_id=run_b.run_id,
-            call_type="llm",
+            call_type=CallType.LLM,
             request_hash=request_hash,
         )
 

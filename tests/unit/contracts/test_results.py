@@ -21,7 +21,7 @@ from typing import Any
 import pytest
 
 from elspeth.contracts import RoutingAction, RowOutcome, TokenInfo, TransformErrorReason
-from elspeth.contracts.errors import MaxRetriesExceeded, OrchestrationInvariantError
+from elspeth.contracts.errors import ConfigGateReason, MaxRetriesExceeded, OrchestrationInvariantError
 from elspeth.contracts.results import (
     ArtifactDescriptor,
     FailureInfo,
@@ -341,7 +341,7 @@ class TestGateResult:
     def test_creation(self) -> None:
         """GateResult stores row and routing action."""
         row = {"value": 100}
-        action = RoutingAction.route("high", reason={"rule": "value > threshold", "matched_value": 50})
+        action = RoutingAction.route("high", reason=ConfigGateReason(condition="value > threshold", result="high"))
         result = GateResult(row=row, action=action)
 
         assert result.row == row

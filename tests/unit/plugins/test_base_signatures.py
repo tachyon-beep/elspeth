@@ -4,7 +4,7 @@ Uses localns to resolve TYPE_CHECKING-only annotations (protocol types
 are not in the runtime namespace due to from __future__ import annotations).
 """
 
-from typing import get_type_hints
+from typing import Any, get_origin, get_type_hints
 
 from elspeth.contracts.contexts import (
     LifecycleContext,
@@ -20,7 +20,7 @@ from elspeth.plugins.infrastructure.results import TransformResult
 class TestBaseClassSignatures:
     """Verify base class signatures use PipelineRow and phase-based protocols."""
 
-    def _get_hints(self, method: object) -> dict[str, type]:
+    def _get_hints(self, method: object) -> dict[str, Any]:
         """Resolve type hints with protocol types available."""
         return get_type_hints(
             method,
@@ -60,7 +60,7 @@ class TestBaseClassSignatures:
     def test_base_sink_write_accepts_list_of_dicts(self) -> None:
         """BaseSink.write() should accept list[dict[str, Any]] (not PipelineRow)."""
         hints = self._get_hints(BaseSink.write)
-        assert hints["rows"].__origin__ is list
+        assert get_origin(hints["rows"]) is list
 
     def test_base_sink_write_accepts_sink_context(self) -> None:
         """BaseSink.write() should accept SinkContext (not PluginContext)."""

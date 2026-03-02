@@ -3,6 +3,7 @@
 import io
 import json
 from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -252,6 +253,7 @@ class TestJSONSourceFlexibleContract:
         assert len(rows) == 2
         assert rows[0].is_quarantined is False
         assert rows[1].is_quarantined is True
+        assert rows[1].quarantine_error is not None
         assert "extra" in rows[1].quarantine_error
 
         contract = source.get_schema_contract()
@@ -603,7 +605,7 @@ class TestJSONSourceParseErrors:
         fake_file = io.StringIO('{"id": 1}\n\udcff\n{"id": 3}\n')
         real_open = open
 
-        def fake_open(file: object, *args: object, **kwargs: object) -> object:
+        def fake_open(file: str | Path, *args: Any, **kwargs: Any) -> object:
             if Path(file) == jsonl_file and kwargs.get("encoding") == "utf-16":
                 fake_file.seek(0)
                 return fake_file
@@ -1097,6 +1099,7 @@ class TestJSONSourceDataKeyStructuralErrors:
         # Structural error yields a quarantined SourceRow
         assert len(results) == 1
         assert results[0].quarantine_destination == "quarantine"
+        assert results[0].quarantine_error is not None
         assert "results" in results[0].quarantine_error  # The missing data_key
 
         # Verify validation error was recorded to Landscape
@@ -1104,6 +1107,7 @@ class TestJSONSourceDataKeyStructuralErrors:
 
         from elspeth.core.landscape.schema import validation_errors_table
 
+        assert ctx.landscape is not None
         with ctx.landscape._db.engine.connect() as conn:
             rows = conn.execute(select(validation_errors_table).where(validation_errors_table.c.run_id == ctx.run_id)).fetchall()
 

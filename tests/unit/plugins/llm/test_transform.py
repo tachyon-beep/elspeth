@@ -932,6 +932,7 @@ class TestMultiQueryOutputSchemaConfig:
             )
         )
 
+        assert transform._output_schema_config.guaranteed_fields is not None
         guaranteed = set(transform._output_schema_config.guaranteed_fields)
         assert "quality_llm_response" in guaranteed
         assert "quality_llm_response_usage" in guaranteed
@@ -953,6 +954,7 @@ class TestMultiQueryOutputSchemaConfig:
             )
         )
 
+        assert transform._output_schema_config.audit_fields is not None
         audit = set(transform._output_schema_config.audit_fields)
         assert "quality_llm_response_template_hash" in audit
         assert "quality_llm_response_variables_hash" in audit
@@ -974,6 +976,8 @@ class TestMultiQueryOutputSchemaConfig:
             )
         )
 
+        assert transform._output_schema_config.guaranteed_fields is not None
+        assert transform._output_schema_config.audit_fields is not None
         guaranteed = set(transform._output_schema_config.guaranteed_fields)
         audit = set(transform._output_schema_config.audit_fields)
         all_fields = guaranteed | audit
@@ -1010,6 +1014,7 @@ class TestMultiQueryOutputSchemaConfig:
 
         transform = LLMTransform(_make_config())
 
+        assert transform._output_schema_config.guaranteed_fields is not None
         guaranteed = set(transform._output_schema_config.guaranteed_fields)
         assert "llm_response" in guaranteed
         assert "llm_response_usage" in guaranteed
@@ -1029,6 +1034,8 @@ class TestMultiQueryOutputSchemaConfig:
             )
         )
 
+        assert transform._output_schema_config.guaranteed_fields is not None
+        assert transform._output_schema_config.audit_fields is not None
         schema_fields = set(transform._output_schema_config.guaranteed_fields) | set(transform._output_schema_config.audit_fields)
         declared = transform.declared_output_fields
 
@@ -1055,6 +1062,7 @@ class TestMultiQueryOutputSchemaConfig:
             )
         )
 
+        assert transform._output_schema_config.guaranteed_fields is not None
         guaranteed = set(transform._output_schema_config.guaranteed_fields)
         assert "quality_score" in guaranteed
         assert "quality_label" in guaranteed
@@ -1400,6 +1408,7 @@ class TestMultiQueryFieldTypeValidation:
 
         result = transform._process_row(_make_row(), _make_ctx())
         assert result.status == "error"
+        assert result.reason is not None
         assert result.reason["reason"] == "field_type_mismatch"
         assert result.reason["query_name"] == "second"
         assert result.reason["query_index"] == 1
@@ -1496,6 +1505,7 @@ class TestMultiQuerySequentialRetryBehavior:
         result = transform._process_row(_make_row(), _make_ctx())
         assert result.status == "error"
         assert result.retryable is True
+        assert result.reason is not None
         assert result.reason["reason"] == "multi_query_failed"
         assert result.reason["failed_query_name"] == "q2"
         assert result.reason["discarded_successful_queries"] == 1
@@ -1555,6 +1565,7 @@ class TestMultiQueryParallelExecution:
             assert output["q3_llm_response"] == "response text"
             assert mock_provider.execute_query.call_count == 3
         finally:
+            assert transform._query_executor is not None
             transform._query_executor.shutdown(wait=True)
 
     def test_parallel_one_fails_non_retryable(self) -> None:
@@ -1592,6 +1603,7 @@ class TestMultiQueryParallelExecution:
             assert result.status == "error"
             assert result.retryable is False
         finally:
+            assert transform._query_executor is not None
             transform._query_executor.shutdown(wait=True)
 
     def test_parallel_with_structured_output(self) -> None:
@@ -1649,6 +1661,7 @@ class TestMultiQueryParallelExecution:
             assert output["quality_label"] == "high"
             assert output["relevance_score"] == 72
         finally:
+            assert transform._query_executor is not None
             transform._query_executor.shutdown(wait=True)
 
     def test_close_shuts_down_executor(self) -> None:

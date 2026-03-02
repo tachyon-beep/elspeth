@@ -205,6 +205,7 @@ class TestGetRowDataTier1Corruption:
         # Corrupt the payload file by tampering with its contents
         # FilesystemPayloadStore uses hash[:2]/hash as path structure
         payload_ref = row.source_data_ref
+        assert payload_ref is not None
         payload_path = tmp_path / "payloads" / payload_ref[:2] / payload_ref
         payload_path.write_bytes(b"corrupted data that won't match hash")
 

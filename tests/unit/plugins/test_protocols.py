@@ -61,15 +61,15 @@ class TestSourceProtocol:
 
         source = MySource({"path": "test.csv"})
 
-        # IMPORTANT: Verify protocol conformance at runtime
-        # This is why we use @runtime_checkable
-        assert isinstance(
-            source,  # type: ignore[unreachable]
-            SourceProtocol,
-        ), "Source must conform to SourceProtocol"
+        # IMPORTANT: Verify protocol conformance at runtime.
+        # This is why we use @runtime_checkable. Assign to a variable to
+        # prevent mypy from narrowing `source` to Never (which would make
+        # all subsequent code unreachable).
+        _conforms = isinstance(source, SourceProtocol)
+        assert _conforms, "Source must conform to SourceProtocol"
 
         recorder = make_recorder()
-        ctx = make_context(landscape=recorder)  # type: ignore[unreachable]
+        ctx = make_context(landscape=recorder)
 
         source_rows = list(source.load(ctx))
         assert len(source_rows) == 3
@@ -173,12 +173,13 @@ class TestTransformProtocol:
             def __init__(self, config: dict[str, Any]) -> None:
                 self.config = config
 
-            def process(self, row: dict[str, Any], ctx: PluginContext) -> TransformResult:
+            def process(self, row: PipelineRow, ctx: PluginContext) -> TransformResult:
+                d = row.to_dict()
                 return TransformResult.success(
                     make_pipeline_row(
                         {
-                            "value": row["value"],
-                            "doubled": row["value"] * 2,
+                            "value": d["value"],
+                            "doubled": d["value"] * 2,
                         }
                     ),
                     success_reason={"action": "test"},
@@ -195,14 +196,12 @@ class TestTransformProtocol:
 
         transform = DoubleTransform({})
 
-        # IMPORTANT: Verify protocol conformance at runtime
-        assert isinstance(
-            transform,  # type: ignore[unreachable]
-            TransformProtocol,
-        ), "Must conform to TransformProtocol"
+        # IMPORTANT: Verify protocol conformance at runtime (see test_source_protocol_conformance).
+        _conforms = isinstance(transform, TransformProtocol)
+        assert _conforms, "Must conform to TransformProtocol"
 
         recorder = make_recorder()
-        ctx = make_context(landscape=recorder)  # type: ignore[unreachable]
+        ctx = make_context(landscape=recorder)
 
         result = transform.process(make_pipeline_row({"value": 21}), ctx)
         assert result.status == "success"
@@ -216,7 +215,7 @@ class TestTransformBatchSupport:
     def test_transform_process_single_row(self) -> None:
         """Transform.process() accepts single row dict."""
         from elspeth.contracts import Determinism, PluginSchema
-        from elspeth.contracts.plugin_context import PluginContext
+        from elspeth.contracts.contexts import TransformContext
         from elspeth.plugins.infrastructure.base import BaseTransform
         from elspeth.plugins.infrastructure.results import TransformResult
 
@@ -230,7 +229,7 @@ class TestTransformBatchSupport:
             determinism = Determinism.DETERMINISTIC
             plugin_version = "1.0.0"
 
-            def process(self, row: PipelineRow, ctx: PluginContext) -> TransformResult:
+            def process(self, row: PipelineRow, ctx: TransformContext) -> TransformResult:
                 return TransformResult.success(make_pipeline_row({"processed": row["value"]}), success_reason={"action": "test"})
 
         transform = SingleTransform({})
@@ -243,7 +242,7 @@ class TestTransformBatchSupport:
     def test_transform_process_batch_rows(self) -> None:
         """Transform.process() accepts list of row dicts when is_batch_aware=True."""
         from elspeth.contracts import Determinism, PluginSchema
-        from elspeth.contracts.plugin_context import PluginContext
+        from elspeth.contracts.contexts import TransformContext
         from elspeth.plugins.infrastructure.base import BaseTransform
         from elspeth.plugins.infrastructure.results import TransformResult
 
@@ -258,7 +257,7 @@ class TestTransformBatchSupport:
             plugin_version = "1.0.0"
             is_batch_aware = True  # Declares batch support
 
-            def process(self, row: PipelineRow | list[PipelineRow], ctx: PluginContext) -> TransformResult:
+            def process(self, row: PipelineRow | list[PipelineRow], ctx: TransformContext) -> TransformResult:
                 # When given a list, process as batch
                 if isinstance(row, list):
                     total = sum(r["value"] for r in row)
@@ -280,7 +279,7 @@ class TestTransformBatchSupport:
     def test_transform_is_batch_aware_default_false(self) -> None:
         """Transforms have is_batch_aware=False by default."""
         from elspeth.contracts import Determinism, PluginSchema
-        from elspeth.contracts.plugin_context import PluginContext
+        from elspeth.contracts.contexts import TransformContext
         from elspeth.plugins.infrastructure.base import BaseTransform
         from elspeth.plugins.infrastructure.results import TransformResult
 
@@ -294,7 +293,7 @@ class TestTransformBatchSupport:
             determinism = Determinism.DETERMINISTIC
             plugin_version = "1.0.0"
 
-            def process(self, row: PipelineRow, ctx: PluginContext) -> TransformResult:
+            def process(self, row: PipelineRow, ctx: TransformContext) -> TransformResult:
                 return TransformResult.success(make_pipeline_row(row.to_dict()), success_reason={"action": "test"})
 
         regular = RegularTransform({})
@@ -303,7 +302,7 @@ class TestTransformBatchSupport:
     def test_transform_is_batch_aware_can_be_set_true(self) -> None:
         """Transforms can declare is_batch_aware=True for batch support."""
         from elspeth.contracts import Determinism, PluginSchema
-        from elspeth.contracts.plugin_context import PluginContext
+        from elspeth.contracts.contexts import TransformContext
         from elspeth.plugins.infrastructure.base import BaseTransform
         from elspeth.plugins.infrastructure.results import TransformResult
 
@@ -318,7 +317,7 @@ class TestTransformBatchSupport:
             determinism = Determinism.DETERMINISTIC
             plugin_version = "1.0.0"
 
-            def process(self, row: PipelineRow | list[PipelineRow], ctx: PluginContext) -> TransformResult:
+            def process(self, row: PipelineRow | list[PipelineRow], ctx: TransformContext) -> TransformResult:
                 if isinstance(row, list):
                     return TransformResult.success(make_pipeline_row({"count": len(row)}), success_reason={"action": "test"})
                 return TransformResult.success(make_pipeline_row(row.to_dict()), success_reason={"action": "test"})
@@ -463,10 +462,12 @@ class TestSinkProtocol:
                 pass  # Not needed for this test sink
 
         sink = BatchMemorySink({})
-        assert isinstance(sink, SinkProtocol)  # type: ignore[unreachable]
+        # Verify protocol conformance at runtime (see test_source_protocol_conformance).
+        _conforms = isinstance(sink, SinkProtocol)
+        assert _conforms, "Must conform to SinkProtocol"
 
         recorder = make_recorder()
-        ctx = make_context(landscape=recorder)  # type: ignore[unreachable]
+        ctx = make_context(landscape=recorder)
         artifact = sink.write([{"value": 1}, {"value": 2}], ctx)
 
         assert isinstance(artifact, ArtifactDescriptor)
@@ -532,11 +533,12 @@ class TestSinkProtocol:
 
         sink = MemorySink({})
 
-        # IMPORTANT: Verify protocol conformance at runtime
-        assert isinstance(sink, SinkProtocol), "Must conform to SinkProtocol"  # type: ignore[unreachable]
+        # IMPORTANT: Verify protocol conformance at runtime (see test_source_protocol_conformance).
+        _conforms = isinstance(sink, SinkProtocol)
+        assert _conforms, "Must conform to SinkProtocol"
 
         recorder = make_recorder()
-        ctx = make_context(landscape=recorder)  # type: ignore[unreachable]
+        ctx = make_context(landscape=recorder)
 
         # Batch write
         artifact = sink.write([{"value": 1}, {"value": 2}], ctx)

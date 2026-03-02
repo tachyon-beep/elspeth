@@ -147,7 +147,10 @@ class TestOnStartSetsProvider:
         transform.on_start(mock_ctx)
 
         assert transform._provider is not None
-        assert isinstance(transform._provider, AzureLLMProvider)
+        # _provider is typed as LLMProvider (Protocol), but at runtime it's a concrete
+        # AzureLLMProvider. Mypy considers this unreachable because the Protocol and
+        # concrete class are nominally unrelated — but that's what we're verifying.
+        assert isinstance(transform._provider, AzureLLMProvider)  # type: ignore[unreachable]
         assert isinstance(transform._provider, LLMProvider)
 
     def test_on_start_sets_provider_for_openrouter(self) -> None:
@@ -165,7 +168,8 @@ class TestOnStartSetsProvider:
         transform.on_start(mock_ctx)
 
         assert transform._provider is not None
-        assert isinstance(transform._provider, OpenRouterLLMProvider)
+        # Same as above — verifying concrete provider type behind Protocol interface.
+        assert isinstance(transform._provider, OpenRouterLLMProvider)  # type: ignore[unreachable]
         assert isinstance(transform._provider, LLMProvider)
 
     def test_on_start_stores_recorder(self) -> None:

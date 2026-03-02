@@ -6,7 +6,7 @@ provider="azure" and queries={...} config format.
 
 from __future__ import annotations
 
-from collections.abc import Generator
+from collections.abc import Generator, Sequence
 from typing import Any
 from unittest.mock import Mock
 
@@ -106,7 +106,7 @@ def _make_config(**overrides: Any) -> dict[str, Any]:
 
 
 def _make_mock_provider(
-    responses: list[dict[str, Any] | str] | None = None,
+    responses: Sequence[dict[str, Any] | str] | None = None,
 ) -> Mock:
     """Create a mock LLM provider returning predetermined responses.
 
@@ -723,7 +723,7 @@ class TestMultiRowPipelining:
         transform.close()
 
         assert transform._recorder is None
-        assert transform._provider is None
+        assert transform._provider is None  # type: ignore[unreachable]  # verifying close() cleanup at runtime
 
 
 class TestMultiQueryWithMockProvider:

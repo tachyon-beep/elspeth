@@ -20,14 +20,12 @@ Fork terminology:
 
 from __future__ import annotations
 
-from typing import cast
-
 import pytest
 from hypothesis import given, settings
 from hypothesis import strategies as st
 from sqlalchemy import text
 
-from elspeth.contracts import CoalesceName, GateName, RoutingAction, RoutingMode, SinkName, TransformProtocol
+from elspeth.contracts import CoalesceName, GateName, RoutingAction, RoutingMode, SinkName
 from elspeth.contracts.enums import RowOutcome
 from elspeth.core.config import CoalesceSettings, GateSettings, SourceSettings
 from elspeth.core.dag import ExecutionGraph, GraphValidationError
@@ -199,7 +197,7 @@ def _build_production_graph(config: PipelineConfig) -> ExecutionGraph:
     source_on_success = "source_out" if transforms else sink_name
     wired_transforms = (
         wire_transforms(
-            cast(list[TransformProtocol], transforms),
+            transforms,
             source_connection=source_on_success,
             final_sink=sink_name,
         )

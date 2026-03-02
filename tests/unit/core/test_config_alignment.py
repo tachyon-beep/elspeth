@@ -588,7 +588,9 @@ class TestExplicitFieldMappings:
             "default_requests_per_minute: direct mapping (int->float)"
         )
         assert config.persistence_path == settings.persistence_path, "persistence_path: direct mapping"
-        assert config.services == dict(settings.services), "services: direct mapping"
+        # RuntimeServiceRateLimit vs ServiceRateLimit: different types compared for value equality
+        # to verify settings-to-runtime mapping produces equivalent values.
+        assert config.services == dict(settings.services), "services: direct mapping"  # type: ignore[comparison-overlap]
 
     def test_concurrency_field_mapping_explicit(self) -> None:
         """Verify ConcurrencySettings->RuntimeConcurrencyConfig field name mappings."""

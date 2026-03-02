@@ -20,8 +20,8 @@ from sqlalchemy import select
 
 from elspeth.contracts import NodeType, PluginSchema, TokenInfo, TransformResult
 from elspeth.contracts.config import RuntimeRetryConfig
+from elspeth.contracts.contexts import TransformContext
 from elspeth.contracts.errors import MaxRetriesExceeded
-from elspeth.contracts.plugin_context import PluginContext
 from elspeth.contracts.schema_contract import FieldContract, PipelineRow, SchemaContract
 from elspeth.core.landscape.recorder import LandscapeRecorder
 from elspeth.core.landscape.schema import node_states_table
@@ -66,7 +66,7 @@ class FlakyTransform(BaseTransform):
         self.fail_count = 0
         self.max_fails = config.get("max_fails", 2)
 
-    def process(self, row: PipelineRow, ctx: PluginContext) -> TransformResult:
+    def process(self, row: PipelineRow, ctx: TransformContext) -> TransformResult:
         """Fail max_fails times, then succeed."""
         self.fail_count += 1
         if self.fail_count <= self.max_fails:
@@ -89,7 +89,7 @@ class AlwaysFailTransform(BaseTransform):
         super().__init__(config)
         self.fail_count = 0
 
-    def process(self, row: PipelineRow, ctx: PluginContext) -> TransformResult:
+    def process(self, row: PipelineRow, ctx: TransformContext) -> TransformResult:
         """Always fail with retryable error."""
         self.fail_count += 1
         raise ConnectionError(f"Permanent failure attempt {self.fail_count}")

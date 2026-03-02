@@ -16,13 +16,14 @@ from typing import Any
 import pytest
 
 from elspeth.contracts import TransformResult
+from elspeth.contracts.contexts import TransformContext
 from elspeth.contracts.identity import TokenInfo
 from elspeth.contracts.plugin_context import PluginContext
 from elspeth.contracts.schema_contract import PipelineRow
 from elspeth.core.landscape.recorder import LandscapeRecorder
 from elspeth.plugins.infrastructure.base import BaseTransform
 from elspeth.plugins.infrastructure.batching import BatchTransformMixin
-from elspeth.plugins.infrastructure.batching.ports import CollectorOutputPort
+from elspeth.plugins.infrastructure.batching.ports import CollectorOutputPort, OutputPort
 from elspeth.testing import make_pipeline_row
 from tests.fixtures.factories import make_context
 from tests.fixtures.landscape import make_recorder
@@ -51,7 +52,7 @@ class SimpleBatchTransform(BaseTransform, BatchTransformMixin):
         super().__init__({"schema": {"mode": "observed"}})
         self._batch_initialized = False
 
-    def connect_output(self, output: CollectorOutputPort, max_pending: int = 10) -> None:
+    def connect_output(self, output: OutputPort, max_pending: int = 10) -> None:
         if self._batch_initialized:
             raise RuntimeError("connect_output() already called")
         self.init_batch_processing(
@@ -62,18 +63,18 @@ class SimpleBatchTransform(BaseTransform, BatchTransformMixin):
         )
         self._batch_initialized = True
 
-    def accept(self, row: dict[str, Any], ctx: PluginContext) -> None:
+    def accept(self, row: dict[str, Any], ctx: TransformContext) -> None:  # type: ignore[override]
         if not self._batch_initialized:
             raise RuntimeError("connect_output() must be called before accept()")
         self.accept_row(make_pipeline_row(row), ctx, self._process_row)
 
-    def _process_row(self, row: PipelineRow, ctx: PluginContext) -> TransformResult:
+    def _process_row(self, row: PipelineRow, ctx: TransformContext) -> TransformResult:
         # Simple passthrough - just add a marker
         output = row.to_dict()
         output["processed"] = True
         return TransformResult.success(make_pipeline_row(output), success_reason={"action": "test"})
 
-    def process(self, row: PipelineRow, ctx: PluginContext) -> TransformResult:
+    def process(self, row: PipelineRow, ctx: TransformContext) -> TransformResult:
         raise NotImplementedError("Use accept() for row-level pipelining")
 
     def close(self) -> None:
@@ -317,7 +318,7 @@ class BlockingBatchTransform(BaseTransform, BatchTransformMixin):
         self._block_event = threading.Event()
         self._processing_started = threading.Event()
 
-    def connect_output(self, output: CollectorOutputPort, max_pending: int = 10) -> None:
+    def connect_output(self, output: OutputPort, max_pending: int = 10) -> None:
         if self._batch_initialized:
             raise RuntimeError("connect_output() already called")
         self.init_batch_processing(
@@ -328,12 +329,12 @@ class BlockingBatchTransform(BaseTransform, BatchTransformMixin):
         )
         self._batch_initialized = True
 
-    def accept(self, row: dict[str, Any], ctx: PluginContext) -> None:
+    def accept(self, row: dict[str, Any], ctx: TransformContext) -> None:  # type: ignore[override]
         if not self._batch_initialized:
             raise RuntimeError("connect_output() must be called before accept()")
         self.accept_row(make_pipeline_row(row), ctx, self._process_row)
 
-    def _process_row(self, row: PipelineRow, ctx: PluginContext) -> TransformResult:
+    def _process_row(self, row: PipelineRow, ctx: TransformContext) -> TransformResult:
         # Signal that processing has started
         self._processing_started.set()
         # Block until released
@@ -350,7 +351,7 @@ class BlockingBatchTransform(BaseTransform, BatchTransformMixin):
         """Wait until at least one worker has started processing."""
         return self._processing_started.wait(timeout=timeout)
 
-    def process(self, row: PipelineRow, ctx: PluginContext) -> TransformResult:
+    def process(self, row: PipelineRow, ctx: TransformContext) -> TransformResult:
         raise NotImplementedError("Use accept() for row-level pipelining")
 
     def close(self) -> None:
@@ -476,7 +477,7 @@ class SlowBatchTransform(BaseTransform, BatchTransformMixin):
         self._delay = delay
         self._processing_started = threading.Event()
 
-    def connect_output(self, output: CollectorOutputPort, max_pending: int = 10) -> None:
+    def connect_output(self, output: OutputPort, max_pending: int = 10) -> None:
         if self._batch_initialized:
             raise RuntimeError("connect_output() already called")
         self.init_batch_processing(
@@ -487,12 +488,12 @@ class SlowBatchTransform(BaseTransform, BatchTransformMixin):
         )
         self._batch_initialized = True
 
-    def accept(self, row: dict[str, Any], ctx: PluginContext) -> None:
+    def accept(self, row: dict[str, Any], ctx: TransformContext) -> None:  # type: ignore[override]
         if not self._batch_initialized:
             raise RuntimeError("connect_output() must be called before accept()")
         self.accept_row(make_pipeline_row(row), ctx, self._process_row)
 
-    def _process_row(self, row: PipelineRow, ctx: PluginContext) -> TransformResult:
+    def _process_row(self, row: PipelineRow, ctx: TransformContext) -> TransformResult:
         self._processing_started.set()
         import time
 
@@ -501,7 +502,7 @@ class SlowBatchTransform(BaseTransform, BatchTransformMixin):
         output["processed"] = True
         return TransformResult.success(make_pipeline_row(output), success_reason={"action": "test"})
 
-    def process(self, row: PipelineRow, ctx: PluginContext) -> TransformResult:
+    def process(self, row: PipelineRow, ctx: TransformContext) -> TransformResult:
         raise NotImplementedError("Use accept() for row-level pipelining")
 
     def close(self) -> None:

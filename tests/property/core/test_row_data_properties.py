@@ -97,7 +97,7 @@ class TestRowDataInvariantProperties:
     def test_available_with_non_dict_fails(self, data: Any) -> None:
         """Property: AVAILABLE state with non-dict data raises TypeError."""
         with pytest.raises(TypeError, match="AVAILABLE state requires dict data"):
-            RowDataResult(state=RowDataState.AVAILABLE, data=data)  # type: ignore[arg-type]
+            RowDataResult(state=RowDataState.AVAILABLE, data=data)
 
     @given(state=non_available_states)
     @settings(max_examples=50)

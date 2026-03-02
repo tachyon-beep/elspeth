@@ -20,6 +20,8 @@ from sqlalchemy import text
 from elspeth.contracts import (
     PipelineRow,
     RunStatus,
+    SourceProtocol,
+    TransformProtocol,
 )
 from elspeth.contracts.results import SourceRow
 from elspeth.contracts.schema_contract import FieldContract, SchemaContract
@@ -140,10 +142,10 @@ class TestT18CharacterizationExecuteRun:
     def _build_pipeline(
         self,
     ) -> tuple[
-        QuarantiningSource,
-        DoubleValueTransform,
-        CollectSink,
-        CollectSink,
+        SourceProtocol,
+        TransformProtocol,
+        Any,
+        Any,
         PipelineConfig,
     ]:
         rows = [
@@ -153,17 +155,19 @@ class TestT18CharacterizationExecuteRun:
             {"value": 40, "valid": True},  # valid (row 3)
             {"value": 50, "valid": True},  # valid (row 4)
         ]
+        output_collect = CollectSink("output")
+        error_collect = CollectSink("errors")
         source = as_source(QuarantiningSource(rows, quarantine_sink="errors"))
         transform = as_transform(DoubleValueTransform())
-        output_sink = as_sink(CollectSink("output"))
-        error_sink = as_sink(CollectSink("errors"))
+        output_sink = as_sink(output_collect)
+        error_sink = as_sink(error_collect)
 
         config = PipelineConfig(
             source=source,
             transforms=[transform],
             sinks={"output": output_sink, "errors": error_sink},
         )
-        return source, transform, output_sink, error_sink, config
+        return source, transform, output_collect, error_collect, config
 
     def test_counter_values_exact(self) -> None:
         """Assert exact counter values for the characterization pipeline.
@@ -277,6 +281,7 @@ class TestT18CharacterizationExecuteRun:
         )
 
         # Check that field resolution was recorded on the runs table
+        assert db._engine is not None
         with db._engine.connect() as conn:
             result = conn.execute(
                 text("SELECT source_field_resolution_json FROM runs WHERE run_id = :run_id"),
@@ -308,12 +313,14 @@ class TestT18CharacterizationExecuteRun:
             payload_store=payload_store,
         )
 
+        assert db._engine is not None
         with db._engine.connect() as conn:
             # Nodes registered
             node_count = conn.execute(
                 text("SELECT COUNT(*) FROM nodes WHERE run_id = :run_id"),
                 {"run_id": run_id},
             ).scalar()
+            assert node_count is not None
             # At minimum: source + transform + 2 sinks = 4
             assert node_count >= 4, f"Expected >= 4 nodes, got {node_count}"
 
@@ -437,6 +444,7 @@ class TestT18CharacterizationResumePath:
         )
 
         # Retrieve the actual row_id created during the original run
+        assert db._engine is not None
         with db._engine.connect() as conn:
             row_id = conn.execute(
                 text("SELECT row_id FROM rows WHERE run_id = :run_id LIMIT 1"),
@@ -632,7 +640,7 @@ class SumBatchTransform(BaseTransform):
         return TransformResult.success(make_pipeline_row(row.to_dict()), success_reason={"action": "buffer"})
 
 
-def _build_aggregation_pipeline() -> tuple[Any, SumBatchTransform, CollectSink, PipelineConfig, ExecutionGraph]:
+def _build_aggregation_pipeline() -> tuple[SourceProtocol, TransformProtocol, Any, PipelineConfig, ExecutionGraph]:
     """Build a pipeline with batch-aware aggregation for characterization.
 
     Pipeline: ListSource → SumBatchTransform → CollectSink("output")
@@ -640,9 +648,10 @@ def _build_aggregation_pipeline() -> tuple[Any, SumBatchTransform, CollectSink, 
     Input: 3 rows with values [10, 20, 30]
     Expected: 1 aggregated output row with value=60, count=3
     """
+    output_collect = CollectSink("output")
     source = as_source(ListSource([{"value": 10}, {"value": 20}, {"value": 30}], name="agg_source", on_success="source_out"))
     transform = as_transform(SumBatchTransform())
-    output_sink = as_sink(CollectSink("output"))
+    output_sink = as_sink(output_collect)
 
     # Build graph via production path
     graph = ExecutionGraph.from_plugin_instances(
@@ -676,7 +685,7 @@ def _build_aggregation_pipeline() -> tuple[Any, SumBatchTransform, CollectSink, 
         aggregation_settings={transform_node_id: agg_settings},
     )
 
-    return source, transform, output_sink, config, graph
+    return source, transform, output_collect, config, graph
 
 
 # ---------------------------------------------------------------------------
@@ -772,6 +781,7 @@ class TestT18CharacterizationAggregation:
         assert len(output_sink.results) == 1, "Flush must produce output before sink writes"
 
         # Verify operation attribution in Landscape DB
+        assert db._engine is not None
         with db._engine.connect() as conn:
             source_ops = conn.execute(
                 text("SELECT COUNT(*) FROM operations WHERE run_id = :run_id AND operation_type = 'source_load'"),
@@ -783,4 +793,5 @@ class TestT18CharacterizationAggregation:
                 text("SELECT COUNT(*) FROM operations WHERE run_id = :run_id AND operation_type = 'sink_write'"),
                 {"run_id": run_id},
             ).scalar()
+            assert sink_ops is not None
             assert sink_ops >= 1, f"Expected >= 1 sink_write operation, got {sink_ops}"
