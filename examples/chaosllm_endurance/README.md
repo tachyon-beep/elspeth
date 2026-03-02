@@ -1,14 +1,14 @@
 # ChaosLLM Endurance Test Example
 
-Demonstrates the `openrouter_multi_query_llm` transform under sustained fault injection using ChaosLLM.
+Demonstrates the `llm` transform (multi-query strategy) under sustained fault injection using ChaosLLM.
 
 ## What This Shows
 
 A medical assessment pipeline processes case studies against multiple evaluation criteria (diagnosis, treatment, prognosis, risk, follow-up). Each row generates N x M LLM calls (case studies x criteria) with a pool of 30 concurrent workers. ChaosLLM injects realistic failures to stress-test retry logic and error handling.
 
 ```
-source ─(source_out)─> openrouter_multi_query_llm ─┬─(output)─> results.csv
-                                                    └─(on_error)─> quarantined.json
+source ─(source_out)─> llm ─┬─(output)─> results.csv
+                            └─(on_error)─> quarantined.json
 ```
 
 ## Prerequisites

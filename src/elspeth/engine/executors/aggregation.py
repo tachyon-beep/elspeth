@@ -1,4 +1,3 @@
-# src/elspeth/engine/executors/aggregation.py
 """AggregationExecutor - manages batch lifecycle with audit recording."""
 
 import logging
@@ -10,6 +9,7 @@ import structlog
 
 from elspeth.contracts import (
     BatchPendingError,
+    BatchTransformProtocol,
     ExecutionError,
     PipelineRow,
     SchemaContract,
@@ -25,7 +25,12 @@ from elspeth.contracts.enums import (
     NodeStateStatus,
     TriggerType,
 )
-from elspeth.contracts.errors import OrchestrationInvariantError, PluginContractViolation
+from elspeth.contracts.errors import (
+    AuditIntegrityError,
+    FrameworkBugError,
+    OrchestrationInvariantError,
+    PluginContractViolation,
+)
 from elspeth.contracts.node_state_context import AggregationFlushContext
 from elspeth.contracts.plugin_context import PluginContext
 from elspeth.contracts.types import NodeID, StepResolver
@@ -36,8 +41,7 @@ from elspeth.engine.clock import DEFAULT_CLOCK
 from elspeth.engine.executors.state_guard import NodeStateGuard
 from elspeth.engine.spans import SpanFactory
 from elspeth.engine.triggers import TriggerEvaluator
-from elspeth.plugins.protocols import BatchTransformProtocol
-from elspeth.plugins.results import TransformResult
+from elspeth.plugins.infrastructure.results import TransformResult
 
 if TYPE_CHECKING:
     from elspeth.engine.clock import Clock
@@ -168,7 +172,8 @@ class AggregationExecutor:
             node.member_count = 0
 
         batch_id = node.batch_id
-        assert batch_id is not None  # We just created it if it was None
+        if batch_id is None:
+            raise OrchestrationInvariantError(f"batch_id is None after creation for node {node_id}")
 
         # Buffer the row - store dict (JSON-serializable for checkpoints)
         # TokenInfo.row_data is PipelineRow, extract dict for buffer
@@ -423,10 +428,10 @@ class AggregationExecutor:
                         duration_ms = (time.perf_counter() - start) * 1000
 
                         # Record failure in node_state
-                        error: ExecutionError = {
-                            "exception": str(e),
-                            "type": type(e).__name__,
-                        }
+                        error = ExecutionError(
+                            exception=str(e),
+                            exception_type=type(e).__name__,
+                        )
                         guard.complete(
                             NodeStateStatus.FAILED,
                             duration_ms=duration_ms,
@@ -476,7 +481,7 @@ class AggregationExecutor:
                         )
 
                     flush_context = AggregationFlushContext(
-                        trigger_type=trigger_type.value,
+                        trigger_type=trigger_type,
                         buffer_size=len(buffered_rows),
                         batch_id=batch_id,
                     )
@@ -498,10 +503,10 @@ class AggregationExecutor:
                     batch_finalized = True
                 else:
                     # Transform returned error status
-                    error_info: ExecutionError = {
-                        "exception": str(result.reason) if result.reason else "Transform returned error",
-                        "type": "TransformError",
-                    }
+                    error_info = ExecutionError(
+                        exception=str(result.reason) if result.reason else "Transform returned error",
+                        exception_type="TransformError",
+                    )
                     guard.complete(
                         NodeStateStatus.FAILED,
                         duration_ms=duration_ms,
@@ -540,6 +545,8 @@ class AggregationExecutor:
                             trigger_type=trigger_type,
                             state_id=guard.state_id,
                         )
+                    except (FrameworkBugError, AuditIntegrityError):
+                        raise  # System bugs and audit corruption must crash immediately
                     except Exception:
                         logger.error(
                             "Failed to mark batch %s as FAILED during error cleanup",
@@ -580,7 +587,8 @@ class AggregationExecutor:
             node_id: Aggregation node ID
         """
         node = self._nodes[node_id]
-        assert node.batch_id is not None, f"_reset_batch_state invariant violation: batch_id is None for {node_id}"
+        if node.batch_id is None:
+            raise OrchestrationInvariantError(f"_reset_batch_state invariant violation: batch_id is None for {node_id}")
         node.batch_id = None
         node.member_count = 0
 

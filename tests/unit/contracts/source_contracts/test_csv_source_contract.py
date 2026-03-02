@@ -11,17 +11,17 @@ from typing import TYPE_CHECKING
 
 import pytest
 
-from elspeth.contracts import NodeType, SourceRow
-from elspeth.contracts.plugin_context import PluginContext
-from elspeth.contracts.schema import SchemaConfig
+from elspeth.contracts import SourceRow
 from elspeth.core.canonical import CANONICAL_VERSION, stable_hash
-from elspeth.core.landscape import LandscapeDB, LandscapeRecorder
 from elspeth.plugins.sources.csv_source import CSVSource
+from tests.fixtures.factories import make_context
+from tests.fixtures.landscape import make_landscape_db, make_recorder, make_recorder_with_run
 
 from .test_source_protocol import SourceContractPropertyTestBase
 
 if TYPE_CHECKING:
-    from elspeth.plugins.protocols import SourceProtocol
+    from elspeth.contracts import SourceProtocol
+    from elspeth.contracts.plugin_context import PluginContext
 
 
 class TestCSVSourceContract(SourceContractPropertyTestBase):
@@ -63,7 +63,9 @@ class TestCSVSourceContract(SourceContractPropertyTestBase):
             }
         )
         source.on_success = "output"
-        ctx = PluginContext(run_id="test", config={})
+        db = make_landscape_db()
+        recorder = make_recorder(db)
+        ctx = make_context(landscape=recorder)
 
         rows = list(source.load(ctx))
         assert len(rows) == 2
@@ -92,7 +94,9 @@ class TestCSVSourceContract(SourceContractPropertyTestBase):
             }
         )
         source.on_success = "output"
-        ctx = PluginContext(run_id="test", config={})
+        db = make_landscape_db()
+        recorder = make_recorder(db)
+        ctx = make_context(landscape=recorder)
 
         # Empty file returns no rows gracefully (no error)
         rows = list(source.load(ctx))
@@ -111,7 +115,9 @@ class TestCSVSourceContract(SourceContractPropertyTestBase):
             }
         )
         source.on_success = "output"
-        ctx = PluginContext(run_id="test", config={})
+        db = make_landscape_db()
+        recorder = make_recorder(db)
+        ctx = make_context(landscape=recorder)
 
         rows = list(source.load(ctx))
         assert rows == []
@@ -123,6 +129,21 @@ class TestCSVSourceQuarantineContract(SourceContractPropertyTestBase):
     Verifies that validation failures produce proper SourceRow.quarantined() results
     and are recorded in the audit trail.
     """
+
+    @pytest.fixture
+    def ctx(self) -> PluginContext:
+        """Override base ctx to include landscape (quarantine records validation errors)."""
+        setup = make_recorder_with_run(
+            run_id="test-run-001",
+            source_node_id="test-source",
+            source_plugin_name="csv",
+            canonical_version=CANONICAL_VERSION,
+        )
+        return make_context(
+            run_id=setup.run_id,
+            landscape=setup.recorder,
+            node_id=setup.source_node_id,
+        )
 
     @pytest.fixture
     def source_data_with_invalid(self, tmp_path: Path) -> Path:
@@ -149,26 +170,18 @@ class TestCSVSourceQuarantineContract(SourceContractPropertyTestBase):
 
     def test_invalid_rows_are_quarantined(self, source: SourceProtocol) -> None:
         """Contract: Invalid rows MUST be yielded as SourceRow.quarantined()."""
-        db = LandscapeDB.in_memory()
-        recorder = LandscapeRecorder(db)
-        run = recorder.begin_run(config={}, canonical_version=CANONICAL_VERSION, run_id="test-quarantine")
-
-        recorder.register_node(
-            run_id=run.run_id,
-            plugin_name="csv",
-            node_type=NodeType.SOURCE,
-            plugin_version="1.0",
-            config={},
-            schema_config=SchemaConfig.from_dict({"mode": "observed"}),
-            node_id="csv_source",
-            sequence=0,
+        setup = make_recorder_with_run(
+            run_id="test-quarantine",
+            source_node_id="csv_source",
+            source_plugin_name="csv",
+            canonical_version=CANONICAL_VERSION,
         )
+        recorder, run_id = setup.recorder, setup.run_id
 
-        ctx = PluginContext(
-            run_id=run.run_id,
-            config={},
+        ctx = make_context(
+            run_id=run_id,
             landscape=recorder,
-            node_id="csv_source",
+            node_id=setup.source_node_id,
         )
         rows = list(source.load(ctx))
 
@@ -186,7 +199,7 @@ class TestCSVSourceQuarantineContract(SourceContractPropertyTestBase):
         assert q_row.quarantine_destination == "quarantine_sink"
 
         row_hash = stable_hash({"id": "not_an_int", "name": "Bob"})
-        errors = recorder.get_validation_errors_for_row(run.run_id, row_hash)
+        errors = recorder.get_validation_errors_for_row(run_id, row_hash)
         assert len(errors) == 1
         assert errors[0].schema_mode == "fixed"
         assert errors[0].destination == "quarantine_sink"
@@ -208,20 +221,13 @@ class TestCSVSourceDiscardContract:
 
     def test_discarded_rows_not_yielded_but_recorded(self, source_data_with_invalid: Path) -> None:
         """Contract: When discard mode, invalid rows NOT yielded but MUST be recorded."""
-        db = LandscapeDB.in_memory()
-        recorder = LandscapeRecorder(db)
-        run = recorder.begin_run(config={}, canonical_version=CANONICAL_VERSION, run_id="test-discard")
-
-        recorder.register_node(
-            run_id=run.run_id,
-            plugin_name="csv",
-            node_type=NodeType.SOURCE,
-            plugin_version="1.0",
-            config={},
-            schema_config=SchemaConfig.from_dict({"mode": "observed"}),
-            node_id="csv_source",
-            sequence=0,
+        setup = make_recorder_with_run(
+            run_id="test-discard",
+            source_node_id="csv_source",
+            source_plugin_name="csv",
+            canonical_version=CANONICAL_VERSION,
         )
+        recorder, run_id = setup.recorder, setup.run_id
 
         source = CSVSource(
             {
@@ -234,11 +240,10 @@ class TestCSVSourceDiscardContract:
             }
         )
         source.on_success = "output"
-        ctx = PluginContext(
-            run_id=run.run_id,
-            config={},
+        ctx = make_context(
+            run_id=run_id,
             landscape=recorder,
-            node_id="csv_source",
+            node_id=setup.source_node_id,
         )
 
         rows = list(source.load(ctx))
@@ -248,7 +253,7 @@ class TestCSVSourceDiscardContract:
             assert not row.is_quarantined
 
         row_hash = stable_hash({"id": "not_an_int", "name": "Bob"})
-        errors = recorder.get_validation_errors_for_row(run.run_id, row_hash)
+        errors = recorder.get_validation_errors_for_row(run_id, row_hash)
         assert len(errors) == 1
         assert errors[0].schema_mode == "fixed"
         assert errors[0].destination == "discard"
@@ -267,7 +272,9 @@ class TestCSVSourceFileNotFoundContract:
             }
         )
         source.on_success = "output"
-        ctx = PluginContext(run_id="test", config={})
+        db = make_landscape_db()
+        recorder = make_recorder(db)
+        ctx = make_context(landscape=recorder)
 
         with pytest.raises(FileNotFoundError):
             list(source.load(ctx))

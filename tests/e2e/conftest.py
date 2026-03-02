@@ -13,6 +13,7 @@ import pytest
 
 from elspeth.core.landscape.database import LandscapeDB
 from elspeth.core.landscape.recorder import LandscapeRecorder
+from tests.fixtures.landscape import make_recorder
 
 
 @pytest.fixture
@@ -25,7 +26,7 @@ def system_landscape_db(tmp_path: Path) -> LandscapeDB:
 @pytest.fixture
 def system_recorder(system_landscape_db: LandscapeDB) -> LandscapeRecorder:
     """Function-scoped recorder for E2E tests."""
-    return LandscapeRecorder(system_landscape_db)
+    return make_recorder(system_landscape_db)
 
 
 @pytest.fixture

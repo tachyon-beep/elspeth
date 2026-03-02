@@ -61,7 +61,7 @@ class TestKeyVaultSecretsConfig:
 
         # Should have loaded one secret
         assert len(resolutions) == 1
-        assert resolutions[0]["env_var_name"] == "ELSPETH_FINGERPRINT_KEY"
+        assert resolutions[0].env_var_name == "ELSPETH_FINGERPRINT_KEY"
 
         # Now get_fingerprint_key should work
         key = get_fingerprint_key()

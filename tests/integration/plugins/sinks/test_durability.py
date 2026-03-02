@@ -14,30 +14,15 @@ from unittest.mock import Mock, patch
 import pytest
 
 from elspeth.contracts import Determinism, NodeType, PendingOutcome, RowOutcome, TokenInfo
-from elspeth.contracts.plugin_context import PluginContext
-from elspeth.contracts.schema_contract import FieldContract, SchemaContract
 from elspeth.core.checkpoint import CheckpointManager
 from elspeth.core.dag import ExecutionGraph
 from elspeth.core.landscape.database import LandscapeDB
-from elspeth.core.landscape.recorder import LandscapeRecorder
 from elspeth.core.payload_store import FilesystemPayloadStore
 from elspeth.engine.executors import SinkExecutor
 from elspeth.engine.spans import SpanFactory
-
-
-def _make_contract(data: dict[str, Any]) -> SchemaContract:
-    """Create a simple schema contract for test data."""
-    fields = tuple(
-        FieldContract(
-            normalized_name=k,
-            original_name=k,
-            python_type=object,
-            required=False,
-            source="inferred",
-        )
-        for k in data
-    )
-    return SchemaContract(mode="OBSERVED", fields=fields, locked=True)
+from tests.fixtures.base_classes import create_observed_contract
+from tests.fixtures.factories import make_context
+from tests.fixtures.landscape import make_recorder
 
 
 class TestSinkDurability:
@@ -90,7 +75,7 @@ class TestSinkDurability:
         db = LandscapeDB(f"sqlite:///{tmp_path}/test.db")
         payload_store = FilesystemPayloadStore(tmp_path / "payloads")
         checkpoint_mgr = CheckpointManager(db)
-        recorder = LandscapeRecorder(db)
+        recorder = make_recorder(db)
 
         return {
             "db": db,
@@ -181,7 +166,7 @@ class TestSinkDurability:
         # Create TokenInfo for executor (includes PipelineRow)
         from elspeth.contracts.schema_contract import PipelineRow
 
-        pipeline_row = PipelineRow(data=row_data, contract=_make_contract(row_data))
+        pipeline_row = PipelineRow(data=row_data, contract=create_observed_contract(row_data))
         token = TokenInfo(
             row_id=row.row_id,
             token_id=db_token.token_id,
@@ -189,11 +174,7 @@ class TestSinkDurability:
         )
 
         # Create context
-        ctx = PluginContext(
-            run_id=run.run_id,
-            config={},
-        )
-        ctx.node_id = "sink"
+        ctx = make_context(run_id=run.run_id, node_id="sink")
 
         # Create checkpoint callback
         checkpoint_created = False
@@ -280,7 +261,7 @@ class TestSinkDurability:
         # Create TokenInfo for executor (includes PipelineRow)
         from elspeth.contracts.schema_contract import PipelineRow
 
-        pipeline_row = PipelineRow(data=row_data, contract=_make_contract(row_data))
+        pipeline_row = PipelineRow(data=row_data, contract=create_observed_contract(row_data))
         token = TokenInfo(
             row_id=row.row_id,
             token_id=db_token.token_id,
@@ -288,11 +269,7 @@ class TestSinkDurability:
         )
 
         # Create context
-        ctx = PluginContext(
-            run_id=run.run_id,
-            config={},
-        )
-        ctx.node_id = "sink"
+        ctx = make_context(run_id=run.run_id, node_id="sink")
 
         # Create checkpoint callback that fails
         def failing_checkpoint_callback(token_info):
@@ -372,7 +349,7 @@ class TestSinkDurability:
         # Create TokenInfo for executor (includes PipelineRow)
         from elspeth.contracts.schema_contract import PipelineRow
 
-        pipeline_row = PipelineRow(data=row_data, contract=_make_contract(row_data))
+        pipeline_row = PipelineRow(data=row_data, contract=create_observed_contract(row_data))
         token = TokenInfo(
             row_id=row.row_id,
             token_id=db_token.token_id,
@@ -380,11 +357,7 @@ class TestSinkDurability:
         )
 
         # Create context
-        ctx = PluginContext(
-            run_id=run.run_id,
-            config={},
-        )
-        ctx.node_id = "sink"
+        ctx = make_context(run_id=run.run_id, node_id="sink")
 
         # Track call order
         call_order = []

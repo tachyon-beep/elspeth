@@ -1,4 +1,3 @@
-# src/elspeth/core/dag/graph.py
 """ExecutionGraph class — query, validation, and traversal operations.
 
 Construction logic lives in builder.py; this module contains the graph
@@ -40,7 +39,7 @@ from elspeth.core.dag.models import (
 )
 
 if TYPE_CHECKING:
-    from elspeth.contracts import PluginSchema
+    from elspeth.contracts import PluginSchema, SinkProtocol, SourceProtocol, TransformProtocol
     from elspeth.core.config import (
         AggregationSettings,
         CoalesceSettings,
@@ -48,7 +47,6 @@ if TYPE_CHECKING:
         SourceSettings,
     )
     from elspeth.core.dag.models import WiredTransform
-    from elspeth.plugins.protocols import SinkProtocol, SourceProtocol, TransformProtocol
 
 
 class ExecutionGraph:
@@ -834,17 +832,21 @@ class ExecutionGraph:
             This is PHASE 2 validation (cross-plugin compatibility). Plugin
             SELF-validation happens in PHASE 1 during plugin construction.
         """
+        # Schema resolution cache shared across all edge validations.
+        # Eliminates redundant recursion through long gate chains (O(N^2) → O(N)).
+        schema_cache: dict[str, type[PluginSchema] | None] = {}
+
         # Validate each edge (skip divert edges — quarantine/error data doesn't
         # conform to producer schemas because it failed validation or errored)
         for from_id, to_id, edge_data in self._graph.edges(data=True):
             if edge_data["mode"] == RoutingMode.DIVERT:
                 continue
-            self._validate_single_edge(from_id, to_id)
+            self._validate_single_edge(from_id, to_id, _schema_cache=schema_cache)
 
         # Validate all coalesce nodes (must have compatible schemas from all branches)
         coalesce_nodes = [node_id for node_id, data in self._graph.nodes(data=True) if data["info"].node_type == NodeType.COALESCE]
         for coalesce_id in coalesce_nodes:
-            self._validate_coalesce_compatibility(coalesce_id)
+            self._validate_coalesce_compatibility(coalesce_id, _schema_cache=schema_cache)
 
     def warn_divert_coalesce_interactions(
         self,
@@ -952,7 +954,13 @@ class ExecutionGraph:
 
         return warnings
 
-    def _validate_single_edge(self, from_node_id: str, to_node_id: str) -> None:
+    def _validate_single_edge(
+        self,
+        from_node_id: str,
+        to_node_id: str,
+        *,
+        _schema_cache: dict[str, type[PluginSchema] | None] | None = None,
+    ) -> None:
         """Validate schema compatibility for a single edge.
 
         Validation is performed in two phases:
@@ -966,6 +974,7 @@ class ExecutionGraph:
         Args:
             from_node_id: Source node ID
             to_node_id: Destination node ID
+            _schema_cache: Shared memoization dict for schema resolution.
 
         Raises:
             GraphValidationError: If schemas are incompatible or contracts violated
@@ -1016,7 +1025,7 @@ class ExecutionGraph:
 
         # ===== PHASE 2: TYPE VALIDATION (schema compatibility) =====
         # Get EFFECTIVE producer schema (walks through gates if needed)
-        producer_schema = self.get_effective_producer_schema(from_node_id)
+        producer_schema = self.get_effective_producer_schema(from_node_id, _cache=_schema_cache)
         consumer_schema = to_info.input_schema
 
         # Rule 1: Dynamic schemas (None) bypass type validation
@@ -1041,15 +1050,23 @@ class ExecutionGraph:
                 f"consumer schema '{consumer_schema.__name__}': {result.error_message}"
             )
 
-    def get_effective_producer_schema(self, node_id: str) -> type[PluginSchema] | None:
+    def get_effective_producer_schema(
+        self,
+        node_id: str,
+        _cache: dict[str, type[PluginSchema] | None] | None = None,
+    ) -> type[PluginSchema] | None:
         """Get effective output schema, walking through pass-through nodes (gates, coalesce).
 
         Gates and coalesce nodes don't transform data - they inherit schema from their
         upstream producers. This method walks backwards through the graph to find the
         nearest schema-carrying producer.
 
+        Results are memoized in ``_cache`` to avoid redundant recursion through
+        long gate chains (O(N) depth per gate → O(1) with cache).
+
         Args:
             node_id: Node to get effective schema for
+            _cache: Internal memoization dict, created on first call.
 
         Returns:
             Output schema type, or None if dynamic
@@ -1057,10 +1074,17 @@ class ExecutionGraph:
         Raises:
             GraphValidationError: If pass-through node has no incoming edges (graph construction bug)
         """
+        if _cache is None:
+            _cache = {}
+
+        if node_id in _cache:
+            return _cache[node_id]
+
         node_info = self.get_node_info(node_id)
 
         # If node has output_schema, return it directly
         if node_info.output_schema is not None:
+            _cache[node_id] = node_info.output_schema
             return node_info.output_schema
 
         # Coalesce nodes are NOT pass-throughs — they transform data via merge
@@ -1078,11 +1102,16 @@ class ExecutionGraph:
                     # Identity branch: COPY edge from gate to coalesce with label == select_branch
                     for from_id, _, edge_data in self._graph.in_edges(node_id, data=True):
                         if edge_data.get("mode") == RoutingMode.COPY and edge_data.get("label") == select_branch:
-                            return self.get_effective_producer_schema(from_id)
+                            result = self.get_effective_producer_schema(from_id, _cache)
+                            _cache[node_id] = result
+                            return result
                     # Transform branch: last transform's edge has label "continue", not
                     # the branch name. Trace backward to find the last transform node.
                     _first, last = self._trace_branch_endpoints(NodeID(node_id), select_branch)
-                    return self.get_effective_producer_schema(last)
+                    result = self.get_effective_producer_schema(last, _cache)
+                    _cache[node_id] = result
+                    return result
+            _cache[node_id] = None
             return None
 
         # Gates are true pass-throughs — inherit schema from upstream producers
@@ -1099,7 +1128,7 @@ class ExecutionGraph:
             # Gather all input schemas for validation
             all_schemas: list[tuple[str, type[PluginSchema] | None]] = []
             for from_id, _, _ in incoming:
-                schema = self.get_effective_producer_schema(from_id)
+                schema = self.get_effective_producer_schema(from_id, _cache)
                 all_schemas.append((from_id, schema))
 
             # For multi-input nodes, check for mixed observed/explicit schemas first
@@ -1139,9 +1168,12 @@ class ExecutionGraph:
                             )
 
             # Return first schema (all are now either all-observed or all-explicit-compatible)
-            return all_schemas[0][1]
+            result = all_schemas[0][1]
+            _cache[node_id] = result
+            return result
 
         # Not a pass-through node and no schema - return None (observed)
+        _cache[node_id] = None
         return None
 
     def _is_observed_schema(self, schema: type[PluginSchema] | None) -> bool:
@@ -1213,7 +1245,12 @@ class ExecutionGraph:
             errors.append(f"{schema_b.__name__} -> {schema_a.__name__}: {result_ba.error_message}")
         return False, "; ".join(errors)
 
-    def _validate_coalesce_compatibility(self, coalesce_id: str) -> None:
+    def _validate_coalesce_compatibility(
+        self,
+        coalesce_id: str,
+        *,
+        _schema_cache: dict[str, type[PluginSchema] | None] | None = None,
+    ) -> None:
         """Validate all inputs to coalesce node have compatible schemas.
 
         Strategy-aware: only ``union`` requires cross-branch schema compatibility.
@@ -1222,6 +1259,7 @@ class ExecutionGraph:
 
         Args:
             coalesce_id: Coalesce node ID
+            _schema_cache: Shared memoization dict for schema resolution.
 
         Raises:
             GraphValidationError: If branches have incompatible schemas
@@ -1243,7 +1281,7 @@ class ExecutionGraph:
         # union strategy: gather all branch schemas and validate
         all_schemas: list[tuple[str, type[PluginSchema] | None]] = []
         for from_id, _, _ in incoming:
-            schema = self.get_effective_producer_schema(from_id)
+            schema = self.get_effective_producer_schema(from_id, _cache=_schema_cache)
             all_schemas.append((from_id, schema))
 
         # Reject mixed observed/explicit schemas (P2-2026-02-01 fix)

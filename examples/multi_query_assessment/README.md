@@ -1,7 +1,7 @@
 # Multi-Query Case Study Assessment Example
 
-This example demonstrates the `azure_multi_query_llm` transform, which evaluates
-multiple case studies against multiple criteria in a single pipeline step.
+This example demonstrates the unified `llm` transform (with `provider: azure`), which
+evaluates multiple case studies against multiple criteria in a single pipeline step.
 
 ## Configuration
 

@@ -1,4 +1,3 @@
-# src/elspeth/core/landscape/formatters.py
 """Export formatters for Landscape data.
 
 Formatters transform audit records for different output formats.

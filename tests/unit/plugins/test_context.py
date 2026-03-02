@@ -1,12 +1,13 @@
 # tests/plugins/test_context.py
 """Tests for plugin context."""
 
-from contextlib import nullcontext
 from typing import TYPE_CHECKING
 
-if TYPE_CHECKING:
-    import pytest
+from elspeth.core.landscape.database import LandscapeDB
+from elspeth.core.landscape.recorder import LandscapeRecorder
+from tests.fixtures.factories import make_source_context
 
+if TYPE_CHECKING:
     from elspeth.contracts.batch_checkpoint import BatchCheckpointState
 
 
@@ -16,37 +17,19 @@ class TestPluginContext:
     def test_minimal_context(self) -> None:
         from elspeth.contracts.plugin_context import PluginContext
 
-        ctx = PluginContext(run_id="run-001", config={})
+        db = LandscapeDB.in_memory()
+        recorder = LandscapeRecorder(db)
+        ctx = PluginContext(run_id="run-001", config={}, landscape=recorder)
         assert ctx.run_id == "run-001"
         assert ctx.config == {}
 
     def test_optional_integrations_default_none(self) -> None:
         from elspeth.contracts.plugin_context import PluginContext
 
-        ctx = PluginContext(run_id="run-001", config={})
-        # Phase 3 integration points - optional in Phase 2
-        assert ctx.landscape is None
-        assert ctx.tracer is None
+        db = LandscapeDB.in_memory()
+        recorder = LandscapeRecorder(db)
+        ctx = PluginContext(run_id="run-001", config={}, landscape=recorder)
         assert ctx.payload_store is None
-
-    def test_start_span_without_tracer(self) -> None:
-        from elspeth.contracts.plugin_context import PluginContext
-
-        ctx = PluginContext(run_id="run-001", config={})
-        # Should return nullcontext when no tracer
-        span_ctx = ctx.start_span("test_operation")
-        assert isinstance(span_ctx, nullcontext)
-
-    def test_get_config_value(self) -> None:
-        from elspeth.contracts.plugin_context import PluginContext
-
-        ctx = PluginContext(
-            run_id="run-001",
-            config={"threshold": 0.5, "nested": {"key": "value"}},
-        )
-        assert ctx.get("threshold") == 0.5
-        assert ctx.get("nested.key") == "value"
-        assert ctx.get("missing", default="default") == "default"
 
 
 def _make_checkpoint(**overrides: object) -> "BatchCheckpointState":
@@ -69,27 +52,22 @@ def _make_checkpoint(**overrides: object) -> "BatchCheckpointState":
 class TestCheckpointAPI:
     """Tests for checkpoint API used by batch transforms."""
 
-    def test_checkpoint_methods_exist(self) -> None:
-        """PluginContext has checkpoint methods."""
-        from elspeth.contracts.plugin_context import PluginContext
-
-        ctx = PluginContext(run_id="run-001", config={})
-        assert hasattr(ctx, "get_checkpoint")
-        assert hasattr(ctx, "set_checkpoint")
-        assert hasattr(ctx, "clear_checkpoint")
-
     def test_get_checkpoint_returns_none_when_empty(self) -> None:
         """Empty checkpoint returns None."""
         from elspeth.contracts.plugin_context import PluginContext
 
-        ctx = PluginContext(run_id="run-001", config={})
+        db = LandscapeDB.in_memory()
+        recorder = LandscapeRecorder(db)
+        ctx = PluginContext(run_id="run-001", config={}, landscape=recorder)
         assert ctx.get_checkpoint() is None
 
     def test_set_checkpoint_stores_data(self) -> None:
         """set_checkpoint stores data accessible via get_checkpoint."""
         from elspeth.contracts.plugin_context import PluginContext
 
-        ctx = PluginContext(run_id="run-001", config={})
+        db = LandscapeDB.in_memory()
+        recorder = LandscapeRecorder(db)
+        ctx = PluginContext(run_id="run-001", config={}, landscape=recorder)
         state = _make_checkpoint(batch_id="batch-123", row_count=5)
         ctx.set_checkpoint(state)
 
@@ -102,7 +80,9 @@ class TestCheckpointAPI:
         """set_checkpoint replaces the previous checkpoint state."""
         from elspeth.contracts.plugin_context import PluginContext
 
-        ctx = PluginContext(run_id="run-001", config={})
+        db = LandscapeDB.in_memory()
+        recorder = LandscapeRecorder(db)
+        ctx = PluginContext(run_id="run-001", config={}, landscape=recorder)
         ctx.set_checkpoint(_make_checkpoint(batch_id="batch-old"))
         ctx.set_checkpoint(_make_checkpoint(batch_id="batch-new"))
 
@@ -114,7 +94,9 @@ class TestCheckpointAPI:
         """clear_checkpoint removes all checkpoint data."""
         from elspeth.contracts.plugin_context import PluginContext
 
-        ctx = PluginContext(run_id="run-001", config={})
+        db = LandscapeDB.in_memory()
+        recorder = LandscapeRecorder(db)
+        ctx = PluginContext(run_id="run-001", config={}, landscape=recorder)
         ctx.set_checkpoint(_make_checkpoint())
         assert ctx.get_checkpoint() is not None
 
@@ -125,7 +107,9 @@ class TestCheckpointAPI:
         """Checkpoint API supports typical batch transform workflow."""
         from elspeth.contracts.plugin_context import PluginContext
 
-        ctx = PluginContext(run_id="run-001", config={})
+        db = LandscapeDB.in_memory()
+        recorder = LandscapeRecorder(db)
+        ctx = PluginContext(run_id="run-001", config={}, landscape=recorder)
 
         # Phase 1: Submit - no existing checkpoint
         assert ctx.get_checkpoint() is None
@@ -207,8 +191,10 @@ class TestCheckpointRestoredBehavior:
             _batch_checkpoints={"node_1": restored},
         )
 
-        assert ctx.get_checkpoint() is restored
-        assert ctx.get_checkpoint().batch_id == "batch-restored"
+        checkpoint = ctx.get_checkpoint()
+        assert checkpoint is restored
+        assert checkpoint is not None
+        assert checkpoint.batch_id == "batch-restored"
 
     def test_set_checkpoint_without_node_id_uses_local(self) -> None:
         """set_checkpoint uses local checkpoint when node_id is None."""
@@ -247,19 +233,11 @@ class TestCheckpointRestoredBehavior:
 class TestValidationErrorRecording:
     """Tests for recording validation errors from sources."""
 
-    def test_record_validation_error_exists(self) -> None:
-        """PluginContext has record_validation_error method."""
-        from elspeth.contracts.plugin_context import PluginContext
-
-        ctx = PluginContext(run_id="test-run", config={})
-        assert hasattr(ctx, "record_validation_error")
-        assert callable(ctx.record_validation_error)
-
     def test_record_validation_error_returns_quarantine_token(self) -> None:
         """record_validation_error returns token for tracking quarantined row."""
-        from elspeth.contracts.plugin_context import PluginContext, ValidationErrorToken
+        from elspeth.contracts.plugin_context import ValidationErrorToken
 
-        ctx = PluginContext(run_id="test-run", config={}, node_id="source_node")
+        ctx = make_source_context(node_id="source_node")
 
         token = ctx.record_validation_error(
             row={"id": 42, "invalid": "data"},
@@ -273,33 +251,26 @@ class TestValidationErrorRecording:
         assert token.row_id is not None
         assert token.node_id == "source_node"
 
-    def test_record_validation_error_without_landscape_logs_warning(self, caplog: "pytest.LogCaptureFixture") -> None:
-        """record_validation_error logs warning when no landscape configured."""
-        import logging
+    def test_record_validation_error_without_landscape_raises(self) -> None:
+        """record_validation_error raises FrameworkBugError when no landscape configured."""
+        import pytest
 
+        from elspeth.contracts.errors import FrameworkBugError
         from elspeth.contracts.plugin_context import PluginContext
 
         ctx = PluginContext(run_id="test-run", config={}, node_id="source_node")
 
-        with caplog.at_level(logging.WARNING):
-            token = ctx.record_validation_error(
+        with pytest.raises(FrameworkBugError, match=r"record_validation_error.*without landscape"):
+            ctx.record_validation_error(
                 row={"id": 42, "invalid": "data"},
                 error="validation failed",
                 schema_mode="fixed",
                 destination="discard",
             )
 
-        # Should still return a token even without landscape
-        assert token is not None
-        assert token.error_id is None  # Not recorded to landscape
-        # Check that warning was logged
-        assert "no landscape" in caplog.text.lower()
-
     def test_record_validation_error_uses_id_field_as_row_id(self) -> None:
         """record_validation_error uses row's id field if present."""
-        from elspeth.contracts.plugin_context import PluginContext
-
-        ctx = PluginContext(run_id="test-run", config={}, node_id="source_node")
+        ctx = make_source_context(node_id="source_node")
 
         token = ctx.record_validation_error(
             row={"id": "row-42", "invalid": "data"},
@@ -312,9 +283,7 @@ class TestValidationErrorRecording:
 
     def test_record_validation_error_generates_row_id_from_hash(self) -> None:
         """record_validation_error generates row_id from content hash if no id field."""
-        from elspeth.contracts.plugin_context import PluginContext
-
-        ctx = PluginContext(run_id="test-run", config={}, node_id="source_node")
+        ctx = make_source_context(node_id="source_node")
 
         token = ctx.record_validation_error(
             row={"no_id_field": "data"},
@@ -460,9 +429,7 @@ class TestValidationErrorDestination:
 
     def test_record_validation_error_requires_destination(self) -> None:
         """record_validation_error requires destination parameter."""
-        from elspeth.contracts.plugin_context import PluginContext
-
-        ctx = PluginContext(run_id="test-run", config={}, node_id="source_node")
+        ctx = make_source_context(node_id="source_node")
 
         # Should work with destination
         token = ctx.record_validation_error(
@@ -476,9 +443,7 @@ class TestValidationErrorDestination:
 
     def test_record_validation_error_with_discard_destination(self) -> None:
         """record_validation_error accepts 'discard' as destination."""
-        from elspeth.contracts.plugin_context import PluginContext
-
-        ctx = PluginContext(run_id="test-run", config={}, node_id="source_node")
+        ctx = make_source_context(node_id="source_node")
 
         token = ctx.record_validation_error(
             row={"id": 1, "bad": "data"},
@@ -519,34 +484,16 @@ class TestTransformErrorRecording:
 
         assert token.destination == "discard"
 
-    def test_record_transform_error_without_landscape(self) -> None:
-        """record_transform_error works without landscape (logs warning)."""
+    def test_record_transform_error_without_landscape_raises(self) -> None:
+        """record_transform_error raises FrameworkBugError when no landscape configured."""
+        import pytest
+
+        from elspeth.contracts.errors import FrameworkBugError
         from elspeth.contracts.plugin_context import PluginContext
 
         ctx = PluginContext(run_id="test-run", config={}, node_id="transform_node")
 
-        token = ctx.record_transform_error(
-            token_id="tok_123",
-            transform_id="field_mapper",
-            row={"id": 1, "data": "test"},
-            error_details={"reason": "validation_failed", "error": "Cannot process"},
-            destination="error_sink",
-        )
-
-        assert token.token_id == "tok_123"
-        assert token.transform_id == "field_mapper"
-        assert token.destination == "error_sink"
-        assert token.error_id is None  # No landscape
-
-    def test_record_transform_error_without_landscape_logs_warning(self, caplog: "pytest.LogCaptureFixture") -> None:
-        """record_transform_error logs warning when no landscape configured."""
-        import logging
-
-        from elspeth.contracts.plugin_context import PluginContext
-
-        ctx = PluginContext(run_id="test-run", config={}, node_id="transform_node")
-
-        with caplog.at_level(logging.WARNING):
+        with pytest.raises(FrameworkBugError, match=r"record_transform_error.*without landscape"):
             ctx.record_transform_error(
                 token_id="tok_123",
                 transform_id="field_mapper",
@@ -554,9 +501,6 @@ class TestTransformErrorRecording:
                 error_details={"reason": "validation_failed", "error": "Cannot process"},
                 destination="error_sink",
             )
-
-        # Check that warning was logged
-        assert "no landscape" in caplog.text.lower()
 
     def test_record_transform_error_with_landscape(self) -> None:
         """record_transform_error stores in audit trail via mock."""
@@ -605,7 +549,9 @@ class TestTokenField:
         """PluginContext.token defaults to None."""
         from elspeth.contracts.plugin_context import PluginContext
 
-        ctx = PluginContext(run_id="test-run", config={})
+        db = LandscapeDB.in_memory()
+        recorder = LandscapeRecorder(db)
+        ctx = PluginContext(run_id="test-run", config={}, landscape=recorder)
         assert ctx.token is None
 
     def test_token_accepts_token_info(self) -> None:
@@ -624,7 +570,9 @@ class TestTokenField:
         row_data = make_row({"x": 1}, contract=contract)
 
         token = TokenInfo(row_id="row-1", token_id="token-row-1", row_data=row_data)
-        ctx = PluginContext(run_id="test-run", config={}, token=token)
+        db = LandscapeDB.in_memory()
+        recorder = LandscapeRecorder(db)
+        ctx = PluginContext(run_id="test-run", config={}, landscape=recorder, token=token)
 
         assert ctx.token is not None
         assert ctx.token is token  # Same object reference
@@ -648,7 +596,9 @@ class TestTokenField:
         row_data = make_row({"value": 100}, contract=contract)
 
         token = TokenInfo(row_id="row-42", token_id="token-42", row_data=row_data)
-        ctx = PluginContext(run_id="test-run", config={}, token=token)
+        db = LandscapeDB.in_memory()
+        recorder = LandscapeRecorder(db)
+        ctx = PluginContext(run_id="test-run", config={}, landscape=recorder, token=token)
 
         # Multiple accesses should return the exact same object
         access1 = ctx.token
@@ -663,7 +613,9 @@ class TestTokenField:
         from elspeth.contracts.schema_contract import SchemaContract
         from elspeth.testing import make_field, make_row
 
-        ctx = PluginContext(run_id="test-run", config={})
+        db = LandscapeDB.in_memory()
+        recorder = LandscapeRecorder(db)
+        ctx = PluginContext(run_id="test-run", config={}, landscape=recorder)
         assert ctx.token is None
 
         # Create PipelineRow for TokenInfo
@@ -704,8 +656,15 @@ class TestRecordCallTelemetryPayloadSnapshot:
         def capture_telemetry(event):
             emitted_events.append(event)
 
+        request_data: dict[str, Any] = {"a": 1, "nested": {"x": 2}}
+        expected_request: dict[str, Any] = {"a": 1, "nested": {"x": 2}}
+
         mock_landscape = MagicMock()
-        mock_landscape.record_call.return_value = MagicMock(call_id="call-001")
+        mock_landscape.record_call.return_value = MagicMock(
+            call_id="call-001",
+            request_hash=stable_hash(expected_request),
+            response_hash=stable_hash({"ok": True}),
+        )
 
         ctx = PluginContext(
             run_id="test-run",
@@ -714,9 +673,6 @@ class TestRecordCallTelemetryPayloadSnapshot:
             state_id="state-001",
             telemetry_emit=capture_telemetry,
         )
-
-        request_data = {"a": 1, "nested": {"x": 2}}
-        expected_request = {"a": 1, "nested": {"x": 2}}
 
         ctx.record_call(
             call_type=CallType.HTTP,
@@ -752,7 +708,11 @@ class TestRecordCallTelemetryPayloadSnapshot:
             emitted_events.append(event)
 
         mock_landscape = MagicMock()
-        mock_landscape.record_call.return_value = MagicMock(call_id="call-001")
+        mock_landscape.record_call.return_value = MagicMock(
+            call_id="call-001",
+            request_hash=stable_hash({"prompt": "hi"}),
+            response_hash=stable_hash({"usage": {"prompt_tokens": 1, "completion_tokens": 2}}),
+        )
 
         ctx = PluginContext(
             run_id="test-run",
@@ -906,9 +866,16 @@ class TestRecordCallTelemetryResponseHash:
         def capture_telemetry(event):
             emitted_events.append(event)
 
-        # Mock landscape to avoid DB setup - we only care about telemetry
+        # Mock landscape — recorder is single source of truth for hashes.
+        # Empty dict {} is a valid response with a real hash, not None.
+        from elspeth.core.canonical import stable_hash
+
         mock_landscape = MagicMock()
-        mock_landscape.record_call.return_value = MagicMock(call_id="call-001")
+        mock_landscape.record_call.return_value = MagicMock(
+            call_id="call-001",
+            request_hash=stable_hash({"endpoint": "/empty"}),
+            response_hash=stable_hash({}),
+        )
 
         ctx = PluginContext(
             run_id="test-run",
@@ -928,13 +895,14 @@ class TestRecordCallTelemetryResponseHash:
             status=CallStatus.SUCCESS,
         )
 
-        # Verify telemetry was emitted with response_hash
+        # Verify telemetry was emitted with response_hash from recorder
         assert len(emitted_events) == 1
         event = emitted_events[0]
         # response_hash should NOT be None for empty dict
         assert event.response_hash is not None, (
             "Empty dict response should still get hashed. Got response_hash=None which breaks telemetry/audit correlation."
         )
+        assert event.response_hash == stable_hash({})
 
     def test_empty_list_response_gets_hashed(self) -> None:
         """Empty list [] response should emit response_hash in telemetry."""
@@ -949,8 +917,14 @@ class TestRecordCallTelemetryResponseHash:
         def capture_telemetry(event):
             emitted_events.append(event)
 
+        from elspeth.core.canonical import stable_hash
+
         mock_landscape = MagicMock()
-        mock_landscape.record_call.return_value = MagicMock(call_id="call-001")
+        mock_landscape.record_call.return_value = MagicMock(
+            call_id="call-001",
+            request_hash=stable_hash({"query": "SELECT * FROM empty_table"}),
+            response_hash=stable_hash({"rows": []}),
+        )
 
         ctx = PluginContext(
             run_id="test-run",
@@ -980,6 +954,7 @@ class TestRecordCallTelemetryResponseHash:
 
         from elspeth.contracts.enums import CallStatus, CallType
         from elspeth.contracts.plugin_context import PluginContext
+        from elspeth.core.canonical import stable_hash
 
         emitted_events: list[Any] = []
 
@@ -987,7 +962,11 @@ class TestRecordCallTelemetryResponseHash:
             emitted_events.append(event)
 
         mock_landscape = MagicMock()
-        mock_landscape.record_call.return_value = MagicMock(call_id="call-001")
+        mock_landscape.record_call.return_value = MagicMock(
+            call_id="call-001",
+            request_hash=stable_hash({"method": "DELETE"}),
+            response_hash=stable_hash({"body": ""}),
+        )
 
         ctx = PluginContext(
             run_id="test-run",
@@ -1024,7 +1003,11 @@ class TestRecordCallTelemetryResponseHash:
             emitted_events.append(event)
 
         mock_landscape = MagicMock()
-        mock_landscape.record_call.return_value = MagicMock(call_id="call-001")
+        mock_landscape.record_call.return_value = MagicMock(
+            call_id="call-001",
+            request_hash="abc123",
+            response_hash=None,  # No response recorded
+        )
 
         ctx = PluginContext(
             run_id="test-run",
@@ -1047,3 +1030,197 @@ class TestRecordCallTelemetryResponseHash:
         assert len(emitted_events) == 1
         # None is correct for truly missing response
         assert emitted_events[0].response_hash is None
+
+
+class TestRecordCallRawCallPayloadWrapping:
+    """Tests for RawCallPayload wrapping in record_call.
+
+    Verifies that request_data and response_data dicts are wrapped in
+    RawCallPayload before being passed to the Landscape recorder (lines 262-265
+    of plugin_context.py) and that None response_data is NOT wrapped.
+    """
+
+    def test_response_data_none_not_wrapped_in_raw_call_payload(self) -> None:
+        """record_call() with response_data=None should pass None, not RawCallPayload(None)."""
+        from unittest.mock import MagicMock
+
+        from elspeth.contracts.enums import CallStatus, CallType
+        from elspeth.contracts.plugin_context import PluginContext
+
+        mock_landscape = MagicMock()
+        mock_landscape.record_call.return_value = MagicMock(
+            call_id="call-001",
+            request_hash="req-hash",
+            response_hash=None,
+        )
+
+        ctx = PluginContext(
+            run_id="test-run",
+            config={},
+            landscape=mock_landscape,
+            state_id="state-001",
+        )
+
+        ctx.record_call(
+            call_type=CallType.HTTP,
+            provider="api.example.com",
+            request_data={"method": "HEAD"},
+            response_data=None,
+            latency_ms=5.0,
+            status=CallStatus.SUCCESS,
+        )
+
+        # Verify record_call was invoked with response_data=None (not wrapped)
+        call_kwargs = mock_landscape.record_call.call_args[1]
+        assert call_kwargs["response_data"] is None
+
+    def test_response_data_dict_wrapped_in_raw_call_payload(self) -> None:
+        """record_call() with response_data=dict should wrap in RawCallPayload."""
+        from unittest.mock import MagicMock
+
+        from elspeth.contracts.call_data import RawCallPayload
+        from elspeth.contracts.enums import CallStatus, CallType
+        from elspeth.contracts.plugin_context import PluginContext
+
+        mock_landscape = MagicMock()
+        mock_landscape.record_call.return_value = MagicMock(
+            call_id="call-002",
+            request_hash="req-hash",
+            response_hash="resp-hash",
+        )
+
+        ctx = PluginContext(
+            run_id="test-run",
+            config={},
+            landscape=mock_landscape,
+            state_id="state-001",
+        )
+
+        ctx.record_call(
+            call_type=CallType.HTTP,
+            provider="api.example.com",
+            request_data={"method": "GET"},
+            response_data={"key": "val"},
+            latency_ms=10.0,
+            status=CallStatus.SUCCESS,
+        )
+
+        call_kwargs = mock_landscape.record_call.call_args[1]
+        # response_data should be RawCallPayload, not a raw dict
+        assert isinstance(call_kwargs["response_data"], RawCallPayload)
+        assert call_kwargs["response_data"].to_dict() == {"key": "val"}
+
+    def test_request_data_wrapped_in_raw_call_payload(self) -> None:
+        """record_call() always wraps request_data in RawCallPayload."""
+        from unittest.mock import MagicMock
+
+        from elspeth.contracts.call_data import RawCallPayload
+        from elspeth.contracts.enums import CallStatus, CallType
+        from elspeth.contracts.plugin_context import PluginContext
+
+        mock_landscape = MagicMock()
+        mock_landscape.record_call.return_value = MagicMock(
+            call_id="call-003",
+            request_hash="req-hash",
+            response_hash=None,
+        )
+
+        ctx = PluginContext(
+            run_id="test-run",
+            config={},
+            landscape=mock_landscape,
+            state_id="state-001",
+        )
+
+        ctx.record_call(
+            call_type=CallType.HTTP,
+            provider="api.example.com",
+            request_data={"endpoint": "/test"},
+            response_data=None,
+            latency_ms=5.0,
+            status=CallStatus.SUCCESS,
+        )
+
+        call_kwargs = mock_landscape.record_call.call_args[1]
+        assert isinstance(call_kwargs["request_data"], RawCallPayload)
+        assert call_kwargs["request_data"].to_dict() == {"endpoint": "/test"}
+
+    def test_telemetry_event_request_payload_is_raw_call_payload(self) -> None:
+        """Telemetry event emitted by record_call has request_payload as RawCallPayload."""
+        from typing import Any
+        from unittest.mock import MagicMock
+
+        from elspeth.contracts.call_data import RawCallPayload
+        from elspeth.contracts.enums import CallStatus, CallType
+        from elspeth.contracts.plugin_context import PluginContext
+
+        emitted_events: list[Any] = []
+
+        def capture_telemetry(event: Any) -> None:
+            emitted_events.append(event)
+
+        mock_landscape = MagicMock()
+        mock_landscape.record_call.return_value = MagicMock(
+            call_id="call-004",
+            request_hash="req-hash",
+            response_hash="resp-hash",
+        )
+
+        ctx = PluginContext(
+            run_id="test-run",
+            config={},
+            landscape=mock_landscape,
+            state_id="state-001",
+            telemetry_emit=capture_telemetry,
+        )
+
+        ctx.record_call(
+            call_type=CallType.HTTP,
+            provider="api.example.com",
+            request_data={"method": "POST", "body": "data"},
+            response_data={"status": 200},
+            latency_ms=12.0,
+            status=CallStatus.SUCCESS,
+        )
+
+        assert len(emitted_events) == 1
+        event = emitted_events[0]
+        assert isinstance(event.request_payload, RawCallPayload)
+        assert isinstance(event.response_payload, RawCallPayload)
+
+    def test_operation_context_also_wraps_in_raw_call_payload(self) -> None:
+        """record_call() via operation_id path also wraps in RawCallPayload."""
+        from unittest.mock import MagicMock
+
+        from elspeth.contracts.call_data import RawCallPayload
+        from elspeth.contracts.enums import CallStatus, CallType
+        from elspeth.contracts.plugin_context import PluginContext
+
+        mock_landscape = MagicMock()
+        mock_landscape.record_operation_call.return_value = MagicMock(
+            call_id="op-call-001",
+            request_hash="req-hash",
+            response_hash="resp-hash",
+        )
+
+        ctx = PluginContext(
+            run_id="test-run",
+            config={},
+            landscape=mock_landscape,
+            operation_id="operation-001",
+        )
+
+        ctx.record_call(
+            call_type=CallType.HTTP,
+            provider="api.example.com",
+            request_data={"url": "https://example.com"},
+            response_data={"body": "response"},
+            latency_ms=20.0,
+            status=CallStatus.SUCCESS,
+        )
+
+        call_kwargs = mock_landscape.record_operation_call.call_args[1]
+        assert isinstance(call_kwargs["request_data"], RawCallPayload)
+        assert isinstance(call_kwargs["response_data"], RawCallPayload)
+        assert call_kwargs["request_data"].to_dict() == {"url": "https://example.com"}
+        assert call_kwargs["response_data"].to_dict() == {"body": "response"}

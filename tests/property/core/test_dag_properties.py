@@ -16,6 +16,7 @@ import networkx as nx
 from hypothesis import given, settings
 from hypothesis import strategies as st
 
+from elspeth.contracts.enums import NodeType
 from elspeth.contracts.types import NodeID
 from elspeth.core.dag import ExecutionGraph, GraphValidationError
 
@@ -42,18 +43,18 @@ def linear_pipelines(draw: st.DrawFn, min_transforms: int = 1, max_transforms: i
     graph = ExecutionGraph()
 
     # Add source
-    graph.add_node("source", node_type="source", plugin_name="test_source")
+    graph.add_node("source", node_type=NodeType.SOURCE, plugin_name="test_source")
 
     # Add transforms
     prev_node = "source"
     for i in range(num_transforms):
         node_id = f"transform_{i}"
-        graph.add_node(node_id, node_type="transform", plugin_name="test_transform")
+        graph.add_node(node_id, node_type=NodeType.TRANSFORM, plugin_name="test_transform")
         graph.add_edge(prev_node, node_id, label="continue")
         prev_node = node_id
 
     # Add sink
-    graph.add_node("sink", node_type="sink", plugin_name="test_sink")
+    graph.add_node("sink", node_type=NodeType.SINK, plugin_name="test_sink")
     graph.add_edge(prev_node, "sink", label="continue")
 
     return graph
@@ -70,21 +71,21 @@ def diamond_pipelines(draw: st.DrawFn) -> ExecutionGraph:
     graph = ExecutionGraph()
 
     # Source
-    graph.add_node("source", node_type="source", plugin_name="test_source")
+    graph.add_node("source", node_type=NodeType.SOURCE, plugin_name="test_source")
 
     # Parallel branches
     for i in range(num_branches):
         branch_id = f"branch_{i}"
-        graph.add_node(branch_id, node_type="transform", plugin_name="test_transform")
+        graph.add_node(branch_id, node_type=NodeType.TRANSFORM, plugin_name="test_transform")
         graph.add_edge("source", branch_id, label=f"path_{i}")
 
     # Merge point (simplified - in real ELSPETH this would be a coalesce)
-    graph.add_node("merge", node_type="transform", plugin_name="test_transform")
+    graph.add_node("merge", node_type=NodeType.TRANSFORM, plugin_name="test_transform")
     for i in range(num_branches):
         graph.add_edge(f"branch_{i}", "merge", label=f"continue_{i}")
 
     # Sink
-    graph.add_node("sink", node_type="sink", plugin_name="test_sink")
+    graph.add_node("sink", node_type=NodeType.SINK, plugin_name="test_sink")
     graph.add_edge("merge", "sink", label="continue")
 
     return graph
@@ -101,16 +102,16 @@ def multi_sink_pipelines(draw: st.DrawFn) -> ExecutionGraph:
     graph = ExecutionGraph()
 
     # Source
-    graph.add_node("source", node_type="source", plugin_name="test_source")
+    graph.add_node("source", node_type=NodeType.SOURCE, plugin_name="test_source")
 
     # Transform
-    graph.add_node("transform", node_type="transform", plugin_name="test_transform")
+    graph.add_node("transform", node_type=NodeType.TRANSFORM, plugin_name="test_transform")
     graph.add_edge("source", "transform", label="continue")
 
     # Multiple sinks with unique edge labels
     for i in range(num_sinks):
         sink_id = f"sink_{i}"
-        graph.add_node(sink_id, node_type="sink", plugin_name="test_sink")
+        graph.add_node(sink_id, node_type=NodeType.SINK, plugin_name="test_sink")
         graph.add_edge("transform", sink_id, label=f"route_{i}")
 
     return graph
@@ -270,10 +271,10 @@ class TestValidationFailureProperties:
     def test_validate_rejects_cycle(self) -> None:
         """Property: Cyclic graphs are rejected."""
         graph = ExecutionGraph()
-        graph.add_node("source", node_type="source", plugin_name="test")
-        graph.add_node("a", node_type="transform", plugin_name="test")
-        graph.add_node("b", node_type="transform", plugin_name="test")
-        graph.add_node("sink", node_type="sink", plugin_name="test")
+        graph.add_node("source", node_type=NodeType.SOURCE, plugin_name="test")
+        graph.add_node("a", node_type=NodeType.TRANSFORM, plugin_name="test")
+        graph.add_node("b", node_type=NodeType.TRANSFORM, plugin_name="test")
+        graph.add_node("sink", node_type=NodeType.SINK, plugin_name="test")
 
         # Create cycle: a -> b -> a
         graph.add_edge("source", "a", label="continue")
@@ -289,8 +290,8 @@ class TestValidationFailureProperties:
     def test_validate_rejects_no_source(self) -> None:
         """Property: Graphs without source are rejected."""
         graph = ExecutionGraph()
-        graph.add_node("transform", node_type="transform", plugin_name="test")
-        graph.add_node("sink", node_type="sink", plugin_name="test")
+        graph.add_node("transform", node_type=NodeType.TRANSFORM, plugin_name="test")
+        graph.add_node("sink", node_type=NodeType.SINK, plugin_name="test")
         graph.add_edge("transform", "sink", label="continue")
 
         import pytest
@@ -301,9 +302,9 @@ class TestValidationFailureProperties:
     def test_validate_rejects_multiple_sources(self) -> None:
         """Property: Graphs with multiple sources are rejected."""
         graph = ExecutionGraph()
-        graph.add_node("source1", node_type="source", plugin_name="test")
-        graph.add_node("source2", node_type="source", plugin_name="test")
-        graph.add_node("sink", node_type="sink", plugin_name="test")
+        graph.add_node("source1", node_type=NodeType.SOURCE, plugin_name="test")
+        graph.add_node("source2", node_type=NodeType.SOURCE, plugin_name="test")
+        graph.add_node("sink", node_type=NodeType.SINK, plugin_name="test")
         graph.add_edge("source1", "sink", label="path1")
         graph.add_edge("source2", "sink", label="path2")
 
@@ -315,8 +316,8 @@ class TestValidationFailureProperties:
     def test_validate_rejects_no_sink(self) -> None:
         """Property: Graphs without sink are rejected."""
         graph = ExecutionGraph()
-        graph.add_node("source", node_type="source", plugin_name="test")
-        graph.add_node("transform", node_type="transform", plugin_name="test")
+        graph.add_node("source", node_type=NodeType.SOURCE, plugin_name="test")
+        graph.add_node("transform", node_type=NodeType.TRANSFORM, plugin_name="test")
         graph.add_edge("source", "transform", label="continue")
 
         import pytest
@@ -327,9 +328,9 @@ class TestValidationFailureProperties:
     def test_validate_rejects_duplicate_edge_labels(self) -> None:
         """Property: Duplicate edge labels from same node are rejected."""
         graph = ExecutionGraph()
-        graph.add_node("source", node_type="source", plugin_name="test")
-        graph.add_node("sink1", node_type="sink", plugin_name="test")
-        graph.add_node("sink2", node_type="sink", plugin_name="test")
+        graph.add_node("source", node_type=NodeType.SOURCE, plugin_name="test")
+        graph.add_node("sink1", node_type=NodeType.SINK, plugin_name="test")
+        graph.add_node("sink2", node_type=NodeType.SINK, plugin_name="test")
 
         # Same label "continue" to two different sinks
         graph.add_edge("source", "sink1", label="continue")
@@ -372,10 +373,10 @@ class TestAcyclicityProperties:
     def test_adding_back_edge_breaks_acyclicity(self) -> None:
         """Property: Adding edge from later to earlier node creates cycle."""
         graph = ExecutionGraph()
-        graph.add_node("source", node_type="source", plugin_name="test")
-        graph.add_node("a", node_type="transform", plugin_name="test")
-        graph.add_node("b", node_type="transform", plugin_name="test")
-        graph.add_node("sink", node_type="sink", plugin_name="test")
+        graph.add_node("source", node_type=NodeType.SOURCE, plugin_name="test")
+        graph.add_node("a", node_type=NodeType.TRANSFORM, plugin_name="test")
+        graph.add_node("b", node_type=NodeType.TRANSFORM, plugin_name="test")
+        graph.add_node("sink", node_type=NodeType.SINK, plugin_name="test")
 
         # Linear: source -> a -> b -> sink
         graph.add_edge("source", "a", label="continue")
@@ -507,7 +508,7 @@ class TestGuaranteedFieldsProperties:
         # Source with guaranteed fields (dynamic schema with guarantees)
         graph.add_node(
             "source",
-            node_type="source",
+            node_type=NodeType.SOURCE,
             plugin_name="test_source",
             config={"schema": {"mode": "observed", "guaranteed_fields": list(guaranteed)}},
         )
@@ -515,13 +516,13 @@ class TestGuaranteedFieldsProperties:
         # Transform with required fields
         graph.add_node(
             "transform",
-            node_type="transform",
+            node_type=NodeType.TRANSFORM,
             plugin_name="test_transform",
             config={"required_input_fields": list(required)},
         )
 
         # Sink
-        graph.add_node("sink", node_type="sink", plugin_name="test_sink")
+        graph.add_node("sink", node_type=NodeType.SINK, plugin_name="test_sink")
 
         # Connect
         graph.add_edge("source", "transform", label="continue")
@@ -550,7 +551,7 @@ class TestGuaranteedFieldsProperties:
             source_config = {}  # No schema config = no guarantees
         graph.add_node(
             "source",
-            node_type="source",
+            node_type=NodeType.SOURCE,
             plugin_name="test_source",
             config=source_config,
         )
@@ -558,12 +559,12 @@ class TestGuaranteedFieldsProperties:
         # Transform requires more than guaranteed
         graph.add_node(
             "transform",
-            node_type="transform",
+            node_type=NodeType.TRANSFORM,
             plugin_name="test_transform",
             config={"required_input_fields": list(required)},
         )
 
-        graph.add_node("sink", node_type="sink", plugin_name="test_sink")
+        graph.add_node("sink", node_type=NodeType.SINK, plugin_name="test_sink")
 
         graph.add_edge("source", "transform", label="continue")
         graph.add_edge("transform", "sink", label="continue")
@@ -615,27 +616,27 @@ class TestGuaranteedFieldsProperties:
         graph = ExecutionGraph()
 
         # Source
-        graph.add_node("source", node_type="source", plugin_name="test_source")
+        graph.add_node("source", node_type=NodeType.SOURCE, plugin_name="test_source")
 
         # Two branches with different guarantees
         graph.add_node(
             "branch_a",
-            node_type="transform",
+            node_type=NodeType.TRANSFORM,
             plugin_name="test_transform",
             config={"schema": {"mode": "observed", "guaranteed_fields": list(branch_a_guarantees)}},
         )
         graph.add_node(
             "branch_b",
-            node_type="transform",
+            node_type=NodeType.TRANSFORM,
             plugin_name="test_transform",
             config={"schema": {"mode": "observed", "guaranteed_fields": list(branch_b_guarantees)}},
         )
 
         # Coalesce node (merge point) — union merge uses intersection of guarantees
-        graph.add_node("coalesce", node_type="coalesce", plugin_name="test_coalesce", config={"merge": "union"})
+        graph.add_node("coalesce", node_type=NodeType.COALESCE, plugin_name="test_coalesce", config={"merge": "union"})
 
         # Sink
-        graph.add_node("sink", node_type="sink", plugin_name="test_sink")
+        graph.add_node("sink", node_type=NodeType.SINK, plugin_name="test_sink")
 
         # Connect: source -> [branch_a, branch_b] -> coalesce -> sink
         graph.add_edge("source", "branch_a", label="path_a")
@@ -666,16 +667,16 @@ class TestGuaranteedFieldsProperties:
         # Source with guarantees
         graph.add_node(
             "source",
-            node_type="source",
+            node_type=NodeType.SOURCE,
             plugin_name="test_source",
             config={"schema": {"mode": "observed", "guaranteed_fields": list(guaranteed)}},
         )
 
         # Gate (pass-through)
-        graph.add_node("gate", node_type="gate", plugin_name="test_gate")
+        graph.add_node("gate", node_type=NodeType.GATE, plugin_name="test_gate")
 
         # Sink
-        graph.add_node("sink", node_type="sink", plugin_name="test_sink")
+        graph.add_node("sink", node_type=NodeType.SINK, plugin_name="test_sink")
 
         # Connect
         graph.add_edge("source", "gate", label="continue")
@@ -702,19 +703,19 @@ class TestGuaranteedFieldsProperties:
 
         graph.add_node(
             "source",
-            node_type="source",
+            node_type=NodeType.SOURCE,
             plugin_name="test_source",
             config={"schema": {"mode": "observed", "guaranteed_fields": list(g1)}},
         )
 
         graph.add_node(
             "transform",
-            node_type="transform",
+            node_type=NodeType.TRANSFORM,
             plugin_name="test_transform",
             config={"schema": {"mode": "observed", "guaranteed_fields": list(g2)}},
         )
 
-        graph.add_node("sink", node_type="sink", plugin_name="test_sink")
+        graph.add_node("sink", node_type=NodeType.SINK, plugin_name="test_sink")
 
         graph.add_edge("source", "transform", label="continue")
         graph.add_edge("transform", "sink", label="continue")
@@ -736,17 +737,17 @@ class TestGuaranteedFieldsProperties:
         graph = ExecutionGraph()
 
         # Source with no guarantees (no schema config)
-        graph.add_node("source", node_type="source", plugin_name="test_source")
+        graph.add_node("source", node_type=NodeType.SOURCE, plugin_name="test_source")
 
         # Transform requires a field
         graph.add_node(
             "transform",
-            node_type="transform",
+            node_type=NodeType.TRANSFORM,
             plugin_name="test_transform",
             config={"required_input_fields": ["must_have_field"]},
         )
 
-        graph.add_node("sink", node_type="sink", plugin_name="test_sink")
+        graph.add_node("sink", node_type=NodeType.SINK, plugin_name="test_sink")
 
         graph.add_edge("source", "transform", label="continue")
         graph.add_edge("transform", "sink", label="continue")
@@ -767,7 +768,7 @@ class TestGuaranteedFieldsProperties:
         # Source with arbitrary guarantees
         graph.add_node(
             "source",
-            node_type="source",
+            node_type=NodeType.SOURCE,
             plugin_name="test_source",
             config={"schema": {"mode": "observed", "guaranteed_fields": ["field_a", "field_b"]}},
         )
@@ -775,11 +776,11 @@ class TestGuaranteedFieldsProperties:
         # Transform with no requirements
         graph.add_node(
             "transform",
-            node_type="transform",
+            node_type=NodeType.TRANSFORM,
             plugin_name="test_transform",
         )
 
-        graph.add_node("sink", node_type="sink", plugin_name="test_sink")
+        graph.add_node("sink", node_type=NodeType.SINK, plugin_name="test_sink")
 
         graph.add_edge("source", "transform", label="continue")
         graph.add_edge("transform", "sink", label="continue")

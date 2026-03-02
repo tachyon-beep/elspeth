@@ -1,4 +1,3 @@
-# src/elspeth/testing/chaosengine/vocabulary.py
 """Shared vocabulary banks for chaos testing content generation.
 
 Used by both ChaosLLM (response_generator.py) and ChaosWeb

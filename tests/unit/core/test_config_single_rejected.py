@@ -13,6 +13,7 @@ def test_aggregation_config_rejects_single_mode() -> None:
             name="test_agg",
             plugin="test_plugin",
             input="source_out",
+            on_error="discard",
             trigger=TriggerConfig(count=5),
             output_mode="single",
         )
@@ -28,6 +29,7 @@ def test_aggregation_config_accepts_transform_mode() -> None:
         name="test_agg",
         plugin="test_plugin",
         input="source_out",
+        on_error="discard",
         trigger=TriggerConfig(count=5),
         output_mode="transform",
     )
@@ -40,6 +42,7 @@ def test_aggregation_config_accepts_passthrough_mode() -> None:
         name="test_agg",
         plugin="test_plugin",
         input="source_out",
+        on_error="discard",
         trigger=TriggerConfig(count=5),
         output_mode="passthrough",
     )
@@ -52,6 +55,7 @@ def test_aggregation_config_default_is_transform() -> None:
         name="test_agg",
         plugin="test_plugin",
         input="source_out",
+        on_error="discard",
         trigger=TriggerConfig(count=5),
     )
     assert settings.output_mode == "transform"
@@ -63,6 +67,7 @@ def test_aggregation_config_expected_output_count() -> None:
         name="test_agg",
         plugin="test_plugin",
         input="source_out",
+        on_error="discard",
         trigger=TriggerConfig(count=5),
         output_mode="transform",
         expected_output_count=1,

@@ -13,10 +13,10 @@ import csv
 import json
 from pathlib import Path
 
-from elspeth.contracts.plugin_context import PluginContext
 from elspeth.plugins.sinks.csv_sink import CSVSink
 from elspeth.plugins.sinks.database_sink import DatabaseSink
 from elspeth.plugins.sinks.json_sink import JSONSink
+from tests.fixtures.factories import make_operation_context
 
 
 class TestCSVSinkResumeSchemaValidation:
@@ -158,7 +158,14 @@ class TestDatabaseSinkResumeSchemaValidation:
         assert validation.valid is True
 
         # Regression check: write must not raise RuntimeError after validation.
-        sink.write([{"id": 1, "name": "alice"}], PluginContext(run_id="test-run", config={}))
+        # Sink context requires landscape + operation_id for record_call() audit trail.
+        ctx = make_operation_context(
+            node_id="sink",
+            plugin_name="database_sink",
+            node_type="SINK",
+            operation_type="sink_write",
+        )
+        sink.write([{"id": 1, "name": "alice"}], ctx)
         sink.close()
 
         engine = create_engine(url)

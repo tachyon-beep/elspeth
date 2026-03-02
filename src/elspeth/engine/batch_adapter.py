@@ -1,4 +1,3 @@
-# src/elspeth/engine/batch_adapter.py
 """Adapter for batch transform integration with TransformExecutor.
 
 Allows TransformExecutor to call accept() and wait for results while
@@ -124,7 +123,10 @@ class RowWaiter:
                 raise entry.result.exception from None
 
             # result is guaranteed non-None here: emit() sets it before signaling event
-            assert entry.result is not None
+            if entry.result is None:
+                raise OrchestrationInvariantError(
+                    "BatchAdapter waiter signaled but result is None — emit() must set result before event.set()"
+                )
             return entry.result
 
 

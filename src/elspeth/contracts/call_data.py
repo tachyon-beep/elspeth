@@ -41,14 +41,14 @@ class CallPayload(Protocol):
 class RawCallPayload:
     """Wrapper for pre-serialized call payload dicts from PluginContext.
 
-    Caller is responsible for providing an already-copied snapshot
-    (PluginContext.record_call deepcopies before wrapping).
+    ``to_dict()`` returns a shallow copy to prevent callers from mutating
+    the internal dict through the returned reference.
     """
 
     data: dict[str, Any]
 
     def to_dict(self) -> dict[str, Any]:
-        return self.data
+        return dict(self.data)
 
 
 # ---------------------------------------------------------------------------

@@ -1,4 +1,3 @@
-# src/elspeth/testing/chaosweb/error_injector.py
 """Error injection logic for ChaosWeb.
 
 The WebErrorInjector decides per-request whether to inject an error based on

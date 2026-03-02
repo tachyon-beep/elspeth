@@ -1,4 +1,3 @@
-# src/elspeth/contracts/sink.py
 """Sink-specific contracts for cross-boundary data types.
 
 This module defines contracts for sink validation and output target compatibility.

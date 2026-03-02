@@ -1446,6 +1446,37 @@ class TestFailPendingDetails:
         result = executor.notify_branch_lost("merge", "row_1", "c", "error")
         assert set(result.coalesce_metadata.branches_arrived) == {"a", "b"}
 
+    def test_require_all_timeout_error_includes_timeout_ms(self):
+        """Bug de4781: require_all timeout path must include timeout_ms in error payload.
+
+        Previously, timeout_ms was only set when 'timeout' appeared in the
+        failure_reason string. The require_all timeout path uses
+        failure_reason='incomplete_branches', so timeout_ms was omitted.
+        """
+        executor, recorder, _, clock = _make_executor()
+        s = _settings(policy="require_all", timeout_seconds=5.0)
+        executor.register_coalesce(s, "node_1")
+        executor.accept(_make_token(branch_name="a", token_id="t1"), "merge")
+        clock.advance(6.0)
+        executor.check_timeouts("merge")
+        # The error payload recorded via complete_node_state must have timeout_ms
+        fail_call = next(c for c in recorder.complete_node_state.call_args_list if c.kwargs.get("status") == NodeStateStatus.FAILED)
+        error = fail_call.kwargs["error"]
+        assert error.timeout_ms == 5000
+        assert error.failure_reason == "incomplete_branches"
+
+    def test_flush_pending_require_all_does_not_set_timeout_ms(self):
+        """flush_pending is NOT a timeout — timeout_ms should be None."""
+        executor, recorder, *_ = _make_executor()
+        s = _settings(policy="require_all", timeout_seconds=5.0)
+        executor.register_coalesce(s, "node_1")
+        executor.accept(_make_token(branch_name="a", token_id="t1"), "merge")
+        executor.flush_pending()
+        fail_call = next(c for c in recorder.complete_node_state.call_args_list if c.kwargs.get("status") == NodeStateStatus.FAILED)
+        error = fail_call.kwargs["error"]
+        assert error.timeout_ms is None
+        assert error.failure_reason == "incomplete_branches"
+
 
 # ===========================================================================
 # Bug D3-2: best_effort timeout with zero arrivals

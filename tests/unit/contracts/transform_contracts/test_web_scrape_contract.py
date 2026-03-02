@@ -19,7 +19,7 @@ from elspeth.plugins.transforms.web_scrape import WebScrapeTransform
 from .test_transform_protocol import TransformContractPropertyTestBase
 
 if TYPE_CHECKING:
-    from elspeth.plugins.protocols import TransformProtocol
+    from elspeth.contracts import TransformProtocol
 
 
 def _create_mock_http_response() -> Mock:
@@ -64,6 +64,11 @@ class TestWebScrapeContract(TransformContractPropertyTestBase):
             }
         )
 
+    @pytest.fixture(autouse=True)
+    def _init_lifecycle(self, transform, ctx) -> None:
+        """Call on_start() to capture infrastructure before tests call process()."""
+        transform.on_start(ctx)
+
     @pytest.fixture
     def valid_input(self) -> dict[str, Any]:
         """Provide a valid input row with a URL field."""
@@ -92,7 +97,6 @@ class TestWebScrapeContract(TransformContractPropertyTestBase):
             run_id="test-run-001",
             config={},
             node_id="test-transform",
-            plugin_name="test",
             rate_limit_registry=mock_registry,
             landscape=mock_landscape,
             state_id="test-state-001",

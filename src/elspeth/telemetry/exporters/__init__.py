@@ -1,4 +1,3 @@
-# src/elspeth/telemetry/exporters/__init__.py
 """Built-in telemetry exporters.
 
 This package provides exporters for shipping telemetry events to various

@@ -7,7 +7,7 @@ from unittest.mock import MagicMock
 
 from elspeth.contracts import Call, CallStatus, CallType
 from elspeth.core.canonical import stable_hash
-from elspeth.plugins.clients.verifier import (
+from elspeth.plugins.infrastructure.clients.verifier import (
     CallVerifier,
     VerificationReport,
     VerificationResult,
@@ -220,7 +220,7 @@ class TestCallVerifier:
 
         # Live response matches recorded
         result = verifier.verify(
-            call_type="llm",
+            call_type=CallType.LLM,
             request_data=request_data,
             live_response=recorded_response.copy(),
         )
@@ -246,7 +246,7 @@ class TestCallVerifier:
         verifier = CallVerifier(recorder, source_run_id="run_abc123")
 
         result = verifier.verify(
-            call_type="llm",
+            call_type=CallType.LLM,
             request_data=request_data,
             live_response=live_response,
         )
@@ -266,7 +266,7 @@ class TestCallVerifier:
         request_data = {"model": "gpt-4", "messages": []}
 
         result = verifier.verify(
-            call_type="llm",
+            call_type=CallType.LLM,
             request_data=request_data,
             live_response={"content": "Hello"},
         )
@@ -298,7 +298,7 @@ class TestCallVerifier:
         )
 
         result = verifier.verify(
-            call_type="llm",
+            call_type=CallType.LLM,
             request_data=request_data,
             live_response=live_response,
         )
@@ -332,21 +332,21 @@ class TestCallVerifier:
 
         # First call: match
         verifier.verify(
-            call_type="llm",
+            call_type=CallType.LLM,
             request_data=request1,
             live_response={"content": "recorded"},
         )
 
         # Second call: mismatch
         verifier.verify(
-            call_type="llm",
+            call_type=CallType.LLM,
             request_data=request2,
             live_response={"content": "different"},
         )
 
         # Third call: missing recording
         verifier.verify(
-            call_type="llm",
+            call_type=CallType.LLM,
             request_data=request3,
             live_response={"content": "new"},
         )
@@ -372,7 +372,7 @@ class TestCallVerifier:
         # Make 4 matching calls
         for i in range(4):
             verifier.verify(
-                call_type="llm",
+                call_type=CallType.LLM,
                 request_data={"id": i},
                 live_response={"content": "match"},
             )
@@ -383,7 +383,7 @@ class TestCallVerifier:
         # Now add a mismatch
         recorder.get_call_response_data.return_value = {"content": "different"}
         verifier.verify(
-            call_type="llm",
+            call_type=CallType.LLM,
             request_data={"id": 5},
             live_response={"content": "live"},
         )
@@ -402,7 +402,7 @@ class TestCallVerifier:
 
         # Make a verification
         verifier.verify(
-            call_type="llm",
+            call_type=CallType.LLM,
             request_data={"id": 1},
             live_response={"content": "match"},
         )
@@ -451,7 +451,7 @@ class TestCallVerifier:
 
         verifier = CallVerifier(recorder, source_run_id="run_abc123")
         result = verifier.verify(
-            call_type="http",
+            call_type=CallType.HTTP,
             request_data=request_data,
             live_response={"status": 200, "body": "OK"},
         )
@@ -459,7 +459,7 @@ class TestCallVerifier:
         assert result.is_match is True
         recorder.find_call_by_request_hash.assert_called_once_with(
             run_id="run_abc123",
-            call_type="http",
+            call_type=CallType.HTTP,
             request_hash=request_hash,
             sequence_index=0,
         )
@@ -483,7 +483,7 @@ class TestCallVerifier:
 
         verifier = CallVerifier(recorder, source_run_id="run_abc123")
         result = verifier.verify(
-            call_type="llm",
+            call_type=CallType.LLM,
             request_data=request_data,
             live_response={"content": "Hello"},
         )
@@ -520,7 +520,7 @@ class TestCallVerifier:
 
         verifier = CallVerifier(recorder, source_run_id="run_abc123")
         result = verifier.verify(
-            call_type="llm",
+            call_type=CallType.LLM,
             request_data=request_data,
             live_response={"error": "timeout"},
         )
@@ -554,7 +554,7 @@ class TestCallVerifier:
 
         verifier = CallVerifier(recorder, source_run_id="run_abc123")
         result = verifier.verify(
-            call_type="llm",
+            call_type=CallType.LLM,
             request_data=request_data,
             live_response={"error": "bad request"},
         )
@@ -586,7 +586,7 @@ class TestCallVerifier:
 
         verifier = CallVerifier(recorder, source_run_id="run_abc123")
         result = verifier.verify(
-            call_type="llm",
+            call_type=CallType.LLM,
             request_data=request_data,
             live_response=original_response,  # Same response
         )
@@ -623,7 +623,7 @@ class TestCallVerifier:
 
         verifier = CallVerifier(recorder, source_run_id="run_abc123")
         result = verifier.verify(
-            call_type="llm",
+            call_type=CallType.LLM,
             request_data=request_data,
             live_response={"content": "DIFFERENT response", "model": "gpt-4"},
         )
@@ -663,7 +663,7 @@ class TestCallVerifier:
 
         verifier = CallVerifier(recorder, source_run_id="run_abc123")
         result = verifier.verify(
-            call_type="llm",
+            call_type=CallType.LLM,
             request_data=request_data,
             live_response={"content": "Hello"},
         )
@@ -693,7 +693,7 @@ class TestCallVerifier:
 
         verifier = CallVerifier(recorder, source_run_id="run_abc123")
         result = verifier.verify(
-            call_type="llm",
+            call_type=CallType.LLM,
             request_data=request_data,
             live_response=live_response,
         )
@@ -730,7 +730,7 @@ class TestCallVerifier:
 
         verifier = CallVerifier(recorder, source_run_id="run_abc123")
         result = verifier.verify(
-            call_type="llm",
+            call_type=CallType.LLM,
             request_data=request_data,
             live_response=live_response,
         )
@@ -767,7 +767,7 @@ class TestCallVerifier:
         )
 
         result = verifier.verify(
-            call_type="llm",
+            call_type=CallType.LLM,
             request_data=request_data,
             live_response=live_response,
         )
@@ -816,7 +816,7 @@ class TestCallVerifier:
 
         # First verify - matches first recorded response
         result1 = verifier.verify(
-            call_type="llm",
+            call_type=CallType.LLM,
             request_data=request_data,
             live_response={"content": "Response 1 - first call"},
         )
@@ -824,7 +824,7 @@ class TestCallVerifier:
 
         # Second verify - should compare against SECOND recorded response
         result2 = verifier.verify(
-            call_type="llm",
+            call_type=CallType.LLM,
             request_data=request_data,
             live_response={"content": "Response 2 - second call"},
         )
@@ -832,7 +832,7 @@ class TestCallVerifier:
 
         # Third verify with mismatched response
         result3 = verifier.verify(
-            call_type="llm",
+            call_type=CallType.LLM,
             request_data=request_data,
             live_response={"content": "Wrong response"},
         )
@@ -859,7 +859,7 @@ class TestCallVerifier:
 
         verifier = CallVerifier(recorder, source_run_id="run_abc123", ignore_order=False)
         result = verifier.verify(
-            call_type="llm",
+            call_type=CallType.LLM,
             request_data=request_data,
             live_response=live_response,
         )
@@ -886,7 +886,7 @@ class TestCallVerifier:
         # With ignore_order=True (default): should match (same multiset)
         verifier_loose = CallVerifier(recorder, source_run_id="run_abc123", ignore_order=True)
         result_loose = verifier_loose.verify(
-            call_type="llm",
+            call_type=CallType.LLM,
             request_data=request_data,
             live_response=live_response,
         )
@@ -895,7 +895,7 @@ class TestCallVerifier:
         # With ignore_order=False: should NOT match (different positions)
         verifier_strict = CallVerifier(recorder, source_run_id="run_abc123", ignore_order=False)
         result_strict = verifier_strict.verify(
-            call_type="llm",
+            call_type=CallType.LLM,
             request_data=request_data,
             live_response=live_response,
         )
@@ -927,7 +927,7 @@ class TestCallVerifier:
         # With ignore_order=True: matches (recursive order-independence)
         verifier_loose = CallVerifier(recorder, source_run_id="run_abc123", ignore_order=True)
         result_loose = verifier_loose.verify(
-            call_type="llm",
+            call_type=CallType.LLM,
             request_data=request_data,
             live_response=live_response,
         )
@@ -936,7 +936,7 @@ class TestCallVerifier:
         # With ignore_order=False: does NOT match
         verifier_strict = CallVerifier(recorder, source_run_id="run_abc123", ignore_order=False)
         result_strict = verifier_strict.verify(
-            call_type="llm",
+            call_type=CallType.LLM,
             request_data=request_data,
             live_response=live_response,
         )
@@ -959,7 +959,7 @@ class TestCallVerifier:
         # Both with and without ignore_order: dicts should match
         verifier_loose = CallVerifier(recorder, source_run_id="run_abc123", ignore_order=True)
         result_loose = verifier_loose.verify(
-            call_type="llm",
+            call_type=CallType.LLM,
             request_data=request_data,
             live_response=live_response,
         )
@@ -967,7 +967,7 @@ class TestCallVerifier:
 
         verifier_strict = CallVerifier(recorder, source_run_id="run_abc123", ignore_order=False)
         result_strict = verifier_strict.verify(
-            call_type="llm",
+            call_type=CallType.LLM,
             request_data=request_data,
             live_response=live_response,
         )
@@ -990,7 +990,7 @@ class TestCallVerifier:
         for ignore_order in [True, False]:
             verifier = CallVerifier(recorder, source_run_id="run_abc123", ignore_order=ignore_order)
             result = verifier.verify(
-                call_type="llm",
+                call_type=CallType.LLM,
                 request_data=request_data,
                 live_response=live_response,
             )
@@ -1036,7 +1036,7 @@ class TestCallVerifier:
         # With ignore_order=True (default): matches despite tool call reordering
         verifier_loose = CallVerifier(recorder, source_run_id="run_abc123", ignore_order=True)
         result_loose = verifier_loose.verify(
-            call_type="llm",
+            call_type=CallType.LLM,
             request_data=request_data,
             live_response=live_response,
         )
@@ -1045,7 +1045,7 @@ class TestCallVerifier:
         # With ignore_order=False: tool call reordering is detected as drift
         verifier_strict = CallVerifier(recorder, source_run_id="run_abc123", ignore_order=False)
         result_strict = verifier_strict.verify(
-            call_type="llm",
+            call_type=CallType.LLM,
             request_data=request_data,
             live_response=live_response,
         )

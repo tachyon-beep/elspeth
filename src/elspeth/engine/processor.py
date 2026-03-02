@@ -1,10 +1,9 @@
-# src/elspeth/engine/processor.py
 """RowProcessor: Orchestrates row processing through pipeline.
 
 Coordinates:
 - Token creation
 - Transform execution
-- Gate evaluation (plugin and config-driven)
+- Gate evaluation (config-driven)
 - Aggregation handling
 - Final outcome recording
 """
@@ -33,8 +32,9 @@ if TYPE_CHECKING:
     from elspeth.engine.orchestrator.types import RowPlugin
     from elspeth.telemetry import TelemetryManager
 
+from elspeth.contracts import BatchTransformProtocol, TransformProtocol
 from elspeth.contracts.enums import NodeStateStatus, OutputMode, RoutingKind, RoutingMode, TriggerType
-from elspeth.contracts.errors import OrchestrationInvariantError, TransformErrorReason
+from elspeth.contracts.errors import MaxRetriesExceeded, OrchestrationInvariantError, TransformErrorCategory, TransformErrorReason
 from elspeth.contracts.plugin_context import PluginContext
 from elspeth.contracts.results import FailureInfo
 from elspeth.core.config import AggregationSettings, GateSettings
@@ -45,12 +45,11 @@ from elspeth.engine.executors import (
     GateExecutor,
     TransformExecutor,
 )
-from elspeth.engine.retry import MaxRetriesExceeded, RetryManager
+from elspeth.engine.retry import RetryManager
 from elspeth.engine.spans import SpanFactory
 from elspeth.engine.tokens import TokenManager
-from elspeth.plugins.clients.llm import LLMClientError
-from elspeth.plugins.pooling import CapacityError
-from elspeth.plugins.protocols import BatchTransformProtocol, TransformProtocol
+from elspeth.plugins.infrastructure.clients.llm import LLMClientError
+from elspeth.plugins.infrastructure.pooling import CapacityError
 
 # Iteration guard to prevent infinite loops from bugs
 MAX_WORK_QUEUE_ITERATIONS = 10_000
@@ -106,6 +105,46 @@ class _FlushContext:
     triggering_token: TokenInfo | None
     coalesce_node_id: NodeID | None
     coalesce_name: CoalesceName | None
+
+
+# --- T18: Discriminated union types for _process_single_token extraction ---
+
+
+@dataclass(frozen=True, slots=True)
+class _TransformContinue:
+    """Token should advance to the next node in the DAG."""
+
+    updated_token: TokenInfo
+    updated_sink: str
+
+
+@dataclass(frozen=True, slots=True)
+class _TransformTerminal:
+    """Token has reached a terminal state (completed, failed, quarantined, etc.)."""
+
+    result: RowResult | list[RowResult]
+
+
+type _TransformOutcome = _TransformContinue | _TransformTerminal
+
+
+@dataclass(frozen=True, slots=True)
+class _GateContinue:
+    """Gate says advance to next node (or jump to a specific node)."""
+
+    updated_token: TokenInfo
+    updated_sink: str
+    next_node_id: NodeID | None = None  # None = next structural node
+
+
+@dataclass(frozen=True, slots=True)
+class _GateTerminal:
+    """Gate has routed, forked, or diverted the token to a terminal state."""
+
+    result: RowResult | list[RowResult]
+
+
+type _GateOutcome = _GateContinue | _GateTerminal
 
 
 def make_step_resolver(
@@ -271,7 +310,6 @@ class RowProcessor:
         self._token_manager = TokenManager(
             recorder,
             step_resolver=self._step_resolver,
-            payload_store=payload_store,
         )
         self._transform_executor = TransformExecutor(
             recorder,
@@ -364,7 +402,8 @@ class RowProcessor:
         status = NodeStateStatus.COMPLETED if transform_result.status == "success" else NodeStateStatus.FAILED
 
         # node_id is assigned during DAG construction in from_plugin_instances()
-        assert transform.node_id is not None, "node_id must be assigned by DAG construction before execution"
+        if transform.node_id is None:
+            raise OrchestrationInvariantError("node_id must be assigned by DAG construction before execution")
         self._emit_telemetry(
             TransformCompleted(
                 timestamp=datetime.now(UTC),
@@ -374,7 +413,7 @@ class RowProcessor:
                 node_id=transform.node_id,
                 plugin_name=transform.name,
                 status=status,
-                duration_ms=transform_result.duration_ms or 0.0,
+                duration_ms=transform_result.duration_ms if transform_result.duration_ms is not None else 0.0,
                 input_hash=transform_result.input_hash,
                 output_hash=transform_result.output_hash,
             )
@@ -394,7 +433,7 @@ class RowProcessor:
 
         Args:
             token: Token that was routed
-            gate_name: Name of the gate plugin
+            gate_name: Name of the gate (from GateSettings)
             gate_node_id: Node ID of the gate
             routing_mode: How routing was performed (move, copy)
             destinations: Destination node/sink names
@@ -548,45 +587,22 @@ class RowProcessor:
     ) -> list[RowResult]:
         """Handle failed aggregation flush for both passthrough and transform modes.
 
-        Token outcome recording depends on output_mode:
-        - passthrough: tokens have BUFFERED (non-terminal) → record FAILED
-        - transform: tokens have CONSUMED_IN_BATCH (terminal) → cannot record FAILED
-          (would violate unique terminal outcome constraint)
-
-        For count-triggered transform mode, the triggering token needs
-        CONSUMED_IN_BATCH recorded because it went from buffer_row() to
-        execute_flush() without the non-flushing return path.
+        T26: Both modes now have BUFFERED (non-terminal) at buffer time,
+        so FAILED can be recorded as the terminal outcome for all tokens.
         """
         error_hash = hashlib.sha256(fctx.error_msg.encode()).hexdigest()[:16]
         results: list[RowResult] = []
         failure = FailureInfo(exception_type="TransformError", message=fctx.error_msg)
 
-        if fctx.settings.output_mode == OutputMode.PASSTHROUGH:
-            for token in fctx.buffered_tokens:
-                self._recorder.record_token_outcome(
-                    run_id=self._run_id,
-                    token_id=token.token_id,
-                    outcome=RowOutcome.FAILED,
-                    error_hash=error_hash,
-                )
-                self._emit_token_completed(token, RowOutcome.FAILED)
-                results.append(RowResult(token=token, final_data=token.row_data, outcome=RowOutcome.FAILED, error=failure))
-        else:
-            # Transform mode: previously-buffered tokens already have CONSUMED_IN_BATCH.
-            # Triggering token (count-triggered only) needs CONSUMED_IN_BATCH recorded.
-            if fctx.triggering_token is not None:
-                self._recorder.record_token_outcome(
-                    run_id=self._run_id,
-                    token_id=fctx.triggering_token.token_id,
-                    outcome=RowOutcome.CONSUMED_IN_BATCH,
-                    batch_id=fctx.batch_id,
-                )
-            # Emit TokenCompleted for all buffered tokens (deferred from buffer time
-            # to maintain TransformCompleted-before-TokenCompleted ordering).
-            # Note: TransformCompleted is NOT emitted on error path.
-            for token in fctx.buffered_tokens:
-                self._emit_token_completed(token, RowOutcome.CONSUMED_IN_BATCH)
-                results.append(RowResult(token=token, final_data=token.row_data, outcome=RowOutcome.FAILED, error=failure))
+        for token in fctx.buffered_tokens:
+            self._recorder.record_token_outcome(
+                run_id=self._run_id,
+                token_id=token.token_id,
+                outcome=RowOutcome.FAILED,
+                error_hash=error_hash,
+            )
+            self._emit_token_completed(token, RowOutcome.FAILED)
+            results.append(RowResult(token=token, final_data=token.row_data, outcome=RowOutcome.FAILED, error=failure))
 
         return results
 
@@ -657,22 +673,42 @@ class RowProcessor:
         """Route transform-mode aggregation results after successful flush.
 
         Transform mode: N input rows → M output rows with new tokens via expand_token.
-        Records CONSUMED_IN_BATCH for triggering token (if present), emits
-        deferred TokenCompleted telemetry, then routes expanded tokens downstream.
-        """
-        # Record CONSUMED_IN_BATCH for triggering token (count-triggered only)
-        if fctx.triggering_token is not None:
-            self._recorder.record_token_outcome(
-                run_id=self._run_id,
-                token_id=fctx.triggering_token.token_id,
-                outcome=RowOutcome.CONSUMED_IN_BATCH,
-                batch_id=fctx.batch_id,
-            )
+        Records per-token terminal outcomes (CONSUMED_IN_BATCH or QUARANTINED),
+        emits deferred TokenCompleted telemetry, then routes expanded tokens downstream.
 
-        # Emit deferred TokenCompleted for all buffered tokens
-        # (TransformCompleted was already emitted by the caller)
-        for token in fctx.buffered_tokens:
-            self._emit_token_completed(token, RowOutcome.CONSUMED_IN_BATCH)
+        T26: Batch transforms can quarantine individual rows. Quarantined tokens
+        get QUARANTINED terminal state instead of CONSUMED_IN_BATCH, identified
+        via quarantined_indices in the result's success_reason metadata.
+        """
+        # T26: Extract quarantined indices from result metadata.
+        # metadata is optional in TransformSuccessReason — only present when
+        # the batch transform quarantines rows.
+        quarantined_index_set: set[int] = set()
+        if result.success_reason and "metadata" in result.success_reason:
+            metadata = result.success_reason["metadata"]
+            if "quarantined_indices" in metadata:
+                quarantined_index_set = set(metadata["quarantined_indices"])
+
+        # Record terminal outcomes for ALL buffered tokens (deferred from buffer time).
+        # T26: Quarantined tokens get QUARANTINED; valid tokens get CONSUMED_IN_BATCH.
+        for i, token in enumerate(fctx.buffered_tokens):
+            if i in quarantined_index_set:
+                error_hash = hashlib.sha256(f"quarantined_in_batch:{fctx.batch_id}:{i}".encode()).hexdigest()[:16]
+                self._recorder.record_token_outcome(
+                    run_id=self._run_id,
+                    token_id=token.token_id,
+                    outcome=RowOutcome.QUARANTINED,
+                    error_hash=error_hash,
+                )
+                self._emit_token_completed(token, RowOutcome.QUARANTINED)
+            else:
+                self._recorder.record_token_outcome(
+                    run_id=self._run_id,
+                    token_id=token.token_id,
+                    outcome=RowOutcome.CONSUMED_IN_BATCH,
+                    batch_id=fctx.batch_id,
+                )
+                self._emit_token_completed(token, RowOutcome.CONSUMED_IN_BATCH)
 
         # Extract output rows
         if result.is_multi_row:
@@ -713,13 +749,19 @@ class RowProcessor:
                 record_parent_outcome=False,
             )
 
-            # Build triggering RowResult if applicable (count-triggered only)
+            # Build triggering RowResult if applicable (count-triggered only).
+            # The triggering token is always the last buffered token (buffered
+            # immediately before flush), so its index is len(buffered_tokens) - 1.
+            # Its outcome must match what the recorder loop already recorded —
+            # QUARANTINED if in quarantined_index_set, CONSUMED_IN_BATCH otherwise.
             if fctx.triggering_token is not None:
+                triggering_index = len(fctx.buffered_tokens) - 1
+                triggering_outcome = RowOutcome.QUARANTINED if triggering_index in quarantined_index_set else RowOutcome.CONSUMED_IN_BATCH
                 results.append(
                     RowResult(
                         token=fctx.triggering_token,
                         final_data=fctx.triggering_token.row_data,
-                        outcome=RowOutcome.CONSUMED_IN_BATCH,
+                        outcome=triggering_outcome,
                     )
                 )
 
@@ -826,13 +868,14 @@ class RowProcessor:
         when the trigger fires. Flush handling is delegated to shared helpers
         (_handle_flush_error, _route_passthrough_results, _route_transform_results).
 
-        TEMPORAL DECOUPLING (Bug P2-2026-02-01):
+        TEMPORAL DECOUPLING (Bug P2-2026-02-01, updated T26):
 
-        For transform-mode aggregation, there is intentional temporal decoupling
-        between Landscape recording and telemetry emission:
+        Both modes now record BUFFERED (non-terminal) at buffer time, with
+        terminal outcomes deferred to flush time. This enables per-token
+        QUARANTINED recording when batch transforms quarantine individual rows.
 
-        - **Landscape (audit trail)**: Records CONSUMED_IN_BATCH at buffer time.
-          This is the source of truth - the token IS terminal when buffered.
+        - **Landscape (audit trail)**: Records BUFFERED at buffer time.
+          Terminal outcome (CONSUMED_IN_BATCH, QUARANTINED, FAILED) at flush.
 
         - **Telemetry (observability)**: Emits TokenCompleted at flush time.
           Deferred to maintain ordering invariant (TransformCompleted before
@@ -861,6 +904,20 @@ class RowProcessor:
 
         # Buffer the row
         self._aggregation_executor.buffer_row(node_id, current_token)
+
+        # T26: Record BUFFERED for this token BEFORE checking flush.
+        # On count-threshold flush, the triggering token would otherwise have
+        # no BUFFERED record — it goes directly to CONSUMED_IN_BATCH/FAILED.
+        # Recording here ensures BUFFERED → terminal for every aggregation token.
+        buf_batch_id = self._aggregation_executor.get_batch_id(node_id)
+        if buf_batch_id is None:
+            raise OrchestrationInvariantError(f"batch_id is None after buffer_row() for node {node_id}")
+        self._recorder.record_token_outcome(
+            run_id=self._run_id,
+            token_id=current_token.token_id,
+            outcome=RowOutcome.BUFFERED,
+            batch_id=buf_batch_id,
+        )
 
         # Check if we should flush
         if self._aggregation_executor.should_flush(node_id):
@@ -905,46 +962,78 @@ class RowProcessor:
                 return flush_results, child_items
             raise ValueError(f"Unknown output_mode: {output_mode}")
 
-        # Not flushing yet - row is buffered
-        # In passthrough mode: BUFFERED (non-terminal, will reappear)
-        # In transform mode: CONSUMED_IN_BATCH (terminal)
-        if output_mode == OutputMode.PASSTHROUGH:
-            buf_batch_id = self._aggregation_executor.get_batch_id(node_id)
-            self._recorder.record_token_outcome(
-                run_id=self._run_id,
-                token_id=current_token.token_id,
+        # Not flushing yet — BUFFERED already recorded above.
+        # Terminal outcome is deferred to flush time for both modes:
+        # - passthrough: BUFFERED → COMPLETED/FAILED at flush
+        # - transform: BUFFERED → CONSUMED_IN_BATCH/QUARANTINED/FAILED at flush
+        # NOTE: Do NOT emit TokenCompleted telemetry here!
+        # Bug P2-2026-02-01: TokenCompleted must be deferred to flush time so that
+        # TransformCompleted can be emitted first.
+        return (
+            RowResult(
+                token=current_token,
+                final_data=current_token.row_data,
                 outcome=RowOutcome.BUFFERED,
-                batch_id=buf_batch_id,
+            ),
+            child_items,
+        )
+
+    def _convert_retryable_to_error_result(
+        self,
+        exc: Exception,
+        transform: Any,
+        token: TokenInfo,
+        ctx: Any,
+        reason: TransformErrorCategory,
+    ) -> tuple[TransformResult, TokenInfo, str | None]:
+        """Convert a retryable exception to a TransformResult.error when no retry manager is configured.
+
+        Shared handler for LLMClientError (retryable) and transient exceptions
+        (ConnectionError, TimeoutError, OSError, CapacityError). Records the
+        error in the audit trail and emits a DIVERT routing event if on_error
+        routes to a sink.
+        """
+        on_error = transform.on_error
+        # on_error is always set (required by TransformSettings) — Tier 1 invariant
+        if on_error is None:
+            raise OrchestrationInvariantError(
+                f"Transform '{transform.name}' has on_error=None — this should be impossible since TransformSettings requires on_error"
+            ) from None
+
+        error_details: TransformErrorReason = {"reason": reason, "error": str(exc)}
+        ctx.record_transform_error(
+            token_id=token.token_id,
+            transform_id=transform.node_id,
+            row=token.row_data,
+            error_details=error_details,
+            destination=on_error,
+        )
+
+        # Record DIVERT routing_event using ctx.state_id (set by
+        # TransformExecutor.execute_transform before the exception propagated).
+        if on_error != "discard":
+            try:
+                error_edge_id = self._error_edge_ids[NodeID(transform.node_id)]
+            except KeyError:
+                raise OrchestrationInvariantError(
+                    f"Transform '{transform.node_id}' has on_error={on_error!r} but no DIVERT edge registered."
+                ) from exc
+            if ctx.state_id is None:
+                raise OrchestrationInvariantError(
+                    f"ctx.state_id must be set by TransformExecutor before exception propagated (transform={transform.node_id})"
+                ) from None
+            self._recorder.record_routing_event(
+                state_id=ctx.state_id,
+                edge_id=error_edge_id,
+                mode=RoutingMode.DIVERT,
+                reason=error_details,
             )
-            return (
-                RowResult(
-                    token=current_token,
-                    final_data=current_token.row_data,
-                    outcome=RowOutcome.BUFFERED,
-                ),
-                child_items,
-            )
-        else:
-            nf_batch_id = self._aggregation_executor.get_batch_id(node_id)
-            self._recorder.record_token_outcome(
-                run_id=self._run_id,
-                token_id=current_token.token_id,
-                outcome=RowOutcome.CONSUMED_IN_BATCH,
-                batch_id=nf_batch_id,
-            )
-            # NOTE: Do NOT emit TokenCompleted telemetry here!
-            # Bug P2-2026-02-01: TokenCompleted must be deferred to flush time so that
-            # TransformCompleted can be emitted first. The token IS terminal in Landscape
-            # (CONSUMED_IN_BATCH recorded above), but telemetry ordering requires waiting
-            # until the batch actually processes at flush time.
-            return (
-                RowResult(
-                    token=current_token,
-                    final_data=current_token.row_data,
-                    outcome=RowOutcome.CONSUMED_IN_BATCH,
-                ),
-                child_items,
-            )
+
+        return (
+            TransformResult.error(error_details, retryable=True),
+            token,
+            on_error,
+        )
 
     def _execute_transform_with_retry(
         self,
@@ -984,96 +1073,22 @@ class RowProcessor:
                 )
             except LLMClientError as e:
                 if e.retryable:
-                    # Retryable error but no retry manager configured - convert to error result
-                    # This keeps the failure row-scoped instead of aborting the run
-                    #
-                    # BUG FIX (P2-2026-01-27): Must validate on_error and record transform_error
-                    # for audit trail completeness (same as TransformExecutor error handling)
-                    on_error = transform.on_error
-                    # on_error is always set (required by TransformSettings) — Tier 1 invariant
-                    assert on_error is not None, (
-                        f"Transform '{transform.name}' has on_error=None — this should be "
-                        f"impossible since TransformSettings requires on_error"
-                    )
-
-                    error_details: TransformErrorReason = {"reason": "llm_retryable_error_no_retry", "error": str(e)}
-                    ctx.record_transform_error(
-                        token_id=token.token_id,
-                        transform_id=transform.node_id,
-                        row=token.row_data,
-                        error_details=error_details,
-                        destination=on_error,
-                    )
-
-                    # Record DIVERT routing_event using ctx.state_id (set by
-                    # TransformExecutor.execute_transform before the exception propagated).
-                    if on_error != "discard":
-                        try:
-                            error_edge_id = self._error_edge_ids[NodeID(transform.node_id)]
-                        except KeyError:
-                            raise OrchestrationInvariantError(
-                                f"Transform '{transform.node_id}' has on_error={on_error!r} but no DIVERT edge registered."
-                            ) from e
-                        assert ctx.state_id is not None, (
-                            f"ctx.state_id must be set by TransformExecutor before exception propagated (transform={transform.node_id})"
-                        )
-                        self._recorder.record_routing_event(
-                            state_id=ctx.state_id,
-                            edge_id=error_edge_id,
-                            mode=RoutingMode.DIVERT,
-                            reason=error_details,
-                        )
-
-                    return (
-                        TransformResult.error(error_details, retryable=True),
+                    return self._convert_retryable_to_error_result(
+                        e,
+                        transform,
                         token,
-                        on_error,
+                        ctx,
+                        reason="llm_retryable_error_no_retry",
                     )
                 # Non-retryable errors re-raise (already handled by transform)
                 raise
             except (ConnectionError, TimeoutError, OSError, CapacityError) as e:
-                # Other retryable errors - convert to error result
-                #
-                # BUG FIX (P2-2026-01-27): Must validate on_error and record transform_error
-                # for audit trail completeness (same as TransformExecutor error handling)
-                on_error = transform.on_error
-                # on_error is always set (required by TransformSettings) — Tier 1 invariant
-                assert on_error is not None, (
-                    f"Transform '{transform.name}' has on_error=None — this should be impossible since TransformSettings requires on_error"
-                )
-
-                transient_error: TransformErrorReason = {"reason": "transient_error_no_retry", "error": str(e)}
-                ctx.record_transform_error(
-                    token_id=token.token_id,
-                    transform_id=transform.node_id,
-                    row=token.row_data,
-                    error_details=transient_error,
-                    destination=on_error,
-                )
-
-                # Record DIVERT routing_event using ctx.state_id (set by
-                # TransformExecutor.execute_transform before the exception propagated).
-                if on_error != "discard":
-                    try:
-                        error_edge_id = self._error_edge_ids[NodeID(transform.node_id)]
-                    except KeyError:
-                        raise OrchestrationInvariantError(
-                            f"Transform '{transform.node_id}' has on_error={on_error!r} but no DIVERT edge registered."
-                        ) from e
-                    assert ctx.state_id is not None, (
-                        f"ctx.state_id must be set by TransformExecutor before exception propagated (transform={transform.node_id})"
-                    )
-                    self._recorder.record_routing_event(
-                        state_id=ctx.state_id,
-                        edge_id=error_edge_id,
-                        mode=RoutingMode.DIVERT,
-                        reason=transient_error,
-                    )
-
-                return (
-                    TransformResult.error(transient_error, retryable=True),
+                return self._convert_retryable_to_error_result(
+                    e,
+                    transform,
                     token,
-                    on_error,
+                    ctx,
+                    reason="transient_error_no_retry",
                 )
 
         # Track attempt number for audit
@@ -1479,6 +1494,466 @@ class RowProcessor:
 
         return results
 
+    def _handle_transform_node(
+        self,
+        transform: TransformProtocol,
+        current_token: TokenInfo,
+        ctx: PluginContext,
+        node_id: NodeID,
+        child_items: list[WorkItem],
+        coalesce_node_id: NodeID | None,
+        coalesce_name: CoalesceName | None,
+        current_on_success_sink: str,
+    ) -> _TransformOutcome:
+        """Handle a single transform node: execute with retry, route errors, handle multi-row.
+
+        Args:
+            transform: The transform plugin to execute.
+            current_token: Token being processed through the DAG.
+            ctx: Plugin context for the current run.
+            node_id: Current DAG node ID (needed for deaggregation expand_token() and
+                child work item creation via create_continuation_work_item()).
+            child_items: Mutable list — deaggregation appends child work items here.
+            coalesce_node_id: Coalesce barrier node for fork branches (or None).
+            coalesce_name: Coalesce point name for fork branches (or None).
+            current_on_success_sink: Current sink name, may be updated by transform.on_success.
+
+        Returns:
+            _TransformContinue: Token should advance to next node (updated token + updated sink).
+            _TransformTerminal: Token reached terminal state (FAILED, QUARANTINED, ROUTED, or EXPANDED).
+        """
+        # 1. Execute transform with retry
+        try:
+            transform_result, current_token, error_sink = self._execute_transform_with_retry(
+                transform=transform,
+                token=current_token,
+                ctx=ctx,
+            )
+            # Emit TransformCompleted telemetry AFTER Landscape recording succeeds
+            # (Landscape recording happens inside _execute_transform_with_retry)
+            self._emit_transform_completed(
+                token=current_token,
+                transform=transform,
+                transform_result=transform_result,
+            )
+        except MaxRetriesExceeded as e:
+            # All retries exhausted - return FAILED outcome
+            error_hash = hashlib.sha256(str(e).encode()).hexdigest()[:16]
+            self._recorder.record_token_outcome(
+                run_id=self._run_id,
+                token_id=current_token.token_id,
+                outcome=RowOutcome.FAILED,
+                error_hash=error_hash,
+            )
+            # Emit TokenCompleted telemetry AFTER Landscape recording
+            self._emit_token_completed(current_token, RowOutcome.FAILED)
+            # Notify coalesce if this is a forked branch
+            sibling_results = self._notify_coalesce_of_lost_branch(
+                current_token,
+                f"max_retries_exceeded:{e}",
+                child_items,
+            )
+            current_result = RowResult(
+                token=current_token,
+                final_data=current_token.row_data,
+                outcome=RowOutcome.FAILED,
+                error=FailureInfo.from_max_retries_exceeded(e),
+            )
+            if sibling_results:
+                return _TransformTerminal(result=[current_result, *sibling_results])
+            return _TransformTerminal(result=current_result)
+
+        # 2. Handle error status
+        if transform_result.status == "error":
+            return self._handle_transform_error_status(
+                transform_result,
+                current_token,
+                error_sink,
+                child_items,
+            )
+
+        # 3. Track on_success for sink routing at end of chain
+        updated_sink = current_on_success_sink
+        if transform.on_success is not None:
+            updated_sink = transform.on_success
+
+        # 4. Handle multi-row output (deaggregation)
+        # NOTE: This is ONLY for non-aggregation transforms. Aggregation
+        # transforms route through _process_batch_aggregation_node() above.
+        if transform_result.is_multi_row:
+            # Validate transform is allowed to create tokens
+            if not transform.creates_tokens:
+                raise RuntimeError(
+                    f"Transform '{transform.name}' returned multi-row result "
+                    f"but has creates_tokens=False. Either set creates_tokens=True "
+                    f"or return single row via TransformResult.success(row). "
+                    f"(Multi-row is allowed in aggregation passthrough mode.)"
+                )
+
+            # Deaggregation: create child tokens for each output row
+            # NOTE: Parent EXPANDED outcome is recorded atomically in expand_token()
+
+            # is_multi_row check above guarantees rows is not None
+            if transform_result.rows is None:
+                raise OrchestrationInvariantError("is_multi_row guarantees rows is not None")
+            # Contract consistency is enforced by TransformResult.success_multi()
+            output_contract = transform_result.rows[0].contract
+            child_tokens, _expand_group_id = self._token_manager.expand_token(
+                parent_token=current_token,
+                expanded_rows=[r.to_dict() for r in transform_result.rows],
+                output_contract=output_contract,
+                node_id=node_id,
+                run_id=self._run_id,
+            )
+
+            # Queue each child for continued processing.
+            # Pass updated_sink so terminal children inherit the
+            # expanding transform's sink instead of defaulting to source_on_success.
+            for child_token in child_tokens:
+                child_coalesce_name = coalesce_name if coalesce_name is not None and child_token.branch_name is not None else None
+                child_items.append(
+                    self._nav.create_continuation_work_item(
+                        token=child_token,
+                        current_node_id=node_id,
+                        coalesce_name=child_coalesce_name,
+                        on_success_sink=updated_sink,
+                    )
+                )
+
+            # NOTE: Parent EXPANDED outcome is recorded atomically in expand_token()
+            # to eliminate crash window between child creation and outcome recording.
+            return _TransformTerminal(
+                result=RowResult(
+                    token=current_token,
+                    final_data=current_token.row_data,
+                    outcome=RowOutcome.EXPANDED,
+                )
+            )
+
+        # 5. Single row success — continue to next node
+        # (current_token already updated by _execute_transform_with_retry)
+        return _TransformContinue(updated_token=current_token, updated_sink=updated_sink)
+
+    def _handle_transform_error_status(
+        self,
+        transform_result: TransformResult,
+        current_token: TokenInfo,
+        error_sink: str | None,
+        child_items: list[WorkItem],
+    ) -> _TransformTerminal:
+        """Handle transform error status: quarantine (discard) or route to error sink.
+
+        Args:
+            transform_result: The failed transform result.
+            current_token: Token that failed processing.
+            error_sink: "discard" for quarantine, or a sink name for error routing.
+            child_items: Mutable list — coalesce notifications may append child work items.
+
+        Returns:
+            _TransformTerminal with QUARANTINED or ROUTED outcome.
+        """
+        error_detail = str(transform_result.reason) if transform_result.reason else "unknown_error"
+
+        if error_sink == "discard":
+            # Intentionally discarded - QUARANTINED
+            quarantine_error_hash = hashlib.sha256(error_detail.encode()).hexdigest()[:16]
+            self._recorder.record_token_outcome(
+                run_id=self._run_id,
+                token_id=current_token.token_id,
+                outcome=RowOutcome.QUARANTINED,
+                error_hash=quarantine_error_hash,
+            )
+            # Emit TokenCompleted telemetry AFTER Landscape recording
+            self._emit_token_completed(current_token, RowOutcome.QUARANTINED)
+            # Notify coalesce if this is a forked branch
+            sibling_results = self._notify_coalesce_of_lost_branch(
+                current_token,
+                f"quarantined:{error_detail}",
+                child_items,
+            )
+            current_result = RowResult(
+                token=current_token,
+                final_data=current_token.row_data,
+                outcome=RowOutcome.QUARANTINED,
+            )
+            if sibling_results:
+                return _TransformTerminal(result=[current_result, *sibling_results])
+            return _TransformTerminal(result=current_result)
+
+        # Routed to error sink
+        # NOTE: Do NOT record ROUTED outcome here - the token hasn't been written yet.
+        # SinkExecutor.write() records the outcome AFTER sink durability is achieved.
+        sibling_results = self._notify_coalesce_of_lost_branch(
+            current_token,
+            f"error_routed:{error_detail}",
+            child_items,
+        )
+        current_result = RowResult(
+            token=current_token,
+            final_data=current_token.row_data,
+            outcome=RowOutcome.ROUTED,
+            sink_name=error_sink,
+        )
+        if sibling_results:
+            return _TransformTerminal(result=[current_result, *sibling_results])
+        return _TransformTerminal(result=current_result)
+
+    def _handle_gate_node(
+        self,
+        gate: GateSettings,
+        current_token: TokenInfo,
+        ctx: PluginContext,
+        node_id: NodeID,
+        child_items: list[WorkItem],
+        coalesce_node_id: NodeID | None,
+        coalesce_name: CoalesceName | None,
+        current_on_success_sink: str,
+    ) -> _GateOutcome:
+        """Handle a gate node: evaluate, then fork/route/divert/continue.
+
+        Args:
+            gate: Gate configuration to evaluate.
+            current_token: Token being processed through the DAG.
+            ctx: Plugin context for the current run.
+            node_id: Current DAG node ID (passed to gate executor and used for
+                fork child work item creation).
+            child_items: Mutable list — fork paths append child work items here.
+            coalesce_node_id: Coalesce barrier node for fork branches (or None).
+            coalesce_name: Coalesce point name for fork branches (or None).
+            current_on_success_sink: Current sink name, carried forward or overridden by jumps.
+
+        Returns:
+            _GateTerminal: Gate routed to sink, forked to paths, or diverted (contains result + child_items populated).
+            _GateContinue: Gate says continue — updated_token, updated_sink, and optional next_node_id for jumps.
+        """
+        # 1. Execute gate
+        outcome = self._gate_executor.execute_config_gate(
+            gate_config=gate,
+            node_id=node_id,
+            token=current_token,
+            ctx=ctx,
+            token_manager=self._token_manager,
+        )
+        current_token = outcome.updated_token
+
+        # 2. Emit GateEvaluated telemetry AFTER Landscape recording succeeds
+        # (Landscape recording happens inside execute_config_gate)
+        self._emit_gate_evaluated(
+            token=current_token,
+            gate_name=gate.name,
+            gate_node_id=node_id,
+            routing_mode=outcome.result.action.mode,
+            destinations=self._get_gate_destinations(outcome),
+        )
+
+        # 3. Check if gate routed to a sink
+        if outcome.sink_name is not None:
+            # NOTE: Do NOT record ROUTED outcome here - the token hasn't been written yet.
+            # SinkExecutor.write() records the outcome AFTER sink durability is achieved.
+            # Notify coalesce if this is a forked branch
+            sibling_results = self._notify_coalesce_of_lost_branch(
+                current_token,
+                f"gate_routed_to_sink:{outcome.sink_name}",
+                child_items,
+            )
+            current_result = RowResult(
+                token=current_token,
+                final_data=current_token.row_data,
+                outcome=RowOutcome.ROUTED,
+                sink_name=outcome.sink_name,
+            )
+            if sibling_results:
+                return _GateTerminal(result=[current_result, *sibling_results])
+            return _GateTerminal(result=current_result)
+
+        # 4. Fork to paths
+        if outcome.result.action.kind == RoutingKind.FORK_TO_PATHS:
+            return self._handle_gate_fork(outcome, current_token, node_id, child_items)
+
+        # 5. Jump to specific node
+        if outcome.next_node_id is not None:
+            # Validate jump target exists in the DAG (our data — crash on invariant violation).
+            # Without this check, a nonexistent target silently passes the coalesce ordering
+            # check below (both .get() calls return None → condition is False) and only fails
+            # one iteration later with a less informative error from resolve_plugin_for_node().
+            if outcome.next_node_id not in self._node_step_map:
+                raise OrchestrationInvariantError(
+                    f"Gate at node '{node_id}' jumped token '{current_token.token_id}' to "
+                    f"node '{outcome.next_node_id}' which is not in the DAG step map. "
+                    f"Known nodes: {sorted(self._node_step_map.keys())}"
+                )
+
+            updated_sink = current_on_success_sink
+            resolved_sink = self._nav.resolve_jump_target_sink(outcome.next_node_id)
+            if resolved_sink is not None:
+                updated_sink = resolved_sink
+
+            # Re-validate coalesce ordering invariant after gate jump.
+            # The initial check at entry only validates the starting node.
+            # A gate jump can move the token past its coalesce node,
+            # which would silently bypass join handling.
+            #
+            # IMPORTANT: Use outcome.next_node_id (not the caller's node_id param)
+            # because we're validating the JUMP TARGET, not the current position.
+            if coalesce_node_id is not None:
+                jump_target_step = self._node_step_map[outcome.next_node_id]
+                coalesce_barrier_step = self._node_step_map[coalesce_node_id]
+                if jump_target_step > coalesce_barrier_step:
+                    raise OrchestrationInvariantError(
+                        f"Gate jump moved token '{current_token.token_id}' to node '{outcome.next_node_id}' "
+                        f"(step {jump_target_step}) which is past its coalesce node '{coalesce_node_id}' "
+                        f"(step {coalesce_barrier_step}). This would bypass join handling."
+                    )
+
+            return _GateContinue(
+                updated_token=current_token,
+                updated_sink=updated_sink,
+                next_node_id=outcome.next_node_id,
+            )
+
+        # 6. CONTINUE: config gate says "proceed to next structural node."
+        if outcome.result.action.kind != RoutingKind.CONTINUE:
+            raise OrchestrationInvariantError(
+                f"Unhandled config gate routing kind {outcome.result.action.kind!r} "
+                f"for token {current_token.token_id} at node '{node_id}'. "
+                f"Expected CONTINUE when no sink_name, fork, or next_node_id is set."
+            )
+        return _GateContinue(updated_token=current_token, updated_sink=current_on_success_sink)
+
+    def _handle_gate_fork(
+        self,
+        outcome: GateOutcome,
+        current_token: TokenInfo,
+        node_id: NodeID,
+        child_items: list[WorkItem],
+    ) -> _GateTerminal:
+        """Handle fork-to-paths routing: build child work items for each fork branch.
+
+        Iterates child tokens from the gate outcome, resolves coalesce info for each
+        branch, and appends continuation or terminal work items to child_items.
+
+        Args:
+            outcome: Config gate outcome containing child tokens and routing info.
+            current_token: Parent token being forked.
+            node_id: Current gate node ID for continuation work items.
+            child_items: Mutable list — fork paths append child work items here.
+
+        Returns:
+            _GateTerminal with FORKED outcome for the parent token.
+        """
+        for child_token in outcome.child_tokens:
+            # Look up coalesce info for this branch
+            cfg_branch_name = child_token.branch_name
+            cfg_coalesce_name: CoalesceName | None = None
+
+            if cfg_branch_name and BranchName(cfg_branch_name) in self._branch_to_coalesce:
+                cfg_coalesce_name = self._branch_to_coalesce[BranchName(cfg_branch_name)]
+
+            # See config gate fork handler above for routing logic.
+            if cfg_coalesce_name is None and cfg_branch_name and BranchName(cfg_branch_name) in self._branch_to_sink:
+                child_items.append(
+                    self._nav.create_work_item(
+                        token=child_token,
+                        current_node_id=None,
+                    )
+                )
+            else:
+                child_items.append(
+                    self._nav.create_continuation_work_item(
+                        token=child_token,
+                        current_node_id=node_id,
+                        coalesce_name=cfg_coalesce_name,
+                    )
+                )
+
+        # NOTE: Parent FORKED outcome is now recorded atomically in fork_token()
+        # to eliminate crash window between child creation and outcome recording.
+        return _GateTerminal(
+            result=RowResult(
+                token=current_token,
+                final_data=current_token.row_data,
+                outcome=RowOutcome.FORKED,
+            )
+        )
+
+    def _validate_coalesce_ordering(
+        self,
+        token: TokenInfo,
+        current_node_id: NodeID | None,
+        coalesce_node_id: NodeID | None,
+        coalesce_name: CoalesceName | None,
+    ) -> None:
+        """Validate that tokens with coalesce metadata don't start downstream of their coalesce point.
+
+        A malformed work item starting past the coalesce node would silently skip coalesce handling
+        because _maybe_coalesce_token only triggers on exact node equality.
+
+        Raises:
+            OrchestrationInvariantError: If the token's starting node is downstream of its coalesce barrier.
+        """
+        if (
+            coalesce_node_id is not None
+            and current_node_id is not None
+            and coalesce_name is not None
+            and current_node_id != coalesce_node_id
+            and current_node_id in self._node_step_map
+            and coalesce_node_id in self._node_step_map
+        ):
+            current_step = self._node_step_map[current_node_id]
+            coalesce_step = self._node_step_map[coalesce_node_id]
+            if current_step > coalesce_step:
+                raise OrchestrationInvariantError(
+                    f"Token {token.token_id} started at node '{current_node_id}' (step {current_step}), "
+                    f"which is downstream of coalesce '{coalesce_name}' (step {coalesce_step}). "
+                    f"Work items with coalesce metadata must start at or before the coalesce point."
+                )
+
+    def _handle_terminal_token(
+        self,
+        current_token: TokenInfo,
+        current_on_success_sink: str,
+    ) -> RowResult:
+        """Handle a token that has traversed all nodes: resolve final sink, return result.
+
+        Determines the effective sink from:
+        1. branch_to_sink mapping (for fork branches routing directly to sinks)
+        2. last_on_success_sink (inherited from transforms or source)
+
+        If the token has a branch_name that maps to a direct sink via _branch_to_sink,
+        that takes precedence. Otherwise, the accumulated on_success sink is used.
+
+        Raises:
+            OrchestrationInvariantError: If no effective sink can be determined (indicates
+                a DAG construction or on_success configuration bug).
+
+        Returns:
+            RowResult with COMPLETED outcome and resolved sink_name.
+        """
+        # Determine sink name from explicit routing maps. Fork children
+        # targeting direct sinks are resolved via _branch_to_sink (built from
+        # DAG COPY edges at construction time). Non-fork tokens use the last
+        # transform's on_success or the source's on_success.
+        effective_sink = current_on_success_sink
+        if current_token.branch_name is not None:
+            branch = BranchName(current_token.branch_name)
+            if branch in self._branch_to_sink:
+                effective_sink = self._branch_to_sink[branch]
+
+        if not effective_sink or not effective_sink.strip():
+            raise OrchestrationInvariantError(
+                f"No effective sink for token {current_token.token_id}: "
+                f"last_on_success_sink={current_on_success_sink!r}, "
+                f"branch_name={current_token.branch_name!r}. "
+                f"This indicates a DAG construction or on_success configuration bug."
+            )
+
+        return RowResult(
+            token=current_token,
+            final_data=current_token.row_data,
+            outcome=RowOutcome.COMPLETED,
+            sink_name=effective_sink,
+        )
+
     def _process_single_token(
         self,
         token: TokenInfo,
@@ -1508,6 +1983,11 @@ class RowProcessor:
             - None for held coalesce tokens
         """
         current_token = token
+        # MUTATION CONTRACT: child_items is passed by reference to _handle_transform_node(),
+        # _handle_gate_node(), _notify_coalesce_of_lost_branch(), and _maybe_coalesce_token().
+        # These methods append child WorkItems (fork paths, deaggregation, coalesce merges)
+        # directly into this list. The caller returns child_items alongside the RowResult.
+        # Do NOT replace with return-value-based patterns without updating all call sites.
         child_items: list[WorkItem] = []
 
         # current_node_id=None skips traversal loop entirely, so only allow it
@@ -1529,25 +2009,7 @@ class RowProcessor:
                     context=f"start of token processing for token '{token.token_id}'",
                 )
 
-        # Invariant: tokens with coalesce metadata must not start downstream of their coalesce point.
-        # A malformed work item starting past the coalesce node would silently skip coalesce handling
-        # because _maybe_coalesce_token only triggers on exact node equality.
-        if (
-            coalesce_node_id is not None
-            and current_node_id is not None
-            and coalesce_name is not None
-            and current_node_id != coalesce_node_id
-            and current_node_id in self._node_step_map
-            and coalesce_node_id in self._node_step_map
-        ):
-            current_step = self._node_step_map[current_node_id]
-            coalesce_step = self._node_step_map[coalesce_node_id]
-            if current_step > coalesce_step:
-                raise OrchestrationInvariantError(
-                    f"Token {token.token_id} started at node '{current_node_id}' (step {current_step}), "
-                    f"which is downstream of coalesce '{coalesce_name}' (step {coalesce_step}). "
-                    f"Work items with coalesce metadata must start at or before the coalesce point."
-                )
+        self._validate_coalesce_ordering(token, current_node_id, coalesce_node_id, coalesce_name)
 
         node_id: NodeID | None = current_node_id
         max_inner_iterations = len(self._node_to_next) + 1
@@ -1592,291 +2054,45 @@ class RowProcessor:
                         coalesce_name=coalesce_name,
                     )
 
-                # Regular transform (with optional retry)
-                try:
-                    transform_result, current_token, error_sink = self._execute_transform_with_retry(
-                        transform=row_transform,
-                        token=current_token,
-                        ctx=ctx,
-                    )
-                    # Emit TransformCompleted telemetry AFTER Landscape recording succeeds
-                    # (Landscape recording happens inside _execute_transform_with_retry)
-                    self._emit_transform_completed(
-                        token=current_token,
-                        transform=row_transform,
-                        transform_result=transform_result,
-                    )
-                except MaxRetriesExceeded as e:
-                    # All retries exhausted - return FAILED outcome
-                    error_hash = hashlib.sha256(str(e).encode()).hexdigest()[:16]
-                    self._recorder.record_token_outcome(
-                        run_id=self._run_id,
-                        token_id=current_token.token_id,
-                        outcome=RowOutcome.FAILED,
-                        error_hash=error_hash,
-                    )
-                    # Emit TokenCompleted telemetry AFTER Landscape recording
-                    self._emit_token_completed(current_token, RowOutcome.FAILED)
-                    # Notify coalesce if this is a forked branch
-                    sibling_results = self._notify_coalesce_of_lost_branch(
-                        current_token,
-                        f"max_retries_exceeded:{e}",
-                        child_items,
-                    )
-                    current_result = RowResult(
-                        token=current_token,
-                        final_data=current_token.row_data,
-                        outcome=RowOutcome.FAILED,
-                        error=FailureInfo.from_max_retries_exceeded(e),
-                    )
-                    if sibling_results:
-                        return ([current_result, *sibling_results], child_items)
-                    return (current_result, child_items)
-
-                if transform_result.status == "error":
-                    # Determine outcome based on error routing
-                    if error_sink == "discard":
-                        # Intentionally discarded - QUARANTINED
-                        error_detail = str(transform_result.reason) if transform_result.reason else "unknown_error"
-                        quarantine_error_hash = hashlib.sha256(error_detail.encode()).hexdigest()[:16]
-                        self._recorder.record_token_outcome(
-                            run_id=self._run_id,
-                            token_id=current_token.token_id,
-                            outcome=RowOutcome.QUARANTINED,
-                            error_hash=quarantine_error_hash,
-                        )
-                        # Emit TokenCompleted telemetry AFTER Landscape recording
-                        self._emit_token_completed(current_token, RowOutcome.QUARANTINED)
-                        # Notify coalesce if this is a forked branch
-                        sibling_results = self._notify_coalesce_of_lost_branch(
-                            current_token,
-                            f"quarantined:{error_detail}",
-                            child_items,
-                        )
-                        current_result = RowResult(
-                            token=current_token,
-                            final_data=current_token.row_data,
-                            outcome=RowOutcome.QUARANTINED,
-                        )
-                        if sibling_results:
-                            return ([current_result, *sibling_results], child_items)
-                        return (current_result, child_items)
-                    else:
-                        # Routed to error sink
-                        # NOTE: Do NOT record ROUTED outcome here - the token hasn't been written yet.
-                        # SinkExecutor.write() records the outcome AFTER sink durability is achieved.
-                        # Notify coalesce if this is a forked branch
-                        error_detail = str(transform_result.reason) if transform_result.reason else "unknown_error"
-                        sibling_results = self._notify_coalesce_of_lost_branch(
-                            current_token,
-                            f"error_routed:{error_detail}",
-                            child_items,
-                        )
-                        current_result = RowResult(
-                            token=current_token,
-                            final_data=current_token.row_data,
-                            outcome=RowOutcome.ROUTED,
-                            sink_name=error_sink,
-                        )
-                        if sibling_results:
-                            return ([current_result, *sibling_results], child_items)
-                        return (current_result, child_items)
-
-                # Track on_success for sink routing at end of chain
-                if row_transform.on_success is not None:
-                    last_on_success_sink = row_transform.on_success
-
-                # Handle multi-row output (deaggregation)
-                # NOTE: This is ONLY for non-aggregation transforms. Aggregation
-                # transforms route through _process_batch_aggregation_node() above.
-                if transform_result.is_multi_row:
-                    # Validate transform is allowed to create tokens
-                    if not row_transform.creates_tokens:
-                        raise RuntimeError(
-                            f"Transform '{row_transform.name}' returned multi-row result "
-                            f"but has creates_tokens=False. Either set creates_tokens=True "
-                            f"or return single row via TransformResult.success(row). "
-                            f"(Multi-row is allowed in aggregation passthrough mode.)"
-                        )
-
-                    # Deaggregation: create child tokens for each output row
-                    # NOTE: Parent EXPANDED outcome is recorded atomically in expand_token()
-
-                    # is_multi_row check above guarantees rows is not None
-                    assert transform_result.rows is not None, "is_multi_row guarantees rows is not None"
-                    # Contract consistency is enforced by TransformResult.success_multi()
-                    output_contract = transform_result.rows[0].contract
-                    child_tokens, _expand_group_id = self._token_manager.expand_token(
-                        parent_token=current_token,
-                        expanded_rows=[r.to_dict() for r in transform_result.rows],
-                        output_contract=output_contract,
-                        node_id=node_id,
-                        run_id=self._run_id,
-                    )
-
-                    # Queue each child for continued processing.
-                    # Pass last_on_success_sink so terminal children inherit the
-                    # expanding transform's sink instead of defaulting to source_on_success.
-                    for child_token in child_tokens:
-                        child_coalesce_name = coalesce_name if coalesce_name is not None and child_token.branch_name is not None else None
-                        child_items.append(
-                            self._nav.create_continuation_work_item(
-                                token=child_token,
-                                current_node_id=node_id,
-                                coalesce_name=child_coalesce_name,
-                                on_success_sink=last_on_success_sink,
-                            )
-                        )
-
-                    # NOTE: Parent EXPANDED outcome is recorded atomically in expand_token()
-                    # to eliminate crash window between child creation and outcome recording.
-                    return (
-                        RowResult(
-                            token=current_token,
-                            final_data=current_token.row_data,
-                            outcome=RowOutcome.EXPANDED,
-                        ),
-                        child_items,
-                    )
-
-                # Single row output (existing logic - current_token already updated
-                # by _execute_transform_with_retry, continues to next transform)
+                # NOTE: child_items is mutated inside (deagg appends, coalesce notifications).
+                transform_outcome = self._handle_transform_node(
+                    row_transform,
+                    current_token,
+                    ctx,
+                    node_id,
+                    child_items,
+                    coalesce_node_id,
+                    coalesce_name,
+                    last_on_success_sink,
+                )
+                if isinstance(transform_outcome, _TransformTerminal):
+                    return transform_outcome.result, child_items
+                current_token = transform_outcome.updated_token
+                last_on_success_sink = transform_outcome.updated_sink
             elif isinstance(plugin, GateSettings):
-                gate_config = plugin
-                outcome = self._gate_executor.execute_config_gate(
-                    gate_config=gate_config,
-                    node_id=node_id,
-                    token=current_token,
-                    ctx=ctx,
-                    token_manager=self._token_manager,
+                # NOTE: child_items is mutated inside (fork paths, coalesce notifications).
+                gate_outcome = self._handle_gate_node(
+                    plugin,
+                    current_token,
+                    ctx,
+                    node_id,
+                    child_items,
+                    coalesce_node_id,
+                    coalesce_name,
+                    last_on_success_sink,
                 )
-                current_token = outcome.updated_token
-
-                # Emit GateEvaluated telemetry AFTER Landscape recording succeeds
-                # (Landscape recording happens inside execute_config_gate)
-                self._emit_gate_evaluated(
-                    token=current_token,
-                    gate_name=gate_config.name,
-                    gate_node_id=node_id,
-                    routing_mode=outcome.result.action.mode,
-                    destinations=self._get_gate_destinations(outcome),
-                )
-
-                # Check if gate routed to a sink
-                if outcome.sink_name is not None:
-                    # NOTE: Do NOT record ROUTED outcome here - the token hasn't been written yet.
-                    # SinkExecutor.write() records the outcome AFTER sink durability is achieved.
-                    # Notify coalesce if this is a forked branch
-                    sibling_results = self._notify_coalesce_of_lost_branch(
-                        current_token,
-                        f"gate_routed_to_sink:{outcome.sink_name}",
-                        child_items,
-                    )
-                    current_result = RowResult(
-                        token=current_token,
-                        final_data=current_token.row_data,
-                        outcome=RowOutcome.ROUTED,
-                        sink_name=outcome.sink_name,
-                    )
-                    if sibling_results:
-                        return ([current_result, *sibling_results], child_items)
-                    return (current_result, child_items)
-                elif outcome.result.action.kind == RoutingKind.FORK_TO_PATHS:
-                    for child_token in outcome.child_tokens:
-                        # Look up coalesce info for this branch
-                        cfg_branch_name = child_token.branch_name
-                        cfg_coalesce_name: CoalesceName | None = None
-
-                        if cfg_branch_name and BranchName(cfg_branch_name) in self._branch_to_coalesce:
-                            cfg_coalesce_name = self._branch_to_coalesce[BranchName(cfg_branch_name)]
-
-                        # See plugin gate fork handler above for routing logic.
-                        if cfg_coalesce_name is None and cfg_branch_name and BranchName(cfg_branch_name) in self._branch_to_sink:
-                            child_items.append(
-                                self._nav.create_work_item(
-                                    token=child_token,
-                                    current_node_id=None,
-                                )
-                            )
-                        else:
-                            child_items.append(
-                                self._nav.create_continuation_work_item(
-                                    token=child_token,
-                                    current_node_id=node_id,
-                                    coalesce_name=cfg_coalesce_name,
-                                )
-                            )
-
-                    # NOTE: Parent FORKED outcome is now recorded atomically in fork_token()
-                    # to eliminate crash window between child creation and outcome recording.
-                    return (
-                        RowResult(
-                            token=current_token,
-                            final_data=current_token.row_data,
-                            outcome=RowOutcome.FORKED,
-                        ),
-                        child_items,
-                    )
-                elif outcome.next_node_id is not None:
-                    resolved_sink = self._nav.resolve_jump_target_sink(outcome.next_node_id)
-                    if resolved_sink is not None:
-                        last_on_success_sink = resolved_sink
-                    node_id = outcome.next_node_id
-
-                    # Re-validate coalesce ordering invariant after gate jump.
-                    # The initial check at entry only validates the starting node.
-                    # A gate jump can move the token past its coalesce node,
-                    # which would silently bypass join handling.
-                    if coalesce_node_id is not None:
-                        jump_target_step = self._node_step_map.get(node_id)
-                        coalesce_barrier_step = self._node_step_map.get(coalesce_node_id)
-                        if jump_target_step is not None and coalesce_barrier_step is not None and jump_target_step > coalesce_barrier_step:
-                            raise OrchestrationInvariantError(
-                                f"Gate jump moved token '{current_token.token_id}' to node '{node_id}' "
-                                f"(step {jump_target_step}) which is past its coalesce node '{coalesce_node_id}' "
-                                f"(step {coalesce_barrier_step}). This would bypass join handling."
-                            )
-
+                if isinstance(gate_outcome, _GateTerminal):
+                    return gate_outcome.result, child_items
+                current_token = gate_outcome.updated_token
+                last_on_success_sink = gate_outcome.updated_sink
+                if gate_outcome.next_node_id is not None:
+                    node_id = gate_outcome.next_node_id
                     continue
-                else:
-                    # CONTINUE: config gate says "proceed to next structural node."
-                    # Falls through to node_id = next_node_id below.
-                    if outcome.result.action.kind != RoutingKind.CONTINUE:
-                        raise OrchestrationInvariantError(
-                            f"Unhandled config gate routing kind {outcome.result.action.kind!r} "
-                            f"for token {current_token.token_id} at node '{node_id}'. "
-                            f"Expected CONTINUE when no sink_name, fork, or next_node_id is set."
-                        )
 
             else:
                 raise TypeError(f"Unknown transform type: {type(plugin).__name__}. Expected TransformProtocol or GateSettings.")
 
             node_id = next_node_id
 
-        # Determine sink name from explicit routing maps. Fork children
-        # targeting direct sinks are resolved via _branch_to_sink (built from
-        # DAG COPY edges at construction time). Non-fork tokens use the last
-        # transform's on_success or the source's on_success.
-        effective_sink = last_on_success_sink
-        if current_token.branch_name is not None:
-            branch = BranchName(current_token.branch_name)
-            if branch in self._branch_to_sink:
-                effective_sink = self._branch_to_sink[branch]
-
-        if not effective_sink or not effective_sink.strip():
-            raise OrchestrationInvariantError(
-                f"No effective sink for token {current_token.token_id}: "
-                f"last_on_success_sink={last_on_success_sink!r}, "
-                f"branch_name={current_token.branch_name!r}. "
-                f"This indicates a DAG construction or on_success configuration bug."
-            )
-
-        return (
-            RowResult(
-                token=current_token,
-                final_data=current_token.row_data,
-                outcome=RowOutcome.COMPLETED,
-                sink_name=effective_sink,
-            ),
-            child_items,
-        )
+        result = self._handle_terminal_token(current_token, last_on_success_sink)
+        return result, child_items

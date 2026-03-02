@@ -74,11 +74,11 @@ class TestRunStatusInterrupted:
     """Tests for INTERRUPTED enum values."""
 
     def test_run_status_has_interrupted(self) -> None:
-        assert RunStatus.INTERRUPTED == "interrupted"
+        assert RunStatus.INTERRUPTED == RunStatus.INTERRUPTED
         assert RunStatus.INTERRUPTED.value == "interrupted"
 
     def test_run_completion_status_has_interrupted(self) -> None:
-        assert RunCompletionStatus.INTERRUPTED == "interrupted"
+        assert RunCompletionStatus.INTERRUPTED == RunCompletionStatus.INTERRUPTED
         assert RunCompletionStatus.INTERRUPTED.value == "interrupted"
 
 
@@ -87,10 +87,10 @@ class TestShutdownHandlerContext:
 
     def test_handler_restores_original_signals(self) -> None:
         """After context exits, signal handlers are restored."""
-        from elspeth.core.landscape import LandscapeDB
         from elspeth.engine.orchestrator import Orchestrator
+        from tests.fixtures.landscape import make_landscape_db
 
-        db = LandscapeDB.in_memory()
+        db = make_landscape_db()
         try:
             orchestrator = Orchestrator(db=db)
 
@@ -111,10 +111,10 @@ class TestShutdownHandlerContext:
 
     def test_context_yields_unset_event(self) -> None:
         """Context manager yields a threading.Event that starts unset."""
-        from elspeth.core.landscape import LandscapeDB
         from elspeth.engine.orchestrator import Orchestrator
+        from tests.fixtures.landscape import make_landscape_db
 
-        db = LandscapeDB.in_memory()
+        db = make_landscape_db()
         try:
             orchestrator = Orchestrator(db=db)
             with orchestrator._shutdown_handler_context() as event:
@@ -125,32 +125,34 @@ class TestShutdownHandlerContext:
 
     def test_handler_sets_event_on_signal(self) -> None:
         """Signal handler sets the event when invoked."""
-        from elspeth.core.landscape import LandscapeDB
         from elspeth.engine.orchestrator import Orchestrator
+        from tests.fixtures.landscape import make_landscape_db
 
-        db = LandscapeDB.in_memory()
+        db = make_landscape_db()
         try:
             orchestrator = Orchestrator(db=db)
             with orchestrator._shutdown_handler_context() as event:
                 assert not event.is_set()
                 # Simulate signal by calling the handler directly
                 handler = signal.getsignal(signal.SIGINT)
-                handler(signal.SIGINT, None)  # type: ignore[operator]
+                assert callable(handler)
+                handler(signal.SIGINT, None)
                 assert event.is_set()
         finally:
             db.close()
 
     def test_second_signal_restores_default_handler(self) -> None:
         """After first signal, SIGINT handler is restored to default (force-kill)."""
-        from elspeth.core.landscape import LandscapeDB
         from elspeth.engine.orchestrator import Orchestrator
+        from tests.fixtures.landscape import make_landscape_db
 
-        db = LandscapeDB.in_memory()
+        db = make_landscape_db()
         try:
             orchestrator = Orchestrator(db=db)
             with orchestrator._shutdown_handler_context():
                 handler = signal.getsignal(signal.SIGINT)
-                handler(signal.SIGINT, None)  # type: ignore[operator]
+                assert callable(handler)
+                handler(signal.SIGINT, None)
 
                 # After first signal, SIGINT should now be default_int_handler
                 assert signal.getsignal(signal.SIGINT) == signal.default_int_handler

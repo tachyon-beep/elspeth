@@ -1,4 +1,3 @@
-# src/elspeth/core/config.py
 """
 Configuration schema and loading for Elspeth pipelines.
 
@@ -16,6 +15,7 @@ import yaml
 from pydantic import BaseModel, Field, field_validator, model_validator
 
 from elspeth.contracts.enums import OutputMode, RunMode
+from elspeth.contracts.security import SecretFingerprintError as SecretFingerprintError
 
 # Reserved edge labels that cannot be used as user-defined routing names.
 # "continue" is used for sequential edges, "fork" is a gate-only routing action,
@@ -220,20 +220,6 @@ class SecretsConfig(BaseModel):
         return self
 
 
-class SecretFingerprintError(Exception):
-    """Raised when secret fingerprinting fails.
-
-    This occurs when:
-    - Secret-like field names are found in config but ELSPETH_FINGERPRINT_KEY
-      is not set and ELSPETH_ALLOW_RAW_SECRETS is not 'true'
-    - A config dict contains both a secret field (e.g., 'api_key') and the
-      corresponding fingerprint field ('api_key_fingerprint'), which would
-      allow the pre-existing value to overwrite the computed HMAC fingerprint
-    """
-
-    pass
-
-
 class TriggerConfig(BaseModel):
     """Trigger configuration for aggregation batches.
 
@@ -292,7 +278,7 @@ class TriggerConfig(BaseModel):
         if v is None:
             return v
 
-        from elspeth.engine.expression_parser import (
+        from elspeth.core.expression_parser import (
             ExpressionParser,
             ExpressionSecurityError,
             ExpressionSyntaxError,
@@ -403,6 +389,7 @@ class AggregationSettings(BaseModel):
         aggregations:
           - name: batch_stats
             plugin: stats_aggregation
+            on_error: discard
             trigger:
               count: 100
             output_mode: transform
@@ -420,6 +407,9 @@ class AggregationSettings(BaseModel):
     on_success: str | None = Field(
         default=None,
         description="Connection name or sink name for aggregation output",
+    )
+    on_error: str = Field(
+        description="Sink name for rows that fail batch processing, or 'discard'",
     )
     trigger: TriggerConfig = Field(description="When to flush the batch")
     output_mode: OutputMode = Field(
@@ -548,7 +538,7 @@ class GateSettings(BaseModel):
     @classmethod
     def validate_condition_expression(cls, v: str) -> str:
         """Validate that condition is a valid expression at config time."""
-        from elspeth.engine.expression_parser import (
+        from elspeth.core.expression_parser import (
             ExpressionParser,
             ExpressionSecurityError,
             ExpressionSyntaxError,
@@ -636,7 +626,7 @@ class GateSettings(BaseModel):
         `row['amount'] > 1000` is a config error - the expression evaluates to
         True/False, not "above"/"below".
         """
-        from elspeth.engine.expression_parser import ExpressionParser
+        from elspeth.core.expression_parser import ExpressionParser
 
         parser = ExpressionParser(self.condition)
         if parser.is_boolean_expression():
@@ -1991,7 +1981,7 @@ def load_settings(config_path: Path) -> ElspethSettings:
         ValidationError: If configuration fails Pydantic validation
         FileNotFoundError: If config file doesn't exist
     """
-    from dynaconf import Dynaconf  # type: ignore[attr-defined]  # dynaconf has no type stubs
+    from dynaconf import Dynaconf
 
     # Explicit check for file existence (Dynaconf silently accepts missing files)
     if not config_path.exists():

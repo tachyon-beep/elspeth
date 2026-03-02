@@ -1,7 +1,7 @@
-# ELSPETH Feature Inventory - February 13, 2026
+# ELSPETH Feature Inventory - March 1, 2026
 
-**Version:** RC-3
-**Purpose:** Complete inventory of what ELSPETH actually does today, reconciled against the original architecture.md (Jan 12) and requirements.md (Jan 22).
+**Version:** RC-3.3
+**Purpose:** Complete inventory of what ELSPETH actually does today, reconciled against the original architecture.md (Jan 12) and requirements.md (Jan 22). Updated for RC-3.3 architectural remediation.
 
 **This document is the truth.** If code exists, it's listed. If it's listed but doesn't exist, that's a bug in this document.
 
@@ -9,19 +9,19 @@
 
 ## EVOLUTION SUMMARY
 
-| Aspect | Original Vision (Jan 12) | Current Reality (Feb 13, RC-3) |
+| Aspect | Original Vision (Jan 12) | Current Reality (Mar 1, RC-3.3) |
 |--------|-------------------------|-------------------------|
 | Execution Model | Linear pipeline with gates | Full DAG with fork/coalesce, declarative wiring |
 | Routing | continue, route_to_sink | Declarative `on_success`/`input` routing (ADR-004, ADR-005) |
 | Gates | Plugin-based gate system | Config-driven only (GateSettings + ExpressionParser) |
 | Aggregation | "accumulate state until trigger" | Count, timeout, condition triggers with flush |
 | Token Identity | row_id sufficient | row_id + token_id + parent_token_id |
-| LLM Integration | "Phase 6 future work" | 6 LLM transforms, structured outputs, batch API |
+| LLM Integration | "Phase 6 future work" | Unified LLMTransform with provider dispatch (azure/openrouter), single/multi-query strategies, 2 batch transforms |
 | Analysis Tools | "elspeth explain" | MCP server with 20+ analysis tools |
 | Field Handling | Assumed clean input | Full normalization pipeline with collision detection |
 | Shutdown | Not addressed | Cooperative graceful shutdown with checkpoint + resume |
 | Telemetry | Not addressed | OpenTelemetry with OTLP, Azure Monitor, Datadog exporters |
-| Testing | Manual | 8,138 automated tests (unit, integration, e2e, property, performance) |
+| Testing | Manual | ~10,500 automated tests (unit, integration, e2e, property, performance) |
 
 ---
 
@@ -42,7 +42,7 @@
 - Field normalization with collision detection
 - Guaranteed fields declaration for downstream validation
 
-### 1.2 Transforms (18)
+### 1.2 Transforms (13)
 
 #### Core Transforms (8)
 
@@ -55,6 +55,7 @@
 | JSON Explode | `json_explode` | Row (forking) | 1→N | Expand JSON arrays to multiple rows |
 | Batch Stats | `batch_stats` | Batch-aware | N→1 | Compute statistics over batch |
 | Batch Replicate | `batch_replicate` | Batch-aware | N→M | Replicate rows N times |
+| Web Scrape | `web_scrape` | Row | 1→1 | Extract content from web pages with fingerprinting |
 
 #### Azure Transforms (2)
 
@@ -63,16 +64,13 @@
 | Azure Content Safety | `azure_content_safety` | LLM | Detect harmful content |
 | Azure Prompt Shield | `azure_prompt_shield` | LLM | Detect prompt injection |
 
-#### LLM Transforms (6)
+#### LLM Transforms (3)
 
 | Plugin Name | Config Key | Type | Provider | Features |
 |-------------|-----------|------|----------|----------|
-| Azure LLM | `azure_llm` | LLM | Azure OpenAI | Single-row classification, template prompts |
-| Azure Batch LLM | `azure_batch` | Batch LLM | Azure OpenAI Batch API | 50% cost savings, async processing |
-| Azure Multi-Query | `azure_multi_query` | Batch LLM | Azure OpenAI | Multiple prompts per row, structured output |
-| OpenRouter LLM | `openrouter` | LLM | OpenRouter (100+ providers) | Multi-provider access |
-| OpenRouter Multi-Query | `openrouter_multi_query` | Batch LLM | OpenRouter | Multiple prompts, structured output |
-| Multi-Query (Generic) | `multi_query` | LLM | Configurable | Cross-product evaluation |
+| LLM Transform | `llm` | LLM | Azure OpenAI, OpenRouter | Unified transform with provider dispatch (azure/openrouter), single-query and multi-query strategies, template prompts, structured output |
+| Azure Batch LLM | `azure_batch_llm` | Batch LLM | Azure OpenAI Batch API | 50% cost savings, async processing |
+| OpenRouter Batch LLM | `openrouter_batch_llm` | Batch LLM | OpenRouter Batch HTTP | Batch HTTP processing via OpenRouter |
 
 **LLM Capabilities:**
 - Jinja2 template-based prompting
@@ -263,7 +261,7 @@ Gates are **config-driven system operations**, not plugins. Gate plugins were de
 
 | Command | Status | Purpose |
 |---------|--------|---------|
-| `elspeth run` | ⚠️ Partial | Execute pipeline (PayloadStore not wired) |
+| `elspeth run` | ✅ Working | Execute pipeline with PayloadStore |
 | `elspeth validate` | ✅ | Validate configuration |
 | `elspeth explain` | ⚠️ Partial | Lineage explorer (TUI preview) |
 | `elspeth plugins list` | ✅ | List available plugins |
@@ -499,7 +497,7 @@ All gate plugin infrastructure deliberately removed (~3,000 lines deleted):
 
 **Commits:** 7-phase migration (`f62aa1a3` through `9c657fb7`)
 
-- 8,138 tests (8,037 passed, 16 skipped, 3 xfailed)
+- ~10,563 tests at RC-3.3 (grown from initial 8,138 at cutover)
 - Phase 0+1: Scaffolding + factories
 - Phase 2A: Contracts (1,142 tests)
 - Phase 2B+2C+2D: Core + engine + plugins (3,823 tests)
@@ -549,6 +547,28 @@ All gate plugin infrastructure deliberately removed (~3,000 lines deleted):
 - Records vault source, HMAC fingerprint, latency for every secret loaded
 - Azure Key Vault and environment variable sources audited
 
+### 8.19 Per-Branch Transforms (ARCH-15) — RC-3
+
+**Commit:** `83a6d40a`
+
+- Per-branch transforms between fork and coalesce nodes
+- Enables distinct processing on each parallel path
+- 23 tests
+
+### 8.20 LLM Transform Consolidation (T10) — RC-3.3
+
+- Unified 6 separate LLM transforms into single `LLMTransform` with provider dispatch
+- Provider selection via config: `azure` or `openrouter`
+- Strategy selection: single-query or multi-query
+- Batch transforms remain separate: `azure_batch_llm`, `openrouter_batch_llm`
+
+### 8.21 Plugins Restructure — RC-3.3
+
+**Commits:** `ec1f668c`, `4045362e`, `8e120814`
+
+- Restructured `plugins/` into 4 SDA-aligned subfolders: `infrastructure/`, `sources/`, `transforms/`, `sinks/`
+- Updated all imports and patch targets across test suite
+
 ---
 
 ## 9. NOT IMPLEMENTED (Deferred)
@@ -568,7 +588,6 @@ All gate plugin infrastructure deliberately removed (~3,000 lines deleted):
 | Concurrent processing integration | Phase 5 | Config exists, not wired |
 | Circuit breaker for retry logic | RC-3+ | FEAT-06 deferred |
 | CLI `status`/`export`/`db migrate` | RC-3+ | FEAT-04 deferred |
-| Per-branch transforms between fork/coalesce | RC-3+ | ARCH-15 — fork branches wire directly to coalesce |
 | Prometheus/pull metrics | RC-3+ | OBS-04 deferred |
 
 ---
@@ -592,7 +611,6 @@ All gate plugin infrastructure deliberately removed (~3,000 lines deleted):
 ## 11. REQUIREMENTS.MD GAPS
 
 ### In requirements.md but not fully implemented:
-- CLI-016: `elspeth run` PayloadStore wiring
 - FAI-009: Every token reaches terminal state (edge case gaps remain)
 
 ### Working but not in requirements.md:
@@ -609,9 +627,11 @@ All gate plugin infrastructure deliberately removed (~3,000 lines deleted):
 - SQLCipher encrypted audit databases
 - Secret resolution audit trail
 - Contract propagation for complex fields
+- Per-branch transforms between fork/coalesce (ARCH-15)
+- Unified LLM transform with provider dispatch (T10 consolidation)
+- Plugins restructured into SDA-aligned subfolders
 
 ---
 
 *Inventory completed: January 29, 2026*
-*Updated: February 13, 2026 (RC-3 quality sprint)*
-*Next update: After RC-3 release*
+*Updated: March 2, 2026 (RC-3.3 architectural remediation)*

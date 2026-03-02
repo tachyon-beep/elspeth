@@ -27,7 +27,7 @@ import pytest
 from hypothesis import given, settings
 from hypothesis import strategies as st
 
-from elspeth.plugins.batching.row_reorder_buffer import (
+from elspeth.plugins.infrastructure.batching.row_reorder_buffer import (
     RowReorderBuffer,
     ShutdownError,
 )

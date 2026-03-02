@@ -4,7 +4,8 @@
 import pytest
 
 from elspeth.contracts.config import RuntimeRetryConfig
-from elspeth.engine.retry import MaxRetriesExceeded, RetryManager
+from elspeth.contracts.errors import MaxRetriesExceeded
+from elspeth.engine.retry import RetryManager
 
 
 class TestRetryManager:

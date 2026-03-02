@@ -1,10 +1,10 @@
-# ELSPETH RC-3 Release Validation Checklist
+# ELSPETH RC-3.3 Release Validation Checklist
 
 **Purpose:** What MUST work before shipping RC-3. This is not a feature list - it's the minimum bar for release.
 
 **Criterion:** If any item fails, RC-3 cannot ship.
 
-**Branch:** `RC3-quality-sprint`
+**Branch:** `RC3.3-architectural-remediation`
 
 **Legend:** `[ ]` unchecked (awaiting verification); `[KNOWN LIMITATION]` acceptable RC-3 limitation (see list below).
 
@@ -181,7 +181,7 @@ The routing trilogy (ADR-004, ADR-005) replaced implicit pipeline wiring with ex
 
 ### 5.3 LLM Transforms (if using LLM pack)
 
-- [ ] Azure LLM transform calls API and records response
+- [ ] Unified LLM transform calls API and records response (provider dispatch: Azure, OpenRouter)
 - [ ] Template variables substituted correctly
 - [ ] Structured output mode returns parsed JSON
 - [ ] Rate limiting prevents 429 errors
@@ -333,7 +333,7 @@ The routing trilogy (ADR-004, ADR-005) replaced implicit pipeline wiring with ex
 - [ ] No orphan records
 - [ ] Unique constraints respected
 - [ ] Composite primary key (node_id, run_id) on nodes table handled correctly
-- [ ] NodeRepository schema_fields_json shape validated
+- [ ] NodeLoader schema_fields_json shape validated
 - [ ] Scalar CSV audit validation enforced
 
 ---
@@ -363,7 +363,7 @@ The routing trilogy (ADR-004, ADR-005) replaced implicit pipeline wiring with ex
 
 - [x] v2 migration complete: `tests_v2/` renamed to `tests/`
 - [x] Old v1 suite deleted (507 files, 222K lines)
-- [ ] 8,138+ tests collected
+- [ ] 10,482+ tests collected
 - [ ] All imports rewritten (204 imports across 123 files)
 - [ ] pyproject.toml test configuration updated
 
@@ -388,8 +388,8 @@ The routing trilogy (ADR-004, ADR-005) replaced implicit pipeline wiring with ex
 
 ### 12.1 Version Strings (F-01)
 
-- [ ] All version references updated to RC-3 / 0.3.0
-- [ ] `pyproject.toml` version is `0.3.0`
+- [ ] All version references updated to RC-3.3 / 0.3.3
+- [ ] `pyproject.toml` version is `0.3.3`
 - [ ] `src/elspeth/__init__.py` version matches pyproject.toml
 
 ### 12.2 Gate Plugin Removal (F-03)
@@ -423,7 +423,79 @@ The routing trilogy (ADR-004, ADR-005) replaced implicit pipeline wiring with ex
 
 ---
 
-## KNOWN ISSUES ACCEPTABLE FOR RC-3
+## 13. ARCHITECTURAL REMEDIATION (RC-3.3)
+
+### 13.1 LLM Plugin Consolidation (T10)
+
+- [ ] Unified `LLMTransform` dispatches to correct provider (Azure, OpenRouter)
+- [ ] Old plugin names (`azure_llm`, `openrouter_llm`, etc.) raise `ValueError` with migration guidance
+- [ ] `SingleQueryStrategy` and `MultiQueryStrategy` produce correct output
+- [ ] Langfuse tracing works with unified transform
+- [ ] Batch LLM plugins (`azure_batch_llm`, `openrouter_batch_llm`) unchanged and functional
+
+### 13.2 Frozen Audit Records (T1)
+
+- [ ] All 25 dataclasses in `contracts/audit.py` are `frozen=True`
+- [ ] Mutation attempts raise `FrozenInstanceError`
+- [ ] No test or production code mutates audit records after construction
+
+### 13.3 Assert Removal (T2)
+
+- [ ] No `assert` statements in plugin files (replaced with `if/raise RuntimeError`)
+- [ ] Safety checks survive `python -O` execution
+
+### 13.4 Truthiness Checks (T3)
+
+- [ ] Zero values (`0`, `0.0`) not silently excluded by `if x:` patterns
+- [ ] Empty strings not silently excluded
+- [ ] All checks use explicit `is not None` comparisons
+
+### 13.5 Layer Enforcement (T6, T7, ADR-006)
+
+- [ ] `enforce_tier_model.py check` passes with 0 violations
+- [ ] No `contracts/` → `engine/` imports (L0→L2)
+- [ ] No `contracts/` → `plugins/` imports (L0→L3)
+- [ ] No `core/` → `engine/` imports (L1→L2)
+- [ ] `ExpressionParser` lives in `core/` (not `engine/`)
+- [ ] `MaxRetriesExceeded` lives in `contracts/errors.py`
+- [ ] `BufferEntry` lives in `contracts/engine.py`
+
+### 13.6 PluginContext Protocol Split (T17)
+
+- [ ] `SourceContext` protocol exists in `contracts/contexts.py`
+- [ ] `TransformContext` protocol exists in `contracts/contexts.py`
+- [ ] `SinkContext` protocol exists in `contracts/contexts.py`
+- [ ] `LifecycleContext` protocol exists in `contracts/contexts.py`
+- [ ] Concrete `PluginContext` structurally satisfies all 4 protocols
+- [ ] Plugin method signatures use narrowed protocol types
+
+### 13.7 Orchestrator Decomposition (T18)
+
+- [ ] No method in `orchestrator/core.py` exceeds 150 lines
+- [ ] No method in `processor.py` exceeds 150 lines
+- [ ] `GraphArtifacts` uses `MappingProxyType` for immutable config
+
+### 13.8 Landscape Repository Pattern (T19)
+
+- [ ] `RunLifecycleRepository` handles run lifecycle operations
+- [ ] `ExecutionRepository` handles node states and call tracking
+- [ ] `DataFlowRepository` handles rows, tokens, and errors
+- [ ] `QueryRepository` handles read-only cross-cutting queries
+- [ ] `LandscapeRecorder` is pure delegation (no logic in facade)
+- [ ] Model loaders renamed from `*Repository` to `*Loader`
+
+### 13.9 Plugins Restructure
+
+- [ ] `plugins/infrastructure/` contains shared base classes and protocols
+- [ ] `plugins/sources/` contains all source plugins
+- [ ] `plugins/transforms/` contains all transform plugins
+- [ ] `plugins/sinks/` contains all sink plugins
+- [ ] All import paths updated (no `plugins.base` imports remain)
+- [ ] Tier-model allowlist updated for new paths
+
+---
+
+## KNOWN ISSUES ACCEPTABLE FOR RC-3.3
 
 These are documented limitations, not blockers:
 

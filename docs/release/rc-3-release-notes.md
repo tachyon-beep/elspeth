@@ -1,13 +1,160 @@
 # ELSPETH RC-3 Release Notes
 
-**Date:** February 2026
-**Version:** 0.3.0
-**Branch:** `RC3-quality-sprint`
-**Commits since RC-2:** 117
+**Date:** February--March 2026
+**Version:** 0.3.3
+**Branch:** `RC3-quality-sprint`, `RC3.3-architectural-remediation`
+**Commits since RC-2:** 200+
 
 ---
 
-## Highlights
+## RC-3.3 — Architectural Remediation (March 2026)
+
+4-phase remediation sprint driven by full architecture analysis (23 documents). Focus: audit integrity hardening, layer enforcement, plugin decomposition, and elimination of defensive-pattern violations.
+
+**Branch:** `RC3.3-architectural-remediation`
+
+### Highlights
+
+- **LLM plugin consolidation (T10)** — 6 LLM transforms collapsed into unified `LLMTransform` with provider dispatch (~3,300 lines removed)
+- **Frozen audit records (T1)** — All 25 dataclasses in `contracts/audit.py` frozen, preventing silent Tier 1 audit trail corruption
+- **PluginContext protocol split (T17)** — God-object `PluginContext` decomposed into 4 phase-based protocols (`SourceContext`, `TransformContext`, `SinkContext`, `LifecycleContext`)
+- **Orchestrator decomposition (T18)** — Extract-method refactoring of the two largest engine files to ≤150 line methods
+- **Landscape repository pattern (T19)** — `LandscapeRecorder` refactored from 8 mixins into 4 composed domain repositories
+- **Plugins restructure** — Flat `plugins/` directory reorganized into 4 SDA-aligned subfolders (`infrastructure/`, `sources/`, `transforms/`, `sinks/`)
+- **Layer enforcement (T6, T7, ADR-006)** — 10 cross-layer violations eliminated, strict 4-layer model enforced by CI
+
+### Breaking Changes (RC-3.3)
+
+- **LLM plugin names changed:** `azure_llm`, `openrouter_llm`, `azure_multi_query_llm`, `openrouter_multi_query_llm` replaced by unified `plugin: llm` with `provider: azure|openrouter` and `mode: single|multi_query`
+- **Plugin import paths changed:** `plugins.base` → `plugins.infrastructure.base`, `plugins.config_base` → `plugins.infrastructure.config_base`, etc.
+- **Model loader renames:** 15 DTO mapper classes renamed from `*Repository` to `*Loader` (e.g., `RunRepository` → `RunLoader`, `repositories.py` → `model_loaders.py`)
+
+### Architecture Changes (RC-3.3)
+
+#### T10: LLM Plugin Consolidation
+
+Collapsed 6 LLM transform classes (~4,950 lines) into unified `LLMTransform` with strategy pattern:
+- `LLMProvider` protocol handles transport (Azure SDK vs OpenRouter HTTP)
+- `SingleQueryStrategy` / `MultiQueryStrategy` handle row logic
+- Shared `LangfuseTracer` handles tracing
+- Old plugin names raise `ValueError` with migration guidance
+- 16 example YAMLs and 10 docs updated
+
+#### T1: Frozen Audit Records
+
+Added `frozen=True` to all 16 previously-mutable audit record dataclasses. All 25 dataclasses in `contracts/audit.py` are now immutable. Mutations crash at the mutation site instead of silently corrupting the audit trail.
+
+#### T2: Assert Removal
+
+Replaced 18 `assert` statements across 10 plugin files with explicit `if/raise RuntimeError` patterns. Python's `-O` flag strips asserts, silently removing safety checks.
+
+#### T3: Truthiness Checks
+
+Fixed 21 truthiness checks across 8 files. Python's `if x:` silently excludes valid zero values (`0`, `0.0`) and empty strings. All replaced with explicit `is not None` checks.
+
+#### T6--T7: Layer Violation Fixes
+
+- T6: Moved `ExpressionParser` from `engine/` to `core/` (L1→L2 violation)
+- T7: Moved `MaxRetriesExceeded` to `contracts/errors.py`, `BufferEntry` to `contracts/engine.py` (L0→L2/L3 violations)
+- New `RuntimeServiceRateLimit` frozen dataclass replaces runtime L0→L1 import
+
+#### T17: PluginContext Protocol Split
+
+Decomposed god-object `PluginContext` (20+ fields) into 4 phase-based protocols:
+- `SourceContext` (11 fields) — for `load()` methods
+- `TransformContext` (12 fields) — for `process()` / `accept()` methods
+- `SinkContext` (7 fields) — for `write()` methods
+- `LifecycleContext` (7 fields) — for `on_start()` / `on_complete()` methods
+
+23 plugin files updated. Concrete `PluginContext` structurally satisfies all 4 protocols.
+
+#### T18: Orchestrator/Processor Decomposition
+
+Pure extract-method refactoring:
+- 7 methods extracted from `orchestrator/core.py` (largest: `_run_main_processing_loop` ~200→~90 lines)
+- 3 methods extracted from `processor.py`
+- New typed infrastructure: `GraphArtifacts`, `RunContext`, `LoopContext` parameter bundles
+
+#### T19: Landscape Repository Pattern
+
+Refactored `LandscapeRecorder` from 8 mixins into 4 composed domain repositories:
+- `RunLifecycleRepository` (645 lines) — run lifecycle, graph registration, export
+- `ExecutionRepository` (1,472 lines) — node states, call tracking, batch management
+- `DataFlowRepository` (1,435 lines) — rows, tokens, errors, graph structure
+- `QueryRepository` (532 lines) — read-only cross-cutting queries
+
+`LandscapeRecorder` is now a pure delegation facade (1,040 lines, ~91 public methods, zero logic).
+
+#### Plugins Restructure (SDA Alignment)
+
+Reorganized flat `plugins/` into 4 SDA-aligned subfolders:
+- `plugins/infrastructure/` — shared base classes, protocols, config, discovery (29 files)
+- `plugins/sources/` — CSV, JSON, Null, Azure Blob sources (4 plugins)
+- `plugins/transforms/` — all transforms including LLM and Azure safety (12+ plugins)
+- `plugins/sinks/` — CSV, JSON, Database, Azure Blob sinks (4 plugins)
+
+247 files changed, ~460 test imports rewritten.
+
+#### ADR-006: Layer Dependency Remediation
+
+Documents the strict 4-layer model (`contracts → core → engine → plugins`) and the 10→0 violation fix strategy. Enforced by CI via `enforce_tier_model.py`.
+
+### Bug Fixes (RC-3.3)
+
+- 10 silent failure findings remediated in LLM plugins (Langfuse, tracing, finish reasons, content filtering)
+- 4 bugs fixed in unified `LLMTransform` (limiter dispatch, response_format, output_fields extraction, NaN/Infinity rejection)
+- `on_error` now required for aggregation transforms
+- OpenRouter parallel query client race condition (reference counting for shared HTTP clients)
+- Aggregation BUFFERED lifecycle gap (triggering token skipping BUFFERED state)
+- BatchReplicate quarantine audit gap (per-token terminal recording)
+- KeywordFilter fail-closed on non-string values (was fail-open)
+- Multi-query regressions from T10 (field type validation, pooled execution, Pydantic schema, output_schema_config)
+- LLM empty/whitespace content detection at provider boundary
+- Telemetry/Landscape hash divergence (hashes now read from recorded Call object)
+- URL password fingerprint percent-encoding
+- TUI coalesce error crash on older record shapes
+- CLI explain passphrase silently swallowed (T4), MCP diagnose quarantine count unscoped (T5), ChaosLLM MCP CLI broken (T27)
+- Azure AI tracing silent no-op wired into unified LLM transform
+- Contract-level fixes: Token.run_id false optional, CoalesceFailureReason frozen dataclass, stable_hash dead parameter, Call XOR invariant, RawCallPayload copy semantics, SanitizedDatabaseUrl DSN handling
+- Code review remediation: 4 critical, 8 important, 6 suggestion fixes
+
+### Test Infrastructure Overhaul (RC-3.3)
+
+6-phase systematic hardening of the test suite, eliminating brittle coupling to internal constructors and enforcing production code paths:
+
+- **P0.5a--b**: New factories (`make_recorder_with_run()`, `register_test_node()`, etc.) + refactored existing factories to single delegation point
+- **P1**: Replaced ~350 direct `PluginContext(...)` constructions across 53 files with centralized `make_context()` factory
+- **P2**: Replaced ~452 inline `LandscapeDB.in_memory()`/`LandscapeRecorder(...)` constructions across 76 files with factory calls (net −715 lines)
+- **P3**: Replaced ~529 lines of duplicated inline test plugin classes across 10 files with shared `tests.fixtures.plugins` imports
+- **P4**: Re-raise guards, frozen evidence types (`ExceptionResult`, `FailureInfo`), aggregation DRY via `accumulate_row_outcomes()` + `ExecutionCounters`
+- Resolved all 401 mypy errors across test suite (103 files, ~74 stale `# type: ignore` removed)
+
+### Tests (RC-3.3)
+
+- ~150 new tests across hardening, code review, and infrastructure phases
+- Full suite: **10,563 tests collected**, 16 skipped, 3 xfailed
+- mypy/ruff/contracts all clean
+
+### Dead Code Removal (RC-3.3)
+
+- `BaseLLMTransform` abstract class (3,473 lines, zero subclasses)
+- `RequestRecord` dataclass (never instantiated)
+- `TokenManager.payload_store` parameter (accepted but never read)
+- `populate_run()` (raw SQL bypass of `LandscapeRecorder`)
+- LLM validation utilities (`render_template_safe`, `check_truncation`)
+- ~21 low-value tests (vacuous assertions, mock-testing, implementation coupling)
+
+### Other Additions (RC-3.3)
+
+- Security posture brief documenting threat model, controls, and residual risk
+- TYPE_CHECKING layer import detection in `enforce_tier_model.py` CI gate
+- `PluginBundle` frozen dataclass for typed plugin instantiation results
+- Fingerprint primitives moved to `contracts/security.py` (stdlib-only)
+- MCP server `_ToolDef` registry replacing if/elif dispatch chain
+
+---
+
+## RC-3.0 Highlights
 
 - **Routing trilogy completed** -- three-phase architectural overhaul replaces implicit `default_sink` routing with fully declarative DAG wiring (ADR-004, ADR-005). Every edge in the pipeline is now explicit.
 - **Gate plugins removed entirely** -- routing is config-driven only via `GateSettings` and `ExpressionParser`. Approximately 3,000 lines of gate plugin infrastructure deleted.
@@ -220,7 +367,7 @@ Call index is now seeded from `MAX(call_index)` on resume, preventing UNIQUE con
 | Tracing provider validation | `2b947834` | Validate tracing providers and close silent-disable bug |
 | CSV audit validation | `d16f56ab` | Enforce scalar CSV audit validation |
 | PluginContext telemetry snapshots | `3e51467c` | Snapshot PluginContext telemetry payloads |
-| NodeRepository schema fields | `e34d1acb` | Validate `schema_fields_json` shape in NodeRepository |
+| NodeLoader schema fields | `e34d1acb` | Validate `schema_fields_json` shape in NodeLoader |
 | LLM retry classification | `3f94be33` | Fix LLM retry classification false positives |
 | Observed schema mode | `6b6fb334` | Reject non-list fields in observed schema mode |
 | Sink merge failure state | `62cd2bd2` | Fix sink merge failure state closure and prompt shield capacity retries |
@@ -264,7 +411,7 @@ Extensive work on the contracts subsystem throughout the sprint:
 
 ### Unused Session Parameter Removal (ARCH-13)
 
-Removed unused `session` parameter from all Repository classes.
+Removed unused `session` parameter from all Loader classes.
 
 **Commit:** `b60cdcd9`
 
@@ -359,7 +506,7 @@ A full project audit identified 20 documentation and metadata findings (F-01 thr
 
 ## Known Issues
 
-### Open (10 remaining from RC-2 remediation)
+### Open (7 remaining)
 
 | ID | Summary | Priority |
 |----|---------|----------|
@@ -383,7 +530,7 @@ Aggregation timeout triggers fire when the next row arrives, not during complete
 
 ## Infrastructure Changes
 
-- Version bumped to `0.3.0` (from `0.1.0`)
+- Version bumped to `0.3.3` (from `0.1.0` via `0.3.0`)
 - pyproject.toml classifier updated to `Development Status :: 4 - Beta`
 - REQUIREMENTS.md deleted (pyproject.toml is the single source of truth)
 - Obsolete `.codex` configuration file removed
@@ -408,11 +555,11 @@ The full set of RC-3 guarantees is documented in [docs/release/guarantees.md](..
 
 | Metric | Value |
 |--------|-------|
-| Source lines | ~75,800 across 234 Python files |
-| Test lines | ~207,000 (2.7:1 test-to-source ratio) |
-| Tests collected | 8,138 |
-| Tests passing | 8,037 |
+| Source lines | ~80,400 across 243 Python files |
+| Test lines | ~232,100 (2.9:1 test-to-source ratio) |
+| Tests collected | 10,563 |
+| Tests passing | 10,476 |
 | Tests skipped | 16 |
-| Commits (RC-3 branch) | 117 |
-| Remediation items resolved | ~65 of 75 |
-| Remaining open items | 10 |
+| Commits (RC-3 branches) | 200+ |
+| Remediation items resolved | ~85 of 75+ (expanded scope in RC-3.3) |
+| Remaining open items | 7 |

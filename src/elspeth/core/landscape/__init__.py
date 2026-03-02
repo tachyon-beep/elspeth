@@ -1,4 +1,3 @@
-# src/elspeth/core/landscape/__init__.py
 """Landscape: The audit backbone for complete traceability.
 
 This module provides the audit infrastructure for ELSPETH's SDA pipelines.
@@ -51,7 +50,9 @@ from elspeth.contracts import (
     TokenParent,
     ValidationErrorWithContract,
 )
+from elspeth.core.landscape.data_flow_repository import DataFlowRepository
 from elspeth.core.landscape.database import LandscapeDB, SchemaCompatibilityError
+from elspeth.core.landscape.execution_repository import ExecutionRepository
 from elspeth.core.landscape.exporter import LandscapeExporter
 from elspeth.core.landscape.formatters import (
     CSVFormatter,
@@ -62,6 +63,7 @@ from elspeth.core.landscape.formatters import (
     serialize_datetime,
 )
 from elspeth.core.landscape.lineage import LineageResult, explain
+from elspeth.core.landscape.query_repository import QueryRepository
 from elspeth.core.landscape.recorder import LandscapeRecorder
 from elspeth.core.landscape.reproducibility import (
     ReproducibilityGrade,
@@ -69,6 +71,7 @@ from elspeth.core.landscape.reproducibility import (
     update_grade_after_purge,
 )
 from elspeth.core.landscape.row_data import RowDataResult, RowDataState
+from elspeth.core.landscape.run_lifecycle_repository import RunLifecycleRepository
 from elspeth.core.landscape.schema import (
     artifacts_table,
     batch_members_table,
@@ -96,9 +99,10 @@ __all__ = [
     "CallStatus",
     "CallType",
     "Checkpoint",
-    # Schema contract audit records (Phase 5: Audit Trail Integration)
     "ContractAuditRecord",
+    "DataFlowRepository",
     "Edge",
+    "ExecutionRepository",
     "ExportFormatter",
     "FieldAuditRecord",
     "JSONFormatter",
@@ -113,6 +117,7 @@ __all__ = [
     "NodeStateFailed",
     "NodeStateOpen",
     "NodeStateStatus",
+    "QueryRepository",
     "ReproducibilityGrade",
     "RoutingEvent",
     "RoutingSpec",
@@ -121,6 +126,7 @@ __all__ = [
     "RowDataState",
     "RowLineage",
     "Run",
+    "RunLifecycleRepository",
     "RunStatus",
     "SchemaCompatibilityError",
     "Token",

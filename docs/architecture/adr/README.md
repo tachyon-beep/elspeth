@@ -21,6 +21,11 @@ We use a modified version of Michael Nygard's ADR template. See `000-template.md
 |-----|-------|------|--------|
 | [000](000-template.md) | ADR Template | - | Template |
 | [001](001-plugin-level-concurrency.md) | Plugin-Level Concurrency | 2026-01-22 | **Accepted** |
+| [002](002-routing-copy-mode-limitation.md) | Routing Copy Mode Limitation | 2026-01-24 | **Accepted** |
+| [003](003-schema-validation-lifecycle.md) | Schema Validation Lifecycle | 2026-01-24 | **Accepted** |
+| [004](004-adr-explicit-sink-routing.md) | Explicit Sink Routing | 2026-02-09 | **Accepted** |
+| [005](005-adr-declarative-dag-wiring.md) | Declarative DAG Wiring | 2026-02-09 | **Accepted** |
+| [006](006-layer-dependency-remediation.md) | Layer Dependency Remediation | 2026-02-22 | **Accepted** |
 
 ## Status Definitions
 

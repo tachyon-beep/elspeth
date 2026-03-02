@@ -33,10 +33,15 @@ class TestDatabaseSinkResumeEndToEnd:
 
     @pytest.fixture
     def ctx(self):
-        """Create a minimal plugin context."""
-        from elspeth.contracts.plugin_context import PluginContext
+        """Create a plugin context with real landscape and operation records."""
+        from tests.fixtures.factories import make_operation_context
 
-        return PluginContext(run_id="test-run", config={})
+        return make_operation_context(
+            node_id="sink",
+            plugin_name="database_sink",
+            node_type="SINK",
+            operation_type="sink_write",
+        )
 
     def _get_all_rows(self, db_url: str, table_name: str) -> list[dict[str, object]]:
         """Helper to retrieve all rows from a table."""

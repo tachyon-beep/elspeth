@@ -9,12 +9,11 @@ Migrated from tests/integration/test_audit_integration_fixes.py
 
 import pytest
 
-from elspeth.contracts import EdgeInfo, ExecutionError, NodeType, RoutingMode, RunStatus
-from elspeth.contracts.plugin_context import PluginContext
+from elspeth.contracts import EdgeInfo, ExecutionError, NodeID, NodeType, RoutingMode, RunStatus
 from elspeth.core.dag import ExecutionGraph
-from elspeth.core.landscape import LandscapeDB
-from elspeth.core.landscape.recorder import LandscapeRecorder
-from elspeth.plugins.manager import PluginManager
+from elspeth.plugins.infrastructure.manager import PluginManager
+from tests.fixtures.factories import make_context
+from tests.fixtures.landscape import make_landscape_db, make_recorder
 
 # Dynamic schema config for tests - PathConfig now requires schema
 DYNAMIC_SCHEMA = {"mode": "observed"}
@@ -33,22 +32,24 @@ class TestIntegrationAuditFixes:
         manager = PluginManager()
         manager.register_builtin_plugins()
 
-        # All built-in plugins discoverable
-        assert len(manager.get_sources()) >= 2
-        assert len(manager.get_transforms()) >= 2
-        assert len(manager.get_sinks()) >= 3
+        # All built-in plugins discoverable — check concrete counts
+        sources = manager.get_sources()
+        transforms = manager.get_transforms()
+        sinks = manager.get_sinks()
+        assert len(sources) >= 2
+        assert len(transforms) >= 2
+        assert len(sinks) >= 3
 
-        # Instantiate a plugin and verify node_id
+        # Instantiate a plugin and verify node_id round-trip
         csv_source_cls = manager.get_source_by_name("csv")
         assert csv_source_cls is not None
-        # Protocols don't define __init__ but concrete classes do
         source = csv_source_cls(
             {
                 "path": "test.csv",
                 "on_validation_failure": "discard",
                 "schema": DYNAMIC_SCHEMA,
             }
-        )  # type: ignore[call-arg]
+        )
         assert source.node_id is None  # Not yet set
 
         source.node_id = "node-123"
@@ -81,40 +82,50 @@ class TestIntegrationAuditFixes:
         Verifies:
         - Task 5: TypedDict schemas for error/reason payloads
         """
-        error: ExecutionError = {
-            "exception": "Test error",
-            "type": "ValueError",
-        }
+        error = ExecutionError(
+            exception="Test error",
+            exception_type="ValueError",
+        )
 
-        # Type checker validates this structure
-        assert error["exception"] == "Test error"
-        assert error["type"] == "ValueError"
+        # Frozen dataclass validates at construction; to_dict() serializes for audit
+        assert error.exception == "Test error"
+        assert error.exception_type == "ValueError"
+        d = error.to_dict()
+        assert d["type"] == "ValueError"
 
         # Test with optional traceback field
-        error_with_traceback: ExecutionError = {
-            "exception": "Another error",
-            "type": "RuntimeError",
-            "traceback": "Traceback (most recent call last):\n  File ...",
-        }
-        assert "traceback" in error_with_traceback
+        error_with_traceback = ExecutionError(
+            exception="Another error",
+            exception_type="RuntimeError",
+            traceback="Traceback (most recent call last):\n  File ...",
+        )
+        assert error_with_traceback.traceback is not None
+        assert "traceback" in error_with_traceback.to_dict()
 
-    def test_plugin_context_accepts_real_recorder(self) -> None:
-        """PluginContext accepts LandscapeRecorder without type issues.
+    def test_plugin_context_recorder_can_record(self) -> None:
+        """PluginContext with real LandscapeRecorder can begin and complete a run.
 
         Verifies:
         - Task 6: PluginContext.landscape type fix
+        - Recording actually works through the context
         """
-        db = LandscapeDB.in_memory()
-        recorder = LandscapeRecorder(db)
+        db = make_landscape_db()
+        recorder = make_recorder(db)
 
-        ctx = PluginContext(
-            run_id="test-run",
-            config={},
+        run = recorder.begin_run(
+            config={"source": {"plugin": "csv"}},
+            canonical_version="1.0.0",
+        )
+
+        ctx = make_context(
+            run_id=run.run_id,
             landscape=recorder,
         )
 
-        assert ctx.landscape is recorder
-        assert ctx.run_id == "test-run"
+        # Verify recording works through the context's recorder
+        assert ctx.landscape is not None
+        completed = ctx.landscape.complete_run(run.run_id, RunStatus.COMPLETED)
+        assert completed.run_id == run.run_id
 
         # Cleanup
         db.close()
@@ -125,15 +136,15 @@ class TestIntegrationAuditFixes:
         Verifies EdgeInfo contract integrity.
         """
         edge = EdgeInfo(
-            from_node="a",
-            to_node="b",
+            from_node=NodeID("a"),
+            to_node=NodeID("b"),
             label="continue",
             mode=RoutingMode.MOVE,
         )
 
         # Should be immutable
         with pytest.raises(AttributeError):
-            edge.from_node = "c"  # type: ignore[misc]
+            edge.from_node = NodeID("c")  # type: ignore[misc]
 
     def test_routing_mode_is_enum_throughout_dag(self) -> None:
         """RoutingMode stays as enum through DAG operations.
@@ -169,49 +180,44 @@ class TestIntegrationAuditFixes:
         manager = PluginManager()
         manager.register_builtin_plugins()
 
-        # Test source
+        # Test source — node_id starts None, can be set
         csv_source_cls = manager.get_source_by_name("csv")
         assert csv_source_cls is not None
-        # Protocols don't define __init__ but concrete classes do
         source = csv_source_cls(
             {
                 "path": "test.csv",
                 "on_validation_failure": "discard",
                 "schema": DYNAMIC_SCHEMA,
             }
-        )  # type: ignore[call-arg]
-        assert hasattr(source, "node_id")
+        )
+        assert source.node_id is None
         source.node_id = "source-001"
         assert source.node_id == "source-001"
 
         # Test transform
         passthrough_cls = manager.get_transform_by_name("passthrough")
         assert passthrough_cls is not None
-        # Protocols don't define __init__ but concrete classes do
-        transform = passthrough_cls({"schema": DYNAMIC_SCHEMA})  # type: ignore[call-arg]
-        assert hasattr(transform, "node_id")
+        transform = passthrough_cls({"schema": DYNAMIC_SCHEMA})
+        assert transform.node_id is None
         transform.node_id = "transform-001"
         assert transform.node_id == "transform-001"
-
-        # Test gate - SKIPPED: Gate plugins removed in WP-02
-        # Protocol/base class still supports node_id, but no concrete implementations exist
 
         # Test sink (use JSONSink which accepts dynamic schemas)
         json_sink_cls = manager.get_sink_by_name("json")
         assert json_sink_cls is not None
-        # Protocols don't define __init__ but concrete classes do
-        sink = json_sink_cls({"path": "/tmp/test.json", "schema": DYNAMIC_SCHEMA, "format": "jsonl"})  # type: ignore[call-arg]
-        assert hasattr(sink, "node_id")
+        sink = json_sink_cls({"path": "/tmp/test.json", "schema": DYNAMIC_SCHEMA, "format": "jsonl"})
+        assert sink.node_id is None
         sink.node_id = "sink-001"
         assert sink.node_id == "sink-001"
 
-    def test_landscape_recorder_integration(self) -> None:
-        """LandscapeRecorder works with PluginContext in realistic scenario.
+    def test_landscape_recorder_run_lifecycle(self) -> None:
+        """LandscapeRecorder records complete run lifecycle through PluginContext.
 
-        End-to-end test combining multiple fixes.
+        End-to-end test combining multiple fixes — verifies the recorder
+        actually persists data, not just that assignment works.
         """
-        db = LandscapeDB.in_memory()
-        recorder = LandscapeRecorder(db)
+        db = make_landscape_db()
+        recorder = make_recorder(db)
 
         # Begin a run
         run = recorder.begin_run(
@@ -220,19 +226,16 @@ class TestIntegrationAuditFixes:
         )
 
         # Create context with recorder
-        ctx = PluginContext(
+        ctx = make_context(
             run_id=run.run_id,
-            config={},
             landscape=recorder,
         )
 
-        # Verify context has the recorder
-        assert ctx.landscape is recorder
-        assert ctx.run_id == run.run_id
-
-        # Complete the run
-        completed = recorder.complete_run(run.run_id, RunStatus.COMPLETED)
+        # Complete the run through the context's recorder
+        assert ctx.landscape is not None
+        completed = ctx.landscape.complete_run(run.run_id, RunStatus.COMPLETED)
         assert completed.run_id == run.run_id
+        assert completed.status == RunStatus.COMPLETED
 
         # Cleanup
         db.close()

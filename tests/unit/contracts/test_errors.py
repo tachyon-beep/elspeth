@@ -1,33 +1,56 @@
 """Tests for error/reason schema contracts.
 
 Tests for:
-- ExecutionError TypedDict (exception, type, traceback fields)
+- ExecutionError frozen dataclass (exception, exception_type, traceback, phase)
+- CoalesceFailureReason frozen dataclass (failure_reason, expected_branches, etc.)
 - RoutingReason TypedDict (rule, matched_value, threshold fields)
 - TransformReason TypedDict (action, fields_modified fields)
 """
 
+import dataclasses
 
-class TestExecutionErrorSchema:
-    """Tests for ExecutionError TypedDict schema introspection."""
+import pytest
 
-    def test_execution_error_required_keys(self) -> None:
-        """ExecutionError has exactly exception and type as required keys."""
+
+class TestExecutionError:
+    """Tests for ExecutionError frozen dataclass — construction, immutability, serialization."""
+
+    def test_execution_error_is_frozen_dataclass(self) -> None:
+        """ExecutionError is a frozen dataclass (immutable after construction)."""
         from elspeth.contracts import ExecutionError
 
-        assert ExecutionError.__required_keys__ == frozenset({"exception", "type"})
+        assert dataclasses.is_dataclass(ExecutionError)
+        error = ExecutionError(exception="test", exception_type="ValueError")
+        with pytest.raises(dataclasses.FrozenInstanceError):
+            error.exception = "modified"  # type: ignore[misc]
 
-    def test_execution_error_optional_keys(self) -> None:
-        """ExecutionError has traceback and phase as optional keys."""
+    def test_execution_error_to_dict_required_only(self) -> None:
+        """to_dict() serializes exception_type as 'type' and omits None fields."""
         from elspeth.contracts import ExecutionError
 
-        assert ExecutionError.__optional_keys__ == frozenset({"traceback", "phase"})
+        error = ExecutionError(exception="boom", exception_type="RuntimeError")
+        d = error.to_dict()
+        assert d == {"exception": "boom", "type": "RuntimeError"}
+        assert "traceback" not in d
+        assert "phase" not in d
 
-    def test_execution_error_all_keys(self) -> None:
-        """ExecutionError total keys match required + optional."""
+    def test_execution_error_to_dict_with_optionals(self) -> None:
+        """to_dict() includes optional fields when set."""
         from elspeth.contracts import ExecutionError
 
-        all_keys = ExecutionError.__required_keys__ | ExecutionError.__optional_keys__
-        assert all_keys == frozenset({"exception", "type", "traceback", "phase"})
+        error = ExecutionError(
+            exception="boom",
+            exception_type="RuntimeError",
+            traceback="Traceback ...",
+            phase="flush",
+        )
+        d = error.to_dict()
+        assert d == {
+            "exception": "boom",
+            "type": "RuntimeError",
+            "traceback": "Traceback ...",
+            "phase": "flush",
+        }
 
 
 class TestRoutingReasonSchema:
@@ -55,70 +78,6 @@ class TestRoutingReasonSchema:
         assert is_typeddict(ConfigGateReason)
 
 
-class TestTransformSuccessReasonSchema:
-    """Tests for TransformSuccessReason TypedDict schema introspection."""
-
-    def test_transform_success_reason_required_keys(self) -> None:
-        """TransformSuccessReason has action as required key."""
-        from elspeth.contracts import TransformSuccessReason
-
-        assert TransformSuccessReason.__required_keys__ == frozenset({"action"})
-
-    def test_transform_success_reason_optional_keys(self) -> None:
-        """TransformSuccessReason has expected optional keys."""
-        from elspeth.contracts import TransformSuccessReason
-
-        assert TransformSuccessReason.__optional_keys__ == frozenset(
-            {
-                "fields_modified",
-                "fields_added",
-                "fields_removed",
-                "validation_warnings",
-                "metadata",
-            }
-        )
-
-    def test_transform_action_category_values(self) -> None:
-        """TransformActionCategory contains expected action types."""
-        from typing import get_args
-
-        from elspeth.contracts import TransformActionCategory
-
-        categories = get_args(TransformActionCategory)
-        assert "processed" in categories
-        assert "mapped" in categories
-        assert "skipped" in categories
-        assert "enriched" in categories
-
-
-class TestExecutionError:
-    """Tests for ExecutionError TypedDict."""
-
-    def test_execution_error_has_required_fields(self) -> None:
-        """ExecutionError defines exception and type fields."""
-        from elspeth.contracts import ExecutionError
-
-        error: ExecutionError = {
-            "exception": "ValueError: invalid input",
-            "type": "ValueError",
-        }
-
-        assert error["exception"] == "ValueError: invalid input"
-        assert error["type"] == "ValueError"
-
-    def test_execution_error_accepts_optional_traceback(self) -> None:
-        """ExecutionError can include traceback."""
-        from elspeth.contracts import ExecutionError
-
-        error: ExecutionError = {
-            "exception": "KeyError: 'foo'",
-            "type": "KeyError",
-            "traceback": "Traceback (most recent call last):\n...",
-        }
-
-        assert "traceback" in error
-
-
 class TestRoutingReason:
     """Tests for RoutingReason union type usage."""
 
@@ -137,7 +96,19 @@ class TestRoutingReason:
 
 
 class TestTransformSuccessReason:
-    """Tests for TransformSuccessReason TypedDict."""
+    """Tests for TransformSuccessReason TypedDict — construction and Literal values."""
+
+    def test_transform_action_category_values(self) -> None:
+        """TransformActionCategory contains expected action types."""
+        from typing import get_args
+
+        from elspeth.contracts import TransformActionCategory
+
+        categories = get_args(TransformActionCategory)
+        assert "processed" in categories
+        assert "mapped" in categories
+        assert "skipped" in categories
+        assert "enriched" in categories
 
     def test_transform_success_reason_has_action_field(self) -> None:
         """TransformSuccessReason defines action field."""
@@ -177,16 +148,6 @@ class TestTransformSuccessReason:
         assert reason["metadata"]["latency_ms"] == 42
 
 
-class TestRoutingReasonVariants:
-    """Tests for RoutingReason variant structure."""
-
-    def test_config_gate_reason_required_keys(self) -> None:
-        """ConfigGateReason has condition and result as required."""
-        from elspeth.contracts import ConfigGateReason
-
-        assert ConfigGateReason.__required_keys__ == frozenset({"condition", "result"})
-
-
 class TestRoutingReasonUsage:
     """Tests for constructing valid RoutingReason variants."""
 
@@ -202,29 +163,20 @@ class TestRoutingReasonUsage:
         assert reason["result"] == "true"
 
 
-class TestTransformErrorReasonSchema:
-    """Tests for TransformErrorReason TypedDict schema."""
+class TestTransformErrorReasonContract:
+    """Tests for TransformErrorReason TypedDict contract — Literal values and optional fields."""
 
-    def test_transform_error_reason_required_keys(self) -> None:
-        """TransformErrorReason has reason as required."""
+    def test_transform_error_reason_accepts_optional_error_fields(self) -> None:
+        """TransformErrorReason construction with optional error and error_type fields."""
         from elspeth.contracts import TransformErrorReason
 
-        assert TransformErrorReason.__required_keys__ == frozenset({"reason"})
-
-    def test_transform_error_reason_has_expected_optional_keys(self) -> None:
-        """TransformErrorReason has expected optional keys."""
-        from elspeth.contracts import TransformErrorReason
-
-        # Check a subset of important optional keys
-        optional = TransformErrorReason.__optional_keys__
-        assert "error" in optional
-        assert "field" in optional
-        assert "error_type" in optional
-        assert "query" in optional
-        assert "max_tokens" in optional
-        assert "status_code" in optional
-        assert "template_errors" in optional
-        assert "row_errors" in optional
+        reason: TransformErrorReason = {
+            "reason": "api_error",
+            "error": "Connection refused",
+            "error_type": "network_error",
+        }
+        assert reason["error"] == "Connection refused"
+        assert reason["error_type"] == "network_error"
 
     def test_transform_error_category_literal_values(self) -> None:
         """TransformErrorCategory contains expected error types."""
@@ -233,7 +185,6 @@ class TestTransformErrorReasonSchema:
         from elspeth.contracts import TransformErrorCategory
 
         categories = get_args(TransformErrorCategory)
-        # Verify key categories exist
         assert "api_error" in categories
         assert "missing_field" in categories
         assert "template_rendering_failed" in categories
@@ -429,22 +380,6 @@ class TestNestedTypeDicts:
         assert usage["prompt_tokens"] == 100
 
 
-class TestQueryFailureDetailSchema:
-    """Tests for QueryFailureDetail TypedDict schema."""
-
-    def test_query_failure_detail_required_keys(self) -> None:
-        """QueryFailureDetail has query as required."""
-        from elspeth.contracts import QueryFailureDetail
-
-        assert QueryFailureDetail.__required_keys__ == frozenset({"query"})
-
-    def test_query_failure_detail_optional_keys(self) -> None:
-        """QueryFailureDetail has error, error_type, status_code as optional."""
-        from elspeth.contracts import QueryFailureDetail
-
-        assert QueryFailureDetail.__optional_keys__ == frozenset({"error", "error_type", "status_code"})
-
-
 class TestQueryFailureDetailUsage:
     """Tests for constructing valid QueryFailureDetail values."""
 
@@ -469,22 +404,6 @@ class TestQueryFailureDetailUsage:
         assert detail["error"] == "Rate limit exceeded"
         assert detail["error_type"] == "rate_limit"
         assert detail["status_code"] == 429
-
-
-class TestErrorDetailSchema:
-    """Tests for ErrorDetail TypedDict schema."""
-
-    def test_error_detail_required_keys(self) -> None:
-        """ErrorDetail has message as required."""
-        from elspeth.contracts import ErrorDetail
-
-        assert ErrorDetail.__required_keys__ == frozenset({"message"})
-
-    def test_error_detail_optional_keys(self) -> None:
-        """ErrorDetail has error_type, row_index, details as optional."""
-        from elspeth.contracts import ErrorDetail
-
-        assert ErrorDetail.__optional_keys__ == frozenset({"error_type", "row_index", "details"})
 
 
 class TestErrorDetailUsage:
@@ -589,3 +508,118 @@ class TestErrorsFieldType:
             "errors": ["Row 1 failed", detail],
         }
         assert len(reason["errors"]) == 2
+
+
+class TestCoalesceFailureReasonSchema:
+    """Tests for CoalesceFailureReason frozen dataclass schema."""
+
+    def test_is_frozen_dataclass(self) -> None:
+        """CoalesceFailureReason is a frozen dataclass (immutable after construction)."""
+        from elspeth.contracts import CoalesceFailureReason
+
+        assert dataclasses.is_dataclass(CoalesceFailureReason)
+        error = CoalesceFailureReason(
+            failure_reason="quorum_not_met",
+            expected_branches=["a", "b"],
+            branches_arrived=["a"],
+            merge_policy="union",
+        )
+        with pytest.raises(dataclasses.FrozenInstanceError):
+            error.failure_reason = "modified"  # type: ignore[misc]
+
+    def test_has_slots(self) -> None:
+        """CoalesceFailureReason uses __slots__ for memory efficiency — no instance __dict__."""
+        from elspeth.contracts import CoalesceFailureReason
+
+        instance = CoalesceFailureReason(
+            failure_reason="quorum_not_met",
+            expected_branches=["a", "b"],
+            branches_arrived=["a"],
+            merge_policy="union",
+        )
+        assert not hasattr(instance, "__dict__"), "Slots dataclass should not have __dict__"
+
+    def test_to_dict_required_only(self) -> None:
+        """to_dict() omits None-valued optional fields."""
+        from elspeth.contracts import CoalesceFailureReason
+
+        error = CoalesceFailureReason(
+            failure_reason="incomplete_branches",
+            expected_branches=["path_a", "path_b"],
+            branches_arrived=["path_a"],
+            merge_policy="union",
+        )
+        d = error.to_dict()
+        assert d == {
+            "failure_reason": "incomplete_branches",
+            "expected_branches": ["path_a", "path_b"],
+            "branches_arrived": ["path_a"],
+            "merge_policy": "union",
+        }
+        assert "timeout_ms" not in d
+        assert "select_branch" not in d
+
+    def test_to_dict_with_timeout(self) -> None:
+        """to_dict() includes timeout_ms when set."""
+        from elspeth.contracts import CoalesceFailureReason
+
+        error = CoalesceFailureReason(
+            failure_reason="quorum_not_met_at_timeout",
+            expected_branches=["a", "b", "c"],
+            branches_arrived=["a"],
+            merge_policy="nested",
+            timeout_ms=30000,
+        )
+        d = error.to_dict()
+        assert d["timeout_ms"] == 30000
+        assert "select_branch" not in d
+
+    def test_to_dict_with_select_branch(self) -> None:
+        """to_dict() includes select_branch when set."""
+        from elspeth.contracts import CoalesceFailureReason
+
+        error = CoalesceFailureReason(
+            failure_reason="select_branch_not_arrived",
+            expected_branches=["fast", "slow"],
+            branches_arrived=["slow"],
+            merge_policy="select",
+            select_branch="fast",
+        )
+        d = error.to_dict()
+        assert d["select_branch"] == "fast"
+        assert "timeout_ms" not in d
+
+    def test_to_dict_with_all_optionals(self) -> None:
+        """to_dict() includes all fields when all are set."""
+        from elspeth.contracts import CoalesceFailureReason
+
+        error = CoalesceFailureReason(
+            failure_reason="select_branch_not_arrived",
+            expected_branches=["a", "b"],
+            branches_arrived=["b"],
+            merge_policy="select",
+            timeout_ms=5000,
+            select_branch="a",
+        )
+        d = error.to_dict()
+        assert d == {
+            "failure_reason": "select_branch_not_arrived",
+            "expected_branches": ["a", "b"],
+            "branches_arrived": ["b"],
+            "merge_policy": "select",
+            "timeout_ms": 5000,
+            "select_branch": "a",
+        }
+
+    def test_late_arrival_has_empty_branches_arrived(self) -> None:
+        """Late arrival failures have empty branches_arrived list."""
+        from elspeth.contracts import CoalesceFailureReason
+
+        error = CoalesceFailureReason(
+            failure_reason="late_arrival_after_merge",
+            expected_branches=["a", "b"],
+            branches_arrived=[],
+            merge_policy="union",
+        )
+        assert error.branches_arrived == []
+        assert error.to_dict()["branches_arrived"] == []

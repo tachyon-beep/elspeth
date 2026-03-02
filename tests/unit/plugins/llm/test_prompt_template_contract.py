@@ -4,7 +4,7 @@
 import pytest
 
 from elspeth.contracts.schema_contract import SchemaContract
-from elspeth.plugins.llm.templates import PromptTemplate, RenderedPrompt
+from elspeth.plugins.transforms.llm.templates import PromptTemplate, RenderedPrompt
 from elspeth.testing import make_field
 
 

@@ -3,7 +3,7 @@
 import pytest
 
 from elspeth.contracts.header_modes import HeaderMode
-from elspeth.plugins.config_base import SinkPathConfig
+from elspeth.plugins.infrastructure.config_base import SinkPathConfig
 
 
 class TestSinkHeaderConfig:
@@ -114,7 +114,7 @@ class TestSinkHeaderConfigValidation:
 
     def test_unknown_field_rejected(self) -> None:
         """Unknown fields like display_headers are rejected by extra=forbid."""
-        from elspeth.plugins.config_base import PluginConfigError
+        from elspeth.plugins.infrastructure.config_base import PluginConfigError
 
         with pytest.raises(PluginConfigError):
             SinkPathConfig.from_dict(

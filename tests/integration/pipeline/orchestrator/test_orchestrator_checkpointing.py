@@ -11,20 +11,16 @@ from typing import TYPE_CHECKING, Any
 
 import pytest
 
-from elspeth.contracts import GateName, NodeID, NodeType, PipelineRow, RouteDestination, RoutingMode, SinkName
-from elspeth.plugins.base import BaseTransform
 from tests.fixtures.base_classes import (
-    _TestSchema,
-    _TestSinkBase,
     as_sink,
     as_source,
     as_transform,
 )
+from tests.fixtures.landscape import make_recorder
 from tests.fixtures.pipeline import build_production_graph
-from tests.fixtures.plugins import CollectSink, ListSource
+from tests.fixtures.plugins import CollectSink, FailingSink, ListSource, PassTransform
 
 if TYPE_CHECKING:
-    from elspeth.contracts.results import TransformResult
     from elspeth.core.landscape import LandscapeDB
 
 
@@ -64,7 +60,6 @@ class TestOrchestratorCheckpointing:
         from elspeth.core.checkpoint import CheckpointManager
         from elspeth.core.config import CheckpointSettings
         from elspeth.engine.orchestrator import Orchestrator, PipelineConfig
-        from elspeth.plugins.results import TransformResult
 
         checkpoint_mgr = CheckpointManager(landscape_db)
         settings = CheckpointSettings(enabled=True, frequency="every_row")
@@ -79,20 +74,8 @@ class TestOrchestratorCheckpointing:
 
         checkpoint_mgr.create_checkpoint = tracking_create  # type: ignore[method-assign]
 
-        class IdentityTransform(BaseTransform):
-            name = "identity"
-            input_schema = _TestSchema
-            output_schema = _TestSchema
-
-            def __init__(self) -> None:
-                super().__init__({"schema": {"mode": "observed"}})
-
-            def process(self, row: PipelineRow, ctx: Any) -> TransformResult:
-                return TransformResult.success(row, success_reason={"action": "identity"})
-
         source = ListSource([{"value": 1}, {"value": 2}, {"value": 3}])
-        transform = IdentityTransform()
-        transform.on_success = "default"
+        transform = PassTransform(on_success="default")
         sink = CollectSink()
 
         config = PipelineConfig(
@@ -119,7 +102,6 @@ class TestOrchestratorCheckpointing:
         from elspeth.core.checkpoint import CheckpointManager
         from elspeth.core.config import CheckpointSettings
         from elspeth.engine.orchestrator import Orchestrator, PipelineConfig
-        from elspeth.plugins.results import TransformResult
 
         checkpoint_mgr = CheckpointManager(landscape_db)
         settings = CheckpointSettings(enabled=True, frequency="every_n", checkpoint_interval=3)
@@ -134,20 +116,8 @@ class TestOrchestratorCheckpointing:
 
         checkpoint_mgr.create_checkpoint = tracking_create  # type: ignore[method-assign]
 
-        class IdentityTransform(BaseTransform):
-            name = "identity"
-            input_schema = _TestSchema
-            output_schema = _TestSchema
-
-            def __init__(self) -> None:
-                super().__init__({"schema": {"mode": "observed"}})
-
-            def process(self, row: PipelineRow, ctx: Any) -> TransformResult:
-                return TransformResult.success(row, success_reason={"action": "identity"})
-
         source = ListSource([{"value": i} for i in range(7)])
-        transform = IdentityTransform()
-        transform.on_success = "default"
+        transform = PassTransform(on_success="default")
         sink = CollectSink()
 
         config = PipelineConfig(
@@ -174,26 +144,13 @@ class TestOrchestratorCheckpointing:
         from elspeth.core.checkpoint import CheckpointManager
         from elspeth.core.config import CheckpointSettings
         from elspeth.engine.orchestrator import Orchestrator, PipelineConfig
-        from elspeth.plugins.results import TransformResult
 
         checkpoint_mgr = CheckpointManager(landscape_db)
         settings = CheckpointSettings(enabled=True, frequency="every_row")
         checkpoint_config = RuntimeCheckpointConfig.from_settings(settings)
 
-        class IdentityTransform(BaseTransform):
-            name = "identity"
-            input_schema = _TestSchema
-            output_schema = _TestSchema
-
-            def __init__(self) -> None:
-                super().__init__({"schema": {"mode": "observed"}})
-
-            def process(self, row: PipelineRow, ctx: Any) -> TransformResult:
-                return TransformResult.success(row, success_reason={"action": "identity"})
-
         source = ListSource([{"value": 1}, {"value": 2}])
-        transform = IdentityTransform()
-        transform.on_success = "default"
+        transform = PassTransform(on_success="default")
         sink = CollectSink()
 
         config = PipelineConfig(
@@ -216,64 +173,14 @@ class TestOrchestratorCheckpointing:
 
     def test_checkpoint_preserved_on_failure(self, landscape_db: LandscapeDB, payload_store) -> None:
         """Checkpoints are preserved when run fails for recovery."""
-        from elspeth.contracts import ArtifactDescriptor
         from elspeth.contracts.config.runtime import RuntimeCheckpointConfig
         from elspeth.core.checkpoint import CheckpointManager
         from elspeth.core.config import CheckpointSettings, GateSettings
-        from elspeth.core.dag import ExecutionGraph
         from elspeth.engine.orchestrator import Orchestrator, PipelineConfig
-        from elspeth.plugins.results import TransformResult
 
         checkpoint_mgr = CheckpointManager(landscape_db)
         settings = CheckpointSettings(enabled=True, frequency="every_row")
         checkpoint_config = RuntimeCheckpointConfig.from_settings(settings)
-
-        class PassthroughTransform(BaseTransform):
-            name = "passthrough"
-            input_schema = _TestSchema
-            output_schema = _TestSchema
-            on_error = "discard"
-
-            def __init__(self) -> None:
-                super().__init__({"schema": {"mode": "observed"}})
-
-            def process(self, row: PipelineRow, ctx: Any) -> TransformResult:
-                return TransformResult.success(row, success_reason={"action": "passthrough"})
-
-        class GoodSink(_TestSinkBase):
-            name = "good_sink"
-
-            def __init__(self) -> None:
-                super().__init__()
-                self.results: list[dict[str, Any]] = []
-
-            def on_start(self, ctx: Any) -> None:
-                pass
-
-            def on_complete(self, ctx: Any) -> None:
-                pass
-
-            def write(self, rows: Any, ctx: Any) -> ArtifactDescriptor:
-                self.results.extend(rows)
-                return ArtifactDescriptor.for_file(path="memory", size_bytes=0, content_hash="good123")
-
-            def close(self) -> None:
-                pass
-
-        class BadSink(_TestSinkBase):
-            name = "bad_sink"
-
-            def on_start(self, ctx: Any) -> None:
-                pass
-
-            def on_complete(self, ctx: Any) -> None:
-                pass
-
-            def write(self, rows: Any, ctx: Any) -> ArtifactDescriptor:
-                raise RuntimeError("Bad sink failure")
-
-            def close(self) -> None:
-                pass
 
         gate_config = GateSettings(
             name="split",
@@ -283,9 +190,9 @@ class TestOrchestratorCheckpointing:
         )
 
         source = ListSource([{"value": 1}, {"value": 2}, {"value": 3}])
-        transform = PassthroughTransform()
-        good_sink = GoodSink()
-        bad_sink = BadSink()
+        transform = PassTransform(name="passthrough", on_error="discard")
+        good_sink = CollectSink(name="good_sink")
+        bad_sink = FailingSink(name="bad_sink", error_message="Bad sink failure")
 
         config = PipelineConfig(
             source=as_source(source),
@@ -294,37 +201,6 @@ class TestOrchestratorCheckpointing:
             gates=[gate_config],
         )
 
-        graph = ExecutionGraph()
-        schema_config = {"schema": {"mode": "observed"}}
-        graph.add_node("source", node_type=NodeType.SOURCE, plugin_name="list_source", config=schema_config)
-        graph.add_node("transform_0", node_type=NodeType.TRANSFORM, plugin_name="passthrough", config=schema_config)
-        graph.add_node(
-            "config_gate_split",
-            node_type=NodeType.GATE,
-            plugin_name="config_gate:split",
-            config={
-                "schema": schema_config["schema"],
-                "condition": gate_config.condition,
-                "routes": dict(gate_config.routes),
-            },
-        )
-        graph.add_node("sink_good", node_type=NodeType.SINK, plugin_name="good_sink", config=schema_config)
-        graph.add_node("sink_bad", node_type=NodeType.SINK, plugin_name="bad_sink", config=schema_config)
-
-        graph.add_edge("source", "transform_0", label="continue", mode=RoutingMode.MOVE)
-        graph.add_edge("transform_0", "config_gate_split", label="continue", mode=RoutingMode.MOVE)
-        graph.add_edge("config_gate_split", "sink_good", label="true", mode=RoutingMode.MOVE)
-        graph.add_edge("config_gate_split", "sink_bad", label="false", mode=RoutingMode.MOVE)
-
-        graph.set_sink_id_map({SinkName("good"): NodeID("sink_good"), SinkName("bad"): NodeID("sink_bad")})
-        graph.set_transform_id_map({0: NodeID("transform_0")})
-        graph.set_config_gate_id_map({GateName("split"): NodeID("config_gate_split")})
-        graph.set_route_resolution_map(
-            {
-                (NodeID("config_gate_split"), "true"): RouteDestination.sink(SinkName("good")),
-                (NodeID("config_gate_split"), "false"): RouteDestination.sink(SinkName("bad")),
-            }
-        )
         orchestrator = Orchestrator(
             db=landscape_db,
             checkpoint_manager=checkpoint_mgr,
@@ -332,21 +208,21 @@ class TestOrchestratorCheckpointing:
         )
 
         with pytest.raises(RuntimeError, match="Bad sink failure"):
-            orchestrator.run(config, graph=graph, payload_store=payload_store)
+            orchestrator.run(config, graph=build_production_graph(config), payload_store=payload_store)
 
-        from elspeth.core.landscape import LandscapeRecorder
-
-        recorder = LandscapeRecorder(landscape_db)
+        recorder = make_recorder(landscape_db)
         runs = recorder.list_runs()
         assert len(runs) >= 1
         run_id = sorted(runs, key=lambda r: r.started_at, reverse=True)[0].run_id
 
         remaining_checkpoints = checkpoint_mgr.get_checkpoints(run_id)
 
-        if len(good_sink.results) > 0:
-            assert len(remaining_checkpoints) == len(good_sink.results), (
-                f"Expected {len(good_sink.results)} checkpoints for written rows, got {len(remaining_checkpoints)}"
-            )
+        # Rows are processed sequentially: row 1 (odd→good) succeeds and creates
+        # a checkpoint before row 2 (even→bad) crashes at FailingSink.
+        assert len(good_sink.results) >= 1, "At least one odd-valued row should reach good_sink before bad_sink crashes"
+        assert len(remaining_checkpoints) == len(good_sink.results), (
+            f"Expected {len(good_sink.results)} checkpoints for written rows, got {len(remaining_checkpoints)}"
+        )
 
     def test_checkpoint_disabled_skips_checkpoint_creation(self, landscape_db: LandscapeDB, payload_store) -> None:
         """No checkpoints created when checkpointing is disabled."""
@@ -354,7 +230,6 @@ class TestOrchestratorCheckpointing:
         from elspeth.core.checkpoint import CheckpointManager
         from elspeth.core.config import CheckpointSettings
         from elspeth.engine.orchestrator import Orchestrator, PipelineConfig
-        from elspeth.plugins.results import TransformResult
 
         checkpoint_mgr = CheckpointManager(landscape_db)
         settings = CheckpointSettings(enabled=False)
@@ -369,20 +244,8 @@ class TestOrchestratorCheckpointing:
 
         checkpoint_mgr.create_checkpoint = tracking_create  # type: ignore[method-assign]
 
-        class IdentityTransform(BaseTransform):
-            name = "identity"
-            input_schema = _TestSchema
-            output_schema = _TestSchema
-
-            def __init__(self) -> None:
-                super().__init__({"schema": {"mode": "observed"}})
-
-            def process(self, row: PipelineRow, ctx: Any) -> TransformResult:
-                return TransformResult.success(row, success_reason={"action": "identity"})
-
         source = ListSource([{"value": 1}, {"value": 2}])
-        transform = IdentityTransform()
-        transform.on_success = "default"
+        transform = PassTransform(on_success="default")
         sink = CollectSink()
 
         config = PipelineConfig(
@@ -407,25 +270,12 @@ class TestOrchestratorCheckpointing:
         from elspeth.contracts.config.runtime import RuntimeCheckpointConfig
         from elspeth.core.config import CheckpointSettings
         from elspeth.engine.orchestrator import Orchestrator, PipelineConfig
-        from elspeth.plugins.results import TransformResult
 
         settings = CheckpointSettings(enabled=True, frequency="every_row")
         checkpoint_config = RuntimeCheckpointConfig.from_settings(settings)
 
-        class IdentityTransform(BaseTransform):
-            name = "identity"
-            input_schema = _TestSchema
-            output_schema = _TestSchema
-
-            def __init__(self) -> None:
-                super().__init__({"schema": {"mode": "observed"}})
-
-            def process(self, row: PipelineRow, ctx: Any) -> TransformResult:
-                return TransformResult.success(row, success_reason={"action": "identity"})
-
         source = ListSource([{"value": 1}])
-        transform = IdentityTransform()
-        transform.on_success = "default"
+        transform = PassTransform(on_success="default")
         sink = CollectSink()
 
         config = PipelineConfig(

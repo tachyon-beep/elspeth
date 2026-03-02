@@ -1,6 +1,6 @@
 # OpenRouter Sentiment Analysis Example
 
-This example demonstrates using ELSPETH with the OpenRouter LLM transform to perform sentiment analysis on text data.
+This example demonstrates using ELSPETH with the unified `llm` transform (provider: `openrouter`) to perform sentiment analysis on text data.
 
 ## What it does
 
@@ -102,7 +102,7 @@ uv run elspeth run -s examples/openrouter_sentiment/settings_batched.yaml --exec
 ```yaml
 aggregations:
   - name: sentiment_batch
-    plugin: openrouter_llm
+    plugin: openrouter_batch_llm
     trigger:
       count: 5              # Buffer 5 rows before processing
     output_mode: passthrough  # N inputs → N outputs (enriched)

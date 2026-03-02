@@ -1,4 +1,3 @@
-# src/elspeth/engine/executors/gate.py
 """GateExecutor - wraps config-driven gates with audit recording and routing."""
 
 import logging
@@ -10,7 +9,7 @@ import structlog
 
 from elspeth.contracts import (
     ConfigGateReason,
-    ExecutionError,
+    GateResult,
     RouteDestination,
     RouteDestinationKind,
     RoutingAction,
@@ -28,11 +27,16 @@ from elspeth.contracts.plugin_context import PluginContext
 from elspeth.contracts.types import NodeID, StepResolver
 from elspeth.core.canonical import stable_hash
 from elspeth.core.config import GateSettings
+from elspeth.core.expression_parser import (
+    ExpressionEvaluationError,
+    ExpressionParser,
+    ExpressionSecurityError,
+    ExpressionSyntaxError,
+)
 from elspeth.core.landscape import LandscapeRecorder
+from elspeth.engine.executors.state_guard import NodeStateGuard
 from elspeth.engine.executors.types import GateOutcome, MissingEdgeError
-from elspeth.engine.expression_parser import ExpressionParser
 from elspeth.engine.spans import SpanFactory
-from elspeth.plugins.results import GateResult
 
 if TYPE_CHECKING:
     from elspeth.engine.tokens import TokenManager
@@ -52,16 +56,16 @@ class _RouteDispatchOutcome:
 
 
 class GateExecutor:
-    """Executes gates with audit recording and routing.
+    """Executes config-driven gates with audit recording and routing.
 
-    Wraps gate.evaluate() to:
-    1. Record node state start
-    2. Time the operation
-    3. Populate audit fields in result
-    4. Record routing events
-    5. Create child tokens for fork operations
-    6. Record node state completion
-    7. Emit OpenTelemetry span
+    Evaluates gate conditions via ExpressionParser and:
+    1. Records node state start
+    2. Times the operation
+    3. Populates audit fields in result
+    4. Records routing events
+    5. Creates child tokens for fork operations
+    6. Records node state completion
+    7. Emits OpenTelemetry span
 
     CRITICAL: Status is always "completed" for successful gate execution.
     Terminal state (ROUTED, FORKED) is DERIVED from routing_events/token_parents,
@@ -219,86 +223,58 @@ class GateExecutor:
         input_dict = token.row_data.to_dict()
         input_hash = stable_hash(input_dict)
 
-        # Begin node state with dict (for Landscape recording)
-        state = self._recorder.begin_node_state(
+        # Set ctx.contract for plugins that use fallback access (dual-name resolution)
+        ctx.contract = token.row_data.contract
+
+        # NodeStateGuard guarantees the node state reaches terminal status.
+        # If any unhandled exception occurs before guard.complete() is called,
+        # the guard auto-completes the state as FAILED in __exit__.
+        with NodeStateGuard(
+            self._recorder,
             token_id=token.token_id,
             node_id=node_id,
             run_id=ctx.run_id,
             step_index=step,
             input_data=input_dict,
-        )
+        ) as guard:
+            # Create parser and evaluate condition
+            with self._spans.gate_span(
+                gate_config.name,
+                node_id=node_id,
+                input_hash=input_hash,
+                token_id=token.token_id,
+            ):
+                start = time.perf_counter()
+                try:
+                    parser = ExpressionParser(gate_config.condition)
+                    # Pass PipelineRow directly - it implements __getitem__ and .get()
+                    # This preserves dual-name access (normalized and original field names)
+                    eval_result = parser.evaluate(token.row_data)
+                    duration_ms = (time.perf_counter() - start) * 1000
+                except (ExpressionEvaluationError, ExpressionSecurityError, ExpressionSyntaxError):
+                    duration_ms = (time.perf_counter() - start) * 1000
+                    raise
 
-        # Set ctx.contract for plugins that use fallback access (dual-name resolution)
-        ctx.contract = token.row_data.contract
+            # Convert evaluation result to route label
+            if isinstance(eval_result, bool):
+                route_label = "true" if eval_result else "false"
+            elif isinstance(eval_result, str):
+                route_label = eval_result
+            else:
+                # Unexpected result type - convert to string
+                route_label = str(eval_result)
 
-        # Create parser and evaluate condition
-        # P2-2026-01-21: Pass token_id for accurate child token attribution in traces
-        # P2-2026-01-21: Pass node_id for disambiguation when multiple config gates exist
-        with self._spans.gate_span(
-            gate_config.name,
-            node_id=node_id,
-            input_hash=input_hash,
-            token_id=token.token_id,
-        ):
-            start = time.perf_counter()
-            try:
-                parser = ExpressionParser(gate_config.condition)
-                # Pass PipelineRow directly - it implements __getitem__ and .get()
-                # This preserves dual-name access (normalized and original field names)
-                eval_result = parser.evaluate(token.row_data)
-                duration_ms = (time.perf_counter() - start) * 1000
-            except Exception as e:
-                duration_ms = (time.perf_counter() - start) * 1000
-                # Record failure
-                error: ExecutionError = {
-                    "exception": str(e),
-                    "type": type(e).__name__,
-                }
-                self._recorder.complete_node_state(
-                    state_id=state.state_id,
-                    status=NodeStateStatus.FAILED,
-                    duration_ms=duration_ms,
-                    error=error,
+            # Look up destination in routes config
+            if route_label not in gate_config.routes:
+                raise ValueError(
+                    f"Gate '{gate_config.name}' condition returned '{route_label}' which is not in routes: {list(gate_config.routes.keys())}"
                 )
-                raise
 
-        # Convert evaluation result to route label
-        if isinstance(eval_result, bool):
-            route_label = "true" if eval_result else "false"
-        elif isinstance(eval_result, str):
-            route_label = eval_result
-        else:
-            # Unexpected result type - convert to string
-            route_label = str(eval_result)
-
-        # Look up destination in routes config
-        if route_label not in gate_config.routes:
-            # Record failure before raising
-            error = {
-                "exception": f"Route label '{route_label}' not found in routes config",
-                "type": "ValueError",
-            }
-            self._recorder.complete_node_state(
-                state_id=state.state_id,
-                status=NodeStateStatus.FAILED,
-                duration_ms=duration_ms,
-                error=error,
-            )
-            raise ValueError(
-                f"Gate '{gate_config.name}' condition returned '{route_label}' which is not in routes: {list(gate_config.routes.keys())}"
-            )
-
-        # Build routing action and process based on destination
-        action = RoutingAction.continue_(reason={"condition": gate_config.condition, "result": route_label})
-        child_tokens: list[TokenInfo] = []
-        sink_name: str | None = None
-        next_node_id: NodeID | None = None
-        reason: ConfigGateReason = {"condition": gate_config.condition, "result": route_label}
-
-        try:
+            # Build routing action and process based on destination
+            reason: ConfigGateReason = {"condition": gate_config.condition, "result": route_label}
             destination = self._resolve_route_destination(node_id=node_id, route_label=route_label)
             dispatch = self._dispatch_resolved_destination(
-                state_id=state.state_id,
+                state_id=guard.state_id,
                 node_id=node_id,
                 route_label=route_label,
                 destination=destination,
@@ -315,47 +291,30 @@ class GateExecutor:
             sink_name = dispatch.sink_name
             next_node_id = dispatch.next_node_id
 
-        except Exception as e:
-            # Record failure before re-raising - ensures node_state is never left OPEN.
-            # Catches MissingEdgeError, OrchestrationInvariantError, and any other
-            # dispatch/routing errors that would leave the state as non-terminal OPEN.
-            routing_error: ExecutionError = {
-                "exception": str(e),
-                "type": type(e).__name__,
-            }
-            self._recorder.complete_node_state(
-                state_id=state.state_id,
-                status=NodeStateStatus.FAILED,
-                duration_ms=duration_ms,
-                error=routing_error,
+            # Create GateResult for audit fields
+            # Config gates don't modify data, so use input dict as output
+            result = GateResult(
+                row=input_dict,
+                action=action,
+                contract=token.row_data.contract,  # Preserve contract reference
             )
-            raise
+            result.input_hash = input_hash
+            result.output_hash = stable_hash(input_dict)  # Same as input (no modification)
+            result.duration_ms = duration_ms
 
-        # Create GateResult for audit fields
-        # Config gates don't modify data, so use input dict as output
-        result = GateResult(
-            row=input_dict,
-            action=action,
-            contract=token.row_data.contract,  # Preserve contract reference
-        )
-        result.input_hash = input_hash
-        result.output_hash = stable_hash(input_dict)  # Same as input (no modification)
-        result.duration_ms = duration_ms
-
-        # Complete node state - always "completed" for successful execution
-        # Terminal state is DERIVED from routing_events, not stored here
-        gate_context = GateEvaluationContext(
-            condition=gate_config.condition,
-            result=str(eval_result),
-            route_label=route_label,
-        )
-        self._recorder.complete_node_state(
-            state_id=state.state_id,
-            status=NodeStateStatus.COMPLETED,
-            output_data=input_dict,  # Landscape stores dict, not PipelineRow
-            duration_ms=duration_ms,
-            context_after=gate_context,
-        )
+            # Complete node state - always "completed" for successful execution
+            # Terminal state is DERIVED from routing_events, not stored here
+            gate_context = GateEvaluationContext(
+                condition=gate_config.condition,
+                result=str(eval_result),
+                route_label=route_label,
+            )
+            guard.complete(
+                NodeStateStatus.COMPLETED,
+                output_data=input_dict,  # Landscape stores dict, not PipelineRow
+                duration_ms=duration_ms,
+                context_after=gate_context,
+            )
 
         # Token row_data is unchanged (config gates don't modify data)
         # PipelineRow is already set on token, so just preserve it

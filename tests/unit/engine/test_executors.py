@@ -70,10 +70,10 @@ from elspeth.contracts.enums import (
     RowOutcome,
     TriggerType,
 )
-from elspeth.contracts.errors import ContractMergeError, OrchestrationInvariantError, PluginContractViolation
+from elspeth.contracts.errors import ContractMergeError, OrchestrationInvariantError, PluginContractViolation, TransformErrorReason
 from elspeth.contracts.results import ArtifactDescriptor, GateResult
 from elspeth.contracts.routing import RouteDestination, RoutingAction
-from elspeth.contracts.schema_contract import SchemaContract
+from elspeth.contracts.schema_contract import PipelineRow, SchemaContract
 from elspeth.contracts.types import NodeID, SinkName
 from elspeth.core.config import AggregationSettings, GateSettings, TriggerConfig
 from elspeth.engine.executors import (
@@ -86,6 +86,7 @@ from elspeth.engine.executors import (
     TransformExecutor,
 )
 from elspeth.testing import make_field, make_row
+from tests.fixtures.factories import make_context
 from tests.unit.engine.conftest import make_test_step_resolver as _make_step_resolver
 
 # =============================================================================
@@ -101,6 +102,30 @@ def _make_contract() -> SchemaContract:
                 "value",
                 python_type=str,
                 original_name="value",
+                required=True,
+                source="declared",
+            ),
+        ),
+        mode="FLEXIBLE",
+        locked=True,
+    )
+
+
+def _make_output_contract() -> SchemaContract:
+    """Create a contract for transform output (different from input)."""
+    return SchemaContract(
+        fields=(
+            make_field(
+                "value",
+                python_type=str,
+                original_name="value",
+                required=True,
+                source="declared",
+            ),
+            make_field(
+                "processed",
+                python_type=bool,
+                original_name="processed",
                 required=True,
                 source="declared",
             ),
@@ -184,13 +209,6 @@ def _make_sink(
     return sink
 
 
-def _make_ctx(run_id: str = "test-run") -> Any:
-    """Create a PluginContext for testing."""
-    from elspeth.contracts.plugin_context import PluginContext
-
-    return PluginContext(run_id=run_id, config={})
-
-
 # =============================================================================
 # TestMissingEdgeError
 # =============================================================================
@@ -262,7 +280,7 @@ class TestTransformExecutor:
         executor = TransformExecutor(recorder, _make_span_factory(), _make_step_resolver())
         transform = _make_transform(node_id=None)
         token = _make_token()
-        ctx = _make_ctx()
+        ctx = make_context()
 
         with pytest.raises(OrchestrationInvariantError, match="without node_id"):
             executor.execute_transform(transform, token, ctx)
@@ -283,7 +301,7 @@ class TestTransformExecutor:
 
         transform.input_schema = StrictSchema
         token = _make_token(data={"count": "not_an_int"})
-        ctx = _make_ctx()
+        ctx = make_context()
 
         with pytest.raises(PluginContractViolation, match="input validation failed"):
             executor.execute_transform(transform, token, ctx)
@@ -302,7 +320,7 @@ class TestTransformExecutor:
             success_reason={"action": "test"},
         )
         token = _make_token(data={"count": "not_an_int"}, contract=contract)
-        ctx = _make_ctx()
+        ctx = make_context()
 
         result, _, _ = executor.execute_transform(transform, token, ctx)
 
@@ -322,7 +340,7 @@ class TestTransformExecutor:
             make_row({"value": "processed"}, contract=contract),
             success_reason={"action": "test"},
         )
-        ctx = _make_ctx()
+        ctx = make_context()
 
         result, updated_token, error_sink = executor.execute_transform(
             transform,
@@ -345,7 +363,7 @@ class TestTransformExecutor:
             make_row({"value": "out"}, contract=contract),
             success_reason={"action": "test"},
         )
-        ctx = _make_ctx()
+        ctx = make_context()
 
         executor.execute_transform(transform, token, ctx, attempt=2)
 
@@ -369,7 +387,7 @@ class TestTransformExecutor:
             make_row({"value": "out"}, contract=contract),
             success_reason={"action": "test"},
         )
-        ctx = _make_ctx()
+        ctx = make_context()
 
         executor.execute_transform(transform, token, ctx)
 
@@ -389,7 +407,7 @@ class TestTransformExecutor:
             make_row({"value": "out"}, contract=contract),
             success_reason={"action": "test"},
         )
-        ctx = _make_ctx()
+        ctx = make_context()
 
         result, _, _ = executor.execute_transform(
             transform,
@@ -413,7 +431,7 @@ class TestTransformExecutor:
             make_row({"value": "modified"}, contract=contract),
             success_reason={"action": "test"},
         )
-        ctx = _make_ctx()
+        ctx = make_context()
 
         _, updated_token, _ = executor.execute_transform(
             transform,
@@ -447,7 +465,7 @@ class TestTransformExecutor:
 
         transform = _make_transform()
         transform.process = capturing_process
-        ctx = _make_ctx()
+        ctx = make_context()
 
         executor.execute_transform(transform, token, ctx)
 
@@ -466,7 +484,7 @@ class TestTransformExecutor:
             reason={"reason": "test_error"},
         )
         token = _make_token()
-        ctx = _make_ctx()
+        ctx = make_context(landscape=recorder)
 
         result, updated_token, error_sink = executor.execute_transform(
             transform,
@@ -488,7 +506,7 @@ class TestTransformExecutor:
             reason={"reason": "test_error"},
         )
         token = _make_token()
-        ctx = _make_ctx()
+        ctx = make_context(landscape=recorder)
 
         _, _, error_sink = executor.execute_transform(
             transform,
@@ -514,7 +532,7 @@ class TestTransformExecutor:
             reason={"reason": "test_error"},
         )
         token = _make_token()
-        ctx = _make_ctx()
+        ctx = make_context(landscape=recorder)
 
         _, _, error_sink = executor.execute_transform(transform, token, ctx)
         assert error_sink == "discard"
@@ -528,7 +546,7 @@ class TestTransformExecutor:
             reason={"reason": "test_error"},
         )
         token = _make_token()
-        ctx = _make_ctx()
+        ctx = make_context(landscape=recorder)
 
         executor.execute_transform(transform, token, ctx)
 
@@ -545,8 +563,8 @@ class TestTransformExecutor:
             reason={"reason": "test_error"},
         )
         token = _make_token()
-        ctx = _make_ctx()
-        ctx.record_transform_error = MagicMock()
+        ctx = make_context()
+        ctx.record_transform_error = MagicMock()  # type: ignore[method-assign]
 
         executor.execute_transform(transform, token, ctx)
 
@@ -562,7 +580,7 @@ class TestTransformExecutor:
             reason={"reason": "test_error"},
         )
         token = _make_token()
-        ctx = _make_ctx()
+        ctx = make_context(landscape=recorder)
 
         executor.execute_transform(transform, token, ctx)
 
@@ -581,7 +599,7 @@ class TestTransformExecutor:
             reason={"reason": "test_error"},
         )
         token = _make_token()
-        ctx = _make_ctx()
+        ctx = make_context(landscape=recorder)
 
         with pytest.raises(OrchestrationInvariantError, match="DIVERT edge"):
             executor.execute_transform(transform, token, ctx)
@@ -595,7 +613,7 @@ class TestTransformExecutor:
         transform = _make_transform()
         transform.process.side_effect = ValueError("plugin bug")
         token = _make_token()
-        ctx = _make_ctx()
+        ctx = make_context()
 
         with pytest.raises(ValueError, match="plugin bug"):
             executor.execute_transform(transform, token, ctx)
@@ -603,7 +621,7 @@ class TestTransformExecutor:
         recorder.complete_node_state.assert_called_once()
         kwargs = recorder.complete_node_state.call_args[1]
         assert kwargs["status"] == NodeStateStatus.FAILED
-        assert "plugin bug" in kwargs["error"]["exception"]
+        assert "plugin bug" in kwargs["error"].exception
 
     def test_exception_path_captures_duration(self) -> None:
         """Duration is captured even when exception is raised."""
@@ -612,7 +630,7 @@ class TestTransformExecutor:
         transform = _make_transform()
         transform.process.side_effect = RuntimeError("crash")
         token = _make_token()
-        ctx = _make_ctx()
+        ctx = make_context()
 
         with pytest.raises(RuntimeError):
             executor.execute_transform(transform, token, ctx)
@@ -635,7 +653,7 @@ class TestTransformExecutor:
             reason={"reason": "test_error"},
         )
         token = _make_token()
-        ctx = _make_ctx()
+        ctx = make_context(landscape=recorder)
 
         executor.execute_transform(transform, token, ctx)
 
@@ -646,10 +664,10 @@ class TestTransformExecutor:
         recorder = _make_recorder()
         executor = TransformExecutor(recorder, _make_span_factory(), _make_step_resolver())
         transform = _make_transform(on_error="discard")
-        error_reason = {"reason": "content_filtered", "provider": "azure", "code": "CF-01"}
+        error_reason: TransformErrorReason = {"reason": "content_filtered", "provider": "azure", "code": "CF-01"}  # type: ignore[typeddict-unknown-key]
         transform.process.return_value = TransformResult.error(reason=error_reason)
         token = _make_token()
-        ctx = _make_ctx()
+        ctx = make_context(landscape=recorder)
 
         executor.execute_transform(transform, token, ctx)
 
@@ -671,8 +689,8 @@ class TestTransformExecutor:
             reason={"reason": "api_error"},
         )
         token = _make_token()
-        ctx = _make_ctx()
-        ctx.record_transform_error = MagicMock()
+        ctx = make_context()
+        ctx.record_transform_error = MagicMock()  # type: ignore[method-assign]
 
         executor.execute_transform(transform, token, ctx)
 
@@ -697,7 +715,7 @@ class TestTransformExecutor:
         )
         # Input row already has "llm_response" — collision!
         token = _make_token(data={"value": "test", "llm_response": "pre-existing"})
-        ctx = _make_ctx()
+        ctx = make_context()
 
         with pytest.raises(PluginContractViolation, match="would overwrite existing input fields"):
             executor.execute_transform(transform, token, ctx)
@@ -717,7 +735,7 @@ class TestTransformExecutor:
             success_reason={"action": "test"},
         )
         token = _make_token(contract=contract)
-        ctx = _make_ctx()
+        ctx = make_context()
 
         result, updated_token, _error_sink = executor.execute_transform(transform, token, ctx)
 
@@ -736,7 +754,7 @@ class TestTransformExecutor:
             declared_output_fields=frozenset({"value"}),
         )
         token = _make_token(data={"value": "test"})
-        ctx = _make_ctx()
+        ctx = make_context()
 
         with pytest.raises(PluginContractViolation):
             executor.execute_transform(transform, token, ctx)
@@ -757,12 +775,127 @@ class TestTransformExecutor:
             success_reason={"action": "test"},
         )
         token = _make_token(contract=contract)
-        ctx = _make_ctx()
+        ctx = make_context()
 
         result, _, _ = executor.execute_transform(transform, token, ctx)
 
         assert result.status == "success"
         transform.process.assert_called_once()
+
+    # --- PipelineRow handling (merged from test_executor_pipeline_row.py) ---
+
+    def test_passes_pipeline_row_to_plugin(self) -> None:
+        """TransformExecutor should pass PipelineRow (not dict) to transform.process()."""
+        recorder = _make_recorder()
+        executor = TransformExecutor(recorder, _make_span_factory(), _make_step_resolver())
+        contract = _make_contract()
+        transform = _make_transform()
+        transform.process.return_value = TransformResult.success(
+            make_row({"value": "processed"}, contract=contract),
+            success_reason={"action": "test"},
+        )
+        token = _make_token(contract=contract)
+        ctx = make_context()
+
+        executor.execute_transform(transform, token, ctx)
+
+        transform.process.assert_called_once()
+        passed_row = transform.process.call_args[0][0]
+        assert isinstance(passed_row, PipelineRow), f"Expected PipelineRow, got {type(passed_row)}"
+        assert passed_row["value"] == "test"
+
+    def test_extracts_dict_for_landscape_recording(self) -> None:
+        """Landscape recording should receive plain dict, not PipelineRow."""
+        recorder = _make_recorder()
+        executor = TransformExecutor(recorder, _make_span_factory(), _make_step_resolver())
+        contract = _make_contract()
+        transform = _make_transform()
+        transform.process.return_value = TransformResult.success(
+            make_row({"value": "processed"}, contract=contract),
+            success_reason={"action": "test"},
+        )
+        token = _make_token(contract=contract)
+        ctx = make_context()
+
+        executor.execute_transform(transform, token, ctx)
+
+        recorder.begin_node_state.assert_called_once()
+        input_data = recorder.begin_node_state.call_args[1]["input_data"]
+        assert isinstance(input_data, dict)
+        assert type(input_data) is not PipelineRow  # type: ignore[comparison-overlap, unreachable]
+        assert input_data == {"value": "test"}
+
+    def test_sets_ctx_contract_from_token(self) -> None:
+        """TransformExecutor should set ctx.contract from token.row_data.contract."""
+        recorder = _make_recorder()
+        executor = TransformExecutor(recorder, _make_span_factory(), _make_step_resolver())
+        contract = _make_contract()
+
+        captured_ctx = None
+
+        def capture_ctx(row_data: Any, ctx: Any) -> TransformResult:
+            nonlocal captured_ctx
+            captured_ctx = ctx
+            return TransformResult.success(
+                make_row({"value": "processed"}, contract=contract),
+                success_reason={"action": "test"},
+            )
+
+        transform = _make_transform()
+        transform.process = capture_ctx
+        token = _make_token(contract=contract)
+        ctx = make_context()
+        assert ctx.contract is None
+
+        executor.execute_transform(transform, token, ctx)
+
+        assert captured_ctx is not None
+        assert captured_ctx.contract is contract
+
+    def test_creates_pipeline_row_from_result(self) -> None:
+        """Updated token should have PipelineRow with output contract."""
+        recorder = _make_recorder()
+        executor = TransformExecutor(recorder, _make_span_factory(), _make_step_resolver())
+        input_contract = _make_contract()
+        output_contract = SchemaContract(
+            fields=(
+                make_field("value", python_type=str, original_name="'value'", required=True, source="declared"),
+                make_field("processed", python_type=bool, original_name="'processed'", required=True, source="declared"),
+            ),
+            mode="FLEXIBLE",
+            locked=True,
+        )
+        transform = _make_transform()
+        transform.process.return_value = TransformResult.success(
+            make_row({"value": "processed", "processed": True}, contract=output_contract),
+            success_reason={"action": "test"},
+        )
+        token = _make_token(contract=input_contract)
+        ctx = make_context()
+
+        _result, updated_token, _error_sink = executor.execute_transform(transform, token, ctx)
+
+        assert isinstance(updated_token.row_data, PipelineRow)
+        assert updated_token.row_data["value"] == "processed"
+        assert updated_token.row_data["processed"] is True
+        assert updated_token.row_data.contract is output_contract
+
+    def test_error_preserves_original_token(self) -> None:
+        """When transform returns error, token should be unchanged."""
+        recorder = _make_recorder()
+        executor = TransformExecutor(recorder, _make_span_factory(), _make_step_resolver())
+        contract = _make_contract()
+        transform = _make_transform(on_error="discard")
+        transform.process.return_value = TransformResult.error(
+            reason={"reason": "test_error"},
+        )
+        token = _make_token(contract=contract)
+        ctx = make_context(landscape=recorder)
+
+        _result, updated_token, _error_sink = executor.execute_transform(transform, token, ctx)
+
+        assert updated_token is token
+        assert updated_token.row_data is token.row_data
 
 
 # =============================================================================
@@ -795,7 +928,7 @@ class TestGateExecutor:
         )
         contract = _make_contract()
         token = _make_token(contract=contract)
-        ctx = _make_ctx()
+        ctx = make_context()
 
         outcome = executor.execute_config_gate(
             config,
@@ -828,7 +961,7 @@ class TestGateExecutor:
         )
         contract = _make_contract()
         token = _make_token(contract=contract)
-        ctx = _make_ctx()
+        ctx = make_context()
 
         outcome = executor.execute_config_gate(
             config,
@@ -859,7 +992,7 @@ class TestGateExecutor:
         )
         contract = _make_contract()
         token = _make_token(contract=contract)
-        ctx = _make_ctx()
+        ctx = make_context()
 
         outcome = executor.execute_config_gate(
             config,
@@ -891,7 +1024,7 @@ class TestGateExecutor:
         )
         contract = _make_contract()
         token = _make_token(contract=contract)
-        ctx = _make_ctx()
+        ctx = make_context()
 
         outcome = executor.execute_config_gate(
             config,
@@ -915,7 +1048,7 @@ class TestGateExecutor:
         )
         contract = _make_contract()
         token = _make_token(contract=contract)
-        ctx = _make_ctx()
+        ctx = make_context()
 
         with pytest.raises(ValueError, match="unknown_label"):
             executor.execute_config_gate(
@@ -962,7 +1095,7 @@ class TestGateExecutor:
 
         contract = _make_contract()
         token = _make_token(contract=contract)
-        ctx = _make_ctx()
+        ctx = make_context()
 
         outcome = executor.execute_config_gate(
             config,
@@ -1003,7 +1136,7 @@ class TestGateExecutor:
             fork_to=["path_a", "path_b"],
         )
         token = _make_token(contract=_make_contract())
-        ctx = _make_ctx()
+        ctx = make_context()
 
         with pytest.raises(OrchestrationInvariantError, match="no TokenManager"):
             executor.execute_config_gate(
@@ -1030,7 +1163,7 @@ class TestGateExecutor:
         )
         contract = _make_contract()
         token = _make_token(contract=contract)
-        ctx = _make_ctx()
+        ctx = make_context()
 
         with pytest.raises(MissingEdgeError, match="cg_1"):
             executor.execute_config_gate(
@@ -1062,9 +1195,9 @@ class TestGateExecutor:
         )
         contract = _make_contract()
         token = _make_token(contract=contract)
-        ctx = _make_ctx()
+        ctx = make_context()
 
-        from elspeth.engine.expression_parser import ExpressionEvaluationError
+        from elspeth.core.expression_parser import ExpressionEvaluationError
 
         with pytest.raises(ExpressionEvaluationError):
             executor.execute_config_gate(
@@ -1113,7 +1246,7 @@ class TestGateExecutor:
         )
         contract = _make_contract()
         token = _make_token(contract=contract)
-        ctx = _make_ctx()
+        ctx = make_context()
 
         # This raises OrchestrationInvariantError (a subclass of Exception but
         # NOT MissingEdgeError). Before the fix, this would NOT be caught by
@@ -1152,14 +1285,14 @@ class TestGateExecutor:
         )
         contract = _make_contract()
         token = _make_token(contract=contract)
-        ctx = _make_ctx()
+        ctx = make_context()
 
         with pytest.raises(ValueError, match="None"):
             executor.execute_config_gate(config, "cg_1", token, ctx)
 
         last_call = recorder.complete_node_state.call_args_list[-1]
         assert last_call[1]["status"] == NodeStateStatus.FAILED
-        assert "None" in last_call[1]["error"]["exception"]
+        assert "None" in last_call[1]["error"].exception
 
     def test_config_gate_int_result_stringified_for_route_lookup(self) -> None:
         """Expression returning int is stringified for route label matching.
@@ -1178,7 +1311,7 @@ class TestGateExecutor:
         )
         contract = _make_contract()
         token = _make_token(contract=contract)
-        ctx = _make_ctx()
+        ctx = make_context()
 
         with pytest.raises(ValueError, match="'42'"):
             executor.execute_config_gate(config, "cg_1", token, ctx)
@@ -1208,7 +1341,7 @@ class TestGateExecutor:
         )
         contract = _make_contract()
         token = _make_token(contract=contract)
-        ctx = _make_ctx()
+        ctx = make_context()
 
         executor.execute_config_gate(config, "cg_1", token, ctx)
 
@@ -1247,7 +1380,7 @@ class TestGateExecutor:
         )
         contract = _make_contract()
         token = _make_token(contract=contract)
-        ctx = _make_ctx()
+        ctx = make_context()
 
         # This will fail because no route_resolution_map for "true" label
         with pytest.raises(MissingEdgeError):
@@ -1257,6 +1390,68 @@ class TestGateExecutor:
         failed_call = recorder.complete_node_state.call_args_list[-1]
         assert failed_call.kwargs.get("status") == NodeStateStatus.FAILED
         assert "context_after" not in failed_call.kwargs
+
+    # --- NodeStateGuard terminality ---
+
+    def test_post_dispatch_failure_marks_state_failed_via_guard(self) -> None:
+        """Post-dispatch failure (e.g. output_hash crash) → state FAILED, not OPEN.
+
+        NodeStateGuard guarantees that any unhandled exception between
+        begin_node_state and the explicit complete() call results in auto-
+        completion as FAILED.  This test simulates a failure in stable_hash
+        (used for output_hash computation) AFTER successful gate evaluation
+        and dispatch — code that runs after all manual try/except blocks.
+        """
+        recorder = _make_recorder()
+        edge_map = {(NodeID("cg_1"), "true"): "edge_true"}
+        route_map = {(NodeID("cg_1"), "true"): RouteDestination.processing_node(NodeID("next_node"))}
+        executor = GateExecutor(
+            recorder,
+            _make_span_factory(),
+            _make_step_resolver(),
+            edge_map=edge_map,
+            route_resolution_map=route_map,
+        )
+        config = GateSettings(
+            name="my_gate",
+            input="in_conn",
+            condition="True",
+            routes={"true": "next_conn", "false": "error_sink"},
+        )
+        contract = _make_contract()
+        token = _make_token(contract=contract)
+        ctx = make_context()
+
+        # Monkey-patch stable_hash to fail on the second call (output_hash).
+        # First call is input_hash (succeeds), second is output_hash (fails).
+        from elspeth.core.canonical import stable_hash
+
+        original_stable_hash = stable_hash
+        call_count = 0
+
+        def failing_hash(data: Any) -> str:
+            nonlocal call_count
+            call_count += 1
+            if call_count == 1:
+                return original_stable_hash(data)
+            raise ValueError("Simulated output hash failure")
+
+        import elspeth.engine.executors.gate as gate_mod
+
+        original_ref = gate_mod.stable_hash  # type: ignore[attr-defined]
+        gate_mod.stable_hash = failing_hash  # type: ignore[attr-defined, assignment]
+        try:
+            with pytest.raises(ValueError, match="Simulated output hash failure"):
+                executor.execute_config_gate(config, "cg_1", token, ctx)
+        finally:
+            gate_mod.stable_hash = original_ref  # type: ignore[attr-defined]
+
+        # State must be FAILED (auto-completed by guard), not orphan OPEN
+        completed_calls = [c for c in recorder.complete_node_state.call_args_list if c.kwargs.get("status") == NodeStateStatus.FAILED]
+        assert len(completed_calls) >= 1, (
+            "Node state should be FAILED when post-dispatch processing raises. "
+            "Without NodeStateGuard, this failure would leave the state OPEN."
+        )
 
 
 # =============================================================================
@@ -1282,6 +1477,7 @@ class TestAggregationExecutor:
             name="test_agg",
             plugin="batch_stats",
             input="default",
+            on_error="discard",
             trigger=TriggerConfig(count=count),
         )
         executor = AggregationExecutor(
@@ -1434,7 +1630,7 @@ class TestAggregationExecutor:
         """Flushing without a batch raises RuntimeError."""
         executor, _, nid = self._make_agg_executor()
         transform = MagicMock()
-        ctx = _make_ctx()
+        ctx = make_context()
 
         with pytest.raises(RuntimeError, match="No batch exists"):
             executor.execute_flush(nid, transform, ctx, TriggerType.COUNT)
@@ -1468,7 +1664,7 @@ class TestAggregationExecutor:
             make_row({"value": "aggregated"}, contract=contract),
             success_reason={"action": "aggregated"},
         )
-        ctx = _make_ctx()
+        ctx = make_context()
 
         result, tokens, batch_id = executor.execute_flush(
             nid,
@@ -1503,7 +1699,7 @@ class TestAggregationExecutor:
             make_row({"value": "aggregated"}, contract=contract),
             success_reason={"action": "aggregated"},
         )
-        ctx = _make_ctx()
+        ctx = make_context()
 
         executor.execute_flush(nid, transform, ctx, TriggerType.COUNT)
 
@@ -1530,7 +1726,7 @@ class TestAggregationExecutor:
         transform.process.return_value = TransformResult.error(
             reason={"reason": "test_error"},
         )
-        ctx = _make_ctx()
+        ctx = make_context()
 
         result, _tokens, _batch_id = executor.execute_flush(
             nid,
@@ -1556,7 +1752,7 @@ class TestAggregationExecutor:
         transform = MagicMock()
         transform.name = "agg_transform"
         transform.process.side_effect = RuntimeError("transform crash")
-        ctx = _make_ctx()
+        ctx = make_context()
 
         with pytest.raises(RuntimeError, match="transform crash"):
             executor.execute_flush(nid, transform, ctx, TriggerType.COUNT)
@@ -1582,7 +1778,7 @@ class TestAggregationExecutor:
         transform = MagicMock()
         transform.name = "agg"
         transform.process.side_effect = RuntimeError("boom")
-        ctx = _make_ctx()
+        ctx = make_context()
 
         with pytest.raises(RuntimeError, match="boom"):
             executor.execute_flush(nid, transform, ctx, TriggerType.COUNT)
@@ -1607,7 +1803,7 @@ class TestAggregationExecutor:
         transform = MagicMock()
         transform.name = "agg"
         transform.process.side_effect = BatchPendingError("batch-123", "submitted")
-        ctx = _make_ctx()
+        ctx = make_context()
 
         with pytest.raises(BatchPendingError):
             executor.execute_flush(nid, transform, ctx, TriggerType.COUNT)
@@ -1640,7 +1836,7 @@ class TestAggregationExecutor:
         transform = MagicMock()
         transform.name = "agg"
         transform.process.side_effect = BatchPendingError("batch-123", "submitted")
-        ctx = _make_ctx()
+        ctx = make_context()
 
         batch_id_before = executor.get_batch_id(nid)
         assert batch_id_before is not None
@@ -1666,7 +1862,7 @@ class TestAggregationExecutor:
             make_row({"value": "agg"}, contract=contract),
             success_reason={"action": "agg"},
         )
-        ctx = _make_ctx()
+        ctx = make_context()
 
         executor.execute_flush(nid, transform, ctx, TriggerType.COUNT)
 
@@ -1712,13 +1908,165 @@ class TestAggregationExecutor:
 
     def test_restore_state_and_get(self) -> None:
         executor, _, nid = self._make_agg_executor()
-        state = {"key": "value"}
+        state = AggregationCheckpointState(version="3.0", nodes={})
         executor.restore_state(nid, state)
         assert executor.get_restored_state(nid) == state
 
     def test_get_restored_state_returns_none_if_not_set(self) -> None:
         executor, _, nid = self._make_agg_executor()
         assert executor.get_restored_state(nid) is None
+
+    # --- PipelineRow handling (merged from test_executor_pipeline_row.py) ---
+
+    def test_buffer_row_stores_dict_not_pipeline_row(self) -> None:
+        """AggregationExecutor should store dicts in buffer, not PipelineRow.
+
+        Internal buffer must be JSON-serializable for checkpoints.
+        """
+        executor, _, nid = self._make_agg_executor(count=10)
+        contract = _make_contract()
+        token = _make_token(data={"value": "test"}, contract=contract)
+
+        executor.buffer_row(nid, token)
+
+        buffered = executor.get_buffered_rows(nid)
+        assert len(buffered) == 1
+        assert isinstance(buffered[0], dict)
+        assert type(buffered[0]) is not PipelineRow  # type: ignore[comparison-overlap, unreachable]
+        assert buffered[0] == {"value": "test"}
+
+    def test_buffer_row_extracts_dict_from_pipeline_row(self) -> None:
+        """buffer_row should extract dict from PipelineRow, preserving all fields."""
+        executor, _, nid = self._make_agg_executor(count=10)
+        contract = _make_contract()
+        row_data = {"value": "test", "extra": "field", "number": 42}
+        token = _make_token(data=row_data, contract=contract)
+
+        executor.buffer_row(nid, token)
+
+        buffered = executor.get_buffered_rows(nid)
+        assert buffered[0] == {"value": "test", "extra": "field", "number": 42}
+
+    def test_buffer_tokens_preserves_pipeline_row(self) -> None:
+        """TokenInfo in buffer_tokens should keep PipelineRow as row_data."""
+        executor, _, nid = self._make_agg_executor(count=10)
+        contract = _make_contract()
+        token = _make_token(data={"value": "test"}, contract=contract)
+
+        executor.buffer_row(nid, token)
+
+        buffered_tokens = executor.get_buffered_tokens(nid)
+        assert len(buffered_tokens) == 1
+        assert isinstance(buffered_tokens[0].row_data, PipelineRow)
+        assert buffered_tokens[0].row_data.contract is contract
+
+    def test_checkpoint_contains_dicts_not_pipeline_row(self) -> None:
+        """get_checkpoint_state() should return typed DTO with JSON-serializable to_dict()."""
+        import json
+
+        executor, _, nid = self._make_agg_executor(count=10)
+        contract = _make_contract()
+        token = _make_token(data={"value": "test"}, contract=contract)
+
+        executor.buffer_row(nid, token)
+
+        checkpoint = executor.get_checkpoint_state()
+        assert isinstance(checkpoint, AggregationCheckpointState)
+
+        # Verify to_dict() output is JSON-serializable
+        checkpoint_dict = checkpoint.to_dict()
+        try:
+            serialized = json.dumps(checkpoint_dict)
+            assert len(serialized) > 0
+        except (TypeError, ValueError) as e:
+            pytest.fail(f"Checkpoint to_dict() should be JSON-serializable but got error: {e}")
+
+        # Verify row_data is stored as dict in checkpoint token
+        node_checkpoint = checkpoint.nodes[str(nid)]
+        token_ckpt = node_checkpoint.tokens[0]
+        assert isinstance(token_ckpt.row_data, dict)
+        assert token_ckpt.row_data == {"value": "test"}
+
+    def test_checkpoint_includes_contract_for_restore(self) -> None:
+        """Checkpoint should include contract info to enable PipelineRow restoration."""
+        executor, _, nid = self._make_agg_executor(count=10)
+        contract = _make_contract()
+        token = _make_token(data={"value": "test"}, contract=contract)
+
+        executor.buffer_row(nid, token)
+
+        checkpoint = executor.get_checkpoint_state()
+        assert isinstance(checkpoint, AggregationCheckpointState)
+        node_checkpoint = checkpoint.nodes[str(nid)]
+        assert node_checkpoint.contract is not None
+        assert all(t.contract_version for t in node_checkpoint.tokens), "Checkpoint must include contract info for PipelineRow restoration"
+
+    def test_restore_from_checkpoint_creates_pipeline_row(self) -> None:
+        """restore_from_checkpoint should reconstruct TokenInfo with PipelineRow."""
+        executor, recorder, nid = self._make_agg_executor(count=10)
+        contract = _make_contract()
+        token = _make_token(data={"value": "test"}, contract=contract)
+
+        executor.buffer_row(nid, token)
+        checkpoint = executor.get_checkpoint_state()
+
+        # Create new executor and restore from checkpoint
+        new_executor = AggregationExecutor(
+            recorder,
+            _make_span_factory(),
+            _make_step_resolver(),
+            run_id="test-run",
+            aggregation_settings={
+                nid: AggregationSettings(
+                    name="test_agg",
+                    plugin="batch_stats",
+                    input="default",
+                    on_error="discard",
+                    trigger=TriggerConfig(count=10),
+                )
+            },
+        )
+        new_executor.restore_from_checkpoint(checkpoint)
+
+        restored_tokens = new_executor.get_buffered_tokens(nid)
+        assert len(restored_tokens) == 1
+        assert isinstance(restored_tokens[0].row_data, PipelineRow)
+        assert restored_tokens[0].row_data["value"] == "test"
+        assert restored_tokens[0].row_data.contract is not None
+        assert restored_tokens[0].row_data.contract.mode == "FLEXIBLE"
+
+    def test_restore_from_checkpoint_buffer_has_dicts(self) -> None:
+        """After restore, _buffers should contain dicts (not PipelineRow)."""
+        executor, recorder, nid = self._make_agg_executor(count=10)
+        contract = _make_contract()
+        token = _make_token(data={"value": "test"}, contract=contract)
+
+        executor.buffer_row(nid, token)
+        checkpoint = executor.get_checkpoint_state()
+
+        # Create new executor and restore from checkpoint
+        new_executor = AggregationExecutor(
+            recorder,
+            _make_span_factory(),
+            _make_step_resolver(),
+            run_id="test-run",
+            aggregation_settings={
+                nid: AggregationSettings(
+                    name="test_agg",
+                    plugin="batch_stats",
+                    input="default",
+                    on_error="discard",
+                    trigger=TriggerConfig(count=10),
+                )
+            },
+        )
+        new_executor.restore_from_checkpoint(checkpoint)
+
+        restored_rows = new_executor.get_buffered_rows(nid)
+        assert len(restored_rows) == 1
+        assert isinstance(restored_rows[0], dict)
+        assert type(restored_rows[0]) is not PipelineRow  # type: ignore[comparison-overlap, unreachable]
+        assert restored_rows[0] == {"value": "test"}
 
 
 # =============================================================================
@@ -1736,7 +2084,7 @@ class TestSinkExecutor:
         recorder = _make_recorder()
         executor = SinkExecutor(recorder, _make_span_factory(), run_id="test-run")
         sink = _make_sink()
-        ctx = _make_ctx()
+        ctx = make_context()
         pending = PendingOutcome(outcome=RowOutcome.COMPLETED)
 
         result = executor.write(
@@ -1758,7 +2106,7 @@ class TestSinkExecutor:
         executor = SinkExecutor(recorder, _make_span_factory(), run_id="test-run")
         sink = _make_sink(node_id=None)
         token = _make_token()
-        ctx = _make_ctx()
+        ctx = make_context()
         pending = PendingOutcome(outcome=RowOutcome.COMPLETED)
 
         with pytest.raises(OrchestrationInvariantError, match="without node_id"):
@@ -1786,7 +2134,7 @@ class TestSinkExecutor:
         sink = _make_sink()
         sink.validate_input = True
         sink.input_schema = StrictSinkSchema
-        ctx = _make_ctx()
+        ctx = make_context()
         pending = PendingOutcome(outcome=RowOutcome.COMPLETED)
 
         with pytest.raises(PluginContractViolation, match="input validation failed"):
@@ -1810,7 +2158,7 @@ class TestSinkExecutor:
         token = _make_token(data={"id": "1"})  # Missing 'name' field
         sink = _make_sink()
         sink.declared_required_fields = frozenset({"id", "name"})
-        ctx = _make_ctx()
+        ctx = make_context()
         pending = PendingOutcome(outcome=RowOutcome.COMPLETED)
 
         with pytest.raises(PluginContractViolation, match=r"missing required fields.*name"):
@@ -1837,7 +2185,7 @@ class TestSinkExecutor:
         ]
         sink = _make_sink()
         sink.declared_required_fields = frozenset({"id", "name"})
-        ctx = _make_ctx()
+        ctx = make_context()
         pending = PendingOutcome(outcome=RowOutcome.COMPLETED)
 
         with pytest.raises(PluginContractViolation, match=r"row 1.*missing required fields.*name"):
@@ -1864,7 +2212,7 @@ class TestSinkExecutor:
             _make_token(data={"value": "b"}, token_id="t2", contract=contract),
         ]
         sink = _make_sink()
-        ctx = _make_ctx()
+        ctx = make_context()
         pending = PendingOutcome(outcome=RowOutcome.COMPLETED)
 
         artifact = executor.write(
@@ -1896,7 +2244,7 @@ class TestSinkExecutor:
         executor = SinkExecutor(recorder, _make_span_factory(), run_id="test-run")
         token = _make_token()
         sink = _make_sink()
-        ctx = _make_ctx()
+        ctx = make_context()
         pending = PendingOutcome(outcome=RowOutcome.COMPLETED)
 
         executor.write(
@@ -1917,7 +2265,7 @@ class TestSinkExecutor:
         executor = SinkExecutor(recorder, _make_span_factory(), run_id="test-run")
         token = _make_token(data={"value": "test"})
         sink = _make_sink()
-        ctx = _make_ctx()
+        ctx = make_context()
         pending = PendingOutcome(outcome=RowOutcome.COMPLETED)
 
         executor.write(
@@ -1958,7 +2306,7 @@ class TestSinkExecutor:
             _make_token(data={"value": 1}, token_id="t2", contract=contract_b),
         ]
         sink = _make_sink()
-        ctx = _make_ctx()
+        ctx = make_context()
         pending = PendingOutcome(outcome=RowOutcome.COMPLETED)
 
         with pytest.raises(ContractMergeError):
@@ -1975,7 +2323,7 @@ class TestSinkExecutor:
         assert len(failed_calls) == 2
         for call in failed_calls:
             error = call[1]["error"]
-            assert error["phase"] == "contract_merge"
+            assert error.phase == "contract_merge"
 
         sink.write.assert_not_called()
         sink.flush.assert_not_called()
@@ -1992,7 +2340,7 @@ class TestSinkExecutor:
         ]
         sink = _make_sink()
         sink.write.side_effect = OSError("disk full")
-        ctx = _make_ctx()
+        ctx = make_context()
         pending = PendingOutcome(outcome=RowOutcome.COMPLETED)
 
         with pytest.raises(OSError, match="disk full"):
@@ -2018,7 +2366,7 @@ class TestSinkExecutor:
         tokens = [_make_token()]
         sink = _make_sink()
         sink.flush.side_effect = OSError("flush failed")
-        ctx = _make_ctx()
+        ctx = make_context()
         pending = PendingOutcome(outcome=RowOutcome.COMPLETED)
 
         with pytest.raises(OSError, match="flush failed"):
@@ -2046,7 +2394,7 @@ class TestSinkExecutor:
             _make_token(token_id="t2", contract=contract),
         ]
         sink = _make_sink()
-        ctx = _make_ctx()
+        ctx = make_context()
         pending = PendingOutcome(outcome=RowOutcome.COMPLETED)
         callback = MagicMock()
 
@@ -2071,7 +2419,7 @@ class TestSinkExecutor:
         executor = SinkExecutor(recorder, _make_span_factory(), run_id="test-run")
         token = _make_token()
         sink = _make_sink()
-        ctx = _make_ctx()
+        ctx = make_context()
         pending = PendingOutcome(outcome=RowOutcome.COMPLETED)
         callback = MagicMock(side_effect=RuntimeError("checkpoint failed"))
 
@@ -2096,7 +2444,7 @@ class TestSinkExecutor:
         executor = SinkExecutor(recorder, _make_span_factory(), run_id="test-run")
         token = _make_token()
         sink = _make_sink()
-        ctx = _make_ctx()
+        ctx = make_context()
         pending = PendingOutcome(outcome=RowOutcome.QUARANTINED, error_hash="err_hash_123")
 
         executor.write(
@@ -2130,7 +2478,7 @@ class TestSinkExecutor:
             _make_token(token_id="t2", contract=contract),
         ]
         sink = _make_sink()
-        ctx = _make_ctx()
+        ctx = make_context()
         pending = PendingOutcome(outcome=RowOutcome.COMPLETED)
 
         executor.write(
@@ -2159,7 +2507,7 @@ class TestSinkExecutor:
             _make_token(data={"value": "c"}, token_id="t3", contract=contract),
         ]
         sink = _make_sink()
-        ctx = _make_ctx()
+        ctx = make_context()
         pending = PendingOutcome(outcome=RowOutcome.COMPLETED)
 
         executor.write(
@@ -2193,7 +2541,7 @@ class TestSinkExecutor:
         ]
         sink = _make_sink()
         sink.write.side_effect = OSError("disk full")
-        ctx = _make_ctx()
+        ctx = make_context()
         pending = PendingOutcome(outcome=RowOutcome.COMPLETED)
 
         with pytest.raises(OSError):
@@ -2223,7 +2571,7 @@ class TestSinkExecutor:
         ]
         sink = _make_sink()
         sink.flush.side_effect = OSError("flush failed")
-        ctx = _make_ctx()
+        ctx = make_context()
         pending = PendingOutcome(outcome=RowOutcome.COMPLETED)
 
         with pytest.raises(OSError):
@@ -2248,7 +2596,7 @@ class TestSinkExecutor:
         executor = SinkExecutor(recorder, _make_span_factory(), run_id="test-run")
         token = _make_token()
         sink = _make_sink()
-        ctx = _make_ctx()
+        ctx = make_context()
         pending = PendingOutcome(outcome=RowOutcome.COMPLETED)
 
         executor.write(
@@ -2264,6 +2612,214 @@ class TestSinkExecutor:
         assert len(completed_calls) == 1
         # With 1 token, amortized = total (no division effect)
         assert completed_calls[0][1]["duration_ms"] > 0
+
+    # --- PipelineRow extraction (merged from test_executor_pipeline_row.py) ---
+
+    def test_sink_extracts_dict_for_landscape_input(self) -> None:
+        """SinkExecutor should extract dict (not PipelineRow) for Landscape input_data recording."""
+        recorder = _make_recorder()
+        executor = SinkExecutor(recorder, _make_span_factory(), run_id="test-run")
+        token = _make_token(data={"value": "test"})
+        sink = _make_sink()
+        ctx = make_context()
+        pending = PendingOutcome(outcome=RowOutcome.COMPLETED)
+
+        executor.write(
+            sink,
+            [token],
+            ctx,
+            step_in_pipeline=5,
+            sink_name="out",
+            pending_outcome=pending,
+        )
+
+        recorder.begin_node_state.assert_called_once()
+        call_kwargs = recorder.begin_node_state.call_args[1]
+        input_data = call_kwargs["input_data"]
+        assert isinstance(input_data, dict)
+        assert type(input_data) is not PipelineRow  # type: ignore[comparison-overlap, unreachable]
+        assert input_data == {"value": "test"}
+
+    def test_sink_extracts_dict_for_landscape_output(self) -> None:
+        """SinkExecutor should extract dict (not PipelineRow) for Landscape output_data recording."""
+        recorder = _make_recorder()
+        executor = SinkExecutor(recorder, _make_span_factory(), run_id="test-run")
+        token = _make_token(data={"value": "test"})
+        sink = _make_sink()
+        ctx = make_context()
+        pending = PendingOutcome(outcome=RowOutcome.COMPLETED)
+
+        executor.write(
+            sink,
+            [token],
+            ctx,
+            step_in_pipeline=5,
+            sink_name="out",
+            pending_outcome=pending,
+        )
+
+        complete_calls = [c for c in recorder.complete_node_state.call_args_list if c[1].get("output_data") is not None]
+        assert len(complete_calls) == 1
+        output_data = complete_calls[0][1]["output_data"]
+        row_in_output = output_data["row"]
+        assert isinstance(row_in_output, dict)
+        assert type(row_in_output) is not PipelineRow  # type: ignore[comparison-overlap, unreachable]
+        assert row_in_output == {"value": "test"}
+
+    def test_sink_preserves_all_fields_in_dict(self) -> None:
+        """Sink should receive all fields, including extras not in contract."""
+        recorder = _make_recorder()
+        executor = SinkExecutor(recorder, _make_span_factory(), run_id="test-run")
+        contract = _make_contract()
+        row_data = {"value": "test", "extra_field": "extra_value", "another": 123}
+        token = _make_token(data=row_data, contract=contract)
+        sink = _make_sink()
+        ctx = make_context()
+        pending = PendingOutcome(outcome=RowOutcome.COMPLETED)
+
+        executor.write(
+            sink,
+            [token],
+            ctx,
+            step_in_pipeline=5,
+            sink_name="out",
+            pending_outcome=pending,
+        )
+
+        sink.write.assert_called_once()
+        rows = sink.write.call_args[0][0]
+        assert len(rows) == 1
+        assert rows[0] == {"value": "test", "extra_field": "extra_value", "another": 123}
+
+    def test_sink_updates_ctx_contract_from_tokens(self) -> None:
+        """SinkExecutor should synchronize ctx.contract to sink token contracts."""
+        recorder = _make_recorder()
+        executor = SinkExecutor(recorder, _make_span_factory(), run_id="test-run")
+
+        stale_contract = _make_contract()
+        sink_contract = SchemaContract(
+            fields=(
+                make_field(
+                    "value",
+                    python_type=str,
+                    original_name="Value Renamed",
+                    required=True,
+                    source="declared",
+                ),
+            ),
+            mode="FLEXIBLE",
+            locked=True,
+        )
+        token = _make_token(data={"value": "test"}, contract=sink_contract)
+
+        captured_contract = None
+
+        def capture_write(_rows, call_ctx):
+            nonlocal captured_contract
+            captured_contract = call_ctx.contract
+            return ArtifactDescriptor(
+                artifact_type="file",
+                path_or_uri="file:///output/test.csv",
+                content_hash="abc123",
+                size_bytes=100,
+            )
+
+        sink = _make_sink()
+        sink.write.side_effect = capture_write
+
+        ctx = make_context()
+        ctx.contract = stale_contract
+        pending = PendingOutcome(outcome=RowOutcome.COMPLETED)
+
+        executor.write(
+            sink,
+            [token],
+            ctx,
+            step_in_pipeline=5,
+            sink_name="out",
+            pending_outcome=pending,
+        )
+
+        assert captured_contract is sink_contract
+        assert ctx.contract is sink_contract
+
+    def test_sink_merges_mixed_token_contracts_for_context(self) -> None:
+        """SinkExecutor should merge mixed token contracts before sink.write()."""
+        recorder = _make_recorder()
+        executor = SinkExecutor(recorder, _make_span_factory(), run_id="test-run")
+
+        contract_a = SchemaContract(
+            fields=(
+                make_field(
+                    "value",
+                    python_type=str,
+                    original_name="Value",
+                    required=True,
+                    source="declared",
+                ),
+            ),
+            mode="FLEXIBLE",
+            locked=True,
+        )
+        contract_b = SchemaContract(
+            fields=(
+                make_field(
+                    "value",
+                    python_type=str,
+                    original_name="Value",
+                    required=True,
+                    source="declared",
+                ),
+                make_field(
+                    "extra",
+                    python_type=str,
+                    original_name="Extra Field",
+                    required=False,
+                    source="inferred",
+                ),
+            ),
+            mode="FLEXIBLE",
+            locked=True,
+        )
+        expected_merged = contract_a.merge(contract_b)
+
+        tokens = [
+            _make_token(data={"value": "a"}, contract=contract_a, token_id="t1"),
+            _make_token(data={"value": "b", "extra": "x"}, contract=contract_b, token_id="t2"),
+        ]
+
+        captured_contract = None
+
+        def capture_write(_rows, call_ctx):
+            nonlocal captured_contract
+            captured_contract = call_ctx.contract
+            return ArtifactDescriptor(
+                artifact_type="file",
+                path_or_uri="file:///output/test.csv",
+                content_hash="abc123",
+                size_bytes=100,
+            )
+
+        sink = _make_sink()
+        sink.write.side_effect = capture_write
+
+        ctx = make_context()
+        ctx.contract = _make_contract()
+        pending = PendingOutcome(outcome=RowOutcome.COMPLETED)
+
+        executor.write(
+            sink,
+            tokens,
+            ctx,
+            step_in_pipeline=5,
+            sink_name="out",
+            pending_outcome=pending,
+        )
+
+        assert captured_contract is not None
+        assert captured_contract == expected_merged
+        assert captured_contract.get_field("extra") is not None
+        assert ctx.contract == expected_merged
 
 
 # =============================================================================
@@ -2347,7 +2903,7 @@ class TestNodeStateGuard:
         recorder.complete_node_state.assert_called_once()
         kwargs = recorder.complete_node_state.call_args[1]
         assert kwargs["status"] == NodeStateStatus.FAILED
-        assert kwargs["error"]["phase"] == "executor_guard_missing_complete"
+        assert kwargs["error"].phase == "executor_guard_missing_complete"
 
     def test_exception_auto_completes_as_failed(self) -> None:
         """Unhandled exception triggers auto-complete as FAILED."""
@@ -2370,9 +2926,9 @@ class TestNodeStateGuard:
         kwargs = recorder.complete_node_state.call_args[1]
         assert kwargs["status"] == NodeStateStatus.FAILED
         assert kwargs["state_id"] == "state_001"
-        assert "test crash" in kwargs["error"]["exception"]
-        assert kwargs["error"]["type"] == "ValueError"
-        assert kwargs["error"]["phase"] == "executor_post_process"
+        assert "test crash" in kwargs["error"].exception
+        assert kwargs["error"].exception_type == "ValueError"
+        assert kwargs["error"].phase == "executor_post_process"
         assert kwargs["duration_ms"] >= 0
 
     def test_explicit_complete_prevents_auto_fail(self) -> None:
@@ -2469,6 +3025,123 @@ class TestNodeStateGuard:
         assert kwargs["attempt"] == 3
         assert kwargs["step_index"] == 2
 
+    # -- Re-raise guard tests: clean-exit path (missing complete()) ----------
+
+    def test_framework_bug_error_propagates_on_clean_exit(self) -> None:
+        """FrameworkBugError from recorder supersedes OrchestrationInvariantError.
+
+        When the block exits normally without complete(), the guard tries to
+        record FAILED.  If that recorder call raises FrameworkBugError, it must
+        propagate directly — it's more critical than the "missing complete()" bug.
+        """
+        from elspeth.contracts.errors import FrameworkBugError
+        from elspeth.engine.executors import NodeStateGuard
+
+        recorder = _make_recorder()
+        recorder.complete_node_state.side_effect = FrameworkBugError("internal inconsistency")
+        guard = NodeStateGuard(
+            recorder,
+            token_id="tok_1",
+            node_id="node_1",
+            run_id="run_1",
+            step_index=1,
+            input_data={"v": 1},
+        )
+        # Must propagate FrameworkBugError, NOT OrchestrationInvariantError
+        with pytest.raises(FrameworkBugError, match="internal inconsistency"), guard:
+            pass  # Exit without complete()
+
+    def test_audit_integrity_error_propagates_on_clean_exit(self) -> None:
+        """AuditIntegrityError from recorder supersedes OrchestrationInvariantError.
+
+        Same as above but for AuditIntegrityError — audit corruption is always
+        the highest-priority failure signal.
+        """
+        from elspeth.contracts.errors import AuditIntegrityError
+        from elspeth.engine.executors import NodeStateGuard
+
+        recorder = _make_recorder()
+        recorder.complete_node_state.side_effect = AuditIntegrityError("corrupt state table")
+        guard = NodeStateGuard(
+            recorder,
+            token_id="tok_1",
+            node_id="node_1",
+            run_id="run_1",
+            step_index=1,
+            input_data={"v": 1},
+        )
+        with pytest.raises(AuditIntegrityError, match="corrupt state table"), guard:
+            pass
+
+    def test_regular_recorder_error_on_clean_exit_still_raises_invariant(self) -> None:
+        """Non-system recorder error on clean exit → OrchestrationInvariantError still raised.
+
+        When recorder.complete_node_state fails with a regular exception (e.g., DB
+        down), the guard logs it and still raises OrchestrationInvariantError for
+        the missing complete() bug.  The recorder failure is swallowed (logged).
+        """
+        from elspeth.engine.executors import NodeStateGuard
+
+        recorder = _make_recorder()
+        recorder.complete_node_state.side_effect = RuntimeError("DB connection lost")
+        guard = NodeStateGuard(
+            recorder,
+            token_id="tok_1",
+            node_id="node_1",
+            run_id="run_1",
+            step_index=1,
+            input_data={"v": 1},
+        )
+        with pytest.raises(OrchestrationInvariantError, match="exited without complete"), guard:
+            pass
+
+    # -- Re-raise guard tests: exception path (auto-fail) --------------------
+
+    def test_framework_bug_error_supersedes_original_exception(self) -> None:
+        """FrameworkBugError from recorder supersedes the original exception.
+
+        When an exception triggers __exit__ and the auto-fail recorder call
+        raises FrameworkBugError, it must propagate instead of the original
+        exception — system-level corruption outranks the triggering error.
+        """
+        from elspeth.contracts.errors import FrameworkBugError
+        from elspeth.engine.executors import NodeStateGuard
+
+        recorder = _make_recorder()
+        recorder.complete_node_state.side_effect = FrameworkBugError("broken invariant")
+        guard = NodeStateGuard(
+            recorder,
+            token_id="tok_1",
+            node_id="node_1",
+            run_id="run_1",
+            step_index=1,
+            input_data={"v": 1},
+        )
+        # FrameworkBugError supersedes the original ValueError
+        with pytest.raises(FrameworkBugError, match="broken invariant"), guard:
+            raise ValueError("original processing error")
+
+    def test_audit_integrity_error_supersedes_original_exception(self) -> None:
+        """AuditIntegrityError from recorder supersedes the original exception.
+
+        Same as above: audit corruption is always the highest-priority signal.
+        """
+        from elspeth.contracts.errors import AuditIntegrityError
+        from elspeth.engine.executors import NodeStateGuard
+
+        recorder = _make_recorder()
+        recorder.complete_node_state.side_effect = AuditIntegrityError("state table corrupt")
+        guard = NodeStateGuard(
+            recorder,
+            token_id="tok_1",
+            node_id="node_1",
+            run_id="run_1",
+            step_index=1,
+            input_data={"v": 1},
+        )
+        with pytest.raises(AuditIntegrityError, match="state table corrupt"), guard:
+            raise ValueError("original error, now masked by corruption")
+
 
 # =============================================================================
 # Regression: B1 — TransformExecutor post-processing terminality
@@ -2509,7 +3182,7 @@ class TestTransformExecutorTerminality:
         )
 
         token = _make_token()
-        ctx = _make_ctx()
+        ctx = make_context()
 
         # Monkey-patch stable_hash to fail on the second call (output hash)
         # First call is input_hash (succeeds), second is output_hash (fails)
@@ -2525,19 +3198,19 @@ class TestTransformExecutorTerminality:
 
         import elspeth.engine.executors.transform as transform_mod
 
-        original_ref = transform_mod.stable_hash
-        transform_mod.stable_hash = failing_hash
+        original_ref = transform_mod.stable_hash  # type: ignore[attr-defined]
+        transform_mod.stable_hash = failing_hash  # type: ignore[attr-defined, assignment]
         try:
             with pytest.raises(PluginContractViolation, match="non-canonical data"):
                 executor.execute_transform(transform, token, ctx)
         finally:
-            transform_mod.stable_hash = original_ref
+            transform_mod.stable_hash = original_ref  # type: ignore[attr-defined]
 
         # State must be FAILED (auto-completed by guard), not OPEN
         recorder.complete_node_state.assert_called_once()
         kwargs = recorder.complete_node_state.call_args[1]
         assert kwargs["status"] == NodeStateStatus.FAILED
-        assert "executor_post_process" in kwargs["error"]["phase"]
+        assert "executor_post_process" in kwargs["error"].phase
 
     def test_contract_evolution_failure_marks_state_failed(self) -> None:
         """Contract evolution failure → state FAILED, not COMPLETED-then-crash.
@@ -2559,7 +3232,7 @@ class TestTransformExecutorTerminality:
         )
 
         token = _make_token()
-        ctx = _make_ctx()
+        ctx = make_context()
 
         # Make contract propagation fail
         recorder.update_node_output_contract.side_effect = RuntimeError("contract evolution failed")
@@ -2571,7 +3244,7 @@ class TestTransformExecutorTerminality:
         recorder.complete_node_state.assert_called_once()
         kwargs = recorder.complete_node_state.call_args[1]
         assert kwargs["status"] == NodeStateStatus.FAILED
-        assert kwargs["error"]["phase"] == "executor_post_process"
+        assert kwargs["error"].phase == "executor_post_process"
 
     def test_successful_transform_still_completes_normally(self) -> None:
         """Sanity: guard does not interfere with normal success path."""
@@ -2584,7 +3257,7 @@ class TestTransformExecutorTerminality:
             success_reason={"action": "tested"},
         )
         token = _make_token()
-        ctx = _make_ctx()
+        ctx = make_context()
 
         result, _updated_token, error_sink = executor.execute_transform(transform, token, ctx)
 
@@ -2621,6 +3294,7 @@ class TestAggregationExecutorTerminality:
             name="test_agg",
             plugin="batch_stats",
             input="default",
+            on_error="discard",
             trigger=TriggerConfig(count=count),
         )
         executor = AggregationExecutor(
@@ -2650,12 +3324,12 @@ class TestAggregationExecutorTerminality:
             make_row({"value": "aggregated"}, contract=contract),
             success_reason={"action": "aggregated"},
         )
-        ctx = _make_ctx()
+        ctx = make_context()
 
         # Make output hash fail (simulating NaN in transform output)
         import elspeth.engine.executors.aggregation as agg_mod
 
-        original_hash = agg_mod.stable_hash
+        original_hash = agg_mod.stable_hash  # type: ignore[attr-defined]
         call_count = 0
 
         def failing_hash(data: Any) -> str:
@@ -2665,19 +3339,19 @@ class TestAggregationExecutorTerminality:
                 return original_hash(data)  # input hash succeeds
             raise ValueError("NaN detected in output")
 
-        agg_mod.stable_hash = failing_hash
+        agg_mod.stable_hash = failing_hash  # type: ignore[attr-defined, assignment]
         try:
             with pytest.raises(PluginContractViolation, match="non-canonical data"):
                 executor.execute_flush(nid, transform, ctx, TriggerType.COUNT)
         finally:
-            agg_mod.stable_hash = original_hash
+            agg_mod.stable_hash = original_hash  # type: ignore[attr-defined]
 
         # Node state: FAILED (auto-completed by guard)
         # Find the FAILED call — guard auto-completes with phase="executor_post_process"
         failed_calls = [c for c in recorder.complete_node_state.call_args_list if c[1].get("status") == NodeStateStatus.FAILED]
         assert len(failed_calls) >= 1
         # At least one FAILED call should have the guard's phase tag
-        guard_fail = [c for c in failed_calls if c[1].get("error", {}).get("phase") == "executor_post_process"]
+        guard_fail = [c for c in failed_calls if getattr(c[1].get("error"), "phase", None) == "executor_post_process"]
         assert len(guard_fail) == 1
 
         # Batch: FAILED (outer except handler)
@@ -2703,7 +3377,7 @@ class TestAggregationExecutorTerminality:
         transform.name = "agg_transform"
         # Transform crashes — inner except completes guard, then outer except cleans up
         transform.process.side_effect = RuntimeError("plugin crash")
-        ctx = _make_ctx()
+        ctx = make_context()
 
         # Make complete_batch fail (DB is down during cleanup)
         recorder.complete_batch.side_effect = RuntimeError("DB down")
@@ -2728,7 +3402,7 @@ class TestAggregationExecutorTerminality:
             make_row({"value": "aggregated"}, contract=contract),
             success_reason={"action": "aggregated"},
         )
-        ctx = _make_ctx()
+        ctx = make_context()
 
         result, tokens, _batch_id = executor.execute_flush(nid, transform, ctx, TriggerType.COUNT)
 
@@ -2772,7 +3446,7 @@ class TestSinkExecutorTerminality:
             _make_token(data={"value": "b"}, token_id="t2", contract=contract),
         ]
         sink = _make_sink()
-        ctx = _make_ctx()
+        ctx = make_context()
         pending = PendingOutcome(outcome=RowOutcome.COMPLETED)
 
         with pytest.raises(RuntimeError, match="DB connection lost"):
@@ -2789,7 +3463,7 @@ class TestSinkExecutorTerminality:
         failed_calls = [c for c in recorder.complete_node_state.call_args_list if c[1].get("status") == NodeStateStatus.FAILED]
         assert len(failed_calls) == 1
         assert failed_calls[0][1]["state_id"] == "state_001"
-        assert failed_calls[0][1]["error"]["phase"] == "begin_node_state"
+        assert failed_calls[0][1]["error"].phase == "begin_node_state"
 
         # Sink write should NOT have been called (failure happened before write)
         sink.write.assert_not_called()
@@ -2806,7 +3480,7 @@ class TestSinkExecutorTerminality:
         executor = SinkExecutor(recorder, _make_span_factory(), run_id="test-run")
         token = _make_token()
         sink = _make_sink()
-        ctx = _make_ctx()
+        ctx = make_context()
         pending = PendingOutcome(outcome=RowOutcome.COMPLETED)
 
         with pytest.raises(RuntimeError, match="DB down from start"):
@@ -2842,7 +3516,7 @@ class TestSinkExecutorTerminality:
             _make_token(data={"value": "c"}, token_id="t3", contract=contract),
         ]
         sink = _make_sink()
-        ctx = _make_ctx()
+        ctx = make_context()
         pending = PendingOutcome(outcome=RowOutcome.COMPLETED)
 
         with pytest.raises(RuntimeError, match="out of IDs"):
@@ -2860,3 +3534,222 @@ class TestSinkExecutorTerminality:
         assert len(failed_calls) == 2
         failed_state_ids = {c[1]["state_id"] for c in failed_calls}
         assert failed_state_ids == {"state_001", "state_002"}
+
+
+# =============================================================================
+# Gap #6: GateExecutor ExecutionError field rename integration
+# =============================================================================
+
+
+class TestGateExecutorExecutionErrorFieldRename:
+    """Integration test: ExecutionError 'exception_type' serializes as 'type' in audit trail.
+
+    The ExecutionError dataclass has field ``exception_type`` but serializes as
+    ``"type"`` in ``to_dict()`` for hash stability. This test verifies the full
+    path: gate expression error -> ExecutionError -> recorder -> serialized dict
+    has the correct key name.
+    """
+
+    def test_gate_error_records_type_not_exception_type_in_audit(self) -> None:
+        """Gate execution error should record 'type' (not 'exception_type') in the error dict.
+
+        Exercises the full path: GateExecutor catches expression evaluation error,
+        creates ExecutionError, passes it to recorder.complete_node_state(error=...),
+        and the serialized form uses 'type' as the key name.
+        """
+        from elspeth.contracts.errors import ExecutionError
+        from elspeth.core.expression_parser import ExpressionEvaluationError
+
+        recorder = _make_recorder()
+        executor = GateExecutor(recorder, _make_span_factory(), _make_step_resolver())
+        config = GateSettings(
+            name="my_gate",
+            input="in_conn",
+            condition="row['nonexistent_field'] > 0",
+            routes={"true": "next_conn", "false": "error_sink"},
+        )
+        contract = _make_contract()
+        token = _make_token(contract=contract)
+        ctx = make_context()
+
+        # Trigger an expression evaluation error
+        with pytest.raises(ExpressionEvaluationError):
+            executor.execute_config_gate(config, "cg_1", token, ctx)
+
+        # Find the FAILED call to complete_node_state
+        failed_calls = [call for call in recorder.complete_node_state.call_args_list if call.kwargs.get("status") == NodeStateStatus.FAILED]
+        assert len(failed_calls) >= 1, "Expected at least one FAILED node state call"
+
+        # Extract the error argument — it should be an ExecutionError
+        error_obj = failed_calls[0].kwargs.get("error")
+        assert error_obj is not None, "error kwarg should be set on FAILED state"
+        assert isinstance(error_obj, ExecutionError)
+
+        # Verify the dataclass field is 'exception_type' (internal name)
+        assert error_obj.exception_type == "ExpressionEvaluationError"
+
+        # Verify to_dict() serializes as 'type' (audit trail key)
+        error_dict = error_obj.to_dict()
+        assert "type" in error_dict, "Serialized error should use 'type' key, not 'exception_type'"
+        assert "exception_type" not in error_dict, "Serialized error should NOT contain 'exception_type' key"
+        assert error_dict["type"] == "ExpressionEvaluationError"
+
+    def test_gate_route_label_error_serializes_type_correctly(self) -> None:
+        """Route label mismatch error also serializes 'exception_type' as 'type'.
+
+        This tests the second error path in execute_config_gate: when the route
+        label is not in the routes config.
+        """
+        from elspeth.contracts.errors import ExecutionError
+
+        recorder = _make_recorder()
+        executor = GateExecutor(recorder, _make_span_factory(), _make_step_resolver())
+        config = GateSettings(
+            name="my_gate",
+            input="in_conn",
+            condition="None",  # Evaluates to None, str(None) = "None"
+            routes={"true": "next_conn", "false": "error_sink"},
+        )
+        contract = _make_contract()
+        token = _make_token(contract=contract)
+        ctx = make_context()
+
+        # "None" is not in routes, so this raises ValueError
+        with pytest.raises(ValueError, match="None"):
+            executor.execute_config_gate(config, "cg_1", token, ctx)
+
+        failed_calls = [call for call in recorder.complete_node_state.call_args_list if call.kwargs.get("status") == NodeStateStatus.FAILED]
+        assert len(failed_calls) >= 1
+
+        error_obj = failed_calls[0].kwargs.get("error")
+        assert isinstance(error_obj, ExecutionError)
+
+        # Verify serialization: 'type' key with value 'ValueError'
+        error_dict = error_obj.to_dict()
+        assert error_dict["type"] == "ValueError"
+        assert "exception_type" not in error_dict
+
+
+# =============================================================================
+# Structural: FrameworkBugError/AuditIntegrityError re-raise pattern
+# =============================================================================
+
+
+class TestReRaiseGuardPattern:
+    """Structural test: every except (FrameworkBugError, AuditIntegrityError) is a bare re-raise.
+
+    The re-raise pattern is a safety-critical invariant across the codebase:
+    system-level exceptions must NEVER be caught and wrapped, logged-and-swallowed,
+    or transformed into a different exception.  The only valid body for these
+    handlers is a bare ``raise`` statement.
+
+    This test uses AST parsing to verify the pattern is applied consistently
+    across all source files, catching drift when someone refactors a try/except
+    and accidentally removes or modifies the re-raise guard.
+    """
+
+    # Files where the handler intentionally does MORE than bare re-raise.
+    # cli.py is the outermost boundary — it formats errors and sets exit codes.
+    _HANDLER_ALLOWLIST = frozenset({"cli.py"})
+
+    def test_all_reraise_guards_have_bare_raise(self) -> None:
+        """Every except (FrameworkBugError, AuditIntegrityError) must contain only 'raise'.
+
+        Exception: cli.py is the outermost boundary and intentionally formats
+        these errors for operator display with distinct exit codes.
+        """
+        import ast
+        from pathlib import Path
+
+        src_root = Path("src/elspeth")
+        violations: list[str] = []
+
+        for py_file in sorted(src_root.rglob("*.py")):
+            if py_file.name in self._HANDLER_ALLOWLIST:
+                continue
+
+            source = py_file.read_text()
+            try:
+                tree = ast.parse(source, filename=str(py_file))
+            except SyntaxError:
+                continue
+
+            for node in ast.walk(tree):
+                if not isinstance(node, ast.ExceptHandler):
+                    continue
+
+                # Match: except (FrameworkBugError, AuditIntegrityError)
+                if not _is_framework_audit_handler(node):
+                    continue
+
+                # Body must be exactly: [Raise()] or [Expr(comment), Raise()]
+                # (allowing a comment-like string expression before the raise)
+                stmts = [s for s in node.body if not isinstance(s, ast.Expr)]
+                if len(stmts) != 1 or not isinstance(stmts[0], ast.Raise):
+                    violations.append(
+                        f"{py_file.relative_to('src')}:{node.lineno}: "
+                        f"except (FrameworkBugError, AuditIntegrityError) handler "
+                        f"has non-trivial body (expected bare 'raise')"
+                    )
+                elif stmts[0].exc is not None:
+                    # Bare raise has exc=None; raise SomeError(...) has exc set
+                    violations.append(
+                        f"{py_file.relative_to('src')}:{node.lineno}: "
+                        f"except (FrameworkBugError, AuditIntegrityError) handler "
+                        f"raises a new exception instead of bare re-raise"
+                    )
+
+        assert not violations, f"Re-raise guard violations found ({len(violations)}):\n" + "\n".join(f"  - {v}" for v in violations)
+
+    def test_minimum_reraise_guard_count(self) -> None:
+        """Verify the expected number of re-raise guards exist (drift detection).
+
+        If this count drops, someone removed a guard.  If it increases, they
+        added one (which is fine — update the expected count).
+        """
+        import ast
+        from pathlib import Path
+
+        src_root = Path("src/elspeth")
+        count = 0
+
+        for py_file in sorted(src_root.rglob("*.py")):
+            source = py_file.read_text()
+            try:
+                tree = ast.parse(source, filename=str(py_file))
+            except SyntaxError:
+                continue
+
+            for node in ast.walk(tree):
+                if isinstance(node, ast.ExceptHandler) and _is_framework_audit_handler(node):
+                    count += 1
+
+        # Current count: 17 guards across the codebase.
+        # If this drops, a guard was removed.  Update if legitimately adding more.
+        assert count >= 17, (
+            f"Expected at least 17 re-raise guards, found {count}. "
+            f"A FrameworkBugError/AuditIntegrityError re-raise guard may have been removed."
+        )
+
+
+def _is_framework_audit_handler(handler: object) -> bool:
+    """Check if an except handler catches (FrameworkBugError, AuditIntegrityError)."""
+    import ast
+
+    if not isinstance(handler, ast.ExceptHandler):
+        return False
+
+    if handler.type is None:
+        return False
+
+    # Match: except (FrameworkBugError, AuditIntegrityError)
+    if isinstance(handler.type, ast.Tuple):
+        names = set()
+        for elt in handler.type.elts:
+            if isinstance(elt, ast.Name):
+                names.add(elt.id)
+            elif isinstance(elt, ast.Attribute):
+                names.add(elt.attr)
+        return names == {"FrameworkBugError", "AuditIntegrityError"}
+
+    return False

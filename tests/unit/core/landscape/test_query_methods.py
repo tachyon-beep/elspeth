@@ -1,40 +1,44 @@
 from __future__ import annotations
 
+import inspect
+import json
+from typing import ClassVar
+from unittest.mock import MagicMock
+
+import pytest
+
 from elspeth.contracts import (
     CallStatus,
     CallType,
     NodeType,
     RoutingMode,
+    RowOutcome,
 )
+from elspeth.contracts.call_data import RawCallPayload
+from elspeth.contracts.errors import AuditIntegrityError
+from elspeth.contracts.payload_store import IntegrityError as PayloadIntegrityError
 from elspeth.contracts.schema import SchemaConfig
-from elspeth.core.landscape import LandscapeDB, LandscapeRecorder
+from elspeth.core.landscape import LandscapeDB, LandscapeRecorder, QueryRepository
+from elspeth.core.landscape._database_ops import DatabaseOps
+from elspeth.core.landscape.model_loaders import (
+    CallLoader,
+    NodeStateLoader,
+    RoutingEventLoader,
+    RowLoader,
+    TokenLoader,
+    TokenOutcomeLoader,
+    TokenParentLoader,
+)
 from elspeth.core.landscape.row_data import RowDataResult, RowDataState
+from tests.fixtures.landscape import make_landscape_db, make_recorder, make_recorder_with_run, register_test_node
 
 _DYNAMIC_SCHEMA = SchemaConfig.from_dict({"mode": "observed"})
 
 
 def _setup(*, run_id: str = "run-1") -> tuple[LandscapeDB, LandscapeRecorder]:
-    db = LandscapeDB.in_memory()
-    recorder = LandscapeRecorder(db)
-    recorder.begin_run(config={}, canonical_version="v1", run_id=run_id)
-    recorder.register_node(
-        run_id=run_id,
-        plugin_name="csv",
-        node_type=NodeType.SOURCE,
-        plugin_version="1.0",
-        config={},
-        node_id="source-0",
-        schema_config=_DYNAMIC_SCHEMA,
-    )
-    recorder.register_node(
-        run_id=run_id,
-        plugin_name="transform",
-        node_type=NodeType.TRANSFORM,
-        plugin_version="1.0",
-        config={},
-        node_id="transform-1",
-        schema_config=_DYNAMIC_SCHEMA,
-    )
+    setup = make_recorder_with_run(run_id=run_id, source_node_id="source-0", source_plugin_name="csv")
+    db, recorder = setup.db, setup.recorder
+    register_test_node(recorder, run_id, "transform-1", plugin_name="transform")
     return db, recorder
 
 
@@ -81,8 +85,8 @@ class TestGetRows:
         assert rows[0].row_index == 0
 
     def test_rows_scoped_to_run(self):
-        db = LandscapeDB.in_memory()
-        recorder = LandscapeRecorder(db)
+        db = make_landscape_db()
+        recorder = make_recorder(db)
         recorder.begin_run(config={}, canonical_version="v1", run_id="run-a")
         recorder.register_node(
             run_id="run-a",
@@ -264,17 +268,61 @@ class TestGetRowData:
         assert result.state == RowDataState.ROW_NOT_FOUND
         assert result.data is None
 
-    def test_never_stored_or_store_not_configured(self):
-        _, recorder = _setup()
+    def test_never_stored_when_no_payload_ref(self):
+        """Row without source_data_ref → NEVER_STORED."""
+        # Recorder with no payload store — create_row will not store payload
+        setup = make_recorder_with_run(run_id="run-1", source_node_id="source-0", source_plugin_name="csv")
+        recorder = setup.recorder
         recorder.create_row("run-1", "source-0", 0, {"x": 1}, row_id="row-1")
 
-        result = recorder.get_row_data("row-1")
+        # Verify the row has no source_data_ref
+        row = recorder.get_row("row-1")
+        assert row is not None
+        if row.source_data_ref is None:
+            result = recorder.get_row_data("row-1")
+            assert result.state == RowDataState.NEVER_STORED
+            assert result.data is None
+        else:
+            # If the recorder sets a ref even without a store, this row is
+            # STORE_NOT_CONFIGURED — covered by the next test
+            result = recorder.get_row_data("row-1")
+            assert result.state == RowDataState.STORE_NOT_CONFIGURED
+            assert result.data is None
 
-        # Default setup has no payload store; the row may or may not have a
-        # source_data_ref depending on how create_row stores data.
-        # Either NEVER_STORED (no ref on row) or STORE_NOT_CONFIGURED (ref but no store)
-        # is valid.
-        assert result.state in (RowDataState.NEVER_STORED, RowDataState.STORE_NOT_CONFIGURED)
+    def test_store_not_configured_when_ref_exists_but_no_store(self):
+        """Row has source_data_ref but QueryRepository has no payload_store → STORE_NOT_CONFIGURED."""
+        db = make_landscape_db()
+        # Create a recorder WITH a payload store so the row gets a ref
+        mock_store = MagicMock()
+        mock_store.store.return_value = "abc123"
+        recorder = LandscapeRecorder(db, payload_store=mock_store)
+        recorder.begin_run(config={}, canonical_version="v1", run_id="run-1")
+        recorder.register_node(
+            run_id="run-1",
+            plugin_name="csv",
+            node_type=NodeType.SOURCE,
+            plugin_version="1.0",
+            config={},
+            node_id="source-0",
+            schema_config=_DYNAMIC_SCHEMA,
+        )
+        recorder.create_row("run-1", "source-0", 0, {"x": 1}, row_id="row-1")
+
+        # Query through a repo WITHOUT a payload store
+        ops = DatabaseOps(db)
+        repo = QueryRepository(
+            ops,
+            row_loader=RowLoader(),
+            token_loader=TokenLoader(),
+            token_parent_loader=TokenParentLoader(),
+            node_state_loader=NodeStateLoader(),
+            routing_event_loader=RoutingEventLoader(),
+            call_loader=CallLoader(),
+            token_outcome_loader=TokenOutcomeLoader(),
+            payload_store=None,
+        )
+        result = repo.get_row_data("row-1")
+        assert result.state == RowDataState.STORE_NOT_CONFIGURED
         assert result.data is None
 
 
@@ -423,8 +471,8 @@ class TestGetCalls:
             call_index=0,
             call_type=CallType.LLM,
             status=CallStatus.SUCCESS,
-            request_data={"model": "gpt-4", "prompt": "Hello"},
-            response_data={"completion": "Hi"},
+            request_data=RawCallPayload({"model": "gpt-4", "prompt": "Hello"}),
+            response_data=RawCallPayload({"completion": "Hi"}),
             latency_ms=100.0,
         )
 
@@ -442,8 +490,8 @@ class TestGetCalls:
             call_index=1,
             call_type=CallType.LLM,
             status=CallStatus.SUCCESS,
-            request_data={"prompt": "second"},
-            response_data={"out": "b"},
+            request_data=RawCallPayload({"prompt": "second"}),
+            response_data=RawCallPayload({"out": "b"}),
             latency_ms=50.0,
         )
         recorder.record_call(
@@ -451,8 +499,8 @@ class TestGetCalls:
             call_index=0,
             call_type=CallType.HTTP,
             status=CallStatus.SUCCESS,
-            request_data={"url": "https://example.com"},
-            response_data={"body": "ok"},
+            request_data=RawCallPayload({"url": "https://example.com"}),
+            response_data=RawCallPayload({"body": "ok"}),
             latency_ms=75.0,
         )
 
@@ -530,8 +578,8 @@ class TestGetCallsForStates:
             call_index=0,
             call_type=CallType.LLM,
             status=CallStatus.SUCCESS,
-            request_data={"prompt": "a"},
-            response_data={"out": "x"},
+            request_data=RawCallPayload({"prompt": "a"}),
+            response_data=RawCallPayload({"out": "x"}),
             latency_ms=50.0,
         )
         recorder.record_call(
@@ -539,8 +587,8 @@ class TestGetCallsForStates:
             call_index=0,
             call_type=CallType.HTTP,
             status=CallStatus.SUCCESS,
-            request_data={"url": "https://example.com"},
-            response_data={"body": "ok"},
+            request_data=RawCallPayload({"url": "https://example.com"}),
+            response_data=RawCallPayload({"body": "ok"}),
             latency_ms=75.0,
         )
 
@@ -564,8 +612,8 @@ class TestGetCallsForStates:
             call_index=0,
             call_type=CallType.LLM,
             status=CallStatus.SUCCESS,
-            request_data={"prompt": "test"},
-            response_data={"out": "ok"},
+            request_data=RawCallPayload({"prompt": "test"}),
+            response_data=RawCallPayload({"out": "ok"}),
             latency_ms=100.0,
         )
 
@@ -600,8 +648,8 @@ class TestGetAllTokensForRun:
         assert tokens == []
 
     def test_scoped_to_run(self):
-        db = LandscapeDB.in_memory()
-        recorder = LandscapeRecorder(db)
+        db = make_landscape_db()
+        recorder = make_recorder(db)
         recorder.begin_run(config={}, canonical_version="v1", run_id="run-a")
         recorder.register_node(
             run_id="run-a",
@@ -660,8 +708,8 @@ class TestGetAllNodeStatesForRun:
         assert states == []
 
     def test_scoped_to_run(self):
-        db = LandscapeDB.in_memory()
-        recorder = LandscapeRecorder(db)
+        db = make_landscape_db()
+        recorder = make_recorder(db)
 
         recorder.begin_run(config={}, canonical_version="v1", run_id="run-a")
         recorder.register_node(
@@ -771,8 +819,8 @@ class TestGetAllCallsForRun:
             call_index=0,
             call_type=CallType.LLM,
             status=CallStatus.SUCCESS,
-            request_data={"prompt": "a"},
-            response_data={"out": "x"},
+            request_data=RawCallPayload({"prompt": "a"}),
+            response_data=RawCallPayload({"out": "x"}),
             latency_ms=50.0,
         )
         recorder.record_call(
@@ -780,8 +828,8 @@ class TestGetAllCallsForRun:
             call_index=0,
             call_type=CallType.HTTP,
             status=CallStatus.SUCCESS,
-            request_data={"url": "https://example.com"},
-            response_data={"body": "ok"},
+            request_data=RawCallPayload({"url": "https://example.com"}),
+            response_data=RawCallPayload({"body": "ok"}),
             latency_ms=75.0,
         )
 
@@ -882,13 +930,12 @@ class TestExplainRow:
 
         assert lineage is None
 
-    def test_none_for_wrong_run_id(self):
+    def test_raises_for_wrong_run_id(self):
         _, recorder = _setup()
         recorder.create_row("run-1", "source-0", 0, {"x": 1}, row_id="row-1")
 
-        lineage = recorder.explain_row("wrong-run", "row-1")
-
-        assert lineage is None
+        with pytest.raises(ValueError, match="Row row-1 belongs to run run-1, not wrong-run"):
+            recorder.explain_row("wrong-run", "row-1")
 
     def test_payload_available_false_when_no_payload_store(self):
         _, recorder = _setup()
@@ -944,36 +991,10 @@ class TestRoutingEventsOrderedByExecution:
         is the *reverse* of execution order (step=0/att=0, step=0/att=1, step=1/att=0).
         If the query still sorts by state_id, the test will fail.
         """
-        db = LandscapeDB.in_memory()
-        recorder = LandscapeRecorder(db)
-        recorder.begin_run(config={}, canonical_version="v1", run_id="run-1")
-        recorder.register_node(
-            run_id="run-1",
-            plugin_name="csv",
-            node_type=NodeType.SOURCE,
-            plugin_version="1.0",
-            config={},
-            node_id="source-0",
-            schema_config=_DYNAMIC_SCHEMA,
-        )
-        recorder.register_node(
-            run_id="run-1",
-            plugin_name="t1",
-            node_type=NodeType.TRANSFORM,
-            plugin_version="1.0",
-            config={},
-            node_id="transform-1",
-            schema_config=_DYNAMIC_SCHEMA,
-        )
-        recorder.register_node(
-            run_id="run-1",
-            plugin_name="t2",
-            node_type=NodeType.TRANSFORM,
-            plugin_version="1.0",
-            config={},
-            node_id="transform-2",
-            schema_config=_DYNAMIC_SCHEMA,
-        )
+        setup = make_recorder_with_run(run_id="run-1", source_node_id="source-0", source_plugin_name="csv")
+        recorder = setup.recorder
+        register_test_node(recorder, "run-1", "transform-1", plugin_name="t1")
+        register_test_node(recorder, "run-1", "transform-2", plugin_name="t2")
         recorder.register_edge("run-1", "source-0", "transform-1", "continue", RoutingMode.MOVE, edge_id="edge-1")
         recorder.register_edge("run-1", "transform-1", "transform-2", "continue", RoutingMode.MOVE, edge_id="edge-2")
         recorder.create_row("run-1", "source-0", 0, {"x": 1}, row_id="row-1")
@@ -1026,36 +1047,10 @@ class TestCallsOrderedByExecution:
 
     def _setup_three_states(self):
         """Create 3 node states with state_ids that sort opposite to execution order."""
-        db = LandscapeDB.in_memory()
-        recorder = LandscapeRecorder(db)
-        recorder.begin_run(config={}, canonical_version="v1", run_id="run-1")
-        recorder.register_node(
-            run_id="run-1",
-            plugin_name="csv",
-            node_type=NodeType.SOURCE,
-            plugin_version="1.0",
-            config={},
-            node_id="source-0",
-            schema_config=_DYNAMIC_SCHEMA,
-        )
-        recorder.register_node(
-            run_id="run-1",
-            plugin_name="t1",
-            node_type=NodeType.TRANSFORM,
-            plugin_version="1.0",
-            config={},
-            node_id="transform-1",
-            schema_config=_DYNAMIC_SCHEMA,
-        )
-        recorder.register_node(
-            run_id="run-1",
-            plugin_name="t2",
-            node_type=NodeType.TRANSFORM,
-            plugin_version="1.0",
-            config={},
-            node_id="transform-2",
-            schema_config=_DYNAMIC_SCHEMA,
-        )
+        setup = make_recorder_with_run(run_id="run-1", source_node_id="source-0", source_plugin_name="csv")
+        recorder = setup.recorder
+        register_test_node(recorder, "run-1", "transform-1", plugin_name="t1")
+        register_test_node(recorder, "run-1", "transform-2", plugin_name="t2")
         recorder.register_edge("run-1", "source-0", "transform-1", "continue", RoutingMode.MOVE, edge_id="edge-1")
         recorder.register_edge("run-1", "transform-1", "transform-2", "continue", RoutingMode.MOVE, edge_id="edge-2")
         recorder.create_row("run-1", "source-0", 0, {"x": 1}, row_id="row-1")
@@ -1077,8 +1072,8 @@ class TestCallsOrderedByExecution:
                 call_index=0,
                 call_type=CallType.LLM,
                 status=CallStatus.SUCCESS,
-                request_data={"prompt": f"call-{i}"},
-                response_data={"out": f"resp-{i}"},
+                request_data=RawCallPayload({"prompt": f"call-{i}"}),
+                response_data=RawCallPayload({"out": f"resp-{i}"}),
                 latency_ms=50.0,
             )
 
@@ -1099,8 +1094,8 @@ class TestCallsOrderedByExecution:
                 call_index=0,
                 call_type=CallType.LLM,
                 status=CallStatus.SUCCESS,
-                request_data={"prompt": f"call-{i}"},
-                response_data={"out": f"resp-{i}"},
+                request_data=RawCallPayload({"prompt": f"call-{i}"}),
+                response_data=RawCallPayload({"out": f"resp-{i}"}),
                 latency_ms=50.0,
             )
 
@@ -1166,8 +1161,8 @@ class TestChunkedQueryMethods:
                 call_index=0,
                 call_type=CallType.LLM,
                 status=CallStatus.SUCCESS,
-                request_data={"prompt": f"call-{sid}"},
-                response_data={"out": "ok"},
+                request_data=RawCallPayload({"prompt": f"call-{sid}"}),
+                response_data=RawCallPayload({"out": "ok"}),
                 latency_ms=50.0,
             )
 
@@ -1192,7 +1187,7 @@ class TestChunkedQueryMethods:
             )
 
         # Force tiny chunk size to exercise merging
-        with patch("elspeth.core.landscape._query_methods._QUERY_CHUNK_SIZE", 2):
+        with patch("elspeth.core.landscape.query_repository.QueryRepository._QUERY_CHUNK_SIZE", 2):
             events = recorder.get_routing_events_for_states(state_ids)
 
         assert len(events) == 5
@@ -1213,15 +1208,464 @@ class TestChunkedQueryMethods:
                 call_index=0,
                 call_type=CallType.LLM,
                 status=CallStatus.SUCCESS,
-                request_data={"prompt": f"call-{sid}"},
-                response_data={"out": "ok"},
+                request_data=RawCallPayload({"prompt": f"call-{sid}"}),
+                response_data=RawCallPayload({"out": "ok"}),
                 latency_ms=50.0,
             )
 
         # Force tiny chunk size to exercise merging
-        with patch("elspeth.core.landscape._query_methods._QUERY_CHUNK_SIZE", 2):
+        with patch("elspeth.core.landscape.query_repository.QueryRepository._QUERY_CHUNK_SIZE", 2):
             calls = recorder.get_calls_for_states(state_ids)
 
         assert len(calls) == 5
         call_state_ids = [c.state_id for c in calls]
         assert call_state_ids == state_ids
+
+
+# === Direct QueryRepository helpers and tests (M8, C1, C2, C3, H1, H2/M1, M3) ===
+
+
+def _make_repo(
+    *,
+    run_id: str = "run-1",
+    payload_store: MagicMock | None = None,
+) -> tuple[LandscapeDB, QueryRepository, LandscapeRecorder]:
+    """Create a QueryRepository with supporting infrastructure.
+
+    Returns (db, repo, recorder) — recorder is for graph setup only.
+    """
+    setup = make_recorder_with_run(run_id=run_id, source_node_id="source-0", source_plugin_name="csv")
+    db, recorder = setup.db, setup.recorder
+    register_test_node(recorder, run_id, "transform-1", plugin_name="transform")
+    ops = DatabaseOps(db)
+    repo = QueryRepository(
+        ops,
+        row_loader=RowLoader(),
+        token_loader=TokenLoader(),
+        token_parent_loader=TokenParentLoader(),
+        node_state_loader=NodeStateLoader(),
+        routing_event_loader=RoutingEventLoader(),
+        call_loader=CallLoader(),
+        token_outcome_loader=TokenOutcomeLoader(),
+        payload_store=payload_store,
+    )
+    return db, repo, recorder
+
+
+class TestDirectQueryRepositoryConstruction:
+    """M8: Direct QueryRepository constructor tests — not through LandscapeRecorder."""
+
+    def test_smoke_get_rows_on_empty_db(self):
+        _db, repo, _recorder = _make_repo()
+
+        rows = repo.get_rows("run-1")
+
+        assert rows == []
+
+    def test_get_row_data_store_not_configured(self):
+        """payload_store=None → STORE_NOT_CONFIGURED for rows with refs."""
+        mock_store = MagicMock()
+        mock_store.store.return_value = "ref-hash"
+        # Create recorder WITH payload store so create_row sets source_data_ref
+        db = make_landscape_db()
+        recorder = LandscapeRecorder(db, payload_store=mock_store)
+        recorder.begin_run(config={}, canonical_version="v1", run_id="run-1")
+        recorder.register_node(
+            run_id="run-1",
+            plugin_name="csv",
+            node_type=NodeType.SOURCE,
+            plugin_version="1.0",
+            config={},
+            node_id="source-0",
+            schema_config=_DYNAMIC_SCHEMA,
+        )
+        recorder.create_row("run-1", "source-0", 0, {"x": 1}, row_id="row-1")
+
+        # Create a QueryRepository WITHOUT a payload store, same DB
+        ops = DatabaseOps(db)
+        repo_no_store = QueryRepository(
+            ops,
+            row_loader=RowLoader(),
+            token_loader=TokenLoader(),
+            token_parent_loader=TokenParentLoader(),
+            node_state_loader=NodeStateLoader(),
+            routing_event_loader=RoutingEventLoader(),
+            call_loader=CallLoader(),
+            token_outcome_loader=TokenOutcomeLoader(),
+            payload_store=None,
+        )
+        result = repo_no_store.get_row_data("row-1")
+        assert result.state == RowDataState.STORE_NOT_CONFIGURED
+
+    def test_get_row_data_with_valid_payload(self):
+        """Payload store returns valid JSON → AVAILABLE with data."""
+        mock_store = MagicMock()
+        mock_store.store.return_value = "ref-hash"
+        payload = json.dumps({"key": "value"}).encode("utf-8")
+        mock_store.retrieve.return_value = payload
+        db = make_landscape_db()
+        recorder = LandscapeRecorder(db, payload_store=mock_store)
+        recorder.begin_run(config={}, canonical_version="v1", run_id="run-1")
+        recorder.register_node(
+            run_id="run-1",
+            plugin_name="csv",
+            node_type=NodeType.SOURCE,
+            plugin_version="1.0",
+            config={},
+            node_id="source-0",
+            schema_config=_DYNAMIC_SCHEMA,
+        )
+        recorder.create_row("run-1", "source-0", 0, {"key": "value"}, row_id="row-1")
+
+        ops = DatabaseOps(db)
+        repo = QueryRepository(
+            ops,
+            row_loader=RowLoader(),
+            token_loader=TokenLoader(),
+            token_parent_loader=TokenParentLoader(),
+            node_state_loader=NodeStateLoader(),
+            routing_event_loader=RoutingEventLoader(),
+            call_loader=CallLoader(),
+            token_outcome_loader=TokenOutcomeLoader(),
+            payload_store=mock_store,
+        )
+        result = repo.get_row_data("row-1")
+
+        assert result.state == RowDataState.AVAILABLE
+        assert result.data == {"key": "value"}
+
+
+class TestDelegationSignatureAlignment:
+    """H1: Verify LandscapeRecorder delegation methods match QueryRepository signatures.
+
+    This test compares parameter names, kinds, and defaults for all 18 delegated
+    methods to ensure the recorder facade doesn't drift from the repository.
+    """
+
+    _DELEGATED_METHODS: ClassVar[list[str]] = [
+        "get_rows",
+        "get_tokens",
+        "get_node_states_for_token",
+        "get_row",
+        "get_row_data",
+        "get_token",
+        "get_token_parents",
+        "get_routing_events",
+        "get_calls",
+        "get_routing_events_for_states",
+        "get_calls_for_states",
+        "get_all_tokens_for_run",
+        "get_all_node_states_for_run",
+        "get_all_routing_events_for_run",
+        "get_all_calls_for_run",
+        "get_all_token_parents_for_run",
+        "get_all_token_outcomes_for_run",
+        "explain_row",
+    ]
+
+    @pytest.mark.parametrize("method_name", _DELEGATED_METHODS)
+    def test_signature_alignment(self, method_name: str) -> None:
+        """Parameter names, kinds, and defaults must match (excluding 'self')."""
+        recorder_method = getattr(LandscapeRecorder, method_name)
+        repo_method = getattr(QueryRepository, method_name)
+
+        recorder_sig = inspect.signature(recorder_method)
+        repo_sig = inspect.signature(repo_method)
+
+        recorder_params = [(name, p.kind, p.default) for name, p in recorder_sig.parameters.items() if name != "self"]
+        repo_params = [(name, p.kind, p.default) for name, p in repo_sig.parameters.items() if name != "self"]
+
+        assert recorder_params == repo_params, (
+            f"Signature mismatch for {method_name}:\n  Recorder: {recorder_params}\n  Repo:     {repo_params}"
+        )
+
+
+class TestGetRowDataErrorHandling:
+    """C1 + M3: Error handling for get_row_data() payload retrieval.
+
+    Tests cover JSONDecodeError, UnicodeDecodeError, PayloadIntegrityError,
+    OSError — all should raise AuditIntegrityError with row context.
+    """
+
+    def _make_repo_with_row(self, mock_store: MagicMock) -> QueryRepository:
+        """Create a repo+row where the row has a source_data_ref.
+
+        The mock_store is used for BOTH the recorder (so create_row stores a ref)
+        and the QueryRepository (so retrieval goes through the mock).
+        """
+        mock_store.store.return_value = "ref-hash"
+        db = make_landscape_db()
+        # Recorder WITH payload store — so create_row sets source_data_ref
+        recorder = LandscapeRecorder(db, payload_store=mock_store)
+        recorder.begin_run(config={}, canonical_version="v1", run_id="run-1")
+        recorder.register_node(
+            run_id="run-1",
+            plugin_name="csv",
+            node_type=NodeType.SOURCE,
+            plugin_version="1.0",
+            config={},
+            node_id="source-0",
+            schema_config=_DYNAMIC_SCHEMA,
+        )
+        recorder.create_row("run-1", "source-0", 0, {"x": 1}, row_id="row-1")
+        # QueryRepository with SAME mock store — so retrieval hits our mock
+        ops = DatabaseOps(db)
+        return QueryRepository(
+            ops,
+            row_loader=RowLoader(),
+            token_loader=TokenLoader(),
+            token_parent_loader=TokenParentLoader(),
+            node_state_loader=NodeStateLoader(),
+            routing_event_loader=RoutingEventLoader(),
+            call_loader=CallLoader(),
+            token_outcome_loader=TokenOutcomeLoader(),
+            payload_store=mock_store,
+        )
+
+    def test_json_decode_error_raises_audit_integrity(self):
+        mock_store = MagicMock()
+        mock_store.retrieve.return_value = b"not-json{{"
+        repo = self._make_repo_with_row(mock_store)
+
+        with pytest.raises(AuditIntegrityError, match="Corrupt payload for row row-1"):
+            repo.get_row_data("row-1")
+
+    def test_unicode_decode_error_raises_audit_integrity(self):
+        mock_store = MagicMock()
+        mock_store.retrieve.return_value = b"\xff\xfe"
+        repo = self._make_repo_with_row(mock_store)
+
+        with pytest.raises(AuditIntegrityError, match="Corrupt payload for row row-1"):
+            repo.get_row_data("row-1")
+
+    def test_payload_integrity_error_raises_audit_integrity(self):
+        mock_store = MagicMock()
+        mock_store.retrieve.side_effect = PayloadIntegrityError("hash mismatch")
+        repo = self._make_repo_with_row(mock_store)
+
+        with pytest.raises(AuditIntegrityError, match="Payload integrity check failed for row row-1"):
+            repo.get_row_data("row-1")
+
+    def test_os_error_raises_audit_integrity(self):
+        mock_store = MagicMock()
+        mock_store.retrieve.side_effect = OSError("Permission denied")
+        repo = self._make_repo_with_row(mock_store)
+
+        with pytest.raises(AuditIntegrityError, match="Payload retrieval failed for row row-1"):
+            repo.get_row_data("row-1")
+
+    def test_non_dict_json_raises_audit_integrity(self):
+        mock_store = MagicMock()
+        mock_store.retrieve.return_value = json.dumps([1, 2, 3]).encode("utf-8")
+        repo = self._make_repo_with_row(mock_store)
+
+        with pytest.raises(AuditIntegrityError, match="expected JSON object, got list"):
+            repo.get_row_data("row-1")
+
+    def test_valid_json_returns_available(self):
+        mock_store = MagicMock()
+        mock_store.retrieve.return_value = json.dumps({"key": "val"}).encode("utf-8")
+        repo = self._make_repo_with_row(mock_store)
+
+        result = repo.get_row_data("row-1")
+
+        assert result.state == RowDataState.AVAILABLE
+        assert result.data == {"key": "val"}
+
+
+class TestExplainRowErrorHandling:
+    """C2 + H2/M1 + M3: Error handling for explain_row() payload retrieval.
+
+    Tests cover UnicodeDecodeError, OSError, and PayloadIntegrityError — all
+    should raise AuditIntegrityError. The OSError handler was changed from
+    silent degradation to crash per Tier 1 trust model.
+    """
+
+    def _make_repo_with_row(self, mock_store: MagicMock) -> QueryRepository:
+        """Create a repo+row where the row has a source_data_ref."""
+        mock_store.store.return_value = "ref-hash"
+        db = make_landscape_db()
+        recorder = LandscapeRecorder(db, payload_store=mock_store)
+        recorder.begin_run(config={}, canonical_version="v1", run_id="run-1")
+        recorder.register_node(
+            run_id="run-1",
+            plugin_name="csv",
+            node_type=NodeType.SOURCE,
+            plugin_version="1.0",
+            config={},
+            node_id="source-0",
+            schema_config=_DYNAMIC_SCHEMA,
+        )
+        recorder.create_row("run-1", "source-0", 0, {"x": 1}, row_id="row-1")
+        ops = DatabaseOps(db)
+        return QueryRepository(
+            ops,
+            row_loader=RowLoader(),
+            token_loader=TokenLoader(),
+            token_parent_loader=TokenParentLoader(),
+            node_state_loader=NodeStateLoader(),
+            routing_event_loader=RoutingEventLoader(),
+            call_loader=CallLoader(),
+            token_outcome_loader=TokenOutcomeLoader(),
+            payload_store=mock_store,
+        )
+
+    def test_unicode_decode_error_raises_audit_integrity(self):
+        mock_store = MagicMock()
+        mock_store.retrieve.return_value = b"\xff\xfe"
+        repo = self._make_repo_with_row(mock_store)
+
+        with pytest.raises(AuditIntegrityError, match="Corrupt payload for row row-1"):
+            repo.explain_row("run-1", "row-1")
+
+    def test_os_error_raises_audit_integrity(self):
+        """H2: OSError during payload retrieval is infrastructure failure — crash, don't degrade."""
+        mock_store = MagicMock()
+        mock_store.retrieve.side_effect = OSError("NFS timeout")
+        repo = self._make_repo_with_row(mock_store)
+
+        with pytest.raises(AuditIntegrityError, match="Payload retrieval failed for row row-1"):
+            repo.explain_row("run-1", "row-1")
+
+    def test_payload_integrity_error_raises_audit_integrity(self):
+        mock_store = MagicMock()
+        mock_store.retrieve.side_effect = PayloadIntegrityError("hash mismatch")
+        repo = self._make_repo_with_row(mock_store)
+
+        with pytest.raises(AuditIntegrityError, match="Payload integrity check failed for row row-1"):
+            repo.explain_row("run-1", "row-1")
+
+    def test_json_decode_error_raises_audit_integrity(self):
+        mock_store = MagicMock()
+        mock_store.retrieve.return_value = b"not-json{{"
+        repo = self._make_repo_with_row(mock_store)
+
+        with pytest.raises(AuditIntegrityError, match="Corrupt payload for row row-1"):
+            repo.explain_row("run-1", "row-1")
+
+    def test_purged_payload_returns_lineage_without_data(self):
+        """KeyError (purged) is the only graceful degradation — not a crash."""
+        mock_store = MagicMock()
+        mock_store.retrieve.side_effect = KeyError("not found")
+        repo = self._make_repo_with_row(mock_store)
+
+        lineage = repo.explain_row("run-1", "row-1")
+
+        assert lineage is not None
+        assert lineage.source_data is None
+        assert lineage.payload_available is False
+
+    def test_run_id_mismatch_raises_value_error(self):
+        """H3: Cross-run mismatch is a caller bug, not a normal 'not found'."""
+        mock_store = MagicMock()
+        _db, repo, recorder = _make_repo(payload_store=mock_store)
+        recorder.create_row("run-1", "source-0", 0, {"x": 1}, row_id="row-1")
+
+        with pytest.raises(ValueError, match="Row row-1 belongs to run run-1, not wrong-run"):
+            repo.explain_row("wrong-run", "row-1")
+
+    def test_none_for_unknown_row(self):
+        _db, repo, _recorder = _make_repo()
+
+        result = repo.explain_row("run-1", "nonexistent-row")
+
+        assert result is None
+
+
+class TestGetAllTokenOutcomesForRun:
+    """C3: Behavioral tests for get_all_token_outcomes_for_run().
+
+    This method had zero behavioral tests — only mocked away in test_exporter.py.
+    """
+
+    def test_happy_path_multiple_outcomes(self):
+        _, recorder = _setup()
+        recorder.create_row("run-1", "source-0", 0, {"a": 1}, row_id="row-1")
+        recorder.create_row("run-1", "source-0", 1, {"b": 2}, row_id="row-2")
+        recorder.create_token("row-1", token_id="tok-1")
+        recorder.create_token("row-2", token_id="tok-2")
+        recorder.record_token_outcome("run-1", "tok-1", RowOutcome.COMPLETED, sink_name="output")
+        recorder.record_token_outcome("run-1", "tok-2", RowOutcome.QUARANTINED, error_hash="abc123")
+
+        outcomes = recorder.get_all_token_outcomes_for_run("run-1")
+
+        assert len(outcomes) == 2
+        outcome_map = {o.token_id: o.outcome for o in outcomes}
+        assert outcome_map["tok-1"] == RowOutcome.COMPLETED
+        assert outcome_map["tok-2"] == RowOutcome.QUARANTINED
+
+    def test_run_isolation(self):
+        """Outcomes from other runs must not leak."""
+        db = make_landscape_db()
+        recorder = make_recorder(db)
+
+        recorder.begin_run(config={}, canonical_version="v1", run_id="run-a")
+        recorder.register_node(
+            run_id="run-a",
+            plugin_name="csv",
+            node_type=NodeType.SOURCE,
+            plugin_version="1.0",
+            config={},
+            node_id="src-a",
+            schema_config=_DYNAMIC_SCHEMA,
+        )
+        recorder.create_row("run-a", "src-a", 0, {"v": 1}, row_id="row-a1")
+        recorder.create_token("row-a1", token_id="tok-a1")
+        recorder.record_token_outcome("run-a", "tok-a1", RowOutcome.COMPLETED, sink_name="output")
+
+        recorder.begin_run(config={}, canonical_version="v1", run_id="run-b")
+        recorder.register_node(
+            run_id="run-b",
+            plugin_name="csv",
+            node_type=NodeType.SOURCE,
+            plugin_version="1.0",
+            config={},
+            node_id="src-b",
+            schema_config=_DYNAMIC_SCHEMA,
+        )
+        recorder.create_row("run-b", "src-b", 0, {"v": 2}, row_id="row-b1")
+        recorder.create_token("row-b1", token_id="tok-b1")
+        recorder.record_token_outcome("run-b", "tok-b1", RowOutcome.FAILED, error_hash="err-hash-1")
+
+        outcomes_a = recorder.get_all_token_outcomes_for_run("run-a")
+        outcomes_b = recorder.get_all_token_outcomes_for_run("run-b")
+
+        assert len(outcomes_a) == 1
+        assert outcomes_a[0].token_id == "tok-a1"
+        assert len(outcomes_b) == 1
+        assert outcomes_b[0].token_id == "tok-b1"
+
+    def test_empty_for_unknown_run(self):
+        _, recorder = _setup()
+
+        outcomes = recorder.get_all_token_outcomes_for_run("nonexistent-run")
+
+        assert outcomes == []
+
+    def test_ordering_by_token_id_then_recorded_at(self):
+        """Results must be ordered by (token_id, recorded_at)."""
+        _, recorder = _setup()
+        recorder.create_row("run-1", "source-0", 0, {"a": 1}, row_id="row-1")
+        # Create tokens with IDs that sort in known order
+        recorder.create_token("row-1", token_id="tok-aaa")
+        recorder.create_token("row-1", token_id="tok-zzz")
+        recorder.record_token_outcome("run-1", "tok-zzz", RowOutcome.COMPLETED, sink_name="output")
+        recorder.record_token_outcome("run-1", "tok-aaa", RowOutcome.COMPLETED, sink_name="output")
+
+        outcomes = recorder.get_all_token_outcomes_for_run("run-1")
+
+        assert len(outcomes) == 2
+        assert outcomes[0].token_id == "tok-aaa"
+        assert outcomes[1].token_id == "tok-zzz"
+
+    def test_multiple_outcomes_per_token(self):
+        """A token can have multiple outcomes (e.g., fork then complete children)."""
+        _, recorder = _setup_full()
+        # First outcome: FORKED
+        recorder.record_token_outcome("run-1", "tok-1", RowOutcome.FORKED, fork_group_id="fg-1")
+
+        outcomes = recorder.get_all_token_outcomes_for_run("run-1")
+
+        assert len(outcomes) == 1
+        assert outcomes[0].token_id == "tok-1"
+        assert outcomes[0].outcome == RowOutcome.FORKED

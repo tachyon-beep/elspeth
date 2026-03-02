@@ -21,17 +21,22 @@ allow_hits:
   reason: Silent recovery with explicit error handling path
   safety: Code reviewed - legitimate pattern
   expires: '2026-05-15'
-- key: telemetry/manager.py:R4:TelemetryManager:_export_loop:fp=71069f18769cb05f
+- key: telemetry/manager.py:R4:TelemetryManager:_export_loop:fp=cd4d80934208b92c
   owner: architecture
   reason: Broad exception handling at external boundary with logging
   safety: Code reviewed - legitimate pattern
   expires: '2026-05-15'
-- key: telemetry/manager.py:R4:TelemetryManager:_dispatch_to_exporters:fp=4923356726bbe345
+- key: telemetry/manager.py:R5:TelemetryManager:_export_loop:fp=da169f47978a0dfc
   owner: architecture
-  reason: Broad exception handling at external boundary with logging
-  safety: Code reviewed - legitimate pattern
+  reason: isinstance re-raise guard — FrameworkBugError/AuditIntegrityError must not be silently swallowed by telemetry
+  safety: Stores exception for re-raise on flush()/close(); breaks export loop immediately
   expires: '2026-05-15'
-- key: telemetry/manager.py:R1:TelemetryManager:_dispatch_to_exporters:fp=c94c1534c6a1ab0a
+- key: telemetry/manager.py:R5:TelemetryManager:_dispatch_to_exporters:fp=6fd679a61c9d6ef8
+  owner: architecture
+  reason: isinstance re-raise guard — FrameworkBugError/AuditIntegrityError must propagate through telemetry
+  safety: Re-raises system-level exceptions; regular exporter errors counted and logged
+  expires: '2026-05-15'
+- key: telemetry/manager.py:R1:TelemetryManager:_dispatch_to_exporters:fp=c53a171abb7d97f3
   owner: architecture
   reason: Optional field access at trust boundary
   safety: Code reviewed - legitimate pattern
@@ -71,10 +76,10 @@ allow_hits:
   reason: Sentinel reinsertion loop handles bounded queue contention
   safety: Empty queue during contention is a race retry path only; loop continues and fails loudly if unresolved
   expires: '2026-05-15'
-- key: telemetry/manager.py:R4:TelemetryManager:flush:fp=c2b74304503abf32
+- key: telemetry/manager.py:R5:TelemetryManager:flush:fp=81fde18c9a10dd54
   owner: architecture
-  reason: Broad exception handling at external boundary with logging
-  safety: Code reviewed - legitimate pattern
+  reason: isinstance re-raise guard — FrameworkBugError/AuditIntegrityError must propagate through flush()
+  safety: Re-raises system-level exceptions; regular exporter flush errors logged as warnings
   expires: '2026-05-15'
 - key: telemetry/manager.py:R6:TelemetryManager:close:fp=9a5b0d10051f8281
   owner: architecture
@@ -86,10 +91,10 @@ allow_hits:
   reason: Silent recovery with explicit error handling path
   safety: Code reviewed - legitimate pattern
   expires: '2026-05-15'
-- key: telemetry/manager.py:R4:TelemetryManager:close:fp=68940f3fab2966a2
+- key: telemetry/manager.py:R5:TelemetryManager:close:fp=35e53e50bd7ce42b
   owner: architecture
-  reason: Broad exception handling at external boundary with logging
-  safety: Code reviewed - legitimate pattern
+  reason: isinstance re-raise guard — FrameworkBugError/AuditIntegrityError must propagate through close()
+  safety: Re-raises system-level exceptions; regular exporter close errors logged as warnings
   expires: '2026-05-15'
 - key: telemetry/factory.py:R5:_discover_exporter_registry:fp=1f3cc7f6698cb122
   owner: architecture

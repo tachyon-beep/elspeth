@@ -7,8 +7,8 @@ Demonstrates rate limiting on external API calls to prevent flooding upstream se
 A sentiment analysis pipeline with the `rate_limit` configuration section capping API calls to 30 requests per minute. Uses ChaosLLM so no real API key is needed.
 
 ```
-source ─(source_out)─> openrouter_llm (30 req/min) ─┬─ results.json
-                                                      └─ quarantined.json
+source ─(source_out)─> llm (30 req/min) ─┬─ results.json
+                                         └─ quarantined.json
 ```
 
 ## Prerequisites

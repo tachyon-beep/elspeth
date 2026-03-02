@@ -9,7 +9,7 @@ from typing import Any
 import pytest
 
 from elspeth.contracts import TransformResult
-from elspeth.plugins.clients.llm import (
+from elspeth.plugins.infrastructure.clients.llm import (
     ContentPolicyError,
     ContextLengthError,
     LLMClientError,
@@ -17,9 +17,9 @@ from elspeth.plugins.clients.llm import (
     RateLimitError,
     ServerError,
 )
-from elspeth.plugins.pooling.config import PoolConfig
-from elspeth.plugins.pooling.errors import CapacityError
-from elspeth.plugins.pooling.executor import PooledExecutor, RowContext
+from elspeth.plugins.infrastructure.pooling.config import PoolConfig
+from elspeth.plugins.infrastructure.pooling.errors import CapacityError
+from elspeth.plugins.infrastructure.pooling.executor import PooledExecutor, RowContext
 from elspeth.testing import make_pipeline_row
 
 

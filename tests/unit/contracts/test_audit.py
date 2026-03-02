@@ -17,6 +17,7 @@ from elspeth.contracts import (
     Call,
     CallStatus,
     CallType,
+    Checkpoint,
     Determinism,
     Edge,
     ExportStatus,
@@ -33,9 +34,11 @@ from elspeth.contracts import (
     RoutingEvent,
     RoutingMode,
     Row,
+    RowLineage,
     RowOutcome,
     Run,
     RunStatus,
+    SecretResolutionInput,
     Token,
     TokenOutcome,
     TokenParent,
@@ -237,6 +240,7 @@ class TestToken:
             token_id="tok-123",
             row_id="row-456",
             created_at=now,
+            run_id="run-001",
         )
 
         assert token.token_id == "tok-123"
@@ -250,6 +254,7 @@ class TestToken:
             token_id="tok-123",
             row_id="row-456",
             created_at=datetime.now(UTC),
+            run_id="run-001",
             fork_group_id="fork-789",
             branch_name="sentiment",
             step_in_pipeline=3,
@@ -1438,6 +1443,204 @@ class TestFrozenDataclassImmutability:
                 ),
                 "type_name",
             ),
+            # --- Newly frozen (T1) ---
+            # Run
+            (
+                lambda: Run(
+                    run_id="r1",
+                    started_at=datetime.now(UTC),
+                    config_hash="a" * 64,
+                    settings_json="{}",
+                    canonical_version="1.0",
+                    status=RunStatus.RUNNING,
+                ),
+                "run_id",
+            ),
+            # Node
+            (
+                lambda: Node(
+                    node_id="n1",
+                    run_id="r1",
+                    plugin_name="test",
+                    node_type=NodeType.SOURCE,
+                    plugin_version="1.0",
+                    determinism=Determinism.DETERMINISTIC,
+                    config_hash="a" * 64,
+                    config_json="{}",
+                    registered_at=datetime.now(UTC),
+                ),
+                "node_id",
+            ),
+            # Edge
+            (
+                lambda: Edge(
+                    edge_id="e1",
+                    run_id="r1",
+                    from_node_id="n1",
+                    to_node_id="n2",
+                    label="continue",
+                    default_mode=RoutingMode.MOVE,
+                    created_at=datetime.now(UTC),
+                ),
+                "edge_id",
+            ),
+            # Row
+            (
+                lambda: Row(
+                    row_id="row-1",
+                    run_id="r1",
+                    source_node_id="n1",
+                    row_index=0,
+                    source_data_hash="a" * 64,
+                    created_at=datetime.now(UTC),
+                ),
+                "row_id",
+            ),
+            # Token
+            (
+                lambda: Token(
+                    token_id="t1",
+                    row_id="row-1",
+                    created_at=datetime.now(UTC),
+                    run_id="run-1",
+                ),
+                "token_id",
+            ),
+            # TokenParent
+            (
+                lambda: TokenParent(
+                    token_id="t1",
+                    parent_token_id="t0",
+                    ordinal=0,
+                ),
+                "token_id",
+            ),
+            # Call
+            (
+                lambda: Call(
+                    call_id="c1",
+                    call_index=0,
+                    call_type=CallType.HTTP,
+                    status=CallStatus.SUCCESS,
+                    request_hash="a" * 64,
+                    created_at=datetime.now(UTC),
+                    state_id="s1",
+                ),
+                "call_id",
+            ),
+            # Artifact
+            (
+                lambda: Artifact(
+                    artifact_id="a1",
+                    run_id="r1",
+                    produced_by_state_id="s1",
+                    sink_node_id="sink-1",
+                    artifact_type="csv",
+                    path_or_uri="/tmp/out.csv",
+                    content_hash="a" * 64,
+                    size_bytes=1024,
+                    created_at=datetime.now(UTC),
+                ),
+                "artifact_id",
+            ),
+            # RoutingEvent
+            (
+                lambda: RoutingEvent(
+                    event_id="evt-1",
+                    state_id="s1",
+                    edge_id="e1",
+                    routing_group_id="rg-1",
+                    ordinal=0,
+                    mode=RoutingMode.MOVE,
+                    created_at=datetime.now(UTC),
+                ),
+                "event_id",
+            ),
+            # Batch
+            (
+                lambda: Batch(
+                    batch_id="b1",
+                    run_id="r1",
+                    aggregation_node_id="agg-1",
+                    attempt=1,
+                    status=BatchStatus.DRAFT,
+                    created_at=datetime.now(UTC),
+                ),
+                "batch_id",
+            ),
+            # BatchMember
+            (
+                lambda: BatchMember(
+                    batch_id="b1",
+                    token_id="t1",
+                    ordinal=0,
+                ),
+                "batch_id",
+            ),
+            # BatchOutput
+            (
+                lambda: BatchOutput(
+                    batch_id="b1",
+                    output_type="token",
+                    output_id="t2",
+                ),
+                "batch_id",
+            ),
+            # Checkpoint
+            (
+                lambda: Checkpoint(
+                    checkpoint_id="cp-1",
+                    run_id="r1",
+                    token_id="t1",
+                    node_id="n1",
+                    sequence_number=1,
+                    created_at=datetime.now(UTC),
+                    upstream_topology_hash="a" * 64,
+                    checkpoint_node_config_hash="b" * 64,
+                ),
+                "checkpoint_id",
+            ),
+            # RowLineage
+            (
+                lambda: RowLineage(
+                    row_id="row-1",
+                    run_id="r1",
+                    source_node_id="n1",
+                    row_index=0,
+                    source_data_hash="a" * 64,
+                    created_at=datetime.now(UTC),
+                    source_data=None,
+                    payload_available=False,
+                ),
+                "row_id",
+            ),
+            # ValidationErrorRecord
+            (
+                lambda: ValidationErrorRecord(
+                    error_id="verr-1",
+                    run_id="r1",
+                    node_id="n1",
+                    row_hash="a" * 64,
+                    error="test error",
+                    schema_mode="fixed",
+                    destination="quarantine",
+                    created_at=datetime.now(UTC),
+                ),
+                "error_id",
+            ),
+            # TransformErrorRecord
+            (
+                lambda: TransformErrorRecord(
+                    error_id="terr-1",
+                    run_id="r1",
+                    token_id="t1",
+                    transform_id="xform-1",
+                    row_hash="a" * 64,
+                    destination="error_sink",
+                    created_at=datetime.now(UTC),
+                ),
+                "error_id",
+            ),
         ],
         ids=[
             "NodeStateOpen",
@@ -1446,6 +1649,23 @@ class TestFrozenDataclassImmutability:
             "NodeStateFailed",
             "TokenOutcome",
             "NonCanonicalMetadata",
+            # Newly frozen (T1)
+            "Run",
+            "Node",
+            "Edge",
+            "Row",
+            "Token",
+            "TokenParent",
+            "Call",
+            "Artifact",
+            "RoutingEvent",
+            "Batch",
+            "BatchMember",
+            "BatchOutput",
+            "Checkpoint",
+            "RowLineage",
+            "ValidationErrorRecord",
+            "TransformErrorRecord",
         ],
     )
     def test_frozen_dataclass_rejects_mutation(
@@ -1635,6 +1855,7 @@ class TestRequiredFieldValidation:
                 # token_id missing
                 row_id="row-1",
                 created_at=datetime.now(UTC),
+                run_id="run-1",
             )
 
     def test_node_state_open_requires_input_hash(self) -> None:
@@ -1837,6 +2058,7 @@ class TestPropertyBasedAuditContracts:
             token_id=token_id,
             row_id=row_id,
             created_at=datetime.now(UTC),
+            run_id="run-hyp",
         )
         assert token.token_id == token_id
         assert token.row_id == row_id
@@ -2043,3 +2265,231 @@ class TestOperation:
                 started_at=datetime.now(UTC),
                 status="oops",  # type: ignore[arg-type]
             )
+
+    # --- Lifecycle invariant tests (status-dependent field validation) ---
+
+    def test_open_rejects_completed_at(self) -> None:
+        """Status 'open' must not have completed_at set."""
+        with pytest.raises(ValueError, match="status='open' but completed_at is set"):
+            Operation(
+                operation_id="op-1",
+                run_id="run-1",
+                node_id="node-1",
+                operation_type="source_load",
+                started_at=datetime.now(UTC),
+                status="open",
+                completed_at=datetime.now(UTC),
+            )
+
+    def test_open_rejects_duration_ms(self) -> None:
+        """Status 'open' must not have duration_ms set."""
+        with pytest.raises(ValueError, match="status='open' but duration_ms is set"):
+            Operation(
+                operation_id="op-1",
+                run_id="run-1",
+                node_id="node-1",
+                operation_type="source_load",
+                started_at=datetime.now(UTC),
+                status="open",
+                duration_ms=42.0,
+            )
+
+    def test_open_rejects_error_message(self) -> None:
+        """Status 'open' must not have error_message set."""
+        with pytest.raises(ValueError, match="status='open' but error_message is set"):
+            Operation(
+                operation_id="op-1",
+                run_id="run-1",
+                node_id="node-1",
+                operation_type="source_load",
+                started_at=datetime.now(UTC),
+                status="open",
+                error_message="something went wrong",
+            )
+
+    @pytest.mark.parametrize("status", ["completed", "failed", "pending"])
+    def test_terminal_status_requires_completed_at(self, status: str) -> None:
+        """Terminal statuses must have completed_at set."""
+        kwargs: dict[str, Any] = {
+            "operation_id": "op-1",
+            "run_id": "run-1",
+            "node_id": "node-1",
+            "operation_type": "sink_write",
+            "started_at": datetime.now(UTC),
+            "status": status,
+            "completed_at": None,
+            "duration_ms": 100.0,
+        }
+        if status == "failed":
+            kwargs["error_message"] = "error"
+        with pytest.raises(ValueError, match="completed_at is None"):
+            Operation(**kwargs)  # type: ignore[arg-type]
+
+    @pytest.mark.parametrize("status", ["completed", "failed", "pending"])
+    def test_terminal_status_requires_duration_ms(self, status: str) -> None:
+        """Terminal statuses must have duration_ms set."""
+        kwargs: dict[str, Any] = {
+            "operation_id": "op-1",
+            "run_id": "run-1",
+            "node_id": "node-1",
+            "operation_type": "sink_write",
+            "started_at": datetime.now(UTC),
+            "status": status,
+            "completed_at": datetime.now(UTC),
+            "duration_ms": None,
+        }
+        if status == "failed":
+            kwargs["error_message"] = "error"
+        with pytest.raises(ValueError, match="duration_ms is None"):
+            Operation(**kwargs)  # type: ignore[arg-type]
+
+    def test_failed_requires_error_message(self) -> None:
+        """Status 'failed' must have error_message set."""
+        with pytest.raises(ValueError, match="status='failed' but error_message is None"):
+            Operation(
+                operation_id="op-1",
+                run_id="run-1",
+                node_id="node-1",
+                operation_type="source_load",
+                started_at=datetime.now(UTC),
+                status="failed",
+                completed_at=datetime.now(UTC),
+                duration_ms=100.0,
+                error_message=None,
+            )
+
+    def test_completed_rejects_error_message(self) -> None:
+        """Status 'completed' must not have error_message set."""
+        with pytest.raises(ValueError, match="status='completed' but error_message is set"):
+            Operation(
+                operation_id="op-1",
+                run_id="run-1",
+                node_id="node-1",
+                operation_type="sink_write",
+                started_at=datetime.now(UTC),
+                status="completed",
+                completed_at=datetime.now(UTC),
+                duration_ms=50.0,
+                error_message="should not be here",
+            )
+
+    def test_valid_completed_operation(self) -> None:
+        """A properly formed 'completed' operation passes all invariants."""
+        op = Operation(
+            operation_id="op-1",
+            run_id="run-1",
+            node_id="node-1",
+            operation_type="sink_write",
+            started_at=datetime.now(UTC),
+            status="completed",
+            completed_at=datetime.now(UTC),
+            duration_ms=50.0,
+        )
+        assert op.status == "completed"
+        assert op.error_message is None
+
+    def test_valid_failed_operation(self) -> None:
+        """A properly formed 'failed' operation passes all invariants."""
+        op = Operation(
+            operation_id="op-1",
+            run_id="run-1",
+            node_id="node-1",
+            operation_type="source_load",
+            started_at=datetime.now(UTC),
+            status="failed",
+            completed_at=datetime.now(UTC),
+            duration_ms=200.0,
+            error_message="connection refused",
+        )
+        assert op.status == "failed"
+        assert op.error_message == "connection refused"
+
+    def test_valid_pending_operation(self) -> None:
+        """A properly formed 'pending' operation passes all invariants."""
+        op = Operation(
+            operation_id="op-1",
+            run_id="run-1",
+            node_id="node-1",
+            operation_type="sink_write",
+            started_at=datetime.now(UTC),
+            status="pending",
+            completed_at=datetime.now(UTC),
+            duration_ms=300.0,
+        )
+        assert op.status == "pending"
+
+
+# ---------------------------------------------------------------------------
+# SecretResolutionInput — write-side validation (__post_init__)
+# ---------------------------------------------------------------------------
+
+
+class TestSecretResolutionInputValidation:
+    """Tests for SecretResolutionInput __post_init__ write-side validation.
+
+    SecretResolutionInput is the write-side DTO for Key Vault audit records.
+    Validation at construction ensures only well-formed records enter the
+    audit trail (Tier 1 crash-on-anomaly principle).
+    """
+
+    @staticmethod
+    def _valid_kwargs(**overrides: object) -> dict[str, object]:
+        """Build valid SecretResolutionInput kwargs with optional overrides."""
+        defaults: dict[str, object] = {
+            "env_var_name": "API_KEY",
+            "source": "keyvault",
+            "vault_url": "https://vault.example.com",
+            "secret_name": "api-key",
+            "timestamp": 1709100000.0,
+            "resolution_latency_ms": 42.5,
+            "fingerprint": "a" * 64,
+        }
+        defaults.update(overrides)
+        return defaults
+
+    def test_valid_construction_succeeds(self) -> None:
+        """Happy path: valid inputs create the dataclass without error."""
+        sri = SecretResolutionInput(**self._valid_kwargs())  # type: ignore[arg-type]
+        assert sri.env_var_name == "API_KEY"
+        assert sri.fingerprint == "a" * 64
+
+    def test_empty_env_var_name_rejected(self) -> None:
+        with pytest.raises(ValueError, match="env_var_name is required"):
+            SecretResolutionInput(**self._valid_kwargs(env_var_name=""))  # type: ignore[arg-type]
+
+    def test_invalid_source_rejected(self) -> None:
+        with pytest.raises(ValueError, match="source must be one of"):
+            SecretResolutionInput(**self._valid_kwargs(source="s3"))  # type: ignore[arg-type]
+
+    def test_empty_source_rejected(self) -> None:
+        with pytest.raises(ValueError, match="source must be one of"):
+            SecretResolutionInput(**self._valid_kwargs(source=""))  # type: ignore[arg-type]
+
+    def test_short_fingerprint_rejected(self) -> None:
+        with pytest.raises(ValueError, match="64-char lowercase hex"):
+            SecretResolutionInput(**self._valid_kwargs(fingerprint="abc123"))  # type: ignore[arg-type]
+
+    def test_uppercase_fingerprint_rejected(self) -> None:
+        with pytest.raises(ValueError, match="64-char lowercase hex"):
+            SecretResolutionInput(**self._valid_kwargs(fingerprint="A" * 64))  # type: ignore[arg-type]
+
+    def test_non_hex_fingerprint_rejected(self) -> None:
+        with pytest.raises(ValueError, match="64-char lowercase hex"):
+            SecretResolutionInput(**self._valid_kwargs(fingerprint="g" * 64))  # type: ignore[arg-type]
+
+    def test_negative_latency_rejected(self) -> None:
+        with pytest.raises(ValueError, match="non-negative"):
+            SecretResolutionInput(**self._valid_kwargs(resolution_latency_ms=-1.0))  # type: ignore[arg-type]
+
+    def test_zero_latency_accepted(self) -> None:
+        """Zero latency is valid (e.g., cached resolution)."""
+        sri = SecretResolutionInput(**self._valid_kwargs(resolution_latency_ms=0.0))  # type: ignore[arg-type]
+        assert sri.resolution_latency_ms == 0.0
+
+    def test_all_hex_digits_accepted(self) -> None:
+        """Fingerprint using all valid hex chars should pass."""
+        # Use all 16 hex digits repeated to fill 64 chars
+        fingerprint = "0123456789abcdef" * 4
+        assert len(fingerprint) == 64
+        sri = SecretResolutionInput(**self._valid_kwargs(fingerprint=fingerprint))  # type: ignore[arg-type]
+        assert sri.fingerprint == fingerprint

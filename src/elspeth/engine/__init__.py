@@ -1,4 +1,3 @@
-# src/elspeth/engine/__init__.py
 """SDA Engine: Orchestration with complete audit trails.
 
 This module provides the execution engine for ELSPETH pipelines:
@@ -35,6 +34,12 @@ Example:
 
 from elspeth.contracts import RowResult, TokenInfo
 from elspeth.contracts.config import RuntimeRetryConfig
+from elspeth.contracts.errors import MaxRetriesExceeded
+from elspeth.core.expression_parser import (
+    ExpressionParser,
+    ExpressionSecurityError,
+    ExpressionSyntaxError,
+)
 from elspeth.engine.coalesce_executor import CoalesceExecutor, CoalesceOutcome
 from elspeth.engine.executors import (
     AggregationExecutor,
@@ -43,11 +48,6 @@ from elspeth.engine.executors import (
     SinkExecutor,
     TransformExecutor,
 )
-from elspeth.engine.expression_parser import (
-    ExpressionParser,
-    ExpressionSecurityError,
-    ExpressionSyntaxError,
-)
 from elspeth.engine.orchestrator import (
     Orchestrator,
     PipelineConfig,
@@ -55,7 +55,7 @@ from elspeth.engine.orchestrator import (
     RunResult,
 )
 from elspeth.engine.processor import RowProcessor
-from elspeth.engine.retry import MaxRetriesExceeded, RetryManager
+from elspeth.engine.retry import RetryManager
 from elspeth.engine.spans import SpanFactory
 from elspeth.engine.tokens import TokenManager
 

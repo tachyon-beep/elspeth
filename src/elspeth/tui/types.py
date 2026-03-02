@@ -1,4 +1,3 @@
-# src/elspeth/tui/types.py
 """Type definitions for TUI data contracts.
 
 These TypedDicts define the exact shape of data passed between
@@ -129,6 +128,21 @@ class TransformErrorDisplay(TypedDict, total=False):
     message: str  # Human-readable error message
     error_type: str  # Sub-category
     field: str  # Field name for field-related errors
+
+
+class CoalesceErrorDisplay(TypedDict, total=False):
+    """Parsed CoalesceFailureReason for display.
+
+    From contracts.errors.CoalesceFailureReason - used by CoalesceExecutor.
+    The 'failure_reason' field is REQUIRED and identifies the failure type.
+    """
+
+    failure_reason: Required[str]  # Why coalesce failed (REQUIRED)
+    expected_branches: Required[list[str]]  # Branches expected (REQUIRED)
+    branches_arrived: Required[list[str]]  # Branches that arrived (REQUIRED)
+    merge_policy: Required[str]  # Merge policy in effect (REQUIRED)
+    timeout_ms: int  # Timeout in ms (if timeout failure)
+    select_branch: str  # Target branch for select policy
 
 
 class ArtifactDisplay(TypedDict, total=False):

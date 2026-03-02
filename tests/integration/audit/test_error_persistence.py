@@ -11,7 +11,6 @@ from datetime import UTC
 from sqlalchemy import select
 
 from elspeth.contracts.enums import NodeType
-from elspeth.contracts.plugin_context import PluginContext
 from elspeth.contracts.schema import SchemaConfig
 from elspeth.core.landscape.database import LandscapeDB
 from elspeth.core.landscape.lineage import explain
@@ -20,6 +19,7 @@ from elspeth.core.landscape.schema import (
     transform_errors_table,
     validation_errors_table,
 )
+from tests.fixtures.factories import make_context
 
 # Shared schema config for tests
 DYNAMIC_SCHEMA = SchemaConfig.from_dict({"mode": "observed"})
@@ -50,9 +50,8 @@ class TestValidationErrorPersistence:
         )
 
         # Create context with landscape
-        ctx = PluginContext(
+        ctx = make_context(
             run_id=run_id,
-            config={},
             landscape=recorder,
             node_id="source_node",
         )
@@ -99,9 +98,8 @@ class TestValidationErrorPersistence:
             sequence=0,
         )
 
-        ctx = PluginContext(
+        ctx = make_context(
             run_id=run_id,
-            config={},
             landscape=recorder,
             node_id="source_node",
         )
@@ -183,9 +181,8 @@ class TestTransformErrorPersistence:
         )
 
         # Create context with landscape
-        ctx = PluginContext(
+        ctx = make_context(
             run_id=run_id,
-            config={},
             landscape=recorder,
             node_id="transform_node",
         )
@@ -267,9 +264,8 @@ class TestTransformErrorPersistence:
             sequence=1,
         )
 
-        ctx = PluginContext(
+        ctx = make_context(
             run_id=run_id,
-            config={},
             landscape=recorder,
             node_id="transform_node",
         )
@@ -327,9 +323,8 @@ class TestErrorEventExplainQuery:
         token = recorder.create_token(row_id=row.row_id)
 
         # Record validation error using same data (for matching hash)
-        ctx = PluginContext(
+        ctx = make_context(
             run_id=run_id,
-            config={},
             landscape=recorder,
             node_id=source_node.node_id,
         )
@@ -394,9 +389,8 @@ class TestErrorEventExplainQuery:
         token = recorder.create_token(row_id=row.row_id)
 
         # Record transform error
-        ctx = PluginContext(
+        ctx = make_context(
             run_id=run_id,
-            config={},
             landscape=recorder,
             node_id=transform_node.node_id,
         )
@@ -509,9 +503,8 @@ class TestErrorEventExplainQuery:
         )
         token = recorder.create_token(row_id=row.row_id)
 
-        ctx = PluginContext(
+        ctx = make_context(
             run_id=run_id,
-            config={},
             landscape=recorder,
             node_id="test",
         )

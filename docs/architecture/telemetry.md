@@ -258,10 +258,10 @@ XOR enforcement: exactly ONE of `state_id` or `operation_id` must be set.
 
 | Plugin | External I/O | Telemetry | Status |
 |--------|--------------|-----------|--------|
-| AzureLLMTransform | Azure OpenAI | Via `AuditedLLMClient` | OK |
-| AzureMultiQueryLLMTransform | Azure OpenAI | Via `AuditedLLMClient` | OK |
-| OpenRouterLLMTransform | OpenRouter API | Via `AuditedHTTPClient` | OK |
-| OpenRouterMultiQueryLLMTransform | OpenRouter API | Via `AuditedHTTPClient` | OK |
+| LLMTransform (provider: azure, single-query) | Azure OpenAI | Via `AuditedLLMClient` | OK |
+| LLMTransform (provider: azure, multi-query) | Azure OpenAI | Via `AuditedLLMClient` | OK |
+| LLMTransform (provider: openrouter, single-query) | OpenRouter API | Via `AuditedHTTPClient` | OK |
+| LLMTransform (provider: openrouter, multi-query) | OpenRouter API | Via `AuditedHTTPClient` | OK |
 | AzureBatchLLMTransform | Azure Batch API | Has `record_call()` but gap | **GAP** |
 | OpenRouterBatchLLMTransform | OpenRouter API | Raw `httpx.Client()` | **GAP** |
 

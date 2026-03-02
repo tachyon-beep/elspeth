@@ -1,11 +1,9 @@
-# src/elspeth/engine/executors/types.py
 """Shared types for executor modules."""
 
 from dataclasses import dataclass, field
 
-from elspeth.contracts import TokenInfo
+from elspeth.contracts import GateResult, TokenInfo
 from elspeth.contracts.types import NodeID
-from elspeth.plugins.results import GateResult
 
 
 class MissingEdgeError(Exception):
@@ -35,6 +33,9 @@ class GateOutcome:
 
     Contains the gate result plus information about how the token
     should be routed and any child tokens created.
+
+    Invariant: sink_name and next_node_id are mutually exclusive.
+    A gate routes to a sink OR jumps to a node, never both.
     """
 
     result: GateResult
@@ -42,3 +43,11 @@ class GateOutcome:
     child_tokens: list[TokenInfo] = field(default_factory=list)
     sink_name: str | None = None
     next_node_id: NodeID | None = None
+
+    def __post_init__(self) -> None:
+        if self.sink_name is not None and self.next_node_id is not None:
+            raise ValueError(
+                f"GateOutcome invariant violation: sink_name={self.sink_name!r} and "
+                f"next_node_id={self.next_node_id!r} are mutually exclusive. "
+                f"A gate routes to a sink OR jumps to a node, not both."
+            )

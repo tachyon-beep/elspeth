@@ -16,21 +16,20 @@ This avoids the anti-pattern of testing mocks instead of behavior.
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, cast
 from unittest.mock import Mock, patch
 
 import pytest
 
 # For node registration
-from elspeth.contracts import NodeType, RouteDestination, RowOutcome, SourceRow, TokenInfo, TransformResult
+from elspeth.contracts import NodeType, RouteDestination, RowOutcome, RowResult, SourceRow, TokenInfo, TransformProtocol, TransformResult
 from elspeth.contracts.aggregation_checkpoint import AggregationCheckpointState
 from elspeth.contracts.enums import (
     NodeStateStatus,
     RoutingKind,
     TriggerType,
 )
-from elspeth.contracts.errors import OrchestrationInvariantError
-from elspeth.contracts.plugin_context import PluginContext
+from elspeth.contracts.errors import MaxRetriesExceeded, OrchestrationInvariantError
 from elspeth.contracts.results import GateResult
 from elspeth.contracts.routing import RoutingAction
 from elspeth.contracts.schema import SchemaConfig
@@ -45,12 +44,13 @@ from elspeth.engine.processor import (
     DAGTraversalContext,
     RowProcessor,
 )
-from elspeth.engine.retry import MaxRetriesExceeded, RetryManager
+from elspeth.engine.retry import RetryManager
 from elspeth.engine.spans import SpanFactory
-from elspeth.plugins.clients.llm import LLMClientError
-from elspeth.plugins.pooling import CapacityError
-from elspeth.plugins.protocols import TransformProtocol
-from elspeth.testing import make_contract, make_row, make_source_row, make_token_info
+from elspeth.plugins.infrastructure.clients.llm import LLMClientError
+from elspeth.plugins.infrastructure.pooling import CapacityError
+from elspeth.testing import make_contract, make_pipeline_row, make_row, make_source_row, make_token_info
+from tests.fixtures.factories import make_context
+from tests.fixtures.landscape import make_recorder_with_run
 
 # =============================================================================
 # Helpers
@@ -79,19 +79,12 @@ def _make_recorder(
 
     This satisfies FK constraints: rows table references nodes(node_id, run_id).
     """
-    db = LandscapeDB.in_memory()
-    recorder = LandscapeRecorder(db)
-    recorder.begin_run(config={}, canonical_version="v1", run_id=run_id)
-    recorder.register_node(
+    setup = make_recorder_with_run(
         run_id=run_id,
-        plugin_name="test-source",
-        node_type=NodeType.SOURCE,
-        plugin_version="1.0",
-        config={},
-        node_id=source_node_id,
-        schema_config=_DYNAMIC_SCHEMA,
+        source_node_id=source_node_id,
+        source_plugin_name="test-source",
     )
-    return db, recorder
+    return setup.db, setup.recorder
 
 
 def _make_processor(
@@ -246,6 +239,7 @@ class TestConstructorErrorEdgeMap:
                     name="test-agg",
                     plugin="test-plugin",
                     input="agg_in",
+                    on_error="discard",
                     trigger={"count": 3},
                 ),
             },
@@ -277,7 +271,7 @@ class TestTraversalNextNodeInvariants:
         """Processing nodes must have explicit next-node entries (None for terminal)."""
         _db, recorder = _make_recorder()
         source_row = _make_source_row()
-        ctx = PluginContext(run_id="test-run", config={})
+        ctx = make_context(landscape=recorder)
         transform = _make_mock_transform()
         source_node = NodeID("source-0")
         transform_node = NodeID(transform.node_id)
@@ -443,7 +437,7 @@ class TestProcessRowNoTransforms:
 
         processor = _make_processor(recorder)
         source_row = _make_source_row()
-        ctx = PluginContext(run_id="test-run", config={})
+        ctx = make_context(landscape=recorder)
 
         results = processor.process_row(
             row_index=0,
@@ -463,7 +457,7 @@ class TestProcessRowNoTransforms:
 
         processor = _make_processor(recorder)
         source_row = _make_source_row()
-        ctx = PluginContext(run_id="test-run", config={})
+        ctx = make_context(landscape=recorder)
 
         results = processor.process_row(
             row_index=0,
@@ -483,7 +477,7 @@ class TestProcessRowNoTransforms:
 
         processor = _make_processor(recorder)
         source_row = _make_source_row()
-        ctx = PluginContext(run_id="test-run", config={})
+        ctx = make_context(landscape=recorder)
 
         processor.process_row(
             row_index=0,
@@ -503,7 +497,7 @@ class TestProcessRowNoTransforms:
         # At minimum, the source node_state should exist
         assert len(states) >= 1
         source_state = states[0]
-        assert source_state.status == NodeStateStatus.COMPLETED.value
+        assert source_state.status == NodeStateStatus.COMPLETED
 
 
 # =============================================================================
@@ -531,9 +525,9 @@ class TestProcessRowSingleTransform:
     def test_successful_transform_returns_completed(self) -> None:
         """Row passes through transform → COMPLETED."""
         transform = _make_mock_transform()
-        _db, _recorder, processor = self._setup(transform)
+        _db, recorder, processor = self._setup(transform)
         source_row = _make_source_row({"value": 10})
-        ctx = PluginContext(run_id="test-run", config={})
+        ctx = make_context(landscape=recorder)
 
         output_data = make_row({"value": 10, "enriched": True})
         success_result = TransformResult.success(
@@ -564,9 +558,9 @@ class TestProcessRowSingleTransform:
     def test_transform_error_with_discard_returns_quarantined(self) -> None:
         """Transform error with on_error='discard' → QUARANTINED."""
         transform = _make_mock_transform(on_error="discard")
-        _db, _recorder, processor = self._setup(transform)
+        _db, recorder, processor = self._setup(transform)
         source_row = _make_source_row()
-        ctx = PluginContext(run_id="test-run", config={})
+        ctx = make_context(landscape=recorder)
 
         error_result = TransformResult.error(
             {"reason": "test_error"},
@@ -594,9 +588,9 @@ class TestProcessRowSingleTransform:
     def test_transform_error_with_named_sink_returns_routed(self) -> None:
         """Transform error with on_error='errors' → ROUTED to error sink."""
         transform = _make_mock_transform(on_error="errors")
-        _db, _recorder, processor = self._setup(transform)
+        _db, recorder, processor = self._setup(transform)
         source_row = _make_source_row()
-        ctx = PluginContext(run_id="test-run", config={})
+        ctx = make_context(landscape=recorder)
 
         error_result = TransformResult.error(
             {"reason": "test_error"},
@@ -625,9 +619,9 @@ class TestProcessRowSingleTransform:
     def test_max_retries_exceeded_returns_failed(self) -> None:
         """MaxRetriesExceeded → FAILED outcome."""
         transform = _make_mock_transform()
-        _db, _recorder, processor = self._setup(transform)
+        _db, recorder, processor = self._setup(transform)
         source_row = _make_source_row()
-        ctx = PluginContext(run_id="test-run", config={})
+        ctx = make_context(landscape=recorder)
 
         with patch.object(
             processor._transform_executor,
@@ -691,6 +685,7 @@ class TestAggregationFailureMatrix:
                     name="batch_agg",
                     plugin="agg-transform",
                     input="default",
+                    on_error="discard",
                     trigger={"count": 1},
                     output_mode=output_mode,
                 ),
@@ -702,7 +697,7 @@ class TestAggregationFailureMatrix:
         """Passthrough flush failure records FAILED terminal outcomes for buffered tokens."""
         _db, recorder, processor, transform, _agg_node = self._setup_batch_processor(output_mode="passthrough")
         source_row = _make_source_row({"value": 10})
-        ctx = PluginContext(run_id="test-run", config={})
+        ctx = make_context(landscape=recorder)
         captured: dict[str, TokenInfo] = {}
 
         def buffer_row_side_effect(node_id: NodeID, token: TokenInfo) -> None:
@@ -717,6 +712,7 @@ class TestAggregationFailureMatrix:
 
         with (
             patch.object(processor._aggregation_executor, "buffer_row", side_effect=buffer_row_side_effect),
+            patch.object(processor._aggregation_executor, "get_batch_id", return_value="batch-1"),
             patch.object(processor._aggregation_executor, "should_flush", return_value=True),
             patch.object(processor._aggregation_executor, "get_trigger_type", return_value=TriggerType.COUNT),
             patch.object(processor._aggregation_executor, "execute_flush", side_effect=execute_flush_side_effect),
@@ -731,13 +727,22 @@ class TestAggregationFailureMatrix:
 
         assert len(results) == 1
         assert results[0].outcome == RowOutcome.FAILED
-        assert [call.kwargs["outcome"] for call in record_outcome.call_args_list] == [RowOutcome.FAILED]
+        # BUFFERED is always recorded before the flush check, then FAILED on flush error.
+        assert [call.kwargs["outcome"] for call in record_outcome.call_args_list] == [
+            RowOutcome.BUFFERED,
+            RowOutcome.FAILED,
+        ]
 
-    def test_flush_failure_transform_keeps_consumed_in_batch_terminal_semantics(self) -> None:
-        """Transform-mode flush failure keeps terminal outcome as CONSUMED_IN_BATCH (not FAILED)."""
+    def test_flush_failure_transform_records_failed_for_buffered_tokens(self) -> None:
+        """T26: Transform-mode flush failure records FAILED for BUFFERED tokens.
+
+        Before T26, transform-mode buffer time recorded CONSUMED_IN_BATCH (terminal),
+        so flush failures couldn't record FAILED. Now tokens are BUFFERED (non-terminal)
+        at buffer time, allowing FAILED to be recorded on flush error.
+        """
         _db, recorder, processor, transform, _agg_node = self._setup_batch_processor(output_mode="transform")
         source_row = _make_source_row({"value": 10})
-        ctx = PluginContext(run_id="test-run", config={})
+        ctx = make_context(landscape=recorder)
         captured: dict[str, TokenInfo] = {}
 
         def buffer_row_side_effect(node_id: NodeID, token: TokenInfo) -> None:
@@ -752,6 +757,7 @@ class TestAggregationFailureMatrix:
 
         with (
             patch.object(processor._aggregation_executor, "buffer_row", side_effect=buffer_row_side_effect),
+            patch.object(processor._aggregation_executor, "get_batch_id", return_value="batch-1"),
             patch.object(processor._aggregation_executor, "should_flush", return_value=True),
             patch.object(processor._aggregation_executor, "get_trigger_type", return_value=TriggerType.COUNT),
             patch.object(processor._aggregation_executor, "execute_flush", side_effect=execute_flush_side_effect),
@@ -767,15 +773,14 @@ class TestAggregationFailureMatrix:
         assert len(results) == 1
         assert results[0].outcome == RowOutcome.FAILED
         outcomes = [call.kwargs["outcome"] for call in record_outcome.call_args_list]
-        assert outcomes == [RowOutcome.CONSUMED_IN_BATCH]
-        assert record_outcome.call_args_list[0].kwargs["batch_id"] == "batch-1"
-        assert RowOutcome.FAILED not in outcomes
+        # BUFFERED is always recorded before the flush check, then FAILED on flush error.
+        assert outcomes == [RowOutcome.BUFFERED, RowOutcome.FAILED]
 
     def test_passthrough_success_with_rows_none_raises(self) -> None:
         """Passthrough flush requires rows list; rows=None is an invariant violation."""
-        _db, _recorder, processor, transform, _agg_node = self._setup_batch_processor(output_mode="passthrough")
+        _db, recorder, processor, transform, _agg_node = self._setup_batch_processor(output_mode="passthrough")
         source_row = _make_source_row({"value": 10})
-        ctx = PluginContext(run_id="test-run", config={})
+        ctx = make_context(landscape=recorder)
         captured: dict[str, TokenInfo] = {}
 
         bad_result = Mock()
@@ -791,9 +796,11 @@ class TestAggregationFailureMatrix:
 
         with (
             patch.object(processor._aggregation_executor, "buffer_row", side_effect=buffer_row_side_effect),
+            patch.object(processor._aggregation_executor, "get_batch_id", return_value="batch-1"),
             patch.object(processor._aggregation_executor, "should_flush", return_value=True),
             patch.object(processor._aggregation_executor, "get_trigger_type", return_value=TriggerType.COUNT),
             patch.object(processor._aggregation_executor, "execute_flush", side_effect=execute_flush_side_effect),
+            patch.object(processor._recorder, "record_token_outcome"),
             patch.object(processor, "_emit_transform_completed"),
             pytest.raises(RuntimeError, match="rows=None"),
         ):
@@ -806,9 +813,9 @@ class TestAggregationFailureMatrix:
 
     def test_passthrough_success_with_output_count_mismatch_raises(self) -> None:
         """Passthrough flush must return one output row per buffered input token."""
-        _db, _recorder, processor, transform, _agg_node = self._setup_batch_processor(output_mode="passthrough")
+        _db, recorder, processor, transform, _agg_node = self._setup_batch_processor(output_mode="passthrough")
         source_row = _make_source_row({"value": 10})
-        ctx = PluginContext(run_id="test-run", config={})
+        ctx = make_context(landscape=recorder)
         captured: dict[str, TokenInfo] = {}
 
         mismatch_result = TransformResult.success_multi(
@@ -825,9 +832,11 @@ class TestAggregationFailureMatrix:
 
         with (
             patch.object(processor._aggregation_executor, "buffer_row", side_effect=buffer_row_side_effect),
+            patch.object(processor._aggregation_executor, "get_batch_id", return_value="batch-1"),
             patch.object(processor._aggregation_executor, "should_flush", return_value=True),
             patch.object(processor._aggregation_executor, "get_trigger_type", return_value=TriggerType.COUNT),
             patch.object(processor._aggregation_executor, "execute_flush", side_effect=execute_flush_side_effect),
+            patch.object(processor._recorder, "record_token_outcome"),
             patch.object(processor, "_emit_transform_completed"),
             pytest.raises(ValueError, match="same number of output rows"),
         ):
@@ -842,11 +851,11 @@ class TestAggregationFailureMatrix:
         """Timeout flush routes passthrough tokens into child work when downstream exists."""
         downstream_node = NodeID("downstream-2")
         agg_node = NodeID("agg-1")
-        _db, _recorder, processor, transform, agg_node = self._setup_batch_processor(
+        _db, recorder, processor, transform, agg_node = self._setup_batch_processor(
             output_mode="passthrough",
             node_to_next={NodeID("source-0"): agg_node, agg_node: downstream_node, downstream_node: None},
         )
-        ctx = PluginContext(run_id="test-run", config={})
+        ctx = make_context(landscape=recorder)
 
         result = TransformResult.success_multi(
             [make_row({"value": 11}, contract=_make_contract())],
@@ -872,8 +881,8 @@ class TestAggregationFailureMatrix:
 
     def test_timeout_flush_passthrough_terminal_returns_completed(self) -> None:
         """Timeout flush returns terminal COMPLETED results when no downstream/coalesce exists."""
-        _db, _recorder, processor, transform, agg_node = self._setup_batch_processor(output_mode="passthrough")
-        ctx = PluginContext(run_id="test-run", config={})
+        _db, recorder, processor, transform, agg_node = self._setup_batch_processor(output_mode="passthrough")
+        ctx = make_context(landscape=recorder)
 
         result = TransformResult.success_multi(
             [make_row({"value": 11}, contract=_make_contract())],
@@ -898,6 +907,115 @@ class TestAggregationFailureMatrix:
         assert results[0].outcome == RowOutcome.COMPLETED
         assert results[0].sink_name == "agg_sink"
 
+    def test_transform_mode_triggering_token_quarantined_outcome(self) -> None:
+        """Triggering token's RowResult must be QUARANTINED when quarantined_indices includes it.
+
+        Regression: the triggering token (count-triggered flush) was unconditionally
+        returned as CONSUMED_IN_BATCH in its RowResult, even when the recorder had
+        already recorded it as QUARANTINED. This caused outcome disagreement between
+        the audit trail and in-memory control flow.
+        """
+        _db, recorder, processor, transform, _agg_node = self._setup_batch_processor(output_mode="transform")
+        source_row = _make_source_row({"value": 10})
+        ctx = make_context(landscape=recorder)
+        captured: dict[str, TokenInfo] = {}
+
+        # The triggering token is the only buffered token (count=1 trigger).
+        # Index 0 in quarantined_indices means the triggering token IS quarantined.
+        flush_result = TransformResult.success(
+            make_row({"value": 999}, contract=_make_contract()),
+            success_reason={
+                "action": "batch_processed",
+                "metadata": {"quarantined_indices": [0]},
+            },
+        )
+
+        def buffer_row_side_effect(node_id: NodeID, token: TokenInfo) -> None:
+            captured["token"] = token
+
+        def execute_flush_side_effect(*, node_id, transform, ctx, trigger_type):
+            return flush_result, [captured["token"]], "batch-1"
+
+        with (
+            patch.object(processor._aggregation_executor, "buffer_row", side_effect=buffer_row_side_effect),
+            patch.object(processor._aggregation_executor, "get_batch_id", return_value="batch-1"),
+            patch.object(processor._aggregation_executor, "should_flush", return_value=True),
+            patch.object(processor._aggregation_executor, "get_trigger_type", return_value=TriggerType.COUNT),
+            patch.object(processor._aggregation_executor, "execute_flush", side_effect=execute_flush_side_effect),
+            patch.object(recorder, "record_token_outcome") as record_outcome,
+            patch.object(processor, "_emit_transform_completed"),
+            patch.object(processor, "_emit_token_completed"),
+            patch.object(processor._token_manager, "expand_token", return_value=([], "expand-group-1")),
+        ):
+            results = processor.process_row(
+                row_index=0,
+                source_row=source_row,
+                transforms=[transform],
+                ctx=ctx,
+            )
+
+        # The triggering token must be returned as QUARANTINED, matching the recorder.
+        triggering_results = [r for r in results if r.outcome == RowOutcome.QUARANTINED]
+        assert len(triggering_results) == 1, (
+            f"Expected triggering token RowResult with QUARANTINED outcome, got outcomes: {[r.outcome for r in results]}"
+        )
+
+        # Recorder must also have recorded QUARANTINED (not CONSUMED_IN_BATCH).
+        recorded_outcomes = [call.kwargs["outcome"] for call in record_outcome.call_args_list]
+        assert RowOutcome.QUARANTINED in recorded_outcomes
+        assert RowOutcome.CONSUMED_IN_BATCH not in recorded_outcomes
+
+    def test_transform_mode_triggering_token_consumed_when_not_quarantined(self) -> None:
+        """Triggering token's RowResult is CONSUMED_IN_BATCH when not in quarantined_indices.
+
+        Companion to the quarantine test — verifies the normal (non-quarantined) path
+        still works correctly after the fix.
+        """
+        _db, recorder, processor, transform, _agg_node = self._setup_batch_processor(output_mode="transform")
+        source_row = _make_source_row({"value": 10})
+        ctx = make_context(landscape=recorder)
+        captured: dict[str, TokenInfo] = {}
+
+        # No quarantined_indices — all tokens are consumed normally.
+        flush_result = TransformResult.success(
+            make_row({"value": 999}, contract=_make_contract()),
+            success_reason={"action": "batch_processed"},
+        )
+
+        def buffer_row_side_effect(node_id: NodeID, token: TokenInfo) -> None:
+            captured["token"] = token
+
+        def execute_flush_side_effect(*, node_id, transform, ctx, trigger_type):
+            return flush_result, [captured["token"]], "batch-1"
+
+        with (
+            patch.object(processor._aggregation_executor, "buffer_row", side_effect=buffer_row_side_effect),
+            patch.object(processor._aggregation_executor, "get_batch_id", return_value="batch-1"),
+            patch.object(processor._aggregation_executor, "should_flush", return_value=True),
+            patch.object(processor._aggregation_executor, "get_trigger_type", return_value=TriggerType.COUNT),
+            patch.object(processor._aggregation_executor, "execute_flush", side_effect=execute_flush_side_effect),
+            patch.object(recorder, "record_token_outcome") as record_outcome,
+            patch.object(processor, "_emit_transform_completed"),
+            patch.object(processor, "_emit_token_completed"),
+            patch.object(processor._token_manager, "expand_token", return_value=([], "expand-group-1")),
+        ):
+            results = processor.process_row(
+                row_index=0,
+                source_row=source_row,
+                transforms=[transform],
+                ctx=ctx,
+            )
+
+        # Triggering token should be CONSUMED_IN_BATCH (no quarantine).
+        triggering_results = [r for r in results if r.outcome == RowOutcome.CONSUMED_IN_BATCH]
+        assert len(triggering_results) == 1, (
+            f"Expected triggering token RowResult with CONSUMED_IN_BATCH outcome, got outcomes: {[r.outcome for r in results]}"
+        )
+
+        # Recorder should have CONSUMED_IN_BATCH, not QUARANTINED.
+        recorded_outcomes = [call.kwargs["outcome"] for call in record_outcome.call_args_list]
+        assert RowOutcome.CONSUMED_IN_BATCH in recorded_outcomes
+
 
 class TestProcessRowGateBranching:
     """Tests for non-linear gate branching through next_node_id."""
@@ -906,7 +1024,7 @@ class TestProcessRowGateBranching:
         """Config gate PROCESSING_NODE jumps should refresh inherited sink from jumped subchain."""
         _db, recorder = _make_recorder()
         source_row = _make_source_row({"value": 10})
-        ctx = PluginContext(run_id="test-run", config={})
+        ctx = make_context(landscape=recorder)
 
         gate_node = NodeID("cfg-gate-1")
         expander_node = NodeID("expander-2")
@@ -1084,7 +1202,7 @@ class TestProcessRowGateBranching:
     def test_branch_to_sink_routing_applies_for_terminal_fork_children(self) -> None:
         """Branch-routed tokens bypassing coalesce should resolve sink via branch_to_sink."""
         _db, recorder = _make_recorder()
-        ctx = PluginContext(run_id="test-run", config={})
+        ctx = make_context(landscape=recorder)
         token = TokenInfo(
             row_id="row-1",
             token_id="token-branch-1",
@@ -1095,7 +1213,7 @@ class TestProcessRowGateBranching:
         processor = _make_processor(
             recorder,
             source_on_success="source_sink",
-            branch_to_sink={"path_a": "branch_sink"},
+            branch_to_sink={BranchName("path_a"): "branch_sink"},
             sink_names=frozenset({"source_sink", "branch_sink"}),
             node_step_map={NodeID("source-0"): 0},
             node_to_next={NodeID("source-0"): None},
@@ -1105,7 +1223,7 @@ class TestProcessRowGateBranching:
         results = processor.process_token(
             token=token,
             ctx=ctx,
-            current_node_id=None,
+            current_node_id=None,  # type: ignore[arg-type]  # Intentional: tests branch routing when fork child has no starting node
         )
 
         assert len(results) == 1
@@ -1122,7 +1240,7 @@ class TestProcessRowGateBranching:
         With fix: children get current_node_id=None, skip the loop, resolve via _branch_to_sink.
         """
         _db, recorder = _make_recorder()
-        ctx = PluginContext(run_id="test-run", config={})
+        ctx = make_context(landscape=recorder)
 
         gate_node = NodeID("gate-1")
         transform_node = NodeID("transform-1")
@@ -1159,13 +1277,13 @@ class TestProcessRowGateBranching:
         # Transform is the gate's continuation successor — must NOT execute for fork children
         transform = _make_mock_transform(
             node_id="transform-1",
-            result=TransformResult.success({"value": 99, "transformed": True}, success_reason={"action": "test"}),
+            result=TransformResult.success(make_pipeline_row({"value": 99, "transformed": True}), success_reason={"action": "test"}),
         )
 
         processor = _make_processor(
             recorder,
             source_on_success="sink_c",
-            branch_to_sink={"sink_a": "sink_a", "sink_b": "sink_b"},
+            branch_to_sink={BranchName("sink_a"): "sink_a", BranchName("sink_b"): "sink_b"},
             sink_names=frozenset({"sink_a", "sink_b", "sink_c"}),
             node_step_map={gate_node: 1, transform_node: 2},
             node_to_next={gate_node: transform_node, transform_node: None},
@@ -1203,7 +1321,7 @@ class TestProcessRowGateBranching:
                 child_tokens=[child_a, child_b],
             )
 
-        processor._gate_executor.execute_config_gate = mock_execute_config_gate
+        processor._gate_executor.execute_config_gate = mock_execute_config_gate  # type: ignore[method-assign]
 
         source_row = _make_source_row()
         results = processor.process_row(
@@ -1220,7 +1338,7 @@ class TestProcessRowGateBranching:
         # Fork children should complete at their branch sinks
         completed = [r for r in results if r.outcome == RowOutcome.COMPLETED]
         assert len(completed) == 2
-        sink_names = sorted(r.sink_name for r in completed)
+        sink_names = sorted(r.sink_name for r in completed if r.sink_name is not None)
         assert sink_names == ["sink_a", "sink_b"]
 
         # Downstream transform must NOT have been called for fork children
@@ -1233,8 +1351,8 @@ class TestProcessRowGateBranching:
             _make_processor(
                 recorder,
                 source_on_success="output",
-                branch_to_coalesce={"path_a": CoalesceName("merge_point")},
-                branch_to_sink={"path_a": "direct_sink"},
+                branch_to_coalesce={BranchName("path_a"): CoalesceName("merge_point")},
+                branch_to_sink={BranchName("path_a"): "direct_sink"},
                 coalesce_node_ids={CoalesceName("merge_point"): NodeID("coalesce-0")},
                 sink_names=frozenset({"output", "direct_sink"}),
                 node_step_map={NodeID("source-0"): 0, NodeID("coalesce-0"): 1},
@@ -1254,7 +1372,7 @@ class TestProcessRowMultiRowOutput:
         """Transform with creates_tokens=True returning multi-row → EXPANDED."""
         _db, recorder = _make_recorder()
         source_row = _make_source_row()
-        ctx = PluginContext(run_id="test-run", config={})
+        ctx = make_context(landscape=recorder)
 
         contract = _make_contract()
         output_rows = [
@@ -1301,7 +1419,7 @@ class TestProcessRowMultiRowOutput:
         """Transform returning multi-row without creates_tokens=True → RuntimeError."""
         _db, recorder = _make_recorder()
         source_row = _make_source_row()
-        ctx = PluginContext(run_id="test-run", config={})
+        ctx = make_context(landscape=recorder)
 
         contract = _make_contract()
         output_rows = [
@@ -1379,7 +1497,7 @@ class TestProcessExistingRow:
 
         contract = _make_contract()
         row_data = make_row({"value": 42}, contract=contract)
-        ctx = PluginContext(run_id="test-run", config={})
+        ctx = make_context(landscape=recorder)
 
         # We need a pre-existing row. Create one via process_row first.
         source_row = _make_source_row({"value": 42})
@@ -1419,7 +1537,7 @@ class TestProcessToken:
         _db, recorder = _make_recorder()
 
         processor = _make_processor(recorder)
-        ctx = PluginContext(run_id="test-run", config={})
+        ctx = make_context(landscape=recorder)
 
         # Create a token to process
         token = make_token_info(data={"value": 42})
@@ -1446,7 +1564,7 @@ class TestProcessToken:
             node_step_map={NodeID("coalesce::merge"): 1},
             node_to_next={NodeID("coalesce::merge"): None},
         )
-        ctx = PluginContext(run_id="test-run", config={})
+        ctx = make_context(landscape=recorder)
         token = make_token_info(data={"value": 42})
 
         results = processor.process_token(
@@ -1477,7 +1595,7 @@ class TestProcessToken:
             first_transform_node_id=NodeID("transform-1"),
             node_to_plugin={NodeID("transform-1"): transform},
         )
-        ctx = PluginContext(run_id="test-run", config={})
+        ctx = make_context(landscape=recorder)
         token = make_token_info(data={"value": 42})
 
         with patch.object(
@@ -1515,7 +1633,7 @@ class TestDrainWorkQueueIterationGuard:
         _db, recorder = _make_recorder()
 
         processor = _make_processor(recorder)
-        ctx = PluginContext(run_id="test-run", config={})
+        ctx = make_context(landscape=recorder)
         token = make_token_info(data={"value": 1})
 
         # Mock _process_single_token to always produce more work
@@ -1553,10 +1671,10 @@ class TestExecuteTransformNoRetry:
 
     def test_single_attempt_success(self) -> None:
         """Without retry_manager, executes single attempt."""
-        _, _, processor = self._setup()
+        _, recorder, processor = self._setup()
         transform = _make_mock_transform()
         token = make_token_info(data={"value": 42})
-        ctx = PluginContext(run_id="test-run", config={})
+        ctx = make_context(landscape=recorder)
         expected_result = TransformResult.success(
             make_row({"value": 42}),
             success_reason={"action": "test"},
@@ -1578,10 +1696,10 @@ class TestExecuteTransformNoRetry:
 
     def test_retryable_llm_error_with_on_error_discard(self) -> None:
         """Retryable LLMClientError with on_error='discard' returns error result (no re-raise)."""
-        _, _, processor = self._setup()
+        _, _recorder, processor = self._setup()
         transform = _make_mock_transform(node_id="t1", on_error="discard")
         token = make_token_info(data={"value": 42})
-        ctx = PluginContext(run_id="test-run", config={})
+        ctx = make_context()
 
         llm_error = LLMClientError("rate limited", retryable=True)
         with patch.object(
@@ -1605,10 +1723,10 @@ class TestExecuteTransformNoRetry:
         requires on_error, so every transform has a valid error route. This test
         documents the invariant by verifying 'discard' (minimum valid value) works.
         """
-        _, _, processor = self._setup()
+        _, _recorder, processor = self._setup()
         transform = _make_mock_transform(node_id="t1", on_error="discard")
         token = make_token_info(data={"value": 42})
-        ctx = PluginContext(run_id="test-run", config={})
+        ctx = make_context()
 
         llm_error = LLMClientError("rate limited", retryable=True)
         with patch.object(
@@ -1627,10 +1745,10 @@ class TestExecuteTransformNoRetry:
 
     def test_non_retryable_llm_error_reraises(self) -> None:
         """Non-retryable LLMClientError is re-raised directly."""
-        _, _, processor = self._setup()
+        _, _recorder, processor = self._setup()
         transform = _make_mock_transform(node_id="t1", on_error="discard")
         token = make_token_info(data={"value": 42})
-        ctx = PluginContext(run_id="test-run", config={})
+        ctx = make_context()
 
         llm_error = LLMClientError("content policy", retryable=False)
         with (
@@ -1649,10 +1767,10 @@ class TestExecuteTransformNoRetry:
 
     def test_transient_connection_error_with_on_error(self) -> None:
         """ConnectionError with on_error returns error result (no re-raise)."""
-        _, _, processor = self._setup()
+        _, _recorder, processor = self._setup()
         transform = _make_mock_transform(node_id="t1", on_error="discard")
         token = make_token_info(data={"value": 42})
-        ctx = PluginContext(run_id="test-run", config={})
+        ctx = make_context()
 
         with patch.object(
             processor._transform_executor,
@@ -1670,10 +1788,10 @@ class TestExecuteTransformNoRetry:
 
     def test_transient_timeout_error_with_on_error(self) -> None:
         """TimeoutError with on_error returns error result."""
-        _, _, processor = self._setup()
+        _, _recorder, processor = self._setup()
         transform = _make_mock_transform(node_id="t1", on_error="discard")
         token = make_token_info(data={"value": 42})
-        ctx = PluginContext(run_id="test-run", config={})
+        ctx = make_context()
 
         with patch.object(
             processor._transform_executor,
@@ -1691,10 +1809,10 @@ class TestExecuteTransformNoRetry:
 
     def test_capacity_error_with_on_error_returns_row_scoped_error(self) -> None:
         """CapacityError with no retry manager returns retryable row error."""
-        _, _, processor = self._setup()
+        _, _recorder, processor = self._setup()
         transform = _make_mock_transform(node_id="t1", on_error="discard")
         token = make_token_info(data={"value": 42})
-        ctx = PluginContext(run_id="test-run", config={})
+        ctx = make_context()
 
         with patch.object(
             processor._transform_executor,
@@ -1718,10 +1836,10 @@ class TestExecuteTransformNoRetry:
         Now TransformSettings requires on_error, so every transform has a valid
         error route. This test documents the invariant.
         """
-        _, _, processor = self._setup()
+        _, _recorder, processor = self._setup()
         transform = _make_mock_transform(node_id="t1", on_error="discard")
         token = make_token_info(data={"value": 42})
-        ctx = PluginContext(run_id="test-run", config={})
+        ctx = make_context()
 
         with patch.object(
             processor._transform_executor,
@@ -1745,8 +1863,7 @@ class TestExecuteTransformNoRetry:
 
         transform = _make_mock_transform(node_id="t1", on_error="error-sink")
         token = make_token_info(data={"value": 42})
-        ctx = PluginContext(run_id="test-run", config={})
-        ctx.state_id = "state-123"
+        ctx = make_context(state_id="state-123")
 
         llm_error = LLMClientError("rate limited", retryable=True)
         # Mock record_routing_event since we don't have a real state_id in DB
@@ -1765,14 +1882,13 @@ class TestExecuteTransformNoRetry:
 
     def test_retryable_llm_error_with_missing_error_edge_raises(self) -> None:
         """Retryable error with named sink but no DIVERT edge → OrchestrationInvariantError."""
-        _, _, processor = self._setup()
+        _, _recorder, processor = self._setup()
         # No error edges configured
         processor._error_edge_ids = {}
 
         transform = _make_mock_transform(node_id="t1", on_error="error-sink")
         token = make_token_info(data={"value": 42})
-        ctx = PluginContext(run_id="test-run", config={})
-        ctx.state_id = "state-123"
+        ctx = make_context(state_id="state-123")
 
         llm_error = LLMClientError("rate limited", retryable=True)
         with (
@@ -1814,7 +1930,7 @@ class TestExecuteTransformWithRetry:
 
         transform = _make_mock_transform()
         token = make_token_info(data={"value": 42})
-        ctx = PluginContext(run_id="test-run", config={})
+        ctx = make_context(landscape=recorder)
 
         result = processor._execute_transform_with_retry(
             transform=transform,
@@ -1841,7 +1957,7 @@ class TestExecuteTransformWithRetry:
 
         transform = _make_mock_transform()
         token = make_token_info()
-        ctx = PluginContext(run_id="test-run", config={})
+        ctx = make_context(landscape=recorder)
 
         processor._execute_transform_with_retry(
             transform=transform,
@@ -2368,7 +2484,7 @@ class TestUnknownTransformType:
         """Transform that is neither TransformProtocol nor GateSettings raises TypeError."""
         _db, recorder = _make_recorder()
         source_row = _make_source_row()
-        ctx = PluginContext(run_id="test-run", config={})
+        ctx = make_context(landscape=recorder)
 
         # Create an object that is NOT a transform or gate
         class FakePlugin:
@@ -2401,7 +2517,7 @@ class TestRoutingInvariantFailures:
         """Config gate branch must fail closed when CONTINUE invariants are violated."""
         _db, recorder = _make_recorder()
         source_row = _make_source_row({"value": 10})
-        ctx = PluginContext(run_id="test-run", config={})
+        ctx = make_context(landscape=recorder)
 
         source_node = NodeID("source-0")
         gate_node = NodeID("cfg-gate-1")
@@ -2447,7 +2563,7 @@ class TestRoutingInvariantFailures:
         """Terminal completion must not fall back when no sink can be resolved."""
         _db, recorder = _make_recorder()
         source_row = _make_source_row({"value": 10})
-        ctx = PluginContext(run_id="test-run", config={})
+        ctx = make_context(landscape=recorder)
 
         processor = _make_processor(
             recorder,
@@ -2531,7 +2647,9 @@ class TestAggregationFacades:
         ):
             result = processor.get_aggregation_checkpoint_state()
 
-        assert result == checkpoint
+        # Mock returns raw dict; runtime return type is AggregationCheckpointState.
+        # Comparing across types is intentional — verifying pass-through delegation.
+        assert result == checkpoint  # type: ignore[comparison-overlap]
 
 
 # =============================================================================
@@ -2574,7 +2692,7 @@ class TestTerminalDeaggregationSinkRouting:
         """Children of a terminal multi-row transform must route to transform's on_success."""
         _db, recorder = _make_recorder()
         source_row = _make_source_row()
-        ctx = PluginContext(run_id="test-run", config={})
+        ctx = make_context(landscape=recorder)
 
         contract = _make_contract()
         output_rows = [
@@ -2635,7 +2753,7 @@ class TestTerminalDeaggregationSinkRouting:
         """Mid-chain multi-row expansion: children continue to downstream transforms."""
         _db, recorder = _make_recorder()
         source_row = _make_source_row()
-        ctx = PluginContext(run_id="test-run", config={})
+        ctx = make_context(landscape=recorder)
 
         contract = _make_contract()
         output_rows = [
@@ -2718,7 +2836,7 @@ class TestCoalesceTraversalInvariant:
     def test_work_item_downstream_of_coalesce_raises_invariant_error(self) -> None:
         """A work item starting past the coalesce node must raise OrchestrationInvariantError."""
         _db, recorder = _make_recorder()
-        ctx = PluginContext(run_id="test-run", config={})
+        ctx = make_context(landscape=recorder)
 
         # Build DAG: source → transform → coalesce → downstream
         source_node = NodeID("source-0")
@@ -2791,7 +2909,7 @@ class TestCoalesceTraversalInvariant:
     def test_work_item_at_coalesce_does_not_raise(self) -> None:
         """A work item starting exactly at the coalesce node should not raise."""
         _db, recorder = _make_recorder()
-        ctx = PluginContext(run_id="test-run", config={})
+        ctx = make_context(landscape=recorder)
 
         source_node = NodeID("source-0")
         coalesce_node = NodeID("coalesce-1")
@@ -2842,7 +2960,7 @@ class TestTerminalWorkItemInvariant:
     def test_none_current_node_without_sink_context_raises(self) -> None:
         """None current_node_id must not default to source_on_success silently."""
         _db, recorder = _make_recorder()
-        ctx = PluginContext(run_id="test-run", config={})
+        ctx = make_context(landscape=recorder)
         processor = _make_processor(recorder, source_on_success="source_sink")
         token = make_token_info(data={"value": 1})
 
@@ -2856,7 +2974,7 @@ class TestTerminalWorkItemInvariant:
     def test_none_current_node_with_inherited_sink_is_allowed(self) -> None:
         """Explicit on_success_sink context allows terminal completion with None node."""
         _db, recorder = _make_recorder()
-        ctx = PluginContext(run_id="test-run", config={})
+        ctx = make_context(landscape=recorder)
         processor = _make_processor(recorder, source_on_success="source_sink")
         token = make_token_info(data={"value": 1})
 
@@ -2891,7 +3009,7 @@ class TestGateSinkRoutingNotifiesCoalesce:
         After fix: coalesce is notified with reason 'gate_routed_to_sink:<sink_name>'.
         """
         _db, recorder = _make_recorder()
-        ctx = PluginContext(run_id="test-run", config={})
+        ctx = make_context(landscape=recorder)
 
         source_node = NodeID("source-0")
         gate_node = NodeID("gate-1")
@@ -2982,7 +3100,7 @@ class TestGateSinkRoutingNotifiesCoalesce:
     def test_gate_sink_route_with_coalesce_failure_returns_sibling_results(self) -> None:
         """Gate sink routing that triggers coalesce failure returns sibling FAILED results."""
         _db, recorder = _make_recorder()
-        ctx = PluginContext(run_id="test-run", config={})
+        ctx = make_context(landscape=recorder)
 
         source_node = NodeID("source-0")
         gate_node = NodeID("gate-1")
@@ -3069,7 +3187,7 @@ class TestGateSinkRoutingNotifiesCoalesce:
     def test_gate_sink_route_without_branch_skips_coalesce(self) -> None:
         """Gate sink routing a non-fork token does not attempt coalesce notification."""
         _db, recorder = _make_recorder()
-        ctx = PluginContext(run_id="test-run", config={})
+        ctx = make_context(landscape=recorder)
 
         source_node = NodeID("source-0")
         gate_node = NodeID("gate-1")
@@ -3164,7 +3282,7 @@ class TestGateJumpPastCoalesceInvariant:
         This must raise because the token would never hit the coalesce barrier.
         """
         _db, recorder = _make_recorder()
-        ctx = PluginContext(run_id="test-run", config={})
+        ctx = make_context(landscape=recorder)
 
         source_node = NodeID("source-0")
         gate_node = NodeID("gate-1")
@@ -3257,7 +3375,7 @@ class TestGateJumpPastCoalesceInvariant:
         This is fine — the token still has to pass through the coalesce.
         """
         _db, recorder = _make_recorder()
-        ctx = PluginContext(run_id="test-run", config={})
+        ctx = make_context(landscape=recorder)
 
         source_node = NodeID("source-0")
         gate_node = NodeID("gate-1")
@@ -3365,3 +3483,104 @@ class TestGateJumpPastCoalesceInvariant:
 
         # Token should have been held at coalesce
         assert result is None or (hasattr(result, "outcome") and result is not None)
+
+
+# ---------------------------------------------------------------------------
+# T18: Processor outcome type tests
+# ---------------------------------------------------------------------------
+
+
+class TestProcessorOutcomeTypes:
+    """Test the private discriminated union types for _process_single_token extraction."""
+
+    def test_transform_continue(self) -> None:
+        from elspeth.engine.processor import _TransformContinue
+
+        outcome = _TransformContinue(
+            updated_token=Mock(),
+            updated_sink="output",
+        )
+        assert outcome.updated_sink == "output"
+        assert outcome.updated_token is not None
+
+    def test_transform_terminal_single(self) -> None:
+        from elspeth.engine.processor import _TransformTerminal
+
+        mock_result = Mock()
+        outcome = _TransformTerminal(result=mock_result)
+        assert outcome.result is mock_result
+
+    def test_transform_terminal_list(self) -> None:
+        from elspeth.engine.processor import _TransformTerminal
+
+        mock_results = cast("list[RowResult]", [Mock(spec=RowResult), Mock(spec=RowResult)])
+        outcome = _TransformTerminal(result=mock_results)
+        assert isinstance(outcome.result, list)
+        assert len(outcome.result) == 2
+
+    def test_transform_outcome_isinstance_dispatch(self) -> None:
+        """Verify isinstance works for discriminated union dispatch."""
+        from elspeth.engine.processor import _TransformContinue, _TransformTerminal
+
+        continue_outcome = _TransformContinue(updated_token=Mock(), updated_sink="out")
+        terminal_outcome = _TransformTerminal(result=Mock())
+
+        assert isinstance(continue_outcome, _TransformContinue)
+        assert not isinstance(continue_outcome, _TransformTerminal)  # type: ignore[unreachable]  # exhaustiveness verification — disjoint dataclasses
+        assert isinstance(terminal_outcome, _TransformTerminal)
+        assert not isinstance(terminal_outcome, _TransformContinue)  # type: ignore[unreachable]  # exhaustiveness verification — disjoint dataclasses
+
+    def test_gate_continue_default_next_node(self) -> None:
+        from elspeth.engine.processor import _GateContinue
+
+        outcome = _GateContinue(updated_token=Mock(), updated_sink="output")
+        assert outcome.next_node_id is None
+
+    def test_gate_continue_explicit_next_node(self) -> None:
+        from elspeth.engine.processor import _GateContinue
+
+        outcome = _GateContinue(updated_token=Mock(), updated_sink="output", next_node_id=NodeID("jump_target"))
+        assert outcome.next_node_id == NodeID("jump_target")
+
+    def test_gate_terminal(self) -> None:
+        from elspeth.engine.processor import _GateTerminal
+
+        mock_result = Mock()
+        outcome = _GateTerminal(result=mock_result)
+        assert outcome.result is mock_result
+
+    def test_gate_outcome_isinstance_dispatch(self) -> None:
+        from elspeth.engine.processor import _GateContinue, _GateTerminal
+
+        continue_outcome = _GateContinue(updated_token=Mock(), updated_sink="out")
+        terminal_outcome = _GateTerminal(result=Mock())
+
+        assert isinstance(continue_outcome, _GateContinue)
+        assert not isinstance(continue_outcome, _GateTerminal)  # type: ignore[unreachable]  # exhaustiveness verification — disjoint dataclasses
+        assert isinstance(terminal_outcome, _GateTerminal)
+        assert not isinstance(terminal_outcome, _GateContinue)  # type: ignore[unreachable]  # exhaustiveness verification — disjoint dataclasses
+
+    def test_all_outcome_types_are_frozen(self) -> None:
+        from elspeth.engine.processor import (
+            _GateContinue,
+            _GateTerminal,
+            _TransformContinue,
+            _TransformTerminal,
+        )
+
+        # Verify frozen by attempting to mutate each type's own field
+        tc = _TransformContinue(updated_token=Mock(), updated_sink="out")
+        with pytest.raises(AttributeError):
+            tc.updated_sink = "other"  # type: ignore[misc]
+
+        tt = _TransformTerminal(result=Mock())
+        with pytest.raises(AttributeError):
+            tt.result = Mock()  # type: ignore[misc]
+
+        gc = _GateContinue(updated_token=Mock(), updated_sink="out")
+        with pytest.raises(AttributeError):
+            gc.updated_sink = "other"  # type: ignore[misc]
+
+        gt = _GateTerminal(result=Mock())
+        with pytest.raises(AttributeError):
+            gt.result = Mock()  # type: ignore[misc]

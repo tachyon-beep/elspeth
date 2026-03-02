@@ -53,8 +53,8 @@ from elspeth.core.landscape.schema import (
 )
 from elspeth.core.payload_store import FilesystemPayloadStore
 from elspeth.engine.orchestrator import Orchestrator, PipelineConfig
-from elspeth.plugins.base import BaseTransform
-from elspeth.plugins.results import TransformResult
+from elspeth.plugins.infrastructure.base import BaseTransform
+from elspeth.plugins.infrastructure.results import TransformResult
 from elspeth.testing import make_pipeline_row
 from tests.fixtures.base_classes import (
     _TestSinkBase,
@@ -62,6 +62,7 @@ from tests.fixtures.base_classes import (
     as_sink,
     as_source,
 )
+from tests.fixtures.landscape import make_recorder
 
 # ---------------------------------------------------------------------------
 # Shared helpers
@@ -378,8 +379,8 @@ class TestResumeIdempotence:
             mode=RoutingMode.MOVE,
         )
 
-        # Record the contract on the source node for resume
-        recorder.update_run_contract(run_id, source_contract)
+        # Contract already stored via begin_run(schema_contract=...) above.
+        # Record the source node's output contract for resume.
         recorder.update_node_output_contract(run_id, "source", source_contract)
 
         # Create all 5 rows with payloads (create_row auto-stores via payload_store_b)
@@ -908,7 +909,7 @@ class TestAggregationRecovery:
         db = LandscapeDB(f"sqlite:///{tmp_path}/test.db")
         checkpoint_mgr = CheckpointManager(db)
         recovery_mgr = RecoveryManager(db, checkpoint_mgr)
-        recorder = LandscapeRecorder(db)
+        recorder = make_recorder(db)
 
         return {
             "db": db,

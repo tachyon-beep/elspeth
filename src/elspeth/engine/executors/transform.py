@@ -1,4 +1,3 @@
-# src/elspeth/engine/executors/transform.py
 """TransformExecutor - wraps transform.process() with audit recording."""
 
 import logging
@@ -10,6 +9,7 @@ import structlog
 from elspeth.contracts import (
     ExecutionError,
     TokenInfo,
+    TransformProtocol,
 )
 from elspeth.contracts.enums import (
     NodeStateStatus,
@@ -22,9 +22,8 @@ from elspeth.core.canonical import stable_hash
 from elspeth.core.landscape import LandscapeRecorder
 from elspeth.engine.executors.state_guard import NodeStateGuard
 from elspeth.engine.spans import SpanFactory
-from elspeth.plugins.batching.mixin import BatchTransformMixin
-from elspeth.plugins.protocols import TransformProtocol
-from elspeth.plugins.results import TransformResult
+from elspeth.plugins.infrastructure.batching.mixin import BatchTransformMixin
+from elspeth.plugins.infrastructure.results import TransformResult
 
 if TYPE_CHECKING:
     from elspeth.engine.batch_adapter import SharedBatchAdapter
@@ -106,7 +105,8 @@ class TransformExecutor:
 
         # node_id is always set by orchestrator before execution
         node_id = transform.node_id
-        assert node_id is not None, "node_id must be set before execute_transform"
+        if node_id is None:
+            raise OrchestrationInvariantError("node_id must be set before execute_transform")
 
         if node_id not in self._batch_adapters:
             adapter = SharedBatchAdapter()
@@ -200,8 +200,9 @@ class TransformExecutor:
         ) as guard:
             # --- LIFECYCLE GUARD (pre-execution) ---
             # Centralized check: ensure on_start() was called before process().
-            # Uses getattr with True default for non-BaseTransform implementations.
-            if not getattr(transform, "_on_start_called", True):
+            # All transforms are system-owned and must inherit BaseTransform.
+            # AttributeError here means a transform violates the interface contract.
+            if not transform._on_start_called:
                 raise PluginContractViolation(
                     f"Transform '{transform.name}' was called before on_start(). "
                     f"This is an engine lifecycle bug — on_start() must be called "
@@ -310,10 +311,10 @@ class TransformExecutor:
                 except Exception as e:
                     duration_ms = (time.perf_counter() - start) * 1000
                     # Record failure
-                    error: ExecutionError = {
-                        "exception": str(e),
-                        "type": type(e).__name__,
-                    }
+                    error = ExecutionError(
+                        exception=str(e),
+                        exception_type=type(e).__name__,
+                    )
                     guard.complete(
                         NodeStateStatus.FAILED,
                         duration_ms=duration_ms,
@@ -375,7 +376,8 @@ class TransformExecutor:
                 if result.row is not None:
                     output_data = result.row.to_dict()
                 else:
-                    assert result.rows is not None, "has_output_data guarantees rows when row is None"
+                    if result.rows is None:
+                        raise OrchestrationInvariantError("has_output_data guarantees rows when row is None")
                     output_data = [r.to_dict() for r in result.rows]
 
                 # Record schema evolution BEFORE completing the state.
@@ -437,9 +439,10 @@ class TransformExecutor:
                 # Handle error routing - on_error is part of TransformProtocol
                 on_error = transform.on_error
                 # on_error is always set (required by TransformSettings) — Tier 1 invariant
-                assert on_error is not None, (
-                    f"Transform '{transform.name}' has on_error=None — this should be impossible since TransformSettings requires on_error"
-                )
+                if on_error is None:
+                    raise OrchestrationInvariantError(
+                        f"Transform '{transform.name}' has on_error=None — this should be impossible since TransformSettings requires on_error"
+                    )
 
                 # Set error_sink so caller knows where the error was routed
                 error_sink = on_error
@@ -450,10 +453,11 @@ class TransformExecutor:
                 #
                 # result.reason MUST be set for error results - TransformResult.error() requires it.
                 # If None, that's a bug in the transform (constructed error result without reason).
-                assert result.reason is not None, (
-                    f"Transform '{transform.name}' returned error but reason is None. "
-                    'Use TransformResult.error({{"reason": "...", ...}}) to create error results.'
-                )
+                if result.reason is None:
+                    raise OrchestrationInvariantError(
+                        f"Transform '{transform.name}' returned error but reason is None. "
+                        'Use TransformResult.error({{"reason": "...", ...}}) to create error results.'
+                    )
                 ctx.record_transform_error(
                     token_id=token.token_id,
                     transform_id=transform.node_id,

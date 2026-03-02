@@ -1,7 +1,7 @@
 """Audit trail contracts for Landscape tables.
 
 These are strict contracts - all enum fields use proper enum types.
-Repository layer handles string→enum conversion for DB reads.
+Model loader layer handles string→enum conversion for DB reads.
 
 Per Data Manifesto: The audit database is OUR data. If we read
 garbage from it, something catastrophic happened - crash immediately.
@@ -40,7 +40,7 @@ def _validate_enum(value: object, enum_type: type, field_name: str) -> None:
         raise TypeError(f"{field_name} must be {enum_type.__name__}, got {type(value).__name__}: {value!r}")
 
 
-@dataclass
+@dataclass(frozen=True, slots=True)
 class Run:
     """A single execution of a pipeline.
 
@@ -67,7 +67,7 @@ class Run:
         _validate_enum(self.export_status, ExportStatus, "export_status")
 
 
-@dataclass
+@dataclass(frozen=True, slots=True)
 class Node:
     """A node (plugin instance) in the execution graph.
 
@@ -95,7 +95,7 @@ class Node:
         _validate_enum(self.determinism, Determinism, "determinism")
 
 
-@dataclass
+@dataclass(frozen=True, slots=True)
 class Edge:
     """An edge in the execution graph.
 
@@ -115,7 +115,7 @@ class Edge:
         _validate_enum(self.default_mode, RoutingMode, "default_mode")
 
 
-@dataclass
+@dataclass(frozen=True, slots=True)
 class Row:
     """A source row loaded into the system."""
 
@@ -128,22 +128,22 @@ class Row:
     source_data_ref: str | None = None
 
 
-@dataclass
+@dataclass(frozen=True, slots=True)
 class Token:
     """A row instance flowing through a specific DAG path."""
 
     token_id: str
     row_id: str
     created_at: datetime
+    run_id: str
     fork_group_id: str | None = None
     join_group_id: str | None = None
     expand_group_id: str | None = None  # For deaggregation grouping
     branch_name: str | None = None
     step_in_pipeline: int | None = None  # Step where token was created (fork/coalesce/expand)
-    run_id: str | None = None  # Run ownership — required in DB, optional in dataclass for backwards compat
 
 
-@dataclass
+@dataclass(frozen=True, slots=True)
 class TokenParent:
     """Parent relationship for tokens (supports multi-parent joins)."""
 
@@ -152,7 +152,7 @@ class TokenParent:
     ordinal: int
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, slots=True)
 class NodeStateOpen:
     """A node state currently being processed.
 
@@ -173,7 +173,7 @@ class NodeStateOpen:
     context_before_json: str | None = None
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, slots=True)
 class NodeStatePending:
     """A node state where processing completed but output is pending.
 
@@ -200,7 +200,7 @@ class NodeStatePending:
     context_after_json: str | None = None
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, slots=True)
 class NodeStateCompleted:
     """A node state that completed successfully.
 
@@ -226,7 +226,7 @@ class NodeStateCompleted:
     success_reason_json: str | None = None
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, slots=True)
 class NodeStateFailed:
     """A node state that failed during processing.
 
@@ -256,7 +256,7 @@ class NodeStateFailed:
 NodeState = NodeStateOpen | NodeStatePending | NodeStateCompleted | NodeStateFailed
 
 
-@dataclass
+@dataclass(frozen=True, slots=True)
 class Call:
     """An external call made during node processing or operation.
 
@@ -285,12 +285,19 @@ class Call:
     latency_ms: float | None = None
 
     def __post_init__(self) -> None:
-        """Validate enum fields - Tier 1 crash on invalid types."""
+        """Validate enum fields and structural invariants — Tier 1 crash on invalid types."""
         _validate_enum(self.call_type, CallType, "call_type")
         _validate_enum(self.status, CallStatus, "status")
+        # XOR: exactly one of state_id or operation_id must be set
+        has_state = self.state_id is not None
+        has_operation = self.operation_id is not None
+        if has_state == has_operation:
+            raise ValueError(
+                f"Call requires exactly one of state_id or operation_id. Got state_id={self.state_id!r}, operation_id={self.operation_id!r}"
+            )
 
 
-@dataclass
+@dataclass(frozen=True, slots=True)
 class Artifact:
     """An artifact produced by a sink."""
 
@@ -306,7 +313,7 @@ class Artifact:
     idempotency_key: str | None = None  # For retry deduplication
 
 
-@dataclass
+@dataclass(frozen=True, slots=True)
 class RoutingEvent:
     """A routing decision at a gate node.
 
@@ -328,7 +335,7 @@ class RoutingEvent:
         _validate_enum(self.mode, RoutingMode, "mode")
 
 
-@dataclass
+@dataclass(frozen=True, slots=True)
 class Batch:
     """An aggregation batch collecting tokens.
 
@@ -352,7 +359,7 @@ class Batch:
         _validate_enum(self.trigger_type, TriggerType, "trigger_type")
 
 
-@dataclass
+@dataclass(frozen=True, slots=True)
 class BatchMember:
     """A token belonging to a batch."""
 
@@ -361,7 +368,7 @@ class BatchMember:
     ordinal: int
 
 
-@dataclass
+@dataclass(frozen=True, slots=True)
 class BatchOutput:
     """An output produced by a batch."""
 
@@ -370,7 +377,7 @@ class BatchOutput:
     output_id: str
 
 
-@dataclass
+@dataclass(frozen=True, slots=True)
 class Checkpoint:
     """Checkpoint for crash recovery.
 
@@ -412,7 +419,7 @@ class Checkpoint:
             raise ValueError("checkpoint_node_config_hash is required and cannot be empty")
 
 
-@dataclass
+@dataclass(frozen=True, slots=True)
 class RowLineage:
     """Source row with resolved payload for explain output.
 
@@ -463,7 +470,7 @@ class BatchStatusUpdate(TypedDict, total=False):
     aggregation_state_id: str
 
 
-@dataclass
+@dataclass(frozen=True, slots=True)
 class ValidationErrorRecord:
     """A validation error recorded in the audit trail.
 
@@ -482,7 +489,7 @@ class ValidationErrorRecord:
     row_data_json: str | None = None
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, slots=True)
 class NonCanonicalMetadata:
     """Metadata for non-canonical data stored in the audit trail.
 
@@ -550,7 +557,7 @@ class NonCanonicalMetadata:
         )
 
 
-@dataclass
+@dataclass(frozen=True, slots=True)
 class TransformErrorRecord:
     """A transform processing error recorded in the audit trail.
 
@@ -569,7 +576,7 @@ class TransformErrorRecord:
     error_details_json: str | None = None
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, slots=True)
 class TokenOutcome:
     """Recorded terminal state for a token.
 
@@ -772,3 +779,48 @@ class SecretResolution:
                 raise ValueError("SecretResolution: vault_url is required when source='keyvault'")
             if not self.secret_name:
                 raise ValueError("SecretResolution: secret_name is required when source='keyvault'")
+
+
+@dataclass(frozen=True, slots=True)
+class SecretResolutionInput:
+    """Write-side DTO for secret resolution records.
+
+    Used at the Tier 1 boundary when recording secret resolutions into the
+    audit trail. Replaces the previous dict[str, Any] pattern with compile-time
+    key validation. The resolution_id and run_id are assigned at record time,
+    not at creation time.
+
+    Follows the TokenUsage precedent (commit dffe74a6) for typed audit inputs.
+    """
+
+    _ALLOWED_SOURCES: ClassVar[frozenset[str]] = frozenset({"keyvault"})
+
+    env_var_name: str
+    source: str
+    vault_url: str | None
+    secret_name: str | None
+    timestamp: float
+    resolution_latency_ms: float
+    fingerprint: str
+
+    def __post_init__(self) -> None:
+        """Validate write-side invariants before audit trail insertion.
+
+        Lightweight checks for security-critical invariants. The full
+        set of business rule validations lives on the read-side
+        SecretResolution. These checks prevent:
+        - Plaintext secrets being written as fingerprints (security)
+        - Invalid source values persisting undetected (Tier 1 integrity)
+        - Non-negative latency invariant (data quality)
+        """
+        if not self.env_var_name:
+            raise ValueError("SecretResolutionInput: env_var_name is required and cannot be empty")
+        if not self.source or self.source not in self._ALLOWED_SOURCES:
+            raise ValueError(f"SecretResolutionInput: source must be one of {sorted(self._ALLOWED_SOURCES)}, got {self.source!r}")
+        if len(self.fingerprint) != 64 or not all(c in "0123456789abcdef" for c in self.fingerprint):
+            raise ValueError(
+                f"SecretResolutionInput: fingerprint must be 64-char lowercase hex (HMAC-SHA256), "
+                f"got {self.fingerprint!r} (length={len(self.fingerprint)})"
+            )
+        if self.resolution_latency_ms < 0:
+            raise ValueError(f"SecretResolutionInput: resolution_latency_ms must be non-negative, got {self.resolution_latency_ms!r}")

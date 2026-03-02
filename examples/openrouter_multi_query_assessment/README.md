@@ -1,7 +1,7 @@
 # Multi-Query Case Study Assessment Example (OpenRouter)
 
-This example demonstrates the `openrouter_multi_query_llm` transform, which evaluates
-multiple case studies against multiple criteria using OpenRouter's unified LLM API.
+This example demonstrates the unified `llm` transform (with `provider: openrouter`), which
+evaluates multiple case studies against multiple criteria using OpenRouter's unified LLM API.
 
 ## Why OpenRouter?
 
@@ -123,7 +123,9 @@ Weight: {{ lookup[criterion.code].weight }}
 
 ## Comparison with Azure Version
 
-| Feature | Azure Multi-Query | OpenRouter Multi-Query |
+Both examples use the unified `llm` plugin, differing only in the `provider` setting:
+
+| Feature | `provider: azure` | `provider: openrouter` |
 |---------|------------------|------------------------|
 | API | Azure OpenAI SDK | HTTP REST API |
 | Models | Azure-hosted OpenAI | 100+ providers |
@@ -131,7 +133,7 @@ Weight: {{ lookup[criterion.code].weight }}
 | Rate Limits | Per-deployment | Per-account |
 | Error Codes | SDK exceptions | HTTP status codes |
 
-Both transforms use identical:
+Both configurations use identical:
 - Query expansion (case_studies × criteria)
 - Template rendering with `{{ row.input_N }}` and `{{ row.criterion }}`
 - Output mapping (JSON field → column suffix)

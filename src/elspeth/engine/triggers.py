@@ -20,8 +20,8 @@ from typing import TYPE_CHECKING, Literal
 
 from elspeth.contracts.enums import TriggerType
 from elspeth.core.config import TriggerConfig
+from elspeth.core.expression_parser import ExpressionParser
 from elspeth.engine.clock import DEFAULT_CLOCK
-from elspeth.engine.expression_parser import ExpressionParser
 
 if TYPE_CHECKING:
     from elspeth.engine.clock import Clock

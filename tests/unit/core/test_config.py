@@ -760,7 +760,7 @@ class TestElspethSettingsArchitecture:
             ElspethSettings(
                 source=SourceSettings(plugin="csv", on_success="results"),
                 sinks={"results": SinkSettings(plugin="csv")},
-                **{"default_sink": "results"},  # type: ignore[arg-type]  # testing rejected field
+                **{"default_sink": "results"},  # testing rejected field
             )
 
         assert "default_sink" in str(exc_info.value)
@@ -3289,11 +3289,12 @@ sinks:
 
 transforms:
   - name: t1
-    plugin: openrouter_llm
+    plugin: llm
     input: source_out
     on_success: output
     on_error: discard
     options:
+      provider: openrouter
       model: test
       template_file: prompts/test.j2
       lookup_file: prompts/lookups.yaml
@@ -3466,7 +3467,7 @@ class TestSinkNameCasing:
             ElspethSettings(
                 source={"plugin": "csv"},
                 sinks={"output": {"plugin": "csv"}},
-                **{"default_sink": "nonexistent"},  # type: ignore[arg-type]  # testing rejected field
+                **{"default_sink": "nonexistent"},  # testing rejected field
             )
         assert "default_sink" in str(exc_info.value)
         assert "on_success" in str(exc_info.value)
@@ -3496,7 +3497,7 @@ class TestPluginConfigSchemaValidation:
 
     def test_schema_null_gives_clear_error(self) -> None:
         """schema: null should give a clear error, not TypeError."""
-        from elspeth.plugins.config_base import PluginConfig, PluginConfigError
+        from elspeth.plugins.infrastructure.config_base import PluginConfig, PluginConfigError
 
         with pytest.raises(PluginConfigError) as exc_info:
             PluginConfig.from_dict({"schema": None})
@@ -3507,7 +3508,7 @@ class TestPluginConfigSchemaValidation:
 
     def test_schema_string_gives_clear_error(self) -> None:
         """schema: 'invalid' should give a clear error."""
-        from elspeth.plugins.config_base import PluginConfig, PluginConfigError
+        from elspeth.plugins.infrastructure.config_base import PluginConfig, PluginConfigError
 
         with pytest.raises(PluginConfigError) as exc_info:
             PluginConfig.from_dict({"schema": "invalid"})
@@ -3516,7 +3517,7 @@ class TestPluginConfigSchemaValidation:
 
     def test_schema_list_gives_clear_error(self) -> None:
         """schema: [fields] should give a clear error."""
-        from elspeth.plugins.config_base import PluginConfig, PluginConfigError
+        from elspeth.plugins.infrastructure.config_base import PluginConfig, PluginConfigError
 
         with pytest.raises(PluginConfigError) as exc_info:
             PluginConfig.from_dict({"schema": ["fields"]})
@@ -3525,7 +3526,7 @@ class TestPluginConfigSchemaValidation:
 
     def test_schema_int_gives_clear_error(self) -> None:
         """schema: 123 should give a clear error."""
-        from elspeth.plugins.config_base import PluginConfig, PluginConfigError
+        from elspeth.plugins.infrastructure.config_base import PluginConfig, PluginConfigError
 
         with pytest.raises(PluginConfigError) as exc_info:
             PluginConfig.from_dict({"schema": 123})
@@ -3534,7 +3535,7 @@ class TestPluginConfigSchemaValidation:
 
     def test_valid_schema_dict_works(self) -> None:
         """Valid schema dict should work fine."""
-        from elspeth.plugins.config_base import PluginConfig
+        from elspeth.plugins.infrastructure.config_base import PluginConfig
 
         config = PluginConfig.from_dict({"schema": {"mode": "observed"}})
         assert config.schema_config is not None

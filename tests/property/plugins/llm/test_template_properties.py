@@ -17,7 +17,7 @@ import pytest
 from hypothesis import assume, given, settings
 from hypothesis import strategies as st
 
-from elspeth.plugins.llm.templates import PromptTemplate, TemplateError
+from elspeth.plugins.transforms.llm.templates import PromptTemplate, TemplateError
 
 # =============================================================================
 # Strategies

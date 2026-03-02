@@ -10,9 +10,9 @@ from hypothesis import given
 from hypothesis import strategies as st
 from sqlalchemy import create_engine, text
 
-from elspeth.contracts.plugin_context import PluginContext
 from elspeth.core.canonical import canonical_json, stable_hash
 from elspeth.plugins.sinks.database_sink import DatabaseSink
+from tests.fixtures.factories import make_operation_context
 from tests.strategies.settings import SLOW_SETTINGS
 
 # =============================================================================
@@ -31,11 +31,6 @@ rows_strategy = st.lists(row_strategy, min_size=1, max_size=5)
 
 def _table_name_strategy() -> st.SearchStrategy[str]:
     return st.text(min_size=1, max_size=8, alphabet="abcdefghijklmnopqrstuvwxyz").map(lambda s: f"t_{s}")
-
-
-class _NullLandscape:
-    def record_operation_call(self, *args, **kwargs):
-        return None
 
 
 # =============================================================================
@@ -61,9 +56,12 @@ class TestDatabaseSinkProperties:
                     "schema": {"mode": "fixed", "fields": ["id: int", "name: str", "score: float?"]},
                 }
             )
-            ctx = PluginContext(run_id="test-run", config={})
-            ctx.operation_id = "op-test"
-            ctx.landscape = _NullLandscape()  # type: ignore[assignment]
+            ctx = make_operation_context(
+                node_id="sink",
+                plugin_name="database_sink",
+                node_type="SINK",
+                operation_type="sink_write",
+            )
 
             descriptor = sink.write(rows, ctx)
             sink.close()

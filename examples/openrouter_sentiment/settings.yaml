@@ -10,12 +10,13 @@ source:
       - 'text: str'
     on_validation_failure: discard
 transforms:
-- name: openrouter_llm_0
-  plugin: openrouter_llm
+- name: llm_0
+  plugin: llm
   input: source_out
   on_success: output
   on_error: quarantine
   options:
+    provider: openrouter
     api_key: ${OPENROUTER_API_KEY}
     model: openai/gpt-4o-mini
     template: 'Analyze the sentiment of the following text and respond with ONLY a JSON object.

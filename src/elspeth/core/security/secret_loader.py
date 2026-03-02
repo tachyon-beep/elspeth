@@ -1,4 +1,3 @@
-# src/elspeth/core/security/secret_loader.py
 """General-purpose secret loading abstraction.
 
 This module provides a unified interface for loading secrets from multiple backends

@@ -1,4 +1,3 @@
-# src/elspeth/tui/constants.py
 """TUI constants for ELSPETH.
 
 Provides centralized widget IDs and other constants to avoid magic strings.

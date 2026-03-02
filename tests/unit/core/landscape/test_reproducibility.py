@@ -23,14 +23,15 @@ from elspeth.core.landscape.reproducibility import (
     update_grade_after_purge,
 )
 from elspeth.core.landscape.schema import runs_table
+from tests.fixtures.landscape import make_landscape_db, make_recorder
 
 _DYNAMIC_SCHEMA = SchemaConfig.from_dict({"mode": "observed"})
 
 
 def _setup(*, run_id: str = "run-1") -> tuple[LandscapeDB, LandscapeRecorder]:
     """Create in-memory DB with a run."""
-    db = LandscapeDB.in_memory()
-    recorder = LandscapeRecorder(db)
+    db = make_landscape_db()
+    recorder = make_recorder(db)
     recorder.begin_run(config={}, canonical_version="v1", run_id=run_id)
     return db, recorder
 
@@ -178,7 +179,7 @@ class TestUpdateGradeAfterPurge:
         update_grade_after_purge(db, "run-1")
         run = recorder.get_run("run-1")
         assert run is not None
-        assert run.reproducibility_grade == ReproducibilityGrade.ATTRIBUTABLE_ONLY.value
+        assert run.reproducibility_grade == ReproducibilityGrade.ATTRIBUTABLE_ONLY
 
     def test_full_unchanged_after_purge(self) -> None:
         db, recorder = _setup()
@@ -186,7 +187,7 @@ class TestUpdateGradeAfterPurge:
         update_grade_after_purge(db, "run-1")
         run = recorder.get_run("run-1")
         assert run is not None
-        assert run.reproducibility_grade == ReproducibilityGrade.FULL_REPRODUCIBLE.value
+        assert run.reproducibility_grade == ReproducibilityGrade.FULL_REPRODUCIBLE
 
     def test_attributable_unchanged_after_purge(self) -> None:
         db, recorder = _setup()
@@ -194,7 +195,7 @@ class TestUpdateGradeAfterPurge:
         update_grade_after_purge(db, "run-1")
         run = recorder.get_run("run-1")
         assert run is not None
-        assert run.reproducibility_grade == ReproducibilityGrade.ATTRIBUTABLE_ONLY.value
+        assert run.reproducibility_grade == ReproducibilityGrade.ATTRIBUTABLE_ONLY
 
     def test_nonexistent_run_is_noop(self) -> None:
         db, _recorder = _setup()

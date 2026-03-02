@@ -21,7 +21,7 @@ from typing import Any
 import pytest
 
 from elspeth.contracts import RoutingAction, RowOutcome, TokenInfo, TransformErrorReason
-from elspeth.contracts.errors import OrchestrationInvariantError
+from elspeth.contracts.errors import ConfigGateReason, MaxRetriesExceeded, OrchestrationInvariantError
 from elspeth.contracts.results import (
     ArtifactDescriptor,
     FailureInfo,
@@ -31,7 +31,6 @@ from elspeth.contracts.results import (
 )
 from elspeth.contracts.schema_contract import PipelineRow, SchemaContract
 from elspeth.contracts.url import SanitizedDatabaseUrl, SanitizedWebhookUrl
-from elspeth.engine.retry import MaxRetriesExceeded
 from elspeth.testing import make_pipeline_row
 
 
@@ -342,7 +341,7 @@ class TestGateResult:
     def test_creation(self) -> None:
         """GateResult stores row and routing action."""
         row = {"value": 100}
-        action = RoutingAction.route("high", reason={"rule": "value > threshold", "matched_value": 50})
+        action = RoutingAction.route("high", reason=ConfigGateReason(condition="value > threshold", result="high"))
         result = GateResult(row=row, action=action)
 
         assert result.row == row
@@ -376,10 +375,15 @@ class TestGateResult:
 
 
 class TestAcceptResultDeleted:
-    """Verify AcceptResult was deleted in aggregation structural cleanup."""
+    """Guard against AcceptResult reintroduction.
+
+    AcceptResult was removed as part of the aggregation structural cleanup.
+    These tests exist per the no-legacy-code policy: if someone accidentally
+    re-adds AcceptResult, these tests will fail and surface the violation.
+    """
 
     def test_accept_result_deleted_from_contracts(self) -> None:
-        """AcceptResult should be deleted from contracts.results."""
+        """AcceptResult must not exist in contracts.results."""
         with pytest.raises(ImportError):
             from elspeth.contracts.results import AcceptResult  # type: ignore[attr-defined] # noqa: F401
 
@@ -815,16 +819,15 @@ class TestFailureInfo:
         assert info.attempts == 3
         assert info.last_error == "Connection refused"
 
-    def test_is_not_frozen(self) -> None:
-        """FailureInfo is NOT frozen (matches other result types)."""
+    def test_is_frozen(self) -> None:
+        """FailureInfo is frozen — failure evidence must be immutable."""
         info = FailureInfo(
             exception_type="TestError",
             message="Test message",
         )
 
-        # Should be mutable (no FrozenInstanceError)
-        info.attempts = 5
-        assert info.attempts == 5
+        with pytest.raises(AttributeError):
+            info.attempts = 5  # type: ignore[misc]
 
 
 class TestRowResultWithFailureInfo:

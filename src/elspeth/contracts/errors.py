@@ -1,50 +1,104 @@
 """Error and reason schema contracts.
 
-TypedDict schemas for structured error payloads in the audit trail.
-These provide consistent shapes for executor error recording.
+Frozen dataclasses and TypedDict schemas for structured error payloads
+in the audit trail.  These provide consistent shapes for executor error
+recording.
 """
 
+from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Literal, NotRequired, TypedDict
 
 if TYPE_CHECKING:
     from elspeth.contracts.batch_checkpoint import BatchCheckpointState
 
 
-class ExecutionError(TypedDict):
-    """Schema for execution error payloads.
+@dataclass(frozen=True, slots=True)
+class ExecutionError:
+    """Frozen dataclass for execution error payloads.
 
     Used by executors when recording node state failures.
+    Immutable and validated at construction time, consistent with
+    other audit DTOs (TokenUsage, LLMCallRequest, etc.).
+
+    The ``exception_type`` field is renamed from ``type`` to avoid
+    shadowing the Python builtin.  ``to_dict()`` serializes it back
+    as ``"type"`` for hash stability with existing audit records.
     """
 
     exception: str  # String representation of the exception
-    type: str  # Exception class name (e.g., "ValueError")
-    traceback: NotRequired[str]  # Optional full traceback
-    phase: NotRequired[str]  # Optional phase indicator (e.g., "flush" for sink flush errors)
+    exception_type: str  # Exception class name (e.g., "ValueError")
+    traceback: str | None = None  # Optional full traceback
+    phase: str | None = None  # Optional phase indicator (e.g., "flush" for sink flush errors)
+
+    def to_dict(self) -> dict[str, Any]:
+        """Serialize to audit-trail dict.
+
+        Uses ``"type"`` as the key name (not ``exception_type``) to
+        maintain hash stability with existing audit records.
+        Omits None-valued optional fields.
+        """
+        d: dict[str, Any] = {
+            "exception": self.exception,
+            "type": self.exception_type,
+        }
+        if self.traceback is not None:
+            d["traceback"] = self.traceback
+        if self.phase is not None:
+            d["phase"] = self.phase
+        return d
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> "ExecutionError":
+        """Reconstruct from audit-trail dict.
+
+        Reverses the ``to_dict()`` key rename: ``"type"`` → ``exception_type``.
+        """
+        return cls(
+            exception=data["exception"],
+            exception_type=data["type"],
+            traceback=data.get("traceback"),
+            phase=data.get("phase"),
+        )
 
 
-class CoalesceFailureReason(TypedDict, total=False):
-    """Schema for coalesce/barrier failure payloads.
+@dataclass(frozen=True, slots=True)
+class CoalesceFailureReason:
+    """Frozen DTO for coalesce/barrier failure payloads.
 
     Used by CoalesceExecutor when recording fork-join barrier failures.
     These are internal engine errors, not transform or plugin errors.
     """
 
-    failure_reason: str  # Why coalesce failed (e.g., "late_arrival_after_merge")
-    waiting_tokens: list[str]  # Token IDs still waiting at barrier
-    barrier: str  # Barrier identifier
+    failure_reason: str  # Why coalesce failed (e.g., "quorum_not_met")
     expected_branches: list[str]  # Branches expected to arrive
-    actual_branches: list[str]  # Branches that actually arrived
-    branches_arrived: list[str]  # Alias for actual_branches (backwards compat)
+    branches_arrived: list[str]  # Branches that actually arrived
     merge_policy: str  # Merge policy in effect
-    timeout_ms: int  # Timeout that triggered failure
-    select_branch: str | None  # Target branch for select merge policy
+    timeout_ms: int | None = None  # Timeout that triggered failure (if applicable)
+    select_branch: str | None = None  # Target branch for select policy (if applicable)
+
+    def to_dict(self) -> dict[str, Any]:
+        """Serialize to audit-trail dict.
+
+        Omits None-valued optional fields for compact JSON.
+        """
+        d: dict[str, Any] = {
+            "failure_reason": self.failure_reason,
+            "expected_branches": self.expected_branches,
+            "branches_arrived": self.branches_arrived,
+            "merge_policy": self.merge_policy,
+        }
+        if self.timeout_ms is not None:
+            d["timeout_ms"] = self.timeout_ms
+        if self.select_branch is not None:
+            d["select_branch"] = self.select_branch
+        return d
 
 
 class ConfigGateReason(TypedDict):
     """Reason from config-driven gate (expression evaluation).
 
     Used by gates defined via GateSettings with condition expressions.
-    The executor auto-generates this reason structure at executors.py:739.
+    Constructed by GateExecutor.execute_config_gate().
 
     Fields:
         condition: The expression that was evaluated (e.g., "row['score'] > 100")
@@ -55,7 +109,7 @@ class ConfigGateReason(TypedDict):
     result: str
 
 
-# RoutingReason union is defined after TransformErrorReason (below line ~410)
+# RoutingReason union is defined after TransformErrorReason (see RoutingReason below)
 
 
 # Literal type for common transform actions (extensible - str also accepted)
@@ -118,6 +172,9 @@ class TransformSuccessReason(TypedDict):
     """
 
     action: str  # Use TransformActionCategory or custom string
+
+    # Multi-query success context
+    queries_completed: NotRequired[int]  # Number of queries completed in multi-query
 
     # Field tracking
     fields_modified: NotRequired[list[str]]
@@ -210,6 +267,7 @@ TransformErrorCategory = Literal[
     "invalid_input",
     # Template errors
     "template_rendering_failed",
+    "template_context_failed",  # Multi-query template context build failed (missing field)
     "all_templates_failed",
     # JSON/response parsing errors
     "json_parse_failed",
@@ -234,6 +292,8 @@ TransformErrorCategory = Literal[
     "all_rows_failed",
     "result_not_found",
     "query_failed",
+    "multi_query_failed",  # Non-retryable LLM error in multi-query (atomic failure)
+    "context_length_exceeded",  # LLM context too long (not retryable — shorten prompt)
     "rate_limited",
     # Content extraction errors (Tier 3 boundary - external HTML/text parsing)
     "content_extraction_failed",
@@ -244,6 +304,8 @@ TransformErrorCategory = Literal[
     "prompt_injection_detected",
     "unknown_category",  # Unknown category from external API (fail-closed)
     "non_string_field",  # Explicitly-configured field is non-string (security fail-closed)
+    # Field type validation (Tier 3 - LLM output value type mismatch)
+    "field_type_mismatch",
     # Field collision (output would overwrite input fields)
     "field_collision",
     # Contract violations (schema validation)
@@ -367,6 +429,11 @@ class TransformErrorReason(TypedDict):
 
     # Multi-query/template context
     query: NotRequired[str]
+    query_name: NotRequired[str]  # Named query identifier in multi-query
+    query_index: NotRequired[int]  # Position of query in multi-query sequence
+    failed_query_name: NotRequired[str]  # Name of query that caused atomic failure
+    failed_query_index: NotRequired[int]  # Index of query that caused atomic failure
+    discarded_successful_queries: NotRequired[int]  # Successful queries discarded (atomic failure)
     template_hash: NotRequired[str]
     template_file_path: NotRequired[str]  # Path to template file; absent = inline template
     template_errors: NotRequired[list[TemplateErrorEntry]]
@@ -375,6 +442,8 @@ class TransformErrorReason(TypedDict):
     total_count: NotRequired[int]  # Total number of queries attempted
 
     # LLM response context
+    available_fields: NotRequired[list[str]]  # Fields present in LLM JSON response (for missing_output_field)
+    content_length: NotRequired[int]  # Length of LLM response content
     max_tokens: NotRequired[int]
     completion_tokens: NotRequired[int | None]
     prompt_tokens: NotRequired[int | None]
@@ -451,6 +520,24 @@ RoutingReason = ConfigGateReason | TransformErrorReason | SourceQuarantineReason
 # =============================================================================
 # Control Flow Exceptions
 # =============================================================================
+
+
+class MaxRetriesExceeded(Exception):
+    """Raised when max retry attempts are exceeded.
+
+    This is a control-flow exception used by RetryManager to signal that
+    all retry attempts have been exhausted. FailureInfo uses this to
+    construct structured error records for the audit trail.
+
+    Attributes:
+        attempts: Number of attempts made before giving up
+        last_error: The exception from the final attempt
+    """
+
+    def __init__(self, attempts: int, last_error: BaseException) -> None:
+        self.attempts = attempts
+        self.last_error = last_error
+        super().__init__(f"Max retries ({attempts}) exceeded: {last_error}")
 
 
 class BatchPendingError(Exception):

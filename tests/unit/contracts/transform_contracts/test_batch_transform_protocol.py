@@ -41,13 +41,12 @@ from unittest.mock import Mock
 
 import pytest
 
-from elspeth.contracts import Determinism, PluginSchema, TransformResult
+from elspeth.contracts import Determinism, PluginSchema, TransformProtocol, TransformResult
 from elspeth.contracts.identity import TokenInfo
 from elspeth.contracts.plugin_context import PluginContext
 from elspeth.engine.batch_adapter import ExceptionResult
-from elspeth.plugins.batching import OutputPort
-from elspeth.plugins.batching.mixin import BatchTransformMixin
-from elspeth.plugins.protocols import TransformProtocol
+from elspeth.plugins.infrastructure.batching import OutputPort
+from elspeth.plugins.infrastructure.batching.mixin import BatchTransformMixin
 from elspeth.testing import make_contract, make_pipeline_row, make_row
 
 if TYPE_CHECKING:

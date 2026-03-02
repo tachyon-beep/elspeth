@@ -30,6 +30,7 @@ from elspeth.plugins.transforms.azure.content_safety import (
     AzureContentSafety,
     ContentSafetyThresholds,
 )
+from elspeth.testing import make_pipeline_row
 
 # =============================================================================
 # Strategies
@@ -292,7 +293,7 @@ class TestFieldScanSelectionProperties:
     def test_all_mode_selects_only_string_fields(self, row: dict[str, Any]) -> None:
         """Property: 'all' mode returns only keys with string values."""
         scanner = _make_field_scanner("all")
-        result = scanner._get_fields_to_scan(row)
+        result = scanner._get_fields_to_scan(make_pipeline_row(row))
 
         expected = [k for k, v in row.items() if isinstance(v, str)]
         assert result == expected
@@ -304,7 +305,7 @@ class TestFieldScanSelectionProperties:
     def test_single_string_mode_returns_singleton_list(self, field_name: str) -> None:
         """Property: Single string field name returns [field_name]."""
         scanner = _make_field_scanner(field_name)
-        result = scanner._get_fields_to_scan({})  # Row doesn't matter for non-"all"
+        result = scanner._get_fields_to_scan(make_pipeline_row({}))  # Row doesn't matter for non-"all"
         assert result == [field_name]
 
     @given(
@@ -319,18 +320,18 @@ class TestFieldScanSelectionProperties:
     def test_list_mode_returns_exact_list(self, fields: list[str]) -> None:
         """Property: List of field names is returned as-is."""
         scanner = _make_field_scanner(fields)
-        result = scanner._get_fields_to_scan({})  # Row doesn't matter for list mode
+        result = scanner._get_fields_to_scan(make_pipeline_row({}))  # Row doesn't matter for list mode
         assert result == fields
 
     def test_all_mode_empty_row_returns_empty(self) -> None:
         """Property: 'all' mode on empty row returns empty list."""
         scanner = _make_field_scanner("all")
-        assert scanner._get_fields_to_scan({}) == []
+        assert scanner._get_fields_to_scan(make_pipeline_row({})) == []
 
     def test_all_mode_no_strings_returns_empty(self) -> None:
         """Property: 'all' mode with only non-string values returns empty list."""
         scanner = _make_field_scanner("all")
-        assert scanner._get_fields_to_scan({"a": 1, "b": 3.14, "c": None}) == []
+        assert scanner._get_fields_to_scan(make_pipeline_row({"a": 1, "b": 3.14, "c": None})) == []
 
 
 # =============================================================================

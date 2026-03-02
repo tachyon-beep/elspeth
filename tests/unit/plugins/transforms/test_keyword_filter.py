@@ -1,22 +1,10 @@
 """Tests for KeywordFilter transform."""
 
-from typing import TYPE_CHECKING
-from unittest.mock import Mock
-
 import pytest
 
-from elspeth.plugins.config_base import PluginConfigError
+from elspeth.plugins.infrastructure.config_base import PluginConfigError
 from elspeth.testing import make_pipeline_row
-
-if TYPE_CHECKING:
-    from elspeth.contracts.plugin_context import PluginContext
-
-
-def make_mock_context() -> "PluginContext":
-    """Create a mock PluginContext for testing."""
-    from elspeth.contracts.plugin_context import PluginContext
-
-    return Mock(spec=PluginContext, run_id="test-run")
+from tests.fixtures.factories import make_context
 
 
 class TestKeywordFilterConfig:
@@ -189,8 +177,8 @@ class TestValidateRegexSafety:
 class TestKeywordFilterInstantiation:
     """Tests for KeywordFilter transform instantiation."""
 
-    def test_transform_has_required_attributes(self) -> None:
-        """Transform has all protocol-required attributes."""
+    def test_transform_has_required_schema_attributes(self) -> None:
+        """Transform exposes input and output schemas."""
         from elspeth.plugins.transforms.keyword_filter import KeywordFilter
 
         transform = KeywordFilter(
@@ -201,17 +189,29 @@ class TestKeywordFilterInstantiation:
             }
         )
 
-        assert transform.name == "keyword_filter"
-        assert transform.determinism.value == "deterministic"
-        assert transform.plugin_version == "1.0.0"
-        assert transform.is_batch_aware is False
-        assert transform.creates_tokens is False
         assert transform.input_schema is not None
         assert transform.output_schema is not None
 
-    def test_transform_compiles_patterns_at_init(self) -> None:
-        """Transform compiles regex patterns at initialization."""
+    def test_transform_is_deterministic(self) -> None:
+        """KeywordFilter declares deterministic since it's pure regex matching."""
+        from elspeth.contracts.enums import Determinism
         from elspeth.plugins.transforms.keyword_filter import KeywordFilter
+
+        transform = KeywordFilter(
+            {
+                "fields": ["content"],
+                "blocked_patterns": ["test"],
+                "schema": {"mode": "observed"},
+            }
+        )
+
+        assert transform.determinism is Determinism.DETERMINISTIC
+
+    def test_transform_compiles_patterns_at_init(self) -> None:
+        """Patterns are compiled at init — matching works immediately without lazy init."""
+        from elspeth.contracts.schema_contract import SchemaContract
+        from elspeth.plugins.transforms.keyword_filter import KeywordFilter
+        from elspeth.testing import make_field, make_row
 
         transform = KeywordFilter(
             {
@@ -221,8 +221,13 @@ class TestKeywordFilterInstantiation:
             }
         )
 
-        # Patterns should be compiled (implementation detail, but important for perf)
-        assert len(transform._compiled_patterns) == 2
+        # Prove compilation happened: a matching row gets blocked
+        fields = tuple(make_field(k, object, original_name=k, required=False, source="inferred") for k in ["content"])
+        contract = SchemaContract(mode="OBSERVED", fields=fields, locked=True)
+        row = make_row({"content": "my password is 123"}, contract=contract)
+        ctx = make_context()
+        result = transform.process(row, ctx)
+        assert result.status == "error"
 
     def test_transform_rejects_invalid_regex(self) -> None:
         """Transform fails at init if regex pattern is invalid."""
@@ -256,7 +261,7 @@ class TestKeywordFilterProcessing:
         )
 
         row = {"content": "Hello world", "id": 1}
-        result = transform.process(make_pipeline_row(row), make_mock_context())
+        result = transform.process(make_pipeline_row(row), make_context())
 
         assert result.status == "success"
         assert result.row is not None
@@ -275,7 +280,7 @@ class TestKeywordFilterProcessing:
         )
 
         row = {"content": "My password is secret", "id": 1}
-        result = transform.process(make_pipeline_row(row), make_mock_context())
+        result = transform.process(make_pipeline_row(row), make_context())
 
         assert result.status == "error"
         assert result.reason is not None
@@ -296,7 +301,7 @@ class TestKeywordFilterProcessing:
         )
 
         row = {"content": "Please provide your ssn for verification purposes"}
-        result = transform.process(make_pipeline_row(row), make_mock_context())
+        result = transform.process(make_pipeline_row(row), make_context())
 
         assert result.status == "error"
         assert result.reason is not None
@@ -318,7 +323,7 @@ class TestKeywordFilterProcessing:
 
         # Match in second field
         row = {"subject": "Hello", "body": "This is CONFIDENTIAL"}
-        result = transform.process(make_pipeline_row(row), make_mock_context())
+        result = transform.process(make_pipeline_row(row), make_context())
 
         assert result.status == "error"
         assert result.reason is not None
@@ -337,7 +342,7 @@ class TestKeywordFilterProcessing:
         )
 
         row = {"name": "test", "data": "contains secret", "count": 42}
-        result = transform.process(make_pipeline_row(row), make_mock_context())
+        result = transform.process(make_pipeline_row(row), make_context())
 
         assert result.status == "error"
         assert result.reason is not None
@@ -356,7 +361,7 @@ class TestKeywordFilterProcessing:
         )
 
         row = {"name": "safe", "count": 42, "active": True}
-        result = transform.process(make_pipeline_row(row), make_mock_context())
+        result = transform.process(make_pipeline_row(row), make_context())
 
         assert result.status == "success"
 
@@ -373,7 +378,7 @@ class TestKeywordFilterProcessing:
         )
 
         row = {"content": "my password is..."}  # lowercase
-        result = transform.process(make_pipeline_row(row), make_mock_context())
+        result = transform.process(make_pipeline_row(row), make_context())
 
         assert result.status == "success"  # No match - case matters
 
@@ -390,7 +395,7 @@ class TestKeywordFilterProcessing:
         )
 
         row = {"content": "my PASSWORD is..."}
-        result = transform.process(make_pipeline_row(row), make_mock_context())
+        result = transform.process(make_pipeline_row(row), make_context())
 
         assert result.status == "error"
 
@@ -408,7 +413,7 @@ class TestKeywordFilterProcessing:
 
         # Row is missing "optional_field" but has "content"
         row = {"content": "safe data", "id": 1}
-        result = transform.process(make_pipeline_row(row), make_mock_context())
+        result = transform.process(make_pipeline_row(row), make_context())
 
         assert result.status == "success"
 
@@ -426,7 +431,7 @@ class TestKeywordFilterProcessing:
 
         # Row is missing "optional_field" but "content" has blocked pattern
         row = {"content": "contains secret data", "id": 1}
-        result = transform.process(make_pipeline_row(row), make_mock_context())
+        result = transform.process(make_pipeline_row(row), make_context())
 
         assert result.status == "error"
         assert result.reason is not None
@@ -460,7 +465,7 @@ class TestKeywordFilterProcessing:
         )
         row = PipelineRow({"amount_usd": "contains secret value"}, contract)
 
-        result = transform.process(row, make_mock_context())
+        result = transform.process(row, make_context())
 
         assert result.status == "error"
         assert result.reason is not None
@@ -630,3 +635,195 @@ class TestKeywordFilterBlockedPatternsValidation:
             }
         )
         assert len(cfg.blocked_patterns) == 2
+
+
+class TestKeywordFilterNonStringFailClosed:
+    """T16: KeywordFilter must fail-closed when configured fields have non-string values.
+
+    A security filter that silently passes non-string values is fail-OPEN.
+    When the operator explicitly names a field to scan and it contains a
+    non-string value, the row must be quarantined (error result), not
+    silently passed through unchecked.
+
+    The 'all' mode is exempt — it dynamically selects string-valued fields,
+    so non-string fields are correctly excluded by design.
+    """
+
+    def test_non_string_value_in_named_field_returns_error(self) -> None:
+        """Integer in a configured field must return error, not pass through."""
+        from elspeth.plugins.transforms.keyword_filter import KeywordFilter
+
+        transform = KeywordFilter(
+            {
+                "fields": ["amount"],
+                "blocked_patterns": [r"secret"],
+                "schema": {"mode": "observed"},
+            }
+        )
+
+        row = {"amount": 42, "content": "safe text"}
+        result = transform.process(make_pipeline_row(row), make_context())
+
+        assert result.status == "error", "Non-string value in named field must fail-closed"
+        assert result.reason is not None
+        assert result.reason["reason"] == "non_string_field"
+        assert result.reason["field"] == "amount"
+
+    def test_non_string_value_reports_actual_type(self) -> None:
+        """Error reason must include the actual type for diagnostics."""
+        from elspeth.plugins.transforms.keyword_filter import KeywordFilter
+
+        transform = KeywordFilter(
+            {
+                "fields": ["score"],
+                "blocked_patterns": [r"test"],
+                "schema": {"mode": "observed"},
+            }
+        )
+
+        row = {"score": 3.14}
+        result = transform.process(make_pipeline_row(row), make_context())
+
+        assert result.status == "error"
+        assert result.reason is not None
+        assert result.reason["actual_type"] == "float"
+
+    def test_bool_value_in_named_field_returns_error(self) -> None:
+        """Boolean in a configured field must fail-closed."""
+        from elspeth.plugins.transforms.keyword_filter import KeywordFilter
+
+        transform = KeywordFilter(
+            {
+                "fields": ["active"],
+                "blocked_patterns": [r"secret"],
+                "schema": {"mode": "observed"},
+            }
+        )
+
+        row = {"active": True}
+        result = transform.process(make_pipeline_row(row), make_context())
+
+        assert result.status == "error"
+        assert result.reason is not None
+        assert result.reason["reason"] == "non_string_field"
+
+    def test_none_value_in_named_field_returns_error(self) -> None:
+        """None in a configured field must fail-closed."""
+        from elspeth.plugins.transforms.keyword_filter import KeywordFilter
+
+        transform = KeywordFilter(
+            {
+                "fields": ["content"],
+                "blocked_patterns": [r"secret"],
+                "schema": {"mode": "observed"},
+            }
+        )
+
+        row = {"content": None}
+        result = transform.process(make_pipeline_row(row), make_context())
+
+        assert result.status == "error"
+        assert result.reason is not None
+        assert result.reason["reason"] == "non_string_field"
+
+    def test_list_value_in_named_field_returns_error(self) -> None:
+        """List in a configured field must fail-closed."""
+        from elspeth.plugins.transforms.keyword_filter import KeywordFilter
+
+        transform = KeywordFilter(
+            {
+                "fields": ["tags"],
+                "blocked_patterns": [r"secret"],
+                "schema": {"mode": "observed"},
+            }
+        )
+
+        row = {"tags": ["a", "b"]}
+        result = transform.process(make_pipeline_row(row), make_context())
+
+        assert result.status == "error"
+        assert result.reason is not None
+        assert result.reason["reason"] == "non_string_field"
+
+    def test_non_string_not_retryable(self) -> None:
+        """Non-string field error must not be retryable (data issue, not transient)."""
+        from elspeth.plugins.transforms.keyword_filter import KeywordFilter
+
+        transform = KeywordFilter(
+            {
+                "fields": ["count"],
+                "blocked_patterns": [r"test"],
+                "schema": {"mode": "observed"},
+            }
+        )
+
+        row = {"count": 99}
+        result = transform.process(make_pipeline_row(row), make_context())
+
+        assert result.status == "error"
+        assert result.retryable is False
+
+    def test_mixed_fields_string_checked_non_string_errors(self) -> None:
+        """When one named field is non-string, error before checking string fields.
+
+        The filter should detect non-string values in named fields and error
+        immediately, even if other fields contain scannable strings.
+        """
+        from elspeth.plugins.transforms.keyword_filter import KeywordFilter
+
+        transform = KeywordFilter(
+            {
+                "fields": ["amount", "content"],
+                "blocked_patterns": [r"safe_pattern_no_match"],
+                "schema": {"mode": "observed"},
+            }
+        )
+
+        row = {"amount": 42, "content": "safe text"}
+        result = transform.process(make_pipeline_row(row), make_context())
+
+        assert result.status == "error", "Must error on non-string 'amount' even though 'content' is scannable"
+        assert result.reason is not None
+        assert result.reason["field"] == "amount"
+
+    def test_all_mode_still_skips_non_string_fields(self) -> None:
+        """'all' mode must continue to skip non-string fields (no regression).
+
+        The 'all' keyword dynamically selects string-valued fields, so
+        non-string fields are correctly excluded by design. This must
+        not change with the fail-closed fix for named fields.
+        """
+        from elspeth.plugins.transforms.keyword_filter import KeywordFilter
+
+        transform = KeywordFilter(
+            {
+                "fields": "all",
+                "blocked_patterns": [r"secret"],
+                "schema": {"mode": "observed"},
+            }
+        )
+
+        # Only non-string fields — should pass through, not error
+        row = {"count": 42, "active": True, "score": 3.14}
+        result = transform.process(make_pipeline_row(row), make_context())
+
+        assert result.status == "success", "'all' mode must still skip non-string fields"
+
+    def test_string_field_with_match_still_blocks(self) -> None:
+        """String fields with pattern matches must still be blocked (no regression)."""
+        from elspeth.plugins.transforms.keyword_filter import KeywordFilter
+
+        transform = KeywordFilter(
+            {
+                "fields": ["content"],
+                "blocked_patterns": [r"secret"],
+                "schema": {"mode": "observed"},
+            }
+        )
+
+        row = {"content": "contains secret data"}
+        result = transform.process(make_pipeline_row(row), make_context())
+
+        assert result.status == "error"
+        assert result.reason is not None
+        assert result.reason["reason"] == "blocked_content"

@@ -1,4 +1,3 @@
-# src/elspeth/testing/chaosengine/__init__.py
 """ChaosEngine: Shared utilities for chaos testing servers.
 
 Provides composition-based building blocks used by ChaosLLM, ChaosWeb, and

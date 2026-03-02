@@ -3,6 +3,7 @@
 import pytest
 
 from elspeth.contracts.plugin_context import PluginContext
+from tests.fixtures.factories import make_source_context
 
 
 class TestNullSource:
@@ -11,7 +12,7 @@ class TestNullSource:
     @pytest.fixture
     def ctx(self) -> PluginContext:
         """Create a minimal plugin context."""
-        return PluginContext(run_id="test-run", config={})
+        return make_source_context(plugin_name="null")
 
     def test_null_source_yields_nothing(self, ctx: PluginContext) -> None:
         """NullSource.load() yields no rows."""

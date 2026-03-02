@@ -1,7 +1,7 @@
 # tests/plugins/llm/test_tracing_config.py
 """Tests for Tier 2 tracing configuration models."""
 
-from elspeth.plugins.llm.tracing import (
+from elspeth.plugins.transforms.llm.tracing import (
     AzureAITracingConfig,
     LangfuseTracingConfig,
     TracingConfig,

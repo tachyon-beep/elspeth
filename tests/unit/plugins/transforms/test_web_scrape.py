@@ -15,7 +15,7 @@ import respx
 
 from elspeth.contracts.plugin_context import PluginContext
 from elspeth.contracts.schema_contract import SchemaContract
-from elspeth.plugins.config_base import PluginConfigError
+from elspeth.plugins.infrastructure.config_base import PluginConfigError
 from elspeth.plugins.transforms.web_scrape import WebScrapeTransform
 from elspeth.plugins.transforms.web_scrape_errors import (
     NetworkError,
@@ -115,6 +115,7 @@ def test_web_scrape_success_markdown(mock_ctx):
             },
         }
     )
+    transform.on_start(mock_ctx)
 
     with patch("socket.getaddrinfo", _mock_getaddrinfo()):
         result = transform.process(make_pipeline_row({"url": "https://example.com/page"}), mock_ctx)
@@ -144,6 +145,7 @@ def test_web_scrape_404_returns_error(mock_ctx):
             },
         }
     )
+    transform.on_start(mock_ctx)
 
     with patch("socket.getaddrinfo", _mock_getaddrinfo()):
         result = transform.process(make_pipeline_row({"url": "https://example.com/missing"}), mock_ctx)
@@ -170,6 +172,7 @@ def test_web_scrape_500_raises_for_retry(mock_ctx):
             },
         }
     )
+    transform.on_start(mock_ctx)
 
     with patch("socket.getaddrinfo", _mock_getaddrinfo()), pytest.raises(ServerError) as exc_info:
         transform.process(make_pipeline_row({"url": "https://example.com/error"}), mock_ctx)
@@ -195,6 +198,7 @@ def test_web_scrape_429_raises_for_retry(mock_ctx):
             },
         }
     )
+    transform.on_start(mock_ctx)
 
     with patch("socket.getaddrinfo", _mock_getaddrinfo()), pytest.raises(RateLimitError) as exc_info:
         transform.process(make_pipeline_row({"url": "https://example.com/throttled"}), mock_ctx)
@@ -217,6 +221,7 @@ def test_web_scrape_invalid_scheme_returns_error(mock_ctx):
             },
         }
     )
+    transform.on_start(mock_ctx)
 
     result = transform.process(make_pipeline_row({"url": "ftp://example.com/file"}), mock_ctx)
 
@@ -239,6 +244,7 @@ def test_web_scrape_private_ip_returns_error(mock_ctx):
             },
         }
     )
+    transform.on_start(mock_ctx)
 
     with patch("socket.getaddrinfo", _mock_getaddrinfo("169.254.169.254")):
         result = transform.process(make_pipeline_row({"url": "http://169.254.169.254/metadata"}), mock_ctx)
@@ -267,6 +273,7 @@ def test_web_scrape_text_format(mock_ctx):
             },
         }
     )
+    transform.on_start(mock_ctx)
 
     with patch("socket.getaddrinfo", _mock_getaddrinfo()):
         result = transform.process(make_pipeline_row({"url": "https://example.com/page"}), mock_ctx)
@@ -306,6 +313,7 @@ def test_web_scrape_strips_script_tags(mock_ctx):
             },
         }
     )
+    transform.on_start(mock_ctx)
 
     with patch("socket.getaddrinfo", _mock_getaddrinfo()):
         result = transform.process(make_pipeline_row({"url": "https://example.com/page"}), mock_ctx)
@@ -335,6 +343,7 @@ def test_web_scrape_payload_storage(mock_ctx):
             },
         }
     )
+    transform.on_start(mock_ctx)
 
     with patch("socket.getaddrinfo", _mock_getaddrinfo()):
         result = transform.process(make_pipeline_row({"url": "https://example.com/page"}), mock_ctx)
@@ -372,6 +381,7 @@ def test_web_scrape_timeout_raises_network_error(mock_ctx):
             },
         }
     )
+    transform.on_start(mock_ctx)
 
     with patch("socket.getaddrinfo", _mock_getaddrinfo()), pytest.raises(NetworkError) as exc_info:
         transform.process(make_pipeline_row({"url": "https://example.com/slow"}), mock_ctx)
@@ -397,6 +407,7 @@ def test_web_scrape_connection_error_raises_network_error(mock_ctx):
             },
         }
     )
+    transform.on_start(mock_ctx)
 
     with patch("socket.getaddrinfo", _mock_getaddrinfo()), pytest.raises(NetworkError) as exc_info:
         transform.process(make_pipeline_row({"url": "https://example.com/unreachable"}), mock_ctx)
@@ -422,6 +433,7 @@ def test_web_scrape_403_returns_error(mock_ctx):
             },
         }
     )
+    transform.on_start(mock_ctx)
 
     with patch("socket.getaddrinfo", _mock_getaddrinfo()):
         result = transform.process(make_pipeline_row({"url": "https://example.com/forbidden"}), mock_ctx)
@@ -448,6 +460,7 @@ def test_web_scrape_401_returns_error(mock_ctx):
             },
         }
     )
+    transform.on_start(mock_ctx)
 
     with patch("socket.getaddrinfo", _mock_getaddrinfo()):
         result = transform.process(make_pipeline_row({"url": "https://example.com/unauthorized"}), mock_ctx)
@@ -476,6 +489,7 @@ def test_web_scrape_with_pipeline_row(mock_ctx):
             },
         }
     )
+    transform.on_start(mock_ctx)
 
     # Create PipelineRow input (simulates what engine passes to transforms)
     fields = (make_field("url", str, original_name="url", required=True, source="declared"),)
@@ -521,6 +535,7 @@ def test_web_scrape_follows_redirects_301(mock_ctx):
             },
         }
     )
+    transform.on_start(mock_ctx)
 
     with patch("socket.getaddrinfo", _mock_getaddrinfo()):
         result = transform.process(make_pipeline_row({"url": "https://example.com/old"}), mock_ctx)
@@ -555,6 +570,7 @@ def test_web_scrape_follows_redirect_chain(mock_ctx):
             },
         }
     )
+    transform.on_start(mock_ctx)
 
     with patch("socket.getaddrinfo", _mock_getaddrinfo()):
         result = transform.process(make_pipeline_row({"url": "https://example.com/start"}), mock_ctx)
@@ -586,6 +602,7 @@ def test_web_scrape_redirect_limit_exceeded(mock_ctx):
             },
         }
     )
+    transform.on_start(mock_ctx)
 
     with patch("socket.getaddrinfo", _mock_getaddrinfo()), pytest.raises(NetworkError, match=r"redirect|too many redirects"):
         transform.process(make_pipeline_row({"url": "https://example.com/a"}), mock_ctx)
@@ -621,6 +638,7 @@ def test_web_scrape_malformed_html_graceful_degradation(mock_ctx):
             },
         }
     )
+    transform.on_start(mock_ctx)
 
     with patch("socket.getaddrinfo", _mock_getaddrinfo()):
         result = transform.process(make_pipeline_row({"url": "https://example.com/malformed"}), mock_ctx)
@@ -656,6 +674,7 @@ def test_web_scrape_extract_content_exception_returns_error(mock_ctx):
             },
         }
     )
+    transform.on_start(mock_ctx)
 
     # Simulate extract_content() raising an unexpected exception
     with (
@@ -701,6 +720,7 @@ def test_web_scrape_binary_response_does_not_crash(mock_ctx):
             },
         }
     )
+    transform.on_start(mock_ctx)
 
     with patch("socket.getaddrinfo", _mock_getaddrinfo()):
         result = transform.process(make_pipeline_row({"url": "https://example.com/binary"}), mock_ctx)
@@ -727,6 +747,7 @@ def test_web_scrape_unicode_decode_error_returns_error(mock_ctx):
             },
         }
     )
+    transform.on_start(mock_ctx)
 
     with (
         patch("socket.getaddrinfo", _mock_getaddrinfo()),

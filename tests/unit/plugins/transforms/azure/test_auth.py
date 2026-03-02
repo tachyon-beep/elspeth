@@ -12,7 +12,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 from pydantic import ValidationError
 
-from elspeth.plugins.azure.auth import AzureAuthConfig
+from elspeth.plugins.infrastructure.azure_auth import AzureAuthConfig
 
 
 class TestAzureAuthConfigValid:

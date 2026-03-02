@@ -1,4 +1,3 @@
-# src/elspeth/cli.py
 """ELSPETH Command Line Interface.
 
 Entry point for the elspeth CLI tool.
@@ -20,8 +19,9 @@ from dynaconf.vendor.ruamel.yaml.scanner import ScannerError as YamlScannerError
 from pydantic import ValidationError
 
 from elspeth import __version__
-from elspeth.contracts import ExecutionResult
-from elspeth.contracts.errors import GracefulShutdownError
+from elspeth.contracts import ExecutionResult, SecretResolutionInput
+from elspeth.contracts.errors import AuditIntegrityError, FrameworkBugError, GracefulShutdownError
+from elspeth.contracts.types import AggregationName
 from elspeth.core.config import ElspethSettings, SourceSettings, load_settings, resolve_config
 from elspeth.core.dag import ExecutionGraph, GraphValidationError
 from elspeth.core.security.config_secrets import SecretLoadError, load_secrets_from_config
@@ -29,12 +29,13 @@ from elspeth.testing.chaosllm.cli import app as chaosllm_app
 from elspeth.testing.chaosllm.cli import mcp_app as chaosllm_mcp_app
 
 if TYPE_CHECKING:
+    from elspeth.cli_helpers import PluginBundle
+    from elspeth.contracts import SinkProtocol, SourceProtocol
     from elspeth.contracts.payload_store import PayloadStore
     from elspeth.core.landscape import LandscapeDB
     from elspeth.engine import Orchestrator, PipelineConfig
     from elspeth.engine.orchestrator import RowPlugin
-    from elspeth.plugins.manager import PluginManager
-    from elspeth.plugins.protocols import SinkProtocol, SourceProtocol
+    from elspeth.plugins.infrastructure.manager import PluginManager
 
 __all__ = [
     "app",
@@ -53,7 +54,7 @@ def _get_plugin_manager() -> PluginManager:
     """
     global _plugin_manager_cache
 
-    from elspeth.plugins.manager import PluginManager
+    from elspeth.plugins.infrastructure.manager import PluginManager
 
     if _plugin_manager_cache is None:
         manager = PluginManager()
@@ -308,7 +309,7 @@ def _load_raw_yaml(config_path: Path) -> dict[str, Any]:
 
 def _load_settings_with_secrets(
     settings_path: Path,
-) -> tuple[ElspethSettings, list[dict[str, Any]]]:
+) -> tuple[ElspethSettings, list[SecretResolutionInput]]:
     """Load settings with Key Vault secret resolution.
 
     Three-phase loading pattern:
@@ -433,18 +434,18 @@ def run(
     # NEW: Build and validate graph from plugin instances
     # Exclude export sink from graph - it's used post-run, not during pipeline execution.
     # The export sink receives audit records after the run completes, not pipeline data.
-    execution_sinks = plugins["sinks"]
+    execution_sinks = plugins.sinks
     if config.landscape.export.enabled and config.landscape.export.sink:
         export_sink_name = config.landscape.export.sink
-        execution_sinks = {k: v for k, v in plugins["sinks"].items() if k != export_sink_name}
+        execution_sinks = {k: v for k, v in plugins.sinks.items() if k != export_sink_name}
 
     try:
         graph = ExecutionGraph.from_plugin_instances(
-            source=plugins["source"],
-            source_settings=plugins["source_settings"],
-            transforms=plugins["transforms"],
+            source=plugins.source,
+            source_settings=plugins.source_settings,
+            transforms=plugins.transforms,
             sinks=execution_sinks,
-            aggregations=plugins["aggregations"],
+            aggregations=plugins.aggregations,
             gates=list(config.gates),
             coalesce_settings=list(config.coalesce) if config.coalesce else None,
         )
@@ -530,8 +531,35 @@ def run(
             typer.echo(f"\nPipeline interrupted after {e.rows_processed} rows.")
             typer.echo(f"Resume with: elspeth resume {e.run_id} --execute")
         raise typer.Exit(3)  # noqa: B904 -- distinct exit code: 0=success, 1=error, 3=interrupted
+    except (FrameworkBugError, AuditIntegrityError) as e:
+        # Tier 1 violations and framework bugs MUST be clearly distinguishable
+        # from config errors. These indicate database corruption, tampering,
+        # or bugs in ELSPETH itself — not operator mistakes.
+        import traceback
+
+        if output_format == "json":
+            import json
+
+            typer.echo(
+                json.dumps(
+                    {
+                        "event": "fatal",
+                        "error": str(e),
+                        "error_type": type(e).__name__,
+                        "traceback": traceback.format_exc(),
+                    }
+                ),
+                err=True,
+            )
+        else:
+            typer.echo(f"\nFATAL — {type(e).__name__}: {e}", err=True)
+            typer.echo(traceback.format_exc(), err=True)
+        raise typer.Exit(4) from e  # Exit 4: audit integrity / framework bug
     except Exception as e:
-        # Emit structured error for JSON mode, human-readable for console
+        # Always emit the full traceback — hiding it makes debugging impossible.
+        # The AggregationName NameError hid for days because this block swallowed it.
+        import traceback
+
         if output_format == "json":
             import json
 
@@ -541,12 +569,14 @@ def run(
                         "event": "error",
                         "error": str(e),
                         "error_type": type(e).__name__,
+                        "traceback": traceback.format_exc(),
                     }
                 ),
                 err=True,
             )
         else:
             typer.echo(f"Error during pipeline execution: {e}", err=True)
+            typer.echo(traceback.format_exc(), err=True)
         raise typer.Exit(1) from None
 
     # Emit final execution summary in JSON mode for machine consumption
@@ -661,8 +691,15 @@ def explain(
         try:
             settings_for_passphrase = load_settings(settings_path)
             landscape_settings = settings_for_passphrase.landscape
-        except (FileNotFoundError, yaml.YAMLError, YamlParserError, YamlScannerError):
-            pass  # Settings file unreadable — passphrase will be None
+        except (FileNotFoundError, yaml.YAMLError, YamlParserError, YamlScannerError) as e:
+            # User explicitly provided --settings (guarded by settings_path is not None
+            # on line above), so YAML errors are fatal — don't silently proceed
+            # with passphrase=None.
+            if json_output:
+                typer.echo(json_module.dumps({"error": f"Settings YAML error: {e}"}))
+            else:
+                typer.echo(f"Error loading settings: {e}", err=True)
+            raise typer.Exit(1) from None
         except (ValidationError, SecretLoadError) as e:
             # Settings loaded but failed validation or secret resolution.
             # User explicitly provided --settings, so surface the error.
@@ -776,7 +813,7 @@ class _OrchestratorContext:
 def _orchestrator_context(
     config: ElspethSettings,
     graph: ExecutionGraph,
-    plugins: dict[str, Any],
+    plugins: PluginBundle,
     *,
     db: LandscapeDB,
     formatter_prefix: str = "Run",
@@ -798,7 +835,7 @@ def _orchestrator_context(
     Args:
         config: Validated ElspethSettings
         graph: Validated ExecutionGraph (schemas populated)
-        plugins: Pre-instantiated plugins from instantiate_plugins_from_config()
+        plugins: Pre-instantiated PluginBundle from instantiate_plugins_from_config()
         db: LandscapeDB connection (caller owns close lifecycle)
         formatter_prefix: Prefix for console formatters ("Run" or "Resume")
         output_format: 'console' or 'json'
@@ -824,17 +861,17 @@ def _orchestrator_context(
     from elspeth.telemetry import create_telemetry_manager
 
     # Unpack pre-instantiated plugins
-    source: SourceProtocol = plugins["source"]
-    sinks: dict[str, SinkProtocol] = plugins["sinks"]
+    source: SourceProtocol = plugins.source
+    sinks: dict[str, SinkProtocol] = plugins.sinks
 
     # Build transforms list: row_plugins + aggregations (with node_id)
-    transforms: list[RowPlugin] = [wired.plugin for wired in plugins["transforms"]]
+    transforms: list[RowPlugin] = [wired.plugin for wired in plugins.transforms]
 
     agg_id_map = graph.get_aggregation_id_map()
     aggregation_settings: dict[str, AggregationSettings] = {}
 
-    for agg_name, (transform, agg_config) in plugins["aggregations"].items():
-        node_id = agg_id_map[agg_name]
+    for agg_name, (transform, agg_config) in plugins.aggregations.items():
+        node_id = agg_id_map[AggregationName(agg_name)]
         aggregation_settings[node_id] = agg_config
         transform.node_id = node_id
         transforms.append(transform)
@@ -894,10 +931,10 @@ def _orchestrator_context(
 def _execute_pipeline_with_instances(
     config: ElspethSettings,
     graph: ExecutionGraph,
-    plugins: dict[str, Any],
+    plugins: PluginBundle,
     verbose: bool = False,
     output_format: Literal["console", "json"] = "console",
-    secret_resolutions: list[dict[str, Any]] | None = None,
+    secret_resolutions: list[SecretResolutionInput] | None = None,
     passphrase: str | None = None,
 ) -> ExecutionResult:
     """Execute pipeline using pre-instantiated plugin instances.
@@ -905,7 +942,7 @@ def _execute_pipeline_with_instances(
     Args:
         config: Validated ElspethSettings
         graph: Validated ExecutionGraph (schemas populated)
-        plugins: Pre-instantiated plugins from instantiate_plugins_from_config()
+        plugins: Pre-instantiated PluginBundle from instantiate_plugins_from_config()
         verbose: Show detailed output
         output_format: 'console' or 'json'
         secret_resolutions: Optional list of secret resolution records from
@@ -1127,11 +1164,11 @@ def validate(
     # Build and validate graph from plugin instances
     try:
         graph = ExecutionGraph.from_plugin_instances(
-            source=plugins["source"],
-            source_settings=plugins["source_settings"],
-            transforms=plugins["transforms"],
-            sinks=plugins["sinks"],
-            aggregations=plugins["aggregations"],
+            source=plugins.source,
+            source_settings=plugins.source_settings,
+            transforms=plugins.transforms,
+            sinks=plugins.sinks,
+            aggregations=plugins.aggregations,
             gates=list(config.gates),
             coalesce_settings=list(config.coalesce) if config.coalesce else None,
         )
@@ -1187,7 +1224,7 @@ def _build_plugin_registry() -> dict[str, list[PluginInfo]]:
     Returns:
         Dict mapping plugin type to list of PluginInfo for each plugin.
     """
-    from elspeth.plugins.discovery import get_plugin_description
+    from elspeth.plugins.infrastructure.discovery import get_plugin_description
 
     manager = _get_plugin_manager()
 
@@ -1441,7 +1478,7 @@ def purge(
 def _execute_resume_with_instances(
     config: ElspethSettings,
     graph: ExecutionGraph,
-    plugins: dict[str, Any],
+    plugins: PluginBundle,
     resume_point: Any,
     payload_store: PayloadStore | None,
     db: LandscapeDB,
@@ -1484,7 +1521,7 @@ def _execute_resume_with_instances(
 
 def _build_resume_graphs(
     settings_config: ElspethSettings,
-    plugins: dict[str, Any],
+    plugins: PluginBundle,
 ) -> tuple[ExecutionGraph, ExecutionGraph]:
     """Build both validation and execution graphs for resume from pre-instantiated plugins.
 
@@ -1501,11 +1538,11 @@ def _build_resume_graphs(
     # Validation graph uses the ORIGINAL source to match the topology hash
     # computed during the original run
     validation_graph = ExecutionGraph.from_plugin_instances(
-        source=plugins["source"],
-        source_settings=plugins["source_settings"],
-        transforms=plugins["transforms"],
-        sinks=plugins["sinks"],
-        aggregations=plugins["aggregations"],
+        source=plugins.source,
+        source_settings=plugins.source_settings,
+        transforms=plugins.transforms,
+        sinks=plugins.sinks,
+        aggregations=plugins.aggregations,
         gates=gate_settings,
         coalesce_settings=coalesce_settings,
     )
@@ -1514,16 +1551,16 @@ def _build_resume_graphs(
     # Execution graph uses NullSource — resume data comes from stored payloads.
     # NullSource inherits the original source's on_success (which may be a connection
     # name or sink name — the DAG builder validates it during graph construction).
-    null_source_on_success = plugins["source"].on_success
+    null_source_on_success = plugins.source.on_success
     null_source = NullSource({})
     null_source.on_success = null_source_on_success
     null_source_settings = SourceSettings(plugin="null", on_success=null_source_on_success)
     execution_graph = ExecutionGraph.from_plugin_instances(
         source=null_source,
         source_settings=null_source_settings,
-        transforms=plugins["transforms"],
-        sinks=plugins["sinks"],
-        aggregations=plugins["aggregations"],
+        transforms=plugins.transforms,
+        sinks=plugins.sinks,
+        aggregations=plugins.aggregations,
         gates=gate_settings,
         coalesce_settings=coalesce_settings,
     )
@@ -1771,7 +1808,7 @@ def resume(
 
         resume_sinks = {}
 
-        for sink_name, sink in plugins["sinks"].items():
+        for sink_name, sink in plugins.sinks.items():
             # Check if sink supports resume
             if not sink.supports_resume:
                 typer.echo(
@@ -1826,14 +1863,16 @@ def resume(
             resume_sinks[sink_name] = sink
 
         # Override source with NullSource for resume (data comes from payloads)
-        null_source_on_success = plugins["source"].on_success
+        from dataclasses import replace
+
+        null_source_on_success = plugins.source.on_success
         null_source = NullSource({})
         null_source.on_success = null_source_on_success
-        resume_plugins = {
-            **plugins,
-            "source": null_source,
-            "sinks": resume_sinks,  # Use append-mode sinks
-        }
+        resume_plugins = replace(
+            plugins,
+            source=null_source,
+            sinks=resume_sinks,  # Use append-mode sinks
+        )
 
         # Execute resume with execution graph (NullSource)
         try:

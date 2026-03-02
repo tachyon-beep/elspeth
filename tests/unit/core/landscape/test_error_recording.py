@@ -9,24 +9,14 @@ from elspeth.contracts.errors import AuditIntegrityError
 from elspeth.contracts.schema import SchemaConfig
 from elspeth.core.canonical import stable_hash
 from elspeth.core.landscape import LandscapeDB, LandscapeRecorder
+from tests.fixtures.landscape import make_landscape_db, make_recorder, make_recorder_with_run, register_test_node
 
 _DYNAMIC_SCHEMA = SchemaConfig.from_dict({"mode": "observed"})
 
 
 def _setup(*, run_id: str = "run-1") -> tuple[LandscapeDB, LandscapeRecorder]:
-    db = LandscapeDB.in_memory()
-    recorder = LandscapeRecorder(db)
-    recorder.begin_run(config={}, canonical_version="v1", run_id=run_id)
-    recorder.register_node(
-        run_id=run_id,
-        plugin_name="csv",
-        node_type=NodeType.SOURCE,
-        plugin_version="1.0",
-        config={},
-        node_id="source-0",
-        schema_config=_DYNAMIC_SCHEMA,
-    )
-    return db, recorder
+    setup = make_recorder_with_run(run_id=run_id, source_node_id="source-0", source_plugin_name="csv")
+    return setup.db, setup.recorder
 
 
 def _setup_with_token(
@@ -34,22 +24,14 @@ def _setup_with_token(
     run_id: str = "run-1",
 ) -> tuple[LandscapeDB, LandscapeRecorder]:
     db, recorder = _setup(run_id=run_id)
-    recorder.register_node(
-        run_id=run_id,
-        plugin_name="transform",
-        node_type=NodeType.TRANSFORM,
-        plugin_version="1.0",
-        config={},
-        node_id="transform-1",
-        schema_config=_DYNAMIC_SCHEMA,
-    )
+    register_test_node(recorder, run_id, "transform-1", node_type=NodeType.TRANSFORM, plugin_name="transform")
     recorder.create_row(run_id, "source-0", 0, {"name": "test"}, row_id="row-1")
     recorder.create_token("row-1", token_id="tok-1")
     return db, recorder
 
 
 class TestRecordValidationError:
-    """Tests for ErrorRecordingMixin.record_validation_error."""
+    """Tests for DataFlowRepository.record_validation_error."""
 
     def test_returns_error_id_with_verr_prefix(self):
         _db, recorder = _setup()
@@ -312,7 +294,7 @@ class TestRecordValidationErrorNonCanonicalData:
 
 
 class TestRecordTransformError:
-    """Tests for ErrorRecordingMixin.record_transform_error."""
+    """Tests for DataFlowRepository.record_transform_error."""
 
     def test_returns_error_id_with_terr_prefix(self):
         _db, recorder = _setup_with_token()
@@ -435,7 +417,7 @@ class TestRecordTransformError:
 
 
 class TestGetValidationErrorsForRow:
-    """Tests for ErrorRecordingMixin.get_validation_errors_for_row."""
+    """Tests for DataFlowRepository.get_validation_errors_for_row."""
 
     def test_returns_errors_matching_row_hash(self):
         _db, recorder = _setup()
@@ -467,8 +449,8 @@ class TestGetValidationErrorsForRow:
         assert errors == []
 
     def test_does_not_cross_runs(self):
-        db = LandscapeDB.in_memory()
-        recorder = LandscapeRecorder(db)
+        db = make_landscape_db()
+        recorder = make_recorder(db)
         # Set up run-1
         recorder.begin_run(config={}, canonical_version="v1", run_id="run-1")
         recorder.register_node(
@@ -523,7 +505,7 @@ class TestGetValidationErrorsForRow:
 
 
 class TestGetValidationErrorsForRun:
-    """Tests for ErrorRecordingMixin.get_validation_errors_for_run."""
+    """Tests for DataFlowRepository.get_validation_errors_for_run."""
 
     def test_returns_all_errors_for_run(self):
         _db, recorder = _setup()
@@ -562,8 +544,8 @@ class TestGetValidationErrorsForRun:
         assert errors == []
 
     def test_does_not_cross_runs(self):
-        db = LandscapeDB.in_memory()
-        recorder = LandscapeRecorder(db)
+        db = make_landscape_db()
+        recorder = make_recorder(db)
         recorder.begin_run(config={}, canonical_version="v1", run_id="run-1")
         recorder.register_node(
             run_id="run-1",
@@ -625,7 +607,7 @@ class TestGetValidationErrorsForRun:
 
 
 class TestGetTransformErrorsForToken:
-    """Tests for ErrorRecordingMixin.get_transform_errors_for_token."""
+    """Tests for DataFlowRepository.get_transform_errors_for_token."""
 
     def test_returns_errors_for_token(self):
         _db, recorder = _setup_with_token()
@@ -689,7 +671,7 @@ class TestGetTransformErrorsForToken:
 
 
 class TestGetTransformErrorsForRun:
-    """Tests for ErrorRecordingMixin.get_transform_errors_for_run."""
+    """Tests for DataFlowRepository.get_transform_errors_for_run."""
 
     def test_returns_all_errors_for_run(self):
         _db, recorder = _setup_with_token()
@@ -722,8 +704,8 @@ class TestGetTransformErrorsForRun:
         assert errors == []
 
     def test_does_not_cross_runs(self):
-        db = LandscapeDB.in_memory()
-        recorder = LandscapeRecorder(db)
+        db = make_landscape_db()
+        recorder = make_recorder(db)
         # Set up run-1
         recorder.begin_run(config={}, canonical_version="v1", run_id="run-1")
         recorder.register_node(
@@ -735,15 +717,7 @@ class TestGetTransformErrorsForRun:
             node_id="source-0",
             schema_config=_DYNAMIC_SCHEMA,
         )
-        recorder.register_node(
-            run_id="run-1",
-            plugin_name="transform",
-            node_type=NodeType.TRANSFORM,
-            plugin_version="1.0",
-            config={},
-            node_id="transform-1",
-            schema_config=_DYNAMIC_SCHEMA,
-        )
+        register_test_node(recorder, "run-1", "transform-1", node_type=NodeType.TRANSFORM, plugin_name="transform")
         recorder.create_row("run-1", "source-0", 0, {"n": "a"}, row_id="row-r1")
         recorder.create_token("row-r1", token_id="tok-r1")
         # Set up run-2
@@ -757,15 +731,7 @@ class TestGetTransformErrorsForRun:
             node_id="source-0",
             schema_config=_DYNAMIC_SCHEMA,
         )
-        recorder.register_node(
-            run_id="run-2",
-            plugin_name="transform",
-            node_type=NodeType.TRANSFORM,
-            plugin_version="1.0",
-            config={},
-            node_id="transform-1",
-            schema_config=_DYNAMIC_SCHEMA,
-        )
+        register_test_node(recorder, "run-2", "transform-1", node_type=NodeType.TRANSFORM, plugin_name="transform")
         recorder.create_row("run-2", "source-0", 0, {"n": "b"}, row_id="row-r2")
         recorder.create_token("row-r2", token_id="tok-r2")
         recorder.record_transform_error(
@@ -876,8 +842,8 @@ class TestRecordTransformErrorNaNFallback:
 
 def _setup_two_runs_with_transform() -> tuple[LandscapeDB, LandscapeRecorder]:
     """Set up a shared database with two runs, each with source + transform nodes."""
-    db = LandscapeDB.in_memory()
-    recorder = LandscapeRecorder(db)
+    db = make_landscape_db()
+    recorder = make_recorder(db)
     for run_id in ("run-A", "run-B"):
         recorder.begin_run(config={}, canonical_version="v1", run_id=run_id)
         recorder.register_node(
@@ -889,15 +855,7 @@ def _setup_two_runs_with_transform() -> tuple[LandscapeDB, LandscapeRecorder]:
             node_id="source-0",
             schema_config=_DYNAMIC_SCHEMA,
         )
-        recorder.register_node(
-            run_id=run_id,
-            plugin_name="transform",
-            node_type=NodeType.TRANSFORM,
-            plugin_version="1.0",
-            config={},
-            node_id="transform-1",
-            schema_config=_DYNAMIC_SCHEMA,
-        )
+        register_test_node(recorder, run_id, "transform-1", node_type=NodeType.TRANSFORM, plugin_name="transform")
     return db, recorder
 
 

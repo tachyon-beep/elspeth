@@ -9,9 +9,9 @@ from tests.fixtures.factories import wire_transforms
 from tests.fixtures.pipeline import build_aggregation_pipeline, build_fork_pipeline, build_linear_pipeline
 from tests.fixtures.plugins import CollectSink, PassTransform
 
+from elspeth.contracts import TransformProtocol
 from elspeth.contracts.routing import RouteDestinationKind
 from elspeth.core.config import AggregationSettings, CoalesceSettings, GateSettings, TriggerConfig
-from elspeth.plugins.protocols import TransformProtocol
 
 
 def test_wire_transforms_single_transform() -> None:
@@ -131,6 +131,7 @@ def test_build_aggregation_pipeline_sets_source_input_and_terminal_sink() -> Non
         plugin="batch_transform",
         input="batch_in",
         on_success="output",
+        on_error="discard",
         trigger=TriggerConfig(count=2),
         output_mode="transform",
         options={},

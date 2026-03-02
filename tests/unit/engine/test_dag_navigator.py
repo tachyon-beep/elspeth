@@ -16,12 +16,12 @@ from unittest.mock import Mock
 
 import pytest
 
+from elspeth.contracts import TransformProtocol
 from elspeth.contracts.errors import OrchestrationInvariantError
 from elspeth.contracts.types import CoalesceName, NodeID
 from elspeth.core.config import GateSettings
 from elspeth.engine.dag_navigator import DAGNavigator, WorkItem
 from elspeth.engine.processor import DAGTraversalContext
-from elspeth.plugins.protocols import TransformProtocol
 from elspeth.testing import make_token_info
 
 # =============================================================================
@@ -45,12 +45,12 @@ def _make_mock_transform(
 
 def _make_nav(
     *,
-    node_to_plugin: dict | None = None,
-    node_to_next: dict | None = None,
-    coalesce_node_ids: dict | None = None,
-    structural_node_ids: frozenset | None = None,
-    coalesce_name_by_node_id: dict | None = None,
-    coalesce_on_success_map: dict | None = None,
+    node_to_plugin: dict[NodeID, TransformProtocol | GateSettings] | None = None,
+    node_to_next: dict[NodeID, NodeID | None] | None = None,
+    coalesce_node_ids: dict[CoalesceName, NodeID] | None = None,
+    structural_node_ids: frozenset[NodeID] | None = None,
+    coalesce_name_by_node_id: dict[NodeID, CoalesceName] | None = None,
+    coalesce_on_success_map: dict[CoalesceName, str] | None = None,
     sink_names: frozenset[str] | None = None,
     branch_first_node: dict[str, NodeID] | None = None,
 ) -> DAGNavigator:

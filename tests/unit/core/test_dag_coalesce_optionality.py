@@ -7,6 +7,8 @@ from branch field specs, making all merged fields appear required.
 
 from __future__ import annotations
 
+from typing import Any
+
 from elspeth.core.dag.builder import _field_name_type, _field_required
 
 
@@ -64,8 +66,8 @@ class TestUnionMergeOptionalityPreservation:
 
     def _build_coalesce_with_schemas(
         self,
-        branch_schemas: dict[str, dict],
-    ) -> dict:
+        branch_schemas: dict[str, dict[str, Any]],
+    ) -> dict[str, Any]:
         """Build a coalesce graph and return the merged schema config.
 
         Constructs a fork graph with two identity branches, each having

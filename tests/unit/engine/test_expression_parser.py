@@ -9,7 +9,7 @@ import pytest
 from hypothesis import given, settings
 from hypothesis import strategies as st
 
-from elspeth.engine.expression_parser import (
+from elspeth.core.expression_parser import (
     ExpressionEvaluationError,
     ExpressionParser,
     ExpressionSecurityError,
@@ -1549,7 +1549,7 @@ class TestExpressionValidatorFailClosed:
         tree.body = fake_node
 
         # The validator should reject it via the fail-closed visit() override
-        from elspeth.engine.expression_parser import _ExpressionValidator
+        from elspeth.core.expression_parser import _ExpressionValidator
 
         validator = _ExpressionValidator()
         validator.visit(tree)

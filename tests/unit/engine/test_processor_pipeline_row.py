@@ -9,6 +9,8 @@ from elspeth.contracts.schema_contract import PipelineRow, SchemaContract
 from elspeth.contracts.types import NodeID
 from elspeth.engine.processor import DAGTraversalContext
 from elspeth.testing import make_field, make_row, make_source_row
+from tests.fixtures.factories import make_context
+from tests.fixtures.landscape import make_landscape_db, make_recorder
 
 
 def _make_contract() -> SchemaContract:
@@ -61,7 +63,6 @@ class TestRowProcessorPipelineRow:
 
     def test_process_row_accepts_source_row(self) -> None:
         """process_row should accept SourceRow and pass it to create_initial_token."""
-        from elspeth.contracts.plugin_context import PluginContext
         from elspeth.engine.processor import RowProcessor
 
         contract = _make_contract()
@@ -78,7 +79,9 @@ class TestRowProcessorPipelineRow:
         )
 
         source_row = make_source_row({"amount": 100}, contract=contract)
-        ctx = PluginContext(run_id="run_001", config={})
+        landscape_db = make_landscape_db()
+        landscape_recorder = make_recorder(landscape_db)
+        ctx = make_context(run_id="run_001", landscape=landscape_recorder)
 
         # No transforms - token should be created and completed immediately
         processor.process_row(
@@ -94,7 +97,6 @@ class TestRowProcessorPipelineRow:
 
     def test_process_row_creates_pipeline_row(self) -> None:
         """process_row should create token with PipelineRow containing contract."""
-        from elspeth.contracts.plugin_context import PluginContext
         from elspeth.engine.processor import RowProcessor
 
         contract = _make_contract()
@@ -111,7 +113,9 @@ class TestRowProcessorPipelineRow:
         )
 
         source_row = make_source_row({"amount": 100}, contract=contract)
-        ctx = PluginContext(run_id="run_001", config={})
+        landscape_db = make_landscape_db()
+        landscape_recorder = make_recorder(landscape_db)
+        ctx = make_context(run_id="run_001", landscape=landscape_recorder)
 
         results = processor.process_row(
             row_index=0,
@@ -133,7 +137,6 @@ class TestRowProcessorPipelineRow:
         The error propagates from TokenManager.create_initial_token(),
         which enforces this requirement.
         """
-        from elspeth.contracts.plugin_context import PluginContext
         from elspeth.engine.processor import RowProcessor
 
         recorder = _make_mock_recorder()
@@ -153,7 +156,9 @@ class TestRowProcessorPipelineRow:
         from elspeth.contracts import SourceRow
 
         source_row = SourceRow.valid({"amount": 100}, contract=None)
-        ctx = PluginContext(run_id="run_001", config={})
+        landscape_db = make_landscape_db()
+        landscape_recorder = make_recorder(landscape_db)
+        ctx = make_context(run_id="run_001", landscape=landscape_recorder)
 
         with pytest.raises(ValueError, match="must have contract"):
             processor.process_row(
@@ -169,7 +174,6 @@ class TestRowProcessorExistingRow:
 
     def test_process_existing_row_accepts_pipeline_row(self) -> None:
         """process_existing_row should accept PipelineRow for resume scenarios."""
-        from elspeth.contracts.plugin_context import PluginContext
         from elspeth.engine.processor import RowProcessor
 
         contract = _make_contract()
@@ -187,7 +191,9 @@ class TestRowProcessorExistingRow:
 
         # PipelineRow for resume (row already exists in database)
         row_data = make_row({"amount": 100}, contract=contract)
-        ctx = PluginContext(run_id="run_001", config={})
+        landscape_db = make_landscape_db()
+        landscape_recorder = make_recorder(landscape_db)
+        ctx = make_context(run_id="run_001", landscape=landscape_recorder)
 
         results = processor.process_existing_row(
             row_id="existing_row_001",

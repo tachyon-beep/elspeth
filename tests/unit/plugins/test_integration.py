@@ -6,6 +6,8 @@ from typing import Any, ClassVar
 
 from elspeth.contracts.schema_contract import PipelineRow
 from elspeth.testing import make_field, make_pipeline_row
+from tests.fixtures.factories import make_context
+from tests.fixtures.landscape import make_recorder
 
 
 class TestPluginSystemIntegration:
@@ -13,18 +15,13 @@ class TestPluginSystemIntegration:
 
     def test_full_plugin_workflow(self) -> None:
         """Test source -> transform -> sink workflow."""
-        from elspeth.contracts import ArtifactDescriptor, SourceRow
+        from elspeth.contracts import ArtifactDescriptor, PluginSchema, SourceRow
+        from elspeth.contracts.contexts import SinkContext, SourceContext, TransformContext
         from elspeth.contracts.schema_contract import SchemaContract
-        from elspeth.plugins import (
-            BaseSink,
-            BaseSource,
-            BaseTransform,
-            PluginContext,
-            PluginManager,
-            PluginSchema,
-            TransformResult,
-            hookimpl,
-        )
+        from elspeth.plugins.infrastructure.base import BaseSink, BaseSource, BaseTransform
+        from elspeth.plugins.infrastructure.hookspecs import hookimpl
+        from elspeth.plugins.infrastructure.manager import PluginManager
+        from elspeth.plugins.infrastructure.results import TransformResult
 
         # Define schemas
         class InputSchema(PluginSchema):
@@ -39,7 +36,7 @@ class TestPluginSystemIntegration:
             name = "list"
             output_schema = InputSchema
 
-            def load(self, ctx: PluginContext) -> Iterator[SourceRow]:
+            def load(self, ctx: SourceContext) -> Iterator[SourceRow]:
                 # Create schema contract for output
                 contract = SchemaContract(
                     mode="FIXED",
@@ -57,7 +54,7 @@ class TestPluginSystemIntegration:
             input_schema = InputSchema
             output_schema = EnrichedSchema
 
-            def process(self, row: PipelineRow, ctx: PluginContext) -> TransformResult:
+            def process(self, row: PipelineRow, ctx: TransformContext) -> TransformResult:
                 row_dict = row.to_dict()
                 return TransformResult.success(
                     make_pipeline_row(
@@ -74,7 +71,7 @@ class TestPluginSystemIntegration:
             input_schema = EnrichedSchema
             collected: ClassVar[list[dict[str, Any]]] = []
 
-            def write(self, rows: list[dict[str, Any]], ctx: PluginContext) -> ArtifactDescriptor:
+            def write(self, rows: list[dict[str, Any]], ctx: SinkContext) -> ArtifactDescriptor:
                 MemorySink.collected.extend(rows)
                 return ArtifactDescriptor.for_file(path="memory://collected", content_hash="test", size_bytes=0)
 
@@ -107,7 +104,8 @@ class TestPluginSystemIntegration:
         assert len(manager.get_sinks()) == 1
 
         # Create instances and process
-        ctx = PluginContext(run_id="test-001", config={})
+        recorder = make_recorder()
+        ctx = make_context(run_id="test-001", landscape=recorder)
 
         source_cls = manager.get_source_by_name("list")
         transform_cls = manager.get_transform_by_name("double")
@@ -118,9 +116,9 @@ class TestPluginSystemIntegration:
         assert sink_cls is not None
 
         # Protocols don't define __init__ but concrete classes do
-        source = source_cls({"values": [10, 50, 100]})  # type: ignore[call-arg]
-        transform = transform_cls({})  # type: ignore[call-arg]
-        sink = sink_cls({})  # type: ignore[call-arg]
+        source = source_cls({"values": [10, 50, 100]})
+        transform = transform_cls({})
+        sink = sink_cls({})
 
         MemorySink.collected = []  # Reset
 
@@ -143,7 +141,7 @@ class TestPluginSystemIntegration:
 
     def test_schema_validation_in_pipeline(self) -> None:
         """Test that schema compatibility is checked."""
-        from elspeth.plugins import PluginSchema, check_compatibility
+        from elspeth.contracts import PluginSchema, check_compatibility
 
         class SourceOutput(PluginSchema):
             a: int
@@ -165,6 +163,6 @@ class TestPluginSystemIntegration:
         NEW: Aggregation is engine-controlled via batch-aware transforms
              with is_batch_aware=True, no plugin-level aggregation interface.
         """
-        import elspeth.plugins.base as base
+        import elspeth.plugins.infrastructure.base as base
 
         assert not hasattr(base, "BaseAggregation"), "BaseAggregation should be deleted - use is_batch_aware=True on BaseTransform"

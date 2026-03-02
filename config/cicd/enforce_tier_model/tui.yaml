@@ -14,108 +14,123 @@ allow_hits:
   reason: AST/type checking - required for safe parsing or discriminated unions
   safety: Code reviewed - legitimate pattern
   expires: '2026-05-02'
-- key: tui/widgets/node_detail.py:R1:NodeDetailPanel:render_content:fp=efa021de94ac3b1f
+# --- node_detail.py R1 (dict.get on NodeStateInfo optional fields) ---
+- key: tui/widgets/node_detail.py:R1:NodeDetailPanel:render_content:fp=74c139cb3b32d660
   owner: architecture
-  reason: Optional field access at trust boundary
-  safety: Code reviewed - legitimate pattern
+  reason: Optional field access on NodeStateInfo (total=False TypedDict) — fields are conditionally present
+  safety: Explicit None check before display, crash on required fields
   expires: '2026-05-02'
-- key: tui/widgets/node_detail.py:R1:NodeDetailPanel:render_content:fp=c487c413733875f2
+- key: tui/widgets/node_detail.py:R1:NodeDetailPanel:render_content:fp=8bd2d9e980a8c005
   owner: architecture
-  reason: Optional field access at trust boundary
-  safety: Code reviewed - legitimate pattern
+  reason: Optional field access on NodeStateInfo (total=False TypedDict)
+  safety: Explicit None check before display
   expires: '2026-05-02'
-- key: tui/widgets/node_detail.py:R1:NodeDetailPanel:render_content:fp=d83a6cacd8813583
+- key: tui/widgets/node_detail.py:R1:NodeDetailPanel:render_content:fp=93c669611500e95c
   owner: architecture
-  reason: Optional field access at trust boundary
-  safety: Code reviewed - legitimate pattern
+  reason: Optional field access on NodeStateInfo (total=False TypedDict)
+  safety: Explicit None check before display
   expires: '2026-05-02'
-- key: tui/widgets/node_detail.py:R1:NodeDetailPanel:render_content:fp=561bead45d07791c
+- key: tui/widgets/node_detail.py:R1:NodeDetailPanel:render_content:fp=3b50e6162be5847f
   owner: architecture
-  reason: Optional field access at trust boundary
-  safety: Code reviewed - legitimate pattern
+  reason: Optional field access on NodeStateInfo (total=False TypedDict)
+  safety: Explicit None check before display
   expires: '2026-05-02'
-- key: tui/widgets/node_detail.py:R1:NodeDetailPanel:render_content:fp=b9a8fe28fc3a2a35
+- key: tui/widgets/node_detail.py:R1:NodeDetailPanel:render_content:fp=aad0105bd8472c97
   owner: architecture
-  reason: Optional field access at trust boundary
-  safety: Code reviewed - legitimate pattern
+  reason: Optional field access on NodeStateInfo (total=False TypedDict)
+  safety: Explicit None check before display
   expires: '2026-05-02'
-- key: tui/widgets/node_detail.py:R1:NodeDetailPanel:render_content:fp=db3f916fb4b5df04
+- key: tui/widgets/node_detail.py:R1:NodeDetailPanel:render_content:fp=f39fe044ddf78da4
   owner: architecture
-  reason: Optional field access at trust boundary
-  safety: Code reviewed - legitimate pattern
+  reason: Optional field access on NodeStateInfo (total=False TypedDict)
+  safety: Explicit None check before display
   expires: '2026-05-02'
-- key: tui/widgets/node_detail.py:R1:NodeDetailPanel:render_content:fp=f86a38f7c1fdf563
+- key: tui/widgets/node_detail.py:R1:NodeDetailPanel:render_content:fp=38a208d7ad845cb5
   owner: architecture
-  reason: Optional field access at trust boundary
-  safety: Code reviewed - legitimate pattern
+  reason: Optional field access on NodeStateInfo (total=False TypedDict)
+  safety: Explicit None check before display
   expires: '2026-05-02'
-- key: tui/widgets/node_detail.py:R1:NodeDetailPanel:render_content:fp=e0e83f67901e3bc7
+- key: tui/widgets/node_detail.py:R1:NodeDetailPanel:render_content:fp=b66b4075f51da07b
   owner: architecture
-  reason: Optional field access at trust boundary
-  safety: Code reviewed - legitimate pattern
+  reason: Optional field access on NodeStateInfo (total=False TypedDict)
+  safety: Explicit None check before display
   expires: '2026-05-02'
-- key: tui/widgets/node_detail.py:R1:NodeDetailPanel:render_content:fp=2fe3f91f56f42b8c
+- key: tui/widgets/node_detail.py:R1:NodeDetailPanel:render_content:fp=b8407621e938b54b
   owner: architecture
-  reason: Optional field access at trust boundary
-  safety: Code reviewed - legitimate pattern
+  reason: Optional field access on error_json (error_json is optional in NodeStateInfo)
+  safety: Code reviewed - conditionally present field
   expires: '2026-05-02'
-- key: tui/widgets/node_detail.py:R5:NodeDetailPanel:render_content:fp=ab6e5fba4141cf4d
+# --- node_detail.py R5 (isinstance for error variant dispatch) ---
+- key: tui/widgets/node_detail.py:R5:NodeDetailPanel:render_content:fp=2fdc3ea6e9cbac8b
   owner: architecture
-  reason: AST/type checking - required for safe parsing or discriminated unions
-  safety: Code reviewed - legitimate pattern
+  reason: isinstance on error_json string — Tier 1 audit data type validation before JSON parse
+  safety: Raises TypeError on wrong type — explicit crash, not masking
   expires: '2026-05-02'
-- key: tui/widgets/node_detail.py:R1:NodeDetailPanel:render_content:fp=d1f89dde14fd37d2
+- key: tui/widgets/node_detail.py:R5:NodeDetailPanel:render_content:fp=c45756730b398543
   owner: architecture
-  reason: Optional field access at trust boundary
-  safety: Code reviewed - legitimate pattern
+  reason: isinstance on parsed error dict — Tier 1 audit data type validation after JSON parse
+  safety: Raises TypeError on wrong type — explicit crash, not masking
   expires: '2026-05-02'
-- key: tui/widgets/node_detail.py:R5:NodeDetailPanel:render_content:fp=a6f1d850a7f12c4f
+- key: tui/widgets/node_detail.py:R5:NodeDetailPanel:render_content:fp=d517fe8c0ae23489
   owner: architecture
-  reason: AST/type checking - required for safe parsing or discriminated unions
-  safety: Code reviewed - legitimate pattern
+  reason: isinstance on artifact dict — Tier 1 audit data type validation
+  safety: Raises TypeError on wrong type — explicit crash, not masking
   expires: '2026-05-02'
-- key: tui/widgets/node_detail.py:R1:NodeDetailPanel:render_content:fp=4689219565e309cc
+# --- node_detail.py R1 (dict.get on error/artifact validated dicts) ---
+- key: tui/widgets/node_detail.py:R1:NodeDetailPanel:render_content:fp=82ebde4f28490f09
   owner: architecture
-  reason: Optional field access at trust boundary
-  safety: Code reviewed - legitimate pattern
+  reason: Optional field access on validated ExecutionError display dict (phase is NotRequired)
+  safety: Only affects display formatting, not data integrity
   expires: '2026-05-02'
-- key: tui/widgets/node_detail.py:R1:NodeDetailPanel:render_content:fp=6eefee9df94392dd
+- key: tui/widgets/node_detail.py:R1:NodeDetailPanel:render_content:fp=eed481d017b88aa2
   owner: architecture
-  reason: Optional field access at trust boundary
-  safety: Code reviewed - legitimate pattern
+  reason: Optional field access on CoalesceErrorDisplay (timeout_ms is optional)
+  safety: Only affects display formatting, not data integrity
   expires: '2026-05-02'
-- key: tui/widgets/node_detail.py:R1:NodeDetailPanel:render_content:fp=f40067b280807118
+- key: tui/widgets/node_detail.py:R1:NodeDetailPanel:render_content:fp=0107a19dfeb93380
   owner: architecture
-  reason: Optional field access at trust boundary
-  safety: Code reviewed - legitimate pattern
+  reason: Optional field access on CoalesceErrorDisplay (select_branch is optional)
+  safety: Only affects display formatting, not data integrity
   expires: '2026-05-02'
-- key: tui/widgets/node_detail.py:R1:NodeDetailPanel:render_content:fp=a4ecc4a0cc77230c
+- key: tui/widgets/node_detail.py:R1:NodeDetailPanel:render_content:fp=63e6fe20b033911c
   owner: architecture
-  reason: Optional field access at trust boundary
-  safety: Code reviewed - legitimate pattern
+  reason: Optional field access on validated TransformErrorDisplay (error/message are NotRequired)
+  safety: Only affects display formatting, not data integrity
   expires: '2026-05-02'
-- key: tui/widgets/node_detail.py:R1:NodeDetailPanel:render_content:fp=872b14cd5cb8103d
+- key: tui/widgets/node_detail.py:R1:NodeDetailPanel:render_content:fp=850aad74fa49cf21
   owner: architecture
-  reason: Optional field access at trust boundary
-  safety: Code reviewed - legitimate pattern
+  reason: Optional field access on validated TransformErrorDisplay (error/message are NotRequired)
+  safety: Only affects display formatting, not data integrity
   expires: '2026-05-02'
-- key: tui/widgets/node_detail.py:R1:NodeDetailPanel:render_content:fp=675ba5371c46f70a
+- key: tui/widgets/node_detail.py:R1:NodeDetailPanel:render_content:fp=bfd0bbab81f6deb9
   owner: architecture
-  reason: Optional field access at trust boundary
-  safety: Code reviewed - legitimate pattern
+  reason: Optional field access on validated TransformErrorDisplay (field is NotRequired)
+  safety: Only affects display formatting, not data integrity
   expires: '2026-05-02'
-- key: tui/widgets/node_detail.py:R1:NodeDetailPanel:render_content:fp=03b59094c0a9934c
+# --- node_detail.py R1 (state_id in error messages) ---
+- key: tui/widgets/node_detail.py:R1:NodeDetailPanel:render_content:fp=9b66fea7ef337838
   owner: architecture
-  reason: Optional field access at trust boundary
-  safety: Code reviewed - legitimate pattern
+  reason: state_id access in error message for audit integrity violation diagnostics
+  safety: Only used in error message construction, not data flow
   expires: '2026-05-02'
-- key: tui/widgets/node_detail.py:R5:NodeDetailPanel:render_content:fp=2fe98f01ca3be04d
+- key: tui/widgets/node_detail.py:R1:NodeDetailPanel:render_content:fp=03ef6274a8fda29b
   owner: architecture
-  reason: AST/type checking - required for safe parsing or discriminated unions
-  safety: Code reviewed - legitimate pattern
+  reason: state_id access in error message for audit integrity violation diagnostics
+  safety: Only used in error message construction, not data flow
   expires: '2026-05-02'
-- key: tui/widgets/node_detail.py:R1:NodeDetailPanel:render_content:fp=a105e6d08eb1e3b9
+- key: tui/widgets/node_detail.py:R1:NodeDetailPanel:render_content:fp=28f781cec805176f
   owner: architecture
-  reason: Optional field access at trust boundary
-  safety: Code reviewed - legitimate pattern
+  reason: state_id access in error message for audit integrity violation diagnostics
+  safety: Only used in error message construction, not data flow
+  expires: '2026-05-02'
+- key: tui/widgets/node_detail.py:R1:NodeDetailPanel:render_content:fp=5f9b47249643066e
+  owner: architecture
+  reason: state_id access in error message for audit integrity violation diagnostics
+  safety: Only used in error message construction, not data flow
+  expires: '2026-05-02'
+# --- node_detail.py R1 (artifact optional field) ---
+- key: tui/widgets/node_detail.py:R1:NodeDetailPanel:render_content:fp=48eb0cacb43c811b
+  owner: architecture
+  reason: Optional field access on artifact (optional in NodeStateInfo)
+  safety: Code reviewed - conditionally present field
   expires: '2026-05-02'

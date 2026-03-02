@@ -24,7 +24,6 @@ from elspeth.contracts import Determinism, NodeType, RoutingMode, RowOutcome, Ru
 from elspeth.contracts.types import NodeID, SinkName
 from elspeth.core.dag import ExecutionGraph
 from elspeth.core.landscape.database import LandscapeDB
-from elspeth.core.landscape.recorder import LandscapeRecorder
 from elspeth.core.landscape.schema import (
     checkpoints_table,
     edges_table,
@@ -39,6 +38,7 @@ from elspeth.plugins.sinks.csv_sink import CSVSink
 from elspeth.plugins.sinks.json_sink import JSONSink
 from elspeth.plugins.sources.null_source import NullSource
 from elspeth.plugins.transforms.passthrough import PassThrough
+from tests.fixtures.landscape import make_recorder
 
 
 def _null_source(on_success: str = "default") -> NullSource:
@@ -263,7 +263,7 @@ class TestResumeComprehensive:
                 f.write(f"{i},row-{i}\n")
 
         # Mark first 3 rows as completed
-        recorder = LandscapeRecorder(db)
+        recorder = make_recorder(db)
         for i in range(3):
             recorder.record_token_outcome(
                 run_id=run_id,
@@ -371,7 +371,7 @@ class TestResumeComprehensive:
                 f.write(f"{i},row-{i}\n")
 
         # Mark ALL rows as completed (terminal outcome)
-        recorder = LandscapeRecorder(db)
+        recorder = make_recorder(db)
         for i in range(3):
             recorder.record_token_outcome(
                 run_id=run_id,
@@ -581,7 +581,7 @@ class TestResumeComprehensive:
                 )
 
         # Mark first row as completed (checkpoint will be at row 0)
-        recorder = LandscapeRecorder(db)
+        recorder = make_recorder(db)
         recorder.record_token_outcome(
             run_id=run_id,
             token_id="t0",
@@ -786,7 +786,7 @@ class TestResumeComprehensive:
                 )
 
         # Mark first row as completed (checkpoint will be at row 0)
-        recorder = LandscapeRecorder(db)
+        recorder = make_recorder(db)
         recorder.record_token_outcome(
             run_id=run_id,
             token_id="t0",
@@ -987,7 +987,7 @@ class TestResumeComprehensive:
                 )
 
         # Mark first row as completed (checkpoint will be at row 0)
-        recorder = LandscapeRecorder(db)
+        recorder = make_recorder(db)
         recorder.record_token_outcome(
             run_id=run_id,
             token_id="t0",
@@ -1188,7 +1188,7 @@ class TestResumeComprehensive:
                 )
 
         # Mark first row as completed (checkpoint will be at row 0)
-        recorder = LandscapeRecorder(db)
+        recorder = make_recorder(db)
         recorder.record_token_outcome(
             run_id=run_id,
             token_id="t0",

@@ -54,7 +54,7 @@ class TestRuntimeRateLimitFromSettings:
 
     def test_from_settings_maps_all_fields(self) -> None:
         """from_settings() must map all Settings fields correctly."""
-        from elspeth.contracts.config.runtime import RuntimeRateLimitConfig
+        from elspeth.contracts.config.runtime import RuntimeRateLimitConfig, RuntimeServiceRateLimit
         from elspeth.core.config import RateLimitSettings, ServiceRateLimit
 
         # Create settings with non-default values
@@ -72,7 +72,8 @@ class TestRuntimeRateLimitFromSettings:
         assert config.enabled is False, "enabled not mapped correctly"
         assert config.default_requests_per_minute == 500, "default_requests_per_minute not mapped correctly"
         assert config.persistence_path == "/tmp/rate_limits.db", "persistence_path not mapped correctly"
-        assert config.services == services, "services not mapped correctly"
+        expected_services = {"openai": RuntimeServiceRateLimit(requests_per_minute=100)}
+        assert config.services == expected_services, "services not mapped correctly"
 
     def test_from_settings_with_defaults(self) -> None:
         """from_settings() should handle default values from Settings."""

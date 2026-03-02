@@ -6,8 +6,7 @@ Each test class corresponds to one bug fix:
 2. OpenRouter batch HTTP clients never evicted per batch
 3. Base LLM transform output schema diverges from output_schema_config
 4. Terminal batch failures clear checkpoint without per-row LLM call recording
-5. Multi-query cross-product output prefix collisions
-6. enable_content_recording accepted but never applied
+5. enable_content_recording accepted but never applied
 """
 
 from __future__ import annotations
@@ -19,17 +18,17 @@ from unittest.mock import Mock, patch
 if TYPE_CHECKING:
     from elspeth.contracts.batch_checkpoint import BatchCheckpointState
 
-import pytest
-
 from elspeth.contracts import CallStatus, CallType
 from elspeth.contracts.plugin_context import PluginContext
 from elspeth.contracts.schema import SchemaConfig
-from elspeth.plugins.llm import (
+from elspeth.plugins.transforms.llm import (
     _build_augmented_output_schema,
 )
+from elspeth.plugins.transforms.llm.transform import LLMTransform
 from elspeth.testing import make_pipeline_row
+from tests.fixtures.factories import make_context
 
-from .conftest import DYNAMIC_SCHEMA, make_plugin_context, make_token
+from .conftest import DYNAMIC_SCHEMA, make_token
 
 # ---------------------------------------------------------------------------
 # Bug 1: Azure process_row uses mutable ctx.state_id in cleanup
@@ -42,16 +41,20 @@ class TestAzureStateIdSnapshot:
     The engine can rewrite ctx.state_id between attempts on the same context.
     If the finally block uses ctx.state_id instead of the snapshot, it can
     evict the wrong cached client during retry/timeout races.
+
+    Migrated to LLMTransform: the unified transform delegates to _provider,
+    which no longer uses a per-state_id client cache. This test verifies that
+    _process_row correctly uses the state_id from ctx at call time (the strategy
+    captures it), and that processing succeeds with different state_ids.
     """
 
     def test_process_row_uses_snapshot_for_cleanup(self, chaosllm_server: Any) -> None:
-        """Verify that the finally block evicts the correct cache entry even
-        when ctx.state_id is mutated between the snapshot and cleanup."""
-        from elspeth.plugins.llm.azure import AzureLLMTransform
-
+        """Verify that _process_row works correctly even when ctx.state_id
+        is mutated between calls."""
         from .conftest import chaosllm_azure_openai_client
 
         config = {
+            "provider": "azure",
             "deployment_name": "test-deploy",
             "endpoint": "https://test.openai.azure.com",
             "api_key": "test-key",
@@ -61,8 +64,8 @@ class TestAzureStateIdSnapshot:
         }
 
         with chaosllm_azure_openai_client(chaosllm_server, mode="echo"):
-            transform = AzureLLMTransform(config)
-            ctx = make_plugin_context(state_id="state-A")
+            transform = LLMTransform(config)
+            ctx = make_context(state_id="state-A")
             transform.on_start(ctx)
 
             row = make_pipeline_row({"text": "test"})
@@ -71,23 +74,12 @@ class TestAzureStateIdSnapshot:
             result = transform._process_row(row, ctx)
             assert result.status == "success"
 
-            # After processing, "state-A" should be evicted from cache
-            assert "state-A" not in transform._llm_clients
-
-            # Verify the fix is in place: the snapshot pattern means the code
-            # captures state_id at method entry and uses that for cleanup.
-            # We verify this by checking that _process_row reads ctx.state_id
-            # exactly once at the start (snapshot) and uses it for both
-            # _get_llm_client and the finally block.
-            #
-            # Direct mutation test: manually insert a client under "state-X",
-            # then process with state_id="state-X". The finally block should
-            # evict "state-X" (the snapshot) regardless of what ctx.state_id
-            # becomes later.
+            # Mutate ctx.state_id and process again — the strategy should
+            # snapshot state_id at entry and use it consistently within
+            # the call, so this must also succeed cleanly.
             ctx.state_id = "state-X"
             result2 = transform._process_row(row, ctx)
             assert result2.status == "success"
-            assert "state-X" not in transform._llm_clients
 
             transform.close()
 
@@ -106,7 +98,7 @@ class TestOpenRouterBatchClientEviction:
 
     def test_client_evicted_after_batch_success(self, chaosllm_server: Any) -> None:
         """HTTP client is evicted from cache after successful batch processing."""
-        from elspeth.plugins.llm.openrouter_batch import OpenRouterBatchLLMTransform
+        from elspeth.plugins.transforms.llm.openrouter_batch import OpenRouterBatchLLMTransform
 
         from .conftest import chaosllm_openrouter_http_responses
 
@@ -150,7 +142,7 @@ class TestOpenRouterBatchClientEviction:
         """HTTP client is evicted from cache even when batch encounters errors."""
         import httpx
 
-        from elspeth.plugins.llm.openrouter_batch import OpenRouterBatchLLMTransform
+        from elspeth.plugins.transforms.llm.openrouter_batch import OpenRouterBatchLLMTransform
 
         from .conftest import chaosllm_openrouter_http_responses
 
@@ -202,7 +194,7 @@ class TestOpenRouterBatchClientEviction:
 
     def test_multiple_batches_dont_accumulate_clients(self, chaosllm_server: Any) -> None:
         """Multiple batches with different state_ids don't grow the client cache."""
-        from elspeth.plugins.llm.openrouter_batch import OpenRouterBatchLLMTransform
+        from elspeth.plugins.transforms.llm.openrouter_batch import OpenRouterBatchLLMTransform
 
         from .conftest import chaosllm_openrouter_http_responses
 
@@ -258,93 +250,6 @@ class TestLLMOutputSchemaDivergence:
     This caused DAG validation failures for explicit-schema pipelines.
     """
 
-    def test_observed_schema_output_unchanged(self) -> None:
-        """Observed schemas still produce dynamic output (no augmentation needed)."""
-        from elspeth.plugins.llm.base import BaseLLMTransform
-
-        class TestTransform(BaseLLMTransform):
-            name = "test_schema_obs"  # type: ignore[assignment]
-
-            def _get_llm_client(self, ctx: PluginContext) -> Any:
-                return Mock()
-
-        config = {
-            "model": "gpt-4",
-            "template": "hello",
-            "schema": {"mode": "observed"},
-            "required_input_fields": [],
-        }
-
-        transform = TestTransform(config)
-
-        # For observed mode, output_schema should still be a dynamic schema
-        assert len(transform.output_schema.model_fields) == 0
-        assert transform.output_schema.model_config["extra"] == "allow"
-
-    def test_explicit_schema_output_includes_llm_fields(self) -> None:
-        """Explicit (fixed/flexible) schemas include LLM output fields."""
-        from elspeth.plugins.llm.base import BaseLLMTransform
-
-        class TestTransform(BaseLLMTransform):
-            name = "test_schema_fix"  # type: ignore[assignment]
-
-            def _get_llm_client(self, ctx: PluginContext) -> Any:
-                return Mock()
-
-        config = {
-            "model": "gpt-4",
-            "template": "hello",
-            "schema": {
-                "mode": "flexible",
-                "fields": ["text: str"],
-            },
-            "required_input_fields": [],
-        }
-
-        transform = TestTransform(config)
-
-        # output_schema should include both the base "text" field AND LLM fields
-        output_fields = set(transform.output_schema.model_fields.keys())
-        assert "text" in output_fields
-        assert "llm_response" in output_fields
-        assert "llm_response_usage" in output_fields
-        assert "llm_response_model" in output_fields
-        assert "llm_response_template_hash" in output_fields
-
-        # input_schema should NOT have LLM fields (it's the original schema)
-        input_fields = set(transform.input_schema.model_fields.keys())
-        assert "text" in input_fields
-        assert "llm_response" not in input_fields
-
-    def test_output_schema_config_guaranteed_fields_subset_of_output_schema(self) -> None:
-        """All guaranteed_fields from output_schema_config exist in output_schema."""
-        from elspeth.plugins.llm.base import BaseLLMTransform
-
-        class TestTransform(BaseLLMTransform):
-            name = "test_schema_align"  # type: ignore[assignment]
-
-            def _get_llm_client(self, ctx: PluginContext) -> Any:
-                return Mock()
-
-        config = {
-            "model": "gpt-4",
-            "template": "hello",
-            "schema": {
-                "mode": "flexible",
-                "fields": ["text: str"],
-            },
-            "required_input_fields": [],
-        }
-
-        transform = TestTransform(config)
-
-        guaranteed = set(transform._output_schema_config.guaranteed_fields or ())
-        output_fields = set(transform.output_schema.model_fields.keys())
-
-        # Every guaranteed field must exist in output_schema
-        missing = guaranteed - output_fields
-        assert not missing, f"Guaranteed fields missing from output_schema: {missing}"
-
     def test_build_augmented_output_schema_observed_passthrough(self) -> None:
         """_build_augmented_output_schema returns dynamic schema for observed mode."""
         schema_config = SchemaConfig(mode="observed", fields=None)
@@ -357,13 +262,12 @@ class TestLLMOutputSchemaDivergence:
         assert len(result.model_fields) == 0
         assert result.model_config["extra"] == "allow"
 
-    def test_azure_transform_has_augmented_output_schema(self) -> None:
-        """AzureLLMTransform output_schema differs from input_schema when explicit."""
-        from elspeth.plugins.llm.azure import AzureLLMTransform
-
+    def test_llm_transform_has_augmented_output_schema(self) -> None:
+        """LLMTransform output_schema differs from input_schema when explicit."""
         with patch("openai.AzureOpenAI"):
-            transform = AzureLLMTransform(
+            transform = LLMTransform(
                 {
+                    "provider": "azure",
                     "deployment_name": "test",
                     "endpoint": "https://test.azure.com",
                     "api_key": "key",
@@ -394,7 +298,7 @@ class TestAzureBatchTerminalFailureCallRecording:
 
     def _make_transform_and_ctx(self) -> tuple[Any, Mock]:
         """Create an AzureBatchLLMTransform and mock context for testing."""
-        from elspeth.plugins.llm.azure_batch import AzureBatchLLMTransform
+        from elspeth.plugins.transforms.llm.azure_batch import AzureBatchLLMTransform
 
         config = {
             "deployment_name": "test-batch",
@@ -612,127 +516,7 @@ class TestAzureBatchTerminalFailureCallRecording:
 
 
 # ---------------------------------------------------------------------------
-# Bug 5: Multi-query cross-product output prefix collisions
-# ---------------------------------------------------------------------------
-
-
-class TestMultiQueryPrefixCollisions:
-    """Regression: cross-product prefixes must be unique.
-
-    The prefix f"{case_study.name}_{criterion.name}" can collide when names
-    contain underscores. E.g., ("a_b", "c") and ("a", "b_c") both produce "a_b_c".
-    """
-
-    def test_ambiguous_underscore_collision_rejected(self) -> None:
-        """Config with delimiter-ambiguous names that produce same prefix is rejected."""
-        from elspeth.plugins.config_base import PluginConfigError
-        from elspeth.plugins.llm.multi_query import MultiQueryConfig
-
-        config = {
-            "deployment_name": "gpt-4o",
-            "endpoint": "https://test.openai.azure.com",
-            "api_key": "test-key",
-            "template": "Input: {{ row.input_1 }}",
-            "system_prompt": "JSON.",
-            "case_studies": [
-                {"name": "a_b", "input_fields": ["f1"]},
-                {"name": "a", "input_fields": ["f1"]},
-            ],
-            "criteria": [
-                {"name": "c", "code": "C"},
-                {"name": "b_c", "code": "BC"},
-            ],
-            "response_format": "standard",
-            "output_mapping": {
-                "score": {"suffix": "score", "type": "integer"},
-            },
-            "schema": DYNAMIC_SCHEMA,
-            "required_input_fields": [],
-        }
-
-        with pytest.raises(PluginConfigError, match="prefix collision"):
-            MultiQueryConfig.from_dict(config)
-
-    def test_non_ambiguous_names_accepted(self) -> None:
-        """Config with non-ambiguous names passes validation."""
-        from elspeth.plugins.llm.multi_query import MultiQueryConfig
-
-        config = {
-            "deployment_name": "gpt-4o",
-            "endpoint": "https://test.openai.azure.com",
-            "api_key": "test-key",
-            "template": "Input: {{ row.input_1 }}",
-            "system_prompt": "JSON.",
-            "case_studies": [
-                {"name": "alpha", "input_fields": ["f1"]},
-                {"name": "beta", "input_fields": ["f1"]},
-            ],
-            "criteria": [
-                {"name": "score", "code": "S"},
-                {"name": "quality", "code": "Q"},
-            ],
-            "response_format": "standard",
-            "output_mapping": {
-                "score": {"suffix": "score", "type": "integer"},
-            },
-            "schema": DYNAMIC_SCHEMA,
-            "required_input_fields": [],
-        }
-
-        # Should not raise
-        parsed = MultiQueryConfig.from_dict(config)
-        assert len(parsed.case_studies) == 2
-
-    def test_validate_function_directly(self) -> None:
-        """validate_multi_query_key_collisions catches prefix collisions."""
-        from elspeth.plugins.llm.multi_query import (
-            CaseStudyConfig,
-            CriterionConfig,
-            OutputFieldConfig,
-            validate_multi_query_key_collisions,
-        )
-
-        case_studies = [
-            CaseStudyConfig.from_dict({"name": "x_y", "input_fields": ["f"]}),
-            CaseStudyConfig.from_dict({"name": "x", "input_fields": ["f"]}),
-        ]
-        criteria = [
-            CriterionConfig.from_dict({"name": "z"}),
-            CriterionConfig.from_dict({"name": "y_z"}),
-        ]
-        output_mapping = {
-            "s": OutputFieldConfig.from_dict({"suffix": "s", "type": "integer"}),
-        }
-
-        with pytest.raises(ValueError, match="prefix collision"):
-            validate_multi_query_key_collisions(case_studies, criteria, output_mapping)
-
-    def test_same_prefix_from_identical_pair_is_prevented_by_name_uniqueness(self) -> None:
-        """Duplicate case_study or criterion names are caught separately."""
-        from elspeth.plugins.llm.multi_query import (
-            CaseStudyConfig,
-            CriterionConfig,
-            OutputFieldConfig,
-            validate_multi_query_key_collisions,
-        )
-
-        case_studies = [
-            CaseStudyConfig.from_dict({"name": "cs1", "input_fields": ["f"]}),
-            CaseStudyConfig.from_dict({"name": "cs1", "input_fields": ["f"]}),
-        ]
-        criteria = [
-            CriterionConfig.from_dict({"name": "crit1"}),
-        ]
-        output_mapping = {
-            "s": OutputFieldConfig.from_dict({"suffix": "s", "type": "integer"}),
-        }
-
-        with pytest.raises(ValueError, match="Duplicate case_study name"):
-            validate_multi_query_key_collisions(case_studies, criteria, output_mapping)
-
-
-# ---------------------------------------------------------------------------
-# Bug 6: enable_content_recording accepted but never applied
+# Bug 5: enable_content_recording accepted but never applied
 # ---------------------------------------------------------------------------
 
 
@@ -742,22 +526,31 @@ class TestEnableContentRecording:
     The config field was accepted and logged but never passed to the Azure
     Monitor SDK or environment variable, leaving it as a dead config field.
 
-    Note on mocking strategy: _configure_azure_monitor() uses local imports:
-    - `from azure.monitor.opentelemetry import configure_azure_monitor` (installed)
-    - `from azure.ai.inference.tracing import AIInferenceInstrumentor` (NOT installed)
+    Note on mocking strategy: _configure_azure_monitor() uses module-level imports:
+    - `configure_azure_monitor` is imported at module level in providers/azure.py
+    - `from azure.ai.inference.tracing import AIInferenceInstrumentor` is a local import
 
-    Since configure_azure_monitor is imported inside the function body, we must
-    patch it at the source module, not on elspeth.plugins.llm.azure. For
-    AIInferenceInstrumentor, we inject a mock module into sys.modules since the
-    real package is not installed.
+    We must patch the already-imported reference at
+    ``elspeth.plugins.transforms.llm.providers.azure.configure_azure_monitor``, NOT the
+    source module ``azure.monitor.opentelemetry.configure_azure_monitor``.
+    For AIInferenceInstrumentor, we inject a mock module into sys.modules
+    since the real package is not installed.
+
+    Each test resets the module-level idempotency guard via
+    ``_reset_azure_monitor_state()`` to ensure isolation.
     """
 
     def test_content_recording_wired_via_instrumentor(self) -> None:
         """enable_content_recording is passed to AIInferenceInstrumentor when available."""
         import sys
 
-        from elspeth.plugins.llm.azure import _configure_azure_monitor
-        from elspeth.plugins.llm.tracing import AzureAITracingConfig
+        from elspeth.plugins.transforms.llm.providers.azure import (
+            _configure_azure_monitor,
+            _reset_azure_monitor_state,
+        )
+        from elspeth.plugins.transforms.llm.tracing import AzureAITracingConfig
+
+        _reset_azure_monitor_state()
 
         config = AzureAITracingConfig(
             connection_string="InstrumentationKey=test-key",
@@ -772,27 +565,35 @@ class TestEnableContentRecording:
         mock_tracing_module = Mock()
         mock_tracing_module.AIInferenceInstrumentor = mock_instrumentor_class
 
-        with (
-            patch("azure.monitor.opentelemetry.configure_azure_monitor") as mock_az_monitor,
-            patch.dict(sys.modules, {"azure.ai.inference.tracing": mock_tracing_module}),
-        ):
-            result = _configure_azure_monitor(config)
+        try:
+            with (
+                patch("elspeth.plugins.transforms.llm.providers.azure.configure_azure_monitor") as mock_az_monitor,
+                patch.dict(sys.modules, {"azure.ai.inference.tracing": mock_tracing_module}),
+            ):
+                result = _configure_azure_monitor(config)
 
-        assert result is True
-        mock_az_monitor.assert_called_once_with(
-            connection_string="InstrumentationKey=test-key",
-            enable_live_metrics=False,
-        )
-        mock_instrumentor_instance.instrument.assert_called_once_with(
-            enable_content_recording=True,
-        )
+            assert result is True
+            mock_az_monitor.assert_called_once_with(
+                connection_string="InstrumentationKey=test-key",
+                enable_live_metrics=False,
+            )
+            mock_instrumentor_instance.instrument.assert_called_once_with(
+                enable_content_recording=True,
+            )
+        finally:
+            _reset_azure_monitor_state()
 
     def test_content_recording_false_wired_via_instrumentor(self) -> None:
         """enable_content_recording=False is correctly passed through."""
         import sys
 
-        from elspeth.plugins.llm.azure import _configure_azure_monitor
-        from elspeth.plugins.llm.tracing import AzureAITracingConfig
+        from elspeth.plugins.transforms.llm.providers.azure import (
+            _configure_azure_monitor,
+            _reset_azure_monitor_state,
+        )
+        from elspeth.plugins.transforms.llm.tracing import AzureAITracingConfig
+
+        _reset_azure_monitor_state()
 
         config = AzureAITracingConfig(
             connection_string="InstrumentationKey=test-key",
@@ -806,15 +607,18 @@ class TestEnableContentRecording:
         mock_tracing_module = Mock()
         mock_tracing_module.AIInferenceInstrumentor = mock_instrumentor_class
 
-        with (
-            patch("azure.monitor.opentelemetry.configure_azure_monitor"),
-            patch.dict(sys.modules, {"azure.ai.inference.tracing": mock_tracing_module}),
-        ):
-            _configure_azure_monitor(config)
+        try:
+            with (
+                patch("elspeth.plugins.transforms.llm.providers.azure.configure_azure_monitor"),
+                patch.dict(sys.modules, {"azure.ai.inference.tracing": mock_tracing_module}),
+            ):
+                _configure_azure_monitor(config)
 
-        mock_instrumentor_instance.instrument.assert_called_once_with(
-            enable_content_recording=False,
-        )
+            mock_instrumentor_instance.instrument.assert_called_once_with(
+                enable_content_recording=False,
+            )
+        finally:
+            _reset_azure_monitor_state()
 
     def test_content_recording_falls_back_to_env_var(self) -> None:
         """When AIInferenceInstrumentor is not available, falls back to env var.
@@ -825,8 +629,13 @@ class TestEnableContentRecording:
         """
         import os
 
-        from elspeth.plugins.llm.azure import _configure_azure_monitor
-        from elspeth.plugins.llm.tracing import AzureAITracingConfig
+        from elspeth.plugins.transforms.llm.providers.azure import (
+            _configure_azure_monitor,
+            _reset_azure_monitor_state,
+        )
+        from elspeth.plugins.transforms.llm.tracing import AzureAITracingConfig
+
+        _reset_azure_monitor_state()
 
         config = AzureAITracingConfig(
             connection_string="InstrumentationKey=test-key",
@@ -838,22 +647,72 @@ class TestEnableContentRecording:
         env_key = "AZURE_TRACING_GEN_AI_CONTENT_RECORDING_ENABLED"
         old_value = os.environ.pop(env_key, None)
         try:
-            with patch("azure.monitor.opentelemetry.configure_azure_monitor"):
+            with patch("elspeth.plugins.transforms.llm.providers.azure.configure_azure_monitor"):
                 _configure_azure_monitor(config)
 
             assert os.environ.get(env_key) == "true"
         finally:
             # Clean up
+            _reset_azure_monitor_state()
             os.environ.pop(env_key, None)
             if old_value is not None:
                 os.environ[env_key] = old_value
+
+    def test_enable_live_metrics_forwarded_when_true(self) -> None:
+        """enable_live_metrics=True is forwarded to configure_azure_monitor SDK call.
+
+        All existing tests use enable_live_metrics=False. This test catches
+        a hardcoded False that would pass all other tests but silently ignore
+        the user's configuration.
+        """
+        import sys
+
+        from elspeth.plugins.transforms.llm.providers.azure import (
+            _configure_azure_monitor,
+            _reset_azure_monitor_state,
+        )
+        from elspeth.plugins.transforms.llm.tracing import AzureAITracingConfig
+
+        _reset_azure_monitor_state()
+
+        config = AzureAITracingConfig(
+            connection_string="InstrumentationKey=test-key",
+            enable_content_recording=False,
+            enable_live_metrics=True,
+        )
+
+        mock_instrumentor_instance = Mock()
+        mock_instrumentor_class = Mock(return_value=mock_instrumentor_instance)
+
+        mock_tracing_module = Mock()
+        mock_tracing_module.AIInferenceInstrumentor = mock_instrumentor_class
+
+        try:
+            with (
+                patch("elspeth.plugins.transforms.llm.providers.azure.configure_azure_monitor") as mock_az_monitor,
+                patch.dict(sys.modules, {"azure.ai.inference.tracing": mock_tracing_module}),
+            ):
+                result = _configure_azure_monitor(config)
+
+            assert result is True
+            mock_az_monitor.assert_called_once_with(
+                connection_string="InstrumentationKey=test-key",
+                enable_live_metrics=True,
+            )
+        finally:
+            _reset_azure_monitor_state()
 
     def test_content_recording_false_env_var(self) -> None:
         """enable_content_recording=False sets env var to 'false'."""
         import os
 
-        from elspeth.plugins.llm.azure import _configure_azure_monitor
-        from elspeth.plugins.llm.tracing import AzureAITracingConfig
+        from elspeth.plugins.transforms.llm.providers.azure import (
+            _configure_azure_monitor,
+            _reset_azure_monitor_state,
+        )
+        from elspeth.plugins.transforms.llm.tracing import AzureAITracingConfig
+
+        _reset_azure_monitor_state()
 
         config = AzureAITracingConfig(
             connection_string="InstrumentationKey=test-key",
@@ -864,12 +723,13 @@ class TestEnableContentRecording:
         env_key = "AZURE_TRACING_GEN_AI_CONTENT_RECORDING_ENABLED"
         old_value = os.environ.pop(env_key, None)
         try:
-            with patch("azure.monitor.opentelemetry.configure_azure_monitor"):
+            with patch("elspeth.plugins.transforms.llm.providers.azure.configure_azure_monitor"):
                 _configure_azure_monitor(config)
 
             assert os.environ.get(env_key) == "false"
         finally:
             # Clean up
+            _reset_azure_monitor_state()
             os.environ.pop(env_key, None)
             if old_value is not None:
                 os.environ[env_key] = old_value

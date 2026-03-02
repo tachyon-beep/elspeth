@@ -1,4 +1,3 @@
-# src/elspeth/core/logging.py
 """Structured logging configuration for ELSPETH.
 
 Uses structlog for structured logging that complements

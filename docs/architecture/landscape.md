@@ -58,7 +58,7 @@ Landscape enforces strict trust boundaries for data handling:
 | **Total Files** | ~12 Python modules |
 | **Lines of Code** | ~5,500 |
 | **Database Tables** | 17 |
-| **Repository Classes** | ~15 |
+| **Model Loader Classes** | ~15 |
 | **MCP Analysis Tools** | 25 |
 | **Public API Exports** | 50+ |
 
@@ -225,7 +225,7 @@ CHECK (
 
 #### 3. Discriminated Union (NodeState)
 
-`NodeStateRepository.load()` validates invariants based on status:
+`NodeStateLoader.load()` validates invariants based on status:
 
 | Status | Required Fields | Forbidden Fields |
 |--------|-----------------|------------------|
@@ -297,23 +297,23 @@ def allocate_call_index(self, state_id: str) -> int:
 
 Ensures `UNIQUE(state_id, call_index)` across all concurrent calls.
 
-### Repository Layer
+### Model Loader Layer
 
-**File**: `src/elspeth/core/landscape/repositories.py` (577 lines)
+**File**: `src/elspeth/core/landscape/model_loaders.py` (564 lines)
 
-15 repository classes that convert SQLAlchemy rows to domain objects with **strict Tier 1 validation**:
+15 loader classes that convert SQLAlchemy rows to domain objects with **strict Tier 1 validation**:
 
-| Repository | Purpose | Validation |
-|------------|---------|------------|
-| RunRepository | Run records | Crashes on invalid RunStatus |
-| NodeRepository | Plugin instances | Crashes on invalid NodeType, Determinism |
-| TokenOutcomeRepository | Terminal states | Validates is_terminal is 0 or 1 |
-| NodeStateRepository | Processing records | Validates discriminated union invariants |
+| Loader | Purpose | Validation |
+|--------|---------|------------|
+| RunLoader | Run records | Crashes on invalid RunStatus |
+| NodeLoader | Plugin instances | Crashes on invalid NodeType, Determinism |
+| TokenOutcomeLoader | Terminal states | Validates is_terminal is 0 or 1 |
+| NodeStateLoader | Processing records | Validates discriminated union invariants |
 
 **Example: Tier 1 Crash Semantics**
 
 ```python
-class RunRepository:
+class RunLoader:
     def load(self, row: Any) -> Run:
         # No try/except - crashes on invalid enum value
         return Run(
@@ -635,15 +635,15 @@ The MCP server auto-discovers databases:
 ```python
 query = select(runs_table).where(runs_table.c.run_id == run_id)
 row = ops.execute_fetchone(query)  # Crashes if multiple rows
-run = RunRepository().load(row) if row else None
+run = RunLoader().load(row) if row else None
 ```
 
-### Multi-Row with Repository Conversion
+### Multi-Row with Model Loader Conversion
 
 ```python
 query = select(batches_table).where(batches_table.c.run_id == run_id)
 rows = ops.execute_fetchall(query)
-batches = [BatchRepository().load(row) for row in rows]
+batches = [BatchLoader().load(row) for row in rows]
 ```
 
 ### Composite Key Queries
@@ -688,7 +688,7 @@ query = (
 |------|---------|
 | `recorder.py` | Main recording API (60+ methods) |
 | `schema.py` | 17 SQLAlchemy Core table definitions |
-| `repositories.py` | ~15 repository classes for row→object conversion |
+| `model_loaders.py` | ~15 loader classes for row→object conversion |
 | `database.py` | Connection management (SQLite WAL, PostgreSQL) |
 | `exporter.py` | Compliance export with optional HMAC signing |
 | `formatters.py` | Export formatters (CSV, JSON, Lineage text) |

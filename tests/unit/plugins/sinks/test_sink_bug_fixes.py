@@ -15,6 +15,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from elspeth.contracts.plugin_context import PluginContext
+from tests.fixtures.factories import make_operation_context
 
 # === Shared fixtures and schemas ===
 
@@ -30,8 +31,13 @@ TEST_BLOB_PATH = "results/output.csv"
 
 @pytest.fixture
 def ctx() -> PluginContext:
-    """Create a minimal plugin context."""
-    return PluginContext(run_id="test-run", config={})
+    """Create a plugin context with real landscape and operation records."""
+    return make_operation_context(
+        node_id="sink",
+        plugin_name="database_sink",
+        node_type="SINK",
+        operation_type="sink_write",
+    )
 
 
 # =============================================================================
@@ -488,12 +494,12 @@ class TestAzureBlobSinkFieldValidation:
     @pytest.fixture
     def mock_container_client(self):
         """Create a mock container client for testing."""
-        with patch("elspeth.plugins.azure.blob_sink.AzureBlobSink._get_container_client") as mock:
+        with patch("elspeth.plugins.sinks.azure_blob_sink.AzureBlobSink._get_container_client") as mock:
             yield mock
 
     def test_csv_extra_fields_rejected_in_fixed_mode(self, mock_container_client: MagicMock, ctx: PluginContext) -> None:
         """Extra fields in fixed-mode CSV are rejected before serialization."""
-        from elspeth.plugins.azure.blob_sink import AzureBlobSink
+        from elspeth.plugins.sinks.azure_blob_sink import AzureBlobSink
 
         mock_blob_client = MagicMock()
         mock_container = MagicMock()
@@ -524,7 +530,7 @@ class TestAzureBlobSinkFieldValidation:
 
     def test_csv_valid_rows_still_upload(self, mock_container_client: MagicMock, ctx: PluginContext) -> None:
         """Valid rows in fixed mode still upload successfully."""
-        from elspeth.plugins.azure.blob_sink import AzureBlobSink
+        from elspeth.plugins.sinks.azure_blob_sink import AzureBlobSink
 
         mock_blob_client = MagicMock()
         mock_container = MagicMock()
@@ -546,9 +552,9 @@ class TestAzureBlobSinkFieldValidation:
 
     def test_declared_required_fields_populated(self) -> None:
         """AzureBlobSink populates declared_required_fields from schema."""
-        from elspeth.plugins.azure.blob_sink import AzureBlobSink
+        from elspeth.plugins.sinks.azure_blob_sink import AzureBlobSink
 
-        with patch("elspeth.plugins.azure.blob_sink.AzureBlobSink._get_container_client"):
+        with patch("elspeth.plugins.sinks.azure_blob_sink.AzureBlobSink._get_container_client"):
             sink = AzureBlobSink(
                 {
                     "connection_string": TEST_CONNECTION_STRING,

@@ -1,4 +1,3 @@
-# src/elspeth/testing/chaosweb/config.py
 """Configuration schema and loading for ChaosWeb server.
 
 Uses Pydantic for validation with frozen (immutable) models.

@@ -16,6 +16,7 @@ import pytest
 from elspeth.contracts.plugin_context import PluginContext
 from elspeth.contracts.schema_contract import SchemaContract
 from elspeth.testing import make_field, make_row
+from tests.fixtures.factories import make_context
 
 # Common schema config for dynamic field handling (accepts any fields)
 DYNAMIC_SCHEMA = {"mode": "observed"}
@@ -37,7 +38,7 @@ class TestBatchStatsHappyPath:
     @pytest.fixture
     def ctx(self) -> PluginContext:
         """Create minimal plugin context."""
-        return PluginContext(run_id="test-run", config={})
+        return make_context()
 
     def test_has_required_attributes(self) -> None:
         """BatchStats has name and is_batch_aware."""
@@ -211,7 +212,7 @@ class TestBatchStatsFloatOverflow:
 
     @pytest.fixture
     def ctx(self) -> PluginContext:
-        return PluginContext(run_id="test-run", config={})
+        return make_context()
 
     def test_nan_input_skipped_from_computation(self, ctx: PluginContext) -> None:
         """NaN values are skipped from sum/mean, tracked in skipped_non_finite."""
@@ -318,7 +319,7 @@ class TestBatchStatsGroupByHomogeneity:
 
     @pytest.fixture
     def ctx(self) -> PluginContext:
-        return PluginContext(run_id="test-run", config={})
+        return make_context()
 
     def test_homogeneous_group_by_included(self, ctx: PluginContext) -> None:
         """All rows same group_by value — included in output."""

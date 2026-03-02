@@ -56,7 +56,7 @@ class TestOTLPIntegration:
         )
 
         # Replace export method to capture instead of sending over network
-        exporter._span_exporter.export = capture_export  # type: ignore[method-assign]
+        exporter._span_exporter.export = capture_export
 
         return exporter, captured
 
@@ -190,7 +190,7 @@ class TestOTLPSpanFormat:
                 "batch_size": 1,
             }
         )
-        exporter._span_exporter.export = capture_export  # type: ignore[method-assign]
+        exporter._span_exporter.export = capture_export
 
         return exporter, captured
 

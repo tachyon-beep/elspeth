@@ -32,7 +32,6 @@ import pytest
 
 from elspeth.contracts import NodeType, PipelineRow, TransformErrorReason, TransformResult
 from elspeth.contracts.identity import TokenInfo
-from elspeth.contracts.plugin_context import PluginContext
 from elspeth.contracts.schema import SchemaConfig
 from elspeth.contracts.schema_contract import FieldContract, SchemaContract
 from elspeth.core.landscape.database import LandscapeDB
@@ -43,6 +42,7 @@ from elspeth.testing.chaosllm.server import ChaosLLMServer
 if TYPE_CHECKING:
     import httpx
 
+    from elspeth.contracts.plugin_context import PluginContext
     from elspeth.engine.batch_adapter import ExceptionResult
 
 # Dynamic schema for LLM transforms
@@ -574,13 +574,13 @@ class CollectingOutputPort:
 
 def create_recorder_and_run(
     tmp_path_factory: pytest.TempPathFactory,
-    plugin_name: str = "azure_llm",
+    plugin_name: str = "llm",
 ) -> tuple[LandscapeRecorder, str, str]:
     """Create a recorder and start a run, returning (recorder, run_id, node_id).
 
     Args:
         tmp_path_factory: Pytest temp path factory for creating audit DB
-        plugin_name: Plugin name to register as node (default: "azure_llm")
+        plugin_name: Plugin name to register as node (default: "llm")
 
     Returns:
         Tuple of (recorder, run_id, node_id)
@@ -655,6 +655,8 @@ def make_plugin_context(
 ) -> PluginContext:
     """Create a PluginContext with real landscape.
 
+    Delegates to the shared make_context() factory.
+
     Args:
         landscape: LandscapeRecorder for audit trail
         run_id: Run ID for context
@@ -664,16 +666,17 @@ def make_plugin_context(
     Returns:
         PluginContext ready for use
     """
+    from tests.fixtures.factories import make_context
+
     if state_id is None:
         state_id = f"state-{uuid.uuid4().hex[:12]}"
     if token is None:
         token = make_token()
 
-    return PluginContext(
+    return make_context(
         run_id=run_id,
         landscape=landscape,
         state_id=state_id,
-        config={},
         token=token,
     )
 
@@ -694,9 +697,10 @@ def make_azure_llm_config(
         **overrides: Override any config values
 
     Returns:
-        Config dict ready for AzureLLMTransform
+        Config dict ready for LLMTransform with provider="azure"
     """
     config = {
+        "provider": "azure",
         "deployment_name": "gpt-4o",
         "endpoint": chaosllm_url,
         "api_key": "test-key",
@@ -724,13 +728,14 @@ def make_openrouter_llm_config(
         **overrides: Override any config values
 
     Returns:
-        Config dict ready for OpenRouterLLMTransform
+        Config dict ready for LLMTransform with provider="openrouter"
 
     Note:
         OpenRouter uses /chat/completions, but ChaosLLM serves at /v1/chat/completions.
         We append /v1 to the base_url so the paths match.
     """
     config = {
+        "provider": "openrouter",
         "model": "anthropic/claude-3-opus",
         "base_url": f"{chaosllm_url}/v1",  # Append /v1 for ChaosLLM compatibility
         "api_key": "test-key",
@@ -753,31 +758,51 @@ def make_azure_multi_query_config(
 ) -> dict[str, Any]:
     """Create valid Azure multi-query config pointed at ChaosLLM.
 
+    Uses the unified LLMTransform queries dict format with provider="azure".
+
     Args:
         chaosllm_url: Base URL of ChaosLLM server
         **overrides: Override any config values
 
     Returns:
-        Config dict ready for AzureMultiQueryLLMTransform
+        Config dict ready for LLMTransform with provider="azure" and queries
     """
-    config = {
+    config: dict[str, Any] = {
+        "provider": "azure",
         "deployment_name": "gpt-4o",
         "endpoint": chaosllm_url,
         "api_key": "test-key",
-        "template": "Input: {{ row.input_1 }}\nCriterion: {{ row.criterion.name }}",
+        "template": "Input: {{ row.text_content }}\nCriterion: {{ row.criterion_name }}",
         "system_prompt": "You are an assessment AI. Respond in JSON.",
-        "case_studies": [
-            {"name": "cs1", "input_fields": ["cs1_bg", "cs1_sym", "cs1_hist"]},
-            {"name": "cs2", "input_fields": ["cs2_bg", "cs2_sym", "cs2_hist"]},
-        ],
-        "criteria": [
-            {"name": "diagnosis", "code": "DIAG"},
-            {"name": "treatment", "code": "TREAT"},
-        ],
-        "response_format": "standard",
-        "output_mapping": {
-            "score": {"suffix": "score", "type": "integer"},
-            "rationale": {"suffix": "rationale", "type": "string"},
+        "queries": {
+            "cs1_diagnosis": {
+                "input_fields": {"text_content": "cs1_bg", "criterion_name": "cs1_diag_name"},
+                "output_fields": [
+                    {"suffix": "score", "type": "integer"},
+                    {"suffix": "rationale", "type": "string"},
+                ],
+            },
+            "cs1_treatment": {
+                "input_fields": {"text_content": "cs1_bg", "criterion_name": "cs1_treat_name"},
+                "output_fields": [
+                    {"suffix": "score", "type": "integer"},
+                    {"suffix": "rationale", "type": "string"},
+                ],
+            },
+            "cs2_diagnosis": {
+                "input_fields": {"text_content": "cs2_bg", "criterion_name": "cs2_diag_name"},
+                "output_fields": [
+                    {"suffix": "score", "type": "integer"},
+                    {"suffix": "rationale", "type": "string"},
+                ],
+            },
+            "cs2_treatment": {
+                "input_fields": {"text_content": "cs2_bg", "criterion_name": "cs2_treat_name"},
+                "output_fields": [
+                    {"suffix": "score", "type": "integer"},
+                    {"suffix": "rationale", "type": "string"},
+                ],
+            },
         },
         "schema": DYNAMIC_SCHEMA,
         "required_input_fields": [],  # Explicit opt-out for tests
@@ -794,35 +819,55 @@ def make_openrouter_multi_query_config(
 ) -> dict[str, Any]:
     """Create valid OpenRouter multi-query config pointed at ChaosLLM.
 
+    Uses the unified LLMTransform queries dict format with provider="openrouter".
+
     Args:
         chaosllm_url: Base URL of ChaosLLM server
         **overrides: Override any config values
 
     Returns:
-        Config dict ready for OpenRouterMultiQueryLLMTransform
+        Config dict ready for LLMTransform with provider="openrouter" and queries
 
     Note:
         OpenRouter uses /chat/completions, but ChaosLLM serves at /v1/chat/completions.
         We append /v1 to the base_url so the paths match.
     """
-    config = {
+    config: dict[str, Any] = {
+        "provider": "openrouter",
         "model": "anthropic/claude-3-opus",
         "base_url": f"{chaosllm_url}/v1",  # Append /v1 for ChaosLLM compatibility
         "api_key": "test-key",
-        "template": "Input: {{ row.input_1 }}\nCriterion: {{ row.criterion.name }}",
+        "template": "Input: {{ row.text_content }}\nCriterion: {{ row.criterion_name }}",
         "system_prompt": "You are an assessment AI. Respond in JSON.",
-        "case_studies": [
-            {"name": "cs1", "input_fields": ["cs1_bg", "cs1_sym", "cs1_hist"]},
-            {"name": "cs2", "input_fields": ["cs2_bg", "cs2_sym", "cs2_hist"]},
-        ],
-        "criteria": [
-            {"name": "diagnosis", "code": "DIAG"},
-            {"name": "treatment", "code": "TREAT"},
-        ],
-        "response_format": "standard",
-        "output_mapping": {
-            "score": {"suffix": "score", "type": "integer"},
-            "rationale": {"suffix": "rationale", "type": "string"},
+        "queries": {
+            "cs1_diagnosis": {
+                "input_fields": {"text_content": "cs1_bg", "criterion_name": "cs1_diag_name"},
+                "output_fields": [
+                    {"suffix": "score", "type": "integer"},
+                    {"suffix": "rationale", "type": "string"},
+                ],
+            },
+            "cs1_treatment": {
+                "input_fields": {"text_content": "cs1_bg", "criterion_name": "cs1_treat_name"},
+                "output_fields": [
+                    {"suffix": "score", "type": "integer"},
+                    {"suffix": "rationale", "type": "string"},
+                ],
+            },
+            "cs2_diagnosis": {
+                "input_fields": {"text_content": "cs2_bg", "criterion_name": "cs2_diag_name"},
+                "output_fields": [
+                    {"suffix": "score", "type": "integer"},
+                    {"suffix": "rationale", "type": "string"},
+                ],
+            },
+            "cs2_treatment": {
+                "input_fields": {"text_content": "cs2_bg", "criterion_name": "cs2_treat_name"},
+                "output_fields": [
+                    {"suffix": "score", "type": "integer"},
+                    {"suffix": "rationale", "type": "string"},
+                ],
+            },
         },
         "schema": DYNAMIC_SCHEMA,
         "required_input_fields": [],  # Explicit opt-out for tests
@@ -854,14 +899,14 @@ def generate_test_rows(count: int, prefix: str = "row") -> list[dict[str, Any]]:
 def generate_multi_query_rows(count: int, prefix: str = "row") -> list[dict[str, Any]]:
     """Generate test rows for multi-query stress testing.
 
-    Creates rows with all case study input fields.
+    Creates rows with all named input fields that multi-query configs reference.
 
     Args:
         count: Number of rows to generate
         prefix: Prefix for row IDs
 
     Returns:
-        List of row dicts with case study fields
+        List of row dicts with named input fields for each query
     """
     return [
         {
@@ -874,6 +919,11 @@ def generate_multi_query_rows(count: int, prefix: str = "row") -> list[dict[str,
             "cs2_bg": f"Background info for case study 2, row {i}",
             "cs2_sym": f"Symptoms for case study 2, row {i}",
             "cs2_hist": f"History for case study 2, row {i}",
+            # Criterion name fields for each query
+            "cs1_diag_name": "diagnosis",
+            "cs1_treat_name": "treatment",
+            "cs2_diag_name": "diagnosis",
+            "cs2_treat_name": "treatment",
         }
         for i in range(count)
     ]

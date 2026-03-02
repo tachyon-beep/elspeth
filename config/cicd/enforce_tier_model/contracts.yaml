@@ -16,6 +16,16 @@ per_file_rules:
   reason: Type normalization requires isinstance() for polymorphic serialization of numeric types
   expires: null
 allow_hits:
+- key: contracts/errors.py:R1:ExecutionError:from_dict:fp=3034299cc17a86ce
+  owner: architecture
+  reason: Tier 1 deserialization — .get() for optional traceback field in stored ExecutionError JSON
+  safety: Missing traceback returns None — correct for errors recorded before traceback capture was added
+  expires: null
+- key: contracts/errors.py:R1:ExecutionError:from_dict:fp=8b8ea1d23b1ef94f
+  owner: architecture
+  reason: Tier 1 deserialization — .get() for optional phase field in stored ExecutionError JSON
+  safety: Missing phase returns None — correct for errors recorded before phase tracking was added
+  expires: null
 - key: contracts/schema_contract_factory.py:R1:create_contract_from_config:fp=c6546fd479ceedee
   owner: feature
   reason: Intentional identity fallback - fields without resolution mapping use normalized name as original name
@@ -26,11 +36,21 @@ allow_hits:
   reason: TypeError from normalize_type_for_contract for unsupported types (dict, list, Decimal) — maps to object
   safety: Preserves field in contract as 'any' type; no data loss or silent skip
   expires: '2026-05-14'
-- key: contracts/url.py:R6:SanitizedWebhookUrl:from_raw_url:fp=cf2c8467be680950
+- key: contracts/url.py:R6:SanitizedDatabaseUrl:from_raw_url:fp=20b25721d9adf860
   owner: architecture
-  reason: Silent recovery with explicit error handling path
-  safety: Code reviewed - legitimate pattern
-  expires: '2026-05-02'
+  reason: except ValueError on get_fingerprint_key() — explicit branch for dev mode (no key) vs production (fail_if_no_key)
+  safety: Raises SecretFingerprintError when fail_if_no_key=True; only silently continues in dev mode
+  expires: null
+- key: contracts/url.py:R6:SanitizedWebhookUrl:from_raw_url:fp=21ce92115665de50
+  owner: architecture
+  reason: except ValueError on get_fingerprint_key() — explicit branch for dev mode (no key) vs production (fail_if_no_key)
+  safety: Raises SecretFingerprintError when fail_if_no_key=True; only silently continues in dev mode
+  expires: null
+- key: contracts/security.py:R1:get_fingerprint_key:fp=f8bc47a912fd28d8
+  owner: architecture
+  reason: os.environ.get() is the correct API for checking env var existence — followed by explicit ValueError raise
+  safety: Raises ValueError immediately if env var not set — not a silent fallback
+  expires: null
 - key: contracts/data.py:R1:validate_row:fp=0f6fa60e1ef14cec
   owner: architecture
   reason: Optional field access at trust boundary
@@ -131,6 +151,21 @@ allow_hits:
   reason: Tier-3 boundary - from_policy() validates plugin config (user YAML) before conversion
   safety: Raises ValueError with clear field name and value - no silent recovery
   expires: null
+- key: contracts/hashing.py:R5:_reject_non_finite:fp=d35d4e11d243b198
+  owner: bugfix
+  reason: Canonical JSON NaN/Infinity rejection — isinstance(float) to detect non-finite values before rfc8785.dumps()
+  safety: Raises ValueError immediately — explicit crash, not masking
+  expires: null
+- key: contracts/hashing.py:R5:_reject_non_finite:fp=6bbc05c2197b1800
+  owner: bugfix
+  reason: Canonical JSON recursive rejection — isinstance(dict) to traverse nested data structures for NaN/Infinity
+  safety: Pure traversal for validation — no type coercion or default substitution
+  expires: null
+- key: contracts/hashing.py:R5:_reject_non_finite:fp=346fe02f62559967
+  owner: bugfix
+  reason: Canonical JSON recursive rejection — isinstance(list) to traverse nested data structures for NaN/Infinity
+  safety: Pure traversal for validation — no type coercion or default substitution
+  expires: null
 - key: contracts/header_modes.py:R5:parse_header_mode:fp=dc93452b5432e8a4
   owner: feature
   reason: Config parsing - config value from YAML is Tier 3 external data; isinstance() distinguishes string from dict
@@ -176,24 +211,31 @@ allow_hits:
   reason: Tier 1 boundary — .get() for optional condition_fire_offset (may be absent in older checkpoints)
   safety: None default is correct — absent offset means "no offset recorded"
   expires: null
-- key: contracts/plugin_context.py:R5:PluginContext:get:fp=1ba9331f7213c9c0
-  owner: architecture
-  reason: AST/type checking - required for safe parsing or discriminated unions
-- key: contracts/plugin_context.py:R1:PluginContext:record_call:fp=80f01dac69c67313
+- key: contracts/plugin_context.py:R1:PluginContext:record_call:fp=4bcfbddc7c8fb688
   owner: architecture
   reason: Tier 3 boundary — .get() on serialized LLM response dict to extract optional usage data
-- key: contracts/plugin_context.py:R5:PluginContext:record_call:fp=f9288bd1a6081f29
+  safety: Missing key returns None; no fabrication
+  expires: null
+- key: contracts/plugin_context.py:R5:PluginContext:record_call:fp=df23c1c8c7e94509
   owner: architecture
   reason: Tier 3 boundary — isinstance() validates usage is dict before TokenUsage.from_dict() coercion
-- key: contracts/plugin_context.py:R4:PluginContext:record_call:fp=2066dd38dbe9c12e
+  safety: Type dispatch for external data validation, not masking bugs
+  expires: null
+- key: contracts/plugin_context.py:R4:PluginContext:record_call:fp=b165ec2950e261e0
   owner: architecture
-  reason: Broad exception handling at external boundary with logging
-- key: contracts/plugin_context.py:R5:PluginContext:record_validation_error:fp=8a007856aa7c655f
+  reason: Broad exception handling — telemetry failure must not corrupt the audit call recording; FrameworkBugError/AuditIntegrityError re-raised before this handler
+  safety: Warning logged with error details; Landscape recording already succeeded; system errors propagate
+  expires: null
+- key: contracts/plugin_context.py:R5:PluginContext:record_validation_error:fp=4f4efcff4e768b32
   owner: architecture
-  reason: AST/type checking - required for safe parsing or discriminated unions
-- key: contracts/plugin_context.py:R6:PluginContext:record_validation_error:fp=004c532fa0483dba
+  reason: Tier 3 boundary — isinstance() checks if external row data is dict before accessing 'id' key
+  safety: Non-dict data falls through to hash-based row_id generation
+  expires: null
+- key: contracts/plugin_context.py:R6:PluginContext:record_validation_error:fp=77aec82106b1d3da
   owner: architecture
-  reason: Silent recovery with explicit error handling path
+  reason: Tier 3 boundary — ValueError/TypeError from stable_hash on non-canonical data falls back to repr_hash
+  safety: Warning logged; row_id still generated via repr_hash for audit trail continuity
+  expires: null
 - key: contracts/routing.py:R5:RoutingAction:__post_init__:fp=4d9b80b717bc7551
   owner: bugfix
   reason: Dataclass invariant enforcement - RoutingAction requires RoutingMode enum, not raw strings
@@ -243,4 +285,30 @@ allow_hits:
   owner: architecture
   reason: Tier 3 boundary — from_dict() validates completion_tokens is int before accepting
   safety: Non-int values coerced to None (unknown); no fabrication, no crash
+  expires: null
+# TYPE_CHECKING layer imports (L0→L1 annotation dependencies)
+- key: contracts/plugin_context.py:TC:_module_:fp=2281c9d4d4f9c832
+  owner: architecture
+  reason: TYPE_CHECKING import of LandscapeRecorder — PluginContext type annotations need L1 recorder type
+  safety: No runtime coupling — annotation-only import behind TYPE_CHECKING guard
+  expires: null
+- key: contracts/plugin_context.py:TC:_module_:fp=5dfc642462528293
+  owner: architecture
+  reason: TYPE_CHECKING import of RateLimitRegistry — PluginContext type annotations need L1 rate limiter type
+  safety: No runtime coupling — annotation-only import behind TYPE_CHECKING guard
+  expires: null
+- key: contracts/contexts.py:TC:_module_:fp=fe23a281512d9222
+  owner: architecture
+  reason: TYPE_CHECKING import of LandscapeRecorder — context protocols declare landscape property type
+  safety: No runtime coupling — annotation-only import behind TYPE_CHECKING guard
+  expires: null
+- key: contracts/contexts.py:TC:_module_:fp=b29b41656c78b873
+  owner: architecture
+  reason: TYPE_CHECKING import of RateLimitRegistry — context protocols declare rate_limiter property type
+  safety: No runtime coupling — annotation-only import behind TYPE_CHECKING guard
+  expires: null
+- key: contracts/config/runtime.py:TC:_module_:fp=07abedf4392ba82e
+  owner: architecture
+  reason: TYPE_CHECKING import of Settings models — Runtime*Config.from_settings() type annotations
+  safety: No runtime coupling — annotation-only import behind TYPE_CHECKING guard
   expires: null

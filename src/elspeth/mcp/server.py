@@ -1,4 +1,3 @@
-# src/elspeth/mcp/server.py
 """MCP server for ELSPETH Landscape audit database analysis.
 
 A lightweight read-only server that exposes tools for querying
@@ -22,15 +21,24 @@ import argparse
 import json
 import logging
 import sys
+from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any
 
 from mcp.server import Server
 from mcp.server.stdio import stdio_server
-from mcp.types import CallToolResult, TextContent, Tool
+from mcp.types import CallToolResult as CallToolResult
+from mcp.types import TextContent, Tool
 
 from elspeth.contracts.enums import RunStatus
 from elspeth.mcp.analyzer import LandscapeAnalyzer
+
+__all__ = [
+    "CallToolResult",
+    "create_server",
+    "main",
+    "run_server",
+]
 
 logger = logging.getLogger(__name__)
 
@@ -56,71 +64,350 @@ class _ArgSpec:
     optional_dict: tuple[str, ...] = ()  # defaults to None
 
 
-_TOOL_ARGS: dict[str, _ArgSpec] = {
+# ══════════════════════════════════════════════════════════════════════════════
+# Unified Tool Registry
+#
+# Each tool is defined exactly ONCE in _TOOLS. Adding a new tool requires
+# a single dict entry — no changes to list_tools() or call_tool() dispatch.
+# ══════════════════════════════════════════════════════════════════════════════
+
+
+@dataclass(frozen=True, slots=True)
+class _ToolDef:
+    """Complete definition for one MCP tool — single source of truth.
+
+    Combines argument validation spec, JSON Schema for MCP registration,
+    human-readable description, and dispatch handler. The list_tools()
+    and call_tool() functions derive their behavior entirely from this.
+    """
+
+    description: str
+    args: _ArgSpec
+    handler: Callable[[LandscapeAnalyzer, dict[str, Any]], Any]
+    schema_properties: dict[str, Any]
+
+
+_TOOLS: dict[str, _ToolDef] = {
     # --- Core Query Tools ---
-    "list_runs": _ArgSpec(
-        optional_int=(("limit", 50),),
-        optional_str=("status",),
+    "list_runs": _ToolDef(
+        description="List pipeline runs with optional status filter",
+        args=_ArgSpec(
+            optional_int=(("limit", 50),),
+            optional_str=("status",),
+        ),
+        handler=lambda a, args: a.list_runs(
+            limit=args["limit"],
+            status=args["status"],
+        ),
+        schema_properties={
+            "limit": {"type": "integer", "description": "Max runs to return (default 50)", "default": 50},
+            "status": {
+                "type": "string",
+                "description": "Filter by status",
+                "enum": [s.value for s in RunStatus],
+            },
+        },
     ),
-    "get_run": _ArgSpec(required_str=("run_id",)),
-    "get_run_summary": _ArgSpec(required_str=("run_id",)),
-    "list_nodes": _ArgSpec(required_str=("run_id",)),
-    "list_rows": _ArgSpec(
-        required_str=("run_id",),
-        optional_int=(("limit", 100), ("offset", 0)),
+    "get_run": _ToolDef(
+        description="Get details of a specific pipeline run",
+        args=_ArgSpec(required_str=("run_id",)),
+        handler=lambda a, args: a.get_run(args["run_id"]),
+        schema_properties={
+            "run_id": {"type": "string", "description": "Run ID to retrieve"},
+        },
     ),
-    "list_tokens": _ArgSpec(
-        required_str=("run_id",),
-        optional_str=("row_id",),
-        optional_int=(("limit", 100),),
+    "get_run_summary": _ToolDef(
+        description="Get summary statistics for a run: counts, durations, errors, outcome distribution",
+        args=_ArgSpec(required_str=("run_id",)),
+        handler=lambda a, args: a.get_run_summary(args["run_id"]),
+        schema_properties={
+            "run_id": {"type": "string", "description": "Run ID to analyze"},
+        },
     ),
-    "list_operations": _ArgSpec(
-        required_str=("run_id",),
-        optional_str=("operation_type", "status"),
-        optional_int=(("limit", 100),),
+    "list_nodes": _ToolDef(
+        description="List all nodes (plugin instances) for a run",
+        args=_ArgSpec(required_str=("run_id",)),
+        handler=lambda a, args: a.list_nodes(args["run_id"]),
+        schema_properties={
+            "run_id": {"type": "string", "description": "Run ID to query"},
+        },
     ),
-    "get_operation_calls": _ArgSpec(required_str=("operation_id",)),
-    "explain_token": _ArgSpec(
-        required_str=("run_id",),
-        optional_str=("token_id", "row_id", "sink"),
+    "list_rows": _ToolDef(
+        description="List source rows for a run with pagination",
+        args=_ArgSpec(
+            required_str=("run_id",),
+            optional_int=(("limit", 100), ("offset", 0)),
+        ),
+        handler=lambda a, args: a.list_rows(
+            run_id=args["run_id"],
+            limit=args["limit"],
+            offset=args["offset"],
+        ),
+        schema_properties={
+            "run_id": {"type": "string", "description": "Run ID to query"},
+            "limit": {"type": "integer", "description": "Max rows (default 100)", "default": 100},
+            "offset": {"type": "integer", "description": "Rows to skip (default 0)", "default": 0},
+        },
     ),
-    "get_errors": _ArgSpec(
-        required_str=("run_id",),
-        optional_str_defaults=(("error_type", "all"),),
-        optional_int=(("limit", 100),),
+    "list_tokens": _ToolDef(
+        description="List tokens for a run or specific row",
+        args=_ArgSpec(
+            required_str=("run_id",),
+            optional_str=("row_id",),
+            optional_int=(("limit", 100),),
+        ),
+        handler=lambda a, args: a.list_tokens(
+            run_id=args["run_id"],
+            row_id=args["row_id"],
+            limit=args["limit"],
+        ),
+        schema_properties={
+            "run_id": {"type": "string", "description": "Run ID to query"},
+            "row_id": {"type": "string", "description": "Optional row ID to filter by"},
+            "limit": {"type": "integer", "description": "Max tokens (default 100)", "default": 100},
+        },
     ),
-    "get_node_states": _ArgSpec(
-        required_str=("run_id",),
-        optional_str=("node_id", "status"),
-        optional_int=(("limit", 100),),
+    "list_operations": _ToolDef(
+        description="List source/sink operations for a run (blob downloads, file writes, database inserts)",
+        args=_ArgSpec(
+            required_str=("run_id",),
+            optional_str=("operation_type", "status"),
+            optional_int=(("limit", 100),),
+        ),
+        handler=lambda a, args: a.list_operations(
+            run_id=args["run_id"],
+            operation_type=args["operation_type"],
+            status=args["status"],
+            limit=args["limit"],
+        ),
+        schema_properties={
+            "run_id": {"type": "string", "description": "Run ID to query"},
+            "operation_type": {
+                "type": "string",
+                "description": "Filter by type",
+                "enum": ["source_load", "sink_write"],
+            },
+            "status": {
+                "type": "string",
+                "description": "Filter by status",
+                "enum": ["open", "completed", "failed", "pending"],
+            },
+            "limit": {"type": "integer", "description": "Max operations (default 100)", "default": 100},
+        },
     ),
-    "get_calls": _ArgSpec(required_str=("state_id",)),
-    "query": _ArgSpec(
-        required_str=("sql",),
-        optional_dict=("params",),
+    "get_operation_calls": _ToolDef(
+        description="Get external calls (HTTP, SQL, etc.) made during a source/sink operation",
+        args=_ArgSpec(required_str=("operation_id",)),
+        handler=lambda a, args: a.get_operation_calls(args["operation_id"]),
+        schema_properties={
+            "operation_id": {"type": "string", "description": "Operation ID to query"},
+        },
+    ),
+    "explain_token": _ToolDef(
+        description="Get complete lineage for a token: source row, node states, calls, routing, errors, outcome",
+        args=_ArgSpec(
+            required_str=("run_id",),
+            optional_str=("token_id", "row_id", "sink"),
+        ),
+        handler=lambda a, args: a.explain_token(
+            run_id=args["run_id"],
+            token_id=args["token_id"],
+            row_id=args["row_id"],
+            sink=args["sink"],
+        ),
+        schema_properties={
+            "run_id": {"type": "string", "description": "Run ID"},
+            "token_id": {"type": "string", "description": "Token ID (preferred for DAGs with forks)"},
+            "row_id": {"type": "string", "description": "Row ID (alternative to token_id)"},
+            "sink": {"type": "string", "description": "Sink name to disambiguate multiple terminals"},
+        },
+    ),
+    "get_errors": _ToolDef(
+        description="Get validation and/or transform errors for a run",
+        args=_ArgSpec(
+            required_str=("run_id",),
+            optional_str_defaults=(("error_type", "all"),),
+            optional_int=(("limit", 100),),
+        ),
+        handler=lambda a, args: a.get_errors(
+            run_id=args["run_id"],
+            error_type=args["error_type"],
+            limit=args["limit"],
+        ),
+        schema_properties={
+            "run_id": {"type": "string", "description": "Run ID to query"},
+            "error_type": {
+                "type": "string",
+                "description": "Error type filter",
+                "enum": ["all", "validation", "transform"],
+                "default": "all",
+            },
+            "limit": {"type": "integer", "description": "Max errors per type (default 100)", "default": 100},
+        },
+    ),
+    "get_node_states": _ToolDef(
+        description="Get node states (processing records) for a run",
+        args=_ArgSpec(
+            required_str=("run_id",),
+            optional_str=("node_id", "status"),
+            optional_int=(("limit", 100),),
+        ),
+        handler=lambda a, args: a.get_node_states(
+            run_id=args["run_id"],
+            node_id=args["node_id"],
+            status=args["status"],
+            limit=args["limit"],
+        ),
+        schema_properties={
+            "run_id": {"type": "string", "description": "Run ID to query"},
+            "node_id": {"type": "string", "description": "Optional node ID filter"},
+            "status": {
+                "type": "string",
+                "description": "Optional status filter",
+                "enum": ["open", "pending", "completed", "failed"],
+            },
+            "limit": {"type": "integer", "description": "Max states (default 100)", "default": 100},
+        },
+    ),
+    "get_calls": _ToolDef(
+        description="Get external calls (LLM, HTTP, etc.) for a node state",
+        args=_ArgSpec(required_str=("state_id",)),
+        handler=lambda a, args: a.get_calls(args["state_id"]),
+        schema_properties={
+            "state_id": {"type": "string", "description": "Node state ID"},
+        },
+    ),
+    "query": _ToolDef(
+        description="Execute a read-only SQL query against the audit database (SELECT only)",
+        args=_ArgSpec(
+            required_str=("sql",),
+            optional_dict=("params",),
+        ),
+        handler=lambda a, args: a.query(
+            sql=args["sql"],
+            params=args["params"],
+        ),
+        schema_properties={
+            "sql": {"type": "string", "description": "SQL SELECT query"},
+            "params": {"type": "object", "description": "Optional query parameters"},
+        },
     ),
     # --- Precomputed Analysis Tools ---
-    "get_dag_structure": _ArgSpec(required_str=("run_id",)),
-    "get_performance_report": _ArgSpec(required_str=("run_id",)),
-    "get_error_analysis": _ArgSpec(required_str=("run_id",)),
-    "get_llm_usage_report": _ArgSpec(required_str=("run_id",)),
-    "describe_schema": _ArgSpec(),
-    "get_outcome_analysis": _ArgSpec(required_str=("run_id",)),
-    # --- Emergency Diagnostic Tools ---
-    "diagnose": _ArgSpec(),
-    "get_failure_context": _ArgSpec(
-        required_str=("run_id",),
-        optional_int=(("limit", 10),),
+    "get_dag_structure": _ToolDef(
+        description="Get the DAG structure for a run: nodes, edges, and mermaid diagram for visualization",
+        args=_ArgSpec(required_str=("run_id",)),
+        handler=lambda a, args: a.get_dag_structure(args["run_id"]),
+        schema_properties={
+            "run_id": {"type": "string", "description": "Run ID to analyze"},
+        },
     ),
-    "get_recent_activity": _ArgSpec(
-        optional_int=(("minutes", 60),),
+    "get_performance_report": _ToolDef(
+        description="Get performance analysis: slow nodes, bottlenecks, timing statistics, high-variance nodes",
+        args=_ArgSpec(required_str=("run_id",)),
+        handler=lambda a, args: a.get_performance_report(args["run_id"]),
+        schema_properties={
+            "run_id": {"type": "string", "description": "Run ID to analyze"},
+        },
+    ),
+    "get_error_analysis": _ToolDef(
+        description="Analyze errors: grouped by type, by node, with sample data for pattern matching",
+        args=_ArgSpec(required_str=("run_id",)),
+        handler=lambda a, args: a.get_error_analysis(args["run_id"]),
+        schema_properties={
+            "run_id": {"type": "string", "description": "Run ID to analyze"},
+        },
+    ),
+    "get_llm_usage_report": _ToolDef(
+        description="Get LLM usage statistics: call counts, latencies, success rates by plugin",
+        args=_ArgSpec(required_str=("run_id",)),
+        handler=lambda a, args: a.get_llm_usage_report(args["run_id"]),
+        schema_properties={
+            "run_id": {"type": "string", "description": "Run ID to analyze"},
+        },
+    ),
+    "describe_schema": _ToolDef(
+        description="Describe the database schema: tables, columns, primary keys, foreign keys (for ad-hoc SQL)",
+        args=_ArgSpec(),
+        handler=lambda a, args: a.describe_schema(),
+        schema_properties={},
+    ),
+    "get_outcome_analysis": _ToolDef(
+        description="Analyze token outcomes: terminal states, fork/join patterns, sink routing distribution",
+        args=_ArgSpec(required_str=("run_id",)),
+        handler=lambda a, args: a.get_outcome_analysis(args["run_id"]),
+        schema_properties={
+            "run_id": {"type": "string", "description": "Run ID to analyze"},
+        },
+    ),
+    # --- Emergency Diagnostic Tools ---
+    "diagnose": _ToolDef(
+        description="\U0001f6a8 EMERGENCY: What's broken right now? Scans for failed runs, stuck runs, high error rates",
+        args=_ArgSpec(),
+        handler=lambda a, args: a.diagnose(),
+        schema_properties={},
+    ),
+    "get_failure_context": _ToolDef(
+        description="\U0001f50d Deep dive: Get comprehensive context about failures in a run (failed states, errors, patterns)",
+        args=_ArgSpec(
+            required_str=("run_id",),
+            optional_int=(("limit", 10),),
+        ),
+        handler=lambda a, args: a.get_failure_context(
+            run_id=args["run_id"],
+            limit=args["limit"],
+        ),
+        schema_properties={
+            "run_id": {"type": "string", "description": "Run ID to investigate"},
+            "limit": {"type": "integer", "description": "Max failures to return", "default": 10},
+        },
+    ),
+    "get_recent_activity": _ToolDef(
+        description="\U0001f4ca Timeline: What happened recently? Shows runs in the last N minutes",
+        args=_ArgSpec(
+            optional_int=(("minutes", 60),),
+        ),
+        handler=lambda a, args: a.get_recent_activity(
+            minutes=args["minutes"],
+        ),
+        schema_properties={
+            "minutes": {"type": "integer", "description": "Look back this many minutes", "default": 60},
+        },
     ),
     # --- Schema Contract Tools ---
-    "get_run_contract": _ArgSpec(required_str=("run_id",)),
-    "explain_field": _ArgSpec(required_str=("run_id", "field_name")),
-    "list_contract_violations": _ArgSpec(
-        required_str=("run_id",),
-        optional_int=(("limit", 100),),
+    "get_run_contract": _ToolDef(
+        description="Get schema contract for a run: mode, field mappings (original -> normalized), and inferred types",
+        args=_ArgSpec(required_str=("run_id",)),
+        handler=lambda a, args: a.get_run_contract(args["run_id"]),
+        schema_properties={
+            "run_id": {"type": "string", "description": "Run ID to query"},
+        },
+    ),
+    "explain_field": _ToolDef(
+        description="Trace a field's provenance: how it was named at source, normalized, and typed",
+        args=_ArgSpec(required_str=("run_id", "field_name")),
+        handler=lambda a, args: a.explain_field(
+            run_id=args["run_id"],
+            field_name=args["field_name"],
+        ),
+        schema_properties={
+            "run_id": {"type": "string", "description": "Run ID to query"},
+            "field_name": {"type": "string", "description": "Field name (normalized or original)"},
+        },
+    ),
+    "list_contract_violations": _ToolDef(
+        description="List contract violations: type mismatches, missing fields, with field names and type info",
+        args=_ArgSpec(
+            required_str=("run_id",),
+            optional_int=(("limit", 100),),
+        ),
+        handler=lambda a, args: a.list_contract_violations(
+            run_id=args["run_id"],
+            limit=args["limit"],
+        ),
+        schema_properties={
+            "run_id": {"type": "string", "description": "Run ID to query"},
+            "limit": {"type": "integer", "description": "Max violations to return (default 100)", "default": 100},
+        },
     ),
 }
 
@@ -136,10 +423,11 @@ def _validate_tool_args(name: str, arguments: dict[str, Any]) -> dict[str, Any]:
         ValueError: Missing required field or unknown tool.
         TypeError: Field has wrong type.
     """
-    spec = _TOOL_ARGS.get(name)
-    if spec is None:
+    defn = _TOOLS.get(name)
+    if defn is None:
         raise ValueError(f"Unknown tool: {name}")
 
+    spec = defn.args
     validated: dict[str, Any] = {}
 
     for fname in spec.required_str:
@@ -193,329 +481,33 @@ def create_server(database_url: str, *, passphrase: str | None = None) -> Server
     server = Server("elspeth-landscape")
     analyzer = LandscapeAnalyzer(database_url, passphrase=passphrase)
 
-    @server.list_tools()  # type: ignore[misc, no-untyped-call, untyped-decorator]  # MCP SDK decorators lack type stubs
+    @server.list_tools()  # type: ignore[no-untyped-call,untyped-decorator]
     async def list_tools() -> list[Tool]:
-        """List available analysis tools."""
+        """List available analysis tools.
+
+        Generated from _TOOLS registry — each tool's description, schema
+        properties, and required fields are derived from its _ToolDef entry.
+        """
         return [
             Tool(
-                name="list_runs",
-                description="List pipeline runs with optional status filter",
+                name=name,
+                description=defn.description,
                 inputSchema={
                     "type": "object",
-                    "properties": {
-                        "limit": {"type": "integer", "description": "Max runs to return (default 50)", "default": 50},
-                        "status": {
-                            "type": "string",
-                            "description": "Filter by status",
-                            "enum": [s.value for s in RunStatus],
-                        },
-                    },
+                    "properties": defn.schema_properties,
+                    **({"required": list(defn.args.required_str)} if defn.args.required_str else {}),
                 },
-            ),
-            Tool(
-                name="get_run",
-                description="Get details of a specific pipeline run",
-                inputSchema={
-                    "type": "object",
-                    "properties": {
-                        "run_id": {"type": "string", "description": "Run ID to retrieve"},
-                    },
-                    "required": ["run_id"],
-                },
-            ),
-            Tool(
-                name="get_run_summary",
-                description="Get summary statistics for a run: counts, durations, errors, outcome distribution",
-                inputSchema={
-                    "type": "object",
-                    "properties": {
-                        "run_id": {"type": "string", "description": "Run ID to analyze"},
-                    },
-                    "required": ["run_id"],
-                },
-            ),
-            Tool(
-                name="list_nodes",
-                description="List all nodes (plugin instances) for a run",
-                inputSchema={
-                    "type": "object",
-                    "properties": {
-                        "run_id": {"type": "string", "description": "Run ID to query"},
-                    },
-                    "required": ["run_id"],
-                },
-            ),
-            Tool(
-                name="list_rows",
-                description="List source rows for a run with pagination",
-                inputSchema={
-                    "type": "object",
-                    "properties": {
-                        "run_id": {"type": "string", "description": "Run ID to query"},
-                        "limit": {"type": "integer", "description": "Max rows (default 100)", "default": 100},
-                        "offset": {"type": "integer", "description": "Rows to skip (default 0)", "default": 0},
-                    },
-                    "required": ["run_id"],
-                },
-            ),
-            Tool(
-                name="list_tokens",
-                description="List tokens for a run or specific row",
-                inputSchema={
-                    "type": "object",
-                    "properties": {
-                        "run_id": {"type": "string", "description": "Run ID to query"},
-                        "row_id": {"type": "string", "description": "Optional row ID to filter by"},
-                        "limit": {"type": "integer", "description": "Max tokens (default 100)", "default": 100},
-                    },
-                    "required": ["run_id"],
-                },
-            ),
-            Tool(
-                name="list_operations",
-                description="List source/sink operations for a run (blob downloads, file writes, database inserts)",
-                inputSchema={
-                    "type": "object",
-                    "properties": {
-                        "run_id": {"type": "string", "description": "Run ID to query"},
-                        "operation_type": {
-                            "type": "string",
-                            "description": "Filter by type",
-                            "enum": ["source_load", "sink_write"],
-                        },
-                        "status": {
-                            "type": "string",
-                            "description": "Filter by status",
-                            "enum": ["open", "completed", "failed", "pending"],
-                        },
-                        "limit": {"type": "integer", "description": "Max operations (default 100)", "default": 100},
-                    },
-                    "required": ["run_id"],
-                },
-            ),
-            Tool(
-                name="get_operation_calls",
-                description="Get external calls (HTTP, SQL, etc.) made during a source/sink operation",
-                inputSchema={
-                    "type": "object",
-                    "properties": {
-                        "operation_id": {"type": "string", "description": "Operation ID to query"},
-                    },
-                    "required": ["operation_id"],
-                },
-            ),
-            Tool(
-                name="explain_token",
-                description="Get complete lineage for a token: source row, node states, calls, routing, errors, outcome",
-                inputSchema={
-                    "type": "object",
-                    "properties": {
-                        "run_id": {"type": "string", "description": "Run ID"},
-                        "token_id": {"type": "string", "description": "Token ID (preferred for DAGs with forks)"},
-                        "row_id": {"type": "string", "description": "Row ID (alternative to token_id)"},
-                        "sink": {"type": "string", "description": "Sink name to disambiguate multiple terminals"},
-                    },
-                    "required": ["run_id"],
-                },
-            ),
-            Tool(
-                name="get_errors",
-                description="Get validation and/or transform errors for a run",
-                inputSchema={
-                    "type": "object",
-                    "properties": {
-                        "run_id": {"type": "string", "description": "Run ID to query"},
-                        "error_type": {
-                            "type": "string",
-                            "description": "Error type filter",
-                            "enum": ["all", "validation", "transform"],
-                            "default": "all",
-                        },
-                        "limit": {"type": "integer", "description": "Max errors per type (default 100)", "default": 100},
-                    },
-                    "required": ["run_id"],
-                },
-            ),
-            Tool(
-                name="get_node_states",
-                description="Get node states (processing records) for a run",
-                inputSchema={
-                    "type": "object",
-                    "properties": {
-                        "run_id": {"type": "string", "description": "Run ID to query"},
-                        "node_id": {"type": "string", "description": "Optional node ID filter"},
-                        "status": {
-                            "type": "string",
-                            "description": "Optional status filter",
-                            "enum": ["open", "pending", "completed", "failed"],
-                        },
-                        "limit": {"type": "integer", "description": "Max states (default 100)", "default": 100},
-                    },
-                    "required": ["run_id"],
-                },
-            ),
-            Tool(
-                name="get_calls",
-                description="Get external calls (LLM, HTTP, etc.) for a node state",
-                inputSchema={
-                    "type": "object",
-                    "properties": {
-                        "state_id": {"type": "string", "description": "Node state ID"},
-                    },
-                    "required": ["state_id"],
-                },
-            ),
-            Tool(
-                name="query",
-                description="Execute a read-only SQL query against the audit database (SELECT only)",
-                inputSchema={
-                    "type": "object",
-                    "properties": {
-                        "sql": {"type": "string", "description": "SQL SELECT query"},
-                        "params": {"type": "object", "description": "Optional query parameters"},
-                    },
-                    "required": ["sql"],
-                },
-            ),
-            # === Precomputed Analysis Tools ===
-            Tool(
-                name="get_dag_structure",
-                description="Get the DAG structure for a run: nodes, edges, and mermaid diagram for visualization",
-                inputSchema={
-                    "type": "object",
-                    "properties": {
-                        "run_id": {"type": "string", "description": "Run ID to analyze"},
-                    },
-                    "required": ["run_id"],
-                },
-            ),
-            Tool(
-                name="get_performance_report",
-                description="Get performance analysis: slow nodes, bottlenecks, timing statistics, high-variance nodes",
-                inputSchema={
-                    "type": "object",
-                    "properties": {
-                        "run_id": {"type": "string", "description": "Run ID to analyze"},
-                    },
-                    "required": ["run_id"],
-                },
-            ),
-            Tool(
-                name="get_error_analysis",
-                description="Analyze errors: grouped by type, by node, with sample data for pattern matching",
-                inputSchema={
-                    "type": "object",
-                    "properties": {
-                        "run_id": {"type": "string", "description": "Run ID to analyze"},
-                    },
-                    "required": ["run_id"],
-                },
-            ),
-            Tool(
-                name="get_llm_usage_report",
-                description="Get LLM usage statistics: call counts, latencies, success rates by plugin",
-                inputSchema={
-                    "type": "object",
-                    "properties": {
-                        "run_id": {"type": "string", "description": "Run ID to analyze"},
-                    },
-                    "required": ["run_id"],
-                },
-            ),
-            Tool(
-                name="describe_schema",
-                description="Describe the database schema: tables, columns, primary keys, foreign keys (for ad-hoc SQL)",
-                inputSchema={
-                    "type": "object",
-                    "properties": {},
-                },
-            ),
-            Tool(
-                name="get_outcome_analysis",
-                description="Analyze token outcomes: terminal states, fork/join patterns, sink routing distribution",
-                inputSchema={
-                    "type": "object",
-                    "properties": {
-                        "run_id": {"type": "string", "description": "Run ID to analyze"},
-                    },
-                    "required": ["run_id"],
-                },
-            ),
-            # === Emergency Diagnostic Tools ===
-            Tool(
-                name="diagnose",
-                description="\U0001f6a8 EMERGENCY: What's broken right now? Scans for failed runs, stuck runs, high error rates",
-                inputSchema={
-                    "type": "object",
-                    "properties": {},
-                },
-            ),
-            Tool(
-                name="get_failure_context",
-                description="\U0001f50d Deep dive: Get comprehensive context about failures in a run (failed states, errors, patterns)",
-                inputSchema={
-                    "type": "object",
-                    "properties": {
-                        "run_id": {"type": "string", "description": "Run ID to investigate"},
-                        "limit": {"type": "integer", "description": "Max failures to return", "default": 10},
-                    },
-                    "required": ["run_id"],
-                },
-            ),
-            Tool(
-                name="get_recent_activity",
-                description="\U0001f4ca Timeline: What happened recently? Shows runs in the last N minutes",
-                inputSchema={
-                    "type": "object",
-                    "properties": {
-                        "minutes": {"type": "integer", "description": "Look back this many minutes", "default": 60},
-                    },
-                },
-            ),
-            # === Schema Contract Tools (Phase 5: Unified Schema Contracts) ===
-            Tool(
-                name="get_run_contract",
-                description="Get schema contract for a run: mode, field mappings (original -> normalized), and inferred types",
-                inputSchema={
-                    "type": "object",
-                    "properties": {
-                        "run_id": {"type": "string", "description": "Run ID to query"},
-                    },
-                    "required": ["run_id"],
-                },
-            ),
-            Tool(
-                name="explain_field",
-                description="Trace a field's provenance: how it was named at source, normalized, and typed",
-                inputSchema={
-                    "type": "object",
-                    "properties": {
-                        "run_id": {"type": "string", "description": "Run ID to query"},
-                        "field_name": {"type": "string", "description": "Field name (normalized or original)"},
-                    },
-                    "required": ["run_id", "field_name"],
-                },
-            ),
-            Tool(
-                name="list_contract_violations",
-                description="List contract violations: type mismatches, missing fields, with field names and type info",
-                inputSchema={
-                    "type": "object",
-                    "properties": {
-                        "run_id": {"type": "string", "description": "Run ID to query"},
-                        "limit": {"type": "integer", "description": "Max violations to return (default 100)", "default": 100},
-                    },
-                    "required": ["run_id"],
-                },
-            ),
+            )
+            for name, defn in _TOOLS.items()
         ]
 
-    @server.call_tool()  # type: ignore[misc, untyped-decorator]  # MCP SDK decorators lack type stubs
+    @server.call_tool()  # type: ignore[untyped-decorator]
     async def call_tool(name: str, arguments: dict[str, Any]) -> CallToolResult | list[TextContent]:
         """Handle tool calls.
 
         Arguments are validated at the Tier 3 boundary before dispatch.
         ``_validate_tool_args`` checks required fields, types, and defaults.
+        The handler is looked up from the ``_TOOLS`` registry.
         """
         # Validate arguments at the Tier 3 boundary — immediately,
         # before any of the external data travels into analyzer methods.
@@ -532,105 +524,8 @@ def create_server(database_url: str, *, passphrase: str | None = None) -> Server
         # serialization bugs, and analyzer bugs must propagate so they
         # surface as MCP protocol errors rather than silent "Error: ..."
         # text. Tier 1 audit data corruption must never be swallowed.
-        result: Any
-        if name == "list_runs":
-            result = analyzer.list_runs(
-                limit=args["limit"],
-                status=args["status"],
-            )
-        elif name == "get_run":
-            result = analyzer.get_run(args["run_id"])
-        elif name == "get_run_summary":
-            result = analyzer.get_run_summary(args["run_id"])
-        elif name == "list_nodes":
-            result = analyzer.list_nodes(args["run_id"])
-        elif name == "list_rows":
-            result = analyzer.list_rows(
-                run_id=args["run_id"],
-                limit=args["limit"],
-                offset=args["offset"],
-            )
-        elif name == "list_tokens":
-            result = analyzer.list_tokens(
-                run_id=args["run_id"],
-                row_id=args["row_id"],
-                limit=args["limit"],
-            )
-        elif name == "list_operations":
-            result = analyzer.list_operations(
-                run_id=args["run_id"],
-                operation_type=args["operation_type"],
-                status=args["status"],
-                limit=args["limit"],
-            )
-        elif name == "get_operation_calls":
-            result = analyzer.get_operation_calls(args["operation_id"])
-        elif name == "explain_token":
-            result = analyzer.explain_token(
-                run_id=args["run_id"],
-                token_id=args["token_id"],
-                row_id=args["row_id"],
-                sink=args["sink"],
-            )
-        elif name == "get_errors":
-            result = analyzer.get_errors(
-                run_id=args["run_id"],
-                error_type=args["error_type"],
-                limit=args["limit"],
-            )
-        elif name == "get_node_states":
-            result = analyzer.get_node_states(
-                run_id=args["run_id"],
-                node_id=args["node_id"],
-                status=args["status"],
-                limit=args["limit"],
-            )
-        elif name == "get_calls":
-            result = analyzer.get_calls(args["state_id"])
-        elif name == "query":
-            result = analyzer.query(
-                sql=args["sql"],
-                params=args["params"],
-            )
-        # === Precomputed Analysis Tools ===
-        elif name == "get_dag_structure":
-            result = analyzer.get_dag_structure(args["run_id"])
-        elif name == "get_performance_report":
-            result = analyzer.get_performance_report(args["run_id"])
-        elif name == "get_error_analysis":
-            result = analyzer.get_error_analysis(args["run_id"])
-        elif name == "get_llm_usage_report":
-            result = analyzer.get_llm_usage_report(args["run_id"])
-        elif name == "describe_schema":
-            result = analyzer.describe_schema()
-        elif name == "get_outcome_analysis":
-            result = analyzer.get_outcome_analysis(args["run_id"])
-        # === Emergency Diagnostic Tools ===
-        elif name == "diagnose":
-            result = analyzer.diagnose()
-        elif name == "get_failure_context":
-            result = analyzer.get_failure_context(
-                run_id=args["run_id"],
-                limit=args["limit"],
-            )
-        elif name == "get_recent_activity":
-            result = analyzer.get_recent_activity(
-                minutes=args["minutes"],
-            )
-        # === Schema Contract Tools ===
-        elif name == "get_run_contract":
-            result = analyzer.get_run_contract(args["run_id"])
-        elif name == "explain_field":
-            result = analyzer.explain_field(
-                run_id=args["run_id"],
-                field_name=args["field_name"],
-            )
-        elif name == "list_contract_violations":
-            result = analyzer.list_contract_violations(
-                run_id=args["run_id"],
-                limit=args["limit"],
-            )
-        else:
+        defn = _TOOLS.get(name)
+        if defn is None:
             # _validate_tool_args already raises for unknown tools,
             # but keep this branch for defense-in-depth.
             return CallToolResult(
@@ -638,6 +533,7 @@ def create_server(database_url: str, *, passphrase: str | None = None) -> Server
                 isError=True,
             )
 
+        result = defn.handler(analyzer, args)
         return [TextContent(type="text", text=json.dumps(result, indent=2))]
 
     return server

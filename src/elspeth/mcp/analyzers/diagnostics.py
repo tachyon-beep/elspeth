@@ -1,4 +1,3 @@
-# src/elspeth/mcp/analyzers/diagnostics.py
 """Emergency diagnostic functions for the Landscape audit database.
 
 Functions: diagnose, get_failure_context, get_recent_activity.
@@ -167,13 +166,22 @@ def diagnose(db: LandscapeDB, recorder: LandscapeRecorder) -> DiagnosticReport:
             .limit(10)
         ).fetchall()
 
-        # Count QUARANTINED outcomes across recent runs
-        quarantined_count = (
-            conn.execute(
-                select(func.count(token_outcomes_table.c.outcome_id)).where(token_outcomes_table.c.outcome == "quarantined")
-            ).scalar()
-            or 0
-        )
+        # Count QUARANTINED outcomes scoped to runs from the last 24 hours.
+        # Without scoping, old quarantines accumulate and the count is
+        # permanently non-zero in databases with history (T5 bug fix).
+        recent_cutoff = datetime.now(UTC) - timedelta(hours=24)
+        recent_run_ids = conn.execute(select(runs_table.c.run_id).where(runs_table.c.started_at >= recent_cutoff)).scalars().all()
+
+        quarantined_count = 0
+        if recent_run_ids:
+            quarantined_count = (
+                conn.execute(
+                    select(func.count(token_outcomes_table.c.outcome_id))
+                    .where(token_outcomes_table.c.outcome == "quarantined")
+                    .where(token_outcomes_table.c.run_id.in_(recent_run_ids))
+                ).scalar()
+                or 0
+            )
 
         if quarantined_count > 0:
             problems.append(
@@ -181,7 +189,7 @@ def diagnose(db: LandscapeDB, recorder: LandscapeRecorder) -> DiagnosticReport:
                     "severity": "INFO",
                     "type": "quarantined_rows",
                     "count": quarantined_count,
-                    "message": f"{quarantined_count} row(s) have been quarantined across all runs",
+                    "message": f"{quarantined_count} row(s) quarantined in recent runs",
                 }
             )
             recommendations.append("Quarantined rows indicate data quality issues at source")

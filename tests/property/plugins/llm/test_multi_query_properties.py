@@ -1,11 +1,10 @@
 # tests/property/plugins/llm/test_multi_query_properties.py
 """Property-based tests for multi-query pure data transformations.
 
-The multi-query system evaluates a cross-product of (case_study x criterion)
-against each row. These tests cover the pure logic:
+Tests cover QuerySpec (named variable mapping) used by the unified LLMTransform:
 
 1. OutputFieldConfig.to_json_schema: type mapping correctness
-2. QuerySpec.build_template_context: positional variable mapping
+2. QuerySpec.build_template_context: named variable mapping
 3. OutputFieldConfig validation: enum requires values, others reject values
 """
 
@@ -15,7 +14,7 @@ import pytest
 from hypothesis import given, settings
 from hypothesis import strategies as st
 
-from elspeth.plugins.llm.multi_query import (
+from elspeth.plugins.transforms.llm.multi_query import (
     OutputFieldConfig,
     OutputFieldType,
     QuerySpec,
@@ -25,7 +24,9 @@ from elspeth.plugins.llm.multi_query import (
 # Strategies
 # =============================================================================
 
-field_names = st.text(min_size=1, max_size=15, alphabet="abcdefghijklmnopqrstuvwxyz_")
+field_names = st.text(min_size=1, max_size=15, alphabet="abcdefghijklmnopqrstuvwxyz_").filter(
+    lambda s: s != "source_row"  # Reserved key in build_template_context
+)
 
 string_values = st.text(min_size=0, max_size=30)
 
@@ -100,93 +101,70 @@ class TestOutputFieldSchemaProperties:
 
 
 # =============================================================================
-# QuerySpec.build_template_context Properties
+# QuerySpec.build_template_context Properties (Named Mapping)
 # =============================================================================
 
 
 class TestQuerySpecContextProperties:
-    """build_template_context must create correct positional mappings."""
+    """build_template_context must create correct named variable mappings.
+
+    QuerySpec uses named input_fields (dict mapping template variable
+    name to row column name) instead of positional input_1, input_2 variables.
+    """
 
     @given(
         n_fields=st.integers(min_value=1, max_value=5),
         data=st.data(),
     )
     @settings(max_examples=100)
-    def test_positional_mapping(self, n_fields: int, data: st.DataObject) -> None:
-        """Property: input_fields[i] maps to context['input_{i+1}']."""
-        names = data.draw(st.lists(field_names, min_size=n_fields, max_size=n_fields, unique=True))
+    def test_named_mapping(self, n_fields: int, data: st.DataObject) -> None:
+        """Property: input_fields maps template_var -> row[column_name] correctly."""
+        template_vars = data.draw(st.lists(field_names, min_size=n_fields, max_size=n_fields, unique=True))
+        column_names = data.draw(st.lists(field_names, min_size=n_fields, max_size=n_fields, unique=True))
         values = data.draw(st.lists(string_values, min_size=n_fields, max_size=n_fields))
-        row = dict(zip(names, values, strict=False))
+
+        # Build row from column_names -> values
+        row = dict(zip(column_names, values, strict=False))
+
+        # Build input_fields mapping: template_var -> column_name
+        input_fields = dict(zip(template_vars, column_names, strict=False))
 
         spec = QuerySpec(
-            case_study_name="cs1",
-            criterion_name="cr1",
-            input_fields=names,
-            output_prefix="cs1_cr1",
-            criterion_data={"name": "cr1"},
-            case_study_data={"name": "cs1"},
+            name="test_query",
+            input_fields=input_fields,
         )
 
         ctx = spec.build_template_context(row)
 
-        for i, name in enumerate(names, start=1):
-            assert f"input_{i}" in ctx
-            assert ctx[f"input_{i}"] == row[name]
+        # Each template variable should map to the correct row value
+        for template_var, column_name in input_fields.items():
+            assert template_var in ctx
+            assert ctx[template_var] == row[column_name]
 
     @given(data=st.data())
     @settings(max_examples=50)
-    def test_context_includes_criterion_and_case_study(self, data: st.DataObject) -> None:
-        """Property: Context always includes criterion and case_study dicts."""
-        name = data.draw(field_names)
-        row = {name: "value"}
-        criterion_data = {"name": "test_criterion"}
-        case_study_data = {"name": "test_case_study"}
-
-        spec = QuerySpec(
-            case_study_name="cs1",
-            criterion_name="cr1",
-            input_fields=[name],
-            output_prefix="cs1_cr1",
-            criterion_data=criterion_data,
-            case_study_data=case_study_data,
-        )
-
-        ctx = spec.build_template_context(row)
-        assert ctx["criterion"] == criterion_data
-        assert ctx["case_study"] == case_study_data
-
-    @given(data=st.data())
-    @settings(max_examples=50)
-    def test_context_includes_full_row(self, data: st.DataObject) -> None:
+    def test_context_includes_source_row(self, data: st.DataObject) -> None:
         """Property: Context['source_row'] contains the full original row."""
-        name = data.draw(field_names)
+        column_name = data.draw(field_names)
         value = data.draw(string_values)
-        row = {name: value}
+        row = {column_name: value}
 
         spec = QuerySpec(
-            case_study_name="cs1",
-            criterion_name="cr1",
-            input_fields=[name],
-            output_prefix="cs1_cr1",
-            criterion_data={},
-            case_study_data={},
+            name="test_query",
+            input_fields={"var": column_name},
         )
 
         ctx = spec.build_template_context(row)
         assert ctx["source_row"] == row
 
-    def test_missing_field_raises_key_error(self) -> None:
-        """Property: Missing required field raises KeyError."""
+    def test_missing_column_raises_key_error(self) -> None:
+        """Property: Missing row column raises KeyError."""
         spec = QuerySpec(
-            case_study_name="cs1",
-            criterion_name="cr1",
-            input_fields=["required_field"],
-            output_prefix="cs1_cr1",
-            criterion_data={},
-            case_study_data={},
+            name="test_query",
+            input_fields={"template_var": "missing_column"},
         )
 
-        with pytest.raises(KeyError, match="required_field"):
+        with pytest.raises(KeyError):
             spec.build_template_context({"other_field": "value"})
 
     @given(
@@ -195,21 +173,35 @@ class TestQuerySpecContextProperties:
     )
     @settings(max_examples=50)
     def test_context_has_exactly_expected_keys(self, n_fields: int, data: st.DataObject) -> None:
-        """Property: Context has input_N, criterion, case_study, and source_row only."""
-        names = data.draw(st.lists(field_names, min_size=n_fields, max_size=n_fields, unique=True))
-        row = dict.fromkeys(names, "v")
+        """Property: Context has named variables and source_row only."""
+        template_vars = data.draw(st.lists(field_names, min_size=n_fields, max_size=n_fields, unique=True))
+        column_names = data.draw(st.lists(field_names, min_size=n_fields, max_size=n_fields, unique=True))
+        row = dict.fromkeys(column_names, "v")
+
+        input_fields = dict(zip(template_vars, column_names, strict=False))
 
         spec = QuerySpec(
-            case_study_name="cs1",
-            criterion_name="cr1",
-            input_fields=names,
-            output_prefix="cs1_cr1",
-            criterion_data={},
-            case_study_data={},
+            name="test_query",
+            input_fields=input_fields,
         )
 
         ctx = spec.build_template_context(row)
 
-        expected_keys = {f"input_{i}" for i in range(1, n_fields + 1)}
-        expected_keys |= {"criterion", "case_study", "source_row"}
+        expected_keys = set(template_vars) | {"source_row"}
         assert set(ctx.keys()) == expected_keys
+
+    def test_empty_name_rejected(self) -> None:
+        """Property: Empty name raises ValueError."""
+        with pytest.raises(ValueError, match="non-empty"):
+            QuerySpec(
+                name="",
+                input_fields={"var": "col"},
+            )
+
+    def test_empty_input_fields_rejected(self) -> None:
+        """Property: Empty input_fields raises ValueError."""
+        with pytest.raises(ValueError, match="non-empty"):
+            QuerySpec(
+                name="test_query",
+                input_fields={},
+            )

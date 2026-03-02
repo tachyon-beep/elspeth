@@ -1,4 +1,3 @@
-# src/elspeth/core/security/web.py
 """Web security infrastructure for SSRF prevention and URL validation.
 
 This module provides defense-in-depth against Server-Side Request Forgery (SSRF):

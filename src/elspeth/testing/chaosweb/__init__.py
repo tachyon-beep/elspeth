@@ -1,4 +1,3 @@
-# src/elspeth/testing/chaosweb/__init__.py
 """ChaosWeb: Fake web server for testing web scraping pipeline resilience.
 
 ChaosWeb provides:

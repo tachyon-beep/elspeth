@@ -12,9 +12,9 @@ import pytest
 
 from elspeth.contracts.plugin_context import PluginContext
 from elspeth.contracts.schema_contract import PipelineRow, SchemaContract
-from elspeth.plugins.llm.azure_batch import AzureBatchLLMTransform
-from elspeth.plugins.llm.openrouter_batch import OpenRouterBatchLLMTransform
-from elspeth.plugins.results import TransformResult
+from elspeth.plugins.infrastructure.results import TransformResult
+from elspeth.plugins.transforms.llm.azure_batch import AzureBatchLLMTransform
+from elspeth.plugins.transforms.llm.openrouter_batch import OpenRouterBatchLLMTransform
 from elspeth.testing import make_field, make_row
 
 

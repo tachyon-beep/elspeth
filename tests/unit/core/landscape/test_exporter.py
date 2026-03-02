@@ -108,6 +108,7 @@ _TOKEN = Token(
     token_id="tok-1",
     row_id="row-1",
     created_at=_DT,
+    run_id="run-1",
     fork_group_id=None,
     join_group_id=None,
     expand_group_id=None,

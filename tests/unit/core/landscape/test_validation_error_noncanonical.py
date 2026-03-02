@@ -11,17 +11,17 @@ must be quarantined and recorded even when malformed.
 import pytest
 
 from elspeth.contracts import NodeType
-from elspeth.contracts.plugin_context import PluginContext
 from elspeth.contracts.schema import SchemaConfig
-from elspeth.core.landscape.database import LandscapeDB
 from elspeth.core.landscape.recorder import LandscapeRecorder
+from tests.fixtures.factories import make_context
+from tests.fixtures.landscape import make_landscape_db, make_recorder
 
 
 @pytest.fixture
 def recorder() -> LandscapeRecorder:
     """Create in-memory recorder with a registered run."""
-    db = LandscapeDB("sqlite:///:memory:")
-    rec = LandscapeRecorder(db)
+    db = make_landscape_db()
+    rec = make_recorder(db)
 
     # Create a run for foreign key constraint
     rec.begin_run(
@@ -50,12 +50,7 @@ class TestValidationErrorNonCanonical:
 
     def test_record_primitive_int(self, recorder: LandscapeRecorder) -> None:
         """Primitive int should be quarantined without crash."""
-        ctx = PluginContext(
-            run_id="test-run",
-            config={},
-            node_id="source_node",
-            landscape=recorder,
-        )
+        ctx = make_context(run_id="test-run", node_id="source_node", landscape=recorder)
 
         token = ctx.record_validation_error(
             row=42,
@@ -77,12 +72,7 @@ class TestValidationErrorNonCanonical:
 
         from elspeth.core.canonical import stable_hash
 
-        ctx = PluginContext(
-            run_id="test-run",
-            config={},
-            node_id="source_node",
-            landscape=recorder,
-        )
+        ctx = make_context(run_id="test-run", node_id="source_node", landscape=recorder)
 
         row_value = 42
         error_msg = "Expected dict, got int"
@@ -118,12 +108,7 @@ class TestValidationErrorNonCanonical:
 
     def test_record_primitive_string(self, recorder: LandscapeRecorder) -> None:
         """Primitive string should be quarantined without crash."""
-        ctx = PluginContext(
-            run_id="test-run",
-            config={},
-            node_id="source_node",
-            landscape=recorder,
-        )
+        ctx = make_context(run_id="test-run", node_id="source_node", landscape=recorder)
 
         token = ctx.record_validation_error(
             row="invalid_string",
@@ -136,12 +121,7 @@ class TestValidationErrorNonCanonical:
 
     def test_record_list(self, recorder: LandscapeRecorder) -> None:
         """List should be quarantined without crash."""
-        ctx = PluginContext(
-            run_id="test-run",
-            config={},
-            node_id="source_node",
-            landscape=recorder,
-        )
+        ctx = make_context(run_id="test-run", node_id="source_node", landscape=recorder)
 
         token = ctx.record_validation_error(
             row=[1, 2, 3],
@@ -154,12 +134,7 @@ class TestValidationErrorNonCanonical:
 
     def test_record_nan_value(self, recorder: LandscapeRecorder) -> None:
         """Row with NaN should be quarantined without crash."""
-        ctx = PluginContext(
-            run_id="test-run",
-            config={},
-            node_id="source_node",
-            landscape=recorder,
-        )
+        ctx = make_context(run_id="test-run", node_id="source_node", landscape=recorder)
 
         token = ctx.record_validation_error(
             row={"value": float("nan")},
@@ -180,14 +155,9 @@ class TestValidationErrorNonCanonical:
         """
         import json
 
-        from elspeth.core.canonical import repr_hash
+        from elspeth.contracts.hashing import repr_hash
 
-        ctx = PluginContext(
-            run_id="test-run",
-            config={},
-            node_id="source_node",
-            landscape=recorder,
-        )
+        ctx = make_context(run_id="test-run", node_id="source_node", landscape=recorder)
 
         row_value = {"value": float("nan")}
         error_msg = "Row contains NaN"
@@ -219,12 +189,7 @@ class TestValidationErrorNonCanonical:
 
     def test_record_infinity_value(self, recorder: LandscapeRecorder) -> None:
         """Row with Infinity should be quarantined without crash."""
-        ctx = PluginContext(
-            run_id="test-run",
-            config={},
-            node_id="source_node",
-            landscape=recorder,
-        )
+        ctx = make_context(run_id="test-run", node_id="source_node", landscape=recorder)
 
         token = ctx.record_validation_error(
             row={"value": float("inf")},
@@ -237,12 +202,7 @@ class TestValidationErrorNonCanonical:
 
     def test_record_negative_infinity(self, recorder: LandscapeRecorder) -> None:
         """Row with -Infinity should be quarantined without crash."""
-        ctx = PluginContext(
-            run_id="test-run",
-            config={},
-            node_id="source_node",
-            landscape=recorder,
-        )
+        ctx = make_context(run_id="test-run", node_id="source_node", landscape=recorder)
 
         token = ctx.record_validation_error(
             row={"value": float("-inf")},
@@ -255,12 +215,7 @@ class TestValidationErrorNonCanonical:
 
     def test_audit_trail_contains_repr_fallback(self, recorder: LandscapeRecorder) -> None:
         """Verify audit trail stores repr() for non-canonical data."""
-        ctx = PluginContext(
-            run_id="test-run",
-            config={},
-            node_id="source_node",
-            landscape=recorder,
-        )
+        ctx = make_context(run_id="test-run", node_id="source_node", landscape=recorder)
 
         # Use NaN which actually triggers the fallback (primitives are canonical)
         token = ctx.record_validation_error(
@@ -294,12 +249,7 @@ class TestValidationErrorNonCanonical:
 
     def test_multiple_non_canonical_rows(self, recorder: LandscapeRecorder) -> None:
         """Multiple non-canonical rows should all be recorded."""
-        ctx = PluginContext(
-            run_id="test-run",
-            config={},
-            node_id="source_node",
-            landscape=recorder,
-        )
+        ctx = make_context(run_id="test-run", node_id="source_node", landscape=recorder)
 
         tokens = []
         test_rows = [
@@ -329,7 +279,7 @@ class TestValidationErrorNonCanonical:
 
 def test_repr_hash_helper():
     """Verify repr_hash() helper produces consistent hashes."""
-    from elspeth.core.canonical import repr_hash
+    from elspeth.contracts.hashing import repr_hash
 
     # Same object should produce same hash
     hash1 = repr_hash(42)

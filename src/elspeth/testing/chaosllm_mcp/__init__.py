@@ -1,4 +1,3 @@
-# src/elspeth/testing/chaosllm_mcp/__init__.py
 """MCP server for analyzing ChaosLLM test results.
 
 Provides Claude-optimized analysis tools:

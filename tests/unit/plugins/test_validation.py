@@ -2,7 +2,7 @@
 
 import pytest
 
-from elspeth.plugins.validation import PluginConfigValidator
+from elspeth.plugins.infrastructure.validation import PluginConfigValidator
 
 
 def test_validator_accepts_valid_source_config():

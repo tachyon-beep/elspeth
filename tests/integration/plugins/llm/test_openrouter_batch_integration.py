@@ -28,8 +28,9 @@ from elspeth.contracts.schema import SchemaConfig
 from elspeth.core.landscape.database import LandscapeDB
 from elspeth.core.landscape.recorder import LandscapeRecorder
 from elspeth.core.landscape.schema import calls_table
-from elspeth.plugins.llm.openrouter_batch import OpenRouterBatchLLMTransform
+from elspeth.plugins.transforms.llm.openrouter_batch import OpenRouterBatchLLMTransform
 from elspeth.testing import make_pipeline_row
+from tests.fixtures.landscape import make_recorder
 from tests.unit.plugins.llm.conftest import chaosllm_openrouter_http_responses
 
 # Common schema config for dynamic field handling
@@ -148,7 +149,7 @@ class TestThreadSafetyConcurrentWorkers:
 
     @pytest.fixture
     def recorder(self, db: LandscapeDB) -> LandscapeRecorder:
-        return LandscapeRecorder(db)
+        return make_recorder(db)
 
     def test_concurrent_workers_produce_unique_call_indices(self, chaosllm_server, recorder: LandscapeRecorder) -> None:
         """Multiple workers sharing one recorder produce unique call indices.
@@ -165,7 +166,9 @@ class TestThreadSafetyConcurrentWorkers:
         transform.on_start(ctx)
 
         rows = [make_pipeline_row({"text": f"Row {i}"}) for i in range(batch_size)]
-        responses = [_create_mock_response(chaosllm_server, content=f"Result {i}") for i in range(batch_size)]
+        responses: list[dict[str, Any] | str | httpx.Response] = [
+            _create_mock_response(chaosllm_server, content=f"Result {i}") for i in range(batch_size)
+        ]
 
         with chaosllm_openrouter_http_responses(chaosllm_server, responses):
             result = transform.process(rows, ctx)
@@ -202,7 +205,9 @@ class TestThreadSafetyConcurrentWorkers:
         transform.on_start(ctx)
 
         rows = [make_pipeline_row({"text": f"Row {i}"}) for i in range(batch_size)]
-        responses = [_create_mock_response(chaosllm_server, content=f"Result {i}") for i in range(batch_size)]
+        responses: list[dict[str, Any] | str | httpx.Response] = [
+            _create_mock_response(chaosllm_server, content=f"Result {i}") for i in range(batch_size)
+        ]
 
         with chaosllm_openrouter_http_responses(chaosllm_server, responses):
             result = transform.process(rows, ctx)
@@ -238,7 +243,7 @@ class TestStreamErrorBatchHandling:
 
     @pytest.fixture
     def recorder(self, db: LandscapeDB) -> LandscapeRecorder:
-        return LandscapeRecorder(db)
+        return make_recorder(db)
 
     def test_stream_error_produces_error_marker_not_crash(self, chaosllm_server, recorder: LandscapeRecorder) -> None:
         """StreamError during response streaming produces per-row error marker.
@@ -367,9 +372,8 @@ class TestContentFilteredNoneResponse:
     When content moderation filters a response, OpenRouter returns:
     {"choices": [{"message": {"content": null}}]}
 
-    The plugin extracts content via choices[0]["message"]["content"],
-    which yields Python None. This must not crash — it should be stored
-    as None (a valid signal that content was filtered).
+    The plugin detects null content and returns an error with
+    reason="content_filtered" — matching the unified provider pattern.
     """
 
     @pytest.fixture
@@ -379,13 +383,13 @@ class TestContentFilteredNoneResponse:
 
     @pytest.fixture
     def recorder(self, db: LandscapeDB) -> LandscapeRecorder:
-        return LandscapeRecorder(db)
+        return make_recorder(db)
 
-    def test_null_content_stored_as_none(self, chaosllm_server, recorder: LandscapeRecorder) -> None:
-        """Content-filtered response with null content produces row with None.
+    def test_null_content_detected_as_content_filtered(self, chaosllm_server, recorder: LandscapeRecorder) -> None:
+        """Content-filtered response with null content produces error row.
 
-        This validates that the plugin doesn't crash on None content
-        (related to P0 NoneType crash pattern in openrouter_multi_query).
+        This validates that the plugin detects null content (content filtering)
+        and records it as an error rather than silently passing None through.
         """
         run_id, _, state_id = _setup_recorder_state(recorder)
         ctx = _make_real_context(recorder, run_id, state_id)
@@ -416,12 +420,11 @@ class TestContentFilteredNoneResponse:
         assert result.rows is not None
         assert len(result.rows) == 1
 
-        # Content is None (filtered) — this is a valid output, not an error
+        # Null content is detected as content filtering — recorded as error row
         output = result.rows[0]
         assert output["llm_response"] is None
-        # No error marker — null content is "success" (content was filtered,
-        # but the API call itself succeeded)
-        assert output.get("llm_response_error") is None
+        assert output["llm_response_error"] is not None
+        assert output["llm_response_error"]["reason"] == "content_filtered"
 
         transform.close()
 
@@ -463,26 +466,33 @@ class TestContentFilteredNoneResponse:
 # TestRateLimiterWiring
 # ===================================================================
 class TestRateLimiterWiring:
-    """Verify rate limiter is passed through on_start() to AuditedHTTPClient.
+    """Verify rate limiter is wired through on_start() to HTTP calls.
 
-    Unit tests set rate_limit_registry=None. These tests verify the
-    real wiring: on_start() extracts the limiter, _get_http_client()
-    passes it to AuditedHTTPClient, and the client uses it.
+    Tests prove wiring through observable behavior: the limiter's
+    try_acquire is called during processing, not by inspecting
+    private attributes on the transform or client.
     """
 
-    def test_limiter_passed_to_http_client(self, chaosllm_server, recorder: LandscapeRecorder) -> None:
-        """Rate limiter from registry is passed to AuditedHTTPClient.
+    @pytest.fixture
+    def db(self, tmp_path) -> LandscapeDB:
+        return LandscapeDB.from_url(f"sqlite:///{tmp_path / 'audit.db'}")
 
-        Verifies the wiring: ctx.rate_limit_registry.get_limiter("openrouter")
-        → transform._limiter → AuditedHTTPClient(limiter=...).
+    @pytest.fixture
+    def recorder(self, db: LandscapeDB) -> LandscapeRecorder:
+        return make_recorder(db)
+
+    def test_rate_limiter_invoked_during_processing(self, chaosllm_server, recorder: LandscapeRecorder) -> None:
+        """Rate limiter from registry is invoked when processing rows.
+
+        Proves the full wiring chain: ctx.rate_limit_registry.get_limiter("openrouter")
+        → transform captures limiter → AuditedHTTPClient calls acquire().
         """
         from unittest.mock import Mock
 
         run_id, _, state_id = _setup_recorder_state(recorder)
 
-        # Create a mock rate limit registry that returns a mock limiter
         mock_limiter = Mock()
-        mock_limiter.try_acquire = Mock(return_value=True)
+        mock_limiter.acquire = Mock(return_value=None)
         mock_registry = Mock()
         mock_registry.get_limiter = Mock(return_value=mock_limiter)
 
@@ -496,29 +506,40 @@ class TestRateLimiterWiring:
         transform = OpenRouterBatchLLMTransform(_make_valid_config())
         transform.on_start(ctx)
 
-        # Verify on_start extracted the limiter
-        assert transform._limiter is mock_limiter
+        # Registry should have been consulted for "openrouter" limiter
         mock_registry.get_limiter.assert_called_once_with("openrouter")
 
-        # Verify _get_http_client passes limiter to AuditedHTTPClient
-        client = transform._get_http_client(state_id)
-        assert client._limiter is mock_limiter
+        rows = [make_pipeline_row({"text": "Test row"})]
+        responses: list[dict[str, Any] | str | httpx.Response] = [_create_mock_response(chaosllm_server, content="Result")]
+
+        with chaosllm_openrouter_http_responses(chaosllm_server, responses):
+            result = transform.process(rows, ctx)
+
+        assert result.status == "success"
+
+        # Behavioral: limiter.acquire() was called during the HTTP call
+        mock_limiter.acquire.assert_called()
 
         transform.close()
 
-    def test_none_registry_produces_none_limiter(self, chaosllm_server, recorder: LandscapeRecorder) -> None:
-        """When rate_limit_registry is None, limiter is None (no throttling)."""
+    def test_processing_succeeds_without_rate_limiter(self, chaosllm_server, recorder: LandscapeRecorder) -> None:
+        """When rate_limit_registry is None, processing works without throttling."""
         run_id, _, state_id = _setup_recorder_state(recorder)
         ctx = _make_real_context(recorder, run_id, state_id)
 
         transform = OpenRouterBatchLLMTransform(_make_valid_config())
         transform.on_start(ctx)
 
-        assert transform._limiter is None
+        rows = [make_pipeline_row({"text": "Test row"})]
+        responses: list[dict[str, Any] | str | httpx.Response] = [_create_mock_response(chaosllm_server, content="Result")]
 
-        # Client still created successfully without limiter
-        client = transform._get_http_client(state_id)
-        assert client._limiter is None
+        with chaosllm_openrouter_http_responses(chaosllm_server, responses):
+            result = transform.process(rows, ctx)
+
+        # Processing succeeds without any rate limiter configured
+        assert result.status == "success"
+        assert result.rows is not None
+        assert len(result.rows) == 1
 
         transform.close()
 
@@ -529,28 +550,51 @@ class TestRateLimiterWiring:
 class TestOnStartWiring:
     """Verify on_start() correctly wires real PluginContext fields.
 
-    Unit tests mock on_start(). These tests verify the real wiring:
-    recorder, run_id, telemetry_emit, and rate limiter are all captured.
+    Tests prove wiring through observable behavior (audit records and
+    telemetry events), not by inspecting private attributes.
     """
 
-    def test_on_start_captures_recorder(self, recorder: LandscapeRecorder) -> None:
-        """on_start() captures landscape recorder for audit recording."""
+    @pytest.fixture
+    def db(self, tmp_path) -> LandscapeDB:
+        return LandscapeDB.from_url(f"sqlite:///{tmp_path / 'audit.db'}")
+
+    @pytest.fixture
+    def recorder(self, db: LandscapeDB) -> LandscapeRecorder:
+        return make_recorder(db)
+
+    def test_on_start_wires_recorder_for_audit_recording(self, chaosllm_server, recorder: LandscapeRecorder) -> None:
+        """After on_start + process, recorder receives call records.
+
+        Proves recorder was captured and used, not just assigned.
+        """
         run_id, _, state_id = _setup_recorder_state(recorder)
         ctx = _make_real_context(recorder, run_id, state_id)
 
         transform = OpenRouterBatchLLMTransform(_make_valid_config())
-        assert transform._recorder is None  # Before on_start
-
         transform.on_start(ctx)
 
-        assert transform._recorder is recorder
-        assert transform._run_id == run_id
+        rows = [make_pipeline_row({"text": "Test row"})]
+        responses: list[dict[str, Any] | str | httpx.Response] = [_create_mock_response(chaosllm_server, content="Result")]
+
+        with chaosllm_openrouter_http_responses(chaosllm_server, responses):
+            result = transform.process(rows, ctx)
+
+        assert result.status == "success"
+
+        # Behavioral: recorder received call records (proving it was wired)
+        calls = recorder.get_calls(state_id)
+        assert len(calls) >= 1, "Recorder must receive call records after processing"
+
         transform.close()
 
-    def test_on_start_captures_telemetry_emit(self, recorder: LandscapeRecorder) -> None:
-        """on_start() captures telemetry_emit callback from context."""
-        run_id, _, state_id = _setup_recorder_state(recorder)
+    def test_on_start_wires_telemetry_for_event_emission(self, chaosllm_server, recorder: LandscapeRecorder) -> None:
+        """After on_start + process, telemetry_emit receives ExternalCallCompleted.
 
+        Proves telemetry_emit was captured and invoked, not just assigned.
+        """
+        from elspeth.contracts.events import ExternalCallCompleted
+
+        run_id, _, state_id = _setup_recorder_state(recorder)
         events: list[Any] = []
         ctx = _make_real_context(recorder, run_id, state_id)
         ctx.telemetry_emit = events.append
@@ -558,48 +602,35 @@ class TestOnStartWiring:
         transform = OpenRouterBatchLLMTransform(_make_valid_config())
         transform.on_start(ctx)
 
-        assert transform._telemetry_emit == events.append
+        rows = [make_pipeline_row({"text": "Test row"})]
+        responses: list[dict[str, Any] | str | httpx.Response] = [_create_mock_response(chaosllm_server, content="Result")]
+
+        with chaosllm_openrouter_http_responses(chaosllm_server, responses):
+            transform.process(rows, ctx)
+
+        # Behavioral: telemetry_emit was invoked with ExternalCallCompleted
+        assert any(isinstance(e, ExternalCallCompleted) for e in events), (
+            f"Expected ExternalCallCompleted from telemetry_emit, got: {[type(e).__name__ for e in events]}"
+        )
+
         transform.close()
 
-    def test_on_start_sets_lifecycle_flag(self, recorder: LandscapeRecorder) -> None:
-        """on_start() sets _on_start_called for executor lifecycle guard.
+    def test_process_without_on_start_raises(self, recorder: LandscapeRecorder) -> None:
+        """Processing without on_start() raises RuntimeError.
 
-        Lifecycle enforcement is centralized in TransformExecutor.
-        This test verifies the plugin correctly participates in the
-        lifecycle protocol via BaseTransform._on_start_called.
+        Verifies the lifecycle protocol: on_start() must be called before
+        process(). Without it, the recorder is None and client creation fails.
         """
+        run_id, _, state_id = _setup_recorder_state(recorder)
+        ctx = _make_real_context(recorder, run_id, state_id)
+
         transform = OpenRouterBatchLLMTransform(_make_valid_config())
-        assert not transform._on_start_called
+        # Deliberately skip on_start()
 
-        # Reuse existing test infrastructure for context setup
-        schema = SchemaConfig.from_dict({"mode": "observed"})
-        run = recorder.begin_run(config={"test": True}, canonical_version="v1")
-        node = recorder.register_node(
-            run_id=run.run_id,
-            plugin_name="openrouter_batch_llm",
-            node_type=NodeType.TRANSFORM,
-            plugin_version="1.0",
-            config={"model": "openai/gpt-4o-mini"},
-            schema_config=schema,
-        )
-        row = recorder.create_row(
-            run_id=run.run_id,
-            source_node_id=node.node_id,
-            row_index=0,
-            data={"text": "test"},
-        )
-        token = recorder.create_token(row_id=row.row_id)
-        state = recorder.begin_node_state(
-            token_id=token.token_id,
-            node_id=node.node_id,
-            run_id=run.run_id,
-            step_index=0,
-            input_data={"text": "test"},
-        )
-        ctx = _make_real_context(recorder, run.run_id, state.state_id)
-        transform.on_start(ctx)
+        rows = [make_pipeline_row({"text": "Test row"})]
+        with pytest.raises(RuntimeError, match="recorder"), patch("httpx.Client"):
+            transform.process(rows, ctx)
 
-        assert transform._on_start_called
         transform.close()
 
 
@@ -621,7 +652,7 @@ class TestBatchOrderPreservation:
 
     @pytest.fixture
     def recorder(self, db: LandscapeDB) -> LandscapeRecorder:
-        return LandscapeRecorder(db)
+        return make_recorder(db)
 
     def test_output_order_matches_input_order_with_delays(self, chaosllm_server, recorder: LandscapeRecorder) -> None:
         """Results reassembled in input order even when workers finish out-of-order.

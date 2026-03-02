@@ -1,4 +1,3 @@
-# src/elspeth/core/dag/builder.py
 """DAG construction from plugin instances.
 
 Extracts the graph-building logic from ExecutionGraph.from_plugin_instances()
@@ -38,6 +37,7 @@ from elspeth.core.dag.models import (
 )
 
 if TYPE_CHECKING:
+    from elspeth.contracts import SinkProtocol, SourceProtocol, TransformProtocol
     from elspeth.core.config import (
         AggregationSettings,
         CoalesceSettings,
@@ -46,7 +46,6 @@ if TYPE_CHECKING:
     )
     from elspeth.core.dag.graph import ExecutionGraph
     from elspeth.core.dag.models import NodeConfig, WiredTransform
-    from elspeth.plugins.protocols import SinkProtocol, SourceProtocol, TransformProtocol
 
 
 def _field_name_type(field_spec: Any) -> tuple[str, str]:

@@ -13,7 +13,7 @@ Usage:
 from __future__ import annotations
 
 from datetime import UTC, datetime
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Literal
 from unittest.mock import Mock
 from uuid import uuid4
 
@@ -26,9 +26,9 @@ from elspeth.contracts.node_state_context import (
 )
 
 if TYPE_CHECKING:
+    from elspeth.contracts import TransformProtocol
     from elspeth.contracts.plugin_context import PluginContext
     from elspeth.core.dag import ExecutionGraph, WiredTransform
-    from elspeth.plugins.protocols import TransformProtocol
 
 # --- Re-export all production factories for single-import convenience ---
 from elspeth.testing import (  # noqa: F401
@@ -78,6 +78,7 @@ def make_context(
     token: Any | None = None,
     config: dict[str, Any] | None = None,
     landscape: Any | None = None,
+    node_id: str | None = None,
 ) -> PluginContext:
     """Build a PluginContext with sensible test defaults.
 
@@ -85,6 +86,7 @@ def make_context(
         ctx = make_context()                            # Minimal (mock landscape)
         ctx = make_context(state_id="state-retry-3")    # Custom state_id
         ctx = make_context(landscape=recorder)           # Real landscape recorder
+        ctx = make_context(node_id="source")            # With explicit node_id
     """
     from elspeth.contracts.plugin_context import PluginContext
 
@@ -102,6 +104,101 @@ def make_context(
         state_id=state_id,
         config=config or {},
         token=token,
+        node_id=node_id,
+    )
+
+
+def make_source_context(
+    *,
+    run_id: str = "test-run",
+    node_id: str = "source",
+    plugin_name: str = "csv",
+) -> PluginContext:
+    """Build a PluginContext with run and node records for validation error recording.
+
+    Internally delegates to make_recorder_with_run() for DB/recorder/run/node setup.
+
+    For testing source plugins that call ctx.record_validation_error().
+    Creates the FK chain: run → node → PluginContext.
+
+    Use make_operation_context() instead when the plugin also makes external
+    calls and records them via ctx.record_call().
+
+    Usage:
+        ctx = make_source_context()                         # CSV source default
+        ctx = make_source_context(plugin_name="json")       # JSON source
+    """
+    from elspeth.contracts.plugin_context import PluginContext
+    from tests.fixtures.landscape import make_recorder_with_run
+
+    setup = make_recorder_with_run(
+        run_id=run_id,
+        source_node_id=node_id,
+        source_plugin_name=plugin_name,
+    )
+    return PluginContext(
+        run_id=setup.run_id,
+        node_id=setup.source_node_id,
+        config={},
+        landscape=setup.recorder,
+    )
+
+
+def make_operation_context(
+    *,
+    run_id: str = "test-run",
+    node_id: str = "source",
+    plugin_name: str = "azure_blob",
+    node_type: str = "SOURCE",
+    operation_type: Literal["source_load", "sink_write"] = "source_load",
+) -> PluginContext:
+    """Build a PluginContext with real landscape and operation records.
+
+    Internally delegates to make_recorder_with_run() for DB/recorder/run setup.
+
+    For testing source/sink plugins that call ctx.record_call().
+    Creates the full FK chain: run → node → operation → PluginContext.
+
+    Use this instead of make_context() when the plugin under test makes
+    external calls and records them via ctx.record_call().
+
+    Usage:
+        ctx = make_operation_context()                                  # Source default
+        ctx = make_operation_context(operation_type="sink_write",       # Sink context
+                                     node_id="sink", node_type="SINK")
+    """
+    from elspeth.contracts import NodeType
+    from elspeth.contracts.plugin_context import PluginContext
+    from tests.fixtures.landscape import make_recorder_with_run, register_test_node
+
+    if node_type == "SOURCE":
+        # Source node: delegate directly — make_recorder_with_run creates a SOURCE node
+        setup = make_recorder_with_run(
+            run_id=run_id,
+            source_node_id=node_id,
+            source_plugin_name=plugin_name,
+        )
+        actual_node_id = setup.source_node_id
+    else:
+        # Non-source node (SINK, TRANSFORM, etc.): create throwaway source,
+        # then register the actual node type needed
+        setup = make_recorder_with_run(run_id=run_id)
+        register_test_node(
+            setup.recorder,
+            setup.run_id,
+            node_id,
+            node_type=NodeType[node_type],
+            plugin_name=plugin_name,
+        )
+        actual_node_id = node_id
+
+    op = setup.recorder.begin_operation(setup.run_id, actual_node_id, operation_type)
+    return PluginContext(
+        run_id=setup.run_id,
+        node_id=actual_node_id,
+        config={},
+        landscape=setup.recorder,
+        operation_id=op.operation_id,
     )
 
 
@@ -287,127 +384,6 @@ def make_run_record(
         config=config or {},
         canonical_version=canonical_version,
     )
-
-
-def populate_run(
-    recorder: Any,
-    db: Any,
-    *,
-    row_count: int = 5,
-    fail_rows: set[int] | None = None,
-    graph: Any | None = None,
-) -> dict[str, Any]:
-    """Create a complete run with rows, tokens, and outcomes.
-
-    Returns dict with run_id, row_ids, token_ids for assertions.
-
-    Usage:
-        result = populate_run(recorder, db, row_count=10, fail_rows={3, 7})
-        assert len(result["row_ids"]) == 10
-        assert result["row_ids"][3] in result["failed_row_ids"]
-    """
-    from elspeth.contracts.enums import (
-        Determinism,
-        NodeType,
-        RowOutcome,
-        RunStatus,
-    )
-    from elspeth.core.landscape.schema import (
-        nodes_table,
-        rows_table,
-        runs_table,
-        token_outcomes_table,
-        tokens_table,
-    )
-
-    fail_rows = fail_rows or set()
-    run_id = make_run_id()
-    now = datetime.now(UTC)
-
-    if graph is None:
-        graph = make_graph_linear()
-
-    row_ids = [f"row-{i:03d}" for i in range(row_count)]
-    token_ids = [f"tok-{i:03d}" for i in range(row_count)]
-    failed_row_ids = {row_ids[i] for i in fail_rows}
-
-    with db.engine.connect() as conn:
-        conn.execute(
-            runs_table.insert().values(
-                run_id=run_id,
-                started_at=now,
-                config_hash="test",
-                settings_json="{}",
-                canonical_version="sha256-rfc8785-v1",
-                status=RunStatus.COMPLETED,
-            )
-        )
-        conn.execute(
-            nodes_table.insert().values(
-                node_id="source-node",
-                run_id=run_id,
-                plugin_name="test",
-                node_type=NodeType.SOURCE,
-                plugin_version="1.0",
-                determinism=Determinism.DETERMINISTIC,
-                config_hash="x",
-                config_json="{}",
-                registered_at=now,
-            )
-        )
-        conn.execute(
-            nodes_table.insert().values(
-                node_id="sink-node",
-                run_id=run_id,
-                plugin_name="test",
-                node_type=NodeType.SINK,
-                plugin_version="1.0",
-                determinism=Determinism.DETERMINISTIC,
-                config_hash="x",
-                config_json="{}",
-                registered_at=now,
-            )
-        )
-        for i in range(row_count):
-            conn.execute(
-                rows_table.insert().values(
-                    row_id=row_ids[i],
-                    run_id=run_id,
-                    source_node_id="source-node",
-                    row_index=i,
-                    source_data_hash=f"hash{i}",
-                    created_at=now,
-                )
-            )
-            conn.execute(
-                tokens_table.insert().values(
-                    token_id=token_ids[i],
-                    row_id=row_ids[i],
-                    run_id=run_id,
-                    created_at=now,
-                )
-            )
-            outcome = RowOutcome.FAILED if i in fail_rows else RowOutcome.COMPLETED
-            conn.execute(
-                token_outcomes_table.insert().values(
-                    outcome_id=f"outcome-{i:03d}",
-                    run_id=run_id,
-                    token_id=token_ids[i],
-                    outcome=outcome.value,
-                    is_terminal=1,
-                    recorded_at=now,
-                    sink_name="sink-node",
-                )
-            )
-        conn.commit()
-
-    return {
-        "run_id": run_id,
-        "row_ids": row_ids,
-        "token_ids": token_ids,
-        "failed_row_ids": failed_row_ids,
-        "graph": graph,
-    }
 
 
 # =============================================================================

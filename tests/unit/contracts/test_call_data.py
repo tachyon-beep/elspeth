@@ -10,15 +10,50 @@ from __future__ import annotations
 import pytest
 
 from elspeth.contracts.call_data import (
+    CallPayload,
     HTTPCallError,
     HTTPCallRequest,
     HTTPCallResponse,
     LLMCallError,
     LLMCallRequest,
     LLMCallResponse,
+    RawCallPayload,
 )
 from elspeth.contracts.token_usage import TokenUsage
 from elspeth.core.canonical import stable_hash
+
+# ---------------------------------------------------------------------------
+# RawCallPayload
+# ---------------------------------------------------------------------------
+
+
+class TestRawCallPayload:
+    """RawCallPayload wraps pre-serialized dicts and satisfies CallPayload."""
+
+    def test_frozen(self) -> None:
+        obj = RawCallPayload({"k": "v"})
+        with pytest.raises(AttributeError):
+            obj.data = {"other": "value"}  # type: ignore[misc]
+
+    def test_to_dict_returns_copy(self) -> None:
+        obj = RawCallPayload({"k": "v"})
+        returned = obj.to_dict()
+        returned["injected"] = "mutation"
+        assert "injected" not in obj.to_dict()
+
+    def test_to_dict_matches_input(self) -> None:
+        original = {"type": "TestError", "message": "something failed"}
+        obj = RawCallPayload(original)
+        assert obj.to_dict() == original
+
+    def test_satisfies_call_payload_protocol(self) -> None:
+        assert isinstance(RawCallPayload({"k": "v"}), CallPayload)
+
+    def test_hash_stability(self) -> None:
+        original_dict = {"type": "TestError", "message": "something failed"}
+        payload = RawCallPayload(original_dict)
+        assert stable_hash(payload.to_dict()) == stable_hash(original_dict)
+
 
 # ---------------------------------------------------------------------------
 # LLMCallRequest
@@ -29,7 +64,7 @@ class TestLLMCallRequest:
     """LLMCallRequest.to_dict() produces identical hashes to old dict."""
 
     def test_basic_request_hash_stability(self) -> None:
-        old_dict: dict = {
+        old_dict: dict[str, object] = {
             "model": "gpt-4",
             "messages": [{"role": "user", "content": "Hello"}],
             "temperature": 0.0,
@@ -45,7 +80,7 @@ class TestLLMCallRequest:
         assert stable_hash(new_dict) == stable_hash(old_dict)
 
     def test_request_with_max_tokens_hash_stability(self) -> None:
-        old_dict: dict = {
+        old_dict: dict[str, object] = {
             "model": "gpt-4",
             "messages": [{"role": "user", "content": "Hello"}],
             "temperature": 0.7,
@@ -65,7 +100,7 @@ class TestLLMCallRequest:
 
     def test_request_with_extra_kwargs_hash_stability(self) -> None:
         kwargs = {"top_p": 0.9, "frequency_penalty": 0.5}
-        old_dict: dict = {
+        old_dict: dict[str, object] = {
             "model": "gpt-4",
             "messages": [{"role": "user", "content": "Test"}],
             "temperature": 0.0,
@@ -233,7 +268,7 @@ class TestHTTPCallRequest:
     """HTTPCallRequest.to_dict() produces identical hashes to old dict."""
 
     def test_standard_post_hash_stability(self) -> None:
-        old_dict: dict = {
+        old_dict: dict[str, object] = {
             "method": "POST",
             "url": "https://api.example.com/v1/data",
             "headers": {"Content-Type": "application/json"},
@@ -250,7 +285,7 @@ class TestHTTPCallRequest:
         assert stable_hash(new_dict) == stable_hash(old_dict)
 
     def test_standard_get_hash_stability(self) -> None:
-        old_dict: dict = {
+        old_dict: dict[str, object] = {
             "method": "GET",
             "url": "https://api.example.com/v1/data",
             "headers": {"Accept": "application/json"},
@@ -393,7 +428,7 @@ class TestHTTPCallResponse:
         assert stable_hash(new_dict) == stable_hash(old_dict)
 
     def test_ssrf_response_with_redirects_hash_stability(self) -> None:
-        old_dict: dict = {
+        old_dict: dict[str, object] = {
             "status_code": 200,
             "headers": {"content-type": "text/html"},
             "body_size": 1024,

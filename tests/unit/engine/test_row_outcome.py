@@ -44,7 +44,7 @@ class TestRowResultOutcome:
 
         for outcome in RowOutcome:
             sink_name = "output" if outcome in (RowOutcome.COMPLETED, RowOutcome.ROUTED, RowOutcome.COALESCED) else None
-            result = RowResult(token=token, final_data={}, outcome=outcome, sink_name=sink_name)
+            result = RowResult(token=token, final_data=make_pipeline_row({}), outcome=outcome, sink_name=sink_name)
             # Use 'is' to verify identity, not just value equality
             assert result.outcome is outcome
 
@@ -62,7 +62,7 @@ class TestRowResultOutcome:
         # Access .value first to avoid mypy type narrowing from string comparison.
         outcome = result.outcome
         assert outcome.value == "completed"
-        assert outcome == "completed"  # type: ignore[comparison-overlap]
+        assert outcome == "completed"
 
     def test_consumed_in_batch_outcome(self) -> None:
         """CONSUMED_IN_BATCH maps to consumed_in_batch value."""
@@ -92,7 +92,7 @@ class TestRowResultOutcome:
 
         for outcome in terminal_outcomes:
             sink_name = "output" if outcome in (RowOutcome.COMPLETED, RowOutcome.ROUTED, RowOutcome.COALESCED) else None
-            result = RowResult(token=token, final_data={}, outcome=outcome, sink_name=sink_name)
+            result = RowResult(token=token, final_data=make_pipeline_row({}), outcome=outcome, sink_name=sink_name)
             assert result.outcome.is_terminal is True
 
     def test_buffered_outcome_is_not_terminal(self) -> None:

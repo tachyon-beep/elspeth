@@ -1,4 +1,3 @@
-# src/elspeth/testing/chaosllm/response_generator.py
 """Response generation logic for ChaosLLM.
 
 The ResponseGenerator creates fake LLM responses in OpenAI-compatible format.
@@ -18,8 +17,21 @@ import jinja2
 import jinja2.sandbox
 import structlog
 
-from elspeth.testing.chaosengine.vocabulary import ENGLISH_VOCABULARY, LOREM_VOCABULARY
+from elspeth.testing.chaosengine.vocabulary import (
+    ENGLISH_VOCABULARY as ENGLISH_VOCABULARY,
+)
+from elspeth.testing.chaosengine.vocabulary import (
+    LOREM_VOCABULARY as LOREM_VOCABULARY,
+)
 from elspeth.testing.chaosllm.config import ResponseConfig
+
+__all__ = [
+    "ENGLISH_VOCABULARY",
+    "LOREM_VOCABULARY",
+    "OpenAIResponse",
+    "PresetBank",
+    "ResponseGenerator",
+]
 
 logger = structlog.get_logger(__name__)
 

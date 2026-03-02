@@ -1,4 +1,3 @@
-# src/elspeth/mcp/analyzers/__init__.py
 """Analyzer submodules for the ELSPETH Landscape MCP server.
 
 Each submodule exports standalone functions that accept

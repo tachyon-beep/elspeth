@@ -1,13 +1,10 @@
-# src/elspeth/contracts/plugin_context.py
 """Plugin execution context.
 
-The PluginContext carries everything a plugin might need during execution.
-Phase 2 includes Optional placeholders for Phase 3 integrations.
-
-Phase 3 Integration Points:
-- landscape: LandscapeRecorder for audit trail
-- tracer: OpenTelemetry Tracer for distributed tracing
-- payload_store: PayloadStore for large blob storage
+The PluginContext carries everything a plugin needs during execution:
+- Run metadata (run_id, config)
+- Audit trail recording (landscape, payload_store)
+- External call recording (record_call, record_validation_error, record_transform_error)
+- Batch transform support (checkpoints, token identity)
 """
 
 from __future__ import annotations
@@ -15,16 +12,13 @@ from __future__ import annotations
 import copy
 import logging
 from collections.abc import Callable
-from contextlib import AbstractContextManager, nullcontext
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
 
-if TYPE_CHECKING:
-    # These types are available in Phase 3
-    # Using string annotations to avoid import errors in Phase 2
-    from opentelemetry.trace import Span, Tracer
+from elspeth.contracts.call_data import RawCallPayload
 
+if TYPE_CHECKING:
     from elspeth.contracts import Call, CallStatus, CallType, PayloadStore, TransformErrorReason
     from elspeth.contracts.batch_checkpoint import BatchCheckpointState
     from elspeth.contracts.config.runtime import RuntimeConcurrencyConfig
@@ -33,17 +27,16 @@ if TYPE_CHECKING:
     from elspeth.contracts.schema_contract import PipelineRow, SchemaContract
     from elspeth.core.landscape.recorder import LandscapeRecorder
     from elspeth.core.rate_limit import RateLimitRegistry
-    from elspeth.plugins.clients.http import AuditedHTTPClient
-    from elspeth.plugins.clients.llm import AuditedLLMClient
 
 logger = logging.getLogger(__name__)
 
 
-@dataclass
+@dataclass(frozen=True, slots=True)
 class ValidationErrorToken:
     """Token returned when recording a validation error.
 
     Allows tracking the quarantined row through the audit trail.
+    Frozen because these are Tier 1 audit records — immutable after creation.
     """
 
     row_id: str
@@ -52,12 +45,13 @@ class ValidationErrorToken:
     destination: str = "discard"  # Sink name or "discard"
 
 
-@dataclass
+@dataclass(frozen=True, slots=True)
 class TransformErrorToken:
     """Token returned when recording a transform error.
 
     Allows tracking the errored row through the audit trail.
     This is for LEGITIMATE processing errors, not transform bugs.
+    Frozen because these are Tier 1 audit records — immutable after creation.
     """
 
     token_id: str
@@ -72,32 +66,28 @@ class PluginContext:
 
     Provides access to:
     - Run metadata (run_id, config)
-    - Phase 3 integrations (landscape, tracer, payload_store)
-    - Utility methods (get config values, start spans)
+    - Audit trail (landscape, payload_store)
+    - External call recording (record_call)
+    - Validation/transform error recording
+    - Batch checkpoint management
 
     Example:
         def process(self, row: PipelineRow, ctx: PluginContext) -> TransformResult:
-            threshold = ctx.get("threshold", default=0.5)
-            with ctx.start_span("my_operation"):
-                result = do_work(row, threshold)
+            result = do_work(row, ctx.config)
             return TransformResult.success(result, success_reason={"action": "processed"})
     """
 
     run_id: str
     config: dict[str, Any]
 
-    # === Phase 3 Integration Points ===
-    # Optional in Phase 2, populated by engine in Phase 3
-    # Use string annotations to avoid import errors at runtime
+    # === Audit & Infrastructure ===
     landscape: LandscapeRecorder | None = None
-    tracer: Tracer | None = None
     payload_store: PayloadStore | None = None
     rate_limit_registry: RateLimitRegistry | None = None
     concurrency_config: RuntimeConcurrencyConfig | None = None
 
     # Additional metadata
     node_id: str | None = field(default=None)
-    plugin_name: str | None = field(default=None)
 
     # === Row-Level Pipelining (BatchTransformMixin) ===
     # Set by orchestrator/executor when calling accept() on batch transforms.
@@ -113,14 +103,14 @@ class PluginContext:
     # attribution. When None, the transform falls back to ctx.token (single-token mode).
     batch_token_ids: list[str] | None = field(default=None)
 
-    # === Schema Contract (Phase 3: Transform/Sink Integration) ===
+    # === Schema Contract ===
     # Set by executor when processing transforms to enable contract-aware template
     # access (original header names). When transforms receive a plain dict (not
     # PipelineRow), they can still access the contract via ctx.contract.
     # This allows templates using {{ row["Original Header"] }} to resolve correctly.
     contract: SchemaContract | None = field(default=None)
 
-    # === Phase 6: State & Call Recording ===
+    # === State & Call Recording ===
     # Set by executor to enable transforms to record external calls
     # Exactly one of state_id or operation_id should be set when recording calls
     state_id: str | None = field(default=None)  # For transform calls (via node_states)
@@ -128,18 +118,13 @@ class PluginContext:
     # Note: call_index allocation is delegated to LandscapeRecorder.allocate_call_index()
     # to ensure coordination with audited clients. See P1-2026-01-31-context-record-call-bypasses-allocator.
 
-    # === Phase 6: Audited Clients ===
-    # Set by executor when processing LLM transforms
-    llm_client: AuditedLLMClient | None = None
-    http_client: AuditedHTTPClient | None = None
-
-    # === Phase 6: Telemetry Callback ===
+    # === Telemetry Callback ===
     # Callback to emit telemetry events for external calls.
     # Always present - when telemetry is disabled, orchestrator sets this to a no-op.
     # Plugins ALWAYS call this after successful Landscape recording - no None checks.
     telemetry_emit: Callable[[Any], None] = field(default=lambda event: None)
 
-    # === Phase 6: Checkpoint API ===
+    # === Checkpoint API ===
     # Used by batch transforms (e.g., azure_batch_llm) for crash recovery.
     # The checkpoint stores batch_id, row_mapping, etc. as a typed
     # BatchCheckpointState (frozen dataclass) between invocations.
@@ -201,38 +186,6 @@ class PluginContext:
         if self.node_id and self.node_id in self._batch_checkpoints:
             del self._batch_checkpoints[self.node_id]
 
-    def get(self, key: str, *, default: Any = None) -> Any:
-        """Get a config value by dotted path.
-
-        Args:
-            key: Dotted path like "nested.key"
-            default: Value if key not found
-
-        Returns:
-            Config value or default
-        """
-        parts = key.split(".")
-        value: Any = self.config
-        for part in parts:
-            if isinstance(value, dict) and part in value:
-                value = value[part]
-            else:
-                return default
-        return value
-
-    def start_span(self, name: str) -> AbstractContextManager[Span | None]:
-        """Start an OpenTelemetry span.
-
-        Returns nullcontext if tracer not configured.
-
-        Usage:
-            with ctx.start_span("operation_name"):
-                do_work()
-        """
-        if self.tracer is None:
-            return nullcontext()
-        return self.tracer.start_as_current_span(name)
-
     def record_call(
         self,
         call_type: CallType,
@@ -269,10 +222,15 @@ class PluginContext:
             FrameworkBugError: If neither or both of state_id and operation_id are set
         """
         from elspeth.contracts import FrameworkBugError
+        from elspeth.contracts.errors import AuditIntegrityError
 
         if self.landscape is None:
-            logger.warning("External call not recorded (no landscape)")
-            return None
+            raise FrameworkBugError(
+                f"record_call() called without landscape. "
+                f"Context state: run_id={self.run_id}, state_id={self.state_id}, "
+                f"operation_id={self.operation_id}. "
+                f"This is a framework bug — orchestrator must inject landscape before plugin execution."
+            )
 
         # Enforce XOR: exactly one of state_id or operation_id must be set
         has_state = self.state_id is not None
@@ -298,7 +256,8 @@ class PluginContext:
             # This ensures UNIQUE(state_id, call_index) when mixing ctx.record_call()
             # with audited clients (AuditedLLMClient, AuditedHTTPClient), which also
             # use recorder.allocate_call_index(). See P1-2026-01-31-context-record-call-bypasses-allocator.
-            assert self.state_id is not None  # Guarded by has_state check above
+            if self.state_id is None:
+                raise FrameworkBugError("record_call has_state=True but state_id is None")
             call_index = self.landscape.allocate_call_index(self.state_id)
 
             recorded_call = self.landscape.record_call(
@@ -306,22 +265,23 @@ class PluginContext:
                 call_index=call_index,
                 call_type=call_type,
                 status=status,
-                request_data=request_data,
-                response_data=response_data,
-                error=error,
+                request_data=RawCallPayload(request_data),
+                response_data=RawCallPayload(response_data) if response_data is not None else None,
+                error=RawCallPayload(error) if error is not None else None,
                 latency_ms=latency_ms,
             )
             parent_id: str = self.state_id
         else:
             # Operation call - recorder handles call index allocation
-            assert self.operation_id is not None  # Guarded by has_operation check above
+            if self.operation_id is None:
+                raise FrameworkBugError("record_call has_operation=True but operation_id is None")
             recorded_call = self.landscape.record_operation_call(
                 operation_id=self.operation_id,
                 call_type=call_type,
                 status=status,
-                request_data=request_data,
-                response_data=response_data,
-                error=error,
+                request_data=RawCallPayload(request_data),
+                response_data=RawCallPayload(response_data) if response_data is not None else None,
+                error=RawCallPayload(error) if error is not None else None,
                 latency_ms=latency_ms,
                 provider=provider,
             )
@@ -333,7 +293,8 @@ class PluginContext:
         # See P2-2026-02-14-plugincontext-record-call-can-emit-the-wrong-token-id.
         token_id = None
         if has_state:
-            assert self.state_id is not None  # Guarded by has_state check above
+            if self.state_id is None:
+                raise FrameworkBugError("record_call has_state=True but state_id is None (token_id lookup)")
             node_state = self.landscape.get_node_state(self.state_id)
             if node_state is None:
                 raise FrameworkBugError(
@@ -353,12 +314,10 @@ class PluginContext:
         # Emit telemetry AFTER successful Landscape recording
         # Wrapped in try/except to prevent telemetry failures from affecting callers
         try:
-            from elspeth.contracts.call_data import RawCallPayload
             from elspeth.contracts.enums import CallType as CallTypeEnum
             from elspeth.contracts.events import ExternalCallCompleted
-            from elspeth.core.canonical import stable_hash
 
-            # Snapshot payloads so async telemetry exports can't drift from call-time hashes.
+            # Snapshot payloads so async telemetry exports can't drift from call-time values.
             request_snapshot = copy.deepcopy(request_data)
             response_snapshot = copy.deepcopy(response_data) if response_data is not None else None
 
@@ -379,6 +338,9 @@ class PluginContext:
             request_payload = RawCallPayload(request_snapshot)
             response_payload = RawCallPayload(response_snapshot) if response_snapshot is not None else None
 
+            # Use hashes from the recorded Call object — the recorder is the
+            # single source of truth for hashing (via core.canonical.stable_hash).
+            # Recomputing here would risk divergence if the hash implementations differ.
             self.telemetry_emit(
                 ExternalCallCompleted(
                     timestamp=datetime.now(UTC),
@@ -390,14 +352,16 @@ class PluginContext:
                     call_type=call_type,
                     provider=provider,
                     status=status,
-                    latency_ms=latency_ms or 0.0,
-                    request_hash=stable_hash(request_snapshot),
-                    response_hash=stable_hash(response_snapshot) if response_snapshot is not None else None,
+                    latency_ms=latency_ms if latency_ms is not None else 0.0,
+                    request_hash=recorded_call.request_hash,
+                    response_hash=recorded_call.response_hash,
                     request_payload=request_payload,
                     response_payload=response_payload,
                     token_usage=token_usage,
                 )
             )
+        except (FrameworkBugError, AuditIntegrityError):
+            raise  # System bugs and audit integrity violations must crash
         except Exception as tel_err:
             # Telemetry failure must not corrupt the call recording
             logger.warning(
@@ -438,7 +402,7 @@ class PluginContext:
         Returns:
             ValidationErrorToken for tracking the quarantined row
         """
-        from elspeth.core.canonical import repr_hash, stable_hash
+        from elspeth.contracts.hashing import repr_hash, stable_hash
 
         # Generate row_id from content hash if not present
         # External data may be non-dict (e.g., JSON array containing primitives),
@@ -461,15 +425,22 @@ class PluginContext:
                 )
                 row_id = repr_hash(row)[:16]
 
-        if self.landscape is None:
-            logger.warning(
-                "Validation error not recorded (no landscape): %s",
-                error,
+        if self.node_id is None:
+            from elspeth.contracts import FrameworkBugError
+
+            raise FrameworkBugError(
+                f"record_validation_error() called without node_id. "
+                f"Context state: run_id={self.run_id}. "
+                f"This is a framework bug — orchestrator must set node_id before validation."
             )
-            return ValidationErrorToken(
-                row_id=row_id,
-                node_id=self.node_id or "unknown",
-                destination=destination,
+
+        if self.landscape is None:
+            from elspeth.contracts import FrameworkBugError
+
+            raise FrameworkBugError(
+                f"record_validation_error() called without landscape. "
+                f"Context state: run_id={self.run_id}, node_id={self.node_id}. "
+                f"This is a framework bug — orchestrator must inject landscape before source validation."
             )
 
         # Record to landscape audit trail
@@ -485,7 +456,7 @@ class PluginContext:
 
         return ValidationErrorToken(
             row_id=row_id,
-            node_id=self.node_id or "unknown",
+            node_id=self.node_id,
             error_id=error_id,
             destination=destination,
         )
@@ -514,15 +485,12 @@ class PluginContext:
             TransformErrorToken for tracking
         """
         if self.landscape is None:
-            logger.warning(
-                "Transform error not recorded (no landscape): %s - %s",
-                transform_id,
-                error_details,
-            )
-            return TransformErrorToken(
-                token_id=token_id,
-                transform_id=transform_id,
-                destination=destination,
+            from elspeth.contracts import FrameworkBugError
+
+            raise FrameworkBugError(
+                f"record_transform_error() called without landscape. "
+                f"Context state: run_id={self.run_id}, node_id={self.node_id}. "
+                f"This is a framework bug — orchestrator must inject landscape before transform execution."
             )
 
         error_id = self.landscape.record_transform_error(

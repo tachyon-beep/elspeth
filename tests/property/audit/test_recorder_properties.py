@@ -34,7 +34,8 @@ from elspeth.contracts import (
 )
 from elspeth.contracts.schema import SchemaConfig
 from elspeth.core.canonical import stable_hash
-from elspeth.core.landscape import LandscapeDB, LandscapeRecorder
+from elspeth.core.landscape import LandscapeDB
+from tests.fixtures.landscape import make_landscape_db, make_recorder
 from tests.strategies.json import row_data
 
 # =============================================================================
@@ -149,8 +150,8 @@ class TestRunRecordingProperties:
     @settings(max_examples=50, deadline=None)
     def test_begin_run_creates_running_status(self, config: dict[str, Any]) -> None:
         """Property: begin_run() creates a run record in RUNNING status."""
-        db = LandscapeDB.in_memory()
-        recorder = LandscapeRecorder(db)
+        db = make_landscape_db()
+        recorder = make_recorder(db)
 
         run = recorder.begin_run(config=config, canonical_version="1.0")
 
@@ -165,8 +166,8 @@ class TestRunRecordingProperties:
     @settings(max_examples=50, deadline=None)
     def test_complete_run_updates_status(self, config: dict[str, Any]) -> None:
         """Property: complete_run() updates status to COMPLETED."""
-        db = LandscapeDB.in_memory()
-        recorder = LandscapeRecorder(db)
+        db = make_landscape_db()
+        recorder = make_recorder(db)
 
         run = recorder.begin_run(config=config, canonical_version="1.0")
         completed = recorder.complete_run(run.run_id, status=RunStatus.COMPLETED)
@@ -183,8 +184,8 @@ class TestRunRecordingProperties:
     @settings(max_examples=50, deadline=None)
     def test_run_status_transitions(self, config: dict[str, Any], status: RunStatus) -> None:
         """Property: Runs can transition to terminal states (COMPLETED/FAILED)."""
-        db = LandscapeDB.in_memory()
-        recorder = LandscapeRecorder(db)
+        db = make_landscape_db()
+        recorder = make_recorder(db)
 
         run = recorder.begin_run(config=config, canonical_version="1.0")
         completed = recorder.complete_run(run.run_id, status=status)
@@ -198,8 +199,8 @@ class TestRunRecordingProperties:
     @settings(max_examples=30, deadline=None)
     def test_config_hash_is_deterministic(self, config: dict[str, Any]) -> None:
         """Property: Same config produces same config_hash."""
-        db = LandscapeDB.in_memory()
-        recorder = LandscapeRecorder(db)
+        db = make_landscape_db()
+        recorder = make_recorder(db)
 
         # Create two runs with identical config
         run1 = recorder.begin_run(config=config, canonical_version="1.0")
@@ -239,8 +240,8 @@ class TestNodeRecordingProperties:
         determinism: Determinism,
     ) -> None:
         """Property: register_node() creates node record with correct fields."""
-        db = LandscapeDB.in_memory()
-        recorder = LandscapeRecorder(db)
+        db = make_landscape_db()
+        recorder = make_recorder(db)
 
         run = recorder.begin_run(config=config, canonical_version="1.0")
 
@@ -266,8 +267,8 @@ class TestNodeRecordingProperties:
     @settings(max_examples=30, deadline=None)
     def test_multiple_nodes_have_unique_ids(self, config: dict[str, Any], n_nodes: int) -> None:
         """Property: Multiple nodes can be registered with unique IDs."""
-        db = LandscapeDB.in_memory()
-        recorder = LandscapeRecorder(db)
+        db = make_landscape_db()
+        recorder = make_recorder(db)
 
         run = recorder.begin_run(config=config, canonical_version="1.0")
 
@@ -294,8 +295,8 @@ class TestNodeRecordingProperties:
     @settings(max_examples=30, deadline=None)
     def test_node_config_hash_is_deterministic(self, config: dict[str, Any]) -> None:
         """Property: Same node config produces same config_hash."""
-        db = LandscapeDB.in_memory()
-        recorder = LandscapeRecorder(db)
+        db = make_landscape_db()
+        recorder = make_recorder(db)
 
         run = recorder.begin_run(config=config, canonical_version="1.0")
 
@@ -334,8 +335,8 @@ class TestRowRecordingProperties:
     @settings(max_examples=50, deadline=None)
     def test_create_row_persists_correctly(self, config: dict[str, Any], data: dict[str, Any], row_index: int) -> None:
         """Property: create_row() creates row record with correct fields."""
-        db = LandscapeDB.in_memory()
-        recorder = LandscapeRecorder(db)
+        db = make_landscape_db()
+        recorder = make_recorder(db)
 
         run = recorder.begin_run(config=config, canonical_version="1.0")
         source_node = recorder.register_node(
@@ -363,8 +364,8 @@ class TestRowRecordingProperties:
     @settings(max_examples=30, deadline=None)
     def test_row_indices_stored_correctly(self, config: dict[str, Any], n_rows: int) -> None:
         """Property: Row indices are stored correctly."""
-        db = LandscapeDB.in_memory()
-        recorder = LandscapeRecorder(db)
+        db = make_landscape_db()
+        recorder = make_recorder(db)
 
         run = recorder.begin_run(config=config, canonical_version="1.0")
         source_node = recorder.register_node(
@@ -397,8 +398,8 @@ class TestRowRecordingProperties:
     @settings(max_examples=30, deadline=None)
     def test_row_ids_are_unique(self, config: dict[str, Any], n_rows: int) -> None:
         """Property: Row IDs are unique."""
-        db = LandscapeDB.in_memory()
-        recorder = LandscapeRecorder(db)
+        db = make_landscape_db()
+        recorder = make_recorder(db)
 
         run = recorder.begin_run(config=config, canonical_version="1.0")
         source_node = recorder.register_node(
@@ -435,8 +436,8 @@ class TestTokenRecordingProperties:
     @settings(max_examples=50, deadline=None)
     def test_create_token_links_to_row(self, config: dict[str, Any], data: dict[str, Any]) -> None:
         """Property: create_token() creates token linked to its row."""
-        db = LandscapeDB.in_memory()
-        recorder = LandscapeRecorder(db)
+        db = make_landscape_db()
+        recorder = make_recorder(db)
 
         run = recorder.begin_run(config=config, canonical_version="1.0")
         source_node = recorder.register_node(
@@ -465,8 +466,8 @@ class TestTokenRecordingProperties:
     @settings(max_examples=30, deadline=None)
     def test_token_ids_are_unique(self, config: dict[str, Any], n_tokens: int) -> None:
         """Property: Token IDs are unique."""
-        db = LandscapeDB.in_memory()
-        recorder = LandscapeRecorder(db)
+        db = make_landscape_db()
+        recorder = make_recorder(db)
 
         run = recorder.begin_run(config=config, canonical_version="1.0")
         source_node = recorder.register_node(
@@ -505,8 +506,8 @@ class TestTokenOutcomeProperties:
     @settings(max_examples=50, deadline=None)
     def test_record_completed_outcome(self, config: dict[str, Any], data: dict[str, Any]) -> None:
         """Property: COMPLETED outcome is persisted with required sink_name."""
-        db = LandscapeDB.in_memory()
-        recorder = LandscapeRecorder(db)
+        db = make_landscape_db()
+        recorder = make_recorder(db)
 
         run = recorder.begin_run(config=config, canonical_version="1.0")
         source_node = recorder.register_node(
@@ -539,7 +540,7 @@ class TestTokenOutcomeProperties:
         # Verify persisted
         outcome = recorder.get_token_outcome(token.token_id)
         assert outcome is not None
-        assert outcome.outcome == RowOutcome.COMPLETED.value
+        assert outcome.outcome == RowOutcome.COMPLETED
         assert outcome.is_terminal is True
         assert outcome.sink_name == "default"
 
@@ -547,8 +548,8 @@ class TestTokenOutcomeProperties:
     @settings(max_examples=50, deadline=None)
     def test_record_quarantined_outcome(self, config: dict[str, Any], data: dict[str, Any]) -> None:
         """Property: QUARANTINED outcome is persisted with error_hash."""
-        db = LandscapeDB.in_memory()
-        recorder = LandscapeRecorder(db)
+        db = make_landscape_db()
+        recorder = make_recorder(db)
 
         run = recorder.begin_run(config=config, canonical_version="1.0")
         source_node = recorder.register_node(
@@ -582,7 +583,7 @@ class TestTokenOutcomeProperties:
         # Verify persisted
         outcome = recorder.get_token_outcome(token.token_id)
         assert outcome is not None
-        assert outcome.outcome == RowOutcome.QUARANTINED.value
+        assert outcome.outcome == RowOutcome.QUARANTINED
         assert outcome.is_terminal is True
         assert outcome.error_hash == error_hash
 
@@ -590,8 +591,8 @@ class TestTokenOutcomeProperties:
     @settings(max_examples=30, deadline=None)
     def test_outcome_count_matches_recorded(self, config: dict[str, Any], n_rows: int) -> None:
         """Property: All recorded outcomes are persisted (no silent loss)."""
-        db = LandscapeDB.in_memory()
-        recorder = LandscapeRecorder(db)
+        db = make_landscape_db()
+        recorder = make_recorder(db)
 
         run = recorder.begin_run(config=config, canonical_version="1.0")
         source_node = recorder.register_node(
@@ -643,8 +644,8 @@ class TestTokenOutcomeProperties:
         kwargs: dict[str, Any],
     ) -> None:
         """Required fields are enforced for each outcome type."""
-        db = LandscapeDB.in_memory()
-        recorder = LandscapeRecorder(db)
+        db = make_landscape_db()
+        recorder = make_recorder(db)
 
         run = recorder.begin_run(config={"source": {"plugin": "test"}}, canonical_version="1.0")
         source_node = recorder.register_node(
@@ -687,8 +688,8 @@ class TestTokenOutcomeProperties:
     )
     def test_record_outcome_accepts_required_fields(self, outcome: RowOutcome, kwargs: dict[str, Any]) -> None:
         """Outcomes with required fields are recorded and retrievable."""
-        db = LandscapeDB.in_memory()
-        recorder = LandscapeRecorder(db)
+        db = make_landscape_db()
+        recorder = make_recorder(db)
 
         run = recorder.begin_run(config={"source": {"plugin": "test"}}, canonical_version="1.0")
         source_node = recorder.register_node(
@@ -749,8 +750,8 @@ class TestNodeStateProperties:
     @settings(max_examples=50, deadline=None)
     def test_begin_node_state_creates_open_status(self, config: dict[str, Any], data: dict[str, Any]) -> None:
         """Property: begin_node_state() creates state with OPEN status."""
-        db = LandscapeDB.in_memory()
-        recorder = LandscapeRecorder(db)
+        db = make_landscape_db()
+        recorder = make_recorder(db)
 
         run = recorder.begin_run(config=config, canonical_version="1.0")
         source_node = recorder.register_node(
@@ -800,8 +801,8 @@ class TestNodeStateProperties:
     @settings(max_examples=50, deadline=None)
     def test_complete_node_state_updates_status(self, config: dict[str, Any], data: dict[str, Any]) -> None:
         """Property: complete_node_state() updates state to terminal status."""
-        db = LandscapeDB.in_memory()
-        recorder = LandscapeRecorder(db)
+        db = make_landscape_db()
+        recorder = make_recorder(db)
 
         run = recorder.begin_run(config=config, canonical_version="1.0")
         source_node = recorder.register_node(
@@ -863,8 +864,8 @@ class TestForeignKeyIntegrity:
     @settings(max_examples=30, deadline=None)
     def test_rows_reference_valid_run(self, config: dict[str, Any], n_rows: int) -> None:
         """Property: All rows reference a valid run_id."""
-        db = LandscapeDB.in_memory()
-        recorder = LandscapeRecorder(db)
+        db = make_landscape_db()
+        recorder = make_recorder(db)
 
         run = recorder.begin_run(config=config, canonical_version="1.0")
         source_node = recorder.register_node(
@@ -901,8 +902,8 @@ class TestForeignKeyIntegrity:
     @settings(max_examples=30, deadline=None)
     def test_tokens_reference_valid_row(self, config: dict[str, Any], n_tokens: int) -> None:
         """Property: All tokens reference a valid row_id."""
-        db = LandscapeDB.in_memory()
-        recorder = LandscapeRecorder(db)
+        db = make_landscape_db()
+        recorder = make_recorder(db)
 
         run = recorder.begin_run(config=config, canonical_version="1.0")
         source_node = recorder.register_node(
@@ -941,8 +942,8 @@ class TestForeignKeyIntegrity:
     @settings(max_examples=30, deadline=None)
     def test_outcomes_reference_valid_token(self, config: dict[str, Any], n_outcomes: int) -> None:
         """Property: All outcomes reference a valid token_id."""
-        db = LandscapeDB.in_memory()
-        recorder = LandscapeRecorder(db)
+        db = make_landscape_db()
+        recorder = make_recorder(db)
 
         run = recorder.begin_run(config=config, canonical_version="1.0")
         source_node = recorder.register_node(
@@ -995,8 +996,8 @@ class TestHashDeterminism:
     @settings(max_examples=50, deadline=None)
     def test_row_hash_is_deterministic(self, data: dict[str, Any]) -> None:
         """Property: Same row data produces same source_data_hash."""
-        db = LandscapeDB.in_memory()
-        recorder = LandscapeRecorder(db)
+        db = make_landscape_db()
+        recorder = make_recorder(db)
 
         run = recorder.begin_run(config={"source": {"plugin": "test"}}, canonical_version="1.0")
         source_node = recorder.register_node(
@@ -1030,8 +1031,8 @@ class TestHashDeterminism:
     @settings(max_examples=50, deadline=None)
     def test_input_hash_is_deterministic(self, data: dict[str, Any]) -> None:
         """Property: Same input data produces same input_hash in node states."""
-        db = LandscapeDB.in_memory()
-        recorder = LandscapeRecorder(db)
+        db = make_landscape_db()
+        recorder = make_recorder(db)
 
         run = recorder.begin_run(config={"source": {"plugin": "test"}}, canonical_version="1.0")
         source_node = recorder.register_node(

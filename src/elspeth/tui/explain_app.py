@@ -1,4 +1,3 @@
-# src/elspeth/tui/explain_app.py
 """Explain TUI application for ELSPETH.
 
 Provides interactive lineage exploration using ExplainScreen.

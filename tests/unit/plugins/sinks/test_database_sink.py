@@ -6,6 +6,7 @@ import pytest
 from sqlalchemy import MetaData, Table, create_engine, select
 
 from elspeth.contracts.plugin_context import PluginContext
+from tests.fixtures.factories import make_operation_context
 
 # Strict schema config for tests - DataPluginConfig now requires schema
 # DatabaseSink requires fixed-column structure, so we use strict mode
@@ -18,8 +19,13 @@ class TestDatabaseSink:
 
     @pytest.fixture
     def ctx(self) -> PluginContext:
-        """Create a minimal plugin context."""
-        return PluginContext(run_id="test-run", config={})
+        """Create a plugin context with real landscape and operation records."""
+        return make_operation_context(
+            node_id="sink",
+            plugin_name="database_sink",
+            node_type="SINK",
+            operation_type="sink_write",
+        )
 
     @pytest.fixture
     def db_url(self, tmp_path: Path) -> str:
@@ -255,8 +261,13 @@ class TestDatabaseSinkIfExistsReplace:
 
     @pytest.fixture
     def ctx(self) -> PluginContext:
-        """Create a minimal plugin context."""
-        return PluginContext(run_id="test-run", config={})
+        """Create a plugin context with real landscape and operation records."""
+        return make_operation_context(
+            node_id="sink",
+            plugin_name="database_sink",
+            node_type="SINK",
+            operation_type="sink_write",
+        )
 
     @pytest.fixture
     def db_url(self, tmp_path: Path) -> str:
@@ -480,8 +491,13 @@ class TestDatabaseSinkCanonicalHashing:
 
     @pytest.fixture
     def ctx(self) -> PluginContext:
-        """Create a minimal plugin context."""
-        return PluginContext(run_id="test-run", config={})
+        """Create a plugin context with real landscape and operation records."""
+        return make_operation_context(
+            node_id="sink",
+            plugin_name="database_sink",
+            node_type="SINK",
+            operation_type="sink_write",
+        )
 
     @pytest.fixture
     def db_url(self, tmp_path: Path) -> str:
@@ -641,7 +657,12 @@ class TestDatabaseSinkSchemaValidation:
 
         from elspeth.plugins.sinks.database_sink import DatabaseSink
 
-        ctx = PluginContext(run_id="test-run", config={})
+        ctx = make_operation_context(
+            node_id="sink",
+            plugin_name="database_sink",
+            node_type="SINK",
+            operation_type="sink_write",
+        )
         # Schema declares only 'id', but first row has 'id', 'name', 'extra'
         flexible_schema = {"mode": "flexible", "fields": ["id: int"]}
         sink = DatabaseSink(
@@ -687,7 +708,12 @@ class TestDatabaseSinkSchemaValidation:
 
         from elspeth.plugins.sinks.database_sink import DatabaseSink
 
-        ctx = PluginContext(run_id="test-run", config={})
+        ctx = make_operation_context(
+            node_id="sink",
+            plugin_name="database_sink",
+            node_type="SINK",
+            operation_type="sink_write",
+        )
         # Schema declares 'id' as int, 'score' as float
         flexible_schema = {"mode": "flexible", "fields": ["id: int", "score: float"]}
         sink = DatabaseSink(

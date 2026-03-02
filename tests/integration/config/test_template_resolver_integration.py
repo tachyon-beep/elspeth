@@ -15,7 +15,7 @@ rather than manual construction.
 
 from elspeth.contracts.schema_contract import FieldContract, PipelineRow, SchemaContract
 from elspeth.core.templates import extract_jinja2_fields_with_names
-from elspeth.plugins.llm.templates import PromptTemplate
+from elspeth.plugins.transforms.llm.templates import PromptTemplate
 
 
 class TestSourceToTemplateDualName:

@@ -1,4 +1,3 @@
-# src/elspeth/testing/chaosllm/server.py
 """Starlette ASGI application for ChaosLLM fake LLM server.
 
 Provides OpenAI and Azure OpenAI compatible endpoints with configurable
@@ -702,7 +701,7 @@ class ChaosLLMServer:
         """Handle a successful response with latency simulation."""
         # Add latency
         delay = latency_simulator.simulate()
-        total_delay = delay + (extra_delay_sec or 0.0)
+        total_delay = delay + (extra_delay_sec if extra_delay_sec is not None else 0.0)
         if total_delay > 0:
             await asyncio.sleep(total_delay)
 

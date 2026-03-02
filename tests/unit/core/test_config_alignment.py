@@ -26,6 +26,8 @@ If a test fails after adding a new field to a Settings class:
 
 from typing import ClassVar
 
+from tests.fixtures.landscape import make_landscape_db
+
 
 class TestRetryConfigAlignment:
     """Verify RetrySettings ↔ RetryConfig ↔ RetryPolicy alignment.
@@ -139,7 +141,6 @@ class TestConcurrencySettingsAlignment:
         """
         from elspeth.contracts.config.runtime import RuntimeConcurrencyConfig
         from elspeth.core.config import ConcurrencySettings
-        from elspeth.core.landscape import LandscapeDB
         from elspeth.engine import Orchestrator
 
         # Create concurrency config from settings
@@ -147,7 +148,7 @@ class TestConcurrencySettingsAlignment:
         config = RuntimeConcurrencyConfig.from_settings(settings)
 
         # Verify Orchestrator accepts concurrency_config
-        db = LandscapeDB.in_memory()
+        db = make_landscape_db()
         try:
             orchestrator = Orchestrator(db, concurrency_config=config)
             assert orchestrator._concurrency_config is config
@@ -288,7 +289,6 @@ class TestCheckpointSettingsAlignment:
         """
         from elspeth.contracts.config.runtime import RuntimeCheckpointConfig
         from elspeth.core.config import CheckpointSettings
-        from elspeth.core.landscape import LandscapeDB
         from elspeth.engine import Orchestrator
 
         # Create checkpoint config from settings
@@ -296,7 +296,7 @@ class TestCheckpointSettingsAlignment:
         config = RuntimeCheckpointConfig.from_settings(settings)
 
         # Verify Orchestrator accepts checkpoint_config
-        db = LandscapeDB.in_memory()
+        db = make_landscape_db()
         try:
             orchestrator = Orchestrator(db, checkpoint_config=config)
             assert orchestrator._checkpoint_config is config
@@ -588,7 +588,9 @@ class TestExplicitFieldMappings:
             "default_requests_per_minute: direct mapping (int->float)"
         )
         assert config.persistence_path == settings.persistence_path, "persistence_path: direct mapping"
-        assert config.services == dict(settings.services), "services: direct mapping"
+        # RuntimeServiceRateLimit vs ServiceRateLimit: different types compared for value equality
+        # to verify settings-to-runtime mapping produces equivalent values.
+        assert config.services == dict(settings.services), "services: direct mapping"  # type: ignore[comparison-overlap]
 
     def test_concurrency_field_mapping_explicit(self) -> None:
         """Verify ConcurrencySettings->RuntimeConcurrencyConfig field name mappings."""

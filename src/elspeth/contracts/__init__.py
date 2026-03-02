@@ -4,7 +4,11 @@ All dataclasses, enums, TypedDicts, and NamedTuples that cross subsystem
 boundaries MUST be defined here. Internal types are whitelisted in
 config/cicd/contracts-whitelist.yaml.
 
-This package is a LEAF MODULE with no outbound dependencies to core/engine.
+This package is Layer 0 (L0) in the 4-layer dependency hierarchy and has
+NO runtime imports from core, engine, or plugins. This is enforced by CI
+(``enforce_tier_model.py`` with rule L1). TYPE_CHECKING imports from core
+exist for type annotations only and do not create runtime coupling.
+
 To maintain this property, Settings classes (RetrySettings, ElspethSettings, etc.)
 are NOT re-exported here - import them from elspeth.core.config.
 
@@ -44,6 +48,7 @@ from elspeth.contracts.audit import (
     RowLineage,
     Run,
     SecretResolution,
+    SecretResolutionInput,
     Token,
     TokenOutcome,
     TokenParent,
@@ -92,6 +97,12 @@ from elspeth.contracts.config import (
     RuntimeTelemetryConfig,
     RuntimeTelemetryProtocol,
 )
+from elspeth.contracts.contexts import (
+    LifecycleContext,
+    SinkContext,
+    SourceContext,
+    TransformContext,
+)
 
 # Schema contracts (Phase 2: Source Integration)
 from elspeth.contracts.contract_builder import ContractBuilder
@@ -116,7 +127,7 @@ from elspeth.contracts.data import (
     check_compatibility,
     validate_row,
 )
-from elspeth.contracts.engine import PendingOutcome, RetryPolicy
+from elspeth.contracts.engine import BufferEntry, PendingOutcome, RetryPolicy
 from elspeth.contracts.enums import (
     BackpressureMode,
     BatchStatus,
@@ -147,6 +158,7 @@ from elspeth.contracts.errors import (
     ExtraFieldViolation,
     FrameworkBugError,
     GracefulShutdownError,
+    MaxRetriesExceeded,
     MissingFieldViolation,
     PluginContractViolation,
     QueryFailureDetail,
@@ -201,6 +213,12 @@ from elspeth.contracts.plugin_context import (
     PluginContext,
     TransformErrorToken,
     ValidationErrorToken,
+)
+from elspeth.contracts.plugin_protocols import (
+    BatchTransformProtocol,
+    SinkProtocol,
+    SourceProtocol,
+    TransformProtocol,
 )
 from elspeth.contracts.results import (
     ArtifactDescriptor,
@@ -259,6 +277,7 @@ __all__ = [  # Grouped by category for readability
     "BatchPendingError",
     "FrameworkBugError",
     "GracefulShutdownError",
+    "MaxRetriesExceeded",
     "PluginContractViolation",
     "CoalesceFailureReason",
     "ConfigGateReason",
@@ -300,6 +319,7 @@ __all__ = [  # Grouped by category for readability
     "RowLineage",
     "Run",
     "SecretResolution",
+    "SecretResolutionInput",
     "Token",
     "TokenOutcome",
     "TokenParent",
@@ -391,15 +411,26 @@ __all__ = [  # Grouped by category for readability
     "check_compatibility",
     "validate_row",
     # engine
+    "BufferEntry",
     "PendingOutcome",
     "RetryPolicy",
     # payload_store
     "IntegrityError",
     "PayloadStore",
+    # contexts (phase-based protocols)
+    "LifecycleContext",
+    "SinkContext",
+    "SourceContext",
+    "TransformContext",
     # plugin_context
     "PluginContext",
     "TransformErrorToken",
     "ValidationErrorToken",
+    # plugin protocols
+    "BatchTransformProtocol",
+    "SinkProtocol",
+    "SourceProtocol",
+    "TransformProtocol",
     # events
     "ExternalCallCompleted",
     "FieldResolutionApplied",

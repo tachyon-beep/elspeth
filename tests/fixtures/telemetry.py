@@ -8,6 +8,7 @@ dependency on old test conftest.
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
@@ -38,7 +39,7 @@ class TelemetryTestExporter:
     def name(self) -> str:
         return self._name
 
-    def configure(self, config: dict[str, Any]) -> None:
+    def configure(self, config: Mapping[str, Any]) -> None:
         self._configured = True
 
     def export(self, event: TelemetryEvent) -> None:
@@ -118,6 +119,38 @@ class MockTelemetryConfig:
     @property
     def exporter_configs(self) -> tuple[()]:
         return ()
+
+
+class FailingExporter:
+    """Exporter that always fails export() calls.
+
+    Use this to test failure isolation and error handling.
+    """
+
+    def __init__(self, name: str = "failing", *, fail_count: int | None = None):
+        self._name = name
+        self._fail_count = fail_count
+        self._failures = 0
+        self.export_attempts = 0
+
+    @property
+    def name(self) -> str:
+        return self._name
+
+    def configure(self, config: Mapping[str, Any]) -> None:
+        pass
+
+    def export(self, event: TelemetryEvent) -> None:
+        self.export_attempts += 1
+        if self._fail_count is None or self._failures < self._fail_count:
+            self._failures += 1
+            raise RuntimeError(f"Simulated export failure in {self._name}")
+
+    def flush(self) -> None:
+        pass
+
+    def close(self) -> None:
+        pass
 
 
 @pytest.fixture

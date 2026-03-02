@@ -246,7 +246,7 @@ class TestGuaranteedFieldsWithSchemaConfig:
         graph.add_node(
             "llm_node",
             node_type=NodeType.TRANSFORM,
-            plugin_name="azure_llm",
+            plugin_name="llm",
             config={"schema": {"mode": "observed"}},
             output_schema_config=nodeinfo_schema,
         )
@@ -375,6 +375,7 @@ class TestAggregationSchemaConfigPropagation:
             plugin="mock_agg_transform",
             input="agg_in",
             on_success="output",
+            on_error="discard",
             trigger=trigger,
             output_mode="transform",
             options={"schema": {"mode": "observed"}},
@@ -441,7 +442,7 @@ class TestGateSchemaConfigInheritance:
         graph.add_node(
             "llm_transform",
             node_type=NodeType.TRANSFORM,
-            plugin_name="azure_llm",
+            plugin_name="llm",
             config={"schema": {"mode": "observed", "guaranteed_fields": ["result"]}},
             output_schema_config=transform_computed_schema,
         )

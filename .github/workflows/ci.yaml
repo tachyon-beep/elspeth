@@ -52,25 +52,16 @@ jobs:
           sudo apt-get install -y -q libsqlcipher-dev
 
       - name: Install dependencies
-        run: |
-          uv venv
-          source .venv/bin/activate
-          uv pip install -e ".[all]"
+        run: uv sync --frozen --all-extras
 
       - name: Check code style (ruff)
-        run: |
-          source .venv/bin/activate
-          ruff check src/ tests/ scripts/ examples/
+        run: uv run ruff check src/ tests/ scripts/ examples/
 
       - name: Check formatting (ruff format)
-        run: |
-          source .venv/bin/activate
-          ruff format --check src/ tests/ scripts/ examples/
+        run: uv run ruff format --check src/ tests/ scripts/ examples/
 
       - name: Type check (mypy)
-        run: |
-          source .venv/bin/activate
-          mypy src/
+        run: uv run mypy src/
 
   # ===========================================================================
   # Stage 2a: Tier Model Enforcement
@@ -124,15 +115,10 @@ jobs:
           sudo apt-get install -y -q libsqlcipher-dev
 
       - name: Install dependencies
-        run: |
-          uv venv
-          source .venv/bin/activate
-          uv pip install -e ".[all]"
+        run: uv sync --frozen --all-extras
 
       - name: Enforce contract alignment
-        run: |
-          source .venv/bin/activate
-          python scripts/check_contracts.py
+        run: uv run python scripts/check_contracts.py
 
   # ===========================================================================
   # Stage 3: Test (Quality gate - ~3-5 minutes)
@@ -171,16 +157,12 @@ jobs:
           sudo apt-get install -y -q libsqlcipher-dev
 
       - name: Install dependencies
-        run: |
-          uv venv
-          source .venv/bin/activate
-          uv pip install -e ".[all]"
+        run: uv sync --frozen --all-extras
 
       - name: Run tests with coverage
         if: matrix.coverage
         run: |
-          source .venv/bin/activate
-          pytest tests/ \
+          uv run pytest tests/ \
             --cov=src/elspeth \
             --cov-report=xml \
             --cov-report=term-missing \
@@ -191,8 +173,7 @@ jobs:
       - name: Run tests without coverage
         if: ${{ !matrix.coverage }}
         run: |
-          source .venv/bin/activate
-          pytest tests/ \
+          uv run pytest tests/ \
             -v \
             -m "not slow and not stress and not performance"
 
@@ -232,17 +213,12 @@ jobs:
           sudo apt-get install -y -q libsqlcipher-dev
 
       - name: Install dependencies
-        run: |
-          uv venv
-          source .venv/bin/activate
-          uv pip install -e ".[all]"
+        run: uv sync --frozen --all-extras
 
       - name: Run integration tests
         env:
           OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
-        run: |
-          source .venv/bin/activate
-          pytest tests/integration/ -v -m integration || echo "Integration tests skipped (no API keys)"
+        run: uv run pytest tests/integration/ -v -m integration || echo "Integration tests skipped (no API keys)"
 
   # ===========================================================================
   # Summary Job - Required for branch protection

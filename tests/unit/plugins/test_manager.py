@@ -10,7 +10,7 @@ class TestPluginManager:
     """Plugin discovery and registration."""
 
     def test_create_manager(self) -> None:
-        from elspeth.plugins.manager import PluginManager
+        from elspeth.plugins.infrastructure.manager import PluginManager
 
         manager = PluginManager()
         assert manager is not None
@@ -18,9 +18,9 @@ class TestPluginManager:
     def test_register_plugin(self) -> None:
         from elspeth.contracts import PluginSchema
         from elspeth.contracts.plugin_context import PluginContext
-        from elspeth.plugins.hookspecs import hookimpl
-        from elspeth.plugins.manager import PluginManager
-        from elspeth.plugins.results import TransformResult
+        from elspeth.plugins.infrastructure.hookspecs import hookimpl
+        from elspeth.plugins.infrastructure.manager import PluginManager
+        from elspeth.plugins.infrastructure.results import TransformResult
 
         class InputSchema(PluginSchema):
             x: int
@@ -61,9 +61,9 @@ class TestPluginManager:
     def test_get_plugin_by_name(self) -> None:
         from elspeth.contracts import PluginSchema
         from elspeth.contracts.plugin_context import PluginContext
-        from elspeth.plugins.hookspecs import hookimpl
-        from elspeth.plugins.manager import PluginManager
-        from elspeth.plugins.results import TransformResult
+        from elspeth.plugins.infrastructure.hookspecs import hookimpl
+        from elspeth.plugins.infrastructure.manager import PluginManager
+        from elspeth.plugins.infrastructure.results import TransformResult
 
         class Schema(PluginSchema):
             x: int
@@ -122,7 +122,8 @@ class TestDuplicateNameValidation:
     def test_duplicate_transform_raises(self) -> None:
         import pytest
 
-        from elspeth.plugins import PluginManager, hookimpl
+        from elspeth.plugins.infrastructure.hookspecs import hookimpl
+        from elspeth.plugins.infrastructure.manager import PluginManager
 
         class Plugin1:
             @hookimpl
@@ -155,7 +156,8 @@ class TestDuplicateNameValidation:
         """
         import pytest
 
-        from elspeth.plugins import PluginManager, hookimpl
+        from elspeth.plugins.infrastructure.hookspecs import hookimpl
+        from elspeth.plugins.infrastructure.manager import PluginManager
 
         class Plugin1:
             @hookimpl
@@ -202,7 +204,8 @@ class TestDuplicateNameValidation:
 
     def test_same_name_different_types_ok(self) -> None:
         """Same name in different plugin types is allowed."""
-        from elspeth.plugins import PluginManager, hookimpl
+        from elspeth.plugins.infrastructure.hookspecs import hookimpl
+        from elspeth.plugins.infrastructure.manager import PluginManager
 
         class Plugin:
             @hookimpl
@@ -230,7 +233,7 @@ class TestMissingPluginRaises:
         """Verify PluginManager raises ValueError for unknown source plugins."""
         import pytest
 
-        from elspeth.plugins.manager import PluginManager
+        from elspeth.plugins.infrastructure.manager import PluginManager
 
         manager = PluginManager()
 
@@ -242,7 +245,7 @@ class TestMissingPluginRaises:
         """Verify PluginManager raises ValueError for unknown transform plugins."""
         import pytest
 
-        from elspeth.plugins.manager import PluginManager
+        from elspeth.plugins.infrastructure.manager import PluginManager
 
         manager = PluginManager()
 
@@ -253,7 +256,7 @@ class TestMissingPluginRaises:
         """Verify PluginManager raises ValueError for unknown sink plugins."""
         import pytest
 
-        from elspeth.plugins.manager import PluginManager
+        from elspeth.plugins.infrastructure.manager import PluginManager
 
         manager = PluginManager()
 
@@ -269,8 +272,8 @@ class TestHookValidation:
         import pluggy
         import pytest
 
-        from elspeth.plugins.hookspecs import hookimpl
-        from elspeth.plugins.manager import PluginManager
+        from elspeth.plugins.infrastructure.hookspecs import hookimpl
+        from elspeth.plugins.infrastructure.manager import PluginManager
 
         class TypoPlugin:
             @hookimpl
@@ -292,7 +295,7 @@ class TestDiscoveryBasedRegistration:
 
     def test_register_builtin_discovers_csv_source(self) -> None:
         """Verify register_builtin_plugins finds CSVSource via discovery."""
-        from elspeth.plugins.manager import PluginManager
+        from elspeth.plugins.infrastructure.manager import PluginManager
 
         manager = PluginManager()
         manager.register_builtin_plugins()
@@ -303,7 +306,7 @@ class TestDiscoveryBasedRegistration:
 
     def test_register_builtin_discovers_all_transforms(self) -> None:
         """Verify register_builtin_plugins finds all transforms."""
-        from elspeth.plugins.manager import PluginManager
+        from elspeth.plugins.infrastructure.manager import PluginManager
 
         manager = PluginManager()
         manager.register_builtin_plugins()
@@ -316,7 +319,7 @@ class TestDiscoveryBasedRegistration:
 
     def test_register_builtin_discovers_all_sinks(self) -> None:
         """Verify register_builtin_plugins finds all sinks."""
-        from elspeth.plugins.manager import PluginManager
+        from elspeth.plugins.infrastructure.manager import PluginManager
 
         manager = PluginManager()
         manager.register_builtin_plugins()
@@ -335,7 +338,7 @@ class TestManagerValidation:
         """Invalid config raises ValueError with field name."""
         import pytest
 
-        from elspeth.plugins.manager import PluginManager
+        from elspeth.plugins.infrastructure.manager import PluginManager
 
         manager = PluginManager()
         manager.register_builtin_plugins()
@@ -354,7 +357,7 @@ class TestManagerValidation:
 
     def test_manager_creates_plugin_with_valid_config(self) -> None:
         """Valid config creates working plugin."""
-        from elspeth.plugins.manager import PluginManager
+        from elspeth.plugins.infrastructure.manager import PluginManager
 
         manager = PluginManager()
         manager.register_builtin_plugins()

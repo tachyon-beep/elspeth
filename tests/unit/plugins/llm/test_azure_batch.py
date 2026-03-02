@@ -9,15 +9,64 @@ from unittest.mock import MagicMock, Mock, patch
 
 import pytest
 
-from elspeth.contracts import BatchPendingError, Determinism
+from elspeth.contracts import BatchPendingError, Determinism, NodeType
 from elspeth.contracts.batch_checkpoint import BatchCheckpointState, RowMappingEntry
 from elspeth.contracts.plugin_context import PluginContext
-from elspeth.plugins.config_base import PluginConfigError
-from elspeth.plugins.llm.azure_batch import AzureBatchConfig, AzureBatchLLMTransform
+from elspeth.contracts.schema import SchemaConfig
+from elspeth.plugins.infrastructure.config_base import PluginConfigError
+from elspeth.plugins.transforms.llm.azure_batch import AzureBatchConfig, AzureBatchLLMTransform
 from elspeth.testing import make_pipeline_row
+from tests.fixtures.landscape import make_landscape_db, make_recorder
 
 # Common schema config for dynamic field handling
 DYNAMIC_SCHEMA = {"mode": "observed"}
+
+
+def _make_batch_ctx(*, run_id: str = "test-run") -> PluginContext:
+    """Create a PluginContext with full recorder chain for batch transform tests.
+
+    Sets up: run → source node → transform node → row → token → node_state,
+    satisfying all FK constraints for record_call().
+    """
+    db = make_landscape_db()
+    recorder = make_recorder(db)
+    run = recorder.begin_run(config={}, canonical_version="test", run_id=run_id)
+    recorder.register_node(
+        run_id=run.run_id,
+        plugin_name="csv",
+        node_type=NodeType.SOURCE,
+        plugin_version="1.0",
+        config={},
+        schema_config=SchemaConfig.from_dict({"mode": "observed"}),
+        node_id="source-0",
+        sequence=0,
+    )
+    recorder.register_node(
+        run_id=run.run_id,
+        plugin_name="azure_batch_llm",
+        node_type=NodeType.TRANSFORM,
+        plugin_version="1.0",
+        config={},
+        schema_config=SchemaConfig.from_dict({"mode": "observed"}),
+        node_id="azure-batch-node",
+        sequence=1,
+    )
+    recorder.create_row(run.run_id, "source-0", 0, {"text": "test"}, row_id="test-row")
+    recorder.create_token("test-row", token_id="test-token")
+    state = recorder.begin_node_state(
+        "test-token",
+        "azure-batch-node",
+        run.run_id,
+        0,
+        {"text": "test"},
+    )
+    return PluginContext(
+        run_id=run_id,
+        config={},
+        landscape=recorder,
+        node_id="azure-batch-node",
+        state_id=state.state_id,
+    )
 
 
 class TestBatchPendingError:
@@ -367,11 +416,8 @@ class TestAzureBatchLLMTransformEmptyBatch:
 
     @pytest.fixture
     def ctx(self) -> PluginContext:
-        """Create plugin context for testing.
-
-        PluginContext now has native checkpoint support.
-        """
-        return PluginContext(run_id="test-run", config={})
+        """Create plugin context for testing."""
+        return _make_batch_ctx()
 
     @pytest.fixture
     def transform(self) -> AzureBatchLLMTransform:
@@ -393,17 +439,40 @@ class TestAzureBatchLLMTransformEmptyBatch:
             transform.process([], ctx)
 
 
+class TestProcessSingleDefenseInDepth:
+    """Tests for _process_single fallback behavior.
+
+    The _process_single method converts batch results back to single-row.
+    If _process_batch returns an unexpected state (success with empty rows),
+    it should crash rather than silently passing through the original row.
+    """
+
+    def test_process_single_crashes_on_unexpected_batch_result(self) -> None:
+        """TransformResult __post_init__ rejects success without output data.
+
+        Defense-in-depth: status="success" with no row/rows is rejected at
+        construction time by the dataclass invariant — the invalid state
+        can never exist.
+        """
+        from elspeth.plugins.infrastructure.results import TransformResult
+
+        with pytest.raises(ValueError, match="MUST have output data"):
+            TransformResult(
+                status="success",
+                row=None,
+                rows=None,
+                reason=None,
+                success_reason={"action": "processed"},
+            )
+
+
 class TestAzureBatchLLMTransformSubmit:
     """Tests for batch submission (Phase 1)."""
 
     @pytest.fixture
     def ctx(self) -> PluginContext:
-        """Create plugin context for testing.
-
-        PluginContext now has native checkpoint support via
-        get_checkpoint/set_checkpoint/clear_checkpoint methods.
-        """
-        return PluginContext(run_id="test-run", config={})
+        """Create plugin context with full recorder chain for batch submission."""
+        return _make_batch_ctx()
 
     @pytest.fixture
     def transform(self) -> AzureBatchLLMTransform:
@@ -425,10 +494,12 @@ class TestAzureBatchLLMTransformSubmit:
         mock_client = Mock()
         mock_file = Mock()
         mock_file.id = "file-123"
+        mock_file.status = "uploaded"
         mock_client.files.create.return_value = mock_file
 
         mock_batch = Mock()
         mock_batch.id = "batch-456"
+        mock_batch.status = "validating"
         mock_client.batches.create.return_value = mock_batch
 
         transform._client = mock_client
@@ -448,10 +519,12 @@ class TestAzureBatchLLMTransformSubmit:
         mock_client = Mock()
         mock_file = Mock()
         mock_file.id = "file-123"
+        mock_file.status = "uploaded"
         mock_client.files.create.return_value = mock_file
 
         mock_batch = Mock()
         mock_batch.id = "batch-456"
+        mock_batch.status = "validating"
         mock_client.batches.create.return_value = mock_batch
 
         transform._client = mock_client
@@ -462,7 +535,8 @@ class TestAzureBatchLLMTransformSubmit:
             transform.process([make_pipeline_row(d) for d in rows], ctx)
 
         # Verify checkpoint was saved as typed BatchCheckpointState
-        checkpoint = ctx._checkpoint  # type: ignore[attr-defined]
+        checkpoint = ctx._checkpoint
+        assert checkpoint is not None
         assert checkpoint.batch_id == "batch-456"
         assert checkpoint.input_file_id == "file-123"
         assert checkpoint.row_mapping  # non-empty
@@ -486,10 +560,12 @@ class TestAzureBatchLLMTransformSubmit:
         mock_client = Mock()
         mock_file = Mock()
         mock_file.id = "file-123"
+        mock_file.status = "uploaded"
         mock_client.files.create.return_value = mock_file
 
         mock_batch = Mock()
         mock_batch.id = "batch-456"
+        mock_batch.status = "validating"
         mock_client.batches.create.return_value = mock_batch
 
         transform._client = mock_client
@@ -528,10 +604,12 @@ class TestAzureBatchLLMTransformSubmit:
         mock_client = Mock()
         mock_file = Mock()
         mock_file.id = "file-123"
+        mock_file.status = "uploaded"
         mock_client.files.create.return_value = mock_file
 
         mock_batch = Mock()
         mock_batch.id = "batch-456"
+        mock_batch.status = "validating"
         mock_client.batches.create.return_value = mock_batch
 
         transform._client = mock_client
@@ -586,7 +664,7 @@ class TestAzureBatchLLMTransformSubmit:
             transform.process([make_pipeline_row(d) for d in rows], ctx)
 
         # Verify checkpoint includes requests as typed BatchCheckpointState
-        checkpoint = ctx._checkpoint  # type: ignore[attr-defined]
+        checkpoint = ctx._checkpoint
         assert checkpoint is not None
         assert len(checkpoint.requests) == 2
 
@@ -602,11 +680,8 @@ class TestAzureBatchLLMTransformTemplateErrors:
 
     @pytest.fixture
     def ctx(self) -> PluginContext:
-        """Create plugin context for testing.
-
-        PluginContext now has native checkpoint support.
-        """
-        return PluginContext(run_id="test-run", config={})
+        """Create plugin context with full recorder chain for batch submission."""
+        return _make_batch_ctx()
 
     def test_all_templates_fail_returns_error(self, ctx: PluginContext) -> None:
         """When all templates fail, return error immediately."""
@@ -647,10 +722,12 @@ class TestAzureBatchLLMTransformTemplateErrors:
         mock_client = Mock()
         mock_file = Mock()
         mock_file.id = "file-123"
+        mock_file.status = "uploaded"
         mock_client.files.create.return_value = mock_file
 
         mock_batch = Mock()
         mock_batch.id = "batch-456"
+        mock_batch.status = "validating"
         mock_client.batches.create.return_value = mock_batch
 
         transform._client = mock_client
@@ -666,7 +743,8 @@ class TestAzureBatchLLMTransformTemplateErrors:
             transform.process([make_pipeline_row(d) for d in rows], ctx)
 
         # Checkpoint should have template_errors
-        checkpoint = ctx._checkpoint  # type: ignore[attr-defined]
+        checkpoint = ctx._checkpoint
+        assert checkpoint is not None
         assert len(checkpoint.template_errors) == 1
         assert checkpoint.template_errors[0][0] == 1  # Index of failed row
 
@@ -679,7 +757,7 @@ class TestAzureBatchLLMTransformResume:
         """Create plugin context with existing checkpoint for resume tests."""
         from datetime import UTC, datetime
 
-        ctx = PluginContext(run_id="test-run", config={})
+        ctx = _make_batch_ctx()
         # Pre-populate checkpoint for resume scenario (recent timestamp to avoid timeout)
         recent_timestamp = datetime.now(UTC).isoformat()
         ctx.set_checkpoint(
@@ -720,6 +798,8 @@ class TestAzureBatchLLMTransformResume:
         mock_batch = Mock()
         mock_batch.id = "batch-456"
         mock_batch.status = "in_progress"
+        mock_batch.output_file_id = None
+        mock_batch.error_file_id = None
         mock_client.batches.retrieve.return_value = mock_batch
 
         transform._client = mock_client
@@ -776,6 +856,8 @@ class TestAzureBatchLLMTransformResume:
         mock_batch = Mock()
         mock_batch.id = "batch-456"
         mock_batch.status = "failed"
+        mock_batch.output_file_id = None
+        mock_batch.error_file_id = None
         mock_batch.errors = Mock()
         mock_batch.errors.data = [Mock(code="rate_limit", message="Too many requests")]
         mock_client.batches.retrieve.return_value = mock_batch
@@ -797,6 +879,8 @@ class TestAzureBatchLLMTransformResume:
         mock_batch = Mock()
         mock_batch.id = "batch-456"
         mock_batch.status = "cancelled"
+        mock_batch.output_file_id = None
+        mock_batch.error_file_id = None
         mock_client.batches.retrieve.return_value = mock_batch
 
         transform._client = mock_client
@@ -815,6 +899,8 @@ class TestAzureBatchLLMTransformResume:
         mock_batch = Mock()
         mock_batch.id = "batch-456"
         mock_batch.status = "expired"
+        mock_batch.output_file_id = None
+        mock_batch.error_file_id = None
         mock_client.batches.retrieve.return_value = mock_batch
 
         transform._client = mock_client
@@ -858,7 +944,7 @@ class TestAzureBatchLLMTransformResume:
         transform.process([make_pipeline_row(d) for d in rows], ctx_with_checkpoint)
 
         # Checkpoint should be cleared (None after clear_checkpoint)
-        assert ctx_with_checkpoint._checkpoint is None  # type: ignore[attr-defined]
+        assert ctx_with_checkpoint._checkpoint is None
 
 
 class TestAzureBatchLLMTransformTimeout:
@@ -881,7 +967,7 @@ class TestAzureBatchLLMTransformTimeout:
 
     def test_batch_timeout_returns_error(self, transform: AzureBatchLLMTransform) -> None:
         """Batch exceeding max_wait_hours returns error."""
-        ctx = PluginContext(run_id="test-run", config={})
+        ctx = _make_batch_ctx()
         # Pre-populate checkpoint from old timestamp for timeout test
         ctx.set_checkpoint(
             BatchCheckpointState(
@@ -899,6 +985,8 @@ class TestAzureBatchLLMTransformTimeout:
         mock_batch = Mock()
         mock_batch.id = "batch-456"
         mock_batch.status = "in_progress"
+        mock_batch.output_file_id = None
+        mock_batch.error_file_id = None
         mock_client.batches.retrieve.return_value = mock_batch
 
         transform._client = mock_client
@@ -918,11 +1006,8 @@ class TestAzureBatchLLMTransformSingleRow:
 
     @pytest.fixture
     def ctx(self) -> PluginContext:
-        """Create plugin context for testing.
-
-        PluginContext now has native checkpoint support.
-        """
-        return PluginContext(run_id="test-run", config={})
+        """Create plugin context for testing."""
+        return _make_batch_ctx()
 
     @pytest.fixture
     def transform(self) -> AzureBatchLLMTransform:
@@ -943,10 +1028,12 @@ class TestAzureBatchLLMTransformSingleRow:
         mock_client = Mock()
         mock_file = Mock()
         mock_file.id = "file-123"
+        mock_file.status = "uploaded"
         mock_client.files.create.return_value = mock_file
 
         mock_batch = Mock()
         mock_batch.id = "batch-456"
+        mock_batch.status = "validating"
         mock_client.batches.create.return_value = mock_batch
 
         transform._client = mock_client
@@ -981,7 +1068,7 @@ class TestAzureBatchLLMTransformResultAssembly:
         """Results are assembled in original row order."""
         from datetime import UTC, datetime
 
-        ctx = PluginContext(run_id="test-run", config={})
+        ctx = _make_batch_ctx()
         # Pre-populate checkpoint for resume test
         recent_timestamp = datetime.now(UTC).isoformat()
         ctx.set_checkpoint(
@@ -1070,7 +1157,7 @@ class TestAzureBatchLLMTransformResultAssembly:
         """API errors for individual rows are handled gracefully."""
         from datetime import UTC, datetime
 
-        ctx = PluginContext(run_id="test-run", config={})
+        ctx = _make_batch_ctx()
         # Pre-populate checkpoint for resume test
         recent_timestamp = datetime.now(UTC).isoformat()
         ctx.set_checkpoint(
@@ -1396,8 +1483,7 @@ class TestAzureBatchLLMTransformMissingResults:
         call_index_counter = iter(range(100))
         mock_landscape.allocate_call_index.side_effect = lambda _: next(call_index_counter)
 
-        ctx = PluginContext(run_id="test-run", config={})
-        ctx.landscape = mock_landscape
+        ctx = PluginContext(run_id="test-run", config={}, landscape=mock_landscape)
         ctx.state_id = "test-state-123"  # Required for record_call
 
         # Set up checkpoint as if batch was submitted with 2 rows
@@ -1491,9 +1577,9 @@ class TestAzureBatchLLMTransformMissingResults:
 
         error_call = error_calls[0]
         assert error_call.kwargs["call_type"] == CallType.LLM
-        assert error_call.kwargs["request_data"]["custom_id"] == "row-1-def"
-        assert error_call.kwargs["request_data"]["row_index"] == 1
-        assert error_call.kwargs["error"]["reason"] == "result_not_found"
+        assert error_call.kwargs["request_data"].to_dict()["custom_id"] == "row-1-def"
+        assert error_call.kwargs["request_data"].to_dict()["row_index"] == 1
+        assert error_call.kwargs["error"].to_dict()["reason"] == "result_not_found"
 
     def test_all_results_present_no_error_calls(self, transform: AzureBatchLLMTransform) -> None:
         """When all results are present, only SUCCESS calls are recorded."""
@@ -1502,8 +1588,7 @@ class TestAzureBatchLLMTransformMissingResults:
         call_index_counter = iter(range(100))
         mock_landscape.allocate_call_index.side_effect = lambda _: next(call_index_counter)
 
-        ctx = PluginContext(run_id="test-run", config={})
-        ctx.landscape = mock_landscape
+        ctx = PluginContext(run_id="test-run", config={}, landscape=mock_landscape)
         ctx.state_id = "test-state-456"
 
         ctx.set_checkpoint(
@@ -1647,7 +1732,7 @@ class TestBug4_2_NonDictResponseBody:
         """
         from datetime import UTC, datetime
 
-        ctx = PluginContext(run_id="test-run", config={})
+        ctx = _make_batch_ctx()
         recent_timestamp = datetime.now(UTC).isoformat()
 
         ctx.set_checkpoint(

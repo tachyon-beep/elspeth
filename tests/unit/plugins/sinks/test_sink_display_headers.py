@@ -12,6 +12,8 @@ from unittest.mock import MagicMock
 import pytest
 
 from elspeth.contracts.plugin_context import PluginContext
+from tests.fixtures.factories import make_context
+from tests.fixtures.landscape import make_recorder
 
 
 class TestCSVSinkHeaders:
@@ -20,7 +22,8 @@ class TestCSVSinkHeaders:
     @pytest.fixture
     def ctx(self) -> PluginContext:
         """Create a minimal plugin context."""
-        return PluginContext(run_id="test-run", config={})
+        recorder = make_recorder()
+        return make_context(landscape=recorder)
 
     def test_explicit_custom_headers(self, tmp_path: Path, ctx: PluginContext) -> None:
         """headers dict maps normalized names to display names in CSV header."""
@@ -101,11 +104,7 @@ class TestCSVSinkHeaders:
             "case StUdY --- 1!!": "case_study_1",
         }
 
-        ctx = PluginContext(
-            run_id="test-run",
-            config={},
-            landscape=mock_landscape,
-        )
+        ctx = make_context(landscape=mock_landscape)
 
         # on_start fetches the mapping
         sink.on_start(ctx)
@@ -167,7 +166,7 @@ class TestCSVSinkHeaders:
         mock_landscape = MagicMock()
         mock_landscape.get_source_field_resolution.return_value = None
 
-        ctx = PluginContext(run_id="test-run", config={}, landscape=mock_landscape)
+        ctx = make_context(landscape=mock_landscape)
 
         # on_start is now a no-op for original headers (lazy resolution)
         sink.on_start(ctx)
@@ -195,7 +194,7 @@ class TestCSVSinkHeaders:
             "User ID": "user_id",
         }
 
-        ctx = PluginContext(run_id="test-run", config={}, landscape=mock_landscape)
+        ctx = make_context(landscape=mock_landscape)
         sink.on_start(ctx)
 
         sink.write([{"user_id": "u1", "computed_score": 0.95}], ctx)
@@ -236,7 +235,8 @@ class TestJSONSinkHeaders:
     @pytest.fixture
     def ctx(self) -> PluginContext:
         """Create a minimal plugin context."""
-        return PluginContext(run_id="test-run", config={})
+        recorder = make_recorder()
+        return make_context(landscape=recorder)
 
     def test_explicit_custom_headers_jsonl(self, tmp_path: Path, ctx: PluginContext) -> None:
         """headers dict maps normalized names to display names in JSONL keys."""
@@ -314,7 +314,7 @@ class TestJSONSinkHeaders:
             "Amount (USD)": "amount_usd",
         }
 
-        ctx = PluginContext(run_id="test-run", config={}, landscape=mock_landscape)
+        ctx = make_context(landscape=mock_landscape)
         sink.on_start(ctx)
 
         sink.write([{"user_id": "u1", "amount_usd": 99.99}], ctx)
@@ -400,7 +400,8 @@ class TestCSVCustomHeadersAppendMode:
     @pytest.fixture
     def ctx(self) -> PluginContext:
         """Create a minimal plugin context."""
-        return PluginContext(run_id="test-run", config={})
+        recorder = make_recorder()
+        return make_context(landscape=recorder)
 
     def test_append_with_custom_headers(self, tmp_path: Path, ctx: PluginContext) -> None:
         """Append mode correctly validates and appends when custom headers match."""
@@ -450,7 +451,8 @@ class TestCSVCustomHeadersSpecialCharacters:
     @pytest.fixture
     def ctx(self) -> PluginContext:
         """Create a minimal plugin context."""
-        return PluginContext(run_id="test-run", config={})
+        recorder = make_recorder()
+        return make_context(landscape=recorder)
 
     def test_header_with_comma(self, tmp_path: Path, ctx: PluginContext) -> None:
         """Custom headers containing commas are properly quoted in CSV."""
@@ -537,7 +539,8 @@ class TestJSONLCustomHeadersAppendMode:
     @pytest.fixture
     def ctx(self) -> PluginContext:
         """Create a minimal plugin context."""
-        return PluginContext(run_id="test-run", config={})
+        recorder = make_recorder()
+        return make_context(landscape=recorder)
 
     def test_append_with_custom_headers(self, tmp_path: Path, ctx: PluginContext) -> None:
         """Append mode correctly validates and appends when custom headers match."""

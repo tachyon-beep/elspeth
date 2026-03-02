@@ -161,7 +161,7 @@ class TestTelemetrySettings:
     def test_all_granularity_values(self) -> None:
         """All granularity values are valid."""
         for granularity in ["lifecycle", "rows", "full"]:
-            settings = TelemetrySettings(granularity=granularity)  # type: ignore[arg-type]
+            settings = TelemetrySettings(granularity=granularity)
             assert settings.granularity == granularity
 
     def test_all_backpressure_mode_values(self) -> None:
@@ -170,18 +170,18 @@ class TestTelemetrySettings:
         Note: 'slow' is valid in settings but will fail at runtime config conversion.
         """
         for mode in ["block", "drop", "slow"]:
-            settings = TelemetrySettings(backpressure_mode=mode)  # type: ignore[arg-type]
+            settings = TelemetrySettings(backpressure_mode=mode)
             assert settings.backpressure_mode == mode
 
     def test_invalid_granularity_rejected(self) -> None:
         """Invalid granularity value is rejected."""
         with pytest.raises(ValueError):
-            TelemetrySettings(granularity="invalid")  # type: ignore[arg-type]
+            TelemetrySettings(granularity="invalid")
 
     def test_invalid_backpressure_mode_rejected(self) -> None:
         """Invalid backpressure mode value is rejected."""
         with pytest.raises(ValueError):
-            TelemetrySettings(backpressure_mode="invalid")  # type: ignore[arg-type]
+            TelemetrySettings(backpressure_mode="invalid")
 
     def test_frozen(self) -> None:
         """TelemetrySettings is immutable."""
@@ -255,7 +255,7 @@ class TestRuntimeTelemetryConfig:
             ("rows", TelemetryGranularity.ROWS),
             ("full", TelemetryGranularity.FULL),
         ]:
-            settings = TelemetrySettings(granularity=granularity_str)  # type: ignore[arg-type]
+            settings = TelemetrySettings(granularity=granularity_str)
             config = RuntimeTelemetryConfig.from_settings(settings)
             assert config.granularity == expected_enum
 

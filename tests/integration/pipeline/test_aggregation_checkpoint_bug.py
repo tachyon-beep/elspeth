@@ -17,10 +17,7 @@ from __future__ import annotations
 
 from typing import Any
 
-import pytest
-
 from elspeth.contracts import (
-    ArtifactDescriptor,
     FieldContract,
     PipelineRow,
     RunStatus,
@@ -36,18 +33,18 @@ from elspeth.core.config import (
 )
 from elspeth.core.landscape import LandscapeDB
 from elspeth.engine.orchestrator import Orchestrator, PipelineConfig
-from elspeth.plugins.base import BaseTransform
-from elspeth.plugins.results import TransformResult
+from elspeth.plugins.infrastructure.base import BaseTransform
+from elspeth.plugins.infrastructure.results import TransformResult
 from elspeth.testing import make_pipeline_row
 from tests.fixtures.base_classes import (
     CallbackSource,
     _TestSchema,
-    _TestSinkBase,
     as_sink,
     as_source,
     as_transform,
 )
 from tests.fixtures.factories import wire_transforms
+from tests.fixtures.plugins import CollectSink
 
 
 class BatchCollectorTransform(BaseTransform):
@@ -88,34 +85,6 @@ class BatchCollectorTransform(BaseTransform):
             return TransformResult.success(make_pipeline_row(dict(row)), success_reason={"action": "single"})
 
 
-class CollectingSink(_TestSinkBase):
-    """Sink that collects rows."""
-
-    name = "collecting_sink"
-
-    def __init__(self) -> None:
-        super().__init__()
-        self.rows: list[dict[str, Any]] = []
-
-    def on_start(self, ctx: Any) -> None:
-        pass
-
-    def on_complete(self, ctx: Any) -> None:
-        pass
-
-    def write(self, rows: Any, ctx: Any) -> ArtifactDescriptor:
-        for row in rows:
-            self.rows.append(row)
-        return ArtifactDescriptor.for_file(
-            path="memory://test",
-            size_bytes=0,
-            content_hash="test",
-        )
-
-    def close(self) -> None:
-        pass
-
-
 class TestAggregationCheckpointFixVerification:
     """
     FIX VERIFICATION: Verifies aggregation state IS saved to checkpoints.
@@ -123,11 +92,6 @@ class TestAggregationCheckpointFixVerification:
     These tests verify the fix for elspeth-rapid-nsj where aggregation
     checkpoint state was never saved during normal pipeline execution.
     """
-
-    @pytest.fixture
-    def landscape_db(self) -> LandscapeDB:
-        """In-memory database for test isolation."""
-        return LandscapeDB.in_memory()
 
     def test_checkpoint_includes_aggregation_state(
         self,
@@ -159,7 +123,7 @@ class TestAggregationCheckpointFixVerification:
         source = as_source(callback_source)
 
         transform = as_transform(BatchCollectorTransform())
-        collecting_sink = CollectingSink()
+        collecting_sink = CollectSink(name="collecting_sink")
         sink = as_sink(collecting_sink)
 
         # Build graph
@@ -183,6 +147,7 @@ class TestAggregationCheckpointFixVerification:
             name="test_agg",
             plugin="batch_collector",
             input="source_out",
+            on_error="discard",
             trigger=TriggerConfig(
                 count=10,  # High count - won't trigger during 5 rows
                 timeout_seconds=3600,  # 1 hour - won't trigger
@@ -270,38 +235,6 @@ class TestAggregationCheckpointFixVerification:
             agg_state = call["aggregation_state"]
             assert hasattr(agg_state, "version"), "Aggregation state should have version field"
 
-    def test_orchestrator_calls_get_aggregation_checkpoint_state(
-        self,
-        landscape_db: LandscapeDB,
-        payload_store,
-    ) -> None:
-        """
-        VERIFIES FIX: get_aggregation_checkpoint_state() IS called in production.
-
-        We verify this by checking that calls to get_aggregation_checkpoint_state()
-        appear in the orchestrator checkpoint flow. This is a static verification.
-        """
-        import ast
-        from pathlib import Path
-
-        # Read the orchestrator source
-        orchestrator_path = Path(__file__).parent.parent.parent.parent / "src/elspeth/engine/orchestrator/core.py"
-        source_code = orchestrator_path.read_text()
-
-        # Parse and look for get_aggregation_checkpoint_state calls
-        tree = ast.parse(source_code)
-
-        get_checkpoint_state_calls = []
-        for node in ast.walk(tree):
-            # Check for method call pattern: xxx.get_aggregation_checkpoint_state()
-            if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute) and node.func.attr == "get_aggregation_checkpoint_state":
-                get_checkpoint_state_calls.append(node.lineno)
-
-        # FIX VERIFICATION: This assertion PASSES when fix is applied
-        assert len(get_checkpoint_state_calls) > 0, (
-            f"FIX NOT WORKING: Found {len(get_checkpoint_state_calls)} get_aggregation_checkpoint_state() calls (expected > 0 after fix)."
-        )
-
     def test_aggregation_only_frequency_creates_checkpoints(
         self,
         landscape_db: LandscapeDB,
@@ -329,7 +262,7 @@ class TestAggregationCheckpointFixVerification:
         source = as_source(callback_source)
 
         transform = as_transform(BatchCollectorTransform())
-        collecting_sink = CollectingSink()
+        collecting_sink = CollectSink(name="collecting_sink")
         sink = as_sink(collecting_sink)
 
         from elspeth.core.dag import ExecutionGraph
@@ -351,6 +284,7 @@ class TestAggregationCheckpointFixVerification:
             name="test_agg",
             plugin="batch_collector",
             input="source_out",
+            on_error="discard",
             trigger=TriggerConfig(
                 count=2,
                 timeout_seconds=3600,

@@ -1,493 +1,52 @@
-"""Tests for multi-query LLM support."""
+"""Tests for multi-query LLM support.
+
+Tests for QuerySpec, resolve_queries, OutputFieldConfig, ResponseFormat,
+and multi-query transform instantiation via unified LLMTransform.
+"""
 
 from __future__ import annotations
 
+from typing import Any
+
 import pytest
 
-from elspeth.plugins.config_base import PluginConfigError
-from elspeth.plugins.llm.azure_multi_query import AzureMultiQueryLLMTransform
-from elspeth.plugins.llm.multi_query import QuerySpec
+from elspeth.plugins.infrastructure.config_base import PluginConfigError
+from elspeth.plugins.transforms.llm.transform import LLMTransform
 
 # Re-export chaosllm_server fixture for field collision tests
 from tests.fixtures.chaosllm import chaosllm_server  # noqa: F401
 
-from .conftest import (
-    make_azure_multi_query_config,
-)
+# ---------------------------------------------------------------------------
+# Config helpers (inline, using the new unified format)
+# ---------------------------------------------------------------------------
+
+DYNAMIC_SCHEMA = {"mode": "observed"}
 
 
-class TestQuerySpec:
-    """Tests for QuerySpec dataclass."""
-
-    def test_query_spec_creation(self) -> None:
-        """QuerySpec holds case study and criterion info."""
-        spec = QuerySpec(
-            case_study_name="cs1",
-            criterion_name="diagnosis",
-            input_fields=["cs1_bg", "cs1_sym", "cs1_hist"],
-            output_prefix="cs1_diagnosis",
-            criterion_data={"code": "DIAG", "subcriteria": ["accuracy"]},
-            case_study_data={"name": "cs1", "context": "Capability"},
-        )
-        assert spec.case_study_name == "cs1"
-        assert spec.criterion_name == "diagnosis"
-        assert spec.output_prefix == "cs1_diagnosis"
-
-    def test_query_spec_build_template_context(self) -> None:
-        """QuerySpec builds template context with positional inputs, criterion, and case_study."""
-        spec = QuerySpec(
-            case_study_name="cs1",
-            criterion_name="diagnosis",
-            input_fields=["cs1_bg", "cs1_sym", "cs1_hist"],
-            output_prefix="cs1_diagnosis",
-            criterion_data={"code": "DIAG", "subcriteria": ["accuracy"]},
-            case_study_data={"name": "cs1", "context": "Capability", "description": "Technical capability"},
-        )
-        row = {
-            "cs1_bg": "45yo male",
-            "cs1_sym": "chest pain",
-            "cs1_hist": "family history",
-            "other_field": "ignored",
-        }
-        context = spec.build_template_context(row)
-
-        assert context["input_1"] == "45yo male"
-        assert context["input_2"] == "chest pain"
-        assert context["input_3"] == "family history"
-        assert context["criterion"]["code"] == "DIAG"
-        assert context["case_study"]["name"] == "cs1"
-        assert context["case_study"]["context"] == "Capability"
-        assert context["source_row"] == row  # Full row for row-based lookups
-
-    def test_build_template_context_raises_on_missing_field(self) -> None:
-        """Missing input field raises KeyError with informative message."""
-        spec = QuerySpec(
-            case_study_name="cs1",
-            criterion_name="diagnosis",
-            input_fields=["cs1_bg", "missing_field"],
-            output_prefix="cs1_diagnosis",
-            criterion_data={},
-            case_study_data={"name": "cs1"},
-        )
-        row = {"cs1_bg": "data"}
-
-        with pytest.raises(KeyError) as exc_info:
-            spec.build_template_context(row)
-
-        assert "missing_field" in str(exc_info.value)
-        assert "cs1_diagnosis" in str(exc_info.value)
-
-    def test_build_template_context_empty_input_fields(self) -> None:
-        """Empty input_fields produces context with criterion, case_study, and source_row."""
-        spec = QuerySpec(
-            case_study_name="cs1",
-            criterion_name="diagnosis",
-            input_fields=[],
-            output_prefix="cs1_diagnosis",
-            criterion_data={"code": "DIAG"},
-            case_study_data={"name": "cs1", "context": "Capability"},
-        )
-        row = {"some_field": "value"}
-        context = spec.build_template_context(row)
-
-        # No input_N fields
-        assert "input_1" not in context
-        # But criterion, case_study, and row are present
-        assert context["criterion"] == {"code": "DIAG"}
-        assert context["case_study"] == {"name": "cs1", "context": "Capability"}
-        assert context["source_row"] == row
-
-
-class TestCaseStudyConfig:
-    """Tests for CaseStudyConfig validation."""
-
-    def test_case_study_requires_name(self) -> None:
-        """CaseStudyConfig requires name."""
-        from elspeth.plugins.llm.multi_query import CaseStudyConfig
-
-        with pytest.raises(PluginConfigError):
-            CaseStudyConfig.from_dict({"input_fields": ["a", "b"]})
-
-    def test_case_study_requires_input_fields(self) -> None:
-        """CaseStudyConfig requires input_fields."""
-        from elspeth.plugins.llm.multi_query import CaseStudyConfig
-
-        with pytest.raises(PluginConfigError):
-            CaseStudyConfig.from_dict({"name": "cs1"})
-
-    def test_valid_case_study(self) -> None:
-        """Valid CaseStudyConfig passes validation."""
-        from elspeth.plugins.llm.multi_query import CaseStudyConfig
-
-        config = CaseStudyConfig.from_dict(
-            {
-                "name": "cs1",
-                "input_fields": ["cs1_bg", "cs1_sym", "cs1_hist"],
-            }
-        )
-        assert config.name == "cs1"
-        assert config.input_fields == ["cs1_bg", "cs1_sym", "cs1_hist"]
-
-    def test_case_study_rejects_empty_input_fields(self) -> None:
-        """CaseStudyConfig rejects empty input_fields list."""
-        from elspeth.plugins.llm.multi_query import CaseStudyConfig
-
-        with pytest.raises(PluginConfigError):
-            CaseStudyConfig.from_dict({"name": "cs1", "input_fields": []})
-
-    def test_case_study_with_context_and_description(self) -> None:
-        """CaseStudyConfig accepts optional context and description."""
-        from elspeth.plugins.llm.multi_query import CaseStudyConfig
-
-        config = CaseStudyConfig.from_dict(
-            {
-                "name": "cs1",
-                "input_fields": ["field_a"],
-                "context": "Capability",
-                "description": "Technical capability demonstration",
-            }
-        )
-        assert config.name == "cs1"
-        assert config.context == "Capability"
-        assert config.description == "Technical capability demonstration"
-
-    def test_case_study_to_template_data(self) -> None:
-        """to_template_data returns dict suitable for template injection."""
-        from elspeth.plugins.llm.multi_query import CaseStudyConfig
-
-        config = CaseStudyConfig.from_dict(
-            {
-                "name": "cs1",
-                "input_fields": ["field_a", "field_b"],
-                "context": "Capability",
-                "description": "Technical capability",
-            }
-        )
-        data = config.to_template_data()
-
-        assert data == {
-            "name": "cs1",
-            "context": "Capability",
-            "description": "Technical capability",
-            "input_fields": ["field_a", "field_b"],
-        }
-
-
-class TestCriterionConfig:
-    """Tests for CriterionConfig validation."""
-
-    def test_criterion_requires_name(self) -> None:
-        """CriterionConfig requires name."""
-        from elspeth.plugins.llm.multi_query import CriterionConfig
-
-        with pytest.raises(PluginConfigError):
-            CriterionConfig.from_dict({"code": "DIAG"})
-
-    def test_valid_criterion_minimal(self) -> None:
-        """CriterionConfig works with just name."""
-        from elspeth.plugins.llm.multi_query import CriterionConfig
-
-        config = CriterionConfig.from_dict({"name": "diagnosis"})
-        assert config.name == "diagnosis"
-        assert config.code is None
-        assert config.subcriteria == []
-
-    def test_valid_criterion_full(self) -> None:
-        """CriterionConfig accepts all fields."""
-        from elspeth.plugins.llm.multi_query import CriterionConfig
-
-        config = CriterionConfig.from_dict(
-            {
-                "name": "diagnosis",
-                "code": "DIAG",
-                "description": "Assess diagnostic accuracy",
-                "subcriteria": ["accuracy", "evidence"],
-            }
-        )
-        assert config.name == "diagnosis"
-        assert config.code == "DIAG"
-        assert config.description == "Assess diagnostic accuracy"
-        assert config.subcriteria == ["accuracy", "evidence"]
-
-    def test_criterion_to_template_data(self) -> None:
-        """to_template_data returns dict suitable for template injection."""
-        from elspeth.plugins.llm.multi_query import CriterionConfig
-
-        config = CriterionConfig.from_dict(
-            {
-                "name": "diagnosis",
-                "code": "DIAG",
-                "description": "Assess accuracy",
-                "subcriteria": ["a", "b"],
-            }
-        )
-        data = config.to_template_data()
-
-        assert data == {
-            "name": "diagnosis",
-            "code": "DIAG",
-            "description": "Assess accuracy",
-            "subcriteria": ["a", "b"],
-        }
-
-
-class TestMultiQueryConfig:
-    """Tests for MultiQueryConfig validation."""
-
-    def test_config_requires_case_studies(self) -> None:
-        """MultiQueryConfig requires case_studies."""
-        from elspeth.plugins.llm.multi_query import MultiQueryConfig
-
-        with pytest.raises(PluginConfigError):
-            MultiQueryConfig.from_dict(
-                {
-                    "deployment_name": "gpt-4o",
-                    "endpoint": "https://test.openai.azure.com",
-                    "api_key": "key",
-                    "template": "{{ row.input_1 }}",
-                    "criteria": [{"name": "diagnosis"}],
-                    "response_format": "standard",
-                    "output_mapping": {"score": {"suffix": "score", "type": "integer"}},
-                    "schema": {"mode": "observed"},
-                    "required_input_fields": [],  # Explicit opt-out for this test
-                }
-            )
-
-    def test_config_requires_criteria(self) -> None:
-        """MultiQueryConfig requires criteria."""
-        from elspeth.plugins.llm.multi_query import MultiQueryConfig
-
-        with pytest.raises(PluginConfigError):
-            MultiQueryConfig.from_dict(
-                {
-                    "deployment_name": "gpt-4o",
-                    "endpoint": "https://test.openai.azure.com",
-                    "api_key": "key",
-                    "template": "{{ row.input_1 }}",
-                    "case_studies": [{"name": "cs1", "input_fields": ["a"]}],
-                    "response_format": "standard",
-                    "output_mapping": {"score": {"suffix": "score", "type": "integer"}},
-                    "schema": {"mode": "observed"},
-                    "required_input_fields": [],  # Explicit opt-out for this test
-                }
-            )
-
-    def test_config_requires_output_mapping(self) -> None:
-        """MultiQueryConfig requires output_mapping."""
-        from elspeth.plugins.llm.multi_query import MultiQueryConfig
-
-        with pytest.raises(PluginConfigError):
-            MultiQueryConfig.from_dict(
-                {
-                    "deployment_name": "gpt-4o",
-                    "endpoint": "https://test.openai.azure.com",
-                    "api_key": "key",
-                    "template": "{{ row.input_1 }}",
-                    "case_studies": [{"name": "cs1", "input_fields": ["a"]}],
-                    "criteria": [{"name": "diagnosis"}],
-                    "response_format": "standard",
-                    "schema": {"mode": "observed"},
-                    "required_input_fields": [],  # Explicit opt-out for this test
-                }
-            )
-
-    def test_valid_config(self) -> None:
-        """Valid MultiQueryConfig passes validation."""
-        from elspeth.plugins.llm.multi_query import MultiQueryConfig
-
-        config = MultiQueryConfig.from_dict(
-            {
-                "deployment_name": "gpt-4o",
-                "endpoint": "https://test.openai.azure.com",
-                "api_key": "key",
-                "template": "{{ row.input_1 }} {{ row.criterion.name }}",
-                "system_prompt": "You are an AI.",
-                "case_studies": [
-                    {"name": "cs1", "input_fields": ["cs1_bg", "cs1_sym"]},
-                    {"name": "cs2", "input_fields": ["cs2_bg", "cs2_sym"]},
+def _make_llm_config(**overrides: Any) -> dict[str, Any]:
+    """Create valid LLMTransform multi-query config with optional overrides."""
+    config: dict[str, Any] = {
+        "provider": "azure",
+        "deployment_name": "gpt-4o",
+        "endpoint": "https://test.openai.azure.com",
+        "api_key": "test-key",
+        "template": "Evaluate: {{ row.text_content }}",
+        "system_prompt": "You are an assessment AI. Respond in JSON.",
+        "schema": DYNAMIC_SCHEMA,
+        "required_input_fields": [],
+        "pool_size": 1,
+        "queries": {
+            "cs1_diag": {
+                "input_fields": {"text_content": "cs1_bg"},
+                "output_fields": [
+                    {"suffix": "score", "type": "integer"},
+                    {"suffix": "rationale", "type": "string"},
                 ],
-                "criteria": [
-                    {"name": "diagnosis", "code": "DIAG"},
-                    {"name": "treatment", "code": "TREAT"},
-                ],
-                "response_format": "standard",
-                "output_mapping": {
-                    "score": {"suffix": "score", "type": "integer"},
-                    "rationale": {"suffix": "rationale", "type": "string"},
-                },
-                "schema": {"mode": "observed"},
-                "required_input_fields": [],  # Explicit opt-out for this test
-            }
-        )
-        assert len(config.case_studies) == 2
-        assert len(config.criteria) == 2
-        assert "score" in config.output_mapping
-        assert "rationale" in config.output_mapping
-        assert config.output_mapping["score"].suffix == "score"
-        assert config.output_mapping["rationale"].suffix == "rationale"
-
-    def test_config_rejects_empty_output_mapping(self) -> None:
-        """MultiQueryConfig rejects empty output_mapping dict."""
-        from elspeth.plugins.llm.multi_query import MultiQueryConfig
-
-        with pytest.raises(PluginConfigError):
-            MultiQueryConfig.from_dict(
-                {
-                    "deployment_name": "gpt-4o",
-                    "endpoint": "https://test.openai.azure.com",
-                    "api_key": "key",
-                    "template": "{{ row.input_1 }}",
-                    "case_studies": [{"name": "cs1", "input_fields": ["a"]}],
-                    "criteria": [{"name": "diagnosis"}],
-                    "output_mapping": {},  # Empty!
-                    "schema": {"mode": "observed"},
-                    "required_input_fields": [],  # Explicit opt-out for this test
-                }
-            )
-
-    def test_expand_queries_creates_cross_product(self) -> None:
-        """expand_queries creates QuerySpec for each (case_study, criterion) pair."""
-        from elspeth.plugins.llm.multi_query import MultiQueryConfig
-
-        config = MultiQueryConfig.from_dict(
-            {
-                "deployment_name": "gpt-4o",
-                "endpoint": "https://test.openai.azure.com",
-                "api_key": "key",
-                "template": "{{ row.input_1 }}",
-                "case_studies": [
-                    {"name": "cs1", "input_fields": ["cs1_a"]},
-                    {"name": "cs2", "input_fields": ["cs2_a"]},
-                ],
-                "criteria": [
-                    {"name": "diagnosis", "code": "DIAG"},
-                    {"name": "treatment", "code": "TREAT"},
-                ],
-                "response_format": "standard",
-                "output_mapping": {"score": {"suffix": "score", "type": "integer"}},
-                "schema": {"mode": "observed"},
-                "required_input_fields": [],  # Explicit opt-out for this test
-            }
-        )
-
-        specs = config.expand_queries()
-
-        # 2 case studies x 2 criteria = 4 queries
-        assert len(specs) == 4
-
-        # Check cross-product
-        prefixes = [s.output_prefix for s in specs]
-        assert "cs1_diagnosis" in prefixes
-        assert "cs1_treatment" in prefixes
-        assert "cs2_diagnosis" in prefixes
-        assert "cs2_treatment" in prefixes
-
-    def test_duplicate_case_study_criterion_pairs_rejected(self) -> None:
-        """Duplicate (case_study.name, criterion.name) pairs are rejected.
-
-        Regression test for P1-2026-01-31-multi-query-output-key-collisions.
-        """
-        from elspeth.plugins.llm.multi_query import MultiQueryConfig
-
-        with pytest.raises(PluginConfigError) as exc_info:
-            MultiQueryConfig.from_dict(
-                {
-                    "deployment_name": "gpt-4o",
-                    "endpoint": "https://test.openai.azure.com",
-                    "api_key": "key",
-                    "template": "{{ row.input_1 }}",
-                    "case_studies": [
-                        {"name": "cs1", "input_fields": ["a"]},
-                        {"name": "cs1", "input_fields": ["b"]},  # Duplicate name!
-                    ],
-                    "criteria": [{"name": "diagnosis"}],
-                    "response_format": "standard",
-                    "output_mapping": {"score": {"suffix": "score", "type": "integer"}},
-                    "schema": {"mode": "observed"},
-                    "required_input_fields": [],
-                }
-            )
-        assert "duplicate" in str(exc_info.value).lower()
-
-    def test_duplicate_criterion_names_rejected(self) -> None:
-        """Duplicate criterion names are rejected.
-
-        Regression test for P1-2026-01-31-multi-query-output-key-collisions.
-        """
-        from elspeth.plugins.llm.multi_query import MultiQueryConfig
-
-        with pytest.raises(PluginConfigError) as exc_info:
-            MultiQueryConfig.from_dict(
-                {
-                    "deployment_name": "gpt-4o",
-                    "endpoint": "https://test.openai.azure.com",
-                    "api_key": "key",
-                    "template": "{{ row.input_1 }}",
-                    "case_studies": [{"name": "cs1", "input_fields": ["a"]}],
-                    "criteria": [
-                        {"name": "diagnosis"},
-                        {"name": "diagnosis"},  # Duplicate name!
-                    ],
-                    "response_format": "standard",
-                    "output_mapping": {"score": {"suffix": "score", "type": "integer"}},
-                    "schema": {"mode": "observed"},
-                    "required_input_fields": [],
-                }
-            )
-        assert "duplicate" in str(exc_info.value).lower()
-
-    def test_output_suffix_collision_with_reserved_suffix_rejected(self) -> None:
-        """Output mapping suffix that collides with reserved suffixes is rejected.
-
-        Reserved suffixes include _usage, _model, _template_hash, etc.
-        Regression test for P1-2026-01-31-multi-query-output-key-collisions.
-        """
-        from elspeth.plugins.llm.multi_query import MultiQueryConfig
-
-        with pytest.raises(PluginConfigError) as exc_info:
-            MultiQueryConfig.from_dict(
-                {
-                    "deployment_name": "gpt-4o",
-                    "endpoint": "https://test.openai.azure.com",
-                    "api_key": "key",
-                    "template": "{{ row.input_1 }}",
-                    "case_studies": [{"name": "cs1", "input_fields": ["a"]}],
-                    "criteria": [{"name": "diagnosis"}],
-                    "response_format": "standard",
-                    "output_mapping": {
-                        "score": {"suffix": "score", "type": "integer"},
-                        "usage": {"suffix": "usage", "type": "string"},  # Collides with _usage!
-                    },
-                    "schema": {"mode": "observed"},
-                    "required_input_fields": [],
-                }
-            )
-        assert "reserved" in str(exc_info.value).lower() or "usage" in str(exc_info.value).lower()
-
-    def test_duplicate_output_mapping_suffixes_rejected(self) -> None:
-        """Duplicate output_mapping suffixes are rejected to prevent key overwrites."""
-        from elspeth.plugins.llm.multi_query import MultiQueryConfig
-
-        with pytest.raises(PluginConfigError) as exc_info:
-            MultiQueryConfig.from_dict(
-                {
-                    "deployment_name": "gpt-4o",
-                    "endpoint": "https://test.openai.azure.com",
-                    "api_key": "key",
-                    "template": "{{ row.input_1 }}",
-                    "case_studies": [{"name": "cs1", "input_fields": ["a"]}],
-                    "criteria": [{"name": "diagnosis"}],
-                    "response_format": "standard",
-                    "output_mapping": {
-                        "score": {"suffix": "value", "type": "integer"},
-                        "rationale": {"suffix": "value", "type": "string"},
-                    },
-                    "schema": {"mode": "observed"},
-                    "required_input_fields": [],
-                }
-            )
-        assert "duplicate" in str(exc_info.value).lower()
-        assert "suffix" in str(exc_info.value).lower()
+            },
+        },
+    }
+    config.update(overrides)
+    return config
 
 
 class TestOutputFieldConfig:
@@ -495,7 +54,7 @@ class TestOutputFieldConfig:
 
     def test_string_type_to_json_schema(self) -> None:
         """String type generates correct JSON schema."""
-        from elspeth.plugins.llm.multi_query import OutputFieldConfig
+        from elspeth.plugins.transforms.llm.multi_query import OutputFieldConfig
 
         config = OutputFieldConfig.from_dict({"suffix": "rationale", "type": "string"})
         schema = config.to_json_schema()
@@ -504,7 +63,7 @@ class TestOutputFieldConfig:
 
     def test_integer_type_to_json_schema(self) -> None:
         """Integer type generates correct JSON schema."""
-        from elspeth.plugins.llm.multi_query import OutputFieldConfig
+        from elspeth.plugins.transforms.llm.multi_query import OutputFieldConfig
 
         config = OutputFieldConfig.from_dict({"suffix": "score", "type": "integer"})
         schema = config.to_json_schema()
@@ -513,7 +72,7 @@ class TestOutputFieldConfig:
 
     def test_number_type_to_json_schema(self) -> None:
         """Number type generates correct JSON schema."""
-        from elspeth.plugins.llm.multi_query import OutputFieldConfig
+        from elspeth.plugins.transforms.llm.multi_query import OutputFieldConfig
 
         config = OutputFieldConfig.from_dict({"suffix": "probability", "type": "number"})
         schema = config.to_json_schema()
@@ -522,7 +81,7 @@ class TestOutputFieldConfig:
 
     def test_boolean_type_to_json_schema(self) -> None:
         """Boolean type generates correct JSON schema."""
-        from elspeth.plugins.llm.multi_query import OutputFieldConfig
+        from elspeth.plugins.transforms.llm.multi_query import OutputFieldConfig
 
         config = OutputFieldConfig.from_dict({"suffix": "is_valid", "type": "boolean"})
         schema = config.to_json_schema()
@@ -531,7 +90,7 @@ class TestOutputFieldConfig:
 
     def test_enum_type_to_json_schema(self) -> None:
         """Enum type generates JSON schema with allowed values."""
-        from elspeth.plugins.llm.multi_query import OutputFieldConfig
+        from elspeth.plugins.transforms.llm.multi_query import OutputFieldConfig
 
         config = OutputFieldConfig.from_dict(
             {
@@ -546,21 +105,21 @@ class TestOutputFieldConfig:
 
     def test_enum_requires_values(self) -> None:
         """Enum type without values raises validation error."""
-        from elspeth.plugins.llm.multi_query import OutputFieldConfig
+        from elspeth.plugins.transforms.llm.multi_query import OutputFieldConfig
 
         with pytest.raises(PluginConfigError):
             OutputFieldConfig.from_dict({"suffix": "level", "type": "enum"})
 
     def test_enum_requires_non_empty_values(self) -> None:
         """Enum type with empty values list raises validation error."""
-        from elspeth.plugins.llm.multi_query import OutputFieldConfig
+        from elspeth.plugins.transforms.llm.multi_query import OutputFieldConfig
 
         with pytest.raises(PluginConfigError):
             OutputFieldConfig.from_dict({"suffix": "level", "type": "enum", "values": []})
 
     def test_non_enum_rejects_values(self) -> None:
         """Non-enum types reject values parameter."""
-        from elspeth.plugins.llm.multi_query import OutputFieldConfig
+        from elspeth.plugins.transforms.llm.multi_query import OutputFieldConfig
 
         with pytest.raises(PluginConfigError):
             OutputFieldConfig.from_dict(
@@ -572,224 +131,143 @@ class TestOutputFieldConfig:
             )
 
 
-class TestResponseFormatBuilding:
-    """Tests for build_json_schema and build_response_format methods."""
-
-    def test_build_json_schema_single_field(self) -> None:
-        """build_json_schema generates valid schema for single field."""
-        from elspeth.plugins.llm.multi_query import MultiQueryConfig
-
-        config = MultiQueryConfig.from_dict(
-            {
-                "deployment_name": "gpt-4o",
-                "endpoint": "https://test.openai.azure.com",
-                "api_key": "key",
-                "template": "{{ row.input_1 }}",
-                "case_studies": [{"name": "cs1", "input_fields": ["a"]}],
-                "criteria": [{"name": "crit1"}],
-                "response_format": "structured",
-                "output_mapping": {"score": {"suffix": "score", "type": "integer"}},
-                "schema": {"mode": "observed"},
-                "required_input_fields": [],  # Explicit opt-out for this test
-            }
-        )
-
-        schema = config.build_json_schema()
-
-        assert schema == {
-            "type": "object",
-            "properties": {"score": {"type": "integer"}},
-            "required": ["score"],
-            "additionalProperties": False,
-        }
-
-    def test_build_json_schema_multiple_fields(self) -> None:
-        """build_json_schema generates valid schema for multiple fields."""
-        from elspeth.plugins.llm.multi_query import MultiQueryConfig
-
-        config = MultiQueryConfig.from_dict(
-            {
-                "deployment_name": "gpt-4o",
-                "endpoint": "https://test.openai.azure.com",
-                "api_key": "key",
-                "template": "{{ row.input_1 }}",
-                "case_studies": [{"name": "cs1", "input_fields": ["a"]}],
-                "criteria": [{"name": "crit1"}],
-                "response_format": "structured",
-                "output_mapping": {
-                    "score": {"suffix": "score", "type": "integer"},
-                    "rationale": {"suffix": "rationale", "type": "string"},
-                    "confidence": {"suffix": "confidence", "type": "enum", "values": ["low", "medium", "high"]},
-                },
-                "schema": {"mode": "observed"},
-                "required_input_fields": [],  # Explicit opt-out for this test
-            }
-        )
-
-        schema = config.build_json_schema()
-
-        assert schema["type"] == "object"
-        assert schema["additionalProperties"] is False
-        assert set(schema["required"]) == {"score", "rationale", "confidence"}
-        assert schema["properties"]["score"] == {"type": "integer"}
-        assert schema["properties"]["rationale"] == {"type": "string"}
-        assert schema["properties"]["confidence"] == {"type": "string", "enum": ["low", "medium", "high"]}
-
-    def test_build_response_format_standard_mode(self) -> None:
-        """build_response_format returns json_object for standard mode."""
-        from elspeth.plugins.llm.multi_query import MultiQueryConfig
-
-        config = MultiQueryConfig.from_dict(
-            {
-                "deployment_name": "gpt-4o",
-                "endpoint": "https://test.openai.azure.com",
-                "api_key": "key",
-                "template": "{{ row.input_1 }}",
-                "case_studies": [{"name": "cs1", "input_fields": ["a"]}],
-                "criteria": [{"name": "crit1"}],
-                "response_format": "standard",
-                "output_mapping": {"score": {"suffix": "score", "type": "integer"}},
-                "schema": {"mode": "observed"},
-                "required_input_fields": [],  # Explicit opt-out for this test
-            }
-        )
-
-        response_format = config.build_response_format()
-
-        assert response_format == {"type": "json_object"}
-
-    def test_build_response_format_structured_mode(self) -> None:
-        """build_response_format returns json_schema for structured mode."""
-        from elspeth.plugins.llm.multi_query import MultiQueryConfig
-
-        config = MultiQueryConfig.from_dict(
-            {
-                "deployment_name": "gpt-4o",
-                "endpoint": "https://test.openai.azure.com",
-                "api_key": "key",
-                "template": "{{ row.input_1 }}",
-                "case_studies": [{"name": "cs1", "input_fields": ["a"]}],
-                "criteria": [{"name": "crit1"}],
-                "response_format": "structured",
-                "output_mapping": {
-                    "score": {"suffix": "score", "type": "integer"},
-                    "rationale": {"suffix": "rationale", "type": "string"},
-                },
-                "schema": {"mode": "observed"},
-                "required_input_fields": [],  # Explicit opt-out for this test
-            }
-        )
-
-        response_format = config.build_response_format()
-
-        assert response_format["type"] == "json_schema"
-        assert response_format["json_schema"]["name"] == "query_response"
-        assert response_format["json_schema"]["strict"] is True
-        assert response_format["json_schema"]["schema"]["type"] == "object"
-        assert "score" in response_format["json_schema"]["schema"]["properties"]
-        assert "rationale" in response_format["json_schema"]["schema"]["properties"]
-
-    def test_response_format_default_is_standard(self) -> None:
-        """response_format defaults to standard when not specified."""
-        from elspeth.plugins.llm.multi_query import MultiQueryConfig, ResponseFormat
-
-        config = MultiQueryConfig.from_dict(
-            {
-                "deployment_name": "gpt-4o",
-                "endpoint": "https://test.openai.azure.com",
-                "api_key": "key",
-                "template": "{{ row.input_1 }}",
-                "case_studies": [{"name": "cs1", "input_fields": ["a"]}],
-                "criteria": [{"name": "crit1"}],
-                # No response_format specified
-                "output_mapping": {"score": {"suffix": "score", "type": "integer"}},
-                "schema": {"mode": "observed"},
-                "required_input_fields": [],  # Explicit opt-out for this test
-            }
-        )
-
-        assert config.response_format == ResponseFormat.STANDARD
-        assert config.build_response_format() == {"type": "json_object"}
-
-
 class TestMultiQueryDeclaredOutputFields:
-    """Tests for declared_output_fields — centralized collision detection support.
+    """Tests for declared_output_fields on unified LLMTransform.
 
     Field collision detection is enforced centrally by TransformExecutor
     (see TestTransformExecutor in test_executors.py). These tests verify
-    that multi-query transforms correctly declare their output fields so the
+    that LLMTransform correctly declares its output fields so the
     executor can perform pre-execution collision checks.
-
-    Multi-query output fields are a cross-product of query_specs x output_mapping,
-    plus audit fields per spec. These tests verify that declared_output_fields
-    captures the complete set (fixing the prior bug where audit fields were missing).
     """
 
-    def test_declared_output_fields_contains_query_output_fields(self) -> None:
-        """declared_output_fields includes cross-product of specs x output_mapping."""
-        config = make_azure_multi_query_config(
-            case_studies=[{"name": "cs1", "input_fields": ["cs1_bg"]}],
-            criteria=[{"name": "diagnosis", "code": "DIAG"}],
-            pool_size=1,
-        )
+    def test_declared_output_fields_contains_prefixed_response_field(self) -> None:
+        """Multi-query declared_output_fields includes query-prefixed fields."""
+        transform = LLMTransform(_make_llm_config())
+        # Multi-query declares prefixed fields matching actual output
+        assert "cs1_diag_llm_response" in transform.declared_output_fields
 
-        transform = AzureMultiQueryLLMTransform(config)
-
-        # score and rationale suffixes for cs1_diagnosis
-        assert "cs1_diagnosis_score" in transform.declared_output_fields
-        assert "cs1_diagnosis_rationale" in transform.declared_output_fields
-
-    def test_declared_output_fields_contains_audit_fields(self) -> None:
-        """declared_output_fields includes per-spec audit fields (prior bug fix).
+    def test_declared_output_fields_contains_prefixed_audit_fields(self) -> None:
+        """Multi-query declared_output_fields includes prefixed audit fields.
 
         Before centralization, the multi-query collision check only inspected
         output_mapping fields but not audit fields (usage, model, template_hash, etc.).
         declared_output_fields must include these to prevent silent overwrite.
         """
-        config = make_azure_multi_query_config(
-            case_studies=[{"name": "cs1", "input_fields": ["cs1_bg"]}],
-            criteria=[{"name": "diagnosis", "code": "DIAG"}],
-            pool_size=1,
+        transform = LLMTransform(_make_llm_config())
+
+        # Guaranteed metadata fields (prefixed with query name)
+        assert "cs1_diag_llm_response_usage" in transform.declared_output_fields
+        assert "cs1_diag_llm_response_model" in transform.declared_output_fields
+        # Audit fields
+        assert "cs1_diag_llm_response_template_hash" in transform.declared_output_fields
+
+    def test_declared_output_fields_with_multiple_queries(self) -> None:
+        """Multi-query declared_output_fields covers all query prefixes."""
+        config = _make_llm_config(
+            queries={
+                "cs1_diagnosis": {
+                    "input_fields": {"text_content": "cs1_bg"},
+                    "output_fields": [
+                        {"suffix": "score", "type": "integer"},
+                        {"suffix": "rationale", "type": "string"},
+                    ],
+                },
+                "cs2_diagnosis": {
+                    "input_fields": {"text_content": "cs2_bg"},
+                    "output_fields": [
+                        {"suffix": "score", "type": "integer"},
+                        {"suffix": "rationale", "type": "string"},
+                    ],
+                },
+            },
         )
 
-        transform = AzureMultiQueryLLMTransform(config)
+        transform = LLMTransform(config)
 
-        # Guaranteed metadata fields per spec
-        assert "cs1_diagnosis_usage" in transform.declared_output_fields
-        assert "cs1_diagnosis_model" in transform.declared_output_fields
-        # Audit fields per spec (from get_llm_audit_fields)
-        assert "cs1_diagnosis_template_hash" in transform.declared_output_fields
-
-    def test_declared_output_fields_scales_with_multiple_specs(self) -> None:
-        """declared_output_fields grows with number of case_studies x criteria."""
-        config = make_azure_multi_query_config(
-            case_studies=[
-                {"name": "cs1", "input_fields": ["cs1_bg"]},
-                {"name": "cs2", "input_fields": ["cs2_bg"]},
-            ],
-            criteria=[
-                {"name": "diagnosis", "code": "DIAG"},
-                {"name": "treatment", "code": "TREAT"},
-            ],
-            pool_size=1,
-        )
-
-        transform = AzureMultiQueryLLMTransform(config)
-
-        # 2 case_studies x 2 criteria = 4 specs, each with output + audit fields
-        for prefix in ["cs1_diagnosis", "cs1_treatment", "cs2_diagnosis", "cs2_treatment"]:
-            assert f"{prefix}_score" in transform.declared_output_fields
-            assert f"{prefix}_rationale" in transform.declared_output_fields
-            assert f"{prefix}_usage" in transform.declared_output_fields
+        # Both query prefixes must be declared
+        assert "cs1_diagnosis_llm_response" in transform.declared_output_fields
+        assert "cs2_diagnosis_llm_response" in transform.declared_output_fields
+        # Extracted fields too
+        assert "cs1_diagnosis_score" in transform.declared_output_fields
+        assert "cs2_diagnosis_rationale" in transform.declared_output_fields
 
     def test_declared_output_fields_is_nonempty(self) -> None:
         """declared_output_fields is populated for schema evolution recording."""
-        config = make_azure_multi_query_config(
-            case_studies=[{"name": "cs1", "input_fields": ["cs1_bg"]}],
-            criteria=[{"name": "diagnosis", "code": "DIAG"}],
-            pool_size=1,
-        )
-
-        transform = AzureMultiQueryLLMTransform(config)
-
+        transform = LLMTransform(_make_llm_config())
         assert transform.declared_output_fields
+
+
+class TestResolveQueriesDuplicateNames:
+    """Tests for duplicate query name rejection in resolve_queries().
+
+    Bug: list-form configs don't enforce unique spec.name values. If two
+    queries share a name, they emit the same prefixed output keys (e.g.,
+    "{name}_response", "{name}_metadata"), and later dict.update() merges
+    silently overwrite earlier query results, losing data.
+
+    Dict-form configs are naturally protected (Python dict keys are unique),
+    but list-form configs can have duplicate "name" fields.
+    """
+
+    def test_duplicate_names_in_list_form_rejected(self) -> None:
+        """List-form configs with duplicate query names raise ValueError."""
+        from elspeth.plugins.transforms.llm.multi_query import resolve_queries
+
+        with pytest.raises(ValueError, match="Duplicate query name"):
+            resolve_queries(
+                [
+                    {
+                        "name": "diagnosis",
+                        "input_fields": {"text": "col_a"},
+                    },
+                    {
+                        "name": "diagnosis",
+                        "input_fields": {"text": "col_b"},
+                    },
+                ]
+            )
+
+    def test_duplicate_names_in_query_spec_list_rejected(self) -> None:
+        """QuerySpec list with duplicate names raises ValueError."""
+        from elspeth.plugins.transforms.llm.multi_query import QuerySpec, resolve_queries
+
+        with pytest.raises(ValueError, match="Duplicate query name"):
+            resolve_queries(
+                [
+                    QuerySpec(name="scoring", input_fields={"x": "a"}),
+                    QuerySpec(name="scoring", input_fields={"x": "b"}),
+                ]
+            )
+
+    def test_unique_names_in_list_form_accepted(self) -> None:
+        """List-form configs with unique query names work fine."""
+        from elspeth.plugins.transforms.llm.multi_query import resolve_queries
+
+        specs = resolve_queries(
+            [
+                {
+                    "name": "diagnosis_1",
+                    "input_fields": {"text": "col_a"},
+                },
+                {
+                    "name": "diagnosis_2",
+                    "input_fields": {"text": "col_b"},
+                },
+            ]
+        )
+        assert len(specs) == 2
+        assert specs[0].name == "diagnosis_1"
+        assert specs[1].name == "diagnosis_2"
+
+    def test_dict_form_naturally_unique(self) -> None:
+        """Dict-form configs have naturally unique names (sanity check)."""
+        from elspeth.plugins.transforms.llm.multi_query import resolve_queries
+
+        # Python dicts can't have duplicate keys, so this is always safe
+        specs = resolve_queries(
+            {
+                "query_a": {"input_fields": {"text": "col_a"}},
+                "query_b": {"input_fields": {"text": "col_b"}},
+            }
+        )
+        assert len(specs) == 2

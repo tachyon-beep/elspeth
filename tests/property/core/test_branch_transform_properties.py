@@ -18,10 +18,11 @@ from typing import cast
 from hypothesis import given, settings
 from hypothesis import strategies as st
 
+from elspeth.contracts import SinkProtocol, SourceProtocol
+from elspeth.contracts.types import CoalesceName
 from elspeth.core.config import CoalesceSettings, GateSettings, SourceSettings
 from elspeth.core.dag import ExecutionGraph
 from elspeth.core.dag.models import WiredTransform
-from elspeth.plugins.protocols import SinkProtocol, SourceProtocol
 from elspeth.testing import make_pipeline_row, make_token_info
 from tests.fixtures.factories import wire_transforms
 from tests.fixtures.plugins import CollectSink, ListSource, PassTransform
@@ -332,7 +333,7 @@ class TestBranchFirstNodes:
         )
 
         result = graph.get_branch_first_nodes()
-        coalesce_nid = graph.get_coalesce_id_map()["test_merge"]
+        coalesce_nid = graph.get_coalesce_id_map()[CoalesceName("test_merge")]
 
         for name, has_transform in zip(branch_names, has_transforms, strict=True):
             if not has_transform:
@@ -407,7 +408,7 @@ class TestBranchFirstNodes:
         )
 
         result = graph.get_branch_first_nodes()
-        coalesce_nid = graph.get_coalesce_id_map()["test_merge"]
+        coalesce_nid = graph.get_coalesce_id_map()[CoalesceName("test_merge")]
 
         for name, has_transform in zip(branch_names, has_transforms, strict=True):
             if has_transform:

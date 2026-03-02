@@ -3,22 +3,13 @@
 
 from __future__ import annotations
 
-from typing import Any, TypedDict, cast
+from typing import Any
 
 import pytest
 
-from elspeth.core.config import AggregationSettings, ElspethSettings, GateSettings, SourceSettings
-from elspeth.core.dag import ExecutionGraph, WiredTransform
-from elspeth.plugins.protocols import SinkProtocol, SourceProtocol, TransformProtocol
-
-
-class _PluginInstances(TypedDict):
-    source: SourceProtocol
-    source_settings: SourceSettings
-    transforms: list[WiredTransform]
-    sinks: dict[str, SinkProtocol]
-    aggregations: dict[str, tuple[TransformProtocol, AggregationSettings]]
-
+from elspeth.cli_helpers import PluginBundle
+from elspeth.core.config import ElspethSettings, GateSettings
+from elspeth.core.dag import ExecutionGraph
 
 _AUTO_SOURCE_ON_SUCCESS = "_auto_source_on_success"
 _AUTO_GATE_INPUT = "_auto_gate_input"
@@ -80,8 +71,9 @@ def _aggregation_settings(cls: Any, /, **kwargs: Any) -> Any:
     on_success = kwargs.pop("on_success", None)
     if on_success is None and "on_success" in options:
         on_success = options.pop("on_success")
+    on_error = kwargs.pop("on_error", "discard")
     input_connection = kwargs.pop("input", _AUTO_AGG_INPUT)
-    return cls(input=input_connection, on_success=on_success, options=options, **kwargs)
+    return cls(input=input_connection, on_success=on_success, on_error=on_error, options=options, **kwargs)
 
 
 def _apply_explicit_success_routing(settings: Any) -> Any:
@@ -223,14 +215,14 @@ def _apply_explicit_success_routing(settings: Any) -> Any:
     return routed_settings
 
 
-def instantiate_plugins_from_config_raw(settings: Any) -> _PluginInstances:
+def instantiate_plugins_from_config_raw(settings: Any) -> PluginBundle:
     """Instantiate plugins without any test-time routing injection."""
     from elspeth.cli_helpers import instantiate_plugins_from_config as _real_instantiate
 
-    return cast(_PluginInstances, _real_instantiate(settings))
+    return _real_instantiate(settings)
 
 
-def instantiate_plugins_from_config(settings: Any) -> _PluginInstances:
+def instantiate_plugins_from_config(settings: Any) -> PluginBundle:
     """Centralized test factory wrapper for plugin instantiation."""
     routed_settings = _apply_explicit_success_routing(settings)
     # Back-patch routed settings onto the original settings object so callers
@@ -650,7 +642,7 @@ class TestExecutionGraphAccessors:
 
     def test_get_edges(self) -> None:
         """Get all edges with data."""
-        from elspeth.contracts import EdgeInfo, NodeType, RoutingMode
+        from elspeth.contracts import EdgeInfo, NodeID, NodeType, RoutingMode
         from elspeth.core.dag import ExecutionGraph
 
         graph = ExecutionGraph()
@@ -664,8 +656,8 @@ class TestExecutionGraphAccessors:
 
         assert len(edges) == 2
         # Each edge is EdgeInfo (not tuple)
-        assert EdgeInfo(from_node="a", to_node="b", label="continue", mode=RoutingMode.MOVE) in edges
-        assert EdgeInfo(from_node="b", to_node="c", label="output", mode=RoutingMode.COPY) in edges
+        assert EdgeInfo(from_node=NodeID("a"), to_node=NodeID("b"), label="continue", mode=RoutingMode.MOVE) in edges
+        assert EdgeInfo(from_node=NodeID("b"), to_node=NodeID("c"), label="output", mode=RoutingMode.COPY) in edges
 
     def test_get_edges_empty_graph(self) -> None:
         """Empty graph returns empty list."""
@@ -915,11 +907,11 @@ class TestExecutionGraphFromConfig:
 
         plugins = instantiate_plugins_from_config(config)
         graph = ExecutionGraph.from_plugin_instances(
-            source=plugins["source"],
-            source_settings=plugins["source_settings"],
-            transforms=plugins["transforms"],
-            sinks=plugins["sinks"],
-            aggregations=plugins["aggregations"],
+            source=plugins.source,
+            source_settings=plugins.source_settings,
+            transforms=plugins.transforms,
+            sinks=plugins.sinks,
+            aggregations=plugins.aggregations,
             gates=list(config.gates),
         )
 
@@ -953,11 +945,11 @@ class TestExecutionGraphFromConfig:
 
         plugins = instantiate_plugins_from_config(config)
         graph = ExecutionGraph.from_plugin_instances(
-            source=plugins["source"],
-            source_settings=plugins["source_settings"],
-            transforms=plugins["transforms"],
-            sinks=plugins["sinks"],
-            aggregations=plugins["aggregations"],
+            source=plugins.source,
+            source_settings=plugins.source_settings,
+            transforms=plugins.transforms,
+            sinks=plugins.sinks,
+            aggregations=plugins.aggregations,
             gates=list(config.gates),
         )
 
@@ -1006,11 +998,11 @@ class TestExecutionGraphFromConfig:
 
         plugins = instantiate_plugins_from_config(config)
         graph = ExecutionGraph.from_plugin_instances(
-            source=plugins["source"],
-            source_settings=plugins["source_settings"],
-            transforms=plugins["transforms"],
-            sinks=plugins["sinks"],
-            aggregations=plugins["aggregations"],
+            source=plugins.source,
+            source_settings=plugins.source_settings,
+            transforms=plugins.transforms,
+            sinks=plugins.sinks,
+            aggregations=plugins.aggregations,
             gates=list(config.gates),
         )
 
@@ -1037,7 +1029,7 @@ class TestExecutionGraphFromConfig:
         from elspeth.core.config import TransformSettings
 
         with pytest.raises(ValidationError, match="on_success"):
-            TransformSettings(
+            TransformSettings(  # type: ignore[call-arg]  # intentionally missing on_success
                 name="passthrough_0",
                 plugin="passthrough",
                 input="source_out",
@@ -1090,11 +1082,11 @@ class TestExecutionGraphFromConfig:
 
         plugins = instantiate_plugins_from_config_raw(config)
         graph = ExecutionGraph.from_plugin_instances(
-            source=plugins["source"],
-            source_settings=plugins["source_settings"],
-            transforms=plugins["transforms"],
-            sinks=plugins["sinks"],
-            aggregations=plugins["aggregations"],
+            source=plugins.source,
+            source_settings=plugins.source_settings,
+            transforms=plugins.transforms,
+            sinks=plugins.sinks,
+            aggregations=plugins.aggregations,
             gates=list(config.gates),
         )
         graph.validate()
@@ -1132,11 +1124,11 @@ class TestExecutionGraphFromConfig:
         plugins = instantiate_plugins_from_config_raw(config)
         with pytest.raises(GraphValidationError, match=r"on_success 'nowhere' is neither a sink nor a known connection"):
             ExecutionGraph.from_plugin_instances(
-                source=plugins["source"],
-                source_settings=plugins["source_settings"],
-                transforms=plugins["transforms"],
-                sinks=plugins["sinks"],
-                aggregations=plugins["aggregations"],
+                source=plugins.source,
+                source_settings=plugins.source_settings,
+                transforms=plugins.transforms,
+                sinks=plugins.sinks,
+                aggregations=plugins.aggregations,
                 gates=list(config.gates),
             )
 
@@ -1172,11 +1164,11 @@ class TestExecutionGraphFromConfig:
 
         plugins = instantiate_plugins_from_config_raw(config)
         graph = ExecutionGraph.from_plugin_instances(
-            source=plugins["source"],
-            source_settings=plugins["source_settings"],
-            transforms=plugins["transforms"],
-            sinks=plugins["sinks"],
-            aggregations=plugins["aggregations"],
+            source=plugins.source,
+            source_settings=plugins.source_settings,
+            transforms=plugins.transforms,
+            sinks=plugins.sinks,
+            aggregations=plugins.aggregations,
             gates=list(config.gates),
         )
         graph.validate()
@@ -1222,11 +1214,11 @@ class TestExecutionGraphFromConfig:
 
         plugins = instantiate_plugins_from_config_raw(config)
         graph = ExecutionGraph.from_plugin_instances(
-            source=plugins["source"],
-            source_settings=plugins["source_settings"],
-            transforms=plugins["transforms"],
-            sinks=plugins["sinks"],
-            aggregations=plugins["aggregations"],
+            source=plugins.source,
+            source_settings=plugins.source_settings,
+            transforms=plugins.transforms,
+            sinks=plugins.sinks,
+            aggregations=plugins.aggregations,
             gates=list(config.gates),
         )
         graph.validate()
@@ -1280,11 +1272,11 @@ class TestExecutionGraphFromConfig:
 
         plugins = instantiate_plugins_from_config(config)
         graph = ExecutionGraph.from_plugin_instances(
-            source=plugins["source"],
-            source_settings=plugins["source_settings"],
-            transforms=plugins["transforms"],
-            sinks=plugins["sinks"],
-            aggregations=plugins["aggregations"],
+            source=plugins.source,
+            source_settings=plugins.source_settings,
+            transforms=plugins.transforms,
+            sinks=plugins.sinks,
+            aggregations=plugins.aggregations,
             gates=list(config.gates),
         )
 
@@ -1325,11 +1317,11 @@ class TestExecutionGraphFromConfig:
 
         plugins = instantiate_plugins_from_config(config)
         graph = ExecutionGraph.from_plugin_instances(
-            source=plugins["source"],
-            source_settings=plugins["source_settings"],
-            transforms=plugins["transforms"],
-            sinks=plugins["sinks"],
-            aggregations=plugins["aggregations"],
+            source=plugins.source,
+            source_settings=plugins.source_settings,
+            transforms=plugins.transforms,
+            sinks=plugins.sinks,
+            aggregations=plugins.aggregations,
             gates=list(config.gates),
         )
 
@@ -1373,11 +1365,11 @@ class TestExecutionGraphFromConfig:
         with pytest.raises(GraphValidationError) as exc_info:
             plugins = instantiate_plugins_from_config(config)
             ExecutionGraph.from_plugin_instances(
-                source=plugins["source"],
-                source_settings=plugins["source_settings"],
-                transforms=plugins["transforms"],
-                sinks=plugins["sinks"],
-                aggregations=plugins["aggregations"],
+                source=plugins.source,
+                source_settings=plugins.source_settings,
+                transforms=plugins.transforms,
+                sinks=plugins.sinks,
+                aggregations=plugins.aggregations,
                 gates=list(config.gates),
             )
 
@@ -1411,11 +1403,11 @@ class TestExecutionGraphFromConfig:
 
         plugins = instantiate_plugins_from_config(config)
         graph = ExecutionGraph.from_plugin_instances(
-            source=plugins["source"],
-            source_settings=plugins["source_settings"],
-            transforms=plugins["transforms"],
-            sinks=plugins["sinks"],
-            aggregations=plugins["aggregations"],
+            source=plugins.source,
+            source_settings=plugins.source_settings,
+            transforms=plugins.transforms,
+            sinks=plugins.sinks,
+            aggregations=plugins.aggregations,
             gates=list(config.gates),
         )
         sink_map = graph.get_sink_id_map()
@@ -1466,11 +1458,11 @@ class TestExecutionGraphFromConfig:
 
         plugins = instantiate_plugins_from_config(config)
         graph = ExecutionGraph.from_plugin_instances(
-            source=plugins["source"],
-            source_settings=plugins["source_settings"],
-            transforms=plugins["transforms"],
-            sinks=plugins["sinks"],
-            aggregations=plugins["aggregations"],
+            source=plugins.source,
+            source_settings=plugins.source_settings,
+            transforms=plugins.transforms,
+            sinks=plugins.sinks,
+            aggregations=plugins.aggregations,
             gates=list(config.gates),
         )
         transform_map = graph.get_transform_id_map()
@@ -1521,11 +1513,11 @@ class TestExecutionGraphFromConfig:
 
         plugins = instantiate_plugins_from_config(config)
         graph = ExecutionGraph.from_plugin_instances(
-            source=plugins["source"],
-            source_settings=plugins["source_settings"],
-            transforms=plugins["transforms"],
-            sinks=plugins["sinks"],
-            aggregations=plugins["aggregations"],
+            source=plugins.source,
+            source_settings=plugins.source_settings,
+            transforms=plugins.transforms,
+            sinks=plugins.sinks,
+            aggregations=plugins.aggregations,
             gates=list(config.gates),
         )
 
@@ -1591,11 +1583,11 @@ class TestExecutionGraphFromConfig:
 
         plugins = instantiate_plugins_from_config(config)
         graph = ExecutionGraph.from_plugin_instances(
-            source=plugins["source"],
-            source_settings=plugins["source_settings"],
-            transforms=plugins["transforms"],
-            sinks=plugins["sinks"],
-            aggregations=plugins["aggregations"],
+            source=plugins.source,
+            source_settings=plugins.source_settings,
+            transforms=plugins.transforms,
+            sinks=plugins.sinks,
+            aggregations=plugins.aggregations,
             gates=list(config.gates),
         )
 
@@ -1659,11 +1651,11 @@ class TestExecutionGraphFromConfig:
 
         plugins = instantiate_plugins_from_config_raw(config)
         graph = ExecutionGraph.from_plugin_instances(
-            source=plugins["source"],
-            source_settings=plugins["source_settings"],
-            transforms=plugins["transforms"],
-            sinks=plugins["sinks"],
-            aggregations=plugins["aggregations"],
+            source=plugins.source,
+            source_settings=plugins.source_settings,
+            transforms=plugins.transforms,
+            sinks=plugins.sinks,
+            aggregations=plugins.aggregations,
             gates=list(config.gates),
         )
 
@@ -1690,11 +1682,11 @@ class TestExecutionGraphFromConfig:
         bad_plugins = instantiate_plugins_from_config_raw(bad_config)
         with pytest.raises(GraphValidationError, match=r"Source 'csv' on_success 'missing_sink' is neither a sink nor a known connection"):
             ExecutionGraph.from_plugin_instances(
-                source=bad_plugins["source"],
-                source_settings=bad_plugins["source_settings"],
-                transforms=bad_plugins["transforms"],
-                sinks=bad_plugins["sinks"],
-                aggregations=bad_plugins["aggregations"],
+                source=bad_plugins.source,
+                source_settings=bad_plugins.source_settings,
+                transforms=bad_plugins.transforms,
+                sinks=bad_plugins.sinks,
+                aggregations=bad_plugins.aggregations,
                 gates=list(bad_config.gates),
             )
 
@@ -1747,11 +1739,11 @@ class TestGateConnectionRouteMaterialization:
 
         plugins = instantiate_plugins_from_config_raw(config)
         graph = ExecutionGraph.from_plugin_instances(
-            source=plugins["source"],
-            source_settings=plugins["source_settings"],
-            transforms=plugins["transforms"],
-            sinks=plugins["sinks"],
-            aggregations=plugins["aggregations"],
+            source=plugins.source,
+            source_settings=plugins.source_settings,
+            transforms=plugins.transforms,
+            sinks=plugins.sinks,
+            aggregations=plugins.aggregations,
             gates=list(config.gates),
         )
 
@@ -1809,11 +1801,11 @@ class TestGateConnectionRouteMaterialization:
 
         plugins = instantiate_plugins_from_config_raw(config)
         graph = ExecutionGraph.from_plugin_instances(
-            source=plugins["source"],
-            source_settings=plugins["source_settings"],
-            transforms=plugins["transforms"],
-            sinks=plugins["sinks"],
-            aggregations=plugins["aggregations"],
+            source=plugins.source,
+            source_settings=plugins.source_settings,
+            transforms=plugins.transforms,
+            sinks=plugins.sinks,
+            aggregations=plugins.aggregations,
             gates=list(config.gates),
         )
 
@@ -1877,11 +1869,11 @@ class TestGateConnectionRouteMaterialization:
 
         plugins = instantiate_plugins_from_config_raw(config)
         graph = ExecutionGraph.from_plugin_instances(
-            source=plugins["source"],
-            source_settings=plugins["source_settings"],
-            transforms=plugins["transforms"],
-            sinks=plugins["sinks"],
-            aggregations=plugins["aggregations"],
+            source=plugins.source,
+            source_settings=plugins.source_settings,
+            transforms=plugins.transforms,
+            sinks=plugins.sinks,
+            aggregations=plugins.aggregations,
             gates=list(config.gates),
         )
 
@@ -1934,11 +1926,11 @@ class TestGateConnectionRouteMaterialization:
         plugins = instantiate_plugins_from_config_raw(config)
         with pytest.raises(GraphValidationError, match=r"neither a sink nor a known connection name"):
             ExecutionGraph.from_plugin_instances(
-                source=plugins["source"],
-                source_settings=plugins["source_settings"],
-                transforms=plugins["transforms"],
-                sinks=plugins["sinks"],
-                aggregations=plugins["aggregations"],
+                source=plugins.source,
+                source_settings=plugins.source_settings,
+                transforms=plugins.transforms,
+                sinks=plugins.sinks,
+                aggregations=plugins.aggregations,
                 gates=list(config.gates),
             )
 
@@ -1982,11 +1974,11 @@ class TestExecutionGraphRouteMapping:
 
         plugins = instantiate_plugins_from_config(config)
         graph = ExecutionGraph.from_plugin_instances(
-            source=plugins["source"],
-            source_settings=plugins["source_settings"],
-            transforms=plugins["transforms"],
-            sinks=plugins["sinks"],
-            aggregations=plugins["aggregations"],
+            source=plugins.source,
+            source_settings=plugins.source_settings,
+            transforms=plugins.transforms,
+            sinks=plugins.sinks,
+            aggregations=plugins.aggregations,
             gates=list(config.gates),
         )
 
@@ -2041,11 +2033,11 @@ class TestExecutionGraphRouteMapping:
 
         plugins = instantiate_plugins_from_config(config)
         graph = ExecutionGraph.from_plugin_instances(
-            source=plugins["source"],
-            source_settings=plugins["source_settings"],
-            transforms=plugins["transforms"],
-            sinks=plugins["sinks"],
-            aggregations=plugins["aggregations"],
+            source=plugins.source,
+            source_settings=plugins.source_settings,
+            transforms=plugins.transforms,
+            sinks=plugins.sinks,
+            aggregations=plugins.aggregations,
             gates=list(config.gates),
         )
         gate_node_id = graph.get_config_gate_id_map()[GateName("gate1")]
@@ -2095,11 +2087,11 @@ class TestExecutionGraphRouteMapping:
         # DAG compilation should succeed with hyphenated sink names
         plugins = instantiate_plugins_from_config(config)
         graph = ExecutionGraph.from_plugin_instances(
-            source=plugins["source"],
-            source_settings=plugins["source_settings"],
-            transforms=plugins["transforms"],
-            sinks=plugins["sinks"],
-            aggregations=plugins["aggregations"],
+            source=plugins.source,
+            source_settings=plugins.source_settings,
+            transforms=plugins.transforms,
+            sinks=plugins.sinks,
+            aggregations=plugins.aggregations,
             gates=list(config.gates),
         )
 
@@ -2241,11 +2233,11 @@ class TestMultiEdgeScenarios:
 
         plugins = instantiate_plugins_from_config(config)
         graph = ExecutionGraph.from_plugin_instances(
-            source=plugins["source"],
-            source_settings=plugins["source_settings"],
-            transforms=plugins["transforms"],
-            sinks=plugins["sinks"],
-            aggregations=plugins["aggregations"],
+            source=plugins.source,
+            source_settings=plugins.source_settings,
+            transforms=plugins.transforms,
+            sinks=plugins.sinks,
+            aggregations=plugins.aggregations,
             gates=list(config.gates),
         )
 
@@ -2336,11 +2328,11 @@ class TestCoalesceNodes:
 
         plugins = instantiate_plugins_from_config(settings)
         graph = ExecutionGraph.from_plugin_instances(
-            source=plugins["source"],
-            source_settings=plugins["source_settings"],
-            transforms=plugins["transforms"],
-            sinks=plugins["sinks"],
-            aggregations=plugins["aggregations"],
+            source=plugins.source,
+            source_settings=plugins.source_settings,
+            transforms=plugins.transforms,
+            sinks=plugins.sinks,
+            aggregations=plugins.aggregations,
             gates=list(settings.gates),
             coalesce_settings=settings.coalesce,
         )
@@ -2400,11 +2392,11 @@ class TestCoalesceNodes:
 
         plugins = instantiate_plugins_from_config(settings)
         graph = ExecutionGraph.from_plugin_instances(
-            source=plugins["source"],
-            source_settings=plugins["source_settings"],
-            transforms=plugins["transforms"],
-            sinks=plugins["sinks"],
-            aggregations=plugins["aggregations"],
+            source=plugins.source,
+            source_settings=plugins.source_settings,
+            transforms=plugins.transforms,
+            sinks=plugins.sinks,
+            aggregations=plugins.aggregations,
             gates=list(settings.gates),
             coalesce_settings=settings.coalesce,
         )
@@ -2457,11 +2449,11 @@ class TestCoalesceNodes:
 
         with pytest.raises(GraphValidationError, match=r"duplicate fork branches"):
             ExecutionGraph.from_plugin_instances(
-                source=plugins["source"],
-                source_settings=plugins["source_settings"],
-                transforms=plugins["transforms"],
-                sinks=plugins["sinks"],
-                aggregations=plugins["aggregations"],
+                source=plugins.source,
+                source_settings=plugins.source_settings,
+                transforms=plugins.transforms,
+                sinks=plugins.sinks,
+                aggregations=plugins.aggregations,
                 gates=list(settings.gates),
                 coalesce_settings=settings.coalesce,
             )
@@ -2515,11 +2507,11 @@ class TestCoalesceNodes:
 
         plugins = instantiate_plugins_from_config(settings)
         graph = ExecutionGraph.from_plugin_instances(
-            source=plugins["source"],
-            source_settings=plugins["source_settings"],
-            transforms=plugins["transforms"],
-            sinks=plugins["sinks"],
-            aggregations=plugins["aggregations"],
+            source=plugins.source,
+            source_settings=plugins.source_settings,
+            transforms=plugins.transforms,
+            sinks=plugins.sinks,
+            aggregations=plugins.aggregations,
             gates=list(settings.gates),
             coalesce_settings=settings.coalesce,
         )
@@ -2592,11 +2584,11 @@ class TestCoalesceNodes:
 
         plugins = instantiate_plugins_from_config(settings)
         graph = ExecutionGraph.from_plugin_instances(
-            source=plugins["source"],
-            source_settings=plugins["source_settings"],
-            transforms=plugins["transforms"],
-            sinks=plugins["sinks"],
-            aggregations=plugins["aggregations"],
+            source=plugins.source,
+            source_settings=plugins.source_settings,
+            transforms=plugins.transforms,
+            sinks=plugins.sinks,
+            aggregations=plugins.aggregations,
             gates=list(settings.gates),
             coalesce_settings=settings.coalesce,
         )
@@ -2658,11 +2650,11 @@ class TestCoalesceNodes:
 
         plugins = instantiate_plugins_from_config(settings)
         graph = ExecutionGraph.from_plugin_instances(
-            source=plugins["source"],
-            source_settings=plugins["source_settings"],
-            transforms=plugins["transforms"],
-            sinks=plugins["sinks"],
-            aggregations=plugins["aggregations"],
+            source=plugins.source,
+            source_settings=plugins.source_settings,
+            transforms=plugins.transforms,
+            sinks=plugins.sinks,
+            aggregations=plugins.aggregations,
             gates=list(settings.gates),
             coalesce_settings=settings.coalesce,
         )
@@ -2725,11 +2717,11 @@ class TestCoalesceNodes:
 
         plugins = instantiate_plugins_from_config(settings)
         graph = ExecutionGraph.from_plugin_instances(
-            source=plugins["source"],
-            source_settings=plugins["source_settings"],
-            transforms=plugins["transforms"],
-            sinks=plugins["sinks"],
-            aggregations=plugins["aggregations"],
+            source=plugins.source,
+            source_settings=plugins.source_settings,
+            transforms=plugins.transforms,
+            sinks=plugins.sinks,
+            aggregations=plugins.aggregations,
             gates=list(settings.gates),
             coalesce_settings=settings.coalesce,
         )
@@ -2798,11 +2790,11 @@ class TestCoalesceNodes:
 
         with pytest.raises(GraphValidationError, match="Duplicate branch name 'path_a'"):
             ExecutionGraph.from_plugin_instances(
-                source=plugins["source"],
-                source_settings=plugins["source_settings"],
-                transforms=plugins["transforms"],
-                sinks=plugins["sinks"],
-                aggregations=plugins["aggregations"],
+                source=plugins.source,
+                source_settings=plugins.source_settings,
+                transforms=plugins.transforms,
+                sinks=plugins.sinks,
+                aggregations=plugins.aggregations,
                 gates=list(settings.gates),
                 coalesce_settings=settings.coalesce,
             )
@@ -2890,11 +2882,11 @@ class TestCoalesceNodes:
 
         with pytest.raises(GraphValidationError, match=r"branch 'path_x'.*no gate produces"):
             ExecutionGraph.from_plugin_instances(
-                source=plugins["source"],
-                source_settings=plugins["source_settings"],
-                transforms=plugins["transforms"],
-                sinks=plugins["sinks"],
-                aggregations=plugins["aggregations"],
+                source=plugins.source,
+                source_settings=plugins.source_settings,
+                transforms=plugins.transforms,
+                sinks=plugins.sinks,
+                aggregations=plugins.aggregations,
                 gates=list(settings.gates),
                 coalesce_settings=settings.coalesce,
             )
@@ -2962,11 +2954,11 @@ class TestCoalesceNodes:
 
         # Use production path
         graph = ExecutionGraph.from_plugin_instances(
-            source=plugins["source"],
-            source_settings=plugins["source_settings"],
-            transforms=plugins["transforms"],
-            sinks=plugins["sinks"],
-            aggregations=plugins["aggregations"],
+            source=plugins.source,
+            source_settings=plugins.source_settings,
+            transforms=plugins.transforms,
+            sinks=plugins.sinks,
+            aggregations=plugins.aggregations,
             gates=list(settings.gates),
             coalesce_settings=settings.coalesce,
         )
@@ -3033,11 +3025,11 @@ class TestCoalesceNodes:
 
         plugins = instantiate_plugins_from_config(settings)
         graph = ExecutionGraph.from_plugin_instances(
-            source=plugins["source"],
-            source_settings=plugins["source_settings"],
-            transforms=plugins["transforms"],
-            sinks=plugins["sinks"],
-            aggregations=plugins["aggregations"],
+            source=plugins.source,
+            source_settings=plugins.source_settings,
+            transforms=plugins.transforms,
+            sinks=plugins.sinks,
+            aggregations=plugins.aggregations,
             gates=list(settings.gates),
             coalesce_settings=settings.coalesce,
         )
@@ -3106,11 +3098,11 @@ class TestCoalesceNodes:
 
         plugins = instantiate_plugins_from_config(settings)
         graph = ExecutionGraph.from_plugin_instances(
-            source=plugins["source"],
-            source_settings=plugins["source_settings"],
-            transforms=plugins["transforms"],
-            sinks=plugins["sinks"],
-            aggregations=plugins["aggregations"],
+            source=plugins.source,
+            source_settings=plugins.source_settings,
+            transforms=plugins.transforms,
+            sinks=plugins.sinks,
+            aggregations=plugins.aggregations,
             gates=list(settings.gates),
             coalesce_settings=settings.coalesce,
         )
@@ -3172,11 +3164,11 @@ class TestCoalesceNodes:
 
         plugins = instantiate_plugins_from_config(settings)
         graph = ExecutionGraph.from_plugin_instances(
-            source=plugins["source"],
-            source_settings=plugins["source_settings"],
-            transforms=plugins["transforms"],
-            sinks=plugins["sinks"],
-            aggregations=plugins["aggregations"],
+            source=plugins.source,
+            source_settings=plugins.source_settings,
+            transforms=plugins.transforms,
+            sinks=plugins.sinks,
+            aggregations=plugins.aggregations,
             gates=list(settings.gates),
             coalesce_settings=settings.coalesce,
         )
@@ -3409,11 +3401,11 @@ class TestSchemaValidation:
 
         plugins = instantiate_plugins_from_config_raw(config)
         graph = ExecutionGraph.from_plugin_instances(
-            source=plugins["source"],
-            source_settings=plugins["source_settings"],
-            transforms=plugins["transforms"],
-            sinks=plugins["sinks"],
-            aggregations=plugins["aggregations"],
+            source=plugins.source,
+            source_settings=plugins.source_settings,
+            transforms=plugins.transforms,
+            sinks=plugins.sinks,
+            aggregations=plugins.aggregations,
             gates=list(config.gates),
         )
 
@@ -3450,7 +3442,7 @@ class TestSchemaValidation:
         from elspeth.contracts import NodeType, PluginSchema, RoutingMode
         from elspeth.contracts.schema import FieldDefinition, SchemaConfig
         from elspeth.core.dag import ExecutionGraph
-        from elspeth.plugins.schema_factory import create_schema_from_config
+        from elspeth.plugins.infrastructure.schema_factory import create_schema_from_config
 
         # Create two STRUCTURALLY IDENTICAL schemas from same config
         # These will be distinct class objects (SchemaA is not SchemaB)
@@ -3530,7 +3522,7 @@ class TestSchemaValidation:
         from elspeth.contracts import NodeType, PluginSchema, RoutingMode
         from elspeth.contracts.schema import SchemaConfig
         from elspeth.core.dag import ExecutionGraph
-        from elspeth.plugins.schema_factory import create_schema_from_config
+        from elspeth.plugins.infrastructure.schema_factory import create_schema_from_config
 
         # Create two observed schemas (accept anything)
         config = SchemaConfig(mode="observed", fields=None)
@@ -3604,7 +3596,7 @@ class TestSchemaValidation:
         from elspeth.contracts import NodeType, PluginSchema, RoutingMode
         from elspeth.contracts.schema import SchemaConfig
         from elspeth.core.dag import ExecutionGraph
-        from elspeth.plugins.schema_factory import create_schema_from_config
+        from elspeth.plugins.infrastructure.schema_factory import create_schema_from_config
 
         # Create a observed schema (no fields, accepts anything)
         DynamicSchema = create_schema_from_config(
@@ -3681,7 +3673,7 @@ class TestSchemaValidation:
         from elspeth.contracts import NodeType, PluginSchema, RoutingMode
         from elspeth.contracts.schema import SchemaConfig
         from elspeth.core.dag import ExecutionGraph
-        from elspeth.plugins.schema_factory import create_schema_from_config
+        from elspeth.plugins.infrastructure.schema_factory import create_schema_from_config
 
         # Create an explicit schema with specific fields
         ExplicitSchema = create_schema_from_config(
@@ -3752,7 +3744,7 @@ class TestSchemaValidation:
         from elspeth.contracts import NodeType, PluginSchema, RoutingMode
         from elspeth.contracts.schema import SchemaConfig
         from elspeth.core.dag import ExecutionGraph
-        from elspeth.plugins.schema_factory import create_schema_from_config
+        from elspeth.plugins.infrastructure.schema_factory import create_schema_from_config
 
         # Create a observed schema
         DynamicSchema = create_schema_from_config(
@@ -3993,11 +3985,11 @@ sinks:
         plugins = instantiate_plugins_from_config(config)
 
         graph = ExecutionGraph.from_plugin_instances(
-            source=plugins["source"],
-            source_settings=plugins["source_settings"],
-            transforms=plugins["transforms"],
-            sinks=plugins["sinks"],
-            aggregations=plugins["aggregations"],
+            source=plugins.source,
+            source_settings=plugins.source_settings,
+            transforms=plugins.transforms,
+            sinks=plugins.sinks,
+            aggregations=plugins.aggregations,
             gates=list(config.gates),
             coalesce_settings=list(config.coalesce) if config.coalesce else None,
         )
@@ -4072,11 +4064,11 @@ sinks:
 
         with pytest.raises(GraphValidationError, match="cycle"):
             ExecutionGraph.from_plugin_instances(
-                source=plugins["source"],
-                source_settings=plugins["source_settings"],
-                transforms=plugins["transforms"],
-                sinks=plugins["sinks"],
-                aggregations=plugins["aggregations"],
+                source=plugins.source,
+                source_settings=plugins.source_settings,
+                transforms=plugins.transforms,
+                sinks=plugins.sinks,
+                aggregations=plugins.aggregations,
                 gates=list(config.gates),
                 coalesce_settings=list(config.coalesce) if config.coalesce else None,
             )
@@ -4089,7 +4081,7 @@ def test_validate_aggregation_dual_schema():
     from elspeth.contracts import NodeType
     from elspeth.contracts.schema import SchemaConfig
     from elspeth.core.dag import ExecutionGraph
-    from elspeth.plugins.schema_factory import create_schema_from_config
+    from elspeth.plugins.infrastructure.schema_factory import create_schema_from_config
 
     input_schema_config = {"mode": "fixed", "fields": ["value: float"]}
     InputSchema = create_schema_from_config(
@@ -4136,7 +4128,7 @@ def test_validate_aggregation_detects_incompatibility():
     from elspeth.contracts import NodeType
     from elspeth.contracts.schema import SchemaConfig
     from elspeth.core.dag import ExecutionGraph
-    from elspeth.plugins.schema_factory import create_schema_from_config
+    from elspeth.plugins.infrastructure.schema_factory import create_schema_from_config
 
     input_schema_config = {"mode": "fixed", "fields": ["value: float"]}
     InputSchema = create_schema_from_config(
@@ -4199,7 +4191,7 @@ class TestDynamicSchemaDetection:
         from elspeth.contracts import NodeType
         from elspeth.contracts.schema import SchemaConfig
         from elspeth.core.dag import ExecutionGraph
-        from elspeth.plugins.schema_factory import create_schema_from_config
+        from elspeth.plugins.infrastructure.schema_factory import create_schema_from_config
 
         # Create observed schema (no fields, extra='allow')
         DynamicSchema = create_schema_from_config(
@@ -4232,7 +4224,7 @@ class TestDynamicSchemaDetection:
         from elspeth.contracts import NodeType
         from elspeth.contracts.schema import SchemaConfig
         from elspeth.core.dag import ExecutionGraph
-        from elspeth.plugins.schema_factory import create_schema_from_config
+        from elspeth.plugins.infrastructure.schema_factory import create_schema_from_config
 
         # Create specific schema
         SpecificSchema = create_schema_from_config(
@@ -4264,7 +4256,7 @@ class TestDynamicSchemaDetection:
         """
         from elspeth.contracts import PluginSchema
         from elspeth.contracts.schema import SchemaConfig
-        from elspeth.plugins.schema_factory import create_schema_from_config
+        from elspeth.plugins.infrastructure.schema_factory import create_schema_from_config
 
         # Create observed schema
         DynamicSchema = create_schema_from_config(
@@ -4333,21 +4325,21 @@ class TestDeterministicNodeIDs:
         # Build graph twice with same config
         plugins1 = instantiate_plugins_from_config(config)
         graph1 = ExecutionGraph.from_plugin_instances(
-            source=plugins1["source"],
-            source_settings=plugins1["source_settings"],
-            transforms=plugins1["transforms"],
-            sinks=plugins1["sinks"],
-            aggregations=plugins1["aggregations"],
+            source=plugins1.source,
+            source_settings=plugins1.source_settings,
+            transforms=plugins1.transforms,
+            sinks=plugins1.sinks,
+            aggregations=plugins1.aggregations,
             gates=list(config.gates),
         )
 
         plugins2 = instantiate_plugins_from_config(config)
         graph2 = ExecutionGraph.from_plugin_instances(
-            source=plugins2["source"],
-            source_settings=plugins2["source_settings"],
-            transforms=plugins2["transforms"],
-            sinks=plugins2["sinks"],
-            aggregations=plugins2["aggregations"],
+            source=plugins2.source,
+            source_settings=plugins2.source_settings,
+            transforms=plugins2.transforms,
+            sinks=plugins2.sinks,
+            aggregations=plugins2.aggregations,
             gates=list(config.gates),
         )
 
@@ -4396,21 +4388,21 @@ class TestDeterministicNodeIDs:
 
         plugins1 = instantiate_plugins_from_config(config1)
         graph1 = ExecutionGraph.from_plugin_instances(
-            source=plugins1["source"],
-            source_settings=plugins1["source_settings"],
-            transforms=plugins1["transforms"],
-            sinks=plugins1["sinks"],
-            aggregations=plugins1["aggregations"],
+            source=plugins1.source,
+            source_settings=plugins1.source_settings,
+            transforms=plugins1.transforms,
+            sinks=plugins1.sinks,
+            aggregations=plugins1.aggregations,
             gates=list(config1.gates),
         )
 
         plugins2 = instantiate_plugins_from_config(config2)
         graph2 = ExecutionGraph.from_plugin_instances(
-            source=plugins2["source"],
-            source_settings=plugins2["source_settings"],
-            transforms=plugins2["transforms"],
-            sinks=plugins2["sinks"],
-            aggregations=plugins2["aggregations"],
+            source=plugins2.source,
+            source_settings=plugins2.source_settings,
+            transforms=plugins2.transforms,
+            sinks=plugins2.sinks,
+            aggregations=plugins2.aggregations,
             gates=list(config2.gates),
         )
 
@@ -4482,11 +4474,11 @@ class TestBranchGateMap:
 
         plugins = instantiate_plugins_from_config(settings)
         graph = ExecutionGraph.from_plugin_instances(
-            source=plugins["source"],
-            source_settings=plugins["source_settings"],
-            transforms=plugins["transforms"],
-            sinks=plugins["sinks"],
-            aggregations=plugins["aggregations"],
+            source=plugins.source,
+            source_settings=plugins.source_settings,
+            transforms=plugins.transforms,
+            sinks=plugins.sinks,
+            aggregations=plugins.aggregations,
             gates=list(settings.gates),
             coalesce_settings=settings.coalesce,
         )
@@ -4517,11 +4509,11 @@ class TestBranchGateMap:
 
         plugins = instantiate_plugins_from_config(settings)
         graph = ExecutionGraph.from_plugin_instances(
-            source=plugins["source"],
-            source_settings=plugins["source_settings"],
-            transforms=plugins["transforms"],
-            sinks=plugins["sinks"],
-            aggregations=plugins["aggregations"],
+            source=plugins.source,
+            source_settings=plugins.source_settings,
+            transforms=plugins.transforms,
+            sinks=plugins.sinks,
+            aggregations=plugins.aggregations,
             gates=list(settings.gates),
             coalesce_settings=settings.coalesce,
         )
@@ -4544,11 +4536,11 @@ class TestDivertEdges:
 
         plugins = instantiate_plugins_from_config(settings)
         return ExecutionGraph.from_plugin_instances(
-            source=plugins["source"],
-            source_settings=plugins["source_settings"],
-            transforms=plugins["transforms"],
-            sinks=plugins["sinks"],
-            aggregations=plugins["aggregations"],
+            source=plugins.source,
+            source_settings=plugins.source_settings,
+            transforms=plugins.transforms,
+            sinks=plugins.sinks,
+            aggregations=plugins.aggregations,
             gates=list(settings.gates),
         )
 
@@ -4817,11 +4809,11 @@ class TestTerminalGateRouteValidation:
         plugins = instantiate_plugins_from_config_raw(config)
         with pytest.raises(GraphValidationError, match=r"neither a sink nor a known connection name"):
             ExecutionGraph.from_plugin_instances(
-                source=plugins["source"],
-                source_settings=plugins["source_settings"],
-                transforms=plugins["transforms"],
-                sinks=plugins["sinks"],
-                aggregations=plugins["aggregations"],
+                source=plugins.source,
+                source_settings=plugins.source_settings,
+                transforms=plugins.transforms,
+                sinks=plugins.sinks,
+                aggregations=plugins.aggregations,
                 gates=list(config.gates),
             )
 
@@ -4880,11 +4872,11 @@ class TestTerminalGateRouteValidation:
 
         plugins = instantiate_plugins_from_config_raw(config)
         graph = ExecutionGraph.from_plugin_instances(
-            source=plugins["source"],
-            source_settings=plugins["source_settings"],
-            transforms=plugins["transforms"],
-            sinks=plugins["sinks"],
-            aggregations=plugins["aggregations"],
+            source=plugins.source,
+            source_settings=plugins.source_settings,
+            transforms=plugins.transforms,
+            sinks=plugins.sinks,
+            aggregations=plugins.aggregations,
             gates=list(config.gates),
         )
         graph.validate()
@@ -4941,11 +4933,11 @@ class TestTerminalGateRouteValidation:
 
         plugins = instantiate_plugins_from_config_raw(config)
         graph = ExecutionGraph.from_plugin_instances(
-            source=plugins["source"],
-            source_settings=plugins["source_settings"],
-            transforms=plugins["transforms"],
-            sinks=plugins["sinks"],
-            aggregations=plugins["aggregations"],
+            source=plugins.source,
+            source_settings=plugins.source_settings,
+            transforms=plugins.transforms,
+            sinks=plugins.sinks,
+            aggregations=plugins.aggregations,
             gates=list(config.gates),
         )
         graph.validate()
@@ -5015,11 +5007,11 @@ class TestAggregationOnSuccessValidation:
         plugins = instantiate_plugins_from_config_raw(config)
         with pytest.raises(GraphValidationError, match=r"Dangling output connections"):
             ExecutionGraph.from_plugin_instances(
-                source=plugins["source"],
-                source_settings=plugins["source_settings"],
-                transforms=plugins["transforms"],
-                sinks=plugins["sinks"],
-                aggregations=plugins["aggregations"],
+                source=plugins.source,
+                source_settings=plugins.source_settings,
+                transforms=plugins.transforms,
+                sinks=plugins.sinks,
+                aggregations=plugins.aggregations,
                 gates=list(config.gates),
             )
 
@@ -5071,11 +5063,11 @@ class TestAggregationOnSuccessValidation:
         plugins = instantiate_plugins_from_config_raw(config)
         with pytest.raises(GraphValidationError, match=r"on_success 'nonexistent_sink' is neither a sink nor a known connection"):
             ExecutionGraph.from_plugin_instances(
-                source=plugins["source"],
-                source_settings=plugins["source_settings"],
-                transforms=plugins["transforms"],
-                sinks=plugins["sinks"],
-                aggregations=plugins["aggregations"],
+                source=plugins.source,
+                source_settings=plugins.source_settings,
+                transforms=plugins.transforms,
+                sinks=plugins.sinks,
+                aggregations=plugins.aggregations,
                 gates=list(config.gates),
             )
 
@@ -5130,11 +5122,11 @@ class TestAggregationOnSuccessValidation:
 
         plugins = instantiate_plugins_from_config_raw(config)
         graph = ExecutionGraph.from_plugin_instances(
-            source=plugins["source"],
-            source_settings=plugins["source_settings"],
-            transforms=plugins["transforms"],
-            sinks=plugins["sinks"],
-            aggregations=plugins["aggregations"],
+            source=plugins.source,
+            source_settings=plugins.source_settings,
+            transforms=plugins.transforms,
+            sinks=plugins.sinks,
+            aggregations=plugins.aggregations,
             gates=list(config.gates),
         )
         graph.validate()
@@ -5218,11 +5210,11 @@ class TestCoalesceOnSuccessValidation:
         plugins = instantiate_plugins_from_config_raw(config)
         with pytest.raises(GraphValidationError, match=r"Dangling output|no incoming branches"):
             ExecutionGraph.from_plugin_instances(
-                source=plugins["source"],
-                source_settings=plugins["source_settings"],
-                transforms=plugins["transforms"],
-                sinks=plugins["sinks"],
-                aggregations=plugins["aggregations"],
+                source=plugins.source,
+                source_settings=plugins.source_settings,
+                transforms=plugins.transforms,
+                sinks=plugins.sinks,
+                aggregations=plugins.aggregations,
                 gates=list(config.gates),
                 coalesce_settings=config.coalesce,
             )
@@ -5282,11 +5274,11 @@ class TestCoalesceOnSuccessValidation:
         plugins = instantiate_plugins_from_config_raw(config)
         # Coalesce on_success to a valid sink should build successfully
         graph = ExecutionGraph.from_plugin_instances(
-            source=plugins["source"],
-            source_settings=plugins["source_settings"],
-            transforms=plugins["transforms"],
-            sinks=plugins["sinks"],
-            aggregations=plugins["aggregations"],
+            source=plugins.source,
+            source_settings=plugins.source_settings,
+            transforms=plugins.transforms,
+            sinks=plugins.sinks,
+            aggregations=plugins.aggregations,
             gates=list(config.gates),
             coalesce_settings=config.coalesce,
         )
@@ -5343,11 +5335,11 @@ class TestCoalesceOnSuccessValidation:
         plugins = instantiate_plugins_from_config_raw(config)
         with pytest.raises(GraphValidationError, match=r"unknown sink 'nonexistent_sink'"):
             ExecutionGraph.from_plugin_instances(
-                source=plugins["source"],
-                source_settings=plugins["source_settings"],
-                transforms=plugins["transforms"],
-                sinks=plugins["sinks"],
-                aggregations=plugins["aggregations"],
+                source=plugins.source,
+                source_settings=plugins.source_settings,
+                transforms=plugins.transforms,
+                sinks=plugins.sinks,
+                aggregations=plugins.aggregations,
                 gates=list(config.gates),
                 coalesce_settings=config.coalesce,
             )
@@ -5384,21 +5376,24 @@ class TestNodeInfoImmutability:
         )
         plugins = instantiate_plugins_from_config(config)
         graph = ExecutionGraph.from_plugin_instances(
-            source=plugins["source"],
-            source_settings=plugins["source_settings"],
-            transforms=plugins["transforms"],
-            sinks=plugins["sinks"],
-            aggregations=plugins["aggregations"],
+            source=plugins.source,
+            source_settings=plugins.source_settings,
+            transforms=plugins.transforms,
+            sinks=plugins.sinks,
+            aggregations=plugins.aggregations,
             gates=list(config.gates),
             coalesce_settings=config.coalesce,
         )
         frozen_count = 0
         for info in graph.get_nodes():
             if info.config:
-                assert isinstance(info.config, MappingProxyType), (
+                # config is typed as dict[str, Any] but frozen to MappingProxyType
+                # by the builder at runtime. Mypy considers this unreachable because
+                # dict and MappingProxyType are disjoint final types.
+                assert isinstance(info.config, MappingProxyType), (  # type: ignore[unreachable]
                     f"Node '{info.node_id}' config should be MappingProxyType after construction, got {type(info.config).__name__}"
                 )
-                with pytest.raises(TypeError):
-                    info.config["injected_key"] = "should_fail"  # type: ignore[index]
+                with pytest.raises(TypeError):  # type: ignore[unreachable]
+                    info.config["injected_key"] = "should_fail"
                 frozen_count += 1
         assert frozen_count > 0, "Expected at least one node with non-empty config"

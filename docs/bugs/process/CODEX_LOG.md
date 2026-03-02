@@ -68,7 +68,7 @@
 | 2026-02-13T21:49:20+00:00 | ok | src/elspeth/core/landscape/reproducibility.py | docs/bugs/generated/core/landscape/reproducibility.py.md |  | 183.10 |  |
 | 2026-02-13T21:49:30+00:00 | ok | src/elspeth/core/landscape/exporter.py | docs/bugs/generated/core/landscape/exporter.py.md |  | 193.33 |  |
 | 2026-02-13T21:49:59+00:00 | ok | src/elspeth/core/landscape/formatters.py | docs/bugs/generated/core/landscape/formatters.py.md |  | 222.83 |  |
-| 2026-02-13T21:50:53+00:00 | ok | src/elspeth/core/landscape/repositories.py | docs/bugs/generated/core/landscape/repositories.py.md |  | 276.19 |  |
+| 2026-02-13T21:50:53+00:00 | ok | src/elspeth/core/landscape/model_loaders.py | docs/bugs/generated/core/landscape/model_loaders.py.md |  | 276.19 |  |
 | 2026-02-13T21:50:54+00:00 | ok | src/elspeth/core/landscape/lineage.py | docs/bugs/generated/core/landscape/lineage.py.md |  | 277.61 |  |
 | 2026-02-13T21:50:59+00:00 | ok | src/elspeth/core/landscape/database.py | docs/bugs/generated/core/landscape/database.py.md |  | 281.94 |  |
 | 2026-02-13T21:52:56+00:00 | ok | src/elspeth/core/landscape/_token_recording.py | docs/bugs/generated/core/landscape/_token_recording.py.md |  | 399.55 |  |

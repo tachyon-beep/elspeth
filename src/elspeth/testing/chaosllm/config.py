@@ -1,4 +1,3 @@
-# src/elspeth/testing/chaosllm/config.py
 """Configuration schema and loading for ChaosLLM server.
 
 Uses Pydantic for validation with frozen (immutable) models.
@@ -20,10 +19,30 @@ from elspeth.testing.chaosengine.config_loader import (
     load_preset as _load_preset,
 )
 from elspeth.testing.chaosengine.types import (
-    LatencyConfig,
-    MetricsConfig,
-    ServerConfig,
+    LatencyConfig as LatencyConfig,
 )
+from elspeth.testing.chaosengine.types import (
+    MetricsConfig as MetricsConfig,
+)
+from elspeth.testing.chaosengine.types import (
+    ServerConfig as ServerConfig,
+)
+
+__all__ = [
+    "BurstConfig",
+    "ChaosLLMConfig",
+    "ErrorInjectionConfig",
+    "LatencyConfig",
+    "MetricsConfig",
+    "PresetResponseConfig",
+    "RandomResponseConfig",
+    "ResponseConfig",
+    "ServerConfig",
+    "TemplateResponseConfig",
+    "list_presets",
+    "load_config",
+    "load_preset",
+]
 
 # Default shared in-memory SQLite database for ephemeral metrics
 DEFAULT_MEMORY_DB = "file:chaosllm-metrics?mode=memory&cache=shared"

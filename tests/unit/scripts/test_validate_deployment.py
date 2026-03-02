@@ -23,11 +23,12 @@ class TestValidateDeployment:
         """Validation passes when all components are deployed."""
         base = tmp_path / "src" / "elspeth"
         (base / "plugins" / "sources").mkdir(parents=True)
+        (base / "plugins" / "infrastructure").mkdir(parents=True)
         (base / "core").mkdir(parents=True)
 
         # Deploy ALL components
         (base / "plugins" / "sources" / "field_normalization.py").write_text("# normalization module")
-        (base / "plugins" / "config_base.py").write_text("class TabularSourceDataConfig:\n    pass\n")
+        (base / "plugins" / "infrastructure" / "config_base.py").write_text("class TabularSourceDataConfig:\n    pass\n")
         (base / "core" / "identifiers.py").write_text("# identifiers module")
 
         # Should not raise
@@ -37,10 +38,11 @@ class TestValidateDeployment:
         """Validation passes when no components are deployed (clean slate)."""
         base = tmp_path / "src" / "elspeth"
         (base / "plugins" / "sources").mkdir(parents=True)
+        (base / "plugins" / "infrastructure").mkdir(parents=True)
         (base / "core").mkdir(parents=True)
 
         # Create empty config_base.py (no TabularSourceDataConfig)
-        (base / "plugins" / "config_base.py").write_text("# empty config\n")
+        (base / "plugins" / "infrastructure" / "config_base.py").write_text("# empty config\n")
 
         # Should not raise - none deployed is a valid state
         _validate_field_normalization_at_path(base)
@@ -49,11 +51,12 @@ class TestValidateDeployment:
         """Validation fails when only field_normalization.py is deployed."""
         base = tmp_path / "src" / "elspeth"
         (base / "plugins" / "sources").mkdir(parents=True)
+        (base / "plugins" / "infrastructure").mkdir(parents=True)
         (base / "core").mkdir(parents=True)
 
         # Deploy ONLY field_normalization.py
         (base / "plugins" / "sources" / "field_normalization.py").write_text("# normalization module")
-        (base / "plugins" / "config_base.py").write_text("# empty config\n")
+        (base / "plugins" / "infrastructure" / "config_base.py").write_text("# empty config\n")
         # identifiers.py is missing
 
         with pytest.raises(RuntimeError) as exc_info:
@@ -69,10 +72,11 @@ class TestValidateDeployment:
         """Validation fails when field_normalization.py is missing."""
         base = tmp_path / "src" / "elspeth"
         (base / "plugins" / "sources").mkdir(parents=True)
+        (base / "plugins" / "infrastructure").mkdir(parents=True)
         (base / "core").mkdir(parents=True)
 
         # Deploy TabularSourceDataConfig and identifiers.py but NOT field_normalization
-        (base / "plugins" / "config_base.py").write_text("class TabularSourceDataConfig:\n    pass\n")
+        (base / "plugins" / "infrastructure" / "config_base.py").write_text("class TabularSourceDataConfig:\n    pass\n")
         (base / "core" / "identifiers.py").write_text("# identifiers module")
         # field_normalization.py is missing
 
@@ -88,11 +92,12 @@ class TestValidateDeployment:
         """Validation fails when identifiers.py is missing."""
         base = tmp_path / "src" / "elspeth"
         (base / "plugins" / "sources").mkdir(parents=True)
+        (base / "plugins" / "infrastructure").mkdir(parents=True)
         (base / "core").mkdir(parents=True)
 
         # Deploy field_normalization.py and TabularSourceDataConfig but NOT identifiers
         (base / "plugins" / "sources" / "field_normalization.py").write_text("# normalization module")
-        (base / "plugins" / "config_base.py").write_text("class TabularSourceDataConfig:\n    pass\n")
+        (base / "plugins" / "infrastructure" / "config_base.py").write_text("class TabularSourceDataConfig:\n    pass\n")
         # identifiers.py is missing
 
         with pytest.raises(RuntimeError) as exc_info:
@@ -106,11 +111,12 @@ class TestValidateDeployment:
         """Validation fails when TabularSourceDataConfig is missing."""
         base = tmp_path / "src" / "elspeth"
         (base / "plugins" / "sources").mkdir(parents=True)
+        (base / "plugins" / "infrastructure").mkdir(parents=True)
         (base / "core").mkdir(parents=True)
 
         # Deploy field_normalization.py and identifiers but NOT TabularSourceDataConfig
         (base / "plugins" / "sources" / "field_normalization.py").write_text("# normalization module")
-        (base / "plugins" / "config_base.py").write_text("# no config class\n")
+        (base / "plugins" / "infrastructure" / "config_base.py").write_text("# no config class\n")
         (base / "core" / "identifiers.py").write_text("# identifiers module")
 
         with pytest.raises(RuntimeError) as exc_info:
@@ -124,10 +130,11 @@ class TestValidateDeployment:
         """Error message clearly lists both deployed and missing components."""
         base = tmp_path / "src" / "elspeth"
         (base / "plugins" / "sources").mkdir(parents=True)
+        (base / "plugins" / "infrastructure").mkdir(parents=True)
         (base / "core").mkdir(parents=True)
 
         # Deploy only identifiers.py
-        (base / "plugins" / "config_base.py").write_text("# empty\n")
+        (base / "plugins" / "infrastructure" / "config_base.py").write_text("# empty\n")
         (base / "core" / "identifiers.py").write_text("# identifiers module")
 
         with pytest.raises(RuntimeError) as exc_info:

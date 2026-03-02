@@ -11,6 +11,7 @@ import pytest
 
 from elspeth.contracts.plugin_context import PluginContext
 from elspeth.testing import make_pipeline_row
+from tests.fixtures.factories import make_context
 
 # Common schema config for dynamic field handling (accepts any fields)
 DYNAMIC_SCHEMA = {"mode": "observed"}
@@ -22,7 +23,7 @@ class TestBatchReplicateHappyPath:
     @pytest.fixture
     def ctx(self) -> PluginContext:
         """Create minimal plugin context."""
-        return PluginContext(run_id="test-run", config={})
+        return make_context()
 
     def test_has_required_attributes(self) -> None:
         """BatchReplicate has name and is_batch_aware."""
@@ -112,7 +113,7 @@ class TestBatchReplicateTypeEnforcement:
     @pytest.fixture
     def ctx(self) -> PluginContext:
         """Create minimal plugin context."""
-        return PluginContext(run_id="test-run", config={})
+        return make_context()
 
     def test_string_copies_raises_type_error(self, ctx: PluginContext) -> None:
         """String value in copies field raises TypeError (no coercion)."""
@@ -295,7 +296,7 @@ class TestBatchReplicateConfigValidation:
 
     def test_default_copies_zero_rejected(self) -> None:
         """Config with default_copies=0 is rejected at validation time."""
-        from elspeth.plugins.config_base import PluginConfigError
+        from elspeth.plugins.infrastructure.config_base import PluginConfigError
         from elspeth.plugins.transforms.batch_replicate import BatchReplicate
 
         with pytest.raises(PluginConfigError, match="default_copies"):
@@ -308,7 +309,7 @@ class TestBatchReplicateConfigValidation:
 
     def test_default_copies_negative_rejected(self) -> None:
         """Config with negative default_copies is rejected at validation time."""
-        from elspeth.plugins.config_base import PluginConfigError
+        from elspeth.plugins.infrastructure.config_base import PluginConfigError
         from elspeth.plugins.transforms.batch_replicate import BatchReplicate
 
         with pytest.raises(PluginConfigError, match="default_copies"):
@@ -321,7 +322,7 @@ class TestBatchReplicateConfigValidation:
 
     def test_default_copies_above_max_rejected(self) -> None:
         """Config with default_copies > max_copies is rejected at validation time."""
-        from elspeth.plugins.config_base import PluginConfigError
+        from elspeth.plugins.infrastructure.config_base import PluginConfigError
         from elspeth.plugins.transforms.batch_replicate import BatchReplicate
 
         with pytest.raises(PluginConfigError, match="exceeds max_copies"):
@@ -376,7 +377,7 @@ class TestBatchReplicateDeepCopy:
 
     @pytest.fixture
     def ctx(self) -> PluginContext:
-        return PluginContext(run_id="test-run", config={})
+        return make_context()
 
     def test_nested_list_mutation_does_not_cross_contaminate(self, ctx: PluginContext) -> None:
         """Mutating a nested list in one copy must not affect other copies."""

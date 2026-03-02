@@ -463,7 +463,7 @@ class TestRoutingActionJsonSerializationProperties:
         parsed = json.loads(serialized)
 
         assert isinstance(parsed, dict)
-        assert parsed["kind"] == RoutingKind.CONTINUE.value
+        assert parsed["kind"] == RoutingKind.CONTINUE
 
     @given(reason=routing_reasons)
     @settings(max_examples=100)
@@ -477,9 +477,9 @@ class TestRoutingActionJsonSerializationProperties:
         serialized = json.dumps(_routing_action_to_dict(action))
         parsed = json.loads(serialized)
 
-        assert parsed["kind"] == RoutingKind.CONTINUE.value
+        assert parsed["kind"] == RoutingKind.CONTINUE
         assert parsed["destinations"] == []
-        assert parsed["mode"] == RoutingMode.MOVE.value
+        assert parsed["mode"] == RoutingMode.MOVE
 
     @given(label=path_names, reason=routing_reasons)
     @settings(max_examples=100)
@@ -494,9 +494,9 @@ class TestRoutingActionJsonSerializationProperties:
         serialized = json.dumps(_routing_action_to_dict(action))
         parsed = json.loads(serialized)
 
-        assert parsed["kind"] == RoutingKind.ROUTE.value
+        assert parsed["kind"] == RoutingKind.ROUTE
         assert parsed["destinations"] == [label]
-        assert parsed["mode"] == RoutingMode.MOVE.value
+        assert parsed["mode"] == RoutingMode.MOVE
 
     @given(paths=unique_path_lists, reason=routing_reasons)
     @settings(max_examples=100)
@@ -511,9 +511,9 @@ class TestRoutingActionJsonSerializationProperties:
         serialized = json.dumps(_routing_action_to_dict(action))
         parsed = json.loads(serialized)
 
-        assert parsed["kind"] == RoutingKind.FORK_TO_PATHS.value
+        assert parsed["kind"] == RoutingKind.FORK_TO_PATHS
         assert parsed["destinations"] == paths
-        assert parsed["mode"] == RoutingMode.COPY.value
+        assert parsed["mode"] == RoutingMode.COPY
 
 
 class TestRoutingActionReasonSerializationProperties:

@@ -37,9 +37,10 @@ import pytest
 
 from elspeth.contracts import Determinism, PluginSchema, SourceRow
 from elspeth.contracts.plugin_context import PluginContext
+from tests.fixtures.factories import make_context
 
 if TYPE_CHECKING:
-    from elspeth.plugins.protocols import SourceProtocol
+    from elspeth.contracts import SourceProtocol
 
 
 class SourceContractTestBase(ABC):
@@ -59,12 +60,7 @@ class SourceContractTestBase(ABC):
     @pytest.fixture
     def ctx(self) -> PluginContext:
         """Provide a PluginContext for testing."""
-        return PluginContext(
-            run_id="test-run-001",
-            config={},
-            node_id="test-source",
-            plugin_name="test",
-        )
+        return make_context(run_id="test-run-001", node_id="test-source")
 
     # =========================================================================
     # Protocol Attribute Contracts

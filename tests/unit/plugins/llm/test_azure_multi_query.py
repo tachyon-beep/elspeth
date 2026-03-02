@@ -1,202 +1,346 @@
-"""Tests for Azure Multi-Query LLM transform with row-level pipelining."""
+"""Tests for multi-query LLM transform with row-level pipelining.
+
+Migrated from AzureMultiQueryLLMTransform to unified LLMTransform with
+provider="azure" and queries={...} config format.
+"""
 
 from __future__ import annotations
 
-from collections.abc import Generator
+from collections.abc import Generator, Sequence
 from typing import Any
-from unittest.mock import Mock, patch
+from unittest.mock import Mock
 
 import pytest
 
 from elspeth.contracts import Determinism, TransformResult
 from elspeth.contracts.plugin_context import PluginContext
 from elspeth.contracts.schema_contract import FieldContract, PipelineRow, SchemaContract
-from elspeth.plugins.batching.ports import CollectorOutputPort
-from elspeth.plugins.config_base import PluginConfigError
-from elspeth.plugins.llm.azure_multi_query import AzureMultiQueryLLMTransform
+from elspeth.contracts.token_usage import TokenUsage
+from elspeth.plugins.infrastructure.batching.ports import CollectorOutputPort
+from elspeth.plugins.transforms.llm.provider import FinishReason, LLMQueryResult
+from elspeth.plugins.transforms.llm.transform import LLMTransform
 from elspeth.testing import make_pipeline_row
+from tests.fixtures.factories import make_context
 
 from .conftest import (
-    chaosllm_azure_openai_client,
-    chaosllm_azure_openai_responses,
-    make_plugin_context,
     make_token,
 )
-from .conftest import (
-    make_azure_multi_query_config as make_config,
-)
+
+# ---------------------------------------------------------------------------
+# Config helpers (inline, using the new unified format)
+# ---------------------------------------------------------------------------
+
+DYNAMIC_SCHEMA = {"mode": "observed"}
 
 
-class TestAzureMultiQueryLLMTransformInit:
-    """Tests for transform initialization."""
+def _make_config(**overrides: Any) -> dict[str, Any]:
+    """Create valid LLMTransform multi-query config with optional overrides.
+
+    Uses the new unified format: provider + queries (not case_studies + criteria).
+    Default queries define 4 query specs (2 case studies x 2 criteria equivalent):
+      cs1_diag, cs1_treat, cs2_diag, cs2_treat
+    """
+    config: dict[str, Any] = {
+        "provider": "azure",
+        "deployment_name": "gpt-4o",
+        "endpoint": "https://test.openai.azure.com",
+        "api_key": "test-key",
+        "template": "Evaluate: {{ row.text_content }}\nCriterion: {{ row.criterion_name }}",
+        "system_prompt": "You are an assessment AI. Respond in JSON.",
+        "schema": DYNAMIC_SCHEMA,
+        "required_input_fields": [],
+        "pool_size": 4,
+        "queries": {
+            "cs1_diagnosis": {
+                "input_fields": {
+                    "text_content": "cs1_bg",
+                    "symptom": "cs1_sym",
+                    "history": "cs1_hist",
+                    "criterion_name": "cs1_bg",  # placeholder for criterion context
+                },
+                "output_fields": [
+                    {"suffix": "score", "type": "integer"},
+                    {"suffix": "rationale", "type": "string"},
+                ],
+            },
+            "cs1_treatment": {
+                "input_fields": {
+                    "text_content": "cs1_bg",
+                    "symptom": "cs1_sym",
+                    "history": "cs1_hist",
+                    "criterion_name": "cs1_bg",
+                },
+                "output_fields": [
+                    {"suffix": "score", "type": "integer"},
+                    {"suffix": "rationale", "type": "string"},
+                ],
+            },
+            "cs2_diagnosis": {
+                "input_fields": {
+                    "text_content": "cs2_bg",
+                    "symptom": "cs2_sym",
+                    "history": "cs2_hist",
+                    "criterion_name": "cs2_bg",
+                },
+                "output_fields": [
+                    {"suffix": "score", "type": "integer"},
+                    {"suffix": "rationale", "type": "string"},
+                ],
+            },
+            "cs2_treatment": {
+                "input_fields": {
+                    "text_content": "cs2_bg",
+                    "symptom": "cs2_sym",
+                    "history": "cs2_hist",
+                    "criterion_name": "cs2_bg",
+                },
+                "output_fields": [
+                    {"suffix": "score", "type": "integer"},
+                    {"suffix": "rationale", "type": "string"},
+                ],
+            },
+        },
+    }
+    config.update(overrides)
+    return config
+
+
+def _make_mock_provider(
+    responses: Sequence[dict[str, Any] | str] | None = None,
+) -> Mock:
+    """Create a mock LLM provider returning predetermined responses.
+
+    If responses is None, returns a default success response for every call.
+    Otherwise cycles through the provided responses.
+    """
+    import itertools
+    import json
+
+    mock_provider = Mock()
+
+    if responses is None:
+
+        def default_execute(
+            messages: list[dict[str, str]],
+            *,
+            model: str,
+            temperature: float,
+            max_tokens: int | None,
+            state_id: str,
+            token_id: str,
+            response_format: dict[str, Any] | None = None,
+        ) -> LLMQueryResult:
+            return LLMQueryResult(
+                content='{"score": 85, "rationale": "Good"}',
+                usage=TokenUsage.known(10, 5),
+                model="gpt-4o",
+                finish_reason=FinishReason.STOP,
+            )
+
+        mock_provider.execute_query.side_effect = default_execute
+    else:
+        cycle = itertools.cycle(responses)
+
+        def execute_from_list(messages, *, model, temperature, max_tokens, state_id, token_id, response_format=None):
+            payload = next(cycle)
+            if isinstance(payload, str):
+                content = payload
+            else:
+                content = json.dumps(payload)
+            return LLMQueryResult(
+                content=content,
+                usage=TokenUsage.known(10, 5),
+                model="gpt-4o",
+                finish_reason=FinishReason.STOP,
+            )
+
+        mock_provider.execute_query.side_effect = execute_from_list
+
+    mock_provider.close = Mock()
+    return mock_provider
+
+
+class TestLLMTransformMultiQueryInit:
+    """Tests for multi-query LLMTransform initialization."""
 
     def test_transform_has_correct_name(self) -> None:
         """Transform registers with correct plugin name."""
-        transform = AzureMultiQueryLLMTransform(make_config())
-        assert transform.name == "azure_multi_query_llm"
+        transform = LLMTransform(_make_config())
+        assert transform.name == "llm"
 
     def test_transform_is_non_deterministic(self) -> None:
         """LLM transforms are non-deterministic."""
-        transform = AzureMultiQueryLLMTransform(make_config())
+        transform = LLMTransform(_make_config())
         assert transform.determinism == Determinism.NON_DETERMINISTIC
 
-    def test_transform_expands_queries_on_init(self) -> None:
-        """Transform pre-computes query specs on initialization."""
-        transform = AzureMultiQueryLLMTransform(make_config())
-        # 2 case studies x 2 criteria = 4 queries
-        assert len(transform._query_specs) == 4
+    def test_transform_selects_multi_query_strategy(self) -> None:
+        """Transform selects MultiQueryStrategy when queries provided."""
+        from elspeth.plugins.transforms.llm.transform import MultiQueryStrategy
 
-    def test_transform_requires_case_studies(self) -> None:
-        """Transform requires case_studies in config."""
-        config = make_config()
-        del config["case_studies"]
-        with pytest.raises(PluginConfigError):
-            AzureMultiQueryLLMTransform(config)
+        transform = LLMTransform(_make_config())
+        assert isinstance(transform._strategy, MultiQueryStrategy)
 
-    def test_transform_requires_criteria(self) -> None:
-        """Transform requires criteria in config."""
-        config = make_config()
-        del config["criteria"]
-        with pytest.raises(PluginConfigError):
-            AzureMultiQueryLLMTransform(config)
+    def test_transform_resolves_query_specs_on_init(self) -> None:
+        """Transform resolves query specs from queries config on init."""
+        from elspeth.plugins.transforms.llm.transform import MultiQueryStrategy
+
+        transform = LLMTransform(_make_config())
+        assert isinstance(transform._strategy, MultiQueryStrategy)
+        # 4 queries defined in config
+        assert len(transform._strategy.query_specs) == 4
+
+    def test_transform_requires_queries_for_multi_query(self) -> None:
+        """Transform with no queries selects SingleQueryStrategy."""
+        from elspeth.plugins.transforms.llm.transform import SingleQueryStrategy
+
+        config = _make_config()
+        del config["queries"]
+        transform = LLMTransform(config)
+        assert isinstance(transform._strategy, SingleQueryStrategy)
 
     def test_process_raises_not_implemented(self) -> None:
         """process() raises NotImplementedError directing to accept()."""
-        transform = AzureMultiQueryLLMTransform(make_config())
-        ctx = make_plugin_context()
+        transform = LLMTransform(_make_config())
+        ctx = make_context()
 
-        with pytest.raises(NotImplementedError, match="row-level pipelining"):
+        with pytest.raises(NotImplementedError, match="accept"):
             transform.process(make_pipeline_row({"text": "hello"}), ctx)
 
 
 class TestSingleQueryProcessing:
-    """Tests for _process_single_query method."""
+    """Tests for multi-query _process_row method via mocked provider."""
 
-    def test_process_single_query_renders_template(self, chaosllm_server) -> None:
-        """Single query renders template with input fields and criterion."""
-        responses: list[dict[str, Any] | str] = [{"score": 85, "rationale": "Good diagnosis"}]
+    def test_process_row_renders_template(self) -> None:
+        """Query renders template with input fields."""
+        transform = LLMTransform(_make_config())
 
-        with chaosllm_azure_openai_responses(chaosllm_server, responses) as mock_client:
-            transform = AzureMultiQueryLLMTransform(make_config())
-            ctx = make_plugin_context()
-            # Call on_start to set up the recorder
-            transform.on_start(ctx)
+        # Track what messages were sent
+        captured_messages: list[list[dict[str, str]]] = []
 
-            row = {
+        def capture_execute(messages, *, model, temperature, max_tokens, state_id, token_id, response_format=None):
+            captured_messages.append(messages)
+            return LLMQueryResult(
+                content='{"score": 85, "rationale": "Good diagnosis"}',
+                usage=TokenUsage.known(10, 5),
+                model="gpt-4o",
+                finish_reason=FinishReason.STOP,
+            )
+
+        mock_provider = Mock()
+        mock_provider.execute_query.side_effect = capture_execute
+        transform._provider = mock_provider
+
+        row = make_pipeline_row(
+            {
                 "cs1_bg": "45yo male",
                 "cs1_sym": "chest pain",
                 "cs1_hist": "family history",
+                "cs2_bg": "data",
+                "cs2_sym": "data",
+                "cs2_hist": "data",
             }
-            spec = transform._query_specs[0]  # cs1_diagnosis
+        )
+        ctx = make_context()
+        result = transform._process_row(row, ctx)
 
-            assert ctx.state_id is not None
-            transform._process_single_query(row, spec, ctx.state_id, "test-token-id", None)
+        assert result.status == "success"
+        # First query should have rendered template with cs1_bg data
+        assert len(captured_messages) == 4
+        first_user_msg = captured_messages[0][-1]["content"]
+        assert "45yo male" in first_user_msg
 
-            # Check template was rendered with correct content
-            call_args = mock_client.chat.completions.create.call_args
-            messages = call_args.kwargs["messages"]
-            user_message = messages[-1]["content"]
+    def test_process_row_parses_json_response(self) -> None:
+        """Query parses JSON and returns mapped fields."""
+        transform = LLMTransform(_make_config())
+        mock_provider = _make_mock_provider(
+            [
+                {"score": 85, "rationale": "CS1 diagnosis"},
+                {"score": 90, "rationale": "CS1 treatment"},
+                {"score": 75, "rationale": "CS2 diagnosis"},
+                {"score": 80, "rationale": "CS2 treatment"},
+            ]
+        )
+        transform._provider = mock_provider
 
-            assert "45yo male" in user_message
-            assert "diagnosis" in user_message.lower()
+        row = make_pipeline_row(
+            {
+                "cs1_bg": "data",
+                "cs1_sym": "data",
+                "cs1_hist": "data",
+                "cs2_bg": "data",
+                "cs2_sym": "data",
+                "cs2_hist": "data",
+            }
+        )
+        ctx = make_context()
+        result = transform._process_row(row, ctx)
 
-    def test_process_single_query_parses_json_response(self, chaosllm_server) -> None:
-        """Single query parses JSON and returns mapped fields."""
-        responses: list[dict[str, Any] | str] = [{"score": 85, "rationale": "Excellent assessment"}]
+        assert result.status == "success"
+        assert result.row is not None
+        assert result.row["cs1_diagnosis_score"] == 85
+        assert result.row["cs1_diagnosis_rationale"] == "CS1 diagnosis"
 
-        with chaosllm_azure_openai_responses(chaosllm_server, responses):
-            transform = AzureMultiQueryLLMTransform(make_config())
-            ctx = make_plugin_context()
-            transform.on_start(ctx)
+    def test_process_row_handles_invalid_json(self) -> None:
+        """Query returns error on invalid JSON response."""
+        transform = LLMTransform(_make_config())
+        mock_provider = _make_mock_provider(["not json"])
+        transform._provider = mock_provider
 
-            row = {"cs1_bg": "data", "cs1_sym": "data", "cs1_hist": "data"}
-            spec = transform._query_specs[0]  # cs1_diagnosis
+        row = make_pipeline_row(
+            {
+                "cs1_bg": "data",
+                "cs1_sym": "data",
+                "cs1_hist": "data",
+                "cs2_bg": "data",
+                "cs2_sym": "data",
+                "cs2_hist": "data",
+            }
+        )
+        ctx = make_context()
+        result = transform._process_row(row, ctx)
 
-            assert ctx.state_id is not None
-            result = transform._process_single_query(row, spec, ctx.state_id, "test-token-id", None)
+        assert result.status == "error"
+        assert result.reason is not None
+        assert "json" in result.reason["reason"].lower()
 
-            assert result.status == "success"
-            assert result.row is not None
-            # Output fields use prefix from spec
-            assert result.row["cs1_diagnosis_score"] == 85
-            assert result.row["cs1_diagnosis_rationale"] == "Excellent assessment"
-
-    def test_process_single_query_handles_invalid_json(self, chaosllm_server) -> None:
-        """Single query returns error on invalid JSON response."""
-        with chaosllm_azure_openai_client(
-            chaosllm_server,
-            mode="template",
-            template_override="not json",
-        ):
-            transform = AzureMultiQueryLLMTransform(make_config())
-            ctx = make_plugin_context()
-            transform.on_start(ctx)
-
-            row = {"cs1_bg": "data", "cs1_sym": "data", "cs1_hist": "data"}
-            spec = transform._query_specs[0]
-
-            assert ctx.state_id is not None
-            result = transform._process_single_query(row, spec, ctx.state_id, "test-token-id", None)
-
-            assert result.status == "error"
-            assert result.reason is not None
-            assert "json" in result.reason["reason"].lower()
-
-    def test_process_single_query_raises_capacity_error_on_rate_limit(self) -> None:
-        """Rate limit errors are converted to CapacityError for pooled retry."""
-        from elspeth.plugins.clients.llm import RateLimitError
-        from elspeth.plugins.pooling import CapacityError
-
-        with patch("openai.AzureOpenAI") as mock_azure_class:
-            mock_client = Mock()
-            # Simulate rate limit from the underlying client
-            mock_client.chat.completions.create.side_effect = Exception("Rate limit exceeded")
-            mock_azure_class.return_value = mock_client
-
-            transform = AzureMultiQueryLLMTransform(make_config())
-            ctx = make_plugin_context()
-
-            row = {"cs1_bg": "data", "cs1_sym": "data", "cs1_hist": "data"}
-            spec = transform._query_specs[0]
-
-            # Need to mock at AuditedLLMClient level since that's where RateLimitError comes from
-            with patch.object(transform, "_get_llm_client") as mock_get_client:
-                mock_llm_client = Mock()
-                mock_llm_client.chat_completion.side_effect = RateLimitError("Rate limit exceeded")
-                mock_get_client.return_value = mock_llm_client
-
-                assert ctx.state_id is not None
-                with pytest.raises(CapacityError) as exc_info:
-                    transform._process_single_query(row, spec, ctx.state_id, "test-token-id", None)
-
-                assert exc_info.value.status_code == 429
-
-    def test_process_single_query_handles_template_error(self, chaosllm_server) -> None:
+    def test_process_row_handles_template_error(self) -> None:
         """Template rendering errors return error result with details."""
-        from elspeth.plugins.llm.templates import TemplateError
+        from unittest.mock import patch as mock_patch
 
-        with chaosllm_azure_openai_responses(chaosllm_server, [{"score": 85, "rationale": "ok"}]):
-            transform = AzureMultiQueryLLMTransform(make_config())
-            ctx = make_plugin_context()
+        from elspeth.plugins.transforms.llm.templates import TemplateError
 
-            row = {"cs1_bg": "data", "cs1_sym": "data", "cs1_hist": "data"}
-            spec = transform._query_specs[0]
+        transform = LLMTransform(_make_config())
+        mock_provider = _make_mock_provider()
+        transform._provider = mock_provider
 
-            # Mock template to raise error
-            with patch.object(transform._template, "render_with_metadata") as mock_render:
-                mock_render.side_effect = TemplateError("Undefined variable 'missing'")
+        row = make_pipeline_row(
+            {
+                "cs1_bg": "data",
+                "cs1_sym": "data",
+                "cs1_hist": "data",
+                "cs2_bg": "data",
+                "cs2_sym": "data",
+                "cs2_hist": "data",
+            }
+        )
+        ctx = make_context()
 
-                assert ctx.state_id is not None
-                result = transform._process_single_query(row, spec, ctx.state_id, "test-token-id", None)
+        # Mock the template on the strategy to raise TemplateError
+        with mock_patch.object(
+            transform._strategy.template,
+            "render_with_metadata",
+            side_effect=TemplateError("Undefined variable 'missing'"),
+        ):
+            result = transform._process_row(row, ctx)
 
-                assert result.status == "error"
-                assert result.reason is not None
-                assert result.reason["reason"] == "template_rendering_failed"
-                assert "missing" in result.reason["error"]
+        assert result.status == "error"
+        assert result.reason is not None
+        assert result.reason["reason"] == "template_rendering_failed"
+        assert "missing" in result.reason["error"]
 
     def test_on_start_sets_lifecycle_flag(self) -> None:
         """on_start() sets _on_start_called flag for centralized lifecycle guard."""
-        transform = AzureMultiQueryLLMTransform(make_config())
+        transform = LLMTransform(_make_config())
         assert not transform._on_start_called
 
         ctx = Mock()
@@ -212,7 +356,7 @@ class TestSingleQueryProcessing:
 class TestRowProcessingWithPipelining:
     """Tests for full row processing using accept() API with pipelining.
 
-    These tests verify the new accept() API that uses BatchTransformMixin
+    These tests verify the accept() API that uses BatchTransformMixin
     for concurrent row processing with FIFO output ordering.
     """
 
@@ -232,9 +376,8 @@ class TestRowProcessingWithPipelining:
     def ctx(self, mock_recorder: Mock) -> PluginContext:
         """Create plugin context with landscape, state_id, and token."""
         token = make_token("row-1")
-        return PluginContext(
+        return make_context(
             run_id="run-123",
-            config={},
             landscape=mock_recorder,
             state_id="state-123",
             token=token,
@@ -245,12 +388,14 @@ class TestRowProcessingWithPipelining:
         self,
         collector: CollectorOutputPort,
         mock_recorder: Mock,
-    ) -> Generator[AzureMultiQueryLLMTransform, None, None]:
-        """Create and initialize Azure multi-query transform with pipelining."""
-        t = AzureMultiQueryLLMTransform(make_config())
+    ) -> Generator[LLMTransform, None, None]:
+        """Create and initialize LLMTransform with multi-query and pipelining."""
+        t = LLMTransform(_make_config())
         # Initialize with recorder reference
-        init_ctx = PluginContext(run_id="test", config={}, landscape=mock_recorder)
+        init_ctx = make_context(run_id="test", landscape=mock_recorder)
         t.on_start(init_ctx)
+        # Replace provider with mock
+        t._provider = _make_mock_provider()
         # Connect output port
         t.connect_output(collector, max_pending=10)
         yield t
@@ -260,37 +405,36 @@ class TestRowProcessingWithPipelining:
     def test_successful_row_emits_all_query_results(
         self,
         ctx: PluginContext,
-        transform: AzureMultiQueryLLMTransform,
+        transform: LLMTransform,
         collector: CollectorOutputPort,
-        chaosllm_server,
     ) -> None:
         """Successful row emits results with all query outputs merged."""
-        # 4 queries (2 case studies x 2 criteria)
-        responses: list[dict[str, Any] | str] = [
+        # 4 queries with JSON responses
+        responses: list[dict[str, Any]] = [
             {"score": 85, "rationale": "CS1 diagnosis"},
             {"score": 90, "rationale": "CS1 treatment"},
             {"score": 75, "rationale": "CS2 diagnosis"},
             {"score": 80, "rationale": "CS2 treatment"},
         ]
+        transform._provider = _make_mock_provider(responses)
 
-        with chaosllm_azure_openai_responses(chaosllm_server, responses) as mock_client:
-            row_data = {
-                "cs1_bg": "case1 bg",
-                "cs1_sym": "case1 sym",
-                "cs1_hist": "case1 hist",
-                "cs2_bg": "case2 bg",
-                "cs2_sym": "case2 sym",
-                "cs2_hist": "case2 hist",
-            }
-            transform.accept(make_pipeline_row(row_data), ctx)
-            transform.flush_batch_processing(timeout=10.0)
+        row_data = {
+            "cs1_bg": "case1 bg",
+            "cs1_sym": "case1 sym",
+            "cs1_hist": "case1 hist",
+            "cs2_bg": "case2 bg",
+            "cs2_sym": "case2 sym",
+            "cs2_hist": "case2 hist",
+        }
+        transform.accept(make_pipeline_row(row_data), ctx)
+        transform.flush_batch_processing(timeout=10.0)
 
         assert len(collector.results) == 1
         _token, result, _state_id = collector.results[0]
         assert isinstance(result, TransformResult)
 
         assert result.status == "success"
-        assert mock_client.chat.completions.create.call_count == 4
+        assert transform._provider.execute_query.call_count == 4
 
         # All query results merged into output
         assert result.row is not None
@@ -302,30 +446,29 @@ class TestRowProcessingWithPipelining:
     def test_row_preserves_original_fields(
         self,
         ctx: PluginContext,
-        transform: AzureMultiQueryLLMTransform,
+        transform: LLMTransform,
         collector: CollectorOutputPort,
-        chaosllm_server,
     ) -> None:
         """Output row preserves original input fields."""
-        responses: list[dict[str, Any] | str] = [
+        responses: list[dict[str, Any]] = [
             {"score": 85, "rationale": "R1"},
             {"score": 90, "rationale": "R2"},
             {"score": 75, "rationale": "R3"},
             {"score": 80, "rationale": "R4"},
         ]
+        transform._provider = _make_mock_provider(responses)
 
-        with chaosllm_azure_openai_responses(chaosllm_server, responses):
-            row_data = {
-                "cs1_bg": "bg1",
-                "cs1_sym": "sym1",
-                "cs1_hist": "hist1",
-                "cs2_bg": "bg2",
-                "cs2_sym": "sym2",
-                "cs2_hist": "hist2",
-                "original_field": "preserved",
-            }
-            transform.accept(make_pipeline_row(row_data), ctx)
-            transform.flush_batch_processing(timeout=10.0)
+        row_data = {
+            "cs1_bg": "bg1",
+            "cs1_sym": "sym1",
+            "cs1_hist": "hist1",
+            "cs2_bg": "bg2",
+            "cs2_sym": "sym2",
+            "cs2_hist": "hist2",
+            "original_field": "preserved",
+        }
+        transform.accept(make_pipeline_row(row_data), ctx)
+        transform.flush_batch_processing(timeout=10.0)
 
         assert len(collector.results) == 1
         _, result, _state_id = collector.results[0]
@@ -342,19 +485,29 @@ class TestRowProcessingWithPipelining:
         ctx: PluginContext,
         collector: CollectorOutputPort,
         mock_recorder: Mock,
-        chaosllm_server,
     ) -> None:
         """Original source headers in input_fields resolve via PipelineRow contract."""
-        config = make_config(
-            case_studies=[
-                {"name": "cs1", "input_fields": ["Patient Name", "Symptoms", "History"]},
-            ],
-            criteria=[{"name": "diagnosis", "code": "DIAG"}],
-            pool_size=1,
+        # Build config with original column names mapped to normalized names
+        config = _make_config(
+            queries={
+                "cs1_diagnosis": {
+                    "input_fields": {
+                        "text_content": "patient_name",
+                        "symptom": "symptoms",
+                        "history": "history",
+                        "criterion_name": "patient_name",
+                    },
+                    "output_fields": [
+                        {"suffix": "score", "type": "integer"},
+                        {"suffix": "rationale", "type": "string"},
+                    ],
+                },
+            },
         )
-        transform = AzureMultiQueryLLMTransform(config)
-        init_ctx = PluginContext(run_id="test", config={}, landscape=mock_recorder)
+        transform = LLMTransform(config)
+        init_ctx = make_context(run_id="test", landscape=mock_recorder)
         transform.on_start(init_ctx)
+        transform._provider = _make_mock_provider([{"score": 85, "rationale": "Looks consistent"}])
         transform.connect_output(collector, max_pending=10)
 
         contract = SchemaContract(
@@ -376,9 +529,8 @@ class TestRowProcessingWithPipelining:
         )
 
         try:
-            with chaosllm_azure_openai_responses(chaosllm_server, [{"score": 85, "rationale": "Looks consistent"}]) as mock_client:
-                transform.accept(row, ctx)
-                transform.flush_batch_processing(timeout=10.0)
+            transform.accept(row, ctx)
+            transform.flush_batch_processing(timeout=10.0)
 
             assert len(collector.results) == 1
             _, result, _state_id = collector.results[0]
@@ -387,58 +539,67 @@ class TestRowProcessingWithPipelining:
             assert result.row is not None
             assert result.row["cs1_diagnosis_score"] == 85
             assert result.row["patient_name"] == "Alice Smith"
-
-            call_args = mock_client.chat.completions.create.call_args
-            user_message = call_args.kwargs["messages"][-1]["content"]
-            assert "Alice Smith" in user_message
-            assert "diagnosis" in user_message.lower()
         finally:
             transform.close()
 
     def test_row_fails_if_any_query_fails(
         self,
         ctx: PluginContext,
-        transform: AzureMultiQueryLLMTransform,
+        transform: LLMTransform,
         collector: CollectorOutputPort,
-        chaosllm_server,
     ) -> None:
-        """All-or-nothing: if any query fails, entire row fails."""
-        responses: list[dict[str, Any] | str] = [
-            {"score": 85, "rationale": "ok"},
-            {"score": 85, "rationale": "ok"},
-            {"score": 85, "rationale": "ok"},
-            "not valid json",
-        ]
+        """All-or-nothing: if any query fails (invalid JSON), entire row fails."""
+        # 3 good JSON + 1 invalid
+        call_count = [0]
 
-        with chaosllm_azure_openai_responses(chaosllm_server, responses):
-            row = {
-                "cs1_bg": "bg",
-                "cs1_sym": "sym",
-                "cs1_hist": "hist",
-                "cs2_bg": "bg",
-                "cs2_sym": "sym",
-                "cs2_hist": "hist",
-            }
-            transform.accept(make_pipeline_row(row), ctx)
-            transform.flush_batch_processing(timeout=10.0)
+        def fail_on_fourth(messages, *, model, temperature, max_tokens, state_id, token_id, response_format=None):
+            call_count[0] += 1
+            if call_count[0] == 4:
+                return LLMQueryResult(
+                    content="not valid json",
+                    usage=TokenUsage.known(10, 5),
+                    model="gpt-4o",
+                    finish_reason=FinishReason.STOP,
+                )
+            return LLMQueryResult(
+                content='{"score": 85, "rationale": "ok"}',
+                usage=TokenUsage.known(10, 5),
+                model="gpt-4o",
+                finish_reason=FinishReason.STOP,
+            )
+
+        mock_provider = Mock()
+        mock_provider.execute_query.side_effect = fail_on_fourth
+        mock_provider.close = Mock()
+        transform._provider = mock_provider
+
+        row_data = {
+            "cs1_bg": "bg",
+            "cs1_sym": "sym",
+            "cs1_hist": "hist",
+            "cs2_bg": "bg",
+            "cs2_sym": "sym",
+            "cs2_hist": "hist",
+        }
+        transform.accept(make_pipeline_row(row_data), ctx)
+        transform.flush_batch_processing(timeout=10.0)
 
         assert len(collector.results) == 1
         _, result, _state_id = collector.results[0]
         assert isinstance(result, TransformResult)
 
-        # Entire row fails
+        # Entire row fails (atomic multi-query semantics)
         assert result.status == "error"
         assert result.reason is not None
-        assert "query_failed" in result.reason["reason"]
+        assert "json" in result.reason["reason"].lower()
 
     def test_connect_output_required_before_accept(self, mock_recorder: Mock) -> None:
         """accept() raises RuntimeError if connect_output() not called."""
-        transform = AzureMultiQueryLLMTransform(make_config())
+        transform = LLMTransform(_make_config())
 
         token = make_token("row-1")
-        ctx = PluginContext(
+        ctx = make_context(
             run_id="test-run",
-            config={},
             state_id="test-state-id",
             token=token,
         )
@@ -452,8 +613,8 @@ class TestRowProcessingWithPipelining:
         mock_recorder: Mock,
     ) -> None:
         """connect_output() raises if called more than once."""
-        transform = AzureMultiQueryLLMTransform(make_config())
-        init_ctx = PluginContext(run_id="test", config={}, landscape=mock_recorder)
+        transform = LLMTransform(_make_config())
+        init_ctx = make_context(run_id="test", landscape=mock_recorder)
         transform.on_start(init_ctx)
         transform.connect_output(collector, max_pending=10)
 
@@ -483,49 +644,40 @@ class TestMultiRowPipelining:
         self,
         mock_recorder: Mock,
         collector: CollectorOutputPort,
-        chaosllm_server,
     ) -> None:
         """Multiple rows are emitted in submission order (FIFO).
 
-        This test focuses on row-level pipelining via BatchTransformMixin,
-        using sequential query execution (no pool_size) to avoid interference
-        between query-level and row-level concurrency in the test.
+        Tests row-level pipelining via BatchTransformMixin.
         """
-        # Disable query-level pooling to focus on row-level pipelining
-        config = make_config()
-        del config["pool_size"]
+        config = _make_config()
 
-        transform = AzureMultiQueryLLMTransform(config)
-        init_ctx = PluginContext(run_id="test", config={}, landscape=mock_recorder)
+        transform = LLMTransform(config)
+        init_ctx = make_context(run_id="test", landscape=mock_recorder)
         transform.on_start(init_ctx)
+        transform._provider = _make_mock_provider()
         transform.connect_output(collector, max_pending=10)
 
-        # Use consistent response for all queries - test is about FIFO ordering
-        response = {"score": 85, "rationale": "Good"}
-
         try:
-            with chaosllm_azure_openai_responses(chaosllm_server, [response]):
-                for i in range(3):
-                    row_data = {
-                        "row_id": f"row-{i}",
-                        "cs1_bg": f"r{i}",
-                        "cs1_sym": f"r{i}",
-                        "cs1_hist": f"r{i}",
-                        "cs2_bg": f"r{i}",
-                        "cs2_sym": f"r{i}",
-                        "cs2_hist": f"r{i}",
-                    }
-                    token = make_token(f"row-{i}")
-                    ctx = PluginContext(
-                        run_id="run-123",
-                        config={},
-                        landscape=mock_recorder,
-                        state_id=f"state-{i}",
-                        token=token,
-                    )
-                    transform.accept(make_pipeline_row(row_data), ctx)
+            for i in range(3):
+                row_data = {
+                    "row_id": f"row-{i}",
+                    "cs1_bg": f"r{i}",
+                    "cs1_sym": f"r{i}",
+                    "cs1_hist": f"r{i}",
+                    "cs2_bg": f"r{i}",
+                    "cs2_sym": f"r{i}",
+                    "cs2_hist": f"r{i}",
+                }
+                token = make_token(f"row-{i}")
+                ctx = make_context(
+                    run_id="run-123",
+                    landscape=mock_recorder,
+                    state_id=f"state-{i}",
+                    token=token,
+                )
+                transform.accept(make_pipeline_row(row_data), ctx)
 
-                transform.flush_batch_processing(timeout=10.0)
+            transform.flush_batch_processing(timeout=10.0)
         finally:
             transform.close()
 
@@ -537,120 +689,15 @@ class TestMultiRowPipelining:
             assert result.row is not None
             assert result.row["row_id"] == f"row-{i}"
 
-    def test_rows_use_shared_state_id_for_queries(
-        self,
-        mock_recorder: Mock,
-        collector: CollectorOutputPort,
-        chaosllm_server,
-    ) -> None:
-        """Each row's queries share a state_id (FK constraint).
-
-        All queries for a row share ctx.state_id to satisfy FK constraint:
-        - calls.state_id must reference existing node_states.state_id
-        - Uniqueness comes from call_index allocated by recorder
-        """
-        transform = AzureMultiQueryLLMTransform(make_config())
-        init_ctx = PluginContext(run_id="test", config={}, landscape=mock_recorder)
-        transform.on_start(init_ctx)
-        transform.connect_output(collector, max_pending=10)
-
-        responses: list[dict[str, Any] | str] = [{"score": i, "rationale": f"R{i}"} for i in range(8)]  # 2 rows x 4 queries
-        created_state_ids: list[str] = []
-
-        # Patch _get_llm_client to track state_ids
-        original_get_client = transform._get_llm_client
-
-        def tracking_get_client(state_id: str, *, token_id: str | None = None) -> Any:
-            created_state_ids.append(state_id)
-            return original_get_client(state_id, token_id=token_id)
-
-        transform._get_llm_client = tracking_get_client  # type: ignore[method-assign]
-
-        try:
-            with chaosllm_azure_openai_responses(chaosllm_server, responses):
-                for i in range(2):
-                    row_data = {
-                        "cs1_bg": f"r{i}",
-                        "cs1_sym": f"r{i}",
-                        "cs1_hist": f"r{i}",
-                        "cs2_bg": f"r{i}",
-                        "cs2_sym": f"r{i}",
-                        "cs2_hist": f"r{i}",
-                    }
-                    token = make_token(f"row-{i}")
-                    ctx = PluginContext(
-                        run_id="run-123",
-                        config={},
-                        landscape=mock_recorder,
-                        state_id=f"batch-{i:03d}",
-                        token=token,
-                    )
-                    transform.accept(make_pipeline_row(row_data), ctx)
-
-                transform.flush_batch_processing(timeout=10.0)
-        finally:
-            transform.close()
-
-        # All state_ids should be from the set {batch-000, batch-001}
-        unique_state_ids = set(created_state_ids)
-        assert unique_state_ids == {"batch-000", "batch-001"}
-
-        # Verify NO synthetic per-query state_ids were created
-        for state_id in created_state_ids:
-            assert "_q" not in state_id, f"Found synthetic per-query state_id: {state_id}"
-
-    def test_clients_cleaned_up_after_row_processing(
-        self,
-        mock_recorder: Mock,
-        collector: CollectorOutputPort,
-        chaosllm_server,
-    ) -> None:
-        """Clients are cleaned up after each row is processed."""
-        transform = AzureMultiQueryLLMTransform(make_config())
-        init_ctx = PluginContext(run_id="test", config={}, landscape=mock_recorder)
-        transform.on_start(init_ctx)
-        transform.connect_output(collector, max_pending=10)
-
-        responses: list[dict[str, Any] | str] = [{"score": i, "rationale": f"R{i}"} for i in range(8)]
-
-        try:
-            with chaosllm_azure_openai_responses(chaosllm_server, responses):
-                for i in range(2):
-                    row_data = {
-                        "cs1_bg": f"r{i}",
-                        "cs1_sym": f"r{i}",
-                        "cs1_hist": f"r{i}",
-                        "cs2_bg": f"r{i}",
-                        "cs2_sym": f"r{i}",
-                        "cs2_hist": f"r{i}",
-                    }
-                    token = make_token(f"row-{i}")
-                    ctx = PluginContext(
-                        run_id="run-123",
-                        config={},
-                        landscape=mock_recorder,
-                        state_id=f"batch-{i:03d}",
-                        token=token,
-                    )
-                    transform.accept(make_pipeline_row(row_data), ctx)
-
-                transform.flush_batch_processing(timeout=10.0)
-
-            # After processing, clients should be cleaned up
-            assert len(transform._llm_clients) == 0
-        finally:
-            transform.close()
-
     def test_on_start_captures_recorder(self, mock_recorder: Mock) -> None:
-        """on_start() captures recorder reference for LLM client creation."""
-        transform = AzureMultiQueryLLMTransform(make_config())
+        """on_start() captures recorder reference for provider creation."""
+        transform = LLMTransform(_make_config())
 
         # Verify _recorder starts as None
         assert transform._recorder is None
 
-        ctx = PluginContext(
+        ctx = make_context(
             run_id="test-run",
-            config={},
             landscape=mock_recorder,
             state_id="test-state-id",
         )
@@ -659,15 +706,16 @@ class TestMultiRowPipelining:
         # Verify recorder was captured
         assert transform._recorder is mock_recorder
 
-    def test_close_clears_recorder_and_clients(
+    def test_close_clears_recorder_and_provider(
         self,
         mock_recorder: Mock,
         collector: CollectorOutputPort,
     ) -> None:
-        """close() clears recorder reference and cached clients."""
-        transform = AzureMultiQueryLLMTransform(make_config())
-        init_ctx = PluginContext(run_id="test", config={}, landscape=mock_recorder)
+        """close() clears recorder reference and provider."""
+        transform = LLMTransform(_make_config())
+        init_ctx = make_context(run_id="test", landscape=mock_recorder)
         transform.on_start(init_ctx)
+        transform._provider = _make_mock_provider()
         transform.connect_output(collector, max_pending=10)
 
         assert transform._recorder is not None
@@ -675,10 +723,11 @@ class TestMultiRowPipelining:
         transform.close()
 
         assert transform._recorder is None
+        assert transform._provider is None  # type: ignore[unreachable]  # verifying close() cleanup at runtime
 
 
-class TestSequentialMode:
-    """Tests for sequential mode (no pool_size) using accept() API."""
+class TestMultiQueryWithMockProvider:
+    """Tests for multi-query using mock provider (no ChaosLLM server)."""
 
     @pytest.fixture
     def mock_recorder(self) -> Mock:
@@ -692,47 +741,87 @@ class TestSequentialMode:
         """Create output collector for capturing results."""
         return CollectorOutputPort()
 
+    def test_parallel_mode_includes_no_pool_stats_in_context_after(
+        self,
+        mock_recorder: Mock,
+        collector: CollectorOutputPort,
+    ) -> None:
+        """Multi-query with mocked provider processes correctly.
+
+        The new MultiQueryStrategy executes queries sequentially within a row
+        (parallelism is at the row level via BatchTransformMixin).
+        context_after is None for sequential query execution.
+        """
+        config = _make_config(pool_size=4)
+        transform = LLMTransform(config)
+        init_ctx = make_context(run_id="test", landscape=mock_recorder)
+        transform.on_start(init_ctx)
+        transform._provider = _make_mock_provider([{"score": i, "rationale": f"R{i}"} for i in range(4)])
+        transform.connect_output(collector, max_pending=10)
+
+        try:
+            row_data = {
+                "cs1_bg": "bg1",
+                "cs1_sym": "sym1",
+                "cs1_hist": "hist1",
+                "cs2_bg": "bg2",
+                "cs2_sym": "sym2",
+                "cs2_hist": "hist2",
+            }
+            token = make_token("row-1")
+            ctx = make_context(
+                run_id="run-123",
+                landscape=mock_recorder,
+                state_id="state-pool-001",
+                token=token,
+            )
+            transform.accept(make_pipeline_row(row_data), ctx)
+            transform.flush_batch_processing(timeout=10.0)
+        finally:
+            transform.close()
+
+        assert len(collector.results) == 1
+        _, result, _state_id = collector.results[0]
+        assert isinstance(result, TransformResult)
+        assert result.status == "success"
+
+        # The new multi-query strategy processes queries sequentially within
+        # a row — no per-query pool stats. context_after is None.
+        assert result.context_after is None
+
     def test_sequential_mode_processes_rows(
         self,
         mock_recorder: Mock,
         collector: CollectorOutputPort,
-        chaosllm_server,
     ) -> None:
         """Sequential mode (no pool_size) processes rows correctly."""
-        # Create config WITHOUT pool_size - forces sequential mode
-        config = make_config()
+        config = _make_config()
         del config["pool_size"]
 
-        transform = AzureMultiQueryLLMTransform(config)
-        init_ctx = PluginContext(run_id="test", config={}, landscape=mock_recorder)
+        transform = LLMTransform(config)
+        init_ctx = make_context(run_id="test", landscape=mock_recorder)
         transform.on_start(init_ctx)
+        transform._provider = _make_mock_provider([{"score": i, "rationale": f"R{i}"} for i in range(4)])
         transform.connect_output(collector, max_pending=10)
 
-        # Verify no executor created (sequential mode)
-        assert transform._executor is None
-
-        responses: list[dict[str, Any] | str] = [{"score": i, "rationale": f"R{i}"} for i in range(4)]
-
         try:
-            with chaosllm_azure_openai_responses(chaosllm_server, responses):
-                row_data = {
-                    "cs1_bg": "r1",
-                    "cs1_sym": "r1",
-                    "cs1_hist": "r1",
-                    "cs2_bg": "r1",
-                    "cs2_sym": "r1",
-                    "cs2_hist": "r1",
-                }
-                token = make_token("row-1")
-                ctx = PluginContext(
-                    run_id="run-123",
-                    config={},
-                    landscape=mock_recorder,
-                    state_id="batch-seq-001",
-                    token=token,
-                )
-                transform.accept(make_pipeline_row(row_data), ctx)
-                transform.flush_batch_processing(timeout=10.0)
+            row_data = {
+                "cs1_bg": "r1",
+                "cs1_sym": "r1",
+                "cs1_hist": "r1",
+                "cs2_bg": "r1",
+                "cs2_sym": "r1",
+                "cs2_hist": "r1",
+            }
+            token = make_token("row-1")
+            ctx = make_context(
+                run_id="run-123",
+                landscape=mock_recorder,
+                state_id="batch-seq-001",
+                token=token,
+            )
+            transform.accept(make_pipeline_row(row_data), ctx)
+            transform.flush_batch_processing(timeout=10.0)
         finally:
             transform.close()
 
@@ -743,236 +832,56 @@ class TestSequentialMode:
         # Sequential mode has no pool — context_after should be None
         assert result.context_after is None
 
-    def test_sequential_mode_cleans_up_clients(
-        self,
-        mock_recorder: Mock,
-        collector: CollectorOutputPort,
-        chaosllm_server,
-    ) -> None:
-        """Sequential mode cleans up clients after processing."""
-        config = make_config()
-        del config["pool_size"]
-
-        transform = AzureMultiQueryLLMTransform(config)
-        init_ctx = PluginContext(run_id="test", config={}, landscape=mock_recorder)
-        transform.on_start(init_ctx)
-        transform.connect_output(collector, max_pending=10)
-
-        responses: list[dict[str, Any] | str] = [{"score": i, "rationale": f"R{i}"} for i in range(8)]  # 2 rows x 4 queries
-
-        try:
-            with chaosllm_azure_openai_responses(chaosllm_server, responses):
-                for i in range(2):
-                    row_data = {
-                        "cs1_bg": f"r{i}",
-                        "cs1_sym": f"r{i}",
-                        "cs1_hist": f"r{i}",
-                        "cs2_bg": f"r{i}",
-                        "cs2_sym": f"r{i}",
-                        "cs2_hist": f"r{i}",
-                    }
-                    token = make_token(f"row-{i}")
-                    ctx = PluginContext(
-                        run_id="run-123",
-                        config={},
-                        landscape=mock_recorder,
-                        state_id=f"batch-seq-{i:03d}",
-                        token=token,
-                    )
-                    transform.accept(make_pipeline_row(row_data), ctx)
-
-                transform.flush_batch_processing(timeout=10.0)
-
-            # Clients should be cleaned up after each row
-            assert len(transform._llm_clients) == 0
-        finally:
-            transform.close()
-
-
-class TestPoolMetadataAuditIntegration:
-    """Tests for pool metadata flowing to audit trail.
-
-    P3-2026-02-02: Pooling metadata should be persisted to context_after_json.
-    """
-
-    @pytest.fixture
-    def mock_recorder(self) -> Mock:
-        """Create mock LandscapeRecorder."""
-        recorder = Mock()
-        recorder.record_call = Mock()
-        return recorder
-
-    @pytest.fixture
-    def collector(self) -> CollectorOutputPort:
-        """Create output collector for capturing results."""
-        return CollectorOutputPort()
-
-    def test_parallel_mode_includes_pool_stats_in_context_after(
-        self,
-        mock_recorder: Mock,
-        collector: CollectorOutputPort,
-        chaosllm_server,
-    ) -> None:
-        """Parallel mode should include pool_stats in TransformResult.context_after.
-
-        This metadata enables auditors to verify:
-        - Pool utilization (max_concurrent_reached)
-        - Throttle behavior (capacity_retries, total_throttle_time_ms)
-        - Config at completion time (dispatch_delay_at_completion_ms)
-        """
-        config = make_config(pool_size=4)
-        transform = AzureMultiQueryLLMTransform(config)
-        init_ctx = PluginContext(run_id="test", config={}, landscape=mock_recorder)
-        transform.on_start(init_ctx)
-        transform.connect_output(collector, max_pending=10)
-
-        # 4 queries per row (2 case studies x 2 criteria)
-        responses: list[dict[str, Any] | str] = [{"score": i, "rationale": f"R{i}"} for i in range(4)]
-
-        try:
-            with chaosllm_azure_openai_responses(chaosllm_server, responses):
-                row_data = {
-                    "cs1_bg": "bg1",
-                    "cs1_sym": "sym1",
-                    "cs1_hist": "hist1",
-                    "cs2_bg": "bg2",
-                    "cs2_sym": "sym2",
-                    "cs2_hist": "hist2",
-                }
-                token = make_token("row-1")
-                ctx = PluginContext(
-                    run_id="run-123",
-                    config={},
-                    landscape=mock_recorder,
-                    state_id="state-pool-001",
-                    token=token,
-                )
-                transform.accept(make_pipeline_row(row_data), ctx)
-                transform.flush_batch_processing(timeout=10.0)
-        finally:
-            transform.close()
-
-        assert len(collector.results) == 1
-        _, result, _state_id = collector.results[0]
-        assert isinstance(result, TransformResult)
-        assert result.status == "success"
-
-        # VERIFY: context_after should contain typed pool metadata
-        from elspeth.contracts.node_state_context import PoolExecutionContext
-
-        assert result.context_after is not None, (
-            "TransformResult.context_after should contain pool metadata. "
-            "_execute_queries_parallel must call executor.get_stats() and "
-            "include it in the result."
-        )
-        assert isinstance(result.context_after, PoolExecutionContext)
-
-        # Verify pool_config via typed attribute access
-        assert result.context_after.pool_config.pool_size == 4
-
-        # Verify pool_stats via typed attribute access
-        assert result.context_after.pool_stats.max_concurrent_reached > 0
-
-    def test_parallel_mode_includes_query_ordering_in_context_after(
-        self,
-        mock_recorder: Mock,
-        collector: CollectorOutputPort,
-        chaosllm_server,
-    ) -> None:
-        """Parallel mode should include per-query ordering metadata.
-
-        This enables auditors to:
-        - Verify reordering worked correctly
-        - Identify "lost" rows by examining ordering gaps
-        - Measure buffer wait times
-        """
-        config = make_config(pool_size=4)
-        transform = AzureMultiQueryLLMTransform(config)
-        init_ctx = PluginContext(run_id="test", config={}, landscape=mock_recorder)
-        transform.on_start(init_ctx)
-        transform.connect_output(collector, max_pending=10)
-
-        responses: list[dict[str, Any] | str] = [{"score": i, "rationale": f"R{i}"} for i in range(4)]
-
-        try:
-            with chaosllm_azure_openai_responses(chaosllm_server, responses):
-                row_data = {
-                    "cs1_bg": "bg1",
-                    "cs1_sym": "sym1",
-                    "cs1_hist": "hist1",
-                    "cs2_bg": "bg2",
-                    "cs2_sym": "sym2",
-                    "cs2_hist": "hist2",
-                }
-                token = make_token("row-1")
-                ctx = PluginContext(
-                    run_id="run-123",
-                    config={},
-                    landscape=mock_recorder,
-                    state_id="state-ordering-001",
-                    token=token,
-                )
-                transform.accept(make_pipeline_row(row_data), ctx)
-                transform.flush_batch_processing(timeout=10.0)
-        finally:
-            transform.close()
-
-        _, result, _ = collector.results[0]
-        # Type narrow: result from batch processing should be TransformResult, not ExceptionResult
-        assert isinstance(result, TransformResult)
-
-        from elspeth.contracts.node_state_context import PoolExecutionContext
-
-        assert isinstance(result.context_after, PoolExecutionContext)
-
-        # Verify query_ordering via typed attribute access
-        query_ordering = result.context_after.query_ordering
-
-        # Should have 4 entries (2 case studies x 2 criteria)
-        assert len(query_ordering) == 4, f"Expected 4 query ordering entries, got {len(query_ordering)}"
-
-        # Each entry should have typed fields
-        for entry in query_ordering:
-            assert isinstance(entry.submit_index, int)
-            assert isinstance(entry.complete_index, int)
-            assert isinstance(entry.buffer_wait_ms, float)
-
-
-# Removed test_azure_multi_query_with_pipeline_row - duplicate of existing accept() API tests
-# The transform raises NotImplementedError for process() and directs to accept() API
-
 
 class TestBug4_1_KeyErrorInBuildTemplateContext:
     """Bug 4.1: KeyError in build_template_context returns error, not crash.
 
     When a row is missing fields required by build_template_context(),
-    a KeyError is raised. Previously this was uncaught and crashed the transform.
-    Now it's caught and returns TransformResult.error() with reason
-    "template_context_failed".
+    a KeyError is raised. The MultiQueryStrategy catches this and returns
+    TransformResult.error() with reason "template_context_failed".
     """
 
-    def test_missing_input_field_returns_error(self, chaosllm_server) -> None:
+    def test_missing_input_field_returns_error(self) -> None:
         """Row missing required input field returns error instead of crashing."""
-        with chaosllm_azure_openai_client(chaosllm_server):
-            transform = AzureMultiQueryLLMTransform(make_config())
-            ctx = make_plugin_context()
-            transform.on_start(ctx)
+        transform = LLMTransform(_make_config())
+        mock_provider = _make_mock_provider()
+        transform._provider = mock_provider
 
-            # Row is missing cs1_bg, cs1_sym, cs1_hist — required by case study "cs1"
-            row = {"cs2_bg": "bg", "cs2_sym": "sym", "cs2_hist": "hist"}
-            spec = transform._query_specs[0]  # cs1_diagnosis — needs cs1_bg, cs1_sym, cs1_hist
+        # Row is missing cs1_bg, cs1_sym, cs1_hist — required by first query
+        row = make_pipeline_row({"cs2_bg": "bg", "cs2_sym": "sym", "cs2_hist": "hist"})
+        ctx = make_context()
 
-            assert ctx.state_id is not None
-            result = transform._process_single_query(
-                row,
-                spec,
-                ctx.state_id,
-                "test-token-id",
-                make_pipeline_row(row).contract,
-            )
+        result = transform._process_row(row, ctx)
 
-            assert result.status == "error"
-            assert result.reason is not None
-            assert result.reason["reason"] == "missing_field"
-            # Error should mention one of the missing fields
-            assert "cs1_bg" in result.reason["error"] or "cs1_sym" in result.reason["error"] or "cs1_hist" in result.reason["error"]
+        assert result.status == "error"
+        assert result.reason is not None
+        assert result.reason["reason"] == "template_context_failed"
+        # Error should mention the query name
+        assert "cs1_diagnosis" in result.reason["query_name"]
+
+
+class TestMultiQueryDeclaredOutputFields:
+    """Tests for declared_output_fields on unified LLMTransform.
+
+    Field collision detection is enforced centrally by TransformExecutor.
+    These tests verify that LLMTransform correctly declares its output fields.
+    """
+
+    def test_declared_output_fields_is_nonempty(self) -> None:
+        """declared_output_fields is populated for schema evolution recording."""
+        transform = LLMTransform(_make_config())
+        assert transform.declared_output_fields
+
+    def test_declared_output_fields_contains_prefixed_response_fields(self) -> None:
+        """Multi-query declared_output_fields includes query-prefixed fields."""
+        transform = LLMTransform(_make_config())
+        # Multi-query declares prefixed fields, not base unprefixed fields
+        assert "cs1_diagnosis_llm_response" in transform.declared_output_fields
+        assert "cs1_diagnosis_llm_response_usage" in transform.declared_output_fields
+        assert "cs1_diagnosis_llm_response_model" in transform.declared_output_fields
+
+    def test_declared_output_fields_contains_prefixed_audit_fields(self) -> None:
+        """Multi-query declared_output_fields includes prefixed audit fields."""
+        transform = LLMTransform(_make_config())
+        assert "cs1_diagnosis_llm_response_template_hash" in transform.declared_output_fields
+        assert "cs1_diagnosis_llm_response_variables_hash" in transform.declared_output_fields

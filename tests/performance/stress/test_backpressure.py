@@ -11,6 +11,7 @@ These tests do NOT require ChaosLLM; they exercise the telemetry subsystem direc
 from __future__ import annotations
 
 import threading
+from collections.abc import Mapping
 from datetime import UTC, datetime
 from typing import Any
 
@@ -45,7 +46,7 @@ class CountingExporter:
         with self._lock:
             return self._count
 
-    def configure(self, config: dict[str, Any]) -> None:
+    def configure(self, config: Mapping[str, Any]) -> None:
         pass
 
     def export(self, event: TelemetryEvent) -> None:
@@ -82,7 +83,7 @@ class SlowExporter:
         with self._lock:
             return self._count
 
-    def configure(self, config: dict[str, Any]) -> None:
+    def configure(self, config: Mapping[str, Any]) -> None:
         pass
 
     def export(self, event: TelemetryEvent) -> None:

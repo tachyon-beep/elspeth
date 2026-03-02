@@ -53,7 +53,7 @@ export ELSPETH_ALLOW_RAW_SECRETS=true
 ```bash
 docker run --rm \
   -e ELSPETH_FINGERPRINT_KEY="your-key" \
-  ghcr.io/johnm-dta/elspeth:v0.1.0 \
+  ghcr.io/johnm-dta/elspeth:v0.3.3 \
   run --settings /app/config/pipeline.yaml --execute
 ```
 
@@ -111,12 +111,61 @@ docker run --rm \
 
 5. For Azure services, verify your resource endpoint is correct:
    ```yaml
-   row_plugins:
-     - plugin: azure_llm
+   transforms:
+     - plugin: llm
        options:
+         provider: azure
          endpoint: "https://your-resource.openai.azure.com"
          deployment_name: "your-deployment"
    ```
+
+---
+
+### LLM Transform Errors
+
+#### Error: `missing_output_field` in error_json
+
+**Cause:** The LLM returned valid JSON, but a required output field was not present in the response. This commonly happens when the LLM generates a response that doesn't match the expected schema.
+
+**Example error_json:**
+```json
+{
+  "reason": "missing_output_field",
+  "query_name": "classify",
+  "field": "category",
+  "available_fields": ["label", "confidence"]
+}
+```
+
+**Solution:**
+
+1. Check your prompt template — ensure it instructs the LLM to include the required fields
+2. Review the `available_fields` in the error to see what the LLM actually returned
+3. Consider adding few-shot examples to your prompt to guide the output format
+4. If the field is genuinely optional, remove it from `output_fields` in your query spec
+
+#### Error: `content_filtered` in error_json
+
+**Cause:** The LLM provider returned a null content response, typically because the request or response was flagged by the provider's content safety filters.
+
+**Solution:**
+
+1. Review the prompt being sent — check for content that might trigger safety filters
+2. Check the provider's content policy documentation
+3. For Azure OpenAI, review the content filtering configuration on your deployment
+4. The row will be marked as errored (not quarantined) — investigate via:
+   ```bash
+   elspeth explain --run <run_id> --database ./runs/audit.db
+   ```
+
+#### Error: `RuntimeError: langfuse ... not installed`
+
+**Cause:** Langfuse tracing is configured in your pipeline YAML but the `langfuse` package is not installed. As of RC3.3, this fails fast instead of silently degrading.
+
+**Solution:**
+```bash
+uv pip install 'elspeth[tracing-langfuse]'
+```
 
 ---
 
@@ -138,9 +187,10 @@ docker run --rm \
 
 2. Increase timeout for slow operations:
    ```yaml
-   row_plugins:
-     - plugin: azure_llm
+   transforms:
+     - plugin: llm
        options:
+         provider: azure
          timeout: 120  # seconds
    ```
 
@@ -247,20 +297,20 @@ docker run --rm \
    ```bash
    docker run --rm \
      -v $(pwd)/input:/app/input:ro \
-     ghcr.io/johnm-dta/elspeth:v0.1.0 \
+     ghcr.io/johnm-dta/elspeth:v0.3.3 \
      ls /app/input
    ```
 
 2. Ensure pipeline config uses container paths, not host paths:
    ```yaml
    # CORRECT - container path
-   datasource:
+   source:
      plugin: csv
      options:
        path: /app/input/data.csv
 
    # WRONG - host path
-   datasource:
+   source:
      plugin: csv
      options:
        path: ./input/data.csv
@@ -367,7 +417,7 @@ The readiness probe prevents traffic before the app is ready. The liveness probe
 2. Check the configuration reference for required fields
 
 3. Common issues:
-   - Missing `datasource` section
+   - Missing `source` section
    - Missing `sinks` section
    - Plugin options with wrong types
    - Undefined environment variables in `${VAR}` syntax
@@ -403,6 +453,6 @@ If you're still stuck:
 
 ## See Also
 
-- [User Manual](../USER_MANUAL.md) - CLI commands and usage
-- [Docker Deployment Guide](docker.md) - Container deployment
+- [User Manual](user-manual.md) - CLI commands and usage
+- [Docker Deployment Guide](../runbooks/docker.md) - Container deployment
 - [Environment Variables Reference](../reference/environment-variables.md) - Configuration options

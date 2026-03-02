@@ -14,18 +14,23 @@ import pytest
 
 from elspeth.contracts import TransformResult
 from elspeth.contracts.config.runtime import RuntimeRateLimitConfig
+from elspeth.contracts.contexts import LifecycleContext, TransformContext
 from elspeth.contracts.plugin_context import PluginContext
 from elspeth.contracts.schema_contract import PipelineRow
 from elspeth.core.config import RateLimitSettings
-from elspeth.core.landscape import LandscapeDB
 from elspeth.core.rate_limit import RateLimitRegistry
 from elspeth.engine import Orchestrator
-from elspeth.plugins.base import BaseTransform
+from elspeth.plugins.infrastructure.base import BaseTransform
 from elspeth.testing import make_pipeline_row
+from tests.fixtures.landscape import make_landscape_db
 
 
 class RateLimitAwareTransform(BaseTransform):
-    """Test transform that uses rate limiting from context."""
+    """Test transform that uses rate limiting from context.
+
+    Follows the designed architecture: captures rate_limit_registry in
+    on_start() from LifecycleContext and uses it from self in process().
+    """
 
     name = "rate_limit_test"
 
@@ -33,11 +38,17 @@ class RateLimitAwareTransform(BaseTransform):
         super().__init__(config)
         self._service_name = config.get("service_name", "test_service")
         self._call_times: list[float] = []
+        self._registry: RateLimitRegistry | None = None
 
-    def process(self, row: PipelineRow, ctx: PluginContext) -> TransformResult:
+    def on_start(self, ctx: LifecycleContext) -> None:
+        """Capture rate_limit_registry from lifecycle context."""
+        super().on_start(ctx)
+        self._registry = ctx.rate_limit_registry
+
+    def process(self, row: PipelineRow, ctx: TransformContext) -> TransformResult:
         """Process row, using rate limiter if available."""
-        if ctx.rate_limit_registry is not None:
-            limiter = ctx.rate_limit_registry.get_limiter(self._service_name)
+        if self._registry is not None:
+            limiter = self._registry.get_limiter(self._service_name)
             limiter.acquire()
 
         # Record the time of this call
@@ -56,7 +67,7 @@ class TestRateLimitRegistryInOrchestrator:
 
     def test_orchestrator_accepts_rate_limit_registry(self) -> None:
         """Orchestrator constructor accepts rate_limit_registry parameter."""
-        db = LandscapeDB.in_memory()
+        db = make_landscape_db()
         settings = RateLimitSettings(enabled=True, default_requests_per_minute=60)
         config = RuntimeRateLimitConfig.from_settings(settings)
         registry = RateLimitRegistry(config)
@@ -71,7 +82,7 @@ class TestRateLimitRegistryInOrchestrator:
 
     def test_orchestrator_accepts_none_registry(self) -> None:
         """Orchestrator works without rate limit registry."""
-        db = LandscapeDB.in_memory()
+        db = make_landscape_db()
 
         try:
             orchestrator = Orchestrator(db, rate_limit_registry=None)
@@ -189,6 +200,9 @@ class TestRateLimitThrottling:
                 rate_limit_registry=registry,
             )
 
+            # Lifecycle: on_start captures rate_limit_registry from context
+            transform.on_start(ctx)
+
             # Process 10 rows — all should succeed (fills bucket)
             for i in range(10):
                 result = transform.process(make_pipeline_row({"id": i}), ctx)
@@ -268,7 +282,7 @@ class TestAuditedClientRateLimiting:
 
         from elspeth.core.config import RateLimitSettings
         from elspeth.core.rate_limit import RateLimitRegistry
-        from elspeth.plugins.clients.llm import AuditedLLMClient
+        from elspeth.plugins.infrastructure.clients.llm import AuditedLLMClient
 
         settings = RateLimitSettings(enabled=True, default_requests_per_minute=60)
         config = RuntimeRateLimitConfig.from_settings(settings)
@@ -340,7 +354,7 @@ class TestAuditedClientRateLimiting:
 
         from elspeth.core.config import RateLimitSettings
         from elspeth.core.rate_limit import RateLimitRegistry
-        from elspeth.plugins.clients.http import AuditedHTTPClient
+        from elspeth.plugins.infrastructure.clients.http import AuditedHTTPClient
 
         settings = RateLimitSettings(enabled=True, default_requests_per_minute=60)
         config = RuntimeRateLimitConfig.from_settings(settings)
@@ -398,7 +412,7 @@ class TestAuditedClientRateLimiting:
         """AuditedLLMClient works without limiter."""
         from unittest.mock import MagicMock
 
-        from elspeth.plugins.clients.llm import AuditedLLMClient
+        from elspeth.plugins.infrastructure.clients.llm import AuditedLLMClient
 
         # Mock the recorder
         mock_recorder = MagicMock()

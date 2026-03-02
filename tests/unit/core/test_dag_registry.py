@@ -32,11 +32,11 @@ def _build_graph(config: ElspethSettings) -> ExecutionGraph:
 
     plugins = instantiate_plugins_from_config(config)
     return ExecutionGraph.from_plugin_instances(
-        source=plugins["source"],
-        source_settings=plugins["source_settings"],
-        transforms=plugins["transforms"],
-        sinks=plugins["sinks"],
-        aggregations=plugins["aggregations"],
+        source=plugins.source,
+        source_settings=plugins.source_settings,
+        transforms=plugins.transforms,
+        sinks=plugins.sinks,
+        aggregations=plugins.aggregations,
         gates=list(config.gates),
         coalesce_settings=list(config.coalesce) if config.coalesce else None,
     )
@@ -197,11 +197,10 @@ class TestOrphanedConsumer:
 class TestNamespaceCollision:
     """Connection name = sink name must fail."""
 
-    def test_connection_name_equals_sink_name_rejected(self) -> None:
-        """Connection names and sink names must be disjoint."""
-        # t1 produces to "output" as a connection, but "output" is also a sink name.
-        # Since on_success="output" goes to the sink directly (valid), let's make
-        # two transforms both try to use a sink name as a connection.
+    def test_connection_name_distinct_from_sink_name_accepted(self) -> None:
+        """Connection names distinct from sink names are accepted."""
+        # t1 produces to "flagged_conn" as a connection (not a sink name),
+        # t2 consumes it and routes to "output" sink. This should succeed.
         config = ElspethSettings(
             source=_observed_source(on_success="src_out"),
             sinks={"output": _observed_sink(), "flagged": _observed_sink(options={"path": "flagged.json", "schema": {"mode": "observed"}})},

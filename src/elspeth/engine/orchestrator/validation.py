@@ -1,4 +1,3 @@
-# src/elspeth/engine/orchestrator/validation.py
 """Pipeline configuration validation functions.
 
 These functions validate route configurations at pipeline initialization,
@@ -23,14 +22,15 @@ from typing import TYPE_CHECKING
 
 # Import GateName at runtime - used in function body, not just type hints
 from elspeth.contracts import RouteDestination, RouteDestinationKind
+from elspeth.contracts.errors import OrchestrationInvariantError
 from elspeth.contracts.types import GateName
 from elspeth.engine.orchestrator.types import RouteValidationError
 
 if TYPE_CHECKING:
+    from elspeth.contracts import SourceProtocol
     from elspeth.contracts.types import NodeID
     from elspeth.core.config import GateSettings
     from elspeth.engine.orchestrator.types import RowPlugin
-    from elspeth.plugins.protocols import SourceProtocol
 
 
 def validate_route_destinations(
@@ -109,9 +109,10 @@ def validate_transform_error_sinks(
     for transform in transforms:
         on_error = transform.on_error
         # on_error is always set (required by TransformSettings) — Tier 1 invariant
-        assert on_error is not None, (
-            f"Transform '{transform.name}' has on_error=None — this should be impossible since TransformSettings requires on_error"
-        )
+        if on_error is None:
+            raise OrchestrationInvariantError(
+                f"Transform '{transform.name}' has on_error=None — this should be impossible since TransformSettings requires on_error"
+            )
 
         if on_error == "discard":
             # "discard" is a special value, not a sink name

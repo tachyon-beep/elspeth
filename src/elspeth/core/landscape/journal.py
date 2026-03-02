@@ -11,6 +11,7 @@ from typing import Any, NotRequired, TypedDict, cast
 from sqlalchemy import event
 from sqlalchemy.engine import Connection, Engine
 
+from elspeth.contracts.errors import AuditIntegrityError, FrameworkBugError
 from elspeth.core.landscape._helpers import now
 from elspeth.core.landscape.formatters import serialize_datetime
 from elspeth.core.payload_store import FilesystemPayloadStore
@@ -158,6 +159,8 @@ class LandscapeJournal:
                         self._total_dropped,
                     )
                 self._consecutive_failures = 0
+            except (FrameworkBugError, AuditIntegrityError):
+                raise  # System bugs and audit corruption must crash immediately
             except Exception as exc:
                 self._consecutive_failures += 1
                 self._total_dropped += len(records)
@@ -248,6 +251,8 @@ class LandscapeJournal:
             return None, "payload_store_not_configured"
         try:
             content = self._payload_store.retrieve(ref)
+        except (FrameworkBugError, AuditIntegrityError):
+            raise  # System bugs and audit corruption must crash immediately
         except Exception as exc:
             logger.error("Landscape journal payload read failed: %s", exc)
             if self._fail_on_error:

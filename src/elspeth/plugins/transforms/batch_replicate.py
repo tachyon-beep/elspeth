@@ -16,12 +16,12 @@ from typing import Any
 
 from pydantic import Field, model_validator
 
+from elspeth.contracts.contexts import TransformContext
 from elspeth.contracts.errors import TransformSuccessReason
-from elspeth.contracts.plugin_context import PluginContext
 from elspeth.contracts.schema_contract import FieldContract, PipelineRow, SchemaContract
-from elspeth.plugins.base import BaseTransform
-from elspeth.plugins.config_base import TransformDataConfig
-from elspeth.plugins.results import TransformResult
+from elspeth.plugins.infrastructure.base import BaseTransform
+from elspeth.plugins.infrastructure.config_base import TransformDataConfig
+from elspeth.plugins.infrastructure.results import TransformResult
 
 
 class BatchReplicateConfig(TransformDataConfig):
@@ -115,7 +115,7 @@ class BatchReplicate(BaseTransform):
         )
 
     def process(  # type: ignore[override] # Batch signature: list[PipelineRow] instead of PipelineRow
-        self, rows: list[PipelineRow], ctx: PluginContext
+        self, rows: list[PipelineRow], ctx: TransformContext
     ) -> TransformResult:
         """Replicate each row based on its copies field.
 
@@ -148,8 +148,9 @@ class BatchReplicate(BaseTransform):
 
         valid_rows: list[dict[str, Any]] = []
         quarantined: list[dict[str, Any]] = []
+        quarantined_indices: list[int] = []
 
-        for row in rows:
+        for row_index, row in enumerate(rows):
             # Get copies count - field is optional, type must be correct if present
             if self._copies_field not in row:
                 # Field missing - use default, still bounded by max_copies
@@ -179,6 +180,7 @@ class BatchReplicate(BaseTransform):
                             "row_data": row.to_dict(),
                         }
                     )
+                    quarantined_indices.append(row_index)
                     continue
 
                 copies = raw_copies
@@ -229,6 +231,7 @@ class BatchReplicate(BaseTransform):
             success_reason["metadata"] = {
                 "quarantined_count": len(quarantined),
                 "quarantined": quarantined,
+                "quarantined_indices": quarantined_indices,
             }
 
         # Return only valid replicated rows — quarantined rows are in success_reason

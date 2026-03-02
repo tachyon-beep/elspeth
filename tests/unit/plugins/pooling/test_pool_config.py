@@ -15,7 +15,7 @@ from __future__ import annotations
 import pytest
 from pydantic import ValidationError
 
-from elspeth.plugins.pooling.config import PoolConfig
+from elspeth.plugins.infrastructure.pooling.config import PoolConfig
 
 
 class TestPoolConfigZeroDelayRejected:

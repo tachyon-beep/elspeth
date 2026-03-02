@@ -1,4 +1,3 @@
-# src/elspeth/testing/chaosweb/server.py
 """Starlette ASGI application for ChaosWeb fake web server.
 
 Provides multi-path HTTP serving with configurable error injection,
@@ -745,7 +744,7 @@ class ChaosWebServer:
         """Handle a successful page response with latency simulation."""
         # Latency
         delay = self._latency_simulator.simulate()
-        total_delay = delay + (extra_delay_sec or 0.0)
+        total_delay = delay + (extra_delay_sec if extra_delay_sec is not None else 0.0)
         if total_delay > 0:
             await asyncio.sleep(total_delay)
 

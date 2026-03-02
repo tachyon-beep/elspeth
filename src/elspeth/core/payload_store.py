@@ -1,4 +1,3 @@
-# src/elspeth/core/payload_store.py
 """
 Payload store for separating large blobs from audit tables.
 

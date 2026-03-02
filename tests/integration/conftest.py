@@ -15,7 +15,8 @@ import pytest
 from elspeth.contracts.payload_store import PayloadStore
 from elspeth.core.landscape.database import LandscapeDB
 from elspeth.core.landscape.recorder import LandscapeRecorder
-from elspeth.plugins.manager import PluginManager
+from elspeth.plugins.infrastructure.manager import PluginManager
+from tests.fixtures.landscape import make_landscape_db, make_recorder
 from tests.fixtures.stores import MockPayloadStore
 
 
@@ -54,13 +55,13 @@ def payload_store() -> PayloadStore:
 @pytest.fixture
 def landscape_db() -> LandscapeDB:
     """Function-scoped in-memory LandscapeDB — fresh per test."""
-    return LandscapeDB.in_memory()
+    return make_landscape_db()
 
 
 @pytest.fixture
 def recorder(landscape_db: LandscapeDB) -> LandscapeRecorder:
     """Function-scoped LandscapeRecorder."""
-    return LandscapeRecorder(landscape_db)
+    return make_recorder(landscape_db)
 
 
 @pytest.fixture
@@ -85,7 +86,7 @@ def resume_test_env(tmp_path: Path) -> dict[str, Any]:
     recovery_mgr = RecoveryManager(db, checkpoint_mgr)
     checkpoint_settings = CheckpointSettings(frequency="every_row")
     checkpoint_config = RuntimeCheckpointConfig.from_settings(checkpoint_settings)
-    recorder = LandscapeRecorder(db)
+    recorder = make_recorder(db)
 
     return {
         "db": db,

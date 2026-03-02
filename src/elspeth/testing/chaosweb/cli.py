@@ -1,4 +1,3 @@
-# src/elspeth/testing/chaosweb/cli.py
 """CLI for ChaosWeb fake web server.
 
 Provides command-line interface for starting and managing the ChaosWeb

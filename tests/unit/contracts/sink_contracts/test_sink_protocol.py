@@ -40,9 +40,10 @@ import pytest
 
 from elspeth.contracts import ArtifactDescriptor, Determinism, PluginSchema
 from elspeth.contracts.plugin_context import PluginContext
+from tests.fixtures.factories import make_context
 
 if TYPE_CHECKING:
-    from elspeth.plugins.protocols import SinkProtocol
+    from elspeth.contracts import SinkProtocol
 
 
 class SinkContractTestBase(ABC):
@@ -74,12 +75,7 @@ class SinkContractTestBase(ABC):
     @pytest.fixture
     def ctx(self) -> PluginContext:
         """Provide a PluginContext for testing."""
-        return PluginContext(
-            run_id="test-run-001",
-            config={},
-            node_id="test-sink",
-            plugin_name="test",
-        )
+        return make_context(run_id="test-run-001", node_id="test-sink")
 
     # =========================================================================
     # Protocol Attribute Contracts
@@ -319,7 +315,7 @@ class SinkDeterminismContractTestBase(SinkContractTestBase):
 
 def test_sink_protocol_requires_supports_resume() -> None:
     """SinkProtocol must declare supports_resume attribute."""
-    from elspeth.plugins.protocols import SinkProtocol
+    from elspeth.contracts import SinkProtocol
 
     # Verify protocol has supports_resume in annotations
     assert "supports_resume" in SinkProtocol.__annotations__, (
@@ -329,7 +325,7 @@ def test_sink_protocol_requires_supports_resume() -> None:
 
 def test_sink_protocol_requires_configure_for_resume() -> None:
     """SinkProtocol must declare configure_for_resume method."""
-    from elspeth.plugins.protocols import SinkProtocol
+    from elspeth.contracts import SinkProtocol
 
     # Verify protocol has configure_for_resume method
     assert hasattr(SinkProtocol, "configure_for_resume"), "SinkProtocol must declare 'configure_for_resume()' method for resume capability"

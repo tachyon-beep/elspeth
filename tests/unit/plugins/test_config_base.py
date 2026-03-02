@@ -7,7 +7,7 @@ import pytest
 from pydantic import ValidationError
 
 from elspeth.contracts.schema import SchemaConfig
-from elspeth.plugins.config_base import PathConfig, PluginConfig, PluginConfigError
+from elspeth.plugins.infrastructure.config_base import PathConfig, PluginConfig, PluginConfigError
 
 # Helper to create a dynamic schema for tests
 DYNAMIC_SCHEMA = SchemaConfig.from_dict({"mode": "observed"})
@@ -248,7 +248,7 @@ class TestPluginConfigWithSchema:
 
     def test_plugin_config_accepts_schema(self) -> None:
         """PluginConfig can have schema section."""
-        from elspeth.plugins.config_base import PluginConfig
+        from elspeth.plugins.infrastructure.config_base import PluginConfig
 
         class TestConfig(PluginConfig):
             name: str
@@ -265,7 +265,7 @@ class TestPluginConfigWithSchema:
 
     def test_plugin_config_schema_optional_by_default(self) -> None:
         """Schema is optional in base PluginConfig."""
-        from elspeth.plugins.config_base import PluginConfig
+        from elspeth.plugins.infrastructure.config_base import PluginConfig
 
         class TestConfig(PluginConfig):
             name: str
@@ -276,7 +276,7 @@ class TestPluginConfigWithSchema:
 
     def test_data_plugin_config_requires_schema(self) -> None:
         """DataPluginConfig (for sources/sinks) requires schema."""
-        from elspeth.plugins.config_base import DataPluginConfig
+        from elspeth.plugins.infrastructure.config_base import DataPluginConfig
 
         class SourceConfig(DataPluginConfig):
             path: str
@@ -296,7 +296,7 @@ class TestPluginConfigWithSchema:
 
     def test_data_plugin_config_with_explicit_schema(self) -> None:
         """DataPluginConfig accepts explicit schema definition."""
-        from elspeth.plugins.config_base import DataPluginConfig
+        from elspeth.plugins.infrastructure.config_base import DataPluginConfig
 
         class SourceConfig(DataPluginConfig):
             path: str
@@ -321,7 +321,7 @@ class TestSourceDataConfig:
 
     def test_on_validation_failure_required(self) -> None:
         """on_validation_failure must be explicitly specified."""
-        from elspeth.plugins.config_base import SourceDataConfig
+        from elspeth.plugins.infrastructure.config_base import SourceDataConfig
 
         with pytest.raises(ValidationError) as exc_info:
             SourceDataConfig(  # type: ignore[call-arg]  # testing missing required arg
@@ -337,7 +337,7 @@ class TestSourceDataConfig:
     def test_on_validation_failure_accepts_sink_name(self) -> None:
         """on_validation_failure accepts a sink name."""
         from elspeth.contracts.schema import SchemaConfig
-        from elspeth.plugins.config_base import SourceDataConfig
+        from elspeth.plugins.infrastructure.config_base import SourceDataConfig
 
         config = SourceDataConfig(
             path="data.csv",
@@ -350,7 +350,7 @@ class TestSourceDataConfig:
     def test_on_validation_failure_accepts_discard(self) -> None:
         """on_validation_failure accepts 'discard' for explicit /dev/null."""
         from elspeth.contracts.schema import SchemaConfig
-        from elspeth.plugins.config_base import SourceDataConfig
+        from elspeth.plugins.infrastructure.config_base import SourceDataConfig
 
         config = SourceDataConfig(
             path="data.csv",
@@ -363,7 +363,7 @@ class TestSourceDataConfig:
     def test_on_validation_failure_rejects_empty_string(self) -> None:
         """on_validation_failure rejects empty string."""
         from elspeth.contracts.schema import SchemaConfig
-        from elspeth.plugins.config_base import SourceDataConfig
+        from elspeth.plugins.infrastructure.config_base import SourceDataConfig
 
         with pytest.raises(ValidationError):
             SourceDataConfig(
@@ -375,7 +375,7 @@ class TestSourceDataConfig:
     def test_source_config_inherits_path_and_schema(self) -> None:
         """SourceDataConfig inherits path and schema_config requirements."""
         from elspeth.contracts.schema import SchemaConfig
-        from elspeth.plugins.config_base import SourceDataConfig
+        from elspeth.plugins.infrastructure.config_base import SourceDataConfig
 
         config = SourceDataConfig(
             path="data/input.csv",
@@ -400,7 +400,7 @@ class TestTransformDataConfig:
     def test_transform_config_accepts_schema(self) -> None:
         """TransformDataConfig accepts schema_config."""
         from elspeth.contracts.schema import SchemaConfig
-        from elspeth.plugins.config_base import TransformDataConfig
+        from elspeth.plugins.infrastructure.config_base import TransformDataConfig
 
         config = TransformDataConfig(
             schema_config=SchemaConfig.from_dict({"mode": "observed"}),
@@ -412,7 +412,7 @@ class TestTransformDataConfig:
     def test_transform_config_rejects_routing_fields(self) -> None:
         """on_error/on_success are not config-level fields (extra=forbid)."""
         from elspeth.contracts.schema import SchemaConfig
-        from elspeth.plugins.config_base import TransformDataConfig
+        from elspeth.plugins.infrastructure.config_base import TransformDataConfig
 
         with pytest.raises(ValidationError):
             TransformDataConfig(
@@ -423,7 +423,7 @@ class TestTransformDataConfig:
     def test_transform_config_accepts_required_input_fields(self) -> None:
         """TransformDataConfig accepts required_input_fields declaration."""
         from elspeth.contracts.schema import SchemaConfig
-        from elspeth.plugins.config_base import TransformDataConfig
+        from elspeth.plugins.infrastructure.config_base import TransformDataConfig
 
         config = TransformDataConfig(
             schema_config=SchemaConfig.from_dict({"mode": "fixed", "fields": ["id: int"]}),
@@ -435,7 +435,7 @@ class TestTransformDataConfig:
     def test_transform_config_required_input_fields_optional(self) -> None:
         """required_input_fields defaults to None when not specified."""
         from elspeth.contracts.schema import SchemaConfig
-        from elspeth.plugins.config_base import TransformDataConfig
+        from elspeth.plugins.infrastructure.config_base import TransformDataConfig
 
         config = TransformDataConfig(
             schema_config=SchemaConfig.from_dict({"mode": "fixed", "fields": ["id: int"]}),
@@ -445,7 +445,7 @@ class TestTransformDataConfig:
 
     def test_transform_config_inherits_schema_requirement(self) -> None:
         """TransformDataConfig inherits schema requirement from DataPluginConfig."""
-        from elspeth.plugins.config_base import TransformDataConfig
+        from elspeth.plugins.infrastructure.config_base import TransformDataConfig
 
         with pytest.raises(ValidationError):
             TransformDataConfig()  # type: ignore[call-arg]  # Missing schema_config - testing runtime validation

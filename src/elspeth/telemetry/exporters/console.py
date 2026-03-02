@@ -1,4 +1,3 @@
-# src/elspeth/telemetry/exporters/console.py
 """Console exporter for telemetry events.
 
 Writes telemetry events to stdout or stderr in JSON or human-readable format.

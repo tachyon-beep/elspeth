@@ -17,6 +17,7 @@ aggregations:
   plugin: batch_stats
   input: batch_in
   on_success: output
+  on_error: discard
   trigger:
     count: 5
   output_mode: transform

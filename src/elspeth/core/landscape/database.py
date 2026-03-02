@@ -1,4 +1,3 @@
-# src/elspeth/core/landscape/database.py
 """Database connection management for Landscape.
 
 Handles SQLite (development) and PostgreSQL (production) backends
@@ -173,7 +172,7 @@ class LandscapeDB:
             ValueError: If URL points to :memory: (SQLCipher requires a file)
         """
         try:
-            import sqlcipher3  # type: ignore[import-untyped]
+            import sqlcipher3
         except ImportError:
             raise ImportError(
                 "sqlcipher3 is required for encrypted audit databases. "

@@ -1166,7 +1166,7 @@ class TestPipelineRowInit:
             locked=True,
         )
         with pytest.raises(TypeError, match="PipelineRow requires exactly dict"):
-            PipelineRow(OrderedDict(a=1), contract)  # type: ignore[arg-type]
+            PipelineRow(OrderedDict(a=1), contract)
 
     def test_defaultdict_rejected(self) -> None:
         """PipelineRow rejects defaultdict (only exact dict allowed)."""
@@ -1181,7 +1181,7 @@ class TestPipelineRowInit:
         )
         dd = defaultdict(int, a=1)
         with pytest.raises(TypeError, match="PipelineRow requires exactly dict"):
-            PipelineRow(dd, contract)  # type: ignore[arg-type]
+            PipelineRow(dd, contract)
 
     def test_input_dict_not_mutated(self) -> None:
         """PipelineRow copies input dict, so mutations don't affect internal state."""

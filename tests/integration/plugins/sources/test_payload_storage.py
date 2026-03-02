@@ -9,10 +9,9 @@ audit requirement: "Source entry - Raw data stored before any processing"
 from __future__ import annotations
 
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
-from elspeth.contracts import NodeType, SourceRow
-from elspeth.contracts.schema_contract import FieldContract, SchemaContract
+from elspeth.contracts import SourceRow
 from elspeth.core.landscape import LandscapeDB
 from elspeth.core.landscape.row_data import RowDataState
 from elspeth.core.payload_store import FilesystemPayloadStore
@@ -23,49 +22,9 @@ from tests.fixtures.base_classes import (
     _TestSourceBase,
     as_sink,
     as_source,
+    create_observed_contract,
 )
-
-if TYPE_CHECKING:
-    from elspeth.core.dag import ExecutionGraph
-
-
-def _make_contract(data: dict[str, Any]) -> SchemaContract:
-    """Create a simple schema contract for test data."""
-    fields = tuple(
-        FieldContract(
-            normalized_name=k,
-            original_name=k,
-            python_type=object,
-            required=False,
-            source="inferred",
-        )
-        for k in data
-    )
-    return SchemaContract(mode="OBSERVED", fields=fields, locked=True)
-
-
-def _build_simple_graph(config: PipelineConfig) -> ExecutionGraph:
-    """Build minimal graph: source -> sink."""
-    from elspeth.contracts import NodeID, RoutingMode, SinkName
-    from elspeth.core.dag import ExecutionGraph
-
-    graph = ExecutionGraph()
-    schema_config = {"schema": {"mode": "observed"}}
-    graph.add_node("source", node_type=NodeType.SOURCE, plugin_name=config.source.name, config=schema_config)
-
-    # Build sink nodes and ID mapping
-    sink_ids: dict[SinkName, NodeID] = {}
-    for sink_name, sink in config.sinks.items():
-        node_id = f"sink_{sink_name}"
-        sink_ids[SinkName(sink_name)] = NodeID(node_id)
-        graph.add_node(node_id, node_type=NodeType.SINK, plugin_name=sink.name, config=schema_config)
-        graph.add_edge("source", node_id, label="continue", mode=RoutingMode.MOVE)
-
-    # Set the internal mappings that orchestrator expects
-    graph.set_sink_id_map(sink_ids)
-    graph.set_transform_id_map({})  # No transforms in this simple test
-
-    return graph
+from tests.fixtures.pipeline import build_production_graph
 
 
 def test_source_row_payloads_are_stored_during_run(tmp_path: Path, payload_store) -> None:
@@ -105,7 +64,7 @@ def test_source_row_payloads_are_stored_during_run(tmp_path: Path, payload_store
 
         def load(self, ctx: Any) -> Any:
             for row in self._data:
-                yield SourceRow.valid(row, contract=_make_contract(row))
+                yield SourceRow.valid(row, contract=create_observed_contract(row))
 
         def close(self) -> None:
             pass
@@ -141,7 +100,7 @@ def test_source_row_payloads_are_stored_during_run(tmp_path: Path, payload_store
         config={},
     )
 
-    graph = _build_simple_graph(config)
+    graph = build_production_graph(config)
 
     # Act: Run pipeline with payload_store
     orchestrator = Orchestrator(db)

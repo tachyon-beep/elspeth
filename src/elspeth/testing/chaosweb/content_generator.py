@@ -1,4 +1,3 @@
-# src/elspeth/testing/chaosweb/content_generator.py
 """HTML content generation for ChaosWeb server.
 
 The ContentGenerator creates fake web page responses in multiple modes:

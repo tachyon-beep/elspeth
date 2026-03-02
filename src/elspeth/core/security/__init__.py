@@ -1,4 +1,3 @@
-# src/elspeth/core/security/__init__.py
 """Security utilities for ELSPETH.
 
 Exports:

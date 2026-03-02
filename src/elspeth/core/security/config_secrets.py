@@ -1,4 +1,3 @@
-# src/elspeth/core/security/config_secrets.py
 """Config-based secret loading from Azure Key Vault.
 
 This module loads secrets specified in pipeline configuration and injects
@@ -29,7 +28,9 @@ from __future__ import annotations
 
 import os
 import time
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
+
+from elspeth.contracts import SecretResolutionInput
 
 if TYPE_CHECKING:
     from elspeth.core.config import SecretsConfig
@@ -46,7 +47,7 @@ class SecretLoadError(Exception):
     pass
 
 
-def load_secrets_from_config(config: SecretsConfig) -> list[dict[str, Any]]:
+def load_secrets_from_config(config: SecretsConfig) -> list[SecretResolutionInput]:
     """Load secrets from configured source and inject into environment.
 
     When source is 'env', this function does nothing (secrets come from
@@ -131,7 +132,7 @@ def load_secrets_from_config(config: SecretsConfig) -> list[dict[str, Any]]:
     # they never accumulate in the resolutions list.
     from elspeth.core.security.fingerprint import get_fingerprint_key, secret_fingerprint
 
-    resolutions: list[dict[str, Any]] = []
+    resolutions: list[SecretResolutionInput] = []
 
     # Fingerprint key is available after loading ELSPETH_FINGERPRINT_KEY
     # (either from env or from Key Vault earlier in this loop).
@@ -175,15 +176,15 @@ def load_secrets_from_config(config: SecretsConfig) -> list[dict[str, Any]]:
             fp = secret_fingerprint(str(secret_value), key=fingerprint_key)
 
             resolutions.append(
-                {
-                    "env_var_name": env_var_name,
-                    "source": "keyvault",
-                    "vault_url": config.vault_url,
-                    "secret_name": keyvault_secret_name,
-                    "timestamp": start_time,
-                    "latency_ms": latency_ms,
-                    "fingerprint": fp,
-                }
+                SecretResolutionInput(
+                    env_var_name=env_var_name,
+                    source="keyvault",
+                    vault_url=config.vault_url,
+                    secret_name=keyvault_secret_name,
+                    timestamp=start_time,
+                    resolution_latency_ms=latency_ms,
+                    fingerprint=fp,
+                )
             )
 
         except SecretNotFoundError as e:

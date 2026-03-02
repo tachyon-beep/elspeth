@@ -4,8 +4,6 @@
 
 ELSPETH is a **domain-agnostic framework for auditable Sense/Decide/Act (SDA) pipelines**. It provides scaffolding for data processing workflows where every decision must be traceable to its source, regardless of whether the "decide" step is an LLM, ML model, rules engine, or threshold check.
 
-**Current Status:** RC-3. Core architecture, plugins, and audit trail are complete. Quality sprint in progress — stabilization fixes, documentation updates, and contract hardening.
-
 ## Auditability Standard
 
 ELSPETH is built for **high-stakes accountability**. The audit trail must withstand formal inquiry.
@@ -104,41 +102,24 @@ Transforms that make external calls (LLM APIs, HTTP requests, database queries) 
 def process(self, row: PipelineRow, ctx: PluginContext) -> TransformResult:
     # row enters as Tier 2 (pipeline data - trust the schema)
 
-    # External call creates Tier 3 boundary
+    # 1. External call creates Tier 3 boundary — wrap it
     try:
         llm_response = self._llm_client.query(prompt)  # EXTERNAL DATA - zero trust
     except Exception as e:
-        return TransformResult.error(
-            {"reason": "llm_call_failed", "error": str(e)},
-            retryable=True,
-        )
+        return TransformResult.error({"reason": "llm_call_failed", "error": str(e)}, retryable=True)
 
-    # IMMEDIATELY validate at the boundary - don't let "their data" travel
+    # 2. IMMEDIATELY validate at the boundary — retryable=False (bad data, not transient)
     try:
         parsed = json.loads(llm_response.content)
     except json.JSONDecodeError:
-        return TransformResult.error(
-            {"reason": "invalid_json", "raw": llm_response.content[:200]},
-            retryable=False,
-        )
+        return TransformResult.error({"reason": "invalid_json", "raw": llm_response.content[:200]}, retryable=False)
 
-    # Validate structure type IMMEDIATELY
     if not isinstance(parsed, dict):
-        return TransformResult.error(
-            {
-                "reason": "invalid_json_type",
-                "expected": "object",
-                "actual": type(parsed).__name__
-            },
-            retryable=False,
-        )
+        return TransformResult.error({"reason": "invalid_json_type", "expected": "dict", "actual": type(parsed).__name__}, retryable=False)
 
-    # NOW it's our data (Tier 2) - add to row and continue
-    output = {**row.to_dict(), "llm_classification": parsed["category"]}  # Safe - validated above
-    return TransformResult.success(
-        output,
-        success_reason={"action": "llm_classified", "category": parsed["category"]},
-    )
+    # 3. NOW it's our data (Tier 2) — validated, trust it
+    output = {**row.to_dict(), "llm_classification": parsed["category"]}
+    return TransformResult.success(output, success_reason={"action": "llm_classified"})
 ```
 
 **The rule: Minimize the distance external data travels before you validate it.**
@@ -313,7 +294,7 @@ class RetryManager:
 | `contracts/config/runtime.py` | Runtime*Config dataclasses with `from_settings()` |
 | `contracts/config/alignment.py` | Field mapping documentation (`FIELD_MAPPINGS`) |
 | `contracts/config/defaults.py` | Default values (`POLICY_DEFAULTS`, `INTERNAL_DEFAULTS`) |
-| `tests/core/test_config_alignment.py` | Comprehensive alignment verification |
+| `tests/unit/core/test_config_alignment.py` | Comprehensive alignment verification |
 
 **Adding a new Settings field (checklist):**
 
@@ -322,7 +303,7 @@ class RetryManager:
 3. Map in `from_settings()` method (explicit assignment)
 4. If renamed: document in `FIELD_MAPPINGS` in `alignment.py`
 5. If internal-only: document in `INTERNAL_DEFAULTS` in `defaults.py`
-6. Run `.venv/bin/python -m scripts.check_contracts` and `pytest tests/core/test_config_alignment.py`
+6. Run `.venv/bin/python -m scripts.check_contracts` and `pytest tests/unit/core/test_config_alignment.py`
 
 ### Tier Model Enforcement Allowlist
 
@@ -495,6 +476,7 @@ elspeth-mcp --database sqlite:///./examples/my_pipeline/runs/audit.db  # Explici
 | Database | SQLAlchemy Core | Multi-backend without ORM overhead |
 | Migrations | Alembic | Schema versioning |
 | Retries | tenacity | Industry standard backoff |
+| Telemetry | OpenTelemetry (api, sdk, otlp exporter) | Distributed tracing and metrics |
 
 ### Acceleration Stack (avoid reinventing)
 
@@ -512,9 +494,11 @@ elspeth-mcp --database sqlite:///./examples/my_pipeline/runs/audit.db  # Explici
 | Pack | Technology | Use Case |
 | ---- | ---------- | -------- |
 | LLM | LiteLLM | 100+ LLM providers unified |
-| ML | scikit-learn, ONNX | Traditional ML inference |
-| Azure | azure-storage-blob | Azure cloud integration |
-| Telemetry | OpenTelemetry, ddtrace | Observability platform integration |
+| Azure | azure-storage-blob, azure-identity, azure-keyvault-secrets | Azure cloud integration |
+| Telemetry | ddtrace | Datadog APM integration |
+| Web | beautifulsoup4, html2text | Web scraping transforms |
+| Security | sqlcipher3 | Audit database encryption at rest |
+| MCP | mcp | Landscape analysis server protocol |
 
 ## Telemetry (Operational Visibility)
 
@@ -569,8 +553,8 @@ Every row reaches exactly one terminal state - no silent drops:
 
 ### Retry Semantics
 
-- `(run_id, row_id, transform_seq, attempt)` is unique
-- Each attempt recorded separately
+- `(token_id, node_id, attempt)` is unique in the `node_states` table (also `(token_id, step_index, attempt)`)
+- Each attempt recorded as a separate `node_states` row
 - Backoff metadata captured
 
 ### Secret Handling
@@ -623,7 +607,10 @@ graph = ExecutionGraph.from_plugin_instances(source=source, transforms=transform
 For any output, the system must prove complete lineage:
 
 ```python
-lineage = landscape.explain(run_id, token_id=token_id, field=field)
+from elspeth.core.landscape.lineage import explain
+
+lineage = explain(recorder, run_id, token_id=token_id)
+assert lineage is not None
 assert lineage.source_row is not None
 assert len(lineage.node_states) > 0
 ```
@@ -642,12 +629,13 @@ src/elspeth/
 │   ├── config.py       # Configuration loading (Dynaconf + Pydantic)
 │   ├── canonical.py    # Deterministic JSON hashing (RFC 8785)
 │   ├── events.py       # Synchronous event bus for CLI observability
+│   ├── expression_parser.py # AST-based expression parsing (no eval)
 │   ├── identifiers.py  # ID generation utilities
 │   ├── logging.py      # Structured logging setup
 │   ├── operations.py   # Operation type definitions
 │   ├── payload_store.py # Content-addressable storage for large blobs
 │   └── templates.py    # Jinja2 field extraction
-├── contracts/          # Type contracts, schemas, and protocol definitions
+├── contracts/          # Type contracts, schemas, protocol definitions, hashing primitives, and phase-typed contexts
 ├── engine/
 │   ├── orchestrator/   # Full run lifecycle management (core, aggregation, export, outcomes, validation)
 │   ├── executors/      # Transform, gate, sink, aggregation executors
@@ -658,25 +646,57 @@ src/elspeth/
 │   ├── retry.py        # Tenacity-based retry with backoff
 │   ├── tokens.py       # Token identity and lineage management
 │   ├── triggers.py     # Aggregation trigger evaluation
-│   ├── expression_parser.py # AST-based expression parsing (no eval)
 │   ├── clock.py        # Clock abstraction for testing
 │   └── spans.py        # Telemetry span management
 ├── plugins/
+│   ├── infrastructure/ # Shared: base classes, protocols, config, clients, batching, pooling
 │   ├── sources/        # CSVSource, JSONSource, NullSource, AzureBlobSource
-│   ├── transforms/     # FieldMapper, Passthrough, Truncate, etc.
-│   ├── sinks/          # CSVSink, JSONSink, DatabaseSink, BlobSink
-│   ├── llm/            # Azure OpenAI transforms (batch, multi-query)
-│   ├── clients/        # HTTP, LLM, Replayer, Verifier clients
-│   ├── batching/       # Batch-aware transform adapters
-│   └── pooling/        # Thread pool management for plugins
+│   ├── transforms/     # FieldMapper, Passthrough, Truncate, LLM, Azure safety, etc.
+│   └── sinks/          # CSVSink, JSONSink, DatabaseSink, AzureBlobSink
 ├── telemetry/          # OpenTelemetry exporters and instrumentation
 ├── testing/            # ChaosLLM, ChaosWeb, ChaosEngine test servers
+│   ├── chaosllm/       # Fake OpenAI/Azure LLM server with error/latency injection
+│   ├── chaosweb/       # Fake web server with failure profiles
+│   ├── chaosengine/    # Engine-level test utilities
+│   └── chaosllm_mcp/   # MCP server for ChaosLLM metrics and control
 ├── mcp/                # Landscape MCP analysis server
+│   ├── analyzers/      # Domain-specific analysis tools (contracts, diagnostics, queries, reports)
+│   ├── server.py       # MCP server implementation
+│   └── types.py        # MCP type definitions
 ├── tui/                # Terminal UI (Textual) - explain screens and widgets
+│   ├── screens/        # TUI screen implementations
+│   ├── widgets/        # TUI widget components
+│   ├── explain_app.py  # Explain TUI application entry point
+│   └── constants.py    # TUI constants
 ├── cli.py              # Typer CLI
 ├── cli_helpers.py      # CLI utility functions
 └── cli_formatters.py   # Event formatting for CLI output
 ```
+
+## Layer Dependency Rules
+
+ELSPETH uses a strict 4-layer model. Imports must flow **downward only**.
+
+```text
+L0  contracts/     Leaf — imports nothing above. Shared types, enums, protocols.
+L1  core/          Can import L0 only. Landscape, DAG, config, canonical JSON.
+L2  engine/        Can import L0, L1. Orchestrator, processors, executors.
+L3  plugins/       Can import L0, L1, L2. Sources, transforms, sinks, clients.
+    mcp/ tui/ cli* telemetry/ testing/   — also L3 (application layer)
+```
+
+**Enforced by CI:** `scripts/cicd/enforce_tier_model.py` detects upward imports and fails the build. The allowlist mechanism (`config/cicd/enforce_tier_model/`) supports per-file and per-finding exemptions for legitimate exceptions.
+
+**TYPE_CHECKING imports** are reported as warnings, not failures. They're architecturally impure (the dependency still exists for type checkers) but don't create runtime coupling.
+
+### When a New Cross-Layer Need Arises
+
+Resolution options in priority order:
+
+1. **Move the code down.** If the needed code has no upward dependencies, move it to the lower layer. E.g., move a dataclass from `core/` to `contracts/`.
+2. **Extract the primitive.** If only a type or constant is needed, extract it into `contracts/` and import from there.
+3. **Restructure the caller.** Refactor so the higher-layer code isn't needed. Use dependency injection, callbacks, or protocols defined in `contracts/`.
+4. **NEVER:** Add a lazy import with an apologetic comment. This is the "Shifting the Burden" archetype — it defers the structural fix and the pattern will recur.
 
 ## No Legacy Code Policy
 
@@ -698,8 +718,6 @@ src/elspeth/
 - Don't add compatibility layers - change all call sites in the same commit
 - Don't create abstractions to hide breaking changes - make the breaking change
 
-If you are proposing a fix that involves "a patch or temporary workaround," STOP. We only have one chance to fix things pre-release. Make the fix right, not quick. This especially includes architectural defects. Lint failures, failing tests, and CI/CD issues must all be resolved to merge — no exceptions.
-
 ## Git Safety
 
 **Never run destructive git commands without explicit user permission:**
@@ -712,88 +730,68 @@ If you are proposing a fix that involves "a patch or temporary workaround," STOP
 
 **No git stash.** The stash/pop cycle has caused repeated data loss in this project — pre-commit hooks that stash/unstash silently destroy unstaged work when `stash pop` encounters conflicts. If you need to preserve work, commit it to a branch.
 
-## Prohibition on Defensive Programming Patterns
+## Defensive Programming: Forbidden. Offensive Programming: Encouraged
 
-This codebase prohibits defensive patterns that mask bugs instead of fixing them. Do not use `.get()`, `getattr()`, `hasattr()`, `isinstance()`, or silent exception handling to suppress errors from nonexistent attributes, malformed data, or incorrect types.
+### What's Forbidden (Defensive Programming)
+
+Do not use `.get()`, `getattr()`, `hasattr()`, `isinstance()`, or silent exception handling to suppress errors from nonexistent attributes, malformed data, or incorrect types. **Access typed dataclass fields directly** (`obj.field`), not defensively (`obj.get("field")`).
 
 A common anti-pattern: an LLM hallucinates a field name, code fails, and the "fix" is `getattr(obj, "hallucinated_field", None)`. This hides the real bug. Fix the actual cause instead.
 
-**Access typed dataclass fields directly** (`obj.field`), not defensively (`obj.get("field")`). If code would fail without a defensive pattern, that failure is a bug to fix.
+Defensive handling IS appropriate at trust boundaries — see the **Coercion Rules** and **Operation Wrapping Rules** tables in the Three-Tier Trust Model section for the complete rules and examples.
 
-### Legitimate Uses
+### What's Encouraged (Offensive Programming)
 
-Defensive handling IS appropriate at trust boundaries (see Three-Tier Trust Model above for the full rules and examples):
+**Proactively detect invalid states and throw meaningful exceptions.** Don't wait for code to fail with a cryptic `KeyError` or `NoneType` crash three stack frames later. If you can detect that data is corrupt, a precondition is violated, or an invariant is broken — assert it explicitly and fail with a message that tells the operator *exactly what went wrong and why*.
 
-1. **Operations on row values** - Their data can cause operation failures (division by zero, parse errors). Wrap `row["x"] / row["y"]`, but NOT `self._x / self._y` (our bug if that fails).
-2. **External system boundaries** - Validate API/LLM responses immediately at the boundary.
-3. **Framework boundaries** - Plugin schema contracts, Pydantic config validation at load time.
-4. **Serialization** - pandas/numpy dtype normalization in canonical JSON.
+**Key principle:** The goal is not to prevent crashes — it's to make crashes **maximally informative**. A bare `KeyError: 'tokens'` tells an operator nothing. An `AuditIntegrityError("Corrupt field resolution JSON for run run-42: failed to parse stored JSON — database corruption (Tier 1 violation)")` tells them exactly what happened, which record is affected, and what trust tier was violated.
+
+**Examples of good offensive programming:**
+
+```python
+# Detect corruption at read time — don't let bad data propagate
+try:
+    data = json.loads(stored_json)
+except json.JSONDecodeError as exc:
+    raise AuditIntegrityError(
+        f"Corrupt JSON for run {run_id}: database corruption (Tier 1 violation). "
+        f"Parse error: {exc}"
+    ) from exc
+
+# Validate write-side invariants at construction — reject garbage before it enters the audit trail
+@dataclass(frozen=True)
+class SecretResolutionInput:
+    fingerprint: str
+    def __post_init__(self) -> None:
+        if len(self.fingerprint) != 64 or not all(c in "0123456789abcdef" for c in self.fingerprint):
+            raise ValueError(f"fingerprint must be 64-char lowercase hex, got {self.fingerprint!r}")
+
+# Use atomic guards to prevent TOCTOU races — detect the anomaly, don't just hope it doesn't happen
+result = conn.execute(
+    update(table).where(table.c.id == id).where(table.c.field.is_(None)).values(field=value)
+)
+if result.rowcount == 0:
+    # Distinguish "not found" from "already set" — different operator actions needed
+    existing = conn.execute(select(table.c.field).where(table.c.id == id)).fetchone()
+    if existing is not None and existing.field is not None:
+        raise AuditIntegrityError(f"Cannot overwrite: field already exists for {id}")
+    raise ValueError(f"Record {id} not found")
+```
+
+**When to add offensive checks:**
+
+- **Tier 1 read paths**: Data from our own database should be exactly what we expect. If it isn't, crash immediately with context — this is corruption or tampering.
+- **Write-side DTOs**: Validate invariants at construction (via `__post_init__`) before data enters the audit trail. Cheaper to reject garbage at the door than to discover it on read.
+- **State transitions**: When a method has preconditions (e.g., "contract must not already exist"), assert them with contextual error messages, not silent no-ops.
+- **Exception chains**: Always use `from exc` to preserve the original exception chain. `from None` destroys diagnostic information.
 
 ### The Decision Test
 
 | Question | If Yes | If No |
 |----------|--------|-------|
-| Is this protecting against user-provided data values? | ✅ Wrap it | — |
-| Is this at an external system boundary (API, file, DB)? | ✅ Wrap it | — |
+| Is this protecting against user-provided data values? | ✅ Wrap it (trust boundary) | — |
+| Is this at an external system boundary (API, file, DB)? | ✅ Wrap it (trust boundary) | — |
+| Can I detect an invalid state and throw a meaningful error? | ✅ Assert it (offensive) | — |
 | Would this fail due to a bug in code we control? | — | ❌ Let it crash |
 | Am I adding this because "something might be None"? | — | ❌ Fix the root cause |
-
-If you're wrapping to hide a bug that "shouldn't happen," remove the wrapper and fix the bug.
-
-<!-- filigree:instructions -->
-## Issue Tracking (Filigree)
-
-All issue tracking uses **Filigree** — a local SQLite-backed tracker with enforced state machines. Data lives in `.filigree/`. The MCP server (`filigree-mcp`) provides 43 native tools; the CLI is for quick operations and subagent use.
-
-### Issue Types
-
-Pick the right type — each has an enforced state flow that prevents skipping steps:
-
-| Type | Use When | Flow |
-| ---- | -------- | ---- |
-| `bug` | Defect in existing code | `triage → confirmed → fixing → verifying → closed` |
-| `task` | Bounded work item | `open → in_progress → closed` |
-| `feature` | New capability | `proposed → approved → building → reviewing → done` |
-| `epic` | Large cross-cutting effort | `open → in_progress → closed` |
-
-**Bugs MUST use the `bug` type**, not `task`. The triage→confirmed→fixing→verifying flow exists to prevent "fix it and forget it" — every bug fix requires verification before closing. Use `filigree transitions <id>` to see valid next states.
-
-### Priority Scale
-
-| Priority | Meaning | Guidance |
-| -------- | ------- | -------- |
-| P0 | Critical | Drop everything. Pipeline correctness, data loss, audit integrity |
-| P1 | High | Do next. Security issues, contract violations, crash bugs |
-| P2 | Medium | Default. Standard bugs and tasks |
-| P3 | Low | When convenient. Code quality, minor UX issues |
-| P4 | Backlog | Someday. Nice-to-haves, speculative improvements |
-
-### Essential Commands
-
-```bash
-filigree ready                                    # Starting point: unblocked work by priority
-filigree show <id>                                # Full details + dependencies + comments
-filigree create "Title" --type=bug --priority=1   # Create (always specify type + priority)
-filigree update <id> --status=in_progress         # Claim work
-filigree close <id> --reason="explanation"         # Close with context (reason is encouraged)
-filigree add-dep <issue> <depends-on>             # Track blockers
-filigree add-comment <id> "Decision rationale"    # Record decisions on the issue, not in chat
-```
-
-For the full command reference: `filigree --help` or `filigree <command> --help`.
-
-### Workflow
-
-1. **Start of session**: `filigree ready` — see what's available and unblocked
-2. **Pick work**: `filigree show <id>` — read the issue, comments, and dependencies
-3. **Claim it**: `filigree update <id> --status=in_progress` (or `filigree claim <id>` for atomic locking in multi-agent scenarios)
-4. **Work**: Fix the code, write tests, verify
-5. **Document**: `filigree add-comment <id> "what was done and why"` — comments are the audit trail for decisions
-6. **Close**: `filigree close <id> --reason="fixed in <commit>"` — link to the commit
-
-**Don't skip states.** A bug must be confirmed before fixing. A feature must be approved before building. The state machine is there for a reason.
-
-### Dependencies
-
-Use dependencies to track blockers explicitly. `filigree blocked` shows all blocked issues. `filigree add-dep <blocked> <blocker>` creates the relationship. An issue won't appear in `filigree ready` until its blockers are resolved.
-<!-- /filigree:instructions -->
+| Am I silently swallowing an error with a default value? | — | ❌ That's defensive — forbidden |

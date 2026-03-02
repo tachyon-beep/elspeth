@@ -23,15 +23,15 @@ class TestPipelineWithSQLCipherLandscape:
         from elspeth.contracts import NodeType, RunStatus
         from elspeth.contracts.schema import SchemaConfig
         from elspeth.core.landscape.database import LandscapeDB
-        from elspeth.core.landscape.recorder import LandscapeRecorder
         from elspeth.core.landscape.schema import nodes_table, rows_table, runs_table
+        from tests.fixtures.landscape import make_recorder
 
         db_path = tmp_path / "pipeline_audit.db"
         passphrase = "integration-test-passphrase"
 
         db = LandscapeDB.from_url(f"sqlite:///{db_path}", passphrase=passphrase)
         try:
-            recorder = LandscapeRecorder(db)
+            recorder = make_recorder(db)
 
             # Begin a run
             run = recorder.begin_run(

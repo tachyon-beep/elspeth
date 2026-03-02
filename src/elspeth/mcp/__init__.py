@@ -1,4 +1,3 @@
-# src/elspeth/mcp/__init__.py
 """MCP (Model Context Protocol) server for ELSPETH Landscape analysis.
 
 Provides read-only tools for querying the audit database:
