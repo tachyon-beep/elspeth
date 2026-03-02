@@ -1033,6 +1033,91 @@ class Orchestrator:
         finally:
             self._safe_flush_telemetry()
 
+    def _register_nodes_with_landscape(
+        self,
+        recorder: LandscapeRecorder,
+        run_id: str,
+        config: PipelineConfig,
+        graph: ExecutionGraph,
+        execution_order: list[str],
+        node_to_plugin: dict[NodeID, Any],
+        source_id: NodeID,
+        config_gate_node_ids: set[NodeID],
+        coalesce_node_ids: set[NodeID],
+    ) -> None:
+        """Register each node in the execution graph with Landscape.
+
+        Iterates the topological execution order, resolves plugin metadata
+        (version, determinism), schema config, and output contract for each node,
+        then calls recorder.register_node().
+
+        Args:
+            recorder: LandscapeRecorder for audit trail.
+            run_id: Run identifier.
+            config: Pipeline configuration (for source contract).
+            graph: Execution graph (for node info lookup).
+            execution_order: Topological ordering of node IDs.
+            node_to_plugin: Mapping from node ID to plugin instance.
+            source_id: Source node ID (for output contract).
+            config_gate_node_ids: Set of config gate node IDs (structural, no plugin).
+            coalesce_node_ids: Set of coalesce node IDs (structural, no plugin).
+        """
+        from elspeth.contracts import Determinism
+        from elspeth.contracts.schema import SchemaConfig
+
+        for node_id in execution_order:
+            node_info = graph.get_node_info(node_id)
+
+            # Config gates and coalesce nodes are structural (no plugin instances)
+            # Aggregations have plugin instances in node_to_plugin (transforms with metadata)
+            if node_id in config_gate_node_ids:
+                # Config gates are deterministic (expression evaluation is deterministic)
+                # Use engine version to track which version of ExpressionParser was used
+                plugin_version = f"engine:{ENGINE_VERSION}"
+                determinism = Determinism.DETERMINISTIC
+            elif node_id in coalesce_node_ids:
+                # Coalesce nodes merge tokens from parallel paths - deterministic operation
+                # Use engine version to track which version of the coalesce logic was used
+                plugin_version = f"engine:{ENGINE_VERSION}"
+                determinism = Determinism.DETERMINISTIC
+            else:
+                # Direct access - if node_id is in execution_order (from graph.topological_order()),
+                # it MUST be in node_to_plugin (built from the same graph's source, transforms, sinks).
+                # A KeyError here indicates a bug in graph construction or node_to_plugin building.
+                plugin = node_to_plugin[NodeID(node_id)]
+
+                # Extract plugin metadata - all protocols define these attributes,
+                # all base classes provide defaults. Direct access is safe.
+                plugin_version = plugin.plugin_version
+                determinism = plugin.determinism
+
+            # Get schema_config — prefer computed output_schema_config
+            # (includes guaranteed_fields, audit_fields from LLM transforms)
+            # over raw config["schema"] which may omit computed contract fields.
+            if node_info.output_schema_config is not None:
+                schema_config = node_info.output_schema_config
+            else:
+                schema_dict = node_info.config["schema"]
+                schema_config = SchemaConfig.from_dict(schema_dict)
+
+            # Get output_contract for source nodes
+            # Sources have get_schema_contract() method that returns their output contract
+            output_contract = None
+            if node_id == source_id:
+                output_contract = config.source.get_schema_contract()
+
+            recorder.register_node(
+                run_id=run_id,
+                node_id=node_id,
+                plugin_name=node_info.plugin_name,
+                node_type=NodeType(node_info.node_type),  # Already lowercase
+                plugin_version=plugin_version,
+                config=node_info.config,
+                determinism=determinism,
+                schema_config=schema_config,
+                output_contract=output_contract,
+            )
+
     def _register_graph_nodes_and_edges(
         self,
         recorder: LandscapeRecorder,
@@ -1065,6 +1150,8 @@ class Orchestrator:
         # Build node_id -> plugin instance mapping for metadata extraction
         # Source: single plugin from config.source
         source_id = graph.get_source()
+        if source_id is None:
+            raise ValueError("Graph has no source node")
         transform_id_map: dict[int, NodeID] = graph.get_transform_id_map()
         sink_id_map: dict[SinkName, NodeID] = graph.get_sink_id_map()
         config_gate_id_map: dict[GateName, NodeID] = graph.get_config_gate_id_map()
@@ -1077,9 +1164,7 @@ class Orchestrator:
         # Map plugin instances to their node IDs for metadata extraction
         # Config gates and coalesce nodes don't have plugin instances (they're structural)
         # Aggregation transforms DO have instances - they're in config.transforms with node_id set
-        node_to_plugin: dict[NodeID, Any] = {}
-        if source_id is not None:
-            node_to_plugin[source_id] = config.source
+        node_to_plugin: dict[NodeID, Any] = {source_id: config.source}
         for seq, transform in enumerate(config.transforms):
             if seq in transform_id_map:
                 # Regular transform - mapped by sequence number
@@ -1109,61 +1194,17 @@ class Orchestrator:
             )
 
             # Register nodes with Landscape using graph's node IDs and actual plugin metadata
-            from elspeth.contracts import Determinism
-            from elspeth.contracts.schema import SchemaConfig
-
-            for node_id in execution_order:
-                node_info = graph.get_node_info(node_id)
-
-                # Config gates and coalesce nodes are structural (no plugin instances)
-                # Aggregations have plugin instances in node_to_plugin (transforms with metadata)
-                if node_id in config_gate_node_ids:
-                    # Config gates are deterministic (expression evaluation is deterministic)
-                    # Use engine version to track which version of ExpressionParser was used
-                    plugin_version = f"engine:{ENGINE_VERSION}"
-                    determinism = Determinism.DETERMINISTIC
-                elif node_id in coalesce_node_ids:
-                    # Coalesce nodes merge tokens from parallel paths - deterministic operation
-                    # Use engine version to track which version of the coalesce logic was used
-                    plugin_version = f"engine:{ENGINE_VERSION}"
-                    determinism = Determinism.DETERMINISTIC
-                else:
-                    # Direct access - if node_id is in execution_order (from graph.topological_order()),
-                    # it MUST be in node_to_plugin (built from the same graph's source, transforms, sinks).
-                    # A KeyError here indicates a bug in graph construction or node_to_plugin building.
-                    plugin = node_to_plugin[NodeID(node_id)]
-
-                    # Extract plugin metadata - all protocols define these attributes,
-                    # all base classes provide defaults. Direct access is safe.
-                    plugin_version = plugin.plugin_version
-                    determinism = plugin.determinism
-
-                # Get schema_config — prefer computed output_schema_config
-                # (includes guaranteed_fields, audit_fields from LLM transforms)
-                # over raw config["schema"] which may omit computed contract fields.
-                if node_info.output_schema_config is not None:
-                    schema_config = node_info.output_schema_config
-                else:
-                    schema_dict = node_info.config["schema"]
-                    schema_config = SchemaConfig.from_dict(schema_dict)
-
-                # Get output_contract for source nodes
-                # Sources have get_schema_contract() method that returns their output contract
-                output_contract = None
-                if node_id == source_id:
-                    output_contract = config.source.get_schema_contract()
-
-                recorder.register_node(
-                    run_id=run_id,
-                    node_id=node_id,
-                    plugin_name=node_info.plugin_name,
-                    node_type=NodeType(node_info.node_type),  # Already lowercase
-                    plugin_version=plugin_version,
-                    config=node_info.config,
-                    determinism=determinism,
-                    schema_config=schema_config,
-                    output_contract=output_contract,
-                )
+            self._register_nodes_with_landscape(
+                recorder,
+                run_id,
+                config,
+                graph,
+                execution_order,
+                node_to_plugin,
+                source_id,
+                config_gate_node_ids,
+                coalesce_node_ids,
+            )
 
             # Register edges from graph - key by (from_node, label) for lookup
             # Gates return route labels, so edge_map is keyed by label
@@ -1214,15 +1255,6 @@ class Orchestrator:
         except Exception as e:
             self._events.emit(PhaseError(phase=PipelinePhase.GRAPH, error=e))
             raise  # CRITICAL: Always re-raise - graph validation failure is fatal
-
-        # Get explicit node ID mappings from graph
-        source_id = graph.get_source()
-        if source_id is None:
-            raise ValueError("Graph has no source node")
-        sink_id_map = graph.get_sink_id_map()
-        transform_id_map = graph.get_transform_id_map()
-        config_gate_id_map = graph.get_config_gate_id_map()
-        coalesce_id_map = graph.get_coalesce_id_map()
 
         return GraphArtifacts(
             edge_map=edge_map,
