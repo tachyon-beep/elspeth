@@ -1664,6 +1664,103 @@ class TestMultiQueryParallelExecution:
             assert transform._query_executor is not None
             transform._query_executor.shutdown(wait=True)
 
+    def test_parallel_error_accumulation_fields(self) -> None:
+        """Parallel failure includes failed_queries, discarded count, and total_count."""
+        from elspeth.plugins.transforms.llm.transform import LLMTransform
+
+        config = _make_config(
+            template="Evaluate: {{ row.text_content }}",
+            queries={
+                "q1": {"input_fields": {"text_content": "text"}},
+                "q2": {"input_fields": {"text_content": "text"}},
+                "q3": {"input_fields": {"text_content": "text"}},
+            },
+            pool_size=4,
+        )
+        transform = LLMTransform(config)
+        call_count = [0]
+
+        def mock_execute(messages, *, model, temperature, max_tokens, state_id, token_id, response_format=None):
+            call_count[0] += 1
+            # q2 (2nd call) fails non-retryable; q1 and q3 succeed
+            if call_count[0] == 2:
+                raise ContentPolicyError("Blocked content in q2")
+            return LLMQueryResult(
+                content="ok",
+                usage=TokenUsage.known(10, 5),
+                model="gpt-4o",
+                finish_reason=FinishReason.STOP,
+            )
+
+        mock_provider = Mock()
+        mock_provider.execute_query.side_effect = mock_execute
+        transform._provider = mock_provider
+
+        try:
+            result = transform._process_row(_make_row(), _make_ctx())
+            assert result.status == "error"
+            assert result.retryable is False
+            assert result.reason is not None
+            # Verify the accumulated error fields
+            assert "failed_query_name" in result.reason
+            assert "failed_query_index" in result.reason
+            assert "discarded_successful_queries" in result.reason
+            assert "total_count" in result.reason
+            assert result.reason["total_count"] == 3
+            # failed_queries should list the names of failed queries
+            assert "failed_queries" in result.reason
+            assert isinstance(result.reason["failed_queries"], list)
+        finally:
+            assert transform._query_executor is not None
+            transform._query_executor.shutdown(wait=True)
+
+    def test_parallel_multiple_queries_fail(self) -> None:
+        """When multiple queries fail in parallel, first failure's reason is used."""
+        from elspeth.plugins.transforms.llm.transform import LLMTransform
+
+        config = _make_config(
+            template="Evaluate: {{ row.text_content }}",
+            queries={
+                "q1": {"input_fields": {"text_content": "text"}},
+                "q2": {"input_fields": {"text_content": "text"}},
+                "q3": {"input_fields": {"text_content": "text"}},
+            },
+            pool_size=4,
+        )
+        transform = LLMTransform(config)
+        call_count = [0]
+
+        def mock_execute(messages, *, model, temperature, max_tokens, state_id, token_id, response_format=None):
+            call_count[0] += 1
+            # q1 succeeds, q2 and q3 both fail
+            if call_count[0] == 1:
+                return LLMQueryResult(
+                    content="ok",
+                    usage=TokenUsage.known(10, 5),
+                    model="gpt-4o",
+                    finish_reason=FinishReason.STOP,
+                )
+            raise ContentPolicyError(f"Blocked call {call_count[0]}")
+
+        mock_provider = Mock()
+        mock_provider.execute_query.side_effect = mock_execute
+        transform._provider = mock_provider
+
+        try:
+            result = transform._process_row(_make_row(), _make_ctx())
+            assert result.status == "error"
+            assert result.retryable is False
+            assert result.reason is not None
+            # failed_queries should contain all failed query names
+            assert "failed_queries" in result.reason
+            assert len(result.reason["failed_queries"]) == 2
+            # discarded_successful_queries = total - failed
+            assert result.reason["discarded_successful_queries"] == 1
+            assert result.reason["total_count"] == 3
+        finally:
+            assert transform._query_executor is not None
+            transform._query_executor.shutdown(wait=True)
+
     def test_close_shuts_down_executor(self) -> None:
         """LLMTransform.close() shuts down the query executor."""
         from elspeth.plugins.transforms.llm.transform import LLMTransform

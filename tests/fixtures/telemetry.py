@@ -121,6 +121,38 @@ class MockTelemetryConfig:
         return ()
 
 
+class FailingExporter:
+    """Exporter that always fails export() calls.
+
+    Use this to test failure isolation and error handling.
+    """
+
+    def __init__(self, name: str = "failing", *, fail_count: int | None = None):
+        self._name = name
+        self._fail_count = fail_count
+        self._failures = 0
+        self.export_attempts = 0
+
+    @property
+    def name(self) -> str:
+        return self._name
+
+    def configure(self, config: Mapping[str, Any]) -> None:
+        pass
+
+    def export(self, event: TelemetryEvent) -> None:
+        self.export_attempts += 1
+        if self._fail_count is None or self._failures < self._fail_count:
+            self._failures += 1
+            raise RuntimeError(f"Simulated export failure in {self._name}")
+
+    def flush(self) -> None:
+        pass
+
+    def close(self) -> None:
+        pass
+
+
 @pytest.fixture
 def telemetry_test_exporter() -> TelemetryTestExporter:
     """Fixture providing a fresh test exporter."""

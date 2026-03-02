@@ -10,6 +10,10 @@ STATUS: IMPLEMENTED
 - RowProcessor: accepts max_workers and forwards to TransformExecutor
 """
 
+from __future__ import annotations
+
+from typing import TYPE_CHECKING
+
 from elspeth.contracts.config import RuntimeConcurrencyConfig
 from elspeth.contracts.types import NodeID
 from elspeth.core.config import ConcurrencySettings, SourceSettings
@@ -17,8 +21,11 @@ from elspeth.engine.executors import TransformExecutor
 from elspeth.engine.orchestrator import Orchestrator
 from elspeth.engine.processor import DAGTraversalContext, RowProcessor
 from elspeth.engine.spans import SpanFactory
-from tests.fixtures.landscape import make_landscape_db, make_recorder
+from tests.fixtures.landscape import make_recorder
 from tests.fixtures.pipeline import build_linear_pipeline
+
+if TYPE_CHECKING:
+    from elspeth.core.landscape import LandscapeDB
 
 
 def _build_traversal_from_graph() -> tuple[NodeID, str, DAGTraversalContext]:
@@ -50,28 +57,19 @@ def _build_traversal_from_graph() -> tuple[NodeID, str, DAGTraversalContext]:
 class TestConcurrencyConfigInOrchestrator:
     """Test that RuntimeConcurrencyConfig is properly passed to Orchestrator."""
 
-    def test_orchestrator_accepts_concurrency_config(self) -> None:
+    def test_orchestrator_accepts_concurrency_config(self, landscape_db: LandscapeDB) -> None:
         """Orchestrator constructor accepts concurrency_config parameter."""
-        db = make_landscape_db()
         config = RuntimeConcurrencyConfig(max_workers=8)
 
-        try:
-            # Should not raise
-            orchestrator = Orchestrator(db, concurrency_config=config)
-            assert orchestrator._concurrency_config is config
-            assert orchestrator._concurrency_config.max_workers == 8
-        finally:
-            db.close()
+        # Should not raise
+        orchestrator = Orchestrator(landscape_db, concurrency_config=config)
+        assert orchestrator._concurrency_config is config
+        assert orchestrator._concurrency_config.max_workers == 8
 
-    def test_orchestrator_accepts_none_config(self) -> None:
+    def test_orchestrator_accepts_none_config(self, landscape_db: LandscapeDB) -> None:
         """Orchestrator works without concurrency config."""
-        db = make_landscape_db()
-
-        try:
-            orchestrator = Orchestrator(db, concurrency_config=None)
-            assert orchestrator._concurrency_config is None
-        finally:
-            db.close()
+        orchestrator = Orchestrator(landscape_db, concurrency_config=None)
+        assert orchestrator._concurrency_config is None
 
     def test_config_from_settings(self) -> None:
         """RuntimeConcurrencyConfig.from_settings() creates config correctly."""
@@ -84,76 +82,60 @@ class TestConcurrencyConfigInOrchestrator:
 class TestConcurrencyConfigInTransformExecutor:
     """Test that max_workers is passed to TransformExecutor."""
 
-    def test_executor_accepts_max_workers(self) -> None:
+    def test_executor_accepts_max_workers(self, landscape_db: LandscapeDB) -> None:
         """TransformExecutor constructor accepts max_workers parameter."""
-        db = make_landscape_db()
-        recorder = make_recorder(db)
+        recorder = make_recorder(landscape_db)
         span_factory = SpanFactory()
 
-        try:
-            executor = TransformExecutor(recorder, span_factory, lambda node_id: 1, max_workers=8)
-            assert executor._max_workers == 8
-        finally:
-            db.close()
+        executor = TransformExecutor(recorder, span_factory, lambda node_id: 1, max_workers=8)
+        assert executor._max_workers == 8
 
-    def test_executor_without_max_workers(self) -> None:
+    def test_executor_without_max_workers(self, landscape_db: LandscapeDB) -> None:
         """TransformExecutor works without max_workers (no cap)."""
-        db = make_landscape_db()
-        recorder = make_recorder(db)
+        recorder = make_recorder(landscape_db)
         span_factory = SpanFactory()
 
-        try:
-            executor = TransformExecutor(recorder, span_factory, lambda node_id: 1)
-            assert executor._max_workers is None
-        finally:
-            db.close()
+        executor = TransformExecutor(recorder, span_factory, lambda node_id: 1)
+        assert executor._max_workers is None
 
 
 class TestConcurrencyConfigInRowProcessor:
     """Test that max_workers flows through RowProcessor."""
 
-    def test_processor_accepts_max_workers(self) -> None:
+    def test_processor_accepts_max_workers(self, landscape_db: LandscapeDB) -> None:
         """RowProcessor constructor accepts and forwards max_workers."""
-        db = make_landscape_db()
-        recorder = make_recorder(db)
+        recorder = make_recorder(landscape_db)
         span_factory = SpanFactory()
         source_node_id, source_on_success, traversal = _build_traversal_from_graph()
 
-        try:
-            processor = RowProcessor(
-                recorder=recorder,
-                span_factory=span_factory,
-                run_id="test-run",
-                source_node_id=source_node_id,
-                source_on_success=source_on_success,
-                traversal=traversal,
-                max_workers=4,
-            )
-            # Verify max_workers was passed to TransformExecutor
-            assert processor._transform_executor._max_workers == 4
-        finally:
-            db.close()
+        processor = RowProcessor(
+            recorder=recorder,
+            span_factory=span_factory,
+            run_id="test-run",
+            source_node_id=source_node_id,
+            source_on_success=source_on_success,
+            traversal=traversal,
+            max_workers=4,
+        )
+        # Verify max_workers was passed to TransformExecutor
+        assert processor._transform_executor._max_workers == 4
 
-    def test_processor_without_max_workers(self) -> None:
+    def test_processor_without_max_workers(self, landscape_db: LandscapeDB) -> None:
         """RowProcessor works without max_workers."""
-        db = make_landscape_db()
-        recorder = make_recorder(db)
+        recorder = make_recorder(landscape_db)
         span_factory = SpanFactory()
         source_node_id, source_on_success, traversal = _build_traversal_from_graph()
 
-        try:
-            processor = RowProcessor(
-                recorder=recorder,
-                span_factory=span_factory,
-                run_id="test-run",
-                source_node_id=source_node_id,
-                source_on_success=source_on_success,
-                traversal=traversal,
-            )
-            # No max_workers means no cap
-            assert processor._transform_executor._max_workers is None
-        finally:
-            db.close()
+        processor = RowProcessor(
+            recorder=recorder,
+            span_factory=span_factory,
+            run_id="test-run",
+            source_node_id=source_node_id,
+            source_on_success=source_on_success,
+            traversal=traversal,
+        )
+        # No max_workers means no cap
+        assert processor._transform_executor._max_workers is None
 
 
 class TestConcurrencyConfigProtocolCompliance:
@@ -169,7 +151,7 @@ class TestConcurrencyConfigProtocolCompliance:
         assert isinstance(config, RuntimeConcurrencyProtocol)
         assert config.max_workers == 8
 
-    def test_orchestrator_accepts_protocol(self) -> None:
+    def test_orchestrator_accepts_protocol(self, landscape_db: LandscapeDB) -> None:
         """Orchestrator accepts any object implementing RuntimeConcurrencyProtocol."""
         from dataclasses import dataclass
 
@@ -186,13 +168,9 @@ class TestConcurrencyConfigProtocolCompliance:
         assert isinstance(custom_config, RuntimeConcurrencyProtocol)
 
         # Verify Orchestrator accepts it
-        db = make_landscape_db()
-        try:
-            orchestrator = Orchestrator(db, concurrency_config=custom_config)  # type: ignore[arg-type]
-            assert orchestrator._concurrency_config is not None
-            assert orchestrator._concurrency_config.max_workers == 12
-        finally:
-            db.close()
+        orchestrator = Orchestrator(landscape_db, concurrency_config=custom_config)  # type: ignore[arg-type]
+        assert orchestrator._concurrency_config is not None
+        assert orchestrator._concurrency_config.max_workers == 12
 
 
 class TestOrchestratorThreadsMaxWorkersThroughRowProcessor:
@@ -203,7 +181,7 @@ class TestOrchestratorThreadsMaxWorkersThroughRowProcessor:
     to the RowProcessor instantiation in run() and resume().
     """
 
-    def test_orchestrator_run_passes_max_workers_to_processor(self, payload_store) -> None:
+    def test_orchestrator_run_passes_max_workers_to_processor(self, landscape_db: LandscapeDB, payload_store) -> None:
         """Orchestrator.run() passes max_workers from concurrency_config to RowProcessor.
 
         This test verifies the full wiring path:
@@ -218,9 +196,8 @@ class TestOrchestratorThreadsMaxWorkersThroughRowProcessor:
         )
         from tests.fixtures.plugins import CollectSink, ListSource
 
-        db = make_landscape_db()
         concurrency_config = RuntimeConcurrencyConfig(max_workers=5)
-        orchestrator = Orchestrator(db, concurrency_config=concurrency_config)
+        orchestrator = Orchestrator(landscape_db, concurrency_config=concurrency_config)
 
         # Build graph using production path
         source = ListSource([{"id": 1}], name="simple_source", on_success="output")
@@ -254,12 +231,9 @@ class TestOrchestratorThreadsMaxWorkersThroughRowProcessor:
             captured_max_workers.append(kwargs.get("max_workers"))
             return original_init(self, *args, **kwargs)
 
-        try:
-            with patch.object(RowProcessor, "__init__", capturing_init):
-                orchestrator.run(pipeline_config, graph=graph, payload_store=payload_store)
+        with patch.object(RowProcessor, "__init__", capturing_init):
+            orchestrator.run(pipeline_config, graph=graph, payload_store=payload_store)
 
-            # Verify max_workers was passed to RowProcessor
-            assert len(captured_max_workers) == 1, "RowProcessor should be instantiated once"
-            assert captured_max_workers[0] == 5, f"Expected max_workers=5, got {captured_max_workers[0]}"
-        finally:
-            db.close()
+        # Verify max_workers was passed to RowProcessor
+        assert len(captured_max_workers) == 1, "RowProcessor should be instantiated once"
+        assert captured_max_workers[0] == 5, f"Expected max_workers=5, got {captured_max_workers[0]}"

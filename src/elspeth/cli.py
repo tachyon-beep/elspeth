@@ -20,7 +20,7 @@ from pydantic import ValidationError
 
 from elspeth import __version__
 from elspeth.contracts import ExecutionResult, SecretResolutionInput
-from elspeth.contracts.errors import GracefulShutdownError
+from elspeth.contracts.errors import AuditIntegrityError, FrameworkBugError, GracefulShutdownError
 from elspeth.contracts.types import AggregationName
 from elspeth.core.config import ElspethSettings, SourceSettings, load_settings, resolve_config
 from elspeth.core.dag import ExecutionGraph, GraphValidationError
@@ -531,6 +531,30 @@ def run(
             typer.echo(f"\nPipeline interrupted after {e.rows_processed} rows.")
             typer.echo(f"Resume with: elspeth resume {e.run_id} --execute")
         raise typer.Exit(3)  # noqa: B904 -- distinct exit code: 0=success, 1=error, 3=interrupted
+    except (FrameworkBugError, AuditIntegrityError) as e:
+        # Tier 1 violations and framework bugs MUST be clearly distinguishable
+        # from config errors. These indicate database corruption, tampering,
+        # or bugs in ELSPETH itself — not operator mistakes.
+        import traceback
+
+        if output_format == "json":
+            import json
+
+            typer.echo(
+                json.dumps(
+                    {
+                        "event": "fatal",
+                        "error": str(e),
+                        "error_type": type(e).__name__,
+                        "traceback": traceback.format_exc(),
+                    }
+                ),
+                err=True,
+            )
+        else:
+            typer.echo(f"\nFATAL — {type(e).__name__}: {e}", err=True)
+            typer.echo(traceback.format_exc(), err=True)
+        raise typer.Exit(4) from e  # Exit 4: audit integrity / framework bug
     except Exception as e:
         # Always emit the full traceback — hiding it makes debugging impossible.
         # The AggregationName NameError hid for days because this block swallowed it.

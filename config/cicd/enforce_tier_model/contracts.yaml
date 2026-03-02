@@ -16,6 +16,16 @@ per_file_rules:
   reason: Type normalization requires isinstance() for polymorphic serialization of numeric types
   expires: null
 allow_hits:
+- key: contracts/errors.py:R1:ExecutionError:from_dict:fp=3034299cc17a86ce
+  owner: architecture
+  reason: Tier 1 deserialization — .get() for optional traceback field in stored ExecutionError JSON
+  safety: Missing traceback returns None — correct for errors recorded before traceback capture was added
+  expires: null
+- key: contracts/errors.py:R1:ExecutionError:from_dict:fp=8b8ea1d23b1ef94f
+  owner: architecture
+  reason: Tier 1 deserialization — .get() for optional phase field in stored ExecutionError JSON
+  safety: Missing phase returns None — correct for errors recorded before phase tracking was added
+  expires: null
 - key: contracts/schema_contract_factory.py:R1:create_contract_from_config:fp=c6546fd479ceedee
   owner: feature
   reason: Intentional identity fallback - fields without resolution mapping use normalized name as original name

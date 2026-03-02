@@ -19,7 +19,7 @@ from elspeth.plugins.infrastructure.clients.llm import (
     RateLimitError,
     ServerError,
 )
-from elspeth.plugins.transforms.llm.provider import FinishReason, LLMProvider, LLMQueryResult
+from elspeth.plugins.transforms.llm.provider import FinishReason, LLMProvider, LLMQueryResult, UnrecognizedFinishReason
 from elspeth.plugins.transforms.llm.providers.azure import AzureLLMProvider
 
 
@@ -113,7 +113,7 @@ class TestExecuteQuery:
 
         assert result.finish_reason is FinishReason.STOP
 
-    def test_unknown_finish_reason_returns_none(self, provider: AzureLLMProvider) -> None:
+    def test_unknown_finish_reason_returns_unrecognized(self, provider: AzureLLMProvider) -> None:
         with patch.object(provider, "_get_llm_client") as mock_get:
             mock_client = MagicMock()
             mock_client.chat_completion.return_value = _make_llm_response(finish_reason="end_turn")
@@ -128,7 +128,8 @@ class TestExecuteQuery:
                 token_id="tok-1",
             )
 
-        assert result.finish_reason is None
+        assert isinstance(result.finish_reason, UnrecognizedFinishReason)
+        assert result.finish_reason.raw == "end_turn"
 
     def test_propagates_rate_limit_error(self, provider: AzureLLMProvider) -> None:
         with patch.object(provider, "_get_llm_client") as mock_get:

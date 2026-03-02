@@ -13,7 +13,7 @@ for audit recording and telemetry.
 
 from __future__ import annotations
 
-import json as json
+import json
 import math
 from threading import Lock
 from typing import TYPE_CHECKING, Any, Literal
@@ -43,7 +43,6 @@ if TYPE_CHECKING:
 __all__ = [
     "OpenRouterConfig",
     "OpenRouterLLMProvider",
-    "json",
 ]
 
 logger = structlog.get_logger(__name__)
@@ -280,7 +279,14 @@ class OpenRouterLLMProvider:
             finish_reason = parse_finish_reason(str(raw_finish_reason)) if raw_finish_reason is not None else None
 
             # Extract model (provider may return different model than requested)
-            response_model = data.get("model", model) if isinstance(data, dict) else model
+            if isinstance(data, dict) and "model" in data:
+                response_model = data["model"]
+            else:
+                logger.warning(
+                    "LLM response missing 'model' field — using requested model for audit",
+                    requested_model=model,
+                )
+                response_model = model
 
             return LLMQueryResult(
                 content=content,

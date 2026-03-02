@@ -24,7 +24,7 @@ Each test verifies:
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any
+from typing import Any
 from unittest.mock import MagicMock, Mock, patch
 
 import pytest
@@ -40,58 +40,9 @@ from elspeth.engine.orchestrator import Orchestrator, PipelineConfig
 from elspeth.telemetry import TelemetryManager
 from tests.fixtures.base_classes import as_sink, as_source, as_transform
 from tests.fixtures.landscape import make_landscape_db
+from tests.fixtures.pipeline import build_production_graph
 from tests.fixtures.plugins import CollectSink, ListSource, PassTransform
 from tests.fixtures.telemetry import MockTelemetryConfig, TelemetryTestExporter
-
-if TYPE_CHECKING:
-    from elspeth.core.dag import ExecutionGraph
-
-
-# =============================================================================
-# Test Fixtures
-# =============================================================================
-
-
-def _create_test_graph(config: PipelineConfig) -> ExecutionGraph:
-    """Build a graph using the production factory path.
-
-    Replaces build_production_graph from old test helpers. Uses
-    ExecutionGraph.from_plugin_instances() directly for production-path
-    fidelity (see BUG-LINEAGE-01).
-    """
-    from elspeth.contracts import TransformProtocol
-    from elspeth.core.config import SourceSettings
-    from elspeth.core.dag import ExecutionGraph
-    from tests.fixtures.factories import wire_transforms
-
-    # Separate transforms (only TransformProtocol instances)
-    row_transforms: list[TransformProtocol] = []
-    for transform in config.transforms:
-        if isinstance(transform, TransformProtocol):
-            row_transforms.append(transform)
-
-    sink_name = next(iter(config.sinks))
-    source_on_success = "source_out" if row_transforms else sink_name
-    final_destination = config.gates[0].input if config.gates else sink_name
-    if not row_transforms and config.gates:
-        source_on_success = config.gates[0].input
-
-    config.source.on_success = source_on_success
-
-    return ExecutionGraph.from_plugin_instances(
-        source=config.source,
-        source_settings=SourceSettings(plugin=config.source.name, on_success=source_on_success, options={}),
-        transforms=wire_transforms(
-            row_transforms,
-            source_connection=source_on_success,
-            final_sink=final_destination,
-        ),
-        sinks=config.sinks,
-        aggregations={},
-        gates=list(config.gates),
-        coalesce_settings=list(config.coalesce_settings) if config.coalesce_settings else None,
-    )
-
 
 # =============================================================================
 # AuditedLLMClient Telemetry Contract Tests
@@ -427,7 +378,7 @@ class TestOrchestratorTelemetryWiringContract:
         orchestrator = Orchestrator(landscape_db, telemetry_manager=telemetry_manager)
         orchestrator.run(
             pipeline_config,
-            graph=_create_test_graph(pipeline_config),
+            graph=build_production_graph(pipeline_config),
             payload_store=payload_store,
         )
 
@@ -460,7 +411,7 @@ class TestOrchestratorTelemetryWiringContract:
         orchestrator = Orchestrator(landscape_db, telemetry_manager=telemetry_manager)
         result = orchestrator.run(
             pipeline_config,
-            graph=_create_test_graph(pipeline_config),
+            graph=build_production_graph(pipeline_config),
             payload_store=payload_store,
         )
 

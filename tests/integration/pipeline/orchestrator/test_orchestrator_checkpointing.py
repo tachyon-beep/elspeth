@@ -11,12 +11,12 @@ from typing import TYPE_CHECKING, Any
 
 import pytest
 
-from elspeth.contracts import GateName, NodeID, NodeType, RouteDestination, RoutingMode, SinkName
 from tests.fixtures.base_classes import (
     as_sink,
     as_source,
     as_transform,
 )
+from tests.fixtures.landscape import make_recorder
 from tests.fixtures.pipeline import build_production_graph
 from tests.fixtures.plugins import CollectSink, FailingSink, ListSource, PassTransform
 
@@ -176,7 +176,6 @@ class TestOrchestratorCheckpointing:
         from elspeth.contracts.config.runtime import RuntimeCheckpointConfig
         from elspeth.core.checkpoint import CheckpointManager
         from elspeth.core.config import CheckpointSettings, GateSettings
-        from elspeth.core.dag import ExecutionGraph
         from elspeth.engine.orchestrator import Orchestrator, PipelineConfig
 
         checkpoint_mgr = CheckpointManager(landscape_db)
@@ -202,37 +201,6 @@ class TestOrchestratorCheckpointing:
             gates=[gate_config],
         )
 
-        graph = ExecutionGraph()
-        schema_config = {"schema": {"mode": "observed"}}
-        graph.add_node("source", node_type=NodeType.SOURCE, plugin_name="list_source", config=schema_config)
-        graph.add_node("transform_0", node_type=NodeType.TRANSFORM, plugin_name="passthrough", config=schema_config)
-        graph.add_node(
-            "config_gate_split",
-            node_type=NodeType.GATE,
-            plugin_name="config_gate:split",
-            config={
-                "schema": schema_config["schema"],
-                "condition": gate_config.condition,
-                "routes": dict(gate_config.routes),
-            },
-        )
-        graph.add_node("sink_good", node_type=NodeType.SINK, plugin_name="good_sink", config=schema_config)
-        graph.add_node("sink_bad", node_type=NodeType.SINK, plugin_name="bad_sink", config=schema_config)
-
-        graph.add_edge("source", "transform_0", label="continue", mode=RoutingMode.MOVE)
-        graph.add_edge("transform_0", "config_gate_split", label="continue", mode=RoutingMode.MOVE)
-        graph.add_edge("config_gate_split", "sink_good", label="true", mode=RoutingMode.MOVE)
-        graph.add_edge("config_gate_split", "sink_bad", label="false", mode=RoutingMode.MOVE)
-
-        graph.set_sink_id_map({SinkName("good"): NodeID("sink_good"), SinkName("bad"): NodeID("sink_bad")})
-        graph.set_transform_id_map({0: NodeID("transform_0")})
-        graph.set_config_gate_id_map({GateName("split"): NodeID("config_gate_split")})
-        graph.set_route_resolution_map(
-            {
-                (NodeID("config_gate_split"), "true"): RouteDestination.sink(SinkName("good")),
-                (NodeID("config_gate_split"), "false"): RouteDestination.sink(SinkName("bad")),
-            }
-        )
         orchestrator = Orchestrator(
             db=landscape_db,
             checkpoint_manager=checkpoint_mgr,
@@ -240,9 +208,7 @@ class TestOrchestratorCheckpointing:
         )
 
         with pytest.raises(RuntimeError, match="Bad sink failure"):
-            orchestrator.run(config, graph=graph, payload_store=payload_store)
-
-        from tests.fixtures.landscape import make_recorder
+            orchestrator.run(config, graph=build_production_graph(config), payload_store=payload_store)
 
         recorder = make_recorder(landscape_db)
         runs = recorder.list_runs()
@@ -251,10 +217,12 @@ class TestOrchestratorCheckpointing:
 
         remaining_checkpoints = checkpoint_mgr.get_checkpoints(run_id)
 
-        if len(good_sink.results) > 0:
-            assert len(remaining_checkpoints) == len(good_sink.results), (
-                f"Expected {len(good_sink.results)} checkpoints for written rows, got {len(remaining_checkpoints)}"
-            )
+        # Rows are processed sequentially: row 1 (odd→good) succeeds and creates
+        # a checkpoint before row 2 (even→bad) crashes at FailingSink.
+        assert len(good_sink.results) >= 1, "At least one odd-valued row should reach good_sink before bad_sink crashes"
+        assert len(remaining_checkpoints) == len(good_sink.results), (
+            f"Expected {len(good_sink.results)} checkpoints for written rows, got {len(remaining_checkpoints)}"
+        )
 
     def test_checkpoint_disabled_skips_checkpoint_creation(self, landscape_db: LandscapeDB, payload_store) -> None:
         """No checkpoints created when checkpointing is disabled."""

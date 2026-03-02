@@ -28,12 +28,12 @@ allow_hits:
   reason: Idempotent delete — FileNotFoundError means content already deleted (retention purge or duplicate call)
   safety: Returns False on missing file — caller informed, no silent data loss
   expires: null
-- key: core/landscape/execution_repository.py:R5:ExecutionRepository:complete_node_state:fp=21127b12b5a3c838
+- key: core/landscape/execution_repository.py:R5:ExecutionRepository:complete_node_state:fp=d77522a99fc84c84
   owner: architecture
   reason: Type narrowing after DB update - discriminated union requires isinstance to verify terminal state
   safety: Raises AuditIntegrityError if wrong state - explicit failure, not masking
   expires: null
-- key: core/landscape/execution_repository.py:R5:ExecutionRepository:complete_node_state:fp=c8c59dad2360521d
+- key: core/landscape/execution_repository.py:R5:ExecutionRepository:complete_node_state:fp=9299514ede02e66b
   owner: architecture
   reason: Type dispatch — ExecutionError and CoalesceFailureReason are frozen dataclasses with to_dict(); TransformErrorReason is TypedDict (already dict)
   safety: Explicit serialization dispatch, not masking — all paths produce dict for canonical_json
@@ -299,7 +299,7 @@ allow_hits:
 - key: core/landscape/journal.py:R5:LandscapeJournal:_columns_to_values:fp=7e00fb4cf94c9274
   owner: architecture
   reason: AST/type checking - required for safe parsing or discriminated unions
-- key: core/landscape/execution_repository.py:R6:ExecutionRepository:get_call_response_data:fp=4c5bf20fee5e4d80
+- key: core/landscape/execution_repository.py:R6:ExecutionRepository:get_call_response_data:fp=def33708d8b6f94a
   owner: architecture
   reason: Graceful handling of purged payloads - retention policy may have deleted response data
 - key: core/dag/builder.py:R2:build_execution_graph:fp=1473956f4f20f6c8
@@ -475,7 +475,7 @@ allow_hits:
   safety: Only replaces non-finite floats; all other types pass through unchanged
   expires: '2026-05-12'
 # Landscape recording — quarantine path fallback hashing for non-canonical data
-- key: core/landscape/execution_repository.py:R6:ExecutionRepository:begin_node_state:fp=e83be730eea0fd87
+- key: core/landscape/execution_repository.py:R6:ExecutionRepository:begin_node_state:fp=7b931b3721a55e55
   owner: bugfix
   reason: Tier-3 boundary — quarantined row data may contain NaN/Infinity that stable_hash rejects
   safety: Falls back to repr_hash which always succeeds; audit trail integrity maintained

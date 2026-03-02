@@ -47,6 +47,19 @@ class ExecutionError:
             d["phase"] = self.phase
         return d
 
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> "ExecutionError":
+        """Reconstruct from audit-trail dict.
+
+        Reverses the ``to_dict()`` key rename: ``"type"`` → ``exception_type``.
+        """
+        return cls(
+            exception=data["exception"],
+            exception_type=data["type"],
+            traceback=data.get("traceback"),
+            phase=data.get("phase"),
+        )
+
 
 @dataclass(frozen=True, slots=True)
 class CoalesceFailureReason:

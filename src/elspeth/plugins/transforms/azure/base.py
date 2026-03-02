@@ -17,6 +17,7 @@ from threading import Lock
 from typing import TYPE_CHECKING, Any
 
 import httpx
+import structlog
 from pydantic import Field, field_validator
 
 from elspeth.contracts import Determinism
@@ -38,6 +39,16 @@ from elspeth.plugins.transforms.safety_utils import (
 
 if TYPE_CHECKING:
     from elspeth.core.landscape.recorder import LandscapeRecorder
+
+logger = structlog.get_logger(__name__)
+
+
+def _warn_telemetry_before_start(event: Any) -> None:
+    """Default telemetry callback before on_start() — warns instead of silently dropping."""
+    logger.warning(
+        "telemetry_emit called before on_start() — event dropped",
+        event_type=type(event).__name__,
+    )
 
 
 class BaseAzureSafetyConfig(TransformDataConfig):
@@ -101,7 +112,7 @@ class BaseAzureSafetyTransform(BaseTransform, BatchTransformMixin):
 
         self._recorder: LandscapeRecorder | None = None
         self._run_id: str = ""
-        self._telemetry_emit: Callable[[Any], None] = lambda event: None
+        self._telemetry_emit: Callable[[Any], None] = _warn_telemetry_before_start
         self._limiter: Any = None  # RateLimiter | NoOpLimiter | None
 
         self._http_clients: dict[str, Any] = {}  # state_id -> AuditedHTTPClient

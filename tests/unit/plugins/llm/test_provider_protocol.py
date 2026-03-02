@@ -12,6 +12,7 @@ from elspeth.plugins.transforms.llm.provider import (
     FinishReason,
     LLMProvider,
     LLMQueryResult,
+    UnrecognizedFinishReason,
     parse_finish_reason,
 )
 
@@ -125,7 +126,8 @@ class TestParseFinishReason:
 
         with caplog.at_level(logging.WARNING, logger="elspeth.plugins.transforms.llm.provider"):
             result = parse_finish_reason("end_turn")
-        assert result is None
+        assert isinstance(result, UnrecognizedFinishReason)
+        assert result.raw == "end_turn"
         # structlog routes to stdout (PrintLogger) in isolation or stdlib logging
         # in the full suite — check both capture mechanisms
         stdout_has_it = "end_turn" in capsys.readouterr().out
@@ -141,7 +143,8 @@ class TestParseFinishReason:
 
         with caplog.at_level(logging.WARNING, logger="elspeth.plugins.transforms.llm.provider"):
             result = parse_finish_reason("")
-        assert result is None
+        assert isinstance(result, UnrecognizedFinishReason)
+        assert result.raw == ""
         stdout_has_it = "finish_reason" in capsys.readouterr().out.lower()
         caplog_has_it = any("finish_reason" in r.getMessage().lower() for r in caplog.records)
         assert stdout_has_it or caplog_has_it, "Expected warning about unknown finish_reason in structlog output"

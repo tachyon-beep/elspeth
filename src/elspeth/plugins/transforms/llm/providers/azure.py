@@ -173,10 +173,16 @@ class AzureLLMProvider:
                     if raw_fr is not None:
                         finish_reason = parse_finish_reason(str(raw_fr))
                 else:
+                    # Missing choices means we can't detect truncation.
+                    # Log as warning with enough context to investigate.
                     logger.warning(
-                        "Azure SDK response missing choices — finish_reason unavailable",
+                        "Azure SDK response missing choices — finish_reason unavailable, truncation undetectable",
                         raw_response_keys=list(response.raw_response.keys()),
                     )
+            else:
+                logger.warning(
+                    "Azure SDK response has no raw_response — finish_reason unavailable, truncation undetectable",
+                )
 
             # Empty/whitespace content — AuditedLLMClient converts None→""
             # (known fabrication). Detect here and raise typed errors so the

@@ -205,6 +205,11 @@ class QueryRepository:
 
         try:
             data = self._retrieve_and_parse_payload(row_id, row.source_data_ref)
+            # Detect repr-fallback sentinel: quarantined data that couldn't be
+            # canonically serialized is stored as {"_repr": repr(data)}.
+            # Callers must know this is a lossy snapshot, not the real payload.
+            if set(data.keys()) == {"_repr"}:
+                return RowDataResult(state=RowDataState.REPR_FALLBACK, data=data)
             return RowDataResult(state=RowDataState.AVAILABLE, data=data)
         except KeyError:
             return RowDataResult(state=RowDataState.PURGED, data=None)

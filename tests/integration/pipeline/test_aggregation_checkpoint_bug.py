@@ -17,8 +17,6 @@ from __future__ import annotations
 
 from typing import Any
 
-import pytest
-
 from elspeth.contracts import (
     FieldContract,
     PipelineRow,
@@ -46,7 +44,6 @@ from tests.fixtures.base_classes import (
     as_transform,
 )
 from tests.fixtures.factories import wire_transforms
-from tests.fixtures.landscape import make_landscape_db
 from tests.fixtures.plugins import CollectSink
 
 
@@ -95,11 +92,6 @@ class TestAggregationCheckpointFixVerification:
     These tests verify the fix for elspeth-rapid-nsj where aggregation
     checkpoint state was never saved during normal pipeline execution.
     """
-
-    @pytest.fixture
-    def landscape_db(self) -> LandscapeDB:
-        """In-memory database for test isolation."""
-        return make_landscape_db()
 
     def test_checkpoint_includes_aggregation_state(
         self,

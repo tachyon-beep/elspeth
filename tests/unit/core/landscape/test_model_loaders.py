@@ -51,6 +51,7 @@ from elspeth.contracts.enums import (
     RunStatus,
     TriggerType,
 )
+from elspeth.contracts.errors import AuditIntegrityError
 from elspeth.core.landscape.model_loaders import (
     ArtifactLoader,
     BatchLoader,
@@ -293,19 +294,19 @@ class TestNodeLoader:
     def test_schema_fields_json_null_raises_value_error(self) -> None:
         sa_row = self._make_node_row(schema_fields_json="null")
         loader = NodeLoader()
-        with pytest.raises(ValueError, match="must decode to list"):
+        with pytest.raises(AuditIntegrityError, match="must decode to list"):
             loader.load(sa_row)
 
     def test_schema_fields_json_object_raises_value_error(self) -> None:
         sa_row = self._make_node_row(schema_fields_json='{"name": "id"}')
         loader = NodeLoader()
-        with pytest.raises(ValueError, match="must decode to list"):
+        with pytest.raises(AuditIntegrityError, match="must decode to list"):
             loader.load(sa_row)
 
     def test_schema_fields_json_non_dict_element_raises_value_error(self) -> None:
         sa_row = self._make_node_row(schema_fields_json='[{"name": "id"}, 42]')
         loader = NodeLoader()
-        with pytest.raises(ValueError, match="must be object/dict"):
+        with pytest.raises(AuditIntegrityError, match="must be object/dict"):
             loader.load(sa_row)
 
     def test_schema_fields_json_unparseable_json_raises(self) -> None:
@@ -774,7 +775,7 @@ class TestNodeStateLoader:
             output_hash="bad_hash",
         )
         loader = NodeStateLoader()
-        with pytest.raises(ValueError, match="non-NULL output_hash"):
+        with pytest.raises(AuditIntegrityError, match="non-NULL output_hash"):
             loader.load(sa_row)
 
     def test_open_with_non_null_completed_at_raises(self) -> None:
@@ -783,7 +784,7 @@ class TestNodeStateLoader:
             completed_at=NOW,
         )
         loader = NodeStateLoader()
-        with pytest.raises(ValueError, match="non-NULL completed_at"):
+        with pytest.raises(AuditIntegrityError, match="non-NULL completed_at"):
             loader.load(sa_row)
 
     def test_open_with_non_null_duration_ms_raises(self) -> None:
@@ -792,7 +793,7 @@ class TestNodeStateLoader:
             duration_ms=100.0,
         )
         loader = NodeStateLoader()
-        with pytest.raises(ValueError, match="non-NULL duration_ms"):
+        with pytest.raises(AuditIntegrityError, match="non-NULL duration_ms"):
             loader.load(sa_row)
 
     def test_open_with_non_null_context_after_json_raises(self) -> None:
@@ -801,7 +802,7 @@ class TestNodeStateLoader:
             context_after_json='{"after": true}',
         )
         loader = NodeStateLoader()
-        with pytest.raises(ValueError, match="non-NULL context_after_json"):
+        with pytest.raises(AuditIntegrityError, match="non-NULL context_after_json"):
             loader.load(sa_row)
 
     def test_open_with_non_null_error_json_raises(self) -> None:
@@ -810,7 +811,7 @@ class TestNodeStateLoader:
             error_json='{"reason": "unexpected"}',
         )
         loader = NodeStateLoader()
-        with pytest.raises(ValueError, match="non-NULL error_json"):
+        with pytest.raises(AuditIntegrityError, match="non-NULL error_json"):
             loader.load(sa_row)
 
     def test_open_with_non_null_success_reason_json_raises(self) -> None:
@@ -819,7 +820,7 @@ class TestNodeStateLoader:
             success_reason_json='{"action": "classified"}',
         )
         loader = NodeStateLoader()
-        with pytest.raises(ValueError, match="non-NULL success_reason_json"):
+        with pytest.raises(AuditIntegrityError, match="non-NULL success_reason_json"):
             loader.load(sa_row)
 
     def test_open_with_all_invalid_completion_fields(self) -> None:
@@ -831,7 +832,7 @@ class TestNodeStateLoader:
             duration_ms=50.0,
         )
         loader = NodeStateLoader()
-        with pytest.raises(ValueError, match="audit integrity violation"):
+        with pytest.raises(AuditIntegrityError, match="audit integrity violation"):
             loader.load(sa_row)
 
     # === PENDING variant ===
@@ -872,7 +873,7 @@ class TestNodeStateLoader:
             duration_ms=None,
         )
         loader = NodeStateLoader()
-        with pytest.raises(ValueError, match="NULL duration_ms"):
+        with pytest.raises(AuditIntegrityError, match="NULL duration_ms"):
             loader.load(sa_row)
 
     def test_pending_with_null_completed_at_raises(self) -> None:
@@ -882,7 +883,7 @@ class TestNodeStateLoader:
             duration_ms=100.0,
         )
         loader = NodeStateLoader()
-        with pytest.raises(ValueError, match="NULL completed_at"):
+        with pytest.raises(AuditIntegrityError, match="NULL completed_at"):
             loader.load(sa_row)
 
     def test_pending_with_non_null_output_hash_raises(self) -> None:
@@ -893,7 +894,7 @@ class TestNodeStateLoader:
             output_hash="unexpected_hash",
         )
         loader = NodeStateLoader()
-        with pytest.raises(ValueError, match="non-NULL output_hash"):
+        with pytest.raises(AuditIntegrityError, match="non-NULL output_hash"):
             loader.load(sa_row)
 
     def test_pending_with_non_null_error_json_raises(self) -> None:
@@ -904,7 +905,7 @@ class TestNodeStateLoader:
             error_json='{"reason": "premature"}',
         )
         loader = NodeStateLoader()
-        with pytest.raises(ValueError, match="non-NULL error_json"):
+        with pytest.raises(AuditIntegrityError, match="non-NULL error_json"):
             loader.load(sa_row)
 
     def test_pending_with_non_null_success_reason_json_raises(self) -> None:
@@ -915,7 +916,7 @@ class TestNodeStateLoader:
             success_reason_json='{"action": "premature"}',
         )
         loader = NodeStateLoader()
-        with pytest.raises(ValueError, match="non-NULL success_reason_json"):
+        with pytest.raises(AuditIntegrityError, match="non-NULL success_reason_json"):
             loader.load(sa_row)
 
     # === COMPLETED variant ===
@@ -962,7 +963,7 @@ class TestNodeStateLoader:
             duration_ms=100.0,
         )
         loader = NodeStateLoader()
-        with pytest.raises(ValueError, match="NULL output_hash"):
+        with pytest.raises(AuditIntegrityError, match="NULL output_hash"):
             loader.load(sa_row)
 
     def test_completed_with_null_duration_ms_raises(self) -> None:
@@ -973,7 +974,7 @@ class TestNodeStateLoader:
             duration_ms=None,
         )
         loader = NodeStateLoader()
-        with pytest.raises(ValueError, match="NULL duration_ms"):
+        with pytest.raises(AuditIntegrityError, match="NULL duration_ms"):
             loader.load(sa_row)
 
     def test_completed_with_null_completed_at_raises(self) -> None:
@@ -984,7 +985,7 @@ class TestNodeStateLoader:
             duration_ms=100.0,
         )
         loader = NodeStateLoader()
-        with pytest.raises(ValueError, match="NULL completed_at"):
+        with pytest.raises(AuditIntegrityError, match="NULL completed_at"):
             loader.load(sa_row)
 
     def test_completed_with_non_null_error_json_raises(self) -> None:
@@ -997,7 +998,7 @@ class TestNodeStateLoader:
             error_json='{"reason": "should not be here"}',
         )
         loader = NodeStateLoader()
-        with pytest.raises(ValueError, match="non-NULL error_json"):
+        with pytest.raises(AuditIntegrityError, match="non-NULL error_json"):
             loader.load(sa_row)
 
     # === FAILED variant ===
@@ -1080,7 +1081,7 @@ class TestNodeStateLoader:
             duration_ms=None,
         )
         loader = NodeStateLoader()
-        with pytest.raises(ValueError, match="NULL duration_ms"):
+        with pytest.raises(AuditIntegrityError, match="NULL duration_ms"):
             loader.load(sa_row)
 
     def test_failed_with_null_completed_at_raises(self) -> None:
@@ -1090,7 +1091,7 @@ class TestNodeStateLoader:
             duration_ms=50.0,
         )
         loader = NodeStateLoader()
-        with pytest.raises(ValueError, match="NULL completed_at"):
+        with pytest.raises(AuditIntegrityError, match="NULL completed_at"):
             loader.load(sa_row)
 
     def test_failed_with_non_null_success_reason_json_raises(self) -> None:
@@ -1102,7 +1103,7 @@ class TestNodeStateLoader:
             success_reason_json='{"action": "should not be here"}',
         )
         loader = NodeStateLoader()
-        with pytest.raises(ValueError, match="non-NULL success_reason_json"):
+        with pytest.raises(AuditIntegrityError, match="non-NULL success_reason_json"):
             loader.load(sa_row)
 
     # === Invalid status ===
@@ -1319,38 +1320,38 @@ class TestTokenOutcomeLoader:
     def test_outcome_buffered_with_terminal_1_raises_value_error(self) -> None:
         sa_row = self._make_outcome_row(outcome="buffered", is_terminal=1)
         loader = TokenOutcomeLoader()
-        with pytest.raises(ValueError, match="inconsistent is_terminal"):
+        with pytest.raises(AuditIntegrityError, match="inconsistent is_terminal"):
             loader.load(sa_row)
 
     def test_outcome_completed_with_terminal_0_raises_value_error(self) -> None:
         sa_row = self._make_outcome_row(outcome="completed", is_terminal=0)
         loader = TokenOutcomeLoader()
-        with pytest.raises(ValueError, match="inconsistent is_terminal"):
+        with pytest.raises(AuditIntegrityError, match="inconsistent is_terminal"):
             loader.load(sa_row)
 
     def test_is_terminal_2_raises_value_error(self) -> None:
         sa_row = self._make_outcome_row(is_terminal=2)
         loader = TokenOutcomeLoader()
-        with pytest.raises(ValueError, match="invalid is_terminal"):
+        with pytest.raises(AuditIntegrityError, match="invalid is_terminal"):
             loader.load(sa_row)
 
     def test_is_terminal_negative_1_raises_value_error(self) -> None:
         sa_row = self._make_outcome_row(is_terminal=-1)
         loader = TokenOutcomeLoader()
-        with pytest.raises(ValueError, match="invalid is_terminal"):
+        with pytest.raises(AuditIntegrityError, match="invalid is_terminal"):
             loader.load(sa_row)
 
     def test_is_terminal_none_raises_value_error(self) -> None:
         sa_row = self._make_outcome_row(is_terminal=None)
         loader = TokenOutcomeLoader()
-        with pytest.raises(ValueError, match="invalid is_terminal"):
+        with pytest.raises(AuditIntegrityError, match="invalid is_terminal"):
             loader.load(sa_row)
 
     def test_is_terminal_string_raises_value_error(self) -> None:
         """String '1' is NOT in (0, 1) -- Tier 1, no coercion."""
         sa_row = self._make_outcome_row(is_terminal="1")
         loader = TokenOutcomeLoader()
-        with pytest.raises(ValueError, match="invalid is_terminal"):
+        with pytest.raises(AuditIntegrityError, match="invalid is_terminal"):
             loader.load(sa_row)
 
     def test_is_terminal_true_bool_raises_value_error(self) -> None:
@@ -1358,14 +1359,14 @@ class TestTokenOutcomeLoader:
         But Tier 1 strictness requires exact int type — bool must be rejected."""
         sa_row = self._make_outcome_row(is_terminal=True)
         loader = TokenOutcomeLoader()
-        with pytest.raises(ValueError, match="invalid is_terminal"):
+        with pytest.raises(AuditIntegrityError, match="invalid is_terminal"):
             loader.load(sa_row)
 
     def test_is_terminal_false_bool_raises_value_error(self) -> None:
         """bool False must be rejected — bool is subclass of int in Python."""
         sa_row = self._make_outcome_row(is_terminal=False, outcome="buffered")
         loader = TokenOutcomeLoader()
-        with pytest.raises(ValueError, match="invalid is_terminal"):
+        with pytest.raises(AuditIntegrityError, match="invalid is_terminal"):
             loader.load(sa_row)
 
     def test_invalid_outcome_raises_value_error(self) -> None:

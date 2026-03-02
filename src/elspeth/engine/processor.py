@@ -34,7 +34,7 @@ if TYPE_CHECKING:
 
 from elspeth.contracts import BatchTransformProtocol, TransformProtocol
 from elspeth.contracts.enums import NodeStateStatus, OutputMode, RoutingKind, RoutingMode, TriggerType
-from elspeth.contracts.errors import MaxRetriesExceeded, OrchestrationInvariantError, TransformErrorReason
+from elspeth.contracts.errors import MaxRetriesExceeded, OrchestrationInvariantError, TransformErrorCategory, TransformErrorReason
 from elspeth.contracts.plugin_context import PluginContext
 from elspeth.contracts.results import FailureInfo
 from elspeth.core.config import AggregationSettings, GateSettings
@@ -978,6 +978,63 @@ class RowProcessor:
             child_items,
         )
 
+    def _convert_retryable_to_error_result(
+        self,
+        exc: Exception,
+        transform: Any,
+        token: TokenInfo,
+        ctx: Any,
+        reason: TransformErrorCategory,
+    ) -> tuple[TransformResult, TokenInfo, str | None]:
+        """Convert a retryable exception to a TransformResult.error when no retry manager is configured.
+
+        Shared handler for LLMClientError (retryable) and transient exceptions
+        (ConnectionError, TimeoutError, OSError, CapacityError). Records the
+        error in the audit trail and emits a DIVERT routing event if on_error
+        routes to a sink.
+        """
+        on_error = transform.on_error
+        # on_error is always set (required by TransformSettings) — Tier 1 invariant
+        if on_error is None:
+            raise OrchestrationInvariantError(
+                f"Transform '{transform.name}' has on_error=None — this should be impossible since TransformSettings requires on_error"
+            ) from None
+
+        error_details: TransformErrorReason = {"reason": reason, "error": str(exc)}
+        ctx.record_transform_error(
+            token_id=token.token_id,
+            transform_id=transform.node_id,
+            row=token.row_data,
+            error_details=error_details,
+            destination=on_error,
+        )
+
+        # Record DIVERT routing_event using ctx.state_id (set by
+        # TransformExecutor.execute_transform before the exception propagated).
+        if on_error != "discard":
+            try:
+                error_edge_id = self._error_edge_ids[NodeID(transform.node_id)]
+            except KeyError:
+                raise OrchestrationInvariantError(
+                    f"Transform '{transform.node_id}' has on_error={on_error!r} but no DIVERT edge registered."
+                ) from exc
+            if ctx.state_id is None:
+                raise OrchestrationInvariantError(
+                    f"ctx.state_id must be set by TransformExecutor before exception propagated (transform={transform.node_id})"
+                ) from None
+            self._recorder.record_routing_event(
+                state_id=ctx.state_id,
+                edge_id=error_edge_id,
+                mode=RoutingMode.DIVERT,
+                reason=error_details,
+            )
+
+        return (
+            TransformResult.error(error_details, retryable=True),
+            token,
+            on_error,
+        )
+
     def _execute_transform_with_retry(
         self,
         transform: Any,
@@ -1016,100 +1073,22 @@ class RowProcessor:
                 )
             except LLMClientError as e:
                 if e.retryable:
-                    # Retryable error but no retry manager configured - convert to error result
-                    # This keeps the failure row-scoped instead of aborting the run
-                    #
-                    # BUG FIX (P2-2026-01-27): Must validate on_error and record transform_error
-                    # for audit trail completeness (same as TransformExecutor error handling)
-                    on_error = transform.on_error
-                    # on_error is always set (required by TransformSettings) — Tier 1 invariant
-                    if on_error is None:
-                        raise OrchestrationInvariantError(
-                            f"Transform '{transform.name}' has on_error=None — this should be "
-                            f"impossible since TransformSettings requires on_error"
-                        ) from None
-
-                    error_details: TransformErrorReason = {"reason": "llm_retryable_error_no_retry", "error": str(e)}
-                    ctx.record_transform_error(
-                        token_id=token.token_id,
-                        transform_id=transform.node_id,
-                        row=token.row_data,
-                        error_details=error_details,
-                        destination=on_error,
-                    )
-
-                    # Record DIVERT routing_event using ctx.state_id (set by
-                    # TransformExecutor.execute_transform before the exception propagated).
-                    if on_error != "discard":
-                        try:
-                            error_edge_id = self._error_edge_ids[NodeID(transform.node_id)]
-                        except KeyError:
-                            raise OrchestrationInvariantError(
-                                f"Transform '{transform.node_id}' has on_error={on_error!r} but no DIVERT edge registered."
-                            ) from e
-                        if ctx.state_id is None:
-                            raise OrchestrationInvariantError(
-                                f"ctx.state_id must be set by TransformExecutor before exception propagated (transform={transform.node_id})"
-                            ) from None
-                        self._recorder.record_routing_event(
-                            state_id=ctx.state_id,
-                            edge_id=error_edge_id,
-                            mode=RoutingMode.DIVERT,
-                            reason=error_details,
-                        )
-
-                    return (
-                        TransformResult.error(error_details, retryable=True),
+                    return self._convert_retryable_to_error_result(
+                        e,
+                        transform,
                         token,
-                        on_error,
+                        ctx,
+                        reason="llm_retryable_error_no_retry",
                     )
                 # Non-retryable errors re-raise (already handled by transform)
                 raise
             except (ConnectionError, TimeoutError, OSError, CapacityError) as e:
-                # Other retryable errors - convert to error result
-                #
-                # BUG FIX (P2-2026-01-27): Must validate on_error and record transform_error
-                # for audit trail completeness (same as TransformExecutor error handling)
-                on_error = transform.on_error
-                # on_error is always set (required by TransformSettings) — Tier 1 invariant
-                if on_error is None:
-                    raise OrchestrationInvariantError(
-                        f"Transform '{transform.name}' has on_error=None — this should be impossible since TransformSettings requires on_error"
-                    ) from None
-
-                transient_error: TransformErrorReason = {"reason": "transient_error_no_retry", "error": str(e)}
-                ctx.record_transform_error(
-                    token_id=token.token_id,
-                    transform_id=transform.node_id,
-                    row=token.row_data,
-                    error_details=transient_error,
-                    destination=on_error,
-                )
-
-                # Record DIVERT routing_event using ctx.state_id (set by
-                # TransformExecutor.execute_transform before the exception propagated).
-                if on_error != "discard":
-                    try:
-                        error_edge_id = self._error_edge_ids[NodeID(transform.node_id)]
-                    except KeyError:
-                        raise OrchestrationInvariantError(
-                            f"Transform '{transform.node_id}' has on_error={on_error!r} but no DIVERT edge registered."
-                        ) from e
-                    if ctx.state_id is None:
-                        raise OrchestrationInvariantError(
-                            f"ctx.state_id must be set by TransformExecutor before exception propagated (transform={transform.node_id})"
-                        ) from None
-                    self._recorder.record_routing_event(
-                        state_id=ctx.state_id,
-                        edge_id=error_edge_id,
-                        mode=RoutingMode.DIVERT,
-                        reason=transient_error,
-                    )
-
-                return (
-                    TransformResult.error(transient_error, retryable=True),
+                return self._convert_retryable_to_error_result(
+                    e,
+                    transform,
                     token,
-                    on_error,
+                    ctx,
+                    reason="transient_error_no_retry",
                 )
 
         # Track attempt number for audit

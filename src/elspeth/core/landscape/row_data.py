@@ -6,6 +6,8 @@ guessing why data is None.
 
 States:
     AVAILABLE: Data was found and returned
+    REPR_FALLBACK: Data was quarantined and stored as lossy repr snapshot
+        (original contained non-canonical values like NaN/Infinity)
     PURGED: Data existed but was deleted (retention policy)
     NEVER_STORED: Row exists but source_data_ref was never set
     STORE_NOT_CONFIGURED: No payload store configured
@@ -24,6 +26,7 @@ class RowDataState(StrEnum):
     """
 
     AVAILABLE = "available"
+    REPR_FALLBACK = "repr_fallback"
     PURGED = "purged"
     NEVER_STORED = "never_stored"
     STORE_NOT_CONFIGURED = "store_not_configured"
@@ -35,7 +38,7 @@ class RowDataResult:
     """Result of a row data retrieval with explicit state.
 
     Invariants:
-        - AVAILABLE state requires dict data
+        - AVAILABLE and REPR_FALLBACK states require dict data
         - All other states require None data
 
     Example:
@@ -43,6 +46,8 @@ class RowDataResult:
         match result.state:
             case RowDataState.AVAILABLE:
                 process(result.data)  # Safe - guaranteed non-None
+            case RowDataState.REPR_FALLBACK:
+                log.warning("Data is lossy repr snapshot", data=result.data)
             case RowDataState.PURGED:
                 log.info("Data was purged per retention policy")
             case RowDataState.ROW_NOT_FOUND:
@@ -52,18 +57,20 @@ class RowDataResult:
     state: RowDataState
     data: dict[str, Any] | None
 
+    _STATES_WITH_DATA = frozenset({RowDataState.AVAILABLE, RowDataState.REPR_FALLBACK})
+
     def __post_init__(self) -> None:
         if type(self.state) is not RowDataState:
             raise TypeError(f"state must be RowDataState, got {type(self.state).__name__}")
-        if self.state == RowDataState.AVAILABLE:
+        if self.state in self._STATES_WITH_DATA:
             if self.data is None:
-                raise ValueError("AVAILABLE state requires non-None data")
+                raise ValueError(f"{self.state} state requires non-None data")
             payload: object = self.data
             match payload:
                 case dict():
                     pass
                 case _:
                     actual_type = type(payload).__name__
-                    raise TypeError(f"AVAILABLE state requires dict data, got {actual_type}")
-        if self.state != RowDataState.AVAILABLE and self.data is not None:
+                    raise TypeError(f"{self.state} state requires dict data, got {actual_type}")
+        if self.state not in self._STATES_WITH_DATA and self.data is not None:
             raise ValueError(f"{self.state} state requires None data")

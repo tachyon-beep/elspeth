@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from elspeth.contracts import NodeStateStatus, NodeType
 from elspeth.contracts.audit import NodeStateCompleted
+from elspeth.contracts.errors import AuditIntegrityError
 from elspeth.contracts.schema import SchemaConfig
 
 # Dynamic schema for tests that don't care about specific fields
@@ -534,7 +535,7 @@ class TestNodeStateIntegrityValidation:
             conn.commit()
 
         # Reading corrupted data should crash (Tier 1 rule)
-        with pytest.raises(ValueError, match=r"NULL completed_at.*audit integrity violation"):
+        with pytest.raises(AuditIntegrityError, match=r"NULL completed_at.*audit integrity violation"):
             recorder.get_node_states_for_token(token.token_id)
 
     def test_failed_state_with_null_completed_at_raises(self) -> None:
@@ -597,7 +598,7 @@ class TestNodeStateIntegrityValidation:
             conn.commit()
 
         # Reading corrupted data should crash (Tier 1 rule)
-        with pytest.raises(ValueError, match=r"NULL completed_at.*audit integrity violation"):
+        with pytest.raises(AuditIntegrityError, match=r"NULL completed_at.*audit integrity violation"):
             recorder.get_node_states_for_token(token.token_id)
 
 

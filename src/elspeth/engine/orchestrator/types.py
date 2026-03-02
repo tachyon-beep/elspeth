@@ -278,7 +278,8 @@ class LoopContext:
     Convention: fields below the "Read-only" separator are never reassigned
     after construction. They are not frozen because ``counters`` and
     ``pending_tokens`` require in-place mutation. Treat read-only fields as
-    if they were on a frozen dataclass.
+    if they were on a frozen dataclass — mappings are wrapped in
+    MappingProxyType at construction time.
     """
 
     # --- Mutable state (updated row-by-row) ---
@@ -292,6 +293,10 @@ class LoopContext:
     agg_transform_lookup: Mapping[str, AggNodeEntry]
     coalesce_executor: CoalesceExecutor | None
     coalesce_node_map: Mapping[CoalesceName, NodeID]
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "agg_transform_lookup", MappingProxyType(dict(self.agg_transform_lookup)))
+        object.__setattr__(self, "coalesce_node_map", MappingProxyType(dict(self.coalesce_node_map)))
 
 
 @dataclass(frozen=True, slots=True)

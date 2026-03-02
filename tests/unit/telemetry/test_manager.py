@@ -28,7 +28,7 @@ from elspeth.contracts.events import (
 )
 from elspeth.telemetry.errors import TelemetryExporterError
 from elspeth.telemetry.manager import TelemetryManager
-from tests.unit.telemetry.fixtures import (
+from tests.fixtures.telemetry import (
     FailingExporter,
     MockTelemetryConfig,
     TelemetryTestExporter,

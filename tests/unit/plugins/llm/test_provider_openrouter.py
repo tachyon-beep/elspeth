@@ -19,7 +19,7 @@ from elspeth.plugins.infrastructure.clients.llm import (
     RateLimitError,
     ServerError,
 )
-from elspeth.plugins.transforms.llm.provider import FinishReason, LLMProvider, LLMQueryResult
+from elspeth.plugins.transforms.llm.provider import FinishReason, LLMProvider, LLMQueryResult, UnrecognizedFinishReason
 from elspeth.plugins.transforms.llm.providers.openrouter import OpenRouterLLMProvider
 
 if TYPE_CHECKING:
@@ -346,7 +346,8 @@ class TestExecuteQuery:
                 token_id="tok-1",
             )
 
-        assert result.finish_reason is None
+        assert isinstance(result.finish_reason, UnrecognizedFinishReason)
+        assert result.finish_reason.raw == "end_turn"
 
     def test_maps_finish_reason_stop(self, provider: OpenRouterLLMProvider) -> None:
         with patch.object(provider, "_get_http_client") as mock_get:

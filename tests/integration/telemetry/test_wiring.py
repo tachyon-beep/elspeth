@@ -25,7 +25,7 @@ from elspeth.telemetry import TelemetryManager
 from tests.fixtures.base_classes import as_sink, as_source, as_transform
 from tests.fixtures.pipeline import build_production_graph
 from tests.fixtures.plugins import CollectSink, ListSource, PassTransform
-from tests.unit.telemetry.fixtures import MockTelemetryConfig, TelemetryTestExporter
+from tests.fixtures.telemetry import MockTelemetryConfig, TelemetryTestExporter
 
 if TYPE_CHECKING:
     from elspeth.core.dag import ExecutionGraph

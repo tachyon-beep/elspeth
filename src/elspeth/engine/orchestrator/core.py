@@ -201,6 +201,117 @@ class Orchestrator:
         if self._telemetry is not None:
             self._telemetry.flush()
 
+    def _safe_flush_telemetry(self) -> None:
+        """Flush telemetry in a finally block, preserving any pending exception.
+
+        If _flush_telemetry() raises TelemetryExporterError (fail_on_total=True),
+        only re-raises when no other exception is pending — telemetry failures
+        must not mask run errors.
+        """
+        import sys
+
+        import structlog
+
+        from elspeth.telemetry.errors import TelemetryExporterError
+
+        logger = structlog.get_logger()
+        pending_exc = sys.exc_info()[0]
+
+        try:
+            self._flush_telemetry()
+        except TelemetryExporterError as e:
+            logger.warning(
+                "Telemetry flush failed - will raise after cleanup if no other exception pending",
+                exporter=e.exporter_name,
+                error=e.message,
+            )
+            if pending_exc is None:
+                raise
+
+    def _emit_interrupted_ceremony(
+        self,
+        run_id: str,
+        recorder: LandscapeRecorder,
+        shutdown_exc: GracefulShutdownError,
+        start_time: float,
+    ) -> None:
+        """Emit telemetry and EventBus events for a gracefully interrupted run.
+
+        Shared between run() and resume() — the interrupted ceremony is identical
+        in both paths: finalize as INTERRUPTED, emit RunFinished, emit RunSummary.
+        """
+        from elspeth.telemetry import RunFinished
+
+        total_duration = time.perf_counter() - start_time
+        recorder.finalize_run(run_id, status=RunStatus.INTERRUPTED)
+
+        self._emit_telemetry(
+            RunFinished(
+                timestamp=datetime.now(UTC),
+                run_id=run_id,
+                status=RunStatus.INTERRUPTED,
+                row_count=shutdown_exc.rows_processed,
+                duration_ms=total_duration * 1000,
+            )
+        )
+
+        self._events.emit(
+            RunSummary(
+                run_id=run_id,
+                status=RunCompletionStatus.INTERRUPTED,
+                total_rows=shutdown_exc.rows_processed,
+                succeeded=shutdown_exc.rows_succeeded,
+                failed=shutdown_exc.rows_failed,
+                quarantined=shutdown_exc.rows_quarantined,
+                duration_seconds=total_duration,
+                exit_code=3,
+                routed=shutdown_exc.rows_routed,
+                routed_destinations=tuple(shutdown_exc.routed_destinations.items()),
+            )
+        )
+
+    def _emit_failed_ceremony(
+        self,
+        run_id: str,
+        recorder: LandscapeRecorder,
+        start_time: float,
+    ) -> None:
+        """Emit telemetry and EventBus events for a failed run.
+
+        Finalizes the run as FAILED, emits RunFinished telemetry and RunSummary
+        with zero metrics. Shared between run() (when run_completed=False) and
+        resume().
+        """
+        from elspeth.telemetry import RunFinished
+
+        total_duration = time.perf_counter() - start_time
+        recorder.finalize_run(run_id, status=RunStatus.FAILED)
+
+        self._emit_telemetry(
+            RunFinished(
+                timestamp=datetime.now(UTC),
+                run_id=run_id,
+                status=RunStatus.FAILED,
+                row_count=0,
+                duration_ms=total_duration * 1000,
+            )
+        )
+
+        self._events.emit(
+            RunSummary(
+                run_id=run_id,
+                status=RunCompletionStatus.FAILED,
+                total_rows=0,
+                succeeded=0,
+                failed=0,
+                quarantined=0,
+                duration_seconds=total_duration,
+                exit_code=2,  # exit_code: 0=success, 1=partial, 2=total failure
+                routed=0,
+                routed_destinations=(),
+            )
+        )
+
     def _maybe_checkpoint(
         self,
         run_id: str,
@@ -883,46 +994,15 @@ class Orchestrator:
             # Re-raise for caller to schedule retry based on check_after_seconds.
             raise
         except GracefulShutdownError as shutdown_exc:
-            # Graceful shutdown: all in-flight work flushed, checkpoints created.
-            # Mark run INTERRUPTED (resumable via `elspeth resume`).
-            total_duration = time.perf_counter() - run_start_time
-            recorder.finalize_run(run.run_id, status=RunStatus.INTERRUPTED)
-
-            run_duration_ms = total_duration * 1000
-            self._emit_telemetry(
-                RunFinished(
-                    timestamp=datetime.now(UTC),
-                    run_id=run.run_id,
-                    status=RunStatus.INTERRUPTED,
-                    row_count=shutdown_exc.rows_processed,
-                    duration_ms=run_duration_ms,
-                )
-            )
-
-            self._events.emit(
-                RunSummary(
-                    run_id=run.run_id,
-                    status=RunCompletionStatus.INTERRUPTED,
-                    total_rows=shutdown_exc.rows_processed,
-                    succeeded=shutdown_exc.rows_succeeded,
-                    failed=shutdown_exc.rows_failed,
-                    quarantined=shutdown_exc.rows_quarantined,
-                    duration_seconds=total_duration,
-                    exit_code=3,
-                    routed=shutdown_exc.rows_routed,
-                    routed_destinations=tuple(shutdown_exc.routed_destinations.items()),
-                )
-            )
-
+            self._emit_interrupted_ceremony(run.run_id, recorder, shutdown_exc, run_start_time)
             raise  # Propagate to CLI
         except Exception:
             # Emit RunSummary with failure status
-            total_duration = time.perf_counter() - run_start_time
-
             if run_completed:
-                # Export failed after successful run - emit PARTIAL status
-                # NOTE: RunFinished was already emitted at lines 604-612
-                # before the export attempt, so we only emit the EventBus event here
+                # Export failed after successful run — emit PARTIAL status.
+                # RunFinished was already emitted before the export attempt,
+                # so only emit the EventBus RunSummary here.
+                total_duration = time.perf_counter() - run_start_time
                 self._events.emit(
                     RunSummary(
                         run_id=run.run_id,
@@ -938,60 +1018,10 @@ class Orchestrator:
                     )
                 )
             else:
-                # Run failed before completion - emit FAILED status with zero metrics
-                recorder.finalize_run(run.run_id, status=RunStatus.FAILED)
-
-                # Emit telemetry AFTER Landscape finalize succeeds
-                self._emit_telemetry(
-                    RunFinished(
-                        timestamp=datetime.now(UTC),
-                        run_id=run.run_id,
-                        status=RunStatus.FAILED,
-                        row_count=0,
-                        duration_ms=total_duration * 1000,
-                    )
-                )
-
-                self._events.emit(
-                    RunSummary(
-                        run_id=run.run_id,
-                        status=RunCompletionStatus.FAILED,
-                        total_rows=0,
-                        succeeded=0,
-                        failed=0,
-                        quarantined=0,
-                        duration_seconds=total_duration,
-                        exit_code=2,  # exit_code: 0=success, 1=partial, 2=total failure
-                        routed=0,
-                        routed_destinations=(),
-                    )
-                )
+                self._emit_failed_ceremony(run.run_id, recorder, run_start_time)
             raise  # CRITICAL: Always re-raise - observability doesn't suppress errors
         finally:
-            # CRITICAL: Telemetry flush must not mask run errors or skip cleanup.
-            # If _flush_telemetry() raises TelemetryExporterError (fail_on_total=True),
-            # we must still run cleanup and preserve any pending exception.
-            import sys
-
-            import structlog
-
-            from elspeth.telemetry.errors import TelemetryExporterError
-
-            logger = structlog.get_logger()
-            pending_exc = sys.exc_info()[0]
-
-            try:
-                self._flush_telemetry()
-            except TelemetryExporterError as e:
-                logger.warning(
-                    "Telemetry flush failed - will raise after cleanup if no other exception pending",
-                    exporter=e.exporter_name,
-                    error=e.message,
-                )
-                if pending_exc is None:
-                    raise
-            # NOTE: Transform/sink/source cleanup is handled by _cleanup_plugins()
-            # in _execute_run()'s finally block. No need for separate cleanup here.
+            self._safe_flush_telemetry()
 
     def _register_graph_nodes_and_edges(
         self,
@@ -2402,95 +2432,15 @@ class Orchestrator:
 
             return result
         except GracefulShutdownError as shutdown_exc:
-            # Graceful shutdown: all in-flight work flushed, sinks written.
-            # Mark run INTERRUPTED (resumable via `elspeth resume`).
-            total_duration = time.perf_counter() - resume_start_time
-            recorder.finalize_run(run_id, status=RunStatus.INTERRUPTED)
-
-            run_duration_ms = total_duration * 1000
-            self._emit_telemetry(
-                RunFinished(
-                    timestamp=datetime.now(UTC),
-                    run_id=run_id,
-                    status=RunStatus.INTERRUPTED,
-                    row_count=shutdown_exc.rows_processed,
-                    duration_ms=run_duration_ms,
-                )
-            )
-
-            self._events.emit(
-                RunSummary(
-                    run_id=run_id,
-                    status=RunCompletionStatus.INTERRUPTED,
-                    total_rows=shutdown_exc.rows_processed,
-                    succeeded=shutdown_exc.rows_succeeded,
-                    failed=shutdown_exc.rows_failed,
-                    quarantined=shutdown_exc.rows_quarantined,
-                    duration_seconds=total_duration,
-                    exit_code=3,
-                    routed=shutdown_exc.rows_routed,
-                    routed_destinations=tuple(shutdown_exc.routed_destinations.items()),
-                )
-            )
-
+            self._emit_interrupted_ceremony(run_id, recorder, shutdown_exc, resume_start_time)
             raise  # Propagate to CLI
         except Exception:
-            # Non-shutdown exception during resume — finalize as FAILED to prevent
-            # the run from being stuck in RUNNING permanently (which blocks future
-            # resume attempts since recovery rejects RUNNING status).
-            total_duration = time.perf_counter() - resume_start_time
-            recorder.finalize_run(run_id, status=RunStatus.FAILED)
-
-            self._emit_telemetry(
-                RunFinished(
-                    timestamp=datetime.now(UTC),
-                    run_id=run_id,
-                    status=RunStatus.FAILED,
-                    row_count=0,
-                    duration_ms=total_duration * 1000,
-                )
-            )
-
-            self._events.emit(
-                RunSummary(
-                    run_id=run_id,
-                    status=RunCompletionStatus.FAILED,
-                    total_rows=0,
-                    succeeded=0,
-                    failed=0,
-                    quarantined=0,
-                    duration_seconds=total_duration,
-                    exit_code=2,
-                    routed=0,
-                    routed_destinations=(),
-                )
-            )
-
+            # Finalize as FAILED to prevent the run from being stuck in RUNNING
+            # permanently (which blocks future resume attempts).
+            self._emit_failed_ceremony(run_id, recorder, resume_start_time)
             raise
         finally:
-            # CRITICAL: Telemetry flush on resume path — mirrors run() semantics.
-            # If _flush_telemetry() raises TelemetryExporterError (fail_on_total=True),
-            # we must preserve any pending exception.
-            # See P2-2026-02-14-resume-does-not-flush-telemetry.
-            import sys
-
-            import structlog
-
-            from elspeth.telemetry.errors import TelemetryExporterError
-
-            _logger = structlog.get_logger()
-            pending_exc = sys.exc_info()[0]
-
-            try:
-                self._flush_telemetry()
-            except TelemetryExporterError as e:
-                _logger.warning(
-                    "Telemetry flush failed on resume - will raise after cleanup if no other exception pending",
-                    exporter=e.exporter_name,
-                    error=e.message,
-                )
-                if pending_exc is None:
-                    raise
+            self._safe_flush_telemetry()
 
     def _process_resumed_rows(
         self,

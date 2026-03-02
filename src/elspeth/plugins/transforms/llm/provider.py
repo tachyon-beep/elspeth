@@ -38,13 +38,44 @@ class FinishReason(StrEnum):
     TOOL_CALLS = "tool_calls"
 
 
-def parse_finish_reason(raw: str | None) -> FinishReason | None:
+class UnrecognizedFinishReason:
+    """Sentinel for finish reasons not in our FinishReason enum.
+
+    Preserves the raw value for audit trail recording, unlike None which
+    conflates "absent" (no finish_reason in response) with "unrecognized"
+    (provider sent a value we don't know about).
+    """
+
+    __slots__ = ("raw",)
+
+    def __init__(self, raw: str) -> None:
+        self.raw = raw
+
+    def __repr__(self) -> str:
+        return f"UnrecognizedFinishReason({self.raw!r})"
+
+    def __eq__(self, other: object) -> bool:
+        if isinstance(other, UnrecognizedFinishReason):
+            return self.raw == other.raw
+        return NotImplemented
+
+    def __hash__(self) -> int:
+        return hash(self.raw)
+
+
+#: Type alias for parsed finish reasons.  ``None`` means the provider did
+#: not include a finish_reason field at all (absent).
+ParsedFinishReason = FinishReason | UnrecognizedFinishReason | None
+
+
+def parse_finish_reason(raw: str | None) -> ParsedFinishReason:
     """Parse raw finish_reason string into validated enum.
 
-    Unknown values log a warning and return None. This is intentional —
-    providers have provider-specific finish reasons (e.g. Anthropic's
-    "end_turn", "max_tokens") that we don't want to crash on, but we
-    DO want visibility when new values appear.
+    Returns:
+        FinishReason: If the raw value is a known enum member.
+        UnrecognizedFinishReason: If the raw value is not recognized.
+            Preserves the raw string for audit recording.
+        None: If raw is None (no finish_reason in response).
 
     Providers should normalize their known finish reasons BEFORE calling
     this function (e.g. Anthropic "end_turn" → "stop").
@@ -52,7 +83,6 @@ def parse_finish_reason(raw: str | None) -> FinishReason | None:
     IMPORTANT: Callers MUST NOT call this with raw=None to represent
     "no finish_reason in response" — pass None directly instead. This
     function should only be called when a non-None raw value exists.
-    The return value of None means "provider sent an unrecognized value."
     """
     if raw is None:
         return None
@@ -67,7 +97,7 @@ def parse_finish_reason(raw: str | None) -> FinishReason | None:
             "If this value indicates a problem (e.g. safety filter), "
             "add it to FinishReason enum and handle in LLMTransform.",
         )
-        return None
+        return UnrecognizedFinishReason(raw)
 
 
 @dataclass(frozen=True, slots=True)
@@ -87,7 +117,7 @@ class LLMQueryResult:
     content: str
     usage: TokenUsage
     model: str
-    finish_reason: FinishReason | None = None
+    finish_reason: ParsedFinishReason = None
 
     def __post_init__(self) -> None:
         if not self.content or not self.content.strip():
