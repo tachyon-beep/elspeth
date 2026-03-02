@@ -1,5 +1,7 @@
 # ELSPETH Code Quality Assessment
 
+> **Pre-remediation snapshot (2026-02-22).** This assessment was conducted at the start of the RC3.3 branch, before remediation work began. Findings and ratings described here may have been addressed by subsequent commits on this branch. See the CHANGELOG for resolved items.
+
 ## Overall Rating: B
 
 ELSPETH demonstrates strong architectural vision and disciplined implementation of its core audit guarantees. The three-tier trust model is consistently applied, the Landscape audit backbone is well-hardened, and the contracts subsystem provides unusually rigorous type safety for a Python codebase. However, significant structural issues -- 6 bidirectional dependency cycles, a god object at the center of the contracts layer, ~1,330 lines of LLM plugin duplication, and two 2,000+ line files with deeply nested methods -- prevent a higher rating. The codebase is correct where it matters most (audit integrity, security boundaries) but carries accumulating complexity debt in the orchestration and plugin layers.

@@ -1,5 +1,7 @@
 # ELSPETH Architecture Analysis: Final Report
 
+> **Pre-remediation snapshot (2026-02-22).** This analysis was conducted at the start of the RC3.3 branch, before remediation work began. Findings described here may have been addressed by subsequent commits on this branch. See the CHANGELOG for resolved items.
+
 **Date:** 2026-02-22
 **Branch:** RC3.3-architectural-remediation
 **Scope:** 193 files across 45 packages (~66,000 lines)

@@ -99,7 +99,7 @@ Moved `SourceProtocol`, `TransformProtocol`, `SinkProtocol`, `BatchTransformProt
 
 ### Tests
 
-- Full suite: **10,563 tests collected**, 16 skipped, 3 xfailed — mypy/ruff/contracts all clean
+- Full suite: approximately 10,500 tests — mypy/ruff/contracts all clean
 - P0.5a–P4 test infrastructure overhaul: centralized factories, shared fixtures, eliminated ~1,700 lines of duplicated test boilerplate
 
 ---

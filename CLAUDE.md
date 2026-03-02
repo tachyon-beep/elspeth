@@ -115,7 +115,7 @@ def process(self, row: PipelineRow, ctx: PluginContext) -> TransformResult:
         return TransformResult.error({"reason": "invalid_json", "raw": llm_response.content[:200]}, retryable=False)
 
     if not isinstance(parsed, dict):
-        return TransformResult.error({"reason": "invalid_json_type"}, retryable=False)
+        return TransformResult.error({"reason": "invalid_json_type", "expected": "dict", "actual": type(parsed).__name__}, retryable=False)
 
     # 3. NOW it's our data (Tier 2) — validated, trust it
     output = {**row.to_dict(), "llm_classification": parsed["category"]}

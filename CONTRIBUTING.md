@@ -46,7 +46,7 @@ Use the centralized test factories — do not construct framework objects direct
 
 ```python
 # WRONG - couples test to constructor signature
-from elspeth.contracts.contexts import PluginContext
+from elspeth.contracts.plugin_context import PluginContext
 ctx = PluginContext(recorder=recorder, run_id="run-1", node_id="node-1", ...)
 
 # RIGHT - use factories
