@@ -1744,40 +1744,7 @@ class RowProcessor:
 
         # 4. Fork to paths
         if outcome.result.action.kind == RoutingKind.FORK_TO_PATHS:
-            for child_token in outcome.child_tokens:
-                # Look up coalesce info for this branch
-                cfg_branch_name = child_token.branch_name
-                cfg_coalesce_name: CoalesceName | None = None
-
-                if cfg_branch_name and BranchName(cfg_branch_name) in self._branch_to_coalesce:
-                    cfg_coalesce_name = self._branch_to_coalesce[BranchName(cfg_branch_name)]
-
-                # See config gate fork handler above for routing logic.
-                if cfg_coalesce_name is None and cfg_branch_name and BranchName(cfg_branch_name) in self._branch_to_sink:
-                    child_items.append(
-                        self._nav.create_work_item(
-                            token=child_token,
-                            current_node_id=None,
-                        )
-                    )
-                else:
-                    child_items.append(
-                        self._nav.create_continuation_work_item(
-                            token=child_token,
-                            current_node_id=node_id,
-                            coalesce_name=cfg_coalesce_name,
-                        )
-                    )
-
-            # NOTE: Parent FORKED outcome is now recorded atomically in fork_token()
-            # to eliminate crash window between child creation and outcome recording.
-            return _GateTerminal(
-                result=RowResult(
-                    token=current_token,
-                    final_data=current_token.row_data,
-                    outcome=RowOutcome.FORKED,
-                )
-            )
+            return self._handle_gate_fork(outcome, current_token, node_id, child_items)
 
         # 5. Jump to specific node
         if outcome.next_node_id is not None:
@@ -1828,6 +1795,62 @@ class RowProcessor:
                 f"Expected CONTINUE when no sink_name, fork, or next_node_id is set."
             )
         return _GateContinue(updated_token=current_token, updated_sink=current_on_success_sink)
+
+    def _handle_gate_fork(
+        self,
+        outcome: GateOutcome,
+        current_token: TokenInfo,
+        node_id: NodeID,
+        child_items: list[WorkItem],
+    ) -> _GateTerminal:
+        """Handle fork-to-paths routing: build child work items for each fork branch.
+
+        Iterates child tokens from the gate outcome, resolves coalesce info for each
+        branch, and appends continuation or terminal work items to child_items.
+
+        Args:
+            outcome: Config gate outcome containing child tokens and routing info.
+            current_token: Parent token being forked.
+            node_id: Current gate node ID for continuation work items.
+            child_items: Mutable list — fork paths append child work items here.
+
+        Returns:
+            _GateTerminal with FORKED outcome for the parent token.
+        """
+        for child_token in outcome.child_tokens:
+            # Look up coalesce info for this branch
+            cfg_branch_name = child_token.branch_name
+            cfg_coalesce_name: CoalesceName | None = None
+
+            if cfg_branch_name and BranchName(cfg_branch_name) in self._branch_to_coalesce:
+                cfg_coalesce_name = self._branch_to_coalesce[BranchName(cfg_branch_name)]
+
+            # See config gate fork handler above for routing logic.
+            if cfg_coalesce_name is None and cfg_branch_name and BranchName(cfg_branch_name) in self._branch_to_sink:
+                child_items.append(
+                    self._nav.create_work_item(
+                        token=child_token,
+                        current_node_id=None,
+                    )
+                )
+            else:
+                child_items.append(
+                    self._nav.create_continuation_work_item(
+                        token=child_token,
+                        current_node_id=node_id,
+                        coalesce_name=cfg_coalesce_name,
+                    )
+                )
+
+        # NOTE: Parent FORKED outcome is now recorded atomically in fork_token()
+        # to eliminate crash window between child creation and outcome recording.
+        return _GateTerminal(
+            result=RowResult(
+                token=current_token,
+                final_data=current_token.row_data,
+                outcome=RowOutcome.FORKED,
+            )
+        )
 
     def _handle_terminal_token(
         self,
