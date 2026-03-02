@@ -477,80 +477,220 @@ Progress data comes from the telemetry exporter (see [Telemetry](#telemetry-and-
 
 ## Config Generation Layer
 
+The config generation layer uses a **tool-use composition model** rather than free-form YAML generation. The LLM composes pipelines by making structured tool calls — discovering available plugins, configuring them step by step, and validating incrementally. The LLM never generates raw YAML; it makes decisions, and the tools handle formatting and validation.
+
+This design choice is fundamental: the prompt engineering focuses on the **decision space** (which plugins to choose, how to decompose a task into stages, what routing expressions to write) rather than **formatting** (YAML syntax, schema structure, wiring rules). The tools constrain the output to valid configurations — the LLM can't reference a plugin that doesn't exist because it selects from tool-returned lists.
+
+### Pipeline Composition API (Tool Interface)
+
+The composition API is a structured tool surface that any LLM (or programmatic client) can use to build a pipeline step by step. Each tool call validates immediately and returns structured feedback. This API is LLM-independent — it's testable without any LLM involved.
+
+#### Discovery Tools — "what can I use?"
+
+```python
+# Available as tool definitions for the LLM
+tools = [
+    {
+        "name": "list_sources",
+        "description": "List available source plugins with their descriptions and config schemas.",
+        "returns": [{"name": "csv", "description": "...", "config_schema": {...}}, ...]
+    },
+    {
+        "name": "list_transforms",
+        "description": "List available transform plugins (row transforms, gates, aggregations).",
+        "returns": [{"name": "llm", "description": "...", "config_schema": {...}}, ...]
+    },
+    {
+        "name": "list_sinks",
+        "description": "List available sink plugins with their descriptions and config schemas.",
+        "returns": [{"name": "csv", "description": "...", "config_schema": {...}}, ...]
+    },
+    {
+        "name": "get_plugin_options",
+        "description": "Get the full configuration schema for a specific plugin.",
+        "parameters": {"plugin": "string"},
+        "returns": {"schema": "Pydantic JSON Schema", "required_fields": [...], "examples": [...]}
+    },
+    {
+        "name": "infer_data_schema",
+        "description": "Infer the schema of the user's input data.",
+        "parameters": {"data_ref": "string"},
+        "returns": {"fields": [{"name": "customer_id", "type": "str"}, ...], "row_count": 2847, "sample_rows": [...]}
+    },
+    {
+        "name": "get_expression_grammar",
+        "description": "Get the supported gate expression syntax with examples.",
+        "returns": {"syntax": "...", "examples": ["row['field'] > 0.8", "row['status'] in ('a', 'b')"]}
+    },
+]
+```
+
+#### Composition Tools — "build it step by step"
+
+Each composition tool validates the configuration against the plugin's Pydantic schema immediately. Invalid options, missing required fields, or non-existent plugins return structured errors — the LLM gets feedback on every decision, not after assembling 50 lines of YAML.
+
+```python
+composition_tools = [
+    {
+        "name": "set_source",
+        "description": "Set the pipeline source. Returns the guaranteed output fields.",
+        "parameters": {"plugin": "string", "options": "object"},
+        "returns": {"status": "ok", "node_id": "source", "guaranteed_fields": ["customer_id", "amount"]}
+        # On error: {"status": "error", "reason": "Unknown plugin 'csvv'. Did you mean 'csv'?"}
+        # On error: {"status": "error", "reason": "Missing required field 'file_path' for csv source."}
+    },
+    {
+        "name": "add_transform",
+        "description": "Add a transform step. Returns the node ID and output field expectations.",
+        "parameters": {"plugin": "string", "options": "object"},
+        "returns": {"status": "ok", "node_id": "llm_classify", "output_fields": [...]}
+    },
+    {
+        "name": "add_gate",
+        "description": "Add a routing gate with an expression and named routes.",
+        "parameters": {"expression": "string", "routes": "object"},
+        "returns": {"status": "ok", "node_id": "urgency_gate", "branches": ["critical_path", "normal_path"]}
+        # On error: {"status": "error", "reason": "Invalid expression syntax: unexpected token 'AND'. Use 'and' (lowercase)."}
+    },
+    {
+        "name": "add_aggregation",
+        "description": "Add an aggregation step with trigger configuration.",
+        "parameters": {"trigger": "object", "options": "object"},
+        "returns": {"status": "ok", "node_id": "batch_1"}
+    },
+    {
+        "name": "add_sink",
+        "description": "Add an output sink.",
+        "parameters": {"name": "string", "plugin": "string", "options": "object"},
+        "returns": {"status": "ok", "node_id": "results_sink"}
+    },
+    {
+        "name": "connect",
+        "description": "Connect two nodes. Validates that upstream output fields satisfy downstream requirements.",
+        "parameters": {"from_node": "string", "to_node": "string", "on": "string"},
+        "returns": {"status": "ok"}
+        # On error: {"status": "error", "reason": "Field 'sentiment_score' required by 'threshold_gate' not in output of 'llm_classify'. Available: ['urgency', 'confidence']"}
+    },
+    {
+        "name": "remove_node",
+        "description": "Remove a node and its connections.",
+        "parameters": {"node_id": "string"},
+        "returns": {"status": "ok", "disconnected_edges": [...]}
+    },
+]
+```
+
+#### Review Tools — "check my work"
+
+```python
+review_tools = [
+    {
+        "name": "validate_pipeline",
+        "description": "Validate the assembled pipeline. Returns errors and warnings.",
+        "returns": {"valid": True, "warnings": [...]}
+        # On invalid: {"valid": False, "errors": ["Sink 'results' is unreachable from source", "Node 'llm_2' has no input connection"]}
+    },
+    {
+        "name": "preview_pipeline",
+        "description": "Get a human-readable summary of the assembled pipeline.",
+        "returns": {
+            "summary": "Read CSV (2,847 rows) → LLM classify by urgency → Route critical/high to Review, rest to Results",
+            "node_count": 5,
+            "estimated_cost": "$4.20",
+            "review_required_nodes": ["llm_classify"],
+        }
+    },
+    {
+        "name": "submit_pipeline",
+        "description": "Finalize the pipeline design. Only callable after validate_pipeline returns valid.",
+        "returns": {"pipeline_design_id": "pd-abc123", "review_requirements": {"llm_classify": "review_required"}}
+    },
+]
+```
+
+#### Why Tool-Use Over Free-Form Generation
+
+| Aspect | Free-form YAML generation | Tool-use composition |
+|---|---|---|
+| **Validation** | After the fact (generate → validate → retry) | Per-step (each tool call validates immediately) |
+| **Hallucination** | LLM can invent plugin names, fields, syntax | Tools return valid options — can't select what doesn't exist |
+| **Auditability** | One opaque generation step | Sequence of discrete, logged tool calls |
+| **Refinement** | Re-generate or patch YAML string | Add/modify nodes incrementally via tool calls |
+| **Reliability** | Fragile — YAML syntax errors, schema drift | Robust — tools enforce the contract at every step |
+| **Testability** | Hard — need to mock LLM output | Easy — tool API is testable without any LLM |
+| **Prompt complexity** | High — LLM needs full schema knowledge in context | Low — LLM discovers via tools, focuses on decisions |
+
+### LLM Pipeline Composer (Agentic Loop)
+
+The composer is an agentic loop that drives the composition API via tool calls. The LLM receives the user's natural language request and the tool definitions, then iterates through discovery → composition → review.
+
+**Prompt engineering focus areas** (decision space, not formatting):
+
+1. **Task decomposition** — when a user says "analyse sentiment and cluster by theme," the LLM must decide: is this one LLM transform with a complex prompt, or two sequential transforms (sentiment → clustering)? How many stages does a research task need?
+2. **Plugin selection** — given a task like "find the most common words," should the LLM use a field_mapper with string operations, an LLM transform, or an aggregation? The tools expose what's available; the prompt engineering guides when to use each.
+3. **Routing design** — when to add gates (threshold-based routing), how to decompose routing expressions, when fork/coalesce patterns are appropriate vs linear pipelines.
+4. **Field wiring** — understanding how output fields from one transform become input fields for the next. The `connect()` tool validates this, but the LLM needs to anticipate field names when configuring transforms.
+5. **Few-shot patterns** — common pipeline shapes (classification, extraction, multi-stage analysis, aggregation with statistical roll-up) as examples in the system prompt. These guide the LLM's structural decisions, not its formatting.
+
+```python
+async def compose_pipeline(prompt: str, data_ref: str) -> PipelineDesign:
+    """Drive the composition API via LLM tool calls."""
+
+    messages = [
+        {"role": "system", "content": COMPOSER_SYSTEM_PROMPT},
+        {"role": "user", "content": f"Task: {prompt}\nData: {data_ref}"},
+    ]
+
+    for turn in range(MAX_COMPOSITION_TURNS):
+        response = await llm.chat(messages=messages, tools=ALL_COMPOSITION_TOOLS)
+
+        if response.stop_reason == "end_turn":
+            break  # LLM is done composing
+
+        # Execute each tool call against the composition API
+        for tool_call in response.tool_calls:
+            result = composition_api.execute(tool_call.name, tool_call.arguments)
+            messages.append({"role": "tool", "content": result.to_json()})
+
+        # If the LLM called submit_pipeline, we're done
+        if any(tc.name == "submit_pipeline" for tc in response.tool_calls):
+            return composition_api.get_pipeline_design()
+
+    raise CompositionError(f"LLM did not submit pipeline within {MAX_COMPOSITION_TURNS} turns")
+```
+
+**Refinement is incremental.** When the user says "also extract dates," the LLM receives the current pipeline state (via `preview_pipeline()`) and makes additional tool calls — `add_transform(plugin="field_mapper", ...)`, `connect(...)`. No re-generation, no patching of YAML strings.
+
 ### Pipeline Design Artifact
 
-The LLM produces a `PipelineDesign` that contains both the user-facing representation and the executable config:
+The composition API assembles a `PipelineDesign` from the accumulated tool calls. The YAML is **derived** from the tool call sequence, never hand-written by the LLM:
 
 ```python
 @dataclass(frozen=True)
 class PipelineDesign:
-    """The LLM's output — visual and executable representations."""
+    """Assembled by the composition API from tool calls."""
 
     # What the user sees
     graph_descriptor: GraphDescriptor  # Nodes, edges, user-visible settings
 
-    # What ELSPETH executes (derived from above + system defaults)
+    # What ELSPETH executes (derived from composition state + system defaults)
     pipeline_yaml: str
 
     # LLM-generated summary for the summary report view
     summary_report: SummaryReport
 
-    # Review classification per node
+    # Review classification per node (determined by platform config, not LLM)
     review_requirements: dict[str, ReviewTier]  # node_id → tier
 
-    # Provenance
+    # Provenance — the full tool call sequence, not just a hash
     generation_prompt: str
+    tool_call_sequence: list[ToolCallRecord]  # Every tool call with arguments and results
     llm_model: str
-    llm_response_hash: str
 ```
 
-The `GraphDescriptor` and `pipeline_yaml` are derived from the same internal representation. A user edit on the canvas updates the descriptor, which re-derives the YAML.
+The `tool_call_sequence` is the provenance record — it captures every decision the LLM made and every validation result it received. An auditor can replay the sequence to understand exactly why the pipeline was shaped the way it is.
 
-### LLM Context Requirements
-
-The config generation LLM needs:
-
-1. **Plugin catalog** — every available plugin with its config schema, input/output requirements, and plain English description of what it does
-2. **Expression grammar** — what gate conditions can look like (`row['field'] > 0.8`, `row['field'] in ('a', 'b')`)
-3. **Wiring rules** — `input`/`on_success`/`on_error` connection semantics, namespace separation
-4. **Data schema** — column names, types, and sample rows from the user's data
-5. **Few-shot examples** — common pipeline shapes for classification, extraction, aggregation, etc.
-6. **Review classification** — which plugins require review, so the summary report can highlight them
-
-### Validation and Refinement Loop
-
-Generated configs are validated before presentation to the user. If validation fails, the error is fed back to the LLM for correction (up to 3 rounds):
-
-```python
-async def generate_config(prompt: str, data_ref: str) -> PipelineDesign:
-    """Generate and validate pipeline config from natural language."""
-
-    context = build_generation_context(
-        plugin_catalog=get_plugin_catalog(),
-        data_sample=sample_data(data_ref, n=5),
-        data_schema=infer_schema(data_ref),
-    )
-
-    config_yaml = await llm.generate(
-        system=PIPELINE_GENERATION_SYSTEM_PROMPT,
-        user=f"Task: {prompt}\n\nSchema: {context.schema}\nSample: {context.sample}",
-    )
-
-    for attempt in range(3):
-        try:
-            settings = load_settings_from_string(config_yaml)
-            plugins = instantiate_plugins_from_config(settings)
-            graph = ExecutionGraph.from_plugin_instances(...)
-            graph.validate()
-            return build_pipeline_design(config_yaml, settings, graph)
-        except (ValidationError, GraphValidationError) as e:
-            config_yaml = await llm.refine(
-                original=config_yaml,
-                error=str(e),
-            )
-
-    raise ConfigGenerationError("Failed after 3 validation attempts")
-```
+The `GraphDescriptor` and `pipeline_yaml` are derived from the same internal composition state. A user edit on the canvas updates the composition state (equivalent to an additional tool call), which re-derives both representations.
 
 ---
 
@@ -772,10 +912,13 @@ Recommended: Claude Opus or Sonnet class models — strong at structured output,
 | `ExecutionGraph.from_plugin_instances()` | **Exists** | None |
 | `elspeth validate` equivalent | **Exists** | Extract from CLI into library function |
 | `TelemetryManager` + exporters | **Exists** | Add Redis exporter |
-| Plugin catalog discovery | **Exists** (`PluginManager`) | Serialize to LLM-consumable format |
+| Plugin catalog discovery | **Exists** (`PluginManager`) | Serialize to tool-consumable format |
 | PostgreSQL Landscape backend | **Exists** | None |
 | `load_settings()` from string | **Exists** | Verify works without file path |
-| **Config generation LLM wrapper** | **New** | Prompt engineering + validation loop |
+| Pydantic plugin config schemas | **Exists** | Expose as JSON Schema for tool validation |
+| Expression parser grammar | **Exists** | Expose grammar spec for `get_expression_grammar` tool |
+| **Pipeline Composition API** | **New** | Discovery, composition, review, and submission tools with per-step validation |
+| **LLM Pipeline Composer** | **New** | Agentic tool-use loop — decision-space prompt engineering, few-shot pipeline patterns |
 | **Conversation Service (FastAPI)** | **New** | Chat API, config store, refinement |
 | **Temporal workflow definitions** | **New** | Task workflow, activity definitions |
 | **Redis telemetry exporter** | **New** | Implements existing `TelemetryExporter` protocol |
@@ -797,7 +940,7 @@ Recommended: Claude Opus or Sonnet class models — strong at structured output,
 
 3. **LLM cost attribution.** The config generation LLM has a cost. The pipeline LLM transforms have a cost. How are these attributed and billed? Per-task metering? Per-user quotas?
 
-4. **Iterative refinement scope.** "Make it also extract dates" — does this re-generate from scratch or patch the existing config? Patching is faster but risks drift from the original intent.
+4. **~~Iterative refinement scope~~** *(Resolved by tool-use model.)* Refinement is naturally incremental — the LLM receives the current pipeline state via `preview_pipeline()` and makes additional tool calls (`add_transform`, `connect`, `remove_node`). No re-generation or YAML patching needed. The tool call sequence captures the full history including refinement steps.
 
 5. **Template library.** Should common pipeline patterns be pre-built templates that the LLM can reference? ("This looks like a classification task — starting from the classification template.") This would improve generation quality and speed.
 
