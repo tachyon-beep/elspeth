@@ -802,58 +802,27 @@ class Orchestrator:
             signal.signal(signal.SIGINT, original_sigint)
             signal.signal(signal.SIGTERM, original_sigterm)
 
-    def run(
+    def _initialize_database_phase(
         self,
         config: PipelineConfig,
-        graph: ExecutionGraph | None = None,
-        settings: ElspethSettings | None = None,
-        batch_checkpoints: dict[str, BatchCheckpointState] | None = None,
-        *,
         payload_store: PayloadStore,
-        secret_resolutions: list[SecretResolutionInput] | None = None,
-        shutdown_event: threading.Event | None = None,
-    ) -> RunResult:
-        """Execute a pipeline run.
+        secret_resolutions: list[SecretResolutionInput] | None,
+    ) -> tuple[LandscapeRecorder, Any]:
+        """Execute the DATABASE phase: create recorder, begin run, record secrets.
 
         Args:
-            config: Pipeline configuration with plugins
-            graph: Pre-validated execution graph (required)
-            settings: Full settings (for post-run hooks like export)
-            batch_checkpoints: Typed batch transform checkpoints to restore
-                (from previous BatchPendingError). Maps node_id ->
-                BatchCheckpointState. Used when retrying a run after a batch
-                transform raised BatchPendingError.
-            payload_store: PayloadStore for persisting source row payloads.
-                Required for audit compliance (CLAUDE.md: "Source entry - Raw data
-                stored before any processing").
-            secret_resolutions: Optional list of secret resolution records from
-                load_secrets_from_config(). When provided, these are recorded
-                in the audit trail after run creation. Each record contains
-                env_var_name, source, vault_url, secret_name, timestamp, latency_ms,
-                and secret_value (for fingerprinting, never stored).
-            shutdown_event: Optional pre-created shutdown event for testing.
-                When provided, signal handler installation is skipped and this
-                event is passed directly to _execute_run(). Production callers
-                should omit this (signal handlers are installed automatically).
+            config: Pipeline configuration.
+            payload_store: PayloadStore for audit compliance.
+            secret_resolutions: Optional secret resolution records.
+
+        Returns:
+            Tuple of (recorder, run) where run has run_id and config_hash attributes.
 
         Raises:
-            ValueError: If graph or payload_store is not provided
+            Exception: Re-raises any database connection or initialization failure.
         """
-        if graph is None:
-            raise ValueError("ExecutionGraph is required. Build with ExecutionGraph.from_plugin_instances()")
-        if payload_store is None:
-            raise ValueError("PayloadStore is required for audit compliance.")
+        from elspeth.telemetry import RunStarted
 
-        # Schema validation now happens in ExecutionGraph.validate() during graph construction
-
-        # Local imports for telemetry events - consolidated here to avoid repeated imports
-        from elspeth.telemetry import (
-            PhaseChanged,
-            RunFinished,
-            RunStarted,
-        )
-
-        # DATABASE phase - create recorder and begin run
         phase_start = time.perf_counter()
         try:
             self._events.emit(PhaseStarted(phase=PipelinePhase.DATABASE, action=PhaseAction.CONNECTING))
@@ -898,6 +867,119 @@ class Orchestrator:
             self._events.emit(PhaseError(phase=PipelinePhase.DATABASE, error=e))
             raise  # CRITICAL: Always re-raise - database connection failure is fatal
 
+        return recorder, run
+
+    def _execute_export_phase(
+        self,
+        recorder: LandscapeRecorder,
+        run_id: str,
+        settings: ElspethSettings,
+        config: PipelineConfig,
+    ) -> None:
+        """Execute the EXPORT phase: export Landscape data to configured sink.
+
+        Args:
+            recorder: LandscapeRecorder for status tracking.
+            run_id: Run identifier.
+            settings: Full settings (export config accessed from settings.landscape.export).
+            config: Pipeline configuration (sinks needed for export).
+
+        Raises:
+            Exception: Re-raises any export failure (run is still "completed" in Landscape).
+        """
+        from elspeth.telemetry import PhaseChanged
+
+        export_config = settings.landscape.export
+        recorder.set_export_status(
+            run_id,
+            status=ExportStatus.PENDING,
+            export_format=export_config.format,
+            export_sink=export_config.sink,
+        )
+
+        phase_start = time.perf_counter()
+        try:
+            self._events.emit(PhaseStarted(phase=PipelinePhase.EXPORT, action=PhaseAction.EXPORTING, target=export_config.sink))
+
+            # Emit telemetry PhaseChanged for EXPORT
+            self._emit_telemetry(
+                PhaseChanged(
+                    timestamp=datetime.now(UTC),
+                    run_id=run_id,
+                    phase=PipelinePhase.EXPORT,
+                    action=PhaseAction.EXPORTING,
+                )
+            )
+
+            # Call module function directly (no wrapper method)
+            export_landscape(self._db, run_id, settings, config.sinks)
+
+            recorder.set_export_status(run_id, status=ExportStatus.COMPLETED)
+            self._events.emit(PhaseCompleted(phase=PipelinePhase.EXPORT, duration_seconds=time.perf_counter() - phase_start))
+        except Exception as export_error:
+            self._events.emit(PhaseError(phase=PipelinePhase.EXPORT, error=export_error, target=export_config.sink))
+            recorder.set_export_status(
+                run_id,
+                status=ExportStatus.FAILED,
+                error=str(export_error),
+            )
+            # Re-raise so caller knows export failed
+            # (run is still "completed" in Landscape)
+            raise
+
+    def run(
+        self,
+        config: PipelineConfig,
+        graph: ExecutionGraph | None = None,
+        settings: ElspethSettings | None = None,
+        batch_checkpoints: dict[str, BatchCheckpointState] | None = None,
+        *,
+        payload_store: PayloadStore,
+        secret_resolutions: list[SecretResolutionInput] | None = None,
+        shutdown_event: threading.Event | None = None,
+    ) -> RunResult:
+        """Execute a pipeline run.
+
+        Args:
+            config: Pipeline configuration with plugins
+            graph: Pre-validated execution graph (required)
+            settings: Full settings (for post-run hooks like export)
+            batch_checkpoints: Typed batch transform checkpoints to restore
+                (from previous BatchPendingError). Maps node_id ->
+                BatchCheckpointState. Used when retrying a run after a batch
+                transform raised BatchPendingError.
+            payload_store: PayloadStore for persisting source row payloads.
+                Required for audit compliance (CLAUDE.md: "Source entry - Raw data
+                stored before any processing").
+            secret_resolutions: Optional list of secret resolution records from
+                load_secrets_from_config(). When provided, these are recorded
+                in the audit trail after run creation. Each record contains
+                env_var_name, source, vault_url, secret_name, timestamp, latency_ms,
+                and secret_value (for fingerprinting, never stored).
+            shutdown_event: Optional pre-created shutdown event for testing.
+                When provided, signal handler installation is skipped and this
+                event is passed directly to _execute_run(). Production callers
+                should omit this (signal handlers are installed automatically).
+
+        Raises:
+            ValueError: If graph or payload_store is not provided
+        """
+        if graph is None:
+            raise ValueError("ExecutionGraph is required. Build with ExecutionGraph.from_plugin_instances()")
+        if payload_store is None:
+            raise ValueError("PayloadStore is required for audit compliance.")
+
+        # Schema validation now happens in ExecutionGraph.validate() during graph construction
+
+        # DATABASE phase - create recorder and begin run
+        recorder, run = self._initialize_database_phase(
+            config,
+            payload_store,
+            secret_resolutions,
+        )
+
+        from elspeth.telemetry import RunFinished
+
         run_completed = False
         run_start_time = time.perf_counter()
         try:
@@ -939,43 +1021,7 @@ class Orchestrator:
 
             # EXPORT phase - post-run landscape export (if enabled)
             if settings is not None and settings.landscape.export.enabled:
-                export_config = settings.landscape.export
-                recorder.set_export_status(
-                    run.run_id,
-                    status=ExportStatus.PENDING,
-                    export_format=export_config.format,
-                    export_sink=export_config.sink,
-                )
-
-                phase_start = time.perf_counter()
-                try:
-                    self._events.emit(PhaseStarted(phase=PipelinePhase.EXPORT, action=PhaseAction.EXPORTING, target=export_config.sink))
-
-                    # Emit telemetry PhaseChanged for EXPORT
-                    self._emit_telemetry(
-                        PhaseChanged(
-                            timestamp=datetime.now(UTC),
-                            run_id=run.run_id,
-                            phase=PipelinePhase.EXPORT,
-                            action=PhaseAction.EXPORTING,
-                        )
-                    )
-
-                    # Call module function directly (no wrapper method)
-                    export_landscape(self._db, run.run_id, settings, config.sinks)
-
-                    recorder.set_export_status(run.run_id, status=ExportStatus.COMPLETED)
-                    self._events.emit(PhaseCompleted(phase=PipelinePhase.EXPORT, duration_seconds=time.perf_counter() - phase_start))
-                except Exception as export_error:
-                    self._events.emit(PhaseError(phase=PipelinePhase.EXPORT, error=export_error, target=export_config.sink))
-                    recorder.set_export_status(
-                        run.run_id,
-                        status=ExportStatus.FAILED,
-                        error=str(export_error),
-                    )
-                    # Re-raise so caller knows export failed
-                    # (run is still "completed" in Landscape)
-                    raise
+                self._execute_export_phase(recorder, run.run_id, settings, config)
 
             # Emit RunSummary event with final metrics
             total_duration = time.perf_counter() - run_start_time

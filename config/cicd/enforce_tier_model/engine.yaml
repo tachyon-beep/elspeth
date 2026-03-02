@@ -154,17 +154,17 @@ allow_hits:
   reason: Type dispatch on _process_single_token return (RowResult | list[RowResult] | None)
   safety: Crashes on type mismatch - no silent fallback
   expires: '2026-03-11'
-- key: engine/orchestrator/core.py:R5:Orchestrator:_initialize_run_context:fp=f81de4bea6922eb9
+- key: engine/orchestrator/core.py:R5:Orchestrator:_initialize_run_context:fp=40ebcb9d228c561c
   owner: architecture
   reason: Type dispatch - RowPlugin is TransformProtocol, isinstance check filters GateSettings from transforms list to access is_batch_aware
   safety: Crashes on type mismatch - no silent fallback
   expires: '2026-05-13'
-- key: engine/orchestrator/core.py:R5:Orchestrator:_handle_quarantine_row:fp=0f26fc8b905de4d7
+- key: engine/orchestrator/core.py:R5:Orchestrator:_handle_quarantine_row:fp=90a2dff906b2b6f9
   owner: architecture
   reason: Tier 3 boundary - quarantine path handles non-dict source rows
   safety: Crashes on type mismatch - no silent fallback
   expires: '2026-05-13'
-- key: engine/orchestrator/core.py:R6:Orchestrator:_handle_quarantine_row:fp=ab806a8ed3cd76d3
+- key: engine/orchestrator/core.py:R6:Orchestrator:_handle_quarantine_row:fp=6dccc086efdf459b
   owner: bugfix
   reason: Tier-3 boundary — quarantined row data may contain NaN/Infinity that stable_hash rejects
   safety: Falls back to repr_hash for telemetry content_hash; audit trail uses separate hashing path
