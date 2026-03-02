@@ -1,9 +1,25 @@
-<!-- filigree:instructions:v1.3.0:6bd811c8 -->
+<!-- filigree:instructions:v1.4.0:c706f2df -->
 ## Filigree Issue Tracker
 
 Use `filigree` for all task tracking in this project. Data lives in `.filigree/`.
 
-### Quick Reference
+### MCP Tools (Preferred)
+
+When MCP is configured, prefer `mcp__filigree__*` tools over CLI commands — they're
+faster and return structured data. Key tools:
+
+- `get_ready` / `get_blocked` — find available work
+- `get_issue` / `list_issues` / `search_issues` — read issues
+- `create_issue` / `update_issue` / `close_issue` — manage issues
+- `claim_issue` / `claim_next` — atomic claiming
+- `add_comment` / `add_label` — metadata
+- `create_plan` / `get_plan` — milestone planning
+- `get_stats` / `get_metrics` — project health
+- `get_valid_transitions` — workflow navigation
+
+Fall back to CLI (`filigree <command>`) when MCP is unavailable.
+
+### CLI Quick Reference
 
 ```bash
 # Finding work

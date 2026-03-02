@@ -5,12 +5,12 @@
         "hooks": [
           {
             "type": "command",
-            "command": "/home/john/elspeth-rapid/.venv/bin/filigree session-context",
+            "command": "/home/john/elspeth/.venv/bin/filigree session-context",
             "timeout": 5000
           },
           {
             "type": "command",
-            "command": "/home/john/elspeth-rapid/.venv/bin/filigree ensure-dashboard",
+            "command": "/home/john/elspeth/.venv/bin/filigree ensure-dashboard",
             "timeout": 5000
           }
         ]
