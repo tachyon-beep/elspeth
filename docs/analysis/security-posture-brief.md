@@ -2,7 +2,7 @@
 
 **Date:** 2026-03-01
 **Document classification:** OFFICIAL
-**Framework version:** 0.3.0 (RC-3.3)
+**Framework version:** 0.3.3 (RC-3.3)
 **Measurements as of:** commit `ab9e2648` (2026-03-01, branch `RC3.3-architectural-remediation`)
 **Prepared by:** Architecture analysis, synthesized from engineering specification, requirements, CI tooling, and test suite
 **Intended audience:** CISOs and other security evaluators assessing the framework's suitability for use in auditable data processing environments

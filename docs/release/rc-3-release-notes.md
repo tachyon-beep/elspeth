@@ -104,12 +104,53 @@ Documents the strict 4-layer model (`contracts → core → engine → plugins`)
 - 10 silent failure findings remediated in LLM plugins (Langfuse, tracing, finish reasons, content filtering)
 - 4 bugs fixed in unified `LLMTransform` (limiter dispatch, response_format, output_fields extraction, NaN/Infinity rejection)
 - `on_error` now required for aggregation transforms
+- OpenRouter parallel query client race condition (reference counting for shared HTTP clients)
+- Aggregation BUFFERED lifecycle gap (triggering token skipping BUFFERED state)
+- BatchReplicate quarantine audit gap (per-token terminal recording)
+- KeywordFilter fail-closed on non-string values (was fail-open)
+- Multi-query regressions from T10 (field type validation, pooled execution, Pydantic schema, output_schema_config)
+- LLM empty/whitespace content detection at provider boundary
+- Telemetry/Landscape hash divergence (hashes now read from recorded Call object)
+- URL password fingerprint percent-encoding
+- TUI coalesce error crash on older record shapes
+- CLI explain passphrase silently swallowed (T4), MCP diagnose quarantine count unscoped (T5), ChaosLLM MCP CLI broken (T27)
+- Azure AI tracing silent no-op wired into unified LLM transform
+- Contract-level fixes: Token.run_id false optional, CoalesceFailureReason frozen dataclass, stable_hash dead parameter, Call XOR invariant, RawCallPayload copy semantics, SanitizedDatabaseUrl DSN handling
+- Code review remediation: 4 critical, 8 important, 6 suggestion fixes
+
+### Test Infrastructure Overhaul (RC-3.3)
+
+6-phase systematic hardening of the test suite, eliminating brittle coupling to internal constructors and enforcing production code paths:
+
+- **P0.5a--b**: New factories (`make_recorder_with_run()`, `register_test_node()`, etc.) + refactored existing factories to single delegation point
+- **P1**: Replaced ~350 direct `PluginContext(...)` constructions across 53 files with centralized `make_context()` factory
+- **P2**: Replaced ~452 inline `LandscapeDB.in_memory()`/`LandscapeRecorder(...)` constructions across 76 files with factory calls (net −715 lines)
+- **P3**: Replaced ~529 lines of duplicated inline test plugin classes across 10 files with shared `tests.fixtures.plugins` imports
+- **P4**: Re-raise guards, frozen evidence types (`ExceptionResult`, `FailureInfo`), aggregation DRY via `accumulate_row_outcomes()` + `ExecutionCounters`
+- Resolved all 401 mypy errors across test suite (103 files, ~74 stale `# type: ignore` removed)
 
 ### Tests (RC-3.3)
 
-- 65 new tests for review-identified coverage gaps
-- Full suite: 10,482 tests collected, 16 skipped, 3 xfailed
+- ~150 new tests across hardening, code review, and infrastructure phases
+- Full suite: **10,563 tests collected**, 16 skipped, 3 xfailed
 - mypy/ruff/contracts all clean
+
+### Dead Code Removal (RC-3.3)
+
+- `BaseLLMTransform` abstract class (3,473 lines, zero subclasses)
+- `RequestRecord` dataclass (never instantiated)
+- `TokenManager.payload_store` parameter (accepted but never read)
+- `populate_run()` (raw SQL bypass of `LandscapeRecorder`)
+- LLM validation utilities (`render_template_safe`, `check_truncation`)
+- ~21 low-value tests (vacuous assertions, mock-testing, implementation coupling)
+
+### Other Additions (RC-3.3)
+
+- Security posture brief documenting threat model, controls, and residual risk
+- TYPE_CHECKING layer import detection in `enforce_tier_model.py` CI gate
+- `PluginBundle` frozen dataclass for typed plugin instantiation results
+- Fingerprint primitives moved to `contracts/security.py` (stdlib-only)
+- MCP server `_ToolDef` registry replacing if/elif dispatch chain
 
 ---
 
@@ -489,7 +530,7 @@ Aggregation timeout triggers fire when the next row arrives, not during complete
 
 ## Infrastructure Changes
 
-- Version bumped to `0.3.0` (from `0.1.0`)
+- Version bumped to `0.3.3` (from `0.1.0` via `0.3.0`)
 - pyproject.toml classifier updated to `Development Status :: 4 - Beta`
 - REQUIREMENTS.md deleted (pyproject.toml is the single source of truth)
 - Obsolete `.codex` configuration file removed
@@ -516,8 +557,8 @@ The full set of RC-3 guarantees is documented in [docs/release/guarantees.md](..
 |--------|-------|
 | Source lines | ~80,400 across 243 Python files |
 | Test lines | ~232,100 (2.9:1 test-to-source ratio) |
-| Tests collected | 10,482 |
-| Tests passing | 10,463 |
+| Tests collected | 10,563 |
+| Tests passing | 10,476 |
 | Tests skipped | 16 |
 | Commits (RC-3 branches) | 200+ |
 | Remediation items resolved | ~85 of 75+ (expanded scope in RC-3.3) |

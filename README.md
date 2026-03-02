@@ -512,7 +512,7 @@ docker run --rm \
   -v $(pwd)/input:/app/input:ro \
   -v $(pwd)/output:/app/output \
   -v $(pwd)/state:/app/state \
-  ghcr.io/johnm-dta/elspeth:v0.3.0 \
+  ghcr.io/johnm-dta/elspeth:v0.3.3 \
   run --settings /app/config/pipeline.yaml --execute
 
 # Health check

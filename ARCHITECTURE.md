@@ -3,7 +3,7 @@
 C4 model documentation for the ELSPETH auditable pipeline framework.
 
 **Last Updated:** 2026-03-01 (synchronized with RC-3.3 branch)
-**Framework Version:** 0.3.0 (RC-3.3)
+**Framework Version:** 0.3.3 (RC-3.3)
 **Architecture Grade:** A- (Production Ready)
 
 ---

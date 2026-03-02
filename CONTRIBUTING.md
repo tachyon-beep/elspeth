@@ -40,6 +40,39 @@ All of these must pass before submitting changes:
 - **No legacy shims or backwards compatibility.** When changing something, delete the old code completely. No deprecation wrappers, no commented-out code, no compatibility layers.
 - **Test through production code paths.** Integration tests must use `ExecutionGraph.from_plugin_instances()` and `instantiate_plugins_from_config()`, not manually constructed objects.
 
+## Writing Tests
+
+Use the centralized test factories — do not construct framework objects directly:
+
+```python
+# WRONG - couples test to constructor signature
+from elspeth.contracts.contexts import PluginContext
+ctx = PluginContext(recorder=recorder, run_id="run-1", node_id="node-1", ...)
+
+# RIGHT - use factories
+from tests.fixtures.landscape import make_recorder_with_run
+from tests.fixtures.factories import make_context
+recorder, run_id = make_recorder_with_run()
+ctx = make_context(recorder=recorder, run_id=run_id)
+```
+
+**Key factories:**
+
+| Factory | Location | Purpose |
+|---------|----------|---------|
+| `make_recorder_with_run()` | `tests.fixtures.landscape` | Create `LandscapeRecorder` with a registered run |
+| `make_context()` | `tests.fixtures.factories` | Create `PluginContext` with correct wiring |
+| `make_landscape_db()` | `tests.fixtures.landscape` | Create in-memory `LandscapeDB` |
+| `register_test_node()` | `tests.fixtures.landscape` | Register a node in the audit trail |
+| Shared plugins | `tests.fixtures.plugins` | `PassthroughTransform`, `FailingSink`, etc. |
+
+**Additional quality checks:**
+
+```bash
+# Tier model enforcement (layer dependency detection)
+.venv/bin/python scripts/cicd/enforce_tier_model.py check --root src/elspeth --allowlist config/cicd/enforce_tier_model
+```
+
 ## Commit Guidelines
 
 - Keep commits focused on a single logical change.

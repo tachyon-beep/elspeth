@@ -1,7 +1,7 @@
 # Beyond Vibe Coding: How ELSPETH Achieves Structural Security in an AI-Assisted Codebase
 
 **Date:** 2026-03-01
-**Framework Version:** 0.3.0 (RC-3.3)
+**Framework Version:** 0.3.3 (RC-3.3)
 **Measurements as of:** commit `ab9e2648` (2026-03-01, branch `RC3.3-architectural-remediation`)
 **Author:** Architecture analysis, synthesized from CLAUDE.md, ARCHITECTURE.md, requirements, CI tooling, and test suite
 **Companion document:** This provides detailed comparative context for the [Security Architecture and Assurance Evidence](security-posture-brief.md) brief, which contains the formal assurance evidence.

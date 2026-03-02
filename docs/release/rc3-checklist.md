@@ -388,8 +388,8 @@ The routing trilogy (ADR-004, ADR-005) replaced implicit pipeline wiring with ex
 
 ### 12.1 Version Strings (F-01)
 
-- [ ] All version references updated to RC-3 / 0.3.0
-- [ ] `pyproject.toml` version is `0.3.0`
+- [ ] All version references updated to RC-3.3 / 0.3.3
+- [ ] `pyproject.toml` version is `0.3.3`
 - [ ] `src/elspeth/__init__.py` version matches pyproject.toml
 
 ### 12.2 Gate Plugin Removal (F-03)

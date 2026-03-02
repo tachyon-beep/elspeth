@@ -21,7 +21,7 @@
 | Field Handling | Assumed clean input | Full normalization pipeline with collision detection |
 | Shutdown | Not addressed | Cooperative graceful shutdown with checkpoint + resume |
 | Telemetry | Not addressed | OpenTelemetry with OTLP, Azure Monitor, Datadog exporters |
-| Testing | Manual | ~10,400 automated tests (unit, integration, e2e, property, performance) |
+| Testing | Manual | ~10,500 automated tests (unit, integration, e2e, property, performance) |
 
 ---
 
@@ -497,7 +497,7 @@ All gate plugin infrastructure deliberately removed (~3,000 lines deleted):
 
 **Commits:** 7-phase migration (`f62aa1a3` through `9c657fb7`)
 
-- ~10,400 tests at RC-3.3 (grown from initial 8,138 at cutover)
+- ~10,563 tests at RC-3.3 (grown from initial 8,138 at cutover)
 - Phase 0+1: Scaffolding + factories
 - Phase 2A: Contracts (1,142 tests)
 - Phase 2B+2C+2D: Core + engine + plugins (3,823 tests)
@@ -634,4 +634,4 @@ All gate plugin infrastructure deliberately removed (~3,000 lines deleted):
 ---
 
 *Inventory completed: January 29, 2026*
-*Updated: March 1, 2026 (RC-3.3 architectural remediation)*
+*Updated: March 2, 2026 (RC-3.3 architectural remediation)*
