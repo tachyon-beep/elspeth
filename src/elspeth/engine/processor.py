@@ -1565,52 +1565,12 @@ class RowProcessor:
 
         # 2. Handle error status
         if transform_result.status == "error":
-            if error_sink == "discard":
-                # Intentionally discarded - QUARANTINED
-                error_detail = str(transform_result.reason) if transform_result.reason else "unknown_error"
-                quarantine_error_hash = hashlib.sha256(error_detail.encode()).hexdigest()[:16]
-                self._recorder.record_token_outcome(
-                    run_id=self._run_id,
-                    token_id=current_token.token_id,
-                    outcome=RowOutcome.QUARANTINED,
-                    error_hash=quarantine_error_hash,
-                )
-                # Emit TokenCompleted telemetry AFTER Landscape recording
-                self._emit_token_completed(current_token, RowOutcome.QUARANTINED)
-                # Notify coalesce if this is a forked branch
-                sibling_results = self._notify_coalesce_of_lost_branch(
-                    current_token,
-                    f"quarantined:{error_detail}",
-                    child_items,
-                )
-                current_result = RowResult(
-                    token=current_token,
-                    final_data=current_token.row_data,
-                    outcome=RowOutcome.QUARANTINED,
-                )
-                if sibling_results:
-                    return _TransformTerminal(result=[current_result, *sibling_results])
-                return _TransformTerminal(result=current_result)
-            else:
-                # Routed to error sink
-                # NOTE: Do NOT record ROUTED outcome here - the token hasn't been written yet.
-                # SinkExecutor.write() records the outcome AFTER sink durability is achieved.
-                error_detail = str(transform_result.reason) if transform_result.reason else "unknown_error"
-                # Notify coalesce if this is a forked branch
-                sibling_results = self._notify_coalesce_of_lost_branch(
-                    current_token,
-                    f"error_routed:{error_detail}",
-                    child_items,
-                )
-                current_result = RowResult(
-                    token=current_token,
-                    final_data=current_token.row_data,
-                    outcome=RowOutcome.ROUTED,
-                    sink_name=error_sink,
-                )
-                if sibling_results:
-                    return _TransformTerminal(result=[current_result, *sibling_results])
-                return _TransformTerminal(result=current_result)
+            return self._handle_transform_error_status(
+                transform_result,
+                current_token,
+                error_sink,
+                child_items,
+            )
 
         # 3. Track on_success for sink routing at end of chain
         updated_sink = current_on_success_sink
@@ -1673,6 +1633,70 @@ class RowProcessor:
         # 5. Single row success — continue to next node
         # (current_token already updated by _execute_transform_with_retry)
         return _TransformContinue(updated_token=current_token, updated_sink=updated_sink)
+
+    def _handle_transform_error_status(
+        self,
+        transform_result: TransformResult,
+        current_token: TokenInfo,
+        error_sink: str | None,
+        child_items: list[WorkItem],
+    ) -> _TransformTerminal:
+        """Handle transform error status: quarantine (discard) or route to error sink.
+
+        Args:
+            transform_result: The failed transform result.
+            current_token: Token that failed processing.
+            error_sink: "discard" for quarantine, or a sink name for error routing.
+            child_items: Mutable list — coalesce notifications may append child work items.
+
+        Returns:
+            _TransformTerminal with QUARANTINED or ROUTED outcome.
+        """
+        error_detail = str(transform_result.reason) if transform_result.reason else "unknown_error"
+
+        if error_sink == "discard":
+            # Intentionally discarded - QUARANTINED
+            quarantine_error_hash = hashlib.sha256(error_detail.encode()).hexdigest()[:16]
+            self._recorder.record_token_outcome(
+                run_id=self._run_id,
+                token_id=current_token.token_id,
+                outcome=RowOutcome.QUARANTINED,
+                error_hash=quarantine_error_hash,
+            )
+            # Emit TokenCompleted telemetry AFTER Landscape recording
+            self._emit_token_completed(current_token, RowOutcome.QUARANTINED)
+            # Notify coalesce if this is a forked branch
+            sibling_results = self._notify_coalesce_of_lost_branch(
+                current_token,
+                f"quarantined:{error_detail}",
+                child_items,
+            )
+            current_result = RowResult(
+                token=current_token,
+                final_data=current_token.row_data,
+                outcome=RowOutcome.QUARANTINED,
+            )
+            if sibling_results:
+                return _TransformTerminal(result=[current_result, *sibling_results])
+            return _TransformTerminal(result=current_result)
+
+        # Routed to error sink
+        # NOTE: Do NOT record ROUTED outcome here - the token hasn't been written yet.
+        # SinkExecutor.write() records the outcome AFTER sink durability is achieved.
+        sibling_results = self._notify_coalesce_of_lost_branch(
+            current_token,
+            f"error_routed:{error_detail}",
+            child_items,
+        )
+        current_result = RowResult(
+            token=current_token,
+            final_data=current_token.row_data,
+            outcome=RowOutcome.ROUTED,
+            sink_name=error_sink,
+        )
+        if sibling_results:
+            return _TransformTerminal(result=[current_result, *sibling_results])
+        return _TransformTerminal(result=current_result)
 
     def _handle_gate_node(
         self,
