@@ -109,6 +109,7 @@ from elspeth.engine.orchestrator.types import (
     LoopContext,
     LoopResult,
     PipelineConfig,
+    ResumeState,
     RouteValidationError,
     RowPlugin,
     RunContext,
@@ -2271,37 +2272,28 @@ class Orchestrator:
         self._current_graph = None
         return loop_ctx.counters.to_run_result(run_id, status=RunStatus.RUNNING)
 
-    def resume(
+    def _reconstruct_resume_state(
         self,
         resume_point: ResumePoint,
-        config: PipelineConfig,
-        graph: ExecutionGraph,
-        *,
         payload_store: PayloadStore,
-        settings: ElspethSettings | None = None,
-        shutdown_event: threading.Event | None = None,
-    ) -> RunResult:
-        """Resume a failed run from a checkpoint.
+    ) -> ResumeState:
+        """Reconstruct state needed to process resumed rows.
 
-        STATELESS: Like run(), creates fresh recorder and processor internally.
-        This mirrors the reality that recovery happens in a new process.
+        Creates a fresh recorder, handles incomplete batches, restores aggregation state,
+        deserializes the source schema for type fidelity, validates the schema contract,
+        and retrieves unprocessed rows from the payload store.
 
         Args:
             resume_point: ResumePoint from RecoveryManager.get_resume_point()
-            config: Same PipelineConfig used for original run()
-            graph: Same ExecutionGraph used for original run()
-            payload_store: PayloadStore for retrieving row data (required)
-            settings: Full settings (optional, for retry config etc.)
+            payload_store: PayloadStore for retrieving row data
 
         Returns:
-            RunResult with recovery outcome
+            ResumeState with all reconstruction results.
 
         Raises:
-            ValueError: If payload_store is not provided
+            ValueError: If checkpoint_manager is not initialized.
+            OrchestrationInvariantError: If schema contract is missing from audit trail.
         """
-        if payload_store is None:
-            raise ValueError("payload_store is required for resume - row data must be retrieved from stored payloads")
-
         run_id = resume_point.checkpoint.run_id
 
         # Create fresh recorder (stateless, like run())
@@ -2357,6 +2349,52 @@ class Orchestrator:
             )
 
         unprocessed_rows = recovery.get_unprocessed_row_data(run_id, payload_store, source_schema_class=source_schema_class)
+
+        return ResumeState(
+            recorder=recorder,
+            run_id=run_id,
+            restored_aggregation_state=restored_state,
+            unprocessed_rows=unprocessed_rows,
+            schema_contract=schema_contract,
+        )
+
+    def resume(
+        self,
+        resume_point: ResumePoint,
+        config: PipelineConfig,
+        graph: ExecutionGraph,
+        *,
+        payload_store: PayloadStore,
+        settings: ElspethSettings | None = None,
+        shutdown_event: threading.Event | None = None,
+    ) -> RunResult:
+        """Resume a failed run from a checkpoint.
+
+        STATELESS: Like run(), creates fresh recorder and processor internally.
+        This mirrors the reality that recovery happens in a new process.
+
+        Args:
+            resume_point: ResumePoint from RecoveryManager.get_resume_point()
+            config: Same PipelineConfig used for original run()
+            graph: Same ExecutionGraph used for original run()
+            payload_store: PayloadStore for retrieving row data (required)
+            settings: Full settings (optional, for retry config etc.)
+
+        Returns:
+            RunResult with recovery outcome
+
+        Raises:
+            ValueError: If payload_store is not provided
+        """
+        if payload_store is None:
+            raise ValueError("payload_store is required for resume - row data must be retrieved from stored payloads")
+
+        state = self._reconstruct_resume_state(resume_point, payload_store)
+        run_id = state.run_id
+        recorder = state.recorder
+        restored_state = state.restored_aggregation_state
+        schema_contract = state.schema_contract
+        unprocessed_rows = state.unprocessed_rows
 
         if not unprocessed_rows:
             # All rows were processed - complete the run

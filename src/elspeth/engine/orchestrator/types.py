@@ -27,9 +27,12 @@ from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
     from elspeth.contracts import PendingOutcome, SinkProtocol, SourceProtocol, TokenInfo
+    from elspeth.contracts.aggregation_checkpoint import AggregationCheckpointState
     from elspeth.contracts.plugin_context import PluginContext
+    from elspeth.contracts.schema_contract import SchemaContract
     from elspeth.contracts.types import CoalesceName, GateName, NodeID, SinkName
     from elspeth.core.config import AggregationSettings, CoalesceSettings, GateSettings
+    from elspeth.core.landscape.recorder import LandscapeRecorder
     from elspeth.engine.coalesce_executor import CoalesceExecutor
     from elspeth.engine.processor import RowProcessor
 
@@ -312,6 +315,21 @@ class LoopResult:
     start_time: float
     phase_start: float
     last_progress_time: float
+
+
+@dataclass(frozen=True, slots=True)
+class ResumeState:
+    """Return type for _reconstruct_resume_state().
+
+    Bundles the state reconstruction results needed to process resumed rows.
+    Short-lived: consumed immediately by the resume method.
+    """
+
+    recorder: LandscapeRecorder
+    run_id: str
+    restored_aggregation_state: dict[str, AggregationCheckpointState]
+    unprocessed_rows: list[Any]
+    schema_contract: SchemaContract
 
 
 # Factory that creates a per-sink checkpoint callback.
