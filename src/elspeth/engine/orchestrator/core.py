@@ -949,17 +949,10 @@ class Orchestrator:
                 BatchCheckpointState. Used when retrying a run after a batch
                 transform raised BatchPendingError.
             payload_store: PayloadStore for persisting source row payloads.
-                Required for audit compliance (CLAUDE.md: "Source entry - Raw data
-                stored before any processing").
-            secret_resolutions: Optional list of secret resolution records from
-                load_secrets_from_config(). When provided, these are recorded
-                in the audit trail after run creation. Each record contains
-                env_var_name, source, vault_url, secret_name, timestamp, latency_ms,
-                and secret_value (for fingerprinting, never stored).
+            secret_resolutions: Optional secret resolution records from
+                load_secrets_from_config(). Recorded in audit trail after run creation.
             shutdown_event: Optional pre-created shutdown event for testing.
-                When provided, signal handler installation is skipped and this
-                event is passed directly to _execute_run(). Production callers
-                should omit this (signal handlers are installed automatically).
+                Skips signal handler installation when provided.
 
         Raises:
             ValueError: If graph or payload_store is not provided
@@ -1680,6 +1673,219 @@ class Orchestrator:
         # Pass PendingOutcome with error_hash - outcome recorded after sink durability
         pending_tokens[quarantine_sink].append((quarantine_token, PendingOutcome(RowOutcome.QUARANTINED, quarantine_error_hash)))
 
+    def _record_field_resolution(
+        self,
+        recorder: LandscapeRecorder,
+        run_id: str,
+        config: PipelineConfig,
+    ) -> bool:
+        """Record source field resolution mapping if available.
+
+        Called once per run — on first iteration (after generator body executes)
+        or post-loop for empty sources (header-only files where the loop never
+        executes but the source computed field resolution).
+
+        Returns:
+            True if field resolution was recorded, False otherwise.
+        """
+        from elspeth.telemetry import FieldResolutionApplied
+
+        field_resolution = config.source.get_field_resolution()
+        if field_resolution is None:
+            return False
+
+        resolution_mapping, normalization_version = field_resolution
+        recorder.record_source_field_resolution(
+            run_id=run_id,
+            resolution_mapping=resolution_mapping,
+            normalization_version=normalization_version,
+        )
+        # Emit telemetry AFTER Landscape succeeds
+        self._emit_telemetry(
+            FieldResolutionApplied(
+                timestamp=datetime.now(UTC),
+                run_id=run_id,
+                source_plugin=config.source.name,
+                field_count=len(resolution_mapping),
+                normalization_version=normalization_version,
+                resolution_mapping=resolution_mapping,
+            )
+        )
+        return True
+
+    def _record_schema_contract(
+        self,
+        recorder: LandscapeRecorder,
+        run_id: str,
+        source_id: NodeID,
+        config: PipelineConfig,
+        ctx: PluginContext,
+    ) -> bool:
+        """Record source schema contract if available.
+
+        Called once per run — on the first VALID row (quarantined rows don't
+        trigger contract population) or post-loop for runs with no valid rows
+        (empty input or all-quarantined).
+
+        Returns:
+            True if schema contract was recorded, False otherwise.
+        """
+        schema_contract = config.source.get_schema_contract()
+        if schema_contract is None:
+            return False
+
+        # Update run-level contract
+        recorder.update_run_contract(run_id, schema_contract)
+        # Update source node's output_contract (was NULL at registration)
+        recorder.update_node_output_contract(run_id, source_id, schema_contract)
+        # Make contract available to transforms via context
+        ctx.contract = schema_contract
+        return True
+
+    _PROGRESS_ROW_INTERVAL = 100
+    _PROGRESS_TIME_INTERVAL = 5.0  # seconds
+
+    def _maybe_emit_progress(
+        self,
+        counters: ExecutionCounters,
+        start_time: float,
+        last_progress_time: float,
+    ) -> float:
+        """Emit a ProgressEvent if row count or time threshold is met.
+
+        Hybrid timing: emit on first row, every 100 rows, or every 5 seconds.
+        Used in both quarantine and valid-row paths.
+
+        Returns:
+            Updated last_progress_time (unchanged if no emission).
+        """
+        progress_interval = self._PROGRESS_ROW_INTERVAL
+        progress_time_interval = self._PROGRESS_TIME_INTERVAL
+        current_time = time.perf_counter()
+        time_since_last_progress = current_time - last_progress_time
+        should_emit = (
+            counters.rows_processed == 1  # First row - immediate feedback
+            or counters.rows_processed % progress_interval == 0  # Every N rows
+            or time_since_last_progress >= progress_time_interval  # Every M seconds
+        )
+        if should_emit:
+            elapsed = current_time - start_time
+            self._events.emit(
+                ProgressEvent(
+                    rows_processed=counters.rows_processed,
+                    # Include routed rows in success count - they reached their destination
+                    rows_succeeded=counters.rows_succeeded + counters.rows_routed,
+                    rows_failed=counters.rows_failed,
+                    rows_quarantined=counters.rows_quarantined,
+                    elapsed_seconds=elapsed,
+                )
+            )
+            return current_time
+        return last_progress_time
+
+    def _finalize_source_iteration(
+        self,
+        loop_ctx: LoopContext,
+        recorder: LandscapeRecorder,
+        run_id: str,
+        source_id: NodeID,
+        source_operation_id: str,
+        field_resolution_recorded: bool,
+        schema_contract_recorded: bool,
+    ) -> None:
+        """Post-loop work after source iteration completes (or is interrupted).
+
+        Restores operation_id, flushes remaining aggregation buffers, flushes
+        pending coalesce operations, and records deferred field resolution /
+        schema contract for empty sources.
+        """
+        config = loop_ctx.config
+        ctx = loop_ctx.ctx
+        processor = loop_ctx.processor
+        counters = loop_ctx.counters
+        pending_tokens = loop_ctx.pending_tokens
+        coalesce_executor = loop_ctx.coalesce_executor
+        coalesce_node_map = dict(loop_ctx.coalesce_node_map)
+
+        # CRITICAL: Restore operation_id before post-loop flushes.
+        # On normal loop exit, the restore at end-of-iteration ensures
+        # operation_id == source_operation_id. On shutdown break, that
+        # restore is SKIPPED — operation_id is still None. Aggregation
+        # and coalesce flushes can trigger transforms that make external
+        # calls — those must be attributed to source_load, not orphaned.
+        ctx.operation_id = source_operation_id
+
+        # CRITICAL: Flush remaining aggregation buffers at end-of-source
+        if config.aggregation_settings:
+            # NOTE: Aggregation-flushed tokens are NOT checkpointed here.
+            # They go into pending_tokens and are checkpointed only after
+            # SinkExecutor.write() achieves sink durability, via the
+            # checkpoint_after_sink callback.
+            flush_result = flush_remaining_aggregation_buffers(
+                config=config,
+                processor=processor,
+                ctx=ctx,
+                pending_tokens=pending_tokens,
+            )
+            counters.accumulate_flush_result(flush_result)
+
+        # Flush pending coalesce operations at end-of-source
+        if coalesce_executor is not None:
+            flush_coalesce_pending(
+                coalesce_executor=coalesce_executor,
+                coalesce_node_map=coalesce_node_map,
+                processor=processor,
+                config_sinks=config.sinks,
+                ctx=ctx,
+                counters=counters,
+                pending_tokens=pending_tokens,
+            )
+
+        # Record field resolution for empty sources (header-only files).
+        # For sources with rows, this was recorded inside the loop on first iteration.
+        if not field_resolution_recorded:
+            self._record_field_resolution(recorder, run_id, config)
+
+        # Record schema contract for runs with no valid source rows.
+        # In-loop recording happens on first VALID row. For all-invalid
+        # or empty inputs, that branch never executes.
+        if not schema_contract_recorded:
+            self._record_schema_contract(recorder, run_id, source_id, config, ctx)
+
+    def _load_source_with_events(
+        self,
+        config: PipelineConfig,
+        run_id: str,
+        ctx: PluginContext,
+    ) -> Iterator[SourceRow]:
+        """Execute SOURCE phase: emit lifecycle events, load source, handle errors.
+
+        SOURCE phase is complete when this method returns. Errors during load()
+        (file not found, auth failure) are emitted as PhaseError before re-raising.
+        """
+        from elspeth.telemetry import PhaseChanged
+
+        phase_start = time.perf_counter()
+        self._events.emit(PhaseStarted(phase=PipelinePhase.SOURCE, action=PhaseAction.INITIALIZING, target=config.source.name))
+        self._emit_telemetry(
+            PhaseChanged(
+                timestamp=datetime.now(UTC),
+                run_id=run_id,
+                phase=PipelinePhase.SOURCE,
+                action=PhaseAction.INITIALIZING,
+            )
+        )
+
+        try:
+            with self._span_factory.source_span(config.source.name):
+                source_iterator = config.source.load(ctx)
+        except Exception as e:
+            self._events.emit(PhaseError(phase=PipelinePhase.SOURCE, error=e, target=config.source.name))
+            raise
+
+        self._events.emit(PhaseCompleted(phase=PipelinePhase.SOURCE, duration_seconds=time.perf_counter() - phase_start))
+        return source_iterator
+
     def _run_main_processing_loop(
         self,
         loop_ctx: LoopContext,
@@ -1692,59 +1898,29 @@ class Orchestrator:
     ) -> LoopResult:
         """Run the main processing loop: source iteration, quarantine, transform, flush.
 
-        This method owns the track_operation(source_load) context. Everything inside
-        it — source loading, row processing, aggregation flush, coalesce flush, empty
-        source handling — executes within source_load operation attribution.
+        Owns the track_operation(source_load) context — everything inside executes
+        within source_load operation attribution. Sink writes happen OUTSIDE this
+        method in _flush_and_write_sinks() (separate track_operation per sink).
 
-        Sink writes happen OUTSIDE this method in _flush_and_write_sinks(). Each sink
-        has its own track_operation(sink_write). This boundary must be preserved — it
-        determines audit attribution (source_load vs sink_write operations).
-
-        Final progress emission and PhaseCompleted(PROCESS) are NOT in this method.
-        They belong AFTER sink writes so they reflect concrete, durable results.
-        The caller emits them using the timing state in LoopResult.
-
-        Returns:
-            LoopResult with interrupted flag and timing state for post-sink events.
+        Final progress emission and PhaseCompleted(PROCESS) are emitted by the
+        caller AFTER sink writes, using the timing state in LoopResult.
         """
-        # Local imports for telemetry events
-        from elspeth.telemetry import (
-            FieldResolutionApplied,
-            PhaseChanged,
-        )
+        from elspeth.telemetry import PhaseChanged
 
-        # Destructure loop_ctx for local access (matches existing code style)
+        # Destructure loop_ctx for local access
         config = loop_ctx.config
         ctx = loop_ctx.ctx
         processor = loop_ctx.processor
         counters = loop_ctx.counters
         pending_tokens = loop_ctx.pending_tokens
         coalesce_executor = loop_ctx.coalesce_executor
-        coalesce_node_map = dict(loop_ctx.coalesce_node_map)  # dict for aggregation/coalesce functions
-        agg_transform_lookup = dict(loop_ctx.agg_transform_lookup)  # dict for aggregation functions
+        coalesce_node_map = dict(loop_ctx.coalesce_node_map)
+        agg_transform_lookup = dict(loop_ctx.agg_transform_lookup)
 
-        # Progress tracking - hybrid timing: emit on 100 rows OR 5 seconds
-        progress_interval = 100
-        progress_time_interval = 5.0  # seconds
         start_time = time.perf_counter()
         last_progress_time = start_time
 
-        # SOURCE phase - initialize source and begin loading
-        phase_start = time.perf_counter()
-        self._events.emit(PhaseStarted(phase=PipelinePhase.SOURCE, action=PhaseAction.INITIALIZING, target=config.source.name))
-
-        # Emit telemetry PhaseChanged for SOURCE
-        self._emit_telemetry(
-            PhaseChanged(
-                timestamp=datetime.now(UTC),
-                run_id=run_id,
-                phase=PipelinePhase.SOURCE,
-                action=PhaseAction.INITIALIZING,
-            )
-        )
-
-        # Begin source_load operation to track external calls during load/iteration
-        # This operation covers the entire source consumption lifecycle
+        # source_load operation covers the entire source consumption lifecycle
         with track_operation(
             recorder=recorder,
             run_id=run_id,
@@ -1753,39 +1929,21 @@ class Orchestrator:
             ctx=ctx,
             input_data={"source_plugin": config.source.name},
         ) as source_op_handle:
-            # Capture operation_id for restoration during iteration
-            # Generator-based sources execute code during next() calls, so we need
-            # to restore operation_id at the end of each iteration before the for
-            # loop calls enumerate() again.
+            # Generator-based sources execute on next() — restore operation_id
+            # before each iteration so external calls are attributed to source_load
             source_operation_id = source_op_handle.operation.operation_id
 
-            # Nested try for SOURCE phase to catch load() failures separately from PROCESS errors
-            try:
-                with self._span_factory.source_span(config.source.name):
-                    # Invoke load() to get iterator - any immediate failures (file not found) happen here
-                    source_iterator = config.source.load(ctx)
-            except Exception as e:
-                # SOURCE phase error (file not found, auth failure, etc.)
-                self._events.emit(PhaseError(phase=PipelinePhase.SOURCE, error=e, target=config.source.name))
-                raise  # Re-raise to propagate SOURCE failures (cleanup will still run via outer finally)
+            source_iterator = self._load_source_with_events(config, run_id, ctx)
 
-            self._events.emit(PhaseCompleted(phase=PipelinePhase.SOURCE, duration_seconds=time.perf_counter() - phase_start))
-
-            # Track whether field resolution has been recorded (must happen after first iteration)
+            # Deferred recording flags — field resolution after first iteration,
+            # schema contract after first VALID row. If begin_run already stored
+            # a contract (FIXED mode), skip re-recording.
             field_resolution_recorded = False
-            # Track whether schema contract has been recorded (must happen after first VALID row)
-            # Separate from field_resolution because first row might be quarantined
-            # If begin_run already stored a contract (FIXED mode), mark as recorded
-            # to prevent duplicate update_run_contract calls.
-            # Check via recorder (not a local variable) since this method doesn't
-            # have access to the begin_run caller's scope.
             schema_contract_recorded = recorder.get_run_contract(run_id) is not None
 
-            # PROCESS phase - iterate through rows
+            # PROCESS phase
             phase_start = time.perf_counter()
             self._events.emit(PhaseStarted(phase=PipelinePhase.PROCESS, action=PhaseAction.PROCESSING))
-
-            # Emit telemetry PhaseChanged for PROCESS
             self._emit_telemetry(
                 PhaseChanged(
                     timestamp=datetime.now(UTC),
@@ -1795,39 +1953,17 @@ class Orchestrator:
                 )
             )
 
-            # Nested try for PROCESS phase to catch iteration/processing failures
             interrupted_by_shutdown = False
             try:
                 for row_index, source_item in enumerate(source_iterator):
                     counters.rows_processed += 1
 
-                    # Record field resolution mapping on first iteration
-                    # Must happen AFTER iterator advances because generators (like CSVSource.load())
-                    # only execute their body when iterated. The _field_resolution assignment in
-                    # CSVSource happens inside the generator, not when load() is called.
+                    # Record field resolution on first iteration (generators execute body on first next())
                     if not field_resolution_recorded:
                         field_resolution_recorded = True
-                        field_resolution = config.source.get_field_resolution()
-                        if field_resolution is not None:
-                            resolution_mapping, normalization_version = field_resolution
-                            recorder.record_source_field_resolution(
-                                run_id=run_id,
-                                resolution_mapping=resolution_mapping,
-                                normalization_version=normalization_version,
-                            )
-                            # Emit telemetry AFTER Landscape succeeds
-                            self._emit_telemetry(
-                                FieldResolutionApplied(
-                                    timestamp=datetime.now(UTC),
-                                    run_id=run_id,
-                                    source_plugin=config.source.name,
-                                    field_count=len(resolution_mapping),
-                                    normalization_version=normalization_version,
-                                    resolution_mapping=resolution_mapping,
-                                )
-                            )
+                        self._record_field_resolution(recorder, run_id, config)
 
-                    # Handle quarantined source rows - route directly to sink
+                    # Quarantine path — route directly to sink, skip normal processing
                     if source_item.is_quarantined:
                         self._handle_quarantine_row(
                             recorder,
@@ -1838,83 +1974,25 @@ class Orchestrator:
                             edge_map,
                             loop_ctx,
                         )
-                        # Emit progress for quarantine path
-                        # Hybrid timing: emit on first row, every 100 rows, or every 5 seconds
-                        current_time = time.perf_counter()
-                        time_since_last_progress = current_time - last_progress_time
-                        should_emit = (
-                            counters.rows_processed == 1  # First row - immediate feedback
-                            or counters.rows_processed % progress_interval == 0  # Every 100 rows
-                            or time_since_last_progress >= progress_time_interval  # Every 5 seconds
+                        last_progress_time = self._maybe_emit_progress(
+                            counters,
+                            start_time,
+                            last_progress_time,
                         )
-                        if should_emit:
-                            elapsed = current_time - start_time
-                            self._events.emit(
-                                ProgressEvent(
-                                    rows_processed=counters.rows_processed,
-                                    # Include routed rows in success count - they reached their destination
-                                    rows_succeeded=counters.rows_succeeded + counters.rows_routed,
-                                    rows_failed=counters.rows_failed,
-                                    rows_quarantined=counters.rows_quarantined,
-                                    elapsed_seconds=elapsed,
-                                )
-                            )
-                            last_progress_time = current_time
-                        # Restore operation_id before next iteration
-                        # (generator may execute external calls on next() call)
                         ctx.operation_id = source_operation_id
-
-                        # Shutdown check for quarantine path — without this,
-                        # a stream of quarantined rows would never hit the
-                        # normal-path shutdown check because `continue` skips it.
                         if shutdown_event is not None and shutdown_event.is_set():
                             interrupted_by_shutdown = True
                             break
-
-                        # Skip normal processing - row is already handled
                         continue
 
-                    # ─────────────────────────────────────────────────────────────────
-                    # Record schema contract after first VALID row
-                    # (BUG FIX: mwwo + c1v5 - contract only exists after first valid row)
-                    #
-                    # For OBSERVED/FLEXIBLE modes, the source's schema contract is set
-                    # when the first valid row is processed. Quarantined rows don't
-                    # trigger contract population. Recording must happen here, not on
-                    # the first iteration which may be a quarantined row.
-                    # ─────────────────────────────────────────────────────────────────
-                    if not schema_contract_recorded:
-                        schema_contract = config.source.get_schema_contract()
-                        if schema_contract is not None:
-                            schema_contract_recorded = True
-                            # Update run-level contract
-                            recorder.update_run_contract(run_id, schema_contract)
-                            # Update source node's output_contract (was NULL at registration)
-                            recorder.update_node_output_contract(run_id, source_id, schema_contract)
-                            # Make contract available to transforms via context
-                            # This enables contract-aware template access (original header names)
-                            ctx.contract = schema_contract
+                    # Record schema contract on first VALID row (quarantined rows don't populate contract)
+                    if not schema_contract_recorded and self._record_schema_contract(recorder, run_id, source_id, config, ctx):
+                        schema_contract_recorded = True
 
-                    # ─────────────────────────────────────────────────────────────────
-                    # CRITICAL: Clear operation_id now that source item is fetched.
-                    # Generator-based sources (e.g., AzureBlobSource) execute during
-                    # iteration - their external calls (blob downloads) happen inside
-                    # the for loop at the enumerate() call. By this point, the source
-                    # item is fully fetched and any source-side calls are recorded
-                    # with operation_id. Now we must clear it so transforms can set
-                    # their own state_id without triggering the XOR constraint.
-                    # ─────────────────────────────────────────────────────────────────
+                    # Clear operation_id — source item is fetched, transforms set their own state_id
                     ctx.operation_id = None
 
-                    # ─────────────────────────────────────────────────────────────────
-                    # Check for timed-out aggregations BEFORE processing this row
-                    # (BUG FIX: P1-2026-01-22 - ensures timeout flushes OLD batch)
-                    #
-                    # This is the critical fix: checking timeout BEFORE buffering the
-                    # new row ensures the timed-out batch contains only previously
-                    # buffered rows, not the row that just arrived.
-                    # ─────────────────────────────────────────────────────────────────
-                    # Call module function directly (no wrapper method)
+                    # Check aggregation timeouts BEFORE processing (P1-2026-01-22: flush OLD batch first)
                     timeout_result = check_aggregation_timeouts(
                         config=config,
                         processor=processor,
@@ -1930,20 +2008,9 @@ class Orchestrator:
                         transforms=config.transforms,
                         ctx=ctx,
                     )
-
-                    # Handle all results from this source row (includes fork children)
-                    #
-                    # Note: Counters track processing outcomes (how many rows reached each state).
-                    # Sink durability is tracked separately via checkpoints, which are created
-                    # AFTER successful sink writes. A crash before sink write means:
-                    # - Counters may be inflated (row counted but not persisted)
-                    # - But recovery will correctly identify the unwritten rows
                     accumulate_row_outcomes(results, counters, config.sinks, pending_tokens)
 
-                    # ─────────────────────────────────────────────────────────────────
-                    # Check for timed-out coalesces after processing each row
-                    # (BUG FIX: P1-2026-01-22 - check_timeouts was never called)
-                    # ─────────────────────────────────────────────────────────────────
+                    # Check coalesce timeouts after each row (P1-2026-01-22 fix)
                     if coalesce_executor is not None:
                         handle_coalesce_timeouts(
                             coalesce_executor=coalesce_executor,
@@ -1955,154 +2022,37 @@ class Orchestrator:
                             pending_tokens=pending_tokens,
                         )
 
-                    # Emit progress every N rows or every M seconds (after outcome counters are updated)
-                    # Hybrid timing: emit on first row, every 100 rows, or every 5 seconds
-                    current_time = time.perf_counter()
-                    time_since_last_progress = current_time - last_progress_time
-                    should_emit = (
-                        counters.rows_processed == 1  # First row - immediate feedback
-                        or counters.rows_processed % progress_interval == 0  # Every 100 rows
-                        or time_since_last_progress >= progress_time_interval  # Every 5 seconds
+                    last_progress_time = self._maybe_emit_progress(
+                        counters,
+                        start_time,
+                        last_progress_time,
                     )
-                    if should_emit:
-                        elapsed = current_time - start_time
-                        self._events.emit(
-                            ProgressEvent(
-                                rows_processed=counters.rows_processed,
-                                # Include routed rows in success count - they reached their destination
-                                rows_succeeded=counters.rows_succeeded + counters.rows_routed,
-                                rows_failed=counters.rows_failed,
-                                rows_quarantined=counters.rows_quarantined,
-                                elapsed_seconds=elapsed,
-                            )
-                        )
-                        last_progress_time = current_time
 
-                    # ─────────────────────────────────────────────────────────────────
-                    # GRACEFUL SHUTDOWN CHECK
-                    # Check between row iterations — current row is fully
-                    # processed, outcomes recorded, safe to stop here.
-                    # ─────────────────────────────────────────────────────────────────
+                    # Graceful shutdown — current row fully processed, safe to stop
                     if shutdown_event is not None and shutdown_event.is_set():
                         interrupted_by_shutdown = True
                         break
 
-                    # ─────────────────────────────────────────────────────────────────
-                    # CRITICAL: Restore operation_id before next iteration.
-                    # Generator-based sources execute during next() calls in the for
-                    # loop. Any external calls (blob downloads, API fetches) must be
-                    # attributed to the source_load operation.
-                    # ─────────────────────────────────────────────────────────────────
+                    # Restore operation_id for next iteration (generators execute on next())
                     ctx.operation_id = source_operation_id
 
-                # ─────────────────────────────────────────────────────────────────
-                # CRITICAL: Restore operation_id before post-loop flushes.
-                # On normal loop exit, the restore at end-of-iteration (below the
-                # shutdown check) ensures operation_id == source_operation_id.
-                # On shutdown break, that restore is SKIPPED — operation_id is
-                # still None (cleared for transforms at line 1789). Aggregation
-                # and coalesce flushes can trigger transforms that make external
-                # calls — those must be attributed to source_load, not orphaned.
-                # ─────────────────────────────────────────────────────────────────
-                ctx.operation_id = source_operation_id
-
-                # ─────────────────────────────────────────────────────────────────
-                # CRITICAL: Flush remaining aggregation buffers at end-of-source
-                # ─────────────────────────────────────────────────────────────────
-                if config.aggregation_settings:
-                    # NOTE: Aggregation-flushed tokens are NOT checkpointed here.
-                    # They go into pending_tokens and are checkpointed only after
-                    # SinkExecutor.write() achieves sink durability, via the
-                    # checkpoint_after_sink callback.
-                    # Fix: elspeth-rapid-xtmo — the previous checkpoint_callback
-                    # created checkpoints before sink writes, causing data loss on crash.
-
-                    # Call module function directly (no wrapper method)
-                    flush_result = flush_remaining_aggregation_buffers(
-                        config=config,
-                        processor=processor,
-                        ctx=ctx,
-                        pending_tokens=pending_tokens,
-                    )
-                    counters.accumulate_flush_result(flush_result)
-
-                # Flush pending coalesce operations at end-of-source
-                if coalesce_executor is not None:
-                    flush_coalesce_pending(
-                        coalesce_executor=coalesce_executor,
-                        coalesce_node_map=coalesce_node_map,
-                        processor=processor,
-                        config_sinks=config.sinks,
-                        ctx=ctx,
-                        counters=counters,
-                        pending_tokens=pending_tokens,
-                    )
-
-                # Source iteration complete - for loop ends here
-
-                # ─────────────────────────────────────────────────────────────────
-                # Record field resolution for empty sources (header-only files).
-                # For sources with rows, this is recorded inside the loop on the
-                # first iteration. For empty sources, the loop never executes, but
-                # the source may still have computed field resolution (e.g., CSV
-                # sources read headers before yielding data rows).
-                # ─────────────────────────────────────────────────────────────────
-                if not field_resolution_recorded:
-                    field_resolution = config.source.get_field_resolution()
-                    if field_resolution is not None:
-                        resolution_mapping, normalization_version = field_resolution
-                        recorder.record_source_field_resolution(
-                            run_id=run_id,
-                            resolution_mapping=resolution_mapping,
-                            normalization_version=normalization_version,
-                        )
-                        # Emit telemetry AFTER Landscape succeeds
-                        self._emit_telemetry(
-                            FieldResolutionApplied(
-                                timestamp=datetime.now(UTC),
-                                run_id=run_id,
-                                source_plugin=config.source.name,
-                                field_count=len(resolution_mapping),
-                                normalization_version=normalization_version,
-                                resolution_mapping=resolution_mapping,
-                            )
-                        )
-                        field_resolution_recorded = True
-
-                # ─────────────────────────────────────────────────────────────────
-                # Record schema contract for runs with no valid source rows.
-                #
-                # In-loop recording happens on the first VALID row. For all-invalid
-                # or empty inputs, that branch never executes. Sources may still
-                # finalize a locked contract at end-of-load (e.g. FLEXIBLE with
-                # declared fields, OBSERVED/FLEXIBLE empty input). Persist it here
-                # so resume invariants still hold.
-                # ─────────────────────────────────────────────────────────────────
-                if not schema_contract_recorded:
-                    schema_contract = config.source.get_schema_contract()
-                    if schema_contract is not None:
-                        schema_contract_recorded = True
-                        # Update run-level contract
-                        recorder.update_run_contract(run_id, schema_contract)
-                        # Update source node's output_contract (was NULL at registration)
-                        recorder.update_node_output_contract(run_id, source_id, schema_contract)
-                        # Keep context contract aligned with recorded contract
-                        ctx.contract = schema_contract
+                # Post-loop: restore operation_id, flush aggregation/coalesce, record deferred state
+                self._finalize_source_iteration(
+                    loop_ctx,
+                    recorder,
+                    run_id,
+                    source_id,
+                    source_operation_id,
+                    field_resolution_recorded,
+                    schema_contract_recorded,
+                )
 
             except BatchPendingError:
-                # BatchPendingError is a control-flow signal, not an error.
-                # Don't emit PhaseError - the run isn't failing, it's just waiting.
-                raise  # Re-raise immediately for caller to handle retry
+                raise  # Control-flow signal, not an error
             except Exception as e:
-                # PROCESS phase error (iteration or processing failures)
                 self._events.emit(PhaseError(phase=PipelinePhase.PROCESS, error=e, target=config.source.name))
-                raise  # CRITICAL: Always re-raise - exceptions in PROCESS phase must propagate
+                raise
 
-        # track_operation ended - source_load operation is now complete
-        # Source duration is now accurately measured (excludes sink I/O)
-
-        # Return timing state so caller can emit progress + PhaseCompleted
-        # AFTER sink writes (concrete, durable results).
         return LoopResult(
             interrupted=interrupted_by_shutdown,
             start_time=start_time,
