@@ -1852,6 +1852,38 @@ class RowProcessor:
             )
         )
 
+    def _validate_coalesce_ordering(
+        self,
+        token: TokenInfo,
+        current_node_id: NodeID | None,
+        coalesce_node_id: NodeID | None,
+        coalesce_name: CoalesceName | None,
+    ) -> None:
+        """Validate that tokens with coalesce metadata don't start downstream of their coalesce point.
+
+        A malformed work item starting past the coalesce node would silently skip coalesce handling
+        because _maybe_coalesce_token only triggers on exact node equality.
+
+        Raises:
+            OrchestrationInvariantError: If the token's starting node is downstream of its coalesce barrier.
+        """
+        if (
+            coalesce_node_id is not None
+            and current_node_id is not None
+            and coalesce_name is not None
+            and current_node_id != coalesce_node_id
+            and current_node_id in self._node_step_map
+            and coalesce_node_id in self._node_step_map
+        ):
+            current_step = self._node_step_map[current_node_id]
+            coalesce_step = self._node_step_map[coalesce_node_id]
+            if current_step > coalesce_step:
+                raise OrchestrationInvariantError(
+                    f"Token {token.token_id} started at node '{current_node_id}' (step {current_step}), "
+                    f"which is downstream of coalesce '{coalesce_name}' (step {coalesce_step}). "
+                    f"Work items with coalesce metadata must start at or before the coalesce point."
+                )
+
     def _handle_terminal_token(
         self,
         current_token: TokenInfo,
@@ -1953,25 +1985,7 @@ class RowProcessor:
                     context=f"start of token processing for token '{token.token_id}'",
                 )
 
-        # Invariant: tokens with coalesce metadata must not start downstream of their coalesce point.
-        # A malformed work item starting past the coalesce node would silently skip coalesce handling
-        # because _maybe_coalesce_token only triggers on exact node equality.
-        if (
-            coalesce_node_id is not None
-            and current_node_id is not None
-            and coalesce_name is not None
-            and current_node_id != coalesce_node_id
-            and current_node_id in self._node_step_map
-            and coalesce_node_id in self._node_step_map
-        ):
-            current_step = self._node_step_map[current_node_id]
-            coalesce_step = self._node_step_map[coalesce_node_id]
-            if current_step > coalesce_step:
-                raise OrchestrationInvariantError(
-                    f"Token {token.token_id} started at node '{current_node_id}' (step {current_step}), "
-                    f"which is downstream of coalesce '{coalesce_name}' (step {coalesce_step}). "
-                    f"Work items with coalesce metadata must start at or before the coalesce point."
-                )
+        self._validate_coalesce_ordering(token, current_node_id, coalesce_node_id, coalesce_name)
 
         node_id: NodeID | None = current_node_id
         max_inner_iterations = len(self._node_to_next) + 1
