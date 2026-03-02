@@ -26,7 +26,7 @@ from tests.fixtures.base_classes import _TestSchema, as_sink, as_source, as_tran
 from tests.fixtures.factories import wire_transforms
 from tests.fixtures.landscape import make_landscape_db
 from tests.fixtures.pipeline import build_production_graph
-from tests.fixtures.plugins import CollectSink, ListSource
+from tests.fixtures.plugins import CollectSink, ListSource, PassTransform
 
 if TYPE_CHECKING:
     from elspeth.plugins.infrastructure.results import TransformResult
@@ -35,22 +35,6 @@ if TYPE_CHECKING:
 # ---------------------------------------------------------------------------
 # Test Transforms
 # ---------------------------------------------------------------------------
-
-
-class IdentityTransform(BaseTransform):
-    """Transform that passes data through unchanged."""
-
-    name = "identity"
-    input_schema = _TestSchema
-    output_schema = _TestSchema
-
-    def __init__(self) -> None:
-        super().__init__({"schema": {"mode": "observed"}})
-
-    def process(self, row: PipelineRow, ctx: Any) -> TransformResult:
-        from elspeth.plugins.infrastructure.results import TransformResult
-
-        return TransformResult.success(make_pipeline_row(row.to_dict()), success_reason={"action": "identity"})
 
 
 class AddFieldTransform(BaseTransform):
@@ -115,7 +99,7 @@ class TestExplicitSinkRouting:
         db = make_landscape_db()
 
         source = ListSource([{"value": 1}, {"value": 2}], on_success="output")
-        transform = IdentityTransform()
+        transform = PassTransform()
         transform.on_success = "output"
         sink = CollectSink(name="output")
 
@@ -195,7 +179,7 @@ class TestExplicitSinkRouting:
         source = ListSource([{"value": 1}, {"value": 2}], on_success="source_sink")
 
         # One transform per branch — named to match fork branch names
-        transform = IdentityTransform()
+        transform = PassTransform()
 
         fork_gate = GateSettings(
             name="fork_gate",
@@ -346,7 +330,7 @@ class TestExplicitSinkRouting:
         checkpoint_mgr.create_checkpoint = tracking_create  # type: ignore[method-assign]
 
         source = ListSource([{"value": 1}, {"value": 2}, {"value": 3}], on_success="source_out")
-        t1 = IdentityTransform()
+        t1 = PassTransform()
         t1.on_success = "conn_1_2"
         t2 = AddFieldTransform("processed", True)
         t2.on_success = "output"
@@ -405,7 +389,7 @@ class TestExplicitSinkRoutingEdgeCases:
         """
         from tests.fixtures.factories import wire_transforms
 
-        transform = IdentityTransform()
+        transform = PassTransform()
         wired = wire_transforms([as_transform(transform)], final_sink="output")
 
         # wire_transforms always provides on_success to the last transform

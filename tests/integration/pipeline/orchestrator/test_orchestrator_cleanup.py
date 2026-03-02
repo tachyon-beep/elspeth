@@ -18,22 +18,13 @@ from elspeth.plugins.infrastructure.base import BaseTransform
 from elspeth.plugins.infrastructure.results import TransformResult
 from tests.fixtures.base_classes import as_sink, as_source, as_transform
 from tests.fixtures.pipeline import build_production_graph
-from tests.fixtures.plugins import CollectSink, ListSource
+from tests.fixtures.plugins import CollectSink, FailingSource, ListSource
 
 
 class ValueSchema(PluginSchema):
     """Simple schema for test rows."""
 
     value: int
-
-
-class FailingSource(ListSource):
-    """Test source that raises an exception during load."""
-
-    name = "failing_source"
-
-    def load(self, ctx: Any) -> Any:
-        raise RuntimeError("Source failed intentionally")
 
 
 class TrackingTransform(BaseTransform):
@@ -104,7 +95,7 @@ class TestOrchestratorCleanup:
         transform_2 = TrackingTransform("transform_2")
         transform_2.on_success = "default"
 
-        source = FailingSource([{"value": 1}])
+        source = FailingSource()
         sink = CollectSink()
 
         config = PipelineConfig(

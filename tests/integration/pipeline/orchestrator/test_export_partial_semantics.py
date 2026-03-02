@@ -12,7 +12,6 @@ Covers bead scug.2:
 from __future__ import annotations
 
 from collections.abc import Callable
-from typing import Any
 from unittest.mock import patch
 
 import pytest
@@ -33,16 +32,7 @@ from elspeth.engine.orchestrator import Orchestrator, PipelineConfig
 from tests.fixtures.base_classes import as_sink, as_source
 from tests.fixtures.landscape import make_landscape_db, make_recorder
 from tests.fixtures.pipeline import build_production_graph
-from tests.fixtures.plugins import CollectSink, ListSource
-
-
-class FailingSource(ListSource):
-    """Source that fails immediately on load to simulate pre-completion run failure."""
-
-    name = "failing_source"
-
-    def load(self, ctx: Any) -> Any:
-        raise RuntimeError("source load failure")
+from tests.fixtures.plugins import CollectSink, FailingSource, ListSource
 
 
 def _make_export_enabled_settings() -> ElspethSettings:
@@ -169,7 +159,7 @@ class TestExportFailurePartialRunSemantics:
         db = make_landscape_db()
         event_bus, events = _capture_orchestrator_events()
 
-        source = FailingSource([{"value": 1}], on_success="default")
+        source = FailingSource(error_message="source load failure")
         sink = CollectSink("default")
         config = PipelineConfig(
             source=as_source(source),

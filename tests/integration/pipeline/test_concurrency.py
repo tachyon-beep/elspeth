@@ -209,53 +209,22 @@ class TestOrchestratorThreadsMaxWorkersThroughRowProcessor:
         This test verifies the full wiring path:
         CLI -> RuntimeConcurrencyConfig -> Orchestrator -> RowProcessor -> TransformExecutor
         """
-        from collections.abc import Iterator
-        from typing import Any
         from unittest.mock import patch
 
-        from elspeth.contracts import ArtifactDescriptor, SourceRow
         from elspeth.core.dag import ExecutionGraph
         from tests.fixtures.base_classes import (
-            _TestSchema,
-            _TestSinkBase,
-            _TestSourceBase,
             as_sink,
             as_source,
         )
+        from tests.fixtures.plugins import CollectSink, ListSource
 
         db = make_landscape_db()
         concurrency_config = RuntimeConcurrencyConfig(max_workers=5)
         orchestrator = Orchestrator(db, concurrency_config=concurrency_config)
 
-        # Create simple test source
-        class SimpleSource(_TestSourceBase):
-            name = "simple_source"
-            output_schema = _TestSchema
-
-            def __init__(self) -> None:
-                super().__init__()
-                self._data = [{"id": 1}]
-                self.on_success = "output"
-
-            def load(self, ctx: Any) -> Iterator[SourceRow]:
-                yield from self.wrap_rows(self._data)
-
-        # Create simple test sink
-        class SimpleSink(_TestSinkBase):
-            name = "simple_sink"
-            input_schema = _TestSchema
-
-            def __init__(self) -> None:
-                super().__init__()
-                self.written: list[dict[str, Any]] = []
-
-            def write(self, rows: list[dict[str, Any]], ctx: Any) -> ArtifactDescriptor:
-                self.written.extend(rows)
-                return ArtifactDescriptor.for_file(path="memory://test", size_bytes=0, content_hash="test")
-
         # Build graph using production path
-        source = SimpleSource()
-        sink = SimpleSink()
+        source = ListSource([{"id": 1}], name="simple_source", on_success="output")
+        sink = CollectSink(name="simple_sink")
 
         graph = ExecutionGraph.from_plugin_instances(
             source=as_source(source),

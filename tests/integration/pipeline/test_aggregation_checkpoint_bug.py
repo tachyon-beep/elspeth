@@ -20,7 +20,6 @@ from typing import Any
 import pytest
 
 from elspeth.contracts import (
-    ArtifactDescriptor,
     FieldContract,
     PipelineRow,
     RunStatus,
@@ -42,13 +41,13 @@ from elspeth.testing import make_pipeline_row
 from tests.fixtures.base_classes import (
     CallbackSource,
     _TestSchema,
-    _TestSinkBase,
     as_sink,
     as_source,
     as_transform,
 )
 from tests.fixtures.factories import wire_transforms
 from tests.fixtures.landscape import make_landscape_db
+from tests.fixtures.plugins import CollectSink
 
 
 class BatchCollectorTransform(BaseTransform):
@@ -87,34 +86,6 @@ class BatchCollectorTransform(BaseTransform):
         else:
             # Single row - passthrough
             return TransformResult.success(make_pipeline_row(dict(row)), success_reason={"action": "single"})
-
-
-class CollectingSink(_TestSinkBase):
-    """Sink that collects rows."""
-
-    name = "collecting_sink"
-
-    def __init__(self) -> None:
-        super().__init__()
-        self.rows: list[dict[str, Any]] = []
-
-    def on_start(self, ctx: Any) -> None:
-        pass
-
-    def on_complete(self, ctx: Any) -> None:
-        pass
-
-    def write(self, rows: Any, ctx: Any) -> ArtifactDescriptor:
-        for row in rows:
-            self.rows.append(row)
-        return ArtifactDescriptor.for_file(
-            path="memory://test",
-            size_bytes=0,
-            content_hash="test",
-        )
-
-    def close(self) -> None:
-        pass
 
 
 class TestAggregationCheckpointFixVerification:
@@ -160,7 +131,7 @@ class TestAggregationCheckpointFixVerification:
         source = as_source(callback_source)
 
         transform = as_transform(BatchCollectorTransform())
-        collecting_sink = CollectingSink()
+        collecting_sink = CollectSink(name="collecting_sink")
         sink = as_sink(collecting_sink)
 
         # Build graph
@@ -299,7 +270,7 @@ class TestAggregationCheckpointFixVerification:
         source = as_source(callback_source)
 
         transform = as_transform(BatchCollectorTransform())
-        collecting_sink = CollectingSink()
+        collecting_sink = CollectSink(name="collecting_sink")
         sink = as_sink(collecting_sink)
 
         from elspeth.core.dag import ExecutionGraph

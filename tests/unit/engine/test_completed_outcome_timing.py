@@ -19,17 +19,13 @@ after successful sink writes. They currently FAIL because the bug exists.
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any
 
 import pytest
 from sqlalchemy import select
 
 from elspeth.contracts import (
-    ArtifactDescriptor,
     NodeStateStatus,
     NodeType,
-    PipelineRow,
-    PluginSchema,
     RoutingMode,
     RowOutcome,
     SinkName,
@@ -42,15 +38,12 @@ from elspeth.core.dag import ExecutionGraph
 from elspeth.core.landscape import LandscapeDB
 from elspeth.core.landscape.schema import node_states_table, token_outcomes_table
 from elspeth.engine.orchestrator import Orchestrator, PipelineConfig
-from elspeth.plugins.infrastructure.base import BaseTransform
-from elspeth.plugins.infrastructure.results import TransformResult
 from tests.fixtures.base_classes import (
-    _TestSinkBase,
     as_sink,
     as_source,
     as_transform,
 )
-from tests.fixtures.plugins import ListSource
+from tests.fixtures.plugins import FailingSink, ListSource, PassTransform
 
 
 def _build_graph(config: PipelineConfig) -> ExecutionGraph:
@@ -127,45 +120,10 @@ class TestCompletedOutcomeTimingContract:
         checkpoint_settings = CheckpointSettings(enabled=True, frequency="every_row")
         checkpoint_config = RuntimeCheckpointConfig.from_settings(checkpoint_settings)
 
-        class RowSchema(PluginSchema):
-            value: int
-
-        class PassthroughTransform(BaseTransform):
-            name = "passthrough"
-            input_schema = RowSchema
-            output_schema = RowSchema
-            on_error = "discard"
-            on_success = "default"
-
-            def __init__(self) -> None:
-                super().__init__({"schema": {"mode": "observed"}})
-
-            def process(self, row: PipelineRow, ctx: Any) -> TransformResult:
-                return TransformResult.success(
-                    PipelineRow(row.to_dict(), row.contract),
-                    success_reason={"action": "passthrough"},
-                )
-
-        class FailingSink(_TestSinkBase):
-            """Sink that always throws on write.
-
-            This simulates a crash/failure at the sink write boundary.
-            If COMPLETED is recorded correctly (after sink write), then
-            no COMPLETED outcomes should exist when this sink throws.
-            """
-
-            name = "failing_sink"
-
-            def __init__(self) -> None:
-                super().__init__()
-
-            def write(self, rows: Any, ctx: Any) -> ArtifactDescriptor:
-                raise RuntimeError("Simulated sink failure - data never written")
-
         # Create test data: 3 rows
         source = ListSource([{"value": 1}, {"value": 2}, {"value": 3}])
-        transform = PassthroughTransform()
-        sink = FailingSink()
+        transform = PassTransform(name="passthrough", on_success="default", on_error="discard")
+        sink = FailingSink(error_message="Simulated sink failure - data never written")
 
         config = PipelineConfig(
             source=as_source(source),
@@ -221,33 +179,8 @@ class TestCompletedOutcomeTimingContract:
         """
         db = LandscapeDB(f"sqlite:///{tmp_path}/test.db")
 
-        class RowSchema(PluginSchema):
-            value: int
-
-        class PassthroughTransform(BaseTransform):
-            name = "passthrough"
-            input_schema = RowSchema
-            output_schema = RowSchema
-            on_error = "discard"
-            on_success = "default"
-
-            def __init__(self) -> None:
-                super().__init__({"schema": {"mode": "observed"}})
-
-            def process(self, row: PipelineRow, ctx: Any) -> TransformResult:
-                return TransformResult.success(
-                    PipelineRow(row.to_dict(), row.contract),
-                    success_reason={"action": "passthrough"},
-                )
-
-        class FailingSink(_TestSinkBase):
-            name = "failing_sink"
-
-            def write(self, rows: Any, ctx: Any) -> ArtifactDescriptor:
-                raise RuntimeError("Sink write failed")
-
         source = ListSource([{"value": i} for i in range(5)])
-        transform = PassthroughTransform()
+        transform = PassTransform(name="passthrough", on_success="default", on_error="discard")
         sink = FailingSink()
 
         config = PipelineConfig(
@@ -300,33 +233,8 @@ class TestCompletedOutcomeTimingContract:
         """
         db = LandscapeDB(f"sqlite:///{tmp_path}/test.db")
 
-        class RowSchema(PluginSchema):
-            value: int
-
-        class PassthroughTransform(BaseTransform):
-            name = "passthrough"
-            input_schema = RowSchema
-            output_schema = RowSchema
-            on_error = "discard"
-            on_success = "default"
-
-            def __init__(self) -> None:
-                super().__init__({"schema": {"mode": "observed"}})
-
-            def process(self, row: PipelineRow, ctx: Any) -> TransformResult:
-                return TransformResult.success(
-                    PipelineRow(row.to_dict(), row.contract),
-                    success_reason={"action": "passthrough"},
-                )
-
-        class FailingSink(_TestSinkBase):
-            name = "failing_sink"
-
-            def write(self, rows: Any, ctx: Any) -> ArtifactDescriptor:
-                raise RuntimeError("Sink write failed")
-
         source = ListSource([{"value": i} for i in range(5)])
-        transform = PassthroughTransform()
+        transform = PassTransform(name="passthrough", on_success="default", on_error="discard")
         sink = FailingSink()
 
         config = PipelineConfig(

@@ -24,30 +24,23 @@ Each test verifies:
 
 from __future__ import annotations
 
-from collections.abc import Iterator
-from typing import TYPE_CHECKING, Any, ClassVar
+from typing import TYPE_CHECKING, Any
 from unittest.mock import MagicMock, Mock, patch
 
 import pytest
-from pydantic import ConfigDict
 
 from elspeth.contracts import (
-    ArtifactDescriptor,
     CallStatus,
     CallType,
-    PluginSchema,
-    SourceRow,
 )
 from elspeth.contracts.enums import RunStatus, TelemetryGranularity
 from elspeth.contracts.events import ExternalCallCompleted
-from elspeth.contracts.schema_contract import PipelineRow, SchemaContract
 from elspeth.core.landscape import LandscapeDB
 from elspeth.engine.orchestrator import Orchestrator, PipelineConfig
-from elspeth.plugins.infrastructure.results import TransformResult
 from elspeth.telemetry import TelemetryManager
-from elspeth.testing import make_field
-from tests.fixtures.base_classes import _TestSinkBase, _TestSourceBase, _TestTransformBase, as_sink, as_source, as_transform
+from tests.fixtures.base_classes import as_sink, as_source, as_transform
 from tests.fixtures.landscape import make_landscape_db
+from tests.fixtures.plugins import CollectSink, ListSource, PassTransform
 from tests.fixtures.telemetry import MockTelemetryConfig, TelemetryTestExporter
 
 if TYPE_CHECKING:
@@ -57,74 +50,6 @@ if TYPE_CHECKING:
 # =============================================================================
 # Test Fixtures
 # =============================================================================
-
-
-def _make_contract(data: dict[str, Any]) -> SchemaContract:
-    """Create a simple schema contract for test data."""
-    fields = tuple(make_field(k) for k in data)
-    return SchemaContract(mode="OBSERVED", fields=fields, locked=True)
-
-
-class DynamicSchema(PluginSchema):
-    """Dynamic schema for testing - allows any fields."""
-
-    model_config: ClassVar[ConfigDict] = ConfigDict(extra="allow")
-
-
-class SimpleSource(_TestSourceBase):
-    """Simple source that yields a fixed list of rows."""
-
-    name = "simple_source"
-    output_schema = DynamicSchema
-    on_success = "output"
-
-    def __init__(self, rows: list[dict[str, Any]] | None = None) -> None:
-        super().__init__()
-        self._rows = rows or [{"id": 1, "text": "test"}]
-
-    def load(self, ctx: Any) -> Iterator[SourceRow]:
-        for row in self._rows:
-            yield SourceRow.valid(row, contract=_make_contract(row))
-
-
-class SimpleSink(_TestSinkBase):
-    """Sink that collects rows for verification."""
-
-    name = "simple_sink"
-
-    def __init__(self) -> None:
-        super().__init__()
-        self.results: list[dict[str, Any]] = []
-
-    def write(self, rows: Any, ctx: Any) -> ArtifactDescriptor:
-        self.results.extend(rows)
-        return ArtifactDescriptor.for_file(
-            path="memory://test",
-            size_bytes=len(str(rows)),
-            content_hash="test-hash",
-        )
-
-
-class PassthroughTransform(_TestTransformBase):
-    """Transform that passes through rows unchanged."""
-
-    name = "passthrough"
-    input_schema = DynamicSchema
-    output_schema = DynamicSchema
-    on_error: str | None = "discard"
-    on_success: str | None = "output"
-
-    def process(self, row: Any, ctx: Any) -> TransformResult:
-        if isinstance(row, PipelineRow):
-            row_data = row.to_dict()
-            contract = row.contract
-        else:
-            row_data = row
-            contract = _make_contract(row_data)
-        return TransformResult.success(
-            PipelineRow(row_data, contract),
-            success_reason={"action": "passthrough"},
-        )
 
 
 def _create_test_graph(config: PipelineConfig) -> ExecutionGraph:
@@ -480,7 +405,7 @@ class TestOrchestratorTelemetryWiringContract:
         # Capture the telemetry_emit callback from inside a transform
         captured_callback = None
 
-        class TelemetryCapturingTransform(PassthroughTransform):
+        class TelemetryCapturingTransform(PassTransform):
             """Transform that captures the telemetry_emit callback."""
 
             name = "telemetry_capturing"
@@ -490,8 +415,8 @@ class TestOrchestratorTelemetryWiringContract:
                 nonlocal captured_callback
                 captured_callback = ctx.telemetry_emit
 
-        source = SimpleSource()
-        sink = SimpleSink()
+        source = ListSource([{"id": 1, "text": "test"}])
+        sink = CollectSink()
 
         pipeline_config = PipelineConfig(
             source=as_source(source),
@@ -523,12 +448,12 @@ class TestOrchestratorTelemetryWiringContract:
         config = MockTelemetryConfig(granularity=TelemetryGranularity.FULL)
         telemetry_manager = TelemetryManager(config, exporters=[exporter])
 
-        source = SimpleSource()
-        sink = SimpleSink()
+        source = ListSource([{"id": 1, "text": "test"}])
+        sink = CollectSink()
 
         pipeline_config = PipelineConfig(
             source=as_source(source),
-            transforms=[as_transform(PassthroughTransform())],
+            transforms=[as_transform(PassTransform())],
             sinks={"output": as_sink(sink)},
         )
 

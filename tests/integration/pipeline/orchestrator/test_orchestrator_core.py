@@ -17,7 +17,7 @@ from elspeth.plugins.infrastructure.base import BaseTransform
 from elspeth.testing import make_pipeline_row
 from tests.fixtures.base_classes import _TestSchema, as_sink, as_source, as_transform
 from tests.fixtures.pipeline import build_production_graph
-from tests.fixtures.plugins import CollectSink, ListSource
+from tests.fixtures.plugins import CollectSink, ListSource, PassTransform
 
 if TYPE_CHECKING:
     from elspeth.contracts.results import TransformResult
@@ -77,22 +77,6 @@ class MultiplyTwoTransform(BaseTransform):
         from elspeth.plugins.infrastructure.results import TransformResult
 
         return TransformResult.success(make_pipeline_row({"value": row["value"] * 2}), success_reason={"action": "multiply_two"})
-
-
-class IdentityTransform(BaseTransform):
-    """Transform that passes data through unchanged."""
-
-    name = "identity"
-    input_schema = _TestSchema
-    output_schema = _TestSchema
-
-    def __init__(self) -> None:
-        super().__init__({"schema": {"mode": "observed"}})
-
-    def process(self, row: PipelineRow, ctx: Any) -> TransformResult:
-        from elspeth.plugins.infrastructure.results import TransformResult
-
-        return TransformResult.success(make_pipeline_row(row.to_dict()), success_reason={"action": "identity"})
 
 
 # ---------------------------------------------------------------------------
@@ -169,7 +153,7 @@ class TestOrchestrator:
 
         db = make_landscape_db()
         source = ListSource([{"value": 1}, {"value": 2}], on_success="source_sink")
-        transform = IdentityTransform()
+        transform = PassTransform()
         output_sink = CollectSink(name="output")
         source_sink = CollectSink(name="source_sink")
 
@@ -233,7 +217,7 @@ class TestOrchestrator:
 
         db = make_landscape_db()
         source = ListSource([{"value": 1}], on_success="source_sink")
-        transform = IdentityTransform()
+        transform = PassTransform()
         output_sink = CollectSink(name="output")
         source_sink = CollectSink(name="source_sink")
 
@@ -360,7 +344,7 @@ class TestOrchestratorEmptyPipeline:
 
         db = make_landscape_db()
         source = ListSource([])  # Empty source
-        transform = IdentityTransform()
+        transform = PassTransform()
         transform.on_success = "default"
         sink = CollectSink()
 

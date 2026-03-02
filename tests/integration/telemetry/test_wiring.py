@@ -14,21 +14,17 @@ Migrated from tests/integration/test_telemetry_wiring.py
 
 from __future__ import annotations
 
-from collections.abc import Iterator
-from typing import TYPE_CHECKING, Any, ClassVar
+from typing import TYPE_CHECKING, Any
 
-from pydantic import ConfigDict
-
-from elspeth.contracts import ArtifactDescriptor, PluginSchema, SourceRow
 from elspeth.contracts.enums import RunStatus, TelemetryGranularity
 from elspeth.contracts.events import RunStarted
-from elspeth.contracts.schema_contract import FieldContract, SchemaContract
 from elspeth.core.landscape import LandscapeDB
 from elspeth.engine.orchestrator import Orchestrator, PipelineConfig
 from elspeth.plugins.infrastructure.results import TransformResult
 from elspeth.telemetry import TelemetryManager
-from tests.fixtures.base_classes import _TestSinkBase, _TestSourceBase, _TestTransformBase, as_sink, as_source, as_transform
+from tests.fixtures.base_classes import as_sink, as_source, as_transform
 from tests.fixtures.pipeline import build_production_graph
+from tests.fixtures.plugins import CollectSink, ListSource, PassTransform
 from tests.unit.telemetry.fixtures import MockTelemetryConfig, TelemetryTestExporter
 
 if TYPE_CHECKING:
@@ -38,74 +34,6 @@ if TYPE_CHECKING:
 # =============================================================================
 # Test Helpers
 # =============================================================================
-
-
-def _make_contract(data: dict[str, Any]) -> SchemaContract:
-    """Create a simple schema contract for test data."""
-    fields = tuple(
-        FieldContract(
-            normalized_name=k,
-            original_name=k,
-            python_type=object,
-            required=False,
-            source="inferred",
-        )
-        for k in data
-    )
-    return SchemaContract(mode="OBSERVED", fields=fields, locked=True)
-
-
-class DynamicSchema(PluginSchema):
-    """Dynamic schema for testing - allows any fields."""
-
-    model_config: ClassVar[ConfigDict] = ConfigDict(extra="allow")
-
-
-class SimpleSource(_TestSourceBase):
-    """Simple source that yields a fixed list of rows."""
-
-    name = "simple_source"
-    output_schema = DynamicSchema
-    on_success = "output"
-
-    def __init__(self, rows: list[dict[str, Any]] | None = None) -> None:
-        super().__init__()
-        self._rows = rows or [{"id": 1}, {"id": 2}, {"id": 3}]
-
-    def load(self, ctx: Any) -> Iterator[SourceRow]:
-        for row in self._rows:
-            yield SourceRow.valid(row, contract=_make_contract(row))
-
-
-class SimpleTransform(_TestTransformBase):
-    """Transform that passes through rows unchanged."""
-
-    name = "simple_transform"
-    input_schema = DynamicSchema
-    output_schema = DynamicSchema
-    on_error: str | None = "discard"
-    on_success: str | None = "output"
-
-    def process(self, row: Any, ctx: Any) -> TransformResult:
-        return TransformResult.success(row, success_reason={"action": "passthrough"})
-
-
-class SimpleSink(_TestSinkBase):
-    """Sink that collects rows for verification."""
-
-    name = "simple_sink"
-
-    def __init__(self) -> None:
-        super().__init__()
-        self.results: list[dict[str, Any]] = []
-
-    def write(self, rows: Any, ctx: Any) -> ArtifactDescriptor:
-        self.results.extend(rows)
-        return ArtifactDescriptor.for_file(
-            path="memory://test",
-            size_bytes=len(str(rows)),
-            content_hash="test-hash",
-        )
 
 
 def create_test_graph(config: PipelineConfig) -> ExecutionGraph:
@@ -138,12 +66,12 @@ class TestOrchestratorWiresTelemetryToContext:
         config = MockTelemetryConfig(granularity=TelemetryGranularity.FULL)
         telemetry_manager = TelemetryManager(config, exporters=[exporter])
 
-        source = SimpleSource()
-        sink = SimpleSink()
+        source = ListSource([{"id": 1}, {"id": 2}, {"id": 3}], on_success="output")
+        sink = CollectSink()
 
         pipeline_config = PipelineConfig(
             source=as_source(source),
-            transforms=[as_transform(SimpleTransform())],
+            transforms=[as_transform(PassTransform())],
             sinks={"output": as_sink(sink)},
         )
 
@@ -180,7 +108,7 @@ class TestOrchestratorWiresTelemetryToContext:
         """
         captured_callback = None
 
-        class CallbackCapturingTransform(SimpleTransform):
+        class CallbackCapturingTransform(PassTransform):
             """Transform that captures the telemetry_emit callback."""
 
             name = "callback_capturing"
@@ -197,8 +125,8 @@ class TestOrchestratorWiresTelemetryToContext:
         config = MockTelemetryConfig()
         telemetry_manager = TelemetryManager(config, exporters=[exporter])
 
-        source = SimpleSource()
-        sink = SimpleSink()
+        source = ListSource([{"id": 1}, {"id": 2}, {"id": 3}], on_success="output")
+        sink = CollectSink()
 
         pipeline_config = PipelineConfig(
             source=as_source(source),
@@ -240,12 +168,12 @@ class TestOrchestratorWiresTelemetryToContext:
         config = MockTelemetryConfig()
         telemetry_manager = TelemetryManager(config, exporters=[exporter])
 
-        source = SimpleSource()
-        sink = SimpleSink()
+        source = ListSource([{"id": 1}, {"id": 2}, {"id": 3}], on_success="output")
+        sink = CollectSink()
 
         pipeline_config = PipelineConfig(
             source=as_source(source),
-            transforms=[as_transform(SimpleTransform())],
+            transforms=[as_transform(PassTransform())],
             sinks={"output": as_sink(sink)},
         )
 
@@ -271,12 +199,12 @@ class TestNoTelemetryWithoutManager:
         payload_store: Any,
     ) -> None:
         """Pipeline runs successfully without telemetry manager."""
-        source = SimpleSource()
-        sink = SimpleSink()
+        source = ListSource([{"id": 1}, {"id": 2}, {"id": 3}], on_success="output")
+        sink = CollectSink()
 
         pipeline_config = PipelineConfig(
             source=as_source(source),
-            transforms=[as_transform(SimpleTransform())],
+            transforms=[as_transform(PassTransform())],
             sinks={"output": as_sink(sink)},
         )
 
@@ -299,7 +227,7 @@ class TestNoTelemetryWithoutManager:
         """Without telemetry manager, ctx.telemetry_emit is a no-op lambda."""
         captured_callback = None
 
-        class CallbackCapturingTransform(SimpleTransform):
+        class CallbackCapturingTransform(PassTransform):
             name = "callback_capturing"
 
             def on_start(self, ctx: Any) -> None:
@@ -307,8 +235,8 @@ class TestNoTelemetryWithoutManager:
                 nonlocal captured_callback
                 captured_callback = ctx.telemetry_emit
 
-        source = SimpleSource()
-        sink = SimpleSink()
+        source = ListSource([{"id": 1}, {"id": 2}, {"id": 3}], on_success="output")
+        sink = CollectSink()
 
         pipeline_config = PipelineConfig(
             source=as_source(source),
