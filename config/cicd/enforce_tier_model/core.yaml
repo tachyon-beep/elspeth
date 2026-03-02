@@ -490,6 +490,11 @@ allow_hits:
   reason: Tier-3 boundary — quarantined row payload may contain NaN/Infinity that canonical_json rejects
   safety: Falls back to json.dumps(repr()) for payload storage; original error recorded in quarantine metadata
   expires: '2026-05-12'
+- key: core/operations.py:R5:track_operation:fp=f22ae9225381d587
+  owner: architecture
+  reason: isinstance re-raise guard — FrameworkBugError/AuditIntegrityError from complete_operation() must supersede any original exception
+  safety: Tier 1 violations always propagate; original exception chained via __cause__
+  expires: '2026-05-15'
 - key: core/security/web.py:R4:validate_url_for_ssrf:_resolve_worker:fp=dde2f93fdde02a2b
   owner: bugfix
   reason: DNS resolver worker catches BaseException to relay ALL errors through the queue to the caller thread

@@ -494,6 +494,15 @@ class Orchestrator:
         cleanup_errors: list[str] = []
 
         def record_cleanup_error(hook: str, plugin_name: str, error: Exception) -> None:
+            from elspeth.contracts import FrameworkBugError
+            from elspeth.contracts.errors import AuditIntegrityError
+
+            # FrameworkBugError and AuditIntegrityError indicate system-level
+            # corruption or bugs — Tier 1 violations that must crash immediately.
+            # These must NOT be downgraded to cleanup warnings.
+            if isinstance(error, (FrameworkBugError, AuditIntegrityError)):
+                raise
+
             logger.warning(
                 "Plugin cleanup hook failed",
                 hook=hook,

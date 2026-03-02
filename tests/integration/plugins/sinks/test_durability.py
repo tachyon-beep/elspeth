@@ -14,30 +14,15 @@ from unittest.mock import Mock, patch
 import pytest
 
 from elspeth.contracts import Determinism, NodeType, PendingOutcome, RowOutcome, TokenInfo
-from elspeth.contracts.schema_contract import FieldContract, SchemaContract
 from elspeth.core.checkpoint import CheckpointManager
 from elspeth.core.dag import ExecutionGraph
 from elspeth.core.landscape.database import LandscapeDB
 from elspeth.core.payload_store import FilesystemPayloadStore
 from elspeth.engine.executors import SinkExecutor
 from elspeth.engine.spans import SpanFactory
+from tests.fixtures.base_classes import create_observed_contract
 from tests.fixtures.factories import make_context
 from tests.fixtures.landscape import make_recorder
-
-
-def _make_contract(data: dict[str, Any]) -> SchemaContract:
-    """Create a simple schema contract for test data."""
-    fields = tuple(
-        FieldContract(
-            normalized_name=k,
-            original_name=k,
-            python_type=object,
-            required=False,
-            source="inferred",
-        )
-        for k in data
-    )
-    return SchemaContract(mode="OBSERVED", fields=fields, locked=True)
 
 
 class TestSinkDurability:
@@ -181,7 +166,7 @@ class TestSinkDurability:
         # Create TokenInfo for executor (includes PipelineRow)
         from elspeth.contracts.schema_contract import PipelineRow
 
-        pipeline_row = PipelineRow(data=row_data, contract=_make_contract(row_data))
+        pipeline_row = PipelineRow(data=row_data, contract=create_observed_contract(row_data))
         token = TokenInfo(
             row_id=row.row_id,
             token_id=db_token.token_id,
@@ -276,7 +261,7 @@ class TestSinkDurability:
         # Create TokenInfo for executor (includes PipelineRow)
         from elspeth.contracts.schema_contract import PipelineRow
 
-        pipeline_row = PipelineRow(data=row_data, contract=_make_contract(row_data))
+        pipeline_row = PipelineRow(data=row_data, contract=create_observed_contract(row_data))
         token = TokenInfo(
             row_id=row.row_id,
             token_id=db_token.token_id,
@@ -364,7 +349,7 @@ class TestSinkDurability:
         # Create TokenInfo for executor (includes PipelineRow)
         from elspeth.contracts.schema_contract import PipelineRow
 
-        pipeline_row = PipelineRow(data=row_data, contract=_make_contract(row_data))
+        pipeline_row = PipelineRow(data=row_data, contract=create_observed_contract(row_data))
         token = TokenInfo(
             row_id=row.row_id,
             token_id=db_token.token_id,

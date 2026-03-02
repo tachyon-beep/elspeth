@@ -19,10 +19,8 @@ import pytest
 
 from elspeth.contracts import PendingOutcome, RowOutcome, TokenInfo
 from elspeth.contracts.enums import BatchStatus, TriggerType
-from elspeth.contracts.errors import OrchestrationInvariantError
 from elspeth.contracts.types import NodeID
 from elspeth.engine.orchestrator.aggregation import (
-    _route_aggregation_outcome,
     check_aggregation_timeouts,
     find_aggregation_transform,
     flush_remaining_aggregation_buffers,
@@ -1095,38 +1093,3 @@ class TestFlushRemainingAggregationBuffers:
 
         assert result.rows_succeeded == 1
         assert len(pending["output"]) == 1
-
-
-# =============================================================================
-# _route_aggregation_outcome invariant tests
-# =============================================================================
-
-
-class TestRouteAggregationOutcome:
-    """Tests for _route_aggregation_outcome() fail-closed safety check."""
-
-    def test_routes_to_known_sink(self) -> None:
-        """Successfully routes result to a known sink in pending_tokens."""
-        result = _make_result(RowOutcome.COMPLETED, sink_name="output")
-        pending = _make_pending()
-
-        _route_aggregation_outcome(result, pending)
-
-        assert len(pending["output"]) == 1
-        assert pending["output"][0][0] == result.token
-
-    def test_unknown_sink_raises_invariant_error(self) -> None:
-        """Raises OrchestrationInvariantError when sink_name is not in pending_tokens."""
-        result = _make_result(RowOutcome.COMPLETED, sink_name="nonexistent")
-        pending = _make_pending()
-
-        with pytest.raises(OrchestrationInvariantError, match="not in configured sinks"):
-            _route_aggregation_outcome(result, pending)
-
-    def test_missing_sink_name_raises_invariant_error(self) -> None:
-        """Missing sink_name must fail closed with invariant error."""
-        result = _make_result(RowOutcome.COMPLETED, sink_name=None)
-        pending = _make_pending()
-
-        with pytest.raises(OrchestrationInvariantError, match="missing sink_name"):
-            _route_aggregation_outcome(result, pending)

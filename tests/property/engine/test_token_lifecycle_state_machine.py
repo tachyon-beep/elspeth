@@ -43,7 +43,8 @@ from elspeth.contracts import (
     RowOutcome,
 )
 from elspeth.contracts.schema import SchemaConfig
-from elspeth.core.landscape import LandscapeDB, LandscapeRecorder
+from elspeth.core.landscape import LandscapeDB
+from tests.fixtures.landscape import make_landscape_db, make_recorder
 from tests.strategies.ids import multiple_branches
 from tests.strategies.json import row_data
 
@@ -167,8 +168,8 @@ class TokenLifecycleStateMachine(RuleBasedStateMachine):
         super().__init__()
 
         # Database and recorder
-        self.db = LandscapeDB.in_memory()
-        self.recorder = LandscapeRecorder(self.db)
+        self.db = make_landscape_db()
+        self.recorder = make_recorder(self.db)
 
         # Begin a run
         self.run = self.recorder.begin_run(
@@ -585,8 +586,8 @@ class TestTokenLifecycleInvariants:
     @settings(max_examples=20, deadline=None)
     def test_token_id_uniqueness(self, token_count: int) -> None:
         """Property: Token IDs are unique across multiple creations."""
-        with LandscapeDB.in_memory() as db:
-            recorder = LandscapeRecorder(db)
+        with make_landscape_db() as db:
+            recorder = make_recorder(db)
 
             run = recorder.begin_run(
                 config={"source": {"plugin": "test"}},
@@ -620,8 +621,8 @@ class TestTokenLifecycleInvariants:
     @settings(max_examples=20, deadline=None)
     def test_fork_atomic_parent_outcome(self, branch_count: int) -> None:
         """Property: Fork atomically records FORKED outcome for parent."""
-        with LandscapeDB.in_memory() as db:
-            recorder = LandscapeRecorder(db)
+        with make_landscape_db() as db:
+            recorder = make_recorder(db)
 
             run = recorder.begin_run(
                 config={"source": {"plugin": "test"}},
@@ -678,8 +679,8 @@ class TestTokenLifecycleInvariants:
     @settings(max_examples=20, deadline=None)
     def test_terminal_state_is_final(self, data: dict[str, Any]) -> None:
         """Property: Once a token reaches terminal state, no new outcomes can be recorded."""
-        with LandscapeDB.in_memory() as db:
-            recorder = LandscapeRecorder(db)
+        with make_landscape_db() as db:
+            recorder = make_recorder(db)
 
             run = recorder.begin_run(
                 config={"source": {"plugin": "test"}},
@@ -734,8 +735,8 @@ class TestTokenLifecycleInvariants:
     @settings(max_examples=20, deadline=None)
     def test_row_data_preserved_through_lifecycle(self, data: dict[str, Any]) -> None:
         """Property: row_id remains constant through token lifecycle."""
-        with LandscapeDB.in_memory() as db:
-            recorder = LandscapeRecorder(db)
+        with make_landscape_db() as db:
+            recorder = make_recorder(db)
 
             run = recorder.begin_run(
                 config={"source": {"plugin": "test"}},
@@ -784,8 +785,8 @@ class TestTokenLifecycleInvariants:
     @settings(max_examples=20, deadline=None)
     def test_coalesce_creates_merged_token(self, parent_count: int) -> None:
         """Property: Coalesce creates a new token linking to parent tokens."""
-        with LandscapeDB.in_memory() as db:
-            recorder = LandscapeRecorder(db)
+        with make_landscape_db() as db:
+            recorder = make_recorder(db)
 
             run = recorder.begin_run(
                 config={"source": {"plugin": "test"}},

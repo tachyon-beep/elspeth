@@ -316,6 +316,52 @@ class TestSourceRow:
 
         assert SourceRow is not None
 
+    def test_quarantined_without_error_raises(self) -> None:
+        """Quarantined row without error message violates invariant."""
+        from elspeth.contracts import SourceRow
+
+        with pytest.raises(ValueError, match="quarantine_error"):
+            SourceRow(row={"x": 1}, is_quarantined=True, quarantine_destination="bad_sink")
+
+    def test_quarantined_without_destination_raises(self) -> None:
+        """Quarantined row without destination violates invariant."""
+        from elspeth.contracts import SourceRow
+
+        with pytest.raises(ValueError, match="quarantine_destination"):
+            SourceRow(row={"x": 1}, is_quarantined=True, quarantine_error="bad data")
+
+    def test_non_quarantined_with_error_raises(self) -> None:
+        """Non-quarantined row with quarantine_error set violates invariant."""
+        from elspeth.contracts import SourceRow
+
+        with pytest.raises(ValueError, match="quarantine_error"):
+            SourceRow(row={"x": 1}, is_quarantined=False, quarantine_error="stale error")
+
+    def test_non_quarantined_with_destination_raises(self) -> None:
+        """Non-quarantined row with quarantine_destination set violates invariant."""
+        from elspeth.contracts import SourceRow
+
+        with pytest.raises(ValueError, match="quarantine_destination"):
+            SourceRow(row={"x": 1}, is_quarantined=False, quarantine_destination="stale_sink")
+
+    def test_valid_factory_passes_post_init(self) -> None:
+        """SourceRow.valid() produces a row that passes __post_init__ validation."""
+        from elspeth.contracts import SourceRow
+
+        row = SourceRow.valid({"a": 1})
+        assert not row.is_quarantined
+        assert row.quarantine_error is None
+        assert row.quarantine_destination is None
+
+    def test_quarantined_factory_passes_post_init(self) -> None:
+        """SourceRow.quarantined() produces a row that passes __post_init__ validation."""
+        from elspeth.contracts import SourceRow
+
+        row = SourceRow.quarantined(row={"a": "bad"}, error="bad val", destination="quarantine")
+        assert row.is_quarantined
+        assert row.quarantine_error == "bad val"
+        assert row.quarantine_destination == "quarantine"
+
 
 class TestPluginsPublicAPI:
     """Public API exports from elspeth.plugins."""

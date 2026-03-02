@@ -14,10 +14,10 @@ from hypothesis import strategies as st
 from elspeth.contracts import NodeType, TokenInfo
 from elspeth.contracts.schema import SchemaConfig
 from elspeth.contracts.types import CoalesceName, NodeID
-from elspeth.core.landscape import LandscapeDB, LandscapeRecorder
 from elspeth.engine.processor import DAGTraversalContext, RowProcessor
 from elspeth.engine.spans import SpanFactory
 from elspeth.testing import make_row
+from tests.fixtures.landscape import make_landscape_db, make_recorder
 
 
 def _make_processor(
@@ -28,8 +28,8 @@ def _make_processor(
     coalesce_executor: Mock | None,
 ) -> tuple[RowProcessor, Mock]:
     """Construct a minimal processor with deterministic step/node mappings."""
-    db = LandscapeDB.in_memory()
-    recorder = LandscapeRecorder(db)
+    db = make_landscape_db()
+    recorder = make_recorder(db)
     run_id = "test-run"
     source_node_id = NodeID("source-0")
 

@@ -39,6 +39,7 @@ from elspeth.core.landscape.database import LandscapeDB
 from elspeth.core.landscape.reproducibility import ReproducibilityGrade
 from elspeth.core.landscape.schema import nodes_table, rows_table, runs_table
 from elspeth.core.retention import PurgeManager, PurgeResult
+from tests.fixtures.landscape import make_landscape_db
 
 # =============================================================================
 # Strategies for retention testing
@@ -166,7 +167,7 @@ class TestRetentionAgeMonotonicityProperties:
         """
         assume(days_short < days_long)
 
-        with LandscapeDB.in_memory() as db:
+        with make_landscape_db() as db:
             # Create a run that completed 20 days ago
             completed_at = _REFERENCE_TIME - timedelta(days=20)
             run_id = _create_completed_run(db, completed_at)
@@ -191,7 +192,7 @@ class TestRetentionAgeMonotonicityProperties:
         If we retain for 9999 days, a run completed yesterday should
         never have expired refs.
         """
-        with LandscapeDB.in_memory() as db:
+        with make_landscape_db() as db:
             completed_at = _REFERENCE_TIME - timedelta(days=1)
             run_id = _create_completed_run(db, completed_at)
             _insert_rows_with_refs(db, run_id, num_rows)
@@ -211,7 +212,7 @@ class TestRetentionAgeMonotonicityProperties:
         With 0-day retention, any completed run should have its
         payloads eligible for purge.
         """
-        with LandscapeDB.in_memory() as db:
+        with make_landscape_db() as db:
             # Run completed 1 second ago
             completed_at = _REFERENCE_TIME - timedelta(seconds=1)
             run_id = _create_completed_run(db, completed_at)
@@ -254,7 +255,7 @@ class TestCutoffMonotonicityProperties:
         If we check "what expired as of 30 days from now" vs "as of 60
         days from now", the later check should find at least as many.
         """
-        with LandscapeDB.in_memory() as db:
+        with make_landscape_db() as db:
             # Create a run completed 15 days ago
             completed_at = _REFERENCE_TIME - timedelta(days=15)
             run_id = _create_completed_run(db, completed_at)
@@ -327,7 +328,7 @@ class TestPurgeResultInvariantProperties:
         mock_store = MagicMock()
         mock_store.exists.return_value = False
 
-        with LandscapeDB.in_memory() as db:
+        with make_landscape_db() as db:
             completed_at = _REFERENCE_TIME - timedelta(days=30)
             run_id = _create_completed_run(db, completed_at)
             refs = _insert_rows_with_refs(db, run_id, num_rows)
@@ -349,7 +350,7 @@ class TestPurgeResultInvariantProperties:
         mock_store = MagicMock()
         mock_store.exists.return_value = False
 
-        with LandscapeDB.in_memory() as db:
+        with make_landscape_db() as db:
             completed_at = _REFERENCE_TIME - timedelta(days=30)
             run_id = _create_completed_run(db, completed_at)
             refs = _insert_rows_with_refs(db, run_id, num_rows)
@@ -371,7 +372,7 @@ class TestPurgeResultInvariantProperties:
         mock_store.exists.return_value = True
         mock_store.delete.return_value = True
 
-        with LandscapeDB.in_memory() as db:
+        with make_landscape_db() as db:
             completed_at = _REFERENCE_TIME - timedelta(days=30)
             run_id = _create_completed_run(db, completed_at)
             refs = _insert_rows_with_refs(db, run_id, num_rows)

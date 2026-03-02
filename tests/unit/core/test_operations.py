@@ -191,3 +191,75 @@ def test_track_operation_does_not_mask_original_exception_when_completion_fails(
     assert recorder.complete_calls[0]["status"] == "failed"
     assert recorder.complete_calls[0]["error"] == "original failure"
     assert ctx.operation_id is None
+
+
+def test_track_operation_reraises_framework_bug_error_even_with_original_exception() -> None:
+    """FrameworkBugError from complete_operation() must supersede any original exception.
+
+    Tier 1 violations indicate audit corruption — categorically worse than
+    whatever the operation body was doing.
+    """
+    from elspeth.contracts import FrameworkBugError
+
+    recorder = _FakeRecorder(complete_error=FrameworkBugError("audit corruption"))
+    ctx = make_context()
+
+    with (
+        pytest.raises(FrameworkBugError, match="audit corruption"),
+        track_operation(
+            recorder=cast(LandscapeRecorder, recorder),
+            run_id="run-001",
+            node_id="node-001",
+            operation_type="source_load",
+            ctx=ctx,
+        ),
+    ):
+        raise ValueError("original failure")
+
+    assert ctx.operation_id is None
+
+
+def test_track_operation_reraises_audit_integrity_error_even_with_original_exception() -> None:
+    """AuditIntegrityError from complete_operation() must supersede any original exception."""
+    from elspeth.contracts.errors import AuditIntegrityError
+
+    recorder = _FakeRecorder(complete_error=AuditIntegrityError("DB corrupted"))
+    ctx = make_context()
+
+    with (
+        pytest.raises(AuditIntegrityError, match="DB corrupted"),
+        track_operation(
+            recorder=cast(LandscapeRecorder, recorder),
+            run_id="run-001",
+            node_id="node-001",
+            operation_type="sink_write",
+            ctx=ctx,
+        ),
+    ):
+        raise RuntimeError("operation error")
+
+    assert ctx.operation_id is None
+
+
+def test_track_operation_tier1_error_chains_original_exception() -> None:
+    """When Tier 1 error supersedes, the original exception is chained via __cause__."""
+    from elspeth.contracts import FrameworkBugError
+
+    recorder = _FakeRecorder(complete_error=FrameworkBugError("corruption"))
+    ctx = make_context()
+
+    with (
+        pytest.raises(FrameworkBugError) as exc_info,
+        track_operation(
+            recorder=cast(LandscapeRecorder, recorder),
+            run_id="run-001",
+            node_id="node-001",
+            operation_type="source_load",
+            ctx=ctx,
+        ),
+    ):
+        raise ValueError("original cause")
+
+    assert exc_info.value.__cause__ is not None
+    assert isinstance(exc_info.value.__cause__, ValueError)
+    assert str(exc_info.value.__cause__) == "original cause"

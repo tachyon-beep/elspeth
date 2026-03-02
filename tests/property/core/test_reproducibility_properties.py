@@ -40,6 +40,7 @@ from elspeth.core.landscape.reproducibility import (
     update_grade_after_purge,
 )
 from elspeth.core.landscape.schema import nodes_table, runs_table
+from tests.fixtures.landscape import make_landscape_db
 
 # =============================================================================
 # Strategies for reproducibility testing
@@ -203,7 +204,7 @@ class TestDeterminismClassificationProperties:
         DETERMINISTIC and SEEDED can be re-executed with identical results
         (SEEDED needs the seed captured beforehand).
         """
-        with LandscapeDB.in_memory() as db:
+        with make_landscape_db() as db:
             run_id = _create_run(db)
             _insert_nodes(db, run_id, determinisms)
             grade = compute_grade(db, run_id)
@@ -218,7 +219,7 @@ class TestDeterminismClassificationProperties:
         recorded runtime data to replay - they can't be re-executed from
         scratch with identical results.
         """
-        with LandscapeDB.in_memory() as db:
+        with make_landscape_db() as db:
             run_id = _create_run(db)
             _insert_nodes(db, run_id, determinisms)
             grade = compute_grade(db, run_id)
@@ -226,7 +227,7 @@ class TestDeterminismClassificationProperties:
 
     def test_empty_pipeline_is_full_reproducible(self) -> None:
         """Property: Empty pipeline is trivially FULL_REPRODUCIBLE."""
-        with LandscapeDB.in_memory() as db:
+        with make_landscape_db() as db:
             run_id = _create_run(db)
             grade = compute_grade(db, run_id)
             assert grade == ReproducibilityGrade.FULL_REPRODUCIBLE
@@ -291,7 +292,7 @@ class TestGradeDegradationProperties:
     @settings(max_examples=20)
     def test_degradation_rule_applies(self, grade: ReproducibilityGrade) -> None:
         """Property: Degradation rule applied via update_grade_after_purge()."""
-        with LandscapeDB.in_memory() as db:
+        with make_landscape_db() as db:
             run_id = _create_run(db)
             _set_run_grade(db, run_id, grade)
             update_grade_after_purge(db, run_id)
@@ -306,7 +307,7 @@ class TestGradeDegradationProperties:
 
         degrade(degrade(x)) == degrade(x) for all grades.
         """
-        with LandscapeDB.in_memory() as db:
+        with make_landscape_db() as db:
             run_id = _create_run(db)
             _set_run_grade(db, run_id, grade)
 
@@ -331,7 +332,7 @@ class TestGradeDegradationProperties:
             ReproducibilityGrade.FULL_REPRODUCIBLE: 2,
         }
 
-        with LandscapeDB.in_memory() as db:
+        with make_landscape_db() as db:
             run_id = _create_run(db)
             _set_run_grade(db, run_id, grade)
             update_grade_after_purge(db, run_id)
@@ -355,7 +356,7 @@ class TestClassificationDegradationInteractionProperties:
 
         DETERMINISTIC nodes don't need recorded payloads to re-execute.
         """
-        with LandscapeDB.in_memory() as db:
+        with make_landscape_db() as db:
             run_id = _create_run(db)
             _insert_nodes(db, run_id, [det])
 
@@ -372,7 +373,7 @@ class TestClassificationDegradationInteractionProperties:
 
         Without recorded responses, we can only prove what happened via hashes.
         """
-        with LandscapeDB.in_memory() as db:
+        with make_landscape_db() as db:
             run_id = _create_run(db)
             _insert_nodes(db, run_id, [det])
 

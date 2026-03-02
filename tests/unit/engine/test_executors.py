@@ -3025,6 +3025,123 @@ class TestNodeStateGuard:
         assert kwargs["attempt"] == 3
         assert kwargs["step_index"] == 2
 
+    # -- Re-raise guard tests: clean-exit path (missing complete()) ----------
+
+    def test_framework_bug_error_propagates_on_clean_exit(self) -> None:
+        """FrameworkBugError from recorder supersedes OrchestrationInvariantError.
+
+        When the block exits normally without complete(), the guard tries to
+        record FAILED.  If that recorder call raises FrameworkBugError, it must
+        propagate directly — it's more critical than the "missing complete()" bug.
+        """
+        from elspeth.contracts.errors import FrameworkBugError
+        from elspeth.engine.executors import NodeStateGuard
+
+        recorder = _make_recorder()
+        recorder.complete_node_state.side_effect = FrameworkBugError("internal inconsistency")
+        guard = NodeStateGuard(
+            recorder,
+            token_id="tok_1",
+            node_id="node_1",
+            run_id="run_1",
+            step_index=1,
+            input_data={"v": 1},
+        )
+        # Must propagate FrameworkBugError, NOT OrchestrationInvariantError
+        with pytest.raises(FrameworkBugError, match="internal inconsistency"), guard:
+            pass  # Exit without complete()
+
+    def test_audit_integrity_error_propagates_on_clean_exit(self) -> None:
+        """AuditIntegrityError from recorder supersedes OrchestrationInvariantError.
+
+        Same as above but for AuditIntegrityError — audit corruption is always
+        the highest-priority failure signal.
+        """
+        from elspeth.contracts.errors import AuditIntegrityError
+        from elspeth.engine.executors import NodeStateGuard
+
+        recorder = _make_recorder()
+        recorder.complete_node_state.side_effect = AuditIntegrityError("corrupt state table")
+        guard = NodeStateGuard(
+            recorder,
+            token_id="tok_1",
+            node_id="node_1",
+            run_id="run_1",
+            step_index=1,
+            input_data={"v": 1},
+        )
+        with pytest.raises(AuditIntegrityError, match="corrupt state table"), guard:
+            pass
+
+    def test_regular_recorder_error_on_clean_exit_still_raises_invariant(self) -> None:
+        """Non-system recorder error on clean exit → OrchestrationInvariantError still raised.
+
+        When recorder.complete_node_state fails with a regular exception (e.g., DB
+        down), the guard logs it and still raises OrchestrationInvariantError for
+        the missing complete() bug.  The recorder failure is swallowed (logged).
+        """
+        from elspeth.engine.executors import NodeStateGuard
+
+        recorder = _make_recorder()
+        recorder.complete_node_state.side_effect = RuntimeError("DB connection lost")
+        guard = NodeStateGuard(
+            recorder,
+            token_id="tok_1",
+            node_id="node_1",
+            run_id="run_1",
+            step_index=1,
+            input_data={"v": 1},
+        )
+        with pytest.raises(OrchestrationInvariantError, match="exited without complete"), guard:
+            pass
+
+    # -- Re-raise guard tests: exception path (auto-fail) --------------------
+
+    def test_framework_bug_error_supersedes_original_exception(self) -> None:
+        """FrameworkBugError from recorder supersedes the original exception.
+
+        When an exception triggers __exit__ and the auto-fail recorder call
+        raises FrameworkBugError, it must propagate instead of the original
+        exception — system-level corruption outranks the triggering error.
+        """
+        from elspeth.contracts.errors import FrameworkBugError
+        from elspeth.engine.executors import NodeStateGuard
+
+        recorder = _make_recorder()
+        recorder.complete_node_state.side_effect = FrameworkBugError("broken invariant")
+        guard = NodeStateGuard(
+            recorder,
+            token_id="tok_1",
+            node_id="node_1",
+            run_id="run_1",
+            step_index=1,
+            input_data={"v": 1},
+        )
+        # FrameworkBugError supersedes the original ValueError
+        with pytest.raises(FrameworkBugError, match="broken invariant"), guard:
+            raise ValueError("original processing error")
+
+    def test_audit_integrity_error_supersedes_original_exception(self) -> None:
+        """AuditIntegrityError from recorder supersedes the original exception.
+
+        Same as above: audit corruption is always the highest-priority signal.
+        """
+        from elspeth.contracts.errors import AuditIntegrityError
+        from elspeth.engine.executors import NodeStateGuard
+
+        recorder = _make_recorder()
+        recorder.complete_node_state.side_effect = AuditIntegrityError("state table corrupt")
+        guard = NodeStateGuard(
+            recorder,
+            token_id="tok_1",
+            node_id="node_1",
+            run_id="run_1",
+            step_index=1,
+            input_data={"v": 1},
+        )
+        with pytest.raises(AuditIntegrityError, match="state table corrupt"), guard:
+            raise ValueError("original error, now masked by corruption")
+
 
 # =============================================================================
 # Regression: B1 — TransformExecutor post-processing terminality
@@ -3511,3 +3628,128 @@ class TestGateExecutorExecutionErrorFieldRename:
         error_dict = error_obj.to_dict()
         assert error_dict["type"] == "ValueError"
         assert "exception_type" not in error_dict
+
+
+# =============================================================================
+# Structural: FrameworkBugError/AuditIntegrityError re-raise pattern
+# =============================================================================
+
+
+class TestReRaiseGuardPattern:
+    """Structural test: every except (FrameworkBugError, AuditIntegrityError) is a bare re-raise.
+
+    The re-raise pattern is a safety-critical invariant across the codebase:
+    system-level exceptions must NEVER be caught and wrapped, logged-and-swallowed,
+    or transformed into a different exception.  The only valid body for these
+    handlers is a bare ``raise`` statement.
+
+    This test uses AST parsing to verify the pattern is applied consistently
+    across all source files, catching drift when someone refactors a try/except
+    and accidentally removes or modifies the re-raise guard.
+    """
+
+    # Files where the handler intentionally does MORE than bare re-raise.
+    # cli.py is the outermost boundary — it formats errors and sets exit codes.
+    _HANDLER_ALLOWLIST = frozenset({"cli.py"})
+
+    def test_all_reraise_guards_have_bare_raise(self) -> None:
+        """Every except (FrameworkBugError, AuditIntegrityError) must contain only 'raise'.
+
+        Exception: cli.py is the outermost boundary and intentionally formats
+        these errors for operator display with distinct exit codes.
+        """
+        import ast
+        from pathlib import Path
+
+        src_root = Path("src/elspeth")
+        violations: list[str] = []
+
+        for py_file in sorted(src_root.rglob("*.py")):
+            if py_file.name in self._HANDLER_ALLOWLIST:
+                continue
+
+            source = py_file.read_text()
+            try:
+                tree = ast.parse(source, filename=str(py_file))
+            except SyntaxError:
+                continue
+
+            for node in ast.walk(tree):
+                if not isinstance(node, ast.ExceptHandler):
+                    continue
+
+                # Match: except (FrameworkBugError, AuditIntegrityError)
+                if not _is_framework_audit_handler(node):
+                    continue
+
+                # Body must be exactly: [Raise()] or [Expr(comment), Raise()]
+                # (allowing a comment-like string expression before the raise)
+                stmts = [s for s in node.body if not isinstance(s, ast.Expr)]
+                if len(stmts) != 1 or not isinstance(stmts[0], ast.Raise):
+                    violations.append(
+                        f"{py_file.relative_to('src')}:{node.lineno}: "
+                        f"except (FrameworkBugError, AuditIntegrityError) handler "
+                        f"has non-trivial body (expected bare 'raise')"
+                    )
+                elif stmts[0].exc is not None:
+                    # Bare raise has exc=None; raise SomeError(...) has exc set
+                    violations.append(
+                        f"{py_file.relative_to('src')}:{node.lineno}: "
+                        f"except (FrameworkBugError, AuditIntegrityError) handler "
+                        f"raises a new exception instead of bare re-raise"
+                    )
+
+        assert not violations, f"Re-raise guard violations found ({len(violations)}):\n" + "\n".join(f"  - {v}" for v in violations)
+
+    def test_minimum_reraise_guard_count(self) -> None:
+        """Verify the expected number of re-raise guards exist (drift detection).
+
+        If this count drops, someone removed a guard.  If it increases, they
+        added one (which is fine — update the expected count).
+        """
+        import ast
+        from pathlib import Path
+
+        src_root = Path("src/elspeth")
+        count = 0
+
+        for py_file in sorted(src_root.rglob("*.py")):
+            source = py_file.read_text()
+            try:
+                tree = ast.parse(source, filename=str(py_file))
+            except SyntaxError:
+                continue
+
+            for node in ast.walk(tree):
+                if isinstance(node, ast.ExceptHandler) and _is_framework_audit_handler(node):
+                    count += 1
+
+        # Current count: 17 guards across the codebase.
+        # If this drops, a guard was removed.  Update if legitimately adding more.
+        assert count >= 17, (
+            f"Expected at least 17 re-raise guards, found {count}. "
+            f"A FrameworkBugError/AuditIntegrityError re-raise guard may have been removed."
+        )
+
+
+def _is_framework_audit_handler(handler: object) -> bool:
+    """Check if an except handler catches (FrameworkBugError, AuditIntegrityError)."""
+    import ast
+
+    if not isinstance(handler, ast.ExceptHandler):
+        return False
+
+    if handler.type is None:
+        return False
+
+    # Match: except (FrameworkBugError, AuditIntegrityError)
+    if isinstance(handler.type, ast.Tuple):
+        names = set()
+        for elt in handler.type.elts:
+            if isinstance(elt, ast.Name):
+                names.add(elt.id)
+            elif isinstance(elt, ast.Attribute):
+                names.add(elt.attr)
+        return names == {"FrameworkBugError", "AuditIntegrityError"}
+
+    return False

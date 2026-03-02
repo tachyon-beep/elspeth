@@ -37,6 +37,7 @@ from tests.fixtures.base_classes import (
     as_transform,
 )
 from tests.fixtures.factories import wire_transforms
+from tests.fixtures.landscape import make_landscape_db
 from tests.fixtures.plugins import (
     CollectSink,
     ListSource,
@@ -416,7 +417,7 @@ class TestForkJoinRuntimeBalance:
         """
         from elspeth.core.config import ElspethSettings
 
-        db = LandscapeDB.in_memory()
+        db = make_landscape_db()
         payload_store = MockPayloadStore()
 
         rows = [{"value": i} for i in range(n_rows)]
@@ -515,7 +516,7 @@ class TestForkJoinEdgeCases:
 
     def test_no_fork_no_fork_groups(self) -> None:
         """Pipeline without forks should have no fork groups."""
-        db = LandscapeDB.in_memory()
+        db = make_landscape_db()
         payload_store = MockPayloadStore()
 
         source = ListSource([{"value": 1}, {"value": 2}])
@@ -537,7 +538,7 @@ class TestForkJoinEdgeCases:
 
     def test_empty_source_no_fork_issues(self) -> None:
         """Empty source with fork config should not cause issues."""
-        db = LandscapeDB.in_memory()
+        db = make_landscape_db()
         payload_store = MockPayloadStore()
 
         source = ListSource([], on_success="sink_a")  # Empty
@@ -610,7 +611,7 @@ class TestForkRecoveryInvariant:
         from elspeth.core.config import ElspethSettings
         from elspeth.core.landscape.schema import token_outcomes_table
 
-        db = LandscapeDB.in_memory()
+        db = make_landscape_db()
         payload_store = MockPayloadStore()
 
         rows = [{"value": i} for i in range(n_rows)]

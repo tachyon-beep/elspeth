@@ -42,6 +42,7 @@ from tests.fixtures.base_classes import (
     as_source,
     as_transform,
 )
+from tests.fixtures.landscape import make_landscape_db
 from tests.fixtures.plugins import (
     CollectSink,
     ConditionalErrorTransform,
@@ -211,7 +212,7 @@ class TestTerminalStateProperty:
         This is THE foundational property of ELSPETH's audit trail.
         A token without a terminal outcome means we lost track of data.
         """
-        db = LandscapeDB.in_memory()
+        db = make_landscape_db()
         payload_store = MockPayloadStore()
         source = ListSource(rows)
         transform = PassTransform()
@@ -249,7 +250,7 @@ class TestTerminalStateProperty:
         Transform errors don't cause tokens to vanish - they're routed to
         quarantine and recorded with the QUARANTINED outcome.
         """
-        db = LandscapeDB.in_memory()
+        db = make_landscape_db()
         payload_store = MockPayloadStore()
         source = ListSource(rows)
         transform = ConditionalErrorTransform()
@@ -284,7 +285,7 @@ class TestTerminalStateProperty:
     @settings(max_examples=50, deadline=None)
     def test_terminal_outcomes_have_correct_type(self, rows: list[dict[str, Any]]) -> None:
         """Property: All terminal outcomes are valid RowOutcome enum values."""
-        db = LandscapeDB.in_memory()
+        db = make_landscape_db()
         payload_store = MockPayloadStore()
         source = ListSource(rows)
         transform = PassTransform()
@@ -320,7 +321,7 @@ class TestTerminalStateEdgeCases:
 
     def test_empty_source_no_orphan_tokens(self) -> None:
         """Edge case: Empty source should not create any orphan tokens."""
-        db = LandscapeDB.in_memory()
+        db = make_landscape_db()
         payload_store = MockPayloadStore()
         source = ListSource([])  # Empty
         transform = PassTransform()
@@ -348,7 +349,7 @@ class TestTerminalStateEdgeCases:
         """Property: Even minimal rows (single field) reach terminal state."""
         rows = [{"id": i} for i in range(n)]
 
-        db = LandscapeDB.in_memory()
+        db = make_landscape_db()
         payload_store = MockPayloadStore()
         source = ListSource(rows)
         transform = PassTransform()
@@ -371,7 +372,7 @@ class TestTerminalStateEdgeCases:
     @settings(max_examples=30, deadline=None)
     def test_no_transform_pipeline(self, rows: list[dict[str, Any]]) -> None:
         """Property: Pipeline with no transforms still records terminal states."""
-        db = LandscapeDB.in_memory()
+        db = make_landscape_db()
         payload_store = MockPayloadStore()
         source = ListSource(rows)
         sink = CollectSink()

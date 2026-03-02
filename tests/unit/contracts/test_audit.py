@@ -2266,6 +2266,158 @@ class TestOperation:
                 status="oops",  # type: ignore[arg-type]
             )
 
+    # --- Lifecycle invariant tests (status-dependent field validation) ---
+
+    def test_open_rejects_completed_at(self) -> None:
+        """Status 'open' must not have completed_at set."""
+        with pytest.raises(ValueError, match="status='open' but completed_at is set"):
+            Operation(
+                operation_id="op-1",
+                run_id="run-1",
+                node_id="node-1",
+                operation_type="source_load",
+                started_at=datetime.now(UTC),
+                status="open",
+                completed_at=datetime.now(UTC),
+            )
+
+    def test_open_rejects_duration_ms(self) -> None:
+        """Status 'open' must not have duration_ms set."""
+        with pytest.raises(ValueError, match="status='open' but duration_ms is set"):
+            Operation(
+                operation_id="op-1",
+                run_id="run-1",
+                node_id="node-1",
+                operation_type="source_load",
+                started_at=datetime.now(UTC),
+                status="open",
+                duration_ms=42.0,
+            )
+
+    def test_open_rejects_error_message(self) -> None:
+        """Status 'open' must not have error_message set."""
+        with pytest.raises(ValueError, match="status='open' but error_message is set"):
+            Operation(
+                operation_id="op-1",
+                run_id="run-1",
+                node_id="node-1",
+                operation_type="source_load",
+                started_at=datetime.now(UTC),
+                status="open",
+                error_message="something went wrong",
+            )
+
+    @pytest.mark.parametrize("status", ["completed", "failed", "pending"])
+    def test_terminal_status_requires_completed_at(self, status: str) -> None:
+        """Terminal statuses must have completed_at set."""
+        kwargs: dict[str, Any] = {
+            "operation_id": "op-1",
+            "run_id": "run-1",
+            "node_id": "node-1",
+            "operation_type": "sink_write",
+            "started_at": datetime.now(UTC),
+            "status": status,
+            "completed_at": None,
+            "duration_ms": 100.0,
+        }
+        if status == "failed":
+            kwargs["error_message"] = "error"
+        with pytest.raises(ValueError, match="completed_at is None"):
+            Operation(**kwargs)  # type: ignore[arg-type]
+
+    @pytest.mark.parametrize("status", ["completed", "failed", "pending"])
+    def test_terminal_status_requires_duration_ms(self, status: str) -> None:
+        """Terminal statuses must have duration_ms set."""
+        kwargs: dict[str, Any] = {
+            "operation_id": "op-1",
+            "run_id": "run-1",
+            "node_id": "node-1",
+            "operation_type": "sink_write",
+            "started_at": datetime.now(UTC),
+            "status": status,
+            "completed_at": datetime.now(UTC),
+            "duration_ms": None,
+        }
+        if status == "failed":
+            kwargs["error_message"] = "error"
+        with pytest.raises(ValueError, match="duration_ms is None"):
+            Operation(**kwargs)  # type: ignore[arg-type]
+
+    def test_failed_requires_error_message(self) -> None:
+        """Status 'failed' must have error_message set."""
+        with pytest.raises(ValueError, match="status='failed' but error_message is None"):
+            Operation(
+                operation_id="op-1",
+                run_id="run-1",
+                node_id="node-1",
+                operation_type="source_load",
+                started_at=datetime.now(UTC),
+                status="failed",
+                completed_at=datetime.now(UTC),
+                duration_ms=100.0,
+                error_message=None,
+            )
+
+    def test_completed_rejects_error_message(self) -> None:
+        """Status 'completed' must not have error_message set."""
+        with pytest.raises(ValueError, match="status='completed' but error_message is set"):
+            Operation(
+                operation_id="op-1",
+                run_id="run-1",
+                node_id="node-1",
+                operation_type="sink_write",
+                started_at=datetime.now(UTC),
+                status="completed",
+                completed_at=datetime.now(UTC),
+                duration_ms=50.0,
+                error_message="should not be here",
+            )
+
+    def test_valid_completed_operation(self) -> None:
+        """A properly formed 'completed' operation passes all invariants."""
+        op = Operation(
+            operation_id="op-1",
+            run_id="run-1",
+            node_id="node-1",
+            operation_type="sink_write",
+            started_at=datetime.now(UTC),
+            status="completed",
+            completed_at=datetime.now(UTC),
+            duration_ms=50.0,
+        )
+        assert op.status == "completed"
+        assert op.error_message is None
+
+    def test_valid_failed_operation(self) -> None:
+        """A properly formed 'failed' operation passes all invariants."""
+        op = Operation(
+            operation_id="op-1",
+            run_id="run-1",
+            node_id="node-1",
+            operation_type="source_load",
+            started_at=datetime.now(UTC),
+            status="failed",
+            completed_at=datetime.now(UTC),
+            duration_ms=200.0,
+            error_message="connection refused",
+        )
+        assert op.status == "failed"
+        assert op.error_message == "connection refused"
+
+    def test_valid_pending_operation(self) -> None:
+        """A properly formed 'pending' operation passes all invariants."""
+        op = Operation(
+            operation_id="op-1",
+            run_id="run-1",
+            node_id="node-1",
+            operation_type="sink_write",
+            started_at=datetime.now(UTC),
+            status="pending",
+            completed_at=datetime.now(UTC),
+            duration_ms=300.0,
+        )
+        assert op.status == "pending"
+
 
 # ---------------------------------------------------------------------------
 # SecretResolutionInput — write-side validation (__post_init__)

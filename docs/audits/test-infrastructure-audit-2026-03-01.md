@@ -820,6 +820,8 @@ Code review finding: mypy type narrowing added to `test_create_row_round_trip` (
 | `tests/integration/plugins/transforms/test_contract.py` | Uses `_TestablePluginContext(PluginContext)` subclass | all |
 | `tests/integration/plugins/sources/test_trust_boundary.py` | `_TestablePluginContext` subclass remains (custom `__init__` + overridden methods); `_make_audited_context` delegates to `make_context()` (MIGRATED in supplementary fix) | subclass only |
 | `tests/integration/plugins/llm/test_openrouter_batch_integration.py` | Real `LandscapeRecorder` needed for audit trail | all |
+| `tests/unit/contracts/test_record_call_guards.py` | Tests `record_call()` defensive guards — intentionally passes invalid PluginContext combinations (landscape=None, XOR violations, token mismatches) | 6 |
+| `tests/unit/engine/orchestrator/test_resume_failure.py` | Tests orchestrator cleanup when plugins raise `FrameworkBugError`/`AuditIntegrityError` — requires direct PluginContext construction | 3 |
 
 **Bug found and fixed during migration:**
 
@@ -979,8 +981,8 @@ Replaced inline `LandscapeDB.in_memory()` and `LandscapeRecorder(...)` construct
 | `payload_store=` kwarg | 27 | 9 files | `make_recorder()` does not accept `payload_store` — factory gap |
 | `performance/` tests | 16 `in_memory()` + 6 `Recorder(` | 8 files | Out of P2 scope (performance tests — different lifecycle) |
 | EXEMPT recorder tests | 142 `in_memory()` + 154 `Recorder(` | 14 files | SUT is recorder itself — Pattern 3 would hide the code being tested |
-| EXEMPT context/factory tests | 14 `in_memory()` + 4 `Recorder(` | 3 files | SUT is context/factory infrastructure |
-| Property tests | 80 `in_memory()` + 58 `Recorder(` | 12 files | Out of P2 scope |
+| EXEMPT context/factory tests | 13 `in_memory()` + 14 `Recorder(` | 3 files | SUT is context/factory infrastructure |
+| Property tests | 108 `in_memory()` + 58 `Recorder(` | 13 files | Out of P2 scope |
 | `test_processor.py` docstring | 1 | 1 file | Comment, not code |
 
 **Issues found and fixed during migration:**
@@ -1011,3 +1013,174 @@ Replaced inline `LandscapeDB.in_memory()` and `LandscapeRecorder(...)` construct
 | `LandscapeRecorder(` in migrateable scope (excl. `payload_store`) | ~201 | 0 | −201 |
 | Files touched | — | 76 | — |
 | Net lines | — | −715 | — |
+
+**2026-03-02 — P3: Inline plugin class deduplication — COMPLETE**
+
+Replaced 19 inline plugin class definitions across 13 test files with imports from `tests/fixtures/plugins.py`. Implementation split across two commits: 276ec733 (core deduplication, 13 files, −327 net lines) and 3fe16f86 (code review follow-up: test relocation + fixture consolidation).
+
+**Replacements applied:**
+
+| Original Class | Replaced With | Files Affected | Count |
+|---|---|---|---|
+| `IdentityTransform` | `PassTransform` | `test_orchestrator_core.py`, `test_orchestrator_checkpointing.py` (×4), `test_explicit_sink_routing.py` | 6 |
+| `PassthroughTransform` | `PassTransform` | `test_orchestrator_checkpointing.py`, `test_completed_outcome_timing.py` (×3), `test_telemetry_contracts.py` | 5 |
+| `SimpleTransform` | `PassTransform` | `test_wiring.py` (telemetry) | 1 |
+| `SimpleSource` | `ListSource` | `test_concurrency.py`, `test_wiring.py` (telemetry), `test_telemetry_contracts.py` | 3 |
+| `SimpleSink` | `CollectSink` | `test_concurrency.py`, `test_wiring.py` (telemetry), `test_telemetry_contracts.py` | 3 |
+| `CollectingSink` | `CollectSink` | `test_aggregation_checkpoint_bug.py` | 1 |
+| Inline `FailingSink` (×3) | `FailingSink` (fixture) | `test_completed_outcome_timing.py`, `test_orchestrator_checkpointing.py` | 2 files |
+| Inline `FailingSource` | `FailingSource` (fixture) | `test_orchestrator_cleanup.py`, `test_export_partial_semantics.py` | 2 files |
+| **Total** | | **13 files** | **19 class definitions removed** |
+
+**Additional improvements (code review follow-up, 3fe16f86):**
+
+| # | Change | Details |
+|---|--------|---------|
+| I1 | Relocated `test_completed_outcome_timing.py` | `tests/unit/engine/` → `tests/integration/pipeline/orchestrator/` — tests use full `Orchestrator.run()`, belong in integration tier |
+| I3 | Consolidated telemetry fixtures | `tests/unit/telemetry/fixtures.py` (240 lines) deleted → content merged into `tests/fixtures/telemetry.py` |
+| — | Updated `test_manager.py` import | `from tests.unit.telemetry.fixtures` → `from tests.fixtures.telemetry` |
+
+**Audit misclassification resolved:**
+
+The audit listed `MemorySink` in `tests/unit/plugins/test_integration.py:69` as a `CollectSink` duplicate. Investigation found it is NOT functionally equivalent:
+- Extends `BaseSink` directly (not `_TestSinkBase`)
+- Uses typed `PluginSchema` (`EnrichedSchema`) for schema validation
+- Returns `ArtifactDescriptor` from `write()`
+- Uses `ClassVar[list]` for class-level shared storage
+- Registered through pluggy `@hookimpl` in a `TestPlugin` class for integration lifecycle testing
+- Audit description ("Attribute named `rows`") does not match actual attribute name (`collected`)
+
+This class tests plugin registration infrastructure, not sink collection behavior. Correctly classified as exempt — should have been in the audit's "Excluded from count" section alongside `DoubleTransform`, `AddOneTransform`, and other behavioral test classes.
+
+**Residual inline plugin classes (correctly preserved):**
+
+| Class | File | Reason |
+|---|---|---|
+| `MemorySink` | `tests/unit/plugins/test_integration.py` | Plugin registration lifecycle test (see above) |
+| `MemorySink` | `tests/unit/plugins/test_base.py` | Tests `BaseSink` base class behavior directly |
+| `MemorySink` | `tests/unit/plugins/test_protocols.py` | Tests `SinkProtocol` structural compliance |
+| `SimpleTransform` | `tests/unit/plugins/test_base.py` | Tests `BaseTransform` base class behavior |
+| `ListSource` | `tests/unit/plugins/test_base.py` | Reads from `config["data"]` (different interface from fixture `ListSource`) |
+
+**Code review results (5 verification agents):**
+
+| Agent | Scope | Verdict | Issues Found |
+|---|---|---|---|
+| P3 plugin dedup verifier | All 20 audit targets | Complete | 1 misclassification (MemorySink — resolved above) |
+| P1 PluginContext verifier | 19 files with remaining constructions | Complete | None — all documented exemptions |
+| P2 landscape verifier | All `in_memory()` / `Recorder(` residuals | Complete | None — exact match on documented residuals |
+| P0.5 factory verifier | All factory files + 37 smoke tests | Complete | None — full spec compliance |
+| Test suite health verifier | Full pytest + ruff + mypy | Green | 10,476 tests passed, 0 lint/type errors |
+
+**Verification:**
+- pytest: 10,476 collected, 10,389 passed, 17 skipped, 87 deselected, 3 xfailed, 0 failures
+- Test count: +106 from P2 baseline (10,370 → 10,476) — growth from code review additions (I2, I4-I8)
+- Factory tests: 37/37 passed
+- ruff: all checks passed
+- mypy: 0 errors in 243 source files
+
+**P3 coverage summary:**
+
+| Metric | Before P3 | After P3 | Delta |
+|---|---|---|---|
+| Inline PassTransform/IdentityTransform/PassthroughTransform duplicates | 12 | 0 | −12 |
+| Inline SimpleSource duplicates | 3 | 0 | −3 |
+| Inline SimpleSink/CollectingSink duplicates | 4 | 0 | −4 |
+| Inline FailingSink/FailingSource (now shared fixtures) | 5 | 0 | −5 |
+| Files touched (dedup) | — | 13 | — |
+| Files touched (review follow-up) | — | 36 | — |
+| Net lines (dedup commit) | — | −327 | — |
+| Net lines (review follow-up) | — | +720 | — |
+
+**2026-03-02 — P4: Property test factory adoption — COMPLETE**
+
+Replaced inline `LandscapeDB.in_memory()` and `LandscapeRecorder(...)` constructions with centralized factory calls across 13 property test files. Net: 183 insertions, 187 deletions (−4 lines).
+
+**Scope:** 13 property test files containing 108 `LandscapeDB.in_memory()` + 58 `LandscapeRecorder(...)` constructions. All `@given`-decorated tests use factory functions inside the test body (property tests cannot receive pytest fixtures as parameters).
+
+**Replacement patterns applied:**
+
+| Pattern | Description | Count |
+|---|---|---|
+| Pattern 1 | `LandscapeDB.in_memory()` → `make_landscape_db()` | 107 |
+| Pattern 2 | `LandscapeRecorder(db)` → `make_recorder(db)` | 58 |
+| Pattern 3 | 4-step boilerplate → `make_recorder_with_run()` | 1 |
+| **Total** | | **166** |
+
+**Execution:** 8 subagents, each assigned 1–3 files. Written instructions at `.claude/prompts/p4-migration-instructions.md` defined all patterns, import changes, and factory API reference. Each agent made mechanical replacements only.
+
+**Per-file breakdown:**
+
+| File | `in_memory()` | `Recorder(` | Patterns | Notes |
+|---|---|---|---|---|
+| `audit/test_recorder_properties.py` | 24 | 24 | P1+P2 | Hypothesis-generated `config` — Pattern 3 inapplicable |
+| `core/test_landscape_recording_properties.py` | 24 | 23 | P1+P2+P3 | `_setup()` helper → `make_recorder_with_run(canonical_version="1.0", source_plugin_name="test_source")` |
+| `engine/test_processor_properties.py` | 16 | 0 | P1 | No recorders — `Orchestrator(db)` manages internally |
+| `core/test_reproducibility_properties.py` | 8 | 0 | P1 | `LandscapeDB` retained for type annotations |
+| `core/test_retention_monotonicity.py` | 7 | 0 | P1 | `LandscapeDB` retained for type annotations |
+| `engine/test_token_lifecycle_state_machine.py` | 6 | 6 | P1+P2 | State machine `__init__` + `@given` tests |
+| `audit/test_terminal_states.py` | 6 | 0 | P1 | `LandscapeDB` retained for type annotations |
+| `audit/test_fork_coalesce_flow.py` | 5 | 0 | P1 | `LandscapeDB` retained for type annotations |
+| `audit/test_fork_join_balance.py` | 4 | 0 | P1 | `LandscapeDB` retained for type annotations |
+| `engine/test_sink_routing_invariant.py` | 3 | 0 | P1 | `LandscapeDB` retained for type annotations |
+| `sinks/test_csv_sink_properties.py` | 2 | 2 | P1+P2 | Both direct imports removed |
+| `sinks/test_json_sink_properties.py` | 2 | 2 | P1+P2 | Both direct imports removed |
+| `engine/test_processor_coalesce_equivalence_properties.py` | 1 | 1 | P1+P2 | Both direct imports removed |
+| **Total** | **108** | **58** | | **166 replacements** |
+
+**Pattern 3 applicability note:** Only 1 of 166 violations qualified for `make_recorder_with_run()`. Property tests typically create the DB and recorder separately because they pass Hypothesis-generated configs to `begin_run()`, which the factory does not accept. All agents correctly identified this constraint and applied Pattern 1+2 only.
+
+**Residual (intentionally not migrated):**
+
+| Category | Remaining | Files | Reason |
+|---|---|---|---|
+| Docstring reference | 1 `LandscapeDB.in_memory()` | 1 file | Comment text, not constructor call |
+
+**Import decisions:**
+
+| Decision | Files | Reason |
+|---|---|---|
+| `LandscapeDB` import retained | 10 files | Used in type annotations for helper functions |
+| `LandscapeDB` import removed | 3 files | No remaining type annotation references |
+| `LandscapeRecorder` import retained | 1 file | Used in return type annotation for `_setup()` |
+| `LandscapeRecorder` import removed | 5 files | No remaining references after Pattern 2 migration |
+
+**Import sorting (auto-fixed):** 3 files had `I001` ruff violations from `tests.fixtures.landscape` imports placed after `tests.fixtures.stores` (alphabetical sort required `landscape` before `stores`). Auto-fixed with `ruff check tests/property/ --fix`.
+
+**Code review results (3 agents):**
+
+| Reviewer | Scope | Verdict | Issues Found |
+|---|---|---|---|
+| High-density reviewer | 3 files, 111 replacements | Clean | None |
+| Medium-density reviewer | 5 files, 37 replacements | Clean | None |
+| Small-density reviewer | 5 files, 18 replacements | Clean | None |
+
+**Verification:**
+- pytest: 1,160 passed, 13 deselected, 0 failures
+- Test count: unchanged from P3 baseline (1,160 property tests)
+- ruff: all checks passed (after auto-fix)
+- Remaining `LandscapeDB.in_memory()` in property tests: 0 code, 1 docstring
+- Remaining `LandscapeRecorder(` in property tests: 0
+
+**Cumulative audit impact (P0 through P4):**
+
+| Phase | Violations Resolved | Files Touched | Net Lines |
+|---|---|---|---|
+| P0 (ExecutionGraph) | 3 | 3 | ~−50 |
+| P0.5a (new factories) | 6 scope items | 4 | +350 |
+| P0.5b (factory delegation) | 2 refactors | 1 | ~−30 |
+| P1 (PluginContext) | ~377 | 58 | −303 |
+| P2 (landscape setup) | ~452 | 76 | −715 |
+| P3 (inline plugins) | 19 class defs | 13 | −327 |
+| P4 (property tests) | 166 | 13 | −4 |
+| **Total** | **~1,023** | **~168 unique** | **~−1,079** |
+
+**2026-03-02 — Post-P4 review: Gap remediation**
+
+8-agent parallel verification audit identified 3 minor gaps. All resolved:
+
+| # | Gap | Fix | Files |
+|---|-----|-----|-------|
+| 1 | P1 exceptions table missing 2 legitimate files (9 `PluginContext(...)` calls) | Added `test_record_call_guards.py` (6) and `test_resume_failure.py` (3) to exceptions table | `docs/audits/test-infrastructure-audit-2026-03-01.md` |
+| 2 | F7 `_make_contract()` duplication — 2 files defined local helpers instead of importing `create_observed_contract()` | Deleted local helpers, replaced with `from tests.fixtures.base_classes import create_observed_contract` | `tests/integration/pipeline/test_aggregation_recovery.py`, `tests/integration/plugins/sinks/test_durability.py` |
+| 3 | 6 ruff lint violations across 4 files on branch | Fixed: F401 unused imports (2), RUF043 raw string regex (2), SIM117 nested with (1), I001 import sort (1) | `test_record_call_guards.py`, `test_operations.py`, `test_aggregation.py`, `test_validation.py` |

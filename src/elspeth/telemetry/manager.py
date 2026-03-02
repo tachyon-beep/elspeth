@@ -117,7 +117,9 @@ class TelemetryManager:
         self._disabled = False
 
         # Store exception for fail_on_total=True to re-raise on flush()
-        self._stored_exception: TelemetryExporterError | None = None
+        # Widened from TelemetryExporterError to Exception to also capture
+        # FrameworkBugError/AuditIntegrityError from background thread.
+        self._stored_exception: Exception | None = None
 
         # Thread coordination
         self._shutdown_event = threading.Event()
@@ -162,6 +164,16 @@ class TelemetryManager:
                 logger.error("Export loop failed unexpectedly", error=str(e))
                 self._stored_exception = e
             except Exception as e:
+                from elspeth.contracts import FrameworkBugError
+                from elspeth.contracts.errors import AuditIntegrityError
+
+                # System-level exceptions must not be silently swallowed.
+                # Background thread can't raise to main thread directly —
+                # store for re-raise on flush()/close().
+                if isinstance(e, (FrameworkBugError, AuditIntegrityError)):
+                    self._stored_exception = e
+                    break  # Stop processing — system integrity compromised
+
                 # CRITICAL: Log but don't crash - telemetry must not kill pipeline
                 logger.error("Export loop failed unexpectedly", error=str(e))
             finally:
@@ -184,6 +196,13 @@ class TelemetryManager:
             try:
                 exporter.export(event)
             except Exception as e:
+                from elspeth.contracts import FrameworkBugError
+                from elspeth.contracts.errors import AuditIntegrityError
+
+                # System-level exceptions must not be suppressed by telemetry
+                if isinstance(e, (FrameworkBugError, AuditIntegrityError)):
+                    raise
+
                 failures += 1
                 self._exporter_failures[exporter.name] = self._exporter_failures.get(exporter.name, 0) + 1
                 logger.warning(
@@ -443,6 +462,11 @@ class TelemetryManager:
             try:
                 exporter.flush()
             except Exception as e:
+                from elspeth.contracts import FrameworkBugError
+                from elspeth.contracts.errors import AuditIntegrityError
+
+                if isinstance(e, (FrameworkBugError, AuditIntegrityError)):
+                    raise
                 logger.warning(
                     "Exporter flush failed",
                     exporter=exporter.name,
@@ -511,6 +535,11 @@ class TelemetryManager:
             try:
                 exporter.close()
             except Exception as e:
+                from elspeth.contracts import FrameworkBugError
+                from elspeth.contracts.errors import AuditIntegrityError
+
+                if isinstance(e, (FrameworkBugError, AuditIntegrityError)):
+                    raise
                 logger.warning(
                     "Exporter close failed",
                     exporter=exporter.name,

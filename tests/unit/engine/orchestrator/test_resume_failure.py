@@ -147,3 +147,114 @@ class TestBuildProcessorCallsCleanupOnFailure:
         db = make_landscape_db()
         orch = _make_orchestrator(db)
         assert callable(orch._cleanup_plugins)
+
+
+class TestCleanupPluginsReRaisesSystemExceptions:
+    """Regression test: _cleanup_plugins must re-raise FrameworkBugError/AuditIntegrityError.
+
+    Bug: All 6 except handlers in _cleanup_plugins caught Exception broadly
+    and downgraded every error to a cleanup warning. FrameworkBugError and
+    AuditIntegrityError indicate system-level corruption (Tier 1 violations)
+    and must crash immediately, not be silently downgraded.
+
+    Fix: record_cleanup_error() checks isinstance before logging and re-raises
+    system-level exceptions.
+    """
+
+    def test_source_code_has_reraise_guard(self) -> None:
+        """Verify record_cleanup_error re-raises FrameworkBugError/AuditIntegrityError.
+
+        Structural test: inspect the source to confirm the isinstance check
+        exists inside record_cleanup_error.
+        """
+        import ast
+        import inspect
+        import textwrap
+
+        source = inspect.getsource(Orchestrator._cleanup_plugins)
+        # Dedent because getsource preserves indentation from the class
+        source = textwrap.dedent(source)
+        tree = ast.parse(source)
+
+        # Look for isinstance check with FrameworkBugError in the function
+        source_text = source
+        assert "FrameworkBugError" in source_text, "_cleanup_plugins must check for FrameworkBugError in record_cleanup_error"
+        assert "AuditIntegrityError" in source_text, "_cleanup_plugins must check for AuditIntegrityError in record_cleanup_error"
+
+        # Find a Raise inside an If that checks isinstance — the re-raise guard
+        found_reraise = False
+        for node in ast.walk(tree):
+            if isinstance(node, ast.If):
+                if_source = ast.dump(node)
+                if "isinstance" in if_source and "FrameworkBugError" in if_source:
+                    # Check that the if body contains a raise
+                    for child in ast.walk(node):
+                        if isinstance(child, ast.Raise):
+                            found_reraise = True
+                            break
+
+        assert found_reraise, (
+            "Expected isinstance(error, (FrameworkBugError, AuditIntegrityError)) guard with raise inside record_cleanup_error"
+        )
+
+    def test_framework_bug_error_propagates_through_cleanup(self) -> None:
+        """FrameworkBugError from plugin.on_complete() must propagate, not be swallowed."""
+        from elspeth.contracts import FrameworkBugError
+        from elspeth.contracts.plugin_context import PluginContext
+
+        db = make_landscape_db()
+        orch = _make_orchestrator(db)
+        ctx = PluginContext(run_id="test", config={}, landscape=None)
+
+        # Create a mock config with a transform that raises FrameworkBugError
+        config = MagicMock()
+        bad_transform = MagicMock()
+        bad_transform.on_complete.side_effect = FrameworkBugError("internal corruption")
+        bad_transform.name = "bad_transform"
+        config.transforms = [bad_transform]
+        config.sinks = {}
+        config.source = MagicMock()
+
+        with pytest.raises(FrameworkBugError, match="internal corruption"):
+            orch._cleanup_plugins(config, ctx)
+
+    def test_audit_integrity_error_propagates_through_cleanup(self) -> None:
+        """AuditIntegrityError from sink.close() must propagate, not be swallowed."""
+        from elspeth.contracts.errors import AuditIntegrityError
+        from elspeth.contracts.plugin_context import PluginContext
+
+        db = make_landscape_db()
+        orch = _make_orchestrator(db)
+        ctx = PluginContext(run_id="test", config={}, landscape=None)
+
+        # Create a mock config with a sink that raises AuditIntegrityError on close
+        config = MagicMock()
+        config.transforms = []
+        bad_sink = MagicMock()
+        bad_sink.close.side_effect = AuditIntegrityError("audit DB corrupted")
+        bad_sink.name = "bad_sink"
+        config.sinks = {"output": bad_sink}
+        config.source = MagicMock()
+
+        with pytest.raises(AuditIntegrityError, match="audit DB corrupted"):
+            orch._cleanup_plugins(config, ctx)
+
+    def test_regular_exceptions_still_collected_as_cleanup_errors(self) -> None:
+        """Non-system exceptions are still collected and reported as RuntimeError."""
+        from elspeth.contracts.plugin_context import PluginContext
+
+        db = make_landscape_db()
+        orch = _make_orchestrator(db)
+        ctx = PluginContext(run_id="test", config={}, landscape=None)
+
+        # Create a mock config with a transform that raises a regular error
+        config = MagicMock()
+        bad_transform = MagicMock()
+        bad_transform.on_complete.side_effect = RuntimeError("connection refused")
+        bad_transform.name = "flaky_transform"
+        config.transforms = [bad_transform]
+        config.sinks = {}
+        config.source = MagicMock()
+
+        with pytest.raises(RuntimeError, match="Plugin cleanup failed"):
+            orch._cleanup_plugins(config, ctx)

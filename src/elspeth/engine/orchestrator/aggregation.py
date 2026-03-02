@@ -13,62 +13,23 @@ pure delegation targets.
 
 from __future__ import annotations
 
-from collections import Counter
 from typing import TYPE_CHECKING
 
-from elspeth.contracts import PendingOutcome, RowOutcome, TokenInfo
 from elspeth.contracts.enums import TriggerType
-from elspeth.contracts.errors import OrchestrationInvariantError
 from elspeth.contracts.types import NodeID
-from elspeth.engine.orchestrator.types import AggNodeEntry, AggregationFlushResult, PipelineConfig
+from elspeth.engine.orchestrator.outcomes import accumulate_row_outcomes
+from elspeth.engine.orchestrator.types import (
+    AggNodeEntry,
+    AggregationFlushResult,
+    ExecutionCounters,
+    PipelineConfig,
+)
 
 if TYPE_CHECKING:
-    from elspeth.contracts import TransformProtocol
+    from elspeth.contracts import PendingOutcome, TokenInfo, TransformProtocol
     from elspeth.contracts.plugin_context import PluginContext
-    from elspeth.contracts.results import RowResult
     from elspeth.core.landscape import LandscapeRecorder
     from elspeth.engine.processor import RowProcessor
-
-
-def _require_sink_name(result: RowResult) -> str:
-    """Require sink_name for outcomes that must route to a sink."""
-    if result.sink_name is None:
-        raise OrchestrationInvariantError(f"Result with outcome {result.outcome} missing sink_name")
-    return result.sink_name
-
-
-def _route_aggregation_outcome(
-    result: RowResult,
-    pending_tokens: dict[str, list[tuple[TokenInfo, PendingOutcome | None]]],
-) -> None:
-    """Route a non-failed aggregation result to the appropriate sink.
-
-    Consolidates COMPLETED outcome routing. ROUTED and COALESCED outcomes are
-    handled inline in check_aggregation_timeouts() and
-    flush_remaining_aggregation_buffers() because they require additional
-    counter updates (routed_destinations for ROUTED, both rows_coalesced and
-    rows_succeeded for COALESCED) that this helper cannot express.
-
-    Routing uses result.sink_name which is set by on_success routing in the
-    processor. The sink_name is authoritative for COMPLETED results (guaranteed
-    by RowResult.__post_init__).
-
-    Note: Checkpointing is NOT done here. Tokens appended to pending_tokens
-    are only checkpointed after SinkExecutor.write() achieves durability,
-    via the checkpoint_after_sink callback. Checkpointing before sink
-    durability causes data loss on crash. Fix: elspeth-rapid-xtmo.
-
-    Args:
-        result: A non-FAILED RowResult from aggregation processing
-        pending_tokens: Dict of sink_name -> tokens to append results to
-    """
-    sink_name = _require_sink_name(result)
-    if sink_name not in pending_tokens:
-        raise OrchestrationInvariantError(
-            f"Aggregation result sink '{sink_name}' not in configured sinks. "
-            f"Available: {sorted(pending_tokens.keys())}. Token: {result.token}"
-        )
-    pending_tokens[sink_name].append((result.token, PendingOutcome(result.outcome)))
 
 
 def find_aggregation_transform(
@@ -187,15 +148,7 @@ def check_aggregation_timeouts(
         AggregationFlushResult with counts for succeeded, failed, routed,
         quarantined, coalesced, forked, expanded, buffered rows and routed_destinations
     """
-    rows_succeeded = 0
-    rows_failed = 0
-    rows_routed = 0
-    rows_quarantined = 0
-    rows_coalesced = 0
-    rows_forked = 0
-    rows_expanded = 0
-    rows_buffered = 0
-    routed_destinations: Counter[str] = Counter()
+    counters = ExecutionCounters()
 
     for agg_node_id_str, agg_settings in config.aggregation_settings.items():
         agg_node_id = NodeID(agg_node_id_str)
@@ -236,13 +189,8 @@ def check_aggregation_timeouts(
             trigger_type=trigger_type,
         )
 
-        # Handle completed results (no more transforms - go to sink)
-        for result in completed_results:
-            if result.outcome == RowOutcome.FAILED:
-                rows_failed += 1
-            else:
-                _route_aggregation_outcome(result, pending_tokens)
-                rows_succeeded += 1
+        # Handle completed results (terminal tokens — go to sink)
+        accumulate_row_outcomes(completed_results, counters, config.sinks, pending_tokens)
 
         # Process work items through remaining transforms
         # These tokens need to continue through the pipeline
@@ -256,53 +204,18 @@ def check_aggregation_timeouts(
                 coalesce_node_id=work_item.coalesce_node_id,
                 coalesce_name=work_item.coalesce_name,
             )
-
-            for result in downstream_results:
-                if result.outcome == RowOutcome.FAILED:
-                    rows_failed += 1
-                elif result.outcome == RowOutcome.COMPLETED:
-                    _route_aggregation_outcome(result, pending_tokens)
-                    rows_succeeded += 1
-                elif result.outcome == RowOutcome.ROUTED:
-                    rows_routed += 1
-                    routed_sink = _require_sink_name(result)
-                    routed_destinations[routed_sink] += 1
-                    if routed_sink not in pending_tokens:
-                        raise OrchestrationInvariantError(
-                            f"Routed sink '{routed_sink}' not in configured sinks. "
-                            f"Available: {sorted(pending_tokens.keys())}. Token: {result.token}"
-                        )
-                    pending_tokens[routed_sink].append((result.token, PendingOutcome(RowOutcome.ROUTED)))
-                elif result.outcome == RowOutcome.QUARANTINED:
-                    rows_quarantined += 1
-                elif result.outcome == RowOutcome.COALESCED:
-                    sink_name = _require_sink_name(result)
-                    rows_coalesced += 1
-                    rows_succeeded += 1
-                    if sink_name not in pending_tokens:
-                        raise OrchestrationInvariantError(
-                            f"Coalesced sink '{sink_name}' not in configured sinks. "
-                            f"Available: {sorted(pending_tokens.keys())}. Token: {result.token}"
-                        )
-                    pending_tokens[sink_name].append((result.token, PendingOutcome(RowOutcome.COMPLETED)))
-                elif result.outcome == RowOutcome.FORKED:
-                    rows_forked += 1
-                elif result.outcome == RowOutcome.EXPANDED:
-                    rows_expanded += 1
-                elif result.outcome == RowOutcome.BUFFERED:
-                    rows_buffered += 1
-                # CONSUMED_IN_BATCH is handled within process_token
+            accumulate_row_outcomes(downstream_results, counters, config.sinks, pending_tokens)
 
     return AggregationFlushResult(
-        rows_succeeded=rows_succeeded,
-        rows_failed=rows_failed,
-        rows_routed=rows_routed,
-        rows_quarantined=rows_quarantined,
-        rows_coalesced=rows_coalesced,
-        rows_forked=rows_forked,
-        rows_expanded=rows_expanded,
-        rows_buffered=rows_buffered,
-        routed_destinations=dict(routed_destinations),
+        rows_succeeded=counters.rows_succeeded,
+        rows_failed=counters.rows_failed,
+        rows_routed=counters.rows_routed,
+        rows_quarantined=counters.rows_quarantined,
+        rows_coalesced=counters.rows_coalesced,
+        rows_forked=counters.rows_forked,
+        rows_expanded=counters.rows_expanded,
+        rows_buffered=counters.rows_buffered,
+        routed_destinations=dict(counters.routed_destinations),
     )
 
 
@@ -342,15 +255,8 @@ def flush_remaining_aggregation_buffers(
         RuntimeError: If no batch-aware transform found for an aggregation
                      (indicates bug in graph construction or pipeline config)
     """
-    rows_succeeded = 0
-    rows_failed = 0
-    rows_routed = 0
-    rows_quarantined = 0
-    rows_coalesced = 0
-    rows_forked = 0
-    rows_expanded = 0
-    rows_buffered = 0
-    routed_destinations: Counter[str] = Counter()
+    counters = ExecutionCounters()
+
     for agg_node_id_str, agg_settings in config.aggregation_settings.items():
         agg_node_id = NodeID(agg_node_id_str)
 
@@ -371,13 +277,8 @@ def flush_remaining_aggregation_buffers(
             trigger_type=TriggerType.END_OF_SOURCE,
         )
 
-        # Handle completed results (terminal tokens - go to sink)
-        for result in completed_results:
-            if result.outcome == RowOutcome.FAILED:
-                rows_failed += 1
-            else:
-                _route_aggregation_outcome(result, pending_tokens)
-                rows_succeeded += 1
+        # Handle completed results (terminal tokens — go to sink)
+        accumulate_row_outcomes(completed_results, counters, config.sinks, pending_tokens)
 
         # Process work items through remaining transforms
         # These tokens need to continue through the pipeline
@@ -391,51 +292,16 @@ def flush_remaining_aggregation_buffers(
                 coalesce_node_id=work_item.coalesce_node_id,
                 coalesce_name=work_item.coalesce_name,
             )
-
-            for result in downstream_results:
-                if result.outcome == RowOutcome.FAILED:
-                    rows_failed += 1
-                elif result.outcome == RowOutcome.COMPLETED:
-                    _route_aggregation_outcome(result, pending_tokens)
-                    rows_succeeded += 1
-                elif result.outcome == RowOutcome.ROUTED:
-                    rows_routed += 1
-                    routed_sink = _require_sink_name(result)
-                    routed_destinations[routed_sink] += 1
-                    if routed_sink not in pending_tokens:
-                        raise OrchestrationInvariantError(
-                            f"Routed sink '{routed_sink}' not in configured sinks. "
-                            f"Available: {sorted(pending_tokens.keys())}. Token: {result.token}"
-                        )
-                    pending_tokens[routed_sink].append((result.token, PendingOutcome(RowOutcome.ROUTED)))
-                elif result.outcome == RowOutcome.QUARANTINED:
-                    rows_quarantined += 1
-                elif result.outcome == RowOutcome.COALESCED:
-                    sink_name = _require_sink_name(result)
-                    rows_coalesced += 1
-                    rows_succeeded += 1
-                    if sink_name not in pending_tokens:
-                        raise OrchestrationInvariantError(
-                            f"Coalesced sink '{sink_name}' not in configured sinks. "
-                            f"Available: {sorted(pending_tokens.keys())}. Token: {result.token}"
-                        )
-                    pending_tokens[sink_name].append((result.token, PendingOutcome(RowOutcome.COMPLETED)))
-                elif result.outcome == RowOutcome.FORKED:
-                    rows_forked += 1
-                elif result.outcome == RowOutcome.EXPANDED:
-                    rows_expanded += 1
-                elif result.outcome == RowOutcome.BUFFERED:
-                    rows_buffered += 1
-                # CONSUMED_IN_BATCH is handled within process_token
+            accumulate_row_outcomes(downstream_results, counters, config.sinks, pending_tokens)
 
     return AggregationFlushResult(
-        rows_succeeded=rows_succeeded,
-        rows_failed=rows_failed,
-        rows_routed=rows_routed,
-        rows_quarantined=rows_quarantined,
-        rows_coalesced=rows_coalesced,
-        rows_forked=rows_forked,
-        rows_expanded=rows_expanded,
-        rows_buffered=rows_buffered,
-        routed_destinations=dict(routed_destinations),
+        rows_succeeded=counters.rows_succeeded,
+        rows_failed=counters.rows_failed,
+        rows_routed=counters.rows_routed,
+        rows_quarantined=counters.rows_quarantined,
+        rows_coalesced=counters.rows_coalesced,
+        rows_forked=counters.rows_forked,
+        rows_expanded=counters.rows_expanded,
+        rows_buffered=counters.rows_buffered,
+        routed_destinations=dict(counters.routed_destinations),
     )

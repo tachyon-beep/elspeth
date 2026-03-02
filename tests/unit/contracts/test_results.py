@@ -819,16 +819,15 @@ class TestFailureInfo:
         assert info.attempts == 3
         assert info.last_error == "Connection refused"
 
-    def test_is_not_frozen(self) -> None:
-        """FailureInfo is NOT frozen (matches other result types)."""
+    def test_is_frozen(self) -> None:
+        """FailureInfo is frozen — failure evidence must be immutable."""
         info = FailureInfo(
             exception_type="TestError",
             message="Test message",
         )
 
-        # Should be mutable (no FrozenInstanceError)
-        info.attempts = 5
-        assert info.attempts == 5
+        with pytest.raises(AttributeError):
+            info.attempts = 5  # type: ignore[misc]
 
 
 class TestRowResultWithFailureInfo:

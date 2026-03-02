@@ -169,11 +169,16 @@ allow_hits:
   reason: Tier-3 boundary — quarantined row data may contain NaN/Infinity that stable_hash rejects
   safety: Falls back to repr_hash for telemetry content_hash; audit trail uses separate hashing path
   expires: '2026-05-12'
-- key: engine/orchestrator/aggregation.py:R5:find_aggregation_transform:fp=b99e6bee5e64dbcf
+- key: engine/orchestrator/aggregation.py:R5:find_aggregation_transform:fp=4b5c93937126c1d7
   owner: architecture
   reason: isinstance() check required to find batch-aware transforms - protocol contract verification
   safety: Crashes on type mismatch - no silent fallback
-  expires: '2026-03-09'
+  expires: '2026-05-15'
+- key: engine/orchestrator/core.py:R5:Orchestrator:_cleanup_plugins:record_cleanup_error:fp=178b95ea0073a1bb
+  owner: architecture
+  reason: isinstance re-raise guard — FrameworkBugError/AuditIntegrityError must not be downgraded to cleanup warnings
+  safety: System-level exceptions re-raised immediately; regular cleanup errors collected and reported
+  expires: '2026-05-15'
 - key: engine/executors/gate.py:R5:GateExecutor:execute_config_gate:fp=68ff7b444bed568c
   owner: architecture
   reason: AST/type checking - ExpressionParser returns Any; must distinguish bool/str for route label conversion

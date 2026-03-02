@@ -24,6 +24,7 @@ from elspeth.core.landscape import LandscapeDB
 from elspeth.engine.orchestrator import Orchestrator, PipelineConfig
 from tests.fixtures.base_classes import as_sink, as_source, as_transform
 from tests.fixtures.factories import wire_transforms
+from tests.fixtures.landscape import make_landscape_db
 from tests.fixtures.plugins import CollectSink, ListSource, PassTransform
 from tests.fixtures.stores import MockPayloadStore
 
@@ -100,7 +101,7 @@ class TestSinkRoutingInvariant:
     @settings(max_examples=30, deadline=None)
     def test_linear_pipeline_sink_names_in_configured_sinks(self, num_rows: int) -> None:
         """Linear pipeline: all sink_names must be in configured sinks."""
-        with LandscapeDB.in_memory() as db:
+        with make_landscape_db() as db:
             payload_store = MockPayloadStore()
             rows = [{"id": i, "value": f"row_{i}"} for i in range(num_rows)]
 
@@ -146,7 +147,7 @@ class TestSinkRoutingInvariant:
         """
         from elspeth.core.config import ElspethSettings
 
-        with LandscapeDB.in_memory() as db:
+        with make_landscape_db() as db:
             payload_store = MockPayloadStore()
             rows = [{"value": i} for i in range(num_rows)]
 
@@ -215,7 +216,7 @@ class TestSinkRoutingInvariant:
     @settings(max_examples=20, deadline=None)
     def test_multi_transform_pipeline_sink_names_in_configured_sinks(self, num_rows: int, num_transforms: int) -> None:
         """Multi-transform pipeline: all sink_names must be in configured sinks."""
-        with LandscapeDB.in_memory() as db:
+        with make_landscape_db() as db:
             payload_store = MockPayloadStore()
             rows = [{"id": i} for i in range(num_rows)]
 
