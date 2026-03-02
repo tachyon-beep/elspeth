@@ -75,7 +75,7 @@ dev = [
     "pytest-timeout>=2.3,<3",  # Test timeouts for stress tests
     "hypothesis>=6.98,<7",  # Property-based testing
     "mypy>=1.19,<2",  # Static type checking
-    "ruff==0.15.0",  # Linting and formatting
+    "ruff==0.15.4",  # Linting and formatting
     "pre-commit>=4.0,<5",  # Git hooks
     # Type stubs
     "pandas-stubs>=2.2,<3",  # Pandas type hints
@@ -147,7 +147,7 @@ all = [
     "pytest-timeout>=2.3,<3",
     "hypothesis>=6.98,<7",
     "mypy>=1.19,<2",
-    "ruff==0.15.0",
+    "ruff==0.15.4",
     "pre-commit>=4.0,<5",
     "pandas-stubs>=2.2,<3",
     "types-networkx>=3.2,<4",
@@ -252,8 +252,6 @@ warn_unused_ignores = true
 
 [[tool.mypy.overrides]]
 module = [
-    "dynaconf",
-    "dynaconf.*",
     "pluggy.*",
     "rfc8785.*",
     "pyrate_limiter.*",
@@ -267,6 +265,14 @@ module = [
     "sqlcipher3.*",
     "langfuse.*",
 ]
+ignore_missing_imports = true
+
+[[tool.mypy.overrides]]
+# dynaconf lacks type stubs; mypy non-deterministically resolves Dynaconf
+# depending on cache state, causing attr-defined on cold runs and
+# unused-ignore on warm runs. Skip analysis entirely.
+module = ["dynaconf", "dynaconf.*"]
+follow_imports = "skip"
 ignore_missing_imports = true
 
 [[tool.mypy.overrides]]
