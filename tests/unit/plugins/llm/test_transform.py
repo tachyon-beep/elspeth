@@ -299,6 +299,23 @@ class TestTruncationDetection:
         reason_str = str(result.reason).lower()
         assert "truncat" in reason_str or "length" in reason_str
 
+    def test_content_filtered_single_query_returns_error(self) -> None:
+        """Provider content filtering must not be recorded as success."""
+        transform, mock_provider = _make_transform_with_mock_provider()
+        mock_provider.execute_query.return_value = LLMQueryResult(
+            content="provider fallback text",
+            usage=TokenUsage.known(10, 5),
+            model="gpt-4o",
+            finish_reason=FinishReason.CONTENT_FILTER,
+        )
+
+        result = transform._process_row(_make_row(), _make_ctx())
+        assert result.status == "error"
+        assert result.row is None
+        assert result.reason is not None
+        assert result.reason["reason"] == "content_filtered"
+        assert result.reason["finish_reason"] == "content_filter"
+
 
 # ---------------------------------------------------------------------------
 # Fence stripping
@@ -431,6 +448,49 @@ class TestMultiQueryPartialFailure:
 
         # No output data should exist
         assert result.row is None
+
+    def test_multi_query_content_filter_discards_successful_results(self) -> None:
+        """A content-filtered query must fail the whole multi-query row."""
+        from elspeth.plugins.transforms.llm.transform import LLMTransform
+
+        config = _make_config(
+            template="Evaluate: {{ row.text_content }}",
+            queries={
+                "q1": {"input_fields": {"text_content": "text"}},
+                "q2": {"input_fields": {"text_content": "text"}},
+            },
+        )
+        transform = LLMTransform(config)
+
+        call_count = [0]
+
+        def mock_execute_query(messages, *, model, temperature, max_tokens, state_id, token_id, response_format=None):
+            call_count[0] += 1
+            if call_count[0] == 2:
+                return LLMQueryResult(
+                    content="provider fallback text",
+                    usage=TokenUsage.known(10, 5),
+                    model="gpt-4o",
+                    finish_reason=FinishReason.CONTENT_FILTER,
+                )
+            return LLMQueryResult(
+                content='{"result": "success_1"}',
+                usage=TokenUsage.known(10, 5),
+                model="gpt-4o",
+                finish_reason=FinishReason.STOP,
+            )
+
+        mock_provider = Mock()
+        mock_provider.execute_query.side_effect = mock_execute_query
+        transform._provider = mock_provider
+
+        result = transform._process_row(_make_row(), _make_ctx())
+        assert result.status == "error"
+        assert result.row is None
+        assert result.reason is not None
+        assert result.reason["reason"] == "content_filtered"
+        assert result.reason["query_name"] == "q2"
+        assert result.reason["query_index"] == 1
 
 
 # ---------------------------------------------------------------------------

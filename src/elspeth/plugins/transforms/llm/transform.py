@@ -63,6 +63,46 @@ def _warn_telemetry_before_start(event: Any) -> None:
     )
 
 
+def _finish_reason_error(
+    finish_reason: FinishReason | None,
+    *,
+    query_name: str | None = None,
+    query_index: int | None = None,
+    content_length: int | None = None,
+) -> TransformResult | None:
+    """Convert terminal finish reasons into transform errors.
+
+    Providers already normalize finish reasons; the shared transform must
+    fail closed on provider-signaled unsafe completions instead of treating
+    them as ordinary successful text output.
+    """
+    if finish_reason == FinishReason.LENGTH:
+        reason: dict[str, Any] = {
+            "reason": "response_truncated",
+            "finish_reason": FinishReason.LENGTH.value,
+        }
+        if query_name is not None:
+            reason["query_name"] = query_name
+        if query_index is not None:
+            reason["query_index"] = query_index
+        if content_length is not None:
+            reason["content_length"] = content_length
+        return TransformResult.error(reason, retryable=False)
+
+    if finish_reason == FinishReason.CONTENT_FILTER:
+        reason = {
+            "reason": "content_filtered",
+            "finish_reason": FinishReason.CONTENT_FILTER.value,
+        }
+        if query_name is not None:
+            reason["query_name"] = query_name
+        if query_index is not None:
+            reason["query_index"] = query_index
+        return TransformResult.error(reason, retryable=False)
+
+    return None
+
+
 # ---------------------------------------------------------------------------
 # Provider registry — single source of truth for both config parsing and
 # provider instantiation. Eliminates the sync failure mode of two dispatch tables.
@@ -188,24 +228,24 @@ class SingleQueryStrategy:
 
         latency_ms = (time.monotonic() - start_time) * 1000
 
-        # 4. Check truncation (finish_reason=LENGTH)
-        if result.finish_reason == FinishReason.LENGTH:
+        # 4. Fail closed on provider-signaled terminal finish reasons.
+        finish_reason_error = _finish_reason_error(
+            result.finish_reason if isinstance(result.finish_reason, FinishReason) else None,
+            content_length=len(result.content),
+        )
+        if finish_reason_error is not None:
+            error_message = "Response truncated (finish_reason=length)"
+            if result.finish_reason == FinishReason.CONTENT_FILTER:
+                error_message = "Response blocked by provider content filter"
             tracer.record_error(
                 token_id=token_id,
                 query_name="single",
                 prompt=rendered.prompt,
-                error_message="Response truncated (finish_reason=length)",
+                error_message=error_message,
                 model=self.model,
                 latency_ms=latency_ms,
             )
-            return TransformResult.error(
-                {
-                    "reason": "response_truncated",
-                    "finish_reason": "length",
-                    "content_length": len(result.content),
-                },
-                retryable=False,
-            )
+            return finish_reason_error
 
         # 5. Strip markdown fences
         content = strip_markdown_fences(result.content)
@@ -437,25 +477,25 @@ class MultiQueryStrategy:
 
         latency_ms = (time.monotonic() - start_time) * 1000
 
-        # Check truncation
-        if result.finish_reason == FinishReason.LENGTH:
+        # Fail closed on provider-signaled terminal finish reasons.
+        finish_reason_error = _finish_reason_error(
+            result.finish_reason if isinstance(result.finish_reason, FinishReason) else None,
+            query_name=spec.name,
+            query_index=query_idx,
+        )
+        if finish_reason_error is not None:
+            error_message = "Response truncated (finish_reason=length)"
+            if result.finish_reason == FinishReason.CONTENT_FILTER:
+                error_message = "Response blocked by provider content filter"
             tracer.record_error(
                 token_id=token_id,
                 query_name=spec.name,
                 prompt=rendered.prompt,
-                error_message="Response truncated (finish_reason=length)",
+                error_message=error_message,
                 model=self.model,
                 latency_ms=latency_ms,
             )
-            return TransformResult.error(
-                {
-                    "reason": "response_truncated",
-                    "query_name": spec.name,
-                    "query_index": query_idx,
-                    "finish_reason": "length",
-                },
-                retryable=False,
-            )
+            return finish_reason_error
 
         # Strip fences and store content
         content = strip_markdown_fences(result.content)
