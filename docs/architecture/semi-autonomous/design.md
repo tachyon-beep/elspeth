@@ -1,96 +1,185 @@
-# Semi-Autonomous Platform — Architecture Design
+# Semi-Autonomous Platform - Revised Architecture Design
 
-**Status:** Draft
-**Date:** 2026-03-02
-**Epic:** `elspeth-rapid-ea33f5`
+**Status:** Revised Draft  
+**Date:** 2026-03-03  
+**Epic:** `elspeth-rapid-ea33f5`  
 **Branch:** TBD (pre-implementation)
+
+This document is the authoritative architecture design for the Semi-Autonomous
+Platform. Supporting documents in this folder record review history, critique,
+and design evolution; this document captures the current intended design.
 
 ---
 
 ## Overview
 
-The Semi-Autonomous Platform wraps ELSPETH with an LLM-driven configuration layer, allowing non-technical users to describe data processing tasks in natural language and receive fully auditable pipeline results. The user interacts with a visual graph editor (ComfyUI-inspired), reviews AI-generated pipeline designs, and approves execution with a single action.
+The Semi-Autonomous Platform wraps ELSPETH with an LLM-assisted design and
+governance layer. A user describes a task in natural language, reviews a
+generated pipeline in a summary-first interface, inspects trial evidence,
+obtains any required approvals, and then executes the pipeline through the
+standard ELSPETH engine.
 
-**Core Invariant:** Generated pipelines execute with the FULL rigour of any hand-written ELSPETH pipeline. Every audit trail guarantee, every Landscape record, every trust tier boundary applies identically. The semi-autonomous layer is a configuration generator — once the config is produced, the standard ELSPETH engine executes it with zero relaxation of guarantees.
+The platform does **not** relax ELSPETH's guarantees. It is a configuration,
+review, and orchestration system around ELSPETH. Once a pipeline artifact is
+sealed for execution, the standard engine runs it with the same audit, trust,
+lineage, and failure semantics as a hand-authored pipeline.
 
-**Plugin Exploitation, Not Generation:** The system composes pipelines exclusively from the existing plugin library. It does NOT generate new plugin code, custom transforms, or ad-hoc Python. The LLM's job is to understand user intent and map it onto the existing plugin vocabulary.
+The system composes only from the existing plugin library. It does not generate
+plugin code, ad hoc Python, or arbitrary executable logic.
+
+---
+
+## Core Invariants
+
+1. **ELSPETH remains the execution authority.** The semi-autonomous layer may
+   generate, refine, summarize, validate, and govern. ELSPETH executes.
+2. **The user approves a sealed artifact, not a chat transcript.** Execution
+   binds to an immutable `PipelineArtifact` with cryptographic hashes.
+3. **Governance is platform-enforced, not model-suggested.** The model can
+   explain policy but cannot lower, override, or bypass it.
+4. **Preview evidence is real execution evidence.** Previews run through the
+   real engine, with real Landscape records, under explicit preview semantics.
+5. **Approvals are approvals of dataflow, not just node settings.** Upstream
+   changes invalidate downstream approvals when the approved result contract has
+   changed.
+6. **Deterministic review evidence outranks AI explanation.** The legal review
+   artifact is a deterministic spec plus preview evidence. AI summaries are
+   contextual only.
+7. **No hidden translation layer.** User-intent configuration, derived YAML,
+   tier computation inputs, and policy hashes are all stored and inspectable.
 
 ---
 
 ## Table of Contents
 
 - [Architecture Overview](#architecture-overview)
+- [Key Design Decisions](#key-design-decisions)
 - [Service Decomposition](#service-decomposition)
   - [API Gateway](#api-gateway)
   - [Conversation Service](#conversation-service)
+  - [Policy and Artifact Services](#policy-and-artifact-services)
   - [Workflow Orchestration (Temporal)](#workflow-orchestration-temporal)
-  - [Worker Pods](#worker-pods)
+  - [Preview Workers](#preview-workers)
+  - [Execution Workers](#execution-workers)
   - [Shared Storage](#shared-storage)
-- [User Interface: Visual Graph Editor](#user-interface-visual-graph-editor)
-  - [Interaction Flow](#interaction-flow)
-  - [Node Types and User-Visible Settings](#node-types-and-user-visible-settings)
-  - [Plugin Review Classification](#plugin-review-classification)
-  - [Summary Report Mode](#summary-report-mode)
-  - [Live Execution Visualization](#live-execution-visualization)
+- [Pipeline Artifact and Governance](#pipeline-artifact-and-governance)
+  - [Sealed PipelineArtifact](#sealed-pipelineartifact)
+  - [Approval Records and Approval Scope](#approval-records-and-approval-scope)
+  - [Three-Tier Enforcement Model](#three-tier-enforcement-model)
+  - [Tier Computation](#tier-computation)
+  - [Classification Config Governance](#classification-config-governance)
+- [Preview and Validation Model](#preview-and-validation-model)
+  - [Preview Modes](#preview-modes)
+  - [Preview Row Selection](#preview-row-selection)
+  - [Source Preview Capabilities](#source-preview-capabilities)
+  - [Validation Case Libraries](#validation-case-libraries)
+- [User Experience](#user-experience)
+  - [Summary-First Interaction Model](#summary-first-interaction-model)
+  - [Graph Editor Role](#graph-editor-role)
+  - [Pipeline-Level Review UX](#pipeline-level-review-ux)
+  - [Refinement Diff and Selective Re-Approval](#refinement-diff-and-selective-re-approval)
 - [Config Generation Layer](#config-generation-layer)
-  - [Pipeline Design Artifact](#pipeline-design-artifact)
-  - [LLM Context Requirements](#llm-context-requirements)
-  - [Validation and Refinement Loop](#validation-and-refinement-loop)
+  - [Declarative Composition State](#declarative-composition-state)
+  - [Composition API](#composition-api)
+  - [LLM Composer Loop](#llm-composer-loop)
+  - [Deterministic Mapping to ELSPETH YAML](#deterministic-mapping-to-elspeth-yaml)
+- [Execution and Orchestration](#execution-and-orchestration)
+  - [Temporal Responsibilities](#temporal-responsibilities)
+  - [ELSPETH Responsibilities](#elspeth-responsibilities)
+  - [Retry, Checkpoint, and Resume Ownership](#retry-checkpoint-and-resume-ownership)
+  - [Preview Latency Strategy](#preview-latency-strategy)
 - [Telemetry and Real-Time Progress](#telemetry-and-real-time-progress)
-- [Audit Trail: Meta-Level Provenance](#audit-trail-meta-level-provenance)
-- [Plugin Review Classification System](#plugin-review-classification-system)
-- [Synchronous Loop Considerations](#synchronous-loop-considerations)
+- [Audit Trail and Meta-Level Provenance](#audit-trail-and-meta-level-provenance)
+- [Security, Isolation, and Data Governance](#security-isolation-and-data-governance)
+  - [Static Security Policy Enforcement](#static-security-policy-enforcement)
+  - [Tenant Isolation](#tenant-isolation)
+  - [Reference Data Versioning](#reference-data-versioning)
+  - [Data Sensitivity Declaration](#data-sensitivity-declaration)
+- [User-Facing Accountability Features](#user-facing-accountability-features)
 - [Technology Choices](#technology-choices)
+- [Non-Functional Targets](#non-functional-targets)
 - [What Exists vs What Needs Building](#what-exists-vs-what-needs-building)
-- [Open Design Questions](#open-design-questions)
+- [Open Questions](#open-questions)
 
 ---
 
 ## Architecture Overview
 
 ```text
-┌──────────────────────────────────────────────────────┐
-│                    API GATEWAY                        │
-│            (Auth, rate limit, routing)                │
-└─────────┬────────────────────────┬───────────────────┘
-          │                        │
-  ┌───────┴────────┐      ┌───────┴────────┐
-  │ Conversation   │      │ Temporal       │
-  │ Service        │      │ Server         │
-  │ (FastAPI)      │      │ (workflow      │
-  │                │      │  orchestration)│
-  │ • Chat/prompt  │      │                │
-  │ • LLM calls    │─────►│ • Durably runs │
-  │ • Refinement   │start │   workflows    │
-  │ • Config store │wflow │ • Retries      │
-  └────────────────┘      │ • Timeouts     │
-                          │ • Visibility   │
-                          └───────┬────────┘
-                                  │
-                    ┌─────────────┼─────────────┐
-                    │             │             │
-              ┌─────┴───┐  ┌─────┴───┐  ┌─────┴───┐
-              │ Worker  │  │ Worker  │  │ Worker  │
-              │ Pod     │  │ Pod     │  │ Pod     │
-              │         │  │         │  │         │
-              │ ELSPETH │  │ ELSPETH │  │ ELSPETH │
-              │ Engine  │  │ Engine  │  │ Engine  │
-              └────┬────┘  └────┬────┘  └────┬────┘
-                   │            │            │
-              ┌────┴────────────┴────────────┴────┐
-              │         Shared Storage             │
-              │  PostgreSQL (Landscape + events)   │
-              │  Object Store (payloads, results)  │
-              └────────────────────────────────────┘
+                            +----------------------+
+                            |      API Gateway     |
+                            | auth, rate limit, WS |
+                            +----+------------+----+
+                                 |            |
+                    +------------+            +-------------+
+                    |                                         |
+          +---------v----------+                    +---------v----------+
+          | Conversation       |                    | Temporal           |
+          | Service            |                    | Workflow Service   |
+          |                    |<------------------>|                    |
+          | - composition API  |  start / signal    | - durable state    |
+          | - deterministic    |                    | - approval waits   |
+          |   spec generation  |                    | - dispatch         |
+          | - AI explanation   |                    | - visibility       |
+          +----+-----------+---+                    +----+-----------+---+
+               |           |                             |           |
+   +-----------v--+    +---v---------------+      +------v--+   +---v---------------+
+   | Policy        |    | Artifact Service  |      | Preview |   | Execution         |
+   | Service       |    |                   |      | Workers |   | Workers           |
+   | - plugin tier |    | - sealed artifact |      | warm    |   | isolated long-run |
+   |   policy      |    |   storage         |      | pool    |   | workers           |
+   | - security    |    | - approval refs   |      +----+----+   +----+--------------+
+   |   rules       |    | - lineage chain   |           |              |
+   +---------------+    +-------------------+           |              |
+                                                         \            /
+                                                          \          /
+                                                 +---------v--------v---------+
+                                                 | Shared Storage             |
+                                                 | - Postgres task DB         |
+                                                 | - Landscape DB(s)          |
+                                                 | - Object store             |
+                                                 | - Redis Streams            |
+                                                 +----------------------------+
 ```
 
-### Key Design Decisions
+### Request lifecycle
 
-1. **Conversation and execution are separate services** with an artifact boundary (the generated YAML). Different scaling profiles, different lifecycles.
-2. **Temporal for workflow orchestration** instead of custom job queue. Provides durable execution, crash recovery, approval gates, cancellation, and visibility for free.
-3. **Worker pod isolation** — each pipeline runs in its own pod. Bad pipelines die with their pod, not the service. Kubernetes HPA scales based on queue depth.
-4. **Shared PostgreSQL Landscape** — multi-tenancy via `run_id` scoping. ELSPETH already supports PostgreSQL.
-5. **Event-sourced meta-audit** — the task lifecycle (prompt → generation → review → execution) is an event log that links to the Landscape `run_id`.
+```text
+Prompt -> Compose -> Static policy check -> Tier compute
+       -> Preview eligibility / preview execution
+       -> Human approval gate (if required)
+       -> ELSPETH execution
+       -> Results + audit outputs + methodology artifacts
+```
+
+---
+
+## Key Design Decisions
+
+1. **Use a sealed `PipelineArtifact`, not "frozen YAML".** YAML alone is not a
+   sufficient execution boundary because behavior also depends on plugin catalog
+   version, policy versions, input identities, and preview evidence.
+2. **Use a 3-tier, pipeline-level enforcement model.** There is no checkbox
+   tier. The platform computes a single execution tier for the whole pipeline.
+3. **Keep enforcement outside the model.** The model cannot propose a lower
+   tier, cannot mark review complete, and cannot inspect approval state.
+4. **Store user-intent config and derived YAML together.** Users review the
+   deterministic spec created from declarative composition state; auditors can
+   inspect both the reviewed intent and the executed YAML.
+5. **Treat preview as a governed execution mode.** Preview is not a mock or a
+   UI simulation. It is a constrained ELSPETH run with explicit semantics.
+6. **Use declarative composition tools, not imperative "knobs".** The model
+   proposes desired state and receives full updated state after each mutation.
+7. **Split preview workers from execution workers.** Low-latency previews and
+   isolated long-running execution have different operational requirements.
+8. **Use Redis Streams, not Redis pub/sub, for operational telemetry.** The
+   platform needs reconnect-safe streaming for live progress views.
+9. **Let ELSPETH own row-level execution recovery.** Temporal owns task
+   lifecycle, approval waiting, and coarse orchestration. ELSPETH owns row
+   retries, checkpoints, and resume semantics.
+10. **Adopt schema-per-tenant for standard deployments and database-per-tenant
+    for regulated deployments.** For regulated financial and healthcare use,
+    database-per-tenant is the recommended baseline.
 
 ---
 
@@ -98,776 +187,885 @@ The Semi-Autonomous Platform wraps ELSPETH with an LLM-driven configuration laye
 
 ### API Gateway
 
-Standard API gateway (e.g., Kong, Envoy, or cloud-native):
+Standard API gateway (Kong, Envoy, or cloud-native equivalent):
 
-- **Auth:** OAuth2/OIDC (corporate SSO integration)
-- **Rate limiting:** Per-user request limits (separate from ELSPETH's per-service rate limiting)
-- **Routing:** `/api/conversations/*` → Conversation Service, `/api/tasks/*` → Temporal visibility API
-- **WebSocket upgrade:** For real-time telemetry streaming
+- OAuth2/OIDC authentication
+- Per-user and per-workspace rate limiting
+- HTTP routing
+- WebSocket upgrade for progress streaming
+- Audit-friendly request correlation IDs
+
+Routes:
+
+- `/api/conversations/*` -> Conversation Service
+- `/api/tasks/*` -> Temporal visibility facade
+- `/api/artifacts/*` -> Artifact Service
+- `/api/policy/*` -> Policy Service
 
 ### Conversation Service
 
-**Stateful, long-lived.** Manages the LLM interaction, config generation, and user refinement loop.
+The Conversation Service owns user interaction, composition state, deterministic
+review material generation, and AI interpretation.
 
 Responsibilities:
-- Accept natural language task descriptions
-- Infer data schema from uploaded/referenced data
-- Call LLM to generate pipeline configurations
-- Handle iterative refinement ("also extract dates")
-- Serve graph descriptors to the frontend
-- Apply user edits from the canvas back to the pipeline design
-- Start Temporal workflows when user approves execution
 
-**Does NOT** execute pipelines. The artifact boundary between Conversation Service and Worker Pods is a frozen YAML config.
+- Accept natural language task descriptions
+- Bind uploaded data or external data references to the task
+- Drive the composition API via an LLM composer
+- Apply user edits and refinements
+- Generate deterministic technical specs from composition state
+- Generate labeled AI explanations for usability
+- Request preview or full execution through Temporal
+
+It does **not** run the pipeline itself.
+
+### Policy and Artifact Services
+
+#### Policy Service
+
+Owns platform-level security and governance rules:
+
+- Plugin tier policy
+- Data sensitivity floor policy
+- Workspace-level tier floors
+- Static security rules (allowlists, destination policies, secret reference
+  rules, prohibited config patterns)
+- Plugin allow/deny controls (when enabled)
+
+#### Artifact Service
+
+Owns write-once storage and retrieval for:
+
+- `PipelineArtifact` versions
+- approval records
+- preview records
+- deterministic specs
+- methodology/citation exports
+- lineage chains between refined versions
 
 ### Workflow Orchestration (Temporal)
 
-Temporal replaces a custom job queue + status tracking system. A single workflow type handles the full task lifecycle:
+Temporal owns durable task state, not ELSPETH's internal row-processing logic.
+
+High-level workflow phases:
 
 ```python
 @workflow.defn
 class PipelineTaskWorkflow:
-
-    def __init__(self):
-        self._status = "pending"
-        self._telemetry_events = []
-
     @workflow.run
-    async def run(self, request: TaskRequest) -> TaskResult:
-        # Phase 1: Validate config (local activity, fast)
-        self._status = "validating"
-        validation = await workflow.execute_local_activity(
-            validate_config, args=[request.config_yaml],
-            start_to_close_timeout=timedelta(seconds=10),
+    async def run(self, request: StartTaskRequest) -> TaskResult:
+        artifact = await workflow.execute_activity(create_artifact, args=[request])
+        await workflow.execute_activity(run_static_policy_check, args=[artifact.hash])
+        tier = await workflow.execute_activity(compute_tier, args=[artifact.hash])
+
+        if tier == ExecutionTier.NO_REVIEW_REQUIRED and artifact.preview_plan.auto_run:
+            await workflow.execute_activity(run_preview, args=[artifact.hash, None])
+
+        if tier != ExecutionTier.NO_REVIEW_REQUIRED:
+            await workflow.wait_condition(self._approval_satisfied)
+
+        if self._requested_validation_preview:
+            await workflow.execute_activity(
+                run_preview,
+                args=[artifact.hash, self._validation_plan],
+            )
+
+        return await workflow.execute_activity(
+            execute_artifact,
+            args=[artifact.hash, self._checkpoint_id],
+            retry_policy=NO_AUTOMATIC_RETRY,
         )
-
-        if not validation.valid:
-            return TaskResult(status="validation_failed", errors=validation.errors)
-
-        # Phase 2: Execute pipeline (long-running activity)
-        self._status = "executing"
-        result = await workflow.execute_activity(
-            execute_pipeline,
-            args=[request.config_yaml, request.data_ref],
-            start_to_close_timeout=timedelta(hours=4),
-            heartbeat_timeout=timedelta(seconds=30),
-        )
-
-        return TaskResult(status="completed", result=result)
-
-    @workflow.query
-    def get_status(self) -> str:
-        return self._status
-
-    @workflow.signal
-    def cancel_execution(self):
-        self._cancelled = True
 ```
 
-**Why Temporal over custom queue:**
+Temporal responsibilities:
 
-| Capability | Custom (Redis + workers) | Temporal |
-|---|---|---|
-| Crash recovery | Build checkpoint/retry logic | Free (workflow replay) |
-| Approval gates | Custom polling/WebSocket | `workflow.wait_condition()` |
-| Cancellation | Custom signal propagation | `workflow.cancel()` |
-| Long-running tasks | Timeout management | Per-activity timeouts |
-| Observability | Build status API | Temporal UI + query handlers |
-| Exactly-once semantics | Hard to guarantee | Built-in |
+- durable task and approval state
+- approval waiting and signaling
+- dispatch to preview and execution workers
+- coarse cancellation and visibility
+- orchestration around checkpoint resume
 
-### Worker Pods
+Temporal does **not** replace ELSPETH retry logic with its own generic activity
+retry behavior.
 
-Each worker pod is a Kubernetes Job or Deployment replica that:
+### Preview Workers
 
-1. Registers as a Temporal activity worker
-2. Receives pipeline execution tasks from Temporal
-3. Drives the ELSPETH `Orchestrator.run()` API directly (no CLI)
-4. Streams telemetry via a Redis pub/sub exporter
-5. Sends Temporal heartbeats during execution (crash detection)
+Preview workers are a warm pool optimized for low-latency validation runs.
 
-```python
-@activity.defn
-async def execute_pipeline(config_yaml: str, data_ref: str) -> ExecutionResult:
-    """Temporal activity: execute an ELSPETH pipeline."""
+Characteristics:
 
-    settings = load_settings_from_string(config_yaml)
-    plugins = instantiate_plugins_from_config(settings)
-    graph = ExecutionGraph.from_plugin_instances(
-        source=plugins.source,
-        source_settings=plugins.source_settings,
-        transforms=plugins.transforms,
-        sinks=plugins.sinks,
-        aggregations=plugins.aggregations,
-        gates=list(settings.gates),
-        coalesce_settings=list(settings.coalesce) if settings.coalesce else None,
-    )
-    graph.validate()
+- preloaded Python environment and plugin catalog
+- short-lived, constrained preview executions
+- preview-specific sink substitution and source capability enforcement
+- low-latency dispatch path
 
-    db = LandscapeDB.from_url(SHARED_LANDSCAPE_URL)
-    telemetry_mgr = create_telemetry_manager(
-        exporters=[RedisTelemetryExporter(redis, task_id=activity.info().workflow_id)]
-    )
+Preview workers run in a Deployment-style pool, not one fresh pod per preview.
 
-    orchestrator = Orchestrator(db, telemetry_manager=telemetry_mgr)
-    result = orchestrator.run(
-        config=build_pipeline_config(plugins, settings),
-        graph=graph,
-        payload_store=S3PayloadStore(bucket=PAYLOAD_BUCKET),
-    )
+### Execution Workers
 
-    return result
-```
+Execution workers run full pipeline executions with stricter isolation.
 
-**Pod isolation benefits:**
-- Bad pipeline (OOM, infinite loop) → pod dies → Temporal retries on fresh pod
-- CPU/memory limits per pod prevent one user starving others
-- Kubernetes HPA scales pod count based on Temporal task queue depth
-- No shared mutable state between concurrent pipelines
+Characteristics:
+
+- one artifact execution per worker
+- resource limits sized for real workloads
+- direct ELSPETH orchestration
+- checkpoint-aware resume behavior
+- strong isolation for failures, OOMs, and long-running jobs
+
+Execution workers may be Kubernetes Jobs or Deployment replicas dedicated to the
+Temporal task queue for full executions.
 
 ### Shared Storage
 
 | Store | Purpose | Technology |
 |---|---|---|
-| **Task DB** | Task records, user sessions, generated configs, event log | PostgreSQL |
-| **Landscape DB** | ELSPETH audit trail (shared across all worker pods) | PostgreSQL (ELSPETH native support) |
-| **Payload Store** | Source row payloads, large blobs | S3 / Azure Blob Storage |
-| **Result Store** | Sink outputs (CSVs, JSONs) | S3 / Azure Blob Storage |
-| **Telemetry Channel** | Real-time event streaming to frontend | Redis pub/sub |
+| Task DB | tasks, composition state, typed task events, approval records | PostgreSQL |
+| Artifact Store | sealed artifacts, previews, methodology exports | object store + indexed metadata |
+| Landscape DB | ELSPETH audit trail | PostgreSQL |
+| Payload Store | payloads, snapshots, reference data snapshots | S3 / Azure Blob |
+| Telemetry Stream | operational events for live UI | Redis Streams |
 
 ---
 
-## User Interface: Visual Graph Editor
+## Pipeline Artifact and Governance
 
-### Interaction Flow
+### Sealed PipelineArtifact
 
-The user interaction follows an **AI-generated, human-reviewed** model — fundamentally different from typical low-code builders where the user constructs the graph manually.
-
-```text
-  User types prompt ──► LLM generates graph ──► Graph appears on canvas
-                                                      │
-                                              User reviews:
-                                              • Summary report (always)
-                                              • Node details (optional)
-                                              • Prompted for review on
-                                                classified plugins
-                                                      │
-                                              Hits ▶ Play
-                                                      │
-                                              Validation runs
-                                              (green/red per node)
-                                                      │
-                                              Execution starts
-                                              (nodes animate with
-                                               progress/telemetry)
-                                                      │
-                                              Results available
-                                              (click sink to
-                                               preview/download)
-```
-
-### Node Types and User-Visible Settings
-
-Each ELSPETH plugin type maps to a visual node with curated, user-facing controls. The raw YAML is an internal artifact — users see settings, not configuration.
-
-| Node Type | User Sees | Hidden from User |
-|---|---|---|
-| **Source** | Filename, row count, field names, data preview | `plugin: csv`, schema mode, `on_success` wiring |
-| **LLM Transform** | Prompt text, output field names/types, model picker, temperature | Provider config, API keys, retry settings, `state_id` |
-| **Gate** | Human-readable rule ("If urgency is critical or high → Review"), route labels | Expression syntax, AST internals |
-| **Aggregation** | Grouping description ("Group every 100 rows", "Group by theme") | Trigger config, buffer mechanics, flush internals |
-| **Field Mapper** | Rename/select operations in plain English | Schema mode, config internals |
-| **Sink** | Output name ("Results", "Review Queue"), format, download link | File paths, `on_error` wiring, artifact hashing |
-| **Safety Transform** | "Content safety check enabled", sensitivity level | Azure API config, field mappings |
-
-**What the user CAN do on the canvas:**
-- Edit prompt text, output field definitions, routing rules
-- Change model selection (dropdown of available/permitted models)
-- Adjust aggregation grouping parameters
-- Add/remove routing branches on gates
-- Rearrange visual layout (doesn't change DAG topology)
-- Click any node to preview sample input/output
-
-**What the user CANNOT do:**
-- Add arbitrary nodes (topology changes go through LLM refinement)
-- Wire connections manually (LLM determines dataflow)
-- Edit raw YAML or expression syntax
-- Access API keys, internal paths, engine settings
-
-**Boundary rule:** Parameter tweaks are direct edits on the canvas. Structural changes (add a step, restructure paths) go back through the LLM via natural language refinement.
-
-### Plugin Review Classification
-
-Plugins are classified into review tiers that determine what level of user attention is required before execution. This is a **platform configuration**, not per-user — administrators define the classification.
-
-#### Review Tiers
-
-| Tier | Behavior | User Experience | Example Plugins |
-|---|---|---|---|
-| **Transparent** | No review required. Executes as part of the pipeline without user interaction. | Node appears dimmed/collapsed on canvas. User can expand to inspect but isn't prompted to. | `passthrough`, `field_mapper`, `truncate`, `batch_stats` |
-| **Visible** | Shown in summary report. User sees it but isn't blocked from proceeding. | Node appears normally on canvas. Summary report includes a line item. | `csv_source`, `json_source`, `csv_sink`, `json_sink`, `keyword_filter` |
-| **Review Required** | User must positively acknowledge this node before execution proceeds. The Play button is disabled until all review-required nodes are acknowledged. | Node has a yellow border and a checkbox: "I've reviewed this step." Summary report highlights it with an explanation of what it does and why review matters. | `llm` (any LLM transform), `web_scrape`, `content_safety`, `prompt_shield` |
-| **Approval Required** | Requires explicit approval with a reason. For destructive or high-cost operations. | Node has a red border. User must type a justification or select a predefined reason before the checkbox enables. | `database_sink` (writes to external DB), `azure_blob_sink` (writes to cloud storage) |
-
-#### Classification Configuration
-
-```yaml
-# Platform-level configuration (not per-pipeline)
-plugin_review_classification:
-  # Tier 1: Transparent — no review needed
-  transparent:
-    - passthrough
-    - field_mapper
-    - truncate
-    - batch_stats
-    - batch_replicate
-    - json_explode
-    - null_source
-
-  # Tier 2: Visible — shown in summary, not blocking
-  visible:
-    - csv_source
-    - json_source
-    - csv_sink
-    - json_sink
-    - keyword_filter
-
-  # Tier 3: Review Required — must acknowledge before execution
-  review_required:
-    - llm            # Any LLM call (cost, prompt content, model choice)
-    - web_scrape     # External HTTP calls (SSRF surface, data exfiltration)
-    - content_safety # Safety classification (false positive/negative impact)
-    - prompt_shield  # Prompt injection detection (security decision)
-
-  # Tier 4: Approval Required — must justify before execution
-  approval_required:
-    - database_sink     # Writes to external database
-    - azure_blob_sink   # Writes to cloud storage
-    - azure_blob_source # Reads from cloud storage (data access scope)
-
-  # Default tier for unclassified plugins
-  default_tier: review_required
-```
-
-**Default is `review_required`** — new plugins are conservatively classified until an administrator explicitly assigns them to a lower tier. This is fail-closed design.
-
-#### Audit Trail for Review Actions
-
-Every review action is recorded in the meta-audit event log:
+The artifact boundary is a write-once `PipelineArtifact`.
 
 ```python
-# User acknowledges a review-required node
-TaskEvent("task-1", t3, "node_reviewed", {
-    "node_id": "llm_classify",
-    "plugin": "llm",
-    "review_tier": "review_required",
-    "user_action": "acknowledged",
-    "settings_hash": "abc123",  # Hash of user-visible settings at review time
-}, "user:john")
+@dataclass(frozen=True)
+class PipelineArtifact:
+    artifact_id: str
+    parent_artifact_id: str | None
+    version: int
+    created_at: datetime
+    created_by: str
 
-# User approves an approval-required node with justification
-TaskEvent("task-1", t4, "node_approved", {
-    "node_id": "db_output",
-    "plugin": "database_sink",
-    "review_tier": "approval_required",
-    "user_action": "approved",
-    "justification": "Writing to staging database for QA review",
-    "settings_hash": "def456",
-}, "user:john")
+    # User-reviewed state
+    composition_state: CompositionState
+    graph_descriptor: GraphDescriptor
+    deterministic_spec: DeterministicSpec
+
+    # Executable state
+    pipeline_yaml: str
+
+    # Input identity
+    data_inputs: list[DataReference]
+    reference_datasets: list[ReferenceDatasetBinding]
+
+    # Governance and runtime identity
+    plugin_catalog_hash: str
+    classification_policy_hash: str
+    workspace_policy_hash: str
+    elspeth_version: str
+    pipeline_tier: ExecutionTier
+    tier_reasons: list[TierReason]
+    data_sensitivity: DataSensitivityDeclaration | None
+
+    # Preview plan
+    preview_plan: PreviewPlan
+
+    # Integrity
+    canonical_hash: str
 ```
 
-### Summary Report Mode
+**Why this shape exists:**
 
-For users who don't want to interact with the graph canvas at all, the system generates an **LLM-authored summary report** that describes the pipeline in plain English. This is the default view — the graph canvas is available but secondary.
+- `composition_state` preserves the exact user-intent config
+- `graph_descriptor` drives deterministic review rendering
+- `pipeline_yaml` is what ELSPETH executes
+- policy and catalog hashes capture hidden execution dependencies
+- preview plan captures row selection and preview semantics
 
-#### Summary Report Structure
+Any refinement creates a new artifact version linked to its parent.
+
+### Approval Records and Approval Scope
+
+Approvals are stored as immutable records that reference an artifact. They are
+not mutable fields inside the artifact.
+
+```python
+@dataclass(frozen=True)
+class ApprovalRecord:
+    approval_id: str
+    artifact_hash: str
+    actor: str
+    action: ApprovalAction  # approve | reject
+    execution_tier: ExecutionTier
+    preview_run_ids: list[str]
+    approval_scope_hashes: list[str]
+    comment: str | None
+    created_at: datetime
+```
+
+#### Approval scope hashing
+
+Selective re-approval is permitted only when the approved scope is unchanged.
+
+For each gated node or gated execution boundary, compute:
 
 ```text
-┌─────────────────────────────────────────────────────────────┐
-│  📋 Pipeline Summary                                        │
-│                                                             │
-│  "Classify 2,847 support tickets by urgency level"          │
-│                                                             │
-│  WHAT THIS WILL DO:                                         │
-│  1. Read your file tickets.csv (2,847 rows, 4 fields)       │
-│  2. Send each ticket to GPT-4o with the prompt:             │
-│     "Classify this support ticket by urgency:                │
-│      critical / high / medium / low"                         │
-│  3. Route critical and high urgency tickets to a             │
-│     separate Review file                                     │
-│  4. Write all results to Results.csv with the                │
-│     original fields plus urgency and confidence              │
-│                                                             │
-│  ⚠️  REQUIRES YOUR REVIEW:                                  │
-│  • LLM Classification — uses GPT-4o ($0.01/1K tokens,       │
-│    estimated cost: ~$4.20 for 2,847 rows)                    │
-│    [Review details ▾]                                        │
-│                                                             │
-│  OUTPUTS:                                                   │
-│  • Results.csv — all 2,847 rows with classifications         │
-│  • Review.csv — critical/high urgency tickets only           │
-│                                                             │
-│  ┌────────────┐  ┌──────────────────┐                       │
-│  │ View Graph │  │ ▶ Run Pipeline   │  (disabled until       │
-│  └────────────┘  └──────────────────┘   review complete)     │
-└─────────────────────────────────────────────────────────────┘
+approval_scope_hash =
+  hash(
+    artifact_hash,
+    gated_boundary_id,
+    upstream_subgraph_hash(gated_boundary_id),
+    sink_contract_hash(gated_boundary_id)
+  )
 ```
 
-The summary report is **generated by the same LLM** that created the pipeline config — it understands what it built and can explain it in context. The report includes:
+Implication:
 
-1. **Plain English description** of each pipeline step
-2. **Review-required items** highlighted with expand-to-review controls
-3. **Cost estimate** for LLM calls (token count × model pricing)
-4. **Output description** — what files/data the user will receive
-5. **Data preview** — first few rows of input, expected output shape
+- changing a prompt upstream of a gated sink invalidates the sink approval
+- changing the destination or sink settings invalidates the sink approval
+- purely cosmetic graph layout changes do not invalidate approvals
 
-#### Configuration: Summary vs Graph Default
+This avoids the unsafe "unchanged node means unchanged approval" shortcut.
 
-```yaml
-# Platform-level UI configuration
-ui_defaults:
-  # Which view users see first
-  default_view: summary  # "summary" | "graph" | "both"
+### Three-Tier Enforcement Model
 
-  # Whether the graph canvas is available at all
-  graph_canvas_enabled: true
+| Tier | Enforcement | Typical meaning |
+|---|---|---|
+| `no_review_required` | no human gate; automatic preview when eligible | low-risk operations |
+| `approval_required` | one authenticated signature required | medium-risk operations |
+| `two_approval_required` | two distinct authenticated signatures required | high-risk or externally consequential operations |
 
-  # Whether to show cost estimates for LLM transforms
-  show_cost_estimates: true
+There is no checkbox acknowledgment tier.
 
-  # Whether to show data previews in the summary
-  show_data_previews: true
-  preview_row_count: 5
-```
+### Tier Computation
 
-Users who prefer the graph can switch to it. Users who just want to read a summary and hit Play never need to see the DAG at all.
+The platform computes tier server-side using only policy and artifact facts.
 
-### Live Execution Visualization
-
-During execution, both the summary report and graph canvas show real-time progress:
-
-**Summary Report (live):**
 ```text
-  ✅ Step 1: Read tickets.csv — 2,847 rows loaded
-  ⏳ Step 2: LLM Classification — 1,204 / 2,847 (42%, ~12 min remaining)
-     💰 API cost so far: $2.34
-     ⚠️ 3 rows quarantined (click to view)
-  ⏸ Step 3: Route by urgency — waiting
-  ⏸ Step 4: Write results — waiting
+pipeline_tier =
+  max(
+    max(plugin_floor(plugin) for plugin in pipeline_plugins),
+    sensitivity_floor(data_sensitivity),
+    workspace_floor(workspace_policy)
+  )
 ```
 
-**Graph Canvas (live):**
+Rules:
+
+- the model cannot influence tier computation
+- unclassified plugins default to `approval_required`
+- workspace or data sensitivity can only raise the tier
+- the computed tier and all contributing reasons are recorded in audit events
+
+### Classification Config Governance
+
+The plugin classification config is itself a security-critical artifact.
+
+Requirements:
+
+- versioned and immutable in production
+- two-administrator authorization for policy changes
+- full event logging of old value, new value, actors, timestamp, justification
+- referenced by every artifact and execution via `classification_policy_hash`
+
+This is the "who governs the governors" control. Without it, structural
+enforcement can be silently eroded by policy edits.
+
+---
+
+## Preview and Validation Model
+
+Preview is a governed execution mode, not a UI convenience feature.
+
+### Preview Modes
+
+#### 1. Automatic preview
+
+Used only when:
+
+- pipeline tier is `no_review_required`
+- all sources support safe preview
+- static security policy check has passed
+
+Behavior:
+
+- platform selects sample rows deterministically
+- preview runs automatically before the user is asked to execute
+- preview evidence is shown alongside the deterministic spec
+
+#### 2. Validation preview
+
+Used for `approval_required` and `two_approval_required` flows, or when the user
+explicitly requests validation.
+
+Behavior:
+
+- initiated under explicit platform policy
+- may require the same approval gate as the full run, depending on source and
+  data policy
+- never performs approval-required external writes during preview
+- uses preview-safe sink substitution for write sinks
+
+#### 3. No live preview
+
+Used when source semantics make live preview unsafe or impractical.
+
+Behavior:
+
+- user must provide a design-time sample or validation case library
+- platform validates artifact structure and may run preview on supplied sample
+- no live read is performed against the original source
+
+### Preview row selection
+
+Preview row selection is platform-determined and audit-recorded.
+
+Supported strategies:
+
+- `first_n`
+- `seeded_stratified_sample`
+- `validation_case_library`
+- `explicit_user_case_set` (for governed validation flows)
+
+Recorded with every preview:
+
+- selection policy
+- seed, if used
+- selected row identifiers
+- preview run ID
+- source capability mode used
+
+The model does not choose preview rows.
+
+### Source preview capabilities
+
+Every source classifies preview support explicitly.
+
+```python
+class PreviewCapability(Enum):
+    LIVE_SAMPLE_OK = "live_sample_ok"
+    DESIGN_TIME_SAMPLE_REQUIRED = "design_time_sample_required"
+    NO_PREVIEW = "no_preview"
+```
+
+Examples:
+
+- CSV file on object storage -> `LIVE_SAMPLE_OK`
+- message queue / Kafka / SQS -> `DESIGN_TIME_SAMPLE_REQUIRED`
+- expensive, full-scan API -> `DESIGN_TIME_SAMPLE_REQUIRED`
+- destructive or legally prohibited source -> `NO_PREVIEW`
+
+This prevents preview from consuming production queue items or forcing
+unexpected full-source scans.
+
+### Validation case libraries
+
+For regulated and high-stakes deployments, preview may use a governed validation
+case library instead of a generic sample.
+
+Use cases:
+
+- sanctions screening near-misses
+- threshold boundary cases
+- known false positive / false negative examples
+- organization-specific "must-pass" scenarios
+
+Validation case selection and results are recorded in the approval evidence.
+
+### Preview sink behavior
+
+Preview never performs destructive approval-tier writes.
+
+Rules:
+
+- approval-required sinks are replaced with `PreviewCaptureSink`
+- preview may stop at the last non-destructive boundary when substitution would
+  misrepresent behavior
+- preview output must be clearly labeled as preview-only
+
+This lets reviewers inspect evidence without accidentally committing data to
+external systems.
+
+---
+
+## User Experience
+
+### Summary-First Interaction Model
+
+The primary interface is a summary-first review experience, not a graph-first
+builder. This is both a usability decision and an accessibility decision.
+
+Users first see:
+
+1. task title and business purpose
+2. deterministic technical specification
+3. AI explanation labeled as contextual
+4. preview evidence, if available
+5. pipeline-level governance banner
+6. outputs and expected artifacts
+
+### Graph Editor Role
+
+The graph editor is available for users who want structural inspection, but it
+is not the only way to understand or approve a pipeline.
+
+Rules:
+
+- summary view must offer functional parity for review and approval
+- graph is secondary, not required
+- graph layout changes are non-semantic
+- node indicators are explanatory, not approval gates
+
+### Pipeline-Level Review UX
+
+The user approves the pipeline as a whole.
+
+Example banner:
+
 ```text
-┌────────────────┐     ┌───────────────────────┐     ┌────────────┐
-│ 📥 Source       │     │ 🤖 LLM Classify        │     │ 📊 Results  │
-│ ✅ 2,847/2,847 │────►│ ⏳ 1,204/2,847  42%   │────►│ ⏸ 0 rows   │
-│ ████████ 100%  │     │ ██████░░░░░░          │     └────────────┘
-└────────────────┘     │ ⏱ ~12 min │ 💰 $2.34 │
-                       │ ⚠️ 3 quarantined       │     ┌────────────┐
-                       └───────────┬────────────┘     │ ⚠️ Review   │
-                                   │                  │ ⏸ 0 rows   │
-                       ┌───────────┴────────────┐     └────────────┘
-                       │ 🚦 Route: urgency       │───►
-                       │ ⏸ waiting               │
-                       └─────────────────────────┘
+APPROVAL REQUIRED
+Reason: this pipeline includes database_sink and processes declared PII.
+
+Evidence shown below:
+- deterministic technical spec
+- preview results from run preview-123
+- destination summary
+
+Actions:
+[Refine Pipeline] [Submit for Approval]
 ```
 
-Progress data comes from the telemetry exporter (see [Telemetry](#telemetry-and-real-time-progress)).
+Per-node indicators still show which components drive the tier, but they are
+not separate interactive gates.
+
+### Dual-layer summaries
+
+Every review surface includes three layers:
+
+1. **Deterministic technical specification**
+   - plugin list
+   - field mappings
+   - routing rules
+   - model choice and configurable parameters
+   - destination summary
+2. **AI explanation**
+   - plain-language explanation
+   - explicitly labeled as AI-generated and non-authoritative
+3. **Trial evidence**
+   - preview outputs or validation-case outputs
+
+Approvals bind to the deterministic spec and preview evidence, not the AI text.
+
+### Refinement Diff and Selective Re-Approval
+
+Refinement creates a new artifact version with a structural diff against the
+prior version.
+
+The diff view shows:
+
+- added nodes and edges
+- removed nodes and edges
+- changed settings
+- changed tier drivers
+- changed approval scopes
+
+Carry-forward rule:
+
+- prior approvals carry forward only where approval scope hashes are unchanged
+- any changed upstream contract invalidates downstream approvals
+- if pipeline tier increases, approval restarts from zero
+
+This supports iteration without sacrificing approval integrity.
 
 ---
 
 ## Config Generation Layer
 
-The config generation layer uses a **tool-use composition model** rather than free-form YAML generation. The LLM composes pipelines by making structured tool calls — discovering available plugins, configuring them step by step, and validating incrementally. The LLM never generates raw YAML; it makes decisions, and the tools handle formatting and validation.
+The platform uses a declarative composition model. The LLM does not emit raw
+YAML and should not drive the system through brittle imperative "set one field"
+knobs.
 
-This design choice is fundamental: the prompt engineering focuses on the **decision space** (which plugins to choose, how to decompose a task into stages, what routing expressions to write) rather than **formatting** (YAML syntax, schema structure, wiring rules). The tools constrain the output to valid configurations — the LLM can't reference a plugin that doesn't exist because it selects from tool-returned lists.
+### Declarative Composition State
 
-### Pipeline Composition API (Tool Interface)
-
-The composition API is a structured tool surface that any LLM (or programmatic client) can use to build a pipeline step by step. Each tool call validates immediately and returns structured feedback. This API is LLM-independent — it's testable without any LLM involved.
-
-#### Discovery Tools — "what can I use?"
-
-```python
-# Available as tool definitions for the LLM
-tools = [
-    {
-        "name": "list_sources",
-        "description": "List available source plugins with their descriptions and config schemas.",
-        "returns": [{"name": "csv", "description": "...", "config_schema": {...}}, ...]
-    },
-    {
-        "name": "list_transforms",
-        "description": "List available transform plugins (row transforms, gates, aggregations).",
-        "returns": [{"name": "llm", "description": "...", "config_schema": {...}}, ...]
-    },
-    {
-        "name": "list_sinks",
-        "description": "List available sink plugins with their descriptions and config schemas.",
-        "returns": [{"name": "csv", "description": "...", "config_schema": {...}}, ...]
-    },
-    {
-        "name": "get_plugin_options",
-        "description": "Get the full configuration schema for a specific plugin.",
-        "parameters": {"plugin": "string"},
-        "returns": {"schema": "Pydantic JSON Schema", "required_fields": [...], "examples": [...]}
-    },
-    {
-        "name": "infer_data_schema",
-        "description": "Infer the schema of the user's input data.",
-        "parameters": {"data_ref": "string"},
-        "returns": {"fields": [{"name": "customer_id", "type": "str"}, ...], "row_count": 2847, "sample_rows": [...]}
-    },
-    {
-        "name": "get_expression_grammar",
-        "description": "Get the supported gate expression syntax with examples.",
-        "returns": {"syntax": "...", "examples": ["row['field'] > 0.8", "row['status'] in ('a', 'b')"]}
-    },
-]
-```
-
-#### Composition Tools — "build it step by step"
-
-Each composition tool validates the configuration against the plugin's Pydantic schema immediately. Invalid options, missing required fields, or non-existent plugins return structured errors — the LLM gets feedback on every decision, not after assembling 50 lines of YAML.
-
-```python
-composition_tools = [
-    {
-        "name": "set_source",
-        "description": "Set the pipeline source. Returns the guaranteed output fields.",
-        "parameters": {"plugin": "string", "options": "object"},
-        "returns": {"status": "ok", "node_id": "source", "guaranteed_fields": ["customer_id", "amount"]}
-        # On error: {"status": "error", "reason": "Unknown plugin 'csvv'. Did you mean 'csv'?"}
-        # On error: {"status": "error", "reason": "Missing required field 'file_path' for csv source."}
-    },
-    {
-        "name": "add_transform",
-        "description": "Add a transform step. Returns the node ID and output field expectations.",
-        "parameters": {"plugin": "string", "options": "object"},
-        "returns": {"status": "ok", "node_id": "llm_classify", "output_fields": [...]}
-    },
-    {
-        "name": "add_gate",
-        "description": "Add a routing gate with an expression and named routes.",
-        "parameters": {"expression": "string", "routes": "object"},
-        "returns": {"status": "ok", "node_id": "urgency_gate", "branches": ["critical_path", "normal_path"]}
-        # On error: {"status": "error", "reason": "Invalid expression syntax: unexpected token 'AND'. Use 'and' (lowercase)."}
-    },
-    {
-        "name": "add_aggregation",
-        "description": "Add an aggregation step with trigger configuration.",
-        "parameters": {"trigger": "object", "options": "object"},
-        "returns": {"status": "ok", "node_id": "batch_1"}
-    },
-    {
-        "name": "add_sink",
-        "description": "Add an output sink.",
-        "parameters": {"name": "string", "plugin": "string", "options": "object"},
-        "returns": {"status": "ok", "node_id": "results_sink"}
-    },
-    {
-        "name": "connect",
-        "description": "Connect two nodes. Validates that upstream output fields satisfy downstream requirements.",
-        "parameters": {"from_node": "string", "to_node": "string", "on": "string"},
-        "returns": {"status": "ok"}
-        # On error: {"status": "error", "reason": "Field 'sentiment_score' required by 'threshold_gate' not in output of 'llm_classify'. Available: ['urgency', 'confidence']"}
-    },
-    {
-        "name": "remove_node",
-        "description": "Remove a node and its connections.",
-        "parameters": {"node_id": "string"},
-        "returns": {"status": "ok", "disconnected_edges": [...]}
-    },
-]
-```
-
-#### Review Tools — "check my work"
-
-```python
-review_tools = [
-    {
-        "name": "validate_pipeline",
-        "description": "Validate the assembled pipeline. Returns errors and warnings.",
-        "returns": {"valid": True, "warnings": [...]}
-        # On invalid: {"valid": False, "errors": ["Sink 'results' is unreachable from source", "Node 'llm_2' has no input connection"]}
-    },
-    {
-        "name": "preview_pipeline",
-        "description": "Get a human-readable summary of the assembled pipeline.",
-        "returns": {
-            "summary": "Read CSV (2,847 rows) → LLM classify by urgency → Route critical/high to Review, rest to Results",
-            "node_count": 5,
-            "estimated_cost": "$4.20",
-            "review_required_nodes": ["llm_classify"],
-        }
-    },
-    {
-        "name": "submit_pipeline",
-        "description": "Finalize the pipeline design. Only callable after validate_pipeline returns valid.",
-        "returns": {"pipeline_design_id": "pd-abc123", "review_requirements": {"llm_classify": "review_required"}}
-    },
-]
-```
-
-#### Why Tool-Use Over Free-Form Generation
-
-| Aspect | Free-form YAML generation | Tool-use composition |
-|---|---|---|
-| **Validation** | After the fact (generate → validate → retry) | Per-step (each tool call validates immediately) |
-| **Hallucination** | LLM can invent plugin names, fields, syntax | Tools return valid options — can't select what doesn't exist |
-| **Auditability** | One opaque generation step | Sequence of discrete, logged tool calls |
-| **Refinement** | Re-generate or patch YAML string | Add/modify nodes incrementally via tool calls |
-| **Reliability** | Fragile — YAML syntax errors, schema drift | Robust — tools enforce the contract at every step |
-| **Testability** | Hard — need to mock LLM output | Easy — tool API is testable without any LLM |
-| **Prompt complexity** | High — LLM needs full schema knowledge in context | Low — LLM discovers via tools, focuses on decisions |
-
-### LLM Pipeline Composer (Agentic Loop)
-
-The composer is an agentic loop that drives the composition API via tool calls. The LLM receives the user's natural language request and the tool definitions, then iterates through discovery → composition → review.
-
-**Prompt engineering focus areas** (decision space, not formatting):
-
-1. **Task decomposition** — when a user says "analyse sentiment and cluster by theme," the LLM must decide: is this one LLM transform with a complex prompt, or two sequential transforms (sentiment → clustering)? How many stages does a research task need?
-2. **Plugin selection** — given a task like "find the most common words," should the LLM use a field_mapper with string operations, an LLM transform, or an aggregation? The tools expose what's available; the prompt engineering guides when to use each.
-3. **Routing design** — when to add gates (threshold-based routing), how to decompose routing expressions, when fork/coalesce patterns are appropriate vs linear pipelines.
-4. **Field wiring** — understanding how output fields from one transform become input fields for the next. The `connect()` tool validates this, but the LLM needs to anticipate field names when configuring transforms.
-5. **Few-shot patterns** — common pipeline shapes (classification, extraction, multi-stage analysis, aggregation with statistical roll-up) as examples in the system prompt. These guide the LLM's structural decisions, not its formatting.
-
-```python
-async def compose_pipeline(prompt: str, data_ref: str) -> PipelineDesign:
-    """Drive the composition API via LLM tool calls."""
-
-    messages = [
-        {"role": "system", "content": COMPOSER_SYSTEM_PROMPT},
-        {"role": "user", "content": f"Task: {prompt}\nData: {data_ref}"},
-    ]
-
-    for turn in range(MAX_COMPOSITION_TURNS):
-        response = await llm.chat(messages=messages, tools=ALL_COMPOSITION_TOOLS)
-
-        if response.stop_reason == "end_turn":
-            break  # LLM is done composing
-
-        # Execute each tool call against the composition API
-        for tool_call in response.tool_calls:
-            result = composition_api.execute(tool_call.name, tool_call.arguments)
-            messages.append({"role": "tool", "content": result.to_json()})
-
-        # If the LLM called submit_pipeline, we're done
-        if any(tc.name == "submit_pipeline" for tc in response.tool_calls):
-            return composition_api.get_pipeline_design()
-
-    raise CompositionError(f"LLM did not submit pipeline within {MAX_COMPOSITION_TURNS} turns")
-```
-
-**Refinement is incremental.** When the user says "also extract dates," the LLM receives the current pipeline state (via `preview_pipeline()`) and makes additional tool calls — `add_transform(plugin="field_mapper", ...)`, `connect(...)`. No re-generation, no patching of YAML strings.
-
-### Pipeline Design Artifact
-
-The composition API assembles a `PipelineDesign` from the accumulated tool calls. The YAML is **derived** from the tool call sequence, never hand-written by the LLM:
+`CompositionState` is the canonical user-intent config.
 
 ```python
 @dataclass(frozen=True)
-class PipelineDesign:
-    """Assembled by the composition API from tool calls."""
-
-    # What the user sees
-    graph_descriptor: GraphDescriptor  # Nodes, edges, user-visible settings
-
-    # What ELSPETH executes (derived from composition state + system defaults)
-    pipeline_yaml: str
-
-    # LLM-generated summary for the summary report view
-    summary_report: SummaryReport
-
-    # Review classification per node (determined by platform config, not LLM)
-    review_requirements: dict[str, ReviewTier]  # node_id → tier
-
-    # Provenance — the full tool call sequence, not just a hash
-    generation_prompt: str
-    tool_call_sequence: list[ToolCallRecord]  # Every tool call with arguments and results
-    llm_model: str
+class CompositionState:
+    source: SourceSpec
+    nodes: list[NodeSpec]
+    edges: list[EdgeSpec]
+    outputs: list[OutputSpec]
+    metadata: PipelineMetadata
 ```
 
-The `tool_call_sequence` is the provenance record — it captures every decision the LLM made and every validation result it received. An auditor can replay the sequence to understand exactly why the pipeline was shaped the way it is.
+Every state mutation is validated and versioned.
 
-The `GraphDescriptor` and `pipeline_yaml` are derived from the same internal composition state. A user edit on the canvas updates the composition state (equivalent to an additional tool call), which re-derives both representations.
+### Composition API
+
+#### Discovery tools
+
+- `list_sources`
+- `list_transforms`
+- `list_sinks`
+- `get_plugin_schema`
+- `infer_data_schema`
+- `get_expression_grammar`
+- `list_templates`
+
+#### Mutation tools
+
+Mutation tools are declarative and state-reflecting.
+
+```python
+tools = [
+    "set_source_spec(source_spec)",
+    "upsert_node_spec(node_id, partial_node_spec)",
+    "upsert_edge_spec(edge_id, edge_spec)",
+    "remove_node(node_id)",
+    "set_pipeline_metadata(metadata_patch)",
+]
+```
+
+Each call returns:
+
+- validation result
+- full updated state of affected object
+- affected pipeline summary
+- current tier estimate
+- any approval scope changes
+
+This keeps model context synchronized with actual platform state.
+
+#### Review tools
+
+- `validate_pipeline_state`
+- `generate_deterministic_spec`
+- `compute_pipeline_tier`
+- `plan_preview`
+- `run_preview`
+- `finalize_artifact`
+
+### LLM Composer Loop
+
+The LLM composer operates over tools and current state.
+
+```python
+async def compose_pipeline(prompt: str, context: CompositionContext) -> PipelineArtifactDraft:
+    state = context.initial_state
+    for turn in range(MAX_TURNS):
+        response = await llm.chat(
+            messages=context.messages_for(state),
+            tools=COMPOSITION_TOOLS,
+        )
+        for call in response.tool_calls:
+            result = composition_api.execute(call)
+            state = result.current_state
+        if response.requests_finalization:
+            return composition_api.finalize_draft(state)
+    raise CompositionError("Composer did not converge")
+```
+
+The reviewable object is the finalized draft state and its derived spec, not the
+raw model response stream.
+
+### Deterministic Mapping to ELSPETH YAML
+
+`CompositionState -> GraphDescriptor -> DeterministicSpec -> pipeline_yaml`
+must be deterministic and reversible enough for audit.
+
+Rules:
+
+- mapping logic is pure and versioned
+- defaults injected during derivation are explicit in the deterministic spec
+- artifact stores both composition state and YAML
+- auditors can inspect "what the user approved" and "what ELSPETH executed"
+
+This closes the audit visibility gap between UI state and executable contract.
+
+---
+
+## Execution and Orchestration
+
+### Temporal Responsibilities
+
+Temporal owns:
+
+- task lifecycle state
+- approval wait states
+- preview dispatch
+- execution dispatch
+- timeout at the task-orchestration level
+- cancellation requests
+- visibility and operational status
+
+It does **not** own fine-grained execution retry policy inside ELSPETH.
+
+### ELSPETH Responsibilities
+
+ELSPETH owns:
+
+- graph validation at execution time
+- row processing
+- plugin execution
+- row-level retries and backoff
+- checkpoint creation
+- deterministic audit recording in Landscape
+- sink semantics
+
+### Retry, Checkpoint, and Resume Ownership
+
+This boundary must be explicit to avoid duplicate work and replay confusion.
+
+Rules:
+
+1. `execute_artifact` activity retries are disabled except for narrow
+   infrastructure failures before ELSPETH has begun work.
+2. Once ELSPETH has started, retry and backoff are ELSPETH concerns.
+3. Workers emit checkpoint identifiers to Temporal as workflow-visible progress.
+4. On worker crash, Temporal schedules a `resume_artifact(checkpoint_id)`
+   activity, not a blind fresh rerun.
+5. Sinks used in resumable flows must be idempotent or protected by ELSPETH's
+   checkpoint and sink contract.
+
+This prevents Temporal and ELSPETH from acting as competing state machines.
+
+### Cancellation
+
+Cancellation must be real, not a dead signal.
+
+Behavior:
+
+- Temporal records cancellation request
+- execution worker receives cancellation signal
+- ELSPETH transitions to a controlled stop at the next safe checkpoint boundary
+- Landscape and task audit both record a cancelled terminal outcome
+
+### Preview Latency Strategy
+
+Interactive refinement requires low-latency previews.
+
+Strategy:
+
+- warm preview worker pool
+- preloaded plugin catalog and dependencies
+- preview-specific queue
+- bounded preview data volume
+- fast-fail capability checks before dispatch
+
+Full executions continue to use heavier isolation.
 
 ---
 
 ## Telemetry and Real-Time Progress
 
-ELSPETH's existing `TelemetryManager` supports multiple exporters. The platform adds a `RedisTelemetryExporter` that publishes events to a pub/sub channel keyed by task ID:
+Telemetry is operational visibility, not the legal audit record.
+
+Use Redis Streams instead of pub/sub:
 
 ```python
-class RedisTelemetryExporter(TelemetryExporter):
-    """Publishes telemetry events to Redis pub/sub for real-time streaming."""
-
-    def __init__(self, redis_client: Redis, task_id: str):
-        self._redis = redis_client
-        self._channel = f"task:{task_id}:telemetry"
-
+class RedisStreamsTelemetryExporter(TelemetryExporter):
     def export(self, events: list[TelemetryEvent]) -> None:
         for event in events:
-            self._redis.publish(self._channel, event.to_json())
+            self._redis.xadd(
+                f"task:{self._task_id}:telemetry",
+                event.to_stream_fields(),
+                maxlen=STREAM_RETENTION,
+                approximate=True,
+            )
 ```
 
-The frontend connects via WebSocket. The API Gateway subscribes to the Redis channel and pushes events to the WebSocket:
+Why Streams:
 
-```text
-Worker Pod                              Frontend
-┌──────────────────┐                   ┌──────────────┐
-│ Orchestrator     │                   │ WebSocket GW │
-│   │              │                   │              │
-│   ├─ Landscape   │  (audit trail)    │              │
-│   │  (PostgreSQL)│──────────────────►│ /lineage     │
-│   │              │                   │              │
-│   └─ Telemetry   │                   │              │
-│      Manager     │                   │              │
-│      │           │                   │              │
-│      └─ Redis    │  (real-time)      │              │
-│        Exporter  │──────────────────►│ /tasks/{id}  │
-│                  │  pub/sub channel  │  WebSocket   │
-└──────────────────┘  task:{task_id}   └──────────────┘
-```
+- reconnect-safe consumer model
+- cursor-based replay after transient disconnect
+- bounded retention
+- suitable for WebSocket fanout
 
-**Telemetry events mapped to UI updates:**
+UI views consume the telemetry stream for:
 
-| ELSPETH Event | UI Update |
-|---|---|
-| `RunStarted` | Pipeline execution begins, nodes activate |
-| `RowCreated` | Source node row counter increments |
-| `TransformCompleted` | Transform node progress bar advances |
-| `RoutingDecision` | Gate node split counters update |
-| `ArtifactRegistered` | Sink node row count updates |
-| `RunFinished` | All nodes show final state, results available |
+- step progress
+- row counts
+- quarantine counts
+- cost estimates
+- preview completion
+- full-run completion
 
 ---
 
-## Audit Trail: Meta-Level Provenance
+## Audit Trail and Meta-Level Provenance
 
-ELSPETH's Landscape audit trail covers pipeline execution. The semi-autonomous platform adds a **meta-level event log** that covers the task lifecycle — from prompt to result:
+ELSPETH Landscape remains the source of truth for execution lineage. The
+semi-autonomous platform adds a typed task event log for design and governance.
 
 ```python
 @dataclass(frozen=True)
-class TaskEvent:
+class PromptSubmitted:
     task_id: str
-    timestamp: datetime
-    event_type: str
-    payload: dict[str, Any]
-    actor: str  # "user:john" or "system:config-gen" or "system:elspeth"
+    actor: str
+    prompt_text: str
+    data_inputs: list[DataReference]
+
+@dataclass(frozen=True)
+class ArtifactCreated:
+    task_id: str
+    actor: str
+    artifact_hash: str
+    pipeline_tier: ExecutionTier
+    classification_policy_hash: str
+
+@dataclass(frozen=True)
+class PreviewExecuted:
+    task_id: str
+    actor: str
+    artifact_hash: str
+    preview_run_id: str
+    selection_policy: str
+    row_identifiers: list[str]
+
+TaskEvent = PromptSubmitted | ArtifactCreated | PreviewExecuted | ...
 ```
 
-**Event sequence for a typical task:**
+Key event types:
 
-| Event | Actor | Payload |
-|---|---|---|
-| `prompt_submitted` | `user:john` | Prompt text, data reference |
-| `schema_inferred` | `system:config-gen` | Field names, types, row count |
-| `config_generated` | `system:config-gen` | YAML hash, LLM model, token usage |
-| `summary_generated` | `system:config-gen` | Summary text hash |
-| `graph_presented` | `system:ui` | Nodes visible, review requirements |
-| `node_reviewed` | `user:john` | Node ID, plugin, settings hash |
-| `node_approved` | `user:john` | Node ID, justification (if approval tier) |
-| `user_approved_execution` | `user:john` | Config hash, time on canvas |
-| `validation_passed` | `system:config-gen` | Node count, edge count |
-| `execution_started` | `system:elspeth` | Landscape `run_id` |
-| `execution_completed` | `system:elspeth` | `run_id`, status, row count |
+- prompt submitted
+- composition state updated
+- static policy check passed/failed
+- tier computed
+- artifact created
+- preview planned
+- preview executed
+- approval requested
+- approval granted/rejected
+- execution started
+- execution resumed from checkpoint
+- execution completed/cancelled/failed
+- methodology export generated
+- research finding promotion recorded
 
-The `run_id` field links the meta-level event log to the Landscape audit trail. An auditor can trace from "Run X was produced by task Y, which was generated from prompt Z by user W."
+Each full execution links task audit to Landscape via `run_id`. Each preview does
+the same via `preview_run_id`.
 
 ---
 
-## Plugin Review Classification System
+## Security, Isolation, and Data Governance
 
-### Design Rationale
+### Static Security Policy Enforcement
 
-Not all pipeline operations carry equal risk. A `field_mapper` that renames columns is fundamentally different from an `llm` transform that sends data to an external API or a `database_sink` that writes to a production database. The review classification system ensures users pay attention to the operations that matter while not being burdened by routine transformations.
+Before any artifact is presented for review, and again before execution, the
+platform performs deterministic policy validation.
 
-### Classification Principles
+Examples:
 
-1. **Default is conservative.** Unclassified plugins default to `review_required`. New plugins must be explicitly assigned to a lower tier by an administrator.
-2. **Classification is platform-level.** Individual users cannot lower the review tier of a plugin. They can optionally raise it for themselves (personal stricter settings).
-3. **The LLM doesn't control classification.** The LLM generates the pipeline; the platform determines review requirements based on which plugins were used. This prevents the LLM from downplaying the significance of a step.
-4. **Review state is audited.** Every acknowledgement and approval is recorded with timestamp, settings hash, and (for approval tier) justification text.
+- HTTP-capable plugins may only target allowlisted domains or registered named
+  destinations
+- external write sinks may only target approved destinations
+- no `@env_var` interpolation in model-generated fields
+- no raw secrets in composition state
+- no prohibited plugin combinations for the workspace
 
-### Enforcement
+This is the primary technical control for `no_review_required` flows.
 
-The Play button is disabled until all review/approval requirements are satisfied:
+### Tenant Isolation
 
-```python
-def can_execute(design: PipelineDesign, reviews: list[ReviewAction]) -> bool:
-    """Check if all review requirements are satisfied."""
-    for node_id, tier in design.review_requirements.items():
-        if tier == ReviewTier.TRANSPARENT or tier == ReviewTier.VISIBLE:
-            continue  # No review needed
+Recommended deployment modes:
 
-        matching_review = find_review(reviews, node_id)
+| Deployment type | Isolation model |
+|---|---|
+| standard internal deployment | schema-per-tenant |
+| regulated financial services | database-per-tenant |
+| healthcare / HIPAA-sensitive | database-per-tenant |
+| any physical separation requirement | database-per-tenant |
 
-        if tier == ReviewTier.REVIEW_REQUIRED:
-            if matching_review is None or matching_review.action != "acknowledged":
-                return False
+Schema-per-tenant is acceptable for standard deployments but shares
+infrastructure-level concerns such as WAL, autovacuum, and superuser control.
 
-        if tier == ReviewTier.APPROVAL_REQUIRED:
-            if matching_review is None or matching_review.action != "approved":
-                return False
-            if not matching_review.justification:
-                return False
+### Reference Data Versioning
 
-    return True
-```
+Reference data used for classification is versioned like any other critical
+input.
 
-### Review Tier Descriptions (for UI)
+Recorded per run:
 
-Each tier has a standard explanation shown to the user:
+- dataset name
+- declared version
+- content hash
+- immutable snapshot location
 
-| Tier | UI Label | Explanation |
-|---|---|---|
-| **Transparent** | *(not shown)* | *(node dimmed/collapsed)* |
-| **Visible** | "Included in pipeline" | "This step is part of your pipeline. No action needed." |
-| **Review Required** | "⚠️ Please review" | "This step involves [external API calls / data transformation / ...]. Please review the settings before proceeding." |
-| **Approval Required** | "🔴 Approval needed" | "This step [writes to an external system / accesses sensitive data / ...]. Please review and provide a reason for proceeding." |
+This is required for sanctions lists, jurisdiction tables, risk taxonomies,
+threshold tables, and similar dynamic inputs.
+
+### Data Sensitivity Declaration
+
+Users or platform policy may declare data sensitivity at submission time.
+
+Examples:
+
+- contains PII
+- regulated financial records
+- HIPAA-covered data
+- privileged internal documents
+
+Effects:
+
+- sensitivity can raise tier, never lower it
+- declaration is immutable once artifact is created
+- elevation reason is recorded in audit events
 
 ---
 
-## Synchronous Loop Considerations
+## User-Facing Accountability Features
 
-### Current State
+These are part of the platform design, not optional polish.
 
-ELSPETH's main processing loop is fully synchronous — timeout evaluation is driven by row arrival, not background timers. This is documented as a known limitation (see `elspeth-rapid-2a9f69`).
+### Template library
 
-### Impact on Semi-Autonomous Platform
+Templates support:
 
-For **this use case**, the synchronous loop is acceptable because:
+- onboarding
+- few-shot guidance for generation
+- predictable tier expectations
+- organizational reuse
 
-- Semi-autonomous generates **finite-source** pipelines (CSV, JSON, API batch)
-- Each pod runs one pipeline at a time — no multiplexing
-- End-of-source flush guarantees all buffers drain
-- The telemetry exporter streams progress in real-time regardless of loop timing
+Template types:
 
-### Future: Heartbeat Source Wrapper
+- personal
+- workspace-shared
+- platform-curated
 
-When streaming/server mode is needed, the solution is **synthetic heartbeat rows** injected at the source level. This preserves the single-threaded loop invariant while giving the engine regular "nudges" to check timeouts:
+### Methodology citation export
 
-```python
-class HeartbeatSourceWrapper:
-    """Wraps any source with periodic heartbeat rows for timeout evaluation."""
+Every completed run may generate a citation-ready methodology artifact with:
 
-    def load(self, ctx):
-        for row in self._inner.load(ctx):
-            yield row
-            self._last_yield = clock.monotonic()
+- pipeline name
+- run date
+- run ID
+- model version and parameters
+- prompt text
+- row counts
+- quarantine counts and reasons
+- representative input/output samples
 
-        # After source exhaustion, yield heartbeats (streaming mode only)
-        while not shutdown.is_set():
-            if clock.monotonic() - self._last_yield >= self._interval:
-                yield SourceRow.valid({"_heartbeat": True})
-                self._last_yield = clock.monotonic()
-            time.sleep(0.1)
-```
+This is derived from the deterministic spec and execution records.
 
-Heartbeats are filtered out before reaching sinks via a gate: `row.get('_heartbeat') == True → discard`. The engine processes them normally, triggering all timeout checks as a side effect.
+### Quarantine explanation
 
-This work belongs to the server mode epic (`elspeth-rapid-319f4a`), not the semi-autonomous platform.
+Quarantined rows must be presented in user-accessible terms:
+
+- plain-English reason
+- suggested remediation
+- impact on result validity
+
+This is essential for research and compliance users, not just debugging.
+
+### Screening aid vs research finding mode
+
+Default mode is screening aid / preliminary result.
+
+Optional promotion to research finding requires:
+
+- methodology attachment
+- explicit user confirmation
+- audit event recording the promotion
+
+This supports both compliance and research personas without conflating the two.
 
 ---
 
@@ -877,29 +1075,67 @@ This work belongs to the server mode epic (`elspeth-rapid-319f4a`), not the semi
 
 | Component | Technology | Rationale |
 |---|---|---|
-| **API Gateway** | Kong / Envoy / cloud-native | Standard, proven, SSO integration |
-| **Conversation Service** | FastAPI | Async, typed, ELSPETH stack alignment |
-| **Workflow Engine** | Temporal | Durable execution, crash recovery, approval gates |
-| **Worker Runtime** | Kubernetes Jobs/Deployments | Isolation, scaling, resource limits |
-| **Task Database** | PostgreSQL | Same as Landscape, operational simplicity |
-| **Real-time Channel** | Redis pub/sub | Low-latency, ephemeral (telemetry is operational, not audit) |
-| **Object Storage** | S3 / Azure Blob | Payloads, results, generated configs |
+| API Gateway | Kong / Envoy / cloud-native | standard edge routing |
+| Conversation Service | FastAPI | typed async service, stack alignment |
+| Workflow Engine | Temporal | durable approval and task state |
+| Preview workers | Kubernetes Deployment | warm pool, low-latency dispatch |
+| Execution workers | Kubernetes Job / dedicated Deployment | isolation for full runs |
+| Task DB | PostgreSQL | relational task and governance state |
+| Landscape DB | PostgreSQL | native ELSPETH backend |
+| Telemetry channel | Redis Streams | reconnect-safe progress streaming |
+| Object storage | S3 / Azure Blob | artifacts, payloads, snapshots |
 
 ### Frontend
 
 | Component | Technology | Rationale |
 |---|---|---|
-| **Graph Editor** | React Flow | Most mature node graph library, typed, active ecosystem |
-| **UI Framework** | React + TypeScript | React Flow requirement, broad ecosystem |
-| **State Management** | Zustand or Jotai | Lightweight, fits graph editor pattern |
-| **WebSocket Client** | Native WebSocket API | Real-time telemetry streaming |
-| **Styling** | Tailwind CSS | Rapid iteration, consistent design |
+| Summary UI | React + TypeScript | primary review experience |
+| Graph editor | React Flow | secondary structural visualization |
+| State management | Zustand or Jotai | local composition/view state |
+| Streaming | native WebSocket + stream cursors | live progress and replay |
 
-### LLM for Config Generation
+### LLM for composition
 
-The config generation LLM is **separate from** any LLM used within pipelines. It needs strong structured output (YAML generation with schema adherence).
+Requirements for the composition model:
 
-Recommended: Claude Opus or Sonnet class models — strong at structured output, good at following schema constraints, handles the plugin catalog context well.
+- strong tool-use behavior
+- good long-horizon state tracking
+- reliable schema-driven reasoning
+- stable incremental refinement
+
+The model used for composition is separate from any model invoked by the
+pipeline itself.
+
+---
+
+## Non-Functional Targets
+
+These targets are preliminary but should be treated as architecture-shaping.
+
+### Reliability
+
+- no duplicate sink writes during checkpoint-based resume for supported sinks
+- every preview and full execution produces a typed task audit trail
+- policy hashes and artifact hashes are verified at execution time
+
+### Performance
+
+- warm-pool preview target: P50 under 2s, P95 under 5s for
+  `LIVE_SAMPLE_OK` sources and small sample previews
+- approval notification dispatch under 60s
+- full-run startup target under 30s after approval for warm cluster conditions
+
+### Quality
+
+- benchmark suite for composition tasks must reach >= 90% structural accuracy
+  before production rollout
+- deterministic spec generation must be reproducible from artifact state
+
+### Security and governance
+
+- classification policy changes require two-admin authorization
+- unclassified plugins fail closed to `approval_required`
+- tenant isolation model must be explicit per deployment type
 
 ---
 
@@ -907,45 +1143,49 @@ Recommended: Claude Opus or Sonnet class models — strong at structured output,
 
 | Component | Status | Work Required |
 |---|---|---|
-| `Orchestrator.run()` programmatic API | **Exists** | Minor: extract from CLI coupling |
-| `instantiate_plugins_from_config()` | **Exists** | None |
-| `ExecutionGraph.from_plugin_instances()` | **Exists** | None |
-| `elspeth validate` equivalent | **Exists** | Extract from CLI into library function |
-| `TelemetryManager` + exporters | **Exists** | Add Redis exporter |
-| Plugin catalog discovery | **Exists** (`PluginManager`) | Serialize to tool-consumable format |
-| PostgreSQL Landscape backend | **Exists** | None |
-| `load_settings()` from string | **Exists** | Verify works without file path |
-| Pydantic plugin config schemas | **Exists** | Expose as JSON Schema for tool validation |
-| Expression parser grammar | **Exists** | Expose grammar spec for `get_expression_grammar` tool |
-| **Pipeline Composition API** | **New** | Discovery, composition, review, and submission tools with per-step validation |
-| **LLM Pipeline Composer** | **New** | Agentic tool-use loop — decision-space prompt engineering, few-shot pipeline patterns |
-| **Conversation Service (FastAPI)** | **New** | Chat API, config store, refinement |
-| **Temporal workflow definitions** | **New** | Task workflow, activity definitions |
-| **Redis telemetry exporter** | **New** | Implements existing `TelemetryExporter` protocol |
-| **S3/Blob PayloadStore** | **New** | Implements existing `PayloadStore` protocol |
-| **React Flow graph editor** | **New** | Custom node components per plugin type |
-| **Summary report generator** | **New** | LLM-authored pipeline explanation |
-| **Review classification system** | **New** | Config + enforcement + audit |
-| **Meta-level event log** | **New** | Task lifecycle audit trail |
-| **WebSocket telemetry gateway** | **New** | Redis sub → WebSocket push |
-| **Task database schema** | **New** | Tasks, configs, reviews, events |
+| `Orchestrator.run()` programmatic execution path | Exists | extract clean service-facing API if needed |
+| `instantiate_plugins_from_config()` | Exists | reuse |
+| `ExecutionGraph.from_plugin_instances()` | Exists | reuse |
+| validation logic in ELSPETH | Exists | expose as service/library surface |
+| PostgreSQL Landscape backend | Exists | reuse |
+| telemetry framework | Exists | add Redis Streams exporter |
+| plugin catalog discovery | Exists | serialize for composition/policy use |
+| Pydantic config schemas | Exists | expose through composition API |
+| expression parser | Exists | expose grammar and validation tools |
+| sealed artifact store | New | immutable artifact persistence and hashing |
+| classification policy service | New | versioned governance config |
+| declarative composition API | New | state model, tools, validation |
+| deterministic spec generator | New | audit-grade review rendering |
+| preview planning and source capability layer | New | source preview modes, sink substitution |
+| warm preview worker pool | New | low-latency preview execution |
+| approval workflow service | New | one- and two-signature flows, notifications |
+| typed task event schema | New | meta-audit persistence |
+| methodology citation export | New | user-facing attestation artifacts |
+| template library | New | onboarding and reuse |
+| quarantine explanation layer | New | user-facing remediation output |
 
 ---
 
-## Open Design Questions
+## Open Questions
 
-1. **Multi-tenancy model.** Shared Landscape DB with `run_id` scoping, or per-tenant databases? Shared is simpler but limits isolation. Per-tenant is more complex but enables independent retention policies.
+These questions remain open after incorporating the current review feedback.
 
-2. **Data upload flow.** How does user data reach the worker pod? Options: (a) pre-upload to object store with reference, (b) direct upload through API gateway with size limits, (c) reference to existing data in user's storage.
+1. **Data upload flow.** Pre-upload to object storage is the preferred path, but
+   exact UX for large uploads, resumable uploads, and references to external
+   storage needs product design.
+2. **LLM cost attribution and quotas.** Composition-model cost and pipeline-model
+   cost need a shared metering story.
+3. **Plugin allow/deny policy surface.** Workspace-level controls are desirable,
+   but exact admin UX and policy granularity remain open.
+4. **Validation case authoring UX.** The architecture supports validation case
+   libraries, but the authoring workflow needs product design.
+5. **Citation format targets.** PDF/plain text is sufficient for v1, but APA,
+   Chicago, and BibTeX support may matter for research adoption.
+6. **Jurisdiction-specific legal overlays.** Data residency, AML notification,
+   and formal model validation obligations vary by jurisdiction and must be
+   resolved with legal/compliance partners rather than architecture alone.
 
-3. **LLM cost attribution.** The config generation LLM has a cost. The pipeline LLM transforms have a cost. How are these attributed and billed? Per-task metering? Per-user quotas?
+---
 
-4. **~~Iterative refinement scope~~** *(Resolved by tool-use model.)* Refinement is naturally incremental — the LLM receives the current pipeline state via `preview_pipeline()` and makes additional tool calls (`add_transform`, `connect`, `remove_node`). No re-generation or YAML patching needed. The tool call sequence captures the full history including refinement steps.
-
-5. **Template library.** Should common pipeline patterns be pre-built templates that the LLM can reference? ("This looks like a classification task — starting from the classification template.") This would improve generation quality and speed.
-
-6. **Offline/async execution.** Should users be able to submit a task, close their browser, and come back later for results? Temporal naturally supports this, but the UI needs notification (email, webhook, push notification).
-
-7. **Collaborative review.** Can multiple users review the same pipeline design? ("Alice generated it, Bob reviews the LLM prompts, Charlie approves the database sink.") This adds role-based review but increases complexity.
-
-8. **Plugin allow/deny lists per user/org.** Beyond review classification, should certain plugins be unavailable to certain users? ("Interns can't use database_sink at all, not just approval-required.")
+Built for systems where pipeline generation must be **auditable, governable,
+reviewable, and operationally credible** rather than merely convenient.
