@@ -501,6 +501,70 @@ class TestMultiQueryPartialFailure:
 class TestMultiQueryJSONExtraction:
     """Verify multi-query JSON parsing and field extraction when output_fields configured."""
 
+    def test_per_query_template_override_inherits_lookup_context(self) -> None:
+        """Per-query template overrides should retain shared lookup data."""
+        from elspeth.plugins.transforms.llm.transform import LLMTransform
+
+        lookup = {"labels": {"base": "BASE", "q1": "OVERRIDE"}}
+        config = _make_config(
+            template="Base {{ lookup.labels.base }}: {{ row.text_content }}",
+            lookup=lookup,
+            queries={
+                "q1": {
+                    "input_fields": {"text_content": "text"},
+                    "template": "Override {{ lookup.labels.q1 }}: {{ row.text_content }}",
+                },
+            },
+        )
+        transform = LLMTransform(config)
+        mock_provider = Mock()
+        mock_provider.execute_query.return_value = LLMQueryResult(
+            content="override result",
+            usage=TokenUsage.known(10, 5),
+            model="gpt-4o",
+            finish_reason=FinishReason.STOP,
+        )
+        transform._provider = mock_provider
+
+        result = transform._process_row(_make_row(), _make_ctx())
+        assert result.status == "success"
+        assert result.row is not None
+        assert result.row["q1_llm_response"] == "override result"
+        call_messages = mock_provider.execute_query.call_args.args[0]
+        assert call_messages == [{"role": "user", "content": "Override OVERRIDE: hello"}]
+
+    def test_per_query_template_override_preserves_lookup_audit_metadata(self) -> None:
+        """Per-query template overrides should keep lookup provenance fields."""
+        from elspeth.plugins.transforms.llm.transform import LLMTransform
+
+        config = _make_config(
+            template="Base {{ lookup.labels.base }}: {{ row.text_content }}",
+            lookup={"labels": {"base": "BASE", "q1": "OVERRIDE"}},
+            lookup_source="prompts/lookups.yaml",
+            queries={
+                "q1": {
+                    "input_fields": {"text_content": "text"},
+                    "template": "Override {{ lookup.labels.q1 }}: {{ row.text_content }}",
+                },
+            },
+        )
+        transform = LLMTransform(config)
+        mock_provider = Mock()
+        mock_provider.execute_query.return_value = LLMQueryResult(
+            content="override result",
+            usage=TokenUsage.known(10, 5),
+            model="gpt-4o",
+            finish_reason=FinishReason.STOP,
+        )
+        transform._provider = mock_provider
+
+        result = transform._process_row(_make_row(), _make_ctx())
+        assert result.status == "success"
+        assert result.row is not None
+        output = result.row.to_dict()
+        assert output["q1_llm_response_lookup_hash"] is not None
+        assert output["q1_llm_response_lookup_source"] == "prompts/lookups.yaml"
+
     def test_output_fields_extracts_typed_fields_from_json(self) -> None:
         """When output_fields is configured, JSON is parsed and fields extracted."""
         from elspeth.plugins.transforms.llm.transform import LLMTransform

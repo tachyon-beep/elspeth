@@ -371,7 +371,7 @@ class MultiQueryStrategy:
         # Use per-query template if provided, else config-level template
         query_template = self.template
         if spec.template is not None:
-            query_template = PromptTemplate(spec.template)
+            query_template = self.template.with_template_override(spec.template)
 
         # Render template — use contract=None because template_ctx is a
         # synthetic dict (keys are template variable names from input_fields,
