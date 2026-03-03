@@ -1809,6 +1809,24 @@ class Orchestrator:
         ctx.contract = schema_contract
         return True
 
+    def _restore_source_iteration_context(
+        self,
+        ctx: PluginContext,
+        *,
+        source_id: NodeID,
+        source_operation_id: str,
+    ) -> None:
+        """Restore source-scoped context before source generator code resumes.
+
+        Source plugins run partly in `load(ctx)` setup and partly on each
+        generator `next()` call. Transform execution mutates the shared
+        PluginContext with transform-scoped node/state identity, so we must
+        restore the source identity before the next generator step or any
+        source-side validation/error recording will be misattributed.
+        """
+        ctx.node_id = source_id
+        ctx.operation_id = source_operation_id
+
     _PROGRESS_ROW_INTERVAL = 100
     _PROGRESS_TIME_INTERVAL = 5.0  # seconds
 
@@ -2009,6 +2027,11 @@ class Orchestrator:
             source_operation_id = source_op_handle.operation.operation_id
 
             source_iterator = self._load_source_with_events(config, run_id, ctx)
+            self._restore_source_iteration_context(
+                ctx,
+                source_id=source_id,
+                source_operation_id=source_operation_id,
+            )
 
             # Deferred recording flags — field resolution after first iteration,
             # schema contract after first VALID row. If begin_run already stored
@@ -2057,7 +2080,11 @@ class Orchestrator:
                             start_time,
                             last_progress_time,
                         )
-                        ctx.operation_id = source_operation_id
+                        self._restore_source_iteration_context(
+                            ctx,
+                            source_id=source_id,
+                            source_operation_id=source_operation_id,
+                        )
                         if shutdown_event is not None and shutdown_event.is_set():
                             interrupted_by_shutdown = True
                             break
@@ -2114,7 +2141,11 @@ class Orchestrator:
                         break
 
                     # Restore operation_id for next iteration (generators execute on next())
-                    ctx.operation_id = source_operation_id
+                    self._restore_source_iteration_context(
+                        ctx,
+                        source_id=source_id,
+                        source_operation_id=source_operation_id,
+                    )
 
                 # Post-loop: restore operation_id, flush aggregation/coalesce, record deferred state
                 self._finalize_source_iteration(
