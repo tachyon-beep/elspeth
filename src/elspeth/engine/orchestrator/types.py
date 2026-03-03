@@ -296,6 +296,7 @@ class LoopContext:
     agg_transform_lookup: Mapping[str, AggNodeEntry]
     coalesce_executor: CoalesceExecutor | None
     coalesce_node_map: Mapping[CoalesceName, NodeID]
+    last_token_id: str | None = None
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "agg_transform_lookup", MappingProxyType(dict(self.agg_transform_lookup)))

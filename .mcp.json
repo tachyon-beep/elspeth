@@ -14,7 +14,8 @@
       "args": [
         "--project",
         "/home/john/elspeth"
-      ]
+      ],
+      "env": {}
     }
   }
 }

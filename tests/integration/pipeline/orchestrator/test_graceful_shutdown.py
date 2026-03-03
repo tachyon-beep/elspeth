@@ -17,6 +17,10 @@ import pytest
 from elspeth.contracts import PipelineRow, RunStatus
 from elspeth.contracts.errors import GracefulShutdownError
 from elspeth.contracts.results import SourceRow
+from elspeth.contracts.schema_contract import FieldContract, SchemaContract
+from elspeth.core.config import AggregationSettings, SourceSettings, TriggerConfig
+from elspeth.core.dag import ExecutionGraph
+from elspeth.engine.orchestrator import PipelineConfig
 from elspeth.plugins.infrastructure.base import BaseTransform
 from elspeth.plugins.infrastructure.results import TransformResult
 from tests.fixtures.base_classes import (
@@ -77,6 +81,128 @@ class QuarantineSource(_TestSourceBase):
                 error=f"validation_error_{i}",
                 destination="quarantine",
             )
+
+
+class InterruptAfterNBufferedBatch(BaseTransform):
+    """Batch transform that interrupts after buffering N rows.
+
+    Used to verify graceful shutdown does not force END_OF_SOURCE aggregation
+    semantics for partially buffered batches.
+    """
+
+    name = "interrupt_after_n_buffered_batch"
+    input_schema = _TestSchema
+    output_schema = _TestSchema
+    is_batch_aware = True
+    on_success = "output"
+    on_error = "discard"
+
+    def __init__(self) -> None:
+        super().__init__({"schema": {"mode": "observed"}})
+
+    def process(self, row: PipelineRow | list[PipelineRow], ctx: Any) -> TransformResult:
+        if isinstance(row, list):
+            total = sum(r.get("value", 0) for r in row)
+            contract = SchemaContract(
+                mode="OBSERVED",
+                fields=(
+                    FieldContract(
+                        normalized_name="value",
+                        original_name="value",
+                        python_type=int,
+                        required=False,
+                        source="inferred",
+                    ),
+                    FieldContract(
+                        normalized_name="count",
+                        original_name="count",
+                        python_type=int,
+                        required=False,
+                        source="inferred",
+                    ),
+                ),
+                locked=True,
+            )
+            return TransformResult.success(
+                PipelineRow({"value": total, "count": len(row)}, contract),
+                success_reason={"action": "batch_sum"},
+            )
+
+        return TransformResult.success(row, success_reason={"action": "buffer"})
+
+
+class InterruptingAggregationSource(_TestSourceBase):
+    """Source that raises the shutdown event after yielding N rows."""
+
+    name = "interrupting_aggregation_source"
+    output_schema = _TestSchema
+
+    def __init__(self, rows: list[dict[str, int]], interrupt_after: int, shutdown_event: threading.Event) -> None:
+        super().__init__()
+        self._rows = rows
+        self._interrupt_after = interrupt_after
+        self._event = shutdown_event
+        self.on_success = "source_out"
+
+    def load(self, ctx: Any) -> Iterator[SourceRow]:
+        for index, row in enumerate(self._rows, start=1):
+            if index >= self._interrupt_after:
+                self._event.set()
+            fields = tuple(
+                FieldContract(
+                    normalized_name=key,
+                    original_name=key,
+                    python_type=object,
+                    required=False,
+                    source="inferred",
+                )
+                for key in row
+            )
+            contract = SchemaContract(mode="OBSERVED", fields=fields, locked=True)
+            self._schema_contract = contract
+            yield SourceRow.valid(row, contract=contract)
+
+
+def _build_interruptible_aggregation_config(
+    shutdown_event: threading.Event,
+) -> tuple[PipelineConfig, Any, CollectSink]:
+    """Build a count-triggered aggregation pipeline with an interrupting batch transform."""
+    source = InterruptingAggregationSource(
+        rows=[{"value": 10}, {"value": 20}, {"value": 30}, {"value": 40}],
+        interrupt_after=2,
+        shutdown_event=shutdown_event,
+    )
+    transform = InterruptAfterNBufferedBatch()
+    output_sink = CollectSink("output")
+    agg_settings = AggregationSettings(
+        name="sum_agg",
+        plugin=transform.name,
+        input="source_out",
+        on_success="output",
+        on_error="discard",
+        trigger=TriggerConfig(count=100, timeout_seconds=3600),
+        output_mode="transform",
+    )
+
+    graph = ExecutionGraph.from_plugin_instances(
+        source=as_source(source),
+        source_settings=SourceSettings(plugin=source.name, on_success="source_out", options={}),
+        transforms=[],
+        sinks={"output": as_sink(output_sink)},
+        aggregations={"sum_agg": (as_transform(transform), agg_settings)},
+        gates=[],
+    )
+
+    agg_node_id = graph.get_aggregation_id_map()["sum_agg"]
+    transform.node_id = agg_node_id
+
+    config = PipelineConfig(
+        source=as_source(source),
+        transforms=[as_transform(transform)],
+        sinks={"output": as_sink(output_sink)},
+        aggregation_settings={agg_node_id: agg_settings},
+    )
+    return config, graph, output_sink
 
 
 class TestShutdownBreaksLoop:
@@ -260,6 +386,25 @@ class TestShutdownBreaksLoop:
         assert exc_info.value.rows_processed <= 10
         assert exc_info.value.rows_processed >= 5
 
+    def test_shutdown_does_not_flush_buffered_aggregation(self, landscape_db: LandscapeDB, payload_store) -> None:
+        """Graceful shutdown must not synthesize END_OF_SOURCE aggregation output."""
+        from elspeth.engine.orchestrator import Orchestrator
+
+        shutdown_event = threading.Event()
+        config, graph, output_sink = _build_interruptible_aggregation_config(shutdown_event)
+
+        orchestrator = Orchestrator(db=landscape_db)
+
+        with pytest.raises(GracefulShutdownError) as exc_info:
+            orchestrator.run(config, graph=graph, payload_store=payload_store, shutdown_event=shutdown_event)
+
+        assert exc_info.value.rows_processed == 2
+        assert exc_info.value.rows_succeeded == 0
+        assert exc_info.value.rows_failed == 0
+        assert exc_info.value.rows_quarantined == 0
+        assert exc_info.value.rows_routed == 0
+        assert output_sink.results == []
+
 
 class TestInterruptAndResume:
     """Tests for interrupt → resume pipeline lifecycle."""
@@ -358,6 +503,40 @@ class TestInterruptAndResume:
         # Verify checkpoint was created
         checkpoint = checkpoint_mgr.get_latest_checkpoint(run_id)
         assert checkpoint is not None
+
+    def test_buffered_aggregation_shutdown_remains_resumable(self, landscape_db: LandscapeDB, payload_store) -> None:
+        """Buffered aggregation shutdown must persist a recovery checkpoint."""
+        from elspeth.contracts.config.runtime import RuntimeCheckpointConfig
+        from elspeth.core.checkpoint import CheckpointManager, RecoveryManager
+        from elspeth.core.config import CheckpointSettings
+        from elspeth.engine.orchestrator import Orchestrator
+
+        checkpoint_mgr = CheckpointManager(landscape_db)
+        checkpoint_config = RuntimeCheckpointConfig.from_settings(CheckpointSettings(enabled=True, frequency="every_row"))
+
+        shutdown_event = threading.Event()
+        config, graph, output_sink = _build_interruptible_aggregation_config(shutdown_event)
+
+        orchestrator = Orchestrator(
+            db=landscape_db,
+            checkpoint_manager=checkpoint_mgr,
+            checkpoint_config=checkpoint_config,
+        )
+
+        with pytest.raises(GracefulShutdownError) as exc_info:
+            orchestrator.run(config, graph=graph, payload_store=payload_store, shutdown_event=shutdown_event)
+
+        run_id = exc_info.value.run_id
+        assert run_id is not None
+        assert output_sink.results == []
+
+        checkpoint = checkpoint_mgr.get_latest_checkpoint(run_id)
+        assert checkpoint is not None
+        assert checkpoint.aggregation_state_json is not None
+
+        recovery = RecoveryManager(landscape_db, checkpoint_mgr)
+        check = recovery.can_resume(run_id, graph)
+        assert check.can_resume, f"Expected resumable buffered shutdown, got: {check.reason}"
 
     def _setup_failed_run(
         self,

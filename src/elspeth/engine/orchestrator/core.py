@@ -374,6 +374,64 @@ class Orchestrator:
                 aggregation_state=aggregation_state,
             )
 
+    def _checkpoint_interrupted_progress(
+        self,
+        run_id: str,
+        loop_ctx: LoopContext,
+        sink_id_map: Mapping[SinkName, NodeID],
+        source_id: NodeID,
+    ) -> None:
+        """Persist a resumable checkpoint for graceful shutdown.
+
+        Shutdown is an explicit operator action, so it creates a recovery
+        checkpoint even if normal checkpoint frequency would skip this row.
+        This preserves resumability for runs that stop before any sink-token
+        checkpoint has been emitted, especially buffered aggregation/coalesce
+        pipelines that intentionally skip end-of-source flushes on shutdown.
+        """
+        if not self._checkpoint_config or not self._checkpoint_config.enabled:
+            return
+        if self._checkpoint_manager is None:
+            return
+        if self._current_graph is None:
+            raise RuntimeError("Cannot create shutdown checkpoint: execution graph not available")
+
+        aggregation_state = loop_ctx.processor.get_aggregation_checkpoint_state()
+
+        token_id: str | None = None
+        node_id: str | None = None
+        checkpoint_agg_state: AggregationCheckpointState | None = None
+
+        if aggregation_state.nodes:
+            agg_node_id, agg_node_state = next(iter(aggregation_state.nodes.items()))
+            token_id = agg_node_state.tokens[-1].token_id
+            node_id = agg_node_id
+            checkpoint_agg_state = aggregation_state
+        else:
+            for sink_name, token_outcome_pairs in loop_ctx.pending_tokens.items():
+                if not token_outcome_pairs:
+                    continue
+                token_id = token_outcome_pairs[-1][0].token_id
+                node_id = str(sink_id_map[SinkName(sink_name)])
+                break
+
+        if token_id is None and loop_ctx.last_token_id is not None:
+            token_id = loop_ctx.last_token_id
+            node_id = str(source_id)
+
+        if token_id is None or node_id is None:
+            return
+
+        self._sequence_number += 1
+        self._checkpoint_manager.create_checkpoint(
+            run_id=run_id,
+            token_id=token_id,
+            node_id=node_id,
+            sequence_number=self._sequence_number,
+            graph=self._current_graph,
+            aggregation_state=checkpoint_agg_state,
+        )
+
     def _delete_checkpoints(self, run_id: str) -> None:
         """Delete all checkpoints for a run after successful completion.
 
@@ -1493,6 +1551,7 @@ class Orchestrator:
         interrupted_by_shutdown: bool,
         *,
         on_token_written_factory: _CheckpointFactory | None = None,
+        shutdown_checkpoint_source_id: NodeID | None = None,
     ) -> None:
         """Write all pending tokens to sinks and handle post-loop bookkeeping.
 
@@ -1518,8 +1577,16 @@ class Orchestrator:
         )
 
         # If shutdown interrupted the loop, raise after all pending work is flushed.
-        # At this point: aggregation buffers flushed, coalesce flushed, sink writes done.
+        # At this point: sink writes are done, and any buffered aggregation/coalesce
+        # state that we intentionally preserved can be checkpointed for resume.
         if interrupted_by_shutdown:
+            if shutdown_checkpoint_source_id is not None:
+                self._checkpoint_interrupted_progress(
+                    run_id=run_id,
+                    loop_ctx=loop_ctx,
+                    sink_id_map=sink_id_map,
+                    source_id=shutdown_checkpoint_source_id,
+                )
             raise GracefulShutdownError(
                 rows_processed=counters.rows_processed,
                 run_id=run_id,
@@ -1792,12 +1859,17 @@ class Orchestrator:
         source_operation_id: str,
         field_resolution_recorded: bool,
         schema_contract_recorded: bool,
+        *,
+        interrupted_by_shutdown: bool,
     ) -> None:
-        """Post-loop work after source iteration completes (or is interrupted).
+        """Post-loop work after source iteration completes or is interrupted.
 
-        Restores operation_id, flushes remaining aggregation buffers, flushes
-        pending coalesce operations, and records deferred field resolution /
-        schema contract for empty sources.
+        Restores operation_id, optionally flushes end-of-source aggregation and
+        coalesce state, and records deferred field resolution / schema contract.
+
+        On graceful shutdown we intentionally skip end-of-source flushes. A
+        shutdown stops after the current row; it must not synthesize
+        END_OF_SOURCE aggregation outputs or force pending coalesces to resolve.
         """
         config = loop_ctx.config
         ctx = loop_ctx.ctx
@@ -1815,31 +1887,34 @@ class Orchestrator:
         # calls — those must be attributed to source_load, not orphaned.
         ctx.operation_id = source_operation_id
 
-        # CRITICAL: Flush remaining aggregation buffers at end-of-source
-        if config.aggregation_settings:
-            # NOTE: Aggregation-flushed tokens are NOT checkpointed here.
-            # They go into pending_tokens and are checkpointed only after
-            # SinkExecutor.write() achieves sink durability, via the
-            # checkpoint_after_sink callback.
-            flush_result = flush_remaining_aggregation_buffers(
-                config=config,
-                processor=processor,
-                ctx=ctx,
-                pending_tokens=pending_tokens,
-            )
-            counters.accumulate_flush_result(flush_result)
+        if not interrupted_by_shutdown:
+            # CRITICAL: Flush remaining aggregation buffers only at true end-of-source.
+            # A graceful shutdown is resumable and must preserve buffered state
+            # instead of forcing an END_OF_SOURCE flush.
+            if config.aggregation_settings:
+                # NOTE: Aggregation-flushed tokens are NOT checkpointed here.
+                # They go into pending_tokens and are checkpointed only after
+                # SinkExecutor.write() achieves sink durability, via the
+                # checkpoint_after_sink callback.
+                flush_result = flush_remaining_aggregation_buffers(
+                    config=config,
+                    processor=processor,
+                    ctx=ctx,
+                    pending_tokens=pending_tokens,
+                )
+                counters.accumulate_flush_result(flush_result)
 
-        # Flush pending coalesce operations at end-of-source
-        if coalesce_executor is not None:
-            flush_coalesce_pending(
-                coalesce_executor=coalesce_executor,
-                coalesce_node_map=coalesce_node_map,
-                processor=processor,
-                config_sinks=config.sinks,
-                ctx=ctx,
-                counters=counters,
-                pending_tokens=pending_tokens,
-            )
+            # Flush pending coalesce operations only when the source is actually exhausted.
+            if coalesce_executor is not None:
+                flush_coalesce_pending(
+                    coalesce_executor=coalesce_executor,
+                    coalesce_node_map=coalesce_node_map,
+                    processor=processor,
+                    config_sinks=config.sinks,
+                    ctx=ctx,
+                    counters=counters,
+                    pending_tokens=pending_tokens,
+                )
 
         # Record field resolution for empty sources (header-only files).
         # For sources with rows, this was recorded inside the loop on first iteration.
@@ -1974,6 +2049,9 @@ class Orchestrator:
                             edge_map,
                             loop_ctx,
                         )
+                        quarantine_sink = source_item.quarantine_destination
+                        if quarantine_sink is not None and loop_ctx.pending_tokens[quarantine_sink]:
+                            loop_ctx.last_token_id = loop_ctx.pending_tokens[quarantine_sink][-1][0].token_id
                         last_progress_time = self._maybe_emit_progress(
                             counters,
                             start_time,
@@ -2008,6 +2086,8 @@ class Orchestrator:
                         transforms=config.transforms,
                         ctx=ctx,
                     )
+                    if results:
+                        loop_ctx.last_token_id = results[-1].token.token_id
                     accumulate_row_outcomes(results, counters, config.sinks, pending_tokens)
 
                     # Check coalesce timeouts after each row (P1-2026-01-22 fix)
@@ -2045,6 +2125,7 @@ class Orchestrator:
                     source_operation_id,
                     field_resolution_recorded,
                     schema_contract_recorded,
+                    interrupted_by_shutdown=interrupted_by_shutdown,
                 )
 
             except BatchPendingError:
@@ -2070,8 +2151,9 @@ class Orchestrator:
     ) -> bool:
         """Run the resume processing loop: iterate unprocessed rows, transform, flush, accumulate.
 
-        Includes end-of-loop aggregation flush and coalesce flush (same as the main
-        loop — these must complete before _flush_and_write_sinks() writes to sinks).
+        Includes end-of-loop aggregation/coalesce flushes only when the resume
+        source is actually exhausted. On graceful shutdown we keep buffered state
+        pending rather than forcing end-of-source semantics.
 
         Simpler than the main loop:
         - No quarantine handling (rows already validated)
@@ -2162,31 +2244,30 @@ class Orchestrator:
                 interrupted_by_shutdown = True
                 break
 
-        # ─────────────────────────────────────────────────────────────────
-        # CRITICAL: Flush remaining aggregation buffers at end-of-source
-        # ─────────────────────────────────────────────────────────────────
-        if config.aggregation_settings:
-            # Call module function directly (no wrapper method)
-            # No checkpointing during resume
-            flush_result = flush_remaining_aggregation_buffers(
-                config=config,
-                processor=processor,
-                ctx=ctx,
-                pending_tokens=pending_tokens,
-            )
-            counters.accumulate_flush_result(flush_result)
+        if not interrupted_by_shutdown:
+            # CRITICAL: Flush remaining aggregation buffers only at true end-of-source.
+            if config.aggregation_settings:
+                # Call module function directly (no wrapper method)
+                # No checkpointing during resume
+                flush_result = flush_remaining_aggregation_buffers(
+                    config=config,
+                    processor=processor,
+                    ctx=ctx,
+                    pending_tokens=pending_tokens,
+                )
+                counters.accumulate_flush_result(flush_result)
 
-        # Flush pending coalesce operations
-        if coalesce_executor is not None:
-            flush_coalesce_pending(
-                coalesce_executor=coalesce_executor,
-                coalesce_node_map=coalesce_node_map,
-                processor=processor,
-                config_sinks=config.sinks,
-                ctx=ctx,
-                counters=counters,
-                pending_tokens=pending_tokens,
-            )
+            # Flush pending coalesce operations only when resume processing exhausted all rows.
+            if coalesce_executor is not None:
+                flush_coalesce_pending(
+                    coalesce_executor=coalesce_executor,
+                    coalesce_node_map=coalesce_node_map,
+                    processor=processor,
+                    config_sinks=config.sinks,
+                    ctx=ctx,
+                    counters=counters,
+                    pending_tokens=pending_tokens,
+                )
 
         return interrupted_by_shutdown
 
@@ -2270,6 +2351,7 @@ class Orchestrator:
                 artifacts.sink_id_map,
                 loop_result.interrupted,
                 on_token_written_factory=checkpoint_after_sink,
+                shutdown_checkpoint_source_id=artifacts.source_id,
             )
 
             # 5. Final progress + PROCESS phase completion — AFTER sink writes
