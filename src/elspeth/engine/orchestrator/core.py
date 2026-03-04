@@ -726,8 +726,7 @@ class Orchestrator:
 
         node_to_next: dict[NodeID, NodeID | None] = {}
         source_id = graph.get_source()
-        if source_id is not None:
-            node_to_next[source_id] = graph.get_next_node(source_id)
+        node_to_next[source_id] = graph.get_next_node(source_id)
         for node_id in graph.get_pipeline_node_sequence():
             node_to_next[node_id] = graph.get_next_node(node_id)
         for coalesce_node_id in graph.get_coalesce_id_map().values():
@@ -1288,8 +1287,6 @@ class Orchestrator:
         # Build node_id -> plugin instance mapping for metadata extraction
         # Source: single plugin from config.source
         source_id = graph.get_source()
-        if source_id is None:
-            raise ValueError("Graph has no source node")
         transform_id_map: dict[int, NodeID] = graph.get_transform_id_map()
         sink_id_map: dict[SinkName, NodeID] = graph.get_sink_id_map()
         config_gate_id_map: dict[GateName, NodeID] = graph.get_config_gate_id_map()
@@ -1535,8 +1532,6 @@ class Orchestrator:
         """
         # Get explicit node ID mappings from graph
         source_id = graph.get_source()
-        if source_id is None:
-            raise ValueError("Graph has no source node")
         sink_id_map = graph.get_sink_id_map()
         transform_id_map = graph.get_transform_id_map()
         config_gate_id_map = graph.get_config_gate_id_map()

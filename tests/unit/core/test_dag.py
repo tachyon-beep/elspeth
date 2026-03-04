@@ -592,6 +592,30 @@ class TestSourceSinkValidation:
 
         assert graph.get_source() == "my_source"
 
+    def test_get_source_crashes_on_no_source(self) -> None:
+        """get_source() raises GraphValidationError when graph has no source node."""
+        from elspeth.contracts import NodeType
+        from elspeth.core.dag import ExecutionGraph, GraphValidationError
+
+        graph = ExecutionGraph()
+        graph.add_node("sink", node_type=NodeType.SINK, plugin_name="csv")
+
+        with pytest.raises(GraphValidationError, match="Expected exactly 1 source node, found 0"):
+            graph.get_source()
+
+    def test_get_source_crashes_on_multiple_sources(self) -> None:
+        """get_source() raises GraphValidationError when graph has multiple sources."""
+        from elspeth.contracts import NodeType
+        from elspeth.core.dag import ExecutionGraph, GraphValidationError
+
+        graph = ExecutionGraph()
+        graph.add_node("source1", node_type=NodeType.SOURCE, plugin_name="csv")
+        graph.add_node("source2", node_type=NodeType.SOURCE, plugin_name="json")
+        graph.add_node("sink", node_type=NodeType.SINK, plugin_name="csv")
+
+        with pytest.raises(GraphValidationError, match="Expected exactly 1 source node, found 2"):
+            graph.get_source()
+
     def test_get_sink_nodes(self) -> None:
         from elspeth.contracts import NodeType
         from elspeth.core.dag import ExecutionGraph
@@ -2103,6 +2127,44 @@ class TestExecutionGraphRouteMapping:
         # Verify gate routes to the hyphenated sinks
         gate_node_id = graph.get_config_gate_id_map()[GateName("quality_check")]
         assert graph.get_route_label(gate_node_id, "quarantine-bucket") == "false"
+
+    def test_get_route_label_crashes_for_gate_with_direct_edge_but_no_label(self) -> None:
+        """Gate with a direct edge to a sink but no route label crashes (construction bug)."""
+        from elspeth.contracts import NodeType, RoutingMode
+        from elspeth.contracts.types import NodeID, SinkName
+        from elspeth.core.dag import ExecutionGraph, GraphValidationError
+
+        graph = ExecutionGraph()
+        graph.add_node("source", node_type=NodeType.SOURCE, plugin_name="csv")
+        graph.add_node("gate", node_type=NodeType.GATE, plugin_name="config_gate")
+        graph.add_node("sink_a", node_type=NodeType.SINK, plugin_name="csv")
+        graph.add_node("sink_b", node_type=NodeType.SINK, plugin_name="csv")
+        graph.add_edge("source", "gate", label="continue", mode=RoutingMode.MOVE)
+        graph.add_edge("gate", "sink_a", label="true", mode=RoutingMode.MOVE)
+        graph.add_edge("gate", "sink_b", label="false", mode=RoutingMode.MOVE)
+        # Register route label for sink_a but NOT for sink_b
+        graph.add_route_label_entry(NodeID("gate"), "sink_a", "true")
+        # Set up sink_id_map so graph knows about sink_b
+        graph.set_sink_id_map({SinkName("sink_a"): NodeID("sink_a"), SinkName("sink_b"): NodeID("sink_b")})
+
+        # Gate has direct edge to sink_b but no route label — construction bug
+        with pytest.raises(GraphValidationError, match=r"direct edge to sink 'sink_b'.*no registered route label"):
+            graph.get_route_label("gate", "sink_b")
+
+    def test_get_route_label_returns_continue_for_non_gate(self) -> None:
+        """Non-gate nodes (transforms) return 'continue' for unregistered sinks."""
+        from elspeth.contracts import NodeType, RoutingMode
+        from elspeth.core.dag import ExecutionGraph
+
+        graph = ExecutionGraph()
+        graph.add_node("source", node_type=NodeType.SOURCE, plugin_name="csv")
+        graph.add_node("transform", node_type=NodeType.TRANSFORM, plugin_name="passthrough")
+        graph.add_node("sink", node_type=NodeType.SINK, plugin_name="csv")
+        graph.add_edge("source", "transform", label="continue", mode=RoutingMode.MOVE)
+        graph.add_edge("transform", "sink", label="continue", mode=RoutingMode.MOVE)
+
+        # Non-gate nodes still return "continue" for default path
+        assert graph.get_route_label("transform", "sink") == "continue"
 
 
 class TestMultiEdgeSupport:

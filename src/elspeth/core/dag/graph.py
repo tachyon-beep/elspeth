@@ -239,15 +239,23 @@ class ExecutionGraph:
         except nx.NetworkXUnfeasible as e:
             raise GraphValidationError(f"Cannot sort graph: {e}") from e
 
-    def get_source(self) -> NodeID | None:
+    def get_source(self) -> NodeID:
         """Get the source node ID.
 
         Returns:
-            The source node ID, or None if not exactly one source exists.
+            The source node ID.
+
+        Raises:
+            GraphValidationError: If not exactly one source exists (construction bug).
         """
         # All nodes have "info" - added via add_node(), direct access is safe
         sources = [NodeID(node_id) for node_id, data in self._graph.nodes(data=True) if data["info"].node_type == NodeType.SOURCE]
-        return sources[0] if len(sources) == 1 else None
+        if len(sources) != 1:
+            raise GraphValidationError(
+                f"Expected exactly 1 source node, found {len(sources)}. "
+                "This indicates a graph construction bug."
+            )
+        return sources[0]
 
     def get_sinks(self) -> list[NodeID]:
         """Get all sink node IDs.
@@ -360,8 +368,6 @@ class ExecutionGraph:
             or None for source-only pipelines.
         """
         source_id = self.get_source()
-        if source_id is None:
-            return None
         return self.get_next_node(source_id)
 
     def get_next_node(self, node_id: NodeID) -> NodeID | None:
@@ -417,8 +423,6 @@ class ExecutionGraph:
     def build_step_map(self) -> dict[NodeID, int]:
         """Build node -> audit step map (source=0, processing nodes start at 1)."""
         source_id = self.get_source()
-        if source_id is None:
-            return {}
 
         step_map: dict[NodeID, int] = {source_id: 0}
         for idx, node_id in enumerate(self.get_pipeline_node_sequence(), start=1):
@@ -793,20 +797,47 @@ class ExecutionGraph:
         return result
 
     def get_route_label(self, from_node_id: str, sink_name: str) -> str:
-        """Get the route label for an edge from a gate to a sink.
+        """Get the route label for an edge from a node to a sink.
+
+        For gate nodes, checks the explicit route label map first. If a gate has
+        a direct edge to the sink's node but no registered label, that indicates
+        a graph construction bug and raises GraphValidationError. If the gate
+        reaches the sink indirectly (via continue edges through other nodes),
+        "continue" is returned — that's the legitimate default path.
 
         Args:
-            from_node_id: The gate node ID
+            from_node_id: The originating node ID
             sink_name: The sink name (not node ID)
 
         Returns:
-            The route label (e.g., "suspicious") or "continue" for default path
-        """
-        # Check explicit route mapping first
-        if (NodeID(from_node_id), sink_name) in self._route_label_map:
-            return self._route_label_map[(NodeID(from_node_id), sink_name)]
+            The route label (e.g., "suspicious") or "continue" for default path.
 
-        # Default path uses "continue" label
+        Raises:
+            GraphValidationError: If a gate node has a direct edge to the sink's
+                graph node but no registered route label (construction bug).
+        """
+        key = (NodeID(from_node_id), sink_name)
+        if key in self._route_label_map:
+            return self._route_label_map[key]
+
+        # For gate nodes, verify there's no direct edge to this sink that's
+        # missing from the route label map — that would be a construction bug.
+        node_info = self.get_node_info(from_node_id)
+        if node_info.node_type == NodeType.GATE:
+            sink_node_id = self._sink_id_map.get(SinkName(sink_name))
+            if sink_node_id is not None:
+                # Check if this gate has a direct edge to the sink node
+                for _from, to_id, _key, _data in self._graph.out_edges(
+                    from_node_id, keys=True, data=True
+                ):
+                    if NodeID(to_id) == sink_node_id:
+                        raise GraphValidationError(
+                            f"Gate '{from_node_id}' has a direct edge to sink '{sink_name}' "
+                            "but no registered route label. "
+                            "This indicates a graph construction bug."
+                        )
+
+        # Default path: node reaches sink indirectly via continue edges
         return "continue"
 
     def get_route_resolution_map(self) -> dict[tuple[NodeID, str], RouteDestination]:
@@ -1097,7 +1128,7 @@ class ExecutionGraph:
             if merge_strategy == "select":
                 # Select merge passes through the selected branch's data unchanged.
                 # Trace back to that branch's producer schema for type validation.
-                select_branch = node_info.config.get("select_branch")
+                select_branch = node_info.config["select_branch"]
                 if select_branch is not None:
                     # Identity branch: COPY edge from gate to coalesce with label == select_branch
                     for from_id, _, edge_data in self._graph.in_edges(node_id, data=True):
