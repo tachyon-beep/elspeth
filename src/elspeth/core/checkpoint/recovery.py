@@ -15,7 +15,7 @@ from typing import TYPE_CHECKING, Any
 from sqlalchemy import select
 from sqlalchemy.engine import Row
 
-from elspeth.contracts import PayloadStore, PluginSchema, ResumeCheck, ResumePoint, RowOutcome, RunStatus, SchemaContract
+from elspeth.contracts import Checkpoint, PayloadStore, PluginSchema, ResumeCheck, ResumePoint, RowOutcome, RunStatus, SchemaContract
 from elspeth.contracts.aggregation_checkpoint import AggregationCheckpointState
 from elspeth.contracts.coalesce_checkpoint import CoalesceCheckpointState
 from elspeth.core.checkpoint.compatibility import CheckpointCompatibilityValidator
@@ -448,7 +448,7 @@ class RecoveryManager:
 
         return unprocessed
 
-    def _get_buffered_checkpoint_token_ids(self, checkpoint: Any) -> set[str]:
+    def _get_buffered_checkpoint_token_ids(self, checkpoint: Checkpoint) -> set[str]:
         """Collect token IDs restored from checkpoint state."""
         buffered_token_ids: set[str] = set()
 
@@ -463,8 +463,8 @@ class RecoveryManager:
             raw = checkpoint_loads(checkpoint.coalesce_state_json)
             coalesce_state = CoalesceCheckpointState.from_dict(raw)
             for pending in coalesce_state.pending:
-                for token in pending.branches.values():
-                    buffered_token_ids.add(token.token_id)
+                for coalesce_token in pending.branches.values():
+                    buffered_token_ids.add(coalesce_token.token_id)
 
         return buffered_token_ids
 
