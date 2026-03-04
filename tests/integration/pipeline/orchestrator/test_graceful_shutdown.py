@@ -678,6 +678,65 @@ class TestInterruptAndResume:
         assert output_sink.results[0]["agg_branch"]["count"] == 1
         assert output_sink.results[0]["direct_branch"]["value"] == 10
 
+    def test_buffered_only_resume_respects_pre_set_shutdown(self, landscape_db: LandscapeDB, payload_store) -> None:
+        """Buffered-only resume must checkpoint again instead of flushing when shutdown is already set."""
+        from elspeth.contracts.config.runtime import RuntimeCheckpointConfig
+        from elspeth.core.checkpoint import CheckpointManager, RecoveryManager
+        from elspeth.core.config import CheckpointSettings
+        from elspeth.engine.orchestrator import Orchestrator
+
+        checkpoint_mgr = CheckpointManager(landscape_db)
+        checkpoint_config = RuntimeCheckpointConfig.from_settings(CheckpointSettings(enabled=True, frequency="every_row"))
+
+        initial_shutdown = threading.Event()
+        config, graph, settings, output_sink = _build_interruptible_coalesce_config(initial_shutdown)
+
+        orchestrator = Orchestrator(
+            db=landscape_db,
+            checkpoint_manager=checkpoint_mgr,
+            checkpoint_config=checkpoint_config,
+        )
+
+        with pytest.raises(GracefulShutdownError) as exc_info:
+            orchestrator.run(
+                config,
+                graph=graph,
+                settings=settings,
+                payload_store=payload_store,
+                shutdown_event=initial_shutdown,
+            )
+
+        run_id = exc_info.value.run_id
+        assert run_id is not None
+        assert output_sink.results == []
+
+        recovery = RecoveryManager(landscape_db, checkpoint_mgr)
+        assert recovery.get_unprocessed_rows(run_id) == []
+
+        first_resume_point = recovery.get_resume_point(run_id, graph)
+        assert first_resume_point is not None
+        assert first_resume_point.coalesce_state is not None
+
+        resume_shutdown = threading.Event()
+        resume_shutdown.set()
+        with pytest.raises(GracefulShutdownError):
+            orchestrator.resume(
+                resume_point=first_resume_point,
+                config=config,
+                graph=graph,
+                payload_store=payload_store,
+                settings=settings,
+                shutdown_event=resume_shutdown,
+            )
+
+        assert output_sink.results == []
+
+        second_resume_point = recovery.get_resume_point(run_id, graph)
+        assert second_resume_point is not None
+        assert second_resume_point.sequence_number > first_resume_point.sequence_number
+        assert second_resume_point.coalesce_state is not None
+        assert recovery.get_unprocessed_rows(run_id) == []
+
     def _setup_failed_run(
         self,
         db: LandscapeDB,
@@ -928,8 +987,8 @@ class TestInterruptAndResume:
         # Processed rows reached the sink
         assert len(resume_sink.results) >= 2
 
-    def test_resume_shutdown_advances_buffered_checkpoint_without_sink_writes(self, landscape_db: LandscapeDB, payload_store) -> None:
-        """A second shutdown during resume must checkpoint newly buffered progress."""
+    def test_resume_shutdown_recheckpoints_buffered_aggregation_without_sink_writes(self, landscape_db: LandscapeDB, payload_store) -> None:
+        """Pre-set shutdown during resume must preserve buffered aggregation state without sink writes."""
         import json as json_mod
         from datetime import UTC, datetime
 
@@ -1136,8 +1195,8 @@ class TestInterruptAndResume:
         assert second_resume_point is not None
         assert second_resume_point.sequence_number > first_resume_point.sequence_number
         assert second_resume_point.aggregation_state is not None
-        assert sum(len(node.tokens) for node in second_resume_point.aggregation_state.nodes.values()) == 3
-        assert len(recovery.get_unprocessed_rows(run_id)) == 1
+        assert sum(len(node.tokens) for node in second_resume_point.aggregation_state.nodes.values()) == 2
+        assert len(recovery.get_unprocessed_rows(run_id)) == 2
 
     def test_resume_without_shutdown_completes_normally(self, landscape_db: LandscapeDB, payload_store) -> None:
         """Resume without shutdown event completes all remaining rows."""

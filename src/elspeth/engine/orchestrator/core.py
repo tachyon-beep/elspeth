@@ -2236,11 +2236,17 @@ class Orchestrator:
         coalesce_node_map = dict(loop_ctx.coalesce_node_map)
         agg_transform_lookup = dict(loop_ctx.agg_transform_lookup)
 
-        interrupted_by_shutdown = False
+        # A buffered-only resume can have zero unprocessed rows but still carry
+        # restored aggregation/coalesce state. If shutdown is already requested,
+        # honor it before any end-of-source flush work so buffered state is
+        # checkpointed again instead of being flushed to sinks.
+        interrupted_by_shutdown = shutdown_event is not None and shutdown_event.is_set()
 
         # Process each unprocessed row using process_existing_row
         # (rows already exist in DB, only tokens need to be created)
         for row_id, _row_index, row_data in unprocessed_rows:
+            if interrupted_by_shutdown:
+                break
             counters.rows_processed += 1
 
             # ─────────────────────────────────────────────────────────────────
