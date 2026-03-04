@@ -25,7 +25,7 @@ class SchemaCompatibilityError(Exception):
 
 # Required columns that have been added since initial schema.
 # Used by _validate_schema() to detect outdated SQLite databases.
-_REQUIRED_COLUMNS: list[tuple[str, str]] = [
+_REQUIRED_COLUMNS: tuple[tuple[str, str], ...] = (
     ("tokens", "expand_group_id"),
     # Added for run ownership — prevents cross-run contamination of token-linked records
     ("tokens", "run_id"),
@@ -48,16 +48,16 @@ _REQUIRED_COLUMNS: list[tuple[str, str]] = [
     # Operation I/O hashes - survive payload purge for integrity verification
     ("operations", "input_data_hash"),
     ("operations", "output_data_hash"),
-]
+)
 
 # Required foreign keys for audit integrity (Tier 1 trust).
 # Format: (table_name, column_name, referenced_table)
 # Bug fix: P2-2026-01-19-error-tables-missing-foreign-keys
-_REQUIRED_FOREIGN_KEYS: list[tuple[str, str, str]] = [
+_REQUIRED_FOREIGN_KEYS: tuple[tuple[str, str, str], ...] = (
     ("validation_errors", "node_id", "nodes"),
     ("transform_errors", "token_id", "tokens"),
     ("transform_errors", "transform_id", "nodes"),
-]
+)
 
 
 class LandscapeDB:

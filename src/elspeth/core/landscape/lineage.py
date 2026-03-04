@@ -4,7 +4,7 @@ Provides the explain() function to compose query results into
 complete lineage for a token or row.
 """
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import TYPE_CHECKING, cast
 
 from elspeth.contracts import (
@@ -22,7 +22,7 @@ if TYPE_CHECKING:
     from elspeth.core.landscape.recorder import LandscapeRecorder
 
 
-@dataclass
+@dataclass(frozen=True, slots=True)
 class LineageResult:
     """Complete lineage for a token.
 
@@ -37,26 +37,34 @@ class LineageResult:
     source_row: RowLineage
     """The original source row with resolved payload."""
 
-    node_states: list[NodeState]
+    node_states: tuple[NodeState, ...]
     """All node states visited by this token, in order."""
 
-    routing_events: list[RoutingEvent]
+    routing_events: tuple[RoutingEvent, ...]
     """All routing events for this token's states."""
 
-    calls: list[Call]
+    calls: tuple[Call, ...]
     """All external calls made during processing."""
 
-    parent_tokens: list[Token]
+    parent_tokens: tuple[Token, ...]
     """Parent tokens (for tokens created by fork/coalesce)."""
 
-    validation_errors: list[ValidationErrorRecord] = field(default_factory=list)
+    validation_errors: tuple[ValidationErrorRecord, ...] = ()
     """Validation errors for this row (from source validation)."""
 
-    transform_errors: list[TransformErrorRecord] = field(default_factory=list)
+    transform_errors: tuple[TransformErrorRecord, ...] = ()
     """Transform errors for this token (from transform processing)."""
 
     outcome: TokenOutcome | None = None
     """Terminal outcome for this token (COMPLETED, ROUTED, FAILED, etc.)."""
+
+    def __post_init__(self) -> None:
+        if self.token.row_id != self.source_row.row_id:
+            raise ValueError(
+                f"Token row_id mismatch: token '{self.token.token_id}' has row_id "
+                f"'{self.token.row_id}' but source_row has row_id '{self.source_row.row_id}'. "
+                f"This indicates an audit integrity violation."
+            )
 
 
 def explain(
@@ -148,9 +156,8 @@ def explain(
     if source_row is None:
         return None
 
-    # Get node states for this token
-    node_states = recorder.get_node_states_for_token(token_id)
-    node_states.sort(key=lambda s: s.step_index)
+    # Get node states for this token, sorted by step_index
+    node_states = sorted(recorder.get_node_states_for_token(token_id), key=lambda s: s.step_index)
 
     # Batch query: Get routing events and calls for all states at once (N+1 fix)
     state_ids = [s.state_id for s in node_states]
@@ -225,11 +232,11 @@ def explain(
     return LineageResult(
         token=token,
         source_row=source_row,
-        node_states=node_states,
-        routing_events=routing_events,
-        calls=calls,
-        parent_tokens=parent_tokens,
-        validation_errors=validation_errors,
-        transform_errors=transform_errors,
+        node_states=tuple(node_states),
+        routing_events=tuple(routing_events),
+        calls=tuple(calls),
+        parent_tokens=tuple(parent_tokens),
+        validation_errors=tuple(validation_errors),
+        transform_errors=tuple(transform_errors),
         outcome=outcome,
     )

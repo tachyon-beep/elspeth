@@ -58,8 +58,8 @@ class CoalesceFailureReason:
     """
 
     failure_reason: str  # Why coalesce failed (e.g., "quorum_not_met")
-    expected_branches: list[str]  # Branches expected to arrive
-    branches_arrived: list[str]  # Branches that actually arrived
+    expected_branches: tuple[str, ...]  # Branches expected to arrive
+    branches_arrived: tuple[str, ...]  # Branches that actually arrived
     merge_policy: str  # Merge policy in effect
     timeout_ms: int | None = None  # Timeout that triggered failure (if applicable)
     select_branch: str | None = None  # Target branch for select policy (if applicable)

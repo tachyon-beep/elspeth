@@ -284,13 +284,13 @@ class TestLineageResult:
         result = LineageResult(
             token=token,
             source_row=row_lineage,
-            node_states=[],
-            routing_events=[],
-            calls=[],
-            parent_tokens=[],
+            node_states=(),
+            routing_events=(),
+            calls=(),
+            parent_tokens=(),
         )
         assert result.token is token
         assert result.source_row is row_lineage
-        assert result.validation_errors == []
-        assert result.transform_errors == []
+        assert result.validation_errors == ()
+        assert result.transform_errors == ()
         assert result.outcome is None

@@ -143,8 +143,8 @@ class FilesystemPayloadStore:
         path = self._path_for_hash(content_hash)
         try:
             content = path.read_bytes()
-        except FileNotFoundError:
-            raise KeyError(f"Payload not found: {content_hash}") from None
+        except FileNotFoundError as exc:
+            raise KeyError(f"Payload not found: {content_hash}") from exc
         actual_hash = hashlib.sha256(content).hexdigest()
 
         # Use timing-safe comparison to prevent timing attacks that could

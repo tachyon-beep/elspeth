@@ -251,8 +251,8 @@ class TestLineageResultStructureProperties:
     def test_optional_fields_have_defaults(self) -> None:
         """Property: Optional fields have default values."""
         optional_with_defaults = {
-            "validation_errors": list,
-            "transform_errors": list,
+            "validation_errors": tuple,
+            "transform_errors": tuple,
             "outcome": type(None),
         }
 
@@ -261,20 +261,24 @@ class TestLineageResultStructureProperties:
                 # Field should have a default or default_factory
                 assert field_obj.default is not None or field_obj.default_factory is not None
 
-    def test_error_lists_default_to_empty(self) -> None:
-        """Property: Error lists default to empty (not None)."""
-        # Create minimal valid LineageResult
+    def test_error_tuples_default_to_empty(self) -> None:
+        """Property: Error tuples default to empty (not None)."""
+        # Create minimal valid LineageResult with matching row_ids
+        token = MagicMock()
+        token.row_id = "row-1"
+        source_row = MagicMock()
+        source_row.row_id = "row-1"
         result = LineageResult(
-            token=MagicMock(),
-            source_row=MagicMock(),
-            node_states=[],
-            routing_events=[],
-            calls=[],
-            parent_tokens=[],
+            token=token,
+            source_row=source_row,
+            node_states=(),
+            routing_events=(),
+            calls=(),
+            parent_tokens=(),
         )
 
-        assert result.validation_errors == []
-        assert result.transform_errors == []
+        assert result.validation_errors == ()
+        assert result.transform_errors == ()
         assert result.outcome is None
 
 

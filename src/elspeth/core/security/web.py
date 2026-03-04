@@ -250,8 +250,8 @@ def validate_url_for_ssrf(url: str, timeout: float = 5.0) -> SSRFSafeRequest:
 
     try:
         status, value = result_queue.get(timeout=timeout)
-    except queue.Empty:
-        raise NetworkError(f"DNS resolution timeout ({timeout}s): {hostname}") from None
+    except queue.Empty as exc:
+        raise NetworkError(f"DNS resolution timeout ({timeout}s): {hostname}") from exc
 
     if status == "error":
         exc = value

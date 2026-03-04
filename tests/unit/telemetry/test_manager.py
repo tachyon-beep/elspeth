@@ -9,6 +9,9 @@ from datetime import UTC, datetime
 
 import pytest
 
+from types import MappingProxyType
+from unittest.mock import patch
+
 from elspeth.contracts.config.defaults import INTERNAL_DEFAULTS
 from elspeth.contracts.enums import (
     BackpressureMode,
@@ -357,90 +360,92 @@ class TestShutdownGuards:
 # =============================================================================
 
 
+def _small_queue_defaults() -> MappingProxyType:
+    """INTERNAL_DEFAULTS with telemetry queue_size=2 for backpressure tests."""
+    return MappingProxyType({
+        **INTERNAL_DEFAULTS,
+        "telemetry": MappingProxyType({**INTERNAL_DEFAULTS["telemetry"], "queue_size": 2}),
+    })
+
+
 class TestDropBackpressure:
     def test_drop_mode_drops_oldest_when_queue_full(self) -> None:
-        original_queue_size = INTERNAL_DEFAULTS["telemetry"]["queue_size"]
-        INTERNAL_DEFAULTS["telemetry"]["queue_size"] = 2
+        with patch("elspeth.telemetry.manager.INTERNAL_DEFAULTS", _small_queue_defaults()):
+            config = MockTelemetryConfig(backpressure_mode=BackpressureMode.DROP)
+            exporter = TelemetryTestExporter()
+            manager = TelemetryManager(config, exporters=[exporter])
+            try:
+                # Block the export thread so it can't drain immediately
+                blocker = threading.Event()
+                original_dispatch = manager._dispatch_to_exporters
 
-        config = MockTelemetryConfig(backpressure_mode=BackpressureMode.DROP)
-        exporter = TelemetryTestExporter()
-        manager = TelemetryManager(config, exporters=[exporter])
-        try:
-            # Block the export thread so it can't drain immediately
-            blocker = threading.Event()
-            original_dispatch = manager._dispatch_to_exporters
+                def slow_dispatch(event):
+                    blocker.wait(timeout=5.0)
+                    original_dispatch(event)
 
-            def slow_dispatch(event):
-                blocker.wait(timeout=5.0)
-                original_dispatch(event)
+                object.__setattr__(manager, "_dispatch_to_exporters", slow_dispatch)
 
-            object.__setattr__(manager, "_dispatch_to_exporters", slow_dispatch)
+                # First event is picked up by thread and blocks in dispatch
+                e1 = RunStarted(timestamp=_NOW, run_id="run-1", config_hash="h", source_plugin="csv")
+                e2 = RunStarted(timestamp=_NOW, run_id="run-2", config_hash="h", source_plugin="csv")
+                e3 = RunStarted(timestamp=_NOW, run_id="run-3", config_hash="h", source_plugin="csv")
+                e4 = RunStarted(timestamp=_NOW, run_id="run-4", config_hash="h", source_plugin="csv")
 
-            # First event is picked up by thread and blocks in dispatch
-            e1 = RunStarted(timestamp=_NOW, run_id="run-1", config_hash="h", source_plugin="csv")
-            e2 = RunStarted(timestamp=_NOW, run_id="run-2", config_hash="h", source_plugin="csv")
-            e3 = RunStarted(timestamp=_NOW, run_id="run-3", config_hash="h", source_plugin="csv")
-            e4 = RunStarted(timestamp=_NOW, run_id="run-4", config_hash="h", source_plugin="csv")
+                manager.handle_event(e1)
+                time.sleep(0.05)
 
-            manager.handle_event(e1)
-            time.sleep(0.05)
+                # Fill queue to capacity, then overflow
+                manager.handle_event(e2)
+                manager.handle_event(e3)
+                dropped_before = manager.health_metrics["events_dropped"]
+                manager.handle_event(e4)
+                dropped_after = manager.health_metrics["events_dropped"]
+                assert dropped_after > dropped_before
 
-            # Fill queue to capacity, then overflow
-            manager.handle_event(e2)
-            manager.handle_event(e3)
-            dropped_before = manager.health_metrics["events_dropped"]
-            manager.handle_event(e4)
-            dropped_after = manager.health_metrics["events_dropped"]
-            assert dropped_after > dropped_before
-
-            # Release exporter and verify oldest queued event (e2) was evicted
-            blocker.set()
-            object.__setattr__(manager, "_dispatch_to_exporters", original_dispatch)
-            _wait_for_processing(manager)
-
-            run_ids = [event.run_id for event in exporter.events]
-            assert run_ids == ["run-1", "run-3", "run-4"]
-        finally:
-            if "blocker" in locals() and not blocker.is_set():
+                # Release exporter and verify oldest queued event (e2) was evicted
                 blocker.set()
-            if "original_dispatch" in locals():
                 object.__setattr__(manager, "_dispatch_to_exporters", original_dispatch)
-            manager.close()
-            INTERNAL_DEFAULTS["telemetry"]["queue_size"] = original_queue_size
+                _wait_for_processing(manager)
+
+                run_ids = [event.run_id for event in exporter.events]
+                assert run_ids == ["run-1", "run-3", "run-4"]
+            finally:
+                if "blocker" in locals() and not blocker.is_set():
+                    blocker.set()
+                if "original_dispatch" in locals():
+                    object.__setattr__(manager, "_dispatch_to_exporters", original_dispatch)
+                manager.close()
 
     def test_drop_mode_increments_events_dropped(self) -> None:
-        original_queue_size = INTERNAL_DEFAULTS["telemetry"]["queue_size"]
-        INTERNAL_DEFAULTS["telemetry"]["queue_size"] = 2
+        with patch("elspeth.telemetry.manager.INTERNAL_DEFAULTS", _small_queue_defaults()):
+            config = MockTelemetryConfig(backpressure_mode=BackpressureMode.DROP)
+            exporter = TelemetryTestExporter()
+            manager = TelemetryManager(config, exporters=[exporter])
+            try:
+                blocker = threading.Event()
+                original_dispatch = manager._dispatch_to_exporters
 
-        config = MockTelemetryConfig(backpressure_mode=BackpressureMode.DROP)
-        exporter = TelemetryTestExporter()
-        manager = TelemetryManager(config, exporters=[exporter])
-        try:
-            blocker = threading.Event()
-            original_dispatch = manager._dispatch_to_exporters
+                def slow_dispatch(event):
+                    blocker.wait(timeout=5.0)
+                    original_dispatch(event)
 
-            def slow_dispatch(event):
-                blocker.wait(timeout=5.0)
-                original_dispatch(event)
+                object.__setattr__(manager, "_dispatch_to_exporters", slow_dispatch)
 
-            object.__setattr__(manager, "_dispatch_to_exporters", slow_dispatch)
+                # First event occupies thread; queue fills with next two; fourth overflows
+                manager.handle_event(_lifecycle_event())
+                time.sleep(0.05)
+                manager.handle_event(_lifecycle_event())
+                manager.handle_event(_lifecycle_event())
 
-            # First event occupies thread; queue fills with next two; fourth overflows
-            manager.handle_event(_lifecycle_event())
-            time.sleep(0.05)
-            manager.handle_event(_lifecycle_event())
-            manager.handle_event(_lifecycle_event())
-
-            initial_dropped = manager.health_metrics["events_dropped"]
-            manager.handle_event(_lifecycle_event())
-            assert manager.health_metrics["events_dropped"] > initial_dropped
-        finally:
-            if "blocker" in locals() and not blocker.is_set():
-                blocker.set()
-            if "original_dispatch" in locals():
-                object.__setattr__(manager, "_dispatch_to_exporters", original_dispatch)
-            manager.close()
-            INTERNAL_DEFAULTS["telemetry"]["queue_size"] = original_queue_size
+                initial_dropped = manager.health_metrics["events_dropped"]
+                manager.handle_event(_lifecycle_event())
+                assert manager.health_metrics["events_dropped"] > initial_dropped
+            finally:
+                if "blocker" in locals() and not blocker.is_set():
+                    blocker.set()
+                if "original_dispatch" in locals():
+                    object.__setattr__(manager, "_dispatch_to_exporters", original_dispatch)
+                manager.close()
 
     def test_drop_mode_replacement_keeps_join_blocked_until_replacement_queued(self) -> None:
         """Eviction must not let queue.join() observe a transient zero.

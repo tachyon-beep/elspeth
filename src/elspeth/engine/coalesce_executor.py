@@ -367,8 +367,8 @@ class CoalesceExecutor:
             )
             error = CoalesceFailureReason(
                 failure_reason=failure_reason,
-                expected_branches=list(settings.branches),
-                branches_arrived=[],  # Late arrival — merge already happened
+                expected_branches=tuple(settings.branches),
+                branches_arrived=(),  # Late arrival — merge already happened
                 merge_policy=settings.merge,
             )
             self._recorder.complete_node_state(
@@ -507,8 +507,8 @@ class CoalesceExecutor:
         # Complete pending node states with failure
         error = CoalesceFailureReason(
             failure_reason=failure_reason,
-            expected_branches=list(settings.branches),
-            branches_arrived=list(pending.branches.keys()),
+            expected_branches=tuple(settings.branches),
+            branches_arrived=tuple(pending.branches.keys()),
             merge_policy=settings.merge,
             timeout_ms=int(settings.timeout_seconds * 1000) if is_timeout and settings.timeout_seconds is not None else None,
         )
@@ -535,8 +535,8 @@ class CoalesceExecutor:
             consumed_tokens=consumed_tokens,
             coalesce_metadata=CoalesceMetadata.for_failure(
                 policy=settings.policy,
-                expected_branches=list(settings.branches),
-                branches_arrived=list(pending.branches.keys()),
+                expected_branches=tuple(settings.branches),
+                branches_arrived=tuple(pending.branches.keys()),
                 branches_lost=pending.lost_branches if pending.lost_branches else None,
                 quorum_required=settings.quorum_count,
                 timeout_seconds=settings.timeout_seconds,
@@ -580,8 +580,8 @@ class CoalesceExecutor:
 
             select_error = CoalesceFailureReason(
                 failure_reason="select_branch_not_arrived",
-                expected_branches=list(settings.branches),
-                branches_arrived=list(pending.branches.keys()),
+                expected_branches=tuple(settings.branches),
+                branches_arrived=tuple(pending.branches.keys()),
                 merge_policy=settings.merge,
                 select_branch=settings.select_branch,
             )
@@ -610,7 +610,7 @@ class CoalesceExecutor:
                     merge_strategy=settings.merge,
                     # select_branch is validated non-None by CoalesceSettings for merge="select"
                     select_branch=settings.select_branch,  # type: ignore[arg-type]
-                    branches_arrived=list(pending.branches.keys()),
+                    branches_arrived=tuple(pending.branches.keys()),
                 ),
                 coalesce_name=coalesce_name,
                 outcomes_recorded=True,  # Bug 9z8 fix: token outcomes already recorded above
@@ -703,7 +703,7 @@ class CoalesceExecutor:
                 coalesce_name=coalesce_name,
                 merge_strategy="select",
                 selected_branch=settings.select_branch,
-                branches_arrived=list(pending.branches.keys()),
+                branches_arrived=tuple(pending.branches.keys()),
             )
 
         else:
@@ -728,8 +728,8 @@ class CoalesceExecutor:
         coalesce_metadata = CoalesceMetadata.for_merge(
             policy=settings.policy,
             merge_strategy=settings.merge,
-            expected_branches=list(settings.branches),
-            branches_arrived=list(pending.branches.keys()),
+            expected_branches=tuple(settings.branches),
+            branches_arrived=tuple(pending.branches.keys()),
             branches_lost=pending.lost_branches if pending.lost_branches else {},
             arrival_order=[
                 ArrivalOrderEntry(
