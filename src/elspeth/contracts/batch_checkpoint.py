@@ -90,7 +90,7 @@ class BatchCheckpointState:
             batch_id=data["batch_id"],
             input_file_id=data["input_file_id"],
             row_mapping={k: RowMappingEntry.from_dict(v) for k, v in data["row_mapping"].items()},
-            template_errors=data["template_errors"],
+            template_errors=[(int(idx), str(msg)) for idx, msg in data["template_errors"]],
             submitted_at=data["submitted_at"],
             row_count=data["row_count"],
             requests=data["requests"],
