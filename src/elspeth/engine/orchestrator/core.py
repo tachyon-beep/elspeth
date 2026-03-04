@@ -409,21 +409,20 @@ class Orchestrator:
             raise RuntimeError("Cannot create shutdown checkpoint: execution graph not available")
 
         aggregation_state = loop_ctx.processor.get_aggregation_checkpoint_state()
-        coalesce_state = loop_ctx.processor.get_coalesce_checkpoint_state()
+        raw_coalesce = loop_ctx.processor.get_coalesce_checkpoint_state()
+        # Only persist coalesce state that has pending entries worth checkpointing
+        coalesce_state = raw_coalesce if raw_coalesce is not None and raw_coalesce.pending else None
 
         token_id: str | None = None
         node_id: str | None = None
         checkpoint_agg_state: AggregationCheckpointState | None = None
-        checkpoint_coalesce_state: CoalesceCheckpointState | None = None
-        if coalesce_state is not None and coalesce_state.pending:
-            checkpoint_coalesce_state = coalesce_state
 
         if aggregation_state.nodes:
             agg_node_id, agg_node_state = next(iter(aggregation_state.nodes.items()))
             token_id = agg_node_state.tokens[-1].token_id
             node_id = agg_node_id
             checkpoint_agg_state = aggregation_state
-        elif checkpoint_coalesce_state is not None:
+        elif coalesce_state is not None:
             pending_entry = coalesce_state.pending[-1]
             if pending_entry.branches:
                 last_branch = next(reversed(pending_entry.branches.values()))
@@ -452,7 +451,7 @@ class Orchestrator:
             sequence_number=self._sequence_number,
             graph=self._current_graph,
             aggregation_state=checkpoint_agg_state,
-            coalesce_state=checkpoint_coalesce_state,
+            coalesce_state=coalesce_state,
         )
 
     def _delete_checkpoints(self, run_id: str) -> None:

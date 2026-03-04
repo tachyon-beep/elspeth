@@ -42,7 +42,7 @@ from elspeth.plugins.transforms.llm import (
 from elspeth.plugins.transforms.llm.base import LLMConfig
 from elspeth.plugins.transforms.llm.langfuse import LangfuseTracer, create_langfuse_tracer
 from elspeth.plugins.transforms.llm.multi_query import QuerySpec, ResponseFormat, resolve_queries
-from elspeth.plugins.transforms.llm.provider import FinishReason, LLMProvider
+from elspeth.plugins.transforms.llm.provider import FinishReason, LLMProvider, ParsedFinishReason, UnrecognizedFinishReason
 from elspeth.plugins.transforms.llm.providers.azure import AzureLLMProvider, AzureOpenAIConfig, _configure_azure_monitor
 from elspeth.plugins.transforms.llm.providers.openrouter import OpenRouterConfig, OpenRouterLLMProvider
 from elspeth.plugins.transforms.llm.templates import PromptTemplate, TemplateError
@@ -63,44 +63,77 @@ def _warn_telemetry_before_start(event: Any) -> None:
     )
 
 
+_FINISH_REASON_ERRORS: dict[FinishReason, tuple[str, str]] = {
+    FinishReason.LENGTH: ("response_truncated", "Response truncated (finish_reason=length)"),
+    FinishReason.CONTENT_FILTER: ("content_filtered", "Response blocked by provider content filter"),
+}
+
+
+@dataclass(frozen=True, slots=True)
+class _FinishReasonError:
+    """Bundles the transform result and tracer message for a terminal finish reason."""
+
+    result: TransformResult
+    error_message: str
+
+
 def _finish_reason_error(
-    finish_reason: FinishReason | None,
+    finish_reason: ParsedFinishReason,
     *,
     query_name: str | None = None,
     query_index: int | None = None,
     content_length: int | None = None,
-) -> TransformResult | None:
-    """Convert terminal finish reasons into transform errors.
+) -> _FinishReasonError | None:
+    """Fail closed on non-STOP finish reasons.
 
-    Providers already normalize finish reasons; the shared transform must
-    fail closed on provider-signaled unsafe completions instead of treating
-    them as ordinary successful text output.
+    Allowlists known-good completions (STOP, None/absent) and rejects
+    everything else — known-bad reasons get specific error messages,
+    unknown/unrecognized reasons get a generic rejection.  This ensures
+    new provider finish reasons are never silently treated as success.
     """
-    if finish_reason == FinishReason.LENGTH:
-        reason: dict[str, Any] = {
-            "reason": "response_truncated",
-            "finish_reason": FinishReason.LENGTH.value,
-        }
-        if query_name is not None:
-            reason["query_name"] = query_name
-        if query_index is not None:
-            reason["query_index"] = query_index
-        if content_length is not None:
-            reason["content_length"] = content_length
-        return TransformResult.error(reason, retryable=False)
+    # Allowlist: STOP and absent (None) are the only known-good completions.
+    if finish_reason is None or finish_reason == FinishReason.STOP:
+        return None
 
-    if finish_reason == FinishReason.CONTENT_FILTER:
-        reason = {
-            "reason": "content_filtered",
-            "finish_reason": FinishReason.CONTENT_FILTER.value,
-        }
-        if query_name is not None:
-            reason["query_name"] = query_name
-        if query_index is not None:
-            reason["query_index"] = query_index
-        return TransformResult.error(reason, retryable=False)
+    # Known-bad reasons with specific error messages.
+    if isinstance(finish_reason, FinishReason):
+        entry = _FINISH_REASON_ERRORS.get(finish_reason)
+        if entry is not None:
+            reason_key, error_message = entry
+            reason: dict[str, Any] = {
+                "reason": reason_key,
+                "finish_reason": finish_reason.value,
+            }
+            if query_name is not None:
+                reason["query_name"] = query_name
+            if query_index is not None:
+                reason["query_index"] = query_index
+            if content_length is not None:
+                reason["content_length"] = content_length
+            return _FinishReasonError(
+                result=TransformResult.error(reason, retryable=False),
+                error_message=error_message,
+            )
+        # Known enum member not in STOP or error dict — fail closed.
+        raw_value = finish_reason.value
+    elif isinstance(finish_reason, UnrecognizedFinishReason):
+        raw_value = finish_reason.raw
+    else:
+        raw_value = str(finish_reason)
 
-    return None
+    # Catch-all: any finish reason not explicitly allowlisted is an error.
+    reason = {
+        "reason": "unexpected_finish_reason",
+        "finish_reason": raw_value,
+    }
+    if query_name is not None:
+        reason["query_name"] = query_name
+    if query_index is not None:
+        reason["query_index"] = query_index
+    return _FinishReasonError(
+        result=TransformResult.error(reason, retryable=False),
+        error_message=f"Unexpected finish reason: {raw_value}",
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -230,22 +263,19 @@ class SingleQueryStrategy:
 
         # 4. Fail closed on provider-signaled terminal finish reasons.
         finish_reason_error = _finish_reason_error(
-            result.finish_reason if isinstance(result.finish_reason, FinishReason) else None,
+            result.finish_reason,
             content_length=len(result.content),
         )
         if finish_reason_error is not None:
-            error_message = "Response truncated (finish_reason=length)"
-            if result.finish_reason == FinishReason.CONTENT_FILTER:
-                error_message = "Response blocked by provider content filter"
             tracer.record_error(
                 token_id=token_id,
                 query_name="single",
                 prompt=rendered.prompt,
-                error_message=error_message,
+                error_message=finish_reason_error.error_message,
                 model=self.model,
                 latency_ms=latency_ms,
             )
-            return finish_reason_error
+            return finish_reason_error.result
 
         # 5. Strip markdown fences
         content = strip_markdown_fences(result.content)
@@ -479,23 +509,20 @@ class MultiQueryStrategy:
 
         # Fail closed on provider-signaled terminal finish reasons.
         finish_reason_error = _finish_reason_error(
-            result.finish_reason if isinstance(result.finish_reason, FinishReason) else None,
+            result.finish_reason,
             query_name=spec.name,
             query_index=query_idx,
         )
         if finish_reason_error is not None:
-            error_message = "Response truncated (finish_reason=length)"
-            if result.finish_reason == FinishReason.CONTENT_FILTER:
-                error_message = "Response blocked by provider content filter"
             tracer.record_error(
                 token_id=token_id,
                 query_name=spec.name,
                 prompt=rendered.prompt,
-                error_message=error_message,
+                error_message=finish_reason_error.error_message,
                 model=self.model,
                 latency_ms=latency_ms,
             )
-            return finish_reason_error
+            return finish_reason_error.result
 
         # Strip fences and store content
         content = strip_markdown_fences(result.content)

@@ -10,6 +10,7 @@ All work on `RC4-user-interface` now rolls into the 4.0 release line. RC-3.3 has
 
 ### Fixed
 
+- **LLM finish-reason fail-closed** — Restructured `_finish_reason_error` from blocklist (reject `LENGTH`, `CONTENT_FILTER`) to allowlist (accept only `STOP` and absent). Unknown finish reasons from new providers, `TOOL_CALLS`, and `UnrecognizedFinishReason` values are now rejected as non-retryable errors instead of silently passing through as successful completions.
 - **SQLite read-only audit inspection** — `LandscapeDB.from_url(..., create_tables=False)` no longer stamps `PRAGMA user_version`, preserving non-mutating forensic access to compatible legacy SQLite audit databases.
 
 ---

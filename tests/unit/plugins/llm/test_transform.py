@@ -23,7 +23,7 @@ from elspeth.plugins.infrastructure.clients.llm import (
     RateLimitError,
     ServerError,
 )
-from elspeth.plugins.transforms.llm.provider import FinishReason, LLMQueryResult
+from elspeth.plugins.transforms.llm.provider import FinishReason, LLMQueryResult, UnrecognizedFinishReason
 from elspeth.testing import make_pipeline_row
 
 # ---------------------------------------------------------------------------
@@ -315,6 +315,83 @@ class TestTruncationDetection:
         assert result.reason is not None
         assert result.reason["reason"] == "content_filtered"
         assert result.reason["finish_reason"] == "content_filter"
+
+    def test_tool_calls_finish_reason_returns_error(self) -> None:
+        """TOOL_CALLS finish reason must not be treated as successful text output."""
+        transform, mock_provider = _make_transform_with_mock_provider()
+        mock_provider.execute_query.return_value = LLMQueryResult(
+            content="some content alongside tool call",
+            usage=TokenUsage.known(10, 20),
+            model="gpt-4o",
+            finish_reason=FinishReason.TOOL_CALLS,
+        )
+
+        result = transform._process_row(_make_row(), _make_ctx())
+        assert result.status == "error"
+        assert result.reason is not None
+        assert result.reason["reason"] == "unexpected_finish_reason"
+        assert result.reason["finish_reason"] == "tool_calls"
+        assert result.retryable is False
+
+    def test_unrecognized_finish_reason_returns_error(self) -> None:
+        """Unknown finish reasons must fail closed, not pass through as success."""
+        transform, mock_provider = _make_transform_with_mock_provider()
+        mock_provider.execute_query.return_value = LLMQueryResult(
+            content="filtered by new safety system",
+            usage=TokenUsage.known(10, 15),
+            model="gpt-4o",
+            finish_reason=UnrecognizedFinishReason("safety_filter"),
+        )
+
+        result = transform._process_row(_make_row(), _make_ctx())
+        assert result.status == "error"
+        assert result.reason is not None
+        assert result.reason["reason"] == "unexpected_finish_reason"
+        assert result.reason["finish_reason"] == "safety_filter"
+        assert result.retryable is False
+
+    def test_multi_query_unrecognized_finish_reason_returns_error(self) -> None:
+        """Unknown finish reasons in multi-query mode must also fail closed."""
+        from elspeth.plugins.transforms.llm.transform import LLMTransform
+
+        config = _make_config(
+            template="Evaluate: {{ row.text_content }}",
+            queries={
+                "q1": {"input_fields": {"text_content": "text"}},
+                "q2": {"input_fields": {"text_content": "text"}},
+            },
+        )
+        transform = LLMTransform(config)
+
+        call_count = [0]
+
+        def mock_execute_query(messages, *, model, temperature, max_tokens, state_id, token_id, response_format=None):
+            call_count[0] += 1
+            if call_count[0] == 2:
+                return LLMQueryResult(
+                    content="blocked by moderation",
+                    usage=TokenUsage.known(10, 15),
+                    model="gpt-4o",
+                    finish_reason=UnrecognizedFinishReason("moderation"),
+                )
+            return LLMQueryResult(
+                content='{"result": "ok"}',
+                usage=TokenUsage.known(10, 20),
+                model="gpt-4o",
+                finish_reason=FinishReason.STOP,
+            )
+
+        mock_provider = Mock()
+        mock_provider.execute_query.side_effect = mock_execute_query
+        transform._provider = mock_provider
+
+        result = transform._process_row(_make_row(), _make_ctx())
+        assert result.status == "error"
+        assert result.reason is not None
+        assert result.reason["reason"] == "unexpected_finish_reason"
+        assert result.reason["finish_reason"] == "moderation"
+        assert result.reason["query_name"] == "q2"
+        assert result.reason["query_index"] == 1
 
 
 # ---------------------------------------------------------------------------

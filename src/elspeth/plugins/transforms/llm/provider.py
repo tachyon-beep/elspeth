@@ -90,12 +90,11 @@ def parse_finish_reason(raw: str | None) -> ParsedFinishReason:
         return FinishReason(raw)
     except ValueError:
         logger.warning(
-            "Unknown LLM finish_reason — treating as normal completion",
+            "Unknown LLM finish_reason — will be rejected by transform (fail-closed)",
             finish_reason=raw,
             known_values=[e.value for e in FinishReason],
-            action="Unrecognized finish reasons are not treated as errors. "
-            "If this value indicates a problem (e.g. safety filter), "
-            "add it to FinishReason enum and handle in LLMTransform.",
+            action="Add to FinishReason enum if this is a known-good completion reason. "
+            "Unrecognized finish reasons are rejected as errors by LLMTransform.",
         )
         return UnrecognizedFinishReason(raw)
 
