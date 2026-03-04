@@ -168,7 +168,7 @@ def diagnose(db: LandscapeDB, recorder: LandscapeRecorder) -> DiagnosticReport:
 
         # Count QUARANTINED outcomes scoped to runs from the last 24 hours.
         # Without scoping, old quarantines accumulate and the count is
-        # permanently non-zero in databases with history (T5 bug fix).
+        # permanently non-zero in databases with history.
         recent_cutoff = datetime.now(UTC) - timedelta(hours=24)
         recent_run_ids = conn.execute(select(runs_table.c.run_id).where(runs_table.c.started_at >= recent_cutoff)).scalars().all()
 
@@ -382,8 +382,6 @@ def get_recent_activity(db: LandscapeDB, recorder: LandscapeRecorder, minutes: i
     Returns:
         Timeline of recent runs and their status
     """
-    from datetime import timedelta
-
     from sqlalchemy import func, select
 
     from elspeth.core.landscape.schema import (
@@ -413,13 +411,13 @@ def get_recent_activity(db: LandscapeDB, recorder: LandscapeRecorder, minutes: i
             # Collect run IDs for batch queries
             run_ids = [run.run_id for run in recent_runs]
 
-            # Batch query: Get row counts grouped by run_id (N+1 fix)
+            # Batch query: row counts grouped by run_id
             row_counts_result = conn.execute(
                 select(rows_table.c.run_id, func.count().label("cnt")).where(rows_table.c.run_id.in_(run_ids)).group_by(rows_table.c.run_id)
             ).fetchall()
             row_counts: dict[str, int] = {r.run_id: r.cnt for r in row_counts_result}
 
-            # Batch query: Get state counts grouped by run_id (N+1 fix)
+            # Batch query: state counts grouped by run_id
             state_counts_result = conn.execute(
                 select(node_states_table.c.run_id, func.count().label("cnt"))
                 .where(node_states_table.c.run_id.in_(run_ids))

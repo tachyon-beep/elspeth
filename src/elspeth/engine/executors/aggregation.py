@@ -131,6 +131,22 @@ class AggregationExecutor:
                 trigger=TriggerEvaluator(settings.trigger, clock=self._clock),
             )
 
+    def _get_node(self, node_id: NodeID, caller: str = "") -> _AggregationNodeState:
+        """Look up a configured aggregation node, crash on unknown.
+
+        This is the single validation point for all node access. Unknown
+        node_id is always a bug — either in the caller or in checkpoint
+        data (Tier 1 corruption).
+        """
+        try:
+            return self._nodes[node_id]
+        except KeyError as exc:
+            raise OrchestrationInvariantError(
+                f"{caller or 'AggregationExecutor'} called for node '{node_id}' "
+                f"which is not in aggregation_settings. "
+                f"Configured nodes: {list(self._nodes.keys())}"
+            ) from exc
+
     def buffer_row(
         self,
         node_id: NodeID,
@@ -150,17 +166,7 @@ class AggregationExecutor:
                 This prevents silent data loss where rows are buffered but no
                 trigger evaluator exists to determine when to flush.
         """
-        # Validate node is a configured aggregation (P2-2026-02-02: whitelist-reduction)
-        # Without this check, rows could be buffered without a trigger evaluator,
-        # meaning they'd sit in the buffer forever with no way to flush.
-        if node_id not in self._nodes:
-            raise OrchestrationInvariantError(
-                f"buffer_row called for node '{node_id}' which is not in aggregation_settings. "
-                f"Only configured aggregation nodes can buffer rows. "
-                f"Configured nodes: {list(self._nodes.keys())}"
-            )
-
-        node = self._nodes[node_id]
+        node = self._get_node(node_id, "buffer_row")
 
         # Create batch on first row if needed
         if node.batch_id is None:
@@ -204,14 +210,7 @@ class AggregationExecutor:
         Raises:
             OrchestrationInvariantError: If node_id is not a configured aggregation.
         """
-        # Validate node_id is a configured aggregation (P2-2026-02-02: whitelist-reduction)
-        # This distinguishes "valid node, no rows yet" from "invalid node".
-        if node_id not in self._nodes:
-            raise OrchestrationInvariantError(
-                f"get_buffered_rows called for node '{node_id}' which is not in aggregation_settings. "
-                f"Configured nodes: {list(self._nodes.keys())}"
-            )
-        return list(self._nodes[node_id].buffers)
+        return list(self._get_node(node_id, "get_buffered_rows").buffers)
 
     def get_buffered_tokens(self, node_id: NodeID) -> list[TokenInfo]:
         """Get currently buffered tokens (does not clear buffer).
@@ -225,13 +224,7 @@ class AggregationExecutor:
         Raises:
             OrchestrationInvariantError: If node_id is not a configured aggregation.
         """
-        # Validate node_id is a configured aggregation (P2-2026-02-02: whitelist-reduction)
-        if node_id not in self._nodes:
-            raise OrchestrationInvariantError(
-                f"get_buffered_tokens called for node '{node_id}' which is not in aggregation_settings. "
-                f"Configured nodes: {list(self._nodes.keys())}"
-            )
-        return list(self._nodes[node_id].tokens)
+        return list(self._get_node(node_id, "get_buffered_tokens").tokens)
 
     def _get_buffered_data(self, node_id: NodeID) -> tuple[list[dict[str, Any]], list[TokenInfo]]:
         """Internal: Get buffered rows and tokens without clearing.
@@ -249,13 +242,7 @@ class AggregationExecutor:
         Raises:
             OrchestrationInvariantError: If node_id is not a configured aggregation.
         """
-        # Validate node_id is a configured aggregation (P2-2026-02-02: whitelist-reduction)
-        if node_id not in self._nodes:
-            raise OrchestrationInvariantError(
-                f"_get_buffered_data called for node '{node_id}' which is not in aggregation_settings. "
-                f"Configured nodes: {list(self._nodes.keys())}"
-            )
-        node = self._nodes[node_id]
+        node = self._get_node(node_id, "_get_buffered_data")
         return list(node.buffers), list(node.tokens)
 
     def execute_flush(
@@ -289,8 +276,7 @@ class AggregationExecutor:
         Raises:
             Exception: Re-raised from transform.process() after recording failure
         """
-        # Get node state — must exist if we're flushing
-        node = self._nodes[node_id]
+        node = self._get_node(node_id, "execute_flush")
         batch_id = node.batch_id
         if batch_id is None:
             raise RuntimeError(f"No batch exists for node {node_id} - cannot flush")
@@ -581,12 +567,12 @@ class AggregationExecutor:
         """Reset batch tracking state for next batch.
 
         INTERNAL: Only called from execute_flush() which has already validated
-        that batch_id exists. Direct access ensures we detect state corruption.
+        that batch_id exists. Uses _get_node() for consistent validation.
 
         Args:
             node_id: Aggregation node ID
         """
-        node = self._nodes[node_id]
+        node = self._get_node(node_id, "_reset_batch_state")
         if node.batch_id is None:
             raise OrchestrationInvariantError(f"_reset_batch_state invariant violation: batch_id is None for {node_id}")
         node.batch_id = None
@@ -604,13 +590,7 @@ class AggregationExecutor:
         Raises:
             OrchestrationInvariantError: If node_id is not a configured aggregation.
         """
-        # Validate node_id is a configured aggregation (P2-2026-02-02: whitelist-reduction)
-        if node_id not in self._nodes:
-            raise OrchestrationInvariantError(
-                f"get_buffer_count called for node '{node_id}' which is not in aggregation_settings. "
-                f"Configured nodes: {list(self._nodes.keys())}"
-            )
-        return len(self._nodes[node_id].buffers)
+        return len(self._get_node(node_id, "get_buffer_count").buffers)
 
     def get_checkpoint_state(self) -> AggregationCheckpointState:
         """Return checkpoint state for persistence.
@@ -738,7 +718,7 @@ class AggregationExecutor:
 
         for node_id_str, node_checkpoint in state.nodes.items():
             node_id = NodeID(node_id_str)
-            node = self._nodes[node_id]  # Must exist — crash on configuration mismatch
+            node = self._get_node(node_id, "restore_from_checkpoint")
 
             # Restore contract from checkpoint (stored once per node)
             # Per CLAUDE.md Tier 1: contract MUST exist if tokens exist
@@ -797,21 +777,16 @@ class AggregationExecutor:
     def get_batch_id(self, node_id: NodeID) -> str | None:
         """Get current batch ID for an aggregation node.
 
-        Primarily for testing - production code accesses this via checkpoint state.
-
-        Note: Does not validate against aggregation_settings since this is a
-        testing/inspection method that needs to work with partial setups.
-
         Args:
             node_id: Aggregation node ID
 
         Returns:
             Batch ID if a batch is in progress, None otherwise
+
+        Raises:
+            OrchestrationInvariantError: If node_id is not a configured aggregation.
         """
-        node = self._nodes.get(node_id)
-        if node is None:
-            return None
-        return node.batch_id
+        return self._get_node(node_id, "get_batch_id").batch_id
 
     def should_flush(self, node_id: NodeID) -> bool:
         """Check if the aggregation should flush based on trigger config.
@@ -825,13 +800,7 @@ class AggregationExecutor:
         Raises:
             OrchestrationInvariantError: If node_id is not a configured aggregation.
         """
-        # Validate node_id is a configured aggregation (P2-2026-02-02: whitelist-reduction)
-        if node_id not in self._nodes:
-            raise OrchestrationInvariantError(
-                f"should_flush called for node '{node_id}' which is not in aggregation_settings. "
-                f"Configured nodes: {list(self._nodes.keys())}"
-            )
-        return self._nodes[node_id].trigger.should_trigger()
+        return self._get_node(node_id, "should_flush").trigger.should_trigger()
 
     def get_trigger_type(self, node_id: NodeID) -> "TriggerType | None":
         """Get the TriggerType for the trigger that fired.
@@ -845,13 +814,7 @@ class AggregationExecutor:
         Raises:
             OrchestrationInvariantError: If node_id is not a configured aggregation.
         """
-        # Validate node_id is a configured aggregation (P2-2026-02-02: whitelist-reduction)
-        if node_id not in self._nodes:
-            raise OrchestrationInvariantError(
-                f"get_trigger_type called for node '{node_id}' which is not in aggregation_settings. "
-                f"Configured nodes: {list(self._nodes.keys())}"
-            )
-        return self._nodes[node_id].trigger.get_trigger_type()
+        return self._get_node(node_id, "get_trigger_type").trigger.get_trigger_type()
 
     def check_flush_status(self, node_id: NodeID) -> tuple[bool, "TriggerType | None"]:
         """Check flush status and get trigger type in a single operation.
@@ -871,13 +834,7 @@ class AggregationExecutor:
         Raises:
             OrchestrationInvariantError: If node_id is not a configured aggregation.
         """
-        # Validate node_id is a configured aggregation (P2-2026-02-02: whitelist-reduction)
-        if node_id not in self._nodes:
-            raise OrchestrationInvariantError(
-                f"check_flush_status called for node '{node_id}' which is not in aggregation_settings. "
-                f"Configured nodes: {list(self._nodes.keys())}"
-            )
-        node = self._nodes[node_id]
+        node = self._get_node(node_id, "check_flush_status")
         should_flush = node.trigger.should_trigger()
         trigger_type = node.trigger.get_trigger_type() if should_flush else None
         return (should_flush, trigger_type)
@@ -891,11 +848,13 @@ class AggregationExecutor:
         Args:
             node_id: Aggregation node ID
             state: Typed aggregation checkpoint state
+
+        Raises:
+            OrchestrationInvariantError: If node_id is not a configured aggregation.
+                This is Tier 1 checkpoint data — unknown node_id indicates corruption
+                or configuration mismatch between the checkpoint and current pipeline.
         """
-        node = self._nodes.get(node_id)
-        if node is None:
-            slog.warning("restore_state_unknown_node", node_id=str(node_id))
-            return
+        node = self._get_node(node_id, "restore_state")
         node.restored_state = state
 
     def get_restored_state(self, node_id: NodeID) -> AggregationCheckpointState | None:
@@ -904,18 +863,16 @@ class AggregationExecutor:
         Used by aggregation plugins during recovery to restore their
         internal state from checkpoint.
 
-        Returns None for nodes without restored state or unconfigured nodes.
-
         Args:
             node_id: Aggregation node ID
 
         Returns:
             Typed checkpoint state, or None if no state was restored
+
+        Raises:
+            OrchestrationInvariantError: If node_id is not a configured aggregation.
         """
-        node = self._nodes.get(node_id)
-        if node is None:
-            return None
-        return node.restored_state
+        return self._get_node(node_id, "get_restored_state").restored_state
 
     def restore_batch(self, batch_id: str) -> None:
         """Restore a batch as the current in-progress batch.
@@ -934,7 +891,7 @@ class AggregationExecutor:
             raise ValueError(f"Batch not found: {batch_id}")
 
         node_id = NodeID(batch.aggregation_node_id)
-        node = self._nodes[node_id]
+        node = self._get_node(node_id, "restore_batch")
         node.batch_id = batch_id
 
         # Restore member count from database

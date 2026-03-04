@@ -42,17 +42,6 @@ __all__ = [
 
 logger = logging.getLogger(__name__)
 
-
-# ══════════════════════════════════════════════════════════════════════════════
-# MCP Argument Validation (Tier 3 boundary)
-#
-# The MCP SDK delivers tool arguments as dict[str, Any]. This is a Tier 3
-# (external) trust boundary — the MCP client can send any JSON. We validate
-# types immediately rather than letting bad types travel through to SQLAlchemy
-# or analyzer methods.
-# ══════════════════════════════════════════════════════════════════════════════
-
-
 @dataclass(frozen=True, slots=True)
 class _ArgSpec:
     """Declarative schema for one MCP tool's arguments."""
@@ -62,15 +51,6 @@ class _ArgSpec:
     optional_str_defaults: tuple[tuple[str, str], ...] = ()  # (name, default)
     optional_int: tuple[tuple[str, int], ...] = ()  # (name, default)
     optional_dict: tuple[str, ...] = ()  # defaults to None
-
-
-# ══════════════════════════════════════════════════════════════════════════════
-# Unified Tool Registry
-#
-# Each tool is defined exactly ONCE in _TOOLS. Adding a new tool requires
-# a single dict entry — no changes to list_tools() or call_tool() dispatch.
-# ══════════════════════════════════════════════════════════════════════════════
-
 
 @dataclass(frozen=True, slots=True)
 class _ToolDef:
@@ -88,7 +68,6 @@ class _ToolDef:
 
 
 _TOOLS: dict[str, _ToolDef] = {
-    # --- Core Query Tools ---
     "list_runs": _ToolDef(
         description="List pipeline runs with optional status filter",
         args=_ArgSpec(
@@ -292,7 +271,6 @@ _TOOLS: dict[str, _ToolDef] = {
             "params": {"type": "object", "description": "Optional query parameters"},
         },
     ),
-    # --- Precomputed Analysis Tools ---
     "get_dag_structure": _ToolDef(
         description="Get the DAG structure for a run: nodes, edges, and mermaid diagram for visualization",
         args=_ArgSpec(required_str=("run_id",)),
@@ -339,7 +317,6 @@ _TOOLS: dict[str, _ToolDef] = {
             "run_id": {"type": "string", "description": "Run ID to analyze"},
         },
     ),
-    # --- Emergency Diagnostic Tools ---
     "diagnose": _ToolDef(
         description="\U0001f6a8 EMERGENCY: What's broken right now? Scans for failed runs, stuck runs, high error rates",
         args=_ArgSpec(),
@@ -373,7 +350,6 @@ _TOOLS: dict[str, _ToolDef] = {
             "minutes": {"type": "integer", "description": "Look back this many minutes", "default": 60},
         },
     ),
-    # --- Schema Contract Tools ---
     "get_run_contract": _ToolDef(
         description="Get schema contract for a run: mode, field mappings (original -> normalized), and inferred types",
         args=_ArgSpec(required_str=("run_id",)),

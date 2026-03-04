@@ -1904,6 +1904,19 @@ class TestAggregationExecutor:
         with pytest.raises(OrchestrationInvariantError):
             executor.check_flush_status(NodeID("unknown"))
 
+    # --- _get_node (unified validation) ---
+
+    def test_get_node_unknown_raises_orchestration_invariant(self) -> None:
+        """Unknown node_id always raises OrchestrationInvariantError with diagnostics."""
+        executor, _, _ = self._make_agg_executor()
+        unknown = NodeID("not_configured")
+        with pytest.raises(OrchestrationInvariantError, match="not_configured"):
+            executor.get_batch_id(unknown)
+        with pytest.raises(OrchestrationInvariantError, match="not_configured"):
+            executor.get_restored_state(unknown)
+        with pytest.raises(OrchestrationInvariantError, match="not_configured"):
+            executor.restore_state(unknown, AggregationCheckpointState(version="3.0", nodes={}))
+
     # --- restore_state / get_restored_state ---
 
     def test_restore_state_and_get(self) -> None:

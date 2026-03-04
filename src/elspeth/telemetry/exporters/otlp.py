@@ -61,6 +61,43 @@ def _generate_span_id() -> int:
     return span_id if span_id != 0 else 1
 
 
+def _serialize_event_attributes(event: TelemetryEvent) -> dict[str, Any]:
+    """Serialize event fields as span attributes.
+
+    Shared by OTLP and Azure Monitor exporters. Handles type conversions
+    for OpenTelemetry compatibility:
+    - datetime -> ISO 8601 string
+    - Enum -> value
+    - dict -> JSON string (OTLP doesn't support nested attributes)
+    - tuple -> list
+
+    Args:
+        event: The telemetry event
+
+    Returns:
+        Dictionary of attribute key-value pairs
+    """
+    data = event.to_dict()
+    data["event_type"] = type(event).__name__
+
+    result: dict[str, Any] = {}
+    for key, value in data.items():
+        if value is None:
+            continue
+        elif isinstance(value, datetime):
+            result[key] = value.isoformat()
+        elif isinstance(value, Enum):
+            result[key] = value.value
+        elif isinstance(value, dict):
+            result[key] = json.dumps(value)
+        elif isinstance(value, tuple):
+            result[key] = list(value)
+        else:
+            result[key] = value
+
+    return result
+
+
 class OTLPExporter:
     """Export telemetry events via OpenTelemetry Protocol.
 
@@ -314,41 +351,10 @@ class OTLPExporter:
 
         return span
 
-    def _serialize_event_attributes(self, event: TelemetryEvent) -> dict[str, Any]:
-        """Serialize event fields as span attributes.
-
-        Handles type conversions for OpenTelemetry compatibility:
-        - datetime -> ISO 8601 string
-        - Enum -> value
-        - dict -> JSON string (OTLP doesn't support nested attributes)
-        - tuple -> list
-
-        Args:
-            event: The telemetry event
-
-        Returns:
-            Dictionary of attribute key-value pairs
-        """
-        data = event.to_dict()
-        data["event_type"] = type(event).__name__
-
-        result: dict[str, Any] = {}
-        for key, value in data.items():
-            if value is None:
-                continue  # Skip None values
-            elif isinstance(value, datetime):
-                result[key] = value.isoformat()
-            elif isinstance(value, Enum):
-                result[key] = value.value
-            elif isinstance(value, dict):
-                # OTLP doesn't support nested attributes, serialize as JSON
-                result[key] = json.dumps(value)
-            elif isinstance(value, tuple):
-                result[key] = list(value)
-            else:
-                result[key] = value
-
-        return result
+    @staticmethod
+    def _serialize_event_attributes(event: TelemetryEvent) -> dict[str, Any]:
+        """Serialize event fields as span attributes."""
+        return _serialize_event_attributes(event)
 
     def flush(self) -> None:
         """Flush any buffered events to the OTLP endpoint.
