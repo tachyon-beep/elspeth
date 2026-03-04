@@ -119,7 +119,9 @@ class TokenUsage:
         raw_prompt = data.get("prompt_tokens")
         raw_completion = data.get("completion_tokens")
 
-        prompt = raw_prompt if isinstance(raw_prompt, int) else None
-        completion = raw_completion if isinstance(raw_completion, int) else None
+        # bool is a subclass of int in Python, so isinstance(True, int) is True.
+        # But True/False are not valid token counts — reject them as non-int.
+        prompt = raw_prompt if isinstance(raw_prompt, int) and not isinstance(raw_prompt, bool) else None
+        completion = raw_completion if isinstance(raw_completion, int) and not isinstance(raw_completion, bool) else None
 
         return cls(prompt_tokens=prompt, completion_tokens=completion)

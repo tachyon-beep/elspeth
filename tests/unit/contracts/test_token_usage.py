@@ -140,11 +140,16 @@ class TestTokenUsageFromDict:
         assert usage == TokenUsage.known(10, 20)
 
     def test_from_dict_bool_coerced_to_none(self) -> None:
-        """bool is a subclass of int in Python, but we accept it since isinstance(True, int) is True."""
+        """bool is subclass of int in Python, but True/False are not valid token counts."""
         usage = TokenUsage.from_dict({"prompt_tokens": True, "completion_tokens": False})
-        # bool IS int in Python, so this actually passes isinstance check
-        assert usage.prompt_tokens == 1  # True == 1
-        assert usage.completion_tokens == 0  # False == 0
+        assert usage.prompt_tokens is None
+        assert usage.completion_tokens is None
+
+    def test_from_dict_bool_prompt_with_valid_completion(self) -> None:
+        """Bool in one field shouldn't affect valid int in the other."""
+        usage = TokenUsage.from_dict({"prompt_tokens": True, "completion_tokens": 20})
+        assert usage.prompt_tokens is None
+        assert usage.completion_tokens == 20
 
 
 class TestTokenUsageImmutability:
