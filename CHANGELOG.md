@@ -4,7 +4,17 @@ All notable changes to ELSPETH are documented here.
 
 ---
 
-## [Unreleased] (RC-3.3 — Architectural Remediation)
+## [Unreleased] (RC-4.0 — Semi-Autonomous Pipeline Platform)
+
+All work on `RC4-user-interface` now rolls into the 4.0 release line. RC-3.3 has already shipped and is recorded below.
+
+### Fixed
+
+- **SQLite read-only audit inspection** — `LandscapeDB.from_url(..., create_tables=False)` no longer stamps `PRAGMA user_version`, preserving non-mutating forensic access to compatible legacy SQLite audit databases.
+
+---
+
+## [0.3.3] (RC-3.3 — Architectural Remediation)
 
 4-phase remediation sprint driven by full architecture analysis. Focus: audit integrity hardening, layer enforcement, and elimination of defensive-pattern violations.
 
