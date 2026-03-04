@@ -78,7 +78,7 @@ class ChaosLLMAnalyzer:
 
         cursor = conn.execute("SELECT COUNT(*) FROM requests WHERE outcome = 'success'")
         success_count = cursor.fetchone()[0]
-        success_rate = (success_count / total) * 100 if total > 0 else 0.0
+        success_rate = (success_count / total) * 100
 
         # Top 3 error types
         cursor = conn.execute(
@@ -99,7 +99,7 @@ class ChaosLLMAnalyzer:
         # AIMD assessment based on 429 rate and patterns
         cursor = conn.execute("SELECT COUNT(*) FROM requests WHERE status_code = 429")
         rate_limit_count = cursor.fetchone()[0]
-        rate_limit_pct = (rate_limit_count / total) * 100 if total > 0 else 0.0
+        rate_limit_pct = (rate_limit_count / total) * 100
 
         if rate_limit_pct > 30:
             aimd_status = "STRESSED: High 429 rate indicates AIMD under pressure"

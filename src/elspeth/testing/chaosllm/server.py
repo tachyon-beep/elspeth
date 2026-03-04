@@ -530,8 +530,7 @@ class ChaosLLMServer:
                 )
             raise ConnectionResetError("Request timed out")
 
-        elif error_type == "connection_reset":
-            # Record the attempt
+        if error_type == "connection_reset":
             elapsed_ms = (time.monotonic() - start_time) * 1000
             self._record_request(
                 request_id=request_id,
@@ -546,14 +545,8 @@ class ChaosLLMServer:
                 latency_ms=elapsed_ms,
                 message_count=message_count,
             )
-            # Close the connection abruptly by raising an exception
-            # In test client, this manifests as a disconnection
             raise ConnectionResetError("Connection reset by server")
 
-        elif error_type == "slow_response":
-            raise ValueError("slow_response should be handled by _handle_slow_response")
-
-        # Should not reach here
         raise ValueError(f"Unknown connection error type: {error_type}")
 
     async def _handle_http_error(
