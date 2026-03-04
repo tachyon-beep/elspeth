@@ -25,6 +25,67 @@ def _make_instance(url: str) -> LandscapeDB:
     return instance
 
 
+class TestSyncSchemaEpochDirectionalGuard:
+    """Coverage for _sync_sqlite_schema_epoch directional guard."""
+
+    def test_sync_rejects_future_epoch(self, tmp_path: Path) -> None:
+        """_sync_sqlite_schema_epoch must refuse to downgrade a future epoch.
+
+        Regression: The method used != comparison, so a database from a
+        newer ELSPETH version (epoch 2 when code expects 1) would be
+        silently overwritten — destroying the newer epoch stamp.
+        """
+        db_path = tmp_path / "future_epoch.db"
+        engine = create_engine(f"sqlite:///{db_path}")
+        metadata.create_all(engine)
+        with engine.begin() as conn:
+            conn.exec_driver_sql(f"PRAGMA user_version = {SQLITE_SCHEMA_EPOCH + 1}")
+        engine.dispose()
+
+        instance = _make_instance(f"sqlite:///{db_path}")
+
+        with pytest.raises(SchemaCompatibilityError, match="newer.*epoch"):
+            instance._sync_sqlite_schema_epoch()
+
+        # Epoch must NOT have been downgraded
+        with instance.engine.connect() as conn:
+            epoch = conn.exec_driver_sql("PRAGMA user_version").scalar_one()
+        assert epoch == SQLITE_SCHEMA_EPOCH + 1
+        instance.close()
+
+    def test_sync_upgrades_epoch_zero(self, tmp_path: Path) -> None:
+        """_sync_sqlite_schema_epoch upgrades unstamped databases (epoch 0)."""
+        db_path = tmp_path / "unstamped.db"
+        engine = create_engine(f"sqlite:///{db_path}")
+        metadata.create_all(engine)
+        engine.dispose()
+
+        instance = _make_instance(f"sqlite:///{db_path}")
+        instance._sync_sqlite_schema_epoch()
+
+        with instance.engine.connect() as conn:
+            epoch = conn.exec_driver_sql("PRAGMA user_version").scalar_one()
+        assert epoch == SQLITE_SCHEMA_EPOCH
+        instance.close()
+
+    def test_sync_noops_on_current_epoch(self, tmp_path: Path) -> None:
+        """_sync_sqlite_schema_epoch is a no-op when epoch already matches."""
+        db_path = tmp_path / "current_epoch.db"
+        engine = create_engine(f"sqlite:///{db_path}")
+        metadata.create_all(engine)
+        with engine.begin() as conn:
+            conn.exec_driver_sql(f"PRAGMA user_version = {SQLITE_SCHEMA_EPOCH}")
+        engine.dispose()
+
+        instance = _make_instance(f"sqlite:///{db_path}")
+        instance._sync_sqlite_schema_epoch()  # Should not raise
+
+        with instance.engine.connect() as conn:
+            epoch = conn.exec_driver_sql("PRAGMA user_version").scalar_one()
+        assert epoch == SQLITE_SCHEMA_EPOCH
+        instance.close()
+
+
 class TestSchemaCompatibilityGuards:
     """Coverage for fail-fast schema compatibility checks."""
 

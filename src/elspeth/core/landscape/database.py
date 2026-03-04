@@ -286,12 +286,26 @@ class LandscapeDB:
         current stamp, which preserves a future migration path without requiring
         a full migration framework today. Call this only from schema-managing
         paths; read-only/inspection opens must not mutate the database.
+
+        Raises:
+            SchemaCompatibilityError: If the database has a newer epoch than
+                this code version expects (prevents silent downgrades).
         """
         if not self.connection_string.startswith("sqlite"):
             return
 
         current_epoch = self._get_sqlite_schema_epoch()
-        if current_epoch != SQLITE_SCHEMA_EPOCH:
+        if current_epoch > SQLITE_SCHEMA_EPOCH:
+            raise SchemaCompatibilityError(
+                "Cannot sync schema epoch: database has a newer epoch than this "
+                "ELSPETH version supports.\n\n"
+                f"Database epoch: {current_epoch}\n"
+                f"Current epoch: {SQLITE_SCHEMA_EPOCH}\n\n"
+                "This database was created or stamped by a newer ELSPETH version. "
+                "Upgrade ELSPETH to open this database.\n\n"
+                f"Database: {self.connection_string}"
+            )
+        if current_epoch < SQLITE_SCHEMA_EPOCH:
             self._set_sqlite_schema_epoch(SQLITE_SCHEMA_EPOCH)
 
     def _validate_schema(self) -> None:
