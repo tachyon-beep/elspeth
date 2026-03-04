@@ -133,26 +133,35 @@ class AggregationNodeCheckpoint:
             data: Node-level dict from checkpoint.
 
         Raises:
-            ValueError: If structure is invalid.
+            ValueError: If required keys are missing or structure is invalid.
         """
-        if "tokens" not in data:
-            raise ValueError(f"Invalid checkpoint format for node {node_id}: missing 'tokens' key. Found keys: {list(data.keys())}.")
+        required_fields = {
+            "tokens",
+            "batch_id",
+            "elapsed_age_seconds",
+            "count_fire_offset",
+            "condition_fire_offset",
+            "contract",
+        }
+        missing = required_fields - set(data.keys())
+        if missing:
+            raise ValueError(
+                f"Checkpoint node '{node_id}' missing required fields: {missing}. "
+                f"Found: {set(data.keys())}"
+            )
+
         tokens_data = data["tokens"]
         if not isinstance(tokens_data, list):
-            raise ValueError(f"Invalid checkpoint format for node {node_id}: 'tokens' must be a list, got {type(tokens_data).__name__}")
+            raise ValueError(
+                f"Invalid checkpoint format for node {node_id}: "
+                f"'tokens' must be a list, got {type(tokens_data).__name__}"
+            )
 
-        if "batch_id" not in data:
-            raise ValueError(f"Invalid checkpoint format for node {node_id}: missing 'batch_id' key. Found keys: {list(data.keys())}.")
         batch_id = data["batch_id"]
         if batch_id is None:
             raise ValueError(
-                f"Invalid checkpoint format for node {node_id}: 'batch_id' is None. Checkpoint entries with tokens must include a batch_id."
-            )
-
-        if "contract" not in data:
-            raise ValueError(
-                f"Invalid checkpoint format for node {node_id}: missing 'contract' key. "
-                "Checkpoint format requires contract for PipelineRow restoration."
+                f"Invalid checkpoint format for node {node_id}: 'batch_id' is None. "
+                "Checkpoint entries with tokens must include a batch_id."
             )
 
         tokens = tuple(AggregationTokenCheckpoint.from_dict(t) for t in tokens_data)
@@ -161,8 +170,8 @@ class AggregationNodeCheckpoint:
             tokens=tokens,
             batch_id=batch_id,
             elapsed_age_seconds=data["elapsed_age_seconds"],
-            count_fire_offset=data.get("count_fire_offset"),
-            condition_fire_offset=data.get("condition_fire_offset"),
+            count_fire_offset=data["count_fire_offset"],
+            condition_fire_offset=data["condition_fire_offset"],
             contract=data["contract"],
         )
 

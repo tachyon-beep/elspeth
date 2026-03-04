@@ -157,3 +157,84 @@ def test_resume_point_rejects_non_dto_coalesce_state() -> None:
             sequence_number=1,
             coalesce_state={"not": "a DTO"},  # type: ignore[arg-type]
         )
+
+
+# === AggregationNodeCheckpoint.from_dict corruption tests ===
+
+
+def _valid_node_dict() -> dict:
+    """Complete valid node checkpoint dict for mutation in corruption tests."""
+    return {
+        "tokens": [
+            {
+                "token_id": "tok-001",
+                "row_id": "row-001",
+                "branch_name": None,
+                "fork_group_id": None,
+                "join_group_id": None,
+                "expand_group_id": None,
+                "row_data": {"x": 1},
+                "contract_version": "abc123",
+            }
+        ],
+        "batch_id": "batch-001",
+        "elapsed_age_seconds": 0.0,
+        "count_fire_offset": None,
+        "condition_fire_offset": None,
+        "contract": {"mode": "FLEXIBLE"},
+    }
+
+
+def test_node_from_dict_round_trip() -> None:
+    """Valid dict round-trips through from_dict → to_dict."""
+    data = _valid_node_dict()
+    node = AggregationNodeCheckpoint.from_dict("node-001", data)
+    assert node.batch_id == "batch-001"
+    assert node.count_fire_offset is None
+    assert node.condition_fire_offset is None
+    rt = node.to_dict()
+    assert rt["count_fire_offset"] is None
+    assert rt["condition_fire_offset"] is None
+
+
+def test_node_from_dict_missing_count_fire_offset_raises() -> None:
+    """Missing count_fire_offset is corruption — must crash, not silently return None."""
+    data = _valid_node_dict()
+    del data["count_fire_offset"]
+
+    with pytest.raises(ValueError, match="count_fire_offset"):
+        AggregationNodeCheckpoint.from_dict("node-001", data)
+
+
+def test_node_from_dict_missing_condition_fire_offset_raises() -> None:
+    """Missing condition_fire_offset is corruption — must crash, not silently return None."""
+    data = _valid_node_dict()
+    del data["condition_fire_offset"]
+
+    with pytest.raises(ValueError, match="condition_fire_offset"):
+        AggregationNodeCheckpoint.from_dict("node-001", data)
+
+
+def test_node_from_dict_missing_elapsed_age_raises_with_context() -> None:
+    """Missing elapsed_age_seconds should raise ValueError with node_id, not bare KeyError."""
+    data = _valid_node_dict()
+    del data["elapsed_age_seconds"]
+
+    with pytest.raises(ValueError, match="node-001"):
+        AggregationNodeCheckpoint.from_dict("node-001", data)
+
+
+def test_node_from_dict_multiple_missing_fields_reports_all() -> None:
+    """All missing fields reported in one error, not just the first one found."""
+    data = _valid_node_dict()
+    del data["elapsed_age_seconds"]
+    del data["count_fire_offset"]
+    del data["condition_fire_offset"]
+
+    with pytest.raises(ValueError, match="missing required fields") as exc_info:
+        AggregationNodeCheckpoint.from_dict("node-001", data)
+
+    msg = str(exc_info.value)
+    assert "elapsed_age_seconds" in msg
+    assert "count_fire_offset" in msg
+    assert "condition_fire_offset" in msg
