@@ -1008,7 +1008,7 @@ class RowProcessor:
         if on_error is None:
             raise OrchestrationInvariantError(
                 f"Transform '{transform.name}' has on_error=None — this should be impossible since TransformSettings requires on_error"
-            ) from None
+            )
 
         error_details: TransformErrorReason = {"reason": reason, "error": str(exc)}
         ctx.record_transform_error(
@@ -1031,7 +1031,7 @@ class RowProcessor:
             if ctx.state_id is None:
                 raise OrchestrationInvariantError(
                     f"ctx.state_id must be set by TransformExecutor before exception propagated (transform={transform.node_id})"
-                ) from None
+                )
             self._recorder.record_routing_event(
                 state_id=ctx.state_id,
                 edge_id=error_edge_id,

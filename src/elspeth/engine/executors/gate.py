@@ -109,8 +109,8 @@ class GateExecutor:
         """Resolve route label to concrete destination or fail closed."""
         try:
             return self._route_resolution_map[(NodeID(node_id), route_label)]
-        except KeyError:
-            raise MissingEdgeError(node_id=NodeID(node_id), label=route_label) from None
+        except KeyError as exc:
+            raise MissingEdgeError(node_id=NodeID(node_id), label=route_label) from exc
 
     def _dispatch_resolved_destination(
         self,

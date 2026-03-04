@@ -760,8 +760,8 @@ def build_execution_graph(
             cycle = nx.find_cycle(graph._graph)
             cycle_str = " -> ".join(f"{edge[0]}" for edge in cycle)
             raise GraphValidationError(f"Pipeline contains a cycle: {cycle_str}")
-        except nx.NetworkXNoCycle:
-            raise GraphValidationError("Pipeline contains a cycle") from None
+        except nx.NetworkXNoCycle as exc:
+            raise GraphValidationError("Pipeline contains a cycle") from exc
     pipeline_nodes = [node_id for node_id in topo_order if node_id in processing_node_ids]
 
     branch_info: dict[BranchName, BranchInfo] = {}

@@ -77,11 +77,11 @@ def compute_grade(db: "LandscapeDB", run_id: str) -> ReproducibilityGrade:
             raise ValueError(f"NULL determinism value in nodes table for run {run_id} - audit data corruption")
         try:
             Determinism(det_value)
-        except ValueError:
+        except ValueError as exc:
             raise ValueError(
                 f"Invalid determinism value '{det_value}' in nodes table for run {run_id} - "
                 f"expected one of {[d.value for d in Determinism]}"
-            ) from None
+            ) from exc
 
     # Determinism values that require replay (cannot reproduce from inputs alone)
     # IO_READ/IO_WRITE are external/side-effectful - require captured data for replay
@@ -131,11 +131,11 @@ def update_grade_after_purge(db: "LandscapeDB", run_id: str) -> None:
 
         try:
             ReproducibilityGrade(current_grade)
-        except ValueError:
+        except ValueError as exc:
             raise ValueError(
                 f"Invalid reproducibility_grade '{current_grade}' for run {run_id} - "
                 f"expected one of {[g.value for g in ReproducibilityGrade]}"
-            ) from None
+            ) from exc
 
         # Atomic conditional update — no read-modify-write race.
         # The WHERE clause acts as a compare-and-swap: only degrades if still REPLAY_REPRODUCIBLE.

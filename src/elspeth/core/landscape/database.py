@@ -174,12 +174,12 @@ class LandscapeDB:
         """
         try:
             import sqlcipher3
-        except ImportError:
+        except ImportError as exc:
             raise ImportError(
                 "sqlcipher3 is required for encrypted audit databases. "
                 "Install it with: uv pip install 'elspeth[security]'\n"
                 "Note: requires libsqlcipher-dev system package."
-            ) from None
+            ) from exc
 
         parsed = make_url(url)
 

@@ -55,9 +55,9 @@ def list_runs(db: LandscapeDB, recorder: LandscapeRecorder, limit: int = 50, sta
             # Validate status
             try:
                 RunStatus(status)
-            except ValueError:
+            except ValueError as exc:
                 valid = [s.value for s in RunStatus]
-                raise ValueError(f"Invalid status '{status}'. Valid: {valid}") from None
+                raise ValueError(f"Invalid status '{status}'. Valid: {valid}") from exc
             query = query.where(runs_table.c.status == status)
 
         rows = conn.execute(query).fetchall()
@@ -478,9 +478,9 @@ def get_node_states(
         if status is not None:
             try:
                 NodeStateStatus(status)
-            except ValueError:
+            except ValueError as exc:
                 valid = [s.value for s in NodeStateStatus]
-                raise ValueError(f"Invalid status '{status}'. Valid: {valid}") from None
+                raise ValueError(f"Invalid status '{status}'. Valid: {valid}") from exc
             query = query.where(node_states_table.c.status == status)
 
         query = query.order_by(

@@ -248,11 +248,11 @@ def create_langfuse_tracer(
             tracing_enabled=tracing_config.tracing_enabled,
         )
         return ActiveLangfuseTracer(transform_name=transform_name, client=client)
-    except ImportError:
+    except ImportError as exc:
         # User explicitly configured Langfuse tracing but the package is missing.
         # This is a startup error, not a silent degradation — the user has a
         # reasonable expectation that configured tracing is active.
         raise RuntimeError(
             "Langfuse tracing is configured but the 'langfuse' package is not installed. "
             "Install with: uv pip install 'elspeth[tracing-langfuse]'"
-        ) from None
+        ) from exc

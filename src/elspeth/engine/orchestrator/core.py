@@ -1740,14 +1740,14 @@ class Orchestrator:
         quarantine_edge_key = (source_id, "__quarantine__")
         try:
             quarantine_edge_id = edge_map[quarantine_edge_key]
-        except KeyError:
+        except KeyError as exc:
             raise OrchestrationInvariantError(
                 f"Quarantine row reached orchestrator but no __quarantine__ "
                 f"DIVERT edge exists in DAG for source '{source_id}'. "
                 f"This is a DAG construction bug — "
                 f"on_validation_failure should have created a DIVERT edge "
                 f"in from_plugin_instances()."
-            ) from None
+            ) from exc
         recorder.record_routing_event(
             state_id=source_state.state_id,
             edge_id=quarantine_edge_id,

@@ -76,8 +76,8 @@ def _validate_int_field(field_name: str, value: Any) -> int:
     if isinstance(value, str):
         try:
             return int(value)
-        except ValueError:
-            raise ValueError(f"Invalid retry policy: {field_name} must be numeric, got {value!r}") from None
+        except ValueError as exc:
+            raise ValueError(f"Invalid retry policy: {field_name} must be numeric, got {value!r}") from exc
 
     # Non-numeric type (list, dict, bool, etc.)
     type_name = type(value).__name__
@@ -115,8 +115,8 @@ def _validate_float_field(field_name: str, value: Any) -> float:
     if isinstance(value, str):
         try:
             result = float(value)
-        except ValueError:
-            raise ValueError(f"Invalid retry policy: {field_name} must be numeric, got {value!r}") from None
+        except ValueError as exc:
+            raise ValueError(f"Invalid retry policy: {field_name} must be numeric, got {value!r}") from exc
         if not math.isfinite(result):
             raise ValueError(f"Invalid retry policy: {field_name} must be finite, got {value!r}")
         return result

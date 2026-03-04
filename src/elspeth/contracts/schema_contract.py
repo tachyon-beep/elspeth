@@ -411,8 +411,8 @@ class SchemaContract:
         # to_checkpoint_format() ALWAYS writes version_hash, so missing = corruption
         try:
             expected_hash = data["version_hash"]
-        except KeyError:
-            raise KeyError(f"Corrupt SchemaContract checkpoint: missing 'version_hash'. Top-level keys: {sorted(data.keys())}") from None
+        except KeyError as exc:
+            raise KeyError(f"Corrupt SchemaContract checkpoint: missing 'version_hash'. Top-level keys: {sorted(data.keys())}") from exc
         actual_hash = contract.version_hash()
         if actual_hash != expected_hash:
             raise ValueError(
@@ -748,21 +748,21 @@ class PipelineRow:
         """
         try:
             version = checkpoint_data["contract_version"]
-        except KeyError:
+        except KeyError as exc:
             raise KeyError(
                 f"Corrupt PipelineRow checkpoint: missing 'contract_version'. Available keys: {sorted(checkpoint_data.keys())}"
-            ) from None
+            ) from exc
 
         try:
             contract = contract_registry[version]
-        except KeyError:
+        except KeyError as exc:
             raise KeyError(
                 f"Contract version '{version}' not in registry. Available versions: {sorted(contract_registry.keys())}"
-            ) from None
+            ) from exc
 
         try:
             data = checkpoint_data["data"]
-        except KeyError:
-            raise KeyError(f"Corrupt PipelineRow checkpoint: missing 'data'. Available keys: {sorted(checkpoint_data.keys())}") from None
+        except KeyError as exc:
+            raise KeyError(f"Corrupt PipelineRow checkpoint: missing 'data'. Available keys: {sorted(checkpoint_data.keys())}") from exc
 
         return cls(data=data, contract=contract)

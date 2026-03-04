@@ -178,8 +178,8 @@ class ExecutionGraph:
                 # MultiDiGraph returns (u, v, key) tuples; extract just u for display
                 cycle_str = " -> ".join(f"{edge[0]}" for edge in cycle)
                 raise GraphValidationError(f"Graph contains a cycle: {cycle_str}")
-            except nx.NetworkXNoCycle:
-                raise GraphValidationError("Graph contains a cycle") from None
+            except nx.NetworkXNoCycle as exc:
+                raise GraphValidationError("Graph contains a cycle") from exc
 
         # Check for exactly one source
         # All nodes have "info" - added via add_node(), direct access is safe

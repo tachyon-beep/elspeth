@@ -68,8 +68,8 @@ def export_landscape(
     if export_config.sign:
         try:
             key_str = os.environ["ELSPETH_SIGNING_KEY"]
-        except KeyError:
-            raise ValueError("ELSPETH_SIGNING_KEY environment variable required for signed export") from None
+        except KeyError as exc:
+            raise ValueError("ELSPETH_SIGNING_KEY environment variable required for signed export") from exc
         signing_key = key_str.encode("utf-8")
 
     # Create exporter

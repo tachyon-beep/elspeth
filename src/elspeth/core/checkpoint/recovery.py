@@ -250,8 +250,8 @@ class RecoveryManager:
             try:
                 payload_bytes = payload_store.retrieve(source_data_ref)
                 degraded_data = json.loads(payload_bytes.decode("utf-8"))
-            except KeyError:
-                raise ValueError(f"Row {row_id} payload has been purged - cannot resume") from None
+            except KeyError as exc:
+                raise ValueError(f"Row {row_id} payload has been purged - cannot resume") from exc
 
             # TYPE FIDELITY RESTORATION:
             # Re-validate through source schema to restore types.

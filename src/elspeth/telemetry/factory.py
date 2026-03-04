@@ -213,12 +213,12 @@ def create_telemetry_manager(
         # Look up exporter class - raises TelemetryExporterError if unknown
         try:
             exporter_class = exporter_registry[exporter_config.name]
-        except KeyError:
+        except KeyError as exc:
             available = sorted(exporter_registry.keys())
             raise TelemetryExporterError(
                 exporter_name=exporter_config.name,
                 message=f"Unknown exporter. Available exporters: {available}",
-            ) from None
+            ) from exc
 
         exporter = exporter_class()
         exporter.configure(exporter_config.options)

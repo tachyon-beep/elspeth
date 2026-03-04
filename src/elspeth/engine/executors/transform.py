@@ -473,12 +473,12 @@ class TransformExecutor:
                 if on_error != "discard":
                     try:
                         error_edge_id = self._error_edge_ids[NodeID(transform.node_id)]
-                    except KeyError:
+                    except KeyError as exc:
                         raise OrchestrationInvariantError(
                             f"Transform '{transform.node_id}' has on_error={on_error!r} but no "
                             f"DIVERT edge registered. DAG construction should have created an "
                             f"__error_{{name}}__ edge in from_plugin_instances()."
-                        ) from None
+                        ) from exc
                     self._recorder.record_routing_event(
                         state_id=guard.state_id,
                         edge_id=error_edge_id,

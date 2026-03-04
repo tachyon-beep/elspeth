@@ -1818,10 +1818,10 @@ def _resolve_template_path(file_ref: str, settings_path: Path, label: str) -> Pa
     # Containment check: resolved path must be under the config directory
     try:
         file_path.relative_to(config_root)
-    except ValueError:
+    except ValueError as exc:
         raise TemplateFileError(
             f"{label} path traversal blocked: {file_ref!r} resolves to {file_path} which is outside config directory {config_root}"
-        ) from None
+        ) from exc
 
     if not file_path.exists():
         raise TemplateFileError(f"{label} not found: {file_path}")
