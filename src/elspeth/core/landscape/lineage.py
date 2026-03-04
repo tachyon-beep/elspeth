@@ -17,6 +17,7 @@ from elspeth.contracts import (
     TransformErrorRecord,
     ValidationErrorRecord,
 )
+from elspeth.contracts.errors import AuditIntegrityError
 
 if TYPE_CHECKING:
     from elspeth.core.landscape.recorder import LandscapeRecorder
@@ -60,7 +61,7 @@ class LineageResult:
 
     def __post_init__(self) -> None:
         if self.token.row_id != self.source_row.row_id:
-            raise ValueError(
+            raise AuditIntegrityError(
                 f"Token row_id mismatch: token '{self.token.token_id}' has row_id "
                 f"'{self.token.row_id}' but source_row has row_id '{self.source_row.row_id}'. "
                 f"This indicates an audit integrity violation."
@@ -96,6 +97,10 @@ def explain(
     """
     if token_id is None and row_id is None:
         raise ValueError("Must provide either token_id or row_id")
+
+    # Track whether we resolved token_id ourselves from Tier 1 data (token_outcomes).
+    # If so, the token MUST exist — a missing token is database corruption, not "not found".
+    caller_provided_token_id = token_id is not None
 
     # Resolve token_id from row_id if needed
     if token_id is None and row_id is not None:
@@ -149,12 +154,22 @@ def explain(
     # Get the token
     token = recorder.get_token(token_id)
     if token is None:
-        return None
+        if not caller_provided_token_id:
+            # Token was resolved from our own token_outcomes table — it MUST exist
+            raise AuditIntegrityError(
+                f"Token '{token_id}' resolved from token_outcomes for row '{row_id}' "
+                f"but does not exist in tokens table — database corruption (Tier 1 violation)"
+            )
+        return None  # Caller-provided token_id, genuinely not found
 
     # Get source row with resolved payload via explain_row
     source_row = recorder.explain_row(run_id, token.row_id)
     if source_row is None:
-        return None
+        # token.row_id is Tier 1 data — the row MUST exist
+        raise AuditIntegrityError(
+            f"Row '{token.row_id}' for token '{token_id}' does not exist in rows table "
+            f"— foreign key violation, database corruption (Tier 1 violation)"
+        )
 
     # Get node states for this token, sorted by step_index
     node_states = sorted(recorder.get_node_states_for_token(token_id), key=lambda s: s.step_index)
@@ -179,14 +194,14 @@ def explain(
     # Reject empty-string group IDs — they're corruption, not valid values
     for gtype, gval in group_ids.items():
         if gval is not None and gval == "":
-            raise ValueError(
+            raise AuditIntegrityError(
                 f"Audit integrity violation: token '{token_id}' has empty {gtype}_group_id. "
                 f"Group IDs must be non-empty UUIDs or NULL. This indicates database corruption."
             )
     set_groups = [k for k, v in group_ids.items() if v is not None]
     # At most one group type should be set (fork XOR join XOR expand)
     if len(set_groups) > 1:
-        raise ValueError(
+        raise AuditIntegrityError(
             f"Audit integrity violation: token '{token_id}' has multiple group IDs set: "
             f"{set_groups}. A token can belong to exactly one lineage operation."
         )
@@ -194,14 +209,14 @@ def explain(
     if set_groups and not parents:
         group_type = set_groups[0]
         group_id = group_ids[group_type]
-        raise ValueError(
+        raise AuditIntegrityError(
             f"Audit integrity violation: token '{token_id}' has {group_type}_group_id='{group_id}' "
             f"but no parent relationships in token_parents table. Tokens with group IDs must have "
             f"parent lineage recorded. This indicates missing {group_type} metadata or audit corruption."
         )
     if parents and not set_groups:
         parent_ids = [p.parent_token_id for p in parents]
-        raise ValueError(
+        raise AuditIntegrityError(
             f"Audit integrity violation: token '{token_id}' has parent relationships "
             f"{parent_ids} but no group ID (fork/join/expand) is set. Parent tokens must "
             f"be associated with a lineage operation."
@@ -213,7 +228,7 @@ def explain(
             # This indicates audit DB corruption - a token_parents record
             # references a parent that doesn't exist. This should be impossible
             # with FK constraints enabled, but we crash as defense-in-depth.
-            raise ValueError(
+            raise AuditIntegrityError(
                 f"Audit integrity violation: parent token '{parent.parent_token_id}' "
                 f"not found for token '{token_id}'. The token_parents table references "
                 f"a non-existent parent. This indicates database corruption."

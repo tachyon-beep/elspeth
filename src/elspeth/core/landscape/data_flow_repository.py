@@ -1133,12 +1133,12 @@ class DataFlowRepository:
             Edge model
 
         Raises:
-            ValueError: If edge not found (audit integrity violation)
+            AuditIntegrityError: If edge not found (audit integrity violation)
         """
         query = select(edges_table).where(edges_table.c.edge_id == edge_id)
         row = self._ops.execute_fetchone(query)
         if row is None:
-            raise ValueError(
+            raise AuditIntegrityError(
                 f"Audit integrity violation: edge '{edge_id}' not found. "
                 f"A routing_event references a non-existent edge. "
                 f"This indicates database corruption."
@@ -1155,7 +1155,7 @@ class DataFlowRepository:
             Dictionary mapping (from_node_id, label) to edge_id
 
         Raises:
-            ValueError: If run has no edges registered (data corruption).
+            AuditIntegrityError: If run has no edges registered (data corruption).
                 DAG compilation always registers edges, so an empty map
                 indicates the run was never properly initialized.
 
@@ -1171,7 +1171,7 @@ class DataFlowRepository:
             edge_map[(edge.from_node_id, edge.label)] = edge.edge_id
 
         if not edge_map:
-            raise ValueError(
+            raise AuditIntegrityError(
                 f"Run {run_id!r} has no edges registered — cannot build edge map. "
                 f"DAG compilation always registers edges; an empty map indicates "
                 f"the run was never properly initialized or database corruption."

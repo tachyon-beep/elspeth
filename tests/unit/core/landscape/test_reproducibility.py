@@ -197,9 +197,11 @@ class TestUpdateGradeAfterPurge:
         assert run is not None
         assert run.reproducibility_grade == ReproducibilityGrade.ATTRIBUTABLE_ONLY
 
-    def test_nonexistent_run_is_noop(self) -> None:
+    def test_nonexistent_run_raises(self) -> None:
+        """Purging a nonexistent run is a caller bug — must crash."""
         db, _recorder = _setup()
-        update_grade_after_purge(db, "nonexistent")  # Should not raise
+        with pytest.raises(ValueError, match="does not exist"):
+            update_grade_after_purge(db, "nonexistent")
 
     def test_null_grade_raises(self) -> None:
         """NULL reproducibility_grade is Tier 1 corruption — must crash."""

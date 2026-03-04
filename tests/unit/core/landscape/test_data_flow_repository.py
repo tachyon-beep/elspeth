@@ -308,9 +308,9 @@ class TestRegisterEdgeAndEdgeMapDirect:
         assert ("source-0", "default") not in map_r1
 
     def test_get_edge_map_raises_on_empty(self) -> None:
-        """get_edge_map raises ValueError when run has no edges."""
+        """get_edge_map raises AuditIntegrityError when run has no edges."""
         _db, repo, _rec = _make_repo()
-        with pytest.raises(ValueError, match="no edges registered"):
+        with pytest.raises(AuditIntegrityError, match="no edges registered"):
             repo.get_edge_map("run-1")
 
 

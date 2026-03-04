@@ -18,7 +18,7 @@ from unittest.mock import patch
 import pytest
 
 from elspeth.contracts import Checkpoint, PluginSchema, ResumePoint, RunStatus
-from elspeth.contracts.errors import OrchestrationInvariantError
+from elspeth.contracts.errors import AuditIntegrityError, OrchestrationInvariantError
 from elspeth.contracts.schema_contract import FieldContract, SchemaContract
 from elspeth.core.landscape import LandscapeDB, LandscapeRecorder
 from elspeth.engine.orchestrator import Orchestrator, PipelineConfig
@@ -179,7 +179,7 @@ class TestResumeGuardrails:
                 "elspeth.core.checkpoint.recovery.RecoveryManager.get_unprocessed_row_data",
                 return_value=[("row-1", 0, {"id": 1, "value": "alpha"})],
             ),
-            pytest.raises(ValueError, match="has no edges registered") as exc_info,
+            pytest.raises(AuditIntegrityError, match="has no edges registered") as exc_info,
         ):
             orchestrator.resume(
                 resume_point=_make_resume_point(run_id),

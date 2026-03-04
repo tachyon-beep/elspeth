@@ -23,6 +23,7 @@ from elspeth.contracts.audit import (
     TokenParent,
 )
 from elspeth.contracts.enums import RowOutcome
+from elspeth.contracts.errors import AuditIntegrityError
 from elspeth.core.landscape.lineage import LineageResult, explain
 
 # ---------------------------------------------------------------------------
@@ -170,11 +171,12 @@ class TestExplainByTokenId:
         result = explain(recorder, "run-1", token_id="nonexistent")
         assert result is None
 
-    def test_returns_none_when_row_not_found(self) -> None:
+    def test_raises_when_row_not_found_for_known_token(self) -> None:
+        """Token exists but its row_id doesn't — Tier 1 corruption."""
         token = _make_token()
         recorder = _make_recorder(token=token, row_lineage=None)
-        result = explain(recorder, "run-1", token_id="tok-1")
-        assert result is None
+        with pytest.raises(AuditIntegrityError, match="does not exist in rows table"):
+            explain(recorder, "run-1", token_id="tok-1")
 
 
 # ===========================================================================
@@ -234,6 +236,40 @@ class TestExplainByRowId:
 
 
 # ===========================================================================
+# Tier 1 corruption detection
+# ===========================================================================
+
+
+class TestExplainTier1Corruption:
+    """Tests for explain() detecting Tier 1 audit data corruption."""
+
+    def test_resolved_token_missing_raises_audit_integrity(self) -> None:
+        """Token resolved from token_outcomes but missing from tokens table."""
+        outcomes = [_make_outcome(token_id="tok-resolved")]
+        recorder = _make_recorder(token=None, token_outcomes=outcomes)
+
+        with pytest.raises(AuditIntegrityError, match="resolved from token_outcomes"):
+            explain(recorder, "run-1", row_id="row-1")
+
+    def test_lineage_result_row_id_mismatch_raises_audit_integrity(self) -> None:
+        """LineageResult rejects mismatched token/row IDs as corruption."""
+        token = _make_token(token_id="tok-1", row_id="row-1")
+        row_lineage = _make_row_lineage()  # has row_id="row-1"
+        # Manually create a mismatch by making a token with different row_id
+        mismatched_token = _make_token(token_id="tok-1", row_id="row-WRONG")
+
+        with pytest.raises(AuditIntegrityError, match="row_id mismatch"):
+            LineageResult(
+                token=mismatched_token,
+                source_row=row_lineage,
+                node_states=(),
+                routing_events=(),
+                calls=(),
+                parent_tokens=(),
+            )
+
+
+# ===========================================================================
 # Parent token integrity
 # ===========================================================================
 
@@ -250,7 +286,7 @@ class TestExplainParentIntegrity:
             row_lineage=row_lineage,
             token_parents=[],
         )
-        with pytest.raises(ValueError, match="Audit integrity violation"):
+        with pytest.raises(AuditIntegrityError, match="Audit integrity violation"):
             explain(recorder, "run-1", token_id="tok-1")
 
     def test_parent_token_not_found_raises(self) -> None:
@@ -266,7 +302,7 @@ class TestExplainParentIntegrity:
         # get_token returns the main token for tok-1, None for missing-parent
         recorder.get_token.side_effect = lambda tid: token if tid == "tok-1" else None
 
-        with pytest.raises(ValueError, match=r"parent token.*not found"):
+        with pytest.raises(AuditIntegrityError, match=r"parent token.*not found"):
             explain(recorder, "run-1", token_id="tok-1")
 
 
