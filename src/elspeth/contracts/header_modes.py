@@ -83,7 +83,17 @@ def resolve_headers(
     elif field_names is not None:
         names = field_names
     else:
-        return {}
+        raise ValueError(
+            "resolve_headers() called with both contract and field_names as None. "
+            "Caller must provide at least one source of field names."
+        )
+
+    # Validate CUSTOM mode preconditions up front
+    if mode == HeaderMode.CUSTOM and not custom_mapping:
+        raise ValueError(
+            "CUSTOM header mode requires a non-empty custom_mapping. "
+            "Got None or empty dict — this is a configuration error."
+        )
 
     result: dict[str, str] = {}
 
@@ -102,9 +112,14 @@ def resolve_headers(
                 result[name] = name
 
         elif mode == HeaderMode.CUSTOM:
-            if custom_mapping and name in custom_mapping:
-                result[name] = custom_mapping[name]
-            else:
-                result[name] = name  # Fallback to normalized
+            assert custom_mapping is not None  # Guaranteed by precondition check above
+            if name not in custom_mapping:
+                raise ValueError(
+                    f"CUSTOM header mode has no mapping for field '{name}'. "
+                    f"All fields must be explicitly mapped — silent fallback to normalized "
+                    f"names risks data corruption in external system handover. "
+                    f"Mapped fields: {sorted(custom_mapping.keys())}"
+                )
+            result[name] = custom_mapping[name]
 
     return result
