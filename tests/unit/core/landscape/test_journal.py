@@ -144,6 +144,24 @@ class TestSerializeRecord:
         parsed = json.loads(result)
         assert parsed["timestamp"] == "2026-01-15T12:00:00+00:00"
 
+    def test_non_serializable_type_raises(self) -> None:
+        """Non-JSON types must crash, not silently convert via str()."""
+        record = cast(JournalRecord, {"timestamp": "t", "statement": "INSERT", "parameters": {b"bytes": "value"}, "executemany": False})
+        with pytest.raises(TypeError):
+            LandscapeJournal._serialize_record(record)
+
+    def test_nan_rejected(self) -> None:
+        """NaN in journal data must be rejected — audit integrity."""
+        record = cast(JournalRecord, {"timestamp": "t", "statement": "INSERT", "parameters": {"val": float("nan")}, "executemany": False})
+        with pytest.raises(ValueError, match="NaN"):
+            LandscapeJournal._serialize_record(record)
+
+    def test_set_type_raises(self) -> None:
+        """Sets are not JSON-serializable — must crash, not silently str()."""
+        record = cast(JournalRecord, {"timestamp": "t", "statement": "INSERT", "parameters": {"ids": {1, 2, 3}}, "executemany": False})
+        with pytest.raises(TypeError):
+            LandscapeJournal._serialize_record(record)
+
 
 # ===========================================================================
 # INSERT statement parsing

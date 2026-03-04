@@ -184,7 +184,7 @@ class LandscapeJournal:
     @staticmethod
     def _serialize_record(record: JournalRecord) -> str:
         safe = serialize_datetime(record)
-        return json.dumps(safe, default=str)
+        return json.dumps(safe, allow_nan=False)
 
     @staticmethod
     def _normalize_parameters(parameters: Any) -> Any:
