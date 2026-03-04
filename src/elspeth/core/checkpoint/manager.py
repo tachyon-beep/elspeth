@@ -16,6 +16,7 @@ from elspeth.core.landscape.schema import checkpoints_table
 
 if TYPE_CHECKING:
     from elspeth.contracts.aggregation_checkpoint import AggregationCheckpointState
+    from elspeth.contracts.coalesce_checkpoint import CoalesceCheckpointState
     from elspeth.core.dag import ExecutionGraph
 
 
@@ -62,6 +63,7 @@ class CheckpointManager:
         sequence_number: int,
         graph: ExecutionGraph,
         aggregation_state: AggregationCheckpointState | None = None,
+        coalesce_state: CoalesceCheckpointState | None = None,
     ) -> Checkpoint:
         """Create a checkpoint at current progress point.
 
@@ -72,6 +74,7 @@ class CheckpointManager:
             sequence_number: Monotonic progress marker
             graph: Execution graph for topology validation (REQUIRED)
             aggregation_state: Optional serializable aggregation buffers
+            coalesce_state: Optional serializable pending coalesce state
 
         Returns:
             The created Checkpoint
@@ -98,6 +101,7 @@ class CheckpointManager:
             # Note: We don't use canonical_json because it normalizes floats to integers,
             # breaking round-trip for aggregation state
             agg_json = checkpoint_dumps(aggregation_state.to_dict()) if aggregation_state is not None else None
+            coalesce_json = checkpoint_dumps(coalesce_state.to_dict()) if coalesce_state is not None else None
 
             # Compute topology hashes INSIDE transaction (Bug #1 fix)
             # This ensures hash matches graph state at exact moment of checkpoint creation
@@ -116,6 +120,7 @@ class CheckpointManager:
                     node_id=node_id,
                     sequence_number=sequence_number,
                     aggregation_state_json=agg_json,
+                    coalesce_state_json=coalesce_json,
                     created_at=created_at,
                     upstream_topology_hash=upstream_topology_hash,
                     checkpoint_node_config_hash=checkpoint_node_config_hash,
@@ -134,6 +139,7 @@ class CheckpointManager:
             upstream_topology_hash=upstream_topology_hash,
             checkpoint_node_config_hash=checkpoint_node_config_hash,
             aggregation_state_json=agg_json,
+            coalesce_state_json=coalesce_json,
             format_version=Checkpoint.CURRENT_FORMAT_VERSION,
         )
 
@@ -171,6 +177,7 @@ class CheckpointManager:
                 upstream_topology_hash=result.upstream_topology_hash,
                 checkpoint_node_config_hash=result.checkpoint_node_config_hash,
                 aggregation_state_json=result.aggregation_state_json,
+                coalesce_state_json=result.coalesce_state_json,
                 format_version=result.format_version,  # None for legacy checkpoints
             )
         except ValueError as e:
@@ -211,6 +218,7 @@ class CheckpointManager:
                         upstream_topology_hash=r.upstream_topology_hash,
                         checkpoint_node_config_hash=r.checkpoint_node_config_hash,
                         aggregation_state_json=r.aggregation_state_json,
+                        coalesce_state_json=r.coalesce_state_json,
                         format_version=r.format_version,  # None for legacy checkpoints
                     )
                 )

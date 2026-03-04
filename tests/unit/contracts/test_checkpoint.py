@@ -12,6 +12,11 @@ from elspeth.contracts.aggregation_checkpoint import (
     AggregationNodeCheckpoint,
     AggregationTokenCheckpoint,
 )
+from elspeth.contracts.coalesce_checkpoint import (
+    CoalesceCheckpointState,
+    CoalescePendingCheckpoint,
+    CoalesceTokenCheckpoint,
+)
 
 
 def _checkpoint() -> Checkpoint:
@@ -103,4 +108,52 @@ def test_resume_point_rejects_non_dto_aggregation_state() -> None:
             node_id="node-001",
             sequence_number=1,
             aggregation_state={"not": "a DTO"},  # type: ignore[arg-type]
+        )
+
+
+def test_resume_point_accepts_typed_coalesce_state() -> None:
+    coalesce_state = CoalesceCheckpointState(
+        version="1.0",
+        pending=(
+            CoalescePendingCheckpoint(
+                coalesce_name="merge_paths",
+                row_id="row-001",
+                elapsed_age_seconds=1.5,
+                branches={
+                    "branch_a": CoalesceTokenCheckpoint(
+                        token_id="tok-branch-a",
+                        row_id="row-001",
+                        branch_name="branch_a",
+                        fork_group_id="fork-1",
+                        join_group_id=None,
+                        expand_group_id=None,
+                        row_data={"value": 1},
+                        contract={"mode": "OBSERVED", "locked": True, "fields": []},
+                        state_id="state-123",
+                        arrival_offset_seconds=0.0,
+                    )
+                },
+                lost_branches={},
+            ),
+        ),
+    )
+
+    resume_point = ResumePoint(
+        checkpoint=_checkpoint(),
+        token_id="tok-001",
+        node_id="node-001",
+        sequence_number=1,
+        coalesce_state=coalesce_state,
+    )
+    assert resume_point.coalesce_state is coalesce_state
+
+
+def test_resume_point_rejects_non_dto_coalesce_state() -> None:
+    with pytest.raises(ValueError, match="coalesce_state must be CoalesceCheckpointState or None"):
+        ResumePoint(
+            checkpoint=_checkpoint(),
+            token_id="tok-001",
+            node_id="node-001",
+            sequence_number=1,
+            coalesce_state={"not": "a DTO"},  # type: ignore[arg-type]
         )

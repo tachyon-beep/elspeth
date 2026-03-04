@@ -10,6 +10,7 @@ from dataclasses import dataclass
 
 from elspeth.contracts.aggregation_checkpoint import AggregationCheckpointState
 from elspeth.contracts.audit import Checkpoint
+from elspeth.contracts.coalesce_checkpoint import CoalesceCheckpointState
 
 
 @dataclass(frozen=True)
@@ -42,7 +43,8 @@ class ResumePoint:
     token_id: str
     node_id: str
     sequence_number: int
-    aggregation_state: AggregationCheckpointState | None
+    aggregation_state: AggregationCheckpointState | None = None
+    coalesce_state: CoalesceCheckpointState | None = None
 
     def __post_init__(self) -> None:
         """Validate aggregation_state type — Tier 1 crash on invalid types.
@@ -55,4 +57,9 @@ class ResumePoint:
             raise ValueError(
                 f"aggregation_state must be AggregationCheckpointState or None, "
                 f"got {type(self.aggregation_state).__name__}: {self.aggregation_state!r}"
+            )
+        if self.coalesce_state is not None and not isinstance(self.coalesce_state, CoalesceCheckpointState):
+            raise ValueError(
+                f"coalesce_state must be CoalesceCheckpointState or None, "
+                f"got {type(self.coalesce_state).__name__}: {self.coalesce_state!r}"
             )

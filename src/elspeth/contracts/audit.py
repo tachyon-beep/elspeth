@@ -386,11 +386,12 @@ class Checkpoint:
     Format Versions:
         Version 1: Pre-deterministic node IDs (legacy, incompatible)
         Version 2: Deterministic node IDs (2026-01-24+)
-        Version 3: Phase 2 traversal refactor checkpoint break (current)
+        Version 3: Phase 2 traversal refactor checkpoint break
+        Version 4: Pending coalesce state persisted in checkpoints (current)
     """
 
     # Current checkpoint format version (ClassVar excludes from dataclass fields)
-    CURRENT_FORMAT_VERSION: ClassVar[int] = 3
+    CURRENT_FORMAT_VERSION: ClassVar[int] = 4
 
     checkpoint_id: str
     run_id: str
@@ -404,6 +405,7 @@ class Checkpoint:
     checkpoint_node_config_hash: str  # Hash of checkpoint node config only
     # Optional fields (with defaults) MUST come after required fields in dataclass
     aggregation_state_json: str | None = None
+    coalesce_state_json: str | None = None
     # Format version for compatibility checking
     format_version: int | None = None
 

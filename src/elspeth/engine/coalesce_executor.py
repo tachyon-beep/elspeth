@@ -12,6 +12,11 @@ from typing import TYPE_CHECKING, Any
 import structlog
 
 from elspeth.contracts import TokenInfo
+from elspeth.contracts.coalesce_checkpoint import (
+    CoalesceCheckpointState,
+    CoalescePendingCheckpoint,
+    CoalesceTokenCheckpoint,
+)
 from elspeth.contracts.coalesce_metadata import ArrivalOrderEntry, CoalesceMetadata
 from elspeth.contracts.enums import NodeStateStatus, RowOutcome
 from elspeth.contracts.errors import CoalesceFailureReason, OrchestrationInvariantError
@@ -27,6 +32,8 @@ if TYPE_CHECKING:
     from elspeth.engine.tokens import TokenManager
 
 slog = structlog.get_logger(__name__)
+
+COALESCE_CHECKPOINT_VERSION = "1.0"
 
 
 @dataclass
@@ -173,6 +180,107 @@ class CoalesceExecutor:
             List of registered coalesce names
         """
         return list(self._settings.keys())
+
+    def get_checkpoint_state(self) -> CoalesceCheckpointState:
+        """Return checkpoint state for pending coalesces."""
+        from elspeth.core.checkpoint.serialization import checkpoint_dumps
+
+        pending_entries: list[CoalescePendingCheckpoint] = []
+        for (coalesce_name, row_id), pending in self._pending.items():
+            branch_entries = {
+                branch_name: CoalesceTokenCheckpoint(
+                    token_id=entry.token.token_id,
+                    row_id=entry.token.row_id,
+                    branch_name=branch_name,
+                    fork_group_id=entry.token.fork_group_id,
+                    join_group_id=entry.token.join_group_id,
+                    expand_group_id=entry.token.expand_group_id,
+                    row_data=entry.token.row_data.to_dict(),
+                    contract=entry.token.row_data.contract.to_checkpoint_format(),
+                    state_id=entry.state_id,
+                    arrival_offset_seconds=entry.arrival_time - pending.first_arrival,
+                )
+                for branch_name, entry in pending.branches.items()
+            }
+            pending_entries.append(
+                CoalescePendingCheckpoint(
+                    coalesce_name=coalesce_name,
+                    row_id=row_id,
+                    elapsed_age_seconds=self._clock.monotonic() - pending.first_arrival,
+                    branches=branch_entries,
+                    lost_branches=dict(pending.lost_branches),
+                )
+            )
+
+        checkpoint = CoalesceCheckpointState(
+            version=COALESCE_CHECKPOINT_VERSION,
+            pending=tuple(pending_entries),
+        )
+
+        serialized = checkpoint_dumps(checkpoint.to_dict())
+        size_mb = len(serialized) / 1_000_000
+        if size_mb > 1:
+            slog.warning(
+                "large_coalesce_checkpoint",
+                size_mb=size_mb,
+                pending_count=len(pending_entries),
+            )
+        if size_mb > 10:
+            raise RuntimeError(
+                f"Coalesce checkpoint size {size_mb:.1f}MB exceeds 10MB limit. "
+                f"Pending joins: {len(pending_entries)}."
+            )
+
+        return checkpoint
+
+    def restore_from_checkpoint(self, state: CoalesceCheckpointState) -> None:
+        """Restore pending coalesces from checkpoint."""
+        if state.version != COALESCE_CHECKPOINT_VERSION:
+            slog.warning(
+                "coalesce_checkpoint_version_rejected",
+                found_version=state.version,
+                expected_version=COALESCE_CHECKPOINT_VERSION,
+            )
+            raise ValueError(
+                f"Incompatible coalesce checkpoint version: {state.version!r}. "
+                f"Expected: {COALESCE_CHECKPOINT_VERSION!r}."
+            )
+
+        now = self._clock.monotonic()
+        self._pending.clear()
+        self._completed_keys.clear()
+
+        for pending_entry in state.pending:
+            if pending_entry.coalesce_name not in self._settings:
+                raise ValueError(
+                    f"Checkpoint references unknown coalesce '{pending_entry.coalesce_name}'. "
+                    f"Configured coalesces: {sorted(self._settings)}"
+                )
+            first_arrival = now - pending_entry.elapsed_age_seconds
+            branches: dict[str, _BranchEntry] = {}
+            for branch_name, token_checkpoint in pending_entry.branches.items():
+                restored_contract = SchemaContract.from_checkpoint(token_checkpoint.contract)
+                restored_row = PipelineRow(token_checkpoint.row_data, restored_contract)
+                token = TokenInfo(
+                    row_id=token_checkpoint.row_id,
+                    token_id=token_checkpoint.token_id,
+                    row_data=restored_row,
+                    branch_name=token_checkpoint.branch_name,
+                    fork_group_id=token_checkpoint.fork_group_id,
+                    join_group_id=token_checkpoint.join_group_id,
+                    expand_group_id=token_checkpoint.expand_group_id,
+                )
+                branches[branch_name] = _BranchEntry(
+                    token=token,
+                    arrival_time=first_arrival + token_checkpoint.arrival_offset_seconds,
+                    state_id=token_checkpoint.state_id,
+                )
+
+            self._pending[(pending_entry.coalesce_name, pending_entry.row_id)] = _PendingCoalesce(
+                branches=branches,
+                first_arrival=first_arrival,
+                lost_branches=dict(pending_entry.lost_branches),
+            )
 
     def _mark_completed(self, key: tuple[str, str]) -> None:
         """Mark a coalesce key as completed with bounded memory.

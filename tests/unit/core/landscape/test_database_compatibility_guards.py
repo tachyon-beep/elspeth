@@ -11,6 +11,7 @@ from sqlalchemy import create_engine, text
 
 import elspeth.core.landscape.database as database_module
 from elspeth.core.landscape.database import LandscapeDB, SchemaCompatibilityError
+from elspeth.core.landscape.schema import SQLITE_SCHEMA_EPOCH, metadata
 
 
 def _make_instance(url: str) -> LandscapeDB:
@@ -26,6 +27,26 @@ def _make_instance(url: str) -> LandscapeDB:
 
 class TestSchemaCompatibilityGuards:
     """Coverage for fail-fast schema compatibility checks."""
+
+    def test_validate_schema_rejects_incompatible_schema_epoch(self, tmp_path: Path) -> None:
+        """Stamped SQLite schema epochs provide an explicit future migration seam."""
+        db_path = tmp_path / "wrong_epoch.db"
+        engine = create_engine(f"sqlite:///{db_path}")
+        metadata.create_all(engine)
+        with engine.begin() as conn:
+            conn.exec_driver_sql(f"PRAGMA user_version = {SQLITE_SCHEMA_EPOCH + 1}")
+        engine.dispose()
+
+        instance = _make_instance(f"sqlite:///{db_path}")
+
+        with pytest.raises(SchemaCompatibilityError) as exc_info:
+            instance._validate_schema()
+
+        msg = str(exc_info.value)
+        assert "schema epoch is incompatible" in msg
+        assert f"Database epoch: {SQLITE_SCHEMA_EPOCH + 1}" in msg
+        assert f"Current epoch: {SQLITE_SCHEMA_EPOCH}" in msg
+        instance.close()
 
     def test_validate_schema_reports_missing_tables_with_actionable_guidance(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         """Existing partial Landscape DBs must fail with clear remediation text."""
@@ -125,6 +146,20 @@ class TestSchemaCompatibilityGuards:
 
 class TestJournalPathGuards:
     """Coverage for from_url journal path derivation failure modes."""
+
+    def test_from_url_stamps_schema_epoch_for_compatible_sqlite_db(self, tmp_path: Path) -> None:
+        """Compatible SQLite databases should be stamped for future migrations."""
+        db_path = tmp_path / "epoch_stamp.db"
+
+        db = LandscapeDB.from_url(f"sqlite:///{db_path}")
+        db.close()
+
+        engine = create_engine(f"sqlite:///{db_path}")
+        with engine.connect() as conn:
+            epoch = conn.exec_driver_sql("PRAGMA user_version").scalar_one()
+        engine.dispose()
+
+        assert epoch == SQLITE_SCHEMA_EPOCH
 
     def test_from_url_dump_to_jsonl_requires_explicit_path_for_non_sqlite(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """Non-SQLite URLs must provide dump_to_jsonl_path explicitly."""

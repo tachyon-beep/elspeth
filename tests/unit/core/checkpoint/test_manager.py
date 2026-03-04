@@ -8,6 +8,11 @@ import pytest
 from sqlalchemy import Connection
 
 from elspeth.contracts import Checkpoint, Determinism, NodeType, RunStatus
+from elspeth.contracts.coalesce_checkpoint import (
+    CoalesceCheckpointState,
+    CoalescePendingCheckpoint,
+    CoalesceTokenCheckpoint,
+)
 from elspeth.core.checkpoint.manager import CheckpointManager, IncompatibleCheckpointError
 from elspeth.core.landscape.database import LandscapeDB
 from elspeth.core.landscape.schema import nodes_table, rows_table, runs_table, tokens_table
@@ -111,6 +116,50 @@ def test_get_checkpoints_returns_ascending_sequence_order(db: LandscapeDB, check
 
     checkpoints = checkpoint_manager.get_checkpoints("run-001")
     assert [cp.sequence_number for cp in checkpoints] == [1, 3, 5]
+
+
+def test_create_checkpoint_round_trips_coalesce_state(db: LandscapeDB, checkpoint_manager: CheckpointManager) -> None:
+    with db.connection() as conn:
+        _insert_checkpoint_prereqs(conn)
+
+    graph = make_graph_linear("node-001")
+    checkpoint = checkpoint_manager.create_checkpoint(
+        "run-001",
+        "tok-001",
+        "node-001",
+        1,
+        graph,
+        coalesce_state=CoalesceCheckpointState(
+            version="1.0",
+            pending=(
+                CoalescePendingCheckpoint(
+                    coalesce_name="merge_paths",
+                    row_id="row-001",
+                    elapsed_age_seconds=2.0,
+                    branches={
+                        "branch_a": CoalesceTokenCheckpoint(
+                            token_id="tok-001",
+                            row_id="row-001",
+                            branch_name="branch_a",
+                            fork_group_id="fork-001",
+                            join_group_id=None,
+                            expand_group_id=None,
+                            row_data={"value": 1},
+                            contract={"mode": "OBSERVED", "locked": True, "fields": [], "version_hash": "vh-1"},
+                            state_id="state-001",
+                            arrival_offset_seconds=0.0,
+                        )
+                    },
+                    lost_branches={},
+                ),
+            ),
+        ),
+    )
+
+    assert checkpoint.coalesce_state_json is not None
+    loaded = checkpoint_manager.get_latest_checkpoint("run-001")
+    assert loaded is not None
+    assert loaded.coalesce_state_json == checkpoint.coalesce_state_json
 
 
 def test_validate_checkpoint_compatibility_rejects_missing_format_version(checkpoint_manager: CheckpointManager) -> None:

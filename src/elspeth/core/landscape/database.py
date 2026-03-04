@@ -14,7 +14,7 @@ from sqlalchemy.engine import Engine
 from sqlalchemy.engine.url import make_url
 
 from elspeth.core.landscape.journal import LandscapeJournal
-from elspeth.core.landscape.schema import metadata
+from elspeth.core.landscape.schema import SQLITE_SCHEMA_EPOCH, metadata
 
 
 class SchemaCompatibilityError(Exception):
@@ -105,6 +105,7 @@ class LandscapeDB:
         self._setup_engine()
         self._validate_schema()  # Check BEFORE create_tables
         self._create_tables()
+        self._sync_sqlite_schema_epoch()
 
     def _setup_engine(self) -> None:
         """Create and configure the database engine."""
@@ -256,6 +257,42 @@ class LandscapeDB:
         """Create all tables if they don't exist."""
         metadata.create_all(self.engine)
 
+    def _get_sqlite_schema_epoch(self) -> int:
+        """Return SQLite schema epoch from PRAGMA user_version.
+
+        Uses SQLite's built-in schema version slot as a lightweight marker for
+        intentional pre-1.0 schema breaks. This is not a migration system; it
+        simply gives future migration code a stable entry point.
+        """
+        if not self.connection_string.startswith("sqlite"):
+            return 0
+
+        with self.engine.connect() as conn:
+            return int(conn.exec_driver_sql("PRAGMA user_version").scalar_one())
+
+    def _set_sqlite_schema_epoch(self, epoch: int) -> None:
+        """Persist the SQLite schema epoch in PRAGMA user_version."""
+        if not self.connection_string.startswith("sqlite"):
+            return
+
+        with self.engine.begin() as conn:
+            conn.exec_driver_sql(f"PRAGMA user_version = {int(epoch)}")
+
+    def _sync_sqlite_schema_epoch(self) -> None:
+        """Stamp compatible SQLite databases with the current schema epoch.
+
+        New databases get the epoch immediately after create_all(). Existing
+        compatible databases without an epoch are upgraded in place to the
+        current stamp, which preserves a future migration path without requiring
+        a full migration framework today.
+        """
+        if not self.connection_string.startswith("sqlite"):
+            return
+
+        current_epoch = self._get_sqlite_schema_epoch()
+        if current_epoch != SQLITE_SCHEMA_EPOCH:
+            self._set_sqlite_schema_epoch(SQLITE_SCHEMA_EPOCH)
+
     def _validate_schema(self) -> None:
         """Validate that existing database has all required columns and foreign keys.
 
@@ -290,6 +327,7 @@ class LandscapeDB:
             raise
         expected_tables = set(metadata.tables.keys())
         present_landscape_tables = existing_tables & expected_tables
+        schema_epoch = self._get_sqlite_schema_epoch()
 
         # If this looks like an existing Landscape database, all known tables must exist.
         # For brand-new DB files (no Landscape tables yet), creation happens in create_all().
@@ -302,6 +340,16 @@ class LandscapeDB:
                 "Database does not contain any Landscape tables.\n\n"
                 "This does not appear to be an ELSPETH audit database. "
                 "Verify the database path is correct.\n\n"
+                f"Database: {self.connection_string}"
+            )
+        if present_landscape_tables and schema_epoch not in (0, SQLITE_SCHEMA_EPOCH):
+            raise SchemaCompatibilityError(
+                "Landscape database schema epoch is incompatible.\n\n"
+                f"Database epoch: {schema_epoch}\n"
+                f"Current epoch: {SQLITE_SCHEMA_EPOCH}\n\n"
+                "This ELSPETH version is using an incompatible SQLite schema epoch.\n"
+                "Pre-1.0 releases may require either recreating the database or "
+                "running a future migration command.\n\n"
                 f"Database: {self.connection_string}"
             )
         missing_tables = sorted(expected_tables - existing_tables) if present_landscape_tables else []
@@ -402,6 +450,7 @@ class LandscapeDB:
         instance._engine = engine
         instance._journal = None
         instance._require_existing_schema = False
+        instance._sync_sqlite_schema_epoch()
         return instance
 
     @classmethod
@@ -469,6 +518,7 @@ class LandscapeDB:
 
         if create_tables:
             metadata.create_all(engine)
+        instance._sync_sqlite_schema_epoch()
         return instance
 
     @staticmethod

@@ -28,6 +28,7 @@ from typing import TYPE_CHECKING, Any
 if TYPE_CHECKING:
     from elspeth.contracts import PendingOutcome, SinkProtocol, SourceProtocol, TokenInfo
     from elspeth.contracts.aggregation_checkpoint import AggregationCheckpointState
+    from elspeth.contracts.coalesce_checkpoint import CoalesceCheckpointState
     from elspeth.contracts.plugin_context import PluginContext
     from elspeth.contracts.schema_contract import SchemaContract
     from elspeth.contracts.types import CoalesceName, GateName, NodeID, SinkName
@@ -329,6 +330,7 @@ class ResumeState:
     recorder: LandscapeRecorder
     run_id: str
     restored_aggregation_state: dict[str, AggregationCheckpointState]
+    restored_coalesce_state: CoalesceCheckpointState | None
     unprocessed_rows: list[Any]
     schema_contract: SchemaContract
 

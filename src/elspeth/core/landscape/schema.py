@@ -24,6 +24,11 @@ from sqlalchemy import (
 # Shared metadata for all tables
 metadata = MetaData()
 
+# Explicit SQLite schema epoch for pre-1.0 compatibility policy.
+# Stored in PRAGMA user_version so future releases can distinguish
+# "intentionally old schema, needs migration" from "runtime-required field".
+SQLITE_SCHEMA_EPOCH = 1
+
 # Column width for node_id across all tables. Referenced by dag.py
 # for validation — changing this value requires an Alembic migration.
 NODE_ID_COLUMN_LENGTH = 64
@@ -476,6 +481,7 @@ checkpoints_table = Table(
     Column("node_id", String(64), nullable=False),  # Part of composite FK to nodes
     Column("sequence_number", Integer, nullable=False),  # Monotonic progress marker
     Column("aggregation_state_json", Text),  # Serialized aggregation buffers (if any)
+    Column("coalesce_state_json", Text),  # Serialized pending coalesce state (if any)
     Column("created_at", DateTime(timezone=True), nullable=False),
     # Topology validation (topological checkpoint compatibility)
     Column("upstream_topology_hash", String(64), nullable=False),  # Hash of nodes + edges upstream of checkpoint
@@ -484,6 +490,7 @@ checkpoints_table = Table(
     # Version 1: Pre-deterministic node IDs (legacy, rejected)
     # Version 2: Deterministic node IDs (2026-01-24+)
     # Version 3: Phase 2 traversal refactor checkpoint break
+    # Version 4: Pending coalesce state persisted in checkpoints
     Column("format_version", Integer, nullable=True),  # Nullable for backwards compat with existing checkpoints
     # Composite FK to nodes (node_id, run_id)
     ForeignKeyConstraint(

@@ -1751,6 +1751,7 @@ def resume(
                 "node_id": resume_point.node_id,
                 "sequence_number": resume_point.sequence_number,
                 "has_aggregation_state": resume_point.aggregation_state is not None,
+                "has_coalesce_state": resume_point.coalesce_state is not None,
             },
             "unprocessed_rows": len(unprocessed_row_ids),
         }
@@ -1772,6 +1773,10 @@ def resume(
                 typer.echo("  Has aggregation state: Yes")
             else:
                 typer.echo("  Has aggregation state: No")
+            if resume_point.coalesce_state is not None:
+                typer.echo("  Has coalesce state: Yes")
+            else:
+                typer.echo("  Has coalesce state: No")
             typer.echo(f"  Unprocessed rows: {len(unprocessed_row_ids)}")
 
         if not execute:

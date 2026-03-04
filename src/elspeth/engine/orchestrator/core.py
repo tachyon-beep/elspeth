@@ -29,6 +29,7 @@ from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
     from elspeth.contracts.aggregation_checkpoint import AggregationCheckpointState
+    from elspeth.contracts.coalesce_checkpoint import CoalesceCheckpointState
     from elspeth.contracts.events import TelemetryEvent
     from elspeth.contracts.payload_store import PayloadStore
     from elspeth.core.events import EventBusProtocol
@@ -182,6 +183,14 @@ class Orchestrator:
         self._current_graph: ExecutionGraph | None = None  # Set during execution for checkpointing
         self._telemetry = telemetry_manager  # Optional, disabled by default
 
+    def _reset_checkpoint_sequence(self) -> None:
+        """Reset checkpoint ordering for a fresh run."""
+        self._sequence_number = 0
+
+    def _rebase_checkpoint_sequence(self, sequence_number: int) -> None:
+        """Continue checkpoint ordering from a previously persisted checkpoint."""
+        self._sequence_number = sequence_number
+
     def _emit_telemetry(self, event: TelemetryEvent) -> None:
         """Emit telemetry event if manager is configured.
 
@@ -319,6 +328,7 @@ class Orchestrator:
         token_id: str,
         node_id: str,
         aggregation_state: AggregationCheckpointState | None = None,
+        coalesce_state: CoalesceCheckpointState | None = None,
     ) -> None:
         """Create checkpoint if configured.
 
@@ -335,6 +345,7 @@ class Orchestrator:
             token_id: Token that was just written to sink
             node_id: Sink node that received the token
             aggregation_state: Typed aggregation checkpoint state for crash recovery
+            coalesce_state: Typed pending coalesce state for crash recovery
         """
         if not self._checkpoint_config or not self._checkpoint_config.enabled:
             return
@@ -372,6 +383,7 @@ class Orchestrator:
                 sequence_number=self._sequence_number,
                 graph=self._current_graph,
                 aggregation_state=aggregation_state,
+                coalesce_state=coalesce_state,
             )
 
     def _checkpoint_interrupted_progress(
@@ -397,16 +409,26 @@ class Orchestrator:
             raise RuntimeError("Cannot create shutdown checkpoint: execution graph not available")
 
         aggregation_state = loop_ctx.processor.get_aggregation_checkpoint_state()
+        coalesce_state = loop_ctx.processor.get_coalesce_checkpoint_state()
 
         token_id: str | None = None
         node_id: str | None = None
         checkpoint_agg_state: AggregationCheckpointState | None = None
+        checkpoint_coalesce_state: CoalesceCheckpointState | None = None
+        if coalesce_state is not None and coalesce_state.pending:
+            checkpoint_coalesce_state = coalesce_state
 
         if aggregation_state.nodes:
             agg_node_id, agg_node_state = next(iter(aggregation_state.nodes.items()))
             token_id = agg_node_state.tokens[-1].token_id
             node_id = agg_node_id
             checkpoint_agg_state = aggregation_state
+        elif checkpoint_coalesce_state is not None:
+            pending_entry = coalesce_state.pending[-1]
+            if pending_entry.branches:
+                last_branch = next(reversed(pending_entry.branches.values()))
+                token_id = last_branch.token_id
+                node_id = str(loop_ctx.coalesce_node_map[CoalesceName(pending_entry.coalesce_name)])
         else:
             for sink_name, token_outcome_pairs in loop_ctx.pending_tokens.items():
                 if not token_outcome_pairs:
@@ -430,6 +452,7 @@ class Orchestrator:
             sequence_number=self._sequence_number,
             graph=self._current_graph,
             aggregation_state=checkpoint_agg_state,
+            coalesce_state=checkpoint_coalesce_state,
         )
 
     def _delete_checkpoints(self, run_id: str) -> None:
@@ -720,6 +743,7 @@ class Orchestrator:
         coalesce_id_map: dict[CoalesceName, NodeID],
         payload_store: PayloadStore,
         restored_aggregation_state: dict[NodeID, AggregationCheckpointState] | None = None,
+        restored_coalesce_state: CoalesceCheckpointState | None = None,
     ) -> tuple[RowProcessor, dict[CoalesceName, NodeID], CoalesceExecutor | None]:
         """Build a RowProcessor with all supporting infrastructure.
 
@@ -779,6 +803,8 @@ class Orchestrator:
             for coalesce_settings_entry in settings.coalesce:
                 coalesce_node_id = coalesce_id_map[CoalesceName(coalesce_settings_entry.name)]
                 coalesce_executor.register_coalesce(coalesce_settings_entry, coalesce_node_id)
+            if restored_coalesce_state is not None:
+                coalesce_executor.restore_from_checkpoint(restored_coalesce_state)
 
         # Derive coalesce on_success from graph's terminal sink map (graph-authoritative),
         # falling back to settings for non-terminal coalesce nodes.
@@ -1021,6 +1047,7 @@ class Orchestrator:
             raise ValueError("PayloadStore is required for audit compliance.")
 
         # Schema validation now happens in ExecutionGraph.validate() during graph construction
+        self._reset_checkpoint_sequence()
 
         # DATABASE phase - create recorder and begin run
         recorder, run = self._initialize_database_phase(
@@ -1375,6 +1402,7 @@ class Orchestrator:
         *,
         include_source_on_start: bool = True,
         restored_aggregation_state: dict[str, AggregationCheckpointState] | None = None,
+        restored_coalesce_state: CoalesceCheckpointState | None = None,
     ) -> RunContext:
         """Initialize run context: assign node IDs, create PluginContext, call on_start, build processor.
 
@@ -1382,6 +1410,7 @@ class Orchestrator:
             include_source_on_start: If True, call source.on_start(). False for resume
                 (source was fully consumed in original run).
             restored_aggregation_state: Map of node_id -> state for resume path.
+            restored_coalesce_state: Pending coalesce state for resume path.
 
         Returns:
             RunContext with ctx, processor, coalesce_executor, coalesce_node_map,
@@ -1453,6 +1482,7 @@ class Orchestrator:
                 restored_aggregation_state={NodeID(k): v for k, v in restored_aggregation_state.items()}
                 if restored_aggregation_state
                 else None,
+                restored_coalesce_state=restored_coalesce_state,
             )
         except Exception:
             self._cleanup_plugins(config, ctx, include_source=include_source_on_start)
@@ -2210,15 +2240,6 @@ class Orchestrator:
 
         # Process each unprocessed row using process_existing_row
         # (rows already exist in DB, only tokens need to be created)
-        #
-        # NOTE: No checkpointing during resume processing.
-        # This is intentional for the following reasons:
-        # 1. Resume typically handles few rows (those after the original checkpoint)
-        # 2. Adding checkpointing during resume increases complexity significantly
-        # 3. If resume crashes, re-running from the original checkpoint is acceptable
-        # 4. For very large resume scenarios, a future enhancement could add checkpoint
-        #    support, but the current design prioritizes simplicity over edge-case
-        #    optimization
         for row_id, _row_index, row_data in unprocessed_rows:
             counters.rows_processed += 1
 
@@ -2246,6 +2267,8 @@ class Orchestrator:
                 transforms=config.transforms,
                 ctx=ctx,
             )
+            if results:
+                loop_ctx.last_token_id = results[-1].token.token_id
 
             # Handle all results from this row
             accumulate_row_outcomes(results, counters, config.sinks, pending_tokens)
@@ -2279,7 +2302,6 @@ class Orchestrator:
             # CRITICAL: Flush remaining aggregation buffers only at true end-of-source.
             if config.aggregation_settings:
                 # Call module function directly (no wrapper method)
-                # No checkpointing during resume
                 flush_result = flush_remaining_aggregation_buffers(
                     config=config,
                     processor=processor,
@@ -2366,11 +2388,13 @@ class Orchestrator:
             def checkpoint_after_sink(sink_node_id: str) -> Callable[[TokenInfo], None]:
                 def callback(token: TokenInfo) -> None:
                     agg_state = processor.get_aggregation_checkpoint_state()
+                    coalesce_state = processor.get_coalesce_checkpoint_state()
                     self._maybe_checkpoint(
                         run_id=run_id,
                         token_id=token.token_id,
                         node_id=sink_node_id,
                         aggregation_state=agg_state,
+                        coalesce_state=coalesce_state if coalesce_state is not None and coalesce_state.pending else None,
                     )
 
                 return callback
@@ -2451,6 +2475,7 @@ class Orchestrator:
         restored_state: dict[str, AggregationCheckpointState] = {}
         if resume_point.aggregation_state is not None:
             restored_state[resume_point.node_id] = resume_point.aggregation_state
+        restored_coalesce_state = resume_point.coalesce_state
 
         # 4. Get unprocessed row data from payload store
         from elspeth.core.checkpoint import RecoveryManager
@@ -2495,6 +2520,7 @@ class Orchestrator:
             recorder=recorder,
             run_id=run_id,
             restored_aggregation_state=restored_state,
+            restored_coalesce_state=restored_coalesce_state,
             unprocessed_rows=unprocessed_rows,
             schema_contract=schema_contract,
         )
@@ -2530,14 +2556,16 @@ class Orchestrator:
         if payload_store is None:
             raise ValueError("payload_store is required for resume - row data must be retrieved from stored payloads")
 
+        self._rebase_checkpoint_sequence(resume_point.sequence_number)
         state = self._reconstruct_resume_state(resume_point, payload_store)
         run_id = state.run_id
         recorder = state.recorder
         restored_state = state.restored_aggregation_state
+        restored_coalesce_state = state.restored_coalesce_state
         schema_contract = state.schema_contract
         unprocessed_rows = state.unprocessed_rows
 
-        if not unprocessed_rows:
+        if not unprocessed_rows and not restored_state and restored_coalesce_state is None:
             # All rows were processed - complete the run
             recorder.finalize_run(run_id, status=RunStatus.COMPLETED)
 
@@ -2572,6 +2600,7 @@ class Orchestrator:
                     graph=graph,
                     unprocessed_rows=unprocessed_rows,
                     restored_aggregation_state=restored_state,
+                    restored_coalesce_state=restored_coalesce_state,
                     settings=settings,
                     payload_store=payload_store,
                     schema_contract=schema_contract,
@@ -2638,6 +2667,7 @@ class Orchestrator:
         graph: ExecutionGraph,
         unprocessed_rows: list[tuple[str, int, dict[str, Any]]],
         restored_aggregation_state: dict[str, AggregationCheckpointState],
+        restored_coalesce_state: CoalesceCheckpointState | None,
         settings: ElspethSettings | None = None,
         *,
         payload_store: PayloadStore,
@@ -2660,7 +2690,7 @@ class Orchestrator:
         # Schema contract:        Skipped (passed via parameter)
         # operation_id lifecycle: Not applicable (no source track_operation)
         # Progress emission:      None (known gap — T24 follow-up)
-        # Checkpointing:          None (on_token_written_factory=None)
+        # Checkpointing:          Same post-sink + shutdown semantics as run()
         # ─────────────────────────────────────────────────────────────────
 
         self._current_graph = graph
@@ -2680,6 +2710,7 @@ class Orchestrator:
             payload_store,
             include_source_on_start=False,
             restored_aggregation_state=restored_aggregation_state,
+            restored_coalesce_state=restored_coalesce_state,
         )
 
         # Restore contract from parameter (already retrieved by resume() caller)
@@ -2705,13 +2736,31 @@ class Orchestrator:
                 shutdown_event=shutdown_event,
             )
 
-            # 4. Flush + write sinks (no checkpointing during resume)
+            # 4. Flush + write sinks with checkpoint advancement
+            processor = run_ctx.processor
+
+            def checkpoint_after_sink(sink_node_id: str) -> Callable[[TokenInfo], None]:
+                def callback(token: TokenInfo) -> None:
+                    agg_state = processor.get_aggregation_checkpoint_state()
+                    coalesce_state = processor.get_coalesce_checkpoint_state()
+                    self._maybe_checkpoint(
+                        run_id=run_id,
+                        token_id=token.token_id,
+                        node_id=sink_node_id,
+                        aggregation_state=agg_state,
+                        coalesce_state=coalesce_state if coalesce_state is not None and coalesce_state.pending else None,
+                    )
+
+                return callback
+
             self._flush_and_write_sinks(
                 recorder,
                 run_id,
                 loop_ctx,
                 artifacts.sink_id_map,
                 interrupted,
+                on_token_written_factory=checkpoint_after_sink,
+                shutdown_checkpoint_source_id=artifacts.source_id,
             )
 
         finally:

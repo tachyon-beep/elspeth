@@ -24,6 +24,7 @@ from elspeth.engine.dag_navigator import DAGNavigator, WorkItem
 
 if TYPE_CHECKING:
     from elspeth.contracts.aggregation_checkpoint import AggregationCheckpointState
+    from elspeth.contracts.coalesce_checkpoint import CoalesceCheckpointState
     from elspeth.contracts.events import TelemetryEvent
     from elspeth.contracts.payload_store import PayloadStore
     from elspeth.engine.clock import Clock
@@ -329,10 +330,13 @@ class RowProcessor:
         )
         self._telemetry_manager = telemetry_manager
 
-        # Restore aggregation state if provided (crash recovery)
+        # Restore aggregation state if provided (crash recovery / resume)
         if restored_aggregation_state:
-            for node_id, state in restored_aggregation_state.items():
-                self._aggregation_executor.restore_state(node_id, state)
+            restored_states: dict[int, AggregationCheckpointState] = {}
+            for state in restored_aggregation_state.values():
+                restored_states.setdefault(id(state), state)
+            for state in restored_states.values():
+                self._aggregation_executor.restore_from_checkpoint(state)
 
     @property
     def token_manager(self) -> TokenManager:
@@ -559,6 +563,12 @@ class RowProcessor:
             Typed checkpoint state suitable for passing to create_checkpoint().
         """
         return self._aggregation_executor.get_checkpoint_state()
+
+    def get_coalesce_checkpoint_state(self) -> CoalesceCheckpointState | None:
+        """Get checkpoint state for pending coalesces."""
+        if self._coalesce_executor is None:
+            return None
+        return self._coalesce_executor.get_checkpoint_state()
 
     # ─────────────────────────────────────────────────────────────────────────
     # Aggregation flush helpers (shared by handle_timeout_flush and

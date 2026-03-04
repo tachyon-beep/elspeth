@@ -17,6 +17,7 @@ from sqlalchemy.engine import Row
 
 from elspeth.contracts import PayloadStore, PluginSchema, ResumeCheck, ResumePoint, RowOutcome, RunStatus, SchemaContract
 from elspeth.contracts.aggregation_checkpoint import AggregationCheckpointState
+from elspeth.contracts.coalesce_checkpoint import CoalesceCheckpointState
 from elspeth.core.checkpoint.compatibility import CheckpointCompatibilityValidator
 from elspeth.core.checkpoint.manager import CheckpointCorruptionError, CheckpointManager, IncompatibleCheckpointError
 from elspeth.core.checkpoint.serialization import checkpoint_loads
@@ -159,12 +160,18 @@ class RecoveryManager:
             raw = checkpoint_loads(checkpoint.aggregation_state_json)
             agg_state = AggregationCheckpointState.from_dict(raw)
 
+        coalesce_state = None
+        if checkpoint.coalesce_state_json:
+            raw = checkpoint_loads(checkpoint.coalesce_state_json)
+            coalesce_state = CoalesceCheckpointState.from_dict(raw)
+
         return ResumePoint(
             checkpoint=checkpoint,
             token_id=checkpoint.token_id,
             node_id=checkpoint.node_id,
             sequence_number=checkpoint.sequence_number,
             aggregation_state=agg_state,
+            coalesce_state=coalesce_state,
         )
 
     def get_unprocessed_row_data(
@@ -299,15 +306,7 @@ class RecoveryManager:
         # These buffered tokens will be restored from checkpoint state and must not
         # trigger duplicate reprocessing, but row-level exclusion is unsafe when a row
         # has mixed buffered and non-buffered incomplete tokens.
-        buffered_token_ids: set[str] = set()
-        if checkpoint.aggregation_state_json:
-            # Use checkpoint_loads for consistency (handles datetime type tags)
-            raw = checkpoint_loads(checkpoint.aggregation_state_json)
-            agg_state = AggregationCheckpointState.from_dict(raw)
-            # Typed iteration — no startswith("_") hack needed
-            for node_checkpoint in agg_state.nodes.values():
-                for token in node_checkpoint.tokens:
-                    buffered_token_ids.add(token.token_id)
+        buffered_token_ids = self._get_buffered_checkpoint_token_ids(checkpoint)
 
         with self._db.engine.connect() as conn:
             # CORRECT SEMANTICS FOR FORK/AGGREGATION/COALESCE RECOVERY:
@@ -448,6 +447,26 @@ class RecoveryManager:
             unprocessed = filtered_rows
 
         return unprocessed
+
+    def _get_buffered_checkpoint_token_ids(self, checkpoint: Any) -> set[str]:
+        """Collect token IDs restored from checkpoint state."""
+        buffered_token_ids: set[str] = set()
+
+        if checkpoint.aggregation_state_json:
+            raw = checkpoint_loads(checkpoint.aggregation_state_json)
+            agg_state = AggregationCheckpointState.from_dict(raw)
+            for node_checkpoint in agg_state.nodes.values():
+                for token in node_checkpoint.tokens:
+                    buffered_token_ids.add(token.token_id)
+
+        if checkpoint.coalesce_state_json:
+            raw = checkpoint_loads(checkpoint.coalesce_state_json)
+            coalesce_state = CoalesceCheckpointState.from_dict(raw)
+            for pending in coalesce_state.pending:
+                for token in pending.branches.values():
+                    buffered_token_ids.add(token.token_id)
+
+        return buffered_token_ids
 
     def _get_run(self, run_id: str) -> Row[Any] | None:
         """Get run metadata from the database.
