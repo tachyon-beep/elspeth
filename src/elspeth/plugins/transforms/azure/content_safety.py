@@ -92,6 +92,8 @@ _AZURE_CATEGORY_MAP: dict[str, str] = {
     "SelfHarm": "self_harm",
 }
 
+_EXPECTED_CATEGORIES: frozenset[str] = frozenset(_AZURE_CATEGORY_MAP.values())
+
 
 class AzureContentSafety(BaseAzureSafetyTransform):
     """Analyze content using Azure Content Safety API.
@@ -175,8 +177,6 @@ class AzureContentSafety(BaseAzureSafetyTransform):
             raise MalformedResponseError(f"Invalid JSON in Content Safety response: {e}") from e
 
         try:
-            # Initialize all expected categories to 0 (safe)
-            _EXPECTED_CATEGORIES = {"hate", "violence", "sexual", "self_harm"}
             result: dict[str, int] = dict.fromkeys(_EXPECTED_CATEGORIES, 0)
 
             for item in data["categoriesAnalysis"]:
@@ -225,27 +225,13 @@ class AzureContentSafety(BaseAzureSafetyTransform):
             analysis: Category -> severity mapping from _analyze_content.
                       All 4 categories are guaranteed to be present (defaults applied at boundary).
         """
+        t = self._thresholds
         categories: dict[str, dict[str, Any]] = {
-            "hate": {
-                "severity": analysis["hate"],
-                "threshold": self._thresholds.hate,
-            },
-            "violence": {
-                "severity": analysis["violence"],
-                "threshold": self._thresholds.violence,
-            },
-            "sexual": {
-                "severity": analysis["sexual"],
-                "threshold": self._thresholds.sexual,
-            },
-            "self_harm": {
-                "severity": analysis["self_harm"],
-                "threshold": self._thresholds.self_harm,
-            },
+            "hate": {"severity": analysis["hate"], "threshold": t.hate, "exceeded": analysis["hate"] > t.hate},
+            "violence": {"severity": analysis["violence"], "threshold": t.violence, "exceeded": analysis["violence"] > t.violence},
+            "sexual": {"severity": analysis["sexual"], "threshold": t.sexual, "exceeded": analysis["sexual"] > t.sexual},
+            "self_harm": {"severity": analysis["self_harm"], "threshold": t.self_harm, "exceeded": analysis["self_harm"] > t.self_harm},
         }
-
-        for info in categories.values():
-            info["exceeded"] = info["severity"] > info["threshold"]
 
         if any(info["exceeded"] for info in categories.values()):
             return categories

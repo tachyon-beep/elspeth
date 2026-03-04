@@ -178,7 +178,6 @@ class JSONExplode(BaseTransform):
         if self._include_index:
             fields_added.append("item_index")
 
-        # B3: Validate schema homogeneity before using first row's schema
         if len(output_rows) > 1:
             first_keys = set(output_rows[0].keys())
             for i, output_row in enumerate(output_rows[1:], start=1):

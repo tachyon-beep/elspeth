@@ -110,7 +110,6 @@ class BatchStats(BaseTransform):
             result_data["batch_empty"] = True
             fields_added.append("batch_empty")
 
-            # Create OBSERVED contract for transform mode (processor.py:712 requires it)
             fields = tuple(
                 FieldContract(
                     normalized_name=key,
@@ -214,8 +213,6 @@ class BatchStats(BaseTransform):
         if self._group_by and rows:
             fields_added.append(self._group_by)
 
-        # Create OBSERVED contract from output fields for transform mode
-        # Aggregations in transform mode create new tokens (processor.py:712 requires contract)
         fields = tuple(
             FieldContract(
                 normalized_name=key,

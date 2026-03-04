@@ -20,7 +20,7 @@ from sqlalchemy.engine import Engine
 from sqlalchemy.types import TypeEngine
 
 from elspeth.contracts import ArtifactDescriptor, CallStatus, CallType, PluginSchema
-from elspeth.contracts.contexts import LifecycleContext, SinkContext
+from elspeth.contracts.contexts import SinkContext
 from elspeth.contracts.url import SanitizedDatabaseUrl
 from elspeth.core.canonical import canonical_json
 from elspeth.plugins.infrastructure.base import BaseSink
@@ -268,7 +268,6 @@ class DatabaseSink(BaseSink):
 
         DDL operations (DROP TABLE, CREATE TABLE) are instrumented via
         ctx.record_call for audit trail completeness.
-        See P2-2026-02-14-ddl-calls-bypass-ctx-record-call.
         """
         self._ensure_engine_and_metadata_initialized()
         if self._engine is None:
@@ -331,7 +330,6 @@ class DatabaseSink(BaseSink):
         (SQLite, PostgreSQL, MySQL, etc.).
 
         DDL is instrumented via ctx.record_call for audit trail completeness.
-        See P2-2026-02-14-ddl-calls-bypass-ctx-record-call.
         """
         if self._engine is None:
             return
@@ -540,12 +538,3 @@ class DatabaseSink(BaseSink):
             self._metadata = None
             self._table_replaced = False
 
-    # === Lifecycle Hooks ===
-
-    def on_start(self, ctx: LifecycleContext) -> None:
-        """Called before processing begins."""
-        pass
-
-    def on_complete(self, ctx: LifecycleContext) -> None:
-        """Called after processing completes."""
-        pass

@@ -20,7 +20,7 @@ from elspeth.contracts import ArtifactDescriptor, PluginSchema
 if TYPE_CHECKING:
     from elspeth.contracts.schema_contract import SchemaContract
     from elspeth.contracts.sink import OutputValidationResult
-from elspeth.contracts.contexts import LifecycleContext, SinkContext
+from elspeth.contracts.contexts import SinkContext
 from elspeth.contracts.header_modes import HeaderMode, resolve_headers
 from elspeth.plugins.infrastructure.base import BaseSink
 from elspeth.plugins.infrastructure.config_base import SinkPathConfig
@@ -512,8 +512,7 @@ class CSVSink(BaseSink):
         explicit orchestrator wiring of set_output_contract().
 
         The orchestrator sets ctx.contract after the first valid source row is
-        processed (see orchestrator/core.py line ~1164). By the time write() is
-        called, the contract is available.
+        processed. By the time write() is called, the contract is available.
 
         Note:
             This only has effect when:
@@ -617,17 +616,3 @@ class CSVSink(BaseSink):
             self._file = None
             self._writer = None
 
-    # === Lifecycle Hooks ===
-
-    def on_start(self, ctx: LifecycleContext) -> None:
-        """Called before processing begins.
-
-        Note: ORIGINAL header resolution is done lazily in write() because
-        the field resolution mapping is only recorded AFTER source iteration begins,
-        which happens after on_start() is called.
-        """
-        pass
-
-    def on_complete(self, ctx: LifecycleContext) -> None:
-        """Called after processing completes."""
-        pass

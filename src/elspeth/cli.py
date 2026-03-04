@@ -160,9 +160,6 @@ def main(
         )
 
 
-# === Subcommand stubs (to be implemented in later tasks) ===
-
-
 def _ensure_output_directories(config: ElspethSettings) -> list[str]:
     """Ensure required output directories exist, creating them if needed.
 
@@ -424,14 +421,14 @@ def run(
         typer.echo(f"Error loading secrets: {e}", err=True)
         raise typer.Exit(1) from None
 
-    # NEW: Instantiate plugins BEFORE graph construction
+    # Instantiate plugins before graph construction
     try:
         plugins = instantiate_plugins_from_config(config)
     except Exception as e:
         typer.echo(f"Error instantiating plugins: {e}", err=True)
         raise typer.Exit(1) from None
 
-    # NEW: Build and validate graph from plugin instances
+    # Build and validate graph from plugin instances
     # Exclude export sink from graph - it's used post-run, not during pipeline execution.
     # The export sink receives audit records after the run completes, not pipeline data.
     execution_sinks = plugins.sinks
@@ -1972,11 +1969,8 @@ def health(
         elspeth health --verbose
     """
     import json as json_module
-    import os
     import subprocess
     import sys
-
-    from elspeth import __version__
 
     # Health check results
     checks: dict[str, dict[str, str | bool]] = {}

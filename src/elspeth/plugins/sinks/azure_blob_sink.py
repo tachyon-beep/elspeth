@@ -26,7 +26,7 @@ from jinja2.sandbox import SandboxedEnvironment
 from pydantic import BaseModel, Field, field_validator, model_validator
 
 from elspeth.contracts import ArtifactDescriptor, CallStatus, CallType, PluginSchema
-from elspeth.contracts.contexts import LifecycleContext, SinkContext
+from elspeth.contracts.contexts import SinkContext
 from elspeth.plugins.infrastructure.azure_auth import AzureAuthConfig
 from elspeth.plugins.infrastructure.base import BaseSink
 from elspeth.plugins.infrastructure.config_base import DataPluginConfig
@@ -695,12 +695,3 @@ class AzureBlobSink(BaseSink):
         self._resolved_blob_path = None
         self._has_uploaded = False
 
-    # === Lifecycle Hooks ===
-
-    def on_start(self, ctx: LifecycleContext) -> None:
-        """Called before processing begins."""
-        pass
-
-    def on_complete(self, ctx: LifecycleContext) -> None:
-        """Called after processing completes."""
-        pass

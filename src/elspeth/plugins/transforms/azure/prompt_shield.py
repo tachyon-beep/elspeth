@@ -178,16 +178,15 @@ class AzurePromptShield(BaseAzureSafetyTransform):
                     f"documentsAnalysis must have exactly 1 entry (matching submitted document count), got {len(documents_analysis)}"
                 )
 
-            for i, doc in enumerate(documents_analysis):
-                if not isinstance(doc, dict):
-                    raise MalformedResponseError(f"documentsAnalysis[{i}] must be dict, got {type(doc).__name__}")
-                attack_detected = doc.get("attackDetected")
-                if not isinstance(attack_detected, bool):
-                    raise MalformedResponseError(
-                        f"documentsAnalysis[{i}].attackDetected must be bool, got {type(attack_detected).__name__}"
-                    )
-                if attack_detected:
-                    doc_attack = True
+            doc = documents_analysis[0]
+            if not isinstance(doc, dict):
+                raise MalformedResponseError(f"documentsAnalysis[0] must be dict, got {type(doc).__name__}")
+            attack_detected = doc.get("attackDetected")
+            if not isinstance(attack_detected, bool):
+                raise MalformedResponseError(
+                    f"documentsAnalysis[0].attackDetected must be bool, got {type(attack_detected).__name__}"
+                )
+            doc_attack = attack_detected
 
         return {
             "user_prompt_attack": user_attack,

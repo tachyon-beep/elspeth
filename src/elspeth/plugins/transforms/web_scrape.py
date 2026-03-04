@@ -276,8 +276,7 @@ class WebScrapeTransform(BaseTransform):
         output["fetch_response_raw_hash"] = response_raw_hash
         output["fetch_response_processed_hash"] = response_processed_hash
 
-        # Propagate contract with new fields inferred from output
-        # Per P2 bug fix: Without this, FIXED schemas can't access new fields
+        # Propagate contract so FIXED schemas can access fields added during enrichment
         output_contract = narrow_contract_to_output(
             input_contract=row.contract,
             output_row=output,

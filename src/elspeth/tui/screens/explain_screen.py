@@ -177,9 +177,7 @@ class ExplainScreen:
                 "source": {
                     "name": source_nodes[0].plugin_name if source_nodes else "unknown",
                     "node_id": source_nodes[0].node_id if source_nodes else None,
-                }
-                if source_nodes
-                else {"name": "unknown", "node_id": None},
+                },
                 "transforms": [{"name": n.plugin_name, "node_id": n.node_id, "node_type": n.node_type.value} for n in transform_nodes],
                 "sinks": [{"name": n.plugin_name, "node_id": n.node_id, "node_type": n.node_type.value} for n in sink_nodes],
                 "tokens": [],  # Tokens loaded separately when needed
@@ -202,14 +200,6 @@ class ExplainScreen:
             )
             return LoadingFailedState(db=db, run_id=run_id, error=str(e))
 
-    def get_widget_types(self) -> list[str]:
-        """Get list of widget types in this screen.
-
-        Returns:
-            List of widget type names
-        """
-        return ["LineageTree", "NodeDetailPanel"]
-
     def get_lineage_data(self) -> LineageData | None:
         """Get current lineage data.
 
@@ -219,14 +209,6 @@ class ExplainScreen:
         match self._state:
             case LoadedState(lineage_data=data):
                 return data
-            case _:
-                return None
-
-    def _get_db(self) -> LandscapeDB | None:
-        """Get database connection if available."""
-        match self._state:
-            case LoadedState(db=db) | LoadingFailedState(db=db):
-                return db
             case _:
                 return None
 
@@ -246,14 +228,12 @@ class ExplainScreen:
         """
         self._selected_node_id = node_id
 
-        # Load node state from database if in a state with db access
-        db = self._get_db()
-        run_id = self._get_run_id()
-        if db and run_id and node_id:
-            node_state = self._load_node_state(db, run_id, node_id)
-            self._detail_panel.update_state(node_state)
-        else:
-            self._detail_panel.update_state(None)
+        match self._state:
+            case (LoadedState(db=db, run_id=run_id) | LoadingFailedState(db=db, run_id=run_id)) if node_id:
+                node_state = self._load_node_state(db, run_id, node_id)
+                self._detail_panel.update_state(node_state)
+            case _:
+                self._detail_panel.update_state(None)
 
     def _load_node_state(self, db: LandscapeDB, run_id: str, node_id: str) -> NodeStateInfo | None:
         """Load node state from database.
@@ -305,14 +285,6 @@ class ExplainScreen:
             )
             return None
 
-    def get_detail_panel_state(self) -> NodeStateInfo | None:
-        """Get current detail panel state.
-
-        Returns:
-            Node state being displayed or None
-        """
-        return self._detail_panel._state
-
     def render(self) -> str:
         """Render the screen as text.
 
@@ -343,10 +315,6 @@ class ExplainScreen:
         lines.append(self._detail_panel.render_content())
 
         return "\n".join(lines)
-
-    # =========================================================================
-    # State Transition Methods
-    # =========================================================================
 
     def load(self, db: LandscapeDB, run_id: str) -> None:
         """Load pipeline data from database.

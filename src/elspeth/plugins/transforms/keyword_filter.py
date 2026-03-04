@@ -11,12 +11,8 @@ from elspeth.contracts.schema_contract import PipelineRow
 from elspeth.plugins.infrastructure.base import BaseTransform
 from elspeth.plugins.infrastructure.config_base import TransformDataConfig
 from elspeth.plugins.infrastructure.results import TransformResult
-from elspeth.plugins.transforms.safety_utils import (
-    get_fields_to_scan,
-)
-from elspeth.plugins.transforms.safety_utils import (
-    validate_fields_not_empty as _validate_fields,
-)
+from elspeth.plugins.transforms.safety_utils import get_fields_to_scan
+from elspeth.plugins.transforms.safety_utils import validate_fields_not_empty as _validate_fields
 
 # ReDoS detection: patterns with nested quantifiers cause catastrophic backtracking
 # on adversarial input. E.g., (a+)+ on "aaa...!" is O(2^n).
@@ -154,7 +150,7 @@ class KeywordFilter(BaseTransform):
             TransformResult.success(row) if no patterns match
             TransformResult.error(reason) if any pattern matches
         """
-        fields_to_scan = self._get_fields_to_scan(row)
+        fields_to_scan = get_fields_to_scan(self._fields, row)
         named_fields = self._fields != "all"
 
         for field_name in fields_to_scan:
@@ -202,10 +198,6 @@ class KeywordFilter(BaseTransform):
             row,
             success_reason={"action": "filtered"},
         )
-
-    def _get_fields_to_scan(self, row: PipelineRow) -> list[str]:
-        """Determine which fields to scan based on config."""
-        return get_fields_to_scan(self._fields, row)
 
     def close(self) -> None:
         """Release resources."""

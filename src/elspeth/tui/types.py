@@ -96,12 +96,6 @@ class NodeStateInfo(TypedDict, total=False):
     artifact: dict[str, Any]
 
 
-# =============================================================================
-# Display Types for Parsed Landscape Data
-# =============================================================================
-# These types represent PARSED data from Landscape that has been validated.
-# After validation, fields are accessed directly (no .get()).
-
 
 class ExecutionErrorDisplay(TypedDict, total=False):
     """Parsed ExecutionError for display.

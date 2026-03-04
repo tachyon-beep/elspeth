@@ -26,16 +26,12 @@ from elspeth.plugins.infrastructure.base import BaseSource
 from elspeth.plugins.infrastructure.config_base import DataPluginConfig
 from elspeth.plugins.infrastructure.schema_factory import create_schema_from_config
 from elspeth.plugins.sources.field_normalization import FieldResolution, resolve_field_names
+from elspeth.plugins.sources.json_source import _reject_nonfinite_constant
 
 if TYPE_CHECKING:
     from azure.storage.blob import BlobClient
 
 logger = logging.getLogger(__name__)
-
-
-def _reject_nonfinite_constant(value: str) -> None:
-    """Reject non-standard JSON constants (NaN, Infinity, -Infinity)."""
-    raise ValueError(f"Non-standard JSON constant '{value}' not allowed. Use null for missing values, not NaN/Infinity.")
 
 
 class CSVOptions(BaseModel):
@@ -356,8 +352,6 @@ class AzureBlobSource(BaseSource):
         # Lazy-loaded blob client
         self._blob_client: BlobClient | None = None
 
-        # PHASE 1: Validate self-consistency
-
     def _get_blob_client(self) -> BlobClient:
         """Get or create the Azure Blob client.
 
@@ -491,8 +485,8 @@ class AzureBlobSource(BaseSource):
         except UnicodeDecodeError as e:
             raise ValueError(f"Failed to decode blob as {encoding}: {e}") from e
 
-        # BUG-BLOB-01 fix: Wrap pandas CSV parsing to quarantine on structural errors
-        # Even with pandas' robustness, severely malformed CSVs can cause parse failures
+        # Wrap pandas CSV parsing to quarantine on structural errors.
+        # Even with pandas' robustness, severely malformed CSVs can cause parse failures.
         try:
             # Use pandas for robust CSV parsing (consistent with CSVSource)
             header_arg = 0 if has_header else None
