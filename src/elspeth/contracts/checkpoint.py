@@ -13,7 +13,7 @@ from elspeth.contracts.audit import Checkpoint
 from elspeth.contracts.coalesce_checkpoint import CoalesceCheckpointState
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, slots=True)
 class ResumeCheck:
     """Result of checking if a run can be resumed.
 
@@ -31,7 +31,7 @@ class ResumeCheck:
             raise ValueError("can_resume=False must have a reason explaining why")
 
 
-@dataclass
+@dataclass(frozen=True, slots=True)
 class ResumePoint:
     """Information needed to resume a run.
 

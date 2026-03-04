@@ -102,7 +102,7 @@ class NodeInfo:
             raise GraphValidationError(msg)
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, slots=True)
 class _GateEntry:
     """Internal gate metadata for coalesce and routing wiring."""
 

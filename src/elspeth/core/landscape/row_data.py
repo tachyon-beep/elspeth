@@ -16,7 +16,7 @@ States:
 
 from dataclasses import dataclass
 from enum import StrEnum
-from typing import Any
+from typing import Any, ClassVar
 
 
 class RowDataState(StrEnum):
@@ -33,7 +33,7 @@ class RowDataState(StrEnum):
     ROW_NOT_FOUND = "row_not_found"
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, slots=True)
 class RowDataResult:
     """Result of a row data retrieval with explicit state.
 
@@ -57,7 +57,7 @@ class RowDataResult:
     state: RowDataState
     data: dict[str, Any] | None
 
-    _STATES_WITH_DATA = frozenset({RowDataState.AVAILABLE, RowDataState.REPR_FALLBACK})
+    _STATES_WITH_DATA: ClassVar[frozenset[RowDataState]] = frozenset({RowDataState.AVAILABLE, RowDataState.REPR_FALLBACK})
 
     def __post_init__(self) -> None:
         if type(self.state) is not RowDataState:
