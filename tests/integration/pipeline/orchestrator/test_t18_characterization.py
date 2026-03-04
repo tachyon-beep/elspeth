@@ -479,6 +479,7 @@ class TestT18CharacterizationResumePath:
             graph=graph,
             unprocessed_rows=[(row_id, 0, {"value": 1})],
             restored_aggregation_state={},
+            restored_coalesce_state=None,
             payload_store=payload_store,
             schema_contract=resume_contract,
         )
@@ -588,6 +589,7 @@ class TestT18CharacterizationResumePath:
                 graph=graph,
                 unprocessed_rows=[],
                 restored_aggregation_state={},
+                restored_coalesce_state=None,
                 payload_store=payload_store,
                 schema_contract=schema_contract,
             )
