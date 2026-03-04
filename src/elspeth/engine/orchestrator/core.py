@@ -441,6 +441,21 @@ class Orchestrator:
             node_id = str(source_id)
 
         if token_id is None or node_id is None:
+            import structlog
+
+            structlog.get_logger().warning(
+                "shutdown_checkpoint_skipped",
+                run_id=run_id,
+                reason="no_token_or_node_id_available",
+                has_aggregation_nodes=bool(aggregation_state.nodes),
+                has_coalesce_pending=coalesce_state is not None,
+                has_pending_sink_tokens=any(
+                    bool(pairs) for pairs in loop_ctx.pending_tokens.values()
+                ),
+                last_token_id=loop_ctx.last_token_id,
+                resolved_token_id=token_id,
+                resolved_node_id=node_id,
+            )
             return
 
         self._sequence_number += 1
