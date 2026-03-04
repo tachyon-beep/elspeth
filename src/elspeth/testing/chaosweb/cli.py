@@ -351,12 +351,7 @@ def show_config(
     if output_format == "json":
         typer.echo(json.dumps(config_dict, indent=2))
     else:
-        try:
-            import yaml
-
-            typer.echo(yaml.dump(config_dict, default_flow_style=False, sort_keys=False))
-        except ImportError:
-            typer.echo(json.dumps(config_dict, indent=2))
+        typer.echo(yaml.dump(config_dict, default_flow_style=False, sort_keys=False))
 
 
 def main() -> None:

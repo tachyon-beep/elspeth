@@ -176,7 +176,7 @@ class ContentGenerator:
         """Create Jinja2 SandboxedEnvironment with template helpers.
 
         Uses SandboxedEnvironment to prevent arbitrary code execution
-        in user-provided templates (review condition S3).
+        in user-provided templates.
         """
         env = jinja2.sandbox.SandboxedEnvironment(
             autoescape=True,  # HTML context — auto-escape for safety
@@ -258,9 +258,6 @@ class ContentGenerator:
         words_used = 0
         while words_used < total_words:
             remaining = total_words - words_used
-            if remaining <= 0:
-                break
-
             tag, kind = self._rng.choice(_BLOCK_ELEMENTS)
 
             if kind == "heading":
@@ -301,7 +298,7 @@ class ContentGenerator:
         """Generate HTML from Jinja2 template.
 
         Template rendering errors are caught and return a generic error page
-        (review condition: no Python tracebacks in responses).
+        to avoid leaking Python tracebacks in responses.
         """
         template_str = self._config.template.body
         max_len = self._config.max_template_length
@@ -333,8 +330,7 @@ class ContentGenerator:
     def _generate_echo_html(self, path: str, headers: dict[str, str]) -> str:
         """Generate HTML that reflects request information.
 
-        All reflected content is HTML-escaped to prevent XSS
-        (review condition: echo mode XSS sanitization).
+        All reflected content is HTML-escaped to prevent XSS.
         """
         escaped_path = html.escape(path)
         header_rows = "\n".join(f"<tr><td>{html.escape(k)}</td><td>{html.escape(v)}</td></tr>" for k, v in sorted(headers.items()))
