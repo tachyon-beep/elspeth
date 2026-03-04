@@ -284,7 +284,8 @@ class LandscapeDB:
         New databases get the epoch immediately after create_all(). Existing
         compatible databases without an epoch are upgraded in place to the
         current stamp, which preserves a future migration path without requiring
-        a full migration framework today.
+        a full migration framework today. Call this only from schema-managing
+        paths; read-only/inspection opens must not mutate the database.
         """
         if not self.connection_string.startswith("sqlite"):
             return
@@ -518,7 +519,7 @@ class LandscapeDB:
 
         if create_tables:
             metadata.create_all(engine)
-        instance._sync_sqlite_schema_epoch()
+            instance._sync_sqlite_schema_epoch()
         return instance
 
     @staticmethod

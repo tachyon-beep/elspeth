@@ -161,6 +161,23 @@ class TestJournalPathGuards:
 
         assert epoch == SQLITE_SCHEMA_EPOCH
 
+    def test_from_url_create_tables_false_does_not_stamp_schema_epoch(self, tmp_path: Path) -> None:
+        """Read-only opens must not mutate compatible legacy SQLite databases."""
+        db_path = tmp_path / "readonly_epoch.db"
+        engine = create_engine(f"sqlite:///{db_path}")
+        metadata.create_all(engine)
+        engine.dispose()
+
+        db = LandscapeDB.from_url(f"sqlite:///{db_path}", create_tables=False)
+        db.close()
+
+        engine = create_engine(f"sqlite:///{db_path}")
+        with engine.connect() as conn:
+            epoch = conn.exec_driver_sql("PRAGMA user_version").scalar_one()
+        engine.dispose()
+
+        assert epoch == 0
+
     def test_from_url_dump_to_jsonl_requires_explicit_path_for_non_sqlite(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """Non-SQLite URLs must provide dump_to_jsonl_path explicitly."""
         mock_create_engine = Mock(return_value=Mock())
