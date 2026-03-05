@@ -1,4 +1,4 @@
-# Mutation Testing Workflow
+# Mutation Testing Workflow (cosmic-ray)
 # Runs weekly to validate test effectiveness - mutation testing is slow so not run on every PR
 #
 # Mutation testing introduces artificial bugs (mutants) into the code and checks if tests catch them.
@@ -8,6 +8,9 @@
 #   - canonical.py: 95%+ (hash integrity is foundational)
 #   - landscape/: 90%+ (audit trail is the legal record)
 #   - engine/: 85%+ (orchestration correctness)
+#
+# Note: cosmic-ray has a known bug with lambda functions (github.com/sixty-north/cosmic-ray/issues/581).
+# The fix is applied via a post-install patch in the setup step.
 
 name: Mutation Testing
 
@@ -18,15 +21,21 @@ on:
   workflow_dispatch:
     # Allow manual triggering for ad-hoc runs
     inputs:
-      paths_to_mutate:
-        description: 'Specific path to mutate (default: src/elspeth/core/)'
+      module:
+        description: 'Module to test (default: canonical.py)'
         required: false
-        default: 'src/elspeth/core/canonical.py'
+        default: 'canonical.py'
+        type: choice
+        options:
+          - canonical.py
+          - landscape/recorder.py
+          - landscape/exporter.py
+          - landscape/models.py
 
 jobs:
   mutation-test:
     runs-on: ubuntu-latest
-    timeout-minutes: 60  # Mutation testing is slow
+    timeout-minutes: 60
 
     steps:
       - name: Checkout code
@@ -46,31 +55,27 @@ jobs:
           source .venv/bin/activate
           uv pip install -e ".[dev]"
 
-      - name: Run mutation testing on canonical.py (critical)
+      - name: Patch cosmic-ray lambda bug
         run: |
           source .venv/bin/activate
-          echo "## Mutation Testing: canonical.py" >> $GITHUB_STEP_SUMMARY
+          # Fix github.com/sixty-north/cosmic-ray/issues/581
+          # Lambda nodes inherit from Function but have no .name attribute
+          QUERY_FILE=$(python -c "import cosmic_ray.ast.ast_query; print(cosmic_ray.ast.ast_query.__file__)")
+          sed -i 's/if isinstance(obj, (parso.python.tree.Function, parso.python.tree.Class)):/if isinstance(obj, (parso.python.tree.Function, parso.python.tree.Class)) and not isinstance(obj, parso.python.tree.Lambda):/' "$QUERY_FILE"
+
+      - name: Run mutation testing
+        run: |
+          source .venv/bin/activate
+          MODULE="${{ github.event.inputs.module || 'canonical.py' }}"
+          echo "## Mutation Testing: ${MODULE}" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
 
-          # Run mutmut on canonical.py - the hash integrity module
-          python -m mutmut run --paths-to-mutate src/elspeth/core/canonical.py || true
+          python scripts/run_mutation_testing.py --module "$MODULE" --strict
 
-          # Capture results
           echo "### Results" >> $GITHUB_STEP_SUMMARY
           echo '```' >> $GITHUB_STEP_SUMMARY
-          python -m mutmut results 2>/dev/null || echo "Results summary not available"
+          python scripts/run_mutation_testing.py --module "$MODULE" --show-survivors --no-clean 2>&1 | tee -a $GITHUB_STEP_SUMMARY
           echo '```' >> $GITHUB_STEP_SUMMARY
-
-      - name: Check canonical.py mutation score
-        run: |
-          source .venv/bin/activate
-          # Count killed vs total
-          KILLED=$(cat .mutmut-cache/mutmut.db 2>/dev/null | grep -c "killed" || echo "0")
-          TOTAL=$(cat .mutmut-cache/mutmut.db 2>/dev/null | grep -c "mutant" || echo "1")
-
-          # Basic threshold check (95% target for canonical)
-          # Note: Actual scoring would require parsing mutmut output
-          echo "Mutation testing completed for canonical.py"
 
       - name: Upload mutation results
         uses: actions/upload-artifact@v4
@@ -78,13 +83,13 @@ jobs:
         with:
           name: mutation-results
           path: |
-            .mutmut-cache/
+            .cosmic-ray/
           retention-days: 30
 
   mutation-test-landscape:
     runs-on: ubuntu-latest
-    timeout-minutes: 120  # Landscape has more code
-    if: github.event_name == 'schedule'  # Only run on schedule, not manual dispatch
+    timeout-minutes: 120
+    if: github.event_name == 'schedule'
 
     steps:
       - name: Checkout code
@@ -104,18 +109,25 @@ jobs:
           source .venv/bin/activate
           uv pip install -e ".[dev]"
 
-      - name: Run mutation testing on landscape recorder
+      - name: Patch cosmic-ray lambda bug
         run: |
           source .venv/bin/activate
-          echo "## Mutation Testing: landscape/recorder.py" >> $GITHUB_STEP_SUMMARY
+          QUERY_FILE=$(python -c "import cosmic_ray.ast.ast_query; print(cosmic_ray.ast.ast_query.__file__)")
+          sed -i 's/if isinstance(obj, (parso.python.tree.Function, parso.python.tree.Class)):/if isinstance(obj, (parso.python.tree.Function, parso.python.tree.Class)) and not isinstance(obj, parso.python.tree.Lambda):/' "$QUERY_FILE"
+
+      - name: Run mutation testing on landscape modules
+        run: |
+          source .venv/bin/activate
+          echo "## Mutation Testing: landscape/" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
 
-          python -m mutmut run --paths-to-mutate src/elspeth/core/landscape/recorder.py || true
-
-          echo "### Results" >> $GITHUB_STEP_SUMMARY
-          echo '```' >> $GITHUB_STEP_SUMMARY
-          python -m mutmut results 2>/dev/null || echo "Results summary not available"
-          echo '```' >> $GITHUB_STEP_SUMMARY
+          for MODULE in landscape/recorder.py landscape/exporter.py landscape/models.py; do
+            echo "### ${MODULE}" >> $GITHUB_STEP_SUMMARY
+            python scripts/run_mutation_testing.py --module "$MODULE" --no-clean || true
+            echo '```' >> $GITHUB_STEP_SUMMARY
+            python scripts/run_mutation_testing.py --module "$MODULE" --show-survivors --no-clean 2>&1 | tee -a $GITHUB_STEP_SUMMARY
+            echo '```' >> $GITHUB_STEP_SUMMARY
+          done
 
       - name: Upload mutation results
         uses: actions/upload-artifact@v4
@@ -123,5 +135,5 @@ jobs:
         with:
           name: mutation-results-landscape
           path: |
-            .mutmut-cache/
+            .cosmic-ray/
           retention-days: 30

@@ -123,9 +123,8 @@ credentials.json
 .DS_Store
 Thumbs.db
 
-# Mutation testing
-.mutmut-cache
-mutants/
+# Mutation testing (cosmic-ray)
+.cosmic-ray/
 
 # uv
 .uv-cache/

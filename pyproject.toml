@@ -82,7 +82,7 @@ dev = [
     "types-networkx>=3.2,<4",  # NetworkX type hints
     "types-PyYAML>=6.0,<7",  # PyYAML type hints
     # Mutation testing (Phase 3)
-    "mutmut>=2.4,<3",  # Mutation testing
+    "cosmic-ray>=8.4,<9",  # Mutation testing
     # ChaosLLM test server
     "starlette>=0.45,<1",  # ASGI framework for ChaosLLM
     "uvicorn>=0.34,<1",  # ASGI server for ChaosLLM
@@ -152,7 +152,7 @@ all = [
     "pandas-stubs>=2.2,<3",
     "types-networkx>=3.2,<4",
     "types-PyYAML>=6.0,<7",
-    "mutmut>=2.4,<3",
+    "cosmic-ray>=8.4,<9",
     "starlette>=0.45,<1",
     "uvicorn>=0.34,<1",
     "respx>=0.21,<1",
@@ -337,29 +337,3 @@ exclude_lines = [
     "@abstractmethod",
 ]
 
-# === Mutation Testing Configuration (mutmut 2.x) ===
-[tool.mutmut]
-# Paths to mutate - audit-critical code that MUST have effective tests
-# Target mutation scores:
-#   - canonical.py: 95%+ (hash integrity is critical)
-#   - landscape/: 90%+ (audit trail must be bulletproof)
-#   - engine/: 85%+ (orchestration must be reliable)
-paths_to_mutate = [
-    # Core audit infrastructure
-    "src/elspeth/core/canonical.py",
-    "src/elspeth/core/payload_store.py",
-    "src/elspeth/core/landscape/",
-    "src/elspeth/core/checkpoint/",
-    # Engine - row processing and orchestration
-    "src/elspeth/engine/orchestrator/",
-    "src/elspeth/engine/processor.py",
-    "src/elspeth/engine/executors/",
-    "src/elspeth/engine/coalesce_executor.py",
-    "src/elspeth/engine/tokens.py",
-]
-# Test runner - include engine tests, use short traceback for debugging
-runner = "python -m pytest tests/unit/core/ tests/unit/engine/ tests/property/ --tb=short"
-# Tests directory
-tests_dir = "tests/"
-# Disable backup files - we use git
-backup = false

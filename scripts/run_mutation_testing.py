@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Run mutation testing on ELSPETH core modules.
+"""Run mutation testing on ELSPETH core modules using cosmic-ray.
 
 Mutation testing validates test effectiveness by introducing artificial bugs
 (mutants) and checking if tests catch them. A high mutation score means tests
@@ -32,156 +32,240 @@ Exit codes:
 from __future__ import annotations
 
 import argparse
-import contextlib
 import shutil
 import subprocess
 import sys
 from pathlib import Path
 
-# Module paths relative to src/elspeth/core/
-MODULES = {
-    "canonical": "canonical.py",
-    "landscape/recorder": "landscape/recorder.py",
-    "landscape/exporter": "landscape/exporter.py",
-    "landscape/models": "landscape/models.py",
+# Module paths relative to src/elspeth/core/, with per-module test scopes
+MODULES: dict[str, dict[str, str | list[str]]] = {
+    "canonical.py": {
+        "path": "src/elspeth/core/canonical.py",
+        "tests": ["tests/unit/core/test_canonical.py", "tests/unit/core/test_canonical_mutation_gaps.py"],
+    },
+    "landscape/recorder.py": {
+        "path": "src/elspeth/core/landscape/recorder.py",
+        "tests": ["tests/unit/core/landscape/"],
+    },
+    "landscape/exporter.py": {
+        "path": "src/elspeth/core/landscape/exporter.py",
+        "tests": ["tests/unit/core/landscape/"],
+    },
+    "landscape/models.py": {
+        "path": "src/elspeth/core/landscape/models.py",
+        "tests": ["tests/unit/core/landscape/"],
+    },
 }
 
 # Target mutation scores per module
-THRESHOLDS = {
+THRESHOLDS: dict[str, int] = {
     "canonical.py": 95,
     "landscape/recorder.py": 90,
     "landscape/exporter.py": 90,
     "landscape/models.py": 90,
 }
 
-CORE_PATH = Path("src/elspeth/core")
-CACHE_PATH = Path(".mutmut-cache")
+SESSION_DIR = Path(".cosmic-ray")
 
 
-def clean_cache() -> None:
-    """Remove the mutmut cache directory."""
-    if CACHE_PATH.exists():
-        print(f"🧹 Cleaning {CACHE_PATH}...")
-        shutil.rmtree(CACHE_PATH)
+def _session_path(module_key: str) -> Path:
+    """Get session file path for a module."""
+    safe_name = module_key.replace("/", "_").replace(".py", "")
+    return SESSION_DIR / f"{safe_name}.sqlite"
 
 
-def run_mutmut(module_path: str, timeout_minutes: int = 120) -> int:
-    """Run mutmut on a specific module.
+def _config_path(module_key: str) -> Path:
+    """Get config file path for a module."""
+    safe_name = module_key.replace("/", "_").replace(".py", "")
+    return SESSION_DIR / f"{safe_name}.toml"
+
+
+def _write_config(module_key: str) -> Path:
+    """Generate a cosmic-ray TOML config for a module."""
+    module_info = MODULES[module_key]
+    module_path = module_info["path"]
+    test_paths = module_info["tests"]
+
+    test_args = " ".join(str(t) for t in test_paths)
+    test_command = f"python -m pytest {test_args} --tb=short -q"
+
+    config = f"""[cosmic-ray]
+module-path = "{module_path}"
+timeout = 30
+excluded-modules = []
+test-command = "{test_command}"
+
+[cosmic-ray.distributor]
+name = "local"
+"""
+    config_file = _config_path(module_key)
+    config_file.write_text(config)
+    return config_file
+
+
+def run_cosmic_ray(module_key: str, timeout_minutes: int = 120) -> int:
+    """Run cosmic-ray on a specific module.
 
     Args:
-        module_path: Path relative to src/elspeth/core/
+        module_key: Key in MODULES dict (e.g., "canonical.py")
         timeout_minutes: Maximum time to wait
 
     Returns:
-        Exit code from mutmut
+        Exit code (0 = success)
     """
-    full_path = CORE_PATH / module_path
+    module_info = MODULES[module_key]
+    module_path = module_info["path"]
 
-    if not full_path.exists():
-        print(f"❌ Module not found: {full_path}")
+    if not Path(module_path).exists():
+        print(f"Module not found: {module_path}")
         return 1
 
     print(f"\n{'=' * 60}")
-    print(f"🧬 Running mutation testing on: {module_path}")
+    print(f"Running mutation testing on: {module_key}")
     print(f"{'=' * 60}\n")
 
-    cmd = [
-        sys.executable,
-        "-m",
-        "mutmut",
-        "run",
-        "--paths-to-mutate",
-        str(full_path),
-    ]
+    config_file = _write_config(module_key)
+    session_file = _session_path(module_key)
 
+    # Phase 1: Init - discover all mutants
+    print("Phase 1: Discovering mutants...")
     try:
-        result = subprocess.run(
-            cmd,
+        subprocess.run(
+            [sys.executable, "-m", "cosmic_ray.cli", "init", str(config_file), str(session_file), "--force"],
+            timeout=60,
+            check=True,
+        )
+    except subprocess.CalledProcessError as e:
+        print(f"Init failed with exit code {e.returncode}")
+        return 1
+    except subprocess.TimeoutExpired:
+        print("Init timed out after 60 seconds")
+        return 1
+
+    # Phase 2: Baseline - verify tests pass without mutations
+    print("Phase 2: Running baseline (verifying tests pass unmutated)...")
+    try:
+        subprocess.run(
+            [sys.executable, "-m", "cosmic_ray.cli", "baseline", str(config_file)],
+            timeout=120,
+            check=True,
+        )
+    except subprocess.CalledProcessError:
+        print("Baseline FAILED: tests don't pass without mutations!")
+        print("Fix your tests before running mutation testing.")
+        return 1
+    except subprocess.TimeoutExpired:
+        print("Baseline timed out after 120 seconds")
+        return 1
+
+    # Phase 3: Exec - run mutations
+    print("Phase 3: Executing mutations (this takes a while)...")
+    try:
+        subprocess.run(
+            [sys.executable, "-m", "cosmic_ray.cli", "exec", str(config_file), str(session_file)],
             timeout=timeout_minutes * 60,
             check=False,
         )
-        return result.returncode
     except subprocess.TimeoutExpired:
-        print(f"⏰ Timeout after {timeout_minutes} minutes")
+        print(f"Exec timed out after {timeout_minutes} minutes")
         return 1
     except KeyboardInterrupt:
-        print("\n⚠️  Interrupted by user")
+        print("\nInterrupted by user")
         return 1
 
-
-def show_results() -> int:
-    """Show mutation testing results."""
-    print("\n📊 Mutation Testing Results:")
-    print("-" * 40)
-
-    cmd = [sys.executable, "-m", "mutmut", "results"]
-    result = subprocess.run(cmd, check=False)
-    return result.returncode
+    return 0
 
 
-def show_survivors() -> None:
-    """Show details of survived mutants."""
-    print("\n🔍 Survived Mutants (tests didn't catch these bugs):")
-    print("-" * 50)
-
-    # Get list of survived mutant IDs
-    cmd = [sys.executable, "-m", "mutmut", "results"]
-    result = subprocess.run(cmd, capture_output=True, text=True, check=False)
-
-    if "Survived" not in result.stdout:
-        print("✅ No survivors - all mutants were killed!")
-        return
-
-    # Parse survivor count and show first few
-    print("\nUse 'python -m mutmut show <id>' to inspect specific mutants")
-    print("Use 'python -m mutmut html' to generate an HTML report\n")
-
-
-def calculate_score() -> tuple[int, int, float] | None:
-    """Calculate mutation score from results.
+def calculate_score(module_key: str) -> tuple[int, int, int, float] | None:
+    """Calculate mutation score from session results.
 
     Returns:
-        Tuple of (killed, total, score_percent) or None if can't parse
+        Tuple of (killed, survived, total, score_percent) or None if no results.
     """
-    cmd = [sys.executable, "-m", "mutmut", "results"]
-    result = subprocess.run(cmd, capture_output=True, text=True, check=False)
-
-    # Parse output - mutmut 2.x format varies
-    # Try to extract from the summary line
-    output = result.stdout + result.stderr
-
-    killed = 0
-    survived = 0
-    timeout = 0
-
-    for line in output.split("\n"):
-        line_lower = line.lower()
-        if "killed" in line_lower:
-            # Try to find number before "killed"
-            parts = line.split()
-            for i, part in enumerate(parts):
-                if "killed" in part.lower() and i > 0:
-                    with contextlib.suppress(ValueError):
-                        killed = int(parts[i - 1])
-        if "survived" in line_lower:
-            parts = line.split()
-            for i, part in enumerate(parts):
-                if "survived" in part.lower() and i > 0:
-                    with contextlib.suppress(ValueError):
-                        survived = int(parts[i - 1])
-        if "timeout" in line_lower:
-            parts = line.split()
-            for i, part in enumerate(parts):
-                if "timeout" in part.lower() and i > 0:
-                    with contextlib.suppress(ValueError):
-                        timeout = int(parts[i - 1])
-
-    total = killed + survived + timeout
-    if total == 0:
+    session_file = _session_path(module_key)
+    if not session_file.exists():
         return None
 
-    score = (killed / total) * 100
-    return killed, total, score
+    try:
+        from cosmic_ray.work_db import WorkDB, use_db
+        from cosmic_ray.work_item import TestOutcome, WorkerOutcome
+    except ImportError:
+        print("cosmic-ray not installed, cannot parse results")
+        return None
+
+    with use_db(str(session_file), WorkDB.Mode.open) as db:
+        killed = 0
+        survived = 0
+        incompetent = 0
+        timeout = 0
+
+        for _job_id, result in db.results:
+            if result.worker_outcome == WorkerOutcome.NORMAL:
+                if result.test_outcome == TestOutcome.KILLED:
+                    killed += 1
+                elif result.test_outcome == TestOutcome.SURVIVED:
+                    survived += 1
+                elif result.test_outcome == TestOutcome.INCOMPETENT:
+                    incompetent += 1
+            elif result.worker_outcome == WorkerOutcome.ABNORMAL:
+                timeout += 1
+
+        # Total = killed + survived (incompetent mutants are excluded from score)
+        total = killed + survived
+        if total == 0:
+            return None
+
+        score = (killed / total) * 100
+        return killed, survived, total, score
+
+
+def show_results(module_key: str) -> None:
+    """Show mutation testing results for a module."""
+    score_data = calculate_score(module_key)
+    if score_data is None:
+        print(f"\nNo results for {module_key}")
+        return
+
+    killed, survived, total, score = score_data
+    print(f"\nResults for {module_key}:")
+    print(f"  Killed:   {killed}")
+    print(f"  Survived: {survived}")
+    print(f"  Total:    {total}")
+    print(f"  Score:    {score:.1f}%")
+
+
+def show_survivors(module_key: str) -> None:
+    """Show details of survived mutants for a module."""
+    session_file = _session_path(module_key)
+    if not session_file.exists():
+        print(f"\nNo session file for {module_key}")
+        return
+
+    try:
+        from cosmic_ray.work_db import WorkDB, use_db
+        from cosmic_ray.work_item import TestOutcome, WorkerOutcome
+    except ImportError:
+        print("cosmic-ray not installed")
+        return
+
+    print(f"\nSurvived mutants for {module_key}:")
+    print("-" * 50)
+
+    with use_db(str(session_file), WorkDB.Mode.open) as db:
+        survivor_count = 0
+        for job_id, result in db.results:
+            if result.worker_outcome == WorkerOutcome.NORMAL and result.test_outcome == TestOutcome.SURVIVED:
+                survivor_count += 1
+                if result.diff:
+                    print(f"\n  Mutant {job_id}:")
+                    for line in result.diff.split("\n"):
+                        if line.startswith(("+", "-")) and not line.startswith(("+++", "---")):
+                            print(f"    {line}")
+
+        if survivor_count == 0:
+            print("  No survivors - all mutants were killed!")
+        else:
+            print(f"\n  Total survivors: {survivor_count}")
 
 
 def main() -> int:
@@ -205,7 +289,7 @@ def main() -> int:
     parser.add_argument(
         "--no-clean",
         action="store_true",
-        help="Don't clean cache before running",
+        help="Don't clean session files before running",
     )
     parser.add_argument(
         "--show-survivors",
@@ -226,54 +310,67 @@ def main() -> int:
 
     args = parser.parse_args()
 
-    # Show survivors and exit
-    if args.show_survivors:
-        show_results()
-        show_survivors()
-        return 0
-
-    # Clean cache unless --no-clean
-    if not args.no_clean:
-        clean_cache()
-
     # Determine modules to test
     if args.all:
-        modules = list(MODULES.values())
-        print("🧬 Running mutation testing on ALL core modules")
-        print("⚠️  This will take a long time (potentially hours)")
+        modules = list(MODULES.keys())
     else:
+        if args.module not in MODULES:
+            print(f"Unknown module: {args.module}")
+            print(f"Available: {', '.join(MODULES.keys())}")
+            return 1
         modules = [args.module]
+
+    # Show survivors and exit
+    if args.show_survivors:
+        for module in modules:
+            show_results(module)
+            show_survivors(module)
+        return 0
+
+    # Ensure session directory exists
+    SESSION_DIR.mkdir(exist_ok=True)
+
+    # Clean session files unless --no-clean
+    if not args.no_clean:
+        for module in modules:
+            session = _session_path(module)
+            if session.exists():
+                print(f"Cleaning {session}...")
+                session.unlink()
+
+    if args.all:
+        print("Running mutation testing on ALL core modules")
+        print("This will take a long time (potentially hours)")
 
     # Run mutation testing
     exit_code = 0
     for module in modules:
-        result = run_mutmut(module, timeout_minutes=args.timeout)
+        result = run_cosmic_ray(module, timeout_minutes=args.timeout)
         if result != 0:
-            # mutmut returns non-zero even on success sometimes
-            pass
+            exit_code = 1
+            continue
 
         # Show results
-        show_results()
+        show_results(module)
 
         # Check threshold if strict mode
         if args.strict:
-            score_data = calculate_score()
+            score_data = calculate_score(module)
             if score_data:
-                killed, total, score = score_data
+                killed, survived, total, score = score_data
                 threshold = THRESHOLDS.get(module, 80)
-                print(f"\n📈 Score: {score:.1f}% ({killed}/{total} killed)")
-                print(f"📊 Threshold: {threshold}%")
+                print(f"\n  Threshold: {threshold}%")
                 if score < threshold:
-                    print(f"❌ FAILED: Score {score:.1f}% below {threshold}% threshold")
+                    print(f"  FAILED: Score {score:.1f}% below {threshold}% threshold")
                     exit_code = 2
                 else:
-                    print(f"✅ PASSED: Score {score:.1f}% meets {threshold}% threshold")
+                    print(f"  PASSED: Score {score:.1f}% meets {threshold}% threshold")
 
-    print("\n" + "=" * 60)
-    print("💡 Tips:")
-    print("  - Use 'python -m mutmut show <id>' to inspect a mutant")
-    print("  - Use 'python -m mutmut html' for an HTML report")
-    print("  - Survived mutants reveal weak test assertions")
+    print(f"\n{'=' * 60}")
+    print("Tips:")
+    print("  - Use '--show-survivors' to see which mutations weren't caught")
+    print("  - Session files are in .cosmic-ray/ for manual inspection")
+    print("  - Use 'cosmic-ray dump <session.sqlite>' for raw JSON output")
     print("=" * 60)
 
     return exit_code
