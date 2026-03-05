@@ -581,6 +581,50 @@ class TestSourceSinkValidation:
         # Should not raise
         graph.validate()
 
+    def test_validate_catches_gate_sink_edge_without_route_label(self) -> None:
+        """validate() rejects gate→sink edges missing from _route_label_map."""
+        from elspeth.contracts import NodeType, RoutingMode
+        from elspeth.contracts.types import NodeID, SinkName
+        from elspeth.core.dag import ExecutionGraph, GraphValidationError
+
+        graph = ExecutionGraph()
+        graph.add_node("source", node_type=NodeType.SOURCE, plugin_name="csv")
+        graph.add_node("gate", node_type=NodeType.GATE, plugin_name="config_gate")
+        graph.add_node("sink_a", node_type=NodeType.SINK, plugin_name="csv")
+        graph.add_node("sink_b", node_type=NodeType.SINK, plugin_name="csv")
+        graph.add_edge("source", "gate", label="continue", mode=RoutingMode.MOVE)
+        graph.add_edge("gate", "sink_a", label="true", mode=RoutingMode.MOVE)
+        graph.add_edge("gate", "sink_b", label="false", mode=RoutingMode.MOVE)
+        # Register route label for sink_a but NOT for sink_b
+        graph.add_route_label_entry(NodeID("gate"), SinkName("sink_a"), "true")
+        graph.set_sink_id_map({SinkName("sink_a"): NodeID("sink_a"), SinkName("sink_b"): NodeID("sink_b")})
+
+        with pytest.raises(GraphValidationError, match=r"direct edge to sink node 'sink_b'.*no registered route label"):
+            graph.validate()
+
+    def test_validate_allows_gate_copy_edges_to_sinks_without_route_labels(self) -> None:
+        """COPY edges (fork paths) from gates to sinks don't require route labels."""
+        from elspeth.contracts import NodeType, RoutingMode
+        from elspeth.contracts.types import NodeID, SinkName
+        from elspeth.core.dag import ExecutionGraph
+
+        graph = ExecutionGraph()
+        graph.add_node("source", node_type=NodeType.SOURCE, plugin_name="csv")
+        graph.add_node("gate", node_type=NodeType.GATE, plugin_name="config_gate")
+        graph.add_node("sink_a", node_type=NodeType.SINK, plugin_name="csv")
+        graph.add_node("sink_b", node_type=NodeType.SINK, plugin_name="csv")
+        graph.add_edge("source", "gate", label="continue", mode=RoutingMode.MOVE)
+        graph.add_edge("gate", "sink_a", label="branch_a", mode=RoutingMode.COPY)
+        graph.add_edge("gate", "sink_b", label="branch_b", mode=RoutingMode.COPY)
+        # No route labels registered — COPY edges are exempt
+        graph.set_sink_id_map({
+            SinkName("sink_a"): NodeID("sink_a"),
+            SinkName("sink_b"): NodeID("sink_b"),
+        })
+
+        # Should NOT raise — COPY edges don't need route labels
+        graph.validate()
+
     def test_get_source_node(self) -> None:
         from elspeth.contracts import NodeType
         from elspeth.core.dag import ExecutionGraph
@@ -1964,7 +2008,7 @@ class TestExecutionGraphRouteMapping:
 
     def test_get_route_label_for_sink(self, plugin_manager) -> None:
         """Get route label that leads to a sink from a config gate."""
-        from elspeth.contracts import GateName
+        from elspeth.contracts import GateName, SinkName
         from elspeth.core.config import (
             ElspethSettings,
             SinkSettings,
@@ -2010,13 +2054,13 @@ class TestExecutionGraphRouteMapping:
         gate_node_id = graph.get_config_gate_id_map()[GateName("classifier")]
 
         # Given gate node and sink name, get the route label
-        route_label = graph.get_route_label(gate_node_id, "flagged")
+        route_label = graph.get_route_label(gate_node_id, SinkName("flagged"))
 
         assert route_label == "true"
 
     def test_get_route_label_for_continue(self, plugin_manager) -> None:
         """Non-terminal continue routes return 'continue' as label."""
-        from elspeth.contracts import GateName
+        from elspeth.contracts import GateName, SinkName
         from elspeth.core.config import (
             ElspethSettings,
             SinkSettings,
@@ -2067,7 +2111,7 @@ class TestExecutionGraphRouteMapping:
         gate_node_id = graph.get_config_gate_id_map()[GateName("gate1")]
 
         # gate1 reaches results via a continue edge to gate2
-        route_label = graph.get_route_label(gate_node_id, "results")
+        route_label = graph.get_route_label(gate_node_id, SinkName("results"))
         assert route_label == "continue"
 
     def test_hyphenated_sink_names_work_in_dag(self, plugin_manager) -> None:
@@ -2126,13 +2170,17 @@ class TestExecutionGraphRouteMapping:
 
         # Verify gate routes to the hyphenated sinks
         gate_node_id = graph.get_config_gate_id_map()[GateName("quality_check")]
-        assert graph.get_route_label(gate_node_id, "quarantine-bucket") == "false"
+        assert graph.get_route_label(gate_node_id, SinkName("quarantine-bucket")) == "false"
 
-    def test_get_route_label_crashes_for_gate_with_direct_edge_but_no_label(self) -> None:
-        """Gate with a direct edge to a sink but no route label crashes (construction bug)."""
+    def test_get_route_label_returns_continue_for_missing_label(self) -> None:
+        """get_route_label() returns 'continue' for unregistered gate→sink pairs.
+
+        The primary enforcement is in validate() — get_route_label() is a
+        simple map lookup with 'continue' fallback.
+        """
         from elspeth.contracts import NodeType, RoutingMode
         from elspeth.contracts.types import NodeID, SinkName
-        from elspeth.core.dag import ExecutionGraph, GraphValidationError
+        from elspeth.core.dag import ExecutionGraph
 
         graph = ExecutionGraph()
         graph.add_node("source", node_type=NodeType.SOURCE, plugin_name="csv")
@@ -2142,18 +2190,18 @@ class TestExecutionGraphRouteMapping:
         graph.add_edge("source", "gate", label="continue", mode=RoutingMode.MOVE)
         graph.add_edge("gate", "sink_a", label="true", mode=RoutingMode.MOVE)
         graph.add_edge("gate", "sink_b", label="false", mode=RoutingMode.MOVE)
-        # Register route label for sink_a but NOT for sink_b
-        graph.add_route_label_entry(NodeID("gate"), "sink_a", "true")
-        # Set up sink_id_map so graph knows about sink_b
+        graph.add_route_label_entry(NodeID("gate"), SinkName("sink_a"), "true")
         graph.set_sink_id_map({SinkName("sink_a"): NodeID("sink_a"), SinkName("sink_b"): NodeID("sink_b")})
 
-        # Gate has direct edge to sink_b but no route label — construction bug
-        with pytest.raises(GraphValidationError, match=r"direct edge to sink 'sink_b'.*no registered route label"):
-            graph.get_route_label("gate", "sink_b")
+        # Registered label returns the label
+        assert graph.get_route_label("gate", SinkName("sink_a")) == "true"
+        # Unregistered pair returns "continue" (validate() catches the real bug)
+        assert graph.get_route_label("gate", SinkName("sink_b")) == "continue"
 
     def test_get_route_label_returns_continue_for_non_gate(self) -> None:
         """Non-gate nodes (transforms) return 'continue' for unregistered sinks."""
         from elspeth.contracts import NodeType, RoutingMode
+        from elspeth.contracts.types import SinkName
         from elspeth.core.dag import ExecutionGraph
 
         graph = ExecutionGraph()
@@ -2164,7 +2212,7 @@ class TestExecutionGraphRouteMapping:
         graph.add_edge("transform", "sink", label="continue", mode=RoutingMode.MOVE)
 
         # Non-gate nodes still return "continue" for default path
-        assert graph.get_route_label("transform", "sink") == "continue"
+        assert graph.get_route_label("transform", SinkName("sink")) == "continue"
 
 
 class TestMultiEdgeSupport:
@@ -3244,6 +3292,78 @@ class TestCoalesceNodes:
         assert node_info.config["merge"] == "nested"
         assert node_info.config["timeout_seconds"] == 30.0
         assert node_info.config["quorum_count"] == 1
+
+    def test_select_merge_coalesce_through_production_path(self, plugin_manager) -> None:
+        """Select merge coalesce builds through from_plugin_instances() with select_branch.
+
+        Exercises the select_branch code path in the builder: config propagation,
+        schema copying from the selected branch, and validation.
+        """
+        from elspeth.contracts import CoalesceName, NodeType
+        from elspeth.core.config import (
+            CoalesceSettings,
+            ElspethSettings,
+            SinkSettings,
+            SourceSettings,
+        )
+        from elspeth.core.dag import ExecutionGraph
+
+        settings = ElspethSettings(
+            source=_source_settings(
+                SourceSettings,
+                plugin="csv",
+                options={
+                    "path": "test.csv",
+                    "on_validation_failure": "discard",
+                    "schema": {"mode": "observed"},
+                },
+            ),
+            sinks={
+                "output": SinkSettings(plugin="json", options={"path": "output.json", "schema": {"mode": "observed"}}),
+            },
+            gates=[
+                _gate_settings(
+                    GateSettings,
+                    name="forker",
+                    condition="True",
+                    routes={"true": "fork", "false": "output"},
+                    fork_to=["path_a", "path_b"],
+                ),
+            ],
+            coalesce=[
+                CoalesceSettings(
+                    name="select_winner",
+                    branches=["path_a", "path_b"],
+                    policy="require_all",
+                    merge="select",
+                    select_branch="path_a",
+                ),
+            ],
+        )
+
+        plugins = instantiate_plugins_from_config(settings)
+        graph = ExecutionGraph.from_plugin_instances(
+            source=plugins.source,
+            source_settings=plugins.source_settings,
+            transforms=plugins.transforms,
+            sinks=plugins.sinks,
+            aggregations=plugins.aggregations,
+            gates=list(settings.gates),
+            coalesce_settings=settings.coalesce,
+        )
+
+        # Verify coalesce node exists with correct config
+        coalesce_map = graph.get_coalesce_id_map()
+        assert CoalesceName("select_winner") in coalesce_map
+
+        coalesce_id = coalesce_map[CoalesceName("select_winner")]
+        node_info = graph.get_node_info(coalesce_id)
+        assert node_info.node_type == NodeType.COALESCE
+        assert node_info.config["merge"] == "select"
+        assert node_info.config["select_branch"] == "path_a"
+
+        # Graph should validate without errors
+        graph.validate()
 
 
 class TestSchemaValidation:

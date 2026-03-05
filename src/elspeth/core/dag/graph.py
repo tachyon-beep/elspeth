@@ -65,7 +65,7 @@ class ExecutionGraph:
         self._aggregation_id_map: dict[AggregationName, NodeID] = {}  # agg_name -> node_id
         self._coalesce_id_map: dict[CoalesceName, NodeID] = {}  # coalesce_name -> node_id
         self._branch_info: dict[BranchName, BranchInfo] = {}  # branch_name -> coalesce + gate info
-        self._route_label_map: dict[tuple[NodeID, str], str] = {}  # (gate_node, sink_name) -> route_label
+        self._route_label_map: dict[tuple[NodeID, SinkName], str] = {}  # (gate_node, sink_name) -> route_label
         self._route_resolution_map: dict[tuple[NodeID, str], RouteDestination] = {}
         self._pipeline_nodes: list[NodeID] | None = None  # Ordered processing nodes (no source/sinks); None = not yet populated
         self._node_step_map: dict[NodeID, int] = {}  # node_id -> audit step (source=0)
@@ -224,6 +224,52 @@ class ExecutionGraph:
                         "routing event recording."
                     )
                 labels_seen.add(edge_key)
+
+        # Route label completeness: every gate→sink MOVE edge must have a
+        # corresponding _route_label_map entry.  Missing entries mean the builder
+        # created the edge but forgot to register the label — a construction bug
+        # that would silently misrecord routing decisions in the audit trail.
+        #
+        # WHY MOVE-only:  Gates produce two kinds of edges to sinks:
+        #   - MOVE edges: routing decisions (gate evaluates condition → routes row
+        #     to a sink).  These MUST have route labels for audit recording.
+        #   - COPY edges: fork paths (gate forks token → copies flow to parallel
+        #     destinations).  These are NOT routing decisions — they're structural
+        #     fan-out.  No route label needed.
+        # The builder creates MOVE edges via routes={} and COPY edges via fork_to=[].
+        # See builder.py lines ~293 (MOVE+label) vs ~414 (COPY, no label).
+        #
+        # WHY skip when _sink_id_map is empty:  Manual unit-test graphs for
+        # isolated algorithms (cycle detection, topo sort) don't populate the
+        # sink ID map.  This check only applies to builder-constructed graphs.
+        if not self._sink_id_map:
+            return
+        for node_id_str in self._graph.nodes():
+            node_info = cast(NodeInfo, self._graph.nodes[node_id_str]["info"])
+            if node_info.node_type != NodeType.GATE:
+                continue
+            for _, to_id, _key, edge_data in self._graph.out_edges(node_id_str, keys=True, data=True):
+                to_info = cast(NodeInfo, self._graph.nodes[to_id]["info"])
+                if to_info.node_type != NodeType.SINK:
+                    continue
+                if edge_data["mode"] != RoutingMode.MOVE:
+                    continue
+                sink_name = next(
+                    (name for name, nid in self._sink_id_map.items() if nid == NodeID(to_id)),
+                    None,
+                )
+                if sink_name is None:
+                    raise GraphValidationError(
+                        f"Sink node '{to_id}' exists in the graph but is not registered "
+                        "in the sink ID map. This indicates a graph construction bug."
+                    )
+                if (NodeID(node_id_str), sink_name) not in self._route_label_map:
+                    raise GraphValidationError(
+                        f"Gate '{node_id_str}' has a direct edge to sink node '{to_id}' "
+                        f"(sink name '{sink_name}') but no registered route label. "
+                        "This indicates a graph construction bug — every gate→sink edge "
+                        "must have a corresponding route label entry."
+                    )
 
     def topological_order(self) -> list[str]:
         """Return nodes in topological order.
@@ -555,7 +601,7 @@ class ExecutionGraph:
         """Set the branch_name -> BranchInfo mapping (coalesce + gate)."""
         self._branch_info = dict(mapping)
 
-    def set_route_label_map(self, mapping: dict[tuple[NodeID, str], str]) -> None:
+    def set_route_label_map(self, mapping: dict[tuple[NodeID, SinkName], str]) -> None:
         """Set the (gate_node, sink_name) -> route_label mapping."""
         self._route_label_map = dict(mapping)
 
@@ -571,7 +617,7 @@ class ExecutionGraph:
         """Add a single entry to the route resolution map."""
         self._route_resolution_map[(gate_id, label)] = dest
 
-    def add_route_label_entry(self, gate_id: NodeID, sink_name: str, label: str) -> None:
+    def add_route_label_entry(self, gate_id: NodeID, sink_name: SinkName, label: str) -> None:
         """Add a single entry to the route label map."""
         self._route_label_map[(gate_id, sink_name)] = label
 
@@ -796,48 +842,41 @@ class ExecutionGraph:
                 result[NodeID(from_id)] = sink_node_to_name[NodeID(to_id)]
         return result
 
-    def get_route_label(self, from_node_id: str, sink_name: str) -> str:
+    def get_route_label(self, from_node_id: str, sink_name: SinkName) -> str:
         """Get the route label for an edge from a node to a sink.
 
-        For gate nodes, checks the explicit route label map first. If a gate has
-        a direct edge to the sink's node but no registered label, that indicates
-        a graph construction bug and raises GraphValidationError. If the gate
-        reaches the sink indirectly (via continue edges through other nodes),
-        "continue" is returned — that's the legitimate default path.
+        Pure map lookup with "continue" fallback for indirect paths.
+
+        DESIGN DECISION (2026-03-05): This method is deliberately a pure lookup,
+        consistent with other map accessors (get_route_resolution_map,
+        get_terminal_sink_map, get_fork_to_sink_branches).  Gate→sink route-label
+        completeness is enforced at construction time by validate().  A missing
+        entry here means the node reaches the sink indirectly via continue edges
+        — a legitimate topology, not a bug.
+
+        We evaluated three alternatives:
+          1. Restore the runtime edge scan (pre-35a9caad) — rejected: O(E) per
+             call, duplicates validate() logic, wrong layer for enforcement.
+          2. Add a _validated flag guard — rejected: introduces lifecycle state
+             to a stateless-after-construction class where no other accessor has
+             preconditions.  Architectural weight for zero production callers.
+          3. Pure lookup (chosen) — consistent with accessor pattern, validate()
+             is always called in production paths (CLI run/resume/status).
+
+        Zero engine callers today — engine uses _route_resolution_map directly.
+        The Engine API extraction (elspeth-1119dc22ef) must call validate()
+        before using the graph, same as the CLI does.
 
         Args:
             from_node_id: The originating node ID
-            sink_name: The sink name (not node ID)
+            sink_name: The sink name
 
         Returns:
             The route label (e.g., "suspicious") or "continue" for default path.
-
-        Raises:
-            GraphValidationError: If a gate node has a direct edge to the sink's
-                graph node but no registered route label (construction bug).
         """
         key = (NodeID(from_node_id), sink_name)
         if key in self._route_label_map:
             return self._route_label_map[key]
-
-        # For gate nodes, verify there's no direct edge to this sink that's
-        # missing from the route label map — that would be a construction bug.
-        node_info = self.get_node_info(from_node_id)
-        if node_info.node_type == NodeType.GATE:
-            sink_node_id = self._sink_id_map.get(SinkName(sink_name))
-            if sink_node_id is not None:
-                # Check if this gate has a direct edge to the sink node
-                for _from, to_id, _key, _data in self._graph.out_edges(
-                    from_node_id, keys=True, data=True
-                ):
-                    if NodeID(to_id) == sink_node_id:
-                        raise GraphValidationError(
-                            f"Gate '{from_node_id}' has a direct edge to sink '{sink_name}' "
-                            "but no registered route label. "
-                            "This indicates a graph construction bug."
-                        )
-
-        # Default path: node reaches sink indirectly via continue edges
         return "continue"
 
     def get_route_resolution_map(self) -> dict[tuple[NodeID, str], RouteDestination]:
