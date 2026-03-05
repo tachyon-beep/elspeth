@@ -111,7 +111,6 @@ EXEMPT_SETTINGS: Final[frozenset[str]] = frozenset({
 
 RUNTIME_TO_SUBSYSTEM: Final[MappingProxyType[str, str]] = MappingProxyType({
     "RuntimeRetryConfig": "retry",
-    # Future: "RuntimeCheckpointConfig": "checkpoint",
 })
 
 

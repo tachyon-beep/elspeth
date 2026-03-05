@@ -56,26 +56,17 @@ class TestLLMPluginConfigDispatch:
         assert config_model is LLMConfig
 
 
-class TestOldPluginNameMigration:
-    """Tests for helpful error messages when using old plugin names."""
+class TestOldPluginNamesRejected:
+    """Old plugin names are rejected as unknown types."""
 
     @pytest.mark.parametrize(
-        "old_name,expected_provider",
-        [
-            ("azure_llm", "azure"),
-            ("openrouter_llm", "openrouter"),
-            ("azure_multi_query_llm", "azure"),
-            ("openrouter_multi_query_llm", "openrouter"),
-        ],
+        "old_name",
+        ["azure_llm", "openrouter_llm", "azure_multi_query_llm", "openrouter_multi_query_llm"],
     )
-    def test_old_plugin_names_raise_helpful_error(
-        self,
-        old_name: str,
-        expected_provider: str,
-    ) -> None:
-        """verify old plugin names raise ValueError with migration guidance."""
+    def test_old_plugin_names_raise_unknown_type(self, old_name: str) -> None:
+        """Old plugin names should raise ValueError as unknown transform type."""
         validator = PluginConfigValidator()
-        with pytest.raises(ValueError, match=f"replaced by 'llm'.*provider: {expected_provider}"):
+        with pytest.raises(ValueError, match="Unknown transform type"):
             validator._get_transform_config_model(old_name)
 
 

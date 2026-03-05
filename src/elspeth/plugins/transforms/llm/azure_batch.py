@@ -29,7 +29,7 @@ from elspeth.contracts import BatchPendingError, CallStatus, CallType, Determini
 from elspeth.contracts.batch_checkpoint import BatchCheckpointState, RowMappingEntry
 from elspeth.contracts.contexts import LifecycleContext, TransformContext
 from elspeth.contracts.schema import SchemaConfig
-from elspeth.contracts.schema_contract import PipelineRow
+from elspeth.contracts.schema_contract import FieldContract, PipelineRow, SchemaContract
 from elspeth.contracts.token_usage import TokenUsage
 from elspeth.plugins.infrastructure.base import BaseTransform
 from elspeth.plugins.infrastructure.config_base import TransformDataConfig
@@ -1333,8 +1333,6 @@ class AzureBatchLLMTransform(BaseTransform):
         # Create OBSERVED contract from union of ALL output row keys (not just first)
         # Error rows may have extra fields (e.g. _error) that the first row lacks
         # Infer python_type from first non-None value seen per key across all rows
-        from elspeth.contracts.schema_contract import FieldContract, SchemaContract
-
         _PRIMITIVE_TYPES = (int, str, float, bool)
         all_keys: dict[str, type] = {}
         for r in output_rows:

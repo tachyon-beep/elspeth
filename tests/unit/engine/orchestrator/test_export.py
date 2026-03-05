@@ -214,14 +214,11 @@ class TestExportCSVMultifile:
         export_dir = tmp_path / "audit_export"
         exporter = Mock()
         exporter.export_run_grouped.return_value = {}
-        ctx = Mock()
-
         _export_csv_multifile(
             exporter=exporter,
             run_id="run-1",
             artifact_path=str(export_dir),
             sign=False,
-            ctx=ctx,
         )
 
         assert export_dir.exists()
@@ -231,14 +228,11 @@ class TestExportCSVMultifile:
         export_path = tmp_path / "output.csv"
         exporter = Mock()
         exporter.export_run_grouped.return_value = {}
-        ctx = Mock()
-
         _export_csv_multifile(
             exporter=exporter,
             run_id="run-1",
             artifact_path=str(export_path),
             sign=False,
-            ctx=ctx,
         )
 
         # Directory should be "output" (no .csv extension)
@@ -263,14 +257,11 @@ class TestExportCSVMultifile:
                     {"node_id": "n2", "type": "sink"},
                 ],
             }
-            ctx = Mock()
-
             _export_csv_multifile(
                 exporter=exporter,
                 run_id="run-1",
                 artifact_path=str(export_dir),
                 sign=False,
-                ctx=ctx,
             )
 
         # Check files exist
@@ -303,14 +294,11 @@ class TestExportCSVMultifile:
                 "runs": [{"run_id": "r1"}],
                 "empty_type": [],
             }
-            ctx = Mock()
-
             _export_csv_multifile(
                 exporter=exporter,
                 run_id="run-1",
                 artifact_path=str(export_dir),
                 sign=False,
-                ctx=ctx,
             )
 
         assert (export_dir / "runs.csv").exists()
@@ -328,14 +316,11 @@ class TestExportCSVMultifile:
             exporter.export_run_grouped.return_value = {
                 "data": [{"zebra": "z", "alpha": "a", "mid": "m"}],
             }
-            ctx = Mock()
-
             _export_csv_multifile(
                 exporter=exporter,
                 run_id="run-1",
                 artifact_path=str(export_dir),
                 sign=False,
-                ctx=ctx,
             )
 
         with open(export_dir / "data.csv") as f:
@@ -358,14 +343,11 @@ class TestExportCSVMultifile:
                     {"common": "c2", "only_b": "b1"},
                 ],
             }
-            ctx = Mock()
-
             _export_csv_multifile(
                 exporter=exporter,
                 run_id="run-1",
                 artifact_path=str(export_dir),
                 sign=False,
-                ctx=ctx,
             )
 
         with open(export_dir / "mixed.csv") as f:

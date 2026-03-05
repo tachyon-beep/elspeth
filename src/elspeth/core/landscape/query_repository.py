@@ -1,11 +1,7 @@
 """QueryRepository: read-only queries for audit trail entities.
 
-Extracted from QueryMethodsMixin as part of T19 (Landscape mixin ->
-composed repository decomposition).
-
 Provides the external read-only API used by MCP server, exporter, CLI,
-and TUI. Does NOT need LandscapeDB -- only DatabaseOps for queries.
-This makes it the lightest-weight repository.
+and TUI. Does NOT need LandscapeDB — only DatabaseOps for queries.
 """
 
 from __future__ import annotations
@@ -115,7 +111,6 @@ class QueryRepository:
             List of NodeState models (discriminated union), ordered by (step_index, attempt)
         """
         # Order by (step_index, attempt) for deterministic ordering across retries
-        # Bug fix: P2-2026-01-19-node-state-ordering-missing-attempt
         query = (
             select(node_states_table)
             .where(node_states_table.c.token_id == token_id)

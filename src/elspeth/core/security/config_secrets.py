@@ -76,10 +76,7 @@ def load_secrets_from_config(config: SecretsConfig) -> list[SecretResolutionInpu
         return []
 
     # source == "keyvault"
-    # P0-1: No defensive assertions - Pydantic guarantees vault_url and mapping
-    # are set when source == "keyvault"
-
-    # P1-2026-02-05: Preflight check for fingerprint key before any Key Vault calls.
+    # Preflight check for fingerprint key before any Key Vault calls.
     # Audit recording requires ELSPETH_FINGERPRINT_KEY to compute secret fingerprints.
     # Without it, secrets would be fetched but audit recording would fail later,
     # leaving secret resolution events unrecorded (violates auditability standard).
@@ -99,7 +96,6 @@ def load_secrets_from_config(config: SecretsConfig) -> list[SecretResolutionInpu
             "         # ... other secrets"
         )
 
-    # P0-4: Reuse existing KeyVaultSecretLoader instead of duplicating code
     try:
         from elspeth.core.security.secret_loader import (
             KeyVaultSecretLoader,
@@ -113,10 +109,8 @@ def load_secrets_from_config(config: SecretsConfig) -> list[SecretResolutionInpu
     assert config.vault_url is not None, "vault_url required when source=keyvault"
     try:
         loader = KeyVaultSecretLoader(vault_url=config.vault_url)
-    except ImportError as e:
-        raise SecretLoadError("Azure Key Vault packages not installed. Install with: uv pip install 'elspeth[azure]'") from e
     except Exception as e:
-        # P0-2: This catches Azure auth errors during client creation
+        # Catches Azure auth errors during client creation
         error_str = str(e)
         if "ClientAuthenticationError" in error_str or "credential" in error_str.lower():
             raise SecretLoadError(
@@ -130,7 +124,7 @@ def load_secrets_from_config(config: SecretsConfig) -> list[SecretResolutionInpu
     # Load each mapped secret, fingerprint immediately, collect resolution records.
     # Plaintext values are fingerprinted and discarded within this loop iteration —
     # they never accumulate in the resolutions list.
-    from elspeth.core.security.fingerprint import get_fingerprint_key, secret_fingerprint
+    from elspeth.contracts.security import get_fingerprint_key, secret_fingerprint
 
     resolutions: list[SecretResolutionInput] = []
 

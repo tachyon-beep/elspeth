@@ -28,7 +28,7 @@ from pydantic import Field
 from elspeth.contracts import CallStatus, CallType, Determinism, TransformResult
 from elspeth.contracts.contexts import LifecycleContext, TransformContext
 from elspeth.contracts.schema import SchemaConfig
-from elspeth.contracts.schema_contract import PipelineRow
+from elspeth.contracts.schema_contract import FieldContract, PipelineRow, SchemaContract
 from elspeth.contracts.token_usage import TokenUsage
 from elspeth.plugins.infrastructure.base import BaseTransform
 from elspeth.plugins.infrastructure.clients.http import AuditedHTTPClient
@@ -468,8 +468,6 @@ class OpenRouterBatchLLMTransform(BaseTransform):
 
         # Create OBSERVED contract from union of ALL output row keys (not just first)
         # Error rows may have extra fields (e.g. _error) that the first row lacks
-        from elspeth.contracts.schema_contract import FieldContract, SchemaContract
-
         all_keys: dict[str, None] = {}
         for r in output_rows:
             for key in r:

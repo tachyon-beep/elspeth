@@ -1,17 +1,13 @@
 """DataFlowRepository: token/row lifecycle, graph structure, and error recording.
 
-Extracted from TokenRecordingMixin + GraphRecordingMixin + ErrorRecordingMixin
-as part of T19 (Landscape mixin -> composed repository decomposition).
-
 Atomic transactions in fork/coalesce/expand preserved via direct
-LandscapeDB.connection() usage. Token ownership validation deduplicated
-between Token and Error recording.
+LandscapeDB.connection() usage.
 """
 
 from __future__ import annotations
 
 import json
-import logging
+import structlog
 from typing import TYPE_CHECKING, Any
 
 from sqlalchemy import select
@@ -57,7 +53,7 @@ from elspeth.core.landscape.schema import (
     validation_errors_table,
 )
 
-logger = logging.getLogger(__name__)
+logger = structlog.get_logger(__name__)
 
 if TYPE_CHECKING:
     from elspeth.contracts.errors import ContractViolation
@@ -69,7 +65,6 @@ if TYPE_CHECKING:
 class DataFlowRepository:
     """Records data flow: tokens, rows, graph structure, and errors.
 
-    Consolidates TokenRecordingMixin + GraphRecordingMixin + ErrorRecordingMixin.
     Atomic transactions in fork/coalesce/expand preserved via direct
     LandscapeDB.connection() usage.
 

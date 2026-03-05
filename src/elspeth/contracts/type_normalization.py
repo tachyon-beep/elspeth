@@ -15,7 +15,6 @@ from typing import Any
 # NOTE: numpy and pandas are imported LAZILY inside normalize_type_for_contract()
 # to avoid breaking the contracts leaf module boundary. Importing them at module
 # level pulls in 400+ modules just for type normalization.
-# FIX: P2-2026-01-30-6fp (regression from type_normalization.py addition)
 
 # Canonical type registry: string name → Python type.
 # Single source of truth for all contract type maps in the codebase.

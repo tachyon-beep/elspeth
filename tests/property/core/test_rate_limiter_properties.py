@@ -306,8 +306,8 @@ class TestRateLimitRegistryProperties:
 
         assert isinstance(limiter, NoOpLimiter)
 
-    def test_reset_clears_all_limiters(self) -> None:
-        """Property: reset_all() clears all cached limiters."""
+    def test_close_clears_all_limiters(self) -> None:
+        """Property: close() clears all cached limiters."""
         mock_settings = MagicMock()
         mock_settings.enabled = True
         mock_settings.persistence_path = None
@@ -321,8 +321,8 @@ class TestRateLimitRegistryProperties:
             limiter1 = registry.get_limiter("service_a")
             registry.get_limiter("service_b")
 
-            # Reset
-            registry.reset_all()
+            # Close
+            registry.close()
 
             # Get same service - should be NEW instance
             limiter1_new = registry.get_limiter("service_a")

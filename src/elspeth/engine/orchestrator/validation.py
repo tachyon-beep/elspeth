@@ -136,7 +136,7 @@ def validate_source_quarantine_destination(
 
     Called at pipeline initialization, BEFORE any rows are processed.
     This catches config errors early instead of silently dropping quarantined
-    rows at runtime (P2-2026-01-19-source-quarantine-silent-drop).
+    rows at runtime.
 
     Args:
         source: Source plugin instance

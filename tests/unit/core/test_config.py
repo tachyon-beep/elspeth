@@ -547,7 +547,7 @@ sinks:
         assert settings.concurrency.max_workers == 4  # Default
 
     def test_load_default_sink_in_yaml_rejected(self, tmp_path: Path) -> None:
-        """default_sink in YAML is rejected with migration message."""
+        """default_sink in YAML is rejected as unknown key."""
         from elspeth.core.config import load_settings
 
         config_file = tmp_path / "settings.yaml"
@@ -568,9 +568,6 @@ default_sink: results
 
         error_msg = str(exc_info.value)
         assert "default_sink" in error_msg
-        assert "source.on_success" in error_msg
-        assert "transforms[].on_success" in error_msg
-        assert "not inside plugin options" in error_msg
 
 
 class TestExportSinkValidation:
@@ -3460,7 +3457,7 @@ class TestSinkNameCasing:
         assert "sink_123" in settings.sinks
 
     def test_default_sink_rejected(self) -> None:
-        """default_sink is rejected with migration guidance."""
+        """default_sink is rejected by extra='forbid'."""
         from elspeth.core.config import ElspethSettings
 
         with pytest.raises(ValidationError) as exc_info:
@@ -3470,7 +3467,6 @@ class TestSinkNameCasing:
                 **{"default_sink": "nonexistent"},  # testing rejected field
             )
         assert "default_sink" in str(exc_info.value)
-        assert "on_success" in str(exc_info.value)
 
     def test_load_settings_rejects_mixed_case_sink_names(self, tmp_path: Path) -> None:
         """Mixed-case sink names from YAML are rejected with helpful error."""

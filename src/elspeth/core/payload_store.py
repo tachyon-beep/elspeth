@@ -90,7 +90,7 @@ class FilesystemPayloadStore:
         path = self._path_for_hash(content_hash)
 
         if path.exists():
-            # BUG #5: Verify existing file matches expected hash
+            # Verify existing file matches expected hash.
             # Without this check, corrupted files (bit rot, tampering) would be
             # silently accepted, violating Tier-1 audit integrity.
             existing_content = path.read_bytes()

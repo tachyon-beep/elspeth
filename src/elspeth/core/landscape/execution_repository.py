@@ -1,8 +1,5 @@
 """ExecutionRepository: node state recording, call tracking, and batch management.
 
-Extracted from NodeStateRecordingMixin + CallRecordingMixin + BatchRecordingMixin
-as part of T19 (Landscape mixin -> composed repository decomposition).
-
 Owns thread-safe call index allocation (Lock + per-state and per-operation dicts).
 """
 
@@ -10,6 +7,7 @@ from __future__ import annotations
 
 import json
 from threading import Lock
+from uuid import uuid4
 from typing import TYPE_CHECKING, Any, Literal, overload
 
 import structlog
@@ -111,7 +109,7 @@ class ExecutionRepository:
         self._call_index_lock = Lock()
         self._operation_call_indices: dict[str, int] = {}
 
-    # ── Node state recording (from NodeStateRecordingMixin) ───────────
+    # ── Node state recording ────────────────────────────────────────────
 
     def begin_node_state(
         self,
@@ -453,7 +451,7 @@ class ExecutionRepository:
 
         return events
 
-    # ── Call recording (from CallRecordingMixin) ──────────────────────
+    # ── Call recording ─────────────────────────────────────────────────
 
     def allocate_call_index(self, state_id: str) -> int:
         """Allocate next call index for a state_id (thread-safe).
@@ -627,8 +625,6 @@ class ExecutionRepository:
         Returns:
             Operation with operation_id for call attribution
         """
-        from uuid import uuid4
-
         # Use pure UUID for operation_id - run_id + node_id can exceed 64 chars
         # (run_id=36 + node_id=45 + prefixes would be 94+ chars)
         operation_id = f"op_{uuid4().hex}"  # "op_" + 32 hex = 35 chars, well under 64
@@ -1013,7 +1009,7 @@ class ExecutionRepository:
             )
         return decoded
 
-    # ── Batch recording (from BatchRecordingMixin) ────────────────────
+    # ── Batch recording ────────────────────────────────────────────────
 
     def create_batch(
         self,
@@ -1173,7 +1169,7 @@ class ExecutionRepository:
                 .where(batches_table.c.batch_id == batch_id)
                 .values(
                     status=status,
-                    trigger_type=trigger_type if trigger_type is not None else None,
+                    trigger_type=trigger_type,
                     trigger_reason=trigger_reason,
                     aggregation_state_id=state_id,
                     completed_at=timestamp,
@@ -1373,28 +1369,6 @@ class ExecutionRepository:
         if new_row is None:
             raise AuditIntegrityError(f"retry_batch: new batch {new_batch_id} not found after INSERT")
         return self._batch_loader.load(new_row)
-
-    def _find_batch_by_attempt(
-        self,
-        run_id: str,
-        aggregation_node_id: str,
-        attempt: int,
-    ) -> Batch | None:
-        """Find an existing batch by (run_id, aggregation_node_id, attempt).
-
-        Used for retry idempotency — prevents creating duplicate draft
-        batches when recovery restarts after a mid-recovery crash.
-        """
-        query = (
-            select(batches_table)
-            .where(batches_table.c.run_id == run_id)
-            .where(batches_table.c.aggregation_node_id == aggregation_node_id)
-            .where(batches_table.c.attempt == attempt)
-        )
-        row = self._ops.execute_fetchone(query)
-        if row is None:
-            return None
-        return self._batch_loader.load(row)
 
     # === Artifact Registration ===
 

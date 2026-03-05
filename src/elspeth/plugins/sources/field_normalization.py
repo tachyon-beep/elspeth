@@ -25,11 +25,6 @@ from dataclasses import dataclass
 NORMALIZATION_ALGORITHM_VERSION = "1.0.0"
 
 
-def get_normalization_version() -> str:
-    """Return current algorithm version for audit trail storage."""
-    return NORMALIZATION_ALGORITHM_VERSION
-
-
 # Pre-compiled regex patterns (module level for efficiency)
 _NON_IDENTIFIER_CHARS = re.compile(r"[^\w]+")
 _CONSECUTIVE_UNDERSCORES = re.compile(r"_+")
@@ -195,22 +190,6 @@ class FieldResolution:
     resolution_mapping: dict[str, str]
     normalization_version: str | None
 
-    @property
-    def reverse_mapping(self) -> dict[str, str]:
-        """Get mapping from final names back to original names.
-
-        Used by sinks with restore_source_headers=True to restore
-        original header names in output files.
-
-        Returns:
-            Dict mapping final field name -> original field name
-
-        Note:
-            This is a computed property. For hot paths, callers should
-            cache the result rather than calling repeatedly.
-        """
-        return {final: original for original, final in self.resolution_mapping.items()}
-
 
 def resolve_field_names(
     *,
@@ -279,5 +258,5 @@ def resolve_field_names(
     return FieldResolution(
         final_headers=final_headers,
         resolution_mapping=resolution_mapping,
-        normalization_version=get_normalization_version() if used_normalization else None,
+        normalization_version=NORMALIZATION_ALGORITHM_VERSION if used_normalization else None,
     )

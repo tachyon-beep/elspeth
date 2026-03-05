@@ -38,20 +38,12 @@ SRC_ROOT = Path(__file__).resolve().parents[3] / "src" / "elspeth"
 # ---------------------------------------------------------------------------
 
 # Patterns that are ALLOWED to reference "default_sink" in src/elspeth/
-# These are rejection validators and comments explaining the removal.
+# These are docstrings/comments explaining why on_success replaced default_sink.
 ALLOWED_DEFAULT_SINK_PATTERNS = [
-    # config.py: rejection validators that tell users to migrate
-    re.compile(r"reject_default_sink"),
-    re.compile(r"'default_sink' has been removed"),
-    re.compile(r'"default_sink" in'),
-    re.compile(r"default_sink.*migration|remove.*default_sink.*line", re.IGNORECASE),
-    re.compile(r'""".*default_sink'),  # docstrings referencing the concept
-    # Comments/docstrings explaining the removal
     re.compile(r"#.*default_sink"),
     re.compile(r"no default_sink fallback"),
-    re.compile(r"old default_sink"),
-    re.compile(r"replaces.*default_sink"),
     re.compile(r"default_sink_name"),  # parameter name in docstrings
+    re.compile(r'""".*default_sink'),  # docstrings referencing the concept
 ]
 
 
@@ -184,8 +176,8 @@ class TestOnSuccessConfigAlignment:
     def test_config_on_success_parsed_into_transform(self) -> None:
         """TransformSettings.on_success is accepted by Pydantic and validated.
 
-        Note: on_success was lifted from TransformDataConfig (options layer)
-        to TransformSettings (settings level) as part of Phase 3 DAG wiring.
+        Note: on_success is at the TransformSettings (settings level),
+        not inside TransformDataConfig (options layer).
         """
         cfg = TransformSettings(
             name="test_transform",

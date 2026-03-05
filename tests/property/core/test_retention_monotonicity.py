@@ -176,8 +176,8 @@ class TestRetentionAgeMonotonicityProperties:
             mock_store = MagicMock()
             manager = PurgeManager(db, mock_store)
 
-            refs_short = manager.find_expired_row_payloads(days_short)
-            refs_long = manager.find_expired_row_payloads(days_long)
+            refs_short = manager.find_expired_payload_refs(days_short)
+            refs_long = manager.find_expired_payload_refs(days_long)
 
             assert len(refs_long) <= len(refs_short), (
                 f"Longer retention ({days_long}d) expired MORE refs ({len(refs_long)}) "
@@ -200,7 +200,7 @@ class TestRetentionAgeMonotonicityProperties:
             mock_store = MagicMock()
             manager = PurgeManager(db, mock_store)
 
-            refs = manager.find_expired_row_payloads(retention_days=9999)
+            refs = manager.find_expired_payload_refs(retention_days=9999)
 
             assert len(refs) == 0, f"Expected 0 expired refs with 9999-day retention, got {len(refs)}"
 
@@ -221,7 +221,7 @@ class TestRetentionAgeMonotonicityProperties:
             mock_store = MagicMock()
             manager = PurgeManager(db, mock_store)
 
-            expired = manager.find_expired_row_payloads(retention_days=0)
+            expired = manager.find_expired_payload_refs(retention_days=0)
 
             assert set(expired) == set(refs), f"Zero-day retention should expire all {len(refs)} refs, but expired {len(expired)}"
 
@@ -270,8 +270,8 @@ class TestCutoffMonotonicityProperties:
 
             retention = 10  # 10-day retention
 
-            refs_early = manager.find_expired_row_payloads(retention, as_of=as_of_early)
-            refs_late = manager.find_expired_row_payloads(retention, as_of=as_of_late)
+            refs_early = manager.find_expired_payload_refs(retention, as_of=as_of_early)
+            refs_late = manager.find_expired_payload_refs(retention, as_of=as_of_late)
 
             assert len(refs_late) >= len(refs_early), (
                 f"Later as_of ({as_of_late}) found fewer refs ({len(refs_late)}) than earlier as_of ({as_of_early}) ({len(refs_early)})"

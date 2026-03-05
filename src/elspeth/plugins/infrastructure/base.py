@@ -132,7 +132,7 @@ class BaseTransform(ABC):
     output_schema: type[PluginSchema]
     node_id: str | None = None  # Set by orchestrator after registration
 
-    # Metadata for Phase 3 audit/reproducibility
+    # Audit metadata
     determinism: Determinism = Determinism.DETERMINISTIC
     plugin_version: str = "0.0.0"
 
@@ -158,7 +158,7 @@ class BaseTransform(ABC):
     # When True, executor validates input against input_schema before process().
     validate_input: bool = False
 
-    # Error routing configuration (WP-11.99b)
+    # Error routing configuration.
     # Transforms extending TransformDataConfig override this from config.
     # Always non-None at runtime (TransformSettings requires on_error).
     # Base class default is None because injection happens post-construction
@@ -305,14 +305,6 @@ class BaseTransform(ABC):
         pass
 
 
-# NOTE: BaseAggregation was DELETED in aggregation structural cleanup.
-# Aggregation is now fully structural:
-# - Engine buffers rows internally
-# - Engine evaluates triggers (WP-06)
-# - Engine calls batch-aware Transform.process(rows: list[dict])
-# Use is_batch_aware=True on BaseTransform for batch processing.
-
-
 class BaseSink(ABC):
     """Base class for sink plugins.
 
@@ -371,11 +363,10 @@ class BaseSink(ABC):
     idempotent: bool = False
     node_id: str | None = None  # Set by orchestrator after registration
 
-    # Metadata for Phase 3 audit/reproducibility
+    # Audit metadata
     determinism: Determinism = Determinism.IO_WRITE
     plugin_version: str = "0.0.0"
 
-    # Resume capability (Phase 5 - Checkpoint/Resume)
     # Default: sinks don't support resume. Override in subclasses that can append.
     supports_resume: bool = False
 
@@ -434,7 +425,7 @@ class BaseSink(ABC):
         # Intentional no-op - most sinks don't use restore_source_headers
         _ = resolution_mapping  # Explicitly consume the argument
 
-    # Output contract for schema-aware sinks (Phase 3)
+    # Output contract for schema-aware sinks
     _output_contract: SchemaContract | None = None
 
     def __init__(self, config: dict[str, Any]) -> None:
@@ -479,7 +470,7 @@ class BaseSink(ABC):
         """
         ...
 
-    # === Output Contract Support (Phase 3) ===
+    # === Output Contract Support ===
 
     def get_output_contract(self) -> SchemaContract | None:
         """Get the current output contract.
@@ -571,7 +562,7 @@ class BaseSource(ABC):
     output_schema: type[PluginSchema]
     node_id: str | None = None  # Set by orchestrator after registration
 
-    # Metadata for Phase 3 audit/reproducibility
+    # Audit metadata
     determinism: Determinism = Determinism.IO_READ
     plugin_version: str = "0.0.0"
 
@@ -583,7 +574,7 @@ class BaseSource(ABC):
     # All sources must set this - config-based sources get it from SourceDataConfig
     on_success: str
 
-    # Schema contract for row validation (Phase 2)
+    # Schema contract for row validation
     _schema_contract: SchemaContract | None = None
 
     def __init__(self, config: dict[str, Any]) -> None:
@@ -621,7 +612,7 @@ class BaseSource(ABC):
         """
         ...
 
-    # === Schema Contract Support (Phase 2) ===
+    # === Schema Contract Support ===
 
     def get_schema_contract(self) -> SchemaContract | None:
         """Get the current schema contract.

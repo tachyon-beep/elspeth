@@ -199,12 +199,12 @@ class TestFieldBaseIdentifierValidation:
         result = get_llm_guaranteed_fields("llm_response")
         assert "llm_response" in result
 
-    def test_invalid_output_prefix_rejected(self) -> None:
-        """output_prefix with special chars should raise ValueError."""
-        from elspeth.plugins.transforms.llm import get_multi_query_guaranteed_fields
+    def test_invalid_response_field_rejected(self) -> None:
+        """response_field with special chars should raise ValueError."""
+        from elspeth.plugins.transforms.llm import get_llm_guaranteed_fields
 
         with pytest.raises(ValueError, match="not a valid Python identifier"):
-            get_multi_query_guaranteed_fields("my-prefix")
+            get_llm_guaranteed_fields("my-prefix")
 
     def test_invalid_audit_field_rejected(self) -> None:
         """response_field in audit function also validated."""
@@ -244,14 +244,14 @@ class TestSecretFingerprintEmptyKey:
 
     def test_empty_bytes_key_rejected(self) -> None:
         """key=b'' should raise ValueError."""
-        from elspeth.core.security.fingerprint import secret_fingerprint
+        from elspeth.core.security import secret_fingerprint
 
         with pytest.raises(ValueError, match="must not be empty"):
             secret_fingerprint("some-secret", key=b"")
 
     def test_valid_key_accepted(self) -> None:
         """Non-empty key should produce valid fingerprint."""
-        from elspeth.core.security.fingerprint import secret_fingerprint
+        from elspeth.core.security import secret_fingerprint
 
         fp = secret_fingerprint("some-secret", key=b"valid-key")
         assert len(fp) == 64  # SHA256 hex digest

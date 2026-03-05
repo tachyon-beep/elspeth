@@ -333,11 +333,6 @@ class GateResult:
         return PipelineRow(self.row, self.contract)
 
 
-# NOTE: AcceptResult was deleted in aggregation structural cleanup.
-# Aggregation is now engine-controlled via batch-aware transforms.
-# The engine buffers rows and decides when to flush via TriggerEvaluator.
-
-
 @dataclass(frozen=True)
 class RowResult:
     """Final result of processing a row through the pipeline.

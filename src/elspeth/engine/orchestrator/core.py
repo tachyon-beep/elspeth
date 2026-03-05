@@ -521,7 +521,7 @@ class Orchestrator:
 
                 # Group tokens by pending_outcome for separate write() calls
                 # (sink_executor.write() takes a single PendingOutcome for all tokens in a batch)
-                # Fix: P1-2026-01-31 - PendingOutcome carries error_hash for QUARANTINED
+                # PendingOutcome carries error_hash for QUARANTINED tokens
                 def pending_sort_key(pair: tuple[TokenInfo, PendingOutcome | None]) -> tuple[bool, str, str]:
                     pending = pair[1]
                     if pending is None:
@@ -1772,8 +1772,7 @@ class Orchestrator:
 
         # Compute error_hash for QUARANTINED outcome audit trail
         # Per CLAUDE.md: every row must reach exactly one terminal state
-        # Fix: P1-2026-01-31 - Do NOT record outcome here!
-        # Record outcome AFTER sink durability in SinkExecutor.write()
+        # Do NOT record outcome here — record after sink durability in SinkExecutor.write()
         quarantine_error_hash = hashlib.sha256(quarantine_error_msg.encode()).hexdigest()[:16]
 
         # Pass PendingOutcome with error_hash - outcome recorded after sink durability
@@ -2136,7 +2135,7 @@ class Orchestrator:
                     # Clear operation_id — source item is fetched, transforms set their own state_id
                     ctx.operation_id = None
 
-                    # Check aggregation timeouts BEFORE processing (P1-2026-01-22: flush OLD batch first)
+                    # Check aggregation timeouts BEFORE processing (flush OLD batch first)
                     timeout_result = check_aggregation_timeouts(
                         config=config,
                         processor=processor,
@@ -2260,7 +2259,7 @@ class Orchestrator:
 
             # ─────────────────────────────────────────────────────────────────
             # Check for timed-out aggregations BEFORE processing this row
-            # (BUG FIX: P1-2026-01-22 - ensures timeout flushes OLD batch)
+            # Ensures timeout flushes OLD batch before processing new row
             # ─────────────────────────────────────────────────────────────────
             # Call module function directly (no wrapper method)
             timeout_result = check_aggregation_timeouts(
@@ -2290,7 +2289,7 @@ class Orchestrator:
 
             # ─────────────────────────────────────────────────────────────────
             # Check for timed-out coalesces after processing each row
-            # (BUG FIX: P1-2026-01-22 - check_timeouts was never called)
+            # Must check coalesce timeouts after each row to flush stale barriers
             # ─────────────────────────────────────────────────────────────────
             if coalesce_executor is not None:
                 handle_coalesce_timeouts(

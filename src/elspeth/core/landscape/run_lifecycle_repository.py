@@ -2,8 +2,6 @@
 
 Owns all run lifecycle operations: begin, complete, finalize, status updates,
 schema contracts, secret resolutions, export status, and reproducibility grading.
-
-Extracted from RunRecordingMixin as part of T19 (mixin → composition).
 """
 
 from __future__ import annotations

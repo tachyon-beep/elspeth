@@ -53,11 +53,9 @@ class TestNormalizeFieldName:
         """Algorithm version is accessible for audit trail."""
         from elspeth.plugins.sources.field_normalization import (
             NORMALIZATION_ALGORITHM_VERSION,
-            get_normalization_version,
         )
 
         assert NORMALIZATION_ALGORITHM_VERSION == "1.0.0"
-        assert get_normalization_version() == "1.0.0"
 
     def test_unicode_bom_stripped(self) -> None:
         """BOM character at start is stripped."""

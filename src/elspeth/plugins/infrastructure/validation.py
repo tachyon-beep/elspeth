@@ -281,16 +281,6 @@ class PluginConfigValidator:
                 from elspeth.plugins.transforms.llm.base import LLMConfig
 
                 return LLMConfig
-        elif transform_type in {
-            "azure_llm",
-            "openrouter_llm",
-            "azure_multi_query_llm",
-            "openrouter_multi_query_llm",
-        }:
-            provider = "azure" if "azure" in transform_type else "openrouter"
-            raise ValueError(
-                f"Plugin '{transform_type}' has been replaced by 'llm' with a 'provider' field. Example: plugin: llm, provider: {provider}"
-            )
         elif transform_type == "azure_batch_llm":
             from elspeth.plugins.transforms.llm.azure_batch import AzureBatchConfig
 

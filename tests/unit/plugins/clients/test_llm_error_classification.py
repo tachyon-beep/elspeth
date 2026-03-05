@@ -17,8 +17,10 @@ from elspeth.plugins.infrastructure.clients.llm import (
     NetworkError,
     RateLimitError,
     ServerError,
-    _is_retryable_error,
+    _classify_llm_error,
 )
+
+_RETRYABLE_CLASSES = {"rate_limit", "server", "network"}
 
 
 class TestErrorClassification:
@@ -28,11 +30,11 @@ class TestErrorClassification:
         """Rate limit errors (429) should be classified as retryable."""
         # Error with explicit 429 code
         error_429 = Exception("Error 429: Rate limit exceeded")
-        assert _is_retryable_error(error_429) is True
+        assert (_classify_llm_error(error_429) in _RETRYABLE_CLASSES) is True
 
         # Error with "rate" in message
         error_rate = Exception("Rate limit has been exceeded")
-        assert _is_retryable_error(error_rate) is True
+        assert (_classify_llm_error(error_rate) in _RETRYABLE_CLASSES) is True
 
     def test_non_rate_substrings_do_not_trigger_rate_limit_retry(self) -> None:
         """Words containing 'rate' (e.g., enumerate) should not be retryable."""
@@ -42,7 +44,7 @@ class TestErrorClassification:
         ]
 
         for error in non_rate_errors:
-            assert _is_retryable_error(error) is False, f"Failed for: {error}"
+            assert (_classify_llm_error(error) in _RETRYABLE_CLASSES) is False, f"Failed for: {error}"
 
     def test_server_errors_are_retryable(self) -> None:
         """Server errors (5xx) should be classified as retryable."""
@@ -55,7 +57,7 @@ class TestErrorClassification:
         ]
 
         for error in server_errors:
-            assert _is_retryable_error(error) is True, f"Failed for: {error}"
+            assert (_classify_llm_error(error) in _RETRYABLE_CLASSES) is True, f"Failed for: {error}"
 
     def test_network_errors_are_retryable(self) -> None:
         """Network/connection errors should be classified as retryable."""
@@ -72,7 +74,7 @@ class TestErrorClassification:
         ]
 
         for error in network_errors:
-            assert _is_retryable_error(error) is True, f"Failed for: {error}"
+            assert (_classify_llm_error(error) in _RETRYABLE_CLASSES) is True, f"Failed for: {error}"
 
     def test_client_errors_are_not_retryable(self) -> None:
         """Client errors (4xx except 429) should not be retryable."""
@@ -85,7 +87,7 @@ class TestErrorClassification:
         ]
 
         for error in client_errors:
-            assert _is_retryable_error(error) is False, f"Failed for: {error}"
+            assert (_classify_llm_error(error) in _RETRYABLE_CLASSES) is False, f"Failed for: {error}"
 
     def test_content_policy_errors_are_not_retryable(self) -> None:
         """Content policy violations should not be retryable."""
@@ -96,7 +98,7 @@ class TestErrorClassification:
         ]
 
         for error in policy_errors:
-            assert _is_retryable_error(error) is False, f"Failed for: {error}"
+            assert (_classify_llm_error(error) in _RETRYABLE_CLASSES) is False, f"Failed for: {error}"
 
     def test_context_length_errors_are_not_retryable(self) -> None:
         """Context length exceeded errors should not be retryable."""
@@ -107,7 +109,7 @@ class TestErrorClassification:
         ]
 
         for error in context_errors:
-            assert _is_retryable_error(error) is False, f"Failed for: {error}"
+            assert (_classify_llm_error(error) in _RETRYABLE_CLASSES) is False, f"Failed for: {error}"
 
     def test_unknown_errors_are_not_retryable(self) -> None:
         """Unknown errors should default to non-retryable (conservative)."""
@@ -118,7 +120,7 @@ class TestErrorClassification:
         ]
 
         for error in unknown_errors:
-            assert _is_retryable_error(error) is False, f"Failed for: {error}"
+            assert (_classify_llm_error(error) in _RETRYABLE_CLASSES) is False, f"Failed for: {error}"
 
 
 class TestLLMClientExceptionTypes:
@@ -369,7 +371,7 @@ class TestAzureSpecificCodes:
     def test_azure_529_model_overloaded_is_retryable(self) -> None:
         """Azure 529 (model overloaded) should be retryable."""
         error = Exception("529: The model is currently overloaded")
-        assert _is_retryable_error(error) is True
+        assert (_classify_llm_error(error) in _RETRYABLE_CLASSES) is True
 
     def test_azure_other_5xx_codes_are_retryable(self) -> None:
         """Other 5xx codes used by Azure should be retryable."""
@@ -381,4 +383,4 @@ class TestAzureSpecificCodes:
         ]
 
         for error in azure_errors:
-            assert _is_retryable_error(error) is True, f"Failed for: {error}"
+            assert (_classify_llm_error(error) in _RETRYABLE_CLASSES) is True, f"Failed for: {error}"

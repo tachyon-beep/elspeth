@@ -341,7 +341,7 @@ class TriggerConfig(BaseModel):
                 f"{invalid_display}. Allowed keys: row['batch_count'], row['batch_age_seconds']."
             )
 
-        # P2-2026-01-31: Reject non-boolean expressions
+        # Reject non-boolean expressions
         # Per CLAUDE.md: "if bool(result)" coercion is forbidden for our data
         if not parser.is_boolean_expression():
             raise ValueError(
@@ -459,18 +459,6 @@ class AggregationSettings(BaseModel):
             return None
         value = v.strip()
         return _validate_connection_or_sink_name(value, field_label="Aggregation on_success connection name")
-
-    @field_validator("output_mode", mode="before")
-    @classmethod
-    def reject_single_mode(cls, v: Any) -> Any:
-        """Reject deprecated 'single' mode with helpful migration message."""
-        if v == "single":
-            raise ValueError(
-                "output_mode='single' has been removed (bug elspeth-rapid-nd3). "
-                "Use output_mode='transform' instead. For N->1 aggregations, add "
-                "expected_output_count=1 to validate cardinality."
-            )
-        return v
 
 
 class GateSettings(BaseModel):
@@ -819,8 +807,8 @@ class CoalesceSettings(BaseModel):
 class SourceSettings(BaseModel):
     """Source plugin configuration per architecture.
 
-    Phase 3 addition: on_success lifted from SourceDataConfig (options layer)
-    to settings level (3a3f-A). Source must declare where valid rows go.
+    on_success is at the settings level, not inside plugin options.
+    Source must declare where valid rows go.
     """
 
     model_config = {"frozen": True, "extra": "forbid"}
@@ -851,7 +839,7 @@ class TransformSettings(BaseModel):
     Note: Gate routing is now config-driven only (see GateSettings).
     Plugin-based gates were removed - use the gates: section instead.
 
-    Phase 3 additions (declarative DAG wiring):
+    Declarative DAG wiring fields:
         name: User-facing wiring label. Drives node IDs in the DAG and
             appears in Landscape audit records. Must be unique across all
             processing nodes (transforms, gates, aggregations, coalesce).
@@ -1233,14 +1221,6 @@ class TelemetrySettings(BaseModel):
         default_factory=list,
         description="List of telemetry exporters to send events to",
     )
-
-    @model_validator(mode="after")
-    def validate_exporters_when_enabled(self) -> "TelemetrySettings":
-        """Warn if telemetry is enabled but no exporters are configured."""
-        # Note: This is a warning case, not an error. Telemetry with no exporters
-        # just means events are produced but not exported anywhere - useful for
-        # testing or when exporters are added dynamically.
-        return self
 
 
 class ElspethSettings(BaseModel):
@@ -1999,17 +1979,6 @@ def load_settings(config_path: Path) -> ElspethSettings:
     # Dynaconf returns uppercase keys; convert to lowercase for Pydantic
     raw_dict = dynaconf_settings.as_dict()
     raw_config = _lowercase_schema_keys(raw_dict)
-
-    # Explicitly reject removed default_sink in YAML before allowlist filtering.
-    # This MUST happen before the allowlist (which would silently strip it).
-    if "default_sink" in raw_config:
-        raise ValueError(
-            "'default_sink' has been removed. Use explicit 'on_success' routing instead.\n"
-            "Migration: Set top-level 'source.on_success: <sink_or_connection_name>' and "
-            "top-level 'transforms[].on_success: <sink_or_connection_name>' (not inside "
-            "plugin options). Ensure each terminal path routes to a sink.\n"
-            "Then remove the 'default_sink' line from your pipeline YAML."
-        )
 
     # Reject unknown YAML keys before filtering. Only check keys that originate
     # from the YAML file, NOT from environment variables. Dynaconf captures ALL

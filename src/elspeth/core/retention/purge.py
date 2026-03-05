@@ -61,53 +61,6 @@ class PurgeManager:
         self._db = db
         self._payload_store = payload_store
 
-    def find_expired_row_payloads(
-        self,
-        retention_days: int,
-        as_of: datetime | None = None,
-    ) -> list[str]:
-        """Find row payloads eligible for deletion based on retention policy.
-
-        Args:
-            retention_days: Number of days to retain payloads after run completion
-            as_of: Reference datetime for cutoff calculation (defaults to now)
-
-        Returns:
-            List of source_data_ref values for expired payloads
-        """
-        if as_of is None:
-            as_of = datetime.now(UTC)
-
-        cutoff = as_of - timedelta(days=retention_days)
-
-        # Query rows from finished runs (completed OR failed) older than cutoff
-        # Only return non-null source_data_ref values
-        # Use distinct() because multiple rows can reference the same payload
-        # (content-addressed storage means identical content shares one blob)
-        #
-        # Note: Both completed and failed runs are eligible for purge. Only
-        # running runs (status="running") are excluded - they haven't finished
-        # and their payloads may still be needed.
-        query = (
-            select(rows_table.c.source_data_ref)
-            .distinct()
-            .select_from(rows_table.join(runs_table, rows_table.c.run_id == runs_table.c.run_id))
-            .where(
-                and_(
-                    runs_table.c.status.in_(("completed", "failed")),
-                    runs_table.c.completed_at.isnot(None),
-                    runs_table.c.completed_at < cutoff,
-                    rows_table.c.source_data_ref.isnot(None),
-                )
-            )
-        )
-
-        with self._db.connection() as conn:
-            result = conn.execute(query)
-            refs = [row[0] for row in result]
-
-        return refs
-
     def find_expired_payload_refs(
         self,
         retention_days: int,

@@ -47,7 +47,7 @@ class PendingOutcome:
         error_hash: Required for QUARANTINED/FAILED outcomes - hash of error details.
                    For other outcomes, this is None.
 
-    Fix for: P1-2026-01-31-quarantine-outcome-before-durability
+    Quarantine outcomes are recorded after sink durability, not before.
     """
 
     outcome: RowOutcome

@@ -6,8 +6,8 @@ Delegates to 4 composed domain repositories:
 - DataFlowRepository: rows, tokens, errors
 - QueryRepository: read-only queries, bulk retrieval, lineage
 
-The public API is 100% unchanged -- all ~91 methods delegate directly
-to the appropriate repository. No logic in this file.
+All public methods delegate directly to the appropriate repository.
+No logic in this file.
 
 Repository split rationale (domain cohesion, not CQRS):
     The 4 repositories are split by pipeline-phase domain, not by
@@ -15,8 +15,7 @@ Repository split rationale (domain cohesion, not CQRS):
     get_batches() live in ExecutionRepository (not QueryRepository)
     because they belong to the execution domain. QueryRepository holds
     only cross-cutting read methods used by external consumers (MCP,
-    exporter, TUI). A CQRS split would be warranted if read and write
-    scaling needs diverge, but that is not the case today.
+    exporter, TUI).
 """
 
 from __future__ import annotations
@@ -147,10 +146,10 @@ class LandscapeRecorder:
         self._artifact_loader = ArtifactLoader()
         self._batch_member_loader = BatchMemberLoader()
 
-        # Composed repository for run lifecycle (extracted from mixin in T19)
+        # Composed repository for run lifecycle
         self._run_lifecycle = RunLifecycleRepository(db, self._ops, self._run_loader)
 
-        # Composed repository for execution recording (extracted from 3 mixins in T19)
+        # Composed repository for execution recording
         self._execution = ExecutionRepository(
             db,
             self._ops,
@@ -164,7 +163,7 @@ class LandscapeRecorder:
             payload_store=payload_store,
         )
 
-        # Composed repository for data flow recording (extracted from 3 mixins in T19)
+        # Composed repository for data flow recording
         self._data_flow = DataFlowRepository(
             db,
             self._ops,
@@ -176,7 +175,7 @@ class LandscapeRecorder:
             payload_store=payload_store,
         )
 
-        # Composed repository for read-only queries (extracted from mixin in T19)
+        # Composed repository for read-only queries
         self._query = QueryRepository(
             self._ops,
             row_loader=self._row_loader,

@@ -48,10 +48,10 @@ runs_table = Table(
     # Source schema for resume type restoration
     # Stores serialized PluginSchema class info to enable proper type coercion
     # when resuming from payloads (datetime/Decimal string -> typed values)
-    Column("source_schema_json", Text),  # Nullable for backward compatibility
+    Column("source_schema_json", Text),  # Nullable — populated on new runs, NULL for runs created before this column
     # Field resolution mapping from source.load() - captures original→final header mapping
     # when normalize_fields or field_mapping is used. Stored at run level since one source per run.
-    Column("source_field_resolution_json", Text),  # Nullable for backward compatibility
+    Column("source_field_resolution_json", Text),  # Nullable — populated on new runs, NULL for runs created before this column
     Column("status", String(32), nullable=False),
     # Export tracking - separate from run status so export failures
     # don't mask successful pipeline completion
@@ -491,7 +491,7 @@ checkpoints_table = Table(
     # Version 2: Deterministic node IDs (2026-01-24+)
     # Version 3: Phase 2 traversal refactor checkpoint break
     # Version 4: Pending coalesce state persisted in checkpoints
-    Column("format_version", Integer, nullable=True),  # Nullable for backwards compat with existing checkpoints
+    Column("format_version", Integer, nullable=True),  # Nullable — populated on new runs, NULL for checkpoints created before this column
     # Composite FK to nodes (node_id, run_id)
     ForeignKeyConstraint(
         ["node_id", "run_id"],

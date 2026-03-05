@@ -273,39 +273,6 @@ class _ControlledStore(MockPayloadStore):
 
 
 class TestFindExpiredPayloadRefs:
-    def test_find_expired_row_payloads_defaults_as_of_to_now(self, db: LandscapeDB) -> None:
-        manager = PurgeManager(db, MockPayloadStore())
-        now = datetime.now(UTC)
-        old = now - timedelta(days=365)
-        recent = now - timedelta(days=1)
-
-        with db.connection() as conn:
-            _create_run(conn, "run-old-default-now", status=RunStatus.COMPLETED, completed_at=old)
-            _create_node(conn, "run-old-default-now", "node-old-default-now")
-            _create_row(
-                conn,
-                "run-old-default-now",
-                "node-old-default-now",
-                "row-old-default-now",
-                row_index=0,
-                source_data_ref="ref-old-default-now",
-            )
-
-            _create_run(conn, "run-recent-default-now", status=RunStatus.COMPLETED, completed_at=recent)
-            _create_node(conn, "run-recent-default-now", "node-recent-default-now")
-            _create_row(
-                conn,
-                "run-recent-default-now",
-                "node-recent-default-now",
-                "row-recent-default-now",
-                row_index=0,
-                source_data_ref="ref-recent-default-now",
-            )
-
-        refs = set(manager.find_expired_row_payloads(retention_days=30))
-        assert "ref-old-default-now" in refs
-        assert "ref-recent-default-now" not in refs
-
     def test_find_expired_payload_refs_defaults_as_of_to_now(self, db: LandscapeDB) -> None:
         manager = PurgeManager(db, MockPayloadStore())
         now = datetime.now(UTC)
@@ -339,7 +306,7 @@ class TestFindExpiredPayloadRefs:
         assert "ref-old-default-now-all-refs" in refs
         assert "ref-recent-default-now-all-refs" not in refs
 
-    def test_find_expired_row_payloads_distinct_and_respects_status_and_cutoff(self, db: LandscapeDB) -> None:
+    def test_find_expired_payload_refs_distinct_and_respects_status_and_cutoff(self, db: LandscapeDB) -> None:
         manager = PurgeManager(db, MockPayloadStore())
         now = datetime(2026, 2, 8, tzinfo=UTC)
         old = now - timedelta(days=45)
@@ -398,8 +365,11 @@ class TestFindExpiredPayloadRefs:
                 source_data_ref="ref-running",
             )
 
-        expired = set(manager.find_expired_row_payloads(retention_days=30, as_of=now))
-        assert expired == {"ref-old-shared", "ref-old-failed"}
+        expired = set(manager.find_expired_payload_refs(retention_days=30, as_of=now))
+        assert "ref-old-shared" in expired
+        assert "ref-old-failed" in expired
+        assert "ref-recent" not in expired
+        assert "ref-running" not in expired
 
     def test_find_expired_payload_refs_includes_all_ref_types_and_excludes_active_shared_refs(self, db: LandscapeDB) -> None:
         manager = PurgeManager(db, MockPayloadStore())
@@ -690,40 +660,6 @@ class TestInterruptedRunNotPurgeEligible:
     Fix: Changed to `status.in_(("completed", "failed"))` — only terminal
     statuses are purge-eligible. "interrupted" and "running" are excluded.
     """
-
-    def test_interrupted_run_payloads_not_in_expired_row_payloads(self, db: LandscapeDB) -> None:
-        """Interrupted runs must NOT appear in find_expired_row_payloads results."""
-        manager = PurgeManager(db, MockPayloadStore())
-        now = datetime(2026, 2, 14, tzinfo=UTC)
-        old = now - timedelta(days=60)
-
-        with db.connection() as conn:
-            _create_run(conn, "run-interrupted", status=RunStatus.INTERRUPTED, completed_at=old)
-            _create_node(conn, "run-interrupted", "node-interrupted")
-            _create_row(
-                conn,
-                "run-interrupted",
-                "node-interrupted",
-                "row-interrupted",
-                row_index=0,
-                source_data_ref="ref-interrupted",
-            )
-
-            # Control: a completed run IS eligible
-            _create_run(conn, "run-completed", status=RunStatus.COMPLETED, completed_at=old)
-            _create_node(conn, "run-completed", "node-completed")
-            _create_row(
-                conn,
-                "run-completed",
-                "node-completed",
-                "row-completed",
-                row_index=0,
-                source_data_ref="ref-completed",
-            )
-
-        refs = set(manager.find_expired_row_payloads(retention_days=30, as_of=now))
-        assert "ref-interrupted" not in refs, "Interrupted run payloads should be preserved for resume"
-        assert "ref-completed" in refs
 
     def test_interrupted_run_payloads_not_in_expired_payload_refs(self, db: LandscapeDB) -> None:
         """Interrupted runs must NOT appear in find_expired_payload_refs results."""

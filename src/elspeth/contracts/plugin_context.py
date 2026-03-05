@@ -116,7 +116,7 @@ class PluginContext:
     state_id: str | None = field(default=None)  # For transform calls (via node_states)
     operation_id: str | None = field(default=None)  # For source/sink calls (via operations)
     # Note: call_index allocation is delegated to LandscapeRecorder.allocate_call_index()
-    # to ensure coordination with audited clients. See P1-2026-01-31-context-record-call-bypasses-allocator.
+    # to ensure coordination with audited clients.
 
     # === Telemetry Callback ===
     # Callback to emit telemetry events for external calls.
@@ -255,7 +255,7 @@ class PluginContext:
             # Delegate call_index allocation to centralized LandscapeRecorder.
             # This ensures UNIQUE(state_id, call_index) when mixing ctx.record_call()
             # with audited clients (AuditedLLMClient, AuditedHTTPClient), which also
-            # use recorder.allocate_call_index(). See P1-2026-01-31-context-record-call-bypasses-allocator.
+            # use recorder.allocate_call_index().
             if self.state_id is None:
                 raise FrameworkBugError("record_call has_state=True but state_id is None")
             call_index = self.landscape.allocate_call_index(self.state_id)
@@ -290,7 +290,7 @@ class PluginContext:
         # Resolve token_id from authoritative state_id lookup BEFORE telemetry.
         # This is a data integrity check — FrameworkBugError must NOT be swallowed
         # by the telemetry error handler below.
-        # See P2-2026-02-14-plugincontext-record-call-can-emit-the-wrong-token-id.
+        # Resolve from state_id, not from self.token_id which may be stale.
         token_id = None
         if has_state:
             if self.state_id is None:

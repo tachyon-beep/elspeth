@@ -185,25 +185,6 @@ def _classify_llm_error(exception: Exception) -> str:
     return "unknown"
 
 
-def _is_retryable_error(exception: Exception) -> bool:
-    """Determine if an LLM error is retryable.
-
-    Retryable errors (transient):
-    - Rate limits (429)
-    - Server errors (500, 502, 503, 504, 529)
-    - Network/connection errors (timeout, connection refused, etc.)
-
-    Non-retryable errors (permanent):
-    - Client errors (400, 401, 403, 404, 422)
-    - Content policy violations
-    - Context length exceeded
-
-    Returns:
-        True if error is likely transient and should be retried
-    """
-    return _classify_llm_error(exception) in {"rate_limit", "server", "network"}
-
-
 class AuditedLLMClient(AuditedClientBase):
     """LLM client that automatically records all calls to audit trail.
 

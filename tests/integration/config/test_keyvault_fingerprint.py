@@ -42,7 +42,7 @@ class TestKeyVaultSecretsConfig:
         """
         from elspeth.core.config import SecretsConfig
         from elspeth.core.security.config_secrets import load_secrets_from_config
-        from elspeth.core.security.fingerprint import get_fingerprint_key
+        from elspeth.core.security import get_fingerprint_key
 
         # Ensure we're starting without the env var
         monkeypatch.delenv("ELSPETH_FINGERPRINT_KEY", raising=False)
@@ -119,7 +119,7 @@ class TestOldEnvVarApproachRemoved:
         - ELSPETH_FINGERPRINT_KEY env var is set
         - get_fingerprint_key() reads the env var
         """
-        from elspeth.core.security.fingerprint import get_fingerprint_key
+        from elspeth.core.security import get_fingerprint_key
 
         # Clear ELSPETH_FINGERPRINT_KEY
         monkeypatch.delenv("ELSPETH_FINGERPRINT_KEY", raising=False)

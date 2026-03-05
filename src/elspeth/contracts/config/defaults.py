@@ -66,33 +66,3 @@ POLICY_DEFAULTS: Final[MappingProxyType[str, int | float]] = MappingProxyType({
 })
 
 
-def get_internal_default(subsystem: str, field: str) -> int | float | bool | str:
-    """Get an internal default value.
-
-    Args:
-        subsystem: Subsystem name (e.g., "retry", "checkpoint")
-        field: Field name within subsystem
-
-    Returns:
-        The default value
-
-    Raises:
-        KeyError: If subsystem or field not found (bug - internal defaults
-                  should always be present for documented fields)
-    """
-    return INTERNAL_DEFAULTS[subsystem][field]
-
-
-def get_policy_default(field: str) -> int | float:
-    """Get a policy default value.
-
-    Args:
-        field: Field name (e.g., "max_attempts", "jitter")
-
-    Returns:
-        The default value
-
-    Raises:
-        KeyError: If field not found (bug - policy should have all fields)
-    """
-    return POLICY_DEFAULTS[field]

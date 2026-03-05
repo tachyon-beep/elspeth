@@ -25,7 +25,7 @@ import string
 from hypothesis import assume, given, settings
 from hypothesis import strategies as st
 
-from elspeth.core.security.fingerprint import secret_fingerprint
+from elspeth.core.security import secret_fingerprint
 
 # =============================================================================
 # Strategies for generating secrets and keys

@@ -55,24 +55,25 @@ def _validate_transform_error(data: dict[str, Any]) -> TransformErrorDisplay:
     return result
 
 
-def _has_full_coalesce_shape(data: dict[str, Any]) -> bool:
-    """Check whether a coalesce error dict has the current schema shape.
-
-    Older pre-RC3.3 records may only contain ``failure_reason`` (and sometimes
-    ``select_branch``) without the structural fields added later.  This
-    predicate lets the renderer distinguish supported from unsupported shapes
-    *before* attempting validation.
-    """
-    return all(k in data for k in ("failure_reason", "expected_branches", "branches_arrived", "merge_policy"))
-
-
 def _validate_coalesce_error(data: dict[str, Any]) -> CoalesceErrorDisplay:
     """Validate and cast a dict to CoalesceErrorDisplay.
 
     CoalesceFailureReason has required fields: failure_reason, expected_branches,
     branches_arrived, merge_policy.
-    Raises KeyError if required fields are missing (Tier 1 - crash on corruption).
+
+    Raises AuditIntegrityError if required fields are missing (Tier 1 — crash
+    on corruption with diagnostic context, not a bare KeyError).
     """
+    from elspeth.contracts.errors import AuditIntegrityError
+
+    required = ("failure_reason", "expected_branches", "branches_arrived", "merge_policy")
+    missing = [k for k in required if k not in data]
+    if missing:
+        raise AuditIntegrityError(
+            f"Corrupt coalesce error record: missing required fields {missing}. "
+            f"Available keys: {sorted(data.keys())}. "
+            f"This indicates database corruption (Tier 1 violation)."
+        )
     result: CoalesceErrorDisplay = {
         "failure_reason": data["failure_reason"],
         "expected_branches": data["expected_branches"],
@@ -202,23 +203,16 @@ class NodeDetailPanel:
                 if validated.get("phase"):
                     lines.append(f"  Phase:   {validated['phase']}")
             elif "failure_reason" in error:
-                # CoalesceFailureReason variant — check for full vs legacy shape
-                if _has_full_coalesce_shape(error):
-                    validated_coalesce = _validate_coalesce_error(error)
-                    lines.append(f"  Failure: {validated_coalesce['failure_reason']}")
-                    lines.append(f"  Policy:  {validated_coalesce['merge_policy']}")
-                    lines.append(f"  Expected branches: {', '.join(validated_coalesce['expected_branches'])}")
-                    lines.append(f"  Arrived branches:  {', '.join(validated_coalesce['branches_arrived']) or '(none)'}")
-                    if validated_coalesce.get("timeout_ms") is not None:
-                        lines.append(f"  Timeout: {validated_coalesce['timeout_ms']} ms")
-                    if validated_coalesce.get("select_branch"):
-                        lines.append(f"  Select branch: {validated_coalesce['select_branch']}")
-                else:
-                    # Older record shape — render what we can
-                    lines.append(f"  Failure: {error['failure_reason']}")
-                    if "select_branch" in error:
-                        lines.append(f"  Select branch: {error['select_branch']}")
-                    lines.append("  (Older record format — full coalesce details not available)")
+                # CoalesceFailureReason variant
+                validated_coalesce = _validate_coalesce_error(error)
+                lines.append(f"  Failure: {validated_coalesce['failure_reason']}")
+                lines.append(f"  Policy:  {validated_coalesce['merge_policy']}")
+                lines.append(f"  Expected branches: {', '.join(validated_coalesce['expected_branches'])}")
+                lines.append(f"  Arrived branches:  {', '.join(validated_coalesce['branches_arrived']) or '(none)'}")
+                if validated_coalesce.get("timeout_ms") is not None:
+                    lines.append(f"  Timeout: {validated_coalesce['timeout_ms']} ms")
+                if validated_coalesce.get("select_branch"):
+                    lines.append(f"  Select branch: {validated_coalesce['select_branch']}")
             elif "reason" in error:
                 # TransformErrorReason variant
                 validated_transform = _validate_transform_error(error)

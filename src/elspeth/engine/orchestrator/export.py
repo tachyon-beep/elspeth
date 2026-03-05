@@ -102,7 +102,6 @@ def export_landscape(
             run_id=run_id,
             artifact_path=artifact_path,
             sign=export_config.sign,
-            ctx=ctx,
         )
     else:
         # JSON export: batch all records for single write
@@ -121,7 +120,6 @@ def _export_csv_multifile(
     run_id: str,
     artifact_path: str,
     sign: bool,
-    ctx: PluginContext,  # - reserved for future use
 ) -> None:
     """Export audit trail as multiple CSV files (one per record type).
 
@@ -133,7 +131,6 @@ def _export_csv_multifile(
         run_id: The completed run ID
         artifact_path: Path from sink config (validated by caller)
         sign: Whether to sign records
-        ctx: Plugin context for sink operations (reserved for future use)
     """
     from elspeth.core.landscape.formatters import CSVFormatter
 

@@ -113,8 +113,7 @@ def check_aggregation_timeouts(
     processing, not just at end-of-source. Checking BEFORE buffering ensures
     timed-out batches don't include the newly arriving row.
 
-    Bug fix: P1-2026-01-22-aggregation-timeout-idle-never-fires
-    Before this fix, should_flush() was only called from buffer_row(),
+    Before this was added, should_flush() was only called from buffer_row(),
     meaning timeouts never fired during idle periods between rows.
 
     KNOWN LIMITATION (True Idle):
@@ -162,7 +161,7 @@ def check_aggregation_timeouts(
         # Skip count triggers — they are handled in buffer_row.
         # Timeout AND condition triggers can be time-based (e.g.,
         # batch_age_seconds >= 5) and must flush before the next row is buffered.
-        # P1-2026-02-05: condition triggers were previously skipped here.
+        # Condition triggers can also be time-based and must be checked here.
         if trigger_type not in (TriggerType.TIMEOUT, TriggerType.CONDITION):
             continue
 

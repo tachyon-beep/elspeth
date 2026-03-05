@@ -101,8 +101,6 @@ class SchemaContract:
 
         by_norm: dict[str, FieldContract] = {fc.normalized_name: fc for fc in self.fields}
         by_orig: dict[str, str] = {fc.original_name: fc.normalized_name for fc in self.fields}
-        object.__setattr__(self, "_by_normalized", by_norm)
-        object.__setattr__(self, "_by_original", by_orig)
         object.__setattr__(self, "_by_normalized", types.MappingProxyType(by_norm))
         object.__setattr__(self, "_by_original", types.MappingProxyType(by_orig))
 
