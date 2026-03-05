@@ -615,4 +615,3 @@ class CSVSink(BaseSink):
             self._file.close()
             self._file = None
             self._writer = None
-

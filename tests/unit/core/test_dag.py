@@ -617,10 +617,12 @@ class TestSourceSinkValidation:
         graph.add_edge("gate", "sink_a", label="branch_a", mode=RoutingMode.COPY)
         graph.add_edge("gate", "sink_b", label="branch_b", mode=RoutingMode.COPY)
         # No route labels registered — COPY edges are exempt
-        graph.set_sink_id_map({
-            SinkName("sink_a"): NodeID("sink_a"),
-            SinkName("sink_b"): NodeID("sink_b"),
-        })
+        graph.set_sink_id_map(
+            {
+                SinkName("sink_a"): NodeID("sink_a"),
+                SinkName("sink_b"): NodeID("sink_b"),
+            }
+        )
 
         # Should NOT raise — COPY edges don't need route labels
         graph.validate()
@@ -667,10 +669,12 @@ class TestSourceSinkValidation:
         # COPY edge (fork fan-out) — exempt from route label requirement
         graph.add_edge("gate", "sink_forked", label="branch_copy", mode=RoutingMode.COPY)
         graph.add_route_label_entry(NodeID("gate"), SinkName("sink_routed"), "flagged")
-        graph.set_sink_id_map({
-            SinkName("sink_routed"): NodeID("sink_routed"),
-            SinkName("sink_forked"): NodeID("sink_forked"),
-        })
+        graph.set_sink_id_map(
+            {
+                SinkName("sink_routed"): NodeID("sink_routed"),
+                SinkName("sink_forked"): NodeID("sink_forked"),
+            }
+        )
 
         # Should NOT raise — MOVE has label, COPY is exempt
         graph.validate()

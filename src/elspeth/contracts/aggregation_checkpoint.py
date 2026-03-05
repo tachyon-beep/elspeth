@@ -145,23 +145,16 @@ class AggregationNodeCheckpoint:
         }
         missing = required_fields - set(data.keys())
         if missing:
-            raise ValueError(
-                f"Checkpoint node '{node_id}' missing required fields: {missing}. "
-                f"Found: {set(data.keys())}"
-            )
+            raise ValueError(f"Checkpoint node '{node_id}' missing required fields: {missing}. Found: {set(data.keys())}")
 
         tokens_data = data["tokens"]
         if not isinstance(tokens_data, list):
-            raise ValueError(
-                f"Invalid checkpoint format for node {node_id}: "
-                f"'tokens' must be a list, got {type(tokens_data).__name__}"
-            )
+            raise ValueError(f"Invalid checkpoint format for node {node_id}: 'tokens' must be a list, got {type(tokens_data).__name__}")
 
         batch_id = data["batch_id"]
         if batch_id is None:
             raise ValueError(
-                f"Invalid checkpoint format for node {node_id}: 'batch_id' is None. "
-                "Checkpoint entries with tokens must include a batch_id."
+                f"Invalid checkpoint format for node {node_id}: 'batch_id' is None. Checkpoint entries with tokens must include a batch_id."
             )
 
         tokens = tuple(AggregationTokenCheckpoint.from_dict(t) for t in tokens_data)

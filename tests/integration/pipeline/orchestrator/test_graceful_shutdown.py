@@ -772,7 +772,6 @@ class TestInterruptAndResume:
         from elspeth.contracts.schema_contract import FieldContract, SchemaContract
         from elspeth.core.checkpoint import CheckpointManager
         from elspeth.core.landscape.schema import (
-            batches_table,
             edges_table,
             nodes_table,
             rows_table,
@@ -1000,8 +999,8 @@ class TestInterruptAndResume:
             AggregationNodeCheckpoint,
             AggregationTokenCheckpoint,
         )
-        from elspeth.contracts.contract_records import ContractAuditRecord
         from elspeth.contracts.config.runtime import RuntimeCheckpointConfig
+        from elspeth.contracts.contract_records import ContractAuditRecord
         from elspeth.core.checkpoint import CheckpointManager, RecoveryManager
         from elspeth.core.config import CheckpointSettings
         from elspeth.core.landscape.schema import (

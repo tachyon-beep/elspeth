@@ -229,7 +229,7 @@ class ExplainScreen:
         self._selected_node_id = node_id
 
         match self._state:
-            case (LoadedState(db=db, run_id=run_id) | LoadingFailedState(db=db, run_id=run_id)) if node_id:
+            case LoadedState(db=db, run_id=run_id) | LoadingFailedState(db=db, run_id=run_id) if node_id:
                 node_state = self._load_node_state(db, run_id, node_id)
                 self._detail_panel.update_state(node_state)
             case _:

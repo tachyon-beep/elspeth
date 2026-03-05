@@ -142,7 +142,7 @@ class TestResolveHeaders:
 
     def test_no_contract_no_fields_raises(self) -> None:
         """Without contract and without field_names, raises — caller bug."""
-        with pytest.raises(ValueError, match="contract.*field_names"):
+        with pytest.raises(ValueError, match=r"contract.*field_names"):
             resolve_headers(
                 contract=None,
                 mode=HeaderMode.NORMALIZED,

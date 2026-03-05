@@ -537,4 +537,3 @@ class DatabaseSink(BaseSink):
             self._table = None
             self._metadata = None
             self._table_replaced = False
-

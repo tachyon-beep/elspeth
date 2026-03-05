@@ -183,9 +183,7 @@ class AzurePromptShield(BaseAzureSafetyTransform):
                 raise MalformedResponseError(f"documentsAnalysis[0] must be dict, got {type(doc).__name__}")
             attack_detected = doc.get("attackDetected")
             if not isinstance(attack_detected, bool):
-                raise MalformedResponseError(
-                    f"documentsAnalysis[0].attackDetected must be bool, got {type(attack_detected).__name__}"
-                )
+                raise MalformedResponseError(f"documentsAnalysis[0].attackDetected must be bool, got {type(attack_detected).__name__}")
             doc_attack = attack_detected
 
         return {

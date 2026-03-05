@@ -451,4 +451,3 @@ class TestNodeDetailPanel:
         # No timeout or select_branch lines
         assert "Timeout" not in content
         assert "Select branch" not in content
-

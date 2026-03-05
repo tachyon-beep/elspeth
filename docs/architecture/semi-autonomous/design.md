@@ -1,8 +1,8 @@
 # Semi-Autonomous Platform - Revised Architecture Design
 
-**Status:** Revised Draft  
-**Date:** 2026-03-03  
-**Epic:** `elspeth-rapid-ea33f5`  
+**Status:** Revised Draft
+**Date:** 2026-03-03
+**Epic:** `elspeth-rapid-ea33f5`
 **Branch:** TBD (pre-implementation)
 
 This document is the authoritative architecture design for the Semi-Autonomous

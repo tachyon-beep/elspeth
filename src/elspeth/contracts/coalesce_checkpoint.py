@@ -30,22 +30,13 @@ class CoalesceTokenCheckpoint:
         for field_name in ("token_id", "row_id", "branch_name", "state_id"):
             value = getattr(self, field_name)
             if not isinstance(value, str) or not value:
-                raise ValueError(
-                    f"{field_name} must be a non-empty string, "
-                    f"got {type(value).__name__}: {value!r}"
-                )
+                raise ValueError(f"{field_name} must be a non-empty string, got {type(value).__name__}: {value!r}")
         if not isinstance(self.row_data, dict):
-            raise ValueError(
-                f"row_data must be a dict, got {type(self.row_data).__name__}: {self.row_data!r}"
-            )
+            raise ValueError(f"row_data must be a dict, got {type(self.row_data).__name__}: {self.row_data!r}")
         if not isinstance(self.contract, dict):
-            raise ValueError(
-                f"contract must be a dict, got {type(self.contract).__name__}: {self.contract!r}"
-            )
+            raise ValueError(f"contract must be a dict, got {type(self.contract).__name__}: {self.contract!r}")
         if not isinstance(self.arrival_offset_seconds, (int, float)) or self.arrival_offset_seconds < 0:
-            raise ValueError(
-                f"arrival_offset_seconds must be non-negative, got {self.arrival_offset_seconds!r}"
-            )
+            raise ValueError(f"arrival_offset_seconds must be non-negative, got {self.arrival_offset_seconds!r}")
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -107,20 +98,12 @@ class CoalescePendingCheckpoint:
         for field_name in ("coalesce_name", "row_id"):
             value = getattr(self, field_name)
             if not isinstance(value, str) or not value:
-                raise ValueError(
-                    f"{field_name} must be a non-empty string, "
-                    f"got {type(value).__name__}: {value!r}"
-                )
+                raise ValueError(f"{field_name} must be a non-empty string, got {type(value).__name__}: {value!r}")
         if not isinstance(self.elapsed_age_seconds, (int, float)) or self.elapsed_age_seconds < 0:
-            raise ValueError(
-                f"elapsed_age_seconds must be non-negative, got {self.elapsed_age_seconds!r}"
-            )
+            raise ValueError(f"elapsed_age_seconds must be non-negative, got {self.elapsed_age_seconds!r}")
         overlap = set(self.branches) & set(self.lost_branches)
         if overlap:
-            raise ValueError(
-                f"branches and lost_branches must not overlap, "
-                f"shared keys: {sorted(overlap)}"
-            )
+            raise ValueError(f"branches and lost_branches must not overlap, shared keys: {sorted(overlap)}")
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -146,15 +129,12 @@ class CoalescePendingCheckpoint:
 
         branches = data["branches"]
         if not isinstance(branches, dict):
-            raise ValueError(
-                f"Coalesce checkpoint pending entry 'branches' must be a dict, got {type(branches).__name__}: {branches!r}"
-            )
+            raise ValueError(f"Coalesce checkpoint pending entry 'branches' must be a dict, got {type(branches).__name__}: {branches!r}")
 
         lost_branches = data["lost_branches"]
         if not isinstance(lost_branches, dict):
             raise ValueError(
-                "Coalesce checkpoint pending entry 'lost_branches' must be a dict, "
-                f"got {type(lost_branches).__name__}: {lost_branches!r}"
+                f"Coalesce checkpoint pending entry 'lost_branches' must be a dict, got {type(lost_branches).__name__}: {lost_branches!r}"
             )
 
         return cls(
@@ -162,7 +142,7 @@ class CoalescePendingCheckpoint:
             row_id=data["row_id"],
             elapsed_age_seconds=data["elapsed_age_seconds"],
             branches={branch: CoalesceTokenCheckpoint.from_dict(token) for branch, token in branches.items()},
-            lost_branches={branch: reason for branch, reason in lost_branches.items()},
+            lost_branches=dict(lost_branches),
         )
 
 

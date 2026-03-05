@@ -30,17 +30,23 @@ from typing import Final
 # Example: RetrySettings.initial_delay_seconds -> RetryConfig.base_delay
 #          The names differ, so it must be documented here.
 
-FIELD_MAPPINGS: Final[MappingProxyType[str, MappingProxyType[str, str]]] = MappingProxyType({
-    "RetrySettings": MappingProxyType({
-        "initial_delay_seconds": "base_delay",
-        "max_delay_seconds": "max_delay",
-    }),
-    "TelemetrySettings": MappingProxyType({
-        "exporters": "exporter_configs",
-    }),
-    # RateLimitSettings, ConcurrencySettings, CheckpointSettings
-    # all use same field names in Settings and Runtime
-})
+FIELD_MAPPINGS: Final[MappingProxyType[str, MappingProxyType[str, str]]] = MappingProxyType(
+    {
+        "RetrySettings": MappingProxyType(
+            {
+                "initial_delay_seconds": "base_delay",
+                "max_delay_seconds": "max_delay",
+            }
+        ),
+        "TelemetrySettings": MappingProxyType(
+            {
+                "exporters": "exporter_configs",
+            }
+        ),
+        # RateLimitSettings, ConcurrencySettings, CheckpointSettings
+        # all use same field names in Settings and Runtime
+    }
+)
 
 
 # =============================================================================
@@ -50,13 +56,15 @@ FIELD_MAPPINGS: Final[MappingProxyType[str, MappingProxyType[str, str]]] = Mappi
 # Format: {SettingsClassName: RuntimeClassName}
 # This documents the intended pairing for protocol verification.
 
-SETTINGS_TO_RUNTIME: Final[MappingProxyType[str, str]] = MappingProxyType({
-    "RetrySettings": "RuntimeRetryConfig",
-    "RateLimitSettings": "RuntimeRateLimitConfig",
-    "ConcurrencySettings": "RuntimeConcurrencyConfig",
-    "CheckpointSettings": "RuntimeCheckpointConfig",
-    "TelemetrySettings": "RuntimeTelemetryConfig",
-})
+SETTINGS_TO_RUNTIME: Final[MappingProxyType[str, str]] = MappingProxyType(
+    {
+        "RetrySettings": "RuntimeRetryConfig",
+        "RateLimitSettings": "RuntimeRateLimitConfig",
+        "ConcurrencySettings": "RuntimeConcurrencyConfig",
+        "CheckpointSettings": "RuntimeCheckpointConfig",
+        "TelemetrySettings": "RuntimeTelemetryConfig",
+    }
+)
 
 
 # =============================================================================
@@ -72,28 +80,30 @@ SETTINGS_TO_RUNTIME: Final[MappingProxyType[str, str]] = MappingProxyType({
 # - Infrastructure settings: Passed to infrastructure components directly
 # - Config-driven settings: Used at DAG construction, not runtime
 
-EXEMPT_SETTINGS: Final[frozenset[str]] = frozenset({
-    # Plugin option containers - passed to plugin __init__
-    "SourceSettings",
-    "TransformSettings",
-    "SinkSettings",
-    # Config-driven DAG construction - not runtime behavior
-    "AggregationSettings",
-    "GateSettings",
-    "CoalesceSettings",
-    "TriggerConfig",
-    # Infrastructure - passed to components directly
-    "DatabaseSettings",
-    "LandscapeSettings",
-    "LandscapeExportSettings",
-    "PayloadStoreSettings",
-    # Nested in RateLimitSettings - handled by parent
-    "ServiceRateLimit",
-    # Nested in TelemetrySettings - no Runtime counterpart
-    "ExporterSettings",
-    # Top-level container
-    "ElspethSettings",
-})
+EXEMPT_SETTINGS: Final[frozenset[str]] = frozenset(
+    {
+        # Plugin option containers - passed to plugin __init__
+        "SourceSettings",
+        "TransformSettings",
+        "SinkSettings",
+        # Config-driven DAG construction - not runtime behavior
+        "AggregationSettings",
+        "GateSettings",
+        "CoalesceSettings",
+        "TriggerConfig",
+        # Infrastructure - passed to components directly
+        "DatabaseSettings",
+        "LandscapeSettings",
+        "LandscapeExportSettings",
+        "PayloadStoreSettings",
+        # Nested in RateLimitSettings - handled by parent
+        "ServiceRateLimit",
+        # Nested in TelemetrySettings - no Runtime counterpart
+        "ExporterSettings",
+        # Top-level container
+        "ElspethSettings",
+    }
+)
 
 
 # =============================================================================
@@ -109,9 +119,11 @@ EXEMPT_SETTINGS: Final[frozenset[str]] = frozenset({
 # Only classes with hardcoded internal defaults need entries here.
 # Classes that only use settings.X values don't need a mapping.
 
-RUNTIME_TO_SUBSYSTEM: Final[MappingProxyType[str, str]] = MappingProxyType({
-    "RuntimeRetryConfig": "retry",
-})
+RUNTIME_TO_SUBSYSTEM: Final[MappingProxyType[str, str]] = MappingProxyType(
+    {
+        "RuntimeRetryConfig": "retry",
+    }
+)
 
 
 def get_runtime_field_name(settings_class: str, settings_field: str) -> str:

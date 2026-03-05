@@ -199,8 +199,8 @@ class TestFieldBaseIdentifierValidation:
         result = get_llm_guaranteed_fields("llm_response")
         assert "llm_response" in result
 
-    def test_invalid_response_field_rejected(self) -> None:
-        """response_field with special chars should raise ValueError."""
+    def test_invalid_response_field_hyphen_rejected(self) -> None:
+        """response_field with hyphens should raise ValueError."""
         from elspeth.plugins.transforms.llm import get_llm_guaranteed_fields
 
         with pytest.raises(ValueError, match="not a valid Python identifier"):

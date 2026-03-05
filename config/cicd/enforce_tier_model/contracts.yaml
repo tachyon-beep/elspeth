@@ -16,299 +16,295 @@ per_file_rules:
   reason: Type normalization requires isinstance() for polymorphic serialization of numeric types
   expires: null
 allow_hits:
-- key: contracts/errors.py:R1:ExecutionError:from_dict:fp=3034299cc17a86ce
-  owner: architecture
-  reason: Tier 1 deserialization — .get() for optional traceback field in stored ExecutionError JSON
-  safety: Missing traceback returns None — correct for errors recorded before traceback capture was added
-  expires: null
-- key: contracts/errors.py:R1:ExecutionError:from_dict:fp=8b8ea1d23b1ef94f
-  owner: architecture
-  reason: Tier 1 deserialization — .get() for optional phase field in stored ExecutionError JSON
-  safety: Missing phase returns None — correct for errors recorded before phase tracking was added
-  expires: null
-- key: contracts/schema_contract_factory.py:R1:create_contract_from_config:fp=c6546fd479ceedee
-  owner: feature
-  reason: Intentional identity fallback - fields without resolution mapping use normalized name as original name
-  safety: Fallback to same value is correct behavior, not silent coercion
-  expires: null
-- key: contracts/contract_builder.py:R6:ContractBuilder:process_first_row:fp=8af4cf358aa1f676
-  owner: bugfix
-  reason: TypeError from normalize_type_for_contract for unsupported types (dict, list, Decimal) — maps to object
-  safety: Preserves field in contract as 'any' type; no data loss or silent skip
-  expires: '2026-05-14'
 - key: contracts/url.py:R6:SanitizedDatabaseUrl:from_raw_url:fp=20b25721d9adf860
   owner: architecture
-  reason: except ValueError on get_fingerprint_key() — explicit branch for dev mode (no key) vs production (fail_if_no_key)
+  reason: "except ValueError on get_fingerprint_key() \u2014 explicit branch for dev mode (no key) vs production (fail_if_no_key)"
   safety: Raises SecretFingerprintError when fail_if_no_key=True; only silently continues in dev mode
   expires: null
 - key: contracts/url.py:R6:SanitizedWebhookUrl:from_raw_url:fp=21ce92115665de50
   owner: architecture
-  reason: except ValueError on get_fingerprint_key() — explicit branch for dev mode (no key) vs production (fail_if_no_key)
+  reason: "except ValueError on get_fingerprint_key() \u2014 explicit branch for dev mode (no key) vs production (fail_if_no_key)"
   safety: Raises SecretFingerprintError when fail_if_no_key=True; only silently continues in dev mode
-  expires: null
-- key: contracts/security.py:R1:get_fingerprint_key:fp=f8bc47a912fd28d8
-  owner: architecture
-  reason: os.environ.get() is the correct API for checking env var existence — followed by explicit ValueError raise
-  safety: Raises ValueError immediately if env var not set — not a silent fallback
-  expires: null
-- key: contracts/data.py:R1:validate_row:fp=0f6fa60e1ef14cec
-  owner: architecture
-  reason: Optional field access at trust boundary
-  safety: Code reviewed - legitimate pattern
-  expires: '2026-05-02'
-- key: contracts/data.py:R3:_type_name:fp=e5ac6075b25c4cd5
-  owner: architecture
-  reason: hasattr for feature detection
-  safety: Code reviewed - legitimate pattern
-  expires: '2026-05-02'
-- key: contracts/data.py:R5:_is_union_type:fp=0cfbacff868ef7c0
-  owner: architecture
-  reason: AST/type checking - required for safe parsing or discriminated unions
-  safety: Code reviewed - legitimate pattern
-  expires: '2026-05-02'
-- key: contracts/transform_contract.py:R5:_is_union_type:fp=a9ba219b5d0e0a54
-  owner: architecture
-  reason: Type annotation introspection - required to detect Union/Optional types
-  safety: Code reviewed - same pattern as data.py:_is_union_type
-  expires: '2026-05-02'
-- key: contracts/audit.py:R5:SecretResolution:__post_init__:fp=0cb7e8c1ad5f41e8
-  owner: architecture
-  reason: Tier 1 invariant enforcement — isinstance validates timestamp is numeric before math.isinf/isnan guard
-  safety: Raises immediately on wrong type — explicit crash, not masking
-  expires: null
-- key: contracts/events.py:R5:_event_field_to_serializable:fp=50661bf972278f23
-  owner: architecture
-  reason: Serialization dispatch — isinstance for dataclass detection before recursive field serialization
-  safety: Type dispatch for serialization, not masking bugs
-  expires: null
-- key: contracts/events.py:R5:_event_field_to_serializable:fp=0aebf544b5c50354
-  owner: architecture
-  reason: Serialization dispatch — isinstance for MappingProxyType to convert frozen mappings to serializable dicts
-  safety: Type dispatch for serialization, not masking bugs
-  expires: null
-- key: contracts/events.py:R5:_event_field_to_serializable:fp=8a52e7950cca8412
-  owner: architecture
-  reason: Serialization dispatch — isinstance for dict to recursively serialize nested mappings
-  safety: Type dispatch for serialization, not masking bugs
-  expires: null
-- key: contracts/events.py:R5:_event_field_to_serializable:fp=0769227222310cc7
-  owner: architecture
-  reason: Serialization dispatch — isinstance for list/tuple to recursively serialize sequences
-  safety: Type dispatch for serialization, not masking bugs
-  expires: null
-- key: contracts/audit.py:R5:_validate_enum:fp=f48a15b1272c5363
-  owner: architecture
-  reason: AST/type checking - required for safe parsing or discriminated unions
-  safety: Code reviewed - legitimate pattern
-  expires: '2026-05-02'
-- key: contracts/audit.py:R5:TokenOutcome:__post_init__:fp=14670c8c83113873
-  owner: architecture
-  reason: AST/type checking - required for safe parsing or discriminated unions
-  safety: Code reviewed - legitimate pattern
-  expires: '2026-05-02'
-- key: contracts/config/runtime.py:R5:_validate_int_field:fp=dd423d2b04b4504e
-  owner: bugfix
-  reason: Tier-3 boundary - from_policy() validates plugin config (user YAML) before conversion
-  safety: Raises ValueError with clear field name and value - no silent recovery
-  expires: null
-- key: contracts/config/runtime.py:R5:_validate_int_field:fp=938da6715141d3e5
-  owner: bugfix
-  reason: Tier-3 boundary - from_policy() validates plugin config (user YAML) before conversion
-  safety: Raises ValueError with clear field name and value - no silent recovery
-  expires: null
-- key: contracts/config/runtime.py:R5:_validate_int_field:fp=52bab38da653cf0d
-  owner: bugfix
-  reason: Tier-3 boundary - from_policy() validates plugin config (user YAML) before conversion
-  safety: Raises ValueError with clear field name and value - no silent recovery
-  expires: null
-- key: contracts/config/runtime.py:R5:_validate_int_field:fp=40863e768771f423
-  owner: bugfix
-  reason: Tier-3 boundary - from_policy() validates plugin config (user YAML) before conversion
-  safety: Raises ValueError with clear field name and value - no silent recovery
-  expires: null
-- key: contracts/config/runtime.py:R5:_validate_float_field:fp=0e857d596f53150b
-  owner: bugfix
-  reason: Tier-3 boundary - from_policy() validates plugin config (user YAML) before conversion
-  safety: Raises ValueError with clear field name and value - no silent recovery
-  expires: null
-- key: contracts/config/runtime.py:R5:_validate_float_field:fp=8a7ada815bfab93b
-  owner: bugfix
-  reason: Tier-3 boundary - from_policy() validates plugin config (user YAML) before conversion
-  safety: Raises ValueError with clear field name and value - no silent recovery
-  expires: null
-- key: contracts/config/runtime.py:R5:_validate_float_field:fp=38fce4ee43bfdc0d
-  owner: bugfix
-  reason: Tier-3 boundary - from_policy() validates plugin config (user YAML) before conversion
-  safety: Raises ValueError with clear field name and value - no silent recovery
-  expires: null
-- key: contracts/config/runtime.py:R5:_validate_float_field:fp=608a648408504f81
-  owner: bugfix
-  reason: Tier-3 boundary - from_policy() validates plugin config (user YAML) before conversion
-  safety: Raises ValueError with clear field name and value - no silent recovery
-  expires: null
-- key: contracts/config/runtime.py:R5:_validate_float_field:fp=45aa28db08eba5f3
-  owner: bugfix
-  reason: Tier-3 boundary - from_policy() validates plugin config (user YAML) before conversion
-  safety: Raises ValueError with clear field name and value - no silent recovery
-  expires: null
-- key: contracts/hashing.py:R5:_reject_non_finite:fp=d35d4e11d243b198
-  owner: bugfix
-  reason: Canonical JSON NaN/Infinity rejection — isinstance(float) to detect non-finite values before rfc8785.dumps()
-  safety: Raises ValueError immediately — explicit crash, not masking
-  expires: null
-- key: contracts/hashing.py:R5:_reject_non_finite:fp=6bbc05c2197b1800
-  owner: bugfix
-  reason: Canonical JSON recursive rejection — isinstance(dict) to traverse nested data structures for NaN/Infinity
-  safety: Pure traversal for validation — no type coercion or default substitution
-  expires: null
-- key: contracts/hashing.py:R5:_reject_non_finite:fp=346fe02f62559967
-  owner: bugfix
-  reason: Canonical JSON recursive rejection — isinstance(list) to traverse nested data structures for NaN/Infinity
-  safety: Pure traversal for validation — no type coercion or default substitution
-  expires: null
-- key: contracts/header_modes.py:R5:parse_header_mode:fp=dc93452b5432e8a4
-  owner: feature
-  reason: Config parsing - config value from YAML is Tier 3 external data; isinstance() distinguishes string from dict
-  safety: ValueError raised for invalid config - explicit validation failure
   expires: null
 - key: contracts/contract_propagation.py:R6:propagate_contract:fp=8b818d57d7a1b90a
   owner: bugfix
-  reason: TypeError from normalize_type_for_contract for ALL unsupported types — maps to object (was dict/list only)
+  reason: "TypeError from normalize_type_for_contract for ALL unsupported types \u2014 maps to object (was dict/list only)"
   safety: Preserves field in contract as 'any' type; no data loss or silent skip
   expires: '2026-05-14'
 - key: contracts/contract_propagation.py:R6:narrow_contract_to_output:fp=17d3f4491f707761
   owner: bugfix
-  reason: TypeError from normalize_type_for_contract for ALL unsupported types during narrowing — maps to object
+  reason: "TypeError from normalize_type_for_contract for ALL unsupported types during narrowing \u2014 maps to object"
   safety: Preserves field in narrowed contract as 'any' type; no data loss
   expires: '2026-05-14'
-- key: contracts/contract_propagation.py:R6:narrow_contract_to_output:fp=c44a2a3ac4d47e65
-  owner: architecture
-  reason: ValueError skips NaN/Infinity values during contract narrowing
-  safety: Non-finite values excluded with debug log; consistent with canonical JSON rejection
-  expires: null
-- key: contracts/contract_propagation.py:R1:merge_contract_with_output:fp=368e4bbac0c4fcec
-  owner: architecture
-  reason: Optional lookup for original name - new fields from transforms may not have input mapping
-  safety: Fallback to output field's original_name is correct behavior for transform-added fields
-  expires: null
-- key: contracts/checkpoint.py:R5:ResumePoint:__post_init__:fp=56f205eb17c5634d
-  owner: architecture
-  reason: Tier 1 invariant — isinstance validates aggregation_state is AggregationCheckpointState before use
-  safety: Raises TypeError immediately on wrong type — explicit crash, not masking
-  expires: null
-- key: contracts/aggregation_checkpoint.py:R5:AggregationNodeCheckpoint:from_dict:fp=b5a2c519de368caf
-  owner: architecture
-  reason: Tier 1 boundary — from_dict() validates tokens_data is list before iterating (checkpoint is our data)
-  safety: Raises TypeError immediately on corruption — crash, not coercion
-  expires: null
-- key: contracts/aggregation_checkpoint.py:R1:AggregationNodeCheckpoint:from_dict:fp=ed768186a9e8b250
-  owner: architecture
-  reason: Tier 1 boundary — .get() for optional trigger fire offsets (count_fire_offset may be absent in older checkpoints)
-  safety: None default is correct — absent offset means "no offset recorded"
-  expires: null
-- key: contracts/aggregation_checkpoint.py:R1:AggregationNodeCheckpoint:from_dict:fp=c34e645c5a38d890
-  owner: architecture
-  reason: Tier 1 boundary — .get() for optional condition_fire_offset (may be absent in older checkpoints)
-  safety: None default is correct — absent offset means "no offset recorded"
-  expires: null
-- key: contracts/plugin_context.py:R1:PluginContext:record_call:fp=4bcfbddc7c8fb688
-  owner: architecture
-  reason: Tier 3 boundary — .get() on serialized LLM response dict to extract optional usage data
-  safety: Missing key returns None; no fabrication
-  expires: null
-- key: contracts/plugin_context.py:R5:PluginContext:record_call:fp=df23c1c8c7e94509
-  owner: architecture
-  reason: Tier 3 boundary — isinstance() validates usage is dict before TokenUsage.from_dict() coercion
-  safety: Type dispatch for external data validation, not masking bugs
-  expires: null
-- key: contracts/plugin_context.py:R4:PluginContext:record_call:fp=b165ec2950e261e0
-  owner: architecture
-  reason: Broad exception handling — telemetry failure must not corrupt the audit call recording; FrameworkBugError/AuditIntegrityError re-raised before this handler
-  safety: Warning logged with error details; Landscape recording already succeeded; system errors propagate
-  expires: null
-- key: contracts/plugin_context.py:R5:PluginContext:record_validation_error:fp=4f4efcff4e768b32
-  owner: architecture
-  reason: Tier 3 boundary — isinstance() checks if external row data is dict before accessing 'id' key
-  safety: Non-dict data falls through to hash-based row_id generation
-  expires: null
-- key: contracts/plugin_context.py:R6:PluginContext:record_validation_error:fp=77aec82106b1d3da
-  owner: architecture
-  reason: Tier 3 boundary — ValueError/TypeError from stable_hash on non-canonical data falls back to repr_hash
-  safety: Warning logged; row_id still generated via repr_hash for audit trail continuity
-  expires: null
-- key: contracts/routing.py:R5:RoutingAction:__post_init__:fp=4d9b80b717bc7551
-  owner: bugfix
-  reason: Dataclass invariant enforcement - RoutingAction requires RoutingMode enum, not raw strings
-  safety: TypeError raised immediately on construction - explicit crash, not masking
-  expires: null
-- key: contracts/results.py:R5:ArtifactDescriptor:for_database:fp=2300432a3c93d6b5
-  owner: bugfix
-  reason: Tier-3 boundary validation - external URL objects must be verified as SanitizedDatabaseUrl
-  safety: TypeError raised if wrong URL type - explicit failure, not masking
-  expires: null
-- key: contracts/results.py:R5:ArtifactDescriptor:for_webhook:fp=e2fada7e3814d17c
-  owner: bugfix
-  reason: Tier-3 boundary validation - external URL objects must be verified as SanitizedWebhookUrl
-  safety: TypeError raised if wrong URL type - explicit failure, not masking
-  expires: null
-- key: contracts/transform_contract.py:R2:_get_python_type:fp=37ef1f2fbd33537f
-  owner: bugfix
-  reason: Type annotation objects (e.g. list[str]) may not have __name__ attribute - getattr is needed for safe error messages
-  safety: Falls back to str(a) for display purposes only; used in error message, not logic
-  expires: null
-- key: contracts/transform_contract.py:R2:_get_python_type:fp=24df5cf5593bf5fa
-  owner: bugfix
-  reason: Type annotation objects (e.g. list[str]) may not have __name__ attribute - getattr is needed for safe error messages
-  safety: Falls back to str(unwrapped) for display purposes only; used in error message, not logic
-  expires: null
-- key: contracts/token_usage.py:R5:TokenUsage:from_dict:fp=deb0de716b9bcbbf
-  owner: architecture
-  reason: Tier 3 boundary — from_dict() validates input is dict before accessing keys
-  safety: Non-dict input returns TokenUsage.unknown(); no crash
-  expires: null
-- key: contracts/token_usage.py:R1:TokenUsage:from_dict:fp=ce8e331b779c0ebe
-  owner: architecture
-  reason: Tier 3 boundary — from_dict() uses .get() on external LLM API response dicts where keys may be absent
-  safety: Missing keys produce None (unknown); no fabrication
-  expires: null
-- key: contracts/token_usage.py:R1:TokenUsage:from_dict:fp=dda6babca3089a2b
-  owner: architecture
-  reason: Tier 3 boundary — from_dict() uses .get() for completion_tokens on external LLM API response dicts
-  safety: Missing keys produce None (unknown); no fabrication
-  expires: null
-- key: contracts/token_usage.py:R5:TokenUsage:from_dict:fp=9cb74e9ae324a42b
-  owner: architecture
-  reason: Tier 3 boundary — from_dict() coerces external LLM API usage data; isinstance() validates int type
-  safety: Non-int values coerced to None (unknown); no fabrication, no crash
-  expires: null
-- key: contracts/token_usage.py:R5:TokenUsage:from_dict:fp=9cbee04cc3ccdcf1
-  owner: architecture
-  reason: Tier 3 boundary — from_dict() validates completion_tokens is int before accepting
-  safety: Non-int values coerced to None (unknown); no fabrication, no crash
-  expires: null
-# TYPE_CHECKING layer imports (L0→L1 annotation dependencies)
 - key: contracts/plugin_context.py:TC:_module_:fp=2281c9d4d4f9c832
   owner: architecture
-  reason: TYPE_CHECKING import of LandscapeRecorder — PluginContext type annotations need L1 recorder type
-  safety: No runtime coupling — annotation-only import behind TYPE_CHECKING guard
+  reason: "TYPE_CHECKING import of LandscapeRecorder \u2014 PluginContext type annotations need L1 recorder type"
+  safety: "No runtime coupling \u2014 annotation-only import behind TYPE_CHECKING guard"
   expires: null
 - key: contracts/plugin_context.py:TC:_module_:fp=5dfc642462528293
   owner: architecture
-  reason: TYPE_CHECKING import of RateLimitRegistry — PluginContext type annotations need L1 rate limiter type
-  safety: No runtime coupling — annotation-only import behind TYPE_CHECKING guard
+  reason: "TYPE_CHECKING import of RateLimitRegistry \u2014 PluginContext type annotations need L1 rate limiter type"
+  safety: "No runtime coupling \u2014 annotation-only import behind TYPE_CHECKING guard"
   expires: null
 - key: contracts/contexts.py:TC:_module_:fp=fe23a281512d9222
   owner: architecture
-  reason: TYPE_CHECKING import of LandscapeRecorder — context protocols declare landscape property type
-  safety: No runtime coupling — annotation-only import behind TYPE_CHECKING guard
+  reason: "TYPE_CHECKING import of LandscapeRecorder \u2014 context protocols declare landscape property type"
+  safety: "No runtime coupling \u2014 annotation-only import behind TYPE_CHECKING guard"
   expires: null
 - key: contracts/contexts.py:TC:_module_:fp=b29b41656c78b873
   owner: architecture
-  reason: TYPE_CHECKING import of RateLimitRegistry — context protocols declare rate_limiter property type
-  safety: No runtime coupling — annotation-only import behind TYPE_CHECKING guard
+  reason: "TYPE_CHECKING import of RateLimitRegistry \u2014 context protocols declare rate_limiter property type"
+  safety: "No runtime coupling \u2014 annotation-only import behind TYPE_CHECKING guard"
   expires: null
 - key: contracts/config/runtime.py:TC:_module_:fp=07abedf4392ba82e
   owner: architecture
-  reason: TYPE_CHECKING import of Settings models — Runtime*Config.from_settings() type annotations
-  safety: No runtime coupling — annotation-only import behind TYPE_CHECKING guard
+  reason: "TYPE_CHECKING import of Settings models \u2014 Runtime*Config.from_settings() type annotations"
+  safety: "No runtime coupling \u2014 annotation-only import behind TYPE_CHECKING guard"
   expires: null
+- key: contracts/data.py:R1:validate_row:fp=1c829f82426c1723
+  owner: architecture
+  reason: Optional field access at trust boundary
+  safety: Code reviewed - legitimate pattern
+  expires: '2026-05-02'
+- key: contracts/data.py:R3:_type_name:fp=fc0ba036b8c43844
+  owner: architecture
+  reason: hasattr for feature detection
+  safety: Code reviewed - legitimate pattern
+  expires: '2026-05-02'
+- key: contracts/data.py:R5:_is_union_type:fp=8145402319da2f9d
+  owner: architecture
+  reason: AST/type checking - required for safe parsing or discriminated unions
+  safety: Code reviewed - legitimate pattern
+  expires: '2026-05-02'
+- key: contracts/hashing.py:R5:_reject_non_finite:fp=12607d001211f6d6
+  owner: bugfix
+  reason: "Canonical JSON NaN/Infinity rejection \u2014 isinstance(float) to detect non-finite values before rfc8785.dumps()"
+  safety: "Raises ValueError immediately \u2014 explicit crash, not masking"
+- key: contracts/hashing.py:R5:_reject_non_finite:fp=a827f214e41d65f4
+  owner: bugfix
+  reason: "Canonical JSON NaN/Infinity rejection \u2014 isinstance(float) to detect non-finite values before rfc8785.dumps()"
+  safety: "Raises ValueError immediately \u2014 explicit crash, not masking"
+- key: contracts/hashing.py:R5:_reject_non_finite:fp=d99b2975a7e41ec8
+  owner: bugfix
+  reason: "Canonical JSON NaN/Infinity rejection \u2014 isinstance(float) to detect non-finite values before rfc8785.dumps()"
+  safety: "Raises ValueError immediately \u2014 explicit crash, not masking"
+- key: contracts/audit.py:R5:_validate_enum:fp=9ca70ed29944861d
+  owner: architecture
+  reason: AST/type checking - required for safe parsing or discriminated unions
+  safety: Code reviewed - legitimate pattern
+  expires: '2026-05-02'
+- key: contracts/audit.py:R5:TokenOutcome:__post_init__:fp=fcc2134cad55ed92
+  owner: architecture
+  reason: AST/type checking - required for safe parsing or discriminated unions
+  safety: Code reviewed - legitimate pattern
+  expires: '2026-05-02'
+- key: contracts/audit.py:R5:SecretResolution:__post_init__:fp=06b13a2e77960881
+  owner: architecture
+  reason: "Tier 1 invariant enforcement \u2014 isinstance validates timestamp is numeric before math.isinf/isnan guard"
+  safety: "Raises immediately on wrong type \u2014 explicit crash, not masking"
+- key: contracts/results.py:R5:ArtifactDescriptor:for_database:fp=b48f9ec2ebee4f55
+  owner: bugfix
+  reason: Tier-3 boundary validation - external URL objects must be verified as SanitizedDatabaseUrl
+  safety: TypeError raised if wrong URL type - explicit failure, not masking
+- key: contracts/results.py:R5:ArtifactDescriptor:for_webhook:fp=e5a1abf79bb20a88
+  owner: bugfix
+  reason: Tier-3 boundary validation - external URL objects must be verified as SanitizedWebhookUrl
+  safety: TypeError raised if wrong URL type - explicit failure, not masking
+- key: contracts/events.py:R5:_event_field_to_serializable:fp=5f38b2878da5e21a
+  owner: architecture
+  reason: "Serialization dispatch \u2014 isinstance for dataclass detection before recursive field serialization"
+  safety: Type dispatch for serialization, not masking bugs
+- key: contracts/events.py:R5:_event_field_to_serializable:fp=4eeb043c54d2c7eb
+  owner: architecture
+  reason: "Serialization dispatch \u2014 isinstance for dataclass detection before recursive field serialization"
+  safety: Type dispatch for serialization, not masking bugs
+- key: contracts/events.py:R5:_event_field_to_serializable:fp=c12f2e728ab708fe
+  owner: architecture
+  reason: "Serialization dispatch \u2014 isinstance for dataclass detection before recursive field serialization"
+  safety: Type dispatch for serialization, not masking bugs
+- key: contracts/events.py:R5:_event_field_to_serializable:fp=ebd31f5c8cf7e909
+  owner: architecture
+  reason: "Serialization dispatch \u2014 isinstance for dataclass detection before recursive field serialization"
+  safety: Type dispatch for serialization, not masking bugs
+- key: contracts/contract_builder.py:R6:ContractBuilder:process_first_row:fp=757e34496a7ed0ea
+  owner: bugfix
+  reason: "TypeError from normalize_type_for_contract for unsupported types (dict, list, Decimal) \u2014 maps to object"
+  safety: Preserves field in contract as 'any' type; no data loss or silent skip
+  expires: '2026-05-14'
+- key: contracts/transform_contract.py:R5:_is_union_type:fp=c595707597dca7ea
+  owner: architecture
+  reason: Type annotation introspection - required to detect Union/Optional types
+  safety: Code reviewed - same pattern as data.py:_is_union_type
+  expires: '2026-05-02'
+- key: contracts/transform_contract.py:R2:_get_python_type:fp=d2a999e9457911a4
+  owner: bugfix
+  reason: Type annotation objects (e.g. list[str]) may not have __name__ attribute - getattr is needed for safe error messages
+  safety: Falls back to str(a) for display purposes only; used in error message, not logic
+- key: contracts/transform_contract.py:R2:_get_python_type:fp=fe3e9b0583a05a31
+  owner: bugfix
+  reason: Type annotation objects (e.g. list[str]) may not have __name__ attribute - getattr is needed for safe error messages
+  safety: Falls back to str(a) for display purposes only; used in error message, not logic
+- key: contracts/header_modes.py:R5:parse_header_mode:fp=2b9b2575df323e15
+  owner: feature
+  reason: Config parsing - config value from YAML is Tier 3 external data; isinstance() distinguishes string from dict
+  safety: ValueError raised for invalid config - explicit validation failure
+- key: contracts/plugin_context.py:R1:PluginContext:record_call:fp=1af47a5af06d2c56
+  owner: architecture
+  reason: "Tier 3 boundary \u2014 .get() on serialized LLM response dict to extract optional usage data"
+  safety: Missing key returns None; no fabrication
+- key: contracts/plugin_context.py:R5:PluginContext:record_call:fp=ed9209bb6cb4b6fb
+  owner: architecture
+  reason: "Tier 3 boundary \u2014 isinstance() validates usage is dict before TokenUsage.from_dict() coercion"
+  safety: Type dispatch for external data validation, not masking bugs
+- key: contracts/plugin_context.py:R4:PluginContext:record_call:fp=2fbe9f3e722989db
+  owner: architecture
+  reason: "Broad exception handling \u2014 telemetry failure must not corrupt the audit call recording; FrameworkBugError/AuditIntegrityError\
+    \ re-raised before this handler"
+  safety: Warning logged with error details; Landscape recording already succeeded; system errors propagate
+- key: contracts/plugin_context.py:R5:PluginContext:record_validation_error:fp=8032e882779f22f8
+  owner: architecture
+  reason: "Tier 3 boundary \u2014 isinstance() checks if external row data is dict before accessing 'id' key"
+  safety: Non-dict data falls through to hash-based row_id generation
+- key: contracts/plugin_context.py:R6:PluginContext:record_validation_error:fp=337a661bb6aeff40
+  owner: architecture
+  reason: "Tier 3 boundary \u2014 ValueError/TypeError from stable_hash on non-canonical data falls back to repr_hash"
+  safety: Warning logged; row_id still generated via repr_hash for audit trail continuity
+- key: contracts/routing.py:R5:RoutingAction:__post_init__:fp=ac069baef16ae596
+  owner: bugfix
+  reason: Dataclass invariant enforcement - RoutingAction requires RoutingMode enum, not raw strings
+  safety: TypeError raised immediately on construction - explicit crash, not masking
+- key: contracts/token_usage.py:R5:TokenUsage:from_dict:fp=c2f62fa75a0fb1ee
+  owner: architecture
+  reason: "Tier 3 boundary \u2014 from_dict() validates input is dict before accessing keys"
+  safety: Non-dict input returns TokenUsage.unknown(); no crash
+- key: contracts/token_usage.py:R1:TokenUsage:from_dict:fp=7c36c15277f0a2d0
+  owner: architecture
+  reason: "Tier 3 boundary \u2014 from_dict() uses .get() on external LLM API response dicts where keys may be absent"
+  safety: Missing keys produce None (unknown); no fabrication
+- key: contracts/token_usage.py:R1:TokenUsage:from_dict:fp=1a6543451c5c8189
+  owner: architecture
+  reason: "Tier 3 boundary \u2014 from_dict() uses .get() on external LLM API response dicts where keys may be absent"
+  safety: Missing keys produce None (unknown); no fabrication
+- key: contracts/token_usage.py:R5:TokenUsage:from_dict:fp=c6c6e03eef94a554
+  owner: architecture
+  reason: "Tier 3 boundary \u2014 from_dict() validates input is dict before accessing keys"
+  safety: Non-dict input returns TokenUsage.unknown(); no crash
+- key: contracts/token_usage.py:R5:TokenUsage:from_dict:fp=801d51b26b2a2afc
+  owner: architecture
+  reason: "Tier 3 boundary \u2014 from_dict() validates input is dict before accessing keys"
+  safety: Non-dict input returns TokenUsage.unknown(); no crash
+- key: contracts/token_usage.py:R5:TokenUsage:from_dict:fp=caded4e04ffc9203
+  owner: architecture
+  reason: "Tier 3 boundary \u2014 from_dict() validates input is dict before accessing keys"
+  safety: Non-dict input returns TokenUsage.unknown(); no crash
+- key: contracts/token_usage.py:R5:TokenUsage:from_dict:fp=f0bb5a15d5a16741
+  owner: architecture
+  reason: "Tier 3 boundary \u2014 from_dict() validates input is dict before accessing keys"
+  safety: Non-dict input returns TokenUsage.unknown(); no crash
+- key: contracts/coalesce_checkpoint.py:R5:CoalesceTokenCheckpoint:__post_init__:fp=b0a7679e914815a1
+  owner: architecture
+  reason: "Tier 1 write-side validation \u2014 isinstance in __post_init__ enforces invariants at construction time per offensive\
+    \ programming policy"
+  safety: "Raises ValueError on invalid data \u2014 crashes loud, never masks"
+- key: contracts/coalesce_checkpoint.py:R5:CoalesceTokenCheckpoint:__post_init__:fp=2f9c6761318b9d15
+  owner: architecture
+  reason: "Tier 1 write-side validation \u2014 isinstance in __post_init__ enforces invariants at construction time per offensive\
+    \ programming policy"
+  safety: "Raises ValueError on invalid data \u2014 crashes loud, never masks"
+- key: contracts/coalesce_checkpoint.py:R5:CoalesceTokenCheckpoint:__post_init__:fp=5ebbb7f5e80ddee0
+  owner: architecture
+  reason: "Tier 1 write-side validation \u2014 isinstance in __post_init__ enforces invariants at construction time per offensive\
+    \ programming policy"
+  safety: "Raises ValueError on invalid data \u2014 crashes loud, never masks"
+- key: contracts/coalesce_checkpoint.py:R5:CoalesceTokenCheckpoint:__post_init__:fp=082612063db53ba7
+  owner: architecture
+  reason: "Tier 1 write-side validation \u2014 isinstance in __post_init__ enforces invariants at construction time per offensive\
+    \ programming policy"
+  safety: "Raises ValueError on invalid data \u2014 crashes loud, never masks"
+- key: contracts/coalesce_checkpoint.py:R5:CoalescePendingCheckpoint:__post_init__:fp=4124f1b7e6f2759d
+  owner: architecture
+  reason: "Tier 1 write-side validation \u2014 isinstance in __post_init__ enforces invariants at construction time per offensive\
+    \ programming policy"
+  safety: "Raises ValueError on invalid data \u2014 crashes loud, never masks"
+- key: contracts/coalesce_checkpoint.py:R5:CoalescePendingCheckpoint:__post_init__:fp=4c782ec932932d76
+  owner: architecture
+  reason: "Tier 1 write-side validation \u2014 isinstance in __post_init__ enforces invariants at construction time per offensive\
+    \ programming policy"
+  safety: "Raises ValueError on invalid data \u2014 crashes loud, never masks"
+- key: contracts/coalesce_checkpoint.py:R5:CoalescePendingCheckpoint:from_dict:fp=dd0a1b3783c20958
+  owner: architecture
+  reason: "Tier 1 deserialization \u2014 isinstance validates checkpoint JSON structure (our data) before construction"
+  safety: "Raises ValueError on malformed checkpoint \u2014 crash on corruption per Tier 1 rules"
+- key: contracts/coalesce_checkpoint.py:R5:CoalescePendingCheckpoint:from_dict:fp=f4bee3dc03881501
+  owner: architecture
+  reason: "Tier 1 deserialization \u2014 isinstance validates checkpoint JSON structure (our data) before construction"
+  safety: "Raises ValueError on malformed checkpoint \u2014 crash on corruption per Tier 1 rules"
+- key: contracts/coalesce_checkpoint.py:R5:CoalesceCheckpointState:from_dict:fp=7af0b39d5530afda
+  owner: architecture
+  reason: "Tier 1 deserialization \u2014 isinstance validates checkpoint JSON structure (our data) before construction"
+  safety: "Raises ValueError on malformed checkpoint \u2014 crash on corruption per Tier 1 rules"
+- key: contracts/schema_contract_factory.py:R1:create_contract_from_config:fp=dc45957bf113fd02
+  owner: feature
+  reason: Intentional identity fallback - fields without resolution mapping use normalized name as original name
+  safety: Fallback to same value is correct behavior, not silent coercion
+- key: contracts/security.py:R1:get_fingerprint_key:fp=f9b7eed714d2f6e1
+  owner: architecture
+  reason: "os.environ.get() is the correct API for checking env var existence \u2014 followed by explicit ValueError raise"
+  safety: "Raises ValueError immediately if env var not set \u2014 not a silent fallback"
+- key: contracts/contract_propagation.py:R6:narrow_contract_to_output:fp=ddd5d191cd906670
+  owner: bugfix
+  reason: "TypeError from normalize_type_for_contract for ALL unsupported types during narrowing \u2014 maps to object"
+  safety: Preserves field in narrowed contract as 'any' type; no data loss
+  expires: '2026-05-14'
+- key: contracts/contract_propagation.py:R1:merge_contract_with_output:fp=13ca022bbcf95bc9
+  owner: architecture
+  reason: Optional lookup for original name - new fields from transforms may not have input mapping
+  safety: Fallback to output field's original_name is correct behavior for transform-added fields
+- key: contracts/aggregation_checkpoint.py:R5:AggregationNodeCheckpoint:from_dict:fp=40e605dfe41416d2
+  owner: architecture
+  reason: "Tier 1 boundary \u2014 from_dict() validates tokens_data is list before iterating (checkpoint is our data)"
+  safety: "Raises TypeError immediately on corruption \u2014 crash, not coercion"
+- key: contracts/checkpoint.py:R5:ResumePoint:__post_init__:fp=e5bf6a88ef6b62d2
+  owner: architecture
+  reason: "Tier 1 invariant \u2014 isinstance validates aggregation_state is AggregationCheckpointState before use"
+  safety: "Raises TypeError immediately on wrong type \u2014 explicit crash, not masking"
+- key: contracts/checkpoint.py:R5:ResumePoint:__post_init__:fp=be57b2b25c18d2f9
+  owner: architecture
+  reason: "Tier 1 invariant \u2014 isinstance validates aggregation_state is AggregationCheckpointState before use"
+  safety: "Raises TypeError immediately on wrong type \u2014 explicit crash, not masking"
+- key: contracts/config/runtime.py:R5:_validate_int_field:fp=aa24434e9ce21d3c
+  owner: bugfix
+  reason: Tier-3 boundary - from_policy() validates plugin config (user YAML) before conversion
+  safety: Raises ValueError with clear field name and value - no silent recovery
+- key: contracts/config/runtime.py:R5:_validate_int_field:fp=fb419ed19f330fff
+  owner: bugfix
+  reason: Tier-3 boundary - from_policy() validates plugin config (user YAML) before conversion
+  safety: Raises ValueError with clear field name and value - no silent recovery
+- key: contracts/config/runtime.py:R5:_validate_int_field:fp=896a8d81d10d6bb6
+  owner: bugfix
+  reason: Tier-3 boundary - from_policy() validates plugin config (user YAML) before conversion
+  safety: Raises ValueError with clear field name and value - no silent recovery
+- key: contracts/config/runtime.py:R5:_validate_int_field:fp=991a218338930f59
+  owner: bugfix
+  reason: Tier-3 boundary - from_policy() validates plugin config (user YAML) before conversion
+  safety: Raises ValueError with clear field name and value - no silent recovery
+- key: contracts/config/runtime.py:R5:_validate_float_field:fp=1b92cdff0970c2f4
+  owner: bugfix
+  reason: Tier-3 boundary - from_policy() validates plugin config (user YAML) before conversion
+  safety: Raises ValueError with clear field name and value - no silent recovery
+- key: contracts/config/runtime.py:R5:_validate_float_field:fp=8ec95f722513e216
+  owner: bugfix
+  reason: Tier-3 boundary - from_policy() validates plugin config (user YAML) before conversion
+  safety: Raises ValueError with clear field name and value - no silent recovery
+- key: contracts/config/runtime.py:R5:_validate_float_field:fp=5a7cda6accdd4016
+  owner: bugfix
+  reason: Tier-3 boundary - from_policy() validates plugin config (user YAML) before conversion
+  safety: Raises ValueError with clear field name and value - no silent recovery
+- key: contracts/config/runtime.py:R5:_validate_float_field:fp=f25558faaf0772e4
+  owner: bugfix
+  reason: Tier-3 boundary - from_policy() validates plugin config (user YAML) before conversion
+  safety: Raises ValueError with clear field name and value - no silent recovery
+- key: contracts/config/runtime.py:R5:_validate_float_field:fp=604c40dd517e586d
+  owner: bugfix
+  reason: Tier-3 boundary - from_policy() validates plugin config (user YAML) before conversion
+  safety: Raises ValueError with clear field name and value - no silent recovery

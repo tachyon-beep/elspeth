@@ -48,7 +48,6 @@ class ExecutionError:
         return d
 
 
-
 @dataclass(frozen=True, slots=True)
 class CoalesceFailureReason:
     """Frozen DTO for coalesce/barrier failure payloads.

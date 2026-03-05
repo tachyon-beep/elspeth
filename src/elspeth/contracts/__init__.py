@@ -68,12 +68,12 @@ from elspeth.contracts.call_data import (
 )
 from elspeth.contracts.checkpoint import ResumeCheck, ResumePoint
 from elspeth.contracts.cli import ExecutionResult, ProgressEvent
-from elspeth.contracts.coalesce_metadata import ArrivalOrderEntry, CoalesceMetadata
 from elspeth.contracts.coalesce_checkpoint import (
     CoalesceCheckpointState,
     CoalescePendingCheckpoint,
     CoalesceTokenCheckpoint,
 )
+from elspeth.contracts.coalesce_metadata import ArrivalOrderEntry, CoalesceMetadata
 
 # =============================================================================
 # Settings classes are NOT re-exported from contracts

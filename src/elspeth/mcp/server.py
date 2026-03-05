@@ -42,6 +42,7 @@ __all__ = [
 
 logger = logging.getLogger(__name__)
 
+
 @dataclass(frozen=True, slots=True)
 class _ArgSpec:
     """Declarative schema for one MCP tool's arguments."""
@@ -51,6 +52,7 @@ class _ArgSpec:
     optional_str_defaults: tuple[tuple[str, str], ...] = ()  # (name, default)
     optional_int: tuple[tuple[str, int], ...] = ()  # (name, default)
     optional_dict: tuple[str, ...] = ()  # defaults to None
+
 
 @dataclass(frozen=True, slots=True)
 class _ToolDef:

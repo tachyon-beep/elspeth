@@ -9,7 +9,7 @@
 
 ## Executive Summary
 
-While the 3-round design review synthesis (March 2, 2026) significantly strengthened the governance and auditability of the Semi-Autonomous Platform, several critical architectural flaws remain. These issues primarily concern **data lineage integrity**, **orchestration redundancy**, **user experience latency**, and **LLM generation stability**. 
+While the 3-round design review synthesis (March 2, 2026) significantly strengthened the governance and auditability of the Semi-Autonomous Platform, several critical architectural flaws remain. These issues primarily concern **data lineage integrity**, **orchestration redundancy**, **user experience latency**, and **LLM generation stability**.
 
 This document identifies six high-impact risks and proposes specific remediations to ensure the platform meets ELSPETH's core mandates of reliability and traceability.
 
@@ -61,11 +61,11 @@ The architecture relies on Kubernetes Jobs/Deployments to spin up worker pods fo
 The LLM does not generate YAML; it uses **MCP knobs** (structured tools) to tweak a high-level configuration. Once the user signs off, a programmatic process transforms this config into executable YAML.
 
 ### The Flaw
-Using "knobs" (e.g., `set_node_parameter(node_id, key, value)`) is an **imperative** pattern. 
+Using "knobs" (e.g., `set_node_parameter(node_id, key, value)`) is an **imperative** pattern.
 - **The State Synchronization Risk:** If the LLM calls 5 knobs in a row, it must maintain a perfect mental model of the resulting configuration. If one "tweak" fails validation, the LLM often struggles to reconcile the partial state. This leads to "hallucinated state" where the LLM believes a parameter is set because it called the tool, even if the tool returned an error or the state was overwritten.
 
 ### Remediation
-- **Declarative Patching:** Even when using MCP tools, the primary "knob" should be `update_node_spec(node_id, partial_json)`. This allows the LLM to propose a **desired state** for a component rather than a sequence of imperative commands. 
+- **Declarative Patching:** Even when using MCP tools, the primary "knob" should be `update_node_spec(node_id, partial_json)`. This allows the LLM to propose a **desired state** for a component rather than a sequence of imperative commands.
 - **State-Reflecting Feedback:** Every knob call must return the *entire* updated state of the affected node, not just a success message. This forces the LLM's context to stay synchronized with the actual configuration.
 
 ---
@@ -89,7 +89,7 @@ The `HeadSourceWrapper` strategy assumes all sources can be safely and cheaply s
 The user signs off on the "knob-based" configuration, which is then programmatically transformed into ELSPETH YAML.
 
 ### The Flaw
-The programmatic transformation introduces an **Audit Translation Layer**. 
+The programmatic transformation introduces an **Audit Translation Layer**.
 - **Mapping Ambiguity:** If the logic that transforms "Knob A = Value X" into "YAML Path Y = Value Z" is complex or contains defaults/magic values, the user is signing a contract they don't fully see. ELSPETH's core mandate is that every decision is traceable. If the engine behaves a certain way because of a "magic default" added during the programmatic transformation, the audit trail is compromised.
 
 ### Remediation

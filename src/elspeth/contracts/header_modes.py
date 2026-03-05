@@ -84,16 +84,12 @@ def resolve_headers(
         names = field_names
     else:
         raise ValueError(
-            "resolve_headers() called with both contract and field_names as None. "
-            "Caller must provide at least one source of field names."
+            "resolve_headers() called with both contract and field_names as None. Caller must provide at least one source of field names."
         )
 
     # Validate CUSTOM mode preconditions up front
     if mode == HeaderMode.CUSTOM and not custom_mapping:
-        raise ValueError(
-            "CUSTOM header mode requires a non-empty custom_mapping. "
-            "Got None or empty dict — this is a configuration error."
-        )
+        raise ValueError("CUSTOM header mode requires a non-empty custom_mapping. Got None or empty dict — this is a configuration error.")
 
     result: dict[str, str] = {}
 

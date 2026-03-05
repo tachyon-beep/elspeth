@@ -44,7 +44,7 @@ class TestSyncSchemaEpochDirectionalGuard:
 
         instance = _make_instance(f"sqlite:///{db_path}")
 
-        with pytest.raises(SchemaCompatibilityError, match="newer.*epoch"):
+        with pytest.raises(SchemaCompatibilityError, match=r"newer.*epoch"):
             instance._sync_sqlite_schema_epoch()
 
         # Epoch must NOT have been downgraded

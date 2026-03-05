@@ -6,11 +6,10 @@ import queue
 import threading
 import time
 from datetime import UTC, datetime
-
-import pytest
-
 from types import MappingProxyType
 from unittest.mock import patch
+
+import pytest
 
 from elspeth.contracts.config.defaults import INTERNAL_DEFAULTS
 from elspeth.contracts.enums import (
@@ -362,10 +361,12 @@ class TestShutdownGuards:
 
 def _small_queue_defaults() -> MappingProxyType:
     """INTERNAL_DEFAULTS with telemetry queue_size=2 for backpressure tests."""
-    return MappingProxyType({
-        **INTERNAL_DEFAULTS,
-        "telemetry": MappingProxyType({**INTERNAL_DEFAULTS["telemetry"], "queue_size": 2}),
-    })
+    return MappingProxyType(
+        {
+            **INTERNAL_DEFAULTS,
+            "telemetry": MappingProxyType({**INTERNAL_DEFAULTS["telemetry"], "queue_size": 2}),
+        }
+    )
 
 
 class TestDropBackpressure:

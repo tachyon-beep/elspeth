@@ -754,9 +754,7 @@ class PipelineRow:
         try:
             contract = contract_registry[version]
         except KeyError as exc:
-            raise KeyError(
-                f"Contract version '{version}' not in registry. Available versions: {sorted(contract_registry.keys())}"
-            ) from exc
+            raise KeyError(f"Contract version '{version}' not in registry. Available versions: {sorted(contract_registry.keys())}") from exc
 
         try:
             data = checkpoint_data["data"]

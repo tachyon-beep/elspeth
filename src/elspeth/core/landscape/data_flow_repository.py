@@ -7,9 +7,9 @@ LandscapeDB.connection() usage.
 from __future__ import annotations
 
 import json
-import structlog
 from typing import TYPE_CHECKING, Any
 
+import structlog
 from sqlalchemy import select
 
 from elspeth.contracts import (

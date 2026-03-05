@@ -1,136 +1,131 @@
 allow_hits:
-- key: tui/screens/explain_screen.py:R6:ExplainScreen:_load_node_state:fp=ea0af175990905a8
+- key: tui/screens/explain_screen.py:R6:ExplainScreen:_load_node_state:fp=13ca4fd8120e8016
   owner: architecture
   reason: Silent recovery with explicit error handling path
   safety: Code reviewed - legitimate pattern
   expires: '2026-05-02'
-- key: tui/screens/explain_screen.py:R5:ExplainScreen:load:fp=2c2f53eeaf62b1aa
+- key: tui/screens/explain_screen.py:R5:ExplainScreen:load:fp=1174a6f4e45757c6
   owner: architecture
   reason: AST/type checking - required for safe parsing or discriminated unions
   safety: Code reviewed - legitimate pattern
   expires: '2026-05-02'
-- key: tui/screens/explain_screen.py:R5:ExplainScreen:retry:fp=aaa04b3313221b0e
+- key: tui/screens/explain_screen.py:R5:ExplainScreen:retry:fp=6d6ab4d5a3f553da
   owner: architecture
   reason: AST/type checking - required for safe parsing or discriminated unions
   safety: Code reviewed - legitimate pattern
   expires: '2026-05-02'
-# --- node_detail.py R1 (dict.get on NodeStateInfo optional fields) ---
-- key: tui/widgets/node_detail.py:R1:NodeDetailPanel:render_content:fp=74c139cb3b32d660
+- key: tui/widgets/node_detail.py:R1:NodeDetailPanel:render_content:fp=06e1ec070fe268e5
   owner: architecture
-  reason: Optional field access on NodeStateInfo (total=False TypedDict) — fields are conditionally present
+  reason: "Optional field access on NodeStateInfo (total=False TypedDict) \u2014 fields are conditionally present"
   safety: Explicit None check before display, crash on required fields
   expires: '2026-05-02'
-- key: tui/widgets/node_detail.py:R1:NodeDetailPanel:render_content:fp=8bd2d9e980a8c005
+- key: tui/widgets/node_detail.py:R1:NodeDetailPanel:render_content:fp=ff1f6bce70acd98a
   owner: architecture
-  reason: Optional field access on NodeStateInfo (total=False TypedDict)
-  safety: Explicit None check before display
+  reason: "Optional field access on NodeStateInfo (total=False TypedDict) \u2014 fields are conditionally present"
+  safety: Explicit None check before display, crash on required fields
   expires: '2026-05-02'
-- key: tui/widgets/node_detail.py:R1:NodeDetailPanel:render_content:fp=93c669611500e95c
+- key: tui/widgets/node_detail.py:R1:NodeDetailPanel:render_content:fp=346fe48f2b7ecbff
   owner: architecture
-  reason: Optional field access on NodeStateInfo (total=False TypedDict)
-  safety: Explicit None check before display
+  reason: "Optional field access on NodeStateInfo (total=False TypedDict) \u2014 fields are conditionally present"
+  safety: Explicit None check before display, crash on required fields
   expires: '2026-05-02'
-- key: tui/widgets/node_detail.py:R1:NodeDetailPanel:render_content:fp=3b50e6162be5847f
+- key: tui/widgets/node_detail.py:R1:NodeDetailPanel:render_content:fp=87f9153f24f62341
   owner: architecture
-  reason: Optional field access on NodeStateInfo (total=False TypedDict)
-  safety: Explicit None check before display
+  reason: "Optional field access on NodeStateInfo (total=False TypedDict) \u2014 fields are conditionally present"
+  safety: Explicit None check before display, crash on required fields
   expires: '2026-05-02'
-- key: tui/widgets/node_detail.py:R1:NodeDetailPanel:render_content:fp=aad0105bd8472c97
+- key: tui/widgets/node_detail.py:R1:NodeDetailPanel:render_content:fp=e3e5bd07c3fc8bf8
   owner: architecture
-  reason: Optional field access on NodeStateInfo (total=False TypedDict)
-  safety: Explicit None check before display
+  reason: "Optional field access on NodeStateInfo (total=False TypedDict) \u2014 fields are conditionally present"
+  safety: Explicit None check before display, crash on required fields
   expires: '2026-05-02'
-- key: tui/widgets/node_detail.py:R1:NodeDetailPanel:render_content:fp=f39fe044ddf78da4
+- key: tui/widgets/node_detail.py:R1:NodeDetailPanel:render_content:fp=8fb5a36f5abeb224
   owner: architecture
-  reason: Optional field access on NodeStateInfo (total=False TypedDict)
-  safety: Explicit None check before display
+  reason: "Optional field access on NodeStateInfo (total=False TypedDict) \u2014 fields are conditionally present"
+  safety: Explicit None check before display, crash on required fields
   expires: '2026-05-02'
-- key: tui/widgets/node_detail.py:R1:NodeDetailPanel:render_content:fp=38a208d7ad845cb5
+- key: tui/widgets/node_detail.py:R1:NodeDetailPanel:render_content:fp=2b457ed2d2ede37e
   owner: architecture
-  reason: Optional field access on NodeStateInfo (total=False TypedDict)
-  safety: Explicit None check before display
+  reason: "Optional field access on NodeStateInfo (total=False TypedDict) \u2014 fields are conditionally present"
+  safety: Explicit None check before display, crash on required fields
   expires: '2026-05-02'
-- key: tui/widgets/node_detail.py:R1:NodeDetailPanel:render_content:fp=b66b4075f51da07b
+- key: tui/widgets/node_detail.py:R1:NodeDetailPanel:render_content:fp=bd1acc3b76b48eb5
   owner: architecture
-  reason: Optional field access on NodeStateInfo (total=False TypedDict)
-  safety: Explicit None check before display
+  reason: "Optional field access on NodeStateInfo (total=False TypedDict) \u2014 fields are conditionally present"
+  safety: Explicit None check before display, crash on required fields
   expires: '2026-05-02'
-- key: tui/widgets/node_detail.py:R1:NodeDetailPanel:render_content:fp=b8407621e938b54b
+- key: tui/widgets/node_detail.py:R1:NodeDetailPanel:render_content:fp=04ff98f18b2c4896
   owner: architecture
-  reason: Optional field access on error_json (error_json is optional in NodeStateInfo)
-  safety: Code reviewed - conditionally present field
+  reason: "Optional field access on NodeStateInfo (total=False TypedDict) \u2014 fields are conditionally present"
+  safety: Explicit None check before display, crash on required fields
   expires: '2026-05-02'
-# --- node_detail.py R5 (isinstance for error variant dispatch) ---
-- key: tui/widgets/node_detail.py:R5:NodeDetailPanel:render_content:fp=2fdc3ea6e9cbac8b
+- key: tui/widgets/node_detail.py:R5:NodeDetailPanel:render_content:fp=b96ed3a63f223235
   owner: architecture
-  reason: isinstance on error_json string — Tier 1 audit data type validation before JSON parse
-  safety: Raises TypeError on wrong type — explicit crash, not masking
+  reason: "isinstance on error_json string \u2014 Tier 1 audit data type validation before JSON parse"
+  safety: "Raises TypeError on wrong type \u2014 explicit crash, not masking"
   expires: '2026-05-02'
-- key: tui/widgets/node_detail.py:R5:NodeDetailPanel:render_content:fp=c45756730b398543
+- key: tui/widgets/node_detail.py:R1:NodeDetailPanel:render_content:fp=c84c6e89dace98ed
   owner: architecture
-  reason: isinstance on parsed error dict — Tier 1 audit data type validation after JSON parse
-  safety: Raises TypeError on wrong type — explicit crash, not masking
+  reason: "Optional field access on NodeStateInfo (total=False TypedDict) \u2014 fields are conditionally present"
+  safety: Explicit None check before display, crash on required fields
   expires: '2026-05-02'
-- key: tui/widgets/node_detail.py:R5:NodeDetailPanel:render_content:fp=d517fe8c0ae23489
+- key: tui/widgets/node_detail.py:R5:NodeDetailPanel:render_content:fp=6129b733d5d28a21
   owner: architecture
-  reason: isinstance on artifact dict — Tier 1 audit data type validation
-  safety: Raises TypeError on wrong type — explicit crash, not masking
+  reason: "isinstance on error_json string \u2014 Tier 1 audit data type validation before JSON parse"
+  safety: "Raises TypeError on wrong type \u2014 explicit crash, not masking"
   expires: '2026-05-02'
-# --- node_detail.py R1 (dict.get on error/artifact validated dicts) ---
-- key: tui/widgets/node_detail.py:R1:NodeDetailPanel:render_content:fp=82ebde4f28490f09
+- key: tui/widgets/node_detail.py:R1:NodeDetailPanel:render_content:fp=64da55907f3b4da7
   owner: architecture
-  reason: Optional field access on validated ExecutionError display dict (phase is NotRequired)
-  safety: Only affects display formatting, not data integrity
+  reason: "Optional field access on NodeStateInfo (total=False TypedDict) \u2014 fields are conditionally present"
+  safety: Explicit None check before display, crash on required fields
   expires: '2026-05-02'
-- key: tui/widgets/node_detail.py:R1:NodeDetailPanel:render_content:fp=eed481d017b88aa2
+- key: tui/widgets/node_detail.py:R1:NodeDetailPanel:render_content:fp=c800c51e518a6285
   owner: architecture
-  reason: Optional field access on CoalesceErrorDisplay (timeout_ms is optional)
-  safety: Only affects display formatting, not data integrity
+  reason: "Optional field access on NodeStateInfo (total=False TypedDict) \u2014 fields are conditionally present"
+  safety: Explicit None check before display, crash on required fields
   expires: '2026-05-02'
-- key: tui/widgets/node_detail.py:R1:NodeDetailPanel:render_content:fp=0107a19dfeb93380
+- key: tui/widgets/node_detail.py:R1:NodeDetailPanel:render_content:fp=6f7959c27d16004a
   owner: architecture
-  reason: Optional field access on CoalesceErrorDisplay (select_branch is optional)
-  safety: Only affects display formatting, not data integrity
+  reason: "Optional field access on NodeStateInfo (total=False TypedDict) \u2014 fields are conditionally present"
+  safety: Explicit None check before display, crash on required fields
   expires: '2026-05-02'
-- key: tui/widgets/node_detail.py:R1:NodeDetailPanel:render_content:fp=63e6fe20b033911c
+- key: tui/widgets/node_detail.py:R1:NodeDetailPanel:render_content:fp=d4537b0d7464b29f
   owner: architecture
-  reason: Optional field access on validated TransformErrorDisplay (error/message are NotRequired)
-  safety: Only affects display formatting, not data integrity
+  reason: "Optional field access on NodeStateInfo (total=False TypedDict) \u2014 fields are conditionally present"
+  safety: Explicit None check before display, crash on required fields
   expires: '2026-05-02'
-- key: tui/widgets/node_detail.py:R1:NodeDetailPanel:render_content:fp=850aad74fa49cf21
+- key: tui/widgets/node_detail.py:R1:NodeDetailPanel:render_content:fp=f2fdf2ae2c22eff6
   owner: architecture
-  reason: Optional field access on validated TransformErrorDisplay (error/message are NotRequired)
-  safety: Only affects display formatting, not data integrity
+  reason: "Optional field access on NodeStateInfo (total=False TypedDict) \u2014 fields are conditionally present"
+  safety: Explicit None check before display, crash on required fields
   expires: '2026-05-02'
-- key: tui/widgets/node_detail.py:R1:NodeDetailPanel:render_content:fp=bfd0bbab81f6deb9
+- key: tui/widgets/node_detail.py:R1:NodeDetailPanel:render_content:fp=bd387374986ae208
   owner: architecture
-  reason: Optional field access on validated TransformErrorDisplay (field is NotRequired)
-  safety: Only affects display formatting, not data integrity
+  reason: "Optional field access on NodeStateInfo (total=False TypedDict) \u2014 fields are conditionally present"
+  safety: Explicit None check before display, crash on required fields
   expires: '2026-05-02'
-# --- node_detail.py R1 (state_id in error messages) ---
-- key: tui/widgets/node_detail.py:R1:NodeDetailPanel:render_content:fp=9b66fea7ef337838
+- key: tui/widgets/node_detail.py:R1:NodeDetailPanel:render_content:fp=ac18db8f40129c13
   owner: architecture
-  reason: state_id access in error message for audit integrity violation diagnostics
-  safety: Only used in error message construction, not data flow
+  reason: "Optional field access on NodeStateInfo (total=False TypedDict) \u2014 fields are conditionally present"
+  safety: Explicit None check before display, crash on required fields
   expires: '2026-05-02'
-- key: tui/widgets/node_detail.py:R1:NodeDetailPanel:render_content:fp=03ef6274a8fda29b
+- key: tui/widgets/node_detail.py:R1:NodeDetailPanel:render_content:fp=9c9bb770fe4436ba
   owner: architecture
-  reason: state_id access in error message for audit integrity violation diagnostics
-  safety: Only used in error message construction, not data flow
+  reason: "Optional field access on NodeStateInfo (total=False TypedDict) \u2014 fields are conditionally present"
+  safety: Explicit None check before display, crash on required fields
   expires: '2026-05-02'
-- key: tui/widgets/node_detail.py:R1:NodeDetailPanel:render_content:fp=28f781cec805176f
+- key: tui/widgets/node_detail.py:R1:NodeDetailPanel:render_content:fp=dc338cb729bcb39c
   owner: architecture
-  reason: state_id access in error message for audit integrity violation diagnostics
-  safety: Only used in error message construction, not data flow
+  reason: "Optional field access on NodeStateInfo (total=False TypedDict) \u2014 fields are conditionally present"
+  safety: Explicit None check before display, crash on required fields
   expires: '2026-05-02'
-- key: tui/widgets/node_detail.py:R1:NodeDetailPanel:render_content:fp=5f9b47249643066e
+- key: tui/widgets/node_detail.py:R5:NodeDetailPanel:render_content:fp=508daaacaa9b570a
   owner: architecture
-  reason: state_id access in error message for audit integrity violation diagnostics
-  safety: Only used in error message construction, not data flow
+  reason: "isinstance on error_json string \u2014 Tier 1 audit data type validation before JSON parse"
+  safety: "Raises TypeError on wrong type \u2014 explicit crash, not masking"
   expires: '2026-05-02'
-# --- node_detail.py R1 (artifact optional field) ---
-- key: tui/widgets/node_detail.py:R1:NodeDetailPanel:render_content:fp=48eb0cacb43c811b
+- key: tui/widgets/node_detail.py:R1:NodeDetailPanel:render_content:fp=3209636ac4f40108
   owner: architecture
-  reason: Optional field access on artifact (optional in NodeStateInfo)
-  safety: Code reviewed - conditionally present field
+  reason: "Optional field access on NodeStateInfo (total=False TypedDict) \u2014 fields are conditionally present"
+  safety: Explicit None check before display, crash on required fields
   expires: '2026-05-02'

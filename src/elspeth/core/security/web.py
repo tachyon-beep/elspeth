@@ -254,11 +254,11 @@ def validate_url_for_ssrf(url: str, timeout: float = 5.0) -> SSRFSafeRequest:
         raise NetworkError(f"DNS resolution timeout ({timeout}s): {hostname}") from exc
 
     if status == "error":
-        exc = value
-        assert isinstance(exc, BaseException)
-        if isinstance(exc, (SSRFBlockedError, NetworkError)):
-            raise exc
-        raise NetworkError(f"DNS resolution failed: {hostname}: {exc}") from exc
+        err = value
+        assert isinstance(err, BaseException)
+        if isinstance(err, (SSRFBlockedError, NetworkError)):
+            raise err
+        raise NetworkError(f"DNS resolution failed: {hostname}: {err}") from err
 
     ip_list: list[str] = value  # type: ignore[assignment]
 

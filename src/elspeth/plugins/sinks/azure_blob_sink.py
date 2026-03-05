@@ -694,4 +694,3 @@ class AzureBlobSink(BaseSink):
         self._buffered_rows = []
         self._resolved_blob_path = None
         self._has_uploaded = False
-

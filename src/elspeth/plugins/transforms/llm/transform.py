@@ -111,15 +111,15 @@ def _finish_reason_error(
             if content_length is not None:
                 reason["content_length"] = content_length
             return _FinishReasonError(
-                result=TransformResult.error(reason, retryable=False),
+                result=TransformResult.error(cast(TransformErrorReason, reason), retryable=False),
                 error_message=error_message,
             )
         # Known enum member not in STOP or error dict — fail closed.
         raw_value = finish_reason.value
     elif isinstance(finish_reason, UnrecognizedFinishReason):
         raw_value = finish_reason.raw
-    else:
-        raw_value = str(finish_reason)
+    else:  # pragma: no cover — exhaustive, but fail closed on new subtypes
+        raw_value = str(finish_reason)  # type: ignore[unreachable]
 
     # Catch-all: any finish reason not explicitly allowlisted is an error.
     reason = {
@@ -131,7 +131,7 @@ def _finish_reason_error(
     if query_index is not None:
         reason["query_index"] = query_index
     return _FinishReasonError(
-        result=TransformResult.error(reason, retryable=False),
+        result=TransformResult.error(cast(TransformErrorReason, reason), retryable=False),
         error_message=f"Unexpected finish reason: {raw_value}",
     )
 

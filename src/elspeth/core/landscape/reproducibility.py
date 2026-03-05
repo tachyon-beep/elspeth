@@ -121,9 +121,7 @@ def update_grade_after_purge(db: "LandscapeDB", run_id: str) -> None:
         row = result.fetchone()
 
         if row is None:
-            raise ValueError(
-                f"Cannot update reproducibility grade after purge: run '{run_id}' does not exist"
-            )
+            raise ValueError(f"Cannot update reproducibility grade after purge: run '{run_id}' does not exist")
 
         current_grade = row[0]
 

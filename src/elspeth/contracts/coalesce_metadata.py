@@ -14,6 +14,7 @@ Trust-tier notes
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from dataclasses import dataclass, replace
 from types import MappingProxyType
 from typing import Any
@@ -125,8 +126,8 @@ class CoalesceMetadata:
         cls,
         *,
         policy: str,
-        expected_branches: list[str],
-        branches_arrived: list[str],
+        expected_branches: Sequence[str],
+        branches_arrived: Sequence[str],
         branches_lost: dict[str, str] | None = None,
         quorum_required: int | None = None,
         timeout_seconds: float | None = None,
@@ -148,7 +149,7 @@ class CoalesceMetadata:
         policy: str,
         merge_strategy: str,
         select_branch: str,
-        branches_arrived: list[str],
+        branches_arrived: Sequence[str],
     ) -> CoalesceMetadata:
         """Select branch not in arrived set at merge time."""
         return cls(
@@ -164,10 +165,10 @@ class CoalesceMetadata:
         *,
         policy: str,
         merge_strategy: str,
-        expected_branches: list[str],
-        branches_arrived: list[str],
+        expected_branches: Sequence[str],
+        branches_arrived: Sequence[str],
         branches_lost: dict[str, str],
-        arrival_order: list[ArrivalOrderEntry],
+        arrival_order: Sequence[ArrivalOrderEntry],
         wait_duration_ms: float,
     ) -> CoalesceMetadata:
         """Successful merge with full audit context."""

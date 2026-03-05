@@ -60,6 +60,5 @@ class ResumePoint:
             )
         if self.coalesce_state is not None and not isinstance(self.coalesce_state, CoalesceCheckpointState):
             raise ValueError(
-                f"coalesce_state must be CoalesceCheckpointState or None, "
-                f"got {type(self.coalesce_state).__name__}: {self.coalesce_state!r}"
+                f"coalesce_state must be CoalesceCheckpointState or None, got {type(self.coalesce_state).__name__}: {self.coalesce_state!r}"
             )

@@ -572,4 +572,3 @@ class JSONSink(BaseSink):
                 mapped[display_key] = v
             result_rows.append(mapped)
         return result_rows
-

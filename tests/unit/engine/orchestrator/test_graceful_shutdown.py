@@ -12,7 +12,7 @@ from __future__ import annotations
 import logging
 import signal
 import threading
-from unittest.mock import Mock, patch
+from unittest.mock import Mock
 
 import pytest
 
@@ -216,13 +216,8 @@ class TestCheckpointInterruptedProgress:
 
             # Verify warning was emitted (structlog can route to stdout or stdlib)
             stdout_has_it = "shutdown_checkpoint_skipped" in capsys.readouterr().out
-            caplog_has_it = any(
-                "shutdown_checkpoint_skipped" in r.getMessage()
-                for r in caplog.records
-            )
-            assert stdout_has_it or caplog_has_it, (
-                "Expected 'shutdown_checkpoint_skipped' warning in log output"
-            )
+            caplog_has_it = any("shutdown_checkpoint_skipped" in r.getMessage() for r in caplog.records)
+            assert stdout_has_it or caplog_has_it, "Expected 'shutdown_checkpoint_skipped' warning in log output"
         finally:
             db.close()
 

@@ -9,13 +9,13 @@ Exports:
 - Web security: SSRF prevention (validate_url_for_ssrf, SSRFSafeRequest)
 """
 
-from elspeth.core.security.config_secrets import (
-    SecretLoadError,
-    load_secrets_from_config,
-)
 from elspeth.contracts.security import (
     get_fingerprint_key,
     secret_fingerprint,
+)
+from elspeth.core.security.config_secrets import (
+    SecretLoadError,
+    load_secrets_from_config,
 )
 from elspeth.core.security.secret_loader import (
     CachedSecretLoader,

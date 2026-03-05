@@ -96,7 +96,6 @@ class NodeStateInfo(TypedDict, total=False):
     artifact: dict[str, Any]
 
 
-
 class ExecutionErrorDisplay(TypedDict, total=False):
     """Parsed ExecutionError for display.
 

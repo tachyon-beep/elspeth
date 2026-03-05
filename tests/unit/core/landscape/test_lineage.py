@@ -253,7 +253,6 @@ class TestExplainTier1Corruption:
 
     def test_lineage_result_row_id_mismatch_raises_audit_integrity(self) -> None:
         """LineageResult rejects mismatched token/row IDs as corruption."""
-        token = _make_token(token_id="tok-1", row_id="row-1")
         row_lineage = _make_row_lineage()  # has row_id="row-1"
         # Manually create a mismatch by making a token with different row_id
         mismatched_token = _make_token(token_id="tok-1", row_id="row-WRONG")

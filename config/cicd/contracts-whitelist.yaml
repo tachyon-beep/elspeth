@@ -308,7 +308,6 @@ allowed_dict_patterns:
   # The input must be dict[str, Any] because it's the unvalidated type before validation.
   - "src/elspeth/tui/widgets/node_detail.py:_validate_execution_error:data"
   - "src/elspeth/tui/widgets/node_detail.py:_validate_transform_error:data"
-  - "src/elspeth/tui/widgets/node_detail.py:_has_full_coalesce_shape:data"
   - "src/elspeth/tui/widgets/node_detail.py:_validate_coalesce_error:data"
   - "src/elspeth/tui/widgets/node_detail.py:_validate_artifact:data"
 
@@ -317,6 +316,7 @@ allowed_dict_patterns:
   # Exporter serialization returns dict[str, Any] by design for OTLP/JSON payloads.
   # ═══════════════════════════════════════════════════════════════════════════
   - "src/elspeth/telemetry/exporters/azure_monitor.py:AzureMonitorExporter._serialize_event_attributes:return"
+  - "src/elspeth/telemetry/exporters/otlp.py:_serialize_event_attributes:return"
   - "src/elspeth/telemetry/exporters/otlp.py:OTLPExporter._serialize_event_attributes:return"
   - "src/elspeth/telemetry/exporters/otlp.py:_SyntheticReadableSpan.__init__:attributes"
   - "src/elspeth/telemetry/exporters/console.py:ConsoleExporter._serialize_event:return"

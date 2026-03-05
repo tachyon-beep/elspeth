@@ -7,8 +7,8 @@ from __future__ import annotations
 
 import json
 from threading import Lock
-from uuid import uuid4
 from typing import TYPE_CHECKING, Any, Literal, overload
+from uuid import uuid4
 
 import structlog
 from sqlalchemy import func, select

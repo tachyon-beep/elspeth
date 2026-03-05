@@ -226,10 +226,7 @@ class CoalesceExecutor:
                 pending_count=len(pending_entries),
             )
         if size_mb > 10:
-            raise RuntimeError(
-                f"Coalesce checkpoint size {size_mb:.1f}MB exceeds 10MB limit. "
-                f"Pending joins: {len(pending_entries)}."
-            )
+            raise RuntimeError(f"Coalesce checkpoint size {size_mb:.1f}MB exceeds 10MB limit. Pending joins: {len(pending_entries)}.")
 
         return checkpoint
 
@@ -241,10 +238,7 @@ class CoalesceExecutor:
                 found_version=state.version,
                 expected_version=COALESCE_CHECKPOINT_VERSION,
             )
-            raise ValueError(
-                f"Incompatible coalesce checkpoint version: {state.version!r}. "
-                f"Expected: {COALESCE_CHECKPOINT_VERSION!r}."
-            )
+            raise ValueError(f"Incompatible coalesce checkpoint version: {state.version!r}. Expected: {COALESCE_CHECKPOINT_VERSION!r}.")
 
         now = self._clock.monotonic()
         self._pending.clear()

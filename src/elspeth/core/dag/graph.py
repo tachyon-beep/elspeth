@@ -298,10 +298,7 @@ class ExecutionGraph:
         # All nodes have "info" - added via add_node(), direct access is safe
         sources = [NodeID(node_id) for node_id, data in self._graph.nodes(data=True) if data["info"].node_type == NodeType.SOURCE]
         if len(sources) != 1:
-            raise GraphValidationError(
-                f"Expected exactly 1 source node, found {len(sources)}. "
-                "This indicates a graph construction bug."
-            )
+            raise GraphValidationError(f"Expected exactly 1 source node, found {len(sources)}. This indicates a graph construction bug.")
         return sources[0]
 
     def get_sinks(self) -> list[NodeID]:

@@ -41,8 +41,8 @@ class TestKeyVaultSecretsConfig:
         4. Verify get_fingerprint_key() returns the loaded value
         """
         from elspeth.core.config import SecretsConfig
-        from elspeth.core.security.config_secrets import load_secrets_from_config
         from elspeth.core.security import get_fingerprint_key
+        from elspeth.core.security.config_secrets import load_secrets_from_config
 
         # Ensure we're starting without the env var
         monkeypatch.delenv("ELSPETH_FINGERPRINT_KEY", raising=False)
