@@ -572,6 +572,30 @@ class TestArtifactDescriptor:
         with pytest.raises(AttributeError):
             descriptor.content_hash = "new_hash"  # type: ignore[misc]
 
+    def test_metadata_is_deeply_immutable(self) -> None:
+        """metadata dict must be truly immutable — not just shallow-frozen.
+
+        Bug: frozen=True prevents descriptor.metadata = new_dict, but does NOT
+        prevent descriptor.metadata["key"] = "value". The fix is to convert
+        metadata to MappingProxyType in __post_init__.
+        """
+        original = {"table": "results", "row_count": 50}
+        descriptor = ArtifactDescriptor(
+            artifact_type="database",
+            path_or_uri="db://table@url",
+            content_hash="hash",
+            size_bytes=100,
+            metadata=original,
+        )
+
+        # Mutating the metadata dict must raise TypeError
+        with pytest.raises(TypeError):
+            descriptor.metadata["injected"] = "evil"  # type: ignore[index]
+
+        # Mutating the original dict must NOT affect the descriptor (defensive copy)
+        original["injected"] = "evil"
+        assert "injected" not in descriptor.metadata
+
     def test_missing_required_fields_raises_type_error(self) -> None:
         """ArtifactDescriptor requires all fields - TypeError on missing."""
         with pytest.raises(TypeError):

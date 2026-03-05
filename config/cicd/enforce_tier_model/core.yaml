@@ -341,19 +341,19 @@ allow_hits:
 - key: core/landscape/journal.py:R5:LandscapeJournal:_columns_to_values:fp=f36cfbad58bc4f44
   owner: architecture
   reason: AST/type checking - required for safe parsing or discriminated unions
-- key: core/landscape/run_lifecycle_repository.py:R5:RunLifecycleRepository:get_source_field_resolution:fp=b8fb52ce1e986b16
+- key: core/landscape/run_lifecycle_repository.py:R5:RunLifecycleRepository:get_source_field_resolution:fp=7cd6d62cc37449df
   owner: feature
   reason: Tier 1 trust validation - crash on corruption from our own audit database
   safety: AuditIntegrityError raised on corrupt data - explicit failure, not silent coercion
-- key: core/landscape/run_lifecycle_repository.py:R5:RunLifecycleRepository:get_source_field_resolution:fp=cf14f338d94e396f
+- key: core/landscape/run_lifecycle_repository.py:R5:RunLifecycleRepository:get_source_field_resolution:fp=3c57f7fd5152f540
   owner: feature
   reason: Tier 1 trust validation - crash on corruption from our own audit database
   safety: AuditIntegrityError raised on corrupt data - explicit failure, not silent coercion
-- key: core/landscape/run_lifecycle_repository.py:R5:RunLifecycleRepository:get_source_field_resolution:fp=497fa5130892ec1c
+- key: core/landscape/run_lifecycle_repository.py:R5:RunLifecycleRepository:get_source_field_resolution:fp=c9a95c3140d0468c
   owner: feature
   reason: Tier 1 trust validation - crash on corruption from our own audit database
   safety: AuditIntegrityError raised on corrupt data - explicit failure, not silent coercion
-- key: core/landscape/run_lifecycle_repository.py:R5:RunLifecycleRepository:get_source_field_resolution:fp=312feea501e3bac9
+- key: core/landscape/run_lifecycle_repository.py:R5:RunLifecycleRepository:get_source_field_resolution:fp=203e3445250c11d5
   owner: feature
   reason: Tier 1 trust validation - crash on corruption from our own audit database
   safety: AuditIntegrityError raised on corrupt data - explicit failure, not silent coercion

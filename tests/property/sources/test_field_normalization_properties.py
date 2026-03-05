@@ -225,7 +225,7 @@ class TestResolveFieldNamesProperties:
             columns=columns,
         )
 
-        assert result.final_headers == columns, "Columns mode should pass through unchanged"
+        assert result.final_headers == tuple(columns), "Columns mode should pass through unchanged"
         assert result.normalization_version is None, "Columns mode should not set normalization_version"
 
     @given(headers=st.lists(normalizable_headers, min_size=1, max_size=10, unique=True))
@@ -239,7 +239,7 @@ class TestResolveFieldNamesProperties:
             columns=None,
         )
 
-        assert result.final_headers == headers, "Without normalization, headers should pass through"
+        assert result.final_headers == tuple(headers), "Without normalization, headers should pass through"
         assert result.normalization_version is None, "Without normalization, version should be None"
 
     @given(headers=st.lists(normalizable_headers, min_size=2, max_size=10, unique=True), data=st.data())
@@ -260,7 +260,7 @@ class TestResolveFieldNamesProperties:
         for original in headers:
             expected = field_mapping.get(original, original)
             assert result.resolution_mapping[original] == expected
-        assert result.final_headers == [field_mapping.get(h, h) for h in headers]
+        assert result.final_headers == tuple(field_mapping.get(h, h) for h in headers)
 
     @given(headers=st.lists(normalizable_headers, min_size=1, max_size=10, unique=True))
     @settings(max_examples=50)

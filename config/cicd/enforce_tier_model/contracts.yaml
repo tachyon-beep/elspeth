@@ -102,11 +102,11 @@ allow_hits:
   owner: architecture
   reason: "Tier 1 invariant enforcement \u2014 isinstance validates timestamp is numeric before math.isinf/isnan guard"
   safety: "Raises immediately on wrong type \u2014 explicit crash, not masking"
-- key: contracts/results.py:R5:ArtifactDescriptor:for_database:fp=b48f9ec2ebee4f55
+- key: contracts/results.py:R5:ArtifactDescriptor:for_database:fp=feff722b7fd4b079
   owner: bugfix
   reason: Tier-3 boundary validation - external URL objects must be verified as SanitizedDatabaseUrl
   safety: TypeError raised if wrong URL type - explicit failure, not masking
-- key: contracts/results.py:R5:ArtifactDescriptor:for_webhook:fp=e5a1abf79bb20a88
+- key: contracts/results.py:R5:ArtifactDescriptor:for_webhook:fp=07f38ce1ca2712f1
   owner: bugfix
   reason: Tier-3 boundary validation - external URL objects must be verified as SanitizedWebhookUrl
   safety: TypeError raised if wrong URL type - explicit failure, not masking
@@ -126,7 +126,7 @@ allow_hits:
   owner: architecture
   reason: "Serialization dispatch \u2014 isinstance for dataclass detection before recursive field serialization"
   safety: Type dispatch for serialization, not masking bugs
-- key: contracts/contract_builder.py:R6:ContractBuilder:process_first_row:fp=757e34496a7ed0ea
+- key: contracts/contract_builder.py:R6:ContractBuilder:process_first_row:fp=a339212a8e8658cc
   owner: bugfix
   reason: "TypeError from normalize_type_for_contract for unsupported types (dict, list, Decimal) \u2014 maps to object"
   safety: Preserves field in contract as 'any' type; no data loss or silent skip
@@ -243,7 +243,7 @@ allow_hits:
   owner: architecture
   reason: "Tier 1 deserialization \u2014 isinstance validates checkpoint JSON structure (our data) before construction"
   safety: "Raises ValueError on malformed checkpoint \u2014 crash on corruption per Tier 1 rules"
-- key: contracts/schema_contract_factory.py:R1:create_contract_from_config:fp=dc45957bf113fd02
+- key: contracts/schema_contract_factory.py:R1:create_contract_from_config:fp=f930bf0f2eabedce
   owner: feature
   reason: Intentional identity fallback - fields without resolution mapping use normalized name as original name
   safety: Fallback to same value is correct behavior, not silent coercion

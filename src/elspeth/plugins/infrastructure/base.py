@@ -34,7 +34,7 @@ Lifecycle Contract (all hooks called on main thread by orchestrator):
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
-from collections.abc import Iterator
+from collections.abc import Iterator, Mapping
 from typing import TYPE_CHECKING, Any
 
 from elspeth.contracts import ArtifactDescriptor, Determinism, PluginSchema, SourceRow
@@ -662,7 +662,7 @@ class BaseSource(ABC):
 
     # === Audit Trail Metadata ===
 
-    def get_field_resolution(self) -> tuple[dict[str, str], str | None] | None:
+    def get_field_resolution(self) -> tuple[Mapping[str, str], str | None] | None:
         """Return field resolution mapping computed during load().
 
         Sources that perform field normalization (e.g., CSVSource with normalize_fields)

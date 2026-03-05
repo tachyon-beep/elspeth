@@ -21,8 +21,9 @@ import argparse
 import json
 import logging
 import sys
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass
+from types import MappingProxyType
 from typing import Any
 
 from mcp.server import Server
@@ -66,7 +67,10 @@ class _ToolDef:
     description: str
     args: _ArgSpec
     handler: Callable[[LandscapeAnalyzer, dict[str, Any]], Any]
-    schema_properties: dict[str, Any]
+    schema_properties: Mapping[str, Any]
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "schema_properties", MappingProxyType(dict(self.schema_properties)))
 
 
 _TOOLS: dict[str, _ToolDef] = {

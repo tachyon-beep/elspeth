@@ -7,7 +7,7 @@ This is the ONLY place in the pipeline where coercion is allowed.
 """
 
 import csv
-from collections.abc import Iterator
+from collections.abc import Iterator, Mapping
 from typing import Any
 
 from pydantic import Field, ValidationError
@@ -461,7 +461,7 @@ class CSVSource(BaseSource):
         """Release resources (no-op for CSV source)."""
         pass
 
-    def get_field_resolution(self) -> tuple[dict[str, str], str | None] | None:
+    def get_field_resolution(self) -> tuple[Mapping[str, str], str | None] | None:
         """Return field resolution mapping for audit trail.
 
         Returns the mapping from original CSV headers to final field names,

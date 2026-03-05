@@ -6,6 +6,7 @@ SchemaContract used for validation and dual-name access.
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from typing import TYPE_CHECKING, Literal
 
 from elspeth.contracts.schema_contract import FieldContract, SchemaContract
@@ -44,7 +45,7 @@ def map_schema_mode(
 
 def create_contract_from_config(
     config: SchemaConfig,
-    field_resolution: dict[str, str] | None = None,
+    field_resolution: Mapping[str, str] | None = None,
 ) -> SchemaContract:
     """Create SchemaContract from SchemaConfig.
 

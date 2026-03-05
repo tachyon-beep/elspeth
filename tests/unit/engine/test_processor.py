@@ -43,6 +43,7 @@ from elspeth.engine.processor import (
     MAX_WORK_QUEUE_ITERATIONS,
     DAGTraversalContext,
     RowProcessor,
+    _FlushContext,
 )
 from elspeth.engine.retry import RetryManager
 from elspeth.engine.spans import SpanFactory
@@ -3584,3 +3585,36 @@ class TestProcessorOutcomeTypes:
         gt = _GateTerminal(result=Mock())
         with pytest.raises(AttributeError):
             gt.result = Mock()  # type: ignore[misc]
+
+
+class TestFlushContextImmutability:
+    """_FlushContext.buffered_tokens must be truly immutable."""
+
+    def test_buffered_tokens_is_immutable(self) -> None:
+        """buffered_tokens must not be mutable after construction.
+
+        Bug: frozen=True prevents reassignment but list contents remain mutable.
+        Fix: store as tuple instead of list.
+        """
+        token = make_token_info(data={"value": 1})
+        original_list = [token]
+
+        fctx = _FlushContext(
+            node_id=NodeID("node-1"),
+            transform=Mock(),
+            settings=Mock(),
+            buffered_tokens=original_list,
+            batch_id="batch-1",
+            error_msg="test",
+            expand_parent_token=token,
+            triggering_token=None,
+            coalesce_node_id=None,
+            coalesce_name=None,
+        )
+
+        # buffered_tokens must be a tuple (immutable), not a list
+        assert isinstance(fctx.buffered_tokens, tuple)
+
+        # Mutating the original list must not affect the frozen context
+        original_list.append(make_token_info(data={"value": 2}))
+        assert len(fctx.buffered_tokens) == 1

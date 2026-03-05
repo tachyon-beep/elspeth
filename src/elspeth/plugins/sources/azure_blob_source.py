@@ -12,7 +12,7 @@ import io
 import json
 import logging
 import time
-from collections.abc import Iterator
+from collections.abc import Iterator, Mapping
 from typing import TYPE_CHECKING, Any, Literal, Self
 
 import pandas as pd
@@ -538,8 +538,8 @@ class AzureBlobSource(BaseSource):
                 columns=None,
             )
             final_headers = self._field_resolution.final_headers
-            if final_headers != raw_headers:
-                df.columns = final_headers
+            if list(final_headers) != raw_headers:
+                df.columns = list(final_headers)
         elif self._columns is not None:
             self._field_resolution = resolve_field_names(
                 raw_headers=None,
@@ -548,8 +548,8 @@ class AzureBlobSource(BaseSource):
                 columns=self._columns,
             )
             final_headers = self._field_resolution.final_headers
-            if list(df.columns) != final_headers:
-                df.columns = final_headers
+            if list(df.columns) != list(final_headers):
+                df.columns = list(final_headers)
 
         # Create contract now that field_resolution is known (CSV path)
         if self._contract_builder is None and self._format == "csv":
@@ -742,7 +742,7 @@ class AzureBlobSource(BaseSource):
             if self._contract_builder is not None and not self._first_valid_row_processed:
                 # Use field_resolution from CSV if available, else identity mapping for JSON/JSONL
                 if self._field_resolution is not None:
-                    field_resolution_map = self._field_resolution.resolution_mapping
+                    field_resolution_map: Mapping[str, str] = self._field_resolution.resolution_mapping
                 else:
                     # JSON/JSONL without normalization - identity mapping
                     field_resolution_map = {k: k for k in validated_row}
@@ -797,7 +797,7 @@ class AzureBlobSource(BaseSource):
         """Release resources (no-op for Azure Blob source)."""
         self._blob_client = None
 
-    def get_field_resolution(self) -> tuple[dict[str, str], str | None] | None:
+    def get_field_resolution(self) -> tuple[Mapping[str, str], str | None] | None:
         """Return field resolution mapping for audit trail (CSV only)."""
         if self._field_resolution is None:
             return None

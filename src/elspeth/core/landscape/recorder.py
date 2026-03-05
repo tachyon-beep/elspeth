@@ -20,6 +20,7 @@ Repository split rationale (domain cohesion, not CQRS):
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from typing import TYPE_CHECKING, Any, Literal, overload
 
 from elspeth.contracts import CallType, Determinism, RunStatus
@@ -237,7 +238,7 @@ class LandscapeRecorder:
     def record_source_field_resolution(
         self,
         run_id: str,
-        resolution_mapping: dict[str, str],
+        resolution_mapping: Mapping[str, str],
         normalization_version: str | None,
     ) -> None:
         """Record field resolution mapping. Delegates to RunLifecycleRepository."""

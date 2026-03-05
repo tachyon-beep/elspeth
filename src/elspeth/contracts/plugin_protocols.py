@@ -9,7 +9,7 @@ Plugin Types:
 - Sink: Outputs data (one or more per run)
 """
 
-from collections.abc import Iterator
+from collections.abc import Iterator, Mapping
 from typing import TYPE_CHECKING, Any, Protocol, runtime_checkable
 
 from elspeth.contracts.enums import Determinism
@@ -106,7 +106,7 @@ class SourceProtocol(Protocol):
 
     # === Audit Trail Metadata ===
 
-    def get_field_resolution(self) -> tuple[dict[str, str], str | None] | None:
+    def get_field_resolution(self) -> tuple[Mapping[str, str], str | None] | None:
         """Return field resolution mapping computed during load().
 
         Sources that perform field normalization should override this to return

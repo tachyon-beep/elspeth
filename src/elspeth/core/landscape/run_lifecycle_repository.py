@@ -7,6 +7,7 @@ schema contracts, secret resolutions, export status, and reproducibility grading
 from __future__ import annotations
 
 import json
+from collections.abc import Mapping
 from typing import TYPE_CHECKING, Any
 
 from sqlalchemy import select
@@ -219,7 +220,7 @@ class RunLifecycleRepository:
     def record_source_field_resolution(
         self,
         run_id: str,
-        resolution_mapping: dict[str, str],
+        resolution_mapping: Mapping[str, str],
         normalization_version: str | None,
     ) -> None:
         """Record field resolution mapping computed during source.load().

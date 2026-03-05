@@ -12,6 +12,7 @@ IMPORTANT:
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from types import MappingProxyType
 from typing import TYPE_CHECKING, Any, Literal
 
 from elspeth.contracts.url import SanitizedDatabaseUrl, SanitizedWebhookUrl
@@ -382,7 +383,11 @@ class ArtifactDescriptor:
     path_or_uri: str
     content_hash: str  # REQUIRED - audit integrity
     size_bytes: int  # REQUIRED - verification
-    metadata: dict[str, object] | None = None
+    metadata: MappingProxyType[str, object] | None = None
+
+    def __post_init__(self) -> None:
+        if self.metadata is not None:
+            object.__setattr__(self, "metadata", MappingProxyType(dict(self.metadata)))
 
     @classmethod
     def for_file(
@@ -428,7 +433,7 @@ class ArtifactDescriptor:
             path_or_uri=f"db://{table}@{url.sanitized_url}",
             content_hash=content_hash,
             size_bytes=payload_size,
-            metadata=metadata,
+            metadata=MappingProxyType(metadata),
         )
 
     @classmethod
@@ -459,7 +464,7 @@ class ArtifactDescriptor:
             path_or_uri=f"webhook://{url.sanitized_url}",
             content_hash=content_hash,
             size_bytes=request_size,
-            metadata=metadata,
+            metadata=MappingProxyType(metadata),
         )
 
 

@@ -14,7 +14,7 @@ from __future__ import annotations
 
 import pytest
 
-from elspeth.mcp.server import _validate_tool_args
+from elspeth.mcp.server import _ToolDef, _validate_tool_args
 
 
 class TestRequiredStringFields:
@@ -200,3 +200,29 @@ class TestNoArgTools:
     def test_no_arg_tool_ignores_extras(self, tool_name: str) -> None:
         args = _validate_tool_args(tool_name, {"spurious": "value"})
         assert args == {}
+
+
+class TestToolDefImmutability:
+    """_ToolDef.schema_properties must be truly immutable."""
+
+    def test_schema_properties_is_immutable(self) -> None:
+        """schema_properties dict must resist mutation after construction."""
+        from types import MappingProxyType
+
+        from elspeth.mcp.server import _ArgSpec
+
+        original = {"run_id": {"type": "string"}}
+        tool = _ToolDef(
+            description="test",
+            args=_ArgSpec(required_str=("run_id",)),
+            handler=lambda a, args: None,
+            schema_properties=original,
+        )
+
+        assert isinstance(tool.schema_properties, MappingProxyType)
+        with pytest.raises(TypeError):
+            tool.schema_properties["injected"] = "evil"  # type: ignore[index]
+
+        # Caller's original dict must be decoupled
+        original["injected"] = "evil"
+        assert "injected" not in tool.schema_properties

@@ -1,7 +1,7 @@
 # tests/plugins/test_protocols.py
 """Tests for plugin protocols."""
 
-from collections.abc import Iterator
+from collections.abc import Iterator, Mapping
 from typing import Any, ClassVar
 
 from elspeth.contracts import PipelineRow, SourceRow
@@ -53,7 +53,7 @@ class TestSourceProtocol:
             def on_complete(self, ctx: PluginContext) -> None:
                 pass
 
-            def get_field_resolution(self) -> tuple[dict[str, str], str | None] | None:
+            def get_field_resolution(self) -> tuple[Mapping[str, str], str | None] | None:
                 return None  # No field normalization
 
             def get_schema_contract(self) -> Any:
@@ -126,7 +126,7 @@ class TestSourceProtocol:
             def on_complete(self, ctx: PluginContext) -> None:
                 pass
 
-            def get_field_resolution(self) -> tuple[dict[str, str], str | None] | None:
+            def get_field_resolution(self) -> tuple[Mapping[str, str], str | None] | None:
                 return None  # No field normalization
 
             def get_schema_contract(self) -> Any:

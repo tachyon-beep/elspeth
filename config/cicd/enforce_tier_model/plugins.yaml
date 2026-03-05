@@ -161,12 +161,12 @@ allow_hits:
   reason: setdefault used for grouping sources-by-target to detect duplicate target field names
   safety: "Grouping is deterministic; ValueError raised if duplicates found \u2014 prevents silent data loss"
   expires: '2026-05-17'
-- key: plugins/sources/field_normalization.py:R8:check_normalization_collisions:fp=86ef69c29f1d399e
+- key: plugins/sources/field_normalization.py:R8:check_normalization_collisions:fp=e1d67143967b76c3
   owner: architecture
   reason: setdefault for lazy initialization
   safety: Code reviewed - legitimate pattern
   expires: '2026-05-02'
-- key: plugins/sources/field_normalization.py:R8:check_mapping_collisions:fp=720d991f3a1cf7d3
+- key: plugins/sources/field_normalization.py:R8:check_mapping_collisions:fp=ac0ddfbae61b63e0
   owner: architecture
   reason: setdefault for lazy initialization
   safety: Code reviewed - legitimate pattern

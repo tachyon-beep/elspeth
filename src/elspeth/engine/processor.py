@@ -99,13 +99,16 @@ class _FlushContext:
     node_id: NodeID
     transform: TransformProtocol
     settings: AggregationSettings
-    buffered_tokens: list[TokenInfo]
+    buffered_tokens: tuple[TokenInfo, ...]
     batch_id: str
     error_msg: str
     expand_parent_token: TokenInfo
     triggering_token: TokenInfo | None
     coalesce_node_id: NodeID | None
     coalesce_name: CoalesceName | None
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "buffered_tokens", tuple(self.buffered_tokens))
 
 
 # --- T18: Discriminated union types for _process_single_token extraction ---
@@ -841,7 +844,7 @@ class RowProcessor:
             node_id=node_id,
             transform=transform,
             settings=settings,
-            buffered_tokens=buffered_tokens,
+            buffered_tokens=tuple(buffered_tokens),
             batch_id=batch_id,
             error_msg="Batch transform failed during timeout flush",
             expand_parent_token=buffered_tokens[0],
@@ -946,7 +949,7 @@ class RowProcessor:
                 node_id=node_id,
                 transform=transform,
                 settings=settings,
-                buffered_tokens=buffered_tokens,
+                buffered_tokens=tuple(buffered_tokens),
                 batch_id=batch_id,
                 error_msg="Batch transform failed",
                 expand_parent_token=current_token,

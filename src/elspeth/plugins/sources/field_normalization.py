@@ -19,6 +19,7 @@ import keyword
 import re
 import unicodedata
 from dataclasses import dataclass
+from types import MappingProxyType
 
 # Algorithm version for audit trail - frozen per major version
 # Increment when algorithm changes affect output
@@ -186,9 +187,13 @@ class FieldResolution:
         normalization_version: Algorithm version used, or None if no normalization
     """
 
-    final_headers: list[str]
-    resolution_mapping: dict[str, str]
+    final_headers: tuple[str, ...]
+    resolution_mapping: MappingProxyType[str, str]
     normalization_version: str | None
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "final_headers", tuple(self.final_headers))
+        object.__setattr__(self, "resolution_mapping", MappingProxyType(dict(self.resolution_mapping)))
 
 
 def resolve_field_names(
@@ -256,7 +261,7 @@ def resolve_field_names(
     resolution_mapping = dict(zip(original_names, final_headers, strict=True))
 
     return FieldResolution(
-        final_headers=final_headers,
-        resolution_mapping=resolution_mapping,
+        final_headers=tuple(final_headers),
+        resolution_mapping=MappingProxyType(resolution_mapping),
         normalization_version=NORMALIZATION_ALGORITHM_VERSION if used_normalization else None,
     )
