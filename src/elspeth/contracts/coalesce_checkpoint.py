@@ -154,15 +154,25 @@ class CoalescePendingCheckpoint:
 
 @dataclass(frozen=True, slots=True)
 class CoalesceCheckpointState:
-    """Full pending coalesce checkpoint state."""
+    """Full pending coalesce checkpoint state.
+
+    Attributes:
+        version: Checkpoint format version string.
+        pending: Pending coalesce entries awaiting branch completion.
+        completed_keys: Coalesce keys that already merged/failed, for
+            late-arrival detection after restore. Each entry is a
+            ``(coalesce_name, row_id)`` tuple.
+    """
 
     version: str
     pending: tuple[CoalescePendingCheckpoint, ...]
+    completed_keys: tuple[tuple[str, str], ...]
 
     def to_dict(self) -> dict[str, Any]:
         return {
             "_version": self.version,
             "pending": [entry.to_dict() for entry in self.pending],
+            "completed_keys": [list(key) for key in self.completed_keys],
         }
 
     @classmethod
@@ -176,7 +186,15 @@ class CoalesceCheckpointState:
         if not isinstance(pending, list):
             raise ValueError(f"Corrupted coalesce checkpoint: 'pending' must be a list, got {type(pending).__name__}.")
 
+        # completed_keys is optional for backwards compatibility with
+        # checkpoints written before this field existed.
+        raw_keys = data.get("completed_keys", [])
+        if not isinstance(raw_keys, list):
+            raise ValueError(f"Corrupted coalesce checkpoint: 'completed_keys' must be a list, got {type(raw_keys).__name__}.")
+        completed_keys = tuple(tuple(k) for k in raw_keys)
+
         return cls(
             version=data["_version"],
             pending=tuple(CoalescePendingCheckpoint.from_dict(entry) for entry in pending),
+            completed_keys=completed_keys,
         )

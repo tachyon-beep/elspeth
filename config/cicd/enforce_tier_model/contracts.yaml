@@ -239,10 +239,18 @@ allow_hits:
   owner: architecture
   reason: "Tier 1 deserialization \u2014 isinstance validates checkpoint JSON structure (our data) before construction"
   safety: "Raises ValueError on malformed checkpoint \u2014 crash on corruption per Tier 1 rules"
-- key: contracts/coalesce_checkpoint.py:R5:CoalesceCheckpointState:from_dict:fp=251441ef81a37792
+- key: contracts/coalesce_checkpoint.py:R5:CoalesceCheckpointState:from_dict:fp=a1e802fd78bfeda8
   owner: architecture
-  reason: "Tier 1 deserialization \u2014 isinstance validates checkpoint JSON structure (our data) before construction"
-  safety: "Raises ValueError on malformed checkpoint \u2014 crash on corruption per Tier 1 rules"
+  reason: "Tier 1 deserialization — isinstance validates 'pending' is list in checkpoint JSON (our data)"
+  safety: "Raises ValueError on malformed checkpoint — crash on corruption per Tier 1 rules"
+- key: contracts/coalesce_checkpoint.py:R1:CoalesceCheckpointState:from_dict:fp=f1e159ebd76c08a3
+  owner: bugfix
+  reason: "Backwards-compatible deserialization — .get() on completed_keys for checkpoints written before this field existed"
+  safety: "Empty default preserves pre-fix behavior; new checkpoints include field"
+- key: contracts/coalesce_checkpoint.py:R5:CoalesceCheckpointState:from_dict:fp=ceb1e0981edd3dec
+  owner: bugfix
+  reason: "Tier 1 deserialization — isinstance validates 'completed_keys' is list in checkpoint JSON (our data)"
+  safety: "Raises ValueError on malformed checkpoint — crash on corruption per Tier 1 rules"
 - key: contracts/schema_contract_factory.py:R1:create_contract_from_config:fp=f930bf0f2eabedce
   owner: feature
   reason: Intentional identity fallback - fields without resolution mapping use normalized name as original name

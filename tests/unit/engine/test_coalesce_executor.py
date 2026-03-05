@@ -1606,3 +1606,152 @@ class TestBestEffortTimeoutZeroArrivals:
 
         # After timeout, it MUST be gone from _pending (this was the bug)
         assert ("merge", "row_1") not in executor._pending
+
+
+# ===========================================================================
+# Bug: completed_keys lost on checkpoint restore
+# ===========================================================================
+
+
+class TestCheckpointCompletedKeys:
+    """Regression tests for _completed_keys surviving checkpoint/restore.
+
+    Bug: get_checkpoint_state() did not serialize _completed_keys, and
+    restore_from_checkpoint() called _completed_keys.clear(). After a
+    checkpoint/restore cycle, late arrivals were not detected — creating
+    contradictory audit outcomes (both COALESCED and FAILED/timeout for
+    the same fork group).
+    """
+
+    def test_completed_keys_survive_checkpoint_restore(self):
+        """A coalesce that completed before checkpoint must reject late arrivals after restore."""
+        executor, _recorder, _, _clock = _make_executor()
+        executor.register_coalesce(_settings(branches=["a", "b"]), "node_1")
+
+        # Complete a coalesce: both branches arrive → merge
+        executor.accept(_make_token(branch_name="a", token_id="t1"), "merge")
+        executor.accept(_make_token(branch_name="b", token_id="t2"), "merge")
+
+        # Verify the key is marked completed
+        assert ("merge", "row_1") in executor._completed_keys
+
+        # Checkpoint
+        checkpoint = executor.get_checkpoint_state()
+
+        # Build a new executor and restore (simulates crash/resume)
+        executor2, _recorder2, _, _clock2 = _make_executor()
+        executor2.register_coalesce(_settings(branches=["a", "b"]), "node_1")
+        executor2.restore_from_checkpoint(checkpoint)
+
+        # Late arrival on the restored executor must be detected
+        late = _make_token(branch_name="a", token_id="t_late", row_id="row_1")
+        outcome = executor2.accept(late, "merge")
+
+        assert outcome.held is False
+        assert outcome.failure_reason == "late_arrival_after_merge"
+        assert outcome.outcomes_recorded is True
+
+    def test_completed_keys_roundtrip_preserves_all_entries(self):
+        """Multiple completed keys should all survive checkpoint/restore."""
+        executor, _, _, _clock = _make_executor()
+        s = _settings(branches=["a", "b"])
+        executor.register_coalesce(s, "node_1")
+
+        # Complete 3 different row coalesces
+        for i in range(3):
+            row_id = f"row_{i}"
+            executor.accept(_make_token(row_id=row_id, branch_name="a", token_id=f"t{i}_a"), "merge")
+            executor.accept(_make_token(row_id=row_id, branch_name="b", token_id=f"t{i}_b"), "merge")
+
+        assert len(executor._completed_keys) == 3
+
+        # Checkpoint → restore
+        checkpoint = executor.get_checkpoint_state()
+        executor2, _, _, _ = _make_executor()
+        executor2.register_coalesce(s, "node_1")
+        executor2.restore_from_checkpoint(checkpoint)
+
+        # All 3 completed keys must be present
+        for i in range(3):
+            assert ("merge", f"row_{i}") in executor2._completed_keys
+
+    def test_completed_keys_checkpoint_respects_fifo_order(self):
+        """Restored completed keys should maintain insertion order."""
+        executor, _, _, _ = _make_executor(max_completed_keys=3)
+        s = _settings(branches=["a", "b"])
+        executor.register_coalesce(s, "node_1")
+
+        # Complete 3 coalesces in order
+        for i in range(3):
+            row_id = f"row_{i}"
+            executor.accept(_make_token(row_id=row_id, branch_name="a", token_id=f"t{i}_a"), "merge")
+            executor.accept(_make_token(row_id=row_id, branch_name="b", token_id=f"t{i}_b"), "merge")
+
+        # Checkpoint → restore
+        checkpoint = executor.get_checkpoint_state()
+        executor2, _, _, _ = _make_executor(max_completed_keys=3)
+        executor2.register_coalesce(s, "node_1")
+        executor2.restore_from_checkpoint(checkpoint)
+
+        # Adding a 4th should evict the first (row_0), not a random entry
+        executor2._mark_completed(("merge", "row_99"))
+        assert ("merge", "row_0") not in executor2._completed_keys
+        assert ("merge", "row_1") in executor2._completed_keys
+        assert ("merge", "row_2") in executor2._completed_keys
+        assert ("merge", "row_99") in executor2._completed_keys
+
+    def test_pending_and_completed_both_restored(self):
+        """Checkpoint with both pending and completed entries restores both."""
+        executor, _, _, _clock = _make_executor()
+        s = _settings(branches=["a", "b"])
+        executor.register_coalesce(s, "node_1")
+
+        # Complete row_1
+        executor.accept(_make_token(row_id="row_1", branch_name="a", token_id="t1a"), "merge")
+        executor.accept(_make_token(row_id="row_1", branch_name="b", token_id="t1b"), "merge")
+
+        # Leave row_2 pending (only branch a arrived)
+        executor.accept(_make_token(row_id="row_2", branch_name="a", token_id="t2a"), "merge")
+
+        assert ("merge", "row_1") in executor._completed_keys
+        assert ("merge", "row_2") in executor._pending
+
+        checkpoint = executor.get_checkpoint_state()
+
+        executor2, _, _, _ = _make_executor()
+        executor2.register_coalesce(s, "node_1")
+        executor2.restore_from_checkpoint(checkpoint)
+
+        # Completed key restored
+        assert ("merge", "row_1") in executor2._completed_keys
+        # Pending entry restored
+        assert ("merge", "row_2") in executor2._pending
+
+    def test_checkpoint_dto_includes_completed_keys(self):
+        """CoalesceCheckpointState should carry completed_keys in its wire format."""
+        executor, _, _, _ = _make_executor()
+        s = _settings(branches=["a", "b"])
+        executor.register_coalesce(s, "node_1")
+
+        executor.accept(_make_token(branch_name="a", token_id="t1"), "merge")
+        executor.accept(_make_token(branch_name="b", token_id="t2"), "merge")
+
+        checkpoint = executor.get_checkpoint_state()
+        wire = checkpoint.to_dict()
+
+        # Wire format should include completed_keys
+        assert "completed_keys" in wire
+        assert len(wire["completed_keys"]) == 1
+        assert wire["completed_keys"][0] == ["merge", "row_1"]
+
+    def test_checkpoint_dto_from_dict_restores_completed_keys(self):
+        """CoalesceCheckpointState.from_dict should parse completed_keys."""
+        from elspeth.contracts.coalesce_checkpoint import CoalesceCheckpointState
+
+        wire = {
+            "_version": "1.0",
+            "pending": [],
+            "completed_keys": [["merge", "row_1"], ["merge", "row_2"]],
+        }
+        state = CoalesceCheckpointState.from_dict(wire)
+        assert state.completed_keys == (("merge", "row_1"), ("merge", "row_2"))

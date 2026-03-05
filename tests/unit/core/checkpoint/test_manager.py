@@ -153,6 +153,7 @@ def test_create_checkpoint_round_trips_coalesce_state(db: LandscapeDB, checkpoin
                     lost_branches={},
                 ),
             ),
+            completed_keys=(),
         ),
     )
 

@@ -215,6 +215,7 @@ class CoalesceExecutor:
         checkpoint = CoalesceCheckpointState(
             version=COALESCE_CHECKPOINT_VERSION,
             pending=tuple(pending_entries),
+            completed_keys=tuple(self._completed_keys.keys()),
         )
 
         serialized = checkpoint_dumps(checkpoint.to_dict())
@@ -243,6 +244,10 @@ class CoalesceExecutor:
         now = self._clock.monotonic()
         self._pending.clear()
         self._completed_keys.clear()
+
+        # Restore completed keys for late-arrival detection
+        for key in state.completed_keys:
+            self._completed_keys[key] = None
 
         for pending_entry in state.pending:
             if pending_entry.coalesce_name not in self._settings:

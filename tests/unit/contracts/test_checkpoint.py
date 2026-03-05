@@ -136,6 +136,7 @@ def test_resume_point_accepts_typed_coalesce_state() -> None:
                 lost_branches={},
             ),
         ),
+        completed_keys=(),
     )
 
     resume_point = ResumePoint(
