@@ -512,6 +512,14 @@ class RecoveryManager:
                 f"Contract integrity verification failed for run '{run_id}': {e}. "
                 f"Resume aborted - audit trail may be corrupted or tampered with."
             ) from e
+        except (ValueError, KeyError) as e:
+            # ContractAuditRecord.from_json() raises json.JSONDecodeError (subclass of
+            # ValueError) for malformed JSON, or KeyError for missing required fields.
+            # Both indicate Tier 1 data corruption — stored contract JSON is garbage.
+            raise CheckpointCorruptionError(
+                f"Contract integrity verification failed for run '{run_id}': {e}. "
+                f"Resume aborted - stored contract JSON is malformed (database corruption)."
+            ) from e
 
         if contract is None:
             # TIER-1 AUDIT INTEGRITY: Missing contract = audit trail corruption

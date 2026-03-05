@@ -271,7 +271,7 @@ allow_hits:
   reason: Telemetry emission failure - must not crash main LLM call flow
   safety: Logged and continues - telemetry is non-critical to LLM processing
   expires: '2026-05-02'
-- key: plugins/infrastructure/clients/llm.py:R4:AuditedLLMClient:chat_completion:fp=03442499b2ac8b80
+- key: plugins/infrastructure/clients/llm.py:R4:AuditedLLMClient:chat_completion:fp=78725e4b52b62f13
   owner: architecture
   reason: Telemetry emission failure - must not crash main LLM call flow
   safety: Logged and continues - telemetry is non-critical to LLM processing

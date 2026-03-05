@@ -379,7 +379,54 @@ class AuditedLLMClient(AuditedClientBase):
         # instead of being misclassified as LLM errors
         latency_ms = (time.perf_counter() - start) * 1000
 
-        content = response.choices[0].message.content or ""
+        # Tier 3 boundary: validate LLM response structure immediately
+        if not response.choices:
+            raise LLMClientError(
+                "LLM returned empty choices array — abnormal response",
+                retryable=False,
+            )
+        content = response.choices[0].message.content
+        if content is None:
+            # Tool call responses legitimately have no text content
+            if response.choices[0].finish_reason == "tool_calls":
+                content = ""
+            else:
+                # Record the call BEFORE raising — the LLM call happened and must
+                # appear in the audit trail even though the response is unusable.
+                # Without this, content-filtered calls vanish from the audit trail
+                # and create unexplained call-index gaps.
+                error_msg = "LLM returned null content (likely content-filtered by provider)"
+                raw_response = response.model_dump()
+                usage = (
+                    TokenUsage.known(
+                        prompt_tokens=response.usage.prompt_tokens,
+                        completion_tokens=response.usage.completion_tokens,
+                    )
+                    if response.usage is not None
+                    else TokenUsage.unknown()
+                )
+                response_dto = LLMCallResponse(
+                    content="",  # Null content normalized for DTO
+                    model=response.model,
+                    usage=usage,
+                    raw_response=raw_response,
+                )
+                self._recorder.record_call(
+                    state_id=self._state_id,
+                    call_index=call_index,
+                    call_type=CallType.LLM,
+                    status=CallStatus.ERROR,
+                    request_data=request_dto,
+                    response_data=response_dto,
+                    error=LLMCallError(
+                        type="ContentPolicyError",
+                        message=error_msg,
+                        retryable=False,
+                    ),
+                    latency_ms=latency_ms,
+                )
+                raise ContentPolicyError(error_msg)
+
         # Guard against providers that omit usage data (streaming, certain configs)
         if response.usage is not None:
             usage = TokenUsage.known(

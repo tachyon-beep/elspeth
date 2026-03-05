@@ -648,6 +648,50 @@ def test_verify_contract_integrity_raises_on_hash_mismatch(
         recovery_manager.verify_contract_integrity("run-contract-bad-hash")
 
 
+def test_verify_contract_integrity_raises_on_malformed_json(
+    db: LandscapeDB,
+    recovery_manager: RecoveryManager,
+) -> None:
+    """Malformed contract JSON must raise CheckpointCorruptionError, not raw JSONDecodeError.
+
+    When schema_contract_json is garbage (not valid JSON), the recorder's
+    get_run_contract will raise json.JSONDecodeError (via ContractAuditRecord.from_json).
+    verify_contract_integrity must catch this and wrap it as CheckpointCorruptionError
+    for consistent corruption handling.
+    """
+    with db.connection() as conn:
+        _insert_run(
+            conn,
+            "run-contract-malformed",
+            status=RunStatus.FAILED,
+            contract_json_override="not valid json {{{",
+        )
+
+    with pytest.raises(CheckpointCorruptionError, match="Contract integrity verification failed"):
+        recovery_manager.verify_contract_integrity("run-contract-malformed")
+
+
+def test_verify_contract_integrity_raises_on_missing_keys(
+    db: LandscapeDB,
+    recovery_manager: RecoveryManager,
+) -> None:
+    """Contract JSON missing required keys must raise CheckpointCorruptionError.
+
+    If the stored JSON is valid but missing 'mode' or 'fields', the KeyError
+    from ContractAuditRecord.from_json must be wrapped as CheckpointCorruptionError.
+    """
+    with db.connection() as conn:
+        _insert_run(
+            conn,
+            "run-contract-missing-keys",
+            status=RunStatus.FAILED,
+            contract_json_override='{"unexpected": "schema"}',
+        )
+
+    with pytest.raises(CheckpointCorruptionError, match="Contract integrity verification failed"):
+        recovery_manager.verify_contract_integrity("run-contract-missing-keys")
+
+
 def test_get_run_private_helper_returns_none_for_missing_run(recovery_manager: RecoveryManager) -> None:
     assert recovery_manager._get_run("missing-run") is None
 
