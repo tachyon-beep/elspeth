@@ -20,7 +20,7 @@ Keep types.py as pure data definitions with minimal dependencies.
 from __future__ import annotations
 
 from collections import Counter
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field
 from types import MappingProxyType
 from typing import TYPE_CHECKING, Any
@@ -332,10 +332,16 @@ class ResumeState:
 
     recorder: LandscapeRecorder
     run_id: str
-    restored_aggregation_state: dict[str, AggregationCheckpointState]
+    restored_aggregation_state: Mapping[str, AggregationCheckpointState]
     restored_coalesce_state: CoalesceCheckpointState | None
-    unprocessed_rows: list[Any]
+    unprocessed_rows: Sequence[Any]
     schema_contract: SchemaContract
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.restored_aggregation_state, MappingProxyType):
+            object.__setattr__(self, "restored_aggregation_state", MappingProxyType(self.restored_aggregation_state))
+        if not isinstance(self.unprocessed_rows, tuple):
+            object.__setattr__(self, "unprocessed_rows", tuple(self.unprocessed_rows))
 
 
 # Factory that creates a per-sink checkpoint callback.

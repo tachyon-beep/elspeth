@@ -14,9 +14,13 @@ States:
     ROW_NOT_FOUND: Row ID doesn't exist in the database
 """
 
+from collections.abc import Mapping
 from dataclasses import dataclass
 from enum import StrEnum
+from types import MappingProxyType
 from typing import Any, ClassVar
+
+from elspeth.contracts.freeze import deep_freeze
 
 
 class RowDataState(StrEnum):
@@ -55,7 +59,7 @@ class RowDataResult:
     """
 
     state: RowDataState
-    data: dict[str, Any] | None
+    data: Mapping[str, Any] | None
 
     _STATES_WITH_DATA: ClassVar[frozenset[RowDataState]] = frozenset({RowDataState.AVAILABLE, RowDataState.REPR_FALLBACK})
 
@@ -67,10 +71,12 @@ class RowDataResult:
                 raise ValueError(f"{self.state} state requires non-None data")
             payload: object = self.data
             match payload:
-                case dict():
+                case dict() | MappingProxyType():
                     pass
                 case _:
                     actual_type = type(payload).__name__
                     raise TypeError(f"{self.state} state requires dict data, got {actual_type}")
+            if not isinstance(self.data, MappingProxyType):
+                object.__setattr__(self, "data", deep_freeze(self.data))
         if self.state not in self._STATES_WITH_DATA and self.data is not None:
             raise ValueError(f"{self.state} state requires None data")

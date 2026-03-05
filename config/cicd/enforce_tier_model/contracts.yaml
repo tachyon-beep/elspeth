@@ -61,17 +61,17 @@ allow_hits:
   reason: "TYPE_CHECKING import of Settings models \u2014 Runtime*Config.from_settings() type annotations"
   safety: "No runtime coupling \u2014 annotation-only import behind TYPE_CHECKING guard"
   expires: null
-- key: contracts/data.py:R1:validate_row:fp=1c829f82426c1723
+- key: contracts/data.py:R1:validate_row:fp=c746a499342614da
   owner: architecture
   reason: Optional field access at trust boundary
   safety: Code reviewed - legitimate pattern
   expires: '2026-05-02'
-- key: contracts/data.py:R3:_type_name:fp=fc0ba036b8c43844
+- key: contracts/data.py:R3:_type_name:fp=14e20aef3c704c42
   owner: architecture
   reason: hasattr for feature detection
   safety: Code reviewed - legitimate pattern
   expires: '2026-05-02'
-- key: contracts/data.py:R5:_is_union_type:fp=8145402319da2f9d
+- key: contracts/data.py:R5:_is_union_type:fp=88af8154e1b5e50e
   owner: architecture
   reason: AST/type checking - required for safe parsing or discriminated unions
   safety: Code reviewed - legitimate pattern
@@ -88,17 +88,17 @@ allow_hits:
   owner: bugfix
   reason: "Canonical JSON NaN/Infinity rejection \u2014 isinstance(float) to detect non-finite values before rfc8785.dumps()"
   safety: "Raises ValueError immediately \u2014 explicit crash, not masking"
-- key: contracts/audit.py:R5:_validate_enum:fp=9ca70ed29944861d
+- key: contracts/audit.py:R5:_validate_enum:fp=98dcf34967c7f0a3
   owner: architecture
   reason: AST/type checking - required for safe parsing or discriminated unions
   safety: Code reviewed - legitimate pattern
   expires: '2026-05-02'
-- key: contracts/audit.py:R5:TokenOutcome:__post_init__:fp=fcc2134cad55ed92
+- key: contracts/audit.py:R5:TokenOutcome:__post_init__:fp=6c59178b0795028f
   owner: architecture
   reason: AST/type checking - required for safe parsing or discriminated unions
   safety: Code reviewed - legitimate pattern
   expires: '2026-05-02'
-- key: contracts/audit.py:R5:SecretResolution:__post_init__:fp=06b13a2e77960881
+- key: contracts/audit.py:R5:SecretResolution:__post_init__:fp=55de8a5c766b4b9d
   owner: architecture
   reason: "Tier 1 invariant enforcement \u2014 isinstance validates timestamp is numeric before math.isinf/isnan guard"
   safety: "Raises immediately on wrong type \u2014 explicit crash, not masking"
@@ -201,45 +201,45 @@ allow_hits:
   owner: architecture
   reason: "Tier 3 boundary \u2014 from_dict() validates input is dict before accessing keys"
   safety: Non-dict input returns TokenUsage.unknown(); no crash
-- key: contracts/coalesce_checkpoint.py:R5:CoalesceTokenCheckpoint:__post_init__:fp=b0a7679e914815a1
+- key: contracts/coalesce_checkpoint.py:R5:CoalesceTokenCheckpoint:__post_init__:fp=ca648c6eeac4d9db
   owner: architecture
   reason: "Tier 1 write-side validation \u2014 isinstance in __post_init__ enforces invariants at construction time per offensive\
     \ programming policy"
   safety: "Raises ValueError on invalid data \u2014 crashes loud, never masks"
-- key: contracts/coalesce_checkpoint.py:R5:CoalesceTokenCheckpoint:__post_init__:fp=2f9c6761318b9d15
+- key: contracts/coalesce_checkpoint.py:R5:CoalesceTokenCheckpoint:__post_init__:fp=44d2a48bf7b51c3e
   owner: architecture
   reason: "Tier 1 write-side validation \u2014 isinstance in __post_init__ enforces invariants at construction time per offensive\
     \ programming policy"
   safety: "Raises ValueError on invalid data \u2014 crashes loud, never masks"
-- key: contracts/coalesce_checkpoint.py:R5:CoalesceTokenCheckpoint:__post_init__:fp=5ebbb7f5e80ddee0
+- key: contracts/coalesce_checkpoint.py:R5:CoalesceTokenCheckpoint:__post_init__:fp=7abedcc8b8fc91d4
   owner: architecture
   reason: "Tier 1 write-side validation \u2014 isinstance in __post_init__ enforces invariants at construction time per offensive\
     \ programming policy"
   safety: "Raises ValueError on invalid data \u2014 crashes loud, never masks"
-- key: contracts/coalesce_checkpoint.py:R5:CoalesceTokenCheckpoint:__post_init__:fp=082612063db53ba7
+- key: contracts/coalesce_checkpoint.py:R5:CoalesceTokenCheckpoint:__post_init__:fp=f163efc79350eb74
   owner: architecture
   reason: "Tier 1 write-side validation \u2014 isinstance in __post_init__ enforces invariants at construction time per offensive\
     \ programming policy"
   safety: "Raises ValueError on invalid data \u2014 crashes loud, never masks"
-- key: contracts/coalesce_checkpoint.py:R5:CoalescePendingCheckpoint:__post_init__:fp=4124f1b7e6f2759d
+- key: contracts/coalesce_checkpoint.py:R5:CoalescePendingCheckpoint:__post_init__:fp=a898349c411cfd2e
   owner: architecture
   reason: "Tier 1 write-side validation \u2014 isinstance in __post_init__ enforces invariants at construction time per offensive\
     \ programming policy"
   safety: "Raises ValueError on invalid data \u2014 crashes loud, never masks"
-- key: contracts/coalesce_checkpoint.py:R5:CoalescePendingCheckpoint:__post_init__:fp=4c782ec932932d76
+- key: contracts/coalesce_checkpoint.py:R5:CoalescePendingCheckpoint:__post_init__:fp=428f8a0d9dc7e6b0
   owner: architecture
   reason: "Tier 1 write-side validation \u2014 isinstance in __post_init__ enforces invariants at construction time per offensive\
     \ programming policy"
   safety: "Raises ValueError on invalid data \u2014 crashes loud, never masks"
-- key: contracts/coalesce_checkpoint.py:R5:CoalescePendingCheckpoint:from_dict:fp=dd0a1b3783c20958
+- key: contracts/coalesce_checkpoint.py:R5:CoalescePendingCheckpoint:from_dict:fp=f53a45f1e4f17a52
   owner: architecture
   reason: "Tier 1 deserialization \u2014 isinstance validates checkpoint JSON structure (our data) before construction"
   safety: "Raises ValueError on malformed checkpoint \u2014 crash on corruption per Tier 1 rules"
-- key: contracts/coalesce_checkpoint.py:R5:CoalescePendingCheckpoint:from_dict:fp=f4bee3dc03881501
+- key: contracts/coalesce_checkpoint.py:R5:CoalescePendingCheckpoint:from_dict:fp=b29bec93762aa450
   owner: architecture
   reason: "Tier 1 deserialization \u2014 isinstance validates checkpoint JSON structure (our data) before construction"
   safety: "Raises ValueError on malformed checkpoint \u2014 crash on corruption per Tier 1 rules"
-- key: contracts/coalesce_checkpoint.py:R5:CoalesceCheckpointState:from_dict:fp=7af0b39d5530afda
+- key: contracts/coalesce_checkpoint.py:R5:CoalesceCheckpointState:from_dict:fp=251441ef81a37792
   owner: architecture
   reason: "Tier 1 deserialization \u2014 isinstance validates checkpoint JSON structure (our data) before construction"
   safety: "Raises ValueError on malformed checkpoint \u2014 crash on corruption per Tier 1 rules"
@@ -260,7 +260,7 @@ allow_hits:
   owner: architecture
   reason: Optional lookup for original name - new fields from transforms may not have input mapping
   safety: Fallback to output field's original_name is correct behavior for transform-added fields
-- key: contracts/aggregation_checkpoint.py:R5:AggregationNodeCheckpoint:from_dict:fp=40e605dfe41416d2
+- key: contracts/aggregation_checkpoint.py:R5:AggregationNodeCheckpoint:from_dict:fp=4b0f3952792901af
   owner: architecture
   reason: "Tier 1 boundary \u2014 from_dict() validates tokens_data is list before iterating (checkpoint is our data)"
   safety: "Raises TypeError immediately on corruption \u2014 crash, not coercion"
@@ -308,3 +308,158 @@ allow_hits:
   owner: bugfix
   reason: Tier-3 boundary - from_policy() validates plugin config (user YAML) before conversion
   safety: Raises ValueError with clear field name and value - no silent recovery
+- key: 'contracts/audit.py:R5:Node:__post_init__:fp=cab448ea13e388af'
+  owner: architecture
+  reason: Deep-freeze conversion guard — isinstance() checks for MappingProxyType/tuple wrapping, not defensive data access
+  safety: Construction-time type conversion, crashes on unexpected types
+  expires: null
+
+- key: 'contracts/audit.py:R5:RowLineage:__post_init__:fp=082783cdf1b30fd3'
+  owner: architecture
+  reason: Deep-freeze conversion guard — isinstance() checks for MappingProxyType/tuple wrapping, not defensive data access
+  safety: Construction-time type conversion, crashes on unexpected types
+  expires: null
+
+- key: 'contracts/coalesce_checkpoint.py:R5:CoalescePendingCheckpoint:__post_init__:fp=87d18b16122e624a'
+  owner: architecture
+  reason: Deep-freeze conversion guard — isinstance() checks for MappingProxyType/tuple wrapping, not defensive data access
+  safety: Construction-time type conversion, crashes on unexpected types
+  expires: null
+
+- key: 'contracts/coalesce_checkpoint.py:R5:CoalescePendingCheckpoint:__post_init__:fp=e0a1d9b8fcd93c99'
+  owner: architecture
+  reason: Deep-freeze conversion guard — isinstance() checks for MappingProxyType/tuple wrapping, not defensive data access
+  safety: Construction-time type conversion, crashes on unexpected types
+  expires: null
+
+- key: 'contracts/aggregation_checkpoint.py:R5:AggregationCheckpointState:__post_init__:fp=11e615d2fb5967be'
+  owner: architecture
+  reason: Deep-freeze conversion guard — isinstance() checks for MappingProxyType/tuple wrapping, not defensive data access
+  safety: Construction-time type conversion, crashes on unexpected types
+  expires: null
+
+- key: 'contracts/batch_checkpoint.py:R5:BatchCheckpointState:__post_init__:fp=24460e9a790fc967'
+  owner: architecture
+  reason: Deep-freeze conversion guard — isinstance() checks for MappingProxyType/tuple wrapping, not defensive data access
+  safety: Construction-time type conversion, crashes on unexpected types
+  expires: null
+
+- key: 'contracts/batch_checkpoint.py:R5:BatchCheckpointState:__post_init__:fp=224d9f5f0cdc53a0'
+  owner: architecture
+  reason: Deep-freeze conversion guard — isinstance() checks for MappingProxyType/tuple wrapping, not defensive data access
+  safety: Construction-time type conversion, crashes on unexpected types
+  expires: null
+
+- key: 'contracts/batch_checkpoint.py:R5:BatchCheckpointState:__post_init__:fp=41940b054bb4e6e6'
+  owner: architecture
+  reason: Deep-freeze conversion guard — isinstance() checks for MappingProxyType/tuple wrapping, not defensive data access
+  safety: Construction-time type conversion, crashes on unexpected types
+  expires: null
+
+- key: 'contracts/call_data.py:R5:RawCallPayload:__post_init__:fp=77141e12b9a5903a'
+  owner: architecture
+  reason: Deep-freeze conversion guard — isinstance() checks for MappingProxyType/tuple wrapping, not defensive data access
+  safety: Construction-time type conversion, crashes on unexpected types
+  expires: null
+
+- key: 'contracts/call_data.py:R5:LLMCallRequest:__post_init__:fp=b48d8aaf6925ceea'
+  owner: architecture
+  reason: Deep-freeze conversion guard — isinstance() checks for MappingProxyType/tuple wrapping, not defensive data access
+  safety: Construction-time type conversion, crashes on unexpected types
+  expires: null
+
+- key: 'contracts/call_data.py:R5:LLMCallRequest:__post_init__:fp=a3f8422aa49f9a3a'
+  owner: architecture
+  reason: Deep-freeze conversion guard — isinstance() checks for MappingProxyType/tuple wrapping, not defensive data access
+  safety: Construction-time type conversion, crashes on unexpected types
+  expires: null
+
+- key: 'contracts/call_data.py:R5:LLMCallResponse:__post_init__:fp=6565d836c26b8bd5'
+  owner: architecture
+  reason: Deep-freeze conversion guard — isinstance() checks for MappingProxyType/tuple wrapping, not defensive data access
+  safety: Construction-time type conversion, crashes on unexpected types
+  expires: null
+
+- key: 'contracts/call_data.py:R5:HTTPCallRequest:__post_init__:fp=3e7d77d7173bc6c6'
+  owner: architecture
+  reason: Deep-freeze conversion guard — isinstance() checks for MappingProxyType/tuple wrapping, not defensive data access
+  safety: Construction-time type conversion, crashes on unexpected types
+  expires: null
+
+- key: 'contracts/call_data.py:R5:HTTPCallRequest:__post_init__:fp=91401b13aeaccbe3'
+  owner: architecture
+  reason: Deep-freeze conversion guard — isinstance() checks for MappingProxyType/tuple wrapping, not defensive data access
+  safety: Construction-time type conversion, crashes on unexpected types
+  expires: null
+
+- key: 'contracts/call_data.py:R5:HTTPCallRequest:__post_init__:fp=6854ba92ea2c38b5'
+  owner: architecture
+  reason: Deep-freeze conversion guard — isinstance() checks for MappingProxyType/tuple wrapping, not defensive data access
+  safety: Construction-time type conversion, crashes on unexpected types
+  expires: null
+
+- key: 'contracts/call_data.py:R5:HTTPCallResponse:__post_init__:fp=39e9b674dcf98609'
+  owner: architecture
+  reason: Deep-freeze conversion guard — isinstance() checks for MappingProxyType/tuple wrapping, not defensive data access
+  safety: Construction-time type conversion, crashes on unexpected types
+  expires: null
+
+- key: 'contracts/call_data.py:R5:HTTPCallResponse:__post_init__:fp=c10abc30edf76dff'
+  owner: architecture
+  reason: Deep-freeze conversion guard — isinstance() checks for MappingProxyType/tuple wrapping, not defensive data access
+  safety: Construction-time type conversion, crashes on unexpected types
+  expires: null
+
+- key: 'contracts/call_data.py:R5:HTTPCallResponse:to_dict:fp=a165a659c9a0019d'
+  owner: architecture
+  reason: Deep-freeze serialization guard — isinstance() checks MappingProxyType before converting to dict for wire format
+  safety: Serialization-time type conversion for hash-stable output, crashes on unexpected types
+  expires: null
+
+- key: 'contracts/freeze.py:R5:deep_freeze:fp=342f3b1a665e98b8'
+  owner: architecture
+  reason: Recursive freeze utility — isinstance() dispatches on container type (dict/list/MappingProxyType/tuple/frozenset)
+  safety: Type dispatch for immutability conversion, not defensive data access
+  expires: null
+
+- key: 'contracts/freeze.py:R5:deep_freeze:fp=187cac4eb00f523f'
+  owner: architecture
+  reason: Recursive freeze utility — isinstance() dispatches on container type (dict/list/MappingProxyType/tuple/frozenset)
+  safety: Type dispatch for immutability conversion, not defensive data access
+  expires: null
+
+- key: 'contracts/freeze.py:R5:deep_freeze:fp=5967092d709d574b'
+  owner: architecture
+  reason: Recursive freeze utility — isinstance() dispatches on container type (dict/list/MappingProxyType/tuple/frozenset)
+  safety: Type dispatch for immutability conversion, not defensive data access
+  expires: null
+
+- key: 'contracts/freeze.py:R5:deep_freeze:fp=ba6f458f4b8820dd'
+  owner: architecture
+  reason: Recursive freeze utility — isinstance() dispatches on container type (dict/list/MappingProxyType/tuple/frozenset)
+  safety: Type dispatch for immutability conversion, not defensive data access
+  expires: null
+
+- key: 'contracts/freeze.py:R5:deep_thaw:fp=ca9702e04aebb184'
+  owner: architecture
+  reason: Recursive thaw utility — isinstance() dispatches on container type to convert back to mutable for serialization
+  safety: Type dispatch for serialization, not defensive data access
+  expires: null
+
+- key: 'contracts/freeze.py:R5:deep_thaw:fp=943d1b8e2fc105d5'
+  owner: architecture
+  reason: Recursive thaw utility — isinstance() dispatches on container type to convert back to mutable for serialization
+  safety: Type dispatch for serialization, not defensive data access
+  expires: null
+
+- key: 'contracts/freeze.py:R5:deep_thaw:fp=990e74711546dafe'
+  owner: architecture
+  reason: Recursive thaw utility — isinstance() dispatches on container type to convert back to mutable for serialization
+  safety: Type dispatch for serialization, not defensive data access
+  expires: null
+
+- key: 'contracts/freeze.py:R5:deep_thaw:fp=a05a343ca9ecd748'
+  owner: architecture
+  reason: Recursive thaw utility — isinstance() dispatches on container type to convert back to mutable for serialization
+  safety: Type dispatch for serialization, not defensive data access
+  expires: null

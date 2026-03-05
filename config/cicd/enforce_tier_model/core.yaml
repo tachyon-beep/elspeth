@@ -149,102 +149,102 @@ allow_hits:
   reason: "Tier-3 boundary \u2014 isinstance required for recursive dict/list/float traversal to sanitize quarantine data"
   safety: Replaces NaN/Infinity with None; audit trail records original error separately
   expires: '2026-05-12'
-- key: core/dag/builder.py:R5:_field_name_type:fp=4ee1eff815d6884c
+- key: core/dag/builder.py:R5:_field_name_type:fp=f9ea2b8c0078e5f7
   owner: ARCH-15
   reason: isinstance check for dict vs str field spec in schema parsing helper
   safety: "Crashes with ValueError on unrecognised format \u2014 no silent fallback"
   expires: '2026-05-13'
-- key: core/dag/builder.py:R5:_field_name_type:fp=cb5ad3e66923d2dd
+- key: core/dag/builder.py:R5:_field_name_type:fp=91812b8d5ebba874
   owner: ARCH-15
   reason: isinstance check for dict vs str field spec in schema parsing helper
   safety: "Crashes with ValueError on unrecognised format \u2014 no silent fallback"
   expires: '2026-05-13'
-- key: core/dag/builder.py:R5:_field_required:fp=f9ea2b8c0078e5f7
+- key: core/dag/builder.py:R5:_field_required:fp=f009f67385760195
   owner: bugfix
   reason: isinstance check for str field spec format in schema optionality helper
   safety: "Crashes with default True on unrecognised format \u2014 no silent fallback"
   expires: '2026-05-13'
-- key: core/dag/builder.py:R5:_field_required:fp=91812b8d5ebba874
+- key: core/dag/builder.py:R5:_field_required:fp=5251dcd1e1e89b49
   owner: bugfix
   reason: isinstance check for str field spec format in schema optionality helper
   safety: "Crashes with default True on unrecognised format \u2014 no silent fallback"
   expires: '2026-05-13'
-- key: core/dag/builder.py:R2:build_execution_graph:fp=e2436019734d4b7b
+- key: core/dag/builder.py:R2:build_execution_graph:fp=8ed33e14723fc932
   owner: architecture
   reason: Optional _output_schema_config metadata is present only on select plugins
   safety: Missing metadata is handled as None; core schema enforcement still validates edges
   expires: '2026-03-10'
-- key: core/dag/builder.py:R2:build_execution_graph:fp=d7605c506e2c21d4
+- key: core/dag/builder.py:R2:build_execution_graph:fp=df5bd6f019012c5a
   owner: architecture
   reason: Optional _output_schema_config metadata is present only on select plugins
   safety: Missing metadata is handled as None; core schema enforcement still validates edges
   expires: '2026-03-10'
-- key: core/dag/builder.py:R8:build_execution_graph:fp=a9172a982e696f35
+- key: core/dag/builder.py:R8:build_execution_graph:fp=b39d566217ce2b33
   owner: architecture
   reason: setdefault used for route-label grouping while building gate continue-route diagnostics
   safety: Grouping is deterministic and validated before runtime routing
   expires: '2026-03-13'
-- key: core/dag/builder.py:R1:build_execution_graph:fp=175e5896eed38eaa
+- key: core/dag/builder.py:R1:build_execution_graph:fp=c95fb13d5d70bc2b
   owner: architecture
   reason: Optional gate connection route label lookup for coalesce provenance wiring
   safety: "Missing lookup returns None \u2014 handled explicitly by conditional check"
   expires: '2026-03-13'
-- key: core/dag/builder.py:R1:build_execution_graph:fp=27f2fb7a1a342554
+- key: core/dag/builder.py:R1:build_execution_graph:fp=55b93ddc4605fa6b
   owner: architecture
   reason: Optional gate connection route label lookup for coalesce provenance wiring
   safety: "Missing lookup returns None \u2014 handled explicitly by conditional check"
   expires: '2026-03-13'
-- key: core/dag/builder.py:R1:build_execution_graph:fp=5b7ae0046cea1583
+- key: core/dag/builder.py:R1:build_execution_graph:fp=f6fa12a712d944bf
   owner: architecture
   reason: Optional gate connection route label lookup for coalesce provenance wiring
   safety: "Missing lookup returns None \u2014 handled explicitly by conditional check"
   expires: '2026-03-13'
-- key: core/dag/builder.py:R1:build_execution_graph:fp=9803ad1aa6aec4e6
+- key: core/dag/builder.py:R1:build_execution_graph:fp=a95c870f790f30df
   owner: architecture
   reason: Optional gate connection route label lookup for coalesce provenance wiring
   safety: "Missing lookup returns None \u2014 handled explicitly by conditional check"
   expires: '2026-03-13'
-- key: core/dag/builder.py:R1:build_execution_graph:fp=e26645e47005f832
+- key: core/dag/builder.py:R1:build_execution_graph:fp=40cb470bb626c0dc
   owner: architecture
   reason: Optional gate connection route label lookup for coalesce provenance wiring
   safety: "Missing lookup returns None \u2014 handled explicitly by conditional check"
   expires: '2026-03-13'
-- key: core/dag/builder.py:R1:build_execution_graph:fp=647dfa1494c7c4a3
+- key: core/dag/builder.py:R1:build_execution_graph:fp=eb16ce69d9a8251f
   owner: architecture
   reason: Optional gate connection route label lookup for coalesce provenance wiring
   safety: "Missing lookup returns None \u2014 handled explicitly by conditional check"
   expires: '2026-03-13'
-- key: core/dag/builder.py:R5:build_execution_graph:fp=afae47ddbfda9bef
+- key: core/dag/builder.py:R5:build_execution_graph:fp=7b266601a2ca0161
   owner: architecture
   reason: isinstance check for dict vs NodeConfig on config field during schema population
   safety: Crashes on type mismatch - no silent fallback
   expires: '2026-03-13'
-- key: core/dag/graph.py:R1:ExecutionGraph:get_effective_producer_schema:fp=b52fe609b0c44b15
+- key: core/dag/graph.py:R1:ExecutionGraph:get_effective_producer_schema:fp=128cdd67ab27d0ff
   owner: ARCH-15
   reason: "Optional select_branch config lookup \u2014 not all coalesce nodes have select_branch"
   safety: "Falls through to return None if missing \u2014 conservative (skips type validation)"
   expires: '2026-05-13'
-- key: core/dag/graph.py:R1:ExecutionGraph:get_effective_producer_schema:fp=ba2459da5f3e8e75
+- key: core/dag/graph.py:R1:ExecutionGraph:get_effective_producer_schema:fp=6d1f81c80be87c59
   owner: ARCH-15
   reason: "Optional select_branch config lookup \u2014 not all coalesce nodes have select_branch"
   safety: "Falls through to return None if missing \u2014 conservative (skips type validation)"
   expires: '2026-05-13'
-- key: core/dag/graph.py:R1:ExecutionGraph:get_schema_config_from_node:fp=d14d6688674c3d85
+- key: core/dag/graph.py:R1:ExecutionGraph:get_schema_config_from_node:fp=e73629e37afb81d6
   owner: architecture
   reason: Optional schema access for mixed node types (source/sink/gate/coalesce)
   safety: Crashes on malformed schema payloads; None is an intentional non-schema state
   expires: '2026-03-10'
-- key: core/dag/graph.py:R5:ExecutionGraph:get_schema_config_from_node:fp=7846849ba5e7b231
+- key: core/dag/graph.py:R5:ExecutionGraph:get_schema_config_from_node:fp=cf389b7a44b245c2
   owner: architecture
   reason: Runtime shape check before coercing schema dict to SchemaConfig
   safety: Non-dict payloads are rejected and converted to explicit validation failures
   expires: '2026-03-10'
-- key: core/dag/graph.py:R1:ExecutionGraph:get_required_fields:fp=a578f750800beadc
+- key: core/dag/graph.py:R1:ExecutionGraph:get_required_fields:fp=a7a72c372c1fef1c
   owner: architecture
   reason: Optional required_input_fields key supports transforms with implicit/no required field contract
   safety: Missing key yields empty set; downstream schema checks still enforce compatibility
   expires: '2026-03-10'
-- key: core/dag/graph.py:R5:ExecutionGraph:get_required_fields:fp=8c80756e1a0f20ad
+- key: core/dag/graph.py:R5:ExecutionGraph:get_required_fields:fp=836fc35f6138553b
   owner: architecture
   reason: Options payload shape check at config boundary before extracting nested required_input_fields
   safety: Non-dict options are treated as no declared requirements and never silently coerced
@@ -484,3 +484,14 @@ allow_hits:
   owner: architecture
   reason: "AST/type checking \u2014 isinstance for dict during recursive type restoration"
   safety: "Code reviewed \u2014 fundamental to checkpoint deserialization"
+- key: 'core/landscape/row_data.py:R5:RowDataResult:__post_init__:fp=d9e8cfe6e01d6ab4'
+  owner: architecture
+  reason: Deep-freeze conversion guard — isinstance() checks for MappingProxyType/tuple wrapping, not defensive data access
+  safety: Construction-time type conversion, crashes on unexpected types
+  expires: null
+
+- key: 'core/canonical.py:R5:sanitize_for_canonical:fp=e1d2345f7d0befe5'
+  owner: architecture
+  reason: "Tier-3 boundary — isinstance(np.floating) detects numpy scalar NaN/Infinity for quarantine sanitization"
+  safety: Replaces non-finite with None; audit trail records original error separately
+  expires: null

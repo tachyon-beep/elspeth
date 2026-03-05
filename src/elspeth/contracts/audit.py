@@ -7,9 +7,13 @@ Per Data Manifesto: The audit database is OUR data. If we read
 garbage from it, something catastrophic happened - crash immediately.
 """
 
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from datetime import datetime
+from types import MappingProxyType
 from typing import TYPE_CHECKING, Any, ClassVar, Literal, TypedDict
+
+from elspeth.contracts.freeze import deep_freeze
 
 if TYPE_CHECKING:
     pass  # Placeholder for future type-only imports
@@ -87,12 +91,18 @@ class Node:
     sequence_in_pipeline: int | None = None
     # Schema configuration for audit trail (WP-11.99)
     schema_mode: str | None = None  # "observed", "fixed", "flexible", "parse"
-    schema_fields: list[dict[str, object]] | None = None  # Field definitions if explicit
+    schema_fields: Sequence[Mapping[str, object]] | None = None  # Field definitions if explicit
 
     def __post_init__(self) -> None:
         """Validate enum fields - Tier 1 crash on invalid types."""
         _validate_enum(self.node_type, NodeType, "node_type")
         _validate_enum(self.determinism, Determinism, "determinism")
+        if self.schema_fields is not None and not isinstance(self.schema_fields, tuple):
+            object.__setattr__(
+                self,
+                "schema_fields",
+                tuple(deep_freeze(d) for d in self.schema_fields),
+            )
 
 
 @dataclass(frozen=True, slots=True)
@@ -441,8 +451,12 @@ class RowLineage:
     created_at: datetime
 
     # Resolved payload (from PayloadStore)
-    source_data: dict[str, object] | None  # None if purged
+    source_data: Mapping[str, object] | None  # None if purged
     payload_available: bool
+
+    def __post_init__(self) -> None:
+        if self.source_data is not None and not isinstance(self.source_data, MappingProxyType):
+            object.__setattr__(self, "source_data", MappingProxyType(self.source_data))
 
 
 class ExportStatusUpdate(TypedDict, total=False):

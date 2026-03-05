@@ -12,9 +12,10 @@ Also provides content corruption helpers for malformation error injection.
 import html
 import json
 import random as random_module
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
+from types import MappingProxyType
 
 import jinja2
 import jinja2.sandbox
@@ -55,8 +56,12 @@ class WebResponse:
     content: str | bytes
     content_type: str
     status_code: int = 200
-    headers: dict[str, str] | None = None
+    headers: Mapping[str, str] | None = None
     encoding: str = "utf-8"
+
+    def __post_init__(self) -> None:
+        if self.headers is not None and not isinstance(self.headers, MappingProxyType):
+            object.__setattr__(self, "headers", MappingProxyType(self.headers))
 
 
 class PresetBank:

@@ -6,7 +6,9 @@ can resume waiting joins without replaying upstream source rows.
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import dataclass
+from types import MappingProxyType
 from typing import Any
 
 
@@ -90,8 +92,8 @@ class CoalescePendingCheckpoint:
     coalesce_name: str
     row_id: str
     elapsed_age_seconds: float
-    branches: dict[str, CoalesceTokenCheckpoint]
-    lost_branches: dict[str, str]
+    branches: Mapping[str, CoalesceTokenCheckpoint]
+    lost_branches: Mapping[str, str]
 
     def __post_init__(self) -> None:
         """Validate Tier 1 invariants at construction time."""
@@ -101,6 +103,10 @@ class CoalescePendingCheckpoint:
                 raise ValueError(f"{field_name} must be a non-empty string, got {type(value).__name__}: {value!r}")
         if not isinstance(self.elapsed_age_seconds, (int, float)) or self.elapsed_age_seconds < 0:
             raise ValueError(f"elapsed_age_seconds must be non-negative, got {self.elapsed_age_seconds!r}")
+        if not isinstance(self.branches, MappingProxyType):
+            object.__setattr__(self, "branches", MappingProxyType(self.branches))
+        if not isinstance(self.lost_branches, MappingProxyType):
+            object.__setattr__(self, "lost_branches", MappingProxyType(self.lost_branches))
         overlap = set(self.branches) & set(self.lost_branches)
         if overlap:
             raise ValueError(f"branches and lost_branches must not overlap, shared keys: {sorted(overlap)}")

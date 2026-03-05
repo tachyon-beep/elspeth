@@ -180,22 +180,22 @@ allow_hits:
   reason: Tier 3 boundary - isinstance validates parsed YAML is dict before Pydantic
   safety: Validates external file content structure type
   expires: '2026-05-13'
-- key: testing/chaosweb/content_generator.py:R5:PresetBank:from_jsonl:fp=35ee30a7c70c693f
+- key: testing/chaosweb/content_generator.py:R5:PresetBank:from_jsonl:fp=38773d43b9cc4562
   owner: architecture
   reason: Tier 3 boundary - isinstance validates JSONL line is dict before constructing preset entry
   safety: Non-dict lines are skipped with warning - no silent data loss
   expires: '2026-05-13'
-- key: testing/chaosweb/content_generator.py:R1:PresetBank:from_jsonl:fp=50c41c4fe8e54a18
+- key: testing/chaosweb/content_generator.py:R1:PresetBank:from_jsonl:fp=c6838e4ad64cd92e
   owner: architecture
   reason: Tier 3 boundary - .get() on parsed JSONL object for optional url field
   safety: Missing url defaults to empty string - correct for optional preset metadata
   expires: '2026-05-13'
-- key: testing/chaosweb/content_generator.py:R1:PresetBank:from_jsonl:fp=f2e95eeff7570023
+- key: testing/chaosweb/content_generator.py:R1:PresetBank:from_jsonl:fp=a8745d654a3c8041
   owner: architecture
   reason: Tier 3 boundary - .get() on parsed JSONL object for optional url field
   safety: Missing url defaults to empty string - correct for optional preset metadata
   expires: '2026-05-13'
-- key: testing/chaosweb/content_generator.py:R1:ContentGenerator:_generate_preset_html:fp=6557093d1acb3a65
+- key: testing/chaosweb/content_generator.py:R1:ContentGenerator:_generate_preset_html:fp=7c41416fcf20581a
   owner: architecture
   reason: Tier 3 boundary - .get() on preset page dict for optional content_type override
   safety: Falls back to config default_content_type - preset pages may omit content_type
@@ -260,3 +260,8 @@ allow_hits:
   reason: Silent recovery with explicit error handling path
   safety: Falls back to 'version unknown' on ImportError - correct for optional version detection
   expires: '2026-05-13'
+- key: 'testing/chaosweb/content_generator.py:R5:WebResponse:__post_init__:fp=4dc63a1d600a7cb7'
+  owner: architecture
+  reason: Deep-freeze conversion guard — isinstance() checks for MappingProxyType/tuple wrapping, not defensive data access
+  safety: Construction-time type conversion, crashes on unexpected types
+  expires: null

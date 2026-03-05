@@ -28,9 +28,12 @@ if TYPE_CHECKING:
     from elspeth.plugins.infrastructure.config_base import PluginConfig
 
 
-@dataclass
+@dataclass(frozen=True, slots=True)
 class ValidationError:
     """Structured validation error.
+
+    Frozen: error records are immutable evidence — once created, the
+    captured field, message, and value must not be modified.
 
     Attributes:
         field: Field name that failed validation

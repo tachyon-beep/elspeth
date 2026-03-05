@@ -277,8 +277,7 @@ def sanitize_for_canonical(obj: Any) -> Any:
         return [sanitize_for_canonical(v) for v in obj]
     if isinstance(obj, float) and (math.isnan(obj) or math.isinf(obj)):
         return None
-    # numpy floating scalars (without importing numpy)
-    obj_type = type(obj)
-    if obj_type.__module__ == "numpy" and "float" in obj_type.__name__ and not math.isfinite(float(obj)):
+    # numpy floating scalars (longdouble, float16, float32, float64, etc.)
+    if isinstance(obj, np.floating) and not math.isfinite(float(obj)):
         return None
     return obj

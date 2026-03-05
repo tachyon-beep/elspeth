@@ -26,9 +26,16 @@ from elspeth.plugins.infrastructure.pooling.reorder_buffer import ReorderBuffer
 from elspeth.plugins.infrastructure.pooling.throttle import AIMDThrottle
 
 
-@dataclass
+@dataclass(frozen=True, slots=True)
 class RowContext:
     """Context for processing a single row in the pool.
+
+    Frozen: row contexts cross thread boundaries — immutability prevents
+    data races between the dispatch thread and worker threads.
+
+    Note: ``row`` stays as ``dict[str, Any]`` (not MappingProxyType) because
+    it is Tier 2 pipeline data that flows into PipelineRow, which enforces
+    ``type(data) is dict``.
 
     Attributes:
         row: The row data to process

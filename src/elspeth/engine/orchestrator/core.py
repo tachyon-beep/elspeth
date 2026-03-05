@@ -22,7 +22,7 @@ import json
 import signal
 import threading
 import time
-from collections.abc import Callable, Iterator, Mapping
+from collections.abc import Callable, Iterator, Mapping, Sequence
 from contextlib import contextmanager, nullcontext
 from dataclasses import replace
 from datetime import UTC, datetime
@@ -426,7 +426,7 @@ class Orchestrator:
         elif coalesce_state is not None:
             pending_entry = coalesce_state.pending[-1]
             if pending_entry.branches:
-                last_branch = next(reversed(pending_entry.branches.values()))
+                last_branch = list(pending_entry.branches.values())[-1]
                 token_id = last_branch.token_id
                 node_id = str(loop_ctx.coalesce_node_map[CoalesceName(pending_entry.coalesce_name)])
         else:
@@ -754,7 +754,7 @@ class Orchestrator:
         config_gate_id_map: dict[GateName, NodeID],
         coalesce_id_map: dict[CoalesceName, NodeID],
         payload_store: PayloadStore,
-        restored_aggregation_state: dict[NodeID, AggregationCheckpointState] | None = None,
+        restored_aggregation_state: Mapping[NodeID, AggregationCheckpointState] | None = None,
         restored_coalesce_state: CoalesceCheckpointState | None = None,
     ) -> tuple[RowProcessor, dict[CoalesceName, NodeID], CoalesceExecutor | None]:
         """Build a RowProcessor with all supporting infrastructure.
@@ -1411,7 +1411,7 @@ class Orchestrator:
         payload_store: PayloadStore,
         *,
         include_source_on_start: bool = True,
-        restored_aggregation_state: dict[str, AggregationCheckpointState] | None = None,
+        restored_aggregation_state: Mapping[str, AggregationCheckpointState] | None = None,
         restored_coalesce_state: CoalesceCheckpointState | None = None,
     ) -> RunContext:
         """Initialize run context: assign node IDs, create PluginContext, call on_start, build processor.
@@ -2213,7 +2213,7 @@ class Orchestrator:
     def _run_resume_processing_loop(
         self,
         loop_ctx: LoopContext,
-        unprocessed_rows: list[tuple[str, int, dict[str, Any]]],
+        unprocessed_rows: Sequence[tuple[str, int, dict[str, Any]]],
         schema_contract: SchemaContract,
         *,
         shutdown_event: threading.Event | None = None,
@@ -2679,8 +2679,8 @@ class Orchestrator:
         run_id: str,
         config: PipelineConfig,
         graph: ExecutionGraph,
-        unprocessed_rows: list[tuple[str, int, dict[str, Any]]],
-        restored_aggregation_state: dict[str, AggregationCheckpointState],
+        unprocessed_rows: Sequence[tuple[str, int, dict[str, Any]]],
+        restored_aggregation_state: Mapping[str, AggregationCheckpointState],
         restored_coalesce_state: CoalesceCheckpointState | None,
         settings: ElspethSettings | None = None,
         *,

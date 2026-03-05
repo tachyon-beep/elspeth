@@ -13,6 +13,7 @@ from __future__ import annotations
 import math
 from typing import Annotated, Any, Literal
 
+import numpy as np
 from pydantic import ConfigDict, Field, create_model, model_validator
 
 from elspeth.contracts import PluginSchema
@@ -59,8 +60,8 @@ def _find_non_finite_value_path(value: Any, path: str = "$") -> str | None:
             if nested_path is not None:
                 return nested_path
 
-    # Catch numpy floating scalars without importing numpy.
-    if value_type.__module__ == "numpy" and "float" in value_type.__name__ and not math.isfinite(float(value)):
+    # Catch numpy floating scalars (longdouble, float16, float32, float64, etc.)
+    if isinstance(value, np.floating) and not math.isfinite(float(value)):
         return path
 
     return None

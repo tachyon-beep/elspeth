@@ -126,7 +126,7 @@ class _TransformContinue:
 class _TransformTerminal:
     """Token has reached a terminal state (completed, failed, quarantined, etc.)."""
 
-    result: RowResult | list[RowResult]
+    result: RowResult | tuple[RowResult, ...]
 
 
 type _TransformOutcome = _TransformContinue | _TransformTerminal
@@ -145,7 +145,7 @@ class _GateContinue:
 class _GateTerminal:
     """Gate has routed, forked, or diverted the token to a terminal state."""
 
-    result: RowResult | list[RowResult]
+    result: RowResult | tuple[RowResult, ...]
 
 
 type _GateOutcome = _GateContinue | _GateTerminal
@@ -225,7 +225,7 @@ class RowProcessor:
         branch_to_sink: dict[BranchName, SinkName] | None = None,
         sink_names: frozenset[str] | None = None,
         coalesce_on_success_map: dict[CoalesceName, str] | None = None,
-        restored_aggregation_state: dict[NodeID, AggregationCheckpointState] | None = None,
+        restored_aggregation_state: Mapping[NodeID, AggregationCheckpointState] | None = None,
         payload_store: PayloadStore | None = None,
         clock: Clock | None = None,
         max_workers: int | None = None,
@@ -597,7 +597,7 @@ class RowProcessor:
     def _handle_flush_error(
         self,
         fctx: _FlushContext,
-    ) -> list[RowResult]:
+    ) -> tuple[RowResult, ...]:
         """Handle failed aggregation flush for both passthrough and transform modes.
 
         T26: Both modes now have BUFFERED (non-terminal) at buffer time,
@@ -617,13 +617,13 @@ class RowProcessor:
             self._emit_token_completed(token, RowOutcome.FAILED)
             results.append(RowResult(token=token, final_data=token.row_data, outcome=RowOutcome.FAILED, error=failure))
 
-        return results
+        return tuple(results)
 
     def _route_passthrough_results(
         self,
         fctx: _FlushContext,
         result: TransformResult,
-    ) -> tuple[list[RowResult], list[WorkItem]]:
+    ) -> tuple[tuple[RowResult, ...], list[WorkItem]]:
         """Route passthrough aggregation results after successful flush.
 
         Passthrough mode: original tokens continue with enriched data.
@@ -676,13 +676,13 @@ class RowProcessor:
                     )
                 )
 
-        return results, child_items
+        return tuple(results), child_items
 
     def _route_transform_results(
         self,
         fctx: _FlushContext,
         result: TransformResult,
-    ) -> tuple[list[RowResult], list[WorkItem]]:
+    ) -> tuple[tuple[RowResult, ...], list[WorkItem]]:
         """Route transform-mode aggregation results after successful flush.
 
         Transform mode: N input rows → M output rows with new tokens via expand_token.
@@ -804,7 +804,7 @@ class RowProcessor:
                         )
                     )
 
-        return results, child_items
+        return tuple(results), child_items
 
     def handle_timeout_flush(
         self,
@@ -812,7 +812,7 @@ class RowProcessor:
         transform: TransformProtocol,
         ctx: PluginContext,
         trigger_type: TriggerType,
-    ) -> tuple[list[RowResult], list[WorkItem]]:
+    ) -> tuple[tuple[RowResult, ...], list[WorkItem]]:
         """Handle an aggregation flush triggered outside normal row processing.
 
         Handles TIMEOUT (between row arrivals) and END_OF_SOURCE (remaining buffers)
@@ -874,7 +874,7 @@ class RowProcessor:
         child_items: list[WorkItem],
         coalesce_node_id: NodeID | None = None,
         coalesce_name: CoalesceName | None = None,
-    ) -> tuple[RowResult | list[RowResult], list[WorkItem]]:
+    ) -> tuple[RowResult | tuple[RowResult, ...], list[WorkItem]]:
         """Process a row at an aggregation node using engine buffering.
 
         Engine buffers rows and calls transform.process(rows: list[dict])
@@ -1498,7 +1498,7 @@ class RowProcessor:
                 )
 
                 if result is not None:
-                    if isinstance(result, list):
+                    if isinstance(result, tuple):
                         results.extend(result)
                     else:
                         results.append(result)
@@ -1573,7 +1573,7 @@ class RowProcessor:
                 error=FailureInfo.from_max_retries_exceeded(e),
             )
             if sibling_results:
-                return _TransformTerminal(result=[current_result, *sibling_results])
+                return _TransformTerminal(result=(current_result, *sibling_results))
             return _TransformTerminal(result=current_result)
 
         # 2. Handle error status
@@ -1690,7 +1690,7 @@ class RowProcessor:
                 outcome=RowOutcome.QUARANTINED,
             )
             if sibling_results:
-                return _TransformTerminal(result=[current_result, *sibling_results])
+                return _TransformTerminal(result=(current_result, *sibling_results))
             return _TransformTerminal(result=current_result)
 
         # Routed to error sink
@@ -1708,7 +1708,7 @@ class RowProcessor:
             sink_name=error_sink,
         )
         if sibling_results:
-            return _TransformTerminal(result=[current_result, *sibling_results])
+            return _TransformTerminal(result=(current_result, *sibling_results))
         return _TransformTerminal(result=current_result)
 
     def _handle_gate_node(
@@ -1776,7 +1776,7 @@ class RowProcessor:
                 sink_name=outcome.sink_name,
             )
             if sibling_results:
-                return _GateTerminal(result=[current_result, *sibling_results])
+                return _GateTerminal(result=(current_result, *sibling_results))
             return _GateTerminal(result=current_result)
 
         # 4. Fork to paths
@@ -1975,7 +1975,7 @@ class RowProcessor:
         coalesce_node_id: NodeID | None = None,
         coalesce_name: CoalesceName | None = None,
         on_success_sink: str | None = None,
-    ) -> tuple[RowResult | list[RowResult] | None, list[WorkItem]]:
+    ) -> tuple[RowResult | tuple[RowResult, ...] | None, list[WorkItem]]:
         """Process a single token through processing nodes starting at node_id.
 
         Args:

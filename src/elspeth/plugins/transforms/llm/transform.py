@@ -17,7 +17,7 @@ from __future__ import annotations
 
 import json
 import time
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Protocol, cast
 
@@ -334,7 +334,7 @@ class MultiQueryStrategy:
     successful query results.
     """
 
-    query_specs: list[QuerySpec]
+    query_specs: Sequence[QuerySpec]
     template: PromptTemplate
     system_prompt: str | None
     system_prompt_source: str | None
@@ -343,6 +343,10 @@ class MultiQueryStrategy:
     max_tokens: int | None
     response_field: str
     executor: PooledExecutor | None = None
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.query_specs, tuple):
+            object.__setattr__(self, "query_specs", tuple(self.query_specs))
 
     def execute(
         self,

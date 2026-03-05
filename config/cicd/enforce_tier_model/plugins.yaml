@@ -266,13 +266,36 @@ allow_hits:
   reason: HTTP redirect Location header - external system boundary, header may be absent
   safety: Missing Location header breaks redirect loop naturally (no redirect target)
   expires: '2026-05-02'
-- key: plugins/infrastructure/clients/llm.py:R4:AuditedLLMClient:chat_completion:fp=f87d5582ffc050a4
+- key: plugins/infrastructure/clients/llm.py:R4:AuditedLLMClient:chat_completion:fp=848628872704a991
   owner: architecture
   reason: Telemetry emission failure - must not crash main LLM call flow
   safety: Logged and continues - telemetry is non-critical to LLM processing
   expires: '2026-05-02'
-- key: plugins/infrastructure/clients/llm.py:R4:AuditedLLMClient:chat_completion:fp=74c609987bc075ef
+- key: plugins/infrastructure/clients/llm.py:R4:AuditedLLMClient:chat_completion:fp=03442499b2ac8b80
   owner: architecture
   reason: Telemetry emission failure - must not crash main LLM call flow
   safety: Logged and continues - telemetry is non-critical to LLM processing
   expires: '2026-05-02'
+- key: 'plugins/infrastructure/clients/llm.py:R5:LLMResponse:__post_init__:fp=e19c9498e321b6b9'
+  owner: architecture
+  reason: Deep-freeze conversion guard — isinstance() checks for MappingProxyType/tuple wrapping, not defensive data access
+  safety: Construction-time type conversion, crashes on unexpected types
+  expires: null
+
+- key: 'plugins/infrastructure/clients/replayer.py:R5:ReplayedCall:__post_init__:fp=faa8e0ac424c2f2d'
+  owner: architecture
+  reason: Deep-freeze conversion guard — isinstance() checks for MappingProxyType/tuple wrapping, not defensive data access
+  safety: Construction-time type conversion, crashes on unexpected types
+  expires: null
+
+- key: 'plugins/infrastructure/clients/replayer.py:R5:ReplayedCall:__post_init__:fp=a37f80284ecb327b'
+  owner: architecture
+  reason: Deep-freeze conversion guard — isinstance() checks for MappingProxyType/tuple wrapping, not defensive data access
+  safety: Construction-time type conversion, crashes on unexpected types
+  expires: null
+
+- key: 'plugins/infrastructure/schema_factory.py:R5:_find_non_finite_value_path:fp=1cf1757ce29167fd'
+  owner: architecture
+  reason: "Tier-3 boundary — isinstance(np.floating) detects numpy scalar NaN/Infinity in observed schema values"
+  safety: Returns path string for error message; caller raises ValueError with location detail
+  expires: null

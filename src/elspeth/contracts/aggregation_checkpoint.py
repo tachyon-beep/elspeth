@@ -17,7 +17,9 @@ Trust-tier notes
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import dataclass
+from types import MappingProxyType
 from typing import Any
 
 
@@ -187,7 +189,11 @@ class AggregationCheckpointState:
     """
 
     version: str
-    nodes: dict[str, AggregationNodeCheckpoint]
+    nodes: Mapping[str, AggregationNodeCheckpoint]
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.nodes, MappingProxyType):
+            object.__setattr__(self, "nodes", MappingProxyType(self.nodes))
 
     def to_dict(self) -> dict[str, Any]:
         """Serialize to flat wire-format dict.

@@ -13,7 +13,7 @@ evicting the wrong cache entry during retry races.
 from __future__ import annotations
 
 from threading import Lock
-from typing import TYPE_CHECKING, Any, Literal, Self
+from typing import TYPE_CHECKING, Any, Literal
 
 import structlog
 from pydantic import Field, model_validator
@@ -66,12 +66,15 @@ class AzureOpenAIConfig(LLMConfig):
         description="Tier 2 tracing configuration (azure_ai, langfuse, or none)",
     )
 
-    @model_validator(mode="after")
-    def _set_model_from_deployment(self) -> Self:
+    @model_validator(mode="before")
+    @classmethod
+    def _set_model_from_deployment(cls, data: Any) -> Any:
         """Set model to deployment_name if not explicitly provided."""
-        if not self.model:
-            self.model = self.deployment_name
-        return self
+        if isinstance(data, dict) and not data.get("model"):
+            deployment = data.get("deployment_name")
+            if deployment:
+                data["model"] = deployment
+        return data
 
 
 class AzureLLMProvider:

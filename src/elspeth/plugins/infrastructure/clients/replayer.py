@@ -15,22 +15,25 @@ from __future__ import annotations
 
 import json
 from collections import defaultdict
+from collections.abc import Mapping
 from dataclasses import dataclass
+from types import MappingProxyType
 from typing import TYPE_CHECKING, Any
 
 from elspeth.contracts import CallStatus, CallType
+from elspeth.contracts.freeze import deep_freeze
 from elspeth.core.canonical import stable_hash
 
 if TYPE_CHECKING:
     from elspeth.core.landscape.recorder import LandscapeRecorder
 
 
-@dataclass
+@dataclass(frozen=True, slots=True)
 class ReplayedCall:
     """A replayed call result.
 
-    Contains the response data from a previously recorded call,
-    along with metadata about the original call.
+    Frozen: replayed call results are immutable evidence of a recorded
+    response — the data must not be modified after reconstruction.
 
     Attributes:
         response_data: The recorded response payload
@@ -40,11 +43,17 @@ class ReplayedCall:
         error_data: Error details if was_error is True
     """
 
-    response_data: dict[str, Any]
+    response_data: Mapping[str, Any]
     original_latency_ms: float | None
     request_hash: str
     was_error: bool = False
-    error_data: dict[str, Any] | None = None
+    error_data: Mapping[str, Any] | None = None
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.response_data, MappingProxyType):
+            object.__setattr__(self, "response_data", deep_freeze(self.response_data))
+        if self.error_data is not None and not isinstance(self.error_data, MappingProxyType):
+            object.__setattr__(self, "error_data", deep_freeze(self.error_data))
 
 
 class ReplayMissError(Exception):

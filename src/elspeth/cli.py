@@ -859,7 +859,7 @@ def _orchestrator_context(
 
     # Unpack pre-instantiated plugins
     source: SourceProtocol = plugins.source
-    sinks: dict[str, SinkProtocol] = plugins.sinks
+    sinks: dict[str, SinkProtocol] = dict(plugins.sinks)
 
     # Build transforms list: row_plugins + aggregations (with node_id)
     transforms: list[RowPlugin] = [wired.plugin for wired in plugins.transforms]

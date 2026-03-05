@@ -173,7 +173,7 @@ class TestBatchCheckpointState:
         # Must be tuples, not lists
         for entry in restored.template_errors:
             assert isinstance(entry, tuple), f"Expected tuple, got {type(entry).__name__}: {entry}"
-        assert restored.template_errors == [(0, "Missing field: text"), (3, "Invalid template")]
+        assert restored.template_errors == ((0, "Missing field: text"), (3, "Invalid template"))
 
     def test_from_dict_template_errors_are_tuples_not_lists(self) -> None:
         """from_dict with list-of-lists (as JSON produces) must convert to tuples."""
@@ -183,7 +183,7 @@ class TestBatchCheckpointState:
 
         for entry in restored.template_errors:
             assert isinstance(entry, tuple), f"Expected tuple, got {type(entry).__name__}"
-        assert restored.template_errors == [(0, "err0"), (1, "err1")]
+        assert restored.template_errors == ((0, "err0"), (1, "err1"))
 
     def test_from_dict_template_error_wrong_length_crashes(self) -> None:
         """Template error entries must be exactly 2-element (index, message)."""

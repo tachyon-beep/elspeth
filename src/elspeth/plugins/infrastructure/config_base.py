@@ -39,7 +39,7 @@ class PluginConfig(BaseModel):
     (DataPluginConfig) require schema to be specified.
     """
 
-    model_config = {"extra": "forbid"}  # Reject unknown fields
+    model_config = {"extra": "forbid", "frozen": True}  # Reject unknown fields, immutable after construction
 
     schema_config: SchemaConfig | None = None
 

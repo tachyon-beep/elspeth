@@ -12,6 +12,7 @@ from __future__ import annotations
 import copy
 import hashlib
 from collections import Counter
+from collections.abc import Mapping, Sequence
 from types import MappingProxyType
 from typing import TYPE_CHECKING, Any
 
@@ -95,11 +96,11 @@ def build_execution_graph(
     cls: type[ExecutionGraph],
     source: SourceProtocol,
     source_settings: SourceSettings,
-    transforms: list[WiredTransform],
-    sinks: dict[str, SinkProtocol],
-    aggregations: dict[str, tuple[TransformProtocol, AggregationSettings]],
-    gates: list[GateSettings],
-    coalesce_settings: list[CoalesceSettings] | None = None,
+    transforms: Sequence[WiredTransform],
+    sinks: Mapping[str, SinkProtocol],
+    aggregations: Mapping[str, tuple[TransformProtocol, AggregationSettings]],
+    gates: Sequence[GateSettings],
+    coalesce_settings: Sequence[CoalesceSettings] | None = None,
 ) -> ExecutionGraph:
     """Build an ExecutionGraph from plugin instances.
 

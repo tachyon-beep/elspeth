@@ -4,8 +4,10 @@ from __future__ import annotations
 
 import re
 import time
+from collections.abc import Mapping
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
+from types import MappingProxyType
 from typing import TYPE_CHECKING, Any
 
 import structlog
@@ -14,6 +16,7 @@ from elspeth.contracts import CallStatus, CallType
 from elspeth.contracts.call_data import LLMCallError, LLMCallRequest, LLMCallResponse
 from elspeth.contracts.errors import AuditIntegrityError, FrameworkBugError
 from elspeth.contracts.events import ExternalCallCompleted
+from elspeth.contracts.freeze import deep_freeze
 from elspeth.contracts.token_usage import TokenUsage
 from elspeth.core.canonical import stable_hash
 from elspeth.plugins.infrastructure.clients.base import AuditedClientBase, TelemetryEmitCallback
@@ -24,16 +27,12 @@ if TYPE_CHECKING:
 logger = structlog.get_logger(__name__)
 
 
-@dataclass
+@dataclass(frozen=True, slots=True)
 class LLMResponse:
     """Response from an LLM call.
 
-    Provides structured access to LLM response data including:
-    - Generated content
-    - Model used (may differ from requested model)
-    - Token usage statistics
-    - Latency measurement
-    - Raw response for debugging
+    Frozen: LLM responses are immutable evidence — the content, model,
+    usage, and raw response must not be modified after construction.
 
     Attributes:
         content: The generated text response
@@ -47,7 +46,11 @@ class LLMResponse:
     model: str
     usage: TokenUsage = field(default_factory=TokenUsage.unknown)
     latency_ms: float = 0.0
-    raw_response: dict[str, Any] | None = None
+    raw_response: Mapping[str, Any] | None = None
+
+    def __post_init__(self) -> None:
+        if self.raw_response is not None and not isinstance(self.raw_response, MappingProxyType):
+            object.__setattr__(self, "raw_response", deep_freeze(self.raw_response))
 
     @property
     def total_tokens(self) -> int | None:

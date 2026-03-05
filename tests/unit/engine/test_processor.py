@@ -876,7 +876,7 @@ class TestAggregationFailureMatrix:
                 trigger_type=TriggerType.TIMEOUT,
             )
 
-        assert results == []
+        assert results == ()
         assert len(child_items) == 1
         assert child_items[0].current_node_id == downstream_node
 
@@ -2987,7 +2987,7 @@ class TestTerminalWorkItemInvariant:
         )
 
         assert result is not None
-        assert not isinstance(result, list)
+        assert not isinstance(result, tuple)
         assert result.outcome == RowOutcome.COMPLETED
         assert result.sink_name == "terminal_sink"
 
@@ -3081,7 +3081,7 @@ class TestGateSinkRoutingNotifiesCoalesce:
             )
 
         # Gate should produce ROUTED result
-        if isinstance(result, list):
+        if isinstance(result, tuple):
             routed = [r for r in result if r.outcome == RowOutcome.ROUTED]
             assert len(routed) == 1
             assert routed[0].sink_name == "error_sink"
@@ -3174,7 +3174,7 @@ class TestGateSinkRoutingNotifiesCoalesce:
             )
 
         # Result must be a list: ROUTED (current) + FAILED (sibling)
-        assert isinstance(result, list)
+        assert isinstance(result, tuple)
         assert len(result) == 2
 
         routed = [r for r in result if r.outcome == RowOutcome.ROUTED]
@@ -3253,7 +3253,7 @@ class TestGateSinkRoutingNotifiesCoalesce:
 
         # Should still route correctly
         assert result is not None
-        assert not isinstance(result, list)
+        assert not isinstance(result, tuple)
         assert result.outcome == RowOutcome.ROUTED
         assert result.sink_name == "error_sink"
 

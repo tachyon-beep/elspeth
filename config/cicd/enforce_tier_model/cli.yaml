@@ -13,3 +13,20 @@ per_file_rules:
   - R1
   reason: resolve_audit_passphrase reads env vars (Tier 3 boundary) - .get() returns None to signal absent passphrase
   expires: null
+
+allow_hits:
+- key: 'cli_helpers.py:R5:PluginBundle:__post_init__:fp=dc48c1a0f9aaa2e7'
+  owner: architecture
+  reason: Deep-freeze conversion guard — isinstance() checks for MappingProxyType/tuple wrapping, not defensive data access
+  safety: Construction-time type conversion, crashes on unexpected types
+  expires: null
+- key: 'cli_helpers.py:R5:PluginBundle:__post_init__:fp=e012a18074d2eaca'
+  owner: architecture
+  reason: Deep-freeze conversion guard — isinstance() checks for MappingProxyType/tuple wrapping, not defensive data access
+  safety: Construction-time type conversion, crashes on unexpected types
+  expires: null
+- key: 'cli_helpers.py:R5:PluginBundle:__post_init__:fp=3f94a9c7c1819395'
+  owner: architecture
+  reason: Deep-freeze conversion guard — isinstance() checks for MappingProxyType/tuple wrapping, not defensive data access
+  safety: Construction-time type conversion, crashes on unexpected types
+  expires: null
