@@ -6,6 +6,7 @@ import pytest
 from sqlalchemy import MetaData, Table, create_engine, select
 
 from elspeth.contracts.plugin_context import PluginContext
+from elspeth.plugins.sinks.database_sink import DatabaseSink
 from tests.fixtures.factories import make_operation_context
 
 # Strict schema config for tests - DataPluginConfig now requires schema
@@ -744,3 +745,40 @@ class TestDatabaseSinkSchemaValidation:
         )
 
         engine.dispose()
+
+
+class TestDatabaseSinkFalseSuccess:
+    """Engine/table None at INSERT time must crash, not fabricate SUCCESS.
+
+    _ensure_table() guarantees both are set. If somehow they're None at
+    INSERT time, that's a bug — the old code silently skipped the INSERT
+    but still recorded SUCCESS in the audit trail.
+    """
+
+    def test_none_engine_at_insert_raises_invariant_error(self, tmp_path: Path) -> None:
+        """If _ensure_table fails to set engine/table, assertion catches it.
+
+        This tests the defense-in-depth assertion. We mock _ensure_table to
+        be a no-op, simulating a code path where the invariant is broken.
+        Previously, the code would silently skip INSERT and record SUCCESS.
+        """
+        from unittest.mock import patch
+
+        db_path = tmp_path / "test.db"
+        sink = DatabaseSink(
+            {
+                "url": f"sqlite:///{db_path}",
+                "table": "test_table",
+                "schema": STRICT_SCHEMA,
+            }
+        )
+        ctx = make_operation_context(
+            node_id="sink-0",
+            plugin_name="database",
+            node_type="SINK",
+            operation_type="sink_write",
+        )
+
+        # Mock _ensure_table to be a no-op, leaving _engine and _table as None
+        with patch.object(sink, "_ensure_table"), pytest.raises(AssertionError, match=r"engine.*None.*invariant"):
+            sink.write([{"id": 1, "name": "should_fail"}], ctx)

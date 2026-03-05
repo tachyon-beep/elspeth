@@ -1255,9 +1255,23 @@ class AzureBatchLLMTransform(BaseTransform):
                     row_errors.append({"row_index": idx, "reason": "invalid_message_structure"})
                     continue
 
-                # Boundary validation passed - now we trust these fields
-                content = message.get("content", "")  # content can be empty string, that's valid
-                usage = TokenUsage.from_dict(body.get("usage", {}))  # usage is optional in Azure API
+                # Boundary validation passed — check content at Tier 3 boundary
+                content = message.get("content")
+                if content is None:
+                    # Null content = content filtered by provider (Tier 3 boundary)
+                    # Matches the openrouter_batch pattern
+                    output_row = row.to_dict()
+                    output_row[self._response_field] = None
+                    output_row[f"{self._response_field}_error"] = {
+                        "reason": "content_filtered",
+                        "error": "LLM returned null content (likely content-filtered by provider)",
+                    }
+                    output_rows.append(output_row)
+                    row_errors.append({"row_index": idx, "reason": "content_filtered"})
+                    continue
+
+                # Usage is optional in Azure API — from_dict handles None gracefully
+                usage = TokenUsage.from_dict(body.get("usage"))
 
                 # Field collision check already done in _submit_batch() before
                 # submitting the batch — no need to re-check here.

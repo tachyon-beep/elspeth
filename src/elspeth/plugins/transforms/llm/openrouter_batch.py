@@ -698,7 +698,7 @@ class OpenRouterBatchLLMTransform(BaseTransform):
 
         # Note: "usage" and "model" are optional in OpenAI/OpenRouter API responses
         # (e.g., streaming responses may omit usage). Tier 3 boundary: coerce to TokenUsage.
-        usage = TokenUsage.from_dict(data.get("usage") or {})
+        usage = TokenUsage.from_dict(data.get("usage"))
         response_model = data.get("model", self._model)
 
         # Record to Langfuse (per-call tracing — unlike Azure Batch, we control each call)

@@ -331,8 +331,9 @@ class DatabaseSink(BaseSink):
 
         DDL is instrumented via ctx.record_call for audit trail completeness.
         """
-        if self._engine is None:
-            return
+        assert self._engine is not None, (
+            "engine is None at DROP TABLE time — invariant violation (_ensure_engine_and_metadata_initialized must run first)"
+        )
 
         from sqlalchemy import MetaData, Table, inspect
 
@@ -469,11 +470,13 @@ class DatabaseSink(BaseSink):
 
         # Insert all rows in batch with call recording for audit trail
         # (ctx.operation_id is set by executor)
+        assert self._engine is not None and self._table is not None, (
+            "engine/table is None at INSERT time — invariant violation (_ensure_table must set both before write)"
+        )
         start_time = time.perf_counter()
         try:
-            if self._engine is not None and self._table is not None:
-                with self._engine.begin() as conn:
-                    conn.execute(insert(self._table), insert_rows)
+            with self._engine.begin() as conn:
+                conn.execute(insert(self._table), insert_rows)
             latency_ms = (time.perf_counter() - start_time) * 1000
 
             # Record successful INSERT in audit trail

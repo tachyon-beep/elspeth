@@ -1786,5 +1786,143 @@ class TestBug4_2_NonDictResponseBody:
         assert any("not a dict" in err for err in result.reason["errors"])
 
 
+class TestAzureBatchContentFabrication:
+    """Null content in batch responses must produce error, not fabricate "".
+
+    The Azure batch API returns content=null when content is filtered.
+    message.get("content", "") conflates None (filtered) with "" (empty),
+    fabricating data in the audit trail.
+    """
+
+    @pytest.fixture
+    def transform(self) -> AzureBatchLLMTransform:
+        return AzureBatchLLMTransform(
+            {
+                "deployment_name": "my-gpt4o-batch",
+                "endpoint": "https://my-resource.openai.azure.com",
+                "api_key": "azure-api-key",
+                "template": "{{ row.text }}",
+                "schema": DYNAMIC_SCHEMA,
+                "required_input_fields": [],
+            }
+        )
+
+    def test_null_content_produces_error_not_empty_string(self, transform: AzureBatchLLMTransform) -> None:
+        """content=null must be treated as content-filtered, not fabricated to ""."""
+        from datetime import UTC, datetime
+
+        ctx = _make_batch_ctx()
+        recent_timestamp = datetime.now(UTC).isoformat()
+        ctx.set_checkpoint(
+            BatchCheckpointState(
+                batch_id="batch-fab",
+                input_file_id="file-fab",
+                row_mapping={
+                    "row-0-aaa": RowMappingEntry(index=0, variables_hash="hash0"),
+                },
+                template_errors=[],
+                submitted_at=recent_timestamp,
+                row_count=1,
+                requests={
+                    "row-0-aaa": {"messages": [{"role": "user", "content": "a"}], "model": "gpt-4o-batch"},
+                },
+            )
+        )
+
+        mock_client = Mock()
+        mock_batch = Mock()
+        mock_batch.id = "batch-fab"
+        mock_batch.status = "completed"
+        mock_batch.output_file_id = "output-fab"
+        mock_batch.error_file_id = None
+        mock_client.batches.retrieve.return_value = mock_batch
+
+        # Response with content=null (content-filtered)
+        output_lines = [
+            json.dumps(
+                {
+                    "custom_id": "row-0-aaa",
+                    "response": {
+                        "body": {
+                            "choices": [{"message": {"content": None}}],
+                            "usage": {"prompt_tokens": 10, "completion_tokens": 0},
+                        }
+                    },
+                }
+            ),
+        ]
+        output_content = Mock()
+        output_content.text = "\n".join(output_lines)
+        mock_client.files.content.return_value = output_content
+
+        transform._client = mock_client
+        rows = [{"text": "test"}]
+        result = transform.process([make_pipeline_row(d) for d in rows], ctx)
+
+        assert result.status == "success"
+        assert result.rows is not None
+        assert len(result.rows) == 1
+        # Must be None (error), NOT "" (fabrication)
+        assert result.rows[0]["llm_response"] is None
+        assert result.rows[0]["llm_response_error"]["reason"] == "content_filtered"
+
+    def test_null_usage_produces_unknown_not_fabricated_empty(self, transform: AzureBatchLLMTransform) -> None:
+        """usage=null must produce TokenUsage.unknown(), not fabricated from {}."""
+        from datetime import UTC, datetime
+
+        ctx = _make_batch_ctx()
+        recent_timestamp = datetime.now(UTC).isoformat()
+        ctx.set_checkpoint(
+            BatchCheckpointState(
+                batch_id="batch-fab2",
+                input_file_id="file-fab2",
+                row_mapping={
+                    "row-0-aaa": RowMappingEntry(index=0, variables_hash="hash0"),
+                },
+                template_errors=[],
+                submitted_at=recent_timestamp,
+                row_count=1,
+                requests={
+                    "row-0-aaa": {"messages": [{"role": "user", "content": "a"}], "model": "gpt-4o-batch"},
+                },
+            )
+        )
+
+        mock_client = Mock()
+        mock_batch = Mock()
+        mock_batch.id = "batch-fab2"
+        mock_batch.status = "completed"
+        mock_batch.output_file_id = "output-fab2"
+        mock_batch.error_file_id = None
+        mock_client.batches.retrieve.return_value = mock_batch
+
+        # Response with no usage field
+        output_lines = [
+            json.dumps(
+                {
+                    "custom_id": "row-0-aaa",
+                    "response": {
+                        "body": {
+                            "choices": [{"message": {"content": "Hello"}}],
+                            # No "usage" key at all
+                        }
+                    },
+                }
+            ),
+        ]
+        output_content = Mock()
+        output_content.text = "\n".join(output_lines)
+        mock_client.files.content.return_value = output_content
+
+        transform._client = mock_client
+        rows = [{"text": "test"}]
+        result = transform.process([make_pipeline_row(d) for d in rows], ctx)
+
+        assert result.status == "success"
+        assert result.rows is not None
+        # Content should be valid
+        assert result.rows[0]["llm_response"] == "Hello"
+
+
 # RowMappingEntry tests moved to tests/unit/contracts/test_batch_checkpoint.py
 # (class is now in contracts.batch_checkpoint, not azure_batch)
