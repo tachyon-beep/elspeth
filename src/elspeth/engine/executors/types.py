@@ -1,6 +1,6 @@
 """Shared types for executor modules."""
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 
 from elspeth.contracts import GateResult, TokenInfo
 from elspeth.contracts.types import NodeID
@@ -27,7 +27,7 @@ class MissingEdgeError(Exception):
         )
 
 
-@dataclass
+@dataclass(frozen=True, slots=True)
 class GateOutcome:
     """Result of gate execution with routing information.
 
@@ -40,11 +40,12 @@ class GateOutcome:
 
     result: GateResult
     updated_token: TokenInfo
-    child_tokens: list[TokenInfo] = field(default_factory=list)
+    child_tokens: tuple[TokenInfo, ...] = ()
     sink_name: str | None = None
     next_node_id: NodeID | None = None
 
     def __post_init__(self) -> None:
+        object.__setattr__(self, "child_tokens", tuple(self.child_tokens))
         if self.sink_name is not None and self.next_node_id is not None:
             raise ValueError(
                 f"GateOutcome invariant violation: sink_name={self.sink_name!r} and "

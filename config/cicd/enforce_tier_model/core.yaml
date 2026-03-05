@@ -249,11 +249,11 @@ allow_hits:
   reason: Options payload shape check at config boundary before extracting nested required_input_fields
   safety: Non-dict options are treated as no declared requirements and never silently coerced
   expires: '2026-03-10'
-- key: core/retention/purge.py:R6:PurgeManager:purge_payloads:fp=d590f88ecdeef5cf
+- key: core/retention/purge.py:R6:PurgeManager:purge_payloads:fp=0ed3645182bf86bd
   owner: bugfix
   reason: Tier-3 boundary - PayloadStore.exists() is external I/O (filesystem/blob storage)
   safety: Exception caught, ref added to failed_refs, loop continues - explicit failure tracking
-- key: core/retention/purge.py:R6:PurgeManager:purge_payloads:fp=12dae3073b2eba37
+- key: core/retention/purge.py:R6:PurgeManager:purge_payloads:fp=d5a1f7c6ddc40c34
   owner: bugfix
   reason: Tier-3 boundary - PayloadStore.exists() is external I/O (filesystem/blob storage)
   safety: Exception caught, ref added to failed_refs, loop continues - explicit failure tracking

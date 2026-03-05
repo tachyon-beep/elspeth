@@ -27,21 +27,23 @@ if TYPE_CHECKING:
     from elspeth.core.landscape.database import LandscapeDB
 
 
-@dataclass
+@dataclass(frozen=True, slots=True)
 class PurgeResult:
-    """Result of a purge operation.
-
-    Note: bytes_freed is always 0 in the current implementation because
-    PayloadStoreProtocol.delete() does not return the size of deleted content.
-    This field is retained for future compatibility when PayloadStore provides
-    size information on deletion.
-    """
+    """Result of a purge operation."""
 
     deleted_count: int
-    bytes_freed: int
     skipped_count: int  # Refs that didn't exist (already purged/never stored)
-    failed_refs: list[str]  # Refs that existed but failed to delete
+    failed_refs: tuple[str, ...]  # Refs that existed but failed to delete
     duration_seconds: float
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "failed_refs", tuple(self.failed_refs))
+        if self.deleted_count < 0:
+            raise ValueError(f"deleted_count must be non-negative, got {self.deleted_count}")
+        if self.skipped_count < 0:
+            raise ValueError(f"skipped_count must be non-negative, got {self.skipped_count}")
+        if self.duration_seconds < 0:
+            raise ValueError(f"duration_seconds must be non-negative, got {self.duration_seconds}")
 
 
 class PurgeManager:
@@ -400,7 +402,6 @@ class PurgeManager:
         # Step 1: Delete the payloads, tracking which refs were actually deleted
         deleted_count = 0
         skipped_count = 0
-        bytes_freed = 0  # Not tracked by current PayloadStore protocol
         failed_refs: list[str] = []
         deleted_refs: list[str] = []
 
@@ -444,8 +445,7 @@ class PurgeManager:
 
         return PurgeResult(
             deleted_count=deleted_count,
-            bytes_freed=bytes_freed,
             skipped_count=skipped_count,
-            failed_refs=failed_refs,
+            failed_refs=tuple(failed_refs),
             duration_seconds=duration_seconds,
         )

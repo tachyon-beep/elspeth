@@ -137,6 +137,14 @@ class TestContentSafetyThresholdsValidation:
         with pytest.raises(pydantic.ValidationError):
             ContentSafetyThresholds(hate=2, violence=2, sexual=2)  # type: ignore[call-arg]
 
+    def test_frozen_rejects_field_reassignment(self) -> None:
+        """Property: Frozen model rejects post-construction mutation of security thresholds."""
+        import pydantic
+
+        t = ContentSafetyThresholds(hate=2, violence=2, sexual=2, self_harm=2)
+        with pytest.raises(pydantic.ValidationError):
+            t.hate = 6  # type: ignore[misc]
+
 
 # =============================================================================
 # _check_thresholds Properties

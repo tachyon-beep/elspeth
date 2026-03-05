@@ -24,6 +24,7 @@ import threading
 import time
 from collections.abc import Callable, Iterator, Mapping
 from contextlib import contextmanager, nullcontext
+from dataclasses import replace
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
 
@@ -1089,7 +1090,7 @@ class Orchestrator:
 
             # Complete run with reproducibility grade computation
             recorder.finalize_run(run.run_id, status=RunStatus.COMPLETED)
-            result.status = RunStatus.COMPLETED
+            result = replace(result, status=RunStatus.COMPLETED)
             run_completed = True
 
             # Emit telemetry AFTER Landscape finalize succeeds
@@ -1694,7 +1695,8 @@ class Orchestrator:
         # floats (NaN, Infinity) with None so downstream canonical JSON
         # and stable_hash operations succeed. The quarantine_error records
         # what was originally wrong with the data.
-        source_item.row = sanitize_for_canonical(source_item.row)
+        # SourceRow is frozen — create a new instance with sanitized row data.
+        source_item = replace(source_item, row=sanitize_for_canonical(source_item.row))
 
         # Create a token for the quarantined row using specialized method
         # (quarantine rows don't have contracts - they failed validation)
@@ -2625,7 +2627,7 @@ class Orchestrator:
             # Fix: elspeth-rapid-sg0q — previously this was after the finally block,
             # meaning RunFinished was emitted after telemetry flush (never exported).
             recorder.finalize_run(run_id, status=RunStatus.COMPLETED)
-            result.status = RunStatus.COMPLETED
+            result = replace(result, status=RunStatus.COMPLETED)
 
             # 7. Emit RunFinished telemetry
             resume_duration_ms = (time.perf_counter() - resume_start_time) * 1000

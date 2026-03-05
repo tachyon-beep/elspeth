@@ -34,7 +34,7 @@ class ContentSafetyThresholds(BaseModel):
     A threshold of 6 means only the most severe content is blocked.
     """
 
-    model_config = {"extra": "forbid"}
+    model_config = {"extra": "forbid", "frozen": True}
 
     hate: int = Field(..., ge=0, le=6, description="Hate content threshold (0-6)")
     violence: int = Field(..., ge=0, le=6, description="Violence content threshold (0-6)")

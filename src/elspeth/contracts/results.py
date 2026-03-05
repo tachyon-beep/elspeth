@@ -468,7 +468,7 @@ class ArtifactDescriptor:
         )
 
 
-@dataclass
+@dataclass(frozen=True, slots=True)
 class SourceRow:
     """Result from source loading - either valid data or quarantined invalid data.
 

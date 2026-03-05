@@ -631,7 +631,7 @@ class TestPurgePayloads:
         result = manager.purge_payloads([deleted_ref, failed_ref])
 
         assert result.deleted_count == 1
-        assert result.failed_refs == [failed_ref]
+        assert result.failed_refs == (failed_ref,)
         assert captured_refs == [deleted_ref]
 
     def test_purge_payloads_empty_input(self, db: LandscapeDB, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -645,8 +645,7 @@ class TestPurgePayloads:
         result = manager.purge_payloads([])
         assert result.deleted_count == 0
         assert result.skipped_count == 0
-        assert result.failed_refs == []
-        assert result.bytes_freed == 0
+        assert result.failed_refs == ()
         assert result.duration_seconds >= 0
 
 

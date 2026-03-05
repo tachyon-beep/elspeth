@@ -305,7 +305,6 @@ class TestPurgeResultInvariantProperties:
 
         result = PurgeResult(
             deleted_count=deleted,
-            bytes_freed=0,
             skipped_count=skipped,
             failed_refs=failed_refs,
             duration_seconds=duration,
@@ -314,7 +313,6 @@ class TestPurgeResultInvariantProperties:
         assert result.deleted_count >= 0
         assert result.skipped_count >= 0
         assert result.duration_seconds >= 0
-        assert result.bytes_freed >= 0
         assert len(result.failed_refs) >= 0
 
     @given(num_rows=row_counts)

@@ -74,7 +74,7 @@ class PipelineConfig:
     coalesce_settings: list[CoalesceSettings] = field(default_factory=list)
 
 
-@dataclass
+@dataclass(frozen=True, slots=True)
 class RunResult:
     """Result of a pipeline run."""
 
@@ -90,7 +90,10 @@ class RunResult:
     rows_coalesce_failed: int = 0  # Coalesce failures (quorum_not_met, incomplete_branches)
     rows_expanded: int = 0  # Deaggregation parent tokens
     rows_buffered: int = 0  # Passthrough mode buffered tokens
-    routed_destinations: dict[str, int] = field(default_factory=dict)  # sink_name -> count
+    routed_destinations: Mapping[str, int] = field(default_factory=lambda: MappingProxyType({}))
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "routed_destinations", MappingProxyType(dict(self.routed_destinations)))
 
 
 @dataclass(frozen=True, slots=True)

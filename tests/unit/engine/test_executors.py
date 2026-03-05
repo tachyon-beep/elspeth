@@ -244,7 +244,7 @@ class TestGateOutcome:
         result = GateResult(row={"a": 1}, action=RoutingAction.continue_())
         token = _make_token()
         outcome = GateOutcome(result=result, updated_token=token)
-        assert outcome.child_tokens == []
+        assert outcome.child_tokens == ()
         assert outcome.sink_name is None
         assert outcome.next_node_id is None
 
@@ -262,6 +262,26 @@ class TestGateOutcome:
         assert outcome.child_tokens[0].token_id == "child_1"
         assert outcome.sink_name == "error_sink"
         assert outcome.next_node_id is None
+
+    def test_frozen_rejects_field_reassignment(self) -> None:
+        """Frozen dataclass prevents post-construction mutation of fields."""
+        result = GateResult(row={"a": 1}, action=RoutingAction.continue_())
+        token = _make_token()
+        outcome = GateOutcome(result=result, updated_token=token)
+        with pytest.raises(AttributeError):
+            outcome.sink_name = "mutated"
+
+    def test_child_tokens_is_tuple(self) -> None:
+        """child_tokens is converted to tuple for deep immutability."""
+        result = GateResult(row={"a": 1}, action=RoutingAction.continue_())
+        token = _make_token()
+        child = _make_token(token_id="child_1")
+        outcome = GateOutcome(
+            result=result,
+            updated_token=token,
+            child_tokens=[child],
+        )
+        assert isinstance(outcome.child_tokens, tuple)
 
 
 # =============================================================================

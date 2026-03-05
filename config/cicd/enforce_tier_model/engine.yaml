@@ -119,53 +119,53 @@ allow_hits:
   reason: Protocol dispatch - isinstance for plugin type routing in unified node traversal
   safety: isinstance for NodeType discrimination - TransformProtocol vs GateSettings
   expires: '2026-05-13'
-- key: engine/orchestrator/core.py:R5:Orchestrator:_cleanup_plugins:record_cleanup_error:fp=702f25d9ea964b83
+- key: engine/orchestrator/core.py:R5:Orchestrator:_cleanup_plugins:record_cleanup_error:fp=b02e22195b613c24
   owner: architecture
   reason: "isinstance re-raise guard \u2014 FrameworkBugError/AuditIntegrityError must not be downgraded to cleanup warnings"
   safety: System-level exceptions re-raised immediately; regular cleanup errors collected and reported
   expires: '2026-05-15'
-- key: engine/orchestrator/core.py:R4:Orchestrator:_cleanup_plugins:fp=f01e4ca5211ff49a
+- key: engine/orchestrator/core.py:R4:Orchestrator:_cleanup_plugins:fp=9186c6f137f1093b
   owner: architecture
   reason: Plugin cleanup must attempt all closures; broad catch collects errors then raises
   safety: Code reviewed - collects all cleanup errors into list, raises ExceptionGroup after all attempted
   expires: '2026-05-02'
-- key: engine/orchestrator/core.py:R4:Orchestrator:_cleanup_plugins:fp=97499e66d6bda736
+- key: engine/orchestrator/core.py:R4:Orchestrator:_cleanup_plugins:fp=f663dba7daf84786
   owner: architecture
   reason: Plugin cleanup must attempt all closures; broad catch collects errors then raises
   safety: Code reviewed - collects all cleanup errors into list, raises ExceptionGroup after all attempted
   expires: '2026-05-02'
-- key: engine/orchestrator/core.py:R4:Orchestrator:_cleanup_plugins:fp=76aa0f9535f048ac
+- key: engine/orchestrator/core.py:R4:Orchestrator:_cleanup_plugins:fp=5e1bb4fdaa48d043
   owner: architecture
   reason: Plugin cleanup must attempt all closures; broad catch collects errors then raises
   safety: Code reviewed - collects all cleanup errors into list, raises ExceptionGroup after all attempted
   expires: '2026-05-02'
-- key: engine/orchestrator/core.py:R4:Orchestrator:_cleanup_plugins:fp=91e4191ed4ef9e18
+- key: engine/orchestrator/core.py:R4:Orchestrator:_cleanup_plugins:fp=d729293d5527fba4
   owner: architecture
   reason: Plugin cleanup must attempt all closures; broad catch collects errors then raises
   safety: Code reviewed - collects all cleanup errors into list, raises ExceptionGroup after all attempted
   expires: '2026-05-02'
-- key: engine/orchestrator/core.py:R4:Orchestrator:_cleanup_plugins:fp=1cea34e715462cc3
+- key: engine/orchestrator/core.py:R4:Orchestrator:_cleanup_plugins:fp=f817538c934b7617
   owner: architecture
   reason: Plugin cleanup must attempt all closures; broad catch collects errors then raises
   safety: Code reviewed - collects all cleanup errors into list, raises ExceptionGroup after all attempted
   expires: '2026-05-02'
-- key: engine/orchestrator/core.py:R4:Orchestrator:_cleanup_plugins:fp=dd5f98cd1b096112
+- key: engine/orchestrator/core.py:R4:Orchestrator:_cleanup_plugins:fp=9f2626af431e496e
   owner: architecture
   reason: Plugin cleanup must attempt all closures; broad catch collects errors then raises
   safety: Code reviewed - collects all cleanup errors into list, raises ExceptionGroup after all attempted
   expires: '2026-05-02'
-- key: engine/orchestrator/core.py:R5:Orchestrator:_initialize_run_context:fp=9fc2aafe8e2565e3
+- key: engine/orchestrator/core.py:R5:Orchestrator:_initialize_run_context:fp=6dc9e2facf149a98
   owner: architecture
   reason: Type dispatch - RowPlugin is TransformProtocol, isinstance check filters GateSettings from transforms list to access
     is_batch_aware
   safety: Crashes on type mismatch - no silent fallback
   expires: '2026-05-13'
-- key: engine/orchestrator/core.py:R5:Orchestrator:_handle_quarantine_row:fp=372d12f2c9816680
+- key: engine/orchestrator/core.py:R5:Orchestrator:_handle_quarantine_row:fp=59e2553016f89aeb
   owner: architecture
   reason: Tier 3 boundary - quarantine path handles non-dict source rows
   safety: Crashes on type mismatch - no silent fallback
   expires: '2026-05-13'
-- key: engine/orchestrator/core.py:R6:Orchestrator:_handle_quarantine_row:fp=f162d13c2267a92b
+- key: engine/orchestrator/core.py:R6:Orchestrator:_handle_quarantine_row:fp=c551d11eaba0ef1c
   owner: bugfix
   reason: "Tier-3 boundary \u2014 quarantined row data may contain NaN/Infinity that stable_hash rejects"
   safety: Falls back to repr_hash for telemetry content_hash; audit trail uses separate hashing path
