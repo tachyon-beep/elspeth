@@ -363,8 +363,8 @@ class TestExplainGracefulDegradation:
             data=row_data,
         )
 
-        # Try to explain using run2's ID — cross-run mismatch raises ValueError
-        with pytest.raises(ValueError, match=f"Row {row.row_id} belongs to run {run1.run_id}, not {run2.run_id}"):
+        # Try to explain using run2's ID — cross-run mismatch raises AuditIntegrityError
+        with pytest.raises(AuditIntegrityError, match=f"Row {row.row_id} belongs to run {run1.run_id}, not {run2.run_id}"):
             recorder.explain_row(
                 run_id=run2.run_id,  # Wrong run!
                 row_id=row.row_id,

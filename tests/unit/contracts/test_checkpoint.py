@@ -17,6 +17,7 @@ from elspeth.contracts.coalesce_checkpoint import (
     CoalescePendingCheckpoint,
     CoalesceTokenCheckpoint,
 )
+from elspeth.contracts.errors import AuditIntegrityError
 
 
 def _checkpoint() -> Checkpoint:
@@ -203,7 +204,7 @@ def test_node_from_dict_missing_count_fire_offset_raises() -> None:
     data = _valid_node_dict()
     del data["count_fire_offset"]
 
-    with pytest.raises(ValueError, match="count_fire_offset"):
+    with pytest.raises(AuditIntegrityError, match="count_fire_offset"):
         AggregationNodeCheckpoint.from_dict("node-001", data)
 
 
@@ -212,16 +213,16 @@ def test_node_from_dict_missing_condition_fire_offset_raises() -> None:
     data = _valid_node_dict()
     del data["condition_fire_offset"]
 
-    with pytest.raises(ValueError, match="condition_fire_offset"):
+    with pytest.raises(AuditIntegrityError, match="condition_fire_offset"):
         AggregationNodeCheckpoint.from_dict("node-001", data)
 
 
 def test_node_from_dict_missing_elapsed_age_raises_with_context() -> None:
-    """Missing elapsed_age_seconds should raise ValueError with node_id, not bare KeyError."""
+    """Missing elapsed_age_seconds should raise AuditIntegrityError with node_id context."""
     data = _valid_node_dict()
     del data["elapsed_age_seconds"]
 
-    with pytest.raises(ValueError, match="node-001"):
+    with pytest.raises(AuditIntegrityError, match="node-001"):
         AggregationNodeCheckpoint.from_dict("node-001", data)
 
 
@@ -232,7 +233,7 @@ def test_node_from_dict_multiple_missing_fields_reports_all() -> None:
     del data["count_fire_offset"]
     del data["condition_fire_offset"]
 
-    with pytest.raises(ValueError, match="missing required fields") as exc_info:
+    with pytest.raises(AuditIntegrityError, match="missing required fields") as exc_info:
         AggregationNodeCheckpoint.from_dict("node-001", data)
 
     msg = str(exc_info.value)

@@ -163,12 +163,12 @@ class TestGetSourceSchema:
 
     def test_raises_for_unknown_run(self) -> None:
         _db, recorder = _setup()
-        with pytest.raises(ValueError, match="Run nonexistent not found"):
+        with pytest.raises(AuditIntegrityError, match="Run nonexistent not found"):
             recorder.get_source_schema("nonexistent")
 
     def test_raises_for_missing_schema(self) -> None:
         _db, recorder = _setup()
-        with pytest.raises(ValueError, match="no source schema stored"):
+        with pytest.raises(AuditIntegrityError, match="no source schema stored"):
             recorder.get_source_schema("run-1")
 
 
@@ -189,7 +189,7 @@ class TestSourceFieldResolution:
 
     def test_raises_for_unknown_run(self) -> None:
         _db, recorder = _setup()
-        with pytest.raises(ValueError, match="not found"):
+        with pytest.raises(AuditIntegrityError, match="not found"):
             recorder.get_source_field_resolution("nonexistent")
 
 

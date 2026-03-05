@@ -8,6 +8,7 @@ from enum import Enum
 
 import pytest
 
+from elspeth.contracts.errors import AuditIntegrityError
 from elspeth.core.landscape.formatters import (
     CSVFormatter,
     JSONFormatter,
@@ -53,23 +54,23 @@ class TestSerializeDatetime:
 
     def test_rejects_nan(self) -> None:
         """NaN values are rejected per CLAUDE.md audit integrity requirements."""
-        with pytest.raises(ValueError, match="NaN"):
+        with pytest.raises(AuditIntegrityError, match="NaN"):
             serialize_datetime(float("nan"))
 
     def test_rejects_infinity(self) -> None:
         """Infinity values are rejected per CLAUDE.md audit integrity requirements."""
-        with pytest.raises(ValueError, match="Infinity"):
+        with pytest.raises(AuditIntegrityError, match="Infinity"):
             serialize_datetime(float("inf"))
 
-        with pytest.raises(ValueError, match="Infinity"):
+        with pytest.raises(AuditIntegrityError, match="Infinity"):
             serialize_datetime(float("-inf"))
 
     def test_rejects_nan_in_nested_structure(self) -> None:
         """NaN in nested structures is also rejected."""
-        with pytest.raises(ValueError, match="NaN"):
+        with pytest.raises(AuditIntegrityError, match="NaN"):
             serialize_datetime({"nested": {"value": float("nan")}})
 
-        with pytest.raises(ValueError, match="NaN"):
+        with pytest.raises(AuditIntegrityError, match="NaN"):
             serialize_datetime([1, 2, float("nan")])
 
 
@@ -152,9 +153,36 @@ class TestDataclassToDict:
         assert result == {"items": [{"id": 1}, {"id": 2}]}
 
     def test_handles_none(self) -> None:
-        """None returns empty dict."""
+        """None must return None — not {} — to preserve absence semantics.
+
+        Returning {} fabricates 'present but empty' from 'absent', which is
+        data fabrication per the Data Manifesto.
+        """
         result = dataclass_to_dict(None)
-        assert result == {}
+        assert result is None
+
+    def test_optional_nested_dataclass_preserves_none(self) -> None:
+        """Optional dataclass fields that are None must stay None in output.
+
+        Regression test: previously, the recursive call for a None-valued
+        dataclass field would return {}, making 'outcome: None' appear as
+        'outcome: {}' in the audit trail.
+        """
+
+        @dataclass
+        class Inner:
+            value: int
+
+        @dataclass
+        class Outer:
+            name: str
+            inner: Inner | None
+
+        obj = Outer(name="test", inner=None)
+        result = dataclass_to_dict(obj)
+
+        assert result == {"name": "test", "inner": None}
+        assert result["inner"] is None  # Explicitly: not {}
 
     def test_handles_plain_dict(self) -> None:
         """Plain dict passes through (not a dataclass)."""
@@ -282,7 +310,7 @@ class TestCSVFormatter:
             "scores": [0.9, 0.8, math.nan],
         }
 
-        with pytest.raises(ValueError, match="NaN"):
+        with pytest.raises(AuditIntegrityError, match="NaN"):
             formatter.flatten(record)
 
     def test_csv_formatter_rejects_infinity_in_list(self) -> None:
@@ -295,7 +323,7 @@ class TestCSVFormatter:
             "values": [1.0, 2.0, math.inf],
         }
 
-        with pytest.raises(ValueError, match="Infinity"):
+        with pytest.raises(AuditIntegrityError, match="Infinity"):
             formatter.flatten(record)
 
     def test_csv_formatter_rejects_nested_nan_in_list(self) -> None:
@@ -308,7 +336,7 @@ class TestCSVFormatter:
             "events": [{"score": math.nan}],
         }
 
-        with pytest.raises(ValueError, match="NaN"):
+        with pytest.raises(AuditIntegrityError, match="NaN"):
             formatter.flatten(record)
 
     def test_csv_formatter_handles_valid_list_with_floats(self) -> None:
@@ -338,14 +366,14 @@ class TestCSVFormatter:
         """CSV formatter must reject scalar NaN values for audit integrity."""
         formatter = CSVFormatter()
 
-        with pytest.raises(ValueError, match="NaN"):
+        with pytest.raises(AuditIntegrityError, match="NaN"):
             formatter.flatten({"latency_ms": float("nan")})
 
     def test_csv_formatter_rejects_scalar_infinity(self) -> None:
         """CSV formatter must reject scalar Infinity values for audit integrity."""
         formatter = CSVFormatter()
 
-        with pytest.raises(ValueError, match="Infinity"):
+        with pytest.raises(AuditIntegrityError, match="Infinity"):
             formatter.flatten({"latency_ms": float("inf")})
 
 
@@ -393,14 +421,14 @@ class TestJSONFormatter:
         """JSON formatter must reject NaN values for audit integrity."""
         formatter = JSONFormatter()
 
-        with pytest.raises(ValueError, match="NaN"):
+        with pytest.raises(AuditIntegrityError, match="NaN"):
             formatter.format({"latency_ms": float("nan")})
 
     def test_json_formatter_rejects_infinity(self) -> None:
         """JSON formatter must reject Infinity values for audit integrity."""
         formatter = JSONFormatter()
 
-        with pytest.raises(ValueError, match="Infinity"):
+        with pytest.raises(AuditIntegrityError, match="Infinity"):
             formatter.format({"latency_ms": float("inf")})
 
     def test_json_formatter_rejects_unknown_object_types(self) -> None:

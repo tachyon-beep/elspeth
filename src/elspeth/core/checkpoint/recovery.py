@@ -18,6 +18,7 @@ from sqlalchemy.engine import Row
 from elspeth.contracts import Checkpoint, PayloadStore, PluginSchema, ResumeCheck, ResumePoint, RowOutcome, RunStatus, SchemaContract
 from elspeth.contracts.aggregation_checkpoint import AggregationCheckpointState
 from elspeth.contracts.coalesce_checkpoint import CoalesceCheckpointState
+from elspeth.contracts.errors import AuditIntegrityError
 from elspeth.core.checkpoint.compatibility import CheckpointCompatibilityValidator
 from elspeth.core.checkpoint.manager import CheckpointCorruptionError, CheckpointManager, IncompatibleCheckpointError
 from elspeth.core.checkpoint.serialization import checkpoint_loads
@@ -239,12 +240,12 @@ class RecoveryManager:
 
         for row_id in row_ids:
             if row_id not in row_metadata:
-                raise ValueError(f"Row {row_id} not found in database")
+                raise AuditIntegrityError(f"Row {row_id} not found in database — audit data corruption (Tier 1 violation)")
 
             row_index, source_data_ref = row_metadata[row_id]
 
             if source_data_ref is None:
-                raise ValueError(f"Row {row_id} has no source_data_ref - cannot resume without payload")
+                raise AuditIntegrityError(f"Row {row_id} has no source_data_ref — cannot resume without payload (Tier 1 violation)")
 
             # Retrieve from payload store
             try:
@@ -504,9 +505,9 @@ class RecoveryManager:
 
         try:
             contract = recorder.get_run_contract(run_id)
-        except ValueError as e:
-            # get_run_contract raises ValueError when hash verification fails
-            # Convert to CheckpointCorruptionError for checkpoint-specific context
+        except AuditIntegrityError as e:
+            # get_run_contract raises AuditIntegrityError for hash verification failures
+            # and run-not-found. Convert to CheckpointCorruptionError for checkpoint-specific context.
             raise CheckpointCorruptionError(
                 f"Contract integrity verification failed for run '{run_id}': {e}. "
                 f"Resume aborted - audit trail may be corrupted or tampered with."

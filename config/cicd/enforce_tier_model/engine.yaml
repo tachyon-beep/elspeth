@@ -170,7 +170,7 @@ allow_hits:
   reason: "Tier-3 boundary \u2014 quarantined row data may contain NaN/Infinity that stable_hash rejects"
   safety: Falls back to repr_hash for telemetry content_hash; audit trail uses separate hashing path
   expires: '2026-05-12'
-- key: engine/orchestrator/export.py:R1:_json_schema_to_python_type:fp=ec2f01d3a60d729a
+- key: engine/orchestrator/export.py:R1:_json_schema_to_python_type:fp=de64806bdb037416
   owner: bugfix
   reason: Framework boundary - Pydantic JSON schema anyOf entries may be $ref (no "type" key) or typed (has "type" key); .get()
     filters null vs non-null items

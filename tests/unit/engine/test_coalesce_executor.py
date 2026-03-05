@@ -204,7 +204,7 @@ class TestAcceptBasics:
     def test_unregistered_coalesce_raises(self):
         executor, *_ = _make_executor()
         token = _make_token(branch_name="a")
-        with pytest.raises(ValueError, match="not registered"):
+        with pytest.raises(OrchestrationInvariantError, match="not registered"):
             executor.accept(token, "nonexistent")
 
     def test_token_without_branch_raises(self):
@@ -216,14 +216,14 @@ class TestAcceptBasics:
             row_data=make_row({"amount": 1}),
             branch_name=None,
         )
-        with pytest.raises(ValueError, match="no branch_name"):
+        with pytest.raises(OrchestrationInvariantError, match="no branch_name"):
             executor.accept(token, "merge")
 
     def test_unexpected_branch_raises(self):
         executor, *_ = _make_executor()
         executor.register_coalesce(_settings(branches=["a", "b"]), "node_1")
         token = _make_token(branch_name="c")
-        with pytest.raises(ValueError, match="not in expected branches"):
+        with pytest.raises(OrchestrationInvariantError, match="not in expected branches"):
             executor.accept(token, "merge")
 
     def test_duplicate_arrival_raises(self):
@@ -232,7 +232,7 @@ class TestAcceptBasics:
         t1 = _make_token(branch_name="a", token_id="tok_1")
         t2 = _make_token(branch_name="a", token_id="tok_2")
         executor.accept(t1, "merge")
-        with pytest.raises(ValueError, match="Duplicate arrival"):
+        with pytest.raises(OrchestrationInvariantError, match="Duplicate arrival"):
             executor.accept(t2, "merge")
 
     def test_first_token_held(self):
@@ -763,7 +763,7 @@ class TestCheckTimeouts:
 
     def test_unregistered_coalesce_raises(self):
         executor, *_ = _make_executor()
-        with pytest.raises(ValueError, match="not registered"):
+        with pytest.raises(OrchestrationInvariantError, match="not registered"):
             executor.check_timeouts("ghost")
 
     def test_exact_timeout_boundary_triggers(self):
@@ -881,13 +881,13 @@ class TestFlushPending:
 class TestNotifyBranchLost:
     def test_unregistered_coalesce_raises(self):
         executor, *_ = _make_executor()
-        with pytest.raises(ValueError, match="not registered"):
+        with pytest.raises(OrchestrationInvariantError, match="not registered"):
             executor.notify_branch_lost("ghost", "row_1", "a", "reason")
 
     def test_unknown_branch_raises(self):
         executor, *_ = _make_executor()
         executor.register_coalesce(_settings(branches=["a", "b"]), "node_1")
-        with pytest.raises(ValueError, match="not in expected branches"):
+        with pytest.raises(OrchestrationInvariantError, match="not in expected branches"):
             executor.notify_branch_lost("merge", "row_1", "c", "reason")
 
     def test_require_all_any_loss_fails(self):
@@ -964,7 +964,7 @@ class TestNotifyBranchLost:
         executor, *_ = _make_executor()
         executor.register_coalesce(_settings(), "node_1")
         executor.accept(_make_token(branch_name="a", token_id="t1"), "merge")
-        with pytest.raises(ValueError, match="already arrived"):
+        with pytest.raises(OrchestrationInvariantError, match="already arrived"):
             executor.notify_branch_lost("merge", "row_1", "a", "error_routed")
 
     def test_branch_lost_before_any_arrivals(self):
@@ -1074,7 +1074,7 @@ class TestContractHandling:
         bad_row.to_dict.return_value = {"amount": 2}
         t2 = TokenInfo(row_id="row_1", token_id="t2", row_data=bad_row, branch_name="b")
         executor.accept(t1, "merge")
-        with pytest.raises(ValueError, match="has no contract"):
+        with pytest.raises(OrchestrationInvariantError, match="has no contract"):
             executor.accept(t2, "merge")
 
     def test_union_contracts_merged(self):

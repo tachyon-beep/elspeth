@@ -116,7 +116,7 @@ class TestResumeGuardrails:
         orchestrator = Orchestrator(landscape_db)
         config, graph = _build_pipeline()
 
-        with pytest.raises(ValueError, match="payload_store is required for resume"):
+        with pytest.raises(OrchestrationInvariantError, match="payload_store is required for resume"):
             orchestrator.resume(
                 resume_point=_make_resume_point("run-missing-payload-store"),
                 config=config,
@@ -130,7 +130,7 @@ class TestResumeGuardrails:
         orchestrator = Orchestrator(resume_test_env["db"])
         config, graph = _build_pipeline()
 
-        with pytest.raises(ValueError, match="CheckpointManager is required for resume"):
+        with pytest.raises(OrchestrationInvariantError, match="CheckpointManager is required for resume"):
             orchestrator.resume(
                 resume_point=_make_resume_point(run_id),
                 config=config,

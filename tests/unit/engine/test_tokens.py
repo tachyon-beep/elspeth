@@ -6,6 +6,7 @@ from typing import Any
 import pytest
 
 from elspeth.contracts import SourceRow
+from elspeth.contracts.errors import OrchestrationInvariantError
 from elspeth.contracts.schema_contract import PipelineRow, SchemaContract
 from elspeth.contracts.types import NodeID
 from elspeth.testing import make_field
@@ -748,7 +749,7 @@ class TestTokenManagerBoundaryPaths:
     def test_create_initial_token_requires_contract(self) -> None:
         manager, _recorder, run_id, source_node_id = _make_manager_context()
 
-        with pytest.raises(ValueError, match="must have contract"):
+        with pytest.raises(OrchestrationInvariantError, match="must have contract"):
             manager.create_initial_token(
                 run_id=run_id,
                 source_node_id=source_node_id,
@@ -759,7 +760,7 @@ class TestTokenManagerBoundaryPaths:
     def test_create_quarantine_token_rejects_non_quarantined_source_row(self) -> None:
         manager, _recorder, run_id, source_node_id = _make_manager_context()
 
-        with pytest.raises(ValueError, match="requires a quarantined"):
+        with pytest.raises(OrchestrationInvariantError, match="requires a quarantined"):
             manager.create_quarantine_token(
                 run_id=run_id,
                 source_node_id=source_node_id,
@@ -839,7 +840,7 @@ class TestTokenManagerBoundaryPaths:
         parents_before = recorder.get_all_token_parents_for_run(run_id)
         outcome_before = recorder.get_token_outcome(parent.token_id)
 
-        with pytest.raises(ValueError, match="must be locked"):
+        with pytest.raises(OrchestrationInvariantError, match="must be locked"):
             manager.expand_token(
                 parent_token=parent,
                 expanded_rows=[{"value": 1}],

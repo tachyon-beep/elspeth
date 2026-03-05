@@ -137,7 +137,7 @@ class CoalesceMetadata:
             policy=policy,
             expected_branches=tuple(expected_branches),
             branches_arrived=tuple(branches_arrived),
-            branches_lost=MappingProxyType(branches_lost) if branches_lost else None,
+            branches_lost=MappingProxyType(branches_lost) if branches_lost is not None else None,
             quorum_required=quorum_required,
             timeout_seconds=timeout_seconds,
         )

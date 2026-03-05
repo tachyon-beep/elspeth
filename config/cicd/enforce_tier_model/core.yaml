@@ -357,57 +357,57 @@ allow_hits:
   owner: feature
   reason: Tier 1 trust validation - crash on corruption from our own audit database
   safety: AuditIntegrityError raised on corrupt data - explicit failure, not silent coercion
-- key: core/landscape/formatters.py:R5:serialize_datetime:fp=2009ed59420873ed
+- key: core/landscape/formatters.py:R5:serialize_datetime:fp=fccc26ac5316baac
   owner: architecture
   reason: AST/type checking - required for safe parsing or discriminated unions
   safety: Code reviewed - legitimate pattern
   expires: '2026-05-02'
-- key: core/landscape/formatters.py:R5:serialize_datetime:fp=7ff6a3177fc77d14
+- key: core/landscape/formatters.py:R5:serialize_datetime:fp=ed00f0aae4d1e534
   owner: architecture
   reason: AST/type checking - required for safe parsing or discriminated unions
   safety: Code reviewed - legitimate pattern
   expires: '2026-05-02'
-- key: core/landscape/formatters.py:R5:serialize_datetime:fp=e4036bb1db9f96e7
+- key: core/landscape/formatters.py:R5:serialize_datetime:fp=19e973af0066c976
   owner: architecture
   reason: AST/type checking - required for safe parsing or discriminated unions
   safety: Code reviewed - legitimate pattern
   expires: '2026-05-02'
-- key: core/landscape/formatters.py:R5:serialize_datetime:fp=359df3037d848975
+- key: core/landscape/formatters.py:R5:serialize_datetime:fp=18faa236daba717d
   owner: architecture
   reason: AST/type checking - required for safe parsing or discriminated unions
   safety: Code reviewed - legitimate pattern
   expires: '2026-05-02'
-- key: core/landscape/formatters.py:R5:dataclass_to_dict:fp=bc926639a13fa516
+- key: core/landscape/formatters.py:R5:dataclass_to_dict:fp=df66698debb85823
   owner: architecture
   reason: AST/type checking - required for safe parsing or discriminated unions
   safety: Code reviewed - legitimate pattern
   expires: '2026-05-02'
-- key: core/landscape/formatters.py:R5:dataclass_to_dict:fp=aa8eeba4f4a1e2c6
+- key: core/landscape/formatters.py:R5:dataclass_to_dict:fp=848be496100ac05b
   owner: architecture
   reason: AST/type checking - required for safe parsing or discriminated unions
   safety: Code reviewed - legitimate pattern
   expires: '2026-05-02'
-- key: core/landscape/formatters.py:R5:dataclass_to_dict:fp=1aaa941ca1e3a20f
+- key: core/landscape/formatters.py:R5:dataclass_to_dict:fp=08ebbc13d087e1b4
   owner: architecture
   reason: AST/type checking - required for safe parsing or discriminated unions
   safety: Code reviewed - legitimate pattern
   expires: '2026-05-02'
-- key: core/landscape/formatters.py:R5:dataclass_to_dict:fp=070e546ed94e6336
+- key: core/landscape/formatters.py:R5:dataclass_to_dict:fp=7cfb43609b390394
   owner: architecture
   reason: AST/type checking - required for safe parsing or discriminated unions
   safety: Code reviewed - legitimate pattern
   expires: '2026-05-02'
-- key: core/landscape/formatters.py:R5:dataclass_to_dict:fp=fa57d6801c17af8c
+- key: core/landscape/formatters.py:R5:dataclass_to_dict:fp=471817a696073c90
   owner: architecture
   reason: AST/type checking - required for safe parsing or discriminated unions
   safety: Code reviewed - legitimate pattern
   expires: '2026-05-02'
-- key: core/landscape/formatters.py:R5:CSVFormatter:flatten:fp=0450162d6492a12b
+- key: core/landscape/formatters.py:R5:CSVFormatter:flatten:fp=6d09d4ddafba686c
   owner: architecture
   reason: AST/type checking - required for safe parsing or discriminated unions
   safety: Code reviewed - legitimate pattern
   expires: '2026-05-02'
-- key: core/landscape/formatters.py:R5:CSVFormatter:flatten:fp=f5d538f0e0d35d4a
+- key: core/landscape/formatters.py:R5:CSVFormatter:flatten:fp=e07953dc5cba41f2
   owner: architecture
   reason: AST/type checking - required for safe parsing or discriminated unions
   safety: Code reviewed - legitimate pattern

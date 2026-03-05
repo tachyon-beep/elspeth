@@ -631,7 +631,7 @@ class RowProcessor:
         downstream processing or COMPLETED outcome.
         """
         if not result.is_multi_row:
-            raise ValueError(
+            raise OrchestrationInvariantError(
                 f"Passthrough mode requires multi-row result, "
                 f"but transform '{fctx.transform.name}' returned single row. "
                 f"Use TransformResult.success_multi() for passthrough."
@@ -639,7 +639,7 @@ class RowProcessor:
         if result.rows is None:
             raise RuntimeError("Multi-row result has rows=None")
         if len(result.rows) != len(fctx.buffered_tokens):
-            raise ValueError(
+            raise OrchestrationInvariantError(
                 f"Passthrough mode requires same number of output rows "
                 f"as input rows. Transform '{fctx.transform.name}' returned "
                 f"{len(result.rows)} rows but received {len(fctx.buffered_tokens)} input rows."
@@ -864,7 +864,7 @@ class RowProcessor:
             return self._route_passthrough_results(fctx, result)
         if settings.output_mode == OutputMode.TRANSFORM:
             return self._route_transform_results(fctx, result)
-        raise ValueError(f"Unknown output_mode: {settings.output_mode}")
+        raise OrchestrationInvariantError(f"Unknown output_mode: {settings.output_mode}")
 
     def _process_batch_aggregation_node(
         self,
@@ -973,7 +973,7 @@ class RowProcessor:
                 flush_results, flush_child_items = self._route_transform_results(fctx, result)
                 child_items.extend(flush_child_items)
                 return flush_results, child_items
-            raise ValueError(f"Unknown output_mode: {output_mode}")
+            raise OrchestrationInvariantError(f"Unknown output_mode: {output_mode}")
 
         # Not flushing yet — BUFFERED already recorded above.
         # Terminal outcome is deferred to flush time for both modes:

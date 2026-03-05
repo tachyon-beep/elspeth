@@ -5,6 +5,7 @@ from unittest.mock import MagicMock, Mock
 
 import pytest
 
+from elspeth.contracts.errors import OrchestrationInvariantError
 from elspeth.contracts.schema_contract import PipelineRow, SchemaContract
 from elspeth.contracts.types import NodeID
 from elspeth.engine.processor import DAGTraversalContext
@@ -160,7 +161,7 @@ class TestRowProcessorPipelineRow:
         landscape_recorder = make_recorder(landscape_db)
         ctx = make_context(run_id="run_001", landscape=landscape_recorder)
 
-        with pytest.raises(ValueError, match="must have contract"):
+        with pytest.raises(OrchestrationInvariantError, match="must have contract"):
             processor.process_row(
                 row_index=0,
                 source_row=source_row,

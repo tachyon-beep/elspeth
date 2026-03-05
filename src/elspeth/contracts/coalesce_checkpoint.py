@@ -11,6 +11,8 @@ from dataclasses import dataclass
 from types import MappingProxyType
 from typing import Any
 
+from elspeth.contracts.errors import AuditIntegrityError
+
 
 @dataclass(frozen=True, slots=True)
 class CoalesceTokenCheckpoint:
@@ -70,7 +72,7 @@ class CoalesceTokenCheckpoint:
         }
         missing = required_fields - set(data.keys())
         if missing:
-            raise ValueError(f"Coalesce checkpoint token missing required fields: {missing}. Found: {set(data.keys())}")
+            raise AuditIntegrityError(f"Corrupted coalesce token checkpoint: missing required fields {missing}. Found: {set(data.keys())}")
         return cls(
             token_id=data["token_id"],
             row_id=data["row_id"],
@@ -131,16 +133,20 @@ class CoalescePendingCheckpoint:
         }
         missing = required_fields - set(data.keys())
         if missing:
-            raise ValueError(f"Coalesce checkpoint pending entry missing required fields: {missing}. Found: {set(data.keys())}")
+            raise AuditIntegrityError(
+                f"Corrupted coalesce pending checkpoint: missing required fields {missing}. Found: {set(data.keys())}"
+            )
 
         branches = data["branches"]
         if not isinstance(branches, dict):
-            raise ValueError(f"Coalesce checkpoint pending entry 'branches' must be a dict, got {type(branches).__name__}: {branches!r}")
+            raise AuditIntegrityError(
+                f"Corrupted coalesce pending checkpoint: 'branches' must be a dict, got {type(branches).__name__}: {branches!r}"
+            )
 
         lost_branches = data["lost_branches"]
         if not isinstance(lost_branches, dict):
-            raise ValueError(
-                f"Coalesce checkpoint pending entry 'lost_branches' must be a dict, got {type(lost_branches).__name__}: {lost_branches!r}"
+            raise AuditIntegrityError(
+                f"Corrupted coalesce pending checkpoint: 'lost_branches' must be a dict, got {type(lost_branches).__name__}: {lost_branches!r}"
             )
 
         return cls(
@@ -178,19 +184,19 @@ class CoalesceCheckpointState:
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> CoalesceCheckpointState:
         if "_version" not in data:
-            raise ValueError(f"Corrupted coalesce checkpoint: missing '_version'. Found keys: {sorted(data.keys())}.")
+            raise AuditIntegrityError(f"Corrupted coalesce checkpoint: missing '_version'. Found keys: {sorted(data.keys())}.")
         if "pending" not in data:
-            raise ValueError(f"Corrupted coalesce checkpoint: missing 'pending'. Found keys: {sorted(data.keys())}.")
+            raise AuditIntegrityError(f"Corrupted coalesce checkpoint: missing 'pending'. Found keys: {sorted(data.keys())}.")
 
         pending = data["pending"]
         if not isinstance(pending, list):
-            raise ValueError(f"Corrupted coalesce checkpoint: 'pending' must be a list, got {type(pending).__name__}.")
+            raise AuditIntegrityError(f"Corrupted coalesce checkpoint: 'pending' must be a list, got {type(pending).__name__}.")
 
-        # completed_keys is optional for backwards compatibility with
-        # checkpoints written before this field existed.
-        raw_keys = data.get("completed_keys", [])
+        if "completed_keys" not in data:
+            raise AuditIntegrityError(f"Corrupted coalesce checkpoint: missing 'completed_keys'. Found keys: {sorted(data.keys())}.")
+        raw_keys = data["completed_keys"]
         if not isinstance(raw_keys, list):
-            raise ValueError(f"Corrupted coalesce checkpoint: 'completed_keys' must be a list, got {type(raw_keys).__name__}.")
+            raise AuditIntegrityError(f"Corrupted coalesce checkpoint: 'completed_keys' must be a list, got {type(raw_keys).__name__}.")
         completed_keys = tuple(tuple(k) for k in raw_keys)
 
         return cls(

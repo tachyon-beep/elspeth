@@ -5,6 +5,7 @@ from __future__ import annotations
 import pytest
 
 from elspeth.contracts import NodeType, RunStatus
+from elspeth.contracts.errors import AuditIntegrityError
 from elspeth.contracts.schema import SchemaConfig
 
 # Dynamic schema for tests that don't care about specific fields
@@ -245,7 +246,7 @@ class TestReproducibilityGradeComputation:
 
         db = LandscapeDB.in_memory()
 
-        with pytest.raises(ValueError, match="does not exist"):
+        with pytest.raises(AuditIntegrityError, match="does not exist"):
             update_grade_after_purge(db, "nonexistent_run_id")
 
     def test_attributable_only_unchanged_after_purge(self) -> None:

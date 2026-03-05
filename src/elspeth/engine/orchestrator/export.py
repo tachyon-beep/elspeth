@@ -32,6 +32,7 @@ if TYPE_CHECKING:
     from elspeth.core.config import ElspethSettings
     from elspeth.core.landscape import LandscapeDB
 
+from elspeth.contracts.errors import AuditIntegrityError
 from elspeth.contracts.plugin_context import PluginContext
 
 
@@ -185,7 +186,8 @@ def reconstruct_schema_from_json(schema_dict: Mapping[str, object]) -> type:
         Dynamically created Pydantic model class
 
     Raises:
-        ValueError: If schema is malformed, empty, or contains unsupported types
+        AuditIntegrityError: If schema is malformed, empty, or contains unsupported types
+            (stored schema data is Tier 1 — our data from the Landscape DB)
     """
     from pydantic import ConfigDict, create_model
 
@@ -194,7 +196,7 @@ def reconstruct_schema_from_json(schema_dict: Mapping[str, object]) -> type:
     # Extract field definitions from Pydantic JSON schema
     # This is OUR data (from Landscape DB) - crash if malformed
     if "properties" not in schema_dict:
-        raise ValueError(
+        raise AuditIntegrityError(
             "Resume failed: Schema JSON has no 'properties' field. This indicates a malformed schema. Cannot reconstruct types."
         )
     properties = cast(Mapping[str, object], schema_dict["properties"])
@@ -211,7 +213,7 @@ def reconstruct_schema_from_json(schema_dict: Mapping[str, object]) -> type:
                 __config__=ConfigDict(extra="allow"),
             )
         # Empty properties WITHOUT additionalProperties=true is genuinely malformed
-        raise ValueError(
+        raise AuditIntegrityError(
             "Resume failed: Schema has zero fields defined and additionalProperties is not true. "
             "Cannot resume with empty fixed schema - this would silently discard all row data. "
             "For dynamic schemas, additionalProperties must be true."
@@ -299,7 +301,7 @@ def _json_schema_to_python_type(
         Python type for Pydantic field
 
     Raises:
-        ValueError: If field type is not supported (prevents silent degradation)
+        AuditIntegrityError: If field type is not supported (prevents silent degradation)
     """
     from datetime import date, datetime, time, timedelta
     from decimal import Decimal
@@ -337,7 +339,7 @@ def _json_schema_to_python_type(
             return inner_type | None
 
         # Unsupported anyOf pattern (e.g., Union[str, int] without null)
-        raise ValueError(
+        raise AuditIntegrityError(
             f"Resume failed: Field '{field_name}' has unsupported anyOf pattern. "
             f"Supported patterns: Decimal (number|string), nullable (T|null), nullable Decimal (number|string|null). "
             f"Schema definition: {field_info}. "
@@ -349,14 +351,14 @@ def _json_schema_to_python_type(
         ref = cast(str, field_info["$ref"])
         ref_prefix = "#/$defs/"
         if not ref.startswith(ref_prefix):
-            raise ValueError(
+            raise AuditIntegrityError(
                 f"Resume failed: Field '{field_name}' has unsupported $ref '{ref}'. Only local refs under '#/$defs/' are supported."
             )
         if schema_defs is None:
-            raise ValueError(f"Resume failed: Field '{field_name}' references '{ref}' but schema has no $defs section.")
+            raise AuditIntegrityError(f"Resume failed: Field '{field_name}' references '{ref}' but schema has no $defs section.")
         def_name = ref[len(ref_prefix) :]
         if def_name not in schema_defs:
-            raise ValueError(f"Resume failed: Field '{field_name}' references missing schema def '{def_name}'.")
+            raise AuditIntegrityError(f"Resume failed: Field '{field_name}' references missing schema def '{def_name}'.")
         return _json_schema_to_python_type(
             field_name,
             cast(Mapping[str, object], schema_defs[def_name]),
@@ -367,7 +369,7 @@ def _json_schema_to_python_type(
 
     # Get basic type - required for all non-anyOf fields
     if "type" not in field_info:
-        raise ValueError(
+        raise AuditIntegrityError(
             f"Resume failed: Field '{field_name}' has no 'type' in schema. "
             f"Schema definition: {field_info}. "
             f"Cannot determine Python type for field."
@@ -443,7 +445,7 @@ def _json_schema_to_python_type(
                 return dict.__class_getitem__((str, value_type))
             if additional is False:
                 return dict
-            raise ValueError(f"Resume failed: Field '{field_name}' has invalid additionalProperties value: {additional!r}.")
+            raise AuditIntegrityError(f"Resume failed: Field '{field_name}' has invalid additionalProperties value: {additional!r}.")
 
         # Generic dict (no specific structure)
         return dict
@@ -459,7 +461,7 @@ def _json_schema_to_python_type(
         return primitive_type_map[field_type_str]
 
     # Unknown type - CRASH instead of silent degradation
-    raise ValueError(
+    raise AuditIntegrityError(
         f"Resume failed: Field '{field_name}' has unsupported type '{field_type_str}'. "
         f"Supported types: string, integer, number, boolean, date-time, date, time, "
         f"duration, uuid, Decimal, array, object. "

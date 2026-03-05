@@ -19,7 +19,7 @@ from elspeth.contracts.coalesce_checkpoint import (
 )
 from elspeth.contracts.coalesce_metadata import ArrivalOrderEntry, CoalesceMetadata
 from elspeth.contracts.enums import NodeStateStatus, RowOutcome
-from elspeth.contracts.errors import CoalesceFailureReason, OrchestrationInvariantError
+from elspeth.contracts.errors import AuditIntegrityError, CoalesceFailureReason, OrchestrationInvariantError
 from elspeth.contracts.schema_contract import FieldContract, PipelineRow, SchemaContract
 from elspeth.contracts.types import NodeID, StepResolver
 from elspeth.core.config import CoalesceSettings
@@ -239,7 +239,9 @@ class CoalesceExecutor:
                 found_version=state.version,
                 expected_version=COALESCE_CHECKPOINT_VERSION,
             )
-            raise ValueError(f"Incompatible coalesce checkpoint version: {state.version!r}. Expected: {COALESCE_CHECKPOINT_VERSION!r}.")
+            raise AuditIntegrityError(
+                f"Incompatible coalesce checkpoint version: {state.version!r}. Expected: {COALESCE_CHECKPOINT_VERSION!r}."
+            )
 
         now = self._clock.monotonic()
         self._pending.clear()
@@ -251,7 +253,7 @@ class CoalesceExecutor:
 
         for pending_entry in state.pending:
             if pending_entry.coalesce_name not in self._settings:
-                raise ValueError(
+                raise AuditIntegrityError(
                     f"Checkpoint references unknown coalesce '{pending_entry.coalesce_name}'. "
                     f"Configured coalesces: {sorted(self._settings)}"
                 )
@@ -329,13 +331,14 @@ class CoalesceExecutor:
             CoalesceOutcome indicating whether token was held or merged
 
         Raises:
-            ValueError: If coalesce_name not registered or token has no branch_name
+            OrchestrationInvariantError: If coalesce_name not registered, token has no
+                branch_name, or branch is not in the expected set
         """
         if coalesce_name not in self._settings:
-            raise ValueError(f"Coalesce '{coalesce_name}' not registered")
+            raise OrchestrationInvariantError(f"Coalesce '{coalesce_name}' not registered")
 
         if token.branch_name is None:
-            raise ValueError(f"Token {token.token_id} has no branch_name - only forked tokens can be coalesced")
+            raise OrchestrationInvariantError(f"Token {token.token_id} has no branch_name - only forked tokens can be coalesced")
 
         settings = self._settings[coalesce_name]
         node_id = self._node_ids[coalesce_name]
@@ -343,7 +346,7 @@ class CoalesceExecutor:
 
         # Validate branch is expected
         if token.branch_name not in settings.branches:
-            raise ValueError(
+            raise OrchestrationInvariantError(
                 f"Token branch '{token.branch_name}' not in expected branches for coalesce '{coalesce_name}': {settings.branches}"
             )
 
@@ -408,7 +411,7 @@ class CoalesceExecutor:
         # Per "Plugin Ownership" principle: bugs in our code should crash, not hide
         if token.branch_name in pending.branches:
             existing = pending.branches[token.branch_name]
-            raise ValueError(
+            raise OrchestrationInvariantError(
                 f"Duplicate arrival for branch '{token.branch_name}' at coalesce '{coalesce_name}'. "
                 f"Existing token: {existing.token.token_id}, new token: {token.token_id}. "
                 f"This indicates a bug in fork, retry, or checkpoint/resume logic."
@@ -563,7 +566,7 @@ class CoalesceExecutor:
         # ─────────────────────────────────────────────────────────────────────
         for branch, entry in pending.branches.items():
             if entry.token.row_data.contract is None:
-                raise ValueError(
+                raise OrchestrationInvariantError(
                     f"Token {entry.token.token_id} on branch '{branch}' has no contract. "
                     f"Cannot coalesce without contracts on all parents. "
                     f"This indicates a bug in fork or transform execution."
@@ -865,7 +868,7 @@ class CoalesceExecutor:
             List of CoalesceOutcomes for any merges triggered by timeout
         """
         if coalesce_name not in self._settings:
-            raise ValueError(f"Coalesce '{coalesce_name}' not registered")
+            raise OrchestrationInvariantError(f"Coalesce '{coalesce_name}' not registered")
 
         settings = self._settings[coalesce_name]
         node_id = self._node_ids[coalesce_name]
@@ -1090,7 +1093,7 @@ class CoalesceExecutor:
             CoalesceOutcome if merge/failure triggered, None if still waiting.
         """
         if coalesce_name not in self._settings:
-            raise ValueError(f"Coalesce '{coalesce_name}' not registered")
+            raise OrchestrationInvariantError(f"Coalesce '{coalesce_name}' not registered")
 
         key = (coalesce_name, row_id)
 
@@ -1104,7 +1107,9 @@ class CoalesceExecutor:
 
         # Validate branch is expected
         if lost_branch not in settings.branches:
-            raise ValueError(f"Lost branch '{lost_branch}' not in expected branches for coalesce '{coalesce_name}': {settings.branches}")
+            raise OrchestrationInvariantError(
+                f"Lost branch '{lost_branch}' not in expected branches for coalesce '{coalesce_name}': {settings.branches}"
+            )
 
         # No pending entry yet — branch lost before ANY branch arrived.
         # Create a minimal pending entry with the loss recorded.
@@ -1120,7 +1125,7 @@ class CoalesceExecutor:
 
         # Validate branch hasn't already arrived (would be a processor bug)
         if lost_branch in pending.branches:
-            raise ValueError(
+            raise OrchestrationInvariantError(
                 f"Branch '{lost_branch}' already arrived at coalesce '{coalesce_name}' "
                 f"but was reported as lost. This indicates a bug in the processor — "
                 f"a token cannot both arrive and be error-routed."
@@ -1128,7 +1133,7 @@ class CoalesceExecutor:
 
         # Validate branch hasn't already been marked lost (would be a processor bug)
         if lost_branch in pending.lost_branches:
-            raise ValueError(
+            raise OrchestrationInvariantError(
                 f"Branch '{lost_branch}' already marked lost at coalesce '{coalesce_name}'. "
                 f"Duplicate loss notification indicates a processor bug."
             )

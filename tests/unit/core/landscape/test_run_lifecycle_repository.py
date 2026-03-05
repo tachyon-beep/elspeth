@@ -128,13 +128,13 @@ class TestGetSourceSchema:
 
     def test_run_not_found_raises(self) -> None:
         _, repo = _make_repo()
-        with pytest.raises(ValueError, match="not found"):
+        with pytest.raises(AuditIntegrityError, match="not found"):
             repo.get_source_schema("nonexistent-run")
 
     def test_null_schema_raises(self) -> None:
         _, repo = _make_repo()
         # Run created without source_schema_json → column is NULL
-        with pytest.raises(ValueError, match="no source schema stored"):
+        with pytest.raises(AuditIntegrityError, match="no source schema stored"):
             repo.get_source_schema("run-1")
 
     @pytest.mark.skip(reason="SQLite type affinity coerces int→str in TEXT columns; branch unreachable with SQLite backend")
@@ -171,7 +171,7 @@ class TestGetSourceFieldResolution:
 
     def test_run_not_found_raises(self) -> None:
         _, repo = _make_repo()
-        with pytest.raises(ValueError, match="not found"):
+        with pytest.raises(AuditIntegrityError, match="not found"):
             repo.get_source_field_resolution("nonexistent-run")
 
     def test_corrupt_non_dict_json_raises(self) -> None:
@@ -249,9 +249,9 @@ class TestGetRunContract:
         assert repo.get_run_contract("run-1") is None
 
     def test_nonexistent_run_raises(self) -> None:
-        """get_run_contract raises ValueError when run_id not found."""
+        """get_run_contract raises AuditIntegrityError when run_id not found."""
         _, repo = _make_repo()
-        with pytest.raises(ValueError, match="not found"):
+        with pytest.raises(AuditIntegrityError, match="not found"):
             repo.get_run_contract("nonexistent")
 
     def test_roundtrip_with_contract(self) -> None:
@@ -500,14 +500,14 @@ class TestUpdateRunContract:
         assert result.mode == "OBSERVED"
 
     def test_update_nonexistent_run_raises(self) -> None:
-        """Atomic guard: update_run_contract on missing run raises ValueError."""
+        """Atomic guard: update_run_contract on missing run raises AuditIntegrityError."""
         _, repo = _make_repo()
         contract = SchemaContract(
             mode="FIXED",
             fields=(FieldContract(normalized_name="x", original_name="x", python_type=str, required=True, source="declared"),),
             locked=True,
         )
-        with pytest.raises(ValueError, match="not found"):
+        with pytest.raises(AuditIntegrityError, match="not found"):
             repo.update_run_contract("ghost-run", contract)
 
     def test_overwrite_existing_contract_raises(self) -> None:
@@ -588,7 +588,7 @@ class TestUpdateRunStatus:
 
     def test_nonexistent_run_raises(self) -> None:
         _, repo = _make_repo()
-        with pytest.raises(ValueError, match="not found"):
+        with pytest.raises(AuditIntegrityError, match="not found"):
             repo.update_run_status("ghost-run", RunStatus.RUNNING)
 
     def test_completed_to_running_rejected(self) -> None:

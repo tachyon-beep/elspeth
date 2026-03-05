@@ -502,8 +502,8 @@ class QueryRepository:
             RowLineage with hash and optionally source data, or None if row not found
 
         Raises:
-            ValueError: If row exists but belongs to a different run
-            AuditIntegrityError: If payload data is corrupt, fails integrity check,
+            AuditIntegrityError: If row exists but belongs to a different run,
+                payload data is corrupt, fails integrity check,
                 or cannot be retrieved due to infrastructure failure
         """
         row = self.get_row(row_id)
@@ -513,7 +513,7 @@ class QueryRepository:
         # Validate row belongs to the specified run — cross-run mismatch is a
         # caller bug or data corruption, not a normal "not found" case
         if row.run_id != run_id:
-            raise ValueError(f"Row {row_id} belongs to run {row.run_id}, not {run_id}")
+            raise AuditIntegrityError(f"Row {row_id} belongs to run {row.run_id}, not {run_id}")
 
         # Try to load payload
         source_data: dict[str, Any] | None = None

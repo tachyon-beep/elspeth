@@ -839,7 +839,7 @@ class TestAggregationFailureMatrix:
             patch.object(processor._aggregation_executor, "execute_flush", side_effect=execute_flush_side_effect),
             patch.object(processor._recorder, "record_token_outcome"),
             patch.object(processor, "_emit_transform_completed"),
-            pytest.raises(ValueError, match="same number of output rows"),
+            pytest.raises(OrchestrationInvariantError, match="same number of output rows"),
         ):
             processor.process_row(
                 row_index=0,

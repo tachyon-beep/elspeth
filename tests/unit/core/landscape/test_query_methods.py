@@ -934,7 +934,7 @@ class TestExplainRow:
         _, recorder = _setup()
         recorder.create_row("run-1", "source-0", 0, {"x": 1}, row_id="row-1")
 
-        with pytest.raises(ValueError, match="Row row-1 belongs to run run-1, not wrong-run"):
+        with pytest.raises(AuditIntegrityError, match="Row row-1 belongs to run run-1, not wrong-run"):
             recorder.explain_row("wrong-run", "row-1")
 
     def test_payload_available_false_when_no_payload_store(self):
@@ -1561,7 +1561,7 @@ class TestExplainRowErrorHandling:
         _db, repo, recorder = _make_repo(payload_store=mock_store)
         recorder.create_row("run-1", "source-0", 0, {"x": 1}, row_id="row-1")
 
-        with pytest.raises(ValueError, match="Row row-1 belongs to run run-1, not wrong-run"):
+        with pytest.raises(AuditIntegrityError, match="Row row-1 belongs to run run-1, not wrong-run"):
             repo.explain_row("wrong-run", "row-1")
 
     def test_none_for_unknown_row(self):

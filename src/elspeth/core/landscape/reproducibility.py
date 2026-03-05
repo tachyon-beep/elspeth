@@ -18,6 +18,7 @@ from typing import TYPE_CHECKING
 from sqlalchemy import select
 
 from elspeth.contracts import Determinism
+from elspeth.contracts.errors import AuditIntegrityError
 from elspeth.core.landscape.schema import nodes_table, runs_table
 
 if TYPE_CHECKING:
@@ -53,14 +54,14 @@ def compute_grade(db: "LandscapeDB", run_id: str) -> ReproducibilityGrade:
         ReproducibilityGrade enum value
 
     Raises:
-        ValueError: If any node has invalid determinism enum value (audit corruption)
+        AuditIntegrityError: If run does not exist or any node has invalid determinism value.
     """
     # Verify run exists before computing grade — a nonexistent run_id
     # must not return FULL_REPRODUCIBLE (which is what "no nodes" implies).
     with db.connection() as conn:
         run_check = conn.execute(select(runs_table.c.run_id).where(runs_table.c.run_id == run_id))
         if run_check.fetchone() is None:
-            raise ValueError(f"Cannot compute reproducibility grade: run '{run_id}' does not exist")
+            raise AuditIntegrityError(f"Cannot compute reproducibility grade: run '{run_id}' does not exist")
 
     # Tier-1 audit data validation: Fetch ALL distinct determinism values
     # and validate each is a valid Determinism enum member.
@@ -74,12 +75,12 @@ def compute_grade(db: "LandscapeDB", run_id: str) -> ReproducibilityGrade:
     # Validate all determinism values are valid enum members
     for det_value in determinism_values:
         if det_value is None:
-            raise ValueError(f"NULL determinism value in nodes table for run {run_id} - audit data corruption")
+            raise AuditIntegrityError(f"NULL determinism value in nodes table for run {run_id} — audit data corruption")
         try:
             Determinism(det_value)
         except ValueError as exc:
-            raise ValueError(
-                f"Invalid determinism value '{det_value}' in nodes table for run {run_id} - "
+            raise AuditIntegrityError(
+                f"Invalid determinism value '{det_value}' in nodes table for run {run_id} — "
                 f"expected one of {[d.value for d in Determinism]}"
             ) from exc
 
@@ -121,19 +122,19 @@ def update_grade_after_purge(db: "LandscapeDB", run_id: str) -> None:
         row = result.fetchone()
 
         if row is None:
-            raise ValueError(f"Cannot update reproducibility grade after purge: run '{run_id}' does not exist")
+            raise AuditIntegrityError(f"Cannot update reproducibility grade after purge: run '{run_id}' does not exist")
 
         current_grade = row[0]
 
         # Per Data Manifesto: "Bad data in the audit trail = crash immediately"
         if current_grade is None:
-            raise ValueError(f"NULL reproducibility_grade for run {run_id} - audit data corruption")
+            raise AuditIntegrityError(f"NULL reproducibility_grade for run {run_id} — audit data corruption")
 
         try:
             ReproducibilityGrade(current_grade)
         except ValueError as exc:
-            raise ValueError(
-                f"Invalid reproducibility_grade '{current_grade}' for run {run_id} - "
+            raise AuditIntegrityError(
+                f"Invalid reproducibility_grade '{current_grade}' for run {run_id} — "
                 f"expected one of {[g.value for g in ReproducibilityGrade]}"
             ) from exc
 

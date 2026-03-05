@@ -12,6 +12,7 @@ from elspeth.contracts.coalesce_checkpoint import (
     CoalescePendingCheckpoint,
     CoalesceTokenCheckpoint,
 )
+from elspeth.contracts.errors import AuditIntegrityError
 
 
 def _valid_token_kwargs() -> dict:
@@ -136,8 +137,8 @@ class TestCoalesceTokenCheckpointFromDict:
     """from_dict validation for CoalesceTokenCheckpoint."""
 
     def test_rejects_missing_fields(self) -> None:
-        """from_dict raises on missing required fields."""
-        with pytest.raises(ValueError, match="missing required fields"):
+        """from_dict raises AuditIntegrityError on missing required fields."""
+        with pytest.raises(AuditIntegrityError, match="missing required fields"):
             CoalesceTokenCheckpoint.from_dict({"token_id": "tok-1"})
 
     def test_roundtrip(self) -> None:
@@ -151,8 +152,8 @@ class TestCoalescePendingCheckpointFromDict:
     """from_dict validation for CoalescePendingCheckpoint."""
 
     def test_rejects_missing_fields(self) -> None:
-        """from_dict raises on missing required fields."""
-        with pytest.raises(ValueError, match="missing required fields"):
+        """from_dict raises AuditIntegrityError on missing required fields."""
+        with pytest.raises(AuditIntegrityError, match="missing required fields"):
             CoalescePendingCheckpoint.from_dict({"coalesce_name": "merge_1"})
 
     def test_roundtrip(self) -> None:

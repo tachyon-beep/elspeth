@@ -5,6 +5,7 @@ from unittest.mock import MagicMock, Mock
 
 import pytest
 
+from elspeth.contracts.errors import OrchestrationInvariantError
 from elspeth.contracts.identity import TokenInfo
 from elspeth.contracts.schema_contract import PipelineRow, SchemaContract
 from elspeth.contracts.types import NodeID
@@ -84,7 +85,7 @@ class TestTokenManagerCreateInitialToken:
         # make_source_row auto-creates a contract when contract=None
         source_row = SourceRow.valid({"amount": 100}, contract=None)
 
-        with pytest.raises(ValueError, match="must have contract"):
+        with pytest.raises(OrchestrationInvariantError, match="must have contract"):
             manager.create_initial_token(
                 run_id="run_001",
                 source_node_id="source_001",

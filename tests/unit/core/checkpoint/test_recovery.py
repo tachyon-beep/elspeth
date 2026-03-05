@@ -24,6 +24,7 @@ from elspeth.contracts.aggregation_checkpoint import (
     AggregationTokenCheckpoint,
 )
 from elspeth.contracts.contract_records import ContractAuditRecord
+from elspeth.contracts.errors import AuditIntegrityError
 from elspeth.contracts.schema_contract import FieldContract, SchemaContract
 from elspeth.core.checkpoint import CheckpointCorruptionError, CheckpointManager, RecoveryManager
 from elspeth.core.checkpoint.manager import IncompatibleCheckpointError
@@ -530,7 +531,7 @@ def test_get_unprocessed_row_data_errors_when_row_missing_from_metadata(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setattr(recovery_manager, "get_unprocessed_rows", lambda _run_id: ["row-missing"])
-    with pytest.raises(ValueError, match="Row row-missing not found in database"):
+    with pytest.raises(AuditIntegrityError, match="Row row-missing not found in database"):
         recovery_manager.get_unprocessed_row_data("run", payload_store, source_schema_class=_SimpleSchema)
 
 
@@ -546,7 +547,7 @@ def test_get_unprocessed_row_data_errors_on_missing_source_data_ref(
         _insert_row(conn, "run-meta", "row-1", row_index=1, source_data_ref=None)
 
     monkeypatch.setattr(recovery_manager, "get_unprocessed_rows", lambda _run_id: ["row-1"])
-    with pytest.raises(ValueError, match="has no source_data_ref"):
+    with pytest.raises(AuditIntegrityError, match="has no source_data_ref"):
         recovery_manager.get_unprocessed_row_data("run-meta", payload_store, source_schema_class=_SimpleSchema)
 
 

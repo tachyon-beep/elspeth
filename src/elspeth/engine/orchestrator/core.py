@@ -688,7 +688,7 @@ class Orchestrator:
                 # Already has node_id (e.g., aggregation transform) - skip
                 continue
             if seq not in transform_id_map:
-                raise ValueError(
+                raise OrchestrationInvariantError(
                     f"Transform at sequence {seq} not found in graph. Graph has mappings for sequences: {list(transform_id_map.keys())}"
                 )
             transform.node_id = transform_id_map[seq]
@@ -1051,12 +1051,12 @@ class Orchestrator:
                 Skips signal handler installation when provided.
 
         Raises:
-            ValueError: If graph or payload_store is not provided
+            OrchestrationInvariantError: If graph or payload_store is not provided
         """
         if graph is None:
-            raise ValueError("ExecutionGraph is required. Build with ExecutionGraph.from_plugin_instances()")
+            raise OrchestrationInvariantError("ExecutionGraph is required. Build with ExecutionGraph.from_plugin_instances()")
         if payload_store is None:
-            raise ValueError("PayloadStore is required for audit compliance.")
+            raise OrchestrationInvariantError("PayloadStore is required for audit compliance.")
 
         # Schema validation now happens in ExecutionGraph.validate() during graph construction
         self._reset_checkpoint_sequence()
@@ -2495,7 +2495,9 @@ class Orchestrator:
         from elspeth.core.checkpoint import RecoveryManager
 
         if self._checkpoint_manager is None:
-            raise ValueError("CheckpointManager is required for resume - Orchestrator must be initialized with checkpoint_manager")
+            raise OrchestrationInvariantError(
+                "CheckpointManager is required for resume - Orchestrator must be initialized with checkpoint_manager"
+            )
         recovery = RecoveryManager(self._db, self._checkpoint_manager)
 
         # TYPE FIDELITY: Retrieve source schema from audit trail for type restoration
@@ -2568,7 +2570,7 @@ class Orchestrator:
             ValueError: If payload_store is not provided
         """
         if payload_store is None:
-            raise ValueError("payload_store is required for resume - row data must be retrieved from stored payloads")
+            raise OrchestrationInvariantError("payload_store is required for resume - row data must be retrieved from stored payloads")
 
         self._rebase_checkpoint_sequence(resume_point.sequence_number)
         state = self._reconstruct_resume_state(resume_point, payload_store)

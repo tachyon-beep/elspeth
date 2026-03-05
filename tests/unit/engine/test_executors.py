@@ -70,7 +70,13 @@ from elspeth.contracts.enums import (
     RowOutcome,
     TriggerType,
 )
-from elspeth.contracts.errors import ContractMergeError, OrchestrationInvariantError, PluginContractViolation, TransformErrorReason
+from elspeth.contracts.errors import (
+    AuditIntegrityError,
+    ContractMergeError,
+    OrchestrationInvariantError,
+    PluginContractViolation,
+    TransformErrorReason,
+)
 from elspeth.contracts.results import ArtifactDescriptor, GateResult
 from elspeth.contracts.routing import RouteDestination, RoutingAction
 from elspeth.contracts.schema_contract import PipelineRow, SchemaContract
@@ -2870,7 +2876,7 @@ class TestAggregationCheckpointVersion:
         # Construct typed DTO with wrong version — restore_from_checkpoint checks value
         old_checkpoint = AggregationCheckpointState(version="2.1", nodes={})
 
-        with pytest.raises(ValueError, match="Incompatible checkpoint version"):
+        with pytest.raises(AuditIntegrityError, match="Incompatible checkpoint version"):
             executor.restore_from_checkpoint(old_checkpoint)
 
     def test_current_version_accepted(self) -> None:
@@ -2887,7 +2893,7 @@ class TestAggregationCheckpointVersion:
         """Checkpoint without _version key is rejected as corrupt by from_dict()."""
         # Validation now happens in AggregationCheckpointState.from_dict(),
         # not in restore_from_checkpoint() — the DTO enforces structure.
-        with pytest.raises(ValueError, match="Corrupted checkpoint: missing '_version' key"):
+        with pytest.raises(AuditIntegrityError, match="Corrupted aggregation checkpoint: missing '_version' key"):
             AggregationCheckpointState.from_dict({"agg_1": {"tokens": []}})
 
 

@@ -695,7 +695,7 @@ class AggregationExecutor:
             state: Typed checkpoint state from ``AggregationCheckpointState.from_dict()``.
 
         Raises:
-            ValueError: If checkpoint version is incompatible or data is invalid
+            AuditIntegrityError: If checkpoint version is incompatible or data is invalid
                 (per CLAUDE.md — our data, full trust)
         """
         # Validate checkpoint version (Bug #12 fix)
@@ -709,7 +709,7 @@ class AggregationExecutor:
                 expected_version=checkpoint_version,
                 reason="incompatible_checkpoint_version",
             )
-            raise ValueError(
+            raise AuditIntegrityError(
                 f"Incompatible checkpoint version: {state.version!r}. "
                 f"Expected: {checkpoint_version!r}. "
                 f"Cannot resume from incompatible checkpoint format. "
@@ -730,7 +730,7 @@ class AggregationExecutor:
                 # Validate contract_version matches restored contract
                 # Per CLAUDE.md Tier 1: integrity check on our data
                 if t.contract_version != restored_contract.version_hash():
-                    raise ValueError(
+                    raise AuditIntegrityError(
                         f"Contract version mismatch for token {t.token_id}: "
                         f"expected {restored_contract.version_hash()}, got {t.contract_version}. "
                         f"Checkpoint may be corrupted."
@@ -884,11 +884,11 @@ class AggregationExecutor:
             batch_id: The batch to restore as current
 
         Raises:
-            ValueError: If batch not found
+            AuditIntegrityError: If batch not found in audit trail
         """
         batch = self._recorder.get_batch(batch_id)
         if batch is None:
-            raise ValueError(f"Batch not found: {batch_id}")
+            raise AuditIntegrityError(f"Batch not found in audit trail: {batch_id}")
 
         node_id = NodeID(batch.aggregation_node_id)
         node = self._get_node(node_id, "restore_batch")

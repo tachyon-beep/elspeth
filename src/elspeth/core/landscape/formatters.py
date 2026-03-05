@@ -12,6 +12,8 @@ from datetime import datetime
 from enum import Enum
 from typing import TYPE_CHECKING, Any, Protocol
 
+from elspeth.contracts.errors import AuditIntegrityError
+
 if TYPE_CHECKING:
     from elspeth.core.landscape.lineage import LineageResult
 
@@ -29,14 +31,14 @@ def serialize_datetime(obj: Any) -> Any:
         The same structure with datetime objects replaced by ISO strings
 
     Raises:
-        ValueError: If NaN or Infinity values are encountered
+        AuditIntegrityError: If NaN or Infinity values are encountered
     """
     # Reject NaN and Infinity - audit trail must be pristine
     if isinstance(obj, float):
         if math.isnan(obj):
-            raise ValueError("NaN values are not allowed in audit data (violates audit integrity)")
+            raise AuditIntegrityError("NaN values are not allowed in audit data (violates audit integrity)")
         if math.isinf(obj):
-            raise ValueError("Infinity values are not allowed in audit data (violates audit integrity)")
+            raise AuditIntegrityError("Infinity values are not allowed in audit data (violates audit integrity)")
 
     if isinstance(obj, datetime):
         return obj.isoformat()
@@ -55,7 +57,7 @@ def dataclass_to_dict(obj: Any) -> Any:
     - Lists of dataclasses
     - Enum values (converted to .value)
     - Datetime values (converted to ISO strings)
-    - None (returns empty dict)
+    - None (returns None — preserves absence semantics)
     - Plain values (pass through)
 
     Uses stdlib is_dataclass() and isinstance(Enum) for explicit type checking
@@ -68,7 +70,7 @@ def dataclass_to_dict(obj: Any) -> Any:
         dict for dataclasses, list for lists, or the original value
     """
     if obj is None:
-        return {}
+        return None
     if isinstance(obj, list):
         return [dataclass_to_dict(item) for item in obj]
     if is_dataclass(obj) and not isinstance(obj, type):

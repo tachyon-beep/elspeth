@@ -22,6 +22,8 @@ from dataclasses import dataclass
 from types import MappingProxyType
 from typing import Any
 
+from elspeth.contracts.errors import AuditIntegrityError
+
 
 @dataclass(frozen=True, slots=True)
 class AggregationTokenCheckpoint:
@@ -68,7 +70,7 @@ class AggregationTokenCheckpoint:
             data: Token dict from checkpoint.
 
         Raises:
-            ValueError: If required keys are missing.
+            AuditIntegrityError: If required keys are missing.
         """
         required_fields = {
             "token_id",
@@ -82,7 +84,9 @@ class AggregationTokenCheckpoint:
         }
         missing = required_fields - set(data.keys())
         if missing:
-            raise ValueError(f"Checkpoint token missing required fields: {missing}. Found: {set(data.keys())}")
+            raise AuditIntegrityError(
+                f"Corrupted aggregation token checkpoint: missing required fields {missing}. Found: {set(data.keys())}"
+            )
         return cls(
             token_id=data["token_id"],
             row_id=data["row_id"],
@@ -135,7 +139,7 @@ class AggregationNodeCheckpoint:
             data: Node-level dict from checkpoint.
 
         Raises:
-            ValueError: If required keys are missing or structure is invalid.
+            AuditIntegrityError: If required keys are missing or structure is invalid.
         """
         required_fields = {
             "tokens",
@@ -147,16 +151,20 @@ class AggregationNodeCheckpoint:
         }
         missing = required_fields - set(data.keys())
         if missing:
-            raise ValueError(f"Checkpoint node '{node_id}' missing required fields: {missing}. Found: {set(data.keys())}")
+            raise AuditIntegrityError(
+                f"Corrupted aggregation node checkpoint '{node_id}': missing required fields {missing}. Found: {set(data.keys())}"
+            )
 
         tokens_data = data["tokens"]
         if not isinstance(tokens_data, list):
-            raise ValueError(f"Invalid checkpoint format for node {node_id}: 'tokens' must be a list, got {type(tokens_data).__name__}")
+            raise AuditIntegrityError(
+                f"Corrupted aggregation node checkpoint '{node_id}': 'tokens' must be a list, got {type(tokens_data).__name__}"
+            )
 
         batch_id = data["batch_id"]
         if batch_id is None:
-            raise ValueError(
-                f"Invalid checkpoint format for node {node_id}: 'batch_id' is None. Checkpoint entries with tokens must include a batch_id."
+            raise AuditIntegrityError(
+                f"Corrupted aggregation node checkpoint '{node_id}': 'batch_id' is None. Checkpoint entries with tokens must include a batch_id."
             )
 
         tokens = tuple(AggregationTokenCheckpoint.from_dict(t) for t in tokens_data)
@@ -213,10 +221,10 @@ class AggregationCheckpointState:
             data: Flat checkpoint dict with ``_version`` key and node_id keys.
 
         Raises:
-            ValueError: If ``_version`` is missing or structure is invalid.
+            AuditIntegrityError: If ``_version`` is missing or structure is invalid.
         """
         if "_version" not in data:
-            raise ValueError(f"Corrupted checkpoint: missing '_version' key. Found keys: {sorted(data.keys())}.")
+            raise AuditIntegrityError(f"Corrupted aggregation checkpoint: missing '_version' key. Found keys: {sorted(data.keys())}.")
         version = data["_version"]
 
         nodes: dict[str, AggregationNodeCheckpoint] = {}

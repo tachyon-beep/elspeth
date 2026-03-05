@@ -15,6 +15,7 @@ from dataclasses import dataclass, field
 from typing import Any, Literal
 
 from elspeth.contracts.errors import (
+    AuditIntegrityError,
     ContractMergeError,
     ContractViolation,
     ExtraFieldViolation,
@@ -402,7 +403,7 @@ class SchemaContract:
                 locked=data["locked"],
             )
         except KeyError as e:
-            raise KeyError(f"Corrupt SchemaContract checkpoint: missing key {e}. Top-level keys: {sorted(data.keys())}") from e
+            raise AuditIntegrityError(f"Corrupt SchemaContract checkpoint: missing key {e}. Top-level keys: {sorted(data.keys())}") from e
 
         # Verify integrity (Tier 1 audit requirement)
         # Per CLAUDE.md: "Bad data in the audit trail = crash immediately"
@@ -410,10 +411,12 @@ class SchemaContract:
         try:
             expected_hash = data["version_hash"]
         except KeyError as exc:
-            raise KeyError(f"Corrupt SchemaContract checkpoint: missing 'version_hash'. Top-level keys: {sorted(data.keys())}") from exc
+            raise AuditIntegrityError(
+                f"Corrupt SchemaContract checkpoint: missing 'version_hash'. Top-level keys: {sorted(data.keys())}"
+            ) from exc
         actual_hash = contract.version_hash()
         if actual_hash != expected_hash:
-            raise ValueError(
+            raise AuditIntegrityError(
                 f"Contract integrity violation: hash mismatch. "
                 f"Expected {expected_hash}, got {actual_hash}. "
                 f"Checkpoint may be corrupted or from different version."

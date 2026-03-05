@@ -13,6 +13,7 @@ import pytest
 
 from elspeth.cli_helpers import instantiate_plugins_from_config
 from elspeth.contracts import Determinism, NodeType, PipelineRow, RoutingMode, RunStatus, SinkName, SourceRow
+from elspeth.contracts.errors import OrchestrationInvariantError
 from elspeth.plugins.infrastructure.base import BaseTransform
 from elspeth.testing import make_pipeline_row, make_source_row
 from tests.fixtures.base_classes import _TestSchema, _TestSourceBase, as_sink, as_source, as_transform
@@ -670,5 +671,5 @@ class TestOrchestratorAcceptsGraph:
         orchestrator = Orchestrator(landscape_db)
 
         # graph=None should raise ValueError
-        with pytest.raises(ValueError, match="ExecutionGraph is required"):
+        with pytest.raises(OrchestrationInvariantError, match="ExecutionGraph is required"):
             orchestrator.run(config, graph=None, payload_store=payload_store)

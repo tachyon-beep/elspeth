@@ -220,9 +220,9 @@ class OuterData:
 class TestDataclassToDict:
     """dataclass_to_dict must recursively convert all types."""
 
-    def test_none_returns_empty_dict(self) -> None:
-        """Property: None input returns empty dict."""
-        assert dataclass_to_dict(None) == {}
+    def test_none_returns_none(self) -> None:
+        """Property: None input returns None — preserves absence semantics."""
+        assert dataclass_to_dict(None) is None
 
     @given(
         name=st.text(min_size=1, max_size=20),

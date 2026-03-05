@@ -21,6 +21,7 @@ from unittest.mock import MagicMock, Mock, patch
 
 import pytest
 
+from elspeth.contracts.errors import AuditIntegrityError
 from elspeth.core.landscape.journal import JournalRecord, LandscapeJournal
 
 # ---------------------------------------------------------------------------
@@ -153,7 +154,7 @@ class TestSerializeRecord:
     def test_nan_rejected(self) -> None:
         """NaN in journal data must be rejected — audit integrity."""
         record = cast(JournalRecord, {"timestamp": "t", "statement": "INSERT", "parameters": {"val": float("nan")}, "executemany": False})
-        with pytest.raises(ValueError, match="NaN"):
+        with pytest.raises(AuditIntegrityError, match="NaN"):
             LandscapeJournal._serialize_record(record)
 
     def test_set_type_raises(self) -> None:
