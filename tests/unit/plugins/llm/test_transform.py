@@ -232,6 +232,7 @@ class TestSingleQuerySuccess:
             content="result",
             usage=TokenUsage.known(10, 5),
             model="gpt-4o",
+            finish_reason=FinishReason.STOP,
         )
 
         row = _make_row()
@@ -332,6 +333,22 @@ class TestTruncationDetection:
         assert result.reason["reason"] == "unexpected_finish_reason"
         assert result.reason["finish_reason"] == "tool_calls"
         assert result.retryable is False
+
+    def test_missing_finish_reason_returns_retryable_error(self) -> None:
+        """Absent finish_reason (None) must not be treated as success."""
+        transform, mock_provider = _make_transform_with_mock_provider()
+        mock_provider.execute_query.return_value = LLMQueryResult(
+            content="content with no finish_reason",
+            usage=TokenUsage.known(10, 5),
+            model="gpt-4o",
+            finish_reason=None,
+        )
+
+        result = transform._process_row(_make_row(), _make_ctx())
+        assert result.status == "error"
+        assert result.reason is not None
+        assert result.reason["reason"] == "missing_finish_reason"
+        assert result.retryable is True
 
     def test_unrecognized_finish_reason_returns_error(self) -> None:
         """Unknown finish reasons must fail closed, not pass through as success."""

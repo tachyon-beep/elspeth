@@ -96,8 +96,8 @@ class TestBatchStatsHappyPath:
         assert result.row is not None
         assert result.row["category"] == "sales"
 
-    def test_empty_batch_returns_zeros(self, ctx: PluginContext) -> None:
-        """Empty batch returns zero count/sum and None mean."""
+    def test_empty_batch_returns_error(self, ctx: PluginContext) -> None:
+        """Empty batch returns error — not fabricated statistics."""
         from elspeth.plugins.transforms.batch_stats import BatchStats
 
         transform = BatchStats(
@@ -109,15 +109,13 @@ class TestBatchStatsHappyPath:
 
         result = transform.process([], ctx)
 
-        assert result.status == "success"
-        assert result.row is not None
-        assert result.row["count"] == 0
-        assert result.row["sum"] == 0
-        assert result.row["mean"] is None
-        assert result.row["batch_empty"] is True
+        assert result.status == "error"
+        assert result.reason is not None
+        assert result.reason["reason"] == "empty_batch"
+        assert not result.retryable
 
-    def test_empty_batch_without_mean_omits_mean_field(self, ctx: PluginContext) -> None:
-        """Empty batch respects compute_mean=False in output and success metadata."""
+    def test_empty_batch_without_mean_also_errors(self, ctx: PluginContext) -> None:
+        """Empty batch errors regardless of compute_mean setting."""
         from elspeth.plugins.transforms.batch_stats import BatchStats
 
         transform = BatchStats(
@@ -130,14 +128,9 @@ class TestBatchStatsHappyPath:
 
         result = transform.process([], ctx)
 
-        assert result.status == "success"
-        assert result.row is not None
-        assert result.row["count"] == 0
-        assert result.row["sum"] == 0
-        assert result.row["batch_empty"] is True
-        assert "mean" not in result.row
-        assert result.success_reason is not None
-        assert result.success_reason["fields_added"] == ["count", "sum", "batch_empty"]
+        assert result.status == "error"
+        assert result.reason is not None
+        assert result.reason["reason"] == "empty_batch"
 
     def test_non_numeric_values_raise_type_error(self, ctx: PluginContext) -> None:
         """BatchStats raises TypeError on non-numeric values (no coercion).

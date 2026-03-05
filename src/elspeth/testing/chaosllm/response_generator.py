@@ -292,23 +292,18 @@ class ResponseGenerator:
         return " ".join(words) + "."
 
     def _generate_template_response(self, request: dict[str, Any]) -> str:
-        """Generate response from Jinja2 template."""
+        """Generate response from Jinja2 template.
+
+        Config-sourced templates are system data — a broken template is a
+        config bug that should crash. Let TemplateError propagate.
+        """
         template_str = self._config.template.body
-        try:
-            template = self._jinja_env.from_string(template_str)
-            return template.render(
-                request=request,
-                messages=request.get("messages", []),
-                model=request.get("model", "unknown"),
-            )
-        except jinja2.TemplateError as exc:
-            logger.warning(
-                "template_rendering_failed",
-                error=str(exc),
-                error_type=type(exc).__name__,
-                template_length=len(template_str),
-            )
-            return f"Template rendering error: {type(exc).__name__}"
+        template = self._jinja_env.from_string(template_str)
+        return template.render(
+            request=request,
+            messages=request.get("messages", []),
+            model=request.get("model"),
+        )
 
     def _generate_echo_response(self, request: dict[str, Any]) -> str:
         """Echo parts of the input prompt."""
@@ -395,21 +390,14 @@ class ResponseGenerator:
             if template_override is not None:
                 if len(template_override) > max_len:
                     raise ValueError(f"Template override exceeds max length ({len(template_override)} > {max_len})")
-                try:
-                    template = self._jinja_env.from_string(template_override)
-                    content = template.render(
-                        request=request,
-                        messages=request.get("messages", []),
-                        model=request.get("model", "unknown"),
-                    )
-                except jinja2.TemplateError as exc:
-                    logger.warning(
-                        "template_override_rendering_failed",
-                        error=str(exc),
-                        error_type=type(exc).__name__,
-                        template_length=len(template_override),
-                    )
-                    content = f"Template rendering error: {type(exc).__name__}"
+                # Header-override template is Tier 3 (external data from request header).
+                # Let TemplateError propagate — the test client sent a bad template.
+                template = self._jinja_env.from_string(template_override)
+                content = template.render(
+                    request=request,
+                    messages=request.get("messages", []),
+                    model=request.get("model"),
+                )
             else:
                 content = self._generate_template_response(request)
         elif mode == "echo":

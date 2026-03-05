@@ -416,7 +416,10 @@ class ContentGenerator:
         elif mode == "preset":
             return self._generate_preset_html()
         else:
-            content = self._error_page("Error", f"Unknown content mode: {mode}")
+            # Config mode is Pydantic Literal-validated, so invalid config mode
+            # is impossible. This branch is only reachable via mode_override from
+            # the X-Fake-Content-Mode header (Tier 3 external data).
+            raise ValueError(f"Unknown content mode: {mode!r}")
 
         return WebResponse(
             content=content,

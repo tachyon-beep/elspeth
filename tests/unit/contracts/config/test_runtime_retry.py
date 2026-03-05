@@ -130,27 +130,47 @@ class TestRuntimeRetryFromPolicy:
         assert config.jitter == POLICY_DEFAULTS["jitter"]
         assert config.exponential_base == POLICY_DEFAULTS["exponential_base"]
 
-    def test_from_policy_clamps_invalid_values(self) -> None:
-        """from_policy() should clamp values to safe minimums."""
-        from elspeth.contracts import RetryPolicy
+    def test_from_policy_rejects_zero_max_attempts(self) -> None:
+        """from_policy() should reject max_attempts=0 instead of silently clamping."""
         from elspeth.contracts.config.runtime import RuntimeRetryConfig
 
-        # Invalid values that need clamping
-        policy: RetryPolicy = {
-            "max_attempts": 0,  # Must be >= 1
-            "base_delay": 0.0,  # Must be > 0
-            "max_delay": 0.0,  # Must be > 0
-            "jitter": -1.0,  # Must be >= 0
-            "exponential_base": 0.5,  # Must be > 1
-        }
+        with pytest.raises(ValueError, match=r"max_attempts must be >= 1"):
+            RuntimeRetryConfig.from_policy({"max_attempts": 0})
 
-        config = RuntimeRetryConfig.from_policy(policy)
+    def test_from_policy_rejects_zero_base_delay(self) -> None:
+        """from_policy() should reject base_delay=0.0 instead of silently clamping."""
+        from elspeth.contracts.config.runtime import RuntimeRetryConfig
 
-        assert config.max_attempts >= 1, "max_attempts must be clamped to >= 1"
-        assert config.base_delay > 0, "base_delay must be clamped to > 0"
-        assert config.max_delay > 0, "max_delay must be clamped to > 0"
-        assert config.jitter >= 0, "jitter must be clamped to >= 0"
-        assert config.exponential_base > 1, "exponential_base must be clamped to > 1"
+        with pytest.raises(ValueError, match=r"base_delay must be >= 0\.01"):
+            RuntimeRetryConfig.from_policy({"base_delay": 0.0})
+
+    def test_from_policy_rejects_zero_max_delay(self) -> None:
+        """from_policy() should reject max_delay=0.0 instead of silently clamping."""
+        from elspeth.contracts.config.runtime import RuntimeRetryConfig
+
+        with pytest.raises(ValueError, match=r"max_delay must be >= 0\.1"):
+            RuntimeRetryConfig.from_policy({"max_delay": 0.0})
+
+    def test_from_policy_rejects_negative_jitter(self) -> None:
+        """from_policy() should reject jitter=-1.0 instead of silently clamping."""
+        from elspeth.contracts.config.runtime import RuntimeRetryConfig
+
+        with pytest.raises(ValueError, match=r"jitter must be >= 0\.0"):
+            RuntimeRetryConfig.from_policy({"jitter": -1.0})
+
+    def test_from_policy_rejects_low_exponential_base(self) -> None:
+        """from_policy() should reject exponential_base=0.5 instead of silently clamping."""
+        from elspeth.contracts.config.runtime import RuntimeRetryConfig
+
+        with pytest.raises(ValueError, match=r"exponential_base must be > 1\.0"):
+            RuntimeRetryConfig.from_policy({"exponential_base": 0.5})
+
+    def test_from_policy_rejects_exponential_base_exactly_one(self) -> None:
+        """from_policy() should reject exponential_base=1.0 — linear backoff is not exponential."""
+        from elspeth.contracts.config.runtime import RuntimeRetryConfig
+
+        with pytest.raises(ValueError, match=r"exponential_base must be > 1\.0"):
+            RuntimeRetryConfig.from_policy({"exponential_base": 1.0})
 
 
 class TestRuntimeRetryConvenienceFactories:
@@ -294,7 +314,11 @@ class TestRuntimeRetryRejectsNonFiniteFloats:
 
 
 class TestRuntimeRetryValidation:
-    """Test validation in RuntimeRetryConfig."""
+    """Test __post_init__ validation in RuntimeRetryConfig.
+
+    All fields are validated at construction time with clear error messages.
+    No silent clamping — invalid values are rejected immediately.
+    """
 
     def test_max_attempts_must_be_positive(self) -> None:
         """max_attempts < 1 should raise ValueError."""
@@ -307,4 +331,56 @@ class TestRuntimeRetryValidation:
                 max_delay=60.0,
                 jitter=1.0,
                 exponential_base=2.0,
+            )
+
+    def test_base_delay_must_be_positive(self) -> None:
+        """base_delay < 0.01 should raise ValueError."""
+        from elspeth.contracts.config.runtime import RuntimeRetryConfig
+
+        with pytest.raises(ValueError, match=r"base_delay must be >= 0\.01"):
+            RuntimeRetryConfig(
+                max_attempts=3,
+                base_delay=0.0,
+                max_delay=60.0,
+                jitter=1.0,
+                exponential_base=2.0,
+            )
+
+    def test_max_delay_must_be_positive(self) -> None:
+        """max_delay < 0.1 should raise ValueError."""
+        from elspeth.contracts.config.runtime import RuntimeRetryConfig
+
+        with pytest.raises(ValueError, match=r"max_delay must be >= 0\.1"):
+            RuntimeRetryConfig(
+                max_attempts=3,
+                base_delay=1.0,
+                max_delay=0.0,
+                jitter=1.0,
+                exponential_base=2.0,
+            )
+
+    def test_jitter_must_be_non_negative(self) -> None:
+        """jitter < 0 should raise ValueError."""
+        from elspeth.contracts.config.runtime import RuntimeRetryConfig
+
+        with pytest.raises(ValueError, match=r"jitter must be >= 0\.0"):
+            RuntimeRetryConfig(
+                max_attempts=3,
+                base_delay=1.0,
+                max_delay=60.0,
+                jitter=-0.5,
+                exponential_base=2.0,
+            )
+
+    def test_exponential_base_must_exceed_one(self) -> None:
+        """exponential_base <= 1.0 should raise ValueError."""
+        from elspeth.contracts.config.runtime import RuntimeRetryConfig
+
+        with pytest.raises(ValueError, match=r"exponential_base must be > 1\.0"):
+            RuntimeRetryConfig(
+                max_attempts=3,
+                base_delay=1.0,
+                max_delay=60.0,
+                jitter=1.0,
+                exponential_base=1.0,
             )

@@ -127,23 +127,12 @@ class BatchReplicate(BaseTransform):
             TransformResult.success_multi() with replicated rows
         """
         if not rows:
-            # Empty batch - should not happen in normal operation
-            # Return success with single empty-marker row
-            empty_data: dict[str, Any] = {"batch_empty": True}
-            empty_fields = tuple(
-                FieldContract(
-                    normalized_name=key,
-                    original_name=key,
-                    python_type=object,
-                    required=False,
-                    source="inferred",
-                )
-                for key in empty_data
-            )
-            empty_contract = SchemaContract(mode="OBSERVED", fields=empty_fields, locked=True)
-            return TransformResult.success(
-                PipelineRow(empty_data, empty_contract),
-                success_reason={"action": "processed", "metadata": {"empty_batch": True}},
+            # Empty batch is an anomaly — return error, not fabricated data.
+            # A synthetic PipelineRow({batch_empty: True}) would flow through
+            # the pipeline as real data, corrupting the audit trail.
+            return TransformResult.error(
+                {"reason": "empty_batch"},
+                retryable=False,
             )
 
         valid_rows: list[dict[str, Any]] = []

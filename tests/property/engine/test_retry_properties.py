@@ -14,14 +14,14 @@ Properties tested:
 from __future__ import annotations
 
 import pytest
-from hypothesis import assume, given, settings
+from hypothesis import given, settings
 from hypothesis import strategies as st
 
 from elspeth.contracts.config import RuntimeRetryConfig
 from elspeth.contracts.engine import RetryPolicy
 from elspeth.contracts.errors import MaxRetriesExceeded
 from elspeth.engine.retry import RetryManager
-from tests.strategies.config import valid_delays, valid_jitter, valid_max_attempts
+from tests.strategies.config import valid_base_delays, valid_jitter, valid_max_attempts, valid_max_delays
 
 
 class TestRuntimeRetryConfigValidationProperties:
@@ -29,8 +29,8 @@ class TestRuntimeRetryConfigValidationProperties:
 
     @given(
         max_attempts=valid_max_attempts,
-        base_delay=valid_delays,
-        max_delay=valid_delays,
+        base_delay=valid_base_delays,
+        max_delay=valid_max_delays,
         jitter=valid_jitter,
     )
     @settings(max_examples=300)
@@ -70,8 +70,8 @@ class TestRuntimeRetryConfigValidationProperties:
 
     @given(
         max_attempts=valid_max_attempts,
-        base_delay=valid_delays,
-        max_delay=valid_delays,
+        base_delay=valid_base_delays,
+        max_delay=valid_max_delays,
         jitter=valid_jitter,
     )
     @settings(max_examples=100)
@@ -108,39 +108,41 @@ class TestRuntimeRetryConfigFactoryProperties:
         assert config.max_attempts == 1, f"no_retry() should have max_attempts=1, got {config.max_attempts}"
 
     @given(
-        max_attempts=st.integers(min_value=-100, max_value=100),
-        base_delay=st.floats(min_value=-100.0, max_value=100.0, allow_nan=False, allow_infinity=False),
-        max_delay=st.floats(min_value=-100.0, max_value=100.0, allow_nan=False, allow_infinity=False),
-        jitter=st.floats(min_value=-100.0, max_value=100.0, allow_nan=False, allow_infinity=False),
+        max_attempts=st.integers(min_value=1, max_value=100),
+        base_delay=st.floats(min_value=0.01, max_value=100.0, allow_nan=False, allow_infinity=False),
+        max_delay=st.floats(min_value=0.1, max_value=100.0, allow_nan=False, allow_infinity=False),
+        jitter=st.floats(min_value=0.0, max_value=100.0, allow_nan=False, allow_infinity=False),
+        exponential_base=st.floats(min_value=1.01, max_value=10.0, allow_nan=False, allow_infinity=False),
     )
     @settings(max_examples=200)
-    def test_from_policy_always_produces_valid_config(
+    def test_from_policy_valid_ranges_produce_valid_config(
         self,
         max_attempts: int,
         base_delay: float,
         max_delay: float,
         jitter: float,
+        exponential_base: float,
     ) -> None:
-        """Property: from_policy() always produces valid config, even with bad input.
+        """Property: from_policy() with valid-range inputs produces valid config.
 
-        This is a trust boundary - external policy config may have invalid values.
-        The factory must coerce to valid values without crashing.
+        This is a trust boundary — values in valid ranges should pass through.
+        Out-of-range values are rejected with ValueError (no silent clamping).
         """
         policy: RetryPolicy = {
             "max_attempts": max_attempts,
             "base_delay": base_delay,
             "max_delay": max_delay,
             "jitter": jitter,
+            "exponential_base": exponential_base,
         }
 
-        # Should NOT raise, even with invalid inputs
         config = RuntimeRetryConfig.from_policy(policy)
 
-        # Result must be valid
-        assert config.max_attempts >= 1, "max_attempts must be >= 1 after coercion"
-        assert config.base_delay >= 0.01, "base_delay must be >= 0.01 after coercion"
-        assert config.max_delay >= 0.1, "max_delay must be >= 0.1 after coercion"
-        assert config.jitter >= 0.0, "jitter must be >= 0.0 after coercion"
+        assert config.max_attempts >= 1
+        assert config.base_delay >= 0.01
+        assert config.max_delay >= 0.1
+        assert config.jitter >= 0.0
+        assert config.exponential_base > 1.0
 
     def test_from_policy_none_returns_no_retry(self) -> None:
         """Property: from_policy(None) returns no-retry config."""
@@ -162,8 +164,8 @@ class TestRuntimeRetryConfigFactoryProperties:
 
     @given(
         max_attempts=valid_max_attempts,
-        base_delay=valid_delays,
-        max_delay=valid_delays,
+        base_delay=valid_base_delays,
+        max_delay=valid_max_delays,
         jitter=valid_jitter,
     )
     @settings(max_examples=100)
@@ -175,11 +177,6 @@ class TestRuntimeRetryConfigFactoryProperties:
         jitter: float,
     ) -> None:
         """Property: from_policy() preserves valid input values."""
-        # Ensure values are above coercion thresholds
-        assume(max_attempts >= 1)
-        assume(base_delay >= 0.01)
-        assume(max_delay >= 0.1)
-        assume(jitter >= 0.0)
 
         policy: RetryPolicy = {
             "max_attempts": max_attempts,
@@ -197,35 +194,36 @@ class TestRuntimeRetryConfigFactoryProperties:
         assert config.jitter == jitter
 
 
-class TestRuntimeRetryConfigCoercionProperties:
-    """Property tests for trust boundary coercion in from_policy()."""
+class TestRuntimeRetryConfigRejectionProperties:
+    """Property tests for trust boundary rejection in from_policy().
+
+    Out-of-range values are rejected with ValueError — no silent clamping.
+    This ensures the user is told about their misconfiguration at startup.
+    """
 
     @given(bad_max_attempts=st.integers(max_value=0))
     @settings(max_examples=50)
-    def test_negative_max_attempts_coerced_to_minimum(self, bad_max_attempts: int) -> None:
-        """Property: Negative/zero max_attempts coerced to 1."""
+    def test_negative_max_attempts_rejected(self, bad_max_attempts: int) -> None:
+        """Property: Negative/zero max_attempts raises ValueError."""
         policy: RetryPolicy = {"max_attempts": bad_max_attempts}
-        config = RuntimeRetryConfig.from_policy(policy)
-
-        assert config.max_attempts >= 1, f"Bad max_attempts {bad_max_attempts} should coerce to >= 1, got {config.max_attempts}"
+        with pytest.raises(ValueError, match="max_attempts must be >= 1"):
+            RuntimeRetryConfig.from_policy(policy)
 
     @given(bad_base_delay=st.floats(max_value=0.0, allow_nan=False, allow_infinity=False))
     @settings(max_examples=50)
-    def test_negative_base_delay_coerced_to_minimum(self, bad_base_delay: float) -> None:
-        """Property: Negative/zero base_delay coerced to minimum."""
+    def test_negative_base_delay_rejected(self, bad_base_delay: float) -> None:
+        """Property: Negative/zero base_delay raises ValueError."""
         policy: RetryPolicy = {"base_delay": bad_base_delay}
-        config = RuntimeRetryConfig.from_policy(policy)
-
-        assert config.base_delay >= 0.01, f"Bad base_delay {bad_base_delay} should coerce to >= 0.01, got {config.base_delay}"
+        with pytest.raises(ValueError, match=r"base_delay must be >= 0\.01"):
+            RuntimeRetryConfig.from_policy(policy)
 
     @given(bad_jitter=st.floats(max_value=-0.01, allow_nan=False, allow_infinity=False))
     @settings(max_examples=50)
-    def test_negative_jitter_coerced_to_zero(self, bad_jitter: float) -> None:
-        """Property: Negative jitter coerced to 0."""
+    def test_negative_jitter_rejected(self, bad_jitter: float) -> None:
+        """Property: Negative jitter raises ValueError."""
         policy: RetryPolicy = {"jitter": bad_jitter}
-        config = RuntimeRetryConfig.from_policy(policy)
-
-        assert config.jitter >= 0.0, f"Bad jitter {bad_jitter} should coerce to >= 0.0, got {config.jitter}"
+        with pytest.raises(ValueError, match=r"jitter must be >= 0\.0"):
+            RuntimeRetryConfig.from_policy(policy)
 
 
 # =============================================================================
@@ -247,8 +245,8 @@ class TestRetryManagerExecutionProperties:
 
         config = RuntimeRetryConfig(
             max_attempts=max_attempts,
-            base_delay=0.001,  # Minimal delay for fast tests
-            max_delay=0.01,
+            base_delay=0.01,  # Minimum valid delay for fast tests
+            max_delay=0.1,
             jitter=0.0,
             exponential_base=2.0,
         )
@@ -284,8 +282,8 @@ class TestRetryManagerExecutionProperties:
         """Property: Non-retryable error causes immediate failure (no retries)."""
         config = RuntimeRetryConfig(
             max_attempts=max_attempts,
-            base_delay=0.001,
-            max_delay=0.01,
+            base_delay=0.01,
+            max_delay=0.1,
             jitter=0.0,
             exponential_base=2.0,
         )
@@ -319,8 +317,8 @@ class TestRetryManagerExecutionProperties:
         """Property: Exactly max_attempts tries before MaxRetriesExceeded."""
         config = RuntimeRetryConfig(
             max_attempts=max_attempts,
-            base_delay=0.001,
-            max_delay=0.01,
+            base_delay=0.01,
+            max_delay=0.1,
             jitter=0.0,
             exponential_base=2.0,
         )
@@ -368,8 +366,8 @@ class TestRetryManagerExecutionProperties:
         """Property: Success on first attempt means no on_retry callbacks."""
         config = RuntimeRetryConfig(
             max_attempts=max_attempts,
-            base_delay=0.001,
-            max_delay=0.01,
+            base_delay=0.01,
+            max_delay=0.1,
             jitter=0.0,
             exponential_base=2.0,
         )
@@ -400,8 +398,8 @@ class TestRetryManagerErrorHandlingProperties:
         """Property: MaxRetriesExceeded contains the last error."""
         config = RuntimeRetryConfig(
             max_attempts=max_attempts,
-            base_delay=0.001,
-            max_delay=0.01,
+            base_delay=0.01,
+            max_delay=0.1,
             jitter=0.0,
             exponential_base=2.0,
         )
@@ -427,8 +425,8 @@ class TestRetryManagerErrorHandlingProperties:
         """Property: on_retry=None is allowed and works correctly."""
         config = RuntimeRetryConfig(
             max_attempts=3,
-            base_delay=0.001,
-            max_delay=0.01,
+            base_delay=0.01,
+            max_delay=0.1,
             jitter=0.0,
             exponential_base=2.0,
         )

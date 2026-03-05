@@ -23,7 +23,7 @@ class NodeInfo(TypedDict):
 class SourceInfo(TypedDict):
     """Information about the pipeline source."""
 
-    name: str
+    name: str | None
     node_id: str | None
 
 

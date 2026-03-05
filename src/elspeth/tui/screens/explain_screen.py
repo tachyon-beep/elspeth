@@ -175,7 +175,7 @@ class ExplainScreen:
             lineage_data: LineageData = {
                 "run_id": run_id,
                 "source": {
-                    "name": source_nodes[0].plugin_name if source_nodes else "unknown",
+                    "name": source_nodes[0].plugin_name if source_nodes else None,
                     "node_id": source_nodes[0].node_id if source_nodes else None,
                 },
                 "transforms": [{"name": n.plugin_name, "node_id": n.node_id, "node_type": n.node_type.value} for n in transform_nodes],

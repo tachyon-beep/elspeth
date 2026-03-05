@@ -335,7 +335,7 @@ def get_failure_context(db: LandscapeDB, recorder: LandscapeRecorder, run_id: st
                 f"but no matching node in nodes table for run_id={run_id!r}"
             )
             raise RuntimeError(msg)
-        plugin = e.plugin_name if e.plugin_name is not None else "unknown"
+        plugin = e.plugin_name  # None means no associated plugin node — don't fabricate "unknown"
         validation_error_list.append(
             {
                 "plugin": plugin,

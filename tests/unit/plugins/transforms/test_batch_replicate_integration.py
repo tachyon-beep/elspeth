@@ -120,7 +120,7 @@ def test_batch_replicate_contract_covers_all_output_shapes():
 
 
 def test_batch_replicate_contract_empty_output():
-    """BatchReplicate returns marker row for empty batch (not multi-row)."""
+    """BatchReplicate returns error for empty batch — not fabricated data."""
     transform = BatchReplicate(
         {
             "schema": {"mode": "observed"},
@@ -133,11 +133,10 @@ def test_batch_replicate_contract_empty_output():
     ctx = make_context()
     result = transform.process([], ctx)
 
-    # Empty batches return a marker row (single-row success), not multi-row
-    # This is correct behavior per the plugin's empty batch handling
-    assert not result.is_multi_row, "Empty batch should return marker row, not multi-row"
-    assert result.row is not None, "Should return marker row"
-    assert result.row.get("batch_empty") is True, "Marker should indicate empty batch"
+    assert result.status == "error"
+    assert result.reason is not None
+    assert result.reason["reason"] == "empty_batch"
+    assert not result.retryable
 
 
 def test_batch_replicate_all_invalid_returns_error():

@@ -91,16 +91,32 @@ def _finish_reason_error(
     unknown/unrecognized reasons get a generic rejection.  This ensures
     new provider finish reasons are never silently treated as success.
     """
-    # Allowlist: STOP and absent (None) are the only known-good completions.
-    if finish_reason is None or finish_reason == FinishReason.STOP:
+    # Allowlist: only explicit STOP is a known-good completion.
+    if finish_reason == FinishReason.STOP:
         return None
+
+    # Absent finish_reason (None) means the provider couldn't extract it —
+    # abnormal response.  We can't verify the output wasn't truncated, so
+    # fail closed rather than fabricating "success" in the audit trail.
+    if finish_reason is None:
+        reason: dict[str, Any] = {"reason": "missing_finish_reason"}
+        if query_name is not None:
+            reason["query_name"] = query_name
+        if query_index is not None:
+            reason["query_index"] = query_index
+        if content_length is not None:
+            reason["content_length"] = content_length
+        return _FinishReasonError(
+            result=TransformResult.error(cast(TransformErrorReason, reason), retryable=True),
+            error_message="finish_reason absent from provider response — cannot verify completion integrity",
+        )
 
     # Known-bad reasons with specific error messages.
     if isinstance(finish_reason, FinishReason):
         entry = _FINISH_REASON_ERRORS.get(finish_reason)
         if entry is not None:
             reason_key, error_message = entry
-            reason: dict[str, Any] = {
+            reason = {
                 "reason": reason_key,
                 "finish_reason": finish_reason.value,
             }

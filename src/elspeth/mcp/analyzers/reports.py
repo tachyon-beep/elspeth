@@ -399,14 +399,14 @@ def get_error_analysis(db: LandscapeDB, recorder: LandscapeRecorder, run_id: str
 
     validation_summary = [
         {
-            "source_plugin": row.plugin_name or "unknown",
+            "source_plugin": row.plugin_name,
             "schema_mode": row.schema_mode,
             "count": row.count,
         }
         for row in val_rows
     ]
 
-    transform_summary = [{"transform_plugin": row.plugin_name or "unknown", "count": row.count} for row in trans_rows]
+    transform_summary = [{"transform_plugin": row.plugin_name, "count": row.count} for row in trans_rows]
 
     return {
         "run_id": run_id,
@@ -416,7 +416,7 @@ def get_error_analysis(db: LandscapeDB, recorder: LandscapeRecorder, run_id: str
             "sample_data": [json.loads(r[0]) if r[0] else None for r in sample_val],
         },
         "transform_errors": {
-            "total": sum(r["count"] for r in transform_summary),  # type: ignore[misc]  # SA Row attr types
+            "total": sum(r["count"] for r in transform_summary),
             "by_transform": transform_summary,  # type: ignore[typeddict-item]
             "sample_details": [json.loads(r[0]) if r[0] else None for r in sample_trans],
         },

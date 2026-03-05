@@ -229,7 +229,7 @@ class TestRetryAuditTrail:
         transform_executor = TransformExecutor(recorder, span_factory, step_resolver)
 
         # Create retry manager with 3 attempts (enough to succeed)
-        retry_manager = RetryManager(RuntimeRetryConfig(max_attempts=3, base_delay=0.001, max_delay=60.0, jitter=0.0, exponential_base=2.0))
+        retry_manager = RetryManager(RuntimeRetryConfig(max_attempts=3, base_delay=0.01, max_delay=60.0, jitter=0.0, exponential_base=2.0))
 
         ctx = make_context(run_id=run_id, landscape=recorder)
         transform.on_start(ctx)
@@ -330,7 +330,7 @@ class TestRetryAuditTrail:
         transform_executor = TransformExecutor(recorder, span_factory, step_resolver)
 
         # Create retry manager with only 2 attempts
-        retry_manager = RetryManager(RuntimeRetryConfig(max_attempts=2, base_delay=0.001, max_delay=60.0, jitter=0.0, exponential_base=2.0))
+        retry_manager = RetryManager(RuntimeRetryConfig(max_attempts=2, base_delay=0.01, max_delay=60.0, jitter=0.0, exponential_base=2.0))
 
         ctx = make_context(run_id=run_id, landscape=recorder)
         transform.on_start(ctx)

@@ -305,7 +305,10 @@ class ChaosLLMServer:
 
         # Parse request body
         body = await request.json()
-        model = body.get("model", "gpt-4")
+        # Metrics recording uses the actual value (None if absent) — don't
+        # fabricate "gpt-4" in metrics when no model was requested.
+        # The response generator extracts model from `body` itself.
+        model_for_metrics: str | None = body.get("model")
         messages = body.get("messages", [])
 
         # Extract override headers (only if config allows)
@@ -340,7 +343,7 @@ class ChaosLLMServer:
                 timestamp_utc=timestamp_utc,
                 endpoint=endpoint,
                 deployment=deployment,
-                model=model,
+                model=model_for_metrics,
                 message_count=len(messages),
                 start_time=start_time,
             )
@@ -397,7 +400,7 @@ class ChaosLLMServer:
         timestamp_utc: str,
         endpoint: str,
         deployment: str | None,
-        model: str,
+        model: str | None,
         message_count: int,
         start_time: float,
     ) -> Response:
@@ -447,7 +450,7 @@ class ChaosLLMServer:
         timestamp_utc: str,
         endpoint: str,
         deployment: str | None,
-        model: str,
+        model: str | None,
         message_count: int,
         start_time: float,
     ) -> Response:
@@ -556,7 +559,7 @@ class ChaosLLMServer:
         timestamp_utc: str,
         endpoint: str,
         deployment: str | None,
-        model: str,
+        model: str | None,
         message_count: int,
         start_time: float,
     ) -> JSONResponse:
@@ -610,7 +613,7 @@ class ChaosLLMServer:
         timestamp_utc: str,
         endpoint: str,
         deployment: str | None,
-        model: str,
+        model: str | None,
         message_count: int,
         start_time: float,
     ) -> Response:
@@ -713,7 +716,7 @@ class ChaosLLMServer:
             endpoint=endpoint,
             outcome="success",
             deployment=deployment,
-            model=body.get("model", "gpt-4"),
+            model=body.get("model"),  # Don't fabricate "gpt-4" in metrics
             status_code=200,
             latency_ms=elapsed_ms,
             injected_delay_ms=total_delay * 1000 if total_delay > 0 else None,

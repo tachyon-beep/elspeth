@@ -309,6 +309,8 @@ TransformErrorCategory = Literal[
     "simulated_failure",
     "deliberate_failure",
     "intentional_failure",
+    # Batch processing
+    "empty_batch",
 ]
 
 

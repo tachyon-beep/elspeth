@@ -847,7 +847,7 @@ class TestLLMTransformOpenRouterIntegration:
             chaosllm_server,
             raw_body=json.dumps(
                 {
-                    "choices": [{"message": {"content": "Response"}}],
+                    "choices": [{"message": {"content": "Response"}, "finish_reason": "stop"}],
                     "model": "openai/gpt-4",
                 }
             ),

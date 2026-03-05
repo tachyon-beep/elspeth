@@ -6,6 +6,7 @@ import random
 from pathlib import Path
 from typing import Any
 
+import jinja2
 import pytest
 
 from elspeth.testing.chaosllm.config import (
@@ -498,8 +499,8 @@ class TestTemplateMode:
 
         assert response.content == "Overridden: gpt-4"
 
-    def test_template_undefined_variable_returns_error_content(self) -> None:
-        """Template with undefined variable returns error content and logs warning."""
+    def test_template_undefined_variable_raises(self) -> None:
+        """Template with undefined variable raises — config bug, not content."""
         config = ResponseConfig(
             mode="template",
             template=TemplateResponseConfig(body="{{ undefined_var }}"),
@@ -508,9 +509,8 @@ class TestTemplateMode:
 
         request = {"model": "gpt-4", "messages": []}
 
-        response = generator.generate(request)
-        assert "Template rendering error" in response.content
-        assert "UndefinedError" in response.content
+        with pytest.raises(jinja2.UndefinedError):
+            generator.generate(request)
 
 
 class TestEchoMode:

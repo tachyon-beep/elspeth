@@ -155,11 +155,13 @@ class CSVSource(BaseSource):
         except UnicodeDecodeError as e:
             # Decode failure while reading rows — Tier 3 boundary.
             # Record parse-level error and stop (remaining rows may be corrupt).
-            physical_line = getattr(f, "lineno", None) or "unknown"
+            # File-level decode errors occur before CSV parsing — no meaningful
+            # line number exists. Don't fabricate "unknown" or use dead getattr
+            # (file objects don't have lineno; csv.reader does, but it's not
+            # in scope here).
             raw_row = {
                 "file_path": str(self._path),
                 "__encoding__": self._encoding,
-                "__line_number__": physical_line,
             }
             error_msg = f"CSV decode error (encoding '{self._encoding}'): {e}"
             ctx.record_validation_error(

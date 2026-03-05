@@ -101,34 +101,11 @@ class BatchStats(BaseTransform):
             TypeError: If value_field is not numeric (upstream bug)
         """
         if not rows:
-            # Empty batch - should not happen in normal operation
-            result_data: dict[str, Any] = {"count": 0, "sum": 0}
-            fields_added = ["count", "sum"]
-            if self._compute_mean:
-                result_data["mean"] = None
-                fields_added.append("mean")
-            result_data["batch_empty"] = True
-            fields_added.append("batch_empty")
-
-            fields = tuple(
-                FieldContract(
-                    normalized_name=key,
-                    original_name=key,
-                    python_type=object,
-                    required=False,
-                    source="inferred",
-                )
-                for key in result_data
-            )
-            output_contract = SchemaContract(mode="OBSERVED", fields=fields, locked=True)
-
-            return TransformResult.success(
-                PipelineRow(result_data, output_contract),
-                success_reason={
-                    "action": "processed",
-                    "fields_added": fields_added,
-                    "metadata": {"empty_batch": True},
-                },
+            # Empty batch is an anomaly — return error, not fabricated statistics.
+            # Phantom sum=0/count=0/mean=None would flow to sinks as real data.
+            return TransformResult.error(
+                {"reason": "empty_batch"},
+                retryable=False,
             )
         # Extract numeric values - enforce type contract
         # Tier 2 pipeline data should already be validated; wrong types = upstream bug
