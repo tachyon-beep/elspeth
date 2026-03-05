@@ -12,7 +12,7 @@ Properties tested:
 1. ContentSafetyThresholds: Pydantic validation enforces 0-6 range
 2. _check_thresholds: threshold comparison correctness and completeness
 3. _AZURE_CATEGORY_MAP: structural alignment with thresholds model
-4. _get_fields_to_scan: field selection modes ("all", single, list)
+4. get_fields_to_scan: field selection modes ("all", single, list)
 5. _analyze_content: fail-CLOSED on unknown/missing categories
 6. _analyze_prompt: strict bool type validation on attackDetected
 """
@@ -30,6 +30,7 @@ from elspeth.plugins.transforms.azure.content_safety import (
     AzureContentSafety,
     ContentSafetyThresholds,
 )
+from elspeth.plugins.transforms.safety_utils import get_fields_to_scan
 from elspeth.testing import make_pipeline_row
 
 # =============================================================================
@@ -77,16 +78,6 @@ def _make_checker(thresholds: ContentSafetyThresholds) -> AzureContentSafety:
     """
     obj = object.__new__(AzureContentSafety)
     obj._thresholds = thresholds
-    return obj
-
-
-def _make_field_scanner(fields: str | list[str]) -> AzureContentSafety:
-    """Create a minimal AzureContentSafety instance for _get_fields_to_scan testing.
-
-    _get_fields_to_scan only reads self._fields.
-    """
-    obj = object.__new__(AzureContentSafety)
-    obj._fields = fields
     return obj
 
 
@@ -277,7 +268,7 @@ class TestAzureCategoryMapProperties:
 
 
 # =============================================================================
-# _get_fields_to_scan Properties
+# get_fields_to_scan Properties
 # =============================================================================
 
 
@@ -300,8 +291,7 @@ class TestFieldScanSelectionProperties:
     @settings(max_examples=200)
     def test_all_mode_selects_only_string_fields(self, row: dict[str, Any]) -> None:
         """Property: 'all' mode returns only keys with string values."""
-        scanner = _make_field_scanner("all")
-        result = scanner._get_fields_to_scan(make_pipeline_row(row))
+        result = get_fields_to_scan("all", make_pipeline_row(row))
 
         expected = [k for k, v in row.items() if isinstance(v, str)]
         assert result == expected
@@ -312,8 +302,7 @@ class TestFieldScanSelectionProperties:
     @settings(max_examples=100)
     def test_single_string_mode_returns_singleton_list(self, field_name: str) -> None:
         """Property: Single string field name returns [field_name]."""
-        scanner = _make_field_scanner(field_name)
-        result = scanner._get_fields_to_scan(make_pipeline_row({}))  # Row doesn't matter for non-"all"
+        result = get_fields_to_scan(field_name, make_pipeline_row({}))
         assert result == [field_name]
 
     @given(
@@ -327,19 +316,16 @@ class TestFieldScanSelectionProperties:
     @settings(max_examples=100)
     def test_list_mode_returns_exact_list(self, fields: list[str]) -> None:
         """Property: List of field names is returned as-is."""
-        scanner = _make_field_scanner(fields)
-        result = scanner._get_fields_to_scan(make_pipeline_row({}))  # Row doesn't matter for list mode
+        result = get_fields_to_scan(fields, make_pipeline_row({}))
         assert result == fields
 
     def test_all_mode_empty_row_returns_empty(self) -> None:
         """Property: 'all' mode on empty row returns empty list."""
-        scanner = _make_field_scanner("all")
-        assert scanner._get_fields_to_scan(make_pipeline_row({})) == []
+        assert get_fields_to_scan("all", make_pipeline_row({})) == []
 
     def test_all_mode_no_strings_returns_empty(self) -> None:
         """Property: 'all' mode with only non-string values returns empty list."""
-        scanner = _make_field_scanner("all")
-        assert scanner._get_fields_to_scan(make_pipeline_row({"a": 1, "b": 3.14, "c": None})) == []
+        assert get_fields_to_scan("all", make_pipeline_row({"a": 1, "b": 3.14, "c": None})) == []
 
 
 # =============================================================================
