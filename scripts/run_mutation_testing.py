@@ -27,6 +27,15 @@ Exit codes:
     0: Mutation testing completed (check output for score)
     1: Error during testing
     2: Mutation score below threshold (when --strict is used)
+
+Known issue:
+    cosmic-ray 8.4.x has a bug where lambda functions cause an AttributeError
+    during `init` (github.com/sixty-north/cosmic-ray/issues/581). The fix is a
+    one-line change in cosmic_ray/ast/ast_query.py:get_definition_name() — add
+    `and not isinstance(obj, parso.python.tree.Lambda)` to the isinstance check
+    on the line that matches Function/Class nodes. Lambda inherits from Function
+    but raises AttributeError on .name access. The CI workflow applies this patch
+    automatically via sed in the "Patch cosmic-ray lambda bug" step.
 """
 
 from __future__ import annotations
