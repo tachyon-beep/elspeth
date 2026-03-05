@@ -625,6 +625,56 @@ class TestSourceSinkValidation:
         # Should NOT raise — COPY edges don't need route labels
         graph.validate()
 
+    def test_validate_catches_sink_missing_from_sink_id_map(self) -> None:
+        """validate() rejects sink nodes that exist in graph but not in _sink_id_map."""
+        from elspeth.contracts import NodeType, RoutingMode
+        from elspeth.contracts.types import NodeID, SinkName
+        from elspeth.core.dag import ExecutionGraph, GraphValidationError
+
+        graph = ExecutionGraph()
+        graph.add_node("source", node_type=NodeType.SOURCE, plugin_name="csv")
+        graph.add_node("gate", node_type=NodeType.GATE, plugin_name="config_gate")
+        graph.add_node("sink_a", node_type=NodeType.SINK, plugin_name="csv")
+        graph.add_node("sink_b", node_type=NodeType.SINK, plugin_name="csv")
+        graph.add_edge("source", "gate", label="continue", mode=RoutingMode.MOVE)
+        graph.add_edge("gate", "sink_a", label="true", mode=RoutingMode.MOVE)
+        graph.add_edge("gate", "sink_b", label="false", mode=RoutingMode.MOVE)
+        graph.add_route_label_entry(NodeID("gate"), SinkName("sink_a"), "true")
+        # Register only sink_a in the ID map — sink_b is missing
+        graph.set_sink_id_map({SinkName("sink_a"): NodeID("sink_a")})
+
+        with pytest.raises(GraphValidationError, match=r"Sink node 'sink_b'.*not registered.*sink ID map"):
+            graph.validate()
+
+    def test_validate_allows_mixed_move_and_copy_edges_from_gate(self) -> None:
+        """Gate with both MOVE (route) and COPY (fork) edges to sinks validates correctly.
+
+        MOVE edges require route labels; COPY edges are exempt. Validates that
+        the per-edge mode filtering works when the same gate has both types.
+        """
+        from elspeth.contracts import NodeType, RoutingMode
+        from elspeth.contracts.types import NodeID, SinkName
+        from elspeth.core.dag import ExecutionGraph
+
+        graph = ExecutionGraph()
+        graph.add_node("source", node_type=NodeType.SOURCE, plugin_name="csv")
+        graph.add_node("gate", node_type=NodeType.GATE, plugin_name="config_gate")
+        graph.add_node("sink_routed", node_type=NodeType.SINK, plugin_name="csv")
+        graph.add_node("sink_forked", node_type=NodeType.SINK, plugin_name="csv")
+        graph.add_edge("source", "gate", label="continue", mode=RoutingMode.MOVE)
+        # MOVE edge (route decision) — needs route label
+        graph.add_edge("gate", "sink_routed", label="flagged", mode=RoutingMode.MOVE)
+        # COPY edge (fork fan-out) — exempt from route label requirement
+        graph.add_edge("gate", "sink_forked", label="branch_copy", mode=RoutingMode.COPY)
+        graph.add_route_label_entry(NodeID("gate"), SinkName("sink_routed"), "flagged")
+        graph.set_sink_id_map({
+            SinkName("sink_routed"): NodeID("sink_routed"),
+            SinkName("sink_forked"): NodeID("sink_forked"),
+        })
+
+        # Should NOT raise — MOVE has label, COPY is exempt
+        graph.validate()
+
     def test_get_source_node(self) -> None:
         from elspeth.contracts import NodeType
         from elspeth.core.dag import ExecutionGraph
@@ -2213,6 +2263,64 @@ class TestExecutionGraphRouteMapping:
 
         # Non-gate nodes still return "continue" for default path
         assert graph.get_route_label("transform", SinkName("sink")) == "continue"
+
+    def test_route_labels_registered_through_production_path(self, plugin_manager) -> None:
+        """Route labels are correctly registered when building via from_plugin_instances().
+
+        Guards against BUG-LINEAGE-01 pattern: manual graph construction in tests
+        passes but production path has different (wrong) mapping. This test verifies
+        the builder registers route labels that survive validate().
+        """
+        from elspeth.contracts import GateName, SinkName
+        from elspeth.core.config import (
+            ElspethSettings,
+            SinkSettings,
+            SourceSettings,
+        )
+        from elspeth.core.dag import ExecutionGraph
+
+        config = ElspethSettings(
+            source=_source_settings(
+                SourceSettings,
+                plugin="csv",
+                options={
+                    "path": "test.csv",
+                    "on_validation_failure": "discard",
+                    "schema": {"mode": "observed"},
+                },
+            ),
+            sinks={
+                "clean": SinkSettings(plugin="json", options={"path": "clean.json", "schema": {"mode": "observed"}}),
+                "quarantine": SinkSettings(plugin="json", options={"path": "quarantine.json", "schema": {"mode": "observed"}}),
+            },
+            gates=[
+                _gate_settings(
+                    GateSettings,
+                    name="router",
+                    condition="row.get('valid', False)",
+                    routes={"true": "clean", "false": "quarantine"},
+                ),
+            ],
+        )
+
+        plugins = instantiate_plugins_from_config(config)
+        graph = ExecutionGraph.from_plugin_instances(
+            source=plugins.source,
+            source_settings=plugins.source_settings,
+            transforms=plugins.transforms,
+            sinks=plugins.sinks,
+            aggregations=plugins.aggregations,
+            gates=list(config.gates),
+            coalesce_settings=None,
+        )
+
+        # validate() should pass — all gate→sink MOVE edges have route labels
+        graph.validate()
+
+        # Verify the labels are actually registered correctly
+        gate_id = graph.get_config_gate_id_map()[GateName("router")]
+        assert graph.get_route_label(gate_id, SinkName("clean")) == "true"
+        assert graph.get_route_label(gate_id, SinkName("quarantine")) == "false"
 
 
 class TestMultiEdgeSupport:

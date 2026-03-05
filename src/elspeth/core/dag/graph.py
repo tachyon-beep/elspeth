@@ -164,6 +164,7 @@ class ExecutionGraph:
         3. At least one sink node exists
         4. All nodes are reachable from source (no disconnected/orphaned nodes)
         5. Edge labels are unique per source node
+        6. Every gate→sink MOVE edge has a corresponding route label entry
 
         Does NOT check schema compatibility - plugins validate their own
         schemas during construction.
