@@ -1128,20 +1128,24 @@ class ExecutionGraph:
             if merge_strategy == "select":
                 # Select merge passes through the selected branch's data unchanged.
                 # Trace back to that branch's producer schema for type validation.
+                if "select_branch" not in node_info.config:
+                    raise GraphValidationError(
+                        f"Coalesce node '{node_id}' has merge strategy 'select' but "
+                        "no 'select_branch' in config. This indicates a graph construction bug."
+                    )
                 select_branch = node_info.config["select_branch"]
-                if select_branch is not None:
-                    # Identity branch: COPY edge from gate to coalesce with label == select_branch
-                    for from_id, _, edge_data in self._graph.in_edges(node_id, data=True):
-                        if edge_data.get("mode") == RoutingMode.COPY and edge_data.get("label") == select_branch:
-                            result = self.get_effective_producer_schema(from_id, _cache)
-                            _cache[node_id] = result
-                            return result
-                    # Transform branch: last transform's edge has label "continue", not
-                    # the branch name. Trace backward to find the last transform node.
-                    _first, last = self._trace_branch_endpoints(NodeID(node_id), select_branch)
-                    result = self.get_effective_producer_schema(last, _cache)
-                    _cache[node_id] = result
-                    return result
+                # Identity branch: COPY edge from gate to coalesce with label == select_branch
+                for from_id, _, edge_data in self._graph.in_edges(node_id, data=True):
+                    if edge_data.get("mode") == RoutingMode.COPY and edge_data.get("label") == select_branch:
+                        result = self.get_effective_producer_schema(from_id, _cache)
+                        _cache[node_id] = result
+                        return result
+                # Transform branch: last transform's edge has label "continue", not
+                # the branch name. Trace backward to find the last transform node.
+                _first, last = self._trace_branch_endpoints(NodeID(node_id), select_branch)
+                result = self.get_effective_producer_schema(last, _cache)
+                _cache[node_id] = result
+                return result
             _cache[node_id] = None
             return None
 
