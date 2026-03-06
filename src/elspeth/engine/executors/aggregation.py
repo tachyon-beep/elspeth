@@ -724,7 +724,7 @@ class AggregationExecutor:
 
             # Restore contract from checkpoint (stored once per node)
             # Per CLAUDE.md Tier 1: contract MUST exist if tokens exist
-            restored_contract = SchemaContract.from_checkpoint(node_checkpoint.contract)
+            restored_contract = SchemaContract.from_checkpoint(dict(node_checkpoint.contract))
 
             # Reconstruct TokenInfo objects directly from typed checkpoint
             reconstructed_tokens = []
@@ -739,7 +739,7 @@ class AggregationExecutor:
                     )
 
                 # Reconstruct PipelineRow from checkpoint data
-                row_data = PipelineRow(t.row_data, restored_contract)
+                row_data = PipelineRow(dict(t.row_data), restored_contract)
 
                 reconstructed_tokens.append(
                     TokenInfo(

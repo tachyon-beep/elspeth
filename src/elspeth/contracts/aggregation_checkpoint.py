@@ -24,6 +24,7 @@ from types import MappingProxyType
 from typing import Any
 
 from elspeth.contracts.errors import AuditIntegrityError
+from elspeth.contracts.freeze import deep_freeze, deep_thaw
 
 
 @dataclass(frozen=True, slots=True)
@@ -47,7 +48,7 @@ class AggregationTokenCheckpoint:
     fork_group_id: str | None
     join_group_id: str | None
     expand_group_id: str | None
-    row_data: dict[str, Any]
+    row_data: Mapping[str, Any]
     contract_version: str
 
     def __post_init__(self) -> None:
@@ -57,6 +58,8 @@ class AggregationTokenCheckpoint:
             raise ValueError("AggregationTokenCheckpoint.row_id must not be empty")
         if not self.contract_version:
             raise ValueError("AggregationTokenCheckpoint.contract_version must not be empty")
+        if not isinstance(self.row_data, MappingProxyType):
+            object.__setattr__(self, "row_data", deep_freeze(self.row_data))
 
     def to_dict(self) -> dict[str, Any]:
         """Serialize to checkpoint dict format."""
@@ -67,7 +70,7 @@ class AggregationTokenCheckpoint:
             "fork_group_id": self.fork_group_id,
             "join_group_id": self.join_group_id,
             "expand_group_id": self.expand_group_id,
-            "row_data": self.row_data,
+            "row_data": deep_thaw(self.row_data),
             "contract_version": self.contract_version,
         }
 
@@ -126,7 +129,7 @@ class AggregationNodeCheckpoint:
     elapsed_age_seconds: float
     count_fire_offset: float | None
     condition_fire_offset: float | None
-    contract: dict[str, Any]
+    contract: Mapping[str, Any]
 
     def __post_init__(self) -> None:
         if not self.batch_id:
@@ -141,6 +144,8 @@ class AggregationNodeCheckpoint:
             raise ValueError(
                 f"AggregationNodeCheckpoint.condition_fire_offset must be non-negative and finite, got {self.condition_fire_offset}"
             )
+        if not isinstance(self.contract, MappingProxyType):
+            object.__setattr__(self, "contract", deep_freeze(self.contract))
 
     def to_dict(self) -> dict[str, Any]:
         """Serialize to checkpoint dict format."""
@@ -150,7 +155,7 @@ class AggregationNodeCheckpoint:
             "elapsed_age_seconds": self.elapsed_age_seconds,
             "count_fire_offset": self.count_fire_offset,
             "condition_fire_offset": self.condition_fire_offset,
-            "contract": self.contract,
+            "contract": deep_thaw(self.contract),
         }
 
     @classmethod

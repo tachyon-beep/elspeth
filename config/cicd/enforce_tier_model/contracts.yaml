@@ -201,52 +201,62 @@ allow_hits:
   owner: architecture
   reason: "Tier 3 boundary \u2014 from_dict() validates input is dict before accessing keys"
   safety: Non-dict input returns TokenUsage.unknown(); no crash
-- key: contracts/coalesce_checkpoint.py:R5:CoalesceTokenCheckpoint:__post_init__:fp=e658b73a93aed9eb
+- key: contracts/coalesce_checkpoint.py:R5:CoalesceTokenCheckpoint:__post_init__:fp=ddf1a54fbcb62ff8
   owner: architecture
-  reason: "Tier 1 write-side validation \u2014 isinstance in __post_init__ enforces invariants at construction time per offensive\
-    \ programming policy"
+  reason: "Tier 1 write-side validation \u2014 isinstance in __post_init__ enforces invariants at construction time per offensive programming policy"
   safety: "Raises ValueError on invalid data \u2014 crashes loud, never masks"
-- key: contracts/coalesce_checkpoint.py:R5:CoalesceTokenCheckpoint:__post_init__:fp=87fec060637cf309
+- key: contracts/coalesce_checkpoint.py:R5:CoalesceTokenCheckpoint:__post_init__:fp=178cba2b401b4579
   owner: architecture
-  reason: "Tier 1 write-side validation \u2014 isinstance in __post_init__ enforces invariants at construction time per offensive\
-    \ programming policy"
+  reason: "Tier 1 write-side validation \u2014 isinstance in __post_init__ enforces invariants at construction time per offensive programming policy"
   safety: "Raises ValueError on invalid data \u2014 crashes loud, never masks"
-- key: contracts/coalesce_checkpoint.py:R5:CoalesceTokenCheckpoint:__post_init__:fp=9ab6237024088015
+- key: contracts/coalesce_checkpoint.py:R5:CoalesceTokenCheckpoint:__post_init__:fp=5fb27a585022e927
   owner: architecture
-  reason: "Tier 1 write-side validation \u2014 isinstance in __post_init__ enforces invariants at construction time per offensive\
-    \ programming policy"
+  reason: "Tier 1 write-side validation \u2014 isinstance in __post_init__ enforces invariants at construction time per offensive programming policy"
   safety: "Raises ValueError on invalid data \u2014 crashes loud, never masks"
-- key: contracts/coalesce_checkpoint.py:R5:CoalesceTokenCheckpoint:__post_init__:fp=ddff6a8d08ab9769
+- key: contracts/coalesce_checkpoint.py:R5:CoalesceTokenCheckpoint:__post_init__:fp=87f4d32e675a60b3
   owner: architecture
-  reason: "Tier 1 write-side validation \u2014 isinstance in __post_init__ enforces invariants at construction time per offensive\
-    \ programming policy"
-  safety: "Raises ValueError on invalid data \u2014 crashes loud, never masks"
-- key: contracts/coalesce_checkpoint.py:R5:CoalescePendingCheckpoint:__post_init__:fp=7901bad5e714c012
+  reason: "Deep-freeze conversion guard \u2014 isinstance checks for MappingProxyType wrapping, not defensive data access"
+  safety: "Construction-time type conversion, crashes on unexpected types"
+- key: contracts/coalesce_checkpoint.py:R5:CoalesceTokenCheckpoint:__post_init__:fp=f321070b4ca838ab
   owner: architecture
-  reason: "Tier 1 write-side validation \u2014 isinstance in __post_init__ enforces invariants at construction time per offensive\
-    \ programming policy"
-  safety: "Raises ValueError on invalid data \u2014 crashes loud, never masks"
-- key: contracts/coalesce_checkpoint.py:R5:CoalescePendingCheckpoint:__post_init__:fp=952d83792258576a
+  reason: "Deep-freeze conversion guard \u2014 isinstance checks for MappingProxyType wrapping, not defensive data access"
+  safety: "Construction-time type conversion, crashes on unexpected types"
+- key: contracts/coalesce_checkpoint.py:R5:CoalesceTokenCheckpoint:__post_init__:fp=5589812016afb4fe
   owner: architecture
-  reason: "Tier 1 write-side validation \u2014 isinstance in __post_init__ enforces invariants at construction time per offensive\
-    \ programming policy"
+  reason: "Tier 1 write-side validation \u2014 isinstance in __post_init__ enforces non-negative arrival_offset_seconds"
   safety: "Raises ValueError on invalid data \u2014 crashes loud, never masks"
-- key: contracts/coalesce_checkpoint.py:R5:CoalescePendingCheckpoint:from_dict:fp=c66c5cde3041ceb8
+- key: contracts/coalesce_checkpoint.py:R5:CoalescePendingCheckpoint:__post_init__:fp=da49e3e166b22dea
+  owner: architecture
+  reason: "Tier 1 write-side validation \u2014 isinstance in __post_init__ enforces invariants at construction time per offensive programming policy"
+  safety: "Raises ValueError on invalid data \u2014 crashes loud, never masks"
+- key: contracts/coalesce_checkpoint.py:R5:CoalescePendingCheckpoint:__post_init__:fp=258223e5083ec1d2
+  owner: architecture
+  reason: "Tier 1 write-side validation \u2014 isinstance in __post_init__ enforces invariants at construction time per offensive programming policy"
+  safety: "Raises ValueError on invalid data \u2014 crashes loud, never masks"
+- key: contracts/coalesce_checkpoint.py:R5:CoalescePendingCheckpoint:__post_init__:fp=50602c9bbfcd3b4f
+  owner: architecture
+  reason: "Deep-freeze conversion guard \u2014 isinstance checks for MappingProxyType wrapping, not defensive data access"
+  safety: "Construction-time type conversion, crashes on unexpected types"
+- key: contracts/coalesce_checkpoint.py:R5:CoalescePendingCheckpoint:__post_init__:fp=de028b7affcfc2d7
+  owner: architecture
+  reason: "Deep-freeze conversion guard \u2014 isinstance checks for MappingProxyType wrapping, not defensive data access"
+  safety: "Construction-time type conversion, crashes on unexpected types"
+- key: contracts/coalesce_checkpoint.py:R5:CoalescePendingCheckpoint:from_dict:fp=ffc470fcacf5ea67
   owner: architecture
   reason: "Tier 1 deserialization \u2014 isinstance validates checkpoint JSON structure (our data) before construction"
   safety: "Raises ValueError on malformed checkpoint \u2014 crash on corruption per Tier 1 rules"
-- key: contracts/coalesce_checkpoint.py:R5:CoalescePendingCheckpoint:from_dict:fp=53bdf7f5d189838c
+- key: contracts/coalesce_checkpoint.py:R5:CoalescePendingCheckpoint:from_dict:fp=b43fe92daff42fce
   owner: architecture
   reason: "Tier 1 deserialization \u2014 isinstance validates checkpoint JSON structure (our data) before construction"
   safety: "Raises ValueError on malformed checkpoint \u2014 crash on corruption per Tier 1 rules"
-- key: contracts/coalesce_checkpoint.py:R5:CoalesceCheckpointState:from_dict:fp=e43e1a747ebbdcdb
+- key: contracts/coalesce_checkpoint.py:R5:CoalesceCheckpointState:from_dict:fp=bbe655ca02f4d23e
   owner: architecture
-  reason: "Tier 1 deserialization — isinstance validates 'pending' is list in checkpoint JSON (our data)"
-  safety: "Raises ValueError on malformed checkpoint — crash on corruption per Tier 1 rules"
-- key: contracts/coalesce_checkpoint.py:R5:CoalesceCheckpointState:from_dict:fp=851aa780b777d62c
+  reason: "Tier 1 deserialization \u2014 isinstance validates 'pending' is list in checkpoint JSON (our data)"
+  safety: "Raises ValueError on malformed checkpoint \u2014 crash on corruption per Tier 1 rules"
+- key: contracts/coalesce_checkpoint.py:R5:CoalesceCheckpointState:from_dict:fp=7b2311040ea40864
   owner: bugfix
-  reason: "Tier 1 deserialization — isinstance validates 'completed_keys' is list in checkpoint JSON (our data)"
-  safety: "Raises ValueError on malformed checkpoint — crash on corruption per Tier 1 rules"
+  reason: "Tier 1 deserialization \u2014 isinstance validates 'completed_keys' is list in checkpoint JSON (our data)"
+  safety: "Raises ValueError on malformed checkpoint \u2014 crash on corruption per Tier 1 rules"
 - key: contracts/schema_contract_factory.py:R1:create_contract_from_config:fp=f930bf0f2eabedce
   owner: feature
   reason: Intentional identity fallback - fields without resolution mapping use normalized name as original name
@@ -264,10 +274,18 @@ allow_hits:
   owner: architecture
   reason: Optional lookup for original name - new fields from transforms may not have input mapping
   safety: Fallback to output field's original_name is correct behavior for transform-added fields
-- key: contracts/aggregation_checkpoint.py:R5:AggregationNodeCheckpoint:from_dict:fp=cd6c124d0c3a7c7b
+- key: contracts/aggregation_checkpoint.py:R5:AggregationNodeCheckpoint:from_dict:fp=a36ac21ac4faa0c5
   owner: architecture
   reason: "Tier 1 boundary \u2014 from_dict() validates tokens_data is list before iterating (checkpoint is our data)"
   safety: "Raises TypeError immediately on corruption \u2014 crash, not coercion"
+- key: contracts/aggregation_checkpoint.py:R5:AggregationTokenCheckpoint:__post_init__:fp=34101238045504b1
+  owner: architecture
+  reason: "Deep-freeze conversion guard \u2014 isinstance checks for MappingProxyType wrapping, not defensive data access"
+  safety: "Construction-time type conversion, crashes on unexpected types"
+- key: contracts/aggregation_checkpoint.py:R5:AggregationNodeCheckpoint:__post_init__:fp=298f9eb7668fa07d
+  owner: architecture
+  reason: "Deep-freeze conversion guard \u2014 isinstance checks for MappingProxyType wrapping, not defensive data access"
+  safety: "Construction-time type conversion, crashes on unexpected types"
 - key: contracts/checkpoint.py:R5:ResumePoint:__post_init__:fp=e5bf6a88ef6b62d2
   owner: architecture
   reason: "Tier 1 invariant \u2014 isinstance validates aggregation_state is AggregationCheckpointState before use"
@@ -324,19 +342,8 @@ allow_hits:
   safety: Construction-time type conversion, crashes on unexpected types
   expires: null
 
-- key: 'contracts/coalesce_checkpoint.py:R5:CoalescePendingCheckpoint:__post_init__:fp=ab29e1398836d153'
-  owner: architecture
-  reason: Deep-freeze conversion guard — isinstance() checks for MappingProxyType/tuple wrapping, not defensive data access
-  safety: Construction-time type conversion, crashes on unexpected types
-  expires: null
 
-- key: 'contracts/coalesce_checkpoint.py:R5:CoalescePendingCheckpoint:__post_init__:fp=09a4385c1af22716'
-  owner: architecture
-  reason: Deep-freeze conversion guard — isinstance() checks for MappingProxyType/tuple wrapping, not defensive data access
-  safety: Construction-time type conversion, crashes on unexpected types
-  expires: null
-
-- key: 'contracts/aggregation_checkpoint.py:R5:AggregationCheckpointState:__post_init__:fp=a3115373152f3c01'
+- key: 'contracts/aggregation_checkpoint.py:R5:AggregationCheckpointState:__post_init__:fp=f6f90d20a423d11e'
   owner: architecture
   reason: Deep-freeze conversion guard — isinstance() checks for MappingProxyType/tuple wrapping, not defensive data access
   safety: Construction-time type conversion, crashes on unexpected types

@@ -13,6 +13,7 @@ from types import MappingProxyType
 from typing import Any
 
 from elspeth.contracts.errors import AuditIntegrityError
+from elspeth.contracts.freeze import deep_freeze, deep_thaw
 
 
 @dataclass(frozen=True, slots=True)
@@ -25,8 +26,8 @@ class CoalesceTokenCheckpoint:
     fork_group_id: str | None
     join_group_id: str | None
     expand_group_id: str | None
-    row_data: dict[str, Any]
-    contract: dict[str, Any]
+    row_data: Mapping[str, Any]
+    contract: Mapping[str, Any]
     state_id: str
     arrival_offset_seconds: float
 
@@ -36,10 +37,14 @@ class CoalesceTokenCheckpoint:
             value = getattr(self, field_name)
             if not isinstance(value, str) or not value:
                 raise ValueError(f"{field_name} must be a non-empty string, got {type(value).__name__}: {value!r}")
-        if not isinstance(self.row_data, dict):
+        if not isinstance(self.row_data, (dict, MappingProxyType)):
             raise ValueError(f"row_data must be a dict, got {type(self.row_data).__name__}: {self.row_data!r}")
-        if not isinstance(self.contract, dict):
+        if not isinstance(self.contract, (dict, MappingProxyType)):
             raise ValueError(f"contract must be a dict, got {type(self.contract).__name__}: {self.contract!r}")
+        if not isinstance(self.row_data, MappingProxyType):
+            object.__setattr__(self, "row_data", deep_freeze(self.row_data))
+        if not isinstance(self.contract, MappingProxyType):
+            object.__setattr__(self, "contract", deep_freeze(self.contract))
         if (
             not isinstance(self.arrival_offset_seconds, (int, float))
             or not math.isfinite(self.arrival_offset_seconds)
@@ -55,8 +60,8 @@ class CoalesceTokenCheckpoint:
             "fork_group_id": self.fork_group_id,
             "join_group_id": self.join_group_id,
             "expand_group_id": self.expand_group_id,
-            "row_data": self.row_data,
-            "contract": self.contract,
+            "row_data": deep_thaw(self.row_data),
+            "contract": deep_thaw(self.contract),
             "state_id": self.state_id,
             "arrival_offset_seconds": self.arrival_offset_seconds,
         }

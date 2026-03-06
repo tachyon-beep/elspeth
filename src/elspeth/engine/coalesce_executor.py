@@ -260,8 +260,8 @@ class CoalesceExecutor:
             first_arrival = now - pending_entry.elapsed_age_seconds
             branches: dict[str, _BranchEntry] = {}
             for branch_name, token_checkpoint in pending_entry.branches.items():
-                restored_contract = SchemaContract.from_checkpoint(token_checkpoint.contract)
-                restored_row = PipelineRow(token_checkpoint.row_data, restored_contract)
+                restored_contract = SchemaContract.from_checkpoint(dict(token_checkpoint.contract))
+                restored_row = PipelineRow(dict(token_checkpoint.row_data), restored_contract)
                 token = TokenInfo(
                     row_id=token_checkpoint.row_id,
                     token_id=token_checkpoint.token_id,
