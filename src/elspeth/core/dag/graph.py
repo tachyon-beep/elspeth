@@ -1156,7 +1156,7 @@ class ExecutionGraph:
                 select_branch = node_info.config["select_branch"]
                 # Identity branch: COPY edge from gate to coalesce with label == select_branch
                 for from_id, _, edge_data in self._graph.in_edges(node_id, data=True):
-                    if edge_data.get("mode") == RoutingMode.COPY and edge_data.get("label") == select_branch:
+                    if edge_data["mode"] == RoutingMode.COPY and edge_data["label"] == select_branch:
                         result = self.get_effective_producer_schema(from_id, _cache)
                         _cache[node_id] = result
                         return result

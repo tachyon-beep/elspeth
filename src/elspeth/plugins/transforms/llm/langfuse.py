@@ -206,6 +206,8 @@ def _handle_trace_failure(
     TelemetryEmitCallback expects ExternalCallCompleted (from plugins/clients/base.py),
     which does not match tracing failure events.
     """
+    if isinstance(error, (TypeError, AttributeError, KeyError, NameError)):
+        raise  # Programming errors must crash — not Langfuse SDK failures
     logger.warning(
         event_name,
         plugin=transform_name,

@@ -10,7 +10,7 @@ to its output port. Could be a sink, could be another transform.
 
 from __future__ import annotations
 
-import contextlib
+import logging
 import threading
 import traceback
 from collections.abc import Callable
@@ -32,6 +32,8 @@ if TYPE_CHECKING:
     from elspeth.contracts.contexts import TransformContext
     from elspeth.contracts.identity import TokenInfo
     from elspeth.contracts.schema_contract import PipelineRow
+
+_logger = logging.getLogger(__name__)
 
 
 class BatchTransformMixin:
@@ -261,15 +263,21 @@ class BatchTransformMixin:
             # KeyError means ticket was evicted due to timeout — discard late result.
             # This is expected when a waiter times out and retry proceeds
             # while the original worker was still processing.
-            with contextlib.suppress(KeyError):
+            try:
                 self._batch_buffer.complete(ticket, (token, exception_result, state_id))
+            except KeyError:
+                _logger.debug(
+                    "late_result_discarded", extra={"token_id": token.token_id, "state_id": state_id, "reason": "timeout_evicted"}
+                )
             return
 
         # Mark complete — result will be released in FIFO order
         # Include state_id for retry-safe waiter matching
         # KeyError means ticket was evicted due to timeout — discard late result.
-        with contextlib.suppress(KeyError):
+        try:
             self._batch_buffer.complete(ticket, (token, result, state_id))
+        except KeyError:
+            _logger.debug("late_result_discarded", extra={"token_id": token.token_id, "state_id": state_id, "reason": "timeout_evicted"})
 
     def _release_loop(self) -> None:
         """Release thread: emit results in FIFO order to output port.

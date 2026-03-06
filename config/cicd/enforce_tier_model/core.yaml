@@ -219,16 +219,6 @@ allow_hits:
   reason: isinstance check for dict vs NodeConfig on config field during schema population
   safety: Crashes on type mismatch - no silent fallback
   expires: '2026-03-13'
-- key: core/dag/graph.py:R1:ExecutionGraph:get_effective_producer_schema:fp=128cdd67ab27d0ff
-  owner: ARCH-15
-  reason: "Optional select_branch config lookup \u2014 not all coalesce nodes have select_branch"
-  safety: "Falls through to return None if missing \u2014 conservative (skips type validation)"
-  expires: '2026-05-13'
-- key: core/dag/graph.py:R1:ExecutionGraph:get_effective_producer_schema:fp=6d1f81c80be87c59
-  owner: ARCH-15
-  reason: "Optional select_branch config lookup \u2014 not all coalesce nodes have select_branch"
-  safety: "Falls through to return None if missing \u2014 conservative (skips type validation)"
-  expires: '2026-05-13'
 - key: core/dag/graph.py:R1:ExecutionGraph:get_schema_config_from_node:fp=e73629e37afb81d6
   owner: architecture
   reason: Optional schema access for mixed node types (source/sink/gate/coalesce)
