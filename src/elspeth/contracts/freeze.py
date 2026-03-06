@@ -91,6 +91,8 @@ def deep_thaw(value: Any) -> Any:
         return {k: deep_thaw(v) for k, v in value.items()}
     if isinstance(value, tuple):
         return [deep_thaw(item) for item in value]
+    if isinstance(value, frozenset):
+        return [deep_thaw(item) for item in value]
     if isinstance(value, dict):
         return {k: deep_thaw(v) for k, v in value.items()}
     if isinstance(value, list):

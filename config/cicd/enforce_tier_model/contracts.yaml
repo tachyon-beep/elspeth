@@ -220,7 +220,7 @@ allow_hits:
   owner: architecture
   reason: "Deep-freeze conversion guard \u2014 isinstance checks for MappingProxyType wrapping, not defensive data access"
   safety: "Construction-time type conversion, crashes on unexpected types"
-- key: contracts/coalesce_checkpoint.py:R5:CoalescePendingCheckpoint:__post_init__:fp=da49e3e166b22dea
+- key: contracts/coalesce_checkpoint.py:R5:CoalescePendingCheckpoint:__post_init__:fp=5cf06e7f080710e2
   owner: architecture
   reason: "Tier 1 write-side validation \u2014 isinstance in __post_init__ enforces invariants at construction time per offensive programming policy"
   safety: "Raises ValueError on invalid data \u2014 crashes loud, never masks"
@@ -480,13 +480,19 @@ allow_hits:
   safety: Type dispatch for serialization, not defensive data access
   expires: null
 
-- key: 'contracts/freeze.py:R5:deep_thaw:fp=990e74711546dafe'
+- key: 'contracts/freeze.py:R5:deep_thaw:fp=183d51e0d771cad2'
   owner: architecture
   reason: Recursive thaw utility — isinstance() dispatches on container type to convert back to mutable for serialization
   safety: Type dispatch for serialization, not defensive data access
   expires: null
 
-- key: 'contracts/freeze.py:R5:deep_thaw:fp=a05a343ca9ecd748'
+- key: 'contracts/freeze.py:R5:deep_thaw:fp=99194c23ede60385'
+  owner: architecture
+  reason: Recursive thaw utility — isinstance() dispatches on container type to convert back to mutable for serialization
+  safety: Type dispatch for serialization, not defensive data access
+  expires: null
+
+- key: 'contracts/freeze.py:R5:deep_thaw:fp=b99e668cfb8b3db0'
   owner: architecture
   reason: Recursive thaw utility — isinstance() dispatches on container type to convert back to mutable for serialization
   safety: Type dispatch for serialization, not defensive data access

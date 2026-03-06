@@ -74,8 +74,11 @@ class DAGTraversalContext:
     branch_first_node: Mapping[str, NodeID] = MappingProxyType({})
 
     def __post_init__(self) -> None:
-        for name in ("node_step_map", "node_to_plugin", "node_to_next", "coalesce_node_map", "branch_first_node"):
-            object.__setattr__(self, name, deep_freeze(getattr(self, name)))
+        object.__setattr__(self, "node_step_map", deep_freeze(self.node_step_map))
+        object.__setattr__(self, "node_to_plugin", deep_freeze(self.node_to_plugin))
+        object.__setattr__(self, "node_to_next", deep_freeze(self.node_to_next))
+        object.__setattr__(self, "coalesce_node_map", deep_freeze(self.coalesce_node_map))
+        object.__setattr__(self, "branch_first_node", deep_freeze(self.branch_first_node))
 
 
 @dataclass(frozen=True, slots=True)

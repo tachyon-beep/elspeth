@@ -151,6 +151,12 @@ class LLMCallError:
     message: str
     retryable: bool
 
+    def __post_init__(self) -> None:
+        if not self.type:
+            raise ValueError("LLMCallError.type must not be empty")
+        if not self.message:
+            raise ValueError("LLMCallError.message must not be empty")
+
     def to_dict(self) -> dict[str, Any]:
         """Serialize to audit-trail dict.
 
@@ -278,6 +284,12 @@ class HTTPCallError:
     type: str
     message: str
     status_code: int | None = None
+
+    def __post_init__(self) -> None:
+        if not self.type:
+            raise ValueError("HTTPCallError.type must not be empty")
+        if not self.message:
+            raise ValueError("HTTPCallError.message must not be empty")
 
     def to_dict(self) -> dict[str, Any]:
         """Serialize to audit-trail dict.

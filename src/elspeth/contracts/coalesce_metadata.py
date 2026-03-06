@@ -56,6 +56,10 @@ class CoalesceMetadata:
 
     policy: str
 
+    def __post_init__(self) -> None:
+        if not self.policy:
+            raise ValueError("CoalesceMetadata.policy must not be empty")
+
     # Failure context
     reason: str | None = None
 

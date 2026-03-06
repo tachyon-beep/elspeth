@@ -5,7 +5,9 @@ in the audit trail.  These provide consistent shapes for executor error
 recording.
 """
 
+from collections.abc import Mapping
 from dataclasses import dataclass
+from types import MappingProxyType
 from typing import TYPE_CHECKING, Any, Literal, NotRequired, TypedDict
 
 if TYPE_CHECKING:
@@ -645,7 +647,9 @@ class GracefulShutdownError(Exception):
         self.rows_failed = rows_failed
         self.rows_quarantined = rows_quarantined
         self.rows_routed = rows_routed
-        self.routed_destinations: dict[str, int] = routed_destinations if routed_destinations is not None else {}
+        self.routed_destinations: Mapping[str, int] = (
+            MappingProxyType(routed_destinations) if routed_destinations is not None else MappingProxyType({})
+        )
         super().__init__(
             f"Pipeline interrupted after {rows_processed} rows (run_id={run_id}). Resume with: elspeth resume {run_id} --execute"
         )

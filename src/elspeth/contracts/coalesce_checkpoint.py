@@ -109,8 +109,10 @@ class CoalescePendingCheckpoint:
 
     def __post_init__(self) -> None:
         """Validate Tier 1 invariants at construction time."""
-        for field_name in ("coalesce_name", "row_id"):
-            value = getattr(self, field_name)
+        for field_name, value in (
+            ("coalesce_name", self.coalesce_name),
+            ("row_id", self.row_id),
+        ):
             if not isinstance(value, str) or not value:
                 raise ValueError(f"{field_name} must be a non-empty string, got {type(value).__name__}: {value!r}")
         if self.elapsed_age_seconds < 0 or not math.isfinite(self.elapsed_age_seconds):

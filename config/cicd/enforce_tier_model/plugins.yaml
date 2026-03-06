@@ -39,7 +39,7 @@ per_file_rules:
   reason: Azure API responses are external data (Tier 3) - all defensive patterns legitimate
   expires: null
 allow_hits:
-- key: plugins/infrastructure/manager.py:R4:PluginManager:register:fp=caefec59faf9ab92
+- key: plugins/infrastructure/manager.py:R4:PluginManager:register:fp=157bcdba7017b610
   owner: bugfix
   reason: "Rollback protection — catch any rollback failure so secondary exception doesn't bury original diagnostic"
   safety: Logs rollback error then re-raises the original exception unchanged

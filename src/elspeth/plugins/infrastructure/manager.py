@@ -91,7 +91,7 @@ class PluginManager:
                 self._pm.unregister(plugin=plugin)
                 self._refresh_caches()
             except Exception as rollback_err:
-                _logger.error("plugin_rollback_failed", rollback_error=str(rollback_err))
+                _logger.error("plugin_rollback_failed", rollback_error=str(rollback_err), exc_info=True)
             raise
 
     def _refresh_caches(self) -> None:
