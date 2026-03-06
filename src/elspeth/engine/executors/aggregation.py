@@ -535,12 +535,15 @@ class AggregationExecutor:
                         raise  # System bugs and audit corruption must crash immediately
                     except (TypeError, AttributeError, KeyError, NameError):
                         raise  # Programming errors in recorder — crash to surface the bug
-                    except Exception:
-                        logger.error(
-                            "Failed to mark batch %s as FAILED during error cleanup",
-                            batch_id,
-                            exc_info=True,
-                        )
+                    except Exception as cleanup_err:
+                        # Batch cleanup failure leaves batch in non-terminal state (DRAFT/EXECUTING)
+                        # permanently — orphaned in the audit trail with no recovery path.
+                        # Per Tier 1 rules: crash rather than leave corrupted audit state.
+                        raise AuditIntegrityError(
+                            f"Failed to mark batch {batch_id} as FAILED during error cleanup — "
+                            f"batch would remain in non-terminal state (audit trail corruption). "
+                            f"Cleanup error: {cleanup_err}"
+                        ) from cleanup_err
                 # Full cleanup: reset batch state, clear buffers, reset trigger
                 self._reset_batch_state(node_id)
                 node.buffers.clear()

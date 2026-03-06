@@ -497,6 +497,7 @@ class AuditedLLMClient(AuditedClientBase):
                 run_id=self._run_id,
                 state_id=self._state_id,
                 call_type="llm",
+                exc_info=True,
             )
 
         return LLMResponse(

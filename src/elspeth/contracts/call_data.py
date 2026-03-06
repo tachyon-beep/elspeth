@@ -86,12 +86,13 @@ class LLMCallRequest:
     extra_kwargs: Mapping[str, Any] = field(default_factory=lambda: MappingProxyType({}))
 
     def __post_init__(self) -> None:
-        if not isinstance(self.messages, tuple):
-            object.__setattr__(
-                self,
-                "messages",
-                tuple(deep_freeze(m) for m in self.messages),
-            )
+        # Always deep-freeze inner message dicts — a pre-built tuple may
+        # still contain mutable inner dicts (e.g. tuple([{"role": "user"}])).
+        object.__setattr__(
+            self,
+            "messages",
+            tuple(deep_freeze(m) for m in self.messages),
+        )
         if not isinstance(self.extra_kwargs, MappingProxyType):
             object.__setattr__(self, "extra_kwargs", deep_freeze(self.extra_kwargs))
         if collisions := (_LLM_REQUEST_RESERVED_KEYS & self.extra_kwargs.keys()):

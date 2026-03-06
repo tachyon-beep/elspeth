@@ -249,14 +249,34 @@ allow_hits:
   owner: architecture
   reason: "Tier 1 deserialization \u2014 isinstance validates checkpoint JSON structure (our data) before construction"
   safety: "Raises ValueError on malformed checkpoint \u2014 crash on corruption per Tier 1 rules"
-- key: contracts/coalesce_checkpoint.py:R5:CoalesceCheckpointState:from_dict:fp=bbe655ca02f4d23e
-  owner: architecture
+- key: contracts/coalesce_checkpoint.py:R5:CoalesceCheckpointState:__post_init__:fp=fa992171df15fbd6
+  owner: bugfix
+  reason: "Tier 1 write-side validation \u2014 isinstance validates version is string at construction time"
+  safety: "Raises ValueError on invalid data \u2014 crashes loud, never masks"
+- key: contracts/coalesce_checkpoint.py:R5:CoalesceCheckpointState:__post_init__:fp=a493fc4608088337
+  owner: bugfix
+  reason: "Tier 1 write-side validation \u2014 isinstance validates completed_keys elements are tuples at construction time"
+  safety: "Raises ValueError on invalid data \u2014 crashes loud, never masks"
+- key: contracts/coalesce_checkpoint.py:R5:CoalesceCheckpointState:__post_init__:fp=4d04de06e1549884
+  owner: bugfix
+  reason: "Tier 1 write-side validation \u2014 isinstance validates completed_keys elements contain strings"
+  safety: "Raises ValueError on invalid data \u2014 crashes loud, never masks"
+- key: contracts/coalesce_checkpoint.py:R5:CoalesceCheckpointState:from_dict:fp=8630d1b040fbe5ae
+  owner: bugfix
   reason: "Tier 1 deserialization \u2014 isinstance validates 'pending' is list in checkpoint JSON (our data)"
-  safety: "Raises ValueError on malformed checkpoint \u2014 crash on corruption per Tier 1 rules"
-- key: contracts/coalesce_checkpoint.py:R5:CoalesceCheckpointState:from_dict:fp=7b2311040ea40864
+  safety: "Raises AuditIntegrityError on malformed checkpoint \u2014 crash on corruption per Tier 1 rules"
+- key: contracts/coalesce_checkpoint.py:R5:CoalesceCheckpointState:from_dict:fp=10511ef4824998af
   owner: bugfix
   reason: "Tier 1 deserialization \u2014 isinstance validates 'completed_keys' is list in checkpoint JSON (our data)"
-  safety: "Raises ValueError on malformed checkpoint \u2014 crash on corruption per Tier 1 rules"
+  safety: "Raises AuditIntegrityError on malformed checkpoint \u2014 crash on corruption per Tier 1 rules"
+- key: contracts/coalesce_checkpoint.py:R5:CoalesceCheckpointState:from_dict:fp=a101594d72e56324
+  owner: bugfix
+  reason: "Tier 1 deserialization \u2014 isinstance validates completed_keys elements are 2-element [str, str]"
+  safety: "Raises AuditIntegrityError on corrupt element \u2014 crash on corruption per Tier 1 rules"
+- key: contracts/coalesce_checkpoint.py:R5:CoalesceCheckpointState:from_dict:fp=c719183533bfa33e
+  owner: bugfix
+  reason: "Tier 1 deserialization \u2014 isinstance validates completed_keys elements contain strings"
+  safety: "Raises AuditIntegrityError on corrupt element \u2014 crash on corruption per Tier 1 rules"
 - key: contracts/schema_contract_factory.py:R1:create_contract_from_config:fp=f930bf0f2eabedce
   owner: feature
   reason: Intentional identity fallback - fields without resolution mapping use normalized name as original name
@@ -349,31 +369,25 @@ allow_hits:
   safety: Construction-time type conversion, crashes on unexpected types
   expires: null
 
-- key: 'contracts/batch_checkpoint.py:R5:BatchCheckpointState:__post_init__:fp=898b8b5fefd7aae1'
+- key: 'contracts/batch_checkpoint.py:R5:BatchCheckpointState:__post_init__:fp=ba9f738a9c75b7ac'
   owner: architecture
   reason: Deep-freeze conversion guard — isinstance() checks for MappingProxyType/tuple wrapping, not defensive data access
   safety: Construction-time type conversion, crashes on unexpected types
   expires: null
 
-- key: 'contracts/batch_checkpoint.py:R5:BatchCheckpointState:__post_init__:fp=593c22c99a9d8bf7'
+- key: 'contracts/batch_checkpoint.py:R5:BatchCheckpointState:__post_init__:fp=863b775b7f445d2e'
   owner: architecture
   reason: Deep-freeze conversion guard — isinstance() checks for MappingProxyType/tuple wrapping, not defensive data access
   safety: Construction-time type conversion, crashes on unexpected types
   expires: null
 
-- key: 'contracts/batch_checkpoint.py:R5:BatchCheckpointState:__post_init__:fp=8c98c9d3d8f4da08'
+- key: 'contracts/batch_checkpoint.py:R5:BatchCheckpointState:__post_init__:fp=db7f595beeb807f7'
   owner: architecture
   reason: Deep-freeze conversion guard — isinstance() checks for MappingProxyType/tuple wrapping, not defensive data access
   safety: Construction-time type conversion, crashes on unexpected types
   expires: null
 
 - key: 'contracts/call_data.py:R5:RawCallPayload:__post_init__:fp=77141e12b9a5903a'
-  owner: architecture
-  reason: Deep-freeze conversion guard — isinstance() checks for MappingProxyType/tuple wrapping, not defensive data access
-  safety: Construction-time type conversion, crashes on unexpected types
-  expires: null
-
-- key: 'contracts/call_data.py:R5:LLMCallRequest:__post_init__:fp=b48d8aaf6925ceea'
   owner: architecture
   reason: Deep-freeze conversion guard — isinstance() checks for MappingProxyType/tuple wrapping, not defensive data access
   safety: Construction-time type conversion, crashes on unexpected types

@@ -15,6 +15,7 @@ from dataclasses import dataclass
 from types import MappingProxyType
 from typing import Any
 
+from elspeth.contracts.errors import AuditIntegrityError
 from elspeth.contracts.freeze import deep_freeze, deep_thaw
 
 
@@ -112,6 +113,18 @@ class BatchCheckpointState:
         structural anomaly — missing keys or wrong types indicate
         checkpoint corruption, not a data quality issue.
         """
+        required_fields = {
+            "batch_id",
+            "input_file_id",
+            "row_mapping",
+            "template_errors",
+            "submitted_at",
+            "row_count",
+            "requests",
+        }
+        missing = required_fields - set(data.keys())
+        if missing:
+            raise AuditIntegrityError(f"Corrupted batch checkpoint: missing required fields {missing}. Found: {set(data.keys())}")
         return cls(
             batch_id=data["batch_id"],
             input_file_id=data["input_file_id"],

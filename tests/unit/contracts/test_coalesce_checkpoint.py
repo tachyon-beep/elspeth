@@ -9,6 +9,7 @@ from __future__ import annotations
 import pytest
 
 from elspeth.contracts.coalesce_checkpoint import (
+    CoalesceCheckpointState,
     CoalescePendingCheckpoint,
     CoalesceTokenCheckpoint,
 )
@@ -204,3 +205,84 @@ class TestCoalescePendingCheckpointFromDict:
         )
         restored = CoalescePendingCheckpoint.from_dict(original.to_dict())
         assert restored == original
+
+
+class TestCoalesceCheckpointStatePostInit:
+    """__post_init__ validation for CoalesceCheckpointState."""
+
+    def test_valid_construction(self) -> None:
+        state = CoalesceCheckpointState(
+            version="1.0",
+            pending=(),
+            completed_keys=(("merge_1", "row-1"),),
+        )
+        assert state.version == "1.0"
+
+    def test_rejects_empty_version(self) -> None:
+        with pytest.raises(ValueError, match="version"):
+            CoalesceCheckpointState(version="", pending=(), completed_keys=())
+
+    def test_rejects_non_string_version(self) -> None:
+        with pytest.raises(ValueError, match="version"):
+            CoalesceCheckpointState(version=42, pending=(), completed_keys=())  # type: ignore[arg-type]
+
+    def test_rejects_wrong_length_completed_key(self) -> None:
+        with pytest.raises(ValueError, match="completed_keys"):
+            CoalesceCheckpointState(
+                version="1.0",
+                pending=(),
+                completed_keys=(("a", "b", "c"),),  # type: ignore[arg-type]
+            )
+
+    def test_rejects_non_string_completed_key_elements(self) -> None:
+        with pytest.raises(ValueError, match="completed_keys"):
+            CoalesceCheckpointState(
+                version="1.0",
+                pending=(),
+                completed_keys=((1, 2),),  # type: ignore[arg-type]
+            )
+
+
+class TestCoalesceCheckpointStateFromDict:
+    """from_dict validation for CoalesceCheckpointState."""
+
+    def test_roundtrip(self) -> None:
+        token = _valid_token()
+        pending = CoalescePendingCheckpoint(
+            coalesce_name="merge_1",
+            row_id="row-1",
+            elapsed_age_seconds=1.5,
+            branches={"path_a": token},
+            lost_branches={},
+        )
+        original = CoalesceCheckpointState(
+            version="1.0",
+            pending=(pending,),
+            completed_keys=(("merge_2", "row-2"),),
+        )
+        restored = CoalesceCheckpointState.from_dict(original.to_dict())
+        assert restored == original
+
+    def test_rejects_missing_version(self) -> None:
+        with pytest.raises(AuditIntegrityError, match="_version"):
+            CoalesceCheckpointState.from_dict({"pending": [], "completed_keys": []})
+
+    def test_rejects_corrupt_completed_key_wrong_length(self) -> None:
+        with pytest.raises(AuditIntegrityError, match="completed_keys"):
+            CoalesceCheckpointState.from_dict(
+                {
+                    "_version": "1.0",
+                    "pending": [],
+                    "completed_keys": [[1, 2, 3]],
+                }
+            )
+
+    def test_rejects_corrupt_completed_key_non_string(self) -> None:
+        with pytest.raises(AuditIntegrityError, match="completed_keys"):
+            CoalesceCheckpointState.from_dict(
+                {
+                    "_version": "1.0",
+                    "pending": [],
+                    "completed_keys": [[1, 2]],
+                }
+            )

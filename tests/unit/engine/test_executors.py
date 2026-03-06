@@ -3400,12 +3400,12 @@ class TestAggregationExecutorTerminality:
         # Buffers cleared for recovery
         assert executor.get_buffer_count(nid) == 0
 
-    def test_batch_complete_failure_still_clears_buffers(self) -> None:
-        """If complete_batch itself fails, buffers are still cleared.
+    def test_batch_complete_failure_raises_audit_integrity_error(self) -> None:
+        """If complete_batch itself fails, AuditIntegrityError crashes the run.
 
         Edge case: guard completes the node state, but complete_batch
-        raises (e.g., DB write failure). The outer except must still
-        clean up buffers so the executor isn't stuck.
+        raises (e.g., DB write failure). Leaving the batch in non-terminal
+        state would corrupt the audit trail, so we crash immediately.
         """
         executor, recorder, nid = self._make_agg_executor(count=1)
         contract = _make_contract()
@@ -3414,19 +3414,15 @@ class TestAggregationExecutorTerminality:
 
         transform = MagicMock()
         transform.name = "agg_transform"
-        # Transform crashes — inner except completes guard, then outer except cleans up
+        # Transform crashes — inner except completes guard, then outer except tries cleanup
         transform.process.side_effect = RuntimeError("plugin crash")
         ctx = make_context()
 
         # Make complete_batch fail (DB is down during cleanup)
         recorder.complete_batch.side_effect = RuntimeError("DB down")
 
-        with pytest.raises(RuntimeError, match="plugin crash"):
+        with pytest.raises(AuditIntegrityError, match="non-terminal state"):
             executor.execute_flush(nid, transform, ctx, TriggerType.COUNT)
-
-        # Despite complete_batch failing, buffers must be cleared
-        assert executor.get_buffer_count(nid) == 0
-        assert ctx.batch_token_ids is None
 
     def test_successful_flush_still_completes_normally(self) -> None:
         """Sanity: guard does not interfere with normal flush success path."""

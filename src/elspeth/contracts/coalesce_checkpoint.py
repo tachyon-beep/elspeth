@@ -188,6 +188,16 @@ class CoalesceCheckpointState:
     pending: tuple[CoalescePendingCheckpoint, ...]
     completed_keys: tuple[tuple[str, str], ...]
 
+    def __post_init__(self) -> None:
+        """Validate Tier 1 invariants at construction time."""
+        if not isinstance(self.version, str) or not self.version:
+            raise ValueError(f"version must be a non-empty string, got {type(self.version).__name__}: {self.version!r}")
+        object.__setattr__(self, "pending", tuple(self.pending))
+        object.__setattr__(self, "completed_keys", tuple(self.completed_keys))
+        for i, key in enumerate(self.completed_keys):
+            if not isinstance(key, tuple) or len(key) != 2 or not all(isinstance(s, str) for s in key):
+                raise ValueError(f"completed_keys[{i}] must be a 2-element (str, str) tuple, got {type(key).__name__}: {key!r}")
+
     def to_dict(self) -> dict[str, Any]:
         return {
             "_version": self.version,
@@ -211,6 +221,11 @@ class CoalesceCheckpointState:
         raw_keys = data["completed_keys"]
         if not isinstance(raw_keys, list):
             raise AuditIntegrityError(f"Corrupted coalesce checkpoint: 'completed_keys' must be a list, got {type(raw_keys).__name__}.")
+        for i, k in enumerate(raw_keys):
+            if not isinstance(k, (list, tuple)) or len(k) != 2 or not all(isinstance(s, str) for s in k):
+                raise AuditIntegrityError(
+                    f"Corrupted coalesce checkpoint: completed_keys[{i}] must be a 2-element [str, str], got {type(k).__name__}: {k!r}"
+                )
         completed_keys = tuple(tuple(k) for k in raw_keys)
 
         return cls(

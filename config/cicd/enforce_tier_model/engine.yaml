@@ -204,10 +204,6 @@ allow_hits:
   reason: Optional edge_id lookup - edge map may not have all node combinations during routing
   safety: Falls back to generating edge_id when not in prebuilt map
   expires: '2026-05-13'
-- key: engine/executors/aggregation.py:R4:AggregationExecutor:execute_flush:fp=35252b73de2fa183
-  owner: bugfix
-  reason: Outer exception handler ensures batch lifecycle cleanup; skips cleanup if batch already submitted (pending)
-  safety: Pending batches preserve state for retry; non-pending batches marked FAILED with buffers cleared; exception re-raised
 - key: engine/executors/transform.py:R5:TransformExecutor:execute_transform:fp=55a00fdf2de31201
   owner: architecture
   reason: isinstance() check required to find batch-aware transforms - protocol contract verification

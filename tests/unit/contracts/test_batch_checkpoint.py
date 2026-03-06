@@ -12,6 +12,7 @@ from __future__ import annotations
 import pytest
 
 from elspeth.contracts.batch_checkpoint import BatchCheckpointState, RowMappingEntry
+from elspeth.contracts.errors import AuditIntegrityError
 
 # ---------------------------------------------------------------------------
 # RowMappingEntry
@@ -115,37 +116,37 @@ class TestBatchCheckpointState:
     def test_from_dict_missing_batch_id_crashes(self) -> None:
         d = _make_state().to_dict()
         del d["batch_id"]
-        with pytest.raises(KeyError, match="batch_id"):
+        with pytest.raises(AuditIntegrityError, match="missing required fields"):
             BatchCheckpointState.from_dict(d)
 
     def test_from_dict_missing_input_file_id_crashes(self) -> None:
         d = _make_state().to_dict()
         del d["input_file_id"]
-        with pytest.raises(KeyError, match="input_file_id"):
+        with pytest.raises(AuditIntegrityError, match="missing required fields"):
             BatchCheckpointState.from_dict(d)
 
     def test_from_dict_missing_row_mapping_crashes(self) -> None:
         d = _make_state().to_dict()
         del d["row_mapping"]
-        with pytest.raises(KeyError, match="row_mapping"):
+        with pytest.raises(AuditIntegrityError, match="missing required fields"):
             BatchCheckpointState.from_dict(d)
 
     def test_from_dict_missing_submitted_at_crashes(self) -> None:
         d = _make_state().to_dict()
         del d["submitted_at"]
-        with pytest.raises(KeyError, match="submitted_at"):
+        with pytest.raises(AuditIntegrityError, match="missing required fields"):
             BatchCheckpointState.from_dict(d)
 
     def test_from_dict_missing_row_count_crashes(self) -> None:
         d = _make_state().to_dict()
         del d["row_count"]
-        with pytest.raises(KeyError, match="row_count"):
+        with pytest.raises(AuditIntegrityError, match="missing required fields"):
             BatchCheckpointState.from_dict(d)
 
     def test_from_dict_missing_requests_crashes(self) -> None:
         d = _make_state().to_dict()
         del d["requests"]
-        with pytest.raises(KeyError, match="requests"):
+        with pytest.raises(AuditIntegrityError, match="missing required fields"):
             BatchCheckpointState.from_dict(d)
 
     def test_from_dict_nested_row_mapping_entry_crashes_on_corruption(self) -> None:
