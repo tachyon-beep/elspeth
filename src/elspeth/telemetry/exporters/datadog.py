@@ -209,6 +209,8 @@ class DatadogExporter:
         except Exception as e:
             if isinstance(e, (FrameworkBugError, AuditIntegrityError)):
                 raise
+            if isinstance(e, (TypeError, AttributeError, KeyError, NameError)):
+                raise  # Programming errors must crash
             # Export MUST NOT raise - log and continue
             logger.warning(
                 "Failed to export telemetry event to Datadog",

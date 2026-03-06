@@ -185,7 +185,16 @@ class LandscapeJournal:
     @staticmethod
     def _serialize_record(record: JournalRecord) -> str:
         safe = serialize_datetime(record)
-        return json.dumps(safe, allow_nan=False)
+        try:
+            return json.dumps(safe, allow_nan=False)
+        except TypeError as exc:
+            from elspeth.contracts.errors import AuditIntegrityError
+
+            raise AuditIntegrityError(
+                f"Journal record failed to serialize — non-JSON-serializable type in "
+                f"SQL parameters (Tier 1 violation). Statement: "
+                f"{record['statement']!r}. Error: {exc}"
+            ) from exc
 
     @staticmethod
     def _normalize_parameters(parameters: Any) -> Any:

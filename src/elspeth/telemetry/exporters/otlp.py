@@ -254,6 +254,8 @@ class OTLPExporter:
         except Exception as e:
             if isinstance(e, (FrameworkBugError, AuditIntegrityError)):
                 raise
+            if isinstance(e, (TypeError, AttributeError, KeyError, NameError)):
+                raise  # Programming errors must crash
             # Export MUST NOT raise - log and continue
             logger.warning(
                 "Failed to buffer telemetry event",
@@ -290,6 +292,8 @@ class OTLPExporter:
         except Exception as e:
             if isinstance(e, (FrameworkBugError, AuditIntegrityError)):
                 raise
+            if isinstance(e, (TypeError, AttributeError, KeyError, NameError)):
+                raise  # Programming errors must crash
             logger.warning(
                 "Failed to export OTLP batch",
                 exporter=self._name,
@@ -370,6 +374,10 @@ class OTLPExporter:
         try:
             self._flush_batch()
         except Exception as e:
+            if isinstance(e, (FrameworkBugError, AuditIntegrityError)):
+                raise
+            if isinstance(e, (TypeError, AttributeError, KeyError, NameError)):
+                raise  # Programming errors must crash
             logger.warning(
                 "Failed to flush OTLP exporter",
                 exporter=self._name,
@@ -387,6 +395,10 @@ class OTLPExporter:
             try:
                 self._span_exporter.shutdown()
             except Exception as e:
+                if isinstance(e, (FrameworkBugError, AuditIntegrityError)):
+                    raise
+                if isinstance(e, (TypeError, AttributeError, KeyError, NameError)):
+                    raise  # Programming errors must crash
                 logger.warning(
                     "Failed to shutdown OTLP exporter",
                     exporter=self._name,

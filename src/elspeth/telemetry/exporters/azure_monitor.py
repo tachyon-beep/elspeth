@@ -230,6 +230,8 @@ class AzureMonitorExporter:
         except Exception as e:
             if isinstance(e, (FrameworkBugError, AuditIntegrityError)):
                 raise
+            if isinstance(e, (TypeError, AttributeError, KeyError, NameError)):
+                raise  # Programming errors must crash
             # Export MUST NOT raise - log and continue
             logger.warning(
                 "Failed to buffer telemetry event",
@@ -266,6 +268,8 @@ class AzureMonitorExporter:
         except Exception as e:
             if isinstance(e, (FrameworkBugError, AuditIntegrityError)):
                 raise
+            if isinstance(e, (TypeError, AttributeError, KeyError, NameError)):
+                raise  # Programming errors must crash
             logger.warning(
                 "Failed to export Azure Monitor batch",
                 exporter=self._name,
@@ -342,6 +346,10 @@ class AzureMonitorExporter:
         try:
             self._flush_batch()
         except Exception as e:
+            if isinstance(e, (FrameworkBugError, AuditIntegrityError)):
+                raise
+            if isinstance(e, (TypeError, AttributeError, KeyError, NameError)):
+                raise  # Programming errors must crash
             logger.warning(
                 "Failed to flush Azure Monitor exporter",
                 exporter=self._name,
@@ -360,6 +368,10 @@ class AzureMonitorExporter:
             try:
                 self._azure_exporter.shutdown()
             except Exception as e:
+                if isinstance(e, (FrameworkBugError, AuditIntegrityError)):
+                    raise
+                if isinstance(e, (TypeError, AttributeError, KeyError, NameError)):
+                    raise  # Programming errors must crash
                 logger.warning(
                     "Failed to shutdown Azure Monitor exporter",
                     exporter=self._name,

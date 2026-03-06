@@ -48,6 +48,8 @@ _REQUIRED_COLUMNS: tuple[tuple[str, str], ...] = (
     # Operation I/O hashes - survive payload purge for integrity verification
     ("operations", "input_data_hash"),
     ("operations", "output_data_hash"),
+    # Coalesce state for checkpoint recovery - serialized pending merge state
+    ("checkpoints", "coalesce_state_json"),
 )
 
 # Required foreign keys for audit integrity (Tier 1 trust).

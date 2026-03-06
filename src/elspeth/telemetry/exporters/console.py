@@ -136,6 +136,8 @@ class ConsoleExporter:
         except Exception as e:
             if isinstance(e, (FrameworkBugError, AuditIntegrityError)):
                 raise
+            if isinstance(e, (TypeError, AttributeError, KeyError, NameError)):
+                raise  # Programming errors must crash
             # Export MUST NOT raise - log and continue
             logger.warning(
                 "Failed to export telemetry event",
@@ -229,6 +231,10 @@ class ConsoleExporter:
         try:
             self._stream.flush()
         except Exception as e:
+            if isinstance(e, (FrameworkBugError, AuditIntegrityError)):
+                raise
+            if isinstance(e, (TypeError, AttributeError, KeyError, NameError)):
+                raise  # Programming errors must crash
             logger.warning(
                 "Failed to flush console stream",
                 exporter=self._name,
