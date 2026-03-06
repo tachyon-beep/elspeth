@@ -174,6 +174,24 @@ def process(self, row: PipelineRow, ctx: PluginContext) -> TransformResult:
 
 **Serialization does not change trust tier.** Data we wrote to our own database or checkpoint file is still Tier 1 when we read it back, even though it passes through `json.loads()` or SQLAlchemy deserialization. The trust boundary is about *who authored the data*, not the transport format. Checkpoints, audit records, and Landscape tables are all our data — we defined the schema, we wrote the values, we own the invariants. If a deserialized checkpoint is missing a `"tokens"` key or a `"row_id"` field, that is corruption in our system, not a data quality issue to handle gracefully. Crash immediately.
 
+### Pipeline Templates as Tier 2 Data
+
+Pipeline templates (Jinja2 prompt templates in YAML config) are **Tier 2 — user-provided, validated at load time, trusted during rendering**. This creates two distinct error categories:
+
+| Failure Type | When | Effect | Example |
+|-------------|------|--------|---------|
+| **Structural** (parse) | Init time | Stop run — no row will ever succeed | `{% if unclosed` (syntax error) |
+| **Operational** (render) | Per-row | Quarantine row, continue pipeline | `{{ row.missing_field }}` (undefined variable) |
+
+**Rules:**
+
+- Templates are parsed **once** at plugin construction (`__init__` / `__post_init__`), never re-parsed per-row
+- `TemplateSyntaxError` during parse → `TemplateError` propagates up → run fails at setup
+- `UndefinedError` / `SecurityError` during render → `TemplateError` caught by transform → `TransformResult.error()` → row quarantined
+- Per-query template overrides (multi-query LLM transforms) are pre-compiled in `MultiQueryStrategy.__post_init__`, not deferred to first row
+
+**Why this matters:** A broken template can never produce valid results for any row. Deferring the parse error to render time would misclassify a config error (structural) as a data error (operational), quarantining the first row instead of stopping the run. The operator would see "row 1 failed: template syntax error" instead of "pipeline config is invalid" — wasting their time investigating row data that was never the problem.
+
 ## Plugin Ownership: System Code, Not User Code
 
 All plugins (Sources, Transforms, Aggregations, Sinks) are **system-owned code**, not user-provided extensions. Gates are config-driven system operations, not plugins. ELSPETH uses `pluggy` for clean architecture, NOT to accept arbitrary user plugins. Plugins are developed, tested, and deployed as part of ELSPETH with the same rigor as engine code.

@@ -494,6 +494,51 @@ class TestTracerWiring:
 # ---------------------------------------------------------------------------
 
 
+class TestTemplateTierPolicy:
+    """Template trust tier: structural errors at init, operational errors per-row."""
+
+    def test_per_query_template_syntax_error_raises_at_construction(self) -> None:
+        """A syntactically invalid per-query template must fail at construction,
+        not be deferred to the first row (structural = Tier 2 init-time validation)."""
+        from elspeth.plugins.transforms.llm.templates import TemplateError
+        from elspeth.plugins.transforms.llm.transform import LLMTransform
+
+        config = _make_multi_query_config()
+        config["queries"]["quality"]["template"] = "{% if unclosed"
+
+        with pytest.raises(TemplateError, match="Invalid template syntax"):
+            LLMTransform(config)
+
+    def test_valid_per_query_template_override_compiles_at_init(self) -> None:
+        """Valid per-query templates are pre-compiled — no re-parsing at render time."""
+        from elspeth.plugins.transforms.llm.transform import LLMTransform
+
+        config = _make_multi_query_config()
+        config["queries"]["quality"]["template"] = "Custom: {{ row.text_content }}"
+        # Should construct without error
+        transform = LLMTransform(config)
+
+        # Strategy should have pre-compiled template
+        strategy = transform._strategy
+        assert hasattr(strategy, "_query_templates")
+        assert "quality" in strategy._query_templates
+
+    def test_render_undefined_variable_is_row_error_not_structural(self) -> None:
+        """A render-time UndefinedError must produce TransformResult.error,
+        not propagate as an exception (operational = per-row quarantine)."""
+        config = _make_config(
+            template="{{ row.nonexistent_field }}",
+            required_input_fields=[],
+        )
+        transform, _mock_provider = _make_transform_with_mock_provider(config)
+        row = _make_row({"text": "hello"})
+        ctx = _make_ctx()
+
+        result = transform._process_row(row, ctx)
+        assert result.status == "error"
+        assert result.reason["reason"] == "template_rendering_failed"
+
+
 class TestMultiQueryPartialFailure:
     """Verify multi-query atomicity — partial failure discards all results."""
 

@@ -18,7 +18,7 @@ from __future__ import annotations
 import json
 import time
 from collections.abc import Callable, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, Protocol, cast
 
 import structlog
@@ -359,10 +359,21 @@ class MultiQueryStrategy:
     max_tokens: int | None
     response_field: str
     executor: PooledExecutor | None = None
+    _query_templates: dict[str, PromptTemplate] = field(init=False, default_factory=dict)
 
     def __post_init__(self) -> None:
         if not isinstance(self.query_specs, tuple):
             object.__setattr__(self, "query_specs", tuple(self.query_specs))
+
+        # Pre-compile per-query template overrides — structural validation at
+        # init time.  Templates are Tier 2 data: validated once at load, trusted
+        # thereafter.  A TemplateSyntaxError here is a structural failure that
+        # propagates up through LLMTransform.__init__ and stops the run at setup.
+        query_templates: dict[str, PromptTemplate] = {}
+        for spec in self.query_specs:
+            if spec.template is not None:
+                query_templates[spec.name] = self.template.with_template_override(spec.template)
+        object.__setattr__(self, "_query_templates", query_templates)
 
     def execute(
         self,
@@ -418,10 +429,9 @@ class MultiQueryStrategy:
                 retryable=False,
             )
 
-        # Use per-query template if provided, else config-level template
-        query_template = self.template
-        if spec.template is not None:
-            query_template = self.template.with_template_override(spec.template)
+        # Use pre-compiled per-query template (already structurally validated
+        # in __post_init__), falling back to config-level template.
+        query_template = self._query_templates.get(spec.name, self.template)
 
         # Render template — use contract=None because template_ctx is a
         # synthetic dict (keys are template variable names from input_fields,
