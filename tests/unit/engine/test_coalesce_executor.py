@@ -17,7 +17,7 @@ import pytest
 
 from elspeth.contracts import TokenInfo
 from elspeth.contracts.enums import NodeStateStatus, RowOutcome
-from elspeth.contracts.errors import OrchestrationInvariantError
+from elspeth.contracts.errors import AuditIntegrityError, OrchestrationInvariantError
 from elspeth.contracts.schema_contract import PipelineRow, SchemaContract
 from elspeth.core.config import CoalesceSettings
 from elspeth.engine.clock import MockClock
@@ -1755,3 +1755,62 @@ class TestCheckpointCompletedKeys:
         }
         state = CoalesceCheckpointState.from_dict(wire)
         assert state.completed_keys == (("merge", "row_1"), ("merge", "row_2"))
+
+
+class TestRestoreFromCheckpoint:
+    """Tests for restore_from_checkpoint version and coalesce name validation."""
+
+    def test_rejects_incompatible_checkpoint_version(self):
+        """restore_from_checkpoint raises AuditIntegrityError on version mismatch."""
+        from elspeth.contracts.coalesce_checkpoint import CoalesceCheckpointState
+
+        executor, *_ = _make_executor()
+        executor.register_coalesce(_settings(name="merge"), "node_1")
+
+        state = CoalesceCheckpointState(
+            version="0.0-bogus",
+            pending=(),
+            completed_keys=(),
+        )
+        with pytest.raises(AuditIntegrityError, match="Incompatible coalesce checkpoint version"):
+            executor.restore_from_checkpoint(state)
+
+    def test_rejects_unknown_coalesce_name_in_pending(self):
+        """restore_from_checkpoint raises AuditIntegrityError for unregistered coalesce names."""
+        from elspeth.contracts.coalesce_checkpoint import (
+            CoalesceCheckpointState,
+            CoalescePendingCheckpoint,
+            CoalesceTokenCheckpoint,
+        )
+        from elspeth.engine.coalesce_executor import COALESCE_CHECKPOINT_VERSION
+
+        executor, *_ = _make_executor()
+        executor.register_coalesce(_settings(name="merge"), "node_1")
+
+        contract = _make_contract()
+        token_cp = CoalesceTokenCheckpoint(
+            token_id="tok_1",
+            row_id="row_1",
+            branch_name="a",
+            fork_group_id=None,
+            join_group_id=None,
+            expand_group_id=None,
+            row_data={"amount": 100},
+            contract=contract.to_checkpoint_format(),
+            state_id="state_001",
+            arrival_offset_seconds=0.5,
+        )
+        pending = CoalescePendingCheckpoint(
+            coalesce_name="nonexistent_merge",
+            row_id="row_1",
+            elapsed_age_seconds=1.0,
+            branches={"a": token_cp},
+            lost_branches={},
+        )
+        state = CoalesceCheckpointState(
+            version=COALESCE_CHECKPOINT_VERSION,
+            pending=(pending,),
+            completed_keys=(),
+        )
+        with pytest.raises(AuditIntegrityError, match="unknown coalesce 'nonexistent_merge'"):
+            executor.restore_from_checkpoint(state)
