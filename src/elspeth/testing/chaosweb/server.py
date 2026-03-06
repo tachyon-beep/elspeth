@@ -282,7 +282,7 @@ class ChaosWebServer:
         request_id = str(uuid.uuid4())
         start_time = time.monotonic()
         timestamp_utc = datetime.now(UTC).isoformat()
-        path = "/" + request.path_params.get("path", "")
+        path = "/" + request.path_params["path"]
 
         # Extract header overrides if allowed
         mode_override: str | None = None

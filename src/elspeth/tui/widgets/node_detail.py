@@ -182,13 +182,13 @@ class NodeDetailPanel:
             if not isinstance(error_json, str):
                 raise TypeError(
                     f"error_json must be str, got {type(error_json).__name__} - "
-                    f"audit integrity violation in state {self._state.get('state_id')}"
+                    f"audit integrity violation in state {self._state['state_id']}"
                 )
             error = json.loads(error_json)  # Let JSONDecodeError crash - it's our data
             if not isinstance(error, dict):
                 raise TypeError(
                     f"error_json must parse to dict, got {type(error).__name__} - "
-                    f"audit integrity violation in state {self._state.get('state_id')}"
+                    f"audit integrity violation in state {self._state['state_id']}"
                 )
 
             # Discriminated union: determine error variant by field presence
@@ -227,7 +227,7 @@ class NodeDetailPanel:
                 # Unknown error format - this is a bug in our recording code
                 raise ValueError(
                     f"error_json has unknown format (no 'type'+'exception' or 'reason') - "
-                    f"audit integrity violation in state {self._state.get('state_id')}: "
+                    f"audit integrity violation in state {self._state['state_id']}: "
                     f"keys={list(error.keys())}"
                 )
             lines.append("")
@@ -240,8 +240,7 @@ class NodeDetailPanel:
             # artifact MUST be a dict (schema contract)
             if not isinstance(artifact, dict):
                 raise TypeError(
-                    f"artifact must be dict, got {type(artifact).__name__} - "
-                    f"audit integrity violation in state {self._state.get('state_id')}"
+                    f"artifact must be dict, got {type(artifact).__name__} - audit integrity violation in state {self._state['state_id']}"
                 )
             # Validate and access fields directly (Tier 1 - crash on missing)
             validated_artifact = _validate_artifact(artifact)

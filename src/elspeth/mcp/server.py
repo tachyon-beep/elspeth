@@ -506,14 +506,7 @@ def create_server(database_url: str, *, passphrase: str | None = None) -> Server
         # serialization bugs, and analyzer bugs must propagate so they
         # surface as MCP protocol errors rather than silent "Error: ..."
         # text. Tier 1 audit data corruption must never be swallowed.
-        defn = _TOOLS.get(name)
-        if defn is None:
-            # _validate_tool_args already raises for unknown tools,
-            # but keep this branch for defense-in-depth.
-            return CallToolResult(
-                content=[TextContent(type="text", text=f"Unknown tool: {name}")],
-                isError=True,
-            )
+        defn = _TOOLS[name]  # Validated by _validate_tool_args above
 
         result = defn.handler(analyzer, args)
         return [TextContent(type="text", text=json.dumps(result, indent=2))]

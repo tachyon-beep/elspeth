@@ -252,8 +252,7 @@ def get_plugin_description(plugin_cls: type) -> str:
                 return cleaned
 
     # Fallback to name-based description
-    name = getattr(plugin_cls, "name", plugin_cls.__name__)
-    return f"{name} plugin"
+    return f"{plugin_cls.name} plugin"  # type: ignore[attr-defined]  # validated by _discover_in_file
 
 
 def create_dynamic_hookimpl(

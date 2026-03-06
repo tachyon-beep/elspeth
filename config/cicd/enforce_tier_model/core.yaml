@@ -423,16 +423,6 @@ allow_hits:
   owner: bugfix
   reason: "Sentinel class definition in except ImportError \u2014 not a runtime error handler"
   safety: _get_client() raises ImportError before any Azure API call; sentinel class is never caught
-- key: core/rate_limit/limiter.py:R5:RateLimiter:acquire:fp=3074b50c6048f301
-  owner: bugfix
-  reason: "Tier-3 boundary \u2014 timeout parameter comes from user config, needs type validation"
-  safety: "Raises ValueError on invalid input \u2014 explicit failure, not masking"
-  expires: '2026-05-14'
-- key: core/rate_limit/limiter.py:R5:RateLimiter:acquire:fp=bb3b0ca920bf0717
-  owner: bugfix
-  reason: "Tier-3 boundary \u2014 timeout parameter comes from user config, needs type validation"
-  safety: "Raises ValueError on invalid input \u2014 explicit failure, not masking"
-  expires: '2026-05-14'
 - key: core/checkpoint/serialization.py:R5:CheckpointEncoder:default:fp=df102ea32f3cd996
   owner: architecture
   reason: "AST/type checking \u2014 isinstance for datetime in JSON encoder"

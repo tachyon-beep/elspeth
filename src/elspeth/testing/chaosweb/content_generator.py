@@ -368,7 +368,7 @@ class ContentGenerator:
         page = bank.next()
         return WebResponse(
             content=page["content"],
-            content_type=page.get("content_type", self._config.default_content_type),
+            content_type=page["content_type"],
         )
 
     def _get_preset_bank(self) -> PresetBank:

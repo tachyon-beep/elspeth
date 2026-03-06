@@ -186,11 +186,6 @@ allow_hits:
   reason: Tier 3 boundary - .get() on parsed JSONL object for optional url field
   safety: Missing url defaults to empty string - correct for optional preset metadata
   expires: '2026-05-13'
-- key: testing/chaosweb/content_generator.py:R1:ContentGenerator:_generate_preset_html:fp=7c41416fcf20581a
-  owner: architecture
-  reason: Tier 3 boundary - .get() on preset page dict for optional content_type override
-  safety: Falls back to config default_content_type - preset pages may omit content_type
-  expires: '2026-05-13'
 - key: testing/chaosweb/server.py:R1:ChaosWebServer:_redirect_hop_endpoint:fp=38b7f0f1049100bb
   owner: architecture
   reason: Tier 3 boundary - .get() on HTTP query params for redirect chain state (hop counter)
@@ -207,11 +202,6 @@ allow_hits:
   safety: Missing hop defaults to 1 (chain start) - correct for redirect loop protocol
   expires: '2026-05-06'
 - key: testing/chaosweb/server.py:R1:ChaosWebServer:_page_endpoint:fp=2c8b904b721920d5
-  owner: architecture
-  reason: Tier 3 boundary - .get() on Starlette path_params dict (HTTP request data)
-  safety: Missing path defaults to empty string - correct for catch-all route
-  expires: '2026-05-06'
-- key: testing/chaosweb/server.py:R1:ChaosWebServer:_page_endpoint:fp=9897a2d095835129
   owner: architecture
   reason: Tier 3 boundary - .get() on Starlette path_params dict (HTTP request data)
   safety: Missing path defaults to empty string - correct for catch-all route

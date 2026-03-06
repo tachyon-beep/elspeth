@@ -99,11 +99,6 @@ allow_hits:
   reason: sys.modules.pop cleanup on import failure — module may not be registered yet
   safety: Legitimate cleanup pattern in error path
   expires: '2026-05-02'
-- key: plugins/infrastructure/discovery.py:R2:get_plugin_description:fp=99a65f8dff5befe4
-  owner: architecture
-  reason: getattr for optional attribute access
-  safety: Code reviewed - legitimate pattern
-  expires: '2026-05-02'
 - key: plugins/infrastructure/utils.py:R5:get_nested_field:fp=535546cd2f8310ed
   owner: architecture
   reason: AST/type checking - required for safe parsing or discriminated unions

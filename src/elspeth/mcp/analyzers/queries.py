@@ -359,7 +359,7 @@ def explain_token(
             "from_node": edge.from_node_id,
             "to_sink": edge.to_node_id,
             "edge_label": edge.label,
-            "reason_hash": divert_event.get("reason_hash"),
+            "reason_hash": divert_event["reason_hash"],
         }
     else:
         result_dict["divert_summary"] = None
