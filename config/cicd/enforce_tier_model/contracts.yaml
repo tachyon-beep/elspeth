@@ -438,7 +438,13 @@ allow_hits:
   safety: Type dispatch for immutability conversion, not defensive data access
   expires: null
 
-- key: 'contracts/freeze.py:R5:deep_freeze:fp=ba6f458f4b8820dd'
+- key: 'contracts/freeze.py:R5:deep_freeze:fp=9c4e61769f936322'
+  owner: architecture
+  reason: Recursive freeze utility — isinstance() dispatches on container type (dict/list/MappingProxyType/tuple/frozenset)
+  safety: Type dispatch for immutability conversion, not defensive data access
+  expires: null
+
+- key: 'contracts/freeze.py:R5:deep_freeze:fp=6ddfb615b2e0cb74'
   owner: architecture
   reason: Recursive freeze utility — isinstance() dispatches on container type (dict/list/MappingProxyType/tuple/frozenset)
   safety: Type dispatch for immutability conversion, not defensive data access

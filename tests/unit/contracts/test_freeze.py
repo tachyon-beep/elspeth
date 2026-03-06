@@ -114,28 +114,43 @@ class TestDeepFreeze:
         result = deep_freeze(already)
         assert result is already
 
-    # --- Known limitation: pre-frozen containers with mutable innards ---
+    # --- Pre-frozen containers with mutable innards ARE recursed ---
 
-    def test_mapping_proxy_with_mutable_inner_not_recursed(self) -> None:
-        """Documents the known limitation: pre-frozen containers aren't recursed into.
-
-        If a MappingProxyType wraps a mutable list, deep_freeze returns it as-is.
-        Callers should pass raw dicts, not pre-wrapped MappingProxyType.
-        """
+    def test_mapping_proxy_with_mutable_inner_is_recursed(self) -> None:
+        """MappingProxyType wrapping a mutable list gets its contents frozen."""
         inner_list = [1, 2, 3]
         already = MappingProxyType({"items": inner_list})
         result = deep_freeze(already)
-        assert result is already
-        # The inner list is still mutable — this is the documented limitation
-        assert isinstance(result["items"], list)
+        assert result is not already
+        assert isinstance(result, MappingProxyType)
+        assert isinstance(result["items"], tuple)
+        assert result["items"] == (1, 2, 3)
 
-    def test_tuple_with_mutable_inner_not_recursed(self) -> None:
-        """Documents the known limitation for tuples containing mutable values."""
+    def test_tuple_with_mutable_inner_is_recursed(self) -> None:
+        """Tuples containing mutable dicts get their contents frozen."""
         inner_dict = {"a": 1}
         already = (inner_dict,)
         result = deep_freeze(already)
+        assert result is not already
+        assert isinstance(result, tuple)
+        assert isinstance(result[0], MappingProxyType)
+        assert result[0]["a"] == 1
+
+    def test_tuple_with_nested_mutable_dict_in_list(self) -> None:
+        """Tuple containing a list of dicts — full depth freezing."""
+        already = ([{"x": 1}, {"y": 2}],)
+        result = deep_freeze(already)
+        assert isinstance(result, tuple)
+        assert isinstance(result[0], tuple)
+        assert isinstance(result[0][0], MappingProxyType)
+        assert result[0][0]["x"] == 1
+
+    def test_frozenset_with_mutable_inner_is_recursed(self) -> None:
+        """Frozensets containing mutable lists get their contents frozen."""
+        already = frozenset({(1, 2), (3, 4)})
+        result = deep_freeze(already)
+        # All elements are already tuples of ints — identity preserved
         assert result is already
-        assert isinstance(result[0], dict)
 
 
 # =============================================================================

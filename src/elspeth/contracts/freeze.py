@@ -5,8 +5,9 @@ Converts mutable containers to their immutable equivalents:
 - ``list`` → ``tuple``
 
 Already-frozen containers (``MappingProxyType``, ``tuple``, ``frozenset``)
-are returned as-is to avoid redundant wrapping on repeated calls (e.g.,
-when ``__post_init__`` is invoked on an already-constructed instance).
+are recursed into to freeze any mutable contents. When all children are
+already frozen, the original object is returned (identity-preserving
+idempotency for repeated ``__post_init__`` calls).
 
 This module is L0 (contracts layer) — no imports from core, engine, or plugins.
 """
@@ -43,11 +44,25 @@ def deep_freeze(value: Any) -> Any:
         return MappingProxyType({k: deep_freeze(v) for k, v in value.items()})
     if isinstance(value, list):
         return tuple(deep_freeze(item) for item in value)
-    # Already immutable containers — return as-is
+    # Already-immutable containers — recurse into contents, but return
+    # the original object when nothing changed (idempotency optimisation).
     if isinstance(value, MappingProxyType):
-        return value
-    if isinstance(value, (tuple, frozenset)):
-        return value
+        frozen_map = {k: deep_freeze(v) for k, v in value.items()}
+        if all(frozen_map[k] is value[k] for k in frozen_map):
+            return value
+        return MappingProxyType(frozen_map)
+    if isinstance(value, tuple):
+        frozen_tup = tuple(deep_freeze(item) for item in value)
+        if all(a is b for a, b in zip(frozen_tup, value, strict=True)):
+            return value
+        return frozen_tup
+    if isinstance(value, frozenset):
+        # frozenset elements are unordered; recurse but can only detect
+        # change by identity of the rebuilt set.
+        frozen_fs = frozenset(deep_freeze(item) for item in value)
+        if frozen_fs == value:
+            return value
+        return frozen_fs
     # Scalars and opaque objects (str, int, float, bool, None, enums, dataclasses)
     return value
 
