@@ -168,42 +168,42 @@ allow_hits:
   reason: Thread pool may be shut down concurrently; RuntimeError caught to complete buffer slot with error result
   safety: Buffer slot filled with deterministic error result; row gets proper error instead of silent drop
   expires: '2026-05-17'
-- key: plugins/infrastructure/batching/mixin.py:R4:BatchTransformMixin:_process_and_complete:fp=8ef6afe768bd66d9
+- key: plugins/infrastructure/batching/mixin.py:R4:BatchTransformMixin:_process_and_complete:fp=e245fc9102042b94
   owner: architecture
   reason: Broad exception handling at external boundary with logging
   safety: Code reviewed - legitimate pattern
   expires: '2026-05-02'
-- key: plugins/infrastructure/batching/mixin.py:R6:BatchTransformMixin:_process_and_complete:fp=49c75754c4f73537
+- key: plugins/infrastructure/batching/mixin.py:R7:BatchTransformMixin:_process_and_complete:fp=6c59d5d50d273150
   owner: architecture
-  reason: Explicit try/except KeyError for expected ticket eviction race
+  reason: contextlib.suppress(KeyError) for expected ticket eviction race
   safety: KeyError from timeout-evicted ticket is expected concurrency behavior
   expires: '2026-05-02'
-- key: plugins/infrastructure/batching/mixin.py:R6:BatchTransformMixin:_process_and_complete:fp=480b656948199019
+- key: plugins/infrastructure/batching/mixin.py:R7:BatchTransformMixin:_process_and_complete:fp=5055bdc91016808f
   owner: architecture
-  reason: Explicit try/except KeyError for expected ticket eviction race
+  reason: contextlib.suppress(KeyError) for expected ticket eviction race
   safety: KeyError from timeout-evicted ticket is expected concurrency behavior
   expires: '2026-05-02'
-- key: plugins/infrastructure/batching/mixin.py:R9:BatchTransformMixin:_release_loop:fp=1ef57501a8bd4ff3
+- key: plugins/infrastructure/batching/mixin.py:R9:BatchTransformMixin:_release_loop:fp=082f15e9cdc8cd64
   owner: architecture
   reason: Cleanup/pop with default - key may not exist in race or optional scenarios
   safety: Code reviewed - legitimate pattern
   expires: '2026-05-02'
-- key: plugins/infrastructure/batching/mixin.py:R6:BatchTransformMixin:_release_loop:fp=1354b5a5a2a3ca27
+- key: plugins/infrastructure/batching/mixin.py:R6:BatchTransformMixin:_release_loop:fp=e4d9d56404402b3d
   owner: architecture
   reason: Silent recovery with explicit error handling path
   safety: Code reviewed - legitimate pattern
   expires: '2026-05-02'
-- key: plugins/infrastructure/batching/mixin.py:R6:BatchTransformMixin:_release_loop:fp=c59b28f42a9b6dd3
+- key: plugins/infrastructure/batching/mixin.py:R6:BatchTransformMixin:_release_loop:fp=87f604a1cbe3da51
   owner: architecture
   reason: Silent recovery with explicit error handling path
   safety: Code reviewed - legitimate pattern
   expires: '2026-05-02'
-- key: plugins/infrastructure/batching/mixin.py:R4:BatchTransformMixin:_release_loop:fp=882b43b1e0bfbb95
+- key: plugins/infrastructure/batching/mixin.py:R4:BatchTransformMixin:_release_loop:fp=3258920cb588c2d4
   owner: architecture
   reason: Broad exception handling at external boundary with logging
   safety: Code reviewed - legitimate pattern
   expires: '2026-05-02'
-- key: plugins/infrastructure/batching/mixin.py:R9:BatchTransformMixin:evict_submission:fp=d039dd1054a21a93
+- key: plugins/infrastructure/batching/mixin.py:R9:BatchTransformMixin:evict_submission:fp=e6964d1e6e3b1f1e
   owner: architecture
   reason: Cleanup/pop with default - key may not exist in race or optional scenarios
   safety: Code reviewed - legitimate pattern

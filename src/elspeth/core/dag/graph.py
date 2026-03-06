@@ -845,26 +845,8 @@ class ExecutionGraph:
         """Get the route label for an edge from a node to a sink.
 
         Pure map lookup with "continue" fallback for indirect paths.
-
-        DESIGN DECISION (2026-03-05): This method is deliberately a pure lookup,
-        consistent with other map accessors (get_route_resolution_map,
-        get_terminal_sink_map, get_fork_to_sink_branches).  Gate→sink route-label
-        completeness is enforced at construction time by validate().  A missing
-        entry here means the node reaches the sink indirectly via continue edges
-        — a legitimate topology, not a bug.
-
-        We evaluated three alternatives:
-          1. Restore the runtime edge scan (pre-35a9caad) — rejected: O(E) per
-             call, duplicates validate() logic, wrong layer for enforcement.
-          2. Add a _validated flag guard — rejected: introduces lifecycle state
-             to a stateless-after-construction class where no other accessor has
-             preconditions.  Architectural weight for zero production callers.
-          3. Pure lookup (chosen) — consistent with accessor pattern, validate()
-             is always called in production paths (CLI run/resume/status).
-
-        Zero engine callers today — engine uses _route_resolution_map directly.
-        The Engine API extraction (elspeth-1119dc22ef) must call validate()
-        before using the graph, same as the CLI does.
+        Route-label completeness is enforced at construction time by validate();
+        a missing entry here means the node reaches the sink via continue edges.
 
         Args:
             from_node_id: The originating node ID

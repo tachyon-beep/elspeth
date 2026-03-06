@@ -10,6 +10,7 @@ to its output port. Could be a sink, could be another transform.
 
 from __future__ import annotations
 
+import contextlib
 import threading
 import traceback
 from collections.abc import Callable
@@ -260,19 +261,15 @@ class BatchTransformMixin:
             # KeyError means ticket was evicted due to timeout — discard late result.
             # This is expected when a waiter times out and retry proceeds
             # while the original worker was still processing.
-            try:  # noqa: SIM105
+            with contextlib.suppress(KeyError):
                 self._batch_buffer.complete(ticket, (token, exception_result, state_id))
-            except KeyError:
-                pass
             return
 
         # Mark complete — result will be released in FIFO order
         # Include state_id for retry-safe waiter matching
         # KeyError means ticket was evicted due to timeout — discard late result.
-        try:  # noqa: SIM105
+        with contextlib.suppress(KeyError):
             self._batch_buffer.complete(ticket, (token, result, state_id))
-        except KeyError:
-            pass
 
     def _release_loop(self) -> None:
         """Release thread: emit results in FIFO order to output port.
