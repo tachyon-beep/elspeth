@@ -180,6 +180,9 @@ class PluginConfigValidator:
         """
         cause = error.__cause__
 
+        if cause is None:
+            return [ValidationError(field="config", message=str(error), value=config)]
+
         if type(cause) is PydanticValidationError:
             return self._extract_errors(cause)
 
@@ -188,7 +191,7 @@ class PluginConfigValidator:
                 return [ValidationError(field="schema", message=str(cause), value=config["schema"])]
             return [ValidationError(field="config", message=str(cause), value=config)]
 
-        raise error
+        raise
 
     def validate_schema_config(
         self,

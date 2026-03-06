@@ -1906,7 +1906,25 @@ def resume(
                 typer.echo(f"Resume with: elspeth resume {e.run_id} --execute")
             raise typer.Exit(3)  # noqa: B904 -- distinct exit code: 0=success, 1=error, 3=interrupted
         except Exception as e:
-            typer.echo(f"Error during resume: {e}", err=True)
+            import traceback
+
+            if output_format == "json":
+                import json as json_mod_err
+
+                typer.echo(
+                    json_mod_err.dumps(
+                        {
+                            "event": "error",
+                            "error": str(e),
+                            "error_type": type(e).__name__,
+                            "traceback": traceback.format_exc(),
+                        }
+                    ),
+                    err=True,
+                )
+            else:
+                typer.echo(f"Error during resume: {e}", err=True)
+                typer.echo(traceback.format_exc(), err=True)
             raise typer.Exit(1) from None
 
         if output_format == "json":

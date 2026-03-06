@@ -6,6 +6,7 @@ Uses pluggy for hook-based plugin registration.
 from typing import Any
 
 import pluggy
+import structlog
 
 from elspeth.contracts import (
     SinkProtocol,
@@ -19,6 +20,8 @@ from elspeth.plugins.infrastructure.hookspecs import (
     ElspethTransformSpec,
 )
 from elspeth.plugins.infrastructure.validation import PluginConfigValidator
+
+_logger = structlog.get_logger(__name__)
 
 
 class PluginManager:
@@ -82,8 +85,13 @@ class PluginManager:
         except Exception:
             # Roll back registration on any failure (hook validation,
             # duplicate name, etc.) to keep pluggy state clean.
-            self._pm.unregister(plugin=plugin)
-            self._refresh_caches()
+            # Protect rollback so a secondary failure doesn't bury
+            # the original diagnostic via implicit exception chaining.
+            try:
+                self._pm.unregister(plugin=plugin)
+                self._refresh_caches()
+            except Exception as rollback_err:
+                _logger.error("plugin_rollback_failed", rollback_error=str(rollback_err))
             raise
 
     def _refresh_caches(self) -> None:

@@ -65,8 +65,7 @@ class PluginConfig(BaseModel):
                 schema_dict = config_copy.pop("schema")
                 # Type guard: schema must be a dict (not None, string, list, etc.)
                 if not isinstance(schema_dict, dict):
-                    raise PluginConfigError(
-                        f"Invalid configuration for {cls.__name__}: "
+                    raise ValueError(
                         f"'schema' must be a dict, got {type(schema_dict).__name__}. "
                         f"Use 'schema: {{mode: observed}}' or provide explicit field definitions."
                     )

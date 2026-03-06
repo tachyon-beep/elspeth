@@ -1040,10 +1040,10 @@ class RowProcessor:
         if on_error != "discard":
             try:
                 error_edge_id = self._error_edge_ids[NodeID(transform.node_id)]
-            except KeyError:
+            except KeyError as key_err:
                 raise OrchestrationInvariantError(
                     f"Transform '{transform.node_id}' has on_error={on_error!r} but no DIVERT edge registered."
-                ) from exc
+                ) from key_err
             if ctx.state_id is None:
                 raise OrchestrationInvariantError(
                     f"ctx.state_id must be set by TransformExecutor before exception propagated (transform={transform.node_id})"

@@ -120,7 +120,7 @@ class RowWaiter:
             # Check for wrapped exception from worker thread
             # Plugin bugs should crash - re-raise the original exception
             if isinstance(entry.result, ExceptionResult):
-                raise entry.result.exception from None
+                raise entry.result.exception
 
             # result is guaranteed non-None here: emit() sets it before signaling event
             if entry.result is None:
