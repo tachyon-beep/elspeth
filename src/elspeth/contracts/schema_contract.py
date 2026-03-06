@@ -744,24 +744,28 @@ class PipelineRow:
             Restored PipelineRow
 
         Raises:
-            KeyError: If checkpoint is missing required keys or contract version
-                not in registry. Error messages include available keys for debugging.
+            AuditIntegrityError: If checkpoint is missing required keys or contract
+                version not in registry (Tier 1 data corruption).
         """
         try:
             version = checkpoint_data["contract_version"]
         except KeyError as exc:
-            raise KeyError(
+            raise AuditIntegrityError(
                 f"Corrupt PipelineRow checkpoint: missing 'contract_version'. Available keys: {sorted(checkpoint_data.keys())}"
             ) from exc
 
         try:
             contract = contract_registry[version]
         except KeyError as exc:
-            raise KeyError(f"Contract version '{version}' not in registry. Available versions: {sorted(contract_registry.keys())}") from exc
+            raise AuditIntegrityError(
+                f"Contract version '{version}' not in registry. Available versions: {sorted(contract_registry.keys())}"
+            ) from exc
 
         try:
             data = checkpoint_data["data"]
         except KeyError as exc:
-            raise KeyError(f"Corrupt PipelineRow checkpoint: missing 'data'. Available keys: {sorted(checkpoint_data.keys())}") from exc
+            raise AuditIntegrityError(
+                f"Corrupt PipelineRow checkpoint: missing 'data'. Available keys: {sorted(checkpoint_data.keys())}"
+            ) from exc
 
         return cls(data=data, contract=contract)

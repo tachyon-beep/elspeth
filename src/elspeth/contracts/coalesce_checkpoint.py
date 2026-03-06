@@ -33,8 +33,12 @@ class CoalesceTokenCheckpoint:
 
     def __post_init__(self) -> None:
         """Validate Tier 1 invariants at construction time."""
-        for field_name in ("token_id", "row_id", "branch_name", "state_id"):
-            value = getattr(self, field_name)
+        for field_name, value in (
+            ("token_id", self.token_id),
+            ("row_id", self.row_id),
+            ("branch_name", self.branch_name),
+            ("state_id", self.state_id),
+        ):
             if not isinstance(value, str) or not value:
                 raise ValueError(f"{field_name} must be a non-empty string, got {type(value).__name__}: {value!r}")
         if not isinstance(self.row_data, (dict, MappingProxyType)):

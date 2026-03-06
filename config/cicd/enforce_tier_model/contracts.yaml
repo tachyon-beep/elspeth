@@ -168,7 +168,7 @@ allow_hits:
   owner: architecture
   reason: "Tier 3 boundary \u2014 ValueError/TypeError from stable_hash on non-canonical data falls back to repr_hash"
   safety: Warning logged; row_id still generated via repr_hash for audit trail continuity
-- key: contracts/routing.py:R5:RoutingAction:__post_init__:fp=ac069baef16ae596
+- key: contracts/routing.py:R5:RoutingAction:__post_init__:fp=666109d29a0837ac
   owner: bugfix
   reason: Dataclass invariant enforcement - RoutingAction requires RoutingMode enum, not raw strings
   safety: TypeError raised immediately on construction - explicit crash, not masking
@@ -200,7 +200,7 @@ allow_hits:
   owner: architecture
   reason: "Tier 3 boundary \u2014 from_dict() validates input is dict before accessing keys"
   safety: Non-dict input returns TokenUsage.unknown(); no crash
-- key: contracts/coalesce_checkpoint.py:R5:CoalesceTokenCheckpoint:__post_init__:fp=ddf1a54fbcb62ff8
+- key: contracts/coalesce_checkpoint.py:R5:CoalesceTokenCheckpoint:__post_init__:fp=5b656b3e78da0283
   owner: architecture
   reason: "Tier 1 write-side validation \u2014 isinstance in __post_init__ enforces invariants at construction time per offensive programming policy"
   safety: "Raises ValueError on invalid data \u2014 crashes loud, never masks"
@@ -456,9 +456,15 @@ allow_hits:
   safety: Type dispatch for immutability conversion, not defensive data access
   expires: null
 
-- key: 'contracts/freeze.py:R5:deep_freeze:fp=6ddfb615b2e0cb74'
+- key: 'contracts/freeze.py:R5:deep_freeze:fp=400c2fb8fed3fd55'
   owner: architecture
-  reason: Recursive freeze utility — isinstance() dispatches on container type (dict/list/MappingProxyType/tuple/frozenset)
+  reason: Recursive freeze utility — isinstance() dispatches on container type (dict/list/set/MappingProxyType/tuple/frozenset)
+  safety: Type dispatch for immutability conversion, not defensive data access
+  expires: null
+
+- key: 'contracts/freeze.py:R5:deep_freeze:fp=d3f5f1015f7335b7'
+  owner: architecture
+  reason: Recursive freeze utility — isinstance() dispatches on container type (dict/list/set/MappingProxyType/tuple/frozenset)
   safety: Type dispatch for immutability conversion, not defensive data access
   expires: null
 

@@ -3,32 +3,13 @@
 These types answer: "Where does data go next?"
 """
 
-import copy
 from dataclasses import dataclass
 from enum import StrEnum
 
 from elspeth.contracts.enums import RoutingKind, RoutingMode
 from elspeth.contracts.errors import RoutingReason
+from elspeth.contracts.freeze import deep_freeze
 from elspeth.contracts.types import NodeID, SinkName
-
-
-def _copy_reason(reason: RoutingReason | None) -> RoutingReason | None:
-    """Create defensive deep copy of routing reason.
-
-    Deep copy prevents mutation via retained references to
-    the original dict or nested objects. The frozen dataclass
-    ensures the reference itself cannot be reassigned.
-
-    Args:
-        reason: RoutingReason dict or None
-
-    Returns:
-        Deep copy of reason, or None if input is None
-    """
-    if reason is None:
-        return None
-    # Deep copy to prevent mutation of original or nested dicts
-    return copy.deepcopy(reason)
 
 
 @dataclass(frozen=True, slots=True)
@@ -87,9 +68,9 @@ class RoutingAction:
                 "COPY would require dual terminal states (ROUTED + COMPLETED)."
             )
 
-        # Deep copy reason to prevent mutation via retained references.
-        # This is the single point of defense — factory methods rely on __post_init__ for the copy.
-        object.__setattr__(self, "reason", _copy_reason(self.reason))
+        # Deep-freeze reason to prevent mutation via retained references.
+        if self.reason is not None:
+            object.__setattr__(self, "reason", deep_freeze(self.reason))
 
     @classmethod
     def continue_(cls, *, reason: RoutingReason | None = None) -> "RoutingAction":

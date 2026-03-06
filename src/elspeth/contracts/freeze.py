@@ -3,6 +3,7 @@
 Converts mutable containers to their immutable equivalents:
 - ``dict`` → ``MappingProxyType``
 - ``list`` → ``tuple``
+- ``set`` → ``frozenset``
 
 Already-frozen containers (``MappingProxyType``, ``tuple``, ``frozenset``)
 are recursed into to freeze any mutable contents. When all children are
@@ -56,6 +57,8 @@ def deep_freeze(value: Any) -> Any:
         if all(a is b for a, b in zip(frozen_tup, value, strict=True)):
             return value
         return frozen_tup
+    if isinstance(value, set):
+        return frozenset(deep_freeze(item) for item in value)
     if isinstance(value, frozenset):
         # frozenset elements are unordered; recurse but can only detect
         # change by identity of the rebuilt set.
