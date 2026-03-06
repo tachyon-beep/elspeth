@@ -649,7 +649,14 @@ class ExpressionParser:
             Result of expression evaluation (typically bool for gate conditions)
         """
         evaluator = _ExpressionEvaluator(row)
-        return evaluator.visit(self._ast)
+        try:
+            return evaluator.visit(self._ast)
+        except (ExpressionEvaluationError, ExpressionSecurityError):
+            raise
+        except Exception as exc:
+            raise ExpressionEvaluationError(
+                f"Unexpected error evaluating expression {self._expression!r}: {type(exc).__name__}: {exc}"
+            ) from exc
 
     def __repr__(self) -> str:
         return f"ExpressionParser({self._expression!r})"

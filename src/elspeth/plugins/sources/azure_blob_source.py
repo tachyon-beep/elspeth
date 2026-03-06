@@ -485,7 +485,25 @@ class AzureBlobSource(BaseSource):
         try:
             text_data = blob_data.decode(encoding)
         except UnicodeDecodeError as e:
-            raise ValueError(f"Failed to decode blob as {encoding}: {e}") from e
+            error_msg = f"Failed to decode CSV blob as {encoding}: {e}"
+            raw_row = {
+                "container": self._container,
+                "blob_path": self._blob_path,
+                "error": error_msg,
+            }
+            ctx.record_validation_error(
+                row=raw_row,
+                error=error_msg,
+                schema_mode="parse",
+                destination=self._on_validation_failure,
+            )
+            if self._on_validation_failure != "discard":
+                yield SourceRow.quarantined(
+                    row=raw_row,
+                    error=error_msg,
+                    destination=self._on_validation_failure,
+                )
+            return
 
         # Wrap pandas CSV parsing to quarantine on structural errors.
         # Even with pandas' robustness, severely malformed CSVs can cause parse failures.

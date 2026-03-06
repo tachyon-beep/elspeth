@@ -24,6 +24,7 @@ if TYPE_CHECKING:
 
 from elspeth.contracts.enums import RowOutcome
 from elspeth.contracts.errors import (
+    FrameworkBugError,
     OrchestrationInvariantError,
     PluginContractViolation,
     TransformErrorReason,
@@ -330,7 +331,10 @@ class GateResult:
         from elspeth.contracts.schema_contract import PipelineRow
 
         if self.contract is None:
-            raise ValueError("GateResult has no contract - cannot create PipelineRow")
+            raise FrameworkBugError(
+                "GateResult has no contract - cannot create PipelineRow. "
+                "The engine must set contract on GateResult before calling to_pipeline_row()."
+            )
         return PipelineRow(self.row, self.contract)
 
 

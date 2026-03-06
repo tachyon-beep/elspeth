@@ -19,6 +19,7 @@ import pytest
 
 from elspeth.contracts import PendingOutcome, RowOutcome, TokenInfo
 from elspeth.contracts.enums import BatchStatus, TriggerType
+from elspeth.contracts.errors import OrchestrationInvariantError
 from elspeth.contracts.types import NodeID
 from elspeth.engine.orchestrator.aggregation import (
     check_aggregation_timeouts,
@@ -122,7 +123,7 @@ class TestFindAggregationTransform:
         t = _make_batch_transform(node_id="agg-node-1", is_batch_aware=False)
         config = _make_config(transforms=[t])
 
-        with pytest.raises(RuntimeError, match="No batch-aware transform"):
+        with pytest.raises(OrchestrationInvariantError, match="No batch-aware transform"):
             find_aggregation_transform(config, "agg-node-1", "batch1")
 
     def test_wrong_node_id_skipped(self) -> None:
@@ -130,21 +131,21 @@ class TestFindAggregationTransform:
         t = _make_batch_transform(node_id="other-node")
         config = _make_config(transforms=[t])
 
-        with pytest.raises(RuntimeError, match="No batch-aware transform"):
+        with pytest.raises(OrchestrationInvariantError, match="No batch-aware transform"):
             find_aggregation_transform(config, "agg-node-1", "batch1")
 
     def test_no_transforms_raises(self) -> None:
         """Empty transforms list raises with helpful error."""
         config = _make_config(transforms=[])
 
-        with pytest.raises(RuntimeError, match="No batch-aware transform"):
+        with pytest.raises(OrchestrationInvariantError, match="No batch-aware transform"):
             find_aggregation_transform(config, "agg-node-1", "batch1")
 
     def test_error_includes_aggregation_name(self) -> None:
         """Error message includes the aggregation name for debugging."""
         config = _make_config(transforms=[])
 
-        with pytest.raises(RuntimeError, match="my_aggregation"):
+        with pytest.raises(OrchestrationInvariantError, match="my_aggregation"):
             find_aggregation_transform(config, "agg-node-1", "my_aggregation")
 
     def test_error_lists_available_transforms(self) -> None:
@@ -152,7 +153,7 @@ class TestFindAggregationTransform:
         t = _make_batch_transform(node_id="other")
         config = _make_config(transforms=[t])
 
-        with pytest.raises(RuntimeError, match="other"):
+        with pytest.raises(OrchestrationInvariantError, match="other"):
             find_aggregation_transform(config, "agg-node-1", "batch1")
 
     def test_first_matching_transform_returned(self) -> None:

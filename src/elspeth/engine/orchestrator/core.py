@@ -356,7 +356,7 @@ class Orchestrator:
             return
         if self._current_graph is None:
             # Should never happen - graph is set during execution
-            raise RuntimeError("Cannot create checkpoint: execution graph not available")
+            raise OrchestrationInvariantError("Cannot create checkpoint: execution graph not available")
 
         self._sequence_number += 1
 
@@ -409,7 +409,7 @@ class Orchestrator:
         if self._checkpoint_manager is None:
             return
         if self._current_graph is None:
-            raise RuntimeError("Cannot create shutdown checkpoint: execution graph not available")
+            raise OrchestrationInvariantError("Cannot create shutdown checkpoint: execution graph not available")
 
         aggregation_state = loop_ctx.processor.get_aggregation_checkpoint_state()
         raw_coalesce = loop_ctx.processor.get_coalesce_checkpoint_state()

@@ -175,7 +175,7 @@ allow_hits:
   reason: Framework boundary - Pydantic JSON schema anyOf entries may be $ref (no "type" key) or typed (has "type" key); .get()
     filters null vs non-null items
   safety: Non-null items fed to recursive resolver which crashes on unrecognized schemas
-- key: engine/orchestrator/aggregation.py:R5:find_aggregation_transform:fp=45500f6406b9e85f
+- key: engine/orchestrator/aggregation.py:R5:find_aggregation_transform:fp=2b88f63fcb0be4d6
   owner: architecture
   reason: isinstance() check required to find batch-aware transforms - protocol contract verification
   safety: Crashes on type mismatch - no silent fallback

@@ -657,8 +657,8 @@ class TestAzureBlobSourceErrors:
         with pytest.raises(Exception, match="Connection refused"):
             list(source.load(ctx))
 
-    def test_encoding_error_raises(self, mock_blob_client: MagicMock, ctx: PluginContext) -> None:
-        """Invalid encoding raises ValueError."""
+    def test_encoding_error_quarantines(self, mock_blob_client: MagicMock, ctx: PluginContext) -> None:
+        """Invalid encoding quarantines instead of crashing (Tier 3 boundary)."""
         # Invalid UTF-8 bytes
         bad_data = b"\xff\xfe"
         mock_client = MagicMock()
@@ -666,8 +666,10 @@ class TestAzureBlobSourceErrors:
         mock_blob_client.return_value = mock_client
 
         source = AzureBlobSource(make_config())
-        with pytest.raises(ValueError, match="Failed to decode"):
-            list(source.load(ctx))
+        rows = list(source.load(ctx))
+        assert len(rows) == 1
+        assert rows[0].is_quarantined
+        assert "Failed to decode" in rows[0].quarantine_error
 
     def test_csv_parse_error_quarantines(self, mock_blob_client: MagicMock, ctx: PluginContext) -> None:
         """BUG-BLOB-01: CSV parse errors quarantine instead of crashing."""

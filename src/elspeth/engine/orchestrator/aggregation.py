@@ -16,6 +16,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 from elspeth.contracts.enums import TriggerType
+from elspeth.contracts.errors import OrchestrationInvariantError
 from elspeth.contracts.types import NodeID
 from elspeth.engine.orchestrator.outcomes import accumulate_row_outcomes
 from elspeth.engine.orchestrator.types import (
@@ -61,7 +62,7 @@ def find_aggregation_transform(
             break
 
     if agg_transform is None:
-        raise RuntimeError(
+        raise OrchestrationInvariantError(
             f"No batch-aware transform found for aggregation '{agg_name}' "
             f"(node_id={agg_node_id_str}). This indicates a bug in graph construction "
             f"or pipeline configuration. "
@@ -195,7 +196,7 @@ def check_aggregation_timeouts(
         # These tokens need to continue through the pipeline
         for work_item in work_items:
             if work_item.current_node_id is None:
-                raise RuntimeError("Aggregation continuation work item missing current_node_id")
+                raise OrchestrationInvariantError("Aggregation continuation work item missing current_node_id")
             downstream_results = processor.process_token(
                 token=work_item.token,
                 ctx=ctx,
@@ -283,7 +284,7 @@ def flush_remaining_aggregation_buffers(
         # These tokens need to continue through the pipeline
         for work_item in work_items:
             if work_item.current_node_id is None:
-                raise RuntimeError("Aggregation continuation work item missing current_node_id")
+                raise OrchestrationInvariantError("Aggregation continuation work item missing current_node_id")
             downstream_results = processor.process_token(
                 token=work_item.token,
                 ctx=ctx,

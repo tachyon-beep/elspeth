@@ -322,7 +322,7 @@ class ContentGenerator:
                 query_params={},
             )
         except jinja2.TemplateError as exc:
-            logger.warning(
+            logger.error(
                 "template_rendering_failed",
                 error=str(exc),
                 error_type=type(exc).__name__,
