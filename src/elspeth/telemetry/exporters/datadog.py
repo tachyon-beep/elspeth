@@ -333,6 +333,10 @@ class DatadogExporter:
             # ddtrace tracer has a flush method that sends pending spans
             self._tracer.flush()
         except Exception as e:
+            if isinstance(e, (FrameworkBugError, AuditIntegrityError)):
+                raise
+            if isinstance(e, (TypeError, AttributeError, KeyError, NameError)):
+                raise  # Programming errors must crash
             logger.warning(
                 "Failed to flush Datadog exporter",
                 exporter=self._name,
@@ -352,6 +356,10 @@ class DatadogExporter:
                 # Shutdown the tracer
                 self._tracer.shutdown()
             except Exception as e:
+                if isinstance(e, (FrameworkBugError, AuditIntegrityError)):
+                    raise
+                if isinstance(e, (TypeError, AttributeError, KeyError, NameError)):
+                    raise  # Programming errors must crash
                 logger.warning(
                     "Failed to shutdown Datadog tracer",
                     exporter=self._name,

@@ -353,6 +353,8 @@ class AuditedLLMClient(AuditedClientBase):
             except (FrameworkBugError, AuditIntegrityError):
                 raise  # System bugs and audit integrity violations must crash
             except Exception as tel_err:
+                if isinstance(tel_err, (TypeError, AttributeError, KeyError, NameError)):
+                    raise  # Programming errors must crash
                 # Telemetry failure must not corrupt the error handling flow
                 logger.warning(
                     "telemetry_emit_failed",
@@ -488,6 +490,8 @@ class AuditedLLMClient(AuditedClientBase):
         except (FrameworkBugError, AuditIntegrityError):
             raise  # System bugs and audit integrity violations must crash
         except Exception as tel_err:
+            if isinstance(tel_err, (TypeError, AttributeError, KeyError, NameError)):
+                raise  # Programming errors must crash
             # Telemetry failure must not corrupt the successful call
             # Landscape has the record - telemetry is operational visibility only
             logger.warning(

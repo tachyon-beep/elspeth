@@ -367,7 +367,7 @@ class PluginContext:
         except (FrameworkBugError, AuditIntegrityError):
             raise  # System bugs and audit integrity violations must crash
         except Exception as tel_err:
-            if isinstance(tel_err, (TypeError, AttributeError, NameError)):
+            if isinstance(tel_err, (TypeError, AttributeError, KeyError, NameError)):
                 raise
             # Telemetry failure must not corrupt the call recording
             logger.warning(

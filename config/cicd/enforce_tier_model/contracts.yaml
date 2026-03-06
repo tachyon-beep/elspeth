@@ -156,11 +156,10 @@ allow_hits:
   owner: architecture
   reason: "Tier 3 boundary \u2014 isinstance() validates usage is dict before TokenUsage.from_dict() coercion"
   safety: Type dispatch for external data validation, not masking bugs
-- key: contracts/plugin_context.py:R5:PluginContext:record_call:fp=b046ee9437e20990
-  owner: architecture
-  reason: "Tier 3 boundary \u2014 isinstance() validates telemetry emission result before audit call recording"
-  safety: Warning logged with error details; Landscape recording already succeeded; system errors propagate
-  expires: '2026-05-06'
+- key: contracts/plugin_context.py:R5:PluginContext:record_call:fp=c9b8a14511a7414a
+  owner: bugfix
+  reason: "Programming error re-raise guard — isinstance() detects TypeError/AttributeError/KeyError/NameError in telemetry code"
+  safety: "Re-raises immediately — crashes on bugs, only swallows runtime telemetry failures"
 - key: contracts/plugin_context.py:R5:PluginContext:record_validation_error:fp=b0865f689398f0a8
   owner: architecture
   reason: "Tier 3 boundary \u2014 isinstance() checks if external row data is dict before accessing 'id' key"

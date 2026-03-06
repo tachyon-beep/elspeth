@@ -258,16 +258,14 @@ allow_hits:
   reason: HTTP redirect Location header - external system boundary, header may be absent
   safety: Missing Location header breaks redirect loop naturally (no redirect target)
   expires: '2026-05-02'
-- key: plugins/infrastructure/clients/llm.py:R4:AuditedLLMClient:chat_completion:fp=c4b1960178361274
-  owner: architecture
-  reason: Telemetry emission failure - must not crash main LLM call flow
-  safety: Logged and continues - telemetry is non-critical to LLM processing
-  expires: '2026-05-02'
-- key: plugins/infrastructure/clients/llm.py:R4:AuditedLLMClient:chat_completion:fp=12ae7e0896433f5a
-  owner: architecture
-  reason: Telemetry emission failure - must not crash main LLM call flow
-  safety: Logged and continues - telemetry is non-critical to LLM processing
-  expires: '2026-05-06'
+- key: plugins/infrastructure/clients/llm.py:R5:AuditedLLMClient:chat_completion:fp=8b2ff0c136176a21
+  owner: bugfix
+  reason: "Programming error re-raise guard — isinstance() detects TypeError/AttributeError/KeyError/NameError in LLM telemetry code"
+  safety: "Re-raises immediately — crashes on bugs, only swallows runtime telemetry failures"
+- key: plugins/infrastructure/clients/llm.py:R5:AuditedLLMClient:chat_completion:fp=3b55736c2cbfaf13
+  owner: bugfix
+  reason: "Programming error re-raise guard — isinstance() detects TypeError/AttributeError/KeyError/NameError in LLM telemetry code"
+  safety: "Re-raises immediately — crashes on bugs, only swallows runtime telemetry failures"
 - key: 'plugins/infrastructure/clients/llm.py:R5:LLMResponse:__post_init__:fp=f9ac8421b167934a'
   owner: architecture
   reason: Deep-freeze conversion guard — isinstance() checks for MappingProxyType/tuple wrapping, not defensive data access
