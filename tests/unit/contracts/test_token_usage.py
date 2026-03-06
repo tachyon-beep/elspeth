@@ -31,6 +31,32 @@ class TestTokenUsageFactories:
         assert usage.prompt_tokens is None
         assert usage.completion_tokens is None
 
+    def test_known_rejects_negative_prompt_tokens(self) -> None:
+        """Negative token counts are physically impossible."""
+        import pytest
+
+        with pytest.raises(ValueError, match="prompt_tokens must be non-negative"):
+            TokenUsage.known(-1, 20)
+
+    def test_known_rejects_negative_completion_tokens(self) -> None:
+        import pytest
+
+        with pytest.raises(ValueError, match="completion_tokens must be non-negative"):
+            TokenUsage.known(10, -5)
+
+    def test_direct_construction_rejects_negative(self) -> None:
+        """Direct construction also validates (not just factories)."""
+        import pytest
+
+        with pytest.raises(ValueError, match="prompt_tokens must be non-negative"):
+            TokenUsage(prompt_tokens=-100, completion_tokens=None)
+
+    def test_zero_tokens_accepted(self) -> None:
+        """Zero is valid (cached responses may report 0 completion tokens)."""
+        usage = TokenUsage.known(0, 0)
+        assert usage.prompt_tokens == 0
+        assert usage.completion_tokens == 0
+
 
 class TestTokenUsageProperties:
     """Tests for total_tokens and is_known derived properties."""

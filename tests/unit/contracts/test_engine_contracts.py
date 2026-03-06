@@ -4,7 +4,8 @@ from dataclasses import FrozenInstanceError
 
 import pytest
 
-from elspeth.contracts.engine import BufferEntry
+from elspeth.contracts.engine import BufferEntry, PendingOutcome
+from elspeth.contracts.enums import RowOutcome
 
 
 class TestBufferEntry:
@@ -71,3 +72,31 @@ class TestBufferEntry:
             buffer_wait_ms=0.0,
         )
         assert str_entry.result == "hello"
+
+
+class TestPendingOutcomePostInit:
+    """Tests for PendingOutcome __post_init__ validation."""
+
+    def test_quarantined_requires_error_hash(self) -> None:
+        with pytest.raises(ValueError, match="QUARANTINED outcome must have error_hash"):
+            PendingOutcome(outcome=RowOutcome.QUARANTINED, error_hash=None)
+
+    def test_failed_requires_error_hash(self) -> None:
+        with pytest.raises(ValueError, match="FAILED outcome must have error_hash"):
+            PendingOutcome(outcome=RowOutcome.FAILED, error_hash=None)
+
+    def test_completed_rejects_error_hash(self) -> None:
+        with pytest.raises(ValueError, match="COMPLETED outcome must not have error_hash"):
+            PendingOutcome(outcome=RowOutcome.COMPLETED, error_hash="abc123")
+
+    def test_quarantined_with_error_hash_accepted(self) -> None:
+        po = PendingOutcome(outcome=RowOutcome.QUARANTINED, error_hash="abc123")
+        assert po.error_hash == "abc123"
+
+    def test_completed_without_error_hash_accepted(self) -> None:
+        po = PendingOutcome(outcome=RowOutcome.COMPLETED)
+        assert po.error_hash is None
+
+    def test_routed_without_error_hash_accepted(self) -> None:
+        po = PendingOutcome(outcome=RowOutcome.ROUTED)
+        assert po.error_hash is None

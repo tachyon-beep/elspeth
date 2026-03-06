@@ -30,6 +30,17 @@ class ExecutionError:
     traceback: str | None = None  # Optional full traceback
     phase: str | None = None  # Optional phase indicator (e.g., "flush" for sink flush errors)
 
+    def __post_init__(self) -> None:
+        """Validate that required error fields are non-empty.
+
+        These fields are recorded in the audit trail. Empty strings would
+        produce valid-looking but uninformative error records.
+        """
+        if not self.exception:
+            raise ValueError("ExecutionError.exception must not be empty")
+        if not self.exception_type:
+            raise ValueError("ExecutionError.exception_type must not be empty")
+
     def to_dict(self) -> dict[str, Any]:
         """Serialize to audit-trail dict.
 
@@ -62,6 +73,17 @@ class CoalesceFailureReason:
     merge_policy: str  # Merge policy in effect
     timeout_ms: int | None = None  # Timeout that triggered failure (if applicable)
     select_branch: str | None = None  # Target branch for select policy (if applicable)
+
+    def __post_init__(self) -> None:
+        """Validate coalesce failure record invariants."""
+        if not self.failure_reason:
+            raise ValueError("CoalesceFailureReason.failure_reason must not be empty")
+        if not self.merge_policy:
+            raise ValueError("CoalesceFailureReason.merge_policy must not be empty")
+        if not self.expected_branches:
+            raise ValueError("CoalesceFailureReason.expected_branches must not be empty")
+        if self.timeout_ms is not None and self.timeout_ms < 0:
+            raise ValueError(f"CoalesceFailureReason.timeout_ms must be non-negative, got {self.timeout_ms}")
 
     def to_dict(self) -> dict[str, Any]:
         """Serialize to audit-trail dict.

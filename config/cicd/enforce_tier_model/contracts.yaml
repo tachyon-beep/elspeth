@@ -173,31 +173,31 @@ allow_hits:
   owner: bugfix
   reason: Dataclass invariant enforcement - RoutingAction requires RoutingMode enum, not raw strings
   safety: TypeError raised immediately on construction - explicit crash, not masking
-- key: contracts/token_usage.py:R5:TokenUsage:from_dict:fp=c2f62fa75a0fb1ee
+- key: contracts/token_usage.py:R5:TokenUsage:from_dict:fp=7feac7c8365dce41
   owner: architecture
   reason: "Tier 3 boundary \u2014 from_dict() validates input is dict before accessing keys"
   safety: Non-dict input returns TokenUsage.unknown(); no crash
-- key: contracts/token_usage.py:R1:TokenUsage:from_dict:fp=7c36c15277f0a2d0
+- key: contracts/token_usage.py:R1:TokenUsage:from_dict:fp=051ec8fbd1b4cf14
   owner: architecture
   reason: "Tier 3 boundary \u2014 from_dict() uses .get() on external LLM API response dicts where keys may be absent"
   safety: Missing keys produce None (unknown); no fabrication
-- key: contracts/token_usage.py:R1:TokenUsage:from_dict:fp=1a6543451c5c8189
+- key: contracts/token_usage.py:R1:TokenUsage:from_dict:fp=1ac854c8ae46f64a
   owner: architecture
   reason: "Tier 3 boundary \u2014 from_dict() uses .get() on external LLM API response dicts where keys may be absent"
   safety: Missing keys produce None (unknown); no fabrication
-- key: contracts/token_usage.py:R5:TokenUsage:from_dict:fp=c6c6e03eef94a554
+- key: contracts/token_usage.py:R5:TokenUsage:from_dict:fp=77ac52d58fb00db5
   owner: architecture
   reason: "Tier 3 boundary \u2014 from_dict() validates input is dict before accessing keys"
   safety: Non-dict input returns TokenUsage.unknown(); no crash
-- key: contracts/token_usage.py:R5:TokenUsage:from_dict:fp=801d51b26b2a2afc
+- key: contracts/token_usage.py:R5:TokenUsage:from_dict:fp=9e8af943b1598e60
   owner: architecture
   reason: "Tier 3 boundary \u2014 from_dict() validates input is dict before accessing keys"
   safety: Non-dict input returns TokenUsage.unknown(); no crash
-- key: contracts/token_usage.py:R5:TokenUsage:from_dict:fp=caded4e04ffc9203
+- key: contracts/token_usage.py:R5:TokenUsage:from_dict:fp=a0da1057b5a69a46
   owner: architecture
   reason: "Tier 3 boundary \u2014 from_dict() validates input is dict before accessing keys"
   safety: Non-dict input returns TokenUsage.unknown(); no crash
-- key: contracts/token_usage.py:R5:TokenUsage:from_dict:fp=f0bb5a15d5a16741
+- key: contracts/token_usage.py:R5:TokenUsage:from_dict:fp=a87ba79a0294e041
   owner: architecture
   reason: "Tier 3 boundary \u2014 from_dict() validates input is dict before accessing keys"
   safety: Non-dict input returns TokenUsage.unknown(); no crash

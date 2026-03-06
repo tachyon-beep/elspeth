@@ -87,10 +87,9 @@ class RoutingAction:
                 "COPY would require dual terminal states (ROUTED + COMPLETED)."
             )
 
-        # NOTE: reason is a mutable dict. _copy_reason() deep-copies at construction
-        # time to prevent external callers from affecting the stored value. Full
-        # immutability via MappingProxyType was attempted but breaks JSON serialization
-        # (audit trail). The deep copy + frozen dataclass provide sufficient protection.
+        # Deep copy reason to prevent mutation via retained references.
+        # Factory methods already do this, but direct construction bypasses them.
+        object.__setattr__(self, "reason", _copy_reason(self.reason))
 
     @classmethod
     def continue_(cls, *, reason: RoutingReason | None = None) -> "RoutingAction":
@@ -99,7 +98,7 @@ class RoutingAction:
             kind=RoutingKind.CONTINUE,
             destinations=(),
             mode=RoutingMode.MOVE,  # Default for continue
-            reason=_copy_reason(reason),
+            reason=reason,  # __post_init__ handles defensive copy
         )
 
     @classmethod
@@ -128,7 +127,7 @@ class RoutingAction:
             kind=RoutingKind.ROUTE,
             destinations=(label,),
             mode=mode,
-            reason=_copy_reason(reason),
+            reason=reason,  # __post_init__ handles defensive copy
         )
 
     @classmethod
@@ -152,7 +151,7 @@ class RoutingAction:
             kind=RoutingKind.FORK_TO_PATHS,
             destinations=tuple(paths),
             mode=RoutingMode.COPY,  # Fork always copies
-            reason=_copy_reason(reason),
+            reason=reason,  # __post_init__ handles defensive copy
         )
 
 
@@ -220,6 +219,11 @@ class RoutingSpec:
     edge_id: str
     mode: RoutingMode
 
+    def __post_init__(self) -> None:
+        """Validate routing spec invariants."""
+        if not self.edge_id:
+            raise ValueError("RoutingSpec.edge_id must not be empty")
+
 
 @dataclass(frozen=True, slots=True)
 class EdgeInfo:
@@ -233,3 +237,10 @@ class EdgeInfo:
     to_node: NodeID
     label: str
     mode: RoutingMode
+
+    def __post_init__(self) -> None:
+        """Validate edge info invariants."""
+        if not self.from_node:
+            raise ValueError("EdgeInfo.from_node must not be empty")
+        if not self.to_node:
+            raise ValueError("EdgeInfo.to_node must not be empty")

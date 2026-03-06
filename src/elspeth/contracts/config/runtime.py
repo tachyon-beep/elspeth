@@ -293,6 +293,11 @@ class RuntimeServiceRateLimit:
 
     requests_per_minute: int
 
+    def __post_init__(self) -> None:
+        """Validate rate limit is positive."""
+        if self.requests_per_minute < 1:
+            raise ValueError(f"requests_per_minute must be >= 1, got {self.requests_per_minute}")
+
 
 @dataclass(frozen=True, slots=True)
 class RuntimeRateLimitConfig:
@@ -320,6 +325,13 @@ class RuntimeRateLimitConfig:
     default_requests_per_minute: int
     persistence_path: str | None
     services: Mapping[str, RuntimeServiceRateLimit]
+
+    def __post_init__(self) -> None:
+        """Validate rate limit config and freeze mutable services mapping."""
+        if self.default_requests_per_minute < 1:
+            raise ValueError(f"default_requests_per_minute must be >= 1, got {self.default_requests_per_minute}")
+        # Freeze services mapping to prevent external mutation
+        object.__setattr__(self, "services", MappingProxyType(dict(self.services)))
 
     def get_service_config(self, service_name: str) -> RuntimeServiceRateLimit:
         """Get rate limit config for a service, with fallback to defaults.
@@ -578,6 +590,11 @@ class RuntimeTelemetryConfig:
     fail_on_total_exporter_failure: bool
     max_consecutive_failures: int
     exporter_configs: tuple[ExporterConfig, ...]
+
+    def __post_init__(self) -> None:
+        """Validate telemetry config invariants."""
+        if self.max_consecutive_failures < 1:
+            raise ValueError(f"max_consecutive_failures must be >= 1, got {self.max_consecutive_failures}")
 
     @classmethod
     def default(cls) -> "RuntimeTelemetryConfig":

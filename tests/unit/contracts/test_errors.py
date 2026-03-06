@@ -617,9 +617,80 @@ class TestCoalesceFailureReasonSchema:
 
         error = CoalesceFailureReason(
             failure_reason="late_arrival_after_merge",
-            expected_branches=["a", "b"],
-            branches_arrived=[],
+            expected_branches=("a", "b"),
+            branches_arrived=(),
             merge_policy="union",
         )
-        assert error.branches_arrived == []
-        assert error.to_dict()["branches_arrived"] == []
+        assert error.branches_arrived == ()
+        assert error.to_dict()["branches_arrived"] == ()
+
+
+class TestExecutionErrorPostInit:
+    """Tests for ExecutionError __post_init__ validation."""
+
+    def test_rejects_empty_exception(self) -> None:
+        from elspeth.contracts import ExecutionError
+
+        with pytest.raises(ValueError, match="exception must not be empty"):
+            ExecutionError(exception="", exception_type="ValueError")
+
+    def test_rejects_empty_exception_type(self) -> None:
+        from elspeth.contracts import ExecutionError
+
+        with pytest.raises(ValueError, match="exception_type must not be empty"):
+            ExecutionError(exception="boom", exception_type="")
+
+    def test_accepts_valid_construction(self) -> None:
+        from elspeth.contracts import ExecutionError
+
+        error = ExecutionError(exception="boom", exception_type="RuntimeError")
+        assert error.exception == "boom"
+
+
+class TestCoalesceFailureReasonPostInit:
+    """Tests for CoalesceFailureReason __post_init__ validation."""
+
+    def test_rejects_empty_failure_reason(self) -> None:
+        from elspeth.contracts import CoalesceFailureReason
+
+        with pytest.raises(ValueError, match="failure_reason must not be empty"):
+            CoalesceFailureReason(
+                failure_reason="",
+                expected_branches=("a",),
+                branches_arrived=(),
+                merge_policy="union",
+            )
+
+    def test_rejects_empty_merge_policy(self) -> None:
+        from elspeth.contracts import CoalesceFailureReason
+
+        with pytest.raises(ValueError, match="merge_policy must not be empty"):
+            CoalesceFailureReason(
+                failure_reason="quorum_not_met",
+                expected_branches=("a",),
+                branches_arrived=(),
+                merge_policy="",
+            )
+
+    def test_rejects_empty_expected_branches(self) -> None:
+        from elspeth.contracts import CoalesceFailureReason
+
+        with pytest.raises(ValueError, match="expected_branches must not be empty"):
+            CoalesceFailureReason(
+                failure_reason="quorum_not_met",
+                expected_branches=(),
+                branches_arrived=(),
+                merge_policy="union",
+            )
+
+    def test_rejects_negative_timeout_ms(self) -> None:
+        from elspeth.contracts import CoalesceFailureReason
+
+        with pytest.raises(ValueError, match="timeout_ms must be non-negative"):
+            CoalesceFailureReason(
+                failure_reason="timeout",
+                expected_branches=("a",),
+                branches_arrived=(),
+                merge_policy="union",
+                timeout_ms=-1,
+            )

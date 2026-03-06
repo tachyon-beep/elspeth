@@ -36,6 +36,18 @@ class TokenUsage:
     prompt_tokens: int | None = None
     completion_tokens: int | None = None
 
+    def __post_init__(self) -> None:
+        """Validate token counts are non-negative when known.
+
+        Negative token counts are physically impossible and indicate
+        either an API bug or data corruption. Zero is acceptable
+        (e.g., cached responses with 0 completion tokens).
+        """
+        if self.prompt_tokens is not None and self.prompt_tokens < 0:
+            raise ValueError(f"prompt_tokens must be non-negative, got {self.prompt_tokens}")
+        if self.completion_tokens is not None and self.completion_tokens < 0:
+            raise ValueError(f"completion_tokens must be non-negative, got {self.completion_tokens}")
+
     # ------------------------------------------------------------------
     # Derived properties
     # ------------------------------------------------------------------

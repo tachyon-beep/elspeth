@@ -105,3 +105,53 @@ class TestRuntimeRateLimitConvenienceFactories:
         assert config.default_requests_per_minute == 60
         assert config.persistence_path is None
         assert config.services == {}
+
+
+class TestRuntimeRateLimitPostInit:
+    """Tests for RuntimeServiceRateLimit and RuntimeRateLimitConfig __post_init__."""
+
+    def test_service_rate_limit_rejects_zero(self) -> None:
+        import pytest
+
+        from elspeth.contracts.config.runtime import RuntimeServiceRateLimit
+
+        with pytest.raises(ValueError, match="requests_per_minute must be >= 1"):
+            RuntimeServiceRateLimit(requests_per_minute=0)
+
+    def test_service_rate_limit_rejects_negative(self) -> None:
+        import pytest
+
+        from elspeth.contracts.config.runtime import RuntimeServiceRateLimit
+
+        with pytest.raises(ValueError, match="requests_per_minute must be >= 1"):
+            RuntimeServiceRateLimit(requests_per_minute=-5)
+
+    def test_config_rejects_zero_default_rpm(self) -> None:
+        from types import MappingProxyType
+
+        import pytest
+
+        from elspeth.contracts.config.runtime import RuntimeRateLimitConfig
+
+        with pytest.raises(ValueError, match="default_requests_per_minute must be >= 1"):
+            RuntimeRateLimitConfig(
+                enabled=True,
+                default_requests_per_minute=0,
+                persistence_path=None,
+                services=MappingProxyType({}),
+            )
+
+    def test_config_freezes_services_mapping(self) -> None:
+        """Direct construction should freeze the services mapping."""
+        from types import MappingProxyType
+
+        from elspeth.contracts.config.runtime import RuntimeRateLimitConfig, RuntimeServiceRateLimit
+
+        mutable_dict = {"svc": RuntimeServiceRateLimit(requests_per_minute=10)}
+        config = RuntimeRateLimitConfig(
+            enabled=True,
+            default_requests_per_minute=60,
+            persistence_path=None,
+            services=mutable_dict,
+        )
+        assert isinstance(config.services, MappingProxyType)

@@ -53,6 +53,19 @@ class PendingOutcome:
     outcome: RowOutcome
     error_hash: str | None = None
 
+    def __post_init__(self) -> None:
+        """Validate outcome/error_hash consistency.
+
+        QUARANTINED and FAILED outcomes MUST have an error_hash — the audit
+        trail needs to reference the error record. Other outcomes must NOT
+        have one (an error_hash on COMPLETED would be nonsensical).
+        """
+        _failure_outcomes = {RowOutcome.QUARANTINED, RowOutcome.FAILED}
+        if self.outcome in _failure_outcomes and self.error_hash is None:
+            raise ValueError(f"PendingOutcome with {self.outcome.name} outcome must have error_hash")
+        if self.outcome not in _failure_outcomes and self.error_hash is not None:
+            raise ValueError(f"PendingOutcome with {self.outcome.name} outcome must not have error_hash")
+
 
 class RetryPolicy(TypedDict, total=False):
     """Schema for retry configuration from plugin policies.

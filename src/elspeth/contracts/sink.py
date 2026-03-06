@@ -34,6 +34,11 @@ class OutputValidationResult:
     order_mismatch: bool = False
     error_message: str | None = None
 
+    def __post_init__(self) -> None:
+        """Validate consistency between valid flag and error_message."""
+        if not self.valid and not self.error_message:
+            raise ValueError("OutputValidationResult with valid=False must have error_message")
+
     @classmethod
     def success(cls, target_fields: list[str] | None = None) -> "OutputValidationResult":
         """Create a successful validation result.
