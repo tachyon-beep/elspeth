@@ -17,6 +17,7 @@ Trust-tier notes
 
 from __future__ import annotations
 
+import math
 from collections.abc import Mapping
 from dataclasses import dataclass
 from types import MappingProxyType
@@ -128,8 +129,6 @@ class AggregationNodeCheckpoint:
     contract: dict[str, Any]
 
     def __post_init__(self) -> None:
-        import math
-
         if not self.batch_id:
             raise ValueError("AggregationNodeCheckpoint.batch_id must not be empty")
         if self.elapsed_age_seconds < 0 or not math.isfinite(self.elapsed_age_seconds):

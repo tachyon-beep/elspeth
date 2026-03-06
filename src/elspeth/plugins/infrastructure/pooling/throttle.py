@@ -9,6 +9,7 @@ This prevents "riding the edge" where you're constantly hitting capacity limits.
 
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass
 from threading import Lock
 
@@ -40,8 +41,8 @@ class ThrottleConfig:
             raise ValueError(
                 f"ThrottleConfig.max_dispatch_delay_ms ({self.max_dispatch_delay_ms}) must be >= min_dispatch_delay_ms ({self.min_dispatch_delay_ms})"
             )
-        if self.backoff_multiplier <= 1.0:
-            raise ValueError(f"ThrottleConfig.backoff_multiplier must be > 1.0, got {self.backoff_multiplier}")
+        if not math.isfinite(self.backoff_multiplier) or self.backoff_multiplier <= 1.0:
+            raise ValueError(f"ThrottleConfig.backoff_multiplier must be > 1.0 and finite, got {self.backoff_multiplier}")
         if self.recovery_step_ms < 0:
             raise ValueError(f"ThrottleConfig.recovery_step_ms must be non-negative, got {self.recovery_step_ms}")
 

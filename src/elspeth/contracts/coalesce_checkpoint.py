@@ -6,6 +6,7 @@ can resume waiting joins without replaying upstream source rows.
 
 from __future__ import annotations
 
+import math
 from collections.abc import Mapping
 from dataclasses import dataclass
 from types import MappingProxyType
@@ -39,7 +40,11 @@ class CoalesceTokenCheckpoint:
             raise ValueError(f"row_data must be a dict, got {type(self.row_data).__name__}: {self.row_data!r}")
         if not isinstance(self.contract, dict):
             raise ValueError(f"contract must be a dict, got {type(self.contract).__name__}: {self.contract!r}")
-        if not isinstance(self.arrival_offset_seconds, (int, float)) or self.arrival_offset_seconds < 0:
+        if (
+            not isinstance(self.arrival_offset_seconds, (int, float))
+            or not math.isfinite(self.arrival_offset_seconds)
+            or self.arrival_offset_seconds < 0
+        ):
             raise ValueError(f"arrival_offset_seconds must be non-negative, got {self.arrival_offset_seconds!r}")
 
     def to_dict(self) -> dict[str, Any]:
@@ -103,7 +108,11 @@ class CoalescePendingCheckpoint:
             value = getattr(self, field_name)
             if not isinstance(value, str) or not value:
                 raise ValueError(f"{field_name} must be a non-empty string, got {type(value).__name__}: {value!r}")
-        if not isinstance(self.elapsed_age_seconds, (int, float)) or self.elapsed_age_seconds < 0:
+        if (
+            not isinstance(self.elapsed_age_seconds, (int, float))
+            or not math.isfinite(self.elapsed_age_seconds)
+            or self.elapsed_age_seconds < 0
+        ):
             raise ValueError(f"elapsed_age_seconds must be non-negative, got {self.elapsed_age_seconds!r}")
         if not isinstance(self.branches, MappingProxyType):
             object.__setattr__(self, "branches", MappingProxyType(self.branches))

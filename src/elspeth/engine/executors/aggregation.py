@@ -533,6 +533,8 @@ class AggregationExecutor:
                         )
                     except (FrameworkBugError, AuditIntegrityError):
                         raise  # System bugs and audit corruption must crash immediately
+                    except (TypeError, AttributeError, KeyError, NameError):
+                        raise  # Programming errors in recorder — crash to surface the bug
                     except Exception:
                         logger.error(
                             "Failed to mark batch %s as FAILED during error cleanup",

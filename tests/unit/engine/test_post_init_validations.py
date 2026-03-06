@@ -30,6 +30,23 @@ class TestFlushContextPostInit:
         """Create a mock AggregationSettings."""
         return MagicMock()
 
+    def test_rejects_empty_node_id(self) -> None:
+        from elspeth.engine.processor import _FlushContext
+
+        with pytest.raises(ValueError, match="node_id must not be empty"):
+            _FlushContext(
+                node_id="",
+                transform=self._make_transform(),
+                settings=self._make_settings(),
+                buffered_tokens=(self._make_token(),),
+                batch_id="b1",
+                error_msg="test",
+                expand_parent_token=self._make_token(),
+                triggering_token=None,
+                coalesce_node_id=None,
+                coalesce_name=None,
+            )
+
     def test_rejects_empty_buffered_tokens(self) -> None:
         from elspeth.engine.processor import _FlushContext
 

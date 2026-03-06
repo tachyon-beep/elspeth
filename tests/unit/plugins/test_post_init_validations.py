@@ -96,6 +96,18 @@ class TestThrottleConfigPostInit:
         with pytest.raises(ValueError, match="recovery_step_ms must be non-negative"):
             ThrottleConfig(recovery_step_ms=-1)
 
+    def test_rejects_nan_backoff_multiplier(self) -> None:
+        from elspeth.plugins.infrastructure.pooling.throttle import ThrottleConfig
+
+        with pytest.raises(ValueError, match=r"backoff_multiplier must be > 1\.0 and finite"):
+            ThrottleConfig(backoff_multiplier=float("nan"))
+
+    def test_rejects_inf_backoff_multiplier(self) -> None:
+        from elspeth.plugins.infrastructure.pooling.throttle import ThrottleConfig
+
+        with pytest.raises(ValueError, match=r"backoff_multiplier must be > 1\.0 and finite"):
+            ThrottleConfig(backoff_multiplier=float("inf"))
+
     def test_accepts_defaults(self) -> None:
         from elspeth.plugins.infrastructure.pooling.throttle import ThrottleConfig
 

@@ -604,6 +604,7 @@ class Orchestrator:
                 plugin=plugin_name,
                 error=str(error),
                 error_type=type(error).__name__,
+                exc_info=error,
             )
             cleanup_errors.append(f"{hook}({plugin_name}): {type(error).__name__}: {error}")
 
@@ -1758,7 +1759,14 @@ class Orchestrator:
         # to repr_hash for non-canonical data.
         try:
             quarantine_content_hash = stable_hash(source_item.row)
-        except (ValueError, TypeError):
+        except (ValueError, TypeError) as e:
+            import structlog
+
+            structlog.get_logger().debug(
+                "stable_hash_fallback_to_repr_hash",
+                error_type=type(e).__name__,
+                error=str(e),
+            )
             quarantine_content_hash = repr_hash(source_item.row)
         self._emit_telemetry(
             RowCreated(

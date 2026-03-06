@@ -63,7 +63,7 @@ class LineageTree:
         source_name = source["name"]
         source_node_id = source["node_id"]
         source_node = TreeNode(
-            label=f"Source: {source_name}",
+            label=f"Source: {source_name or '(unknown)'}",
             node_id=source_node_id,
             node_type="source",
         )

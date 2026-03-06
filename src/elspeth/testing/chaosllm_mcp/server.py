@@ -960,7 +960,7 @@ def create_server(database_path: str) -> Server:
 
             return [TextContent(type="text", text=json.dumps(result, indent=2))]
 
-        except Exception as e:
+        except (ValueError, KeyError, sqlite3.Error) as e:
             return [TextContent(type="text", text=f"Error: {e!s}")]
 
     return server

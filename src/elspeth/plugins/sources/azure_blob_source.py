@@ -417,6 +417,8 @@ class AzureBlobSource(BaseSource):
         except ImportError:
             # Re-raise ImportError as-is for clear dependency messaging
             raise
+        except (TypeError, AttributeError, KeyError, NameError):
+            raise  # Programming errors in our auth/client code — crash to surface the bug
         except Exception as e:
             latency_ms = (time.perf_counter() - start_time) * 1000
 
@@ -508,7 +510,7 @@ class AzureBlobSource(BaseSource):
                 keep_default_na=False,  # Don't convert empty strings to NaN
                 on_bad_lines="error",  # Quarantine parse failures; never silently drop malformed lines
             )
-        except Exception as e:
+        except (pd.errors.ParserError, pd.errors.EmptyDataError) as e:
             # Catastrophic CSV structure failure - entire file unparseable
             # This is rare with pandas but can happen with severely malformed files
             error_msg = f"CSV parse error: Unable to parse blob structure: {e}"

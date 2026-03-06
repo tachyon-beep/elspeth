@@ -17,7 +17,7 @@ allow_hits:
     \ raised afterward"
   safety: Logs failure but always raises OrchestrationInvariantError; audit state is preserved or crash occurs
   expires: null
-- key: engine/executors/state_guard.py:R4:NodeStateGuard:__exit__:fp=9f35e337183c14f8
+- key: engine/executors/state_guard.py:R4:NodeStateGuard:__exit__:fp=bd48ed04609f9dca
   owner: architecture
   reason: "Guard auto-completes node_state as FAILED on unhandled exception \u2014 structural audit integrity guarantee"
   safety: Wraps complete_node_state in try/except; logs failure but never masks original exception
@@ -165,10 +165,10 @@ allow_hits:
   reason: Tier 3 boundary - quarantine path handles non-dict source rows
   safety: Crashes on type mismatch - no silent fallback
   expires: '2026-05-13'
-- key: engine/orchestrator/core.py:R6:Orchestrator:_handle_quarantine_row:fp=c551d11eaba0ef1c
+- key: engine/orchestrator/core.py:R6:Orchestrator:_handle_quarantine_row:fp=cc9ed4fb9da66379
   owner: bugfix
   reason: "Tier-3 boundary \u2014 quarantined row data may contain NaN/Infinity that stable_hash rejects"
-  safety: Falls back to repr_hash for telemetry content_hash; audit trail uses separate hashing path
+  safety: Falls back to repr_hash with debug logging; audit trail uses separate hashing path
   expires: '2026-05-12'
 - key: engine/orchestrator/export.py:R1:_json_schema_to_python_type:fp=de64806bdb037416
   owner: bugfix
@@ -204,7 +204,7 @@ allow_hits:
   reason: Optional edge_id lookup - edge map may not have all node combinations during routing
   safety: Falls back to generating edge_id when not in prebuilt map
   expires: '2026-05-13'
-- key: engine/executors/aggregation.py:R4:AggregationExecutor:execute_flush:fp=76cfa9bac43a9cf4
+- key: engine/executors/aggregation.py:R4:AggregationExecutor:execute_flush:fp=35252b73de2fa183
   owner: bugfix
   reason: Outer exception handler ensures batch lifecycle cleanup; skips cleanup if batch already submitted (pending)
   safety: Pending batches preserve state for retry; non-pending batches marked FAILED with buffers cleared; exception re-raised

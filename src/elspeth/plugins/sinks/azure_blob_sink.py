@@ -285,6 +285,15 @@ class AzureBlobSink(BaseSink):
         self._format = cfg.format
         self._overwrite = cfg.overwrite
 
+        # Pre-compile blob path template at init — structural validation.
+        # A TemplateSyntaxError here is a config error that should stop the run
+        # at setup, not be deferred to the first write() call.
+        env = SandboxedEnvironment(undefined=StrictUndefined)
+        try:
+            self._blob_path_compiled = env.from_string(self._blob_path_template)
+        except Exception as e:
+            raise ValueError(f"Invalid blob_path template: {e}") from e
+
         # CSV options are already validated Pydantic model
         self._csv_options = cfg.csv_options
         self._display_headers = cfg.display_headers
@@ -356,11 +365,10 @@ class AzureBlobSink(BaseSink):
                 This is intentional fail-fast behavior to catch config typos
                 (e.g., {{ runid }} instead of {{ run_id }}).
         """
-        # Use StrictUndefined to fail fast on typos in blob_path template.
-        # A typo like {{ runid }} should error, not silently become empty.
-        env = SandboxedEnvironment(undefined=StrictUndefined)
-        template = env.from_string(self._blob_path_template)
-        return template.render(
+        # Use pre-compiled template (structurally validated in __init__).
+        # Render-time UndefinedError from typos like {{ runid }} still fails
+        # fast here — StrictUndefined was set at compile time.
+        return self._blob_path_compiled.render(
             run_id=ctx.run_id,
             timestamp=datetime.now(tz=UTC).isoformat(),
         )
@@ -630,6 +638,8 @@ class AzureBlobSink(BaseSink):
         except ImportError:
             # Re-raise ImportError as-is for clear dependency messaging
             raise
+        except (TypeError, AttributeError, KeyError, NameError):
+            raise  # Programming errors in our auth/client code — crash to surface the bug
         except Exception as e:
             latency_ms = (time.perf_counter() - start_time) * 1000
             error_data: dict[str, Any] = {"type": type(e).__name__, "message": str(e)}

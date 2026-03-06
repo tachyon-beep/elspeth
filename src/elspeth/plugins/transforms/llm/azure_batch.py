@@ -312,11 +312,13 @@ class AzureBatchLLMTransform(BaseTransform):
                 ) as inner_span:
                     inner_span.update(metadata=span_metadata)
 
+        except (TypeError, AttributeError, KeyError, NameError):
+            raise  # Programming errors in our Langfuse integration — crash to surface the bug
         except Exception as e:
             import structlog
 
             logger = structlog.get_logger(__name__)
-            logger.warning("Failed to record Langfuse batch job", error=str(e))
+            logger.warning("Failed to record Langfuse batch job", error=str(e), exc_info=True)
 
     def _get_client(self) -> Any:
         """Lazy-initialize Azure OpenAI client.
@@ -571,6 +573,8 @@ class AzureBatchLLMTransform(BaseTransform):
                 file=("batch_input.jsonl", file_bytes),
                 purpose="batch",
             )
+        except (TypeError, AttributeError, KeyError, NameError):
+            raise  # Programming errors in our request construction — crash to surface the bug
         except Exception as e:
             # External API failure — record and return structured error
             upload_latency = (time.perf_counter() - start) * 1000
@@ -616,6 +620,8 @@ class AzureBatchLLMTransform(BaseTransform):
                 endpoint="/chat/completions",
                 completion_window="24h",
             )
+        except (TypeError, AttributeError, KeyError, NameError):
+            raise  # Programming errors in our request construction — crash to surface the bug
         except Exception as e:
             # External API failure — record and return structured error
             batch_latency = (time.perf_counter() - start) * 1000
@@ -747,6 +753,8 @@ class AzureBatchLLMTransform(BaseTransform):
         start = time.perf_counter()
         try:
             batch = client.batches.retrieve(batch_id)
+        except (TypeError, AttributeError, KeyError, NameError):
+            raise  # Programming errors — crash to surface the bug
         except Exception as e:
             # External API failure — record and return structured error
             retrieve_latency = (time.perf_counter() - start) * 1000
@@ -940,6 +948,8 @@ class AzureBatchLLMTransform(BaseTransform):
         try:
             output_content = client.files.content(output_file_id)
             output_text = output_content.text
+        except (TypeError, AttributeError, KeyError, NameError):
+            raise  # Programming errors — crash to surface the bug
         except Exception as e:
             # External API failure — record and return structured error
             download_latency = (time.perf_counter() - start) * 1000
@@ -1000,6 +1010,8 @@ class AzureBatchLLMTransform(BaseTransform):
             try:
                 error_content = client.files.content(error_file_id)
                 error_text = error_content.text
+            except (TypeError, AttributeError, KeyError, NameError):
+                raise  # Programming errors — crash to surface the bug
             except Exception as e:
                 # Error file download failed — log but don't fail the batch
                 # The output file was already downloaded successfully

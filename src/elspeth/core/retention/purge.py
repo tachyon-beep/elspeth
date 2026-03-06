@@ -10,6 +10,7 @@ from datetime import UTC, datetime, timedelta
 from time import perf_counter
 from typing import TYPE_CHECKING
 
+import structlog
 from sqlalchemy import and_, or_, select, union
 
 from elspeth.contracts.payload_store import PayloadStore
@@ -44,6 +45,9 @@ class PurgeResult:
             raise ValueError(f"skipped_count must be non-negative, got {self.skipped_count}")
         if self.duration_seconds < 0:
             raise ValueError(f"duration_seconds must be non-negative, got {self.duration_seconds}")
+
+
+logger = structlog.get_logger()
 
 
 class PurgeManager:
@@ -408,16 +412,26 @@ class PurgeManager:
         for ref in refs:
             try:
                 exists = self._payload_store.exists(ref)
-            except OSError:
-                # I/O error checking existence - record as failure, continue with others
+            except OSError as e:
+                logger.warning(
+                    "payload_existence_check_failed",
+                    ref=ref,
+                    error_type=type(e).__name__,
+                    error=str(e),
+                )
                 failed_refs.append(ref)
                 continue
 
             if exists:
                 try:
                     deleted = self._payload_store.delete(ref)
-                except OSError:
-                    # I/O error during deletion - record as failure, continue with others
+                except OSError as e:
+                    logger.warning(
+                        "payload_deletion_failed",
+                        ref=ref,
+                        error_type=type(e).__name__,
+                        error=str(e),
+                    )
                     failed_refs.append(ref)
                     continue
 

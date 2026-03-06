@@ -74,6 +74,45 @@ class TestBufferEntry:
         assert str_entry.result == "hello"
 
 
+class TestBufferEntryPostInit:
+    """Tests for BufferEntry __post_init__ validation."""
+
+    def test_rejects_negative_submit_index(self) -> None:
+        with pytest.raises(ValueError, match="submit_index must be non-negative"):
+            BufferEntry(submit_index=-1, complete_index=0, result="x", submit_timestamp=0.0, complete_timestamp=0.0, buffer_wait_ms=0.0)
+
+    def test_rejects_negative_complete_index(self) -> None:
+        with pytest.raises(ValueError, match="complete_index must be non-negative"):
+            BufferEntry(submit_index=0, complete_index=-1, result="x", submit_timestamp=0.0, complete_timestamp=0.0, buffer_wait_ms=0.0)
+
+    def test_rejects_nan_submit_timestamp(self) -> None:
+        with pytest.raises(ValueError, match="submit_timestamp must be non-negative and finite"):
+            BufferEntry(
+                submit_index=0, complete_index=0, result="x", submit_timestamp=float("nan"), complete_timestamp=0.0, buffer_wait_ms=0.0
+            )
+
+    def test_rejects_inf_complete_timestamp(self) -> None:
+        with pytest.raises(ValueError, match="complete_timestamp must be non-negative and finite"):
+            BufferEntry(
+                submit_index=0, complete_index=0, result="x", submit_timestamp=0.0, complete_timestamp=float("inf"), buffer_wait_ms=0.0
+            )
+
+    def test_rejects_negative_buffer_wait_ms(self) -> None:
+        with pytest.raises(ValueError, match="buffer_wait_ms must be non-negative and finite"):
+            BufferEntry(submit_index=0, complete_index=0, result="x", submit_timestamp=0.0, complete_timestamp=0.0, buffer_wait_ms=-1.0)
+
+    def test_rejects_nan_buffer_wait_ms(self) -> None:
+        with pytest.raises(ValueError, match="buffer_wait_ms must be non-negative and finite"):
+            BufferEntry(
+                submit_index=0, complete_index=0, result="x", submit_timestamp=0.0, complete_timestamp=0.0, buffer_wait_ms=float("nan")
+            )
+
+    def test_accepts_zero_values(self) -> None:
+        entry = BufferEntry(submit_index=0, complete_index=0, result="x", submit_timestamp=0.0, complete_timestamp=0.0, buffer_wait_ms=0.0)
+        assert entry.submit_index == 0
+        assert entry.buffer_wait_ms == 0.0
+
+
 class TestPendingOutcomePostInit:
     """Tests for PendingOutcome __post_init__ validation."""
 

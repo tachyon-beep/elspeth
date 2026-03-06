@@ -86,10 +86,11 @@ def _finish_reason_error(
 ) -> _FinishReasonError | None:
     """Fail closed on non-STOP finish reasons.
 
-    Allowlists known-good completions (STOP, None/absent) and rejects
-    everything else — known-bad reasons get specific error messages,
-    unknown/unrecognized reasons get a generic rejection.  This ensures
-    new provider finish reasons are never silently treated as success.
+    Only explicit STOP is allowlisted.  Absent finish_reason (None) is
+    treated as a retryable error — known-bad reasons get specific error
+    messages, unknown/unrecognized reasons get a generic rejection.
+    This ensures new provider finish reasons are never silently treated
+    as success.
     """
     # Allowlist: only explicit STOP is a known-good completion.
     if finish_reason == FinishReason.STOP:

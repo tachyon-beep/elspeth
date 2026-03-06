@@ -19,6 +19,7 @@ from typing import TYPE_CHECKING, Any
 import structlog
 
 from elspeth import __version__ as _elspeth_version
+from elspeth.contracts.errors import AuditIntegrityError, FrameworkBugError
 from elspeth.telemetry.errors import TelemetryExporterError
 
 if TYPE_CHECKING:
@@ -251,6 +252,8 @@ class OTLPExporter:
             if len(self._buffer) >= self._batch_size:
                 self._flush_batch()
         except Exception as e:
+            if isinstance(e, (FrameworkBugError, AuditIntegrityError)):
+                raise
             # Export MUST NOT raise - log and continue
             logger.warning(
                 "Failed to buffer telemetry event",
@@ -285,6 +288,8 @@ class OTLPExporter:
                 span_count=len(spans),
             )
         except Exception as e:
+            if isinstance(e, (FrameworkBugError, AuditIntegrityError)):
+                raise
             logger.warning(
                 "Failed to export OTLP batch",
                 exporter=self._name,

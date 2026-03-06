@@ -523,6 +523,37 @@ class TestTemplateTierPolicy:
         assert hasattr(strategy, "_query_templates")
         assert "quality" in strategy._query_templates
 
+    def test_pre_compiled_per_query_template_renders_correctly(self) -> None:
+        """Pre-compiled per-query template must actually be used at execution time,
+        producing different rendered output than the config-level template."""
+        from elspeth.plugins.transforms.llm.transform import LLMTransform
+
+        config = _make_config(
+            template="Default: {{ row.text_content }}",
+            queries={
+                "q1": {
+                    "input_fields": {"text_content": "text"},
+                    "template": "Custom: {{ row.text_content }}",
+                },
+            },
+        )
+        transform = LLMTransform(config)
+        mock_provider = Mock()
+        mock_provider.execute_query.return_value = LLMQueryResult(
+            content="result",
+            usage=TokenUsage.known(10, 5),
+            model="gpt-4o",
+            finish_reason=FinishReason.STOP,
+        )
+        transform._provider = mock_provider
+
+        result = transform._process_row(_make_row(), _make_ctx())
+        assert result.status == "success"
+
+        # Verify the custom per-query template was used, not the default
+        call_messages = mock_provider.execute_query.call_args.args[0]
+        assert call_messages == [{"role": "user", "content": "Custom: hello"}]
+
     def test_render_undefined_variable_is_row_error_not_structural(self) -> None:
         """A render-time UndefinedError must produce TransformResult.error,
         not propagate as an exception (operational = per-row quarantine)."""

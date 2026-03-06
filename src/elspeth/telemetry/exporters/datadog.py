@@ -16,6 +16,7 @@ from typing import TYPE_CHECKING, Any
 
 import structlog
 
+from elspeth.contracts.errors import AuditIntegrityError, FrameworkBugError
 from elspeth.telemetry.errors import TelemetryExporterError
 
 if TYPE_CHECKING:
@@ -206,6 +207,8 @@ class DatadogExporter:
         try:
             self._create_span_for_event(event)
         except Exception as e:
+            if isinstance(e, (FrameworkBugError, AuditIntegrityError)):
+                raise
             # Export MUST NOT raise - log and continue
             logger.warning(
                 "Failed to export telemetry event to Datadog",

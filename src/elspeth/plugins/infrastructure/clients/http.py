@@ -420,6 +420,7 @@ class AuditedHTTPClient(AuditedClientBase):
                 run_id=self._run_id,
                 state_id=self._state_id,
                 call_type="http",
+                exc_info=True,
             )
 
     def _execute_request(
@@ -802,6 +803,7 @@ class AuditedHTTPClient(AuditedClientBase):
                     run_id=self._run_id,
                     state_id=self._state_id,
                     call_type="http_ssrf_safe",
+                    exc_info=True,
                 )
 
             return response
@@ -856,6 +858,7 @@ class AuditedHTTPClient(AuditedClientBase):
                     run_id=self._run_id,
                     state_id=self._state_id,
                     call_type="http_ssrf_safe",
+                    exc_info=True,
                 )
 
             raise

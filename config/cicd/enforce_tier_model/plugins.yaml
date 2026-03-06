@@ -39,16 +39,6 @@ per_file_rules:
   reason: Azure API responses are external data (Tier 3) - all defensive patterns legitimate
   expires: null
 allow_hits:
-- key: plugins/infrastructure/batching/mixin.py:R6:BatchTransformMixin:_release_loop:fp=e4d9d56404402b3d
-  owner: architecture
-  reason: Silent recovery with explicit error handling path
-  safety: Code reviewed - legitimate pattern
-  expires: '2026-05-02'
-- key: plugins/infrastructure/batching/mixin.py:R6:BatchTransformMixin:_release_loop:fp=87f604a1cbe3da51
-  owner: architecture
-  reason: Silent recovery with explicit error handling path
-  safety: Code reviewed - legitimate pattern
-  expires: '2026-05-02'
 - key: plugins/infrastructure/clients/http.py:R6:AuditedHTTPClient:_filter_request_headers:fp=8e6fe9689cede063
   owner: architecture
   reason: except ValueError on HMAC fingerprinting - external secret may be invalid bytes
@@ -99,10 +89,10 @@ allow_hits:
   owner: feature
   reason: Display header mapping - fields not in map keep original name (transform-added fields)
   safety: Intentional fallback to original field name, not bug hiding
-- key: plugins/infrastructure/discovery.py:R9:_discover_in_file:fp=dfa93f7fb34bf82f
+- key: plugins/infrastructure/discovery.py:R9:_discover_in_file:fp=47b61374c131669d
   owner: architecture
-  reason: Cleanup/pop with default - key may not exist in race or optional scenarios
-  safety: Code reviewed - legitimate pattern
+  reason: sys.modules.pop cleanup on import failure — module may not be registered yet
+  safety: Legitimate cleanup pattern in error path
   expires: '2026-05-02'
 - key: plugins/infrastructure/discovery.py:R2:get_plugin_description:fp=99a65f8dff5befe4
   owner: architecture
@@ -152,10 +142,7 @@ allow_hits:
   reason: AST/type checking - required for safe parsing or discriminated unions
   safety: Code reviewed - legitimate pattern
   expires: '2026-05-02'
-- key: plugins/transforms/web_scrape.py:R4:WebScrapeTransform:process:fp=0fd2eb903dd43374
-  owner: architecture
-  reason: "Tier 3 boundary \u2014 response.text is external data, extract_content() can fail unpredictably"
-  safety: Returns TransformResult.error() for quarantine with reason, error_type, and URL
+
 - key: plugins/transforms/field_mapper.py:R8:FieldMapperConfig:_reject_duplicate_targets:fp=affbb9c145371427
   owner: bugfix
   reason: setdefault used for grouping sources-by-target to detect duplicate target field names
@@ -176,42 +163,42 @@ allow_hits:
   reason: Thread pool may be shut down concurrently; RuntimeError caught to complete buffer slot with error result
   safety: Buffer slot filled with deterministic error result; row gets proper error instead of silent drop
   expires: '2026-05-17'
-- key: plugins/infrastructure/pooling/executor.py:R5:PooledExecutor:_execute_single:fp=8866e32774b8eb97
-  owner: architecture
-  reason: AST/type checking - required for safe parsing or discriminated unions
-  safety: Code reviewed - legitimate pattern
-  expires: '2026-05-02'
-- key: plugins/infrastructure/pooling/executor.py:R5:PooledExecutor:_execute_single:fp=f6abaa2ac728b5df
-  owner: architecture
-  reason: AST/type checking - required for safe parsing or discriminated unions
-  safety: Code reviewed - legitimate pattern
-  expires: '2026-05-02'
-- key: plugins/infrastructure/batching/mixin.py:R4:BatchTransformMixin:_process_and_complete:fp=e245fc9102042b94
+- key: plugins/infrastructure/batching/mixin.py:R4:BatchTransformMixin:_process_and_complete:fp=8ef6afe768bd66d9
   owner: architecture
   reason: Broad exception handling at external boundary with logging
   safety: Code reviewed - legitimate pattern
   expires: '2026-05-02'
-- key: plugins/infrastructure/batching/mixin.py:R7:BatchTransformMixin:_process_and_complete:fp=6c59d5d50d273150
+- key: plugins/infrastructure/batching/mixin.py:R6:BatchTransformMixin:_process_and_complete:fp=49c75754c4f73537
   owner: architecture
-  reason: contextlib.suppress for expected exceptions
-  safety: Code reviewed - legitimate pattern
+  reason: Explicit try/except KeyError for expected ticket eviction race
+  safety: KeyError from timeout-evicted ticket is expected concurrency behavior
   expires: '2026-05-02'
-- key: plugins/infrastructure/batching/mixin.py:R7:BatchTransformMixin:_process_and_complete:fp=5055bdc91016808f
+- key: plugins/infrastructure/batching/mixin.py:R6:BatchTransformMixin:_process_and_complete:fp=480b656948199019
   owner: architecture
-  reason: contextlib.suppress for expected exceptions
-  safety: Code reviewed - legitimate pattern
+  reason: Explicit try/except KeyError for expected ticket eviction race
+  safety: KeyError from timeout-evicted ticket is expected concurrency behavior
   expires: '2026-05-02'
-- key: plugins/infrastructure/batching/mixin.py:R9:BatchTransformMixin:_release_loop:fp=082f15e9cdc8cd64
+- key: plugins/infrastructure/batching/mixin.py:R9:BatchTransformMixin:_release_loop:fp=1ef57501a8bd4ff3
   owner: architecture
   reason: Cleanup/pop with default - key may not exist in race or optional scenarios
   safety: Code reviewed - legitimate pattern
   expires: '2026-05-02'
-- key: plugins/infrastructure/batching/mixin.py:R4:BatchTransformMixin:_release_loop:fp=3258920cb588c2d4
+- key: plugins/infrastructure/batching/mixin.py:R6:BatchTransformMixin:_release_loop:fp=1354b5a5a2a3ca27
+  owner: architecture
+  reason: Silent recovery with explicit error handling path
+  safety: Code reviewed - legitimate pattern
+  expires: '2026-05-02'
+- key: plugins/infrastructure/batching/mixin.py:R6:BatchTransformMixin:_release_loop:fp=c59b28f42a9b6dd3
+  owner: architecture
+  reason: Silent recovery with explicit error handling path
+  safety: Code reviewed - legitimate pattern
+  expires: '2026-05-02'
+- key: plugins/infrastructure/batching/mixin.py:R4:BatchTransformMixin:_release_loop:fp=882b43b1e0bfbb95
   owner: architecture
   reason: Broad exception handling at external boundary with logging
   safety: Code reviewed - legitimate pattern
   expires: '2026-05-02'
-- key: plugins/infrastructure/batching/mixin.py:R9:BatchTransformMixin:evict_submission:fp=e6964d1e6e3b1f1e
+- key: plugins/infrastructure/batching/mixin.py:R9:BatchTransformMixin:evict_submission:fp=d039dd1054a21a93
   owner: architecture
   reason: Cleanup/pop with default - key may not exist in race or optional scenarios
   safety: Code reviewed - legitimate pattern
@@ -241,42 +228,42 @@ allow_hits:
   reason: HTTP response content-type header - external system boundary, header may be missing
   safety: Falls back to binary encoding if content-type absent
   expires: '2026-05-02'
-- key: plugins/infrastructure/clients/http.py:R4:AuditedHTTPClient:_record_and_emit:fp=579ae31801e9fa76
+- key: plugins/infrastructure/clients/http.py:R4:AuditedHTTPClient:_record_and_emit:fp=b4cd063efc6bf1fa
   owner: architecture
   reason: Telemetry emission failure - must not crash main request flow
   safety: Logged and continues - telemetry is non-critical to HTTP processing
-  expires: '2026-05-02'
+  expires: '2026-05-06'
 - key: plugins/infrastructure/clients/http.py:R1:AuditedHTTPClient:get_ssrf_safe:fp=5f5f86815803d8e6
   owner: architecture
   reason: httpx Client.get() method call - ephemeral client for TLS/SNI isolation
   safety: This is the actual external HTTP call with IP pinning
   expires: '2026-05-02'
-- key: plugins/infrastructure/clients/http.py:R4:AuditedHTTPClient:get_ssrf_safe:fp=1307ee73007672db
+- key: plugins/infrastructure/clients/http.py:R4:AuditedHTTPClient:get_ssrf_safe:fp=12d639ee9a9c7fcc
   owner: architecture
   reason: Telemetry emission failure - must not crash main request flow
   safety: Logged and continues - telemetry is non-critical to HTTP processing
-  expires: '2026-05-02'
-- key: plugins/infrastructure/clients/http.py:R4:AuditedHTTPClient:get_ssrf_safe:fp=e91fd20d34e25b36
+  expires: '2026-05-06'
+- key: plugins/infrastructure/clients/http.py:R4:AuditedHTTPClient:get_ssrf_safe:fp=acb47860a884a551
   owner: architecture
   reason: Telemetry emission failure - must not crash main request flow
   safety: Logged and continues - telemetry is non-critical to HTTP processing
-  expires: '2026-05-02'
+  expires: '2026-05-06'
 - key: plugins/infrastructure/clients/http.py:R1:AuditedHTTPClient:_follow_redirects_safe:fp=65c083df6fdd4602
   owner: architecture
   reason: HTTP redirect Location header - external system boundary, header may be absent
   safety: Missing Location header breaks redirect loop naturally (no redirect target)
   expires: '2026-05-02'
-- key: plugins/infrastructure/clients/llm.py:R4:AuditedLLMClient:chat_completion:fp=848628872704a991
+- key: plugins/infrastructure/clients/llm.py:R4:AuditedLLMClient:chat_completion:fp=4ec6cbbadbf11e05
   owner: architecture
   reason: Telemetry emission failure - must not crash main LLM call flow
   safety: Logged and continues - telemetry is non-critical to LLM processing
   expires: '2026-05-02'
-- key: plugins/infrastructure/clients/llm.py:R4:AuditedLLMClient:chat_completion:fp=78725e4b52b62f13
+- key: plugins/infrastructure/clients/llm.py:R4:AuditedLLMClient:chat_completion:fp=12ae7e0896433f5a
   owner: architecture
   reason: Telemetry emission failure - must not crash main LLM call flow
   safety: Logged and continues - telemetry is non-critical to LLM processing
-  expires: '2026-05-02'
-- key: 'plugins/infrastructure/clients/llm.py:R5:LLMResponse:__post_init__:fp=0dd4ecc65ff47230'
+  expires: '2026-05-06'
+- key: 'plugins/infrastructure/clients/llm.py:R5:LLMResponse:__post_init__:fp=f9ac8421b167934a'
   owner: architecture
   reason: Deep-freeze conversion guard — isinstance() checks for MappingProxyType/tuple wrapping, not defensive data access
   safety: Construction-time type conversion, crashes on unexpected types

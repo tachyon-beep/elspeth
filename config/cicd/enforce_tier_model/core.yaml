@@ -249,14 +249,14 @@ allow_hits:
   reason: Options payload shape check at config boundary before extracting nested required_input_fields
   safety: Non-dict options are treated as no declared requirements and never silently coerced
   expires: '2026-03-10'
-- key: core/retention/purge.py:R6:PurgeManager:purge_payloads:fp=0ed3645182bf86bd
+- key: core/retention/purge.py:R6:PurgeManager:purge_payloads:fp=70cd8fe1b61dd607
   owner: bugfix
   reason: Tier-3 boundary - PayloadStore.exists() is external I/O (filesystem/blob storage)
-  safety: Exception caught, ref added to failed_refs, loop continues - explicit failure tracking
-- key: core/retention/purge.py:R6:PurgeManager:purge_payloads:fp=d5a1f7c6ddc40c34
+  safety: Exception caught and logged, ref added to failed_refs, loop continues
+- key: core/retention/purge.py:R6:PurgeManager:purge_payloads:fp=b7386a0ddf473c18
   owner: bugfix
-  reason: Tier-3 boundary - PayloadStore.exists() is external I/O (filesystem/blob storage)
-  safety: Exception caught, ref added to failed_refs, loop continues - explicit failure tracking
+  reason: Tier-3 boundary - PayloadStore.delete() is external I/O (filesystem/blob storage)
+  safety: Exception caught and logged, ref added to failed_refs, loop continues
 - key: core/landscape/execution_repository.py:R6:ExecutionRepository:begin_node_state:fp=41ef0c6c46683aba
   owner: bugfix
   reason: "Tier-3 boundary \u2014 quarantined row data may contain NaN/Infinity that stable_hash rejects"

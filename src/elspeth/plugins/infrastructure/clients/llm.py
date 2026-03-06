@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import math
 import re
 import time
 from collections.abc import Mapping
@@ -49,8 +50,6 @@ class LLMResponse:
     raw_response: Mapping[str, Any] | None = None
 
     def __post_init__(self) -> None:
-        import math
-
         if self.latency_ms < 0 or not math.isfinite(self.latency_ms):
             raise ValueError(f"LLMResponse.latency_ms must be non-negative and finite, got {self.latency_ms}")
         if self.raw_response is not None and not isinstance(self.raw_response, MappingProxyType):
@@ -362,6 +361,7 @@ class AuditedLLMClient(AuditedClientBase):
                     run_id=self._run_id,
                     state_id=self._state_id,
                     call_type="llm",
+                    exc_info=True,
                 )
 
             # Raise specific exception type based on error classification

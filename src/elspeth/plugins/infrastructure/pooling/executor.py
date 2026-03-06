@@ -450,16 +450,8 @@ class PooledExecutor:
                     result = process_fn(row, state_id)
                     self._throttle.on_success()
                     return (buffer_idx, result)
-                except (CapacityError, LLMClientError) as e:
-                    # CRITICAL: Only expected retryable errors are caught here
-                    # - CapacityError: Rate limiting from pooling infrastructure
-                    # - LLMClientError: Errors from LLM API calls (network, server errors, etc.)
-                    # All other exceptions (KeyError, TypeError, etc.) crash immediately
-                    # This prevents masking programming bugs in process_fn
-
-                    # Check if error is non-retryable (e.g., ContentPolicyError)
-                    if isinstance(e, LLMClientError) and not e.retryable:
-                        # Permanent error - return immediately without retry
+                except LLMClientError as e:
+                    if not e.retryable:
                         return (
                             buffer_idx,
                             TransformResult.error(
@@ -472,7 +464,6 @@ class PooledExecutor:
                             ),
                         )
 
-                    # Check if we've exceeded max retry time
                     if time.monotonic() >= max_time:
                         elapsed = time.monotonic() - start_time
                         error_data: TransformErrorReason = {
@@ -482,47 +473,61 @@ class PooledExecutor:
                             "elapsed_seconds": elapsed,
                             "max_seconds": self._max_capacity_retry_seconds,
                         }
-                        # Add status_code if it's a CapacityError
-                        if isinstance(e, CapacityError):
-                            error_data["status_code"] = e.status_code
                         return (
                             buffer_idx,
                             TransformResult.error(error_data, retryable=False),
                         )
 
-                    # Bail out if shutdown was requested
-                    if self._shutdown_event.is_set():
+                    retryable_error: LLMClientError | CapacityError = e
+                except CapacityError as e:
+                    if time.monotonic() >= max_time:
+                        elapsed = time.monotonic() - start_time
+                        error_data = {
+                            "reason": "retry_timeout",
+                            "error": str(e),
+                            "error_type": type(e).__name__,
+                            "elapsed_seconds": elapsed,
+                            "max_seconds": self._max_capacity_retry_seconds,
+                            "status_code": e.status_code,
+                        }
                         return (
                             buffer_idx,
-                            TransformResult.error(
-                                {"reason": "shutdown_requested", "error": str(e)},
-                                retryable=False,
-                            ),
+                            TransformResult.error(error_data, retryable=False),
                         )
 
-                    # Trigger throttle backoff
-                    self._throttle.on_capacity_error()
+                    retryable_error = e
 
-                    # CRITICAL: Release semaphore BEFORE sleeping
-                    # This allows other workers to make progress while we wait
-                    self._semaphore.release()
-                    self._decrement_active_workers()
-                    holding_semaphore = False
+                if self._shutdown_event.is_set():
+                    return (
+                        buffer_idx,
+                        TransformResult.error(
+                            {"reason": "shutdown_requested", "error": str(retryable_error)},
+                            retryable=False,
+                        ),
+                    )
 
-                    # Wait throttle delay before retry
-                    retry_delay_ms = self._throttle.current_delay_ms
-                    if retry_delay_ms > 0:
-                        time.sleep(retry_delay_ms / 1000)
-                        self._throttle.record_throttle_wait(retry_delay_ms)
+                self._throttle.on_capacity_error()
 
-                    # Re-acquire semaphore for retry
-                    self._semaphore.acquire()
-                    self._increment_active_workers()
-                    holding_semaphore = True
+                # CRITICAL: Release semaphore BEFORE sleeping
+                # This allows other workers to make progress while we wait
+                self._semaphore.release()
+                self._decrement_active_workers()
+                holding_semaphore = False
 
-                    # Continue to top of loop for retry
-                    # Note: We DO NOT skip the dispatch gate check after retry.
-                    # The retry backoff is personal cooldown; the gate ensures global pacing.
+                # Wait throttle delay before retry
+                retry_delay_ms = self._throttle.current_delay_ms
+                if retry_delay_ms > 0:
+                    time.sleep(retry_delay_ms / 1000)
+                    self._throttle.record_throttle_wait(retry_delay_ms)
+
+                # Re-acquire semaphore for retry
+                self._semaphore.acquire()
+                self._increment_active_workers()
+                holding_semaphore = True
+
+                # Continue to top of loop for retry
+                # Note: We DO NOT skip the dispatch gate check after retry.
+                # The retry backoff is personal cooldown; the gate ensures global pacing.
         finally:
             # Release semaphore only if we're holding it
             # This defensive check ensures correctness even if an unexpected

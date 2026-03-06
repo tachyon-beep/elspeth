@@ -177,7 +177,7 @@ class CoalesceMetadata:
             merge_strategy=merge_strategy,
             expected_branches=tuple(expected_branches),
             branches_arrived=tuple(branches_arrived),
-            branches_lost=MappingProxyType(branches_lost) if branches_lost else MappingProxyType({}),
+            branches_lost=MappingProxyType(branches_lost),
             arrival_order=tuple(arrival_order),
             wait_duration_ms=wait_duration_ms,
         )

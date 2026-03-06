@@ -108,6 +108,8 @@ class _FlushContext:
     coalesce_name: CoalesceName | None
 
     def __post_init__(self) -> None:
+        if not self.node_id:
+            raise ValueError("_FlushContext.node_id must not be empty")
         # Freeze before validation so emptiness check works on generators too
         object.__setattr__(self, "buffered_tokens", tuple(self.buffered_tokens))
         if not self.buffered_tokens:

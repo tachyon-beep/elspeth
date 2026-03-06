@@ -18,6 +18,7 @@ Usage:
 
 import asyncio
 import json
+import sqlite3
 import time
 import uuid
 from datetime import UTC, datetime
@@ -819,8 +820,8 @@ class ChaosWebServer:
                 redirect_target=redirect_target,
                 redirect_hops=redirect_hops,
             )
-        except Exception:
-            logger.warning(
+        except sqlite3.Error:
+            logger.error(
                 "metrics_recording_failed",
                 request_id=request_id,
                 path=path,

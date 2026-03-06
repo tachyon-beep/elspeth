@@ -1995,12 +1995,12 @@ def health(
             )
             if git_result.returncode == 0:
                 git_sha = git_result.stdout.strip()
-        except Exception:
-            git_sha = "unknown"
+        except (subprocess.SubprocessError, FileNotFoundError, OSError):
+            git_sha = "unavailable"
 
     checks["commit"] = {
-        "status": "ok" if git_sha and git_sha != "unknown" else "warn",
-        "value": git_sha or "unknown",
+        "status": "ok" if git_sha and git_sha != "unavailable" else "warn",
+        "value": git_sha or "unavailable",
     }
 
     # Check 3: Python version

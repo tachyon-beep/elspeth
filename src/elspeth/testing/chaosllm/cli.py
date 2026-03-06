@@ -48,11 +48,11 @@ def _version_callback(value: bool) -> None:
     """Print version and exit."""
     if value:
         # Use elspeth version
-        try:
-            from elspeth import __version__
+        from importlib.metadata import PackageNotFoundError, version
 
-            typer.echo(f"chaosllm (elspeth {__version__})")
-        except ImportError:
+        try:
+            typer.echo(f"chaosllm (elspeth {version('elspeth')})")
+        except PackageNotFoundError:
             typer.echo("chaosllm (version unknown)")
         raise typer.Exit()
 
@@ -448,7 +448,7 @@ def show_config(
     except FileNotFoundError as e:
         typer.secho(f"Error: {e}", fg=typer.colors.RED, err=True)
         raise typer.Exit(1) from e
-    except Exception as e:
+    except (pydantic.ValidationError, yaml.YAMLError, ValueError) as e:
         typer.secho(f"Configuration error: {e}", fg=typer.colors.RED, err=True)
         raise typer.Exit(1) from e
 

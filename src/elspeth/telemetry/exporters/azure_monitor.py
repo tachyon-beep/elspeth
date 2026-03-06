@@ -15,6 +15,7 @@ from typing import TYPE_CHECKING, Any
 
 import structlog
 
+from elspeth.contracts.errors import AuditIntegrityError, FrameworkBugError
 from elspeth.telemetry.errors import TelemetryExporterError
 from elspeth.telemetry.exporters.otlp import (
     _derive_trace_id,
@@ -227,6 +228,8 @@ class AzureMonitorExporter:
             if len(self._buffer) >= self._batch_size:
                 self._flush_batch()
         except Exception as e:
+            if isinstance(e, (FrameworkBugError, AuditIntegrityError)):
+                raise
             # Export MUST NOT raise - log and continue
             logger.warning(
                 "Failed to buffer telemetry event",
@@ -261,6 +264,8 @@ class AzureMonitorExporter:
                 span_count=len(spans),
             )
         except Exception as e:
+            if isinstance(e, (FrameworkBugError, AuditIntegrityError)):
+                raise
             logger.warning(
                 "Failed to export Azure Monitor batch",
                 exporter=self._name,

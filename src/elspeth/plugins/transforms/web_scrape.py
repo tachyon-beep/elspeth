@@ -243,7 +243,7 @@ class WebScrapeTransform(BaseTransform):
                 format=self._format,
                 strip_elements=self._strip_elements,
             )
-        except Exception as e:
+        except (ValueError, UnicodeDecodeError, UnicodeEncodeError, RuntimeError) as e:
             return TransformResult.error(
                 {
                     "reason": "content_extraction_failed",
@@ -364,6 +364,8 @@ class WebScrapeTransform(BaseTransform):
             raise NetworkError(f"DNS resolution failed during redirect: {safe_request.original_url}: {e}") from e
         except httpx.TooManyRedirects as e:
             raise InvalidURLError(f"Too many redirects: {safe_request.original_url}: {e}") from e
+        except httpx.RequestError as e:
+            raise NetworkError(f"HTTP request error fetching {safe_request.original_url}: {e}") from e
         finally:
             client.close()
 

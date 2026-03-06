@@ -340,7 +340,9 @@ class PluginConfigValidator:
 
         for err in pydantic_error.errors():
             # Pydantic error dict has: loc, msg, type, ctx
-            field_path = ".".join(str(loc) for loc in err["loc"])
+            # Model-level validators (@model_validator) produce loc=() — empty tuple.
+            # Use "__model__" sentinel so the field is never empty.
+            field_path = ".".join(str(loc) for loc in err["loc"]) or "__model__"
             message = err["msg"]
 
             # Pydantic error dict includes failing input value.

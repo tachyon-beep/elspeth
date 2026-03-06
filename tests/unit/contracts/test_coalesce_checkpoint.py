@@ -66,6 +66,20 @@ class TestCoalesceTokenCheckpointPostInit:
         with pytest.raises(ValueError, match="arrival_offset_seconds"):
             CoalesceTokenCheckpoint(**kwargs)
 
+    def test_rejects_nan_arrival_offset(self) -> None:
+        """NaN must not bypass the non-negative check."""
+        kwargs = _valid_token_kwargs()
+        kwargs["arrival_offset_seconds"] = float("nan")
+        with pytest.raises(ValueError, match="arrival_offset_seconds"):
+            CoalesceTokenCheckpoint(**kwargs)
+
+    def test_rejects_inf_arrival_offset(self) -> None:
+        """Infinity must not bypass the non-negative check."""
+        kwargs = _valid_token_kwargs()
+        kwargs["arrival_offset_seconds"] = float("inf")
+        with pytest.raises(ValueError, match="arrival_offset_seconds"):
+            CoalesceTokenCheckpoint(**kwargs)
+
     def test_rejects_non_dict_row_data(self) -> None:
         """row_data must be a dict."""
         kwargs = _valid_token_kwargs()
@@ -116,6 +130,28 @@ class TestCoalescePendingCheckpointPostInit:
                 coalesce_name="merge_1",
                 row_id="row-1",
                 elapsed_age_seconds=-0.1,
+                branches={},
+                lost_branches={},
+            )
+
+    def test_rejects_nan_elapsed_age(self) -> None:
+        """NaN must not bypass the non-negative check."""
+        with pytest.raises(ValueError, match="elapsed_age_seconds"):
+            CoalescePendingCheckpoint(
+                coalesce_name="merge_1",
+                row_id="row-1",
+                elapsed_age_seconds=float("nan"),
+                branches={},
+                lost_branches={},
+            )
+
+    def test_rejects_inf_elapsed_age(self) -> None:
+        """Infinity must not bypass the non-negative check."""
+        with pytest.raises(ValueError, match="elapsed_age_seconds"):
+            CoalescePendingCheckpoint(
+                coalesce_name="merge_1",
+                row_id="row-1",
+                elapsed_age_seconds=float("inf"),
                 branches={},
                 lost_branches={},
             )

@@ -1,5 +1,6 @@
 """Engine-related type contracts."""
 
+import math
 from dataclasses import dataclass
 from typing import TypedDict
 
@@ -29,6 +30,18 @@ class BufferEntry[T]:
     submit_timestamp: float
     complete_timestamp: float
     buffer_wait_ms: float
+
+    def __post_init__(self) -> None:
+        if self.submit_index < 0:
+            raise ValueError(f"BufferEntry.submit_index must be non-negative, got {self.submit_index}")
+        if self.complete_index < 0:
+            raise ValueError(f"BufferEntry.complete_index must be non-negative, got {self.complete_index}")
+        if not math.isfinite(self.submit_timestamp) or self.submit_timestamp < 0:
+            raise ValueError(f"BufferEntry.submit_timestamp must be non-negative and finite, got {self.submit_timestamp}")
+        if not math.isfinite(self.complete_timestamp) or self.complete_timestamp < 0:
+            raise ValueError(f"BufferEntry.complete_timestamp must be non-negative and finite, got {self.complete_timestamp}")
+        if not math.isfinite(self.buffer_wait_ms) or self.buffer_wait_ms < 0:
+            raise ValueError(f"BufferEntry.buffer_wait_ms must be non-negative and finite, got {self.buffer_wait_ms}")
 
 
 @dataclass(frozen=True, slots=True)

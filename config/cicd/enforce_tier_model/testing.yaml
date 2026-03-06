@@ -10,11 +10,11 @@ allow_hits:
   reason: Silent recovery with explicit error handling path
   safety: Code reviewed - legitimate pattern
   expires: '2026-05-02'
-- key: testing/chaosweb/server.py:R4:ChaosWebServer:_record_request:fp=8e596c04782b97af
+- key: testing/chaosweb/server.py:R6:ChaosWebServer:_record_request:fp=f74392f7a8a56907
   owner: architecture
   reason: Metrics isolation - recording is best-effort side-effect that must not crash HTTP responses
   safety: Exception logged via structlog with request_id and exc_info; intended chaos response always served
-  expires: '2026-05-13'
+  expires: '2026-05-06'
 - key: testing/chaosllm/server.py:R4:ChaosLLMServer:_record_request:fp=161b08f529c97d97
   owner: architecture
   reason: Metrics isolation - recording is best-effort side-effect that must not crash HTTP responses
@@ -120,21 +120,17 @@ allow_hits:
   reason: External HTTP request body - optional fields per OpenAI spec (Tier 3)
   safety: dict.get for optional fields in request body from external clients
   expires: '2026-05-13'
-- key: testing/chaosllm/cli.py:R6:_version_callback:fp=d60d40a1a5d30e52
+- key: testing/chaosllm/cli.py:R6:_version_callback:fp=c0ae86dd87e88554
   owner: architecture
   reason: Silent recovery with explicit error handling path
   safety: Code reviewed - legitimate pattern
-  expires: '2026-05-02'
+  expires: '2026-05-06'
 - key: testing/chaosllm_mcp/server.py:R1:create_server:call_tool:fp=09e22428cdf62c21
   owner: architecture
   reason: Optional field access at trust boundary
   safety: Code reviewed - legitimate pattern
   expires: '2026-05-02'
-- key: testing/chaosllm_mcp/server.py:R4:create_server:call_tool:fp=2215ee1b4e6bc50d
-  owner: architecture
-  reason: Broad exception handling at external boundary with logging
-  safety: Code reviewed - legitimate pattern
-  expires: '2026-05-02'
+
 - key: testing/chaosengine/metrics_store.py:R7:MetricsStore:_cleanup_stale_connections:fp=faccf6cb8df9362d
   owner: architecture
   reason: contextlib.suppress on ProgrammingError during stale connection cleanup
@@ -195,66 +191,66 @@ allow_hits:
   reason: Tier 3 boundary - .get() on preset page dict for optional content_type override
   safety: Falls back to config default_content_type - preset pages may omit content_type
   expires: '2026-05-13'
-- key: testing/chaosweb/server.py:R1:ChaosWebServer:_redirect_hop_endpoint:fp=71e754868c97ea72
+- key: testing/chaosweb/server.py:R1:ChaosWebServer:_redirect_hop_endpoint:fp=38b7f0f1049100bb
   owner: architecture
   reason: Tier 3 boundary - .get() on HTTP query params for redirect chain state (hop counter)
   safety: Missing hop defaults to 1 (chain start) - correct for redirect loop protocol
-  expires: '2026-05-13'
-- key: testing/chaosweb/server.py:R1:ChaosWebServer:_redirect_hop_endpoint:fp=3e20b13d56a870be
+  expires: '2026-05-06'
+- key: testing/chaosweb/server.py:R1:ChaosWebServer:_redirect_hop_endpoint:fp=a980076f16a44910
   owner: architecture
   reason: Tier 3 boundary - .get() on HTTP query params for redirect chain state (hop counter)
   safety: Missing hop defaults to 1 (chain start) - correct for redirect loop protocol
-  expires: '2026-05-13'
-- key: testing/chaosweb/server.py:R1:ChaosWebServer:_redirect_hop_endpoint:fp=cb73faeb22d0c3a7
+  expires: '2026-05-06'
+- key: testing/chaosweb/server.py:R1:ChaosWebServer:_redirect_hop_endpoint:fp=b3c8870573123677
   owner: architecture
   reason: Tier 3 boundary - .get() on HTTP query params for redirect chain state (hop counter)
   safety: Missing hop defaults to 1 (chain start) - correct for redirect loop protocol
-  expires: '2026-05-13'
-- key: testing/chaosweb/server.py:R1:ChaosWebServer:_page_endpoint:fp=b815ff0cbb22ad7e
+  expires: '2026-05-06'
+- key: testing/chaosweb/server.py:R1:ChaosWebServer:_page_endpoint:fp=2c8b904b721920d5
   owner: architecture
   reason: Tier 3 boundary - .get() on Starlette path_params dict (HTTP request data)
   safety: Missing path defaults to empty string - correct for catch-all route
-  expires: '2026-05-13'
-- key: testing/chaosweb/server.py:R1:ChaosWebServer:_page_endpoint:fp=bbffdb9883ca3c5d
+  expires: '2026-05-06'
+- key: testing/chaosweb/server.py:R1:ChaosWebServer:_page_endpoint:fp=9897a2d095835129
   owner: architecture
   reason: Tier 3 boundary - .get() on Starlette path_params dict (HTTP request data)
   safety: Missing path defaults to empty string - correct for catch-all route
-  expires: '2026-05-13'
-- key: testing/chaosweb/server.py:R5:ChaosWebServer:_handle_connection_error:fp=1908b34e03bd0b73
+  expires: '2026-05-06'
+- key: testing/chaosweb/server.py:R5:ChaosWebServer:_handle_connection_error:fp=31840da5ea3be151
   owner: architecture
   reason: isinstance check on content generator output (str vs bytes) for encoding
   safety: Both branches produce valid bytes for HTTP response body
-  expires: '2026-05-13'
-- key: testing/chaosweb/server.py:R1:ChaosWebServer:_handle_http_error:fp=8011d9d19105e47c
+  expires: '2026-05-06'
+- key: testing/chaosweb/server.py:R1:ChaosWebServer:_handle_http_error:fp=ab0361735f62084e
   owner: architecture
   reason: .get() on error message mapping - fallback for error types not in mapping
   safety: Falls back to generic status code message - never swallows errors
-  expires: '2026-05-13'
-- key: testing/chaosweb/server.py:R5:ChaosWebServer:_handle_malformed_content:fp=baa809f3bfe7ce98
+  expires: '2026-05-06'
+- key: testing/chaosweb/server.py:R5:ChaosWebServer:_handle_malformed_content:fp=2da5cb077f4b58bb
   owner: architecture
   reason: isinstance check on WebResponse.content (str|bytes) to extract str for corruption helpers
   safety: Bytes decoded with replace - corruption helpers always receive valid str input
-  expires: '2026-05-13'
-- key: testing/chaosweb/server.py:R5:ChaosWebServer:_handle_malformed_content:fp=82dbf1550a57b0be
+  expires: '2026-05-06'
+- key: testing/chaosweb/server.py:R5:ChaosWebServer:_handle_malformed_content:fp=dbdf7bb448162147
   owner: architecture
   reason: isinstance check on WebResponse.content (str|bytes) to extract str for corruption helpers
   safety: Bytes decoded with replace - corruption helpers always receive valid str input
-  expires: '2026-05-13'
-- key: testing/chaosweb/server.py:R5:ChaosWebServer:_handle_success:fp=f9ba67214a19ca13
+  expires: '2026-05-06'
+- key: testing/chaosweb/server.py:R5:ChaosWebServer:_handle_success:fp=894e20a89b9b3174
   owner: architecture
   reason: isinstance check on content generator output (str vs bytes) for HTTP response encoding
   safety: Both branches produce valid bytes for Response body
-  expires: '2026-05-13'
+  expires: '2026-05-06'
 - key: testing/chaosweb/config.py:R5:WebErrorInjectionConfig:parse_range:fp=bf95ca2e3ead1c78
   owner: architecture
   reason: Pydantic before-validator - isinstance checks raw YAML value type for range coercion
   safety: Validates Tier 3 YAML input before Pydantic model creation
   expires: '2026-05-13'
-- key: testing/chaosweb/cli.py:R6:_version_callback:fp=bc58df26d3149aff
+- key: testing/chaosweb/cli.py:R6:_version_callback:fp=52811a3edba6aac3
   owner: architecture
   reason: Silent recovery with explicit error handling path
   safety: Falls back to 'version unknown' on ImportError - correct for optional version detection
-  expires: '2026-05-13'
+  expires: '2026-05-06'
 - key: 'testing/chaosweb/content_generator.py:R5:WebResponse:__post_init__:fp=1656051cfc4dcc2e'
   owner: architecture
   reason: Deep-freeze conversion guard — isinstance() checks for MappingProxyType/tuple wrapping, not defensive data access
