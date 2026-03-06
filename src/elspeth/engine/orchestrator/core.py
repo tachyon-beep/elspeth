@@ -28,6 +28,8 @@ from dataclasses import replace
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
 
+import structlog
+
 if TYPE_CHECKING:
     from elspeth.contracts.aggregation_checkpoint import AggregationCheckpointState
     from elspeth.contracts.coalesce_checkpoint import CoalesceCheckpointState
@@ -136,6 +138,8 @@ if TYPE_CHECKING:
     from elspeth.engine.clock import Clock
     from elspeth.engine.coalesce_executor import CoalesceExecutor
 
+slog = structlog.get_logger(__name__)
+
 
 class Orchestrator:
     """Orchestrates full pipeline runs.
@@ -221,11 +225,9 @@ class Orchestrator:
         """
         import sys
 
-        import structlog
-
         from elspeth.telemetry.errors import TelemetryExporterError
 
-        logger = structlog.get_logger()
+        logger = slog
         pending_exc = sys.exc_info()[0]
 
         try:
@@ -442,9 +444,7 @@ class Orchestrator:
             node_id = str(source_id)
 
         if token_id is None or node_id is None:
-            import structlog
-
-            structlog.get_logger().warning(
+            slog.warning(
                 "shutdown_checkpoint_skipped",
                 run_id=run_id,
                 reason="no_token_or_node_id_available",
@@ -582,9 +582,7 @@ class Orchestrator:
         """
         import sys
 
-        import structlog
-
-        logger = structlog.get_logger()
+        logger = slog
         pending_exc = sys.exc_info()[1]
         cleanup_errors: list[str] = []
 
@@ -1760,9 +1758,7 @@ class Orchestrator:
         try:
             quarantine_content_hash = stable_hash(source_item.row)
         except (ValueError, TypeError) as e:
-            import structlog
-
-            structlog.get_logger().debug(
+            slog.debug(
                 "stable_hash_fallback_to_repr_hash",
                 error_type=type(e).__name__,
                 error=str(e),
@@ -2163,7 +2159,7 @@ class Orchestrator:
                         loop_ctx.last_token_id = results[-1].token.token_id
                     accumulate_row_outcomes(results, counters, config.sinks, pending_tokens)
 
-                    # Check coalesce timeouts after each row (P1-2026-01-22 fix)
+                    # Check coalesce timeouts after each row
                     if coalesce_executor is not None:
                         handle_coalesce_timeouts(
                             coalesce_executor=coalesce_executor,
@@ -2593,7 +2589,7 @@ class Orchestrator:
             # All rows were processed - complete the run
             recorder.finalize_run(run_id, status=RunStatus.COMPLETED)
 
-            # Delete checkpoints on successful completion (Bug #8 fix)
+            # Delete checkpoints on successful completion
             self._delete_checkpoints(run_id)
 
             return RunResult(

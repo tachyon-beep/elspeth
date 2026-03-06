@@ -92,8 +92,8 @@ class CoalesceFailureReason:
         """
         d: dict[str, Any] = {
             "failure_reason": self.failure_reason,
-            "expected_branches": self.expected_branches,
-            "branches_arrived": self.branches_arrived,
+            "expected_branches": list(self.expected_branches),
+            "branches_arrived": list(self.branches_arrived),
             "merge_policy": self.merge_policy,
         }
         if self.timeout_ms is not None:

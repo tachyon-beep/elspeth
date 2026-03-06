@@ -622,7 +622,7 @@ class TestCoalesceFailureReasonSchema:
             merge_policy="union",
         )
         assert error.branches_arrived == ()
-        assert error.to_dict()["branches_arrived"] == ()
+        assert error.to_dict()["branches_arrived"] == []
 
 
 class TestExecutionErrorPostInit:
@@ -694,3 +694,19 @@ class TestCoalesceFailureReasonPostInit:
                 merge_policy="union",
                 timeout_ms=-1,
             )
+
+    def test_to_dict_serializes_tuples_as_lists(self) -> None:
+        """to_dict() converts tuple fields to lists for JSON compatibility."""
+        from elspeth.contracts import CoalesceFailureReason
+
+        error = CoalesceFailureReason(
+            failure_reason="quorum_not_met",
+            expected_branches=("a", "b"),
+            branches_arrived=("a",),
+            merge_policy="union",
+        )
+        d = error.to_dict()
+        assert isinstance(d["expected_branches"], list)
+        assert isinstance(d["branches_arrived"], list)
+        assert d["expected_branches"] == ["a", "b"]
+        assert d["branches_arrived"] == ["a"]

@@ -91,7 +91,7 @@ class AggregationExecutor:
 
         # Accept rows into batch
         result = executor.buffer_row(node_id, token)
-        # Engine uses TriggerEvaluator to decide when to flush (WP-06)
+        # Engine uses TriggerEvaluator to decide when to flush
     """
 
     def __init__(
@@ -329,7 +329,7 @@ class AggregationExecutor:
         batch_input: dict[str, Any] = {"batch_rows": buffered_rows}
 
         # Compute input hash AFTER wrapping (must match what begin_node_state records)
-        # See: P2-2026-01-21-aggregation-input-hash-mismatch
+        # Bug fix: hash must be computed after wrapping to match begin_node_state
         input_hash = stable_hash(batch_input)
 
         # Resolve step position from node_id (injected StepResolver)
@@ -617,9 +617,9 @@ class AggregationExecutor:
             if not node.tokens:  # Only include non-empty buffers
                 continue
 
-            # Get trigger state for preservation (Bug #6 + P2-2026-02-01)
+            # Get trigger state for preservation
             elapsed_age_seconds = node.trigger.get_age_seconds()
-            # P2-2026-02-01: Preserve fire time offsets for "first to fire wins" ordering
+            # Preserve fire time offsets for "first to fire wins" ordering
             count_fire_offset = node.trigger.get_count_fire_offset()
             condition_fire_offset = node.trigger.get_condition_fire_offset()
 
@@ -671,7 +671,7 @@ class AggregationExecutor:
         )
 
         # Size validation (on serialized checkpoint)
-        # Use checkpoint_dumps to handle datetime (P1-2026-02-05 fix)
+        # Use checkpoint_dumps to handle datetime
         serialized = checkpoint_dumps(checkpoint.to_dict())
         size_mb = len(serialized) / 1_000_000
         total_rows = sum(len(n.tokens) for n in self._nodes.values())
@@ -703,7 +703,7 @@ class AggregationExecutor:
             AuditIntegrityError: If checkpoint version is incompatible or data is invalid
                 (per CLAUDE.md — our data, full trust)
         """
-        # Validate checkpoint version (Bug #12 fix)
+        # Validate checkpoint version
         checkpoint_version = AGGREGATION_CHECKPOINT_VERSION
 
         if state.version != checkpoint_version:
@@ -762,8 +762,7 @@ class AggregationExecutor:
             node.batch_id = node_checkpoint.batch_id
             node.member_count = len(reconstructed_tokens)
 
-            # Restore trigger evaluator state (Bug #6 + P2-2026-02-01)
-            # P2-2026-02-01: Use dedicated restore API that preserves fire time ordering
+            # Restore trigger evaluator state using dedicated API that preserves fire time ordering
             node.trigger.restore_from_checkpoint(
                 batch_count=len(reconstructed_tokens),
                 elapsed_age_seconds=node_checkpoint.elapsed_age_seconds,
@@ -902,11 +901,3 @@ class AggregationExecutor:
         # Restore member count from database
         members = self._recorder.get_batch_members(batch_id)
         node.member_count = len(members)
-
-    # NOTE: The old accept() and flush() methods that took AggregationProtocol
-    # were DELETED in the aggregation structural cleanup.
-    # Aggregation is now fully structural:
-    # - Use buffer_row() to buffer rows
-    # - Use should_flush() to check trigger
-    # - Use execute_flush() to flush with full audit recording
-    # - _get_buffered_data() is internal-only (for testing)

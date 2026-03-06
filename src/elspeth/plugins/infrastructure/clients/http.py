@@ -930,7 +930,7 @@ class AuditedHTTPClient(AuditedClientBase):
 
             # Acquire rate limit for each redirect hop — each hop is a separate
             # outbound network request that must be throttled independently.
-            # See P2-2026-02-14-redirect-hops-bypass-rate-limiter.
+            # Bug fix: redirect hops were bypassing the rate limiter.
             self._acquire_rate_limit()
 
             hop_start = time.perf_counter()

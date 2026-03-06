@@ -74,98 +74,98 @@ allow_hits:
   owner: P1-2026-02-05-typecheck
   reason: Internal boundary - PipelineRow vs dict discrimination after mypy typecheck fixes
   safety: isinstance() check converts PipelineRow to dict for audit trail consistency
-- key: engine/processor.py:R8:RowProcessor:__init__:fp=92431a19ea3e4a20
+- key: engine/processor.py:R8:RowProcessor:__init__:fp=62fc84a69f4debd9
   owner: architecture
   reason: "Local dedup dict \u2014 setdefault on locally-constructed dict for deduplication by identity, not hiding missing\
     \ keys"
   safety: "Dict is created locally at line 335, default is the value itself \u2014 no silent fallback"
-- key: engine/processor.py:R5:RowProcessor:_execute_transform_with_retry:is_retryable:fp=58e116262aeaf4a9
+- key: engine/processor.py:R5:RowProcessor:_execute_transform_with_retry:is_retryable:fp=3e8c0ae3190b5db8
   owner: architecture
   reason: Retry boundary - LLMClientError exception type check for retryable classification
   safety: Crashes on type mismatch - no silent fallback
   expires: '2026-03-11'
-- key: engine/processor.py:R5:RowProcessor:_execute_transform_with_retry:is_retryable:fp=c55eae640fcf2725
+- key: engine/processor.py:R5:RowProcessor:_execute_transform_with_retry:is_retryable:fp=aa34187a629d34e4
   owner: architecture
   reason: Retry boundary - LLMClientError exception type check for retryable classification
   safety: Crashes on type mismatch - no silent fallback
   expires: '2026-03-11'
-- key: engine/processor.py:R1:RowProcessor:_notify_coalesce_of_lost_branch:fp=f84b7f3f216c38ab
+- key: engine/processor.py:R1:RowProcessor:_notify_coalesce_of_lost_branch:fp=5c902236276d8e5a
   owner: architecture
   reason: dict.get() correct - not all branch names have coalesce point mapping
   safety: Crashes on type mismatch - no silent fallback
   expires: '2026-03-11'
-- key: engine/processor.py:R5:RowProcessor:_drain_work_queue:fp=5eb5d1901b46a441
+- key: engine/processor.py:R5:RowProcessor:_drain_work_queue:fp=ecc89a5d3957a13e
   owner: architecture
   reason: Type dispatch on _process_single_token return (RowResult | list[RowResult] | None)
   safety: Crashes on type mismatch - no silent fallback
   expires: '2026-03-11'
-- key: engine/processor.py:R5:RowProcessor:_process_single_token:fp=f6b188d63c1acf6c
+- key: engine/processor.py:R5:RowProcessor:_process_single_token:fp=3437d4200832cf1d
   owner: architecture
   reason: Protocol dispatch - isinstance for plugin type routing in unified node traversal
   safety: isinstance for NodeType discrimination - TransformProtocol vs GateSettings
   expires: '2026-05-13'
-- key: engine/processor.py:R5:RowProcessor:_process_single_token:fp=93e504627ede96c0
+- key: engine/processor.py:R5:RowProcessor:_process_single_token:fp=56675e8cd6fd1273
   owner: architecture
   reason: Protocol dispatch - isinstance for plugin type routing in unified node traversal
   safety: isinstance for NodeType discrimination - TransformProtocol vs GateSettings
   expires: '2026-05-13'
-- key: engine/processor.py:R5:RowProcessor:_process_single_token:fp=1f24601efe98e8f7
+- key: engine/processor.py:R5:RowProcessor:_process_single_token:fp=d737ab052f57998d
   owner: architecture
   reason: Protocol dispatch - isinstance for plugin type routing in unified node traversal
   safety: isinstance for NodeType discrimination - TransformProtocol vs GateSettings
   expires: '2026-05-13'
-- key: engine/processor.py:R5:RowProcessor:_process_single_token:fp=413dc772543e4153
+- key: engine/processor.py:R5:RowProcessor:_process_single_token:fp=6492c78b32e3c7af
   owner: architecture
   reason: Protocol dispatch - isinstance for plugin type routing in unified node traversal
   safety: isinstance for NodeType discrimination - TransformProtocol vs GateSettings
   expires: '2026-05-13'
-- key: engine/orchestrator/core.py:R5:Orchestrator:_cleanup_plugins:record_cleanup_error:fp=b02e22195b613c24
+- key: engine/orchestrator/core.py:R5:Orchestrator:_cleanup_plugins:record_cleanup_error:fp=7ae5a000d3e51db0
   owner: architecture
   reason: "isinstance re-raise guard \u2014 FrameworkBugError/AuditIntegrityError must not be downgraded to cleanup warnings"
   safety: System-level exceptions re-raised immediately; regular cleanup errors collected and reported
   expires: '2026-05-15'
-- key: engine/orchestrator/core.py:R4:Orchestrator:_cleanup_plugins:fp=9186c6f137f1093b
+- key: engine/orchestrator/core.py:R4:Orchestrator:_cleanup_plugins:fp=fb9d7889d9ba0793
   owner: architecture
   reason: Plugin cleanup must attempt all closures; broad catch collects errors then raises
   safety: Code reviewed - collects all cleanup errors into list, raises ExceptionGroup after all attempted
   expires: '2026-05-02'
-- key: engine/orchestrator/core.py:R4:Orchestrator:_cleanup_plugins:fp=f663dba7daf84786
+- key: engine/orchestrator/core.py:R4:Orchestrator:_cleanup_plugins:fp=a9a2e7a788b21d3e
   owner: architecture
   reason: Plugin cleanup must attempt all closures; broad catch collects errors then raises
   safety: Code reviewed - collects all cleanup errors into list, raises ExceptionGroup after all attempted
   expires: '2026-05-02'
-- key: engine/orchestrator/core.py:R4:Orchestrator:_cleanup_plugins:fp=5e1bb4fdaa48d043
+- key: engine/orchestrator/core.py:R4:Orchestrator:_cleanup_plugins:fp=b5d382e0cb97a01d
   owner: architecture
   reason: Plugin cleanup must attempt all closures; broad catch collects errors then raises
   safety: Code reviewed - collects all cleanup errors into list, raises ExceptionGroup after all attempted
   expires: '2026-05-02'
-- key: engine/orchestrator/core.py:R4:Orchestrator:_cleanup_plugins:fp=d729293d5527fba4
+- key: engine/orchestrator/core.py:R4:Orchestrator:_cleanup_plugins:fp=d240cd7687818479
   owner: architecture
   reason: Plugin cleanup must attempt all closures; broad catch collects errors then raises
   safety: Code reviewed - collects all cleanup errors into list, raises ExceptionGroup after all attempted
   expires: '2026-05-02'
-- key: engine/orchestrator/core.py:R4:Orchestrator:_cleanup_plugins:fp=f817538c934b7617
+- key: engine/orchestrator/core.py:R4:Orchestrator:_cleanup_plugins:fp=066411294e5174d6
   owner: architecture
   reason: Plugin cleanup must attempt all closures; broad catch collects errors then raises
   safety: Code reviewed - collects all cleanup errors into list, raises ExceptionGroup after all attempted
   expires: '2026-05-02'
-- key: engine/orchestrator/core.py:R4:Orchestrator:_cleanup_plugins:fp=9f2626af431e496e
+- key: engine/orchestrator/core.py:R4:Orchestrator:_cleanup_plugins:fp=4707ddf165ce80ba
   owner: architecture
   reason: Plugin cleanup must attempt all closures; broad catch collects errors then raises
   safety: Code reviewed - collects all cleanup errors into list, raises ExceptionGroup after all attempted
   expires: '2026-05-02'
-- key: engine/orchestrator/core.py:R5:Orchestrator:_initialize_run_context:fp=6dc9e2facf149a98
+- key: engine/orchestrator/core.py:R5:Orchestrator:_initialize_run_context:fp=77e2f59cce292adb
   owner: architecture
   reason: Type dispatch - RowPlugin is TransformProtocol, isinstance check filters GateSettings from transforms list to access
     is_batch_aware
   safety: Crashes on type mismatch - no silent fallback
   expires: '2026-05-13'
-- key: engine/orchestrator/core.py:R5:Orchestrator:_handle_quarantine_row:fp=59e2553016f89aeb
+- key: engine/orchestrator/core.py:R5:Orchestrator:_handle_quarantine_row:fp=5db48bb20fb267e9
   owner: architecture
   reason: Tier 3 boundary - quarantine path handles non-dict source rows
   safety: Crashes on type mismatch - no silent fallback
   expires: '2026-05-13'
-- key: engine/orchestrator/core.py:R6:Orchestrator:_handle_quarantine_row:fp=cc9ed4fb9da66379
+- key: engine/orchestrator/core.py:R6:Orchestrator:_handle_quarantine_row:fp=3622997b03371b40
   owner: bugfix
   reason: "Tier-3 boundary \u2014 quarantined row data may contain NaN/Infinity that stable_hash rejects"
   safety: Falls back to repr_hash with debug logging; audit trail uses separate hashing path
@@ -180,10 +180,6 @@ allow_hits:
   reason: isinstance() check required to find batch-aware transforms - protocol contract verification
   safety: Crashes on type mismatch - no silent fallback
   expires: '2026-05-15'
-- key: engine/orchestrator/types.py:R5:AggregationFlushResult:__post_init__:fp=80da61a17e4e857a
-  owner: architecture
-  reason: "Frozen dataclass invariant \u2014 isinstance check to deep-freeze mutable routed_destinations dict via MappingProxyType"
-  safety: "Converts mutable dict to frozen proxy \u2014 defensive construction, not runtime masking"
 - key: engine/executors/gate.py:R5:GateExecutor:execute_config_gate:fp=356211ac8d3baa70
   owner: architecture
   reason: AST/type checking - ExpressionParser returns Any; must distinguish bool/str for route label conversion
@@ -214,14 +210,7 @@ allow_hits:
   reason: isinstance() check required to find batch-aware transforms - protocol contract verification
   safety: BatchTransformMixin is system-owned; isinstance replaces prior hasattr checks for type safety
   expires: '2026-05-02'
-- key: 'engine/orchestrator/types.py:R5:ResumeState:__post_init__:fp=3beb05b59dc966f3'
+- key: 'engine/orchestrator/types.py:R5:ResumeState:__post_init__:fp=c6d0246f2411d1b9'
   owner: architecture
-  reason: Deep-freeze conversion guard — isinstance() checks for MappingProxyType/tuple wrapping, not defensive data access
+  reason: Deep-freeze conversion guard — isinstance() checks for tuple wrapping, not defensive data access
   safety: Construction-time type conversion, crashes on unexpected types
-  expires: null
-
-- key: 'engine/orchestrator/types.py:R5:ResumeState:__post_init__:fp=43b8e2f7dc4f66f1'
-  owner: architecture
-  reason: Deep-freeze conversion guard — isinstance() checks for MappingProxyType/tuple wrapping, not defensive data access
-  safety: Construction-time type conversion, crashes on unexpected types
-  expires: null

@@ -58,6 +58,8 @@ class AggregationTokenCheckpoint:
             raise ValueError("AggregationTokenCheckpoint.row_id must not be empty")
         if not self.contract_version:
             raise ValueError("AggregationTokenCheckpoint.contract_version must not be empty")
+        if not isinstance(self.row_data, (dict, MappingProxyType)):
+            raise ValueError(f"row_data must be a dict, got {type(self.row_data).__name__}: {self.row_data!r}")
         if not isinstance(self.row_data, MappingProxyType):
             object.__setattr__(self, "row_data", deep_freeze(self.row_data))
 
@@ -144,6 +146,8 @@ class AggregationNodeCheckpoint:
             raise ValueError(
                 f"AggregationNodeCheckpoint.condition_fire_offset must be non-negative and finite, got {self.condition_fire_offset}"
             )
+        if not isinstance(self.contract, (dict, MappingProxyType)):
+            raise ValueError(f"contract must be a dict, got {type(self.contract).__name__}: {self.contract!r}")
         if not isinstance(self.contract, MappingProxyType):
             object.__setattr__(self, "contract", deep_freeze(self.contract))
 

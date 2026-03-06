@@ -128,7 +128,7 @@ class TransformResult:
 
     # Context snapshot for audit trail (optional)
     # Contains operational metadata like pool stats, ordering info
-    # P3-2026-02-02: Enables pool metadata to flow to context_after_json
+    # Enables pool metadata to flow to context_after_json
     context_after: NodeStateContext | None = field(default=None, repr=False)
 
     def __post_init__(self) -> None:

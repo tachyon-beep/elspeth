@@ -9,7 +9,6 @@ The PluginContext carries everything a plugin needs during execution:
 
 from __future__ import annotations
 
-import copy
 import logging
 from collections.abc import Callable
 from dataclasses import dataclass, field
@@ -318,8 +317,13 @@ class PluginContext:
             from elspeth.contracts.events import ExternalCallCompleted
 
             # Snapshot payloads so async telemetry exports can't drift from call-time values.
-            request_snapshot = copy.deepcopy(request_data)
-            response_snapshot = copy.deepcopy(response_data) if response_data is not None else None
+            # Use deep_thaw instead of deepcopy — frozen checkpoint data contains
+            # MappingProxyType which can't be pickled/deepcopied. deep_thaw creates
+            # the mutable copy we need and handles frozen containers correctly.
+            from elspeth.contracts.freeze import deep_thaw
+
+            request_snapshot = deep_thaw(request_data)
+            response_snapshot = deep_thaw(response_data) if response_data is not None else None
 
             # Extract token usage for LLM calls if available.
             # response_snapshot is a serialized dict from LLMCallResponse.to_dict(),

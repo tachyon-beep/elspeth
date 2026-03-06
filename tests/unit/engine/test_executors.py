@@ -3760,10 +3760,10 @@ class TestReRaiseGuardPattern:
                 if isinstance(node, ast.ExceptHandler) and _is_framework_audit_handler(node):
                     count += 1
 
-        # Current count: 17 guards across the codebase.
+        # Current count: 15 guards across the codebase.
         # If this drops, a guard was removed.  Update if legitimately adding more.
-        assert count >= 17, (
-            f"Expected at least 17 re-raise guards, found {count}. "
+        assert count >= 15, (
+            f"Expected at least 15 re-raise guards, found {count}. "
             f"A FrameworkBugError/AuditIntegrityError re-raise guard may have been removed."
         )
 

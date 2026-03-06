@@ -167,6 +167,15 @@ class TestAzureBlobSinkConfigValidation:
         with pytest.raises(PluginConfigError, match="blob_path cannot be empty"):
             AzureBlobSink(make_config(blob_path=""))
 
+    def test_invalid_blob_path_template_raises_error(self) -> None:
+        """Invalid Jinja2 template in blob_path raises ValueError at init time.
+
+        Structural template errors must stop the run at setup, not be deferred
+        to the first write() call (Pipeline Templates as Tier 2 Data pattern).
+        """
+        with pytest.raises(ValueError, match="Invalid blob_path template"):
+            AzureBlobSink(make_config(blob_path="results/{% if unclosed %}/output.csv"))
+
     def test_missing_schema_raises_error(self) -> None:
         """Missing schema raises PluginConfigError."""
         with pytest.raises(PluginConfigError, match=r"schema_config[\s\S]*Field required"):

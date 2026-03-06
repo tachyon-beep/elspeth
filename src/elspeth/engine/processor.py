@@ -18,6 +18,7 @@ from types import MappingProxyType
 from typing import TYPE_CHECKING, Any, cast
 
 from elspeth.contracts import RouteDestination, RowOutcome, RowResult, SourceRow, TokenInfo, TransformResult
+from elspeth.contracts.freeze import deep_freeze
 from elspeth.contracts.schema_contract import PipelineRow
 from elspeth.contracts.types import BranchName, CoalesceName, NodeID, SinkName, StepResolver
 from elspeth.engine.dag_navigator import DAGNavigator, WorkItem
@@ -73,11 +74,8 @@ class DAGTraversalContext:
     branch_first_node: Mapping[str, NodeID] = MappingProxyType({})
 
     def __post_init__(self) -> None:
-        object.__setattr__(self, "node_step_map", MappingProxyType(dict(self.node_step_map)))
-        object.__setattr__(self, "node_to_plugin", MappingProxyType(dict(self.node_to_plugin)))
-        object.__setattr__(self, "node_to_next", MappingProxyType(dict(self.node_to_next)))
-        object.__setattr__(self, "coalesce_node_map", MappingProxyType(dict(self.coalesce_node_map)))
-        object.__setattr__(self, "branch_first_node", MappingProxyType(dict(self.branch_first_node)))
+        for name in ("node_step_map", "node_to_plugin", "node_to_next", "coalesce_node_map", "branch_first_node"):
+            object.__setattr__(self, name, deep_freeze(getattr(self, name)))
 
 
 @dataclass(frozen=True, slots=True)
@@ -126,7 +124,7 @@ class _FlushContext:
             )
 
 
-# --- T18: Discriminated union types for _process_single_token extraction ---
+# --- Discriminated union types for _process_single_token extraction ---
 
 
 @dataclass(frozen=True, slots=True)
@@ -536,7 +534,7 @@ class RowProcessor:
 
     # ─────────────────────────────────────────────────────────────────────────
     # Public facade for aggregation timeout checking
-    # (Bug fix: P1-2026-01-22 - provides clean API for orchestrator timeout checks)
+    # Provides clean API for orchestrator timeout checks
     # ─────────────────────────────────────────────────────────────────────────
 
     def check_aggregation_timeout(self, node_id: NodeID) -> tuple[bool, TriggerType | None]:
@@ -615,7 +613,7 @@ class RowProcessor:
     ) -> tuple[RowResult, ...]:
         """Handle failed aggregation flush for both passthrough and transform modes.
 
-        T26: Both modes now have BUFFERED (non-terminal) at buffer time,
+        Both modes now have BUFFERED (non-terminal) at buffer time,
         so FAILED can be recorded as the terminal outcome for all tokens.
         """
         error_hash = hashlib.sha256(fctx.error_msg.encode()).hexdigest()[:16]
@@ -704,11 +702,11 @@ class RowProcessor:
         Records per-token terminal outcomes (CONSUMED_IN_BATCH or QUARANTINED),
         emits deferred TokenCompleted telemetry, then routes expanded tokens downstream.
 
-        T26: Batch transforms can quarantine individual rows. Quarantined tokens
+        Batch transforms can quarantine individual rows. Quarantined tokens
         get QUARANTINED terminal state instead of CONSUMED_IN_BATCH, identified
         via quarantined_indices in the result's success_reason metadata.
         """
-        # T26: Extract quarantined indices from result metadata.
+        # Extract quarantined indices from result metadata.
         # metadata is optional in TransformSuccessReason — only present when
         # the batch transform quarantines rows.
         quarantined_index_set: set[int] = set()
@@ -718,7 +716,7 @@ class RowProcessor:
                 quarantined_index_set = set(metadata["quarantined_indices"])
 
         # Record terminal outcomes for ALL buffered tokens (deferred from buffer time).
-        # T26: Quarantined tokens get QUARANTINED; valid tokens get CONSUMED_IN_BATCH.
+        # Quarantined tokens get QUARANTINED; valid tokens get CONSUMED_IN_BATCH.
         for i, token in enumerate(fctx.buffered_tokens):
             if i in quarantined_index_set:
                 error_hash = hashlib.sha256(f"quarantined_in_batch:{fctx.batch_id}:{i}".encode()).hexdigest()[:16]
@@ -896,7 +894,7 @@ class RowProcessor:
         when the trigger fires. Flush handling is delegated to shared helpers
         (_handle_flush_error, _route_passthrough_results, _route_transform_results).
 
-        TEMPORAL DECOUPLING (Bug P2-2026-02-01, updated T26):
+        TEMPORAL DECOUPLING:
 
         Both modes now record BUFFERED (non-terminal) at buffer time, with
         terminal outcomes deferred to flush time. This enables per-token
@@ -933,7 +931,7 @@ class RowProcessor:
         # Buffer the row
         self._aggregation_executor.buffer_row(node_id, current_token)
 
-        # T26: Record BUFFERED for this token BEFORE checking flush.
+        # Record BUFFERED for this token BEFORE checking flush.
         # On count-threshold flush, the triggering token would otherwise have
         # no BUFFERED record — it goes directly to CONSUMED_IN_BATCH/FAILED.
         # Recording here ensures BUFFERED → terminal for every aggregation token.
@@ -995,7 +993,7 @@ class RowProcessor:
         # - passthrough: BUFFERED → COMPLETED/FAILED at flush
         # - transform: BUFFERED → CONSUMED_IN_BATCH/QUARANTINED/FAILED at flush
         # NOTE: Do NOT emit TokenCompleted telemetry here!
-        # Bug P2-2026-02-01: TokenCompleted must be deferred to flush time so that
+        # TokenCompleted must be deferred to flush time so that
         # TransformCompleted can be emitted first.
         return (
             RowResult(

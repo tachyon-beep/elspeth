@@ -381,7 +381,7 @@ class TokenManager:
         # CRITICAL: Use deepcopy to prevent nested mutable objects from being
         # shared across expanded children. Same reasoning as fork_token - without
         # this, mutations in one sibling leak to others, corrupting audit trail.
-        # Bug: P2-2026-01-21-expand-token-shared-row-data
+        # Bug fix: expand_token was sharing row_data references across tokens
         child_infos = [
             TokenInfo(
                 row_id=parent_token.row_id,

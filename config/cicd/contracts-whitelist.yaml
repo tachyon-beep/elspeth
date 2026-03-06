@@ -444,6 +444,9 @@ allowed_dict_patterns:
   # Azure blob sink - row serialization
   - "src/elspeth/plugins/sinks/azure_blob_sink.py:AzureBlobSink._get_fieldnames_from_schema_or_rows:rows (list)"
 
+  # LLM finish-reason error builder — constructs dynamic error reason dicts with optional fields
+  - "src/elspeth/plugins/transforms/llm/transform.py:_build_reason:return"
+
   # Multi-query config base (JSON schema building for LLM structured output)
   - "src/elspeth/plugins/transforms/llm/multi_query.py:OutputFieldConfig.to_json_schema:return"
 

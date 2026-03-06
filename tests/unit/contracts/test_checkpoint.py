@@ -101,17 +101,6 @@ def test_resume_point_accepts_none_aggregation_state() -> None:
     assert resume_point.aggregation_state is None
 
 
-def test_resume_point_rejects_non_dto_aggregation_state() -> None:
-    with pytest.raises(ValueError, match="aggregation_state must be AggregationCheckpointState or None"):
-        ResumePoint(
-            checkpoint=_checkpoint(),
-            token_id="tok-001",
-            node_id="node-001",
-            sequence_number=1,
-            aggregation_state={"not": "a DTO"},  # type: ignore[arg-type]
-        )
-
-
 def test_resume_point_accepts_typed_coalesce_state() -> None:
     coalesce_state = CoalesceCheckpointState(
         version="1.0",
@@ -150,15 +139,44 @@ def test_resume_point_accepts_typed_coalesce_state() -> None:
     assert resume_point.coalesce_state is coalesce_state
 
 
-def test_resume_point_rejects_non_dto_coalesce_state() -> None:
-    with pytest.raises(ValueError, match="coalesce_state must be CoalesceCheckpointState or None"):
+def test_resume_point_rejects_empty_token_id() -> None:
+    with pytest.raises(ValueError, match="token_id must not be empty"):
+        ResumePoint(
+            checkpoint=_checkpoint(),
+            token_id="",
+            node_id="node-001",
+            sequence_number=1,
+        )
+
+
+def test_resume_point_rejects_empty_node_id() -> None:
+    with pytest.raises(ValueError, match="node_id must not be empty"):
+        ResumePoint(
+            checkpoint=_checkpoint(),
+            token_id="tok-001",
+            node_id="",
+            sequence_number=1,
+        )
+
+
+def test_resume_point_rejects_negative_sequence_number() -> None:
+    with pytest.raises(ValueError, match="sequence_number must be non-negative"):
         ResumePoint(
             checkpoint=_checkpoint(),
             token_id="tok-001",
             node_id="node-001",
-            sequence_number=1,
-            coalesce_state={"not": "a DTO"},  # type: ignore[arg-type]
+            sequence_number=-1,
         )
+
+
+def test_resume_point_accepts_zero_sequence_number() -> None:
+    resume_point = ResumePoint(
+        checkpoint=_checkpoint(),
+        token_id="tok-001",
+        node_id="node-001",
+        sequence_number=0,
+    )
+    assert resume_point.sequence_number == 0
 
 
 # === AggregationNodeCheckpoint.from_dict corruption tests ===
@@ -240,3 +258,34 @@ def test_node_from_dict_multiple_missing_fields_reports_all() -> None:
     assert "elapsed_age_seconds" in msg
     assert "count_fire_offset" in msg
     assert "condition_fire_offset" in msg
+
+
+# === Aggregation checkpoint type guard tests ===
+
+
+def test_aggregation_token_rejects_non_dict_row_data() -> None:
+    """row_data type guard rejects non-dict values with clear error."""
+    with pytest.raises(ValueError, match="row_data must be a dict"):
+        AggregationTokenCheckpoint(
+            token_id="tok-001",
+            row_id="row-001",
+            branch_name=None,
+            fork_group_id=None,
+            join_group_id=None,
+            expand_group_id=None,
+            row_data="not a dict",  # type: ignore[arg-type]
+            contract_version="abc123",
+        )
+
+
+def test_aggregation_node_rejects_non_dict_contract() -> None:
+    """contract type guard rejects non-dict values with clear error."""
+    with pytest.raises(ValueError, match="contract must be a dict"):
+        AggregationNodeCheckpoint(
+            tokens=(),
+            batch_id="batch-001",
+            elapsed_age_seconds=0.0,
+            count_fire_offset=None,
+            condition_fire_offset=None,
+            contract=["not", "a", "dict"],  # type: ignore[arg-type]
+        )

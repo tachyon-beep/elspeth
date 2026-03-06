@@ -14,7 +14,7 @@ Two categories of defaults:
    These MUST match RetryConfig dataclass defaults.
 
 Why document INTERNAL_DEFAULTS?
-    The P2-2026-01-21 bug showed that undocumented hardcoded values are
+    A field-orphaning bug showed that undocumented hardcoded values are
     invisible. When jitter=1.0 is buried in RetryConfig, no one knows
     whether it should be configurable. By documenting it here:
     - We explicitly declare "this is intentionally internal"

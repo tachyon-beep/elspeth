@@ -52,7 +52,7 @@ _REQUIRED_COLUMNS: tuple[tuple[str, str], ...] = (
 
 # Required foreign keys for audit integrity (Tier 1 trust).
 # Format: (table_name, column_name, referenced_table)
-# Bug fix: P2-2026-01-19-error-tables-missing-foreign-keys
+# Bug fix: error tables were missing foreign keys to nodes/tokens
 _REQUIRED_FOREIGN_KEYS: tuple[tuple[str, str, str], ...] = (
     ("validation_errors", "node_id", "nodes"),
     ("transform_errors", "token_id", "tokens"),

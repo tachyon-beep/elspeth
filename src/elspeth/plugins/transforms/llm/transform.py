@@ -1,4 +1,4 @@
-"""Unified LLM transform with strategy pattern (Task 9 of T10).
+"""Unified LLM transform with strategy pattern.
 
 LLMTransform dispatches to SingleQueryStrategy or MultiQueryStrategy
 based on whether queries are configured. Provider dispatch (Azure,
@@ -92,6 +92,17 @@ def _finish_reason_error(
     This ensures new provider finish reasons are never silently treated
     as success.
     """
+
+    def _build_reason(**base_fields: str) -> dict[str, Any]:
+        reason: dict[str, Any] = dict(base_fields)
+        if query_name is not None:
+            reason["query_name"] = query_name
+        if query_index is not None:
+            reason["query_index"] = query_index
+        if content_length is not None:
+            reason["content_length"] = content_length
+        return reason
+
     # Allowlist: only explicit STOP is a known-good completion.
     if finish_reason == FinishReason.STOP:
         return None
@@ -100,15 +111,11 @@ def _finish_reason_error(
     # abnormal response.  We can't verify the output wasn't truncated, so
     # fail closed rather than fabricating "success" in the audit trail.
     if finish_reason is None:
-        reason: dict[str, Any] = {"reason": "missing_finish_reason"}
-        if query_name is not None:
-            reason["query_name"] = query_name
-        if query_index is not None:
-            reason["query_index"] = query_index
-        if content_length is not None:
-            reason["content_length"] = content_length
         return _FinishReasonError(
-            result=TransformResult.error(cast(TransformErrorReason, reason), retryable=True),
+            result=TransformResult.error(
+                cast(TransformErrorReason, _build_reason(reason="missing_finish_reason")),
+                retryable=True,
+            ),
             error_message="finish_reason absent from provider response — cannot verify completion integrity",
         )
 
@@ -117,18 +124,14 @@ def _finish_reason_error(
         entry = _FINISH_REASON_ERRORS.get(finish_reason)
         if entry is not None:
             reason_key, error_message = entry
-            reason = {
-                "reason": reason_key,
-                "finish_reason": finish_reason.value,
-            }
-            if query_name is not None:
-                reason["query_name"] = query_name
-            if query_index is not None:
-                reason["query_index"] = query_index
-            if content_length is not None:
-                reason["content_length"] = content_length
             return _FinishReasonError(
-                result=TransformResult.error(cast(TransformErrorReason, reason), retryable=False),
+                result=TransformResult.error(
+                    cast(
+                        TransformErrorReason,
+                        _build_reason(reason=reason_key, finish_reason=finish_reason.value),
+                    ),
+                    retryable=False,
+                ),
                 error_message=error_message,
             )
         # Known enum member not in STOP or error dict — fail closed.
@@ -139,16 +142,14 @@ def _finish_reason_error(
         raw_value = str(finish_reason)  # type: ignore[unreachable]
 
     # Catch-all: any finish reason not explicitly allowlisted is an error.
-    reason = {
-        "reason": "unexpected_finish_reason",
-        "finish_reason": raw_value,
-    }
-    if query_name is not None:
-        reason["query_name"] = query_name
-    if query_index is not None:
-        reason["query_index"] = query_index
     return _FinishReasonError(
-        result=TransformResult.error(cast(TransformErrorReason, reason), retryable=False),
+        result=TransformResult.error(
+            cast(
+                TransformErrorReason,
+                _build_reason(reason="unexpected_finish_reason", finish_reason=raw_value),
+            ),
+            retryable=False,
+        ),
         error_message=f"Unexpected finish reason: {raw_value}",
     )
 

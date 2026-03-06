@@ -466,6 +466,32 @@ class TestAppendRecordsFailureHandling:
 
         assert journal._consecutive_failures == 0
 
+    def test_programming_error_not_caught(self, tmp_path: Path) -> None:
+        """TypeError/AttributeError in serialization must crash, not be silently swallowed."""
+        journal = _make_journal(tmp_path)
+        record = cast(JournalRecord, {"timestamp": "t", "statement": "INSERT", "parameters": {}, "executemany": False})
+
+        with (
+            patch.object(journal, "_serialize_record", side_effect=TypeError("bad serialize")),
+            pytest.raises(TypeError, match="bad serialize"),
+        ):
+            journal._append_records([record])
+
+    def test_disabled_drop_always_logs(self, tmp_path: Path) -> None:
+        """Every drop in disabled state must be logged, not just every 100th."""
+        journal = _make_journal(tmp_path)
+        journal._disabled = True
+        journal._consecutive_failures = 5
+        journal._total_dropped = 5  # Not a multiple of 100
+
+        record = cast(JournalRecord, {"timestamp": "t", "statement": "INSERT", "parameters": {}, "executemany": False})
+        with patch("elspeth.core.landscape.journal.logger") as mock_logger:
+            journal._append_records([record])
+
+        mock_logger.warning.assert_called_once()
+        call_kwargs = mock_logger.warning.call_args
+        assert "journal_records_dropped" in str(call_kwargs)
+
 
 # ===========================================================================
 # Attach
@@ -547,6 +573,19 @@ class TestLoadPayload:
         journal._payload_store.retrieve.side_effect = FileNotFoundError("not found")
 
         with pytest.raises(FileNotFoundError):
+            journal._load_payload("some-ref")
+
+    def test_programming_error_in_retrieve_not_caught(self, tmp_path: Path) -> None:
+        """TypeError/AttributeError in payload store must crash, not be silently swallowed."""
+        journal = _make_journal(
+            tmp_path,
+            include_payloads=True,
+            payload_base_path=str(tmp_path / "payloads"),
+        )
+        journal._payload_store = Mock()
+        journal._payload_store.retrieve.side_effect = TypeError("bad type in store")
+
+        with pytest.raises(TypeError, match="bad type in store"):
             journal._load_payload("some-ref")
 
     def test_decode_failure_returns_error(self, tmp_path: Path) -> None:

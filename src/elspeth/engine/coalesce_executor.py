@@ -947,7 +947,7 @@ class CoalesceExecutor:
                     )
 
             # For require_all, timeout means incomplete - record failure
-            # (Bug P1-2026-01-30 fix: require_all was missing from check_timeouts)
+            # (require_all was previously missing from check_timeouts)
             elif settings.policy == "require_all":
                 # require_all never does partial merge - timeout is always a failure
                 results.append(

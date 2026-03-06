@@ -21,7 +21,7 @@ import time
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any, Literal, Self
 
-from jinja2 import StrictUndefined
+from jinja2 import StrictUndefined, TemplateSyntaxError
 from jinja2.sandbox import SandboxedEnvironment
 from pydantic import BaseModel, Field, field_validator, model_validator
 
@@ -291,7 +291,7 @@ class AzureBlobSink(BaseSink):
         env = SandboxedEnvironment(undefined=StrictUndefined)
         try:
             self._blob_path_compiled = env.from_string(self._blob_path_template)
-        except Exception as e:
+        except TemplateSyntaxError as e:
             raise ValueError(f"Invalid blob_path template: {e}") from e
 
         # CSV options are already validated Pydantic model

@@ -45,12 +45,8 @@ class CoalesceTokenCheckpoint:
             object.__setattr__(self, "row_data", deep_freeze(self.row_data))
         if not isinstance(self.contract, MappingProxyType):
             object.__setattr__(self, "contract", deep_freeze(self.contract))
-        if (
-            not isinstance(self.arrival_offset_seconds, (int, float))
-            or not math.isfinite(self.arrival_offset_seconds)
-            or self.arrival_offset_seconds < 0
-        ):
-            raise ValueError(f"arrival_offset_seconds must be non-negative, got {self.arrival_offset_seconds!r}")
+        if self.arrival_offset_seconds < 0 or not math.isfinite(self.arrival_offset_seconds):
+            raise ValueError(f"arrival_offset_seconds must be non-negative and finite, got {self.arrival_offset_seconds!r}")
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -113,12 +109,8 @@ class CoalescePendingCheckpoint:
             value = getattr(self, field_name)
             if not isinstance(value, str) or not value:
                 raise ValueError(f"{field_name} must be a non-empty string, got {type(value).__name__}: {value!r}")
-        if (
-            not isinstance(self.elapsed_age_seconds, (int, float))
-            or not math.isfinite(self.elapsed_age_seconds)
-            or self.elapsed_age_seconds < 0
-        ):
-            raise ValueError(f"elapsed_age_seconds must be non-negative, got {self.elapsed_age_seconds!r}")
+        if self.elapsed_age_seconds < 0 or not math.isfinite(self.elapsed_age_seconds):
+            raise ValueError(f"elapsed_age_seconds must be non-negative and finite, got {self.elapsed_age_seconds!r}")
         if not isinstance(self.branches, MappingProxyType):
             object.__setattr__(self, "branches", MappingProxyType(self.branches))
         if not isinstance(self.lost_branches, MappingProxyType):

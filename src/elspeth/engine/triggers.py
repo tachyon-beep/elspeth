@@ -123,7 +123,7 @@ class TriggerEvaluator:
                 "batch_age_seconds": current_time - self._first_accept_time,
             }
             result = self._condition_parser.evaluate(context)
-            # P2-2026-01-31: Defense-in-depth - reject non-boolean at runtime
+            # Defense-in-depth: reject non-boolean at runtime
             # Per CLAUDE.md: "if bool(result)" coercion is forbidden for our data
             if not isinstance(result, bool):
                 raise TypeError(
@@ -166,8 +166,8 @@ class TriggerEvaluator:
         # Condition: Once fired (latched), always honor the fire time.
         # Re-evaluate only when not yet fired, since time-dependent conditions
         # (batch_age_seconds) may have become true after time passed.
-        # P1-2026-02-05: Window-based conditions (e.g., batch_age_seconds < 0.5)
-        # could "unfire" if re-evaluated after the window closed. Latching fixes this.
+        # Window-based conditions (e.g., batch_age_seconds < 0.5) could "unfire"
+        # if re-evaluated after the window closed. Latching fixes this.
         if self._condition_parser is not None and self._first_accept_time is not None:
             if self._condition_fire_time is not None:
                 # Already latched — honor the recorded fire time unconditionally
@@ -179,7 +179,7 @@ class TriggerEvaluator:
                     "batch_age_seconds": batch_age,
                 }
                 result = self._condition_parser.evaluate(context)
-                # P2-2026-01-31: Defense-in-depth - reject non-boolean at runtime
+                # Defense-in-depth: reject non-boolean at runtime
                 # Per CLAUDE.md: "if bool(result)" coercion is forbidden for our data
                 if not isinstance(result, bool):
                     raise TypeError(
@@ -227,7 +227,7 @@ class TriggerEvaluator:
             return TriggerType.CONDITION
         return None
 
-    # --- Checkpoint/Restore API (P2-2026-02-01) ---
+    # --- Checkpoint/Restore API ---
 
     def get_count_fire_offset(self) -> float | None:
         """Get the offset from first_accept_time when count trigger fired.
@@ -264,9 +264,9 @@ class TriggerEvaluator:
         processed batch_count rows, with the specified elapsed time and
         trigger fire times preserved.
 
-        P2-2026-02-01: This fixes the bug where record_accept() was used
-        during restore, which set fire times to current clock time instead
-        of preserving the original ordering.
+        This fixes a bug where record_accept() was used during restore,
+        which set fire times to current clock time instead of preserving
+        the original ordering.
 
         Args:
             batch_count: Number of rows in the restored batch

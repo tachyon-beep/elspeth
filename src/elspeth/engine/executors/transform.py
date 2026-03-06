@@ -256,12 +256,12 @@ class TransformExecutor:
             # Set token on context for ALL transforms (not just batch-mixin).
             # Regular transforms also need ctx.token for telemetry correlation
             # when using audited clients (e.g., WebScrapeTransform uses ctx.token.token_id).
-            # See P2-2026-02-14-transformexecutor-only-sets-ctx-token-for-batch-mixin.
+            # Bug fix: ctx.token was previously only set for batch-mixin transforms.
             ctx.token = token
 
             # Execute with timing and span
-            # P2-2026-01-21: Pass token_id for accurate child token attribution in traces
-            # P2-2026-01-21: Pass node_id for disambiguation when multiple plugin instances exist
+            # Pass token_id for accurate child token attribution in traces
+            # Pass node_id for disambiguation when multiple plugin instances exist
             with self._spans.transform_span(
                 transform.name,
                 node_id=transform.node_id,
@@ -449,7 +449,7 @@ class TransformExecutor:
 
                 # Record error event (always, even for discard - audit completeness)
                 # Use node_id (unique DAG identifier), not name (plugin type)
-                # Bug fix: P2-2026-01-19-transform-errors-ambiguous-transform-id
+                # Bug fix: use node_id (unique) not name (shared across instances)
                 #
                 # result.reason MUST be set for error results - TransformResult.error() requires it.
                 # If None, that's a bug in the transform (constructed error result without reason).

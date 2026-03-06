@@ -1205,7 +1205,6 @@ class ExecutionGraph:
                 all_schemas.append((from_id, schema))
 
             # For multi-input nodes, check for mixed observed/explicit schemas first
-            # BUG FIX: P2-2026-02-01-dynamic-branch-schema-mismatch-not-detected
             # Mixed observed/explicit branches create semantic mismatches that cause runtime failures
             if len(all_schemas) > 1:
                 observed_branches = [(nid, s) for nid, s in all_schemas if self._is_observed_schema(s)]
@@ -1357,7 +1356,7 @@ class ExecutionGraph:
             schema = self.get_effective_producer_schema(from_id, _cache=_schema_cache)
             all_schemas.append((from_id, schema))
 
-        # Reject mixed observed/explicit schemas (P2-2026-02-01 fix)
+        # Reject mixed observed/explicit schemas
         observed_branches = [(nid, s) for nid, s in all_schemas if self._is_observed_schema(s)]
         explicit_branches = [(nid, s) for nid, s in all_schemas if not self._is_observed_schema(s)]
 
@@ -1513,7 +1512,7 @@ class ExecutionGraph:
         guarantees. This is because gates copy raw config["schema"] from upstream,
         which may not include computed guarantees from output_schema_config
         (e.g., LLM transforms compute additional guaranteed_fields like *_usage).
-        See P1-2026-01-31-gate-drops-computed-schema-guarantees for details.
+        Gates copy raw config["schema"] which may omit computed guarantees.
 
         Args:
             node_id: Node to get effective guarantees for

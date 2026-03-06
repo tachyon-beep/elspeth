@@ -329,16 +329,16 @@ allow_hits:
   owner: bugfix
   reason: "Tier-3 boundary \u2014 quarantined row data may contain NaN/Infinity that canonical_json rejects"
   safety: "Falls back to repr() with logging \u2014 audit trail preserved with metadata"
-- key: core/landscape/journal.py:R5:LandscapeJournal:_normalize_parameters:fp=6035c89a723cc84c
+- key: core/landscape/journal.py:R5:LandscapeJournal:_normalize_parameters:fp=6f7c6c1669761388
   owner: architecture
   reason: AST/type checking - required for safe parsing or discriminated unions
-- key: core/landscape/journal.py:R5:LandscapeJournal:_normalize_parameters:fp=3aa8f35428690c17
+- key: core/landscape/journal.py:R5:LandscapeJournal:_normalize_parameters:fp=b891d78d1e3e60a8
   owner: architecture
   reason: AST/type checking - required for safe parsing or discriminated unions
-- key: core/landscape/journal.py:R5:LandscapeJournal:_normalize_parameters:fp=56d52da6c6b12ff1
+- key: core/landscape/journal.py:R5:LandscapeJournal:_normalize_parameters:fp=51dff408854578a2
   owner: architecture
   reason: AST/type checking - required for safe parsing or discriminated unions
-- key: core/landscape/journal.py:R5:LandscapeJournal:_columns_to_values:fp=f36cfbad58bc4f44
+- key: core/landscape/journal.py:R5:LandscapeJournal:_columns_to_values:fp=1e2aeaeaabf8a7f9
   owner: architecture
   reason: AST/type checking - required for safe parsing or discriminated unions
 - key: core/landscape/run_lifecycle_repository.py:R5:RunLifecycleRepository:get_source_field_resolution:fp=7cd6d62cc37449df

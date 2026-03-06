@@ -159,7 +159,7 @@ def build_execution_graph(
 
         Returns a deep copy to prevent aliasing — mutations to the returned
         dict must not affect the source node's schema or other nodes that
-        received the same schema. BUG FIX: P1-2026-02-14.
+        received the same schema.
         """
         info = graph.get_node_info(nid)
         if info.output_schema_config is not None:
@@ -924,7 +924,7 @@ def build_execution_graph(
     # Note: This is a shallow freeze (top-level only). Deep immutability is
     # not enforced because downstream code (SchemaConfig.from_dict, etc.)
     # expects dict/list types, not MappingProxyType/tuple. The aliasing bug
-    # (P1-2026-02-14) is fixed by deep-copying in _best_schema_dict() instead.
+    # The aliasing bug is fixed by deep-copying in _best_schema_dict() instead.
     for _, attrs in graph._graph.nodes(data=True):
         info = attrs["info"]
         if isinstance(info.config, dict):

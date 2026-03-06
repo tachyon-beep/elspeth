@@ -216,7 +216,7 @@ class AzureBatchLLMTransform(BaseTransform):
             transform_name=self.name,
             tracing_config=self._tracing_config,
         )
-        # TODO(T10-phase-b): remove bridge — _record_langfuse_batch_job should use self._tracer
+        # TODO: remove bridge — _record_langfuse_batch_job should use self._tracer
         self._tracing_active: bool = isinstance(self._tracer, ActiveLangfuseTracer)
         self._langfuse_client: Any = self._tracer.client if isinstance(self._tracer, ActiveLangfuseTracer) else None
 
@@ -1298,7 +1298,7 @@ class AzureBatchLLMTransform(BaseTransform):
                     output_row,
                     self._response_field,
                     usage=usage,
-                    model=body.get("model", self._deployment_name),
+                    model=body.get("model"),
                     template_hash=self._template.template_hash,
                     variables_hash=variables_hash,
                     template_source=self._template.template_source,

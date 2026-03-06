@@ -26,6 +26,7 @@ import pytest
 from hypothesis import given, settings
 from hypothesis import strategies as st
 
+from elspeth.contracts.errors import AuditIntegrityError
 from elspeth.core.landscape.formatters import (
     CSVFormatter,
     JSONFormatter,
@@ -77,41 +78,41 @@ class TestNaNInfinityRejection:
     @given(depth=st.integers(min_value=0, max_value=8))
     @settings(max_examples=50)
     def test_nan_in_nested_dicts_rejected(self, depth: int) -> None:
-        """Property: NaN at any dict nesting depth raises ValueError."""
+        """Property: NaN at any dict nesting depth raises AuditIntegrityError."""
         data = _nest_in_dicts(float("nan"), depth)
-        with pytest.raises(ValueError, match="NaN"):
+        with pytest.raises(AuditIntegrityError, match="NaN"):
             serialize_datetime(data)
 
     @given(depth=st.integers(min_value=0, max_value=8))
     @settings(max_examples=50)
     def test_infinity_in_nested_dicts_rejected(self, depth: int) -> None:
-        """Property: Infinity at any dict nesting depth raises ValueError."""
+        """Property: Infinity at any dict nesting depth raises AuditIntegrityError."""
         data = _nest_in_dicts(float("inf"), depth)
-        with pytest.raises(ValueError, match="Infinity"):
+        with pytest.raises(AuditIntegrityError, match="Infinity"):
             serialize_datetime(data)
 
     @given(depth=st.integers(min_value=0, max_value=8))
     @settings(max_examples=50)
     def test_neg_infinity_in_nested_dicts_rejected(self, depth: int) -> None:
-        """Property: -Infinity at any dict nesting depth raises ValueError."""
+        """Property: -Infinity at any dict nesting depth raises AuditIntegrityError."""
         data = _nest_in_dicts(float("-inf"), depth)
-        with pytest.raises(ValueError, match="Infinity"):
+        with pytest.raises(AuditIntegrityError, match="Infinity"):
             serialize_datetime(data)
 
     @given(depth=st.integers(min_value=1, max_value=8))
     @settings(max_examples=50)
     def test_nan_in_nested_lists_rejected(self, depth: int) -> None:
-        """Property: NaN at any list nesting depth raises ValueError."""
+        """Property: NaN at any list nesting depth raises AuditIntegrityError."""
         data = _nest_in_lists(float("nan"), depth)
-        with pytest.raises(ValueError, match="NaN"):
+        with pytest.raises(AuditIntegrityError, match="NaN"):
             serialize_datetime(data)
 
     @given(depth=st.integers(min_value=1, max_value=8))
     @settings(max_examples=50)
     def test_infinity_in_nested_lists_rejected(self, depth: int) -> None:
-        """Property: Infinity at any list nesting depth raises ValueError."""
+        """Property: Infinity at any list nesting depth raises AuditIntegrityError."""
         data = _nest_in_lists(float("inf"), depth)
-        with pytest.raises(ValueError, match="Infinity"):
+        with pytest.raises(AuditIntegrityError, match="Infinity"):
             serialize_datetime(data)
 
     @given(
@@ -124,7 +125,7 @@ class TestNaNInfinityRejection:
         items: list[Any] = [i * 1.0 for i in range(n_valid)]
         insert_pos = nan_position % (n_valid + 1)
         items.insert(insert_pos, float("nan"))
-        with pytest.raises(ValueError, match="NaN"):
+        with pytest.raises(AuditIntegrityError, match="NaN"):
             serialize_datetime(items)
 
 

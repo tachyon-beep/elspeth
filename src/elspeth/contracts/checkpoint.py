@@ -47,18 +47,15 @@ class ResumePoint:
     coalesce_state: CoalesceCheckpointState | None = None
 
     def __post_init__(self) -> None:
-        """Validate aggregation_state type — Tier 1 crash on invalid types.
+        """Validate resume point fields — Tier 1 crash on invalid data.
 
         Per CLAUDE.md Data Manifesto: Checkpoints are Tier 1 audit data.
-        If aggregation_state is not the expected typed DTO (when present),
-        this indicates corrupted checkpoint data — crash immediately.
+        Empty token_id/node_id or negative sequence_number indicates
+        corrupted checkpoint data — crash immediately.
         """
-        if self.aggregation_state is not None and not isinstance(self.aggregation_state, AggregationCheckpointState):
-            raise ValueError(
-                f"aggregation_state must be AggregationCheckpointState or None, "
-                f"got {type(self.aggregation_state).__name__}: {self.aggregation_state!r}"
-            )
-        if self.coalesce_state is not None and not isinstance(self.coalesce_state, CoalesceCheckpointState):
-            raise ValueError(
-                f"coalesce_state must be CoalesceCheckpointState or None, got {type(self.coalesce_state).__name__}: {self.coalesce_state!r}"
-            )
+        if not self.token_id:
+            raise ValueError("ResumePoint.token_id must not be empty")
+        if not self.node_id:
+            raise ValueError("ResumePoint.node_id must not be empty")
+        if self.sequence_number < 0:
+            raise ValueError(f"ResumePoint.sequence_number must be non-negative, got {self.sequence_number}")

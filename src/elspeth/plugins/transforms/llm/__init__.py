@@ -127,7 +127,7 @@ def populate_llm_metadata_fields(
     field_prefix: str,
     *,
     usage: TokenUsage | None,
-    model: str,
+    model: str | None,
     template_hash: str,
     variables_hash: str,
     template_source: str | None,
@@ -146,7 +146,7 @@ def populate_llm_metadata_fields(
         output: Mutable row dict to populate.
         field_prefix: Response field name (e.g., "llm_response").
         usage: Token usage (``TokenUsage`` or ``None``).
-        model: Model identifier that actually responded.
+        model: Model identifier that actually responded (None if API omitted it).
         template_hash: SHA-256 of prompt template.
         variables_hash: SHA-256 of rendered template variables.
         template_source: Config file path of template (None if inline).

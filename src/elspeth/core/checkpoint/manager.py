@@ -82,7 +82,7 @@ class CheckpointManager:
         Raises:
             ValueError: If graph is None or node_id not in graph
         """
-        # Validate parameters (Bug #9 - early validation)
+        # Validate parameters early
         if graph is None:
             raise ValueError("graph parameter is required for checkpoint creation")
         if not graph.has_node(node_id):
@@ -103,9 +103,9 @@ class CheckpointManager:
             agg_json = checkpoint_dumps(aggregation_state.to_dict()) if aggregation_state is not None else None
             coalesce_json = checkpoint_dumps(coalesce_state.to_dict()) if coalesce_state is not None else None
 
-            # Compute topology hashes INSIDE transaction (Bug #1 fix)
+            # Compute topology hashes inside transaction
             # This ensures hash matches graph state at exact moment of checkpoint creation
-            # BUG-COMPAT-01 fix: Use FULL topology hash instead of upstream-only hash.
+            # Use FULL topology hash instead of upstream-only hash.
             # This ensures changes to ANY branch (including sibling sink branches)
             # are detected during resume validation, enforcing "one run = one config".
             upstream_topology_hash = compute_full_topology_hash(graph)

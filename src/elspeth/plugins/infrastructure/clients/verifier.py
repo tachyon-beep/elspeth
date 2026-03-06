@@ -225,7 +225,7 @@ class CallVerifier:
         if recorded_response is None and response_expected:
             self._report.missing_payloads += 1
 
-            # P1-2026-02-05: When response_hash exists, perform hash-based
+            # When response_hash exists, perform hash-based
             # verification even though the full payload is missing. Per CLAUDE.md:
             # "Hashes survive payload deletion — integrity is always verifiable."
             if call.response_hash is not None:

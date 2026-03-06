@@ -334,3 +334,64 @@ class TestCoalesceCheckpointStateFromDict:
                     "completed_keys": [[1, 2]],
                 }
             )
+
+    def test_full_roundtrip_with_all_optional_fields(self) -> None:
+        """Full round-trip with non-None group IDs, multiple pending entries, and completed keys.
+
+        Exercises the to_dict list serialization → from_dict tuple reconstruction
+        path for completed_keys and the nested branch token serialization with
+        all optional group ID fields populated.
+        """
+        token_a = CoalesceTokenCheckpoint(
+            token_id="tok-a",
+            row_id="row-1",
+            branch_name="path_a",
+            fork_group_id="fork-1",
+            join_group_id="join-1",
+            expand_group_id="expand-1",
+            row_data={"nested": {"deep": [1, 2]}},
+            contract={"mode": "OBSERVED", "locked": True, "fields": ["x"]},
+            state_id="state-a",
+            arrival_offset_seconds=1.25,
+        )
+        token_b = CoalesceTokenCheckpoint(
+            token_id="tok-b",
+            row_id="row-1",
+            branch_name="path_b",
+            fork_group_id="fork-1",
+            join_group_id=None,
+            expand_group_id=None,
+            row_data={"value": "hello"},
+            contract={"mode": "FLEXIBLE"},
+            state_id="state-b",
+            arrival_offset_seconds=0.0,
+        )
+        pending_1 = CoalescePendingCheckpoint(
+            coalesce_name="merge_1",
+            row_id="row-1",
+            elapsed_age_seconds=3.5,
+            branches={"path_a": token_a, "path_b": token_b},
+            lost_branches={"path_c": "timed_out"},
+        )
+        pending_2 = CoalescePendingCheckpoint(
+            coalesce_name="merge_2",
+            row_id="row-2",
+            elapsed_age_seconds=0.0,
+            branches={},
+            lost_branches={},
+        )
+        original = CoalesceCheckpointState(
+            version="2.0",
+            pending=(pending_1, pending_2),
+            completed_keys=(("merge_3", "row-3"), ("merge_4", "row-4")),
+        )
+
+        serialized = original.to_dict()
+
+        # Verify serialization format: completed_keys become lists (JSON arrays)
+        assert isinstance(serialized["completed_keys"][0], list)
+
+        restored = CoalesceCheckpointState.from_dict(serialized)
+        assert restored == original
+        # Verify completed_keys are tuples after deserialization
+        assert isinstance(restored.completed_keys[0], tuple)

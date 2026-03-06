@@ -7,7 +7,7 @@ map to runtime config. Used by:
 2. Tests - Verify mappings are accurate
 3. Humans - Understand the field flow
 
-The P2-2026-01-21 bug (exponential_base orphaned) motivated this system.
+A field-orphaning bug (exponential_base orphaned) motivated this system.
 By making the mapping explicit and checkable, we prevent future orphaning.
 
 Categories:

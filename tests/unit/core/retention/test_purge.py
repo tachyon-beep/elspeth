@@ -272,6 +272,50 @@ class _ControlledStore(MockPayloadStore):
         return super().delete(content_hash)
 
 
+class TestPurgeResultValidation:
+    """__post_init__ validation for PurgeResult — negative counts and tuple coercion."""
+
+    def test_valid_construction(self) -> None:
+        from elspeth.core.retention.purge import PurgeResult
+
+        result = PurgeResult(deleted_count=5, skipped_count=2, failed_refs=("ref-1",), duration_seconds=1.5)
+        assert result.deleted_count == 5
+        assert result.failed_refs == ("ref-1",)
+
+    def test_rejects_negative_deleted_count(self) -> None:
+        from elspeth.core.retention.purge import PurgeResult
+
+        with pytest.raises(ValueError, match="deleted_count must be non-negative"):
+            PurgeResult(deleted_count=-1, skipped_count=0, failed_refs=(), duration_seconds=0.0)
+
+    def test_rejects_negative_skipped_count(self) -> None:
+        from elspeth.core.retention.purge import PurgeResult
+
+        with pytest.raises(ValueError, match="skipped_count must be non-negative"):
+            PurgeResult(deleted_count=0, skipped_count=-1, failed_refs=(), duration_seconds=0.0)
+
+    def test_rejects_negative_duration(self) -> None:
+        from elspeth.core.retention.purge import PurgeResult
+
+        with pytest.raises(ValueError, match="duration_seconds must be non-negative"):
+            PurgeResult(deleted_count=0, skipped_count=0, failed_refs=(), duration_seconds=-0.01)
+
+    def test_coerces_list_failed_refs_to_tuple(self) -> None:
+        from elspeth.core.retention.purge import PurgeResult
+
+        result = PurgeResult(deleted_count=0, skipped_count=0, failed_refs=["ref-a", "ref-b"], duration_seconds=0.0)  # type: ignore[arg-type]
+        assert isinstance(result.failed_refs, tuple)
+        assert result.failed_refs == ("ref-a", "ref-b")
+
+    def test_accepts_zero_counts(self) -> None:
+        from elspeth.core.retention.purge import PurgeResult
+
+        result = PurgeResult(deleted_count=0, skipped_count=0, failed_refs=(), duration_seconds=0.0)
+        assert result.deleted_count == 0
+        assert result.skipped_count == 0
+        assert result.duration_seconds == 0.0
+
+
 class TestFindExpiredPayloadRefs:
     def test_find_expired_payload_refs_defaults_as_of_to_now(self, db: LandscapeDB) -> None:
         manager = PurgeManager(db, MockPayloadStore())

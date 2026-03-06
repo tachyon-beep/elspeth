@@ -68,13 +68,17 @@ def deep_freeze(value: Any) -> Any:
 
 
 def deep_thaw(value: Any) -> Any:
-    """Recursively thaw frozen containers back to plain mutable types.
+    """Recursively convert frozen containers to JSON-serializable mutable types.
 
     Converts ``MappingProxyType`` → ``dict`` and ``tuple`` → ``list``,
-    recursing into values. The inverse of ``deep_freeze``.
+    recursing into values. Used by ``to_dict()`` methods to produce
+    JSON-serializable output from deeply frozen fields.
 
-    Used by ``to_dict()`` methods to produce JSON-serializable output
-    from deeply frozen fields.
+    **Not a true inverse of ``deep_freeze``**: converts ALL tuples to
+    lists, including tuples that were native (not converted from lists
+    by ``deep_freeze``). This is intentional — JSON has no tuple type,
+    so ``to_dict()`` callers need lists. For JSON-like input (only dicts
+    and lists), ``deep_thaw(deep_freeze(x)) == x`` holds.
 
     Examples:
         >>> deep_thaw(MappingProxyType({"a": (1, MappingProxyType({"b": 2}))}))
