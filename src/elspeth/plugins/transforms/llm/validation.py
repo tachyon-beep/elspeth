@@ -102,7 +102,7 @@ class ValidationSuccess:
             object.__setattr__(self, "data", deep_freeze(self.data))
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, slots=True)
 class ValidationError:
     """Failed validation result with error details."""
 

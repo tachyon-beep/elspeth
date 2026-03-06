@@ -15,6 +15,18 @@
           }
         ]
       }
+    ],
+    "PreToolUse": [
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "if echo \"$TOOL_INPUT\" | grep -qE '\"command\"\\s*:\\s*\"[^\"]*git\\s+stash'; then echo 'BLOCKED: git stash is BANNED in this project — no exceptions, no workarounds, no excuses. Read the fucking CLAUDE.md. Pre-commit hooks cause data loss on stash pop conflicts. Commit to a branch instead. And stop being so fucking lazy — pre-existing faults still need to be fixed properly, not worked around with stash hacks.' >&2; exit 2; fi; if echo \"$TOOL_INPUT\" | grep -qE '\"command\"\\s*:\\s*\"[^\"]*git\\s+worktree'; then echo 'BLOCKED: git worktree is BANNED in this project — no exceptions. Read the fucking CLAUDE.md. Use regular branches instead. And stop being so fucking lazy — pre-existing faults still need to be fixed properly, not dodged with worktree isolation.' >&2; exit 2; fi",
+            "timeout": 1000
+          }
+        ]
+      }
     ]
   }
 }

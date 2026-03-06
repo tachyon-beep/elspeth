@@ -27,7 +27,7 @@ if TYPE_CHECKING:
     from elspeth.engine.processor import DAGTraversalContext
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, slots=True)
 class WorkItem:
     """Item in the work queue for DAG processing.
 

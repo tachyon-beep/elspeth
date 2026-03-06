@@ -334,7 +334,7 @@ class GateResult:
         return PipelineRow(self.row, self.contract)
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, slots=True)
 class RowResult:
     """Final result of processing a row through the pipeline.
 
@@ -367,7 +367,7 @@ class RowResult:
             raise OrchestrationInvariantError("COALESCED outcome requires sink_name to be set")
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, slots=True)
 class ArtifactDescriptor:
     """Descriptor for an artifact written by a sink.
 

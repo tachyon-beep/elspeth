@@ -22,7 +22,7 @@ class TemplateError(Exception):
     """Error in template rendering (including sandbox violations)."""
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, slots=True)
 class RenderedPrompt:
     """A rendered prompt with audit metadata."""
 

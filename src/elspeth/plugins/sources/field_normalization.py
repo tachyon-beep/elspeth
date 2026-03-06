@@ -177,7 +177,7 @@ def check_duplicate_raw_headers(raw_headers: list[str]) -> None:
         raise ValueError("Duplicate raw header names:\n" + "\n".join(details))
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, slots=True)
 class FieldResolution:
     """Result of field name resolution.
 

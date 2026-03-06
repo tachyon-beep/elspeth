@@ -44,7 +44,7 @@ class ScreenStateType(Enum):
     LOADED = auto()  # Data loaded successfully
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, slots=True)
 class UninitializedState:
     """Screen has no data source configured.
 
@@ -54,7 +54,7 @@ class UninitializedState:
     state_type: ScreenStateType = ScreenStateType.UNINITIALIZED
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, slots=True)
 class LoadingFailedState:
     """Data source configured but loading failed.
 
@@ -68,7 +68,7 @@ class LoadingFailedState:
     state_type: ScreenStateType = field(default=ScreenStateType.LOADING_FAILED)
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, slots=True)
 class LoadedState:
     """Data loaded successfully.
 

@@ -243,6 +243,34 @@ class TestCoalesceCheckpointStatePostInit:
             )
 
 
+class TestCoalescePendingCheckpointFromDictTypeValidation:
+    """from_dict type validation for branches and lost_branches."""
+
+    def test_rejects_non_dict_branches(self) -> None:
+        """branches must be a dict — catches corruption where JSON decoded to list."""
+        data = {
+            "coalesce_name": "merge_1",
+            "row_id": "row-1",
+            "elapsed_age_seconds": 1.5,
+            "branches": ["not", "a", "dict"],
+            "lost_branches": {},
+        }
+        with pytest.raises(AuditIntegrityError, match=r"branches.*must be a dict"):
+            CoalescePendingCheckpoint.from_dict(data)
+
+    def test_rejects_non_dict_lost_branches(self) -> None:
+        """lost_branches must be a dict — catches corruption where JSON decoded to list."""
+        data = {
+            "coalesce_name": "merge_1",
+            "row_id": "row-1",
+            "elapsed_age_seconds": 1.5,
+            "branches": {},
+            "lost_branches": "not_a_dict",
+        }
+        with pytest.raises(AuditIntegrityError, match=r"lost_branches.*must be a dict"):
+            CoalescePendingCheckpoint.from_dict(data)
+
+
 class TestCoalesceCheckpointStateFromDict:
     """from_dict validation for CoalesceCheckpointState."""
 
@@ -266,6 +294,26 @@ class TestCoalesceCheckpointStateFromDict:
     def test_rejects_missing_version(self) -> None:
         with pytest.raises(AuditIntegrityError, match="_version"):
             CoalesceCheckpointState.from_dict({"pending": [], "completed_keys": []})
+
+    def test_rejects_missing_pending(self) -> None:
+        """Missing 'pending' key in checkpoint data is corruption."""
+        with pytest.raises(AuditIntegrityError, match="pending"):
+            CoalesceCheckpointState.from_dict({"_version": "1.0", "completed_keys": []})
+
+    def test_rejects_pending_not_a_list(self) -> None:
+        """'pending' must be a list — catches corruption where value is wrong type."""
+        with pytest.raises(AuditIntegrityError, match=r"pending.*must be a list"):
+            CoalesceCheckpointState.from_dict({"_version": "1.0", "pending": "not_a_list", "completed_keys": []})
+
+    def test_rejects_missing_completed_keys(self) -> None:
+        """Missing 'completed_keys' key in checkpoint data is corruption."""
+        with pytest.raises(AuditIntegrityError, match="completed_keys"):
+            CoalesceCheckpointState.from_dict({"_version": "1.0", "pending": []})
+
+    def test_rejects_completed_keys_not_a_list(self) -> None:
+        """'completed_keys' must be a list — catches corruption where value is wrong type."""
+        with pytest.raises(AuditIntegrityError, match=r"completed_keys.*must be a list"):
+            CoalesceCheckpointState.from_dict({"_version": "1.0", "pending": [], "completed_keys": "not_a_list"})
 
     def test_rejects_corrupt_completed_key_wrong_length(self) -> None:
         with pytest.raises(AuditIntegrityError, match="completed_keys"):

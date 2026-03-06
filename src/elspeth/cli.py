@@ -1199,7 +1199,7 @@ plugins_app = typer.Typer(help="Plugin management commands.")
 app.add_typer(plugins_app, name="plugins")
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, slots=True)
 class PluginInfo:
     """Metadata for a registered plugin.
 

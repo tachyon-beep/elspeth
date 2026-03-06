@@ -51,6 +51,7 @@ Invariant: Token outcomes only recorded after sink durability (crash recovery sa
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from contextlib import nullcontext
 from typing import Any
 from unittest.mock import MagicMock, Mock
@@ -2020,11 +2021,11 @@ class TestAggregationExecutor:
         except (TypeError, ValueError) as e:
             pytest.fail(f"Checkpoint to_dict() should be JSON-serializable but got error: {e}")
 
-        # Verify row_data is stored as dict in checkpoint token
+        # Verify row_data is stored as a mapping (not PipelineRow) in checkpoint token
         node_checkpoint = checkpoint.nodes[str(nid)]
         token_ckpt = node_checkpoint.tokens[0]
-        assert isinstance(token_ckpt.row_data, dict)
-        assert token_ckpt.row_data == {"value": "test"}
+        assert isinstance(token_ckpt.row_data, Mapping)
+        assert dict(token_ckpt.row_data) == {"value": "test"}
 
     def test_checkpoint_includes_contract_for_restore(self) -> None:
         """Checkpoint should include contract info to enable PipelineRow restoration."""

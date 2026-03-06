@@ -85,7 +85,7 @@ SENSITIVE_PARAMS = frozenset(
 )
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, slots=True)
 class SanitizedDatabaseUrl:
     """Database URL with credentials removed. Cannot contain secrets.
 
@@ -192,7 +192,7 @@ class SanitizedDatabaseUrl:
         return cls(sanitized_url=sanitized, fingerprint=fingerprint)
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, slots=True)
 class SanitizedWebhookUrl:
     """Webhook URL with tokens removed. Cannot contain secrets.
 
