@@ -255,7 +255,7 @@ allow_hits:
   reason: Silent recovery with explicit error handling path
   safety: Falls back to 'version unknown' on ImportError - correct for optional version detection
   expires: '2026-05-13'
-- key: 'testing/chaosweb/content_generator.py:R5:WebResponse:__post_init__:fp=4dc63a1d600a7cb7'
+- key: 'testing/chaosweb/content_generator.py:R5:WebResponse:__post_init__:fp=1656051cfc4dcc2e'
   owner: architecture
   reason: Deep-freeze conversion guard — isinstance() checks for MappingProxyType/tuple wrapping, not defensive data access
   safety: Construction-time type conversion, crashes on unexpected types

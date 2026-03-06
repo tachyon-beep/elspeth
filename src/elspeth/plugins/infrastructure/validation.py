@@ -45,6 +45,12 @@ class ValidationError:
     message: str
     value: Any
 
+    def __post_init__(self) -> None:
+        if not self.field:
+            raise ValueError("ValidationError.field must not be empty")
+        if not self.message:
+            raise ValueError("ValidationError.message must not be empty")
+
 
 class PluginConfigValidator:
     """Validates plugin configurations before instantiation.

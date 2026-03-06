@@ -60,6 +60,14 @@ class OpenAIResponse:
     completion_tokens: int
     finish_reason: str
 
+    def __post_init__(self) -> None:
+        if self.prompt_tokens < 0:
+            raise ValueError(f"OpenAIResponse.prompt_tokens must be non-negative, got {self.prompt_tokens}")
+        if self.completion_tokens < 0:
+            raise ValueError(f"OpenAIResponse.completion_tokens must be non-negative, got {self.completion_tokens}")
+        if self.created < 0:
+            raise ValueError(f"OpenAIResponse.created must be non-negative, got {self.created}")
+
     @property
     def total_tokens(self) -> int:
         """Total tokens (prompt + completion)."""

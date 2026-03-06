@@ -49,6 +49,12 @@ class RowContext:
     state_id: str
     row_index: int
 
+    def __post_init__(self) -> None:
+        if not self.state_id:
+            raise ValueError("RowContext.state_id must not be empty")
+        if self.row_index < 0:
+            raise ValueError(f"RowContext.row_index must be non-negative, got {self.row_index}")
+
 
 class PooledExecutor:
     """Executor for parallel API calls with strict ordering.

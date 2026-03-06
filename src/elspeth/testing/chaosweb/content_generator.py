@@ -60,6 +60,10 @@ class WebResponse:
     encoding: str = "utf-8"
 
     def __post_init__(self) -> None:
+        if not (100 <= self.status_code <= 599):
+            raise ValueError(f"WebResponse.status_code must be a valid HTTP status (100-599), got {self.status_code}")
+        if not self.content_type:
+            raise ValueError("WebResponse.content_type must not be empty")
         if self.headers is not None and not isinstance(self.headers, MappingProxyType):
             object.__setattr__(self, "headers", MappingProxyType(self.headers))
 

@@ -29,6 +29,12 @@ class RowMappingEntry:
     index: int
     variables_hash: str
 
+    def __post_init__(self) -> None:
+        if self.index < 0:
+            raise ValueError(f"RowMappingEntry.index must be non-negative, got {self.index}")
+        if not self.variables_hash:
+            raise ValueError("RowMappingEntry.variables_hash must not be empty")
+
     def to_dict(self) -> dict[str, Any]:
         return {"index": self.index, "variables_hash": self.variables_hash}
 
@@ -68,6 +74,14 @@ class BatchCheckpointState:
     requests: Mapping[str, Mapping[str, Any]]
 
     def __post_init__(self) -> None:
+        if not self.batch_id:
+            raise ValueError("BatchCheckpointState.batch_id must not be empty")
+        if not self.input_file_id:
+            raise ValueError("BatchCheckpointState.input_file_id must not be empty")
+        if not self.submitted_at:
+            raise ValueError("BatchCheckpointState.submitted_at must not be empty")
+        if self.row_count < 0:
+            raise ValueError(f"BatchCheckpointState.row_count must be non-negative, got {self.row_count}")
         if not isinstance(self.row_mapping, MappingProxyType):
             object.__setattr__(self, "row_mapping", MappingProxyType(self.row_mapping))
         if not isinstance(self.template_errors, tuple):

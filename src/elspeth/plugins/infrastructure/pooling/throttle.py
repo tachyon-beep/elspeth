@@ -13,7 +13,7 @@ from dataclasses import dataclass
 from threading import Lock
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, slots=True)
 class ThrottleConfig:
     """Configuration for AIMD throttle behavior.
 
@@ -32,6 +32,18 @@ class ThrottleConfig:
     max_dispatch_delay_ms: int = 5000
     backoff_multiplier: float = 2.0
     recovery_step_ms: int = 50
+
+    def __post_init__(self) -> None:
+        if self.min_dispatch_delay_ms < 0:
+            raise ValueError(f"ThrottleConfig.min_dispatch_delay_ms must be non-negative, got {self.min_dispatch_delay_ms}")
+        if self.max_dispatch_delay_ms < self.min_dispatch_delay_ms:
+            raise ValueError(
+                f"ThrottleConfig.max_dispatch_delay_ms ({self.max_dispatch_delay_ms}) must be >= min_dispatch_delay_ms ({self.min_dispatch_delay_ms})"
+            )
+        if self.backoff_multiplier <= 1.0:
+            raise ValueError(f"ThrottleConfig.backoff_multiplier must be > 1.0, got {self.backoff_multiplier}")
+        if self.recovery_step_ms < 0:
+            raise ValueError(f"ThrottleConfig.recovery_step_ms must be non-negative, got {self.recovery_step_ms}")
 
 
 class AIMDThrottle:

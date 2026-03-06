@@ -22,7 +22,7 @@ class ShutdownError(RuntimeError):
     pass
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, slots=True)
 class RowTicket:
     """Handle for a row submitted to the buffer.
 
@@ -34,8 +34,14 @@ class RowTicket:
     row_id: str
     submitted_at: float
 
+    def __post_init__(self) -> None:
+        if self.sequence < 0:
+            raise ValueError(f"RowTicket.sequence must be non-negative, got {self.sequence}")
+        if not self.row_id:
+            raise ValueError("RowTicket.row_id must not be empty")
 
-@dataclass
+
+@dataclass(frozen=True, slots=True)
 class RowBufferEntry[T]:
     """Entry emitted from the buffer with timing metadata."""
 
@@ -45,6 +51,12 @@ class RowBufferEntry[T]:
     submitted_at: float
     completed_at: float
     buffer_wait_ms: float  # Time between completion and release
+
+    def __post_init__(self) -> None:
+        if self.sequence < 0:
+            raise ValueError(f"RowBufferEntry.sequence must be non-negative, got {self.sequence}")
+        if not self.row_id:
+            raise ValueError("RowBufferEntry.row_id must not be empty")
 
 
 @dataclass

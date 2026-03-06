@@ -49,6 +49,14 @@ class AggregationTokenCheckpoint:
     row_data: dict[str, Any]
     contract_version: str
 
+    def __post_init__(self) -> None:
+        if not self.token_id:
+            raise ValueError("AggregationTokenCheckpoint.token_id must not be empty")
+        if not self.row_id:
+            raise ValueError("AggregationTokenCheckpoint.row_id must not be empty")
+        if not self.contract_version:
+            raise ValueError("AggregationTokenCheckpoint.contract_version must not be empty")
+
     def to_dict(self) -> dict[str, Any]:
         """Serialize to checkpoint dict format."""
         return {
@@ -118,6 +126,12 @@ class AggregationNodeCheckpoint:
     count_fire_offset: float | None
     condition_fire_offset: float | None
     contract: dict[str, Any]
+
+    def __post_init__(self) -> None:
+        if not self.batch_id:
+            raise ValueError("AggregationNodeCheckpoint.batch_id must not be empty")
+        if self.elapsed_age_seconds < 0:
+            raise ValueError(f"AggregationNodeCheckpoint.elapsed_age_seconds must be non-negative, got {self.elapsed_age_seconds}")
 
     def to_dict(self) -> dict[str, Any]:
         """Serialize to checkpoint dict format."""
@@ -200,6 +214,8 @@ class AggregationCheckpointState:
     nodes: Mapping[str, AggregationNodeCheckpoint]
 
     def __post_init__(self) -> None:
+        if not self.version:
+            raise ValueError("AggregationCheckpointState.version must not be empty")
         if not isinstance(self.nodes, MappingProxyType):
             object.__setattr__(self, "nodes", MappingProxyType(self.nodes))
 

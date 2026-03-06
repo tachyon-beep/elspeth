@@ -40,6 +40,12 @@ class GraphValidationWarning:
     message: str
     node_ids: tuple[str, ...]
 
+    def __post_init__(self) -> None:
+        if not self.code:
+            raise ValueError("GraphValidationWarning.code must not be empty")
+        if not self.message:
+            raise ValueError("GraphValidationWarning.message must not be empty")
+
 
 @dataclass(frozen=True, slots=True)
 class BranchInfo:
@@ -52,6 +58,12 @@ class BranchInfo:
 
     coalesce_name: CoalesceName
     gate_node_id: NodeID
+
+    def __post_init__(self) -> None:
+        if not self.coalesce_name:
+            raise ValueError("BranchInfo.coalesce_name must not be empty")
+        if not self.gate_node_id:
+            raise ValueError("BranchInfo.gate_node_id must not be empty")
 
 
 _NODE_ID_MAX_LENGTH = NODE_ID_COLUMN_LENGTH
@@ -110,6 +122,16 @@ class _GateEntry:
     name: str
     fork_to: tuple[str, ...] | None
     routes: MappingProxyType[str, str]
+
+    def __post_init__(self) -> None:
+        if not self.node_id:
+            raise ValueError("_GateEntry.node_id must not be empty")
+        if not self.name:
+            raise ValueError("_GateEntry.name must not be empty")
+        if self.fork_to is not None and len(self.fork_to) == 0:
+            raise ValueError("_GateEntry.fork_to must not be empty tuple (use None for no fork)")
+        if len(self.routes) == 0:
+            raise ValueError("_GateEntry.routes must have at least one entry")
 
 
 @dataclass(frozen=True, slots=True)

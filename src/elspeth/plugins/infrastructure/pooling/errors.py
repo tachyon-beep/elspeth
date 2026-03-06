@@ -51,6 +51,8 @@ class CapacityError(Exception):
             status_code: HTTP status code (429, 503, or 529)
             message: Error message
         """
+        if not (100 <= status_code <= 599):
+            raise ValueError(f"CapacityError.status_code must be a valid HTTP status (100-599), got {status_code}")
         super().__init__(message)
         self.status_code = status_code
         self.retryable = True

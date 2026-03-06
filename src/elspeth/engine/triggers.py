@@ -273,6 +273,17 @@ class TriggerEvaluator:
             count_fire_offset: Offset from first_accept when count fired, or None
             condition_fire_offset: Offset from first_accept when condition fired, or None
         """
+        import math
+
+        if batch_count < 0:
+            raise ValueError(f"batch_count must be non-negative, got {batch_count}")
+        if elapsed_age_seconds < 0 or not math.isfinite(elapsed_age_seconds):
+            raise ValueError(f"elapsed_age_seconds must be non-negative and finite, got {elapsed_age_seconds}")
+        if count_fire_offset is not None and (count_fire_offset < 0 or not math.isfinite(count_fire_offset)):
+            raise ValueError(f"count_fire_offset must be non-negative and finite, got {count_fire_offset}")
+        if condition_fire_offset is not None and (condition_fire_offset < 0 or not math.isfinite(condition_fire_offset)):
+            raise ValueError(f"condition_fire_offset must be non-negative and finite, got {condition_fire_offset}")
+
         current_time = self._clock.monotonic()
 
         # Restore batch count
