@@ -108,6 +108,8 @@ class _FlushContext:
     coalesce_name: CoalesceName | None
 
     def __post_init__(self) -> None:
+        # Freeze before validation so emptiness check works on generators too
+        object.__setattr__(self, "buffered_tokens", tuple(self.buffered_tokens))
         if not self.buffered_tokens:
             raise ValueError("_FlushContext.buffered_tokens must not be empty")
         if not self.batch_id:
@@ -120,7 +122,6 @@ class _FlushContext:
                 f"_FlushContext: coalesce_node_id and coalesce_name must be both set or both None, "
                 f"got node_id={self.coalesce_node_id!r}, name={self.coalesce_name!r}"
             )
-        object.__setattr__(self, "buffered_tokens", tuple(self.buffered_tokens))
 
 
 # --- T18: Discriminated union types for _process_single_token extraction ---

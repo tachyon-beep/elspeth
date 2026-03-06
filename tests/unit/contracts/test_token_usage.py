@@ -182,12 +182,13 @@ class TestTokenUsageImmutability:
     """Tests for frozen dataclass invariants."""
 
     def test_frozen(self) -> None:
+        from dataclasses import FrozenInstanceError
+
+        import pytest
+
         usage = TokenUsage.known(10, 20)
-        try:
+        with pytest.raises(FrozenInstanceError):
             usage.prompt_tokens = 99  # type: ignore[misc]
-            raise AssertionError("Should have raised FrozenInstanceError")
-        except AttributeError:
-            pass  # Expected — frozen dataclass
 
     def test_equality(self) -> None:
         a = TokenUsage.known(10, 20)

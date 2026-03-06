@@ -49,8 +49,10 @@ class LLMResponse:
     raw_response: Mapping[str, Any] | None = None
 
     def __post_init__(self) -> None:
-        if self.latency_ms < 0:
-            raise ValueError(f"LLMResponse.latency_ms must be non-negative, got {self.latency_ms}")
+        import math
+
+        if self.latency_ms < 0 or not math.isfinite(self.latency_ms):
+            raise ValueError(f"LLMResponse.latency_ms must be non-negative and finite, got {self.latency_ms}")
         if self.raw_response is not None and not isinstance(self.raw_response, MappingProxyType):
             object.__setattr__(self, "raw_response", deep_freeze(self.raw_response))
 

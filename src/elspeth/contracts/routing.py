@@ -88,7 +88,7 @@ class RoutingAction:
             )
 
         # Deep copy reason to prevent mutation via retained references.
-        # Factory methods already do this, but direct construction bypasses them.
+        # This is the single point of defense — factory methods rely on __post_init__ for the copy.
         object.__setattr__(self, "reason", _copy_reason(self.reason))
 
     @classmethod
@@ -244,3 +244,5 @@ class EdgeInfo:
             raise ValueError("EdgeInfo.from_node must not be empty")
         if not self.to_node:
             raise ValueError("EdgeInfo.to_node must not be empty")
+        if not self.label:
+            raise ValueError("EdgeInfo.label must not be empty")

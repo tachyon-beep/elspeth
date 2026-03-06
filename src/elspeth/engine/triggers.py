@@ -16,6 +16,7 @@ Trigger types:
 
 from __future__ import annotations
 
+import math
 from typing import TYPE_CHECKING, Literal
 
 from elspeth.contracts.enums import TriggerType
@@ -273,8 +274,6 @@ class TriggerEvaluator:
             count_fire_offset: Offset from first_accept when count fired, or None
             condition_fire_offset: Offset from first_accept when condition fired, or None
         """
-        import math
-
         if batch_count < 0:
             raise ValueError(f"batch_count must be non-negative, got {batch_count}")
         if elapsed_age_seconds < 0 or not math.isfinite(elapsed_age_seconds):

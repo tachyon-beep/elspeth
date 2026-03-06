@@ -276,7 +276,7 @@ allow_hits:
   reason: Telemetry emission failure - must not crash main LLM call flow
   safety: Logged and continues - telemetry is non-critical to LLM processing
   expires: '2026-05-02'
-- key: 'plugins/infrastructure/clients/llm.py:R5:LLMResponse:__post_init__:fp=0181673d43ad6d23'
+- key: 'plugins/infrastructure/clients/llm.py:R5:LLMResponse:__post_init__:fp=0dd4ecc65ff47230'
   owner: architecture
   reason: Deep-freeze conversion guard — isinstance() checks for MappingProxyType/tuple wrapping, not defensive data access
   safety: Construction-time type conversion, crashes on unexpected types

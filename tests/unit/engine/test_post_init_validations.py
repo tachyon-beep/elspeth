@@ -64,7 +64,7 @@ class TestFlushContextPostInit:
                 coalesce_name=None,
             )
 
-    def test_rejects_mismatched_coalesce_fields(self) -> None:
+    def test_rejects_mismatched_coalesce_id_without_name(self) -> None:
         from elspeth.engine.processor import _FlushContext
 
         with pytest.raises(ValueError, match="coalesce_node_id and coalesce_name must be both set or both None"):
@@ -79,6 +79,23 @@ class TestFlushContextPostInit:
                 triggering_token=None,
                 coalesce_node_id="c1",
                 coalesce_name=None,
+            )
+
+    def test_rejects_mismatched_coalesce_name_without_id(self) -> None:
+        from elspeth.engine.processor import _FlushContext
+
+        with pytest.raises(ValueError, match="coalesce_node_id and coalesce_name must be both set or both None"):
+            _FlushContext(
+                node_id="n1",
+                transform=self._make_transform(),
+                settings=self._make_settings(),
+                buffered_tokens=(self._make_token(),),
+                batch_id="b1",
+                error_msg="test",
+                expand_parent_token=self._make_token(),
+                triggering_token=None,
+                coalesce_node_id=None,
+                coalesce_name="merge1",
             )
 
     def test_accepts_both_coalesce_none(self) -> None:
@@ -150,7 +167,31 @@ class TestTriggerEvaluatorRestoreValidation:
                 batch_count=0, elapsed_age_seconds=0.0, count_fire_offset=float("inf"), condition_fire_offset=None
             )
 
+    def test_rejects_negative_condition_fire_offset(self) -> None:
+        evaluator = self._make_evaluator()
+        with pytest.raises(ValueError, match="condition_fire_offset must be non-negative and finite"):
+            evaluator.restore_from_checkpoint(batch_count=0, elapsed_age_seconds=0.0, count_fire_offset=None, condition_fire_offset=-1.0)
+
+    def test_rejects_nan_condition_fire_offset(self) -> None:
+        evaluator = self._make_evaluator()
+        with pytest.raises(ValueError, match="condition_fire_offset must be non-negative and finite"):
+            evaluator.restore_from_checkpoint(
+                batch_count=0, elapsed_age_seconds=0.0, count_fire_offset=None, condition_fire_offset=float("nan")
+            )
+
+    def test_rejects_inf_condition_fire_offset(self) -> None:
+        evaluator = self._make_evaluator()
+        with pytest.raises(ValueError, match="condition_fire_offset must be non-negative and finite"):
+            evaluator.restore_from_checkpoint(
+                batch_count=0, elapsed_age_seconds=0.0, count_fire_offset=None, condition_fire_offset=float("inf")
+            )
+
     def test_accepts_valid(self) -> None:
         evaluator = self._make_evaluator()
         evaluator.restore_from_checkpoint(batch_count=3, elapsed_age_seconds=5.0, count_fire_offset=2.0, condition_fire_offset=None)
         assert evaluator._batch_count == 3
+
+    def test_accepts_valid_with_condition_fire_offset(self) -> None:
+        evaluator = self._make_evaluator()
+        evaluator.restore_from_checkpoint(batch_count=0, elapsed_age_seconds=0.0, count_fire_offset=None, condition_fire_offset=1.5)
+        assert evaluator.get_condition_fire_offset() == 1.5

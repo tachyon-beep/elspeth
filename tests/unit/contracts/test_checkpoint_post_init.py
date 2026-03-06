@@ -91,6 +91,72 @@ class TestAggregationNodeCheckpointPostInit:
                 contract={},
             )
 
+    def test_rejects_nan_elapsed_age(self) -> None:
+        with pytest.raises(ValueError, match="elapsed_age_seconds must be non-negative and finite"):
+            AggregationNodeCheckpoint(
+                tokens=(),
+                batch_id="b1",
+                elapsed_age_seconds=float("nan"),
+                count_fire_offset=None,
+                condition_fire_offset=None,
+                contract={},
+            )
+
+    def test_rejects_inf_elapsed_age(self) -> None:
+        with pytest.raises(ValueError, match="elapsed_age_seconds must be non-negative and finite"):
+            AggregationNodeCheckpoint(
+                tokens=(),
+                batch_id="b1",
+                elapsed_age_seconds=float("inf"),
+                count_fire_offset=None,
+                condition_fire_offset=None,
+                contract={},
+            )
+
+    def test_rejects_negative_count_fire_offset(self) -> None:
+        with pytest.raises(ValueError, match="count_fire_offset must be non-negative and finite"):
+            AggregationNodeCheckpoint(
+                tokens=(),
+                batch_id="b1",
+                elapsed_age_seconds=0.0,
+                count_fire_offset=-1.0,
+                condition_fire_offset=None,
+                contract={},
+            )
+
+    def test_rejects_nan_count_fire_offset(self) -> None:
+        with pytest.raises(ValueError, match="count_fire_offset must be non-negative and finite"):
+            AggregationNodeCheckpoint(
+                tokens=(),
+                batch_id="b1",
+                elapsed_age_seconds=0.0,
+                count_fire_offset=float("nan"),
+                condition_fire_offset=None,
+                contract={},
+            )
+
+    def test_rejects_negative_condition_fire_offset(self) -> None:
+        with pytest.raises(ValueError, match="condition_fire_offset must be non-negative and finite"):
+            AggregationNodeCheckpoint(
+                tokens=(),
+                batch_id="b1",
+                elapsed_age_seconds=0.0,
+                count_fire_offset=None,
+                condition_fire_offset=-2.5,
+                contract={},
+            )
+
+    def test_rejects_nan_condition_fire_offset(self) -> None:
+        with pytest.raises(ValueError, match="condition_fire_offset must be non-negative and finite"):
+            AggregationNodeCheckpoint(
+                tokens=(),
+                batch_id="b1",
+                elapsed_age_seconds=0.0,
+                count_fire_offset=None,
+                condition_fire_offset=float("nan"),
+                contract={},
+            )
+
     def test_accepts_valid(self) -> None:
         n = AggregationNodeCheckpoint(
             tokens=(),
@@ -101,6 +167,18 @@ class TestAggregationNodeCheckpointPostInit:
             contract={},
         )
         assert n.batch_id == "b1"
+
+    def test_accepts_valid_with_fire_offsets(self) -> None:
+        n = AggregationNodeCheckpoint(
+            tokens=(),
+            batch_id="b1",
+            elapsed_age_seconds=0.0,
+            count_fire_offset=1.5,
+            condition_fire_offset=3.0,
+            contract={},
+        )
+        assert n.count_fire_offset == 1.5
+        assert n.condition_fire_offset == 3.0
 
 
 class TestAggregationCheckpointStatePostInit:
@@ -157,6 +235,18 @@ class TestBatchCheckpointStatePostInit:
                 template_errors=[],
                 submitted_at="2026-01-01T00:00:00Z",
                 row_count=-1,
+                requests={},
+            )
+
+    def test_rejects_empty_submitted_at(self) -> None:
+        with pytest.raises(ValueError, match="submitted_at must not be empty"):
+            BatchCheckpointState(
+                batch_id="b1",
+                input_file_id="f1",
+                row_mapping={},
+                template_errors=[],
+                submitted_at="",
+                row_count=1,
                 requests={},
             )
 

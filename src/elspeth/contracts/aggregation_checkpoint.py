@@ -128,10 +128,20 @@ class AggregationNodeCheckpoint:
     contract: dict[str, Any]
 
     def __post_init__(self) -> None:
+        import math
+
         if not self.batch_id:
             raise ValueError("AggregationNodeCheckpoint.batch_id must not be empty")
-        if self.elapsed_age_seconds < 0:
-            raise ValueError(f"AggregationNodeCheckpoint.elapsed_age_seconds must be non-negative, got {self.elapsed_age_seconds}")
+        if self.elapsed_age_seconds < 0 or not math.isfinite(self.elapsed_age_seconds):
+            raise ValueError(
+                f"AggregationNodeCheckpoint.elapsed_age_seconds must be non-negative and finite, got {self.elapsed_age_seconds}"
+            )
+        if self.count_fire_offset is not None and (self.count_fire_offset < 0 or not math.isfinite(self.count_fire_offset)):
+            raise ValueError(f"AggregationNodeCheckpoint.count_fire_offset must be non-negative and finite, got {self.count_fire_offset}")
+        if self.condition_fire_offset is not None and (self.condition_fire_offset < 0 or not math.isfinite(self.condition_fire_offset)):
+            raise ValueError(
+                f"AggregationNodeCheckpoint.condition_fire_offset must be non-negative and finite, got {self.condition_fire_offset}"
+            )
 
     def to_dict(self) -> dict[str, Any]:
         """Serialize to checkpoint dict format."""

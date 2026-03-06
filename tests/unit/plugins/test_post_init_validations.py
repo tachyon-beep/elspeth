@@ -1,6 +1,6 @@
-"""Tests for __post_init__ validations on plugin infrastructure types.
+"""Tests for construction-time validations on plugin infrastructure types.
 
-Covers: ValidationError, CapacityError, ThrottleConfig, RowTicket,
+Covers: ValidationError, CapacityError (__init__), ThrottleConfig, RowTicket,
 RowBufferEntry, RowContext, LLMResponse, OpenAIResponse, WebResponse.
 """
 
@@ -27,7 +27,7 @@ class TestValidationErrorPostInit:
         assert e.field == "name"
 
 
-class TestCapacityErrorPostInit:
+class TestCapacityErrorInit:
     def test_rejects_invalid_status_code(self) -> None:
         from elspeth.plugins.infrastructure.pooling.errors import CapacityError
 
@@ -51,6 +51,24 @@ class TestCapacityErrorPostInit:
 
         e = CapacityError(status_code=429, message="rate limit")
         assert e.status_code == 429
+
+    def test_accepts_boundary_100(self) -> None:
+        from elspeth.plugins.infrastructure.pooling.errors import CapacityError
+
+        e = CapacityError(status_code=100, message="continue")
+        assert e.status_code == 100
+
+    def test_accepts_boundary_599(self) -> None:
+        from elspeth.plugins.infrastructure.pooling.errors import CapacityError
+
+        e = CapacityError(status_code=599, message="network error")
+        assert e.status_code == 599
+
+    def test_rejects_boundary_99(self) -> None:
+        from elspeth.plugins.infrastructure.pooling.errors import CapacityError
+
+        with pytest.raises(ValueError, match="valid HTTP status"):
+            CapacityError(status_code=99, message="bad")
 
 
 class TestThrottleConfigPostInit:
@@ -119,6 +137,18 @@ class TestRowBufferEntryPostInit:
         with pytest.raises(ValueError, match="row_id must not be empty"):
             RowBufferEntry(sequence=0, row_id="", result="ok", submitted_at=1.0, completed_at=2.0, buffer_wait_ms=0.5)
 
+    def test_rejects_negative_buffer_wait_ms(self) -> None:
+        from elspeth.plugins.infrastructure.batching.row_reorder_buffer import RowBufferEntry
+
+        with pytest.raises(ValueError, match="buffer_wait_ms must be non-negative"):
+            RowBufferEntry(sequence=0, row_id="r1", result="ok", submitted_at=1.0, completed_at=2.0, buffer_wait_ms=-0.1)
+
+    def test_accepts_zero_buffer_wait_ms(self) -> None:
+        from elspeth.plugins.infrastructure.batching.row_reorder_buffer import RowBufferEntry
+
+        entry = RowBufferEntry(sequence=0, row_id="r1", result="ok", submitted_at=1.0, completed_at=2.0, buffer_wait_ms=0.0)
+        assert entry.buffer_wait_ms == 0.0
+
     def test_is_frozen(self) -> None:
         from dataclasses import FrozenInstanceError
 
@@ -155,6 +185,24 @@ class TestLLMResponsePostInit:
 
         with pytest.raises(ValueError, match="latency_ms must be non-negative"):
             LLMResponse(content="hi", model="gpt-4", latency_ms=-1.0)
+
+    def test_rejects_nan_latency(self) -> None:
+        from elspeth.plugins.infrastructure.clients.llm import LLMResponse
+
+        with pytest.raises(ValueError, match="latency_ms must be non-negative and finite"):
+            LLMResponse(content="hi", model="gpt-4", latency_ms=float("nan"))
+
+    def test_rejects_inf_latency(self) -> None:
+        from elspeth.plugins.infrastructure.clients.llm import LLMResponse
+
+        with pytest.raises(ValueError, match="latency_ms must be non-negative and finite"):
+            LLMResponse(content="hi", model="gpt-4", latency_ms=float("inf"))
+
+    def test_accepts_zero_latency(self) -> None:
+        from elspeth.plugins.infrastructure.clients.llm import LLMResponse
+
+        r = LLMResponse(content="hi", model="gpt-4", latency_ms=0.0)
+        assert r.latency_ms == 0.0
 
 
 class TestOpenAIResponsePostInit:
@@ -202,6 +250,22 @@ class TestOpenAIResponsePostInit:
                 completion_tokens=10,
                 finish_reason="stop",
             )
+
+    def test_accepts_valid(self) -> None:
+        from elspeth.testing.chaosllm.response_generator import OpenAIResponse
+
+        r = OpenAIResponse(
+            id="fake-1",
+            object="chat.completion",
+            created=1000,
+            model="gpt-4",
+            content="hello world",
+            prompt_tokens=5,
+            completion_tokens=10,
+            finish_reason="stop",
+        )
+        assert r.content == "hello world"
+        assert r.prompt_tokens == 5
 
 
 class TestWebResponsePostInit:

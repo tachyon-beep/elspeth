@@ -48,7 +48,7 @@ class CapacityError(Exception):
         """Initialize capacity error.
 
         Args:
-            status_code: HTTP status code (429, 503, or 529)
+            status_code: HTTP status code (typically 429, 503, or 529 — must be 100-599)
             message: Error message
         """
         if not (100 <= status_code <= 599):

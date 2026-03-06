@@ -74,6 +74,10 @@ class TestEdgeInfoPostInit:
         with pytest.raises(ValueError, match="to_node must not be empty"):
             EdgeInfo(from_node="a", to_node="", label="x", mode=RoutingMode.MOVE)
 
+    def test_rejects_empty_label(self) -> None:
+        with pytest.raises(ValueError, match="label must not be empty"):
+            EdgeInfo(from_node="a", to_node="b", label="", mode=RoutingMode.MOVE)
+
     def test_accepts_valid(self) -> None:
         edge = EdgeInfo(from_node="a", to_node="b", label="continue", mode=RoutingMode.MOVE)
         assert edge.from_node == "a"
@@ -93,14 +97,16 @@ class TestRoutingActionReasonCopy:
         )
         # Mutating the original dict should NOT affect the action
         reason["condition"] = "MUTATED"
-        assert action.reason["condition"] == "x > 1"  # type: ignore[index]
+        assert action.reason is not None
+        assert action.reason["condition"] == "x > 1"
 
     def test_factory_also_protects(self) -> None:
         """Factory methods also protect via __post_init__ copy."""
         reason = {"condition": "x > 1", "result": "true"}
         action = RoutingAction.continue_(reason=reason)
         reason["condition"] = "MUTATED"
-        assert action.reason["condition"] == "x > 1"  # type: ignore[index]
+        assert action.reason is not None
+        assert action.reason["condition"] == "x > 1"
 
     def test_none_reason_accepted(self) -> None:
         action = RoutingAction.continue_()

@@ -6,7 +6,7 @@ This module defines contracts for sink validation and output target compatibilit
 from dataclasses import dataclass, field
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, slots=True)
 class OutputValidationResult:
     """Result of sink output target validation.
 

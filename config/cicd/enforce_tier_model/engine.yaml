@@ -62,11 +62,11 @@ allow_hits:
   reason: "_node_to_plugin.get() needed \u2014 not all node IDs are in plugin map (source nodes, coalesce pseudo-nodes)"
   safety: "None return from .get() is the correct signal for non-gate nodes; isinstance(None, GateSettings) \u2192 False"
   expires: '2026-05-15'
-- key: engine/triggers.py:R5:TriggerEvaluator:record_accept:fp=8851d0a1eb275c6b
+- key: engine/triggers.py:R5:TriggerEvaluator:record_accept:fp=741794822166a3ac
   owner: bugfix
   reason: Defense-in-depth - ExpressionParser returns Any; boundary validation before use
   safety: TypeError raised with expression details - explicit failure, not silent coercion
-- key: engine/triggers.py:R5:TriggerEvaluator:should_trigger:fp=58f5645b1c25b4c5
+- key: engine/triggers.py:R5:TriggerEvaluator:should_trigger:fp=6e7987ec6ebd24b3
   owner: bugfix
   reason: Defense-in-depth - ExpressionParser returns Any; boundary validation before use
   safety: TypeError raised with expression details - explicit failure, not silent coercion
