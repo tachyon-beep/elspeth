@@ -45,6 +45,8 @@
 
 % --- Headers and footers (PSPF classification marking) ---
 \usepackage{fancyhdr}
+
+% Main page style — OFFICIAL header/footer + page number
 \pagestyle{fancy}
 \fancyhf{}
 \fancyhead[C]{\textbf{$if(classification)$$classification$$else$OFFICIAL$endif$}}
@@ -52,6 +54,15 @@
 \fancyfoot[R]{\thepage}
 \renewcommand{\headrulewidth}{0pt}
 \renewcommand{\footrulewidth}{0pt}
+
+% Title page style — OFFICIAL marking but no page number
+\fancypagestyle{titlepage}{%
+  \fancyhf{}%
+  \fancyhead[C]{\textbf{$if(classification)$$classification$$else$OFFICIAL$endif$}}%
+  \fancyfoot[C]{\textbf{$if(classification)$$classification$$else$OFFICIAL$endif$}}%
+  \renewcommand{\headrulewidth}{0pt}%
+  \renewcommand{\footrulewidth}{0pt}%
+}
 
 % --- Chapter and section formatting ---
 \usepackage{titlesec}
@@ -66,18 +77,19 @@
 
 \titleformat{\section}
   {\normalfont\Large\bfseries\color{dtanavy}}
-  {\thesection}{1em}{}
+  {}{0pt}{}
 
 \titleformat{\subsection}
   {\normalfont\large\bfseries\color{dtanavy}}
-  {\thesubsection}{1em}{}
+  {}{0pt}{}
 
 \titleformat{\subsubsection}
   {\normalfont\normalsize\bfseries\color{dtanavy}}
-  {\thesubsubsection}{1em}{}
+  {}{0pt}{}
 
 % --- Section numbering ---
-\setcounter{secnumdepth}{3}
+% Fully disabled — Markdown headings already contain manual numbers (1., 2., etc.)
+\setcounter{secnumdepth}{-\maxdimen}
 \setcounter{tocdepth}{2}
 
 % --- Tables ---
@@ -185,12 +197,13 @@
 
 % --- Title page ---
 \begin{titlepage}
-\thispagestyle{fancy}
+\thispagestyle{titlepage}
 \vspace*{1cm}
 
 % DTA strip crest — Commonwealth Coat of Arms with agency lockup
+% trim={left bottom right top}, clip removes the light grey background
 \noindent
-\includegraphics[height=2.2cm]{../dta_strip_crest.png}
+\includegraphics[height=2.2cm, trim=10 40 10 40, clip]{../dta_strip_crest.png}
 
 \vspace{2cm}
 
@@ -230,9 +243,14 @@ $if(disclaimer)$$disclaimer$$else$This is a discussion paper. It presents a thre
 
 \end{titlepage}
 
-% --- Table of Contents ---
+% --- Front matter (roman numerals for TOC pages) ---
+\pagenumbering{roman}
+\setcounter{page}{1}
 \tableofcontents
 \clearpage
+
+% --- Body (switch to arabic numerals) ---
+\pagenumbering{arabic}
 
 % --- Body ---
 $body$
