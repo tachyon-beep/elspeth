@@ -410,6 +410,24 @@ transforms:
 
 The DAG validates that upstream `guaranteed_fields` satisfy downstream `required_input_fields`. For template-based transforms, use `elspeth.core.templates.extract_jinja2_fields()` to discover template dependencies during development.
 
+### Header Normalization and Engine Custody
+
+**Source field names are normalized to valid Python identifiers at the source boundary.** This is non-negotiable — it's not cosmetic cleanup, it's a language boundary requirement.
+
+User-chosen field names must cross multiple language boundaries during pipeline execution: Python attribute access (`row.field`), Jinja2 templates (`{{ row.field }}`), expression parser AST nodes, SQL column names, and JSON keys. Each has different reserved words, quoting rules, and valid character sets. A field named `"Amount (USD)"` or `" Customer ID "` is a syntax error in Jinja2, ambiguous in SQL, and requires bracket access in Python. Normalizing once at the source boundary (Tier 3 → Tier 2 transition) means every downstream consumer gets names that are valid in every context.
+
+**The engine takes custody of the original headers.** The `SchemaContract` preserves `original_name` metadata on every field throughout the pipeline. At the sink boundary, three header modes control output:
+
+| Mode | Output | Use Case |
+|------|--------|----------|
+| `NORMALIZED` | `customer_id` | Default — pipeline working names |
+| `ORIGINAL` | `Customer ID` | Restore what the source provided |
+| `CUSTOM` | Explicit mapping | External system handover with specific naming requirements |
+
+This is a **restoration**, not a transformation — the engine preserved the originals as metadata and gives them back on request. The `CUSTOM` mode deliberately refuses to silently fall back to normalized names for unmapped fields, because wrong column names in an external system handover are worse than a crash.
+
+**Collision detection operates on normalized names.** The transform executor (`engine/executors/transform.py`) centrally enforces field collision detection pre-execution for any transform that declares `declared_output_fields`. This is mandatory and engine-level — plugins don't opt in, they declare their output fields and the engine prevents collisions before the transform runs.
+
 ### Transform Subtypes
 
 | Type | Behavior |
@@ -814,12 +832,28 @@ if result.rowcount == 0:
 | Am I adding this because "something might be None"? | — | ❌ Fix the root cause |
 | Am I silently swallowing an error with a default value? | — | ❌ That's defensive — forbidden |
 
-<!-- filigree:instructions:v1.3.0:6bd811c8 -->
+<!-- filigree:instructions:v1.4.1:c706f2df -->
 ## Filigree Issue Tracker
 
 Use `filigree` for all task tracking in this project. Data lives in `.filigree/`.
 
-### Quick Reference
+### MCP Tools (Preferred)
+
+When MCP is configured, prefer `mcp__filigree__*` tools over CLI commands — they're
+faster and return structured data. Key tools:
+
+- `get_ready` / `get_blocked` — find available work
+- `get_issue` / `list_issues` / `search_issues` — read issues
+- `create_issue` / `update_issue` / `close_issue` — manage issues
+- `claim_issue` / `claim_next` — atomic claiming
+- `add_comment` / `add_label` — metadata
+- `create_plan` / `get_plan` — milestone planning
+- `get_stats` / `get_metrics` — project health
+- `get_valid_transitions` — workflow navigation
+
+Fall back to CLI (`filigree <command>`) when MCP is unavailable.
+
+### CLI Quick Reference
 
 ```bash
 # Finding work
