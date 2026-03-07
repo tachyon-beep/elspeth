@@ -137,6 +137,9 @@ class BurstConfig:
 # =============================================================================
 
 
+_VALID_SQL_TYPES = frozenset({"TEXT", "INTEGER", "REAL", "BLOB", "NUMERIC"})
+
+
 @dataclass(frozen=True, slots=True)
 class ColumnDef:
     """Definition of a single column in a metrics table.
@@ -154,6 +157,14 @@ class ColumnDef:
     nullable: bool = True
     default: str | None = None
     primary_key: bool = False
+
+    def __post_init__(self) -> None:
+        if not self.name:
+            raise ValueError("ColumnDef name must not be empty")
+        if self.sql_type not in _VALID_SQL_TYPES:
+            raise ValueError(f"ColumnDef sql_type must be one of {sorted(_VALID_SQL_TYPES)}, got {self.sql_type!r}")
+        if self.primary_key and self.nullable:
+            raise ValueError(f"ColumnDef '{self.name}': primary_key columns cannot be nullable")
 
 
 @dataclass(frozen=True, slots=True)

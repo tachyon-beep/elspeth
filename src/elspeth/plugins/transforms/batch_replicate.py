@@ -33,6 +33,7 @@ class BatchReplicateConfig(TransformDataConfig):
     copies_field: str = Field(
         default="copies",
         description="Name of the field containing the number of copies to make",
+        min_length=1,
     )
     default_copies: int = Field(
         default=1,

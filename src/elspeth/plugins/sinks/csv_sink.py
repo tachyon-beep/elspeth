@@ -15,6 +15,8 @@ import os
 from collections.abc import Sequence
 from typing import IO, TYPE_CHECKING, Any, Literal
 
+from pydantic import field_validator
+
 from elspeth.contracts import ArtifactDescriptor, PluginSchema
 
 if TYPE_CHECKING:
@@ -40,6 +42,24 @@ class CSVSinkConfig(SinkPathConfig):
     encoding: str = "utf-8"
     validate_input: bool = False  # Optional runtime validation of incoming rows
     mode: Literal["write", "append"] = "write"
+
+    @field_validator("delimiter")
+    @classmethod
+    def _validate_delimiter(cls, v: str) -> str:
+        if len(v) != 1:
+            raise ValueError(f"delimiter must be a single character, got {v!r}")
+        return v
+
+    @field_validator("encoding")
+    @classmethod
+    def _validate_encoding(cls, v: str) -> str:
+        import codecs
+
+        try:
+            codecs.lookup(v)
+        except LookupError as exc:
+            raise ValueError(f"unknown encoding: {v!r}") from exc
+        return v
 
 
 class CSVSink(BaseSink):

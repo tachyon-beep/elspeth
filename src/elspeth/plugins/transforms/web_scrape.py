@@ -15,10 +15,10 @@ Audit Trail:
 - Generates fingerprints for change detection
 """
 
-from typing import Any
+from typing import Any, Literal
 
 import httpx
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 from elspeth.contracts import Determinism
 from elspeth.contracts.contexts import LifecycleContext, TransformContext
@@ -74,6 +74,13 @@ class WebScrapeHTTPConfig(BaseModel):
         description="Request timeout in seconds",
     )
 
+    @field_validator("abuse_contact", "scraping_reason")
+    @classmethod
+    def _reject_empty(cls, v: str, info: Any) -> str:
+        if not v.strip():
+            raise ValueError(f"{info.field_name} must not be empty")
+        return v
+
 
 class WebScrapeConfig(TransformDataConfig):
     """Configuration for web scrape transform."""
@@ -81,10 +88,23 @@ class WebScrapeConfig(TransformDataConfig):
     url_field: str
     content_field: str
     fingerprint_field: str
-    format: str = "markdown"
-    fingerprint_mode: str = "content"
+    format: Literal["markdown", "text", "raw"] = "markdown"
+    fingerprint_mode: Literal["content", "full"] = "content"
     strip_elements: list[str] = Field(default_factory=lambda: ["script", "style"])
     http: WebScrapeHTTPConfig
+
+    @field_validator("url_field", "content_field", "fingerprint_field")
+    @classmethod
+    def _reject_empty_field_names(cls, v: str, info: Any) -> str:
+        if not v:
+            raise ValueError(f"{info.field_name} must not be empty")
+        return v
+
+    @model_validator(mode="after")
+    def _reject_field_collisions(self) -> "WebScrapeConfig":
+        if self.content_field == self.fingerprint_field:
+            raise ValueError(f"content_field and fingerprint_field must differ, both are '{self.content_field}'")
+        return self
 
 
 class WebScrapeTransform(BaseTransform):

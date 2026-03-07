@@ -81,12 +81,17 @@ class KeywordFilterConfig(TransformDataConfig):
     @field_validator("blocked_patterns")
     @classmethod
     def validate_patterns_not_empty(cls, v: list[str]) -> list[str]:
-        """Ensure at least one non-empty pattern is provided."""
+        """Ensure patterns are non-empty, valid regex, and ReDoS-safe."""
         if not v:
             raise ValueError("blocked_patterns cannot be empty")
         for i, pattern in enumerate(v):
             if pattern == "":
                 raise ValueError(f"blocked_patterns[{i}] cannot be empty (empty regex matches everything)")
+            _validate_regex_safety(pattern)
+            try:
+                re.compile(pattern)
+            except re.error as exc:
+                raise ValueError(f"blocked_patterns[{i}] is not a valid regex: {exc}") from exc
         return v
 
 
@@ -127,10 +132,7 @@ class KeywordFilter(BaseTransform):
         cfg = KeywordFilterConfig.from_dict(config)
         self._fields = cfg.fields
 
-        # Compile patterns at init - fail fast on invalid regex
-        # Validate for ReDoS-prone constructs before compiling
-        for pattern in cfg.blocked_patterns:
-            _validate_regex_safety(pattern)
+        # Patterns already validated (regex syntax + ReDoS safety) by config validator
         self._compiled_patterns: list[tuple[str, re.Pattern[str]]] = [(pattern, re.compile(pattern)) for pattern in cfg.blocked_patterns]
 
         self.input_schema, self.output_schema = self._create_schemas(cfg.schema_config, "KeywordFilter")

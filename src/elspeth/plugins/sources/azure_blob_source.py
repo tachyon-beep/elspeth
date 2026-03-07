@@ -43,6 +43,24 @@ class CSVOptions(BaseModel):
     has_header: bool = True
     encoding: str = "utf-8"
 
+    @field_validator("delimiter")
+    @classmethod
+    def _validate_delimiter(cls, v: str) -> str:
+        if len(v) != 1:
+            raise ValueError(f"delimiter must be a single character, got {v!r}")
+        return v
+
+    @field_validator("encoding")
+    @classmethod
+    def _validate_encoding(cls, v: str) -> str:
+        import codecs
+
+        try:
+            codecs.lookup(v)
+        except LookupError as exc:
+            raise ValueError(f"unknown encoding: {v!r}") from exc
+        return v
+
 
 class JSONOptions(BaseModel):
     """JSON parsing options."""
@@ -51,6 +69,17 @@ class JSONOptions(BaseModel):
 
     encoding: str = "utf-8"
     data_key: str | None = None
+
+    @field_validator("encoding")
+    @classmethod
+    def _validate_encoding(cls, v: str) -> str:
+        import codecs
+
+        try:
+            codecs.lookup(v)
+        except LookupError as exc:
+            raise ValueError(f"unknown encoding: {v!r}") from exc
+        return v
 
 
 class AzureBlobSourceConfig(DataPluginConfig):

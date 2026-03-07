@@ -15,14 +15,14 @@ from elspeth.testing.chaosengine.types import ColumnDef, MetricsConfig, MetricsS
 # Minimal test schema for MetricsStore unit tests.
 _TEST_SCHEMA = MetricsSchema(
     request_columns=(
-        ColumnDef("request_id", "TEXT", primary_key=True),
+        ColumnDef("request_id", "TEXT", nullable=False, primary_key=True),
         ColumnDef("timestamp_utc", "TEXT", nullable=False),
         ColumnDef("outcome", "TEXT", nullable=False),
         ColumnDef("status_code", "INTEGER"),
         ColumnDef("latency_ms", "REAL"),
     ),
     timeseries_columns=(
-        ColumnDef("bucket_utc", "TEXT", primary_key=True),
+        ColumnDef("bucket_utc", "TEXT", nullable=False, primary_key=True),
         ColumnDef("requests_total", "INTEGER", nullable=False, default="0"),
         ColumnDef("requests_success", "INTEGER", nullable=False, default="0"),
         ColumnDef("requests_error", "INTEGER", nullable=False, default="0"),
@@ -78,8 +78,8 @@ class TestDDLGeneration:
     def test_no_indexes_when_empty(self) -> None:
         """Schema with no indexes generates no CREATE INDEX."""
         schema = MetricsSchema(
-            request_columns=(ColumnDef("id", "TEXT", primary_key=True),),
-            timeseries_columns=(ColumnDef("bucket_utc", "TEXT", primary_key=True),),
+            request_columns=(ColumnDef("id", "TEXT", nullable=False, primary_key=True),),
+            timeseries_columns=(ColumnDef("bucket_utc", "TEXT", nullable=False, primary_key=True),),
         )
         ddl = _generate_ddl(schema)
         assert "CREATE INDEX" not in ddl

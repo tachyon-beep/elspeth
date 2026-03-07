@@ -63,25 +63,25 @@ allow_hits:
   owner: architecture
   reason: "httpx Client.get() method call \u2014 ephemeral client per redirect hop for TLS isolation"
   safety: This is the actual external HTTP call, not a defensive dict access
-- key: plugins/sinks/database_sink.py:R1:DatabaseSink:__init__:fp=908b915b356d2542
+- key: plugins/sinks/database_sink.py:R1:DatabaseSink:__init__:fp=ff7dd9a78d26df58
   owner: architecture
   reason: Optional field access at trust boundary
   safety: Code reviewed - legitimate pattern
   expires: '2026-05-02'
-- key: plugins/sinks/database_sink.py:R5:DatabaseSink:_serialize_any_typed_fields:fp=f939fe476ae36909
+- key: plugins/sinks/database_sink.py:R5:DatabaseSink:_serialize_any_typed_fields:fp=c5085e0711149ec5
   owner: bugfix
   reason: "Tier 2 contract enforcement \u2014 isinstance distinguishes dict/list fields for JSON serialization before DB insert"
   safety: Only dict/list values serialized; all other types pass through unchanged
   expires: '2026-05-17'
-- key: plugins/sinks/csv_sink.py:R1:CSVSink:validate_output_target:fp=09ae8b78e67d8cce
+- key: plugins/sinks/csv_sink.py:R1:CSVSink:validate_output_target:fp=078b519642e8758d
   owner: feature
   reason: Display header mapping - fields not in map keep original name (transform-added fields)
   safety: Intentional fallback to original field name, not bug hiding
-- key: plugins/sinks/csv_sink.py:R1:CSVSink:_open_file:fp=c9d0c6cf2b3ded00
+- key: plugins/sinks/csv_sink.py:R1:CSVSink:_open_file:fp=45091ca79230093f
   owner: feature
   reason: Intentional fallback - reverse mapping may not contain all fields (transform-added)
   safety: Falls back to original field name - correct behavior for fields not in source
-- key: plugins/sinks/csv_sink.py:R1:CSVSink:_get_field_names_and_display:fp=0dbee4ac3c86a0fd
+- key: plugins/sinks/csv_sink.py:R1:CSVSink:_get_field_names_and_display:fp=98201a0ee32d7ab7
   owner: feature
   reason: Intentional fallback - display mapping may not contain all fields (transform-added)
   safety: Falls back to normalized field name - correct behavior for fields not in source

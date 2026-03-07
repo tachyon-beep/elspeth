@@ -61,6 +61,13 @@ class BaseAzureSafetyConfig(TransformDataConfig):
     )
     max_capacity_retry_seconds: int = Field(3600, gt=0, description="Max seconds to retry capacity errors")
 
+    @field_validator("endpoint", "api_key")
+    @classmethod
+    def _reject_empty_credentials(cls, v: str, info: Any) -> str:
+        if not v.strip():
+            raise ValueError(f"{info.field_name} must not be empty")
+        return v
+
     @field_validator("fields")
     @classmethod
     def validate_fields_not_empty(cls, v: str | list[str]) -> str | list[str]:

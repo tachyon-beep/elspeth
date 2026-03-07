@@ -22,7 +22,7 @@ and has no on_error configuration.
 import copy
 from typing import Any
 
-from pydantic import Field
+from pydantic import Field, field_validator, model_validator
 
 from elspeth.contracts.contexts import TransformContext
 from elspeth.contracts.contract_propagation import narrow_contract_to_output
@@ -52,6 +52,19 @@ class JSONExplodeConfig(DataPluginConfig):
     array_field: str = Field(..., description="Name of the array field to explode")
     output_field: str = Field(default="item", description="Name for the exploded element")
     include_index: bool = Field(default=True, description="Whether to include item_index field")
+
+    @field_validator("array_field", "output_field")
+    @classmethod
+    def _reject_empty(cls, v: str, info: Any) -> str:
+        if not v:
+            raise ValueError(f"{info.field_name} must not be empty")
+        return v
+
+    @model_validator(mode="after")
+    def _reject_field_collision(self) -> "JSONExplodeConfig":
+        if self.output_field == self.array_field:
+            raise ValueError(f"output_field and array_field must differ, both are '{self.output_field}'")
+        return self
 
 
 class JSONExplode(BaseTransform):

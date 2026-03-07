@@ -45,6 +45,24 @@ class CSVWriteOptions(BaseModel):
     encoding: str = "utf-8"
     include_header: bool = True
 
+    @field_validator("delimiter")
+    @classmethod
+    def _validate_delimiter(cls, v: str) -> str:
+        if len(v) != 1:
+            raise ValueError(f"delimiter must be a single character, got {v!r}")
+        return v
+
+    @field_validator("encoding")
+    @classmethod
+    def _validate_encoding(cls, v: str) -> str:
+        import codecs
+
+        try:
+            codecs.lookup(v)
+        except LookupError as exc:
+            raise ValueError(f"unknown encoding: {v!r}") from exc
+        return v
+
 
 class AzureBlobSinkConfig(DataPluginConfig):
     """Configuration for Azure Blob sink plugin.

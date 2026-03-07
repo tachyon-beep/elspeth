@@ -10,7 +10,7 @@ will buffer rows and call process() with a list when the trigger fires.
 import math
 from typing import Any
 
-from pydantic import Field
+from pydantic import Field, field_validator
 
 from elspeth.contracts.contexts import TransformContext
 from elspeth.contracts.schema_contract import FieldContract, PipelineRow, SchemaContract
@@ -34,6 +34,13 @@ class BatchStatsConfig(TransformDataConfig):
         default=True,
         description="Whether to compute mean in addition to sum/count",
     )
+
+    @field_validator("value_field")
+    @classmethod
+    def _reject_empty(cls, v: str) -> str:
+        if not v:
+            raise ValueError("value_field must not be empty")
+        return v
 
 
 class BatchStats(BaseTransform):

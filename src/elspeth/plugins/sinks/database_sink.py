@@ -14,6 +14,7 @@ from collections.abc import Mapping
 from types import MappingProxyType
 from typing import TYPE_CHECKING, Any, Literal
 
+from pydantic import field_validator
 from sqlalchemy import Boolean, Column, Float, Integer, MetaData, Table, Text, create_engine, insert
 
 if TYPE_CHECKING:
@@ -54,6 +55,13 @@ class DatabaseSinkConfig(DataPluginConfig):
     table: str
     if_exists: Literal["append", "replace"] = "append"
     validate_input: bool = False  # Optional runtime validation of incoming rows
+
+    @field_validator("table")
+    @classmethod
+    def _reject_empty_table(cls, v: str) -> str:
+        if not v.strip():
+            raise ValueError("table name must not be empty")
+        return v
 
 
 class DatabaseSink(BaseSink):
