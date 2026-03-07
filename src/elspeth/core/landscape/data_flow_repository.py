@@ -1064,7 +1064,9 @@ class DataFlowRepository:
         rows = self._ops.execute_fetchall(query)
         return [self._node_loader.load(row) for row in rows]
 
-    def get_node_contracts(self, run_id: str, node_id: str) -> tuple[SchemaContract | None, SchemaContract | None]:
+    def get_node_contracts(
+        self, run_id: str, node_id: str, *, allow_missing: bool = False
+    ) -> tuple[SchemaContract | None, SchemaContract | None]:
         """Get input and output contracts for a node.
 
         Retrieves stored schema contracts and verifies integrity via hash.
@@ -1072,11 +1074,16 @@ class DataFlowRepository:
         Args:
             run_id: Run ID the node belongs to
             node_id: Node ID to query
+            allow_missing: If False (default), crash when node not found
+                (Tier 1 invariant — our audit data must be present).
+                Set to True only for external query paths (MCP, analysis).
 
         Returns:
             Tuple of (input_contract, output_contract), either may be None
+            if the node exists but has no contracts recorded.
 
         Raises:
+            AuditIntegrityError: If node not found and allow_missing is False
             ValueError: If stored contract fails integrity verification
         """
         query = select(
@@ -1086,7 +1093,11 @@ class DataFlowRepository:
         row = self._ops.execute_fetchone(query)
 
         if row is None:
-            return None, None
+            if allow_missing:
+                return None, None
+            raise AuditIntegrityError(
+                f"Node not found in audit trail: node_id={node_id!r}, run_id={run_id!r}. Expected node to exist (Tier 1 data)."
+            )
 
         input_contract: SchemaContract | None = None
         output_contract: SchemaContract | None = None

@@ -1331,13 +1331,18 @@ class TestGetNodeContracts:
         assert inp is None
         assert out is None
 
-    def test_returns_none_none_for_unknown_node(self) -> None:
+    def test_crashes_for_unknown_node_by_default(self) -> None:
         _db, recorder = _setup()
-        inp, out = recorder.get_node_contracts("run-1", "nonexistent")
+        with pytest.raises(AuditIntegrityError, match="Node not found"):
+            recorder.get_node_contracts("run-1", "nonexistent")
+
+    def test_returns_none_none_for_unknown_node_when_allowed(self) -> None:
+        _db, recorder = _setup()
+        inp, out = recorder.get_node_contracts("run-1", "nonexistent", allow_missing=True)
         assert inp is None
         assert out is None
 
-    def test_returns_none_none_for_unknown_run(self) -> None:
+    def test_crashes_for_unknown_run_by_default(self) -> None:
         _db, recorder = _setup()
         recorder.register_node(
             run_id="run-1",
@@ -1348,7 +1353,21 @@ class TestGetNodeContracts:
             node_id="src",
             schema_config=_DYNAMIC_SCHEMA,
         )
-        inp, out = recorder.get_node_contracts("run-999", "src")
+        with pytest.raises(AuditIntegrityError, match="Node not found"):
+            recorder.get_node_contracts("run-999", "src")
+
+    def test_returns_none_none_for_unknown_run_when_allowed(self) -> None:
+        _db, recorder = _setup()
+        recorder.register_node(
+            run_id="run-1",
+            plugin_name="csv",
+            node_type=NodeType.SOURCE,
+            plugin_version="1.0.0",
+            config={},
+            node_id="src",
+            schema_config=_DYNAMIC_SCHEMA,
+        )
+        inp, out = recorder.get_node_contracts("run-999", "src", allow_missing=True)
         assert inp is None
         assert out is None
 

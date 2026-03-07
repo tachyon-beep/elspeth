@@ -100,6 +100,7 @@ class PerFileRule:
     rules: list[str]  # List of rule IDs like ["R1", "R4", "R6"]
     reason: str
     expires: date | None
+    max_hits: int | None = None  # Cap on allowed matches; None = unlimited
     matched_count: int = field(default=0, compare=False)
     source_file: str = field(default="", compare=False)
 
@@ -157,6 +158,10 @@ class Allowlist:
     def get_unused_file_rules(self) -> list[PerFileRule]:
         """Return per-file rules that didn't match any finding."""
         return [r for r in self.per_file_rules if r.matched_count == 0]
+
+    def get_exceeded_file_rules(self) -> list[PerFileRule]:
+        """Return per-file rules where matched_count exceeds max_hits."""
+        return [r for r in self.per_file_rules if r.max_hits is not None and r.matched_count > r.max_hits]
 
 
 # =============================================================================
@@ -732,12 +737,16 @@ def _parse_per_file_rules(data: dict[str, Any], source_file: str = "") -> list[P
                     file=sys.stderr,
                 )
 
+        raw_max_hits = item.get("max_hits")
+        max_hits = int(raw_max_hits) if raw_max_hits is not None else None
+
         per_file_rules.append(
             PerFileRule(
                 pattern=item["pattern"],
                 rules=item.get("rules", []),
                 reason=item.get("reason", ""),
                 expires=expires_date,
+                max_hits=max_hits,
                 source_file=source_file,
             )
         )
@@ -872,6 +881,7 @@ def report_json(
     expired_file_rules: list[PerFileRule] | None = None,
     unused_file_rules: list[PerFileRule] | None = None,
     layer_warnings: list[Finding] | None = None,
+    exceeded_file_rules: list[PerFileRule] | None = None,
 ) -> str:
     """Generate JSON report."""
     result: dict[str, Any] = {
@@ -898,6 +908,11 @@ def report_json(
         ]
     if unused_file_rules:
         result["unused_file_rules"] = [{"pattern": r.pattern, "rules": r.rules, "reason": r.reason} for r in unused_file_rules]
+    if exceeded_file_rules:
+        result["exceeded_file_rules"] = [
+            {"pattern": r.pattern, "rules": r.rules, "matched": r.matched_count, "max_hits": r.max_hits, "reason": r.reason}
+            for r in exceeded_file_rules
+        ]
     if layer_warnings:
         result["layer_warnings"] = [
             {
@@ -1021,6 +1036,9 @@ def run_check(args: argparse.Namespace) -> int:
     # Check for stale/expired allowlist entries (only in full-scan mode)
     # In file-specific mode (pre-commit), we only scan a subset of files,
     # so most allowlist entries won't match - that's expected, not stale.
+    # Exceeded per-file rules always checked (even in pre-commit mode)
+    exceeded_file_rules = allowlist.get_exceeded_file_rules()
+
     if args.files:
         stale_entries: list[AllowlistEntry] = []
         expired_entries: list[AllowlistEntry] = []
@@ -1035,10 +1053,14 @@ def run_check(args: argparse.Namespace) -> int:
     # Report results
     # Include unused_file_rules in error condition - stale per-file rules should fail
     # the same way stale explicit entries do when fail_on_stale is enabled
-    has_errors = bool(violations or stale_entries or expired_entries or expired_file_rules or unused_file_rules)
+    has_errors = bool(violations or stale_entries or expired_entries or expired_file_rules or unused_file_rules or exceeded_file_rules)
 
     if args.format == "json":
-        print(report_json(violations, stale_entries, expired_entries, expired_file_rules, unused_file_rules, layer_warnings))
+        print(
+            report_json(
+                violations, stale_entries, expired_entries, expired_file_rules, unused_file_rules, layer_warnings, exceeded_file_rules
+            )
+        )
     else:
         # Text format
         if violations:
@@ -1093,6 +1115,17 @@ def run_check(args: argparse.Namespace) -> int:
             for r in unused_file_rules:
                 print(f"\n  Pattern: {r.pattern}")
                 print(f"  Rules: {r.rules}")
+                print(f"  Reason: {r.reason}")
+
+        if exceeded_file_rules:
+            print(f"\n{'=' * 60}")
+            print(f"EXCEEDED PER-FILE RULES: {len(exceeded_file_rules)}")
+            print("(These rules matched more findings than max_hits allows - review new additions)")
+            print("=" * 60)
+            for r in exceeded_file_rules:
+                print(f"\n  Pattern: {r.pattern}")
+                print(f"  Rules: {r.rules}")
+                print(f"  Matched: {r.matched_count} (max_hits: {r.max_hits})")
                 print(f"  Reason: {r.reason}")
 
         if has_errors:

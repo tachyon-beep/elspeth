@@ -229,3 +229,36 @@ class TestTokenUsageRoundTrip:
         original = TokenUsage(prompt_tokens=10, completion_tokens=None)
         restored = TokenUsage.from_dict(original.to_dict())
         assert restored == original
+
+    def test_json_round_trip_known(self) -> None:
+        """Round-trip through JSON serialization preserves known token counts.
+
+        This is the real persistence path: to_dict → json.dumps → json.loads → from_dict.
+        """
+        import json
+
+        original = TokenUsage.known(150, 42)
+        serialized = json.dumps(original.to_dict())
+        deserialized = json.loads(serialized)
+        restored = TokenUsage.from_dict(deserialized)
+        assert restored == original
+
+    def test_json_round_trip_unknown(self) -> None:
+        """JSON round-trip for fully unknown usage (empty dict)."""
+        import json
+
+        original = TokenUsage.unknown()
+        serialized = json.dumps(original.to_dict())
+        deserialized = json.loads(serialized)
+        restored = TokenUsage.from_dict(deserialized)
+        assert restored == original
+
+    def test_json_round_trip_partial(self) -> None:
+        """JSON round-trip for partial usage (one field known, one unknown)."""
+        import json
+
+        original = TokenUsage(prompt_tokens=10, completion_tokens=None)
+        serialized = json.dumps(original.to_dict())
+        deserialized = json.loads(serialized)
+        restored = TokenUsage.from_dict(deserialized)
+        assert restored == original

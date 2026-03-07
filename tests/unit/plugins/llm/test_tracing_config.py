@@ -1,6 +1,8 @@
 # tests/plugins/llm/test_tracing_config.py
 """Tests for Tier 2 tracing configuration models."""
 
+import pytest
+
 from elspeth.plugins.transforms.llm.tracing import (
     AzureAITracingConfig,
     LangfuseTracingConfig,
@@ -40,13 +42,19 @@ class TestTracingConfigParsing:
         assert result.enable_content_recording is True
         assert result.enable_live_metrics is False
 
-    def test_azure_ai_defaults(self) -> None:
-        """AzureAITracingConfig has sensible defaults."""
+    def test_azure_ai_rejects_missing_connection_string(self) -> None:
+        """AzureAITracingConfig crashes without connection_string."""
         config = {"provider": "azure_ai"}
+        with pytest.raises(ValueError, match="connection_string"):
+            parse_tracing_config(config)
+
+    def test_azure_ai_defaults(self) -> None:
+        """AzureAITracingConfig has sensible defaults for optional fields."""
+        config = {"provider": "azure_ai", "connection_string": "InstrumentationKey=test"}
         result = parse_tracing_config(config)
 
         assert isinstance(result, AzureAITracingConfig)
-        assert result.connection_string is None
+        assert result.connection_string == "InstrumentationKey=test"
         assert result.enable_content_recording is True  # Default: capture prompts
         assert result.enable_live_metrics is False  # Default: off
 
@@ -66,14 +74,19 @@ class TestTracingConfigParsing:
         assert result.secret_key == "sk-xxx"
         assert result.host == "https://self-hosted.example.com"
 
+    def test_langfuse_rejects_missing_keys(self) -> None:
+        """LangfuseTracingConfig crashes without public_key/secret_key."""
+        with pytest.raises(ValueError, match="public_key"):
+            parse_tracing_config({"provider": "langfuse"})
+        with pytest.raises(ValueError, match="secret_key"):
+            parse_tracing_config({"provider": "langfuse", "public_key": "pk-xxx"})
+
     def test_langfuse_defaults(self) -> None:
-        """LangfuseTracingConfig has sensible defaults."""
-        config = {"provider": "langfuse"}
+        """LangfuseTracingConfig has sensible defaults for optional fields."""
+        config = {"provider": "langfuse", "public_key": "pk-xxx", "secret_key": "sk-xxx"}
         result = parse_tracing_config(config)
 
         assert isinstance(result, LangfuseTracingConfig)
-        assert result.public_key is None
-        assert result.secret_key is None
         assert result.host == "https://cloud.langfuse.com"  # Default: cloud
         assert result.tracing_enabled is True  # v3: default enabled
 
@@ -108,31 +121,38 @@ class TestTracingConfigParsing:
 
 
 class TestTracingConfigValidation:
-    """Tests for validate_tracing_config function."""
+    """Tests for construction-time and post-construction validation."""
 
-    def test_azure_ai_without_connection_string_returns_error(self) -> None:
-        """Azure AI without connection_string returns validation error."""
-        config = AzureAITracingConfig(connection_string=None)
-        errors = validate_tracing_config(config)
-        assert len(errors) == 1
-        assert "connection_string" in errors[0]
+    def test_azure_ai_rejects_none_connection_string(self) -> None:
+        """Azure AI crashes at construction without connection_string."""
+        with pytest.raises(ValueError, match="connection_string"):
+            AzureAITracingConfig(connection_string=None)
 
-    def test_azure_ai_with_connection_string_returns_no_errors(self) -> None:
-        """Azure AI with connection_string returns no errors."""
+    def test_azure_ai_rejects_wrong_provider(self) -> None:
+        """Azure AI crashes if provider discriminator is overridden."""
+        with pytest.raises(ValueError, match="provider='azure_ai'"):
+            AzureAITracingConfig(provider="langfuse", connection_string="x")
+
+    def test_azure_ai_valid_construction(self) -> None:
+        """Azure AI with connection_string passes validation."""
         config = AzureAITracingConfig(connection_string="InstrumentationKey=xxx")
         errors = validate_tracing_config(config)
         assert len(errors) == 0
 
-    def test_langfuse_without_keys_returns_error(self) -> None:
-        """Langfuse without public_key and secret_key returns validation error."""
-        config = LangfuseTracingConfig(public_key=None, secret_key=None)
-        errors = validate_tracing_config(config)
-        assert len(errors) == 2
-        assert any("public_key" in e for e in errors)
-        assert any("secret_key" in e for e in errors)
+    def test_langfuse_rejects_none_keys(self) -> None:
+        """Langfuse crashes at construction without required keys."""
+        with pytest.raises(ValueError, match="public_key"):
+            LangfuseTracingConfig(public_key=None, secret_key="sk-xxx")
+        with pytest.raises(ValueError, match="secret_key"):
+            LangfuseTracingConfig(public_key="pk-xxx", secret_key=None)
 
-    def test_langfuse_with_keys_returns_no_errors(self) -> None:
-        """Langfuse with keys returns no errors."""
+    def test_langfuse_rejects_wrong_provider(self) -> None:
+        """Langfuse crashes if provider discriminator is overridden."""
+        with pytest.raises(ValueError, match="provider='langfuse'"):
+            LangfuseTracingConfig(provider="azure_ai", public_key="pk", secret_key="sk")
+
+    def test_langfuse_valid_construction(self) -> None:
+        """Langfuse with keys passes validation."""
         config = LangfuseTracingConfig(public_key="pk-xxx", secret_key="sk-xxx")
         errors = validate_tracing_config(config)
         assert len(errors) == 0

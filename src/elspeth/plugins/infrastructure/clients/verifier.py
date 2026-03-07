@@ -26,7 +26,7 @@ if TYPE_CHECKING:
     from elspeth.core.landscape.recorder import LandscapeRecorder
 
 
-@dataclass
+@dataclass(frozen=True)
 class VerificationResult:
     """Result of verifying a call against recorded response.
 
@@ -38,6 +38,10 @@ class VerificationResult:
         differences: DeepDiff results as dict (empty if match)
         recorded_call_missing: True if no recorded call was found
         payload_missing: True if call exists but response payload is missing/purged
+
+    Use factory classmethods (``matched``, ``mismatched``, ``missing_recording``,
+    ``missing_payload``) for construction — they prevent contradictory flag
+    combinations.
     """
 
     request_hash: str
@@ -47,6 +51,96 @@ class VerificationResult:
     differences: dict[str, Any] = field(default_factory=dict)
     recorded_call_missing: bool = False
     payload_missing: bool = False
+
+    def __post_init__(self) -> None:
+        if self.is_match and self.recorded_call_missing:
+            raise ValueError("Cannot be a match when recorded call is missing")
+        if self.recorded_call_missing and self.payload_missing:
+            raise ValueError("Cannot have both recorded_call_missing and payload_missing")
+        if self.is_match and self.differences:
+            raise ValueError("Cannot be a match with non-empty differences")
+
+    # --- Factory classmethods ---
+
+    @classmethod
+    def matched(
+        cls,
+        request_hash: str,
+        live_response: dict[str, Any],
+        recorded_response: dict[str, Any],
+    ) -> VerificationResult:
+        """Live response matches recorded baseline."""
+        return cls(
+            request_hash=request_hash,
+            live_response=live_response,
+            recorded_response=recorded_response,
+            is_match=True,
+        )
+
+    @classmethod
+    def mismatched(
+        cls,
+        request_hash: str,
+        live_response: dict[str, Any],
+        recorded_response: dict[str, Any],
+        differences: dict[str, Any],
+    ) -> VerificationResult:
+        """Live response differs from recorded baseline."""
+        return cls(
+            request_hash=request_hash,
+            live_response=live_response,
+            recorded_response=recorded_response,
+            is_match=False,
+            differences=differences,
+        )
+
+    @classmethod
+    def missing_recording(
+        cls,
+        request_hash: str,
+        live_response: dict[str, Any],
+    ) -> VerificationResult:
+        """No recorded call found for this request."""
+        return cls(
+            request_hash=request_hash,
+            live_response=live_response,
+            recorded_response=None,
+            is_match=False,
+            recorded_call_missing=True,
+        )
+
+    @classmethod
+    def missing_payload(
+        cls,
+        request_hash: str,
+        live_response: dict[str, Any],
+        *,
+        is_match: bool = False,
+        differences: dict[str, Any] | None = None,
+    ) -> VerificationResult:
+        """Call exists but response payload is missing or purged."""
+        return cls(
+            request_hash=request_hash,
+            live_response=live_response,
+            recorded_response=None,
+            is_match=is_match,
+            payload_missing=True,
+            differences=differences or {},
+        )
+
+    @classmethod
+    def no_recorded_response(
+        cls,
+        request_hash: str,
+        live_response: dict[str, Any],
+    ) -> VerificationResult:
+        """Call never had a response (e.g., connection timeout, DNS failure)."""
+        return cls(
+            request_hash=request_hash,
+            live_response=live_response,
+            recorded_response=None,
+            is_match=False,
+        )
 
     @property
     def has_differences(self) -> bool:
@@ -202,12 +296,9 @@ class CallVerifier:
         self._report.total_calls += 1
 
         if call is None:
-            result = VerificationResult(
+            result = VerificationResult.missing_recording(
                 request_hash=request_hash,
                 live_response=live_response,
-                recorded_response=None,
-                is_match=False,
-                recorded_call_missing=True,
             )
             self._report.missing_recordings += 1
             self._report.results.append(result)
@@ -235,12 +326,10 @@ class CallVerifier:
                     self._report.matches += 1
                 else:
                     self._report.mismatches += 1
-                result = VerificationResult(
+                result = VerificationResult.missing_payload(
                     request_hash=request_hash,
                     live_response=live_response,
-                    recorded_response=None,
                     is_match=is_match,
-                    payload_missing=True,
                     differences={
                         "hash_mismatch": {
                             "recorded_hash": call.response_hash,
@@ -248,16 +337,13 @@ class CallVerifier:
                         }
                     }
                     if not is_match
-                    else {},
+                    else None,
                 )
             else:
                 # No hash available — cannot verify, just mark as missing
-                result = VerificationResult(
+                result = VerificationResult.missing_payload(
                     request_hash=request_hash,
                     live_response=live_response,
-                    recorded_response=None,
-                    is_match=False,
-                    payload_missing=True,
                 )
 
             self._report.results.append(result)
@@ -266,11 +352,9 @@ class CallVerifier:
         # Call never had a response (e.g., connection timeout, DNS failure)
         # Cannot compare, so not a match, but NOT a missing payload
         if recorded_response is None:
-            result = VerificationResult(
+            result = VerificationResult.no_recorded_response(
                 request_hash=request_hash,
                 live_response=live_response,
-                recorded_response=None,
-                is_match=False,
             )
             self._report.results.append(result)
             return result
@@ -287,16 +371,19 @@ class CallVerifier:
 
         if is_match:
             self._report.matches += 1
+            result = VerificationResult.matched(
+                request_hash=request_hash,
+                live_response=live_response,
+                recorded_response=recorded_response,
+            )
         else:
             self._report.mismatches += 1
-
-        result = VerificationResult(
-            request_hash=request_hash,
-            live_response=live_response,
-            recorded_response=recorded_response,
-            is_match=is_match,
-            differences=diff.to_dict() if diff else {},
-        )
+            result = VerificationResult.mismatched(
+                request_hash=request_hash,
+                live_response=live_response,
+                recorded_response=recorded_response,
+                differences=diff.to_dict(),
+            )
         self._report.results.append(result)
         return result
 

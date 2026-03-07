@@ -335,6 +335,59 @@ class TestCoalesceCheckpointStateFromDict:
                 }
             )
 
+    def test_json_round_trip_preserves_tuple_types(self) -> None:
+        """Round-trip through JSON must restore tuples, not lists.
+
+        json.dumps converts tuple → list.  json.loads always returns list.
+        from_dict must reconstruct tuples so equality holds.
+        This is the real persistence path: to_dict → json.dumps → json.loads → from_dict.
+        """
+        import json
+
+        token = _valid_token()
+        pending = CoalescePendingCheckpoint(
+            coalesce_name="merge_1",
+            row_id="row-1",
+            elapsed_age_seconds=1.5,
+            branches={"path_a": token},
+            lost_branches={"path_b": "timed_out"},
+        )
+        original = CoalesceCheckpointState(
+            version="1.0",
+            pending=(pending,),
+            completed_keys=(("merge_2", "row-2"), ("merge_3", "row-3")),
+        )
+
+        serialized = json.dumps(original.to_dict())
+        deserialized = json.loads(serialized)
+        restored = CoalesceCheckpointState.from_dict(deserialized)
+
+        assert restored == original
+        # Verify pending is a tuple, not a list
+        assert isinstance(restored.pending, tuple), f"Expected tuple, got {type(restored.pending).__name__}"
+        # Verify completed_keys are tuples of tuples, not lists of lists
+        assert isinstance(restored.completed_keys, tuple), f"Expected tuple, got {type(restored.completed_keys).__name__}"
+        for key in restored.completed_keys:
+            assert isinstance(key, tuple), f"Expected tuple, got {type(key).__name__}: {key}"
+
+    def test_json_round_trip_empty_state(self) -> None:
+        """JSON round-trip with empty pending and completed_keys."""
+        import json
+
+        original = CoalesceCheckpointState(
+            version="1.0",
+            pending=(),
+            completed_keys=(),
+        )
+
+        serialized = json.dumps(original.to_dict())
+        deserialized = json.loads(serialized)
+        restored = CoalesceCheckpointState.from_dict(deserialized)
+
+        assert restored == original
+        assert isinstance(restored.pending, tuple)
+        assert isinstance(restored.completed_keys, tuple)
+
     def test_full_roundtrip_with_all_optional_fields(self) -> None:
         """Full round-trip with non-None group IDs, multiple pending entries, and completed keys.
 

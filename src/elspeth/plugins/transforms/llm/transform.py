@@ -397,6 +397,17 @@ class MultiQueryStrategy:
             return self._execute_parallel(row, state_id, token_id, provider, tracer)
         return self._execute_sequential(row, state_id, token_id, provider, tracer)
 
+    @dataclass(frozen=True, slots=True)
+    class _QuerySuccess:
+        """Partial output fields from a successful single-query execution.
+
+        Tagged success type replacing bare ``dict`` in the union return of
+        ``_execute_one_query``, so callers can exhaustively match on
+        ``_QuerySuccess | TransformResult`` instead of ``dict | TransformResult``.
+        """
+
+        fields: dict[str, Any]
+
     def _execute_one_query(
         self,
         query_idx: int,
@@ -406,11 +417,11 @@ class MultiQueryStrategy:
         token_id: str,
         provider: LLMProvider,
         tracer: LangfuseTracer,
-    ) -> dict[str, Any] | TransformResult:
+    ) -> _QuerySuccess | TransformResult:
         """Execute a single query within a multi-query row.
 
         Returns:
-            dict[str, Any]: Partial output fields on success
+            _QuerySuccess: Partial output fields on success
             TransformResult: Error result on failure
 
         Raises:
@@ -650,7 +661,7 @@ class MultiQueryStrategy:
             system_prompt_source=self.system_prompt_source,
         )
 
-        return partial
+        return self._QuerySuccess(fields=partial)
 
     def _execute_sequential(
         self,
@@ -699,7 +710,7 @@ class MultiQueryStrategy:
                     result.reason["discarded_successful_queries"] = query_idx
                 return result
 
-            accumulated_outputs.update(result)
+            accumulated_outputs.update(result.fields)
 
         # All queries succeeded — build output row
         output = {**row.to_dict(), **accumulated_outputs}
@@ -765,7 +776,7 @@ class MultiQueryStrategy:
             )
             if isinstance(result, TransformResult):
                 return result  # Error passthrough
-            # Success: wrap partial dict in TransformResult for pool interface
+            # Success: wrap partial fields in TransformResult for pool interface
             observed = SchemaContract(
                 mode="OBSERVED",
                 fields=tuple(
@@ -776,12 +787,12 @@ class MultiQueryStrategy:
                         required=False,
                         source="inferred",
                     )
-                    for k, v in result.items()
+                    for k, v in result.fields.items()
                 ),
                 locked=True,
             )
             return TransformResult.success(
-                PipelineRow(result, observed),
+                PipelineRow(result.fields, observed),
                 success_reason={"action": "query_completed", "metadata": {"query_name": work["spec"].name}},
             )
 

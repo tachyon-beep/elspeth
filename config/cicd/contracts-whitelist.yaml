@@ -257,8 +257,7 @@ allowed_dict_patterns:
 
   # Unified LLM transform (T10 consolidation — dispatches to Azure/OpenRouter providers)
   - "src/elspeth/plugins/transforms/llm/transform.py:LLMTransform.__init__:config"
-  # Multi-query partial output (keys are dynamic: query-spec-dependent field names)
-  - "src/elspeth/plugins/transforms/llm/transform.py:MultiQueryStrategy._execute_one_query:return"
+  # Multi-query partial output (keys are dynamic: query-spec-dependent field names — _QuerySuccess.fields)
   # Pool work context (PooledExecutor row interface is dict[str, Any])
   - "src/elspeth/plugins/transforms/llm/transform.py:MultiQueryStrategy._process_fn:work"
 
@@ -297,6 +296,16 @@ allowed_dict_patterns:
   - "src/elspeth/plugins/infrastructure/clients/replayer.py:CallReplayer.replay:request_data"
   - "src/elspeth/plugins/infrastructure/clients/verifier.py:CallVerifier.verify:request_data"
   - "src/elspeth/plugins/infrastructure/clients/verifier.py:CallVerifier.verify:live_response"
+  # VerificationResult factory classmethods — dict[str, Any] for external API responses (Tier 3 data)
+  - "src/elspeth/plugins/infrastructure/clients/verifier.py:VerificationResult.matched:live_response"
+  - "src/elspeth/plugins/infrastructure/clients/verifier.py:VerificationResult.matched:recorded_response"
+  - "src/elspeth/plugins/infrastructure/clients/verifier.py:VerificationResult.mismatched:live_response"
+  - "src/elspeth/plugins/infrastructure/clients/verifier.py:VerificationResult.mismatched:recorded_response"
+  - "src/elspeth/plugins/infrastructure/clients/verifier.py:VerificationResult.mismatched:differences"
+  - "src/elspeth/plugins/infrastructure/clients/verifier.py:VerificationResult.missing_recording:live_response"
+  - "src/elspeth/plugins/infrastructure/clients/verifier.py:VerificationResult.missing_payload:live_response"
+  - "src/elspeth/plugins/infrastructure/clients/verifier.py:VerificationResult.missing_payload:differences"
+  - "src/elspeth/plugins/infrastructure/clients/verifier.py:VerificationResult.no_recorded_response:live_response"
 
   # ═══════════════════════════════════════════════════════════════════════════
   # TUI - Display of dynamic audit data

@@ -18,7 +18,7 @@ timeout continuations (lines 2124, 2139-2143 in the original).
 from __future__ import annotations
 
 from collections.abc import Iterable, Mapping
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 
 from elspeth.contracts import PendingOutcome, RowOutcome
 from elspeth.contracts.errors import OrchestrationInvariantError
@@ -27,11 +27,12 @@ from elspeth.engine.orchestrator.types import ExecutionCounters, PendingTokenMap
 
 if TYPE_CHECKING:
     from elspeth.contracts.plugin_context import PluginContext
+    from elspeth.contracts.results import RowResult
     from elspeth.engine.coalesce_executor import CoalesceExecutor
     from elspeth.engine.processor import RowProcessor
 
 
-def _require_sink_name(result: Any) -> str:
+def _require_sink_name(result: RowResult) -> str:
     """Require sink_name for outcomes that must route to a sink.
 
     Replaces cast(str, result.sink_name) which is a no-op at runtime.
@@ -44,7 +45,7 @@ def _require_sink_name(result: Any) -> str:
 
 
 def accumulate_row_outcomes(
-    results: Iterable[Any],
+    results: Iterable[RowResult],
     counters: ExecutionCounters,
     config_sinks: Mapping[str, object],
     pending_tokens: PendingTokenMap,

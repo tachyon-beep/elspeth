@@ -77,6 +77,12 @@ class AzureAITracingConfig(TracingConfig):
     enable_content_recording: bool = True
     enable_live_metrics: bool = False
 
+    def __post_init__(self) -> None:
+        if self.provider != "azure_ai":
+            raise ValueError(f"AzureAITracingConfig requires provider='azure_ai', got {self.provider!r}")
+        if self.connection_string is None:
+            raise ValueError("AzureAITracingConfig requires connection_string. Use ${APPLICATIONINSIGHTS_CONNECTION_STRING} in YAML.")
+
 
 @dataclass(frozen=True, slots=True)
 class LangfuseTracingConfig(TracingConfig):
@@ -104,6 +110,14 @@ class LangfuseTracingConfig(TracingConfig):
     secret_key: str | None = None
     host: str = "https://cloud.langfuse.com"
     tracing_enabled: bool = True
+
+    def __post_init__(self) -> None:
+        if self.provider != "langfuse":
+            raise ValueError(f"LangfuseTracingConfig requires provider='langfuse', got {self.provider!r}")
+        if self.public_key is None:
+            raise ValueError("LangfuseTracingConfig requires public_key. Use ${LANGFUSE_PUBLIC_KEY} in YAML.")
+        if self.secret_key is None:
+            raise ValueError("LangfuseTracingConfig requires secret_key. Use ${LANGFUSE_SECRET_KEY} in YAML.")
 
 
 def parse_tracing_config(config: dict[str, Any] | None) -> TracingConfig | None:
@@ -153,26 +167,17 @@ def parse_tracing_config(config: dict[str, Any] | None) -> TracingConfig | None:
 def validate_tracing_config(config: TracingConfig) -> list[str]:
     """Validate tracing configuration completeness.
 
+    Note: Required-field and discriminator checks are now enforced at
+    construction time via ``__post_init__`` on each subclass.  This
+    function is retained for callers that import it, but only checks
+    provider validity (the one check not covered by construction).
+
     Args:
         config: Parsed tracing configuration
 
     Returns:
         List of validation error messages (empty if valid)
     """
-    errors: list[str] = []
-
     if config.provider not in SUPPORTED_TRACING_PROVIDERS:
-        errors.append(f"Unknown tracing provider '{config.provider}'. Supported providers: azure_ai, langfuse, none.")
-        return errors
-
-    if isinstance(config, AzureAITracingConfig):
-        if config.connection_string is None:
-            errors.append("azure_ai tracing requires connection_string. Use ${APPLICATIONINSIGHTS_CONNECTION_STRING} in YAML.")
-
-    elif isinstance(config, LangfuseTracingConfig):
-        if config.public_key is None:
-            errors.append("langfuse tracing requires public_key. Use ${LANGFUSE_PUBLIC_KEY} in YAML.")
-        if config.secret_key is None:
-            errors.append("langfuse tracing requires secret_key. Use ${LANGFUSE_SECRET_KEY} in YAML.")
-
-    return errors
+        return [f"Unknown tracing provider '{config.provider}'. Supported providers: azure_ai, langfuse, none."]
+    return []

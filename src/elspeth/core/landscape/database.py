@@ -450,6 +450,29 @@ class LandscapeDB:
         self.close()
 
     @classmethod
+    def _from_parts(
+        cls,
+        connection_string: str,
+        engine: Engine,
+        *,
+        passphrase: str | None = None,
+        journal: LandscapeJournal | None = None,
+        require_existing_schema: bool = False,
+    ) -> Self:
+        """Construct instance from pre-created components.
+
+        Single place that sets all instance attributes — eliminates drift risk
+        from parallel ``cls.__new__()`` paths that manually assign fields.
+        """
+        instance = cls.__new__(cls)
+        instance.connection_string = connection_string
+        instance._passphrase = passphrase
+        instance._engine = engine
+        instance._journal = journal
+        instance._require_existing_schema = require_existing_schema
+        return instance
+
+    @classmethod
     def in_memory(cls) -> Self:
         """Create an in-memory SQLite database for testing.
 
@@ -461,12 +484,7 @@ class LandscapeDB:
         engine = create_engine("sqlite:///:memory:", echo=False)
         cls._configure_sqlite(engine)
         metadata.create_all(engine)
-        instance = cls.__new__(cls)
-        instance.connection_string = "sqlite:///:memory:"
-        instance._passphrase = None
-        instance._engine = engine
-        instance._journal = None
-        instance._require_existing_schema = False
+        instance = cls._from_parts("sqlite:///:memory:", engine)
         instance._sync_sqlite_schema_epoch()
         return instance
 
@@ -509,25 +527,24 @@ class LandscapeDB:
             if url.startswith("sqlite"):
                 cls._configure_sqlite(engine)
 
-        # Create instance first - _validate_schema needs self.connection_string and self.engine
-        instance = cls.__new__(cls)
-        instance.connection_string = url
-        instance._passphrase = passphrase
-        instance._engine = engine
-        instance._journal = None
+        journal: LandscapeJournal | None = None
         if dump_to_jsonl:
             journal_path = dump_to_jsonl_path or cls._derive_journal_path(url)
-            instance._journal = LandscapeJournal(
+            journal = LandscapeJournal(
                 journal_path,
                 fail_on_error=dump_to_jsonl_fail_on_error,
                 include_payloads=dump_to_jsonl_include_payloads,
                 payload_base_path=dump_to_jsonl_payload_base_path,
             )
-            instance._journal.attach(engine)
+            journal.attach(engine)
 
-        # When create_tables=False, require existing Landscape schema.
-        # Otherwise a wrong/empty DB passes validation and fails on first query.
-        instance._require_existing_schema = not create_tables
+        instance = cls._from_parts(
+            url,
+            engine,
+            passphrase=passphrase,
+            journal=journal,
+            require_existing_schema=not create_tables,
+        )
 
         # Validate BEFORE create_all - catches old schema with missing columns
         # before we try to use it. For fresh DBs, validation passes (no tables yet).

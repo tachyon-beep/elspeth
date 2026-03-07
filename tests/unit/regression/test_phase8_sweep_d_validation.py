@@ -170,11 +170,16 @@ class TestTracingConfigValidation:
             parse_tracing_config({"provider": "datadog_magic"})
 
     def test_known_providers_accepted(self) -> None:
-        """All known providers should be accepted."""
+        """All known providers should be accepted with required fields."""
         from elspeth.plugins.transforms.llm.tracing import parse_tracing_config
 
-        for provider in ("none", "azure_ai", "langfuse"):
-            result = parse_tracing_config({"provider": provider})
+        configs = {
+            "none": {"provider": "none"},
+            "azure_ai": {"provider": "azure_ai", "connection_string": "InstrumentationKey=test"},
+            "langfuse": {"provider": "langfuse", "public_key": "pk-test", "secret_key": "sk-test"},
+        }
+        for provider, config in configs.items():
+            result = parse_tracing_config(config)
             assert result is not None
             assert result.provider == provider
 

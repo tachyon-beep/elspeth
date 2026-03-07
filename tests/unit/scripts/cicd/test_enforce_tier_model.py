@@ -22,6 +22,7 @@ from scripts.cicd.enforce_tier_model import (
     Allowlist,
     AllowlistEntry,
     Finding,
+    PerFileRule,
     TierModelVisitor,
     _suggest_module_file,
     format_stale_entry_text,
@@ -902,6 +903,146 @@ class TestDirectoryLoading:
         )
         result = _suggest_module_file(finding, allowlist_dir)
         assert result.endswith("cli.yaml")
+
+
+# =============================================================================
+# Per-file rule max_hits
+# =============================================================================
+
+
+class TestPerFileRuleMaxHits:
+    """Tests for max_hits cap on per-file rules."""
+
+    def _make_finding(self, file_path: str, rule_id: str = "R5") -> Finding:
+        """Create a minimal Finding for testing."""
+        return Finding(
+            rule_id=rule_id,
+            file_path=file_path,
+            line=10,
+            col=0,
+            symbol_context=("SomeClass", "method"),
+            fingerprint="deadbeef",
+            code_snippet="isinstance(x, int)",
+            message="test",
+        )
+
+    def test_max_hits_none_allows_unlimited(self) -> None:
+        """Per-file rule with no max_hits should allow any number of matches."""
+        rule = PerFileRule(
+            pattern="core/canonical.py",
+            rules=["R5"],
+            reason="Type dispatch for normalization",
+            expires=None,
+            max_hits=None,
+        )
+        allowlist = Allowlist(entries=[], per_file_rules=[rule])
+
+        for _ in range(50):
+            allowlist.match(self._make_finding("core/canonical.py"))
+
+        assert rule.matched_count == 50
+        assert allowlist.get_exceeded_file_rules() == []
+
+    def test_max_hits_within_limit(self) -> None:
+        """Per-file rule with matched_count <= max_hits should not be exceeded."""
+        rule = PerFileRule(
+            pattern="core/canonical.py",
+            rules=["R5"],
+            reason="Type dispatch",
+            expires=None,
+            max_hits=18,
+        )
+        allowlist = Allowlist(entries=[], per_file_rules=[rule])
+
+        for _ in range(18):
+            allowlist.match(self._make_finding("core/canonical.py"))
+
+        assert rule.matched_count == 18
+        assert allowlist.get_exceeded_file_rules() == []
+
+    def test_max_hits_exceeded(self) -> None:
+        """Per-file rule exceeding max_hits should be reported."""
+        rule = PerFileRule(
+            pattern="core/canonical.py",
+            rules=["R5"],
+            reason="Type dispatch",
+            expires=None,
+            max_hits=5,
+        )
+        allowlist = Allowlist(entries=[], per_file_rules=[rule])
+
+        for _ in range(8):
+            allowlist.match(self._make_finding("core/canonical.py"))
+
+        assert rule.matched_count == 8
+        exceeded = allowlist.get_exceeded_file_rules()
+        assert len(exceeded) == 1
+        assert exceeded[0] is rule
+
+    def test_max_hits_only_counts_matching_rule(self) -> None:
+        """max_hits should only count hits for the matching rule, not other rules."""
+        rule = PerFileRule(
+            pattern="core/canonical.py",
+            rules=["R5"],
+            reason="Type dispatch",
+            expires=None,
+            max_hits=2,
+        )
+        allowlist = Allowlist(entries=[], per_file_rules=[rule])
+
+        # R5 matches the rule
+        allowlist.match(self._make_finding("core/canonical.py", rule_id="R5"))
+        allowlist.match(self._make_finding("core/canonical.py", rule_id="R5"))
+        # R1 does NOT match this rule (rules=["R5"])
+        result = allowlist.match(self._make_finding("core/canonical.py", rule_id="R1"))
+        assert result is None  # R1 not in rule's rules list
+
+        assert rule.matched_count == 2
+        assert allowlist.get_exceeded_file_rules() == []
+
+    def test_max_hits_parsed_from_yaml(self, temp_dir: Path) -> None:
+        """max_hits should be parsed from YAML per_file_rules."""
+        allowlist_dir = temp_dir / "allowlist"
+        allowlist_dir.mkdir()
+
+        (allowlist_dir / "_defaults.yaml").write_text("version: 1\ndefaults: {}\n")
+        (allowlist_dir / "core.yaml").write_text(
+            dedent("""\
+            per_file_rules:
+              - pattern: core/canonical.py
+                rules: [R5]
+                reason: Type dispatch for normalization
+                expires: null
+                max_hits: 18
+            """)
+        )
+
+        allowlist = load_allowlist(allowlist_dir)
+        assert len(allowlist.per_file_rules) == 1
+        assert allowlist.per_file_rules[0].max_hits == 18
+
+    def test_max_hits_defaults_to_none(self, temp_dir: Path) -> None:
+        """Omitting max_hits in YAML should default to None (unlimited)."""
+        allowlist_dir = temp_dir / "allowlist"
+        allowlist_dir.mkdir()
+
+        (allowlist_dir / "_defaults.yaml").write_text("version: 1\ndefaults: {}\n")
+        (allowlist_dir / "core.yaml").write_text(
+            dedent("""\
+            per_file_rules:
+              - pattern: core/canonical.py
+                rules: [R5]
+                reason: Type dispatch
+                expires: null
+            """)
+        )
+
+        allowlist = load_allowlist(allowlist_dir)
+        assert allowlist.per_file_rules[0].max_hits is None
+
+
+class TestDirectoryLoadingSuggestModuleFile:
+    """Tests for _suggest_module_file and related directory loading."""
 
     def test_suggest_module_file_single_file(self, temp_dir: Path) -> None:
         """Single file path should return the file path as-is."""

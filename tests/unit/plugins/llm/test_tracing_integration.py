@@ -267,7 +267,8 @@ class TestGracefulDegradation:
             config = _make_azure_config(
                 tracing={
                     "provider": "langfuse",
-                    # Missing public_key and secret_key
+                    "public_key": "pk-test",
+                    "secret_key": "sk-test",
                 }
             )
             LLMTransform(config)
@@ -478,13 +479,11 @@ class TestAzureAITracingRejection:
 class TestOpenRouterMissingTracingKeys:
     """Tests for OpenRouter tracing with missing Langfuse keys."""
 
-    def test_tracing_config_validation_returns_noop_on_missing_keys(self) -> None:
-        """Langfuse config with missing keys still creates tracer (SDK may fail).
+    def test_tracing_config_rejects_missing_keys_at_construction(self) -> None:
+        """Langfuse config crashes at construction without required keys.
 
-        When Langfuse SDK is available but keys are None, the SDK may still
-        construct (lazy auth). The factory returns ActiveLangfuseTracer or
-        NoOpLangfuseTracer depending on whether the SDK raises.
-        What matters: no crash during construction.
+        Construction-time enforcement prevents invalid configs from reaching
+        the SDK — fails fast with clear error rather than deferred auth failure.
         """
         config = _make_openrouter_config(
             tracing={
@@ -492,9 +491,8 @@ class TestOpenRouterMissingTracingKeys:
                 # Missing public_key and secret_key
             }
         )
-        transform = LLMTransform(config)
-        # Should be one of the two tracer types without crashing
-        assert isinstance(transform._tracer, (ActiveLangfuseTracer, NoOpLangfuseTracer))
+        with pytest.raises(ValueError, match="public_key"):
+            LLMTransform(config)
 
 
 class TestMultiQueryLangfuseTracingViaStrategy:

@@ -65,21 +65,25 @@ def _freeze_fields(instance: Any, *field_names: str) -> None:
         object.__setattr__(instance, name, deep_freeze(getattr(instance, name)))
 
 
-@dataclass
+@dataclass(frozen=True, slots=True)
 class PipelineConfig:
     """Configuration for a pipeline run.
 
     All plugin fields are now properly typed for IDE support and
-    static type checking.
+    static type checking. Frozen after construction — pipeline
+    configuration must not change during execution.
+
+    The ``frozen=True`` decorator prevents field reassignment after
+    construction, ensuring pipeline config is immutable during a run.
 
     Attributes:
         source: Source plugin instance
-        transforms: List of transform plugin instances (processed in DAG order)
+        transforms: Transform plugin instances (processed in DAG order)
         sinks: Dict of sink_name -> sink plugin instance
         config: Additional run configuration
         gates: Config-driven gates (processed AFTER transforms, BEFORE sinks)
         aggregation_settings: Dict of node_id -> AggregationSettings
-        coalesce_settings: List of coalesce configurations for merging fork paths
+        coalesce_settings: Coalesce configurations for merging fork paths
     """
 
     source: SourceProtocol
@@ -89,6 +93,12 @@ class PipelineConfig:
     gates: list[GateSettings] = field(default_factory=list)
     aggregation_settings: dict[str, AggregationSettings] = field(default_factory=dict)
     coalesce_settings: list[CoalesceSettings] = field(default_factory=list)
+
+    def __post_init__(self) -> None:
+        if not self.sinks:
+            from elspeth.contracts.errors import OrchestrationInvariantError
+
+            raise OrchestrationInvariantError("PipelineConfig requires at least one sink")
 
 
 @dataclass(frozen=True, slots=True)
@@ -350,7 +360,7 @@ class ResumeState:
     run_id: str
     restored_aggregation_state: Mapping[str, AggregationCheckpointState]
     restored_coalesce_state: CoalesceCheckpointState | None
-    unprocessed_rows: Sequence[Any]
+    unprocessed_rows: Sequence[tuple[str, int, dict[str, Any]]]
     schema_contract: SchemaContract
 
     def __post_init__(self) -> None:

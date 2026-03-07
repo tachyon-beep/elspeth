@@ -289,3 +289,89 @@ def test_aggregation_node_rejects_non_dict_contract() -> None:
             condition_fire_offset=None,
             contract=["not", "a", "dict"],  # type: ignore[arg-type]
         )
+
+
+# === JSON round-trip tests (tuple→list regression trap) ===
+
+
+def test_aggregation_checkpoint_json_round_trip_preserves_tokens_tuple() -> None:
+    """Round-trip through JSON must restore tokens as tuples, not lists.
+
+    json.dumps converts tuple → list.  json.loads always returns list.
+    from_dict must reconstruct tuples so equality holds.
+    This is the real persistence path: to_dict → json.dumps → json.loads → from_dict.
+    """
+    import json
+
+    state = _make_agg_state()
+    serialized = json.dumps(state.to_dict())
+    deserialized = json.loads(serialized)
+    restored = AggregationCheckpointState.from_dict(deserialized)
+
+    assert restored == state
+    # Verify tokens is a tuple, not a list
+    node = restored.nodes["node-001"]
+    assert isinstance(node.tokens, tuple), f"Expected tuple, got {type(node.tokens).__name__}"
+    assert len(node.tokens) == 1
+    assert node.tokens[0].token_id == "tok-buf-001"
+
+
+def test_aggregation_checkpoint_json_round_trip_multiple_nodes_and_tokens() -> None:
+    """JSON round-trip with multiple nodes and multiple tokens per node."""
+    import json
+
+    state = AggregationCheckpointState(
+        version="3.0",
+        nodes={
+            "node-A": AggregationNodeCheckpoint(
+                tokens=(
+                    AggregationTokenCheckpoint(
+                        token_id="tok-1",
+                        row_id="row-1",
+                        branch_name="path_a",
+                        fork_group_id="fork-1",
+                        join_group_id=None,
+                        expand_group_id=None,
+                        row_data={"nested": {"deep": [1, 2, 3]}},
+                        contract_version="v1",
+                    ),
+                    AggregationTokenCheckpoint(
+                        token_id="tok-2",
+                        row_id="row-2",
+                        branch_name=None,
+                        fork_group_id=None,
+                        join_group_id="join-1",
+                        expand_group_id="expand-1",
+                        row_data={"value": 42},
+                        contract_version="v2",
+                    ),
+                ),
+                batch_id="batch-A",
+                elapsed_age_seconds=5.5,
+                count_fire_offset=1.0,
+                condition_fire_offset=2.5,
+                contract={"mode": "FLEXIBLE", "locked": False, "version_hash": "xyz", "fields": ["a", "b"]},
+            ),
+            "node-B": AggregationNodeCheckpoint(
+                tokens=(),
+                batch_id="batch-B",
+                elapsed_age_seconds=0.0,
+                count_fire_offset=None,
+                condition_fire_offset=None,
+                contract={"mode": "OBSERVED"},
+            ),
+        },
+    )
+
+    serialized = json.dumps(state.to_dict())
+    deserialized = json.loads(serialized)
+    restored = AggregationCheckpointState.from_dict(deserialized)
+
+    assert restored == state
+    # Verify tokens tuples are restored correctly
+    node_a = restored.nodes["node-A"]
+    assert isinstance(node_a.tokens, tuple)
+    assert len(node_a.tokens) == 2
+    node_b = restored.nodes["node-B"]
+    assert isinstance(node_b.tokens, tuple)
+    assert len(node_b.tokens) == 0

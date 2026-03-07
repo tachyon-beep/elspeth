@@ -880,9 +880,11 @@ class LandscapeRecorder:
         """Get all nodes for a run. Delegates to DataFlowRepository."""
         return self._data_flow.get_nodes(run_id)
 
-    def get_node_contracts(self, run_id: str, node_id: str) -> tuple[SchemaContract | None, SchemaContract | None]:
+    def get_node_contracts(
+        self, run_id: str, node_id: str, *, allow_missing: bool = False
+    ) -> tuple[SchemaContract | None, SchemaContract | None]:
         """Get node contracts. Delegates to DataFlowRepository."""
-        return self._data_flow.get_node_contracts(run_id, node_id)
+        return self._data_flow.get_node_contracts(run_id, node_id, allow_missing=allow_missing)
 
     def get_edges(self, run_id: str) -> list[Edge]:
         """Get all edges for a run. Delegates to DataFlowRepository."""
