@@ -261,6 +261,10 @@ allow_hits:
   owner: bugfix
   reason: "Programming error re-raise guard — isinstance() detects TypeError/AttributeError/KeyError/NameError in LLM telemetry code"
   safety: "Re-raises immediately — crashes on bugs, only swallows runtime telemetry failures"
+- key: plugins/infrastructure/clients/llm.py:R5:AuditedLLMClient:chat_completion:fp=0725c4bef855bc97
+  owner: bugfix
+  reason: "Programming error re-raise guard — isinstance() detects TypeError/AttributeError/KeyError/NameError in null-content telemetry code"
+  safety: "Re-raises immediately — crashes on bugs, only swallows runtime telemetry failures"
 - key: 'plugins/infrastructure/clients/llm.py:R5:LLMResponse:__post_init__:fp=f9ac8421b167934a'
   owner: architecture
   reason: Deep-freeze conversion guard — isinstance() checks for MappingProxyType/tuple wrapping, not defensive data access

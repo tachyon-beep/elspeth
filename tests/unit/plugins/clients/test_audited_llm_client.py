@@ -915,6 +915,60 @@ class TestContentFabrication:
         # Response data should still be recorded for audit completeness
         assert call_kwargs["response_data"] is not None
 
+    def test_null_content_emits_telemetry_before_raising(self) -> None:
+        """Null-content responses must emit ExternalCallCompleted telemetry.
+
+        The audit trail records the call, but telemetry dashboards also need
+        the event to avoid undercounting content-filtered failures.
+        """
+        recorder = self._create_mock_recorder()
+
+        message = Mock()
+        message.content = None
+
+        choice = Mock()
+        choice.message = message
+        choice.finish_reason = "content_filter"
+
+        usage = Mock()
+        usage.prompt_tokens = 10
+        usage.completion_tokens = 0
+
+        response = Mock()
+        response.choices = [choice]
+        response.model = "gpt-4"
+        response.usage = usage
+        response.model_dump = Mock(return_value={"id": "resp_null", "choices": [{"finish_reason": "content_filter"}]})
+
+        openai_client = MagicMock()
+        openai_client.chat.completions.create.return_value = response
+
+        emitted_events: list[ExternalCallCompleted] = []
+        client = AuditedLLMClient(
+            recorder=recorder,
+            state_id="state_fab",
+            run_id="run_fab",
+            telemetry_emit=lambda event: emitted_events.append(event),
+            underlying_client=openai_client,
+        )
+
+        with pytest.raises(ContentPolicyError):
+            client.chat_completion(
+                model="gpt-4",
+                messages=[{"role": "user", "content": "Hello"}],
+            )
+
+        assert len(emitted_events) == 1
+        event = emitted_events[0]
+        assert event.status == CallStatus.ERROR
+        assert event.call_type == CallType.LLM
+        assert event.state_id == "state_fab"
+        assert event.run_id == "run_fab"
+        # Unlike SDK errors, null-content has response data (HTTP call succeeded)
+        assert event.response_hash is not None
+        assert event.response_payload is not None
+        assert event.token_usage is not None
+
     def test_empty_choices_raises_error(self) -> None:
         """Empty choices array must raise, not IndexError."""
         recorder = self._create_mock_recorder()

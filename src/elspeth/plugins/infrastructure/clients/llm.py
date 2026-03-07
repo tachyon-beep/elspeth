@@ -431,6 +431,45 @@ class AuditedLLMClient(AuditedClientBase):
                     ),
                     latency_ms=latency_ms,
                 )
+
+                # Telemetry emitted AFTER successful Landscape recording (even for null-content errors)
+                # Unlike SDK errors, we have response data here — the HTTP call succeeded
+                response_data = response_dto.to_dict()
+                try:
+                    self._telemetry_emit(
+                        ExternalCallCompleted(
+                            timestamp=datetime.now(UTC),
+                            run_id=self._run_id,
+                            call_type=CallType.LLM,
+                            provider=self._provider,
+                            status=CallStatus.ERROR,
+                            latency_ms=latency_ms,
+                            state_id=self._state_id,
+                            operation_id=None,
+                            token_id=self._telemetry_token_id(),
+                            request_hash=stable_hash(request_data),
+                            response_hash=stable_hash(response_data),
+                            request_payload=request_dto,
+                            response_payload=response_dto,
+                            token_usage=usage if usage.has_data else None,
+                        )
+                    )
+                except (FrameworkBugError, AuditIntegrityError):
+                    raise  # System bugs and audit integrity violations must crash
+                except Exception as tel_err:
+                    if isinstance(tel_err, (TypeError, AttributeError, KeyError, NameError)):
+                        raise  # Programming errors must crash
+                    # Telemetry failure must not corrupt the error handling flow
+                    logger.warning(
+                        "telemetry_emit_failed",
+                        error=str(tel_err),
+                        error_type=type(tel_err).__name__,
+                        run_id=self._run_id,
+                        state_id=self._state_id,
+                        call_type="llm",
+                        exc_info=True,
+                    )
+
                 raise ContentPolicyError(error_msg)
 
         # Guard against providers that omit usage data (streaming, certain configs)
