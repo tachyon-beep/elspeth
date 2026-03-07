@@ -385,6 +385,8 @@ This is the "Shifting the Burden" systems archetype: the agent's consistent surf
 
 A related but distinct mechanism compounds this effect. Agent-assisted velocity increases the *parallelisation* of work, not just its speed. When an agent assists in producing multiple interdependent artifacts simultaneously — a design specification, an implementation, and a policy document — semantic inconsistencies *between* artifacts become invisible because no single review pass covers all of them. The review window for cross-document consistency shrinks in proportion to the velocity gain. The reviewer is not only less careful per artifact, but also unable to hold the full production context in working memory at the rate artifacts are produced.
 
+The availability of parallel agent generation creates a structural pressure that procedural and behavioural controls may mitigate but are unlikely to eliminate, because the same incentives driving adoption also reward bypassing throughput-constraining review practices. An organisation can prohibit developers from running multiple agents concurrently, but the prohibition runs directly against the productivity incentive that justified adopting agentic development. Controls that depend on sustained human restraint in the face of convenience are inherently fragile — a principle well-established in security engineering but easy to overlook when the convenience is "write code five times faster." The implications for control selection are examined in Section 7.
+
 ### 4.3 The Wrong Question
 
 When organisations evaluate the feasibility of security tooling for agentic code (as examined in Appendix B), the instinctive question is: *"How big is it? How many lines of code? How many hours to build?"*
@@ -561,6 +563,18 @@ No current framework provides:
 ---
 
 ## 7. The Response Landscape
+
+The responses available to organisations fall into three categories of decreasing fragility:
+
+| Control Type | Mechanism | Strength | Example |
+|-------------|-----------|----------|---------|
+| **Behavioural** | Relies on individual compliance | Weakest — requires sustained restraint against incentives | "Developers should not run more than one agent concurrently" |
+| **Procedural** | Relies on organisational process | Moderate — requires consistent enforcement and audit | "Parallel agent-generated changes require separate review queues and staged approval" |
+| **Technical** | Constrains the environment | Strongest — operates regardless of individual behaviour | "The CI pipeline blocks more than N concurrent unreviewed agent-originated changes to protected branches" |
+
+Most organisations will implement behavioural controls, aspire to procedural controls, and underinvest in technical controls — because technical controls constrain the velocity that motivated adoption. The key insight from security engineering applies here: **controls that shape the environment are stronger than controls that depend on restraint.** A rule that developers must not bypass review is an aspiration; a pipeline that physically prevents unreviewed code from reaching protected branches is a control.
+
+The sections below are ordered from weakest to strongest assurance, not from least to most important. All three are necessary. But organisations that rely primarily on behavioural and procedural controls without technical enforcement should understand that their assurance argument rests on sustained human compliance with rules that run directly against the productivity incentive that makes agentic development attractive.
 
 ### 7.1 Process Controls (Strengthening Existing Practices)
 
