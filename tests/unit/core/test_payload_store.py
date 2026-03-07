@@ -257,6 +257,137 @@ class TestPayloadStoreConcurrency:
         assert len(set(results)) == 20
 
 
+class TestPayloadStoreCleanup:
+    """Mutation-killing tests for crash recovery in FilesystemPayloadStore.store().
+
+    Targets surviving mutants on lines 110-132 of payload_store.py:
+    - Lines 117/129: except BaseException cleanup must catch real exceptions
+    - Lines 118/130: temp file cleanup must not be inverted
+    - Line 110: parents=True must create nested hash prefix directories
+    """
+
+    def test_store_cleans_up_temp_on_write_failure(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Inject fsync failure after write, verify no orphaned .tmp files.
+
+        Kills mutants:
+        - Line 117: except BaseException narrowed — cleanup stops catching OSError
+        - Line 118: if temp_path.exists() inverted — orphaned temp file left behind
+        """
+        import os
+
+        from elspeth.core.payload_store import FilesystemPayloadStore
+
+        store = FilesystemPayloadStore(tmp_path / "payloads")
+
+        # Inject fsync failure — this triggers the write-phase cleanup (lines 117-120)
+        def failing_fsync(fd: int) -> None:
+            raise OSError("disk full")
+
+        monkeypatch.setattr(os, "fsync", failing_fsync)
+
+        with pytest.raises(OSError, match="disk full"):
+            store.store(b"will fail on fsync")
+
+        # If cleanup is inverted (mutant: `if not temp_path.exists()`), temp file remains
+        # If exception type is narrowed (mutant: except Exception), BaseException-derived
+        # errors won't clean up — but OSError IS an Exception subclass, so we also test
+        # with KeyboardInterrupt below.
+        orphaned = list(tmp_path.rglob("*.tmp"))
+        assert orphaned == [], f"Orphaned temp files found: {orphaned}"
+
+    def test_store_cleans_up_temp_on_keyboard_interrupt_during_write(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        """KeyboardInterrupt during write must still clean up temp file.
+
+        Kills mutant on line 117: except BaseException → except Exception
+        KeyboardInterrupt is a BaseException but NOT an Exception subclass.
+        """
+        import os
+
+        from elspeth.core.payload_store import FilesystemPayloadStore
+
+        store = FilesystemPayloadStore(tmp_path / "payloads")
+
+        def interrupted_fsync(fd: int) -> None:
+            raise KeyboardInterrupt()
+
+        monkeypatch.setattr(os, "fsync", interrupted_fsync)
+
+        with pytest.raises(KeyboardInterrupt):
+            store.store(b"interrupted during write")
+
+        orphaned = list(tmp_path.rglob("*.tmp"))
+        assert orphaned == [], f"Orphaned temp files after KeyboardInterrupt: {orphaned}"
+
+    def test_store_cleans_up_temp_on_rename_failure(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Inject os.replace failure, verify temp file cleaned up.
+
+        Kills mutants:
+        - Line 129: except BaseException narrowed — cleanup stops catching OSError
+        - Line 130: if temp_path.exists() inverted — orphaned temp file left behind
+        """
+        import os
+
+        from elspeth.core.payload_store import FilesystemPayloadStore
+
+        store = FilesystemPayloadStore(tmp_path / "payloads")
+
+        def failing_replace(src: str, dst: str) -> None:
+            raise OSError("rename failed")
+
+        monkeypatch.setattr(os, "replace", failing_replace)
+
+        with pytest.raises(OSError, match="rename failed"):
+            store.store(b"will fail on rename")
+
+        orphaned = list(tmp_path.rglob("*.tmp"))
+        assert orphaned == [], f"Orphaned temp files after rename failure: {orphaned}"
+
+    def test_store_cleans_up_temp_on_keyboard_interrupt_during_rename(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        """KeyboardInterrupt during rename must still clean up temp file.
+
+        Kills mutant on line 129: except BaseException → except Exception
+        """
+        import os
+
+        from elspeth.core.payload_store import FilesystemPayloadStore
+
+        store = FilesystemPayloadStore(tmp_path / "payloads")
+
+        def interrupted_replace(src: str, dst: str) -> None:
+            raise KeyboardInterrupt()
+
+        monkeypatch.setattr(os, "replace", interrupted_replace)
+
+        with pytest.raises(KeyboardInterrupt):
+            store.store(b"interrupted during rename")
+
+        orphaned = list(tmp_path.rglob("*.tmp"))
+        assert orphaned == [], f"Orphaned temp files after KeyboardInterrupt on rename: {orphaned}"
+
+    def test_store_creates_nested_hash_prefix_directory(self, tmp_path: Path) -> None:
+        """Line 110: parents=True creates intermediate directories on first write.
+
+        Kills mutant: parents=True → parents=False
+        When parents=False, mkdir fails if the hash-prefix subdirectory's parent
+        doesn't exist. The base_path is created in __init__, but the 2-char hash
+        prefix subdirectory (e.g., base_path/ab/) is created on first store().
+        We verify by using a base_path that exists but has no subdirectories yet.
+        """
+        from elspeth.core.payload_store import FilesystemPayloadStore
+
+        # base_path is created by __init__, but hash prefix dirs are not
+        store = FilesystemPayloadStore(tmp_path / "payloads")
+        content_hash = store.store(b"first write creates hash prefix dir")
+
+        # Verify the content was stored and is retrievable
+        assert store.exists(content_hash)
+        assert store.retrieve(content_hash) == b"first write creates hash prefix dir"
+
+        # Verify the nested directory structure was created
+        hash_prefix_dir = tmp_path / "payloads" / content_hash[:2]
+        assert hash_prefix_dir.is_dir()
+
+
 class TestPayloadStoreSecurityValidation:
     """Security tests for content_hash validation and path containment.
 

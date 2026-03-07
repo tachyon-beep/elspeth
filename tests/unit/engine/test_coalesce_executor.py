@@ -1918,3 +1918,87 @@ class TestShouldMergeMutationGaps:
         )
         # 1 arrived + 0 lost = 1 < 3 expected
         assert executor._should_merge(s, pending) is False
+
+    def test_quorum_fires_when_arrivals_exceed_quorum_count(self) -> None:
+        """Kill mutant: ``arrived_count >= settings.quorum_count`` → ``==``.
+
+        With ``==``, 3 arrivals with quorum_count=2 would compute
+        3 == 2 → False, and the merge would never trigger despite
+        exceeding the quorum threshold.
+        """
+        executor, _, _, _ = _make_executor()
+        s = _settings(branches=["a", "b", "c"], policy="quorum", quorum_count=2)
+
+        pending = _PendingCoalesce(
+            branches={
+                "a": _BranchEntry(token=_make_token(branch_name="a"), arrival_time=100.0, state_id="s1"),
+                "b": _BranchEntry(token=_make_token(branch_name="b", token_id="t2"), arrival_time=100.1, state_id="s2"),
+                "c": _BranchEntry(token=_make_token(branch_name="c", token_id="t3"), arrival_time=100.2, state_id="s3"),
+            },
+            first_arrival=100.0,
+        )
+        # Correct: 3 >= 2 → True
+        # Mutant:  3 == 2 → False
+        assert executor._should_merge(s, pending) is True
+
+
+# ===========================================================================
+# Nested merge produces locked contract
+# ===========================================================================
+
+
+class TestNestedMergeContractLocked:
+    """Kill mutant: ``locked=True`` → ``locked=False`` in nested merge contract.
+
+    An unlocked contract would allow downstream transforms to mutate the
+    schema after the merge — violating the FIXED contract invariant.
+    """
+
+    def test_nested_merge_produces_locked_contract(self) -> None:
+        executor, _, _tm, _ = _make_executor()
+        s = _settings(policy="first", merge="nested")
+        executor.register_coalesce(s, "node_1")
+
+        t = _make_token(branch_name="a", token_id="t1", data={"x": 1})
+        o = executor.accept(t, "merge")
+
+        assert o.held is False
+        assert o.merged_token is not None
+        assert o.merged_token.row_data.contract.locked is True
+
+
+# ===========================================================================
+# select_branch not arrived returns held=False
+# ===========================================================================
+
+
+class TestSelectBranchNotArrivedFailure:
+    """Kill mutant: ``held=False`` → ``held=True`` in select_branch_not_arrived path.
+
+    With ``held=True``, the caller would treat the failure as still-pending,
+    leaving tokens stuck in the barrier forever.
+    """
+
+    def test_select_branch_not_arrived_returns_held_false(self) -> None:
+        executor, _, _, _ = _make_executor()
+        s = _settings(
+            branches=["a", "b", "c"],
+            policy="best_effort",
+            merge="select",
+            select_branch="c",
+            timeout_seconds=60.0,
+        )
+        executor.register_coalesce(s, "node_1")
+
+        # Accept tokens for branches "a" and "b"
+        executor.accept(_make_token(branch_name="a", token_id="t1"), "merge")
+        executor.accept(_make_token(branch_name="b", token_id="t2"), "merge")
+
+        # Notify branch "c" (the select_branch) as lost — makes all accounted for
+        outcome = executor.notify_branch_lost("merge", "row_1", "c", "error_routed")
+
+        # Merge triggers (3 accounted = 3 expected), but select_branch="c" not arrived
+        assert outcome is not None
+        assert outcome.held is False
+        assert outcome.failure_reason == "select_branch_not_arrived"
+        assert outcome.outcomes_recorded is True

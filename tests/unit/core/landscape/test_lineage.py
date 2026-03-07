@@ -387,3 +387,17 @@ class TestExplainGroupIdValidation:
         result = explain(recorder, "run-1", token_id="tok-1")
         assert result is not None
         assert result.token.token_id == "tok-1"
+
+    def test_two_group_ids_set_raises(self) -> None:
+        """Token with both fork_group_id and join_group_id set is corruption.
+
+        Kill mutant: ``len(set_groups) > 1`` → ``len(set_groups) > 2``.
+        With ``> 2``, exactly 2 group IDs set would slip through without raising.
+        """
+        token = _make_token(fork_group_id="fg-1", join_group_id="jg-1")
+        recorder = _make_recorder(
+            token=token,
+            row_lineage=_make_row_lineage(),
+        )
+        with pytest.raises(AuditIntegrityError, match=r"multiple group IDs"):
+            explain(recorder, "run-1", token_id="tok-1")

@@ -193,3 +193,87 @@ class TestSingleElementNanArrayRejection:
 
         with pytest.raises(ValueError, match="NaN"):
             _normalize_value(np.array([1.0, float("nan"), 3.0]))
+
+
+class TestTopologyHashEdgeKeys:
+    """Kill mutant: ``keys=True`` → ``keys=False`` in ``nx_graph.edges(keys=True)``.
+
+    Line 224 of canonical.py: Without edge keys, multi-edges between the same
+    node pair collapse into a single edge, producing identical hashes for
+    topologically different graphs.
+
+    Two graphs with the same nodes but different edge keys between the same
+    pair must produce different topology hashes.
+    """
+
+    def test_different_multi_edge_keys_produce_different_hashes(self) -> None:
+        """Two graphs with different edge keys between same node pair differ in hash.
+
+        Graph 1: gate -> sink_a via "route_x" and "route_y"
+        Graph 2: gate -> sink_a via "route_x" and "route_z"
+
+        If keys=False, both graphs yield the same (gate, sink_a) edge pair
+        and collapse into the same hash.
+        """
+        from elspeth.contracts.enums import NodeType, RoutingMode
+        from elspeth.core.canonical import compute_full_topology_hash
+        from elspeth.core.dag import ExecutionGraph
+
+        graph1 = ExecutionGraph()
+        graph1.add_node("source", node_type=NodeType.SOURCE, config={}, plugin_name="csv")
+        graph1.add_node("gate", node_type=NodeType.GATE, config={}, plugin_name="fork_gate")
+        graph1.add_node("sink_a", node_type=NodeType.SINK, config={}, plugin_name="csv")
+        graph1.add_edge("source", "gate", label="continue", mode=RoutingMode.MOVE)
+        graph1.add_edge("gate", "sink_a", label="route_x", mode=RoutingMode.MOVE)
+        graph1.add_edge("gate", "sink_a", label="route_y", mode=RoutingMode.MOVE)
+
+        graph2 = ExecutionGraph()
+        graph2.add_node("source", node_type=NodeType.SOURCE, config={}, plugin_name="csv")
+        graph2.add_node("gate", node_type=NodeType.GATE, config={}, plugin_name="fork_gate")
+        graph2.add_node("sink_a", node_type=NodeType.SINK, config={}, plugin_name="csv")
+        graph2.add_edge("source", "gate", label="continue", mode=RoutingMode.MOVE)
+        graph2.add_edge("gate", "sink_a", label="route_x", mode=RoutingMode.MOVE)
+        graph2.add_edge("gate", "sink_a", label="route_z", mode=RoutingMode.MOVE)
+
+        hash1 = compute_full_topology_hash(graph1)
+        hash2 = compute_full_topology_hash(graph2)
+
+        assert hash1 != hash2, (
+            "Graphs with different edge keys between same node pair must produce "
+            "different hashes. If keys=False mutant is active, multi-edges collapse."
+        )
+
+    def test_single_vs_multi_edge_produces_different_hash(self) -> None:
+        """Graph with one edge vs two edges between same pair must differ.
+
+        Graph 1: gate -> sink_a via "route_x" only
+        Graph 2: gate -> sink_a via "route_x" AND "route_y"
+
+        If keys=False, graph2's two edges collapse to one, matching graph1.
+        """
+        from elspeth.contracts.enums import NodeType, RoutingMode
+        from elspeth.core.canonical import compute_full_topology_hash
+        from elspeth.core.dag import ExecutionGraph
+
+        graph1 = ExecutionGraph()
+        graph1.add_node("source", node_type=NodeType.SOURCE, config={}, plugin_name="csv")
+        graph1.add_node("gate", node_type=NodeType.GATE, config={}, plugin_name="fork_gate")
+        graph1.add_node("sink_a", node_type=NodeType.SINK, config={}, plugin_name="csv")
+        graph1.add_edge("source", "gate", label="continue", mode=RoutingMode.MOVE)
+        graph1.add_edge("gate", "sink_a", label="route_x", mode=RoutingMode.MOVE)
+
+        graph2 = ExecutionGraph()
+        graph2.add_node("source", node_type=NodeType.SOURCE, config={}, plugin_name="csv")
+        graph2.add_node("gate", node_type=NodeType.GATE, config={}, plugin_name="fork_gate")
+        graph2.add_node("sink_a", node_type=NodeType.SINK, config={}, plugin_name="csv")
+        graph2.add_edge("source", "gate", label="continue", mode=RoutingMode.MOVE)
+        graph2.add_edge("gate", "sink_a", label="route_x", mode=RoutingMode.MOVE)
+        graph2.add_edge("gate", "sink_a", label="route_y", mode=RoutingMode.MOVE)
+
+        hash1 = compute_full_topology_hash(graph1)
+        hash2 = compute_full_topology_hash(graph2)
+
+        assert hash1 != hash2, (
+            "Single-edge vs multi-edge between same pair must hash differently. "
+            "If keys=False mutant is active, the extra edge is invisible."
+        )

@@ -709,3 +709,140 @@ class TestBatchAgeSecondsSignFlip:
         assert 2.0 <= age <= 3.0, (
             f"batch_age_seconds should be ~2.5 (elapsed), got {age}. Sign-flip mutant would produce ~2002.5 (sum of timestamps)."
         )
+
+
+class TestCountExceedsThreshold:
+    """Kill mutant: ``self._batch_count >= self._config.count`` → ``==`` at line 116.
+
+    Line 116 records the count fire TIME. If ``>=`` becomes ``==``, adding rows
+    one-at-a-time still records the fire time at exactly the threshold. But if
+    the count jumps past the threshold (e.g., via restore_from_checkpoint or
+    bulk accepts where the threshold is crossed), the fire time would never be
+    recorded, and which_triggered() could not report "count".
+    """
+
+    def test_which_triggered_reports_count_when_exceeded(self) -> None:
+        """which_triggered() returns 'count' even when batch exceeds threshold.
+
+        With ``>=``, fire time is recorded at the threshold row and persists.
+        With ``==``, fire time is recorded only at exact threshold — still works
+        for one-at-a-time accepts. So we verify via which_triggered() after
+        exceeding, which requires the fire time to have been set.
+        """
+        from elspeth.core.config import TriggerConfig
+        from elspeth.engine.triggers import TriggerEvaluator
+
+        config = TriggerConfig(count=3)
+        evaluator = TriggerEvaluator(config)
+
+        for _ in range(5):
+            evaluator.record_accept()
+
+        assert evaluator.should_trigger() is True
+        assert evaluator.which_triggered() == "count"
+
+    def test_fire_time_recorded_when_restore_exceeds_threshold(self) -> None:
+        """Fire time must be set when batch count is restored past the threshold.
+
+        restore_from_checkpoint sets _batch_count directly without calling
+        record_accept(). After restore, a single record_accept() at count > threshold
+        must still record the fire time (via ``>=``). With ``==``, the fire time
+        is never set because batch_count is already past the threshold.
+        """
+        from elspeth.core.config import TriggerConfig
+        from elspeth.engine.clock import MockClock
+        from elspeth.engine.triggers import TriggerEvaluator
+
+        clock = MockClock(start=0.0)
+        config = TriggerConfig(count=3, timeout_seconds=3600.0)
+        evaluator = TriggerEvaluator(config, clock=clock)
+
+        # Restore with count already past threshold but NO count_fire_offset
+        # (simulates a checkpoint that didn't record fire time — e.g., old format)
+        evaluator.restore_from_checkpoint(
+            batch_count=5,
+            elapsed_age_seconds=1.0,
+            count_fire_offset=None,
+            condition_fire_offset=None,
+        )
+
+        # Accept one more row — batch_count becomes 6, which is > threshold 3
+        # With >=, fire time is recorded now. With ==, it's not (6 != 3).
+        clock.advance(2.0)
+        evaluator.record_accept()
+
+        assert evaluator.should_trigger() is True
+        assert evaluator.which_triggered() == "count", (
+            "Count fire time must be recorded when batch_count (6) >= threshold (3). The >= mutant to == would fail because 6 != 3."
+        )
+
+
+class TestTimeoutExactBoundary:
+    """Kill mutant: ``current_time >= timeout_fire_time`` → ``>`` at line 159.
+
+    At the exact boundary (elapsed == timeout_seconds), the trigger must fire.
+    With ``>``, it would not fire until strictly past the boundary.
+    """
+
+    def test_timeout_fires_at_exact_boundary(self) -> None:
+        """Timeout fires when elapsed time equals timeout_seconds exactly.
+
+        With ``>=``, current_time == timeout_fire_time → True.
+        With ``>``, current_time == timeout_fire_time → False.
+        """
+        from elspeth.core.config import TriggerConfig
+        from elspeth.engine.clock import MockClock
+        from elspeth.engine.triggers import TriggerEvaluator
+
+        clock = MockClock(start=0.0)
+        config = TriggerConfig(timeout_seconds=10.0)
+        evaluator = TriggerEvaluator(config, clock=clock)
+
+        evaluator.record_accept()  # First accept at t=0.0
+        clock.advance(10.0)  # Now at t=10.0, exactly at timeout boundary
+
+        assert evaluator.should_trigger() is True, (
+            "Timeout must fire at exact boundary (elapsed == timeout_seconds). The >= mutant to > would return False here."
+        )
+        assert evaluator.which_triggered() == "timeout"
+
+
+class TestConditionTriggerCorrectAge:
+    """Kill mutant: ``current_time - self._first_accept_time`` → ``+`` at lines 123, 176.
+
+    batch_age_seconds in the condition context must be elapsed time (subtraction),
+    not the sum of timestamps (addition). With a large start time, addition
+    produces an enormous value that would satisfy any age threshold immediately.
+    """
+
+    def test_condition_age_is_subtraction_not_addition(self) -> None:
+        """Condition using batch_age_seconds must reflect elapsed time only.
+
+        With start=1000.0 and 5s elapsed:
+        - Subtraction: age = 1005.0 - 1000.0 = 5.0 → 5.0 > 10 is False
+        - Addition:    age = 1005.0 + 1000.0 = 2005.0 → 2005.0 > 10 is True
+
+        Then after 11s total:
+        - Subtraction: age = 1011.0 - 1000.0 = 11.0 → 11.0 > 10 is True
+        """
+        from elspeth.core.config import TriggerConfig
+        from elspeth.engine.clock import MockClock
+        from elspeth.engine.triggers import TriggerEvaluator
+
+        clock = MockClock(start=1000.0)
+        config = TriggerConfig(condition="row['batch_age_seconds'] > 10")
+        evaluator = TriggerEvaluator(config, clock=clock)
+
+        evaluator.record_accept()  # First accept at t=1000.0
+
+        # Advance 5s — age should be 5.0, condition (> 10) should be False
+        clock.advance(5.0)  # Now at t=1005.0
+        assert evaluator.should_trigger() is False, (
+            "With 5s elapsed, batch_age_seconds should be 5.0 (not 2005.0). "
+            "Condition 5.0 > 10 is False. Addition mutant would produce 2005.0 > 10 = True."
+        )
+
+        # Advance to 11s total — age should be 11.0, condition (> 10) should be True
+        clock.advance(6.0)  # Now at t=1011.0
+        assert evaluator.should_trigger() is True, "With 11s elapsed, batch_age_seconds should be 11.0. Condition 11.0 > 10 is True."
+        assert evaluator.which_triggered() == "condition"

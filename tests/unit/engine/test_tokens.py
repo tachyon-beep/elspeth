@@ -208,6 +208,87 @@ class TestTokenManagerCoalesceValidation:
             )
 
 
+class TestCoalesceMismatchedRowIdsMutationKill:
+    """Kill mutants on coalesce_tokens row_id validation (lines 285-286).
+
+    Mutant 1: ``parents[0].row_id`` → ``parents[1].row_id``
+        Survives when all test parents share the same row_id OR when the
+        test doesn't verify which row_id appears in the error message.
+
+    Mutant 2: ``p.row_id != row_id`` → ``p.row_id > row_id``
+        Survives when the mismatched parent's row_id is alphabetically
+        greater than the reference. We need at least one parent whose
+        row_id is alphabetically LESS than the reference.
+    """
+
+    def test_error_message_contains_first_parent_row_id(self) -> None:
+        """Verify the reference row_id in the error is parents[0].row_id.
+
+        Kill mutant: ``parents[0].row_id`` → ``parents[1].row_id``.
+        If the mutant is active, the error message will contain parent B's
+        row_id instead of parent A's, and this assertion fails.
+        """
+        manager, _recorder, run_id, source_node_id = _make_manager_context()
+
+        token_a = manager.create_initial_token(
+            run_id=run_id,
+            source_node_id=source_node_id,
+            row_index=0,
+            source_row=_make_source_row({"value": 1}),
+        )
+        token_b = manager.create_initial_token(
+            run_id=run_id,
+            source_node_id=source_node_id,
+            row_index=1,
+            source_row=_make_source_row({"value": 2}),
+        )
+
+        with pytest.raises(OrchestrationInvariantError, match=token_a.row_id):
+            manager.coalesce_tokens(
+                parents=[token_a, token_b],
+                merged_data=_make_pipeline_row({"value": 1}),
+                node_id=NodeID("coalesce_node"),
+            )
+
+    def test_mismatched_row_id_less_than_reference_detected(self) -> None:
+        """Kill mutant: ``p.row_id != row_id`` → ``p.row_id > row_id``.
+
+        The ``>`` mutant misses parents whose row_id is alphabetically less
+        than the reference. We order parents so the second has a lesser row_id.
+        """
+        manager, _recorder, run_id, source_node_id = _make_manager_context()
+
+        token_a = manager.create_initial_token(
+            run_id=run_id,
+            source_node_id=source_node_id,
+            row_index=0,
+            source_row=_make_source_row({"value": 1}),
+        )
+        token_b = manager.create_initial_token(
+            run_id=run_id,
+            source_node_id=source_node_id,
+            row_index=1,
+            source_row=_make_source_row({"value": 2}),
+        )
+
+        # Order so that parents[1].row_id < parents[0].row_id
+        # If row_ids are random UUIDs, sort to guarantee ordering
+        if token_a.row_id < token_b.row_id:
+            first, second = token_b, token_a
+        else:
+            first, second = token_a, token_b
+
+        # Now second.row_id < first.row_id
+        # With the > mutant: p.row_id > row_id would be False for second,
+        # so mismatched would be empty and the error would NOT raise.
+        with pytest.raises(OrchestrationInvariantError, match="mismatched token_ids"):
+            manager.coalesce_tokens(
+                parents=[first, second],
+                merged_data=_make_pipeline_row({"value": 1}),
+                node_id=NodeID("coalesce_node"),
+            )
+
+
 class TestTokenManagerForkIsolation:
     """Test that forked tokens have isolated row_data (no shared mutable objects)."""
 
@@ -856,6 +937,124 @@ class TestTokenManagerBoundaryPaths:
         assert len(tokens_after) == len(tokens_before), "Unlocked contract must not create child tokens"
         assert len(parents_after) == len(parents_before), "Unlocked contract must not create token parent links"
         assert outcome_before is outcome_after is None, "Unlocked contract must not record parent EXPANDED outcome"
+
+
+class TestExpandTokenDefaultOutcome:
+    """Kill mutant: ``record_parent_outcome=True`` default → ``False``.
+
+    Line 330: expand_token(record_parent_outcome=True) is the default.
+    Callers relying on the default must get EXPANDED outcome recorded
+    for the parent. If the mutant flips the default to False, the
+    parent outcome is silently skipped.
+    """
+
+    def test_expand_without_explicit_record_parent_outcome_records_expanded(self) -> None:
+        """Call expand_token WITHOUT record_parent_outcome arg — parent gets EXPANDED."""
+        manager, recorder, run_id, source_node_id = _make_manager_context()
+
+        parent = manager.create_initial_token(
+            run_id=run_id,
+            source_node_id=source_node_id,
+            row_index=0,
+            source_row=_make_source_row({"x": 1}),
+        )
+
+        # Deliberately omit record_parent_outcome — rely on default=True
+        _children, _expand_group_id = manager.expand_token(
+            parent_token=parent,
+            expanded_rows=[{"a": 1}, {"a": 2}],
+            output_contract=_make_observed_contract("a"),
+            node_id=NodeID("expand_node"),
+            run_id=run_id,
+        )
+
+        outcome = recorder.get_token_outcome(parent.token_id)
+        assert outcome is not None, (
+            "Parent token must have an outcome when using expand_token default. "
+            "If record_parent_outcome default mutant (True→False) is active, "
+            "outcome will be None."
+        )
+        from elspeth.contracts.enums import RowOutcome
+
+        assert outcome.outcome == RowOutcome.EXPANDED
+
+    def test_expand_with_explicit_false_skips_parent_outcome(self) -> None:
+        """Call expand_token with record_parent_outcome=False — no EXPANDED outcome."""
+        manager, recorder, run_id, source_node_id = _make_manager_context()
+
+        parent = manager.create_initial_token(
+            run_id=run_id,
+            source_node_id=source_node_id,
+            row_index=0,
+            source_row=_make_source_row({"x": 1}),
+        )
+
+        _children, _expand_group_id = manager.expand_token(
+            parent_token=parent,
+            expanded_rows=[{"a": 1}],
+            output_contract=_make_observed_contract("a"),
+            node_id=NodeID("expand_node"),
+            run_id=run_id,
+            record_parent_outcome=False,
+        )
+
+        outcome = recorder.get_token_outcome(parent.token_id)
+        assert outcome is None, "Parent token must NOT have an outcome when record_parent_outcome=False."
+
+
+class TestExpandTokenStrictZip:
+    """Kill mutant: ``strict=True`` → ``strict=False`` in zip on line 394.
+
+    The strict zip ensures db_children (from recorder) and expanded_rows
+    have the same length. If strict=False, length mismatches are silently
+    ignored — extra rows are dropped or extra children get no data.
+    """
+
+    def test_zip_strict_catches_length_mismatch(self) -> None:
+        """Recorder returns N children but expanded_rows has M != N items.
+
+        We mock the recorder's expand_token to return a different count
+        of children than the expanded_rows length.
+        """
+        from unittest.mock import patch
+
+        from elspeth.contracts.audit import Token
+        from elspeth.engine.tokens import TokenManager
+
+        setup = make_recorder_with_run()
+        recorder = setup.recorder
+        manager = TokenManager(recorder, step_resolver=_make_step_resolver())
+
+        parent = manager.create_initial_token(
+            run_id=setup.run_id,
+            source_node_id=setup.source_node_id,
+            row_index=0,
+            source_row=_make_source_row({"x": 1}),
+        )
+
+        # Create fake Token objects the recorder would return
+        from datetime import UTC, datetime
+
+        fake_children = [
+            Token(
+                token_id=f"fake-child-{i}",
+                row_id=parent.row_id,
+                run_id=setup.run_id,
+                created_at=datetime.now(UTC),
+                expand_group_id="eg-1",
+            )
+            for i in range(2)  # Recorder returns 2 children
+        ]
+
+        # Patch recorder.expand_token to return 2 children
+        with patch.object(recorder, "expand_token", return_value=(fake_children, "eg-1")), pytest.raises(ValueError):
+            manager.expand_token(
+                parent_token=parent,
+                expanded_rows=[{"a": 1}, {"a": 2}, {"a": 3}],
+                output_contract=_make_observed_contract("a"),
+                node_id=NodeID("expand_node"),
+                run_id=setup.run_id,
+            )
 
 
 class TestCreateQuarantineTokenFlag:

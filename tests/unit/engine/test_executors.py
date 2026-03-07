@@ -67,6 +67,7 @@ from elspeth.contracts.aggregation_checkpoint import AggregationCheckpointState
 from elspeth.contracts.enums import (
     BatchStatus,
     NodeStateStatus,
+    RoutingKind,
     RoutingMode,
     RowOutcome,
     TriggerType,
@@ -1479,6 +1480,375 @@ class TestGateExecutor:
             "Node state should be FAILED when post-dispatch processing raises. "
             "Without NodeStateGuard, this failure would leave the state OPEN."
         )
+
+
+# =============================================================================
+# TestDispatchResolvedDestinationPerVariant
+# =============================================================================
+
+
+class TestDispatchResolvedDestinationPerVariant:
+    """Direct tests for GateExecutor._dispatch_resolved_destination.
+
+    Each RouteDestinationKind variant is tested in isolation to kill mutants
+    that change ``==`` to ``>=``/``<=``/``is`` on the StrEnum comparisons.
+    The key assertion pattern: verify the CORRECT outcome AND verify the
+    WRONG outcomes do NOT appear (action.kind, sink_name, next_node_id,
+    child_tokens).
+    """
+
+    def _make_executor(
+        self,
+        edge_map: dict[tuple[NodeID, str], str] | None = None,
+        route_map: dict[tuple[NodeID, str], RouteDestination] | None = None,
+    ) -> GateExecutor:
+        return GateExecutor(
+            _make_recorder(),
+            _make_span_factory(),
+            _make_step_resolver(),
+            edge_map=edge_map,
+            route_resolution_map=route_map,
+        )
+
+    def test_continue_produces_continue_action(self) -> None:
+        """CONTINUE destination with continue_as_route=False produces CONTINUE kind."""
+        executor = self._make_executor()
+        token = _make_token()
+        ctx = make_context()
+
+        outcome = executor._dispatch_resolved_destination(
+            state_id="state_001",
+            node_id="gate_1",
+            route_label="true",
+            destination=RouteDestination.continue_(),
+            token=token,
+            ctx=ctx,
+            token_manager=None,
+            reason=None,
+            mode=RoutingMode.MOVE,
+            fork_branches=None,
+            continue_as_route=False,
+        )
+
+        assert outcome.action.kind == RoutingKind.CONTINUE
+        assert outcome.action.kind != RoutingKind.ROUTE
+        assert outcome.action.kind != RoutingKind.FORK_TO_PATHS
+        assert outcome.sink_name is None
+        assert outcome.next_node_id is None
+        assert outcome.child_tokens == ()
+
+    def test_continue_as_route_produces_route_action(self) -> None:
+        """CONTINUE destination with continue_as_route=True produces ROUTE kind."""
+        edge_map = {(NodeID("gate_1"), "continue"): "edge_cont"}
+        executor = self._make_executor(edge_map=edge_map)
+        token = _make_token()
+        ctx = make_context()
+
+        outcome = executor._dispatch_resolved_destination(
+            state_id="state_001",
+            node_id="gate_1",
+            route_label="true",
+            destination=RouteDestination.continue_(),
+            token=token,
+            ctx=ctx,
+            token_manager=None,
+            reason=None,
+            mode=RoutingMode.MOVE,
+            fork_branches=None,
+            continue_as_route=True,
+        )
+
+        assert outcome.action.kind == RoutingKind.ROUTE
+        assert outcome.action.kind != RoutingKind.CONTINUE
+        assert outcome.action.destinations == ("continue",)
+        assert outcome.sink_name is None
+        assert outcome.next_node_id is None
+        assert outcome.child_tokens == ()
+
+    def test_fork_produces_fork_action_with_children(self) -> None:
+        """FORK destination produces FORK_TO_PATHS kind with child tokens."""
+        edge_map = {
+            (NodeID("gate_1"), "path_a"): "edge_a",
+            (NodeID("gate_1"), "path_b"): "edge_b",
+        }
+        executor = self._make_executor(edge_map=edge_map)
+        token = _make_token()
+        ctx = make_context()
+
+        child_a = _make_token(token_id="child_a")
+        child_b = _make_token(token_id="child_b")
+        token_manager = MagicMock()
+        token_manager.fork_token.return_value = ([child_a, child_b], "fg_001")
+
+        outcome = executor._dispatch_resolved_destination(
+            state_id="state_001",
+            node_id="gate_1",
+            route_label="true",
+            destination=RouteDestination.fork(),
+            token=token,
+            ctx=ctx,
+            token_manager=token_manager,
+            reason=None,
+            mode=RoutingMode.COPY,
+            fork_branches=["path_a", "path_b"],
+            continue_as_route=False,
+        )
+
+        assert outcome.action.kind == RoutingKind.FORK_TO_PATHS
+        assert outcome.action.kind != RoutingKind.CONTINUE
+        assert outcome.action.kind != RoutingKind.ROUTE
+        assert len(outcome.child_tokens) == 2
+        assert outcome.sink_name is None
+        assert outcome.next_node_id is None
+
+    def test_fork_without_branches_raises_invariant_error(self) -> None:
+        """FORK destination without fork_branches raises OrchestrationInvariantError."""
+        executor = self._make_executor()
+        token = _make_token()
+        ctx = make_context()
+
+        with pytest.raises(OrchestrationInvariantError, match="no fork branches"):
+            executor._dispatch_resolved_destination(
+                state_id="state_001",
+                node_id="gate_1",
+                route_label="true",
+                destination=RouteDestination.fork(),
+                token=token,
+                ctx=ctx,
+                token_manager=MagicMock(),
+                reason=None,
+                mode=RoutingMode.COPY,
+                fork_branches=None,
+                continue_as_route=False,
+            )
+
+    def test_fork_without_token_manager_raises_invariant_error(self) -> None:
+        """FORK destination without token_manager raises OrchestrationInvariantError."""
+        executor = self._make_executor()
+        token = _make_token()
+        ctx = make_context()
+
+        with pytest.raises(OrchestrationInvariantError, match="no TokenManager"):
+            executor._dispatch_resolved_destination(
+                state_id="state_001",
+                node_id="gate_1",
+                route_label="true",
+                destination=RouteDestination.fork(),
+                token=token,
+                ctx=ctx,
+                token_manager=None,
+                reason=None,
+                mode=RoutingMode.COPY,
+                fork_branches=["path_a", "path_b"],
+                continue_as_route=False,
+            )
+
+    def test_sink_produces_sink_outcome(self) -> None:
+        """SINK destination produces outcome with sink_name set."""
+        edge_map = {(NodeID("gate_1"), "error"): "edge_err"}
+        executor = self._make_executor(edge_map=edge_map)
+        token = _make_token()
+        ctx = make_context()
+
+        outcome = executor._dispatch_resolved_destination(
+            state_id="state_001",
+            node_id="gate_1",
+            route_label="error",
+            destination=RouteDestination.sink(SinkName("error_output")),
+            token=token,
+            ctx=ctx,
+            token_manager=None,
+            reason=None,
+            mode=RoutingMode.MOVE,
+            fork_branches=None,
+            continue_as_route=False,
+        )
+
+        assert outcome.action.kind == RoutingKind.ROUTE
+        assert outcome.sink_name == "error_output"
+        assert outcome.next_node_id is None
+        assert outcome.child_tokens == ()
+
+    def test_processing_node_produces_next_node_outcome(self) -> None:
+        """PROCESSING_NODE destination produces outcome with next_node_id set."""
+        edge_map = {(NodeID("gate_1"), "high"): "edge_high"}
+        executor = self._make_executor(edge_map=edge_map)
+        token = _make_token()
+        ctx = make_context()
+
+        outcome = executor._dispatch_resolved_destination(
+            state_id="state_001",
+            node_id="gate_1",
+            route_label="high",
+            destination=RouteDestination.processing_node(NodeID("transform_2")),
+            token=token,
+            ctx=ctx,
+            token_manager=None,
+            reason=None,
+            mode=RoutingMode.MOVE,
+            fork_branches=None,
+            continue_as_route=False,
+        )
+
+        assert outcome.action.kind == RoutingKind.ROUTE
+        assert outcome.next_node_id == NodeID("transform_2")
+        assert outcome.sink_name is None
+        assert outcome.child_tokens == ()
+
+    def test_sink_and_processing_node_are_distinguishable(self) -> None:
+        """SINK and PROCESSING_NODE produce mutually exclusive fields.
+
+        This kills mutants where ``== SINK`` is changed to ``>= SINK`` or
+        ``<= SINK`` — if the ordering bleeds, one branch would incorrectly
+        match the other kind.
+        """
+        edge_map = {
+            (NodeID("gate_1"), "route_a"): "edge_a",
+            (NodeID("gate_1"), "route_b"): "edge_b",
+        }
+        executor = self._make_executor(edge_map=edge_map)
+        token = _make_token()
+        ctx = make_context()
+
+        sink_outcome = executor._dispatch_resolved_destination(
+            state_id="state_001",
+            node_id="gate_1",
+            route_label="route_a",
+            destination=RouteDestination.sink(SinkName("my_sink")),
+            token=token,
+            ctx=ctx,
+            token_manager=None,
+            reason=None,
+            mode=RoutingMode.MOVE,
+            fork_branches=None,
+            continue_as_route=False,
+        )
+
+        node_outcome = executor._dispatch_resolved_destination(
+            state_id="state_001",
+            node_id="gate_1",
+            route_label="route_b",
+            destination=RouteDestination.processing_node(NodeID("next_node")),
+            token=token,
+            ctx=ctx,
+            token_manager=None,
+            reason=None,
+            mode=RoutingMode.MOVE,
+            fork_branches=None,
+            continue_as_route=False,
+        )
+
+        # SINK must have sink_name, not next_node_id
+        assert sink_outcome.sink_name == "my_sink"
+        assert sink_outcome.next_node_id is None
+
+        # PROCESSING_NODE must have next_node_id, not sink_name
+        assert node_outcome.next_node_id == NodeID("next_node")
+        assert node_outcome.sink_name is None
+
+    def test_continue_does_not_match_other_kinds(self) -> None:
+        """CONTINUE must not fall through to FORK, SINK, or PROCESSING_NODE branches.
+
+        Kills ``== CONTINUE`` → ``>= CONTINUE`` mutants where StrEnum ordering
+        might cause CONTINUE to match later branches.
+        """
+        executor = self._make_executor()
+        token = _make_token()
+        ctx = make_context()
+
+        outcome = executor._dispatch_resolved_destination(
+            state_id="state_001",
+            node_id="gate_1",
+            route_label="true",
+            destination=RouteDestination.continue_(),
+            token=token,
+            ctx=ctx,
+            token_manager=None,
+            reason=None,
+            mode=RoutingMode.MOVE,
+            fork_branches=None,
+            continue_as_route=False,
+        )
+
+        # Must be CONTINUE, not accidentally matching FORK/SINK/PROCESSING_NODE
+        assert outcome.action.kind == RoutingKind.CONTINUE
+        assert outcome.child_tokens == ()
+        assert outcome.sink_name is None
+        assert outcome.next_node_id is None
+
+    def test_fork_does_not_match_continue(self) -> None:
+        """FORK must not fall into the CONTINUE branch.
+
+        Kills ``== FORK`` → ``<= FORK`` mutants where StrEnum ordering
+        might cause FORK to match the CONTINUE branch first.
+        """
+        edge_map = {
+            (NodeID("gate_1"), "branch_x"): "edge_x",
+            (NodeID("gate_1"), "branch_y"): "edge_y",
+        }
+        executor = self._make_executor(edge_map=edge_map)
+        token = _make_token()
+        ctx = make_context()
+
+        child_x = _make_token(token_id="child_x")
+        child_y = _make_token(token_id="child_y")
+        tm = MagicMock()
+        tm.fork_token.return_value = ([child_x, child_y], "fg_002")
+
+        outcome = executor._dispatch_resolved_destination(
+            state_id="state_001",
+            node_id="gate_1",
+            route_label="true",
+            destination=RouteDestination.fork(),
+            token=token,
+            ctx=ctx,
+            token_manager=tm,
+            reason=None,
+            mode=RoutingMode.COPY,
+            fork_branches=["branch_x", "branch_y"],
+            continue_as_route=False,
+        )
+
+        # Must be FORK_TO_PATHS, definitely not CONTINUE
+        assert outcome.action.kind == RoutingKind.FORK_TO_PATHS
+        assert outcome.action.kind != RoutingKind.CONTINUE
+        assert len(outcome.child_tokens) == 2
+        # fork_token must have been called (not skipped by hitting CONTINUE branch)
+        tm.fork_token.assert_called_once()
+
+    def test_continue_as_route_inversion_changes_action_kind(self) -> None:
+        """continue_as_route=True vs False must produce different action kinds.
+
+        Kills the ``continue_as_route`` boolean inversion mutant.
+        """
+        edge_map = {(NodeID("gate_1"), "continue"): "edge_cont"}
+        executor = self._make_executor(edge_map=edge_map)
+        token = _make_token()
+        ctx = make_context()
+
+        base_kwargs: dict[str, Any] = {
+            "state_id": "state_001",
+            "node_id": "gate_1",
+            "route_label": "true",
+            "destination": RouteDestination.continue_(),
+            "token": token,
+            "ctx": ctx,
+            "token_manager": None,
+            "reason": None,
+            "mode": RoutingMode.MOVE,
+            "fork_branches": None,
+        }
+
+        outcome_normal = executor._dispatch_resolved_destination(**base_kwargs, continue_as_route=False)
+        outcome_as_route = executor._dispatch_resolved_destination(**base_kwargs, continue_as_route=True)
+
+        # Normal continue: CONTINUE kind
+        assert outcome_normal.action.kind == RoutingKind.CONTINUE
+        # As route: ROUTE kind with "continue" destination
+        assert outcome_as_route.action.kind == RoutingKind.ROUTE
+        assert outcome_as_route.action.destinations == ("continue",)
+        # They must differ
+        assert outcome_normal.action.kind != outcome_as_route.action.kind
 
 
 # =============================================================================

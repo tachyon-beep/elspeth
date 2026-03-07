@@ -911,6 +911,159 @@ class TestExportRunGrouped:
 # ===========================================================================
 
 
+class TestTimestampPreservation:
+    """Mutation-killing tests: verify all timestamp fields are preserved (not None) when present.
+
+    Targets 7 surviving AddNot mutants where ``if x`` was flipped to ``if not x``
+    in conditional isoformat() calls, causing non-None timestamps to export as None.
+    """
+
+    def test_run_started_at_is_not_none(self) -> None:
+        """run.started_at present -> exported as ISO string, not None."""
+        exporter = _make_exporter()
+        records = list(exporter.export_run("run-1"))
+        run_rec = records[0]
+        assert run_rec["record_type"] == "run"
+        assert run_rec["started_at"] is not None
+        assert isinstance(run_rec["started_at"], str)
+        assert run_rec["started_at"] == _DT.isoformat()
+
+    def test_run_completed_at_is_not_none(self) -> None:
+        """run.completed_at present -> exported as ISO string, not None."""
+        exporter = _make_exporter()
+        records = list(exporter.export_run("run-1"))
+        run_rec = records[0]
+        assert run_rec["completed_at"] is not None
+        assert isinstance(run_rec["completed_at"], str)
+        assert run_rec["completed_at"] == _DT2.isoformat()
+
+    def test_operation_started_at_is_not_none(self) -> None:
+        """operation.started_at present -> exported as ISO string, not None."""
+        exporter = _make_exporter(operations=[_OPERATION])
+        records = list(exporter.export_run("run-1"))
+        ops = [r for r in records if r["record_type"] == "operation"]
+        assert len(ops) == 1
+        assert ops[0]["started_at"] is not None
+        assert isinstance(ops[0]["started_at"], str)
+        assert ops[0]["started_at"] == _DT.isoformat()
+
+    def test_operation_completed_at_is_not_none(self) -> None:
+        """operation.completed_at present -> exported as ISO string, not None."""
+        exporter = _make_exporter(operations=[_OPERATION])
+        records = list(exporter.export_run("run-1"))
+        ops = [r for r in records if r["record_type"] == "operation"]
+        assert len(ops) == 1
+        assert ops[0]["completed_at"] is not None
+        assert isinstance(ops[0]["completed_at"], str)
+        assert ops[0]["completed_at"] == _DT2.isoformat()
+
+    def test_operation_call_created_at_is_not_none(self) -> None:
+        """Operation-parented call.created_at present -> exported as ISO string, not None."""
+        exporter = _make_exporter(
+            operations=[_OPERATION],
+            operation_calls=[_OP_CALL],
+        )
+        records = list(exporter.export_run("run-1"))
+        calls = [r for r in records if r["record_type"] == "call"]
+        assert len(calls) == 1
+        assert calls[0]["created_at"] is not None
+        assert isinstance(calls[0]["created_at"], str)
+        assert calls[0]["created_at"] == _DT.isoformat()
+
+    def test_state_call_created_at_is_not_none(self) -> None:
+        """State-parented call.created_at present -> exported as ISO string, not None."""
+        exporter = _make_exporter(
+            rows=[_ROW],
+            tokens=[_TOKEN],
+            node_states=[_NODE_STATE_COMPLETED],
+            state_calls=[_STATE_CALL],
+        )
+        records = list(exporter.export_run("run-1"))
+        calls = [r for r in records if r["record_type"] == "call"]
+        assert len(calls) == 1
+        assert calls[0]["created_at"] is not None
+        assert isinstance(calls[0]["created_at"], str)
+        assert calls[0]["created_at"] == _DT.isoformat()
+
+    def test_routing_event_created_at_is_not_none(self) -> None:
+        """event.created_at present -> exported as ISO string, not None."""
+        exporter = _make_exporter(
+            rows=[_ROW],
+            tokens=[_TOKEN],
+            node_states=[_NODE_STATE_COMPLETED],
+            routing_events=[_ROUTING_EVENT],
+        )
+        records = list(exporter.export_run("run-1"))
+        events = [r for r in records if r["record_type"] == "routing_event"]
+        assert len(events) == 1
+        assert events[0]["created_at"] is not None
+        assert isinstance(events[0]["created_at"], str)
+        assert events[0]["created_at"] == _DT.isoformat()
+
+    def test_batch_created_at_is_not_none(self) -> None:
+        """batch.created_at present -> exported as ISO string, not None."""
+        exporter = _make_exporter(batches=[_BATCH])
+        records = list(exporter.export_run("run-1"))
+        batches = [r for r in records if r["record_type"] == "batch"]
+        assert len(batches) == 1
+        assert batches[0]["created_at"] is not None
+        assert isinstance(batches[0]["created_at"], str)
+        assert batches[0]["created_at"] == _DT.isoformat()
+
+    def test_batch_completed_at_is_not_none(self) -> None:
+        """batch.completed_at present -> exported as ISO string, not None."""
+        exporter = _make_exporter(batches=[_BATCH])
+        records = list(exporter.export_run("run-1"))
+        batches = [r for r in records if r["record_type"] == "batch"]
+        assert len(batches) == 1
+        assert batches[0]["completed_at"] is not None
+        assert isinstance(batches[0]["completed_at"], str)
+        assert batches[0]["completed_at"] == _DT2.isoformat()
+
+    def test_all_timestamps_present_in_full_export(self) -> None:
+        """Comprehensive check: every timestamp field across all record types is non-None."""
+        exporter = _make_exporter(
+            secret_resolutions=[_SECRET],
+            nodes=[_NODE],
+            edges=[_EDGE],
+            operations=[_OPERATION],
+            operation_calls=[_OP_CALL],
+            rows=[_ROW],
+            tokens=[_TOKEN],
+            token_parents=[_TOKEN_PARENT],
+            token_outcomes=[_TOKEN_OUTCOME],
+            node_states=[_NODE_STATE_COMPLETED],
+            routing_events=[_ROUTING_EVENT],
+            state_calls=[_STATE_CALL],
+            batches=[_BATCH],
+            batch_members=[_BATCH_MEMBER],
+            artifacts=[_ARTIFACT],
+        )
+        records = list(exporter.export_run("run-1"))
+
+        # Map of record_type -> timestamp fields that must be non-None
+        expected_timestamps: dict[str, list[str]] = {
+            "run": ["started_at", "completed_at"],
+            "operation": ["started_at", "completed_at"],
+            "routing_event": ["created_at"],
+            "batch": ["created_at", "completed_at"],
+        }
+        # Both call records (operation-parented and state-parented) have created_at
+        call_records = [r for r in records if r["record_type"] == "call"]
+        assert len(call_records) == 2
+        for call_rec in call_records:
+            assert call_rec["created_at"] is not None, f"call {call_rec['call_id']} has created_at=None"
+            assert isinstance(call_rec["created_at"], str)
+
+        for record_type, fields in expected_timestamps.items():
+            type_records = [r for r in records if r["record_type"] == record_type]
+            assert len(type_records) >= 1, f"No {record_type} records found"
+            for rec in type_records:
+                for field in fields:
+                    assert rec[field] is not None, f"{record_type}.{field} is None — timestamp not preserved"
+                    assert isinstance(rec[field], str), f"{record_type}.{field} is {type(rec[field])}, expected str"
+
+
 class TestFullPipelineExport:
     """Integration-style test for a complete pipeline export."""
 
