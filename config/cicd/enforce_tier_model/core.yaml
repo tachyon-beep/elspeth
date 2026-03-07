@@ -241,8 +241,12 @@ allow_hits:
   safety: Falls back to repr() with logging - audit trail preserved with metadata
 - key: core/landscape/data_flow_repository.py:R6:DataFlowRepository:record_transform_error:fp=867daff8b670485f
   owner: bugfix
-  reason: Tier-3 boundary — quarantined row data may contain NaN/Infinity that canonical_json rejects
+  reason: Tier-3 boundary — error_details from transform results may contain NaN/Infinity that canonical_json rejects
   safety: Falls back to repr() with logging — audit trail preserved with metadata
+- key: core/landscape/data_flow_repository.py:R6:DataFlowRepository:record_transform_error:fp=ce9eedb049e9330c
+  owner: bugfix
+  reason: Tier-2 boundary — row_data entering audit trail may contain NaN/Infinity that canonical_json rejects
+  safety: Falls back to repr_hash + NonCanonicalMetadata with warning log — audit trail preserved
 - key: core/security/web.py:R4:validate_url_for_ssrf:_resolve_worker:fp=5d2732269e796176
   owner: bugfix
   reason: DNS resolver worker catches BaseException to relay ALL errors through the queue to the caller thread

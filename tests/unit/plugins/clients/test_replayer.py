@@ -51,6 +51,37 @@ class TestReplayedCall:
             "message": "Too many requests",
         }
 
+    def test_was_error_true_without_error_data_is_valid(self) -> None:
+        """ReplayedCall allows was_error=True with error_data=None.
+
+        Error calls can legitimately have no error details (e.g., connection
+        timeout where we know it failed but have no JSON error body).
+        """
+        result = ReplayedCall(
+            response_data={},
+            original_latency_ms=50.0,
+            request_hash="abc123",
+            was_error=True,
+            error_data=None,
+        )
+        assert result.was_error is True
+        assert result.error_data is None
+
+    def test_error_data_without_was_error_rejected(self) -> None:
+        """ReplayedCall rejects error_data with was_error=False.
+
+        Regression: elspeth-dbd8b35d48 — was_error/error_data correlation
+        was unenforced, allowing semantically invalid states.
+        """
+        with pytest.raises(ValueError, match="error_data provided but was_error=False"):
+            ReplayedCall(
+                response_data={},
+                original_latency_ms=50.0,
+                request_hash="abc123",
+                was_error=False,
+                error_data={"type": "SomeError"},
+            )
+
 
 class TestReplayMissError:
     """Tests for ReplayMissError exception."""
@@ -588,3 +619,33 @@ class TestCallReplayer:
         assert result3.response_data["content"] == "Response 3 - third call", (
             f"Third replay should return third response, got: {result3.response_data}"
         )
+
+    def test_replay_corrupt_error_json_raises_audit_integrity_error(self) -> None:
+        """Corrupt error_json raises AuditIntegrityError, not JSONDecodeError.
+
+        Regression: elspeth-dbd8b35d48 — bare json.loads on Tier 1 replay data
+        surfaced as a generic Python exception instead of an AuditIntegrityError
+        with context about which replay record is corrupt.
+        """
+        from elspeth.contracts.errors import AuditIntegrityError
+
+        recorder = self._create_mock_recorder()
+        request_data = {"model": "gpt-4", "messages": []}
+        request_hash = stable_hash(request_data)
+
+        mock_call = self._create_mock_call(
+            call_id="call_corrupt",
+            request_hash=request_hash,
+            status=CallStatus.ERROR,
+            error_json="not valid json {{{",  # Corrupt Tier 1 data
+        )
+        recorder.find_call_by_request_hash.return_value = mock_call
+        recorder.get_call_response_data.return_value = {}
+
+        replayer = CallReplayer(recorder, source_run_id="run_abc123")
+
+        with pytest.raises(AuditIntegrityError, match="call_corrupt") as exc_info:
+            replayer.replay(call_type=CallType.LLM, request_data=request_data)
+
+        assert "Tier 1 violation" in str(exc_info.value)
+        assert "run_abc123" in str(exc_info.value)

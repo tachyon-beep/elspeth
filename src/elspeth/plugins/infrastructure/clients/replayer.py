@@ -21,6 +21,7 @@ from types import MappingProxyType
 from typing import TYPE_CHECKING, Any
 
 from elspeth.contracts import CallStatus, CallType
+from elspeth.contracts.errors import AuditIntegrityError
 from elspeth.contracts.freeze import deep_freeze
 from elspeth.core.canonical import stable_hash
 
@@ -50,6 +51,13 @@ class ReplayedCall:
     error_data: Mapping[str, Any] | None = None
 
     def __post_init__(self) -> None:
+        # was_error=True with error_data=None is valid: error happened but
+        # no error details were recorded (e.g., connection timeout).
+        # was_error=False with error_data set is invalid: contradictory state.
+        if not self.was_error and self.error_data is not None:
+            raise ValueError(
+                f"ReplayedCall invariant violation: error_data provided but was_error=False (request_hash={self.request_hash!r})"
+            )
         if not isinstance(self.response_data, MappingProxyType):
             object.__setattr__(self, "response_data", deep_freeze(self.response_data))
         if self.error_data is not None and not isinstance(self.error_data, MappingProxyType):
@@ -209,10 +217,19 @@ class CallReplayer:
         # Get response data from payload store
         response_data = self._recorder.get_call_response_data(call.call_id)
 
-        # Parse error JSON if present
+        # Parse error JSON if present — this is Tier 1 data (we wrote it),
+        # so corrupt JSON is an AuditIntegrityError, not a data quality issue.
         error_data: dict[str, Any] | None = None
         if call.error_json is not None:
-            error_data = json.loads(call.error_json)
+            try:
+                error_data = json.loads(call.error_json)
+            except json.JSONDecodeError as exc:
+                raise AuditIntegrityError(
+                    f"Corrupt error_json for call {call.call_id} in run "
+                    f"{self._source_run_id}: failed to parse stored JSON — "
+                    f"database corruption (Tier 1 violation). "
+                    f"Parse error: {exc}"
+                ) from exc
 
         # Determine if this was an error call
         was_error = call.status == CallStatus.ERROR

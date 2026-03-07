@@ -1358,14 +1358,30 @@ class DataFlowRepository:
                 }
             )
 
+        # row_data may contain NaN/Infinity (valid floats that passed source
+        # validation). Wrap serialization with the same fallback pattern used
+        # in record_validation_error — losing the error record is worse than
+        # using a repr-based hash.
+        try:
+            row_hash = stable_hash(row_data)
+            row_data_json = canonical_json(row_data)
+        except (ValueError, TypeError) as e:
+            logger.warning(
+                "Transform error row data not canonically serializable (using repr fallback): %s",
+                str(e),
+            )
+            row_hash = repr_hash(row_data)
+            metadata = NonCanonicalMetadata.from_error(row_data, e)
+            row_data_json = json.dumps(metadata.to_dict())
+
         self._ops.execute_insert(
             transform_errors_table.insert().values(
                 error_id=error_id,
                 run_id=run_id,
                 token_id=token_id,
                 transform_id=transform_id,
-                row_hash=stable_hash(row_data),
-                row_data_json=canonical_json(row_data),
+                row_hash=row_hash,
+                row_data_json=row_data_json,
                 error_details_json=error_details_json,
                 destination=destination,
                 created_at=now(),
