@@ -778,7 +778,9 @@ class AzureBatchLLMTransform(BaseTransform):
             )
         retrieve_latency = (time.perf_counter() - start) * 1000
 
-        # Record successful retrieve — our code, must not be caught
+        # Record successful retrieve — Tier 3 boundary: SDK response shape
+        # varies across versions (output_file_id/error_file_id may be absent
+        # on pending batches or older SDK versions).
         ctx.record_call(
             call_type=CallType.HTTP,
             status=CallStatus.SUCCESS,
@@ -786,8 +788,8 @@ class AzureBatchLLMTransform(BaseTransform):
             response_data={
                 "batch_id": batch.id,
                 "status": batch.status,
-                "output_file_id": batch.output_file_id,
-                "error_file_id": batch.error_file_id,
+                "output_file_id": getattr(batch, "output_file_id", None),
+                "error_file_id": getattr(batch, "error_file_id", None),
             },
             latency_ms=retrieve_latency,
             provider="azure",

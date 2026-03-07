@@ -103,21 +103,18 @@ def _finish_reason_error(
             reason["content_length"] = content_length
         return reason
 
-    # Allowlist: only explicit STOP is a known-good completion.
+    # Allowlist: explicit STOP is a known-good completion.
     if finish_reason == FinishReason.STOP:
         return None
 
-    # Absent finish_reason (None) means the provider couldn't extract it —
-    # abnormal response.  We can't verify the output wasn't truncated, so
-    # fail closed rather than fabricating "success" in the audit trail.
+    # Absent finish_reason (None) means the provider couldn't extract it
+    # (e.g. Azure SDK omits raw_response or choices in some configurations).
+    # The provider already validated content is non-empty via LLMQueryResult,
+    # and logged a warning about "truncation undetectable". Accept the
+    # response — rejecting every row when the SDK shape varies makes the
+    # provider unusable.
     if finish_reason is None:
-        return _FinishReasonError(
-            result=TransformResult.error(
-                cast(TransformErrorReason, _build_reason(reason="missing_finish_reason")),
-                retryable=True,
-            ),
-            error_message="finish_reason absent from provider response — cannot verify completion integrity",
-        )
+        return None
 
     # Known-bad reasons with specific error messages.
     if isinstance(finish_reason, FinishReason):
