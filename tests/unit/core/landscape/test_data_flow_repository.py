@@ -643,6 +643,135 @@ class TestExpandTokenAtomicity:
         assert _count_token_parents(db) == parents_before
 
 
+class TestForkTokenRowcountValidation:
+    """fork_token must validate rowcount on every insert — phantom tokens are audit corruption."""
+
+    def test_fork_raises_on_zero_rowcount_token_insert(self) -> None:
+        """If a token insert silently affects zero rows, AuditIntegrityError is raised."""
+        _db, repo, _rec, row_id, tok_id = _make_repo_with_token()
+
+        original_connection = repo._db.connection
+
+        @contextmanager
+        def zero_rowcount_connection():
+            with original_connection() as conn:
+                original_execute = conn.execute
+                insert_count = 0
+
+                def patched_execute(stmt, *args: Any, **kwargs: Any):
+                    nonlocal insert_count
+                    result = original_execute(stmt, *args, **kwargs)
+                    # Only intercept INSERT statements (not SELECT for validation)
+                    if hasattr(stmt, "is_insert") and stmt.is_insert:
+                        insert_count += 1
+                        # First insert is child token — return zero rowcount
+                        if insert_count == 1:
+                            mock_result = MagicMock()
+                            mock_result.rowcount = 0
+                            return mock_result
+                    return result
+
+                conn.execute = patched_execute
+                yield conn
+
+        repo._db.connection = zero_rowcount_connection  # type: ignore[method-assign]
+
+        with pytest.raises(AuditIntegrityError, match="zero rows"):
+            repo.fork_token(
+                parent_token_id=tok_id,
+                row_id=row_id,
+                branches=["a"],
+                run_id="run-1",
+            )
+
+
+class TestCoalesceTokensRowcountValidation:
+    """coalesce_tokens must validate rowcount on every insert."""
+
+    def test_coalesce_raises_on_zero_rowcount_token_insert(self) -> None:
+        """If merged token insert affects zero rows, AuditIntegrityError is raised."""
+        _db, repo, _rec, row_id, tok_id = _make_repo_with_token()
+
+        # Fork first to get children to coalesce
+        children, _fg = repo.fork_token(
+            parent_token_id=tok_id,
+            row_id=row_id,
+            branches=["a", "b"],
+            run_id="run-1",
+        )
+        child_ids = [c.token_id for c in children]
+
+        original_connection = repo._db.connection
+
+        @contextmanager
+        def zero_rowcount_connection():
+            with original_connection() as conn:
+                original_execute = conn.execute
+                insert_count = 0
+
+                def patched_execute(stmt, *args: Any, **kwargs: Any):
+                    nonlocal insert_count
+                    result = original_execute(stmt, *args, **kwargs)
+                    if hasattr(stmt, "is_insert") and stmt.is_insert:
+                        insert_count += 1
+                        if insert_count == 1:
+                            mock_result = MagicMock()
+                            mock_result.rowcount = 0
+                            return mock_result
+                    return result
+
+                conn.execute = patched_execute
+                yield conn
+
+        repo._db.connection = zero_rowcount_connection  # type: ignore[method-assign]
+
+        with pytest.raises(AuditIntegrityError, match="zero rows"):
+            repo.coalesce_tokens(
+                parent_token_ids=child_ids,
+                row_id=row_id,
+            )
+
+
+class TestExpandTokenRowcountValidation:
+    """expand_token must validate rowcount on every insert."""
+
+    def test_expand_raises_on_zero_rowcount_token_insert(self) -> None:
+        """If child token insert affects zero rows, AuditIntegrityError is raised."""
+        _db, repo, _rec, row_id, tok_id = _make_repo_with_token()
+
+        original_connection = repo._db.connection
+
+        @contextmanager
+        def zero_rowcount_connection():
+            with original_connection() as conn:
+                original_execute = conn.execute
+                insert_count = 0
+
+                def patched_execute(stmt, *args: Any, **kwargs: Any):
+                    nonlocal insert_count
+                    result = original_execute(stmt, *args, **kwargs)
+                    if hasattr(stmt, "is_insert") and stmt.is_insert:
+                        insert_count += 1
+                        if insert_count == 1:
+                            mock_result = MagicMock()
+                            mock_result.rowcount = 0
+                            return mock_result
+                    return result
+
+                conn.execute = patched_execute
+                yield conn
+
+        repo._db.connection = zero_rowcount_connection  # type: ignore[method-assign]
+
+        with pytest.raises(AuditIntegrityError, match="zero rows"):
+            repo.expand_token(
+                parent_token_id=tok_id,
+                row_id=row_id,
+                count=2,
+                run_id="run-1",
+            )
+
+
 # ===========================================================================
 # H3: create_row quarantine fallback tests
 # ===========================================================================

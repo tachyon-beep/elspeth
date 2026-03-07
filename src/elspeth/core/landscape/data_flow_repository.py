@@ -471,7 +471,7 @@ class DataFlowRepository:
                 timestamp = now()
 
                 # Create child token (run_id derived from parent -- already validated)
-                conn.execute(
+                result = conn.execute(
                     tokens_table.insert().values(
                         token_id=child_id,
                         row_id=row_id,
@@ -482,15 +482,23 @@ class DataFlowRepository:
                         created_at=timestamp,
                     )
                 )
+                if result.rowcount == 0:
+                    raise AuditIntegrityError(
+                        f"fork_token: child token INSERT affected zero rows (token_id={child_id}, branch={branch_name!r})"
+                    )
 
                 # Record parent relationship
-                conn.execute(
+                result = conn.execute(
                     token_parents_table.insert().values(
                         token_id=child_id,
                         parent_token_id=parent_token_id,
                         ordinal=ordinal,
                     )
                 )
+                if result.rowcount == 0:
+                    raise AuditIntegrityError(
+                        f"fork_token: token_parent INSERT affected zero rows (child={child_id}, parent={parent_token_id})"
+                    )
 
                 children.append(
                     Token(
@@ -506,7 +514,7 @@ class DataFlowRepository:
 
             # 2. Record parent FORKED outcome in SAME transaction (atomic)
             outcome_id = f"out_{generate_id()[:12]}"
-            conn.execute(
+            result = conn.execute(
                 token_outcomes_table.insert().values(
                     outcome_id=outcome_id,
                     run_id=run_id,
@@ -518,6 +526,10 @@ class DataFlowRepository:
                     expected_branches_json=json.dumps(branches),
                 )
             )
+            if result.rowcount == 0:
+                raise AuditIntegrityError(
+                    f"fork_token: FORKED outcome INSERT affected zero rows (parent={parent_token_id}, outcome_id={outcome_id})"
+                )
 
         return children, fork_group_id
 
@@ -573,7 +585,7 @@ class DataFlowRepository:
 
         with self._db.connection() as conn:
             # Create merged token
-            conn.execute(
+            result = conn.execute(
                 tokens_table.insert().values(
                     token_id=token_id,
                     row_id=row_id,
@@ -583,16 +595,22 @@ class DataFlowRepository:
                     created_at=timestamp,
                 )
             )
+            if result.rowcount == 0:
+                raise AuditIntegrityError(f"coalesce_tokens: merged token INSERT affected zero rows (token_id={token_id})")
 
             # Record all parent relationships
             for ordinal, parent_id in enumerate(parent_token_ids):
-                conn.execute(
+                result = conn.execute(
                     token_parents_table.insert().values(
                         token_id=token_id,
                         parent_token_id=parent_id,
                         ordinal=ordinal,
                     )
                 )
+                if result.rowcount == 0:
+                    raise AuditIntegrityError(
+                        f"coalesce_tokens: token_parent INSERT affected zero rows (child={token_id}, parent={parent_id})"
+                    )
 
         return Token(
             token_id=token_id,
@@ -661,7 +679,7 @@ class DataFlowRepository:
                 timestamp = now()
 
                 # Create child token with expand_group_id (run_id from parent -- already validated)
-                conn.execute(
+                result = conn.execute(
                     tokens_table.insert().values(
                         token_id=child_id,
                         row_id=row_id,
@@ -671,15 +689,23 @@ class DataFlowRepository:
                         created_at=timestamp,
                     )
                 )
+                if result.rowcount == 0:
+                    raise AuditIntegrityError(
+                        f"expand_token: child token INSERT affected zero rows (token_id={child_id}, ordinal={ordinal})"
+                    )
 
                 # Record parent relationship
-                conn.execute(
+                result = conn.execute(
                     token_parents_table.insert().values(
                         token_id=child_id,
                         parent_token_id=parent_token_id,
                         ordinal=ordinal,
                     )
                 )
+                if result.rowcount == 0:
+                    raise AuditIntegrityError(
+                        f"expand_token: token_parent INSERT affected zero rows (child={child_id}, parent={parent_token_id})"
+                    )
 
                 children.append(
                     Token(
@@ -700,7 +726,7 @@ class DataFlowRepository:
             # parent token gets CONSUMED_IN_BATCH instead of EXPANDED.
             if record_parent_outcome:
                 outcome_id = f"out_{generate_id()[:12]}"
-                conn.execute(
+                result = conn.execute(
                     token_outcomes_table.insert().values(
                         outcome_id=outcome_id,
                         run_id=run_id,
@@ -713,6 +739,10 @@ class DataFlowRepository:
                         expected_branches_json=json.dumps({"count": count}),
                     )
                 )
+                if result.rowcount == 0:
+                    raise AuditIntegrityError(
+                        f"expand_token: EXPANDED outcome INSERT affected zero rows (parent={parent_token_id}, outcome_id={outcome_id})"
+                    )
 
         return children, expand_group_id
 

@@ -13,6 +13,7 @@ from unittest.mock import Mock, patch
 
 import pytest
 
+from elspeth.contracts.results import TransformResult
 from elspeth.contracts.schema_contract import PipelineRow
 from elspeth.contracts.token_usage import TokenUsage
 from elspeth.plugins.infrastructure.clients.llm import (
@@ -1824,6 +1825,99 @@ class TestMultiQuerySequentialRetryBehavior:
         result = transform._process_row(_make_row(), _make_ctx())
         assert result.status == "error"
         assert result.retryable is False
+
+
+class TestMultiQuerySequentialReasonImmutability:
+    """Sequential path must not mutate TransformResult.reason in-place.
+
+    Bug: _execute_sequential line 707 mutates result.reason directly with
+    result.reason["discarded_successful_queries"] = query_idx. If the reason
+    dict is shared with an already-recorded audit entry, the audit trail
+    contains post-hoc mutations — a data integrity violation.
+
+    The parallel path correctly copies with dict(result.reason) first.
+    """
+
+    def test_sequential_returned_error_does_not_mutate_original_reason(self) -> None:
+        """When _execute_one_query returns TransformResult (not raises), reason must not be mutated.
+
+        Trigger: query 1 succeeds, query 2 returns non-JSON with output_fields configured,
+        so _execute_one_query returns TransformResult.error({"reason": "json_parse_failed", ...}).
+        Then _execute_sequential adds "discarded_successful_queries" — this must NOT mutate
+        the original reason dict.
+
+        We verify by holding a direct reference to the reason dict created inside
+        _execute_one_query and checking whether it gets mutated.
+        """
+        from elspeth.plugins.transforms.llm.transform import LLMTransform
+
+        config = _make_config(
+            template="Classify: {{ row.text_content }}",
+            queries={
+                "q1": {
+                    "input_fields": {"text_content": "text"},
+                    "output_fields": [{"suffix": "category", "type": "string"}],
+                },
+                "q2": {
+                    "input_fields": {"text_content": "text"},
+                    "output_fields": [{"suffix": "sentiment", "type": "string"}],
+                },
+            },
+            pool_size=1,  # Forces sequential path
+        )
+        transform = LLMTransform(config)
+
+        call_count = [0]
+
+        def mock_execute(messages, *, model, temperature, max_tokens, state_id, token_id, response_format=None):
+            call_count[0] += 1
+            if call_count[0] == 1:
+                return LLMQueryResult(
+                    content='{"category": "positive"}',
+                    usage=TokenUsage.known(10, 5),
+                    model="gpt-4o",
+                    finish_reason=FinishReason.STOP,
+                )
+            # Query 2: non-JSON → json_parse_failed from _execute_one_query
+            return LLMQueryResult(
+                content="not valid json at all",
+                usage=TokenUsage.known(10, 5),
+                model="gpt-4o",
+                finish_reason=FinishReason.STOP,
+            )
+
+        mock_provider = Mock()
+        mock_provider.execute_query.side_effect = mock_execute
+        transform._provider = mock_provider
+
+        # Capture direct references to reason dicts at TransformResult construction
+        # (NOT copies — we want to detect in-place mutation)
+        captured_reason_refs: list[dict] = []
+        _original_error = TransformResult.error.__func__  # type: ignore[attr-defined]
+
+        def tracking_error(cls, reason, *, retryable=False, context_after=None):
+            captured_reason_refs.append(reason)  # Hold direct reference
+            return _original_error(cls, reason, retryable=retryable, context_after=context_after)
+
+        with patch.object(TransformResult, "error", classmethod(tracking_error)):
+            result = transform._process_row(_make_row(), _make_ctx())
+
+        assert result.status == "error"
+        assert result.reason is not None
+        assert result.reason["reason"] == "json_parse_failed"
+        assert "discarded_successful_queries" in result.reason
+
+        # The KEY assertion: the FIRST reason dict (from _execute_one_query's
+        # TransformResult.error call) should NOT have been mutated with
+        # "discarded_successful_queries". If it was mutated, that means
+        # _execute_sequential modified the original dict in-place instead
+        # of making a copy first.
+        first_reason_ref = captured_reason_refs[0]
+        assert "discarded_successful_queries" not in first_reason_ref, (
+            "Original TransformResult.reason was mutated in-place! "
+            "Sequential path must copy the dict before adding discarded_successful_queries. "
+            f"Original reason dict now contains: {first_reason_ref}"
+        )
 
 
 class TestMultiQueryParallelExecution:

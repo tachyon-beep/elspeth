@@ -702,9 +702,16 @@ class MultiQueryStrategy:
 
             # Error from template/JSON/validation/non-retryable LLM
             if isinstance(result, TransformResult):
-                # Add discarded count for error reporting
+                # Add discarded count for error reporting — copy first to avoid
+                # mutating the original dict (which may be shared with audit records)
                 if result.reason is not None:
-                    result.reason["discarded_successful_queries"] = query_idx
+                    augmented_reason = cast(TransformErrorReason, dict(result.reason))
+                    augmented_reason["discarded_successful_queries"] = query_idx
+                    return TransformResult.error(
+                        augmented_reason,
+                        retryable=result.retryable,
+                        context_after=result.context_after,
+                    )
                 return result
 
             accumulated_outputs.update(result.fields)
