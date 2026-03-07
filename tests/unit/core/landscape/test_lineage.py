@@ -329,3 +329,61 @@ class TestLineageResult:
         assert result.validation_errors == ()
         assert result.transform_errors == ()
         assert result.outcome is None
+
+
+# ===========================================================================
+# Group ID validation — kill ZeroIterationForLoop & comparison survivors
+# ===========================================================================
+
+
+class TestExplainGroupIdValidation:
+    """Kill mutants on lineage.py lines 195-196.
+
+    ZeroIterationForLoop: the entire group ID validation for-loop can be
+    deleted without any test failing. These tests prove the loop is
+    exercised and catches corrupted empty-string group IDs.
+
+    Comparison mutations on ``gval == ""``: ``is ""``, ``< ""``,
+    ``is not None → is None`` all survive without these tests.
+    """
+
+    def test_empty_fork_group_id_raises(self) -> None:
+        """Token with fork_group_id='' is audit corruption — must raise."""
+        token = _make_token(fork_group_id="")
+        recorder = _make_recorder(
+            token=token,
+            row_lineage=_make_row_lineage(),
+        )
+        with pytest.raises(AuditIntegrityError, match=r"empty.*fork_group_id"):
+            explain(recorder, "run-1", token_id="tok-1")
+
+    def test_empty_join_group_id_raises(self) -> None:
+        """Token with join_group_id='' is audit corruption — must raise."""
+        token = _make_token(join_group_id="")
+        recorder = _make_recorder(
+            token=token,
+            row_lineage=_make_row_lineage(),
+        )
+        with pytest.raises(AuditIntegrityError, match=r"empty.*join_group_id"):
+            explain(recorder, "run-1", token_id="tok-1")
+
+    def test_empty_expand_group_id_raises(self) -> None:
+        """Token with expand_group_id='' is audit corruption — must raise."""
+        token = _make_token(expand_group_id="")
+        recorder = _make_recorder(
+            token=token,
+            row_lineage=_make_row_lineage(),
+        )
+        with pytest.raises(AuditIntegrityError, match=r"empty.*expand_group_id"):
+            explain(recorder, "run-1", token_id="tok-1")
+
+    def test_none_group_ids_accepted(self) -> None:
+        """Token with all group IDs as None is valid (no fork/join/expand)."""
+        token = _make_token()  # All group IDs default to None
+        recorder = _make_recorder(
+            token=token,
+            row_lineage=_make_row_lineage(),
+        )
+        result = explain(recorder, "run-1", token_id="tok-1")
+        assert result is not None
+        assert result.token.token_id == "tok-1"

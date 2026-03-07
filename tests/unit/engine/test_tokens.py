@@ -856,3 +856,51 @@ class TestTokenManagerBoundaryPaths:
         assert len(tokens_after) == len(tokens_before), "Unlocked contract must not create child tokens"
         assert len(parents_after) == len(parents_before), "Unlocked contract must not create token parent links"
         assert outcome_before is outcome_after is None, "Unlocked contract must not record parent EXPANDED outcome"
+
+
+class TestCreateQuarantineTokenFlag:
+    """Kill mutant: ``quarantined=True`` → ``quarantined=False``.
+
+    Quarantined rows must be recorded with quarantined=True so the
+    audit trail distinguishes quarantined data from normal rows.
+    Without this flag, quarantined rows with NaN/Infinity would
+    fail canonical hashing instead of being safely stored.
+    """
+
+    def test_quarantine_token_passes_quarantined_flag_to_recorder(self) -> None:
+        """create_quarantine_token must pass quarantined=True to recorder.create_row.
+
+        Kill mutant: quarantined=True → quarantined=False.
+
+        When quarantined=True, the recorder uses repr_hash fallback for
+        data containing NaN/Infinity. If the mutant flips it to False,
+        canonical hashing crashes on NaN data.
+        """
+        manager, recorder, run_id, source_node_id = _make_manager_context()
+
+        # Data with NaN — only works if quarantined=True (repr_hash fallback)
+        quarantine_row = SourceRow.quarantined(
+            {"bad_data": float("nan")},
+            error="NaN value",
+            destination="quarantine_sink",
+        )
+
+        # This must NOT raise — quarantined=True enables repr_hash fallback
+        token_info = manager.create_quarantine_token(
+            run_id=run_id,
+            source_node_id=source_node_id,
+            row_index=0,
+            source_row=quarantine_row,
+        )
+
+        assert token_info.row_id is not None
+        assert token_info.token_id is not None
+
+        # Verify the row was actually stored (proof quarantined=True worked)
+        row_record = recorder.get_row(token_info.row_id)
+        assert row_record is not None
+        assert row_record.source_data_hash is not None, (
+            "Quarantined row must have a hash (via repr_hash fallback). "
+            "If quarantined=False mutant was active, create_row would have "
+            "crashed on NaN during canonical hashing."
+        )

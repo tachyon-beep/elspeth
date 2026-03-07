@@ -680,3 +680,32 @@ class TestTriggerCheckpointRestore:
         assert evaluator2.which_triggered() == "timeout", (
             "Timeout fired at 1.0s offset, count at 1.5s offset. After restore, should still report 'timeout' not 'count'."
         )
+
+
+class TestBatchAgeSecondsSignFlip:
+    """Kill mutant: ``clock.monotonic() - first_accept_time`` → ``+ first_accept_time``.
+
+    With addition, batch_age_seconds returns the sum of two monotonic
+    timestamps (e.g., 1002.5 instead of 2.5), causing every timeout
+    trigger to fire immediately.
+    """
+
+    def test_batch_age_is_elapsed_not_sum(self) -> None:
+        """batch_age_seconds must equal elapsed time, not sum of timestamps."""
+        from elspeth.core.config import TriggerConfig
+        from elspeth.engine.clock import MockClock
+        from elspeth.engine.triggers import TriggerEvaluator
+
+        clock = MockClock(start=1000.0)
+        config = TriggerConfig(count=999)  # Won't fire on count
+        evaluator = TriggerEvaluator(config, clock=clock)
+
+        evaluator.record_accept()  # Records at t=1000.0
+        clock.advance(2.5)  # Now at t=1002.5
+
+        age = evaluator.batch_age_seconds
+        # Correct: 1002.5 - 1000.0 = 2.5
+        # Mutant:  1002.5 + 1000.0 = 2002.5
+        assert 2.0 <= age <= 3.0, (
+            f"batch_age_seconds should be ~2.5 (elapsed), got {age}. Sign-flip mutant would produce ~2002.5 (sum of timestamps)."
+        )

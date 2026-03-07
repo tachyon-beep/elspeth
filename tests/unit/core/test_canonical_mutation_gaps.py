@@ -155,3 +155,41 @@ class TestNormalFloatsPassThrough:
         result = _normalize_value(np.float64(3.14))
         assert result == 3.14
         assert type(result) is float  # Should be converted from np.float64
+
+
+class TestSingleElementNanArrayRejection:
+    """Kill mutant: obj.size > 0 → obj.size > 1.
+
+    A single-element NaN array must be rejected. If the size check
+    becomes > 1, a single-element array (size=1) bypasses NaN detection
+    and propagates into canonical JSON — producing non-deterministic
+    hashes (IEEE 754: NaN != NaN).
+    """
+
+    def test_single_element_nan_array_rejected(self) -> None:
+        """Single-element NaN array must trigger ValueError."""
+        from elspeth.core.canonical import _normalize_value
+
+        with pytest.raises(ValueError, match="NaN"):
+            _normalize_value(np.array([float("nan")]))
+
+    def test_single_element_inf_array_rejected(self) -> None:
+        """Single-element Infinity array must also be rejected."""
+        from elspeth.core.canonical import _normalize_value
+
+        with pytest.raises(ValueError, match=r"Infinity|NaN"):
+            _normalize_value(np.array([float("inf")]))
+
+    def test_empty_array_returns_empty_list(self) -> None:
+        """Empty array skips NaN check and returns []."""
+        from elspeth.core.canonical import _normalize_value
+
+        result = _normalize_value(np.array([]))
+        assert result == []
+
+    def test_multi_element_nan_array_still_rejected(self) -> None:
+        """Multi-element array with NaN is rejected (existing behavior)."""
+        from elspeth.core.canonical import _normalize_value
+
+        with pytest.raises(ValueError, match="NaN"):
+            _normalize_value(np.array([1.0, float("nan"), 3.0]))

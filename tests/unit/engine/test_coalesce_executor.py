@@ -1845,3 +1845,76 @@ class TestRestoreFromCheckpoint:
         )
         with pytest.raises(AuditIntegrityError, match="unknown coalesce 'nonexistent_merge'"):
             executor.restore_from_checkpoint(state)
+
+
+# ===========================================================================
+# _should_merge mutation survivors — direct policy boundary tests
+# ===========================================================================
+
+
+class TestShouldMergeMutationGaps:
+    """Kill mutants in CoalesceExecutor._should_merge().
+
+    These test _should_merge directly to verify exact boundary conditions
+    that can't be tested through accept() (which always adds a branch
+    before calling _should_merge, so arrived_count is always >= 1).
+    """
+
+    def test_first_policy_does_not_fire_at_zero_arrivals(self) -> None:
+        """Kill mutant: ``arrived_count >= 1`` → ``>= 0``.
+
+        With >= 0, the "first" policy would trigger before any branch
+        arrives, producing a merged token with no data (silent data loss).
+        """
+        executor, _, _, _ = _make_executor()
+        s = _settings(branches=["a", "b", "c"], policy="first")
+        executor.register_coalesce(s, "node_1")
+
+        # Create pending with 0 arrivals
+        pending = _PendingCoalesce(branches={}, first_arrival=100.0)
+        assert executor._should_merge(s, pending) is False
+
+    def test_first_policy_fires_at_one_arrival(self) -> None:
+        """Confirm "first" policy fires at exactly 1 arrival."""
+        executor, _, _, _ = _make_executor()
+        s = _settings(branches=["a", "b", "c"], policy="first")
+
+        pending = _PendingCoalesce(
+            branches={"a": _BranchEntry(token=_make_token(branch_name="a"), arrival_time=100.0, state_id="s1")},
+            first_arrival=100.0,
+        )
+        assert executor._should_merge(s, pending) is True
+
+    def test_best_effort_lost_branches_add_not_subtract(self) -> None:
+        """Kill mutant: ``arrived_count + len(lost_branches)`` → ``- len(lost_branches)``.
+
+        With subtraction, a 3-branch fork where 1 is lost and 2 arrive
+        computes 2 - 1 = 1 instead of 2 + 1 = 3 — merge never triggers,
+        tokens stuck in barrier forever (silent row drop).
+        """
+        executor, _, _, _ = _make_executor()
+        s = _settings(branches=["a", "b", "c"], policy="best_effort", timeout_seconds=60.0)
+
+        pending = _PendingCoalesce(
+            branches={
+                "a": _BranchEntry(token=_make_token(branch_name="a"), arrival_time=100.0, state_id="s1"),
+                "b": _BranchEntry(token=_make_token(branch_name="b", token_id="t2"), arrival_time=100.1, state_id="s2"),
+            },
+            first_arrival=100.0,
+            lost_branches={"c": "error_routed"},
+        )
+        # Correct: 2 + 1 = 3 >= 3 → True
+        # Mutant:  2 - 1 = 1 >= 3 → False
+        assert executor._should_merge(s, pending) is True
+
+    def test_best_effort_does_not_merge_when_unaccounted(self) -> None:
+        """Confirm best_effort does NOT merge when branches are still unaccounted."""
+        executor, _, _, _ = _make_executor()
+        s = _settings(branches=["a", "b", "c"], policy="best_effort", timeout_seconds=60.0)
+
+        pending = _PendingCoalesce(
+            branches={"a": _BranchEntry(token=_make_token(branch_name="a"), arrival_time=100.0, state_id="s1")},
+            first_arrival=100.0,
+        )
+        # 1 arrived + 0 lost = 1 < 3 expected
+        assert executor._should_merge(s, pending) is False
