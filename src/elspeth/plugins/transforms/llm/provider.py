@@ -38,6 +38,7 @@ class FinishReason(StrEnum):
     TOOL_CALLS = "tool_calls"
 
 
+@dataclass(frozen=True, slots=True)
 class UnrecognizedFinishReason:
     """Sentinel for finish reasons not in our FinishReason enum.
 
@@ -46,21 +47,11 @@ class UnrecognizedFinishReason:
     (provider sent a value we don't know about).
     """
 
-    __slots__ = ("raw",)
+    raw: str
 
-    def __init__(self, raw: str) -> None:
-        self.raw = raw
-
-    def __repr__(self) -> str:
-        return f"UnrecognizedFinishReason({self.raw!r})"
-
-    def __eq__(self, other: object) -> bool:
-        if isinstance(other, UnrecognizedFinishReason):
-            return self.raw == other.raw
-        return NotImplemented
-
-    def __hash__(self) -> int:
-        return hash(self.raw)
+    def __post_init__(self) -> None:
+        if not isinstance(self.raw, str):
+            raise TypeError(f"raw must be a string, got {type(self.raw).__name__}: {self.raw!r}")
 
 
 #: Type alias for parsed finish reasons.  ``None`` means the provider did

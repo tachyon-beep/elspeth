@@ -30,7 +30,7 @@ allowed_dict_patterns:
   - "src/elspeth/engine/tokens.py:TokenManager.expand_token:expanded_rows (list)"
   - "src/elspeth/core/expression_parser.py:_ExpressionEvaluator.__init__:row"
   - "src/elspeth/core/expression_parser.py:ExpressionParser.evaluate:row"
-  - "src/elspeth/engine/coalesce_executor.py:CoalesceExecutor._merge_data:return"
+
 
   # Node state guard - row data is Tier 2 pipeline data
   - "src/elspeth/engine/executors/state_guard.py:NodeStateGuard.__init__:input_data"

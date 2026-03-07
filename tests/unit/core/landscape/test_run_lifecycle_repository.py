@@ -19,7 +19,7 @@ import json
 import pytest
 from sqlalchemy import update
 
-from elspeth.contracts import ExportStatus, FieldContract, RunStatus, SchemaContract, SecretResolutionInput
+from elspeth.contracts import ExportStatus, FieldContract, ReproducibilityGrade, RunStatus, SchemaContract, SecretResolutionInput
 from elspeth.contracts.errors import AuditIntegrityError
 from elspeth.core.landscape._database_ops import DatabaseOps
 from elspeth.core.landscape.database import LandscapeDB
@@ -567,7 +567,7 @@ class TestCompleteRunCrashPath:
         _corrupt_column(db, "run-1", reproducibility_grade="full_reproducible")
         run = repo.complete_run("run-1", RunStatus.COMPLETED)
         assert run.status == RunStatus.COMPLETED
-        assert run.reproducibility_grade == "full_reproducible"
+        assert run.reproducibility_grade == ReproducibilityGrade.FULL_REPRODUCIBLE
 
 
 # ---------------------------------------------------------------------------

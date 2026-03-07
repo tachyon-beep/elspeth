@@ -44,6 +44,7 @@ from elspeth.contracts.enums import (
     Determinism,
     NodeStateStatus,
     NodeType,
+    ReproducibilityGrade,
     RoutingMode,
     RowOutcome,
     RunStatus,
@@ -66,7 +67,7 @@ _RUN = Run(
     canonical_version="v1",
     status=RunStatus.COMPLETED,
     completed_at=_DT2,
-    reproducibility_grade="A",
+    reproducibility_grade=ReproducibilityGrade.FULL_REPRODUCIBLE,
 )
 
 _NODE = Node(

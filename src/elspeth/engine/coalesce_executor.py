@@ -36,7 +36,7 @@ slog = structlog.get_logger(__name__)
 COALESCE_CHECKPOINT_VERSION = "1.0"
 
 
-@dataclass
+@dataclass(frozen=True, slots=True)
 class CoalesceOutcome:
     """Result of a coalesce accept operation.
 
@@ -53,11 +53,21 @@ class CoalesceOutcome:
 
     held: bool
     merged_token: TokenInfo | None = None
-    consumed_tokens: list[TokenInfo] = field(default_factory=list)
+    consumed_tokens: tuple[TokenInfo, ...] = ()
     coalesce_metadata: CoalesceMetadata | None = None
     failure_reason: str | None = None
     coalesce_name: str | None = None
     outcomes_recorded: bool = False
+
+    def __post_init__(self) -> None:
+        # Validate mutual exclusivity of states
+        if self.held:
+            if self.merged_token is not None:
+                raise OrchestrationInvariantError("CoalesceOutcome: held=True but merged_token is set — mutually exclusive states")
+            if self.failure_reason is not None:
+                raise OrchestrationInvariantError("CoalesceOutcome: held=True but failure_reason is set — mutually exclusive states")
+        if self.merged_token is not None and self.failure_reason is not None:
+            raise OrchestrationInvariantError("CoalesceOutcome: both merged_token and failure_reason are set — mutually exclusive states")
 
 
 @dataclass(frozen=True, slots=True)
@@ -154,8 +164,6 @@ class CoalesceExecutor:
         # Maximum completed keys to retain (prevents OOM in long-running pipelines).
         # Configurable to match source cardinality and memory budget.
         self._max_completed_keys: int = max_completed_keys
-        # Temporary storage for union merge collision info (consumed by _execute_merge)
-        self._last_union_collisions: dict[str, list[str]] = {}
 
     def register_coalesce(
         self,
@@ -390,7 +398,7 @@ class CoalesceExecutor:
             return CoalesceOutcome(
                 held=False,
                 failure_reason=failure_reason,
-                consumed_tokens=[token],
+                consumed_tokens=(token,),
                 coalesce_metadata=CoalesceMetadata.for_late_arrival(
                     policy=settings.policy,
                     reason="Siblings already merged/failed, this token arrived too late",
@@ -468,11 +476,14 @@ class CoalesceExecutor:
                 )
             return arrived_count >= settings.quorum_count
 
-        # settings.policy == "best_effort":
-        # Merge on timeout (checked elsewhere) or when all branches accounted for.
-        # Lost branches count as "accounted for" — they won't arrive but we know about them.
-        accounted_count = arrived_count + len(pending.lost_branches)
-        return accounted_count >= expected_count
+        elif settings.policy == "best_effort":
+            # Merge on timeout (checked elsewhere) or when all branches accounted for.
+            # Lost branches count as "accounted for" — they won't arrive but we know about them.
+            accounted_count = arrived_count + len(pending.lost_branches)
+            return accounted_count >= expected_count
+
+        else:
+            raise RuntimeError(f"Unknown coalesce policy: {settings.policy!r}")
 
     def _fail_pending(
         self,
@@ -502,7 +513,7 @@ class CoalesceExecutor:
         """
         coalesce_name = key[0]
         pending = self._pending[key]
-        consumed_tokens = [e.token for e in pending.branches.values()]
+        consumed_tokens = tuple(e.token for e in pending.branches.values())
         error_hash = hashlib.sha256(failure_reason.encode()).hexdigest()[:16]
         now = self._clock.monotonic()
 
@@ -576,7 +587,7 @@ class CoalesceExecutor:
         # (Bug 2ho fix: reject instead of silent fallback)
         if settings.merge == "select" and settings.select_branch not in pending.branches:
             # select_branch not arrived - this is a failure, not a fallback
-            consumed_tokens = [e.token for e in pending.branches.values()]
+            consumed_tokens = tuple(e.token for e in pending.branches.values())
             error_msg = "select_branch_not_arrived"
             error_hash = hashlib.sha256(error_msg.encode()).hexdigest()[:16]
 
@@ -622,7 +633,7 @@ class CoalesceExecutor:
         # Merge row data according to strategy (returns dict)
         # We do this FIRST so we can derive contract from actual data shape
         # ─────────────────────────────────────────────────────────────────────
-        merged_data_dict = self._merge_data(settings, pending.branches)
+        merged_data_dict, union_collisions = self._merge_data(settings, pending.branches)
 
         # ─────────────────────────────────────────────────────────────────────
         # Build contract based on merge strategy and actual data shape
@@ -716,11 +727,11 @@ class CoalesceExecutor:
         merged_data = PipelineRow(merged_data_dict, merged_contract)
 
         # Get list of consumed tokens
-        consumed_tokens = [e.token for e in pending.branches.values()]
+        consumed_tokens = tuple(e.token for e in pending.branches.values())
 
         # Create merged token via TokenManager
         merged_token = self._token_manager.coalesce_tokens(
-            parents=consumed_tokens,
+            parents=list(consumed_tokens),
             merged_data=merged_data,
             node_id=node_id,
         )
@@ -744,9 +755,8 @@ class CoalesceExecutor:
         )
 
         # Include union merge collision info in audit trail if present
-        if self._last_union_collisions:
-            coalesce_metadata = CoalesceMetadata.with_collisions(coalesce_metadata, self._last_union_collisions)
-            self._last_union_collisions = {}
+        if union_collisions:
+            coalesce_metadata = CoalesceMetadata.with_collisions(coalesce_metadata, union_collisions)
 
         # Complete pending node states for consumed tokens
         # (These states were created as "pending" when tokens were held in accept())
@@ -792,10 +802,14 @@ class CoalesceExecutor:
         self,
         settings: CoalesceSettings,
         branches: dict[str, _BranchEntry],
-    ) -> dict[str, Any]:
+    ) -> tuple[dict[str, Any], dict[str, list[str]]]:
         """Merge row data from arrived tokens based on strategy.
 
         Note: row_data is PipelineRow, so we use to_dict() to get raw dict.
+
+        Returns:
+            Tuple of (merged_data, union_collisions). Collisions is non-empty only
+            for union merge strategy when field names overlap between branches.
         """
         if settings.merge == "union":
             # Combine all fields from all branches.
@@ -821,33 +835,34 @@ class CoalesceExecutor:
                     collisions=dict(collisions),
                     winner_branch={f: branches_list[-1] for f, branches_list in collisions.items()},
                 )
-            # Stash collisions for audit metadata (read by _execute_merge)
-            self._last_union_collisions = collisions
-            return merged
+            return merged, collisions
 
         elif settings.merge == "nested":
             # Each branch as nested object (use to_dict() for serializable dict)
             return {
                 branch_name: branches[branch_name].token.row_data.to_dict() for branch_name in settings.branches if branch_name in branches
-            }
+            }, {}
 
-        # settings.merge == "select":
-        # Take specific branch output
-        # Note: _execute_merge validates select_branch presence before calling this method
-        # If we get here without select_branch, it's a bug in our code
-        if settings.select_branch is None:
-            raise RuntimeError(
-                f"select_branch is None for select merge strategy at coalesce '{settings.name}'. This indicates a config validation bug."
-            )
-        if settings.select_branch not in branches:
-            # This should be unreachable - _execute_merge catches this case first
-            # Per "Plugin Ownership" principle: crash on our bugs, don't hide them
-            raise RuntimeError(
-                f"select_branch '{settings.select_branch}' not in arrived branches {list(branches.keys())}. "
-                f"This indicates a bug in _execute_merge validation (Bug 2ho fix should have caught this)."
-            )
-        # Return copy of dict (to_dict() returns a copy already)
-        return branches[settings.select_branch].token.row_data.to_dict()
+        elif settings.merge == "select":
+            # Take specific branch output
+            # Note: _execute_merge validates select_branch presence before calling this method
+            # If we get here without select_branch, it's a bug in our code
+            if settings.select_branch is None:
+                raise RuntimeError(
+                    f"select_branch is None for select merge strategy at coalesce '{settings.name}'. This indicates a config validation bug."
+                )
+            if settings.select_branch not in branches:
+                # This should be unreachable - _execute_merge catches this case first
+                # Per "Plugin Ownership" principle: crash on our bugs, don't hide them
+                raise RuntimeError(
+                    f"select_branch '{settings.select_branch}' not in arrived branches {list(branches.keys())}. "
+                    f"This indicates a bug in _execute_merge validation (Bug 2ho fix should have caught this)."
+                )
+            # Return copy of dict (to_dict() returns a copy already)
+            return branches[settings.select_branch].token.row_data.to_dict(), {}
+
+        else:
+            raise RuntimeError(f"Unknown merge strategy: {settings.merge!r}")
 
     def check_timeouts(
         self,
@@ -959,6 +974,19 @@ class CoalesceExecutor:
                         is_timeout=True,
                     )
                 )
+
+            elif settings.policy == "first":
+                # first policy should never reach timeout — it merges on first arrival.
+                # If we get here, it's an invariant violation (the token should have
+                # merged immediately in accept()).
+                raise RuntimeError(
+                    f"check_timeouts reached for 'first' policy at coalesce '{coalesce_name}', "
+                    f"row_id='{key[1]}'. 'first' policy merges immediately on arrival — "
+                    f"this indicates an invariant violation in accept()."
+                )
+
+            else:
+                raise RuntimeError(f"Unknown coalesce policy: {settings.policy!r}")
 
         return results
 
@@ -1218,7 +1246,10 @@ class CoalesceExecutor:
                 )
             return None  # Still waiting for remaining branches
 
-        # settings.policy == "first":
-        # first: should already have merged on first arrival
-        # If no arrivals yet, nothing to merge
-        return None
+        elif settings.policy == "first":
+            # first: should already have merged on first arrival
+            # If no arrivals yet, nothing to merge
+            return None
+
+        else:
+            raise RuntimeError(f"Unknown coalesce policy: {settings.policy!r}")

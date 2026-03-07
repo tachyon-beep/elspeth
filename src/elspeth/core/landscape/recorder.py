@@ -45,6 +45,7 @@ if TYPE_CHECKING:
         NodeStateStatus,
         NodeType,
         Operation,
+        ReproducibilityGrade,
         RoutingEvent,
         RoutingMode,
         RoutingReason,
@@ -68,7 +69,6 @@ if TYPE_CHECKING:
     from elspeth.contracts.payload_store import PayloadStore
     from elspeth.contracts.schema import SchemaConfig
     from elspeth.contracts.schema_contract import PipelineRow, SchemaContract
-    from elspeth.core.landscape.reproducibility import ReproducibilityGrade
     from elspeth.core.landscape.row_data import RowDataResult
 
 from elspeth.core.landscape._database_ops import DatabaseOps

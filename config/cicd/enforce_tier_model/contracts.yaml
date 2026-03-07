@@ -79,7 +79,7 @@ allow_hits:
   owner: bugfix
   reason: "Canonical JSON NaN/Infinity rejection \u2014 isinstance(float) to detect non-finite values before rfc8785.dumps()"
   safety: "Raises ValueError immediately \u2014 explicit crash, not masking"
-- key: contracts/hashing.py:R5:_reject_non_finite:fp=d99b2975a7e41ec8
+- key: contracts/hashing.py:R5:_reject_non_finite:fp=c1a4a2d4ebb1ae53
   owner: bugfix
   reason: "Canonical JSON NaN/Infinity rejection \u2014 isinstance(float) to detect non-finite values before rfc8785.dumps()"
   safety: "Raises ValueError immediately \u2014 explicit crash, not masking"

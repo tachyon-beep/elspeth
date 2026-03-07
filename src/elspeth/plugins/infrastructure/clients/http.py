@@ -85,6 +85,8 @@ def _parse_json_strict(text: str) -> tuple[Any, str | None]:
 
 if TYPE_CHECKING:
     from elspeth.core.landscape.recorder import LandscapeRecorder
+    from elspeth.core.rate_limit import NoOpLimiter
+    from elspeth.core.rate_limit.limiter import RateLimiter
 
 
 class AuditedHTTPClient(AuditedClientBase):
@@ -124,7 +126,7 @@ class AuditedHTTPClient(AuditedClientBase):
         timeout: float = 30.0,
         base_url: str | None = None,
         headers: dict[str, str] | None = None,
-        limiter: Any = None,  # RateLimiter | NoOpLimiter | None
+        limiter: RateLimiter | NoOpLimiter | None = None,
         token_id: str | None = None,
     ) -> None:
         """Initialize audited HTTP client.

@@ -210,7 +210,7 @@ allow_hits:
   reason: isinstance() check required to find batch-aware transforms - protocol contract verification
   safety: BatchTransformMixin is system-owned; isinstance replaces prior hasattr checks for type safety
   expires: '2026-05-02'
-- key: 'engine/orchestrator/types.py:R5:ResumeState:__post_init__:fp=c6d0246f2411d1b9'
+- key: 'engine/orchestrator/types.py:R5:ResumeState:__post_init__:fp=d26de2b60adb2519'
   owner: architecture
   reason: Deep-freeze conversion guard — isinstance() checks for tuple wrapping, not defensive data access
   safety: Construction-time type conversion, crashes on unexpected types

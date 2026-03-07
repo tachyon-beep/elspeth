@@ -26,6 +26,7 @@ from elspeth.contracts.enums import (
     ExportStatus,
     NodeStateStatus,
     NodeType,
+    ReproducibilityGrade,
     RoutingMode,
     RowOutcome,
     RunStatus,
@@ -58,7 +59,7 @@ class Run:
     canonical_version: str
     status: RunStatus  # Strict: enum only
     completed_at: datetime | None = None
-    reproducibility_grade: str | None = None
+    reproducibility_grade: ReproducibilityGrade | None = None
     export_status: ExportStatus | None = None  # Strict: enum only
     export_error: str | None = None
     exported_at: datetime | None = None
@@ -68,6 +69,7 @@ class Run:
     def __post_init__(self) -> None:
         """Validate enum fields - Tier 1 crash on invalid types."""
         _validate_enum(self.status, RunStatus, "status")
+        _validate_enum(self.reproducibility_grade, ReproducibilityGrade, "reproducibility_grade")
         _validate_enum(self.export_status, ExportStatus, "export_status")
 
 

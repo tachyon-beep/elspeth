@@ -20,10 +20,10 @@ from __future__ import annotations
 from collections.abc import Iterable, Mapping
 from typing import TYPE_CHECKING, Any
 
-from elspeth.contracts import PendingOutcome, RowOutcome, TokenInfo
+from elspeth.contracts import PendingOutcome, RowOutcome
 from elspeth.contracts.errors import OrchestrationInvariantError
 from elspeth.contracts.types import CoalesceName, NodeID
-from elspeth.engine.orchestrator.types import ExecutionCounters
+from elspeth.engine.orchestrator.types import ExecutionCounters, PendingTokenMap
 
 if TYPE_CHECKING:
     from elspeth.contracts.plugin_context import PluginContext
@@ -47,7 +47,7 @@ def accumulate_row_outcomes(
     results: Iterable[Any],
     counters: ExecutionCounters,
     config_sinks: Mapping[str, object],
-    pending_tokens: dict[str, list[tuple[TokenInfo, PendingOutcome | None]]],
+    pending_tokens: PendingTokenMap,
 ) -> None:
     """Accumulate row processing outcomes into counters and pending_tokens.
 
@@ -127,7 +127,7 @@ def handle_coalesce_timeouts(
     config_sinks: Mapping[str, object],
     ctx: PluginContext,
     counters: ExecutionCounters,
-    pending_tokens: dict[str, list[tuple[TokenInfo, PendingOutcome | None]]],
+    pending_tokens: PendingTokenMap,
 ) -> None:
     """Check and handle coalesce timeouts after processing each row.
 
@@ -194,7 +194,7 @@ def flush_coalesce_pending(
     config_sinks: Mapping[str, object],
     ctx: PluginContext,
     counters: ExecutionCounters,
-    pending_tokens: dict[str, list[tuple[TokenInfo, PendingOutcome | None]]],
+    pending_tokens: PendingTokenMap,
 ) -> None:
     """Flush pending coalesce operations at end-of-source.
 

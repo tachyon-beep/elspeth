@@ -24,6 +24,8 @@ from elspeth.plugins.infrastructure.clients.base import AuditedClientBase, Telem
 
 if TYPE_CHECKING:
     from elspeth.core.landscape.recorder import LandscapeRecorder
+    from elspeth.core.rate_limit import NoOpLimiter
+    from elspeth.core.rate_limit.limiter import RateLimiter
 
 logger = structlog.get_logger(__name__)
 
@@ -230,7 +232,7 @@ class AuditedLLMClient(AuditedClientBase):
         underlying_client: Any,  # openai.OpenAI or openai.AzureOpenAI
         *,
         provider: str = "openai",
-        limiter: Any = None,  # RateLimiter | NoOpLimiter | None
+        limiter: RateLimiter | NoOpLimiter | None = None,
         token_id: str | None = None,
     ) -> None:
         """Initialize audited LLM client.

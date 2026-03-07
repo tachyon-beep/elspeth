@@ -15,6 +15,7 @@ from sqlalchemy import select
 from elspeth.contracts import (
     ContractAuditRecord,
     ExportStatus,
+    ReproducibilityGrade,
     Run,
     RunStatus,
     SecretResolution,
@@ -26,7 +27,7 @@ from elspeth.core.landscape._database_ops import DatabaseOps
 from elspeth.core.landscape._helpers import generate_id, now
 from elspeth.core.landscape.database import LandscapeDB
 from elspeth.core.landscape.model_loaders import RunLoader
-from elspeth.core.landscape.reproducibility import ReproducibilityGrade, compute_grade
+from elspeth.core.landscape.reproducibility import compute_grade
 from elspeth.core.landscape.schema import (
     runs_table,
     secret_resolutions_table,

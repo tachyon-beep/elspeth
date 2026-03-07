@@ -144,13 +144,13 @@ class TestCoalesceOutcome:
         outcome = CoalesceOutcome(held=True)
         assert outcome.held is True
         assert outcome.merged_token is None
-        assert outcome.consumed_tokens == []
+        assert outcome.consumed_tokens == ()
         assert outcome.coalesce_metadata is None
         assert outcome.failure_reason is None
         assert outcome.coalesce_name is None
         assert outcome.outcomes_recorded is False
 
-    def test_custom_values(self):
+    def test_merged_outcome(self):
         from elspeth.contracts.coalesce_metadata import CoalesceMetadata
 
         token = _make_token()
@@ -158,19 +158,50 @@ class TestCoalesceOutcome:
         outcome = CoalesceOutcome(
             held=False,
             merged_token=token,
-            consumed_tokens=[token],
+            consumed_tokens=(token,),
+            coalesce_metadata=metadata,
+            coalesce_name="merge",
+        )
+        assert outcome.held is False
+        assert outcome.merged_token is token
+        assert outcome.consumed_tokens == (token,)
+        assert outcome.coalesce_metadata.policy == "require_all"
+        assert outcome.failure_reason is None
+        assert outcome.coalesce_name == "merge"
+        assert outcome.outcomes_recorded is False
+
+    def test_failure_outcome(self):
+        from elspeth.contracts.coalesce_metadata import CoalesceMetadata
+
+        token = _make_token()
+        metadata = CoalesceMetadata.for_late_arrival(policy="require_all", reason="test")
+        outcome = CoalesceOutcome(
+            held=False,
+            consumed_tokens=(token,),
             coalesce_metadata=metadata,
             failure_reason="late_arrival_after_merge",
             coalesce_name="merge",
             outcomes_recorded=True,
         )
         assert outcome.held is False
-        assert outcome.merged_token is token
-        assert outcome.consumed_tokens == [token]
-        assert outcome.coalesce_metadata.policy == "require_all"
+        assert outcome.merged_token is None
+        assert outcome.consumed_tokens == (token,)
         assert outcome.failure_reason == "late_arrival_after_merge"
-        assert outcome.coalesce_name == "merge"
         assert outcome.outcomes_recorded is True
+
+    def test_invalid_held_with_merged_token(self):
+        from elspeth.contracts.errors import OrchestrationInvariantError
+
+        token = _make_token()
+        with pytest.raises(OrchestrationInvariantError, match="held=True but merged_token"):
+            CoalesceOutcome(held=True, merged_token=token)
+
+    def test_invalid_merged_and_failed(self):
+        from elspeth.contracts.errors import OrchestrationInvariantError
+
+        token = _make_token()
+        with pytest.raises(OrchestrationInvariantError, match="both merged_token and failure_reason"):
+            CoalesceOutcome(held=False, merged_token=token, failure_reason="some_reason")
 
 
 # ===========================================================================

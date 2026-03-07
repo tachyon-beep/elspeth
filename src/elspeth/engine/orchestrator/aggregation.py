@@ -23,11 +23,12 @@ from elspeth.engine.orchestrator.types import (
     AggNodeEntry,
     AggregationFlushResult,
     ExecutionCounters,
+    PendingTokenMap,
     PipelineConfig,
 )
 
 if TYPE_CHECKING:
-    from elspeth.contracts import PendingOutcome, TokenInfo, TransformProtocol
+    from elspeth.contracts import TransformProtocol
     from elspeth.contracts.plugin_context import PluginContext
     from elspeth.core.landscape import LandscapeRecorder
     from elspeth.engine.processor import RowProcessor
@@ -105,7 +106,7 @@ def check_aggregation_timeouts(
     config: PipelineConfig,
     processor: RowProcessor,
     ctx: PluginContext,
-    pending_tokens: dict[str, list[tuple[TokenInfo, PendingOutcome | None]]],
+    pending_tokens: PendingTokenMap,
     agg_transform_lookup: dict[str, AggNodeEntry] | None = None,
 ) -> AggregationFlushResult:
     """Check and flush any aggregations whose timeout has expired.
@@ -223,7 +224,7 @@ def flush_remaining_aggregation_buffers(
     config: PipelineConfig,
     processor: RowProcessor,
     ctx: PluginContext,
-    pending_tokens: dict[str, list[tuple[TokenInfo, PendingOutcome | None]]],
+    pending_tokens: PendingTokenMap,
 ) -> AggregationFlushResult:
     """Flush remaining aggregation buffers at end-of-source.
 

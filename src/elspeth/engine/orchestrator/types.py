@@ -43,6 +43,11 @@ if TYPE_CHECKING:
 # is used in runtime annotations and isinstance() checks
 from elspeth.contracts import RunStatus, TransformProtocol
 
+# Type alias for pending tokens accumulated during row processing.
+# Keys are sink names, values are lists of (token, optional outcome) pairs.
+# Used across LoopContext, accumulate_row_outcomes, flush functions, etc.
+PendingTokenMap = dict[str, list[tuple["TokenInfo", "PendingOutcome | None"]]]
+
 # Type alias for row-processing plugins in the transforms pipeline
 # NOTE: BaseAggregation was DELETED - aggregation is now handled by
 # batch-aware transforms (is_batch_aware=True on TransformProtocol)
@@ -303,7 +308,7 @@ class LoopContext:
 
     # --- Mutable state (updated row-by-row) ---
     counters: ExecutionCounters
-    pending_tokens: dict[str, list[tuple[TokenInfo, PendingOutcome | None]]]
+    pending_tokens: PendingTokenMap
 
     # --- Read-only after construction (not reassigned) ---
     processor: RowProcessor

@@ -172,10 +172,6 @@ class BaseTransform(ABC):
     # via cli_helpers bridge (set from TransformSettings.on_success).
     on_success: str | None = None
 
-    # Lifecycle guard (centralized in TransformExecutor).
-    # Set to True by on_start(). The executor checks this before process().
-    _on_start_called: bool = False
-
     def __init__(self, config: dict[str, Any]) -> None:
         """Initialize with configuration.
 
@@ -183,6 +179,10 @@ class BaseTransform(ABC):
             config: Plugin configuration
         """
         self.config = config
+        # Lifecycle guard (centralized in TransformExecutor).
+        # Set to True by on_start(). The executor checks this before process().
+        # Per-instance, not per-class — class-level bool would be shared across instances.
+        self._on_start_called: bool = False
 
     @staticmethod
     def _create_schemas(
