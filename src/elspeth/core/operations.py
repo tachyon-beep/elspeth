@@ -19,7 +19,6 @@ import logging
 import time
 from collections.abc import Iterator
 from contextlib import contextmanager
-from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Literal
 
 from elspeth.contracts import BatchPendingError
@@ -32,12 +31,15 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
-@dataclass
 class OperationHandle:
     """Mutable handle for capturing operation output within context manager.
 
     Allows the caller to set output_data during the operation, which will
     be recorded when the operation completes.
+
+    The `operation` field is read-only after construction — mutating it would
+    corrupt audit trail linkage. Only `output_data` is writable (it's the
+    write slot for the context manager pattern).
 
     Usage:
         with track_operation(...) as handle:
@@ -45,8 +47,15 @@ class OperationHandle:
             handle.output_data = {"artifact_path": result.path}  # Explicit!
     """
 
-    operation: Operation
-    output_data: dict[str, Any] | None = None
+    __slots__ = ("_operation", "output_data")
+
+    def __init__(self, operation: Operation, output_data: dict[str, Any] | None = None) -> None:
+        self._operation = operation
+        self.output_data = output_data
+
+    @property
+    def operation(self) -> Operation:
+        return self._operation
 
 
 @contextmanager

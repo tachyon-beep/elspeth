@@ -51,7 +51,7 @@ allow_hits:
   reason: Intentional fallback pattern - CompositeSecretLoader tries loaders in priority order
   safety: SecretNotFoundError from one loader triggers fallback to next; raises if all fail
   expires: null
-- key: core/operations.py:R5:track_operation:fp=058d1c878ecb5304
+- key: core/operations.py:R5:track_operation:fp=b8ecfb94263c6241
   owner: architecture
   reason: "isinstance re-raise guard \u2014 FrameworkBugError/AuditIntegrityError from complete_operation() must supersede\
     \ any original exception"

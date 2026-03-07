@@ -63,12 +63,12 @@ allow_hits:
   owner: architecture
   reason: "httpx Client.get() method call \u2014 ephemeral client per redirect hop for TLS isolation"
   safety: This is the actual external HTTP call, not a defensive dict access
-- key: plugins/sinks/database_sink.py:R1:DatabaseSink:__init__:fp=b8877f83e334dcbb
+- key: plugins/sinks/database_sink.py:R1:DatabaseSink:__init__:fp=908b915b356d2542
   owner: architecture
   reason: Optional field access at trust boundary
   safety: Code reviewed - legitimate pattern
   expires: '2026-05-02'
-- key: plugins/sinks/database_sink.py:R5:DatabaseSink:_serialize_any_typed_fields:fp=92d84ec9e1c987e7
+- key: plugins/sinks/database_sink.py:R5:DatabaseSink:_serialize_any_typed_fields:fp=f939fe476ae36909
   owner: bugfix
   reason: "Tier 2 contract enforcement \u2014 isinstance distinguishes dict/list fields for JSON serialization before DB insert"
   safety: Only dict/list values serialized; all other types pass through unchanged

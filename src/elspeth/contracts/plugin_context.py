@@ -100,7 +100,7 @@ class PluginContext:
     # Maps row index in the batch to the originating token_id. Batch transforms
     # use this to pass per-row token_id to audited clients for correct telemetry
     # attribution. When None, the transform falls back to ctx.token (single-token mode).
-    batch_token_ids: list[str] | None = field(default=None)
+    batch_token_ids: tuple[str, ...] | None = field(default=None)
 
     # === Schema Contract ===
     # Set by executor when processing transforms to enable contract-aware template

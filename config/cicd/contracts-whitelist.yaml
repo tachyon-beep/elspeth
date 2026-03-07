@@ -199,6 +199,7 @@ allowed_dict_patterns:
 
   # Operations tracking - source/sink I/O audit trail
   - "src/elspeth/core/operations.py:track_operation:input_data"
+  - "src/elspeth/core/operations.py:OperationHandle.__init__:output_data"
 
   # ═══════════════════════════════════════════════════════════════════════════
   # FORMATTERS - Record formatting for export

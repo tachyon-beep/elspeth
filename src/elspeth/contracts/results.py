@@ -116,7 +116,7 @@ class TransformResult:
     row: PipelineRow | None
     reason: TransformErrorReason | None
     retryable: bool = False
-    rows: list[PipelineRow] | None = None
+    rows: tuple[PipelineRow, ...] | None = None
 
     # Success metadata - REQUIRED for success results, None for error results
     # Invariant: status="success" implies success_reason is not None
@@ -213,7 +213,7 @@ class TransformResult:
     @classmethod
     def success_multi(
         cls,
-        rows: list[PipelineRow],
+        rows: list[PipelineRow] | tuple[PipelineRow, ...],
         *,
         success_reason: TransformSuccessReason,
         context_after: NodeStateContext | None = None,
@@ -261,7 +261,7 @@ class TransformResult:
             status="success",
             row=None,
             reason=None,
-            rows=rows,
+            rows=tuple(rows),
             success_reason=success_reason,
             context_after=context_after,
         )

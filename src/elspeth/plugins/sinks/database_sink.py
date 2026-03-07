@@ -10,6 +10,8 @@ import hashlib
 import json
 import os
 import time
+from collections.abc import Mapping
+from types import MappingProxyType
 from typing import TYPE_CHECKING, Any, Literal
 
 from sqlalchemy import Boolean, Column, Float, Integer, MetaData, Table, Text, create_engine, insert
@@ -31,13 +33,15 @@ from elspeth.plugins.infrastructure.schema_factory import create_schema_from_con
 # Text (not String) is used for string columns because String() without a length
 # argument causes truncation or errors on MySQL/MSSQL — Text maps to TEXT on all
 # backends and accepts arbitrary-length values without portability issues.
-SCHEMA_TYPE_TO_SQLALCHEMY: dict[str, type[TypeEngine[Any]]] = {
-    "str": Text,
-    "int": Integer,
-    "float": Float,
-    "bool": Boolean,
-    "any": Text,  # Fallback to Text for 'any' type
-}
+SCHEMA_TYPE_TO_SQLALCHEMY: Mapping[str, type[TypeEngine[Any]]] = MappingProxyType(
+    {
+        "str": Text,
+        "int": Integer,
+        "float": Float,
+        "bool": Boolean,
+        "any": Text,  # Fallback to Text for 'any' type
+    }
+)
 
 
 class DatabaseSinkConfig(DataPluginConfig):

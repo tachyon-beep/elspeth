@@ -357,7 +357,7 @@ class AggregationExecutor:
             # Expose per-row token identity for batch transforms. This allows transforms
             # like OpenRouterBatchLLMTransform to pass the correct token_id to audited
             # clients, ensuring per-token telemetry correlation in multi-token batches.
-            batch_token_ids = [t.token_id for t in buffered_tokens]
+            batch_token_ids = tuple(t.token_id for t in buffered_tokens)
             ctx.batch_token_ids = batch_token_ids
 
             # Track whether the batch was finalized (COMPLETED or FAILED).

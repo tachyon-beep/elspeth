@@ -280,11 +280,11 @@ class RowProcessor:
         self._source_node_id: NodeID = source_node_id
         self._source_on_success: str = source_on_success
         self._traversal = traversal
-        self._node_step_map: dict[NodeID, int] = dict(traversal.node_step_map)
+        self._node_step_map: Mapping[NodeID, int] = traversal.node_step_map
         self._step_resolver: StepResolver = make_step_resolver(traversal.node_step_map, source_node_id)
-        self._node_to_plugin: dict[NodeID, RowPlugin | GateSettings] = dict(traversal.node_to_plugin)
+        self._node_to_plugin: Mapping[NodeID, RowPlugin | GateSettings] = traversal.node_to_plugin
         self._first_transform_node_id: NodeID | None = traversal.first_transform_node_id
-        self._node_to_next: dict[NodeID, NodeID | None] = dict(traversal.node_to_next)
+        self._node_to_next: Mapping[NodeID, NodeID | None] = traversal.node_to_next
         self._retry_manager = retry_manager
         self._coalesce_executor = coalesce_executor
         self._coalesce_node_ids: dict[CoalesceName, NodeID] = dict(traversal.coalesce_node_map)
@@ -752,7 +752,7 @@ class RowProcessor:
                     f"TransformResult.success(row) or rows via TransformResult.success_multi(rows). "
                     f"This is a plugin bug."
                 )
-            output_rows = [result.row]
+            output_rows = (result.row,)
 
         # Enforce expected_output_count if configured
         if fctx.settings.expected_output_count is not None:
