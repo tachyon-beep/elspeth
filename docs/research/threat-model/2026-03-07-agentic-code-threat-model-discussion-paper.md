@@ -564,17 +564,17 @@ No current framework provides:
 
 ## 7. The Response Landscape
 
-The responses available to organisations fall into three categories of decreasing fragility:
+The responses available to organisations fall into three categories of increasing assurance strength:
 
 | Control Type | Mechanism | Strength | Example |
 |-------------|-----------|----------|---------|
 | **Behavioural** | Relies on individual compliance | Weakest — requires sustained restraint against incentives | "Developers should not run more than one agent concurrently" |
 | **Procedural** | Relies on organisational process | Moderate — requires consistent enforcement and audit | "Parallel agent-generated changes require separate review queues and staged approval" |
-| **Technical** | Constrains the environment | Strongest — operates regardless of individual behaviour | "The CI pipeline blocks more than N concurrent unreviewed agent-originated changes to protected branches" |
+| **Technical** | Constrains the environment | Strongest — operates regardless of individual behaviour | "The CI/CD pipeline enforces concurrency limits, sequencing rules, or protected-branch gates for agent-originated changes" |
 
 Most organisations will implement behavioural controls, aspire to procedural controls, and underinvest in technical controls — because technical controls constrain the velocity that motivated adoption. The key insight from security engineering applies here: **controls that shape the environment are stronger than controls that depend on restraint.** A rule that developers must not bypass review is an aspiration; a pipeline that physically prevents unreviewed code from reaching protected branches is a control.
 
-The sections below are ordered from weakest to strongest assurance, not from least to most important. All three are necessary. But organisations that rely primarily on behavioural and procedural controls without technical enforcement should understand that their assurance argument rests on sustained human compliance with rules that run directly against the productivity incentive that makes agentic development attractive.
+The sections below are ordered from weakest to strongest assurance, not from least to most important. All three have a role, but assurance should not rest primarily on behavioural or procedural controls where technical enforcement is feasible. Organisations that rely on behavioural and procedural controls without technical enforcement should understand that their assurance argument rests on sustained human compliance with rules that run directly against the productivity incentive that makes agentic development attractive.
 
 ### 7.1 Process Controls (Strengthening Existing Practices)
 
