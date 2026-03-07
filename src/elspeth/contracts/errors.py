@@ -327,6 +327,7 @@ TransformErrorCategory = Literal[
     "non_finite_usage",  # LLM API returned NaN/Infinity in usage metadata
     # Executor lifecycle
     "shutdown_requested",  # Worker stopped mid-retry due to executor shutdown
+    "unexpected_pool_error",  # Worker future raised unexpected exception — buffer slot recovered
     # Generic (for tests and edge cases)
     "test_error",
     "property_test_error",

@@ -486,7 +486,29 @@ class AuditedLLMClient(AuditedClientBase):
         # Capture full raw response for audit completeness
         # raw_response includes: all choices, finish_reason, tool_calls, logprobs, etc.
         # NOTE: model_dump() is guaranteed present - we require openai>=2.15 in pyproject.toml
-        raw_response = response.model_dump()
+        try:
+            raw_response = response.model_dump()
+        except Exception as dump_exc:
+            # The LLM call happened — record it before re-raising so the
+            # audit trail reflects the consumed tokens even though we can't
+            # fully serialize the response.
+            self._recorder.record_call(
+                state_id=self._state_id,
+                call_index=call_index,
+                call_type=CallType.LLM,
+                status=CallStatus.ERROR,
+                request_data=request_dto,
+                error=LLMCallError(
+                    type="ResponseProcessingError",
+                    message=f"Failed to serialize LLM response: {dump_exc}",
+                    retryable=False,
+                ),
+                latency_ms=latency_ms,
+            )
+            raise LLMClientError(
+                f"Failed to serialize LLM response: {dump_exc}",
+                retryable=False,
+            ) from dump_exc
 
         response_dto = LLMCallResponse(
             content=content,

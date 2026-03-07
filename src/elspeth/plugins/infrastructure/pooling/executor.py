@@ -316,7 +316,20 @@ class PooledExecutor:
         entries: list[BufferEntry[TransformResult]] = []
 
         for future in as_completed(futures):
-            buffer_idx, result = future.result()
+            buffer_idx = futures[future]
+            try:
+                _returned_idx, result = future.result()
+            except Exception as exc:
+                # Complete the buffer slot with a deterministic error so the
+                # reorder buffer stays consistent.  Without this, the slot is
+                # permanently occupied and the pool eventually exhausts.
+                result = TransformResult.error(
+                    {
+                        "reason": "unexpected_pool_error",
+                        "error": f"{type(exc).__name__}: {exc}",
+                    },
+                    retryable=False,
+                )
 
             # Complete in buffer (may be out of order)
             self._buffer.complete(buffer_idx, result)

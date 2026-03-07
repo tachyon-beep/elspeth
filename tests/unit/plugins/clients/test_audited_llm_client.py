@@ -1020,3 +1020,61 @@ class TestContentFabrication:
             messages=[{"role": "user", "content": "Hello"}],
         )
         assert result.content == ""
+
+
+class TestModelDumpFailureRecordsCall:
+    """Regression: model_dump() failure must still record the LLM call.
+
+    Bug: If response.model_dump() raises during success-path processing,
+    record_call(SUCCESS) never fires and the audit trail has no evidence
+    that tokens were consumed.
+    """
+
+    @staticmethod
+    def _create_mock_recorder() -> Mock:
+        recorder = Mock()
+        recorder.allocate_call_index = Mock(return_value=0)
+        recorder.record_call = Mock()
+        return recorder
+
+    def test_model_dump_failure_records_error_call(self) -> None:
+        """When model_dump() raises, an ERROR call must be recorded."""
+        recorder = self._create_mock_recorder()
+
+        message = Mock()
+        message.content = "Hello!"
+
+        choice = Mock()
+        choice.message = message
+
+        usage = Mock()
+        usage.prompt_tokens = 10
+        usage.completion_tokens = 5
+
+        response = Mock()
+        response.choices = [choice]
+        response.model = "gpt-4"
+        response.usage = usage
+        response.model_dump = Mock(side_effect=TypeError("Unserializable field"))
+
+        openai_client = MagicMock()
+        openai_client.chat.completions.create.return_value = response
+
+        client = AuditedLLMClient(
+            recorder=recorder,
+            state_id="state_dump_fail",
+            run_id="run_dump_fail",
+            telemetry_emit=lambda event: None,
+            underlying_client=openai_client,
+        )
+
+        with pytest.raises(LLMClientError, match="serialize"):
+            client.chat_completion(
+                model="gpt-4",
+                messages=[{"role": "user", "content": "Hello"}],
+            )
+
+        # The critical assertion: record_call was invoked despite the failure
+        recorder.record_call.assert_called_once()
+        call_kwargs = recorder.record_call.call_args
+        assert call_kwargs.kwargs["status"] == CallStatus.ERROR

@@ -2718,6 +2718,37 @@ sinks:
         assert "url_password_fingerprint" not in result["landscape"]
         assert result["landscape"]["url_password_redacted"] is True
 
+    def test_dsn_unparsable_with_credentials_raises(self) -> None:
+        """Unparsable URLs with credential patterns must not pass through."""
+        from elspeth.core.config import SecretFingerprintError, _sanitize_dsn
+
+        # JDBC-style URL — make_url() raises ArgumentError, but password is present
+        url = "jdbc:postgresql://user:secret@host/db"
+
+        with pytest.raises(SecretFingerprintError, match="credentials"):
+            _sanitize_dsn(url)
+
+    def test_dsn_unparsable_no_scheme_with_credentials_raises(self) -> None:
+        """URLs without scheme but with credentials must not pass through."""
+        from elspeth.core.config import SecretFingerprintError, _sanitize_dsn
+
+        url = "://user:secret@host/db"
+
+        with pytest.raises(SecretFingerprintError, match="credentials"):
+            _sanitize_dsn(url)
+
+    def test_dsn_unparsable_without_credentials_passes_through(self) -> None:
+        """Unparsable URLs without credential patterns should pass through."""
+        from elspeth.core.config import _sanitize_dsn
+
+        # Not a SQLAlchemy URL and no credential pattern
+        url = "not-a-url-at-all"
+        sanitized, fingerprint, had_password = _sanitize_dsn(url)
+
+        assert sanitized == url
+        assert fingerprint is None
+        assert had_password is False
+
 
 class TestRunModeSettings:
     """Tests for run_mode configuration."""

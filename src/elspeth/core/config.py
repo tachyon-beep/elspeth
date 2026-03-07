@@ -1578,8 +1578,22 @@ def _sanitize_dsn(
 
     try:
         parsed = make_url(url)
-    except ArgumentError:
-        # Not a valid SQLAlchemy URL - return as-is (might be a path or other format)
+    except ArgumentError as parse_err:
+        # Not a valid SQLAlchemy URL — but it might still contain credentials.
+        # A typo in the scheme (e.g. "postgreql://user:secret@host/db") bypasses
+        # make_url() parsing, so we must check for credential patterns before
+        # passing the raw URL through.  The RFC 3986 userinfo pattern is
+        # "://<user>:<password>@<host>".
+        import re
+
+        if re.search(r"://[^/@]+:[^/@]+@", url):
+            raise SecretFingerprintError(
+                "Unparsable database URL appears to contain credentials "
+                "(detected '://<user>:<password>@<host>' pattern). "
+                "Fix the URL so SQLAlchemy can parse it, or remove the "
+                "embedded password. Raw URL will NOT be passed through to "
+                "prevent credential leaks into the audit trail."
+            ) from parse_err
         return url, None, False
 
     if parsed.password is None:

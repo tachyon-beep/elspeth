@@ -262,3 +262,8 @@ allow_hits:
   reason: HTTP redirect Location header - external system boundary, header may be absent
   safety: Missing Location header breaks redirect loop naturally (no redirect target)
   expires: '2026-05-02'
+- key: plugins/infrastructure/pooling/executor.py:R4:PooledExecutor:_execute_batch_locked:fp=8167fa43e52bc54f
+  owner: bugfix
+  reason: Worker thread can raise any exception type — must catch broadly to prevent buffer slot leak
+  safety: Exception converted to TransformResult.error (row gets quarantined), buffer stays consistent
+  expires: '2026-06-08'
