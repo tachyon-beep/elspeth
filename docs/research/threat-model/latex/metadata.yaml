@@ -1,0 +1,9 @@
+title: "When Agents Write Code: A Threat Model for AI-Assisted Software Development in Government Systems"
+author: "John Morrissey, Digital Transformation Agency"
+date: "7 March 2026"
+classification: "OFFICIAL"
+version: "DRAFT v0.1"
+version-table:
+  - version: "0.1"
+    date: "7 March 2026"
+    changes: "Initial draft for community discussion"

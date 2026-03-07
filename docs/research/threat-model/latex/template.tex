@@ -1,0 +1,228 @@
+% Pandoc template for Australian Government discussion papers
+% PSPF-compliant header/footer markings, DTA branding placeholder
+%
+% Usage:
+%   pandoc input.md -o output.tex --template=template.tex --standalone
+%   pandoc input.md -o output.pdf --template=template.tex --pdf-engine=xelatex
+
+\documentclass[a4paper,11pt]{report}
+
+% --- Encoding and fonts ---
+\usepackage[T1]{fontenc}
+\usepackage[utf8]{inputenc}
+\usepackage{helvet}                    % Helvetica (Arial-like) — common in AuGov docs
+\renewcommand{\familydefault}{\sfdefault}
+% Monospace: use default Computer Modern typewriter (always available)
+% For better monospace, install texlive-fonts-extra and use beramono or inconsolata
+
+% --- Page geometry ---
+\usepackage[a4paper, top=3cm, bottom=3cm, left=2.5cm, right=2.5cm]{geometry}
+
+% --- Micro-typography ---
+\usepackage{microtype}
+\usepackage{parskip}                   % Space between paragraphs, no indent
+
+% --- Colours ---
+\usepackage{xcolor}
+\definecolor{dtanavy}{HTML}{232946}     % Placeholder DTA navy — replace with brand colour
+\definecolor{dtagrey}{HTML}{4A4A4A}     % Body text grey
+\definecolor{codebackground}{HTML}{F5F5F5}
+\definecolor{ruleblue}{HTML}{2E5090}    % Horizontal rule accent
+
+% --- Headers and footers (PSPF classification marking) ---
+\usepackage{fancyhdr}
+\pagestyle{fancy}
+\fancyhf{}
+\fancyhead[C]{\textbf{$if(classification)$$classification$$else$OFFICIAL$endif$}}
+\fancyfoot[C]{\textbf{$if(classification)$$classification$$else$OFFICIAL$endif$}}
+\fancyfoot[R]{\thepage}
+\renewcommand{\headrulewidth}{0pt}
+\renewcommand{\footrulewidth}{0pt}
+
+% --- Chapter and section formatting ---
+\usepackage{titlesec}
+
+% Remove "Chapter N" prefix — just print the title
+\titleformat{\chapter}[display]
+  {\normalfont\LARGE\bfseries\color{dtanavy}}
+  {}
+  {0pt}
+  {}
+\titlespacing*{\chapter}{0pt}{-20pt}{20pt}
+
+\titleformat{\section}
+  {\normalfont\Large\bfseries\color{dtanavy}}
+  {\thesection}{1em}{}
+
+\titleformat{\subsection}
+  {\normalfont\large\bfseries\color{dtanavy}}
+  {\thesubsection}{1em}{}
+
+\titleformat{\subsubsection}
+  {\normalfont\normalsize\bfseries\color{dtanavy}}
+  {\thesubsubsection}{1em}{}
+
+% --- Section numbering ---
+\setcounter{secnumdepth}{3}
+\setcounter{tocdepth}{2}
+
+% --- Tables ---
+\usepackage{longtable,booktabs,array}
+\usepackage{calc}
+\usepackage{etoolbox}
+\makeatletter
+\patchcmd\longtable{\par}{\if@noskipsec\mbox{}\fi\par}{}{}
+\makeatother
+\usepackage{footnote}
+\makesavenoteenv{longtable}
+
+% Table styling — lighter rules, more space
+\renewcommand{\toprule}{\hline\noalign{\smallskip}}
+\renewcommand{\midrule}{\noalign{\smallskip}\hline\noalign{\smallskip}}
+\renewcommand{\bottomrule}{\noalign{\smallskip}\hline}
+\setlength{\tabcolsep}{8pt}
+\renewcommand{\arraystretch}{1.3}
+
+% --- Code highlighting ---
+\usepackage{fancyvrb}
+\newcommand{\VerbBar}{|}
+\newcommand{\VERB}{\Verb[commandchars=\\\{\}]}
+\DefineVerbatimEnvironment{Highlighting}{Verbatim}{commandchars=\\\{\},fontsize=\small}
+\usepackage{framed}
+\definecolor{shadecolor}{HTML}{F5F5F5}
+\newenvironment{Shaded}{\begin{snugshade}}{\end{snugshade}}
+
+% Pandoc syntax highlighting token definitions
+\newcommand{\AlertTok}[1]{\textcolor[rgb]{0.94,0.16,0.16}{#1}}
+\newcommand{\AnnotationTok}[1]{\textcolor[rgb]{0.56,0.35,0.01}{\textbf{\textit{#1}}}}
+\newcommand{\AttributeTok}[1]{\textcolor[rgb]{0.13,0.29,0.53}{#1}}
+\newcommand{\BaseNTok}[1]{\textcolor[rgb]{0.00,0.00,0.81}{#1}}
+\newcommand{\BuiltInTok}[1]{#1}
+\newcommand{\CharTok}[1]{\textcolor[rgb]{0.31,0.60,0.02}{#1}}
+\newcommand{\CommentTok}[1]{\textcolor[rgb]{0.56,0.35,0.01}{\textit{#1}}}
+\newcommand{\CommentVarTok}[1]{\textcolor[rgb]{0.56,0.35,0.01}{\textbf{\textit{#1}}}}
+\newcommand{\ConstantTok}[1]{\textcolor[rgb]{0.56,0.35,0.01}{#1}}
+\newcommand{\ControlFlowTok}[1]{\textcolor[rgb]{0.13,0.29,0.53}{\textbf{#1}}}
+\newcommand{\DataTypeTok}[1]{\textcolor[rgb]{0.13,0.29,0.53}{#1}}
+\newcommand{\DecValTok}[1]{\textcolor[rgb]{0.00,0.00,0.81}{#1}}
+\newcommand{\DocumentationTok}[1]{\textcolor[rgb]{0.56,0.35,0.01}{\textbf{\textit{#1}}}}
+\newcommand{\ErrorTok}[1]{\textcolor[rgb]{0.64,0.00,0.00}{\textbf{#1}}}
+\newcommand{\ExtensionTok}[1]{#1}
+\newcommand{\FloatTok}[1]{\textcolor[rgb]{0.00,0.00,0.81}{#1}}
+\newcommand{\FunctionTok}[1]{\textcolor[rgb]{0.13,0.29,0.53}{\textbf{#1}}}
+\newcommand{\ImportTok}[1]{#1}
+\newcommand{\InformationTok}[1]{\textcolor[rgb]{0.56,0.35,0.01}{\textbf{\textit{#1}}}}
+\newcommand{\KeywordTok}[1]{\textcolor[rgb]{0.13,0.29,0.53}{\textbf{#1}}}
+\newcommand{\NormalTok}[1]{#1}
+\newcommand{\OperatorTok}[1]{\textcolor[rgb]{0.81,0.36,0.00}{\textbf{#1}}}
+\newcommand{\OtherTok}[1]{\textcolor[rgb]{0.56,0.35,0.01}{#1}}
+\newcommand{\PreprocessorTok}[1]{\textcolor[rgb]{0.56,0.35,0.01}{\textit{#1}}}
+\newcommand{\RegionMarkerTok}[1]{#1}
+\newcommand{\SpecialCharTok}[1]{\textcolor[rgb]{0.81,0.36,0.00}{\textbf{#1}}}
+\newcommand{\SpecialStringTok}[1]{\textcolor[rgb]{0.31,0.60,0.02}{#1}}
+\newcommand{\StringTok}[1]{\textcolor[rgb]{0.31,0.60,0.02}{#1}}
+\newcommand{\VariableTok}[1]{\textcolor[rgb]{0.00,0.00,0.00}{#1}}
+\newcommand{\VerbatimStringTok}[1]{\textcolor[rgb]{0.31,0.60,0.02}{#1}}
+\newcommand{\WarningTok}[1]{\textcolor[rgb]{0.56,0.35,0.01}{\textbf{\textit{#1}}}}
+
+% --- Lists ---
+\providecommand{\tightlist}{%
+  \setlength{\itemsep}{0pt}\setlength{\parskip}{0pt}}
+
+% --- Block quotes ---
+\renewenvironment{quote}{%
+  \par\medskip\noindent
+  \hspace{0.5cm}\begin{minipage}{\dimexpr\textwidth-1cm}
+  \itshape\color{dtagrey}
+}{%
+  \end{minipage}\par\medskip
+}
+
+% --- Hyperlinks ---
+\usepackage{hyperref}
+\hypersetup{
+  colorlinks=true,
+  linkcolor=dtanavy,
+  urlcolor=ruleblue,
+  citecolor=dtanavy,
+  pdfcreator={LaTeX via pandoc},
+  pdftitle={$if(title)$$title$$endif$},
+  pdfauthor={$if(author)$$author$$endif$},
+}
+\usepackage{xurl}                      % Better URL line breaking
+\urlstyle{same}
+
+% --- Emergency line breaking ---
+\setlength{\emergencystretch}{3em}
+
+% --- Prevent overfull hboxes in code ---
+\usepackage{enumitem}
+
+% --- Graphics (for logo placeholder) ---
+\usepackage{graphicx}
+
+% =====================================================================
+% DOCUMENT
+% =====================================================================
+\begin{document}
+
+% --- Title page ---
+\begin{titlepage}
+\thispagestyle{fancy}
+\vspace*{1cm}
+
+% DTA Logo placeholder — replace with \includegraphics[width=6cm]{dta-logo.pdf}
+\noindent
+\colorbox{dtanavy}{%
+  \parbox[c][2cm][c]{6cm}{%
+    \centering\color{white}\sffamily\large\bfseries
+    [DTA Logo]%
+  }%
+}
+
+\vspace{2cm}
+
+{\Huge\bfseries\color{dtanavy} $title$\par}
+
+\vspace{1cm}
+
+{\Large Discussion Paper --- $if(version)$$version$$else$DRAFT$endif$\par}
+
+\vspace{1.5cm}
+
+\begin{tabular}{@{}ll@{}}
+\textbf{Date:}            & $if(date)$$date$$endif$ \\
+\textbf{Classification:}  & $if(classification)$$classification$$else$OFFICIAL$endif$ \\
+\textbf{Prepared by:}     & $if(author)$$author$$endif$ \\
+\end{tabular}
+
+$if(version-table)$
+\vspace{1cm}
+
+\begin{tabular}{@{}llp{8cm}@{}}
+\toprule
+\textbf{Version} & \textbf{Date} & \textbf{Changes} \\
+\midrule
+$for(version-table)$
+$version-table.version$ & $version-table.date$ & $version-table.changes$ \\
+$endfor$
+\bottomrule
+\end{tabular}
+$endif$
+
+\vfill
+
+{\small\color{dtagrey}
+$if(disclaimer)$$disclaimer$$else$This is a discussion paper. It presents a threat model and preliminary analysis, not final guidance. Comments and contributions are welcome.$endif$
+}
+
+\end{titlepage}
+
+% --- Table of Contents ---
+\tableofcontents
+\clearpage
+
+% --- Body ---
+$body$
+
+\end{document}
