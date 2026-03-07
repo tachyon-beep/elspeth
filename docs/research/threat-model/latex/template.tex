@@ -1,5 +1,11 @@
 % Pandoc template for Australian Government discussion papers
-% PSPF-compliant header/footer markings, DTA branding placeholder
+% PSPF-compliant header/footer markings, DTA branding
+%
+% DTA Brand Typography:
+%   Primary:  Neue Haas Grotesk Display (headings) / Text (body)
+%   Fallback: Helvetica (macOS) / Arial (Windows)
+%   This template uses Helvetica (pdflatex fallback). For Neue Haas Grotesk,
+%   compile with XeLaTeX and install the font, then uncomment the fontspec block below.
 %
 % Usage:
 %   pandoc input.md -o output.tex --template=template.tex --standalone
@@ -10,10 +16,17 @@
 % --- Encoding and fonts ---
 \usepackage[T1]{fontenc}
 \usepackage[utf8]{inputenc}
-\usepackage{helvet}                    % Helvetica (Arial-like) — common in AuGov docs
+\usepackage{helvet}                    % Helvetica — DTA brand fallback (pdflatex)
 \renewcommand{\familydefault}{\sfdefault}
 % Monospace: use default Computer Modern typewriter (always available)
 % For better monospace, install texlive-fonts-extra and use beramono or inconsolata
+%
+% --- Neue Haas Grotesk (XeLaTeX/LuaLaTeX only) ---
+% Uncomment these and comment out helvet above if you have the font installed:
+% \usepackage{fontspec}
+% \setmainfont{Neue Haas Grotesk Text}
+% \setsansfont{Neue Haas Grotesk Display}
+% \setmonofont{Menlo}[Scale=0.85]
 
 % --- Page geometry ---
 \usepackage[a4paper, top=3cm, bottom=3cm, left=2.5cm, right=2.5cm]{geometry}
@@ -24,8 +37,9 @@
 
 % --- Colours ---
 \usepackage{xcolor}
-\definecolor{dtanavy}{HTML}{232946}     % Placeholder DTA navy — replace with brand colour
-\definecolor{dtagrey}{HTML}{4A4A4A}     % Body text grey
+% DTA brand colours (from brand guidelines)
+\definecolor{dtanavy}{HTML}{2C3E5D}     % DTA navy — headings, logo lockup
+\definecolor{dtabody}{HTML}{414141}     % DTA body text — #414141 per brand guidelines
 \definecolor{codebackground}{HTML}{F5F5F5}
 \definecolor{ruleblue}{HTML}{2E5090}    % Horizontal rule accent
 
@@ -133,7 +147,7 @@
 \renewenvironment{quote}{%
   \par\medskip\noindent
   \hspace{0.5cm}\begin{minipage}{\dimexpr\textwidth-1cm}
-  \itshape\color{dtagrey}
+  \itshape\color{dtabody}
 }{%
   \end{minipage}\par\medskip
 }
@@ -161,6 +175,9 @@
 % --- Graphics (for logo placeholder) ---
 \usepackage{graphicx}
 
+% --- Body text colour ---
+\color{dtabody}
+
 % =====================================================================
 % DOCUMENT
 % =====================================================================
@@ -171,14 +188,9 @@
 \thispagestyle{fancy}
 \vspace*{1cm}
 
-% DTA Logo placeholder — replace with \includegraphics[width=6cm]{dta-logo.pdf}
+% DTA strip crest — Commonwealth Coat of Arms with agency lockup
 \noindent
-\colorbox{dtanavy}{%
-  \parbox[c][2cm][c]{6cm}{%
-    \centering\color{white}\sffamily\large\bfseries
-    [DTA Logo]%
-  }%
-}
+\includegraphics[height=2.2cm]{../dta_strip_crest.png}
 
 \vspace{2cm}
 
@@ -212,7 +224,7 @@ $endif$
 
 \vfill
 
-{\small\color{dtagrey}
+{\small\color{dtabody}
 $if(disclaimer)$$disclaimer$$else$This is a discussion paper. It presents a threat model and preliminary analysis, not final guidance. Comments and contributions are welcome.$endif$
 }
 
