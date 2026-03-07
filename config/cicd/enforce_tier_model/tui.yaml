@@ -1,9 +1,4 @@
 allow_hits:
-- key: tui/screens/explain_screen.py:R6:ExplainScreen:_load_node_state:fp=13ca4fd8120e8016
-  owner: architecture
-  reason: Silent recovery with explicit error handling path
-  safety: Code reviewed - legitimate pattern
-  expires: '2026-05-02'
 - key: tui/screens/explain_screen.py:R5:ExplainScreen:load:fp=1174a6f4e45757c6
   owner: architecture
   reason: AST/type checking - required for safe parsing or discriminated unions

@@ -832,7 +832,7 @@ def build_execution_graph(
             seen_types: dict[str, tuple[str, bool, str]] = {}  # field → (type, required, first_branch)
             all_observed = False
             for branch_name, schema_dict in branch_to_schema.items():
-                if schema_dict.get("mode") == "observed":
+                if schema_dict["mode"] == "observed":
                     all_observed = True
                     break
                 fields_list = schema_dict.get("fields")

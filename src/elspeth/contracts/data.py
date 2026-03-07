@@ -222,10 +222,13 @@ def _type_name(t: Any) -> str:
     if origin is not None:
         # Generic type - str() gives readable form like "list[str]" or "int | None"
         return str(t)
-    # For simple types, use __name__ if available
-    if hasattr(t, "__name__"):
+    # For simple types, use __name__ directly.
+    # Falls back to str(t) for typing module specials (e.g. typing.Any)
+    # that lack __name__.
+    try:
         return str(t.__name__)
-    return str(t)
+    except AttributeError:
+        return str(t)
 
 
 def _is_union_type(t: Any) -> bool:

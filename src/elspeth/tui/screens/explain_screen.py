@@ -250,40 +250,28 @@ class ExplainScreen:
             NodeStateInfo with at minimum node_id, plugin_name, node_type,
             or None if node not found
         """
-        try:
-            recorder = LandscapeRecorder(db)
-            # Query by composite PK (node_id, run_id) - no post-hoc validation needed
-            node = recorder.get_node(node_id, run_id)
+        recorder = LandscapeRecorder(db)
+        # Query by composite PK (node_id, run_id) - no post-hoc validation needed
+        node = recorder.get_node(node_id, run_id)
 
-            if node is None:
-                return None
-
-            # Build result with required fields - direct access, crash on missing
-            # node_type is an enum, convert to string for display
-            result: NodeStateInfo = {
-                "node_id": node.node_id,
-                "plugin_name": node.plugin_name,
-                "node_type": node.node_type.value,
-            }
-
-            # Note: Full node state requires a token_id to look up execution state.
-            # When selecting a node in the tree (not a specific token), we only
-            # have the registered node info. Token-specific state (state_id,
-            # token_id, status, timing, hashes, errors) would be populated when
-            # the user selects a specific token-node combination.
-
-            return result
-        except _RECOVERABLE_DB_ERRORS as e:
-            # Database connection/availability errors - return None to show "not found"
-            # Other exceptions (bugs in our code) should crash - don't hide them
-            logger.warning(
-                "Database error loading node state",
-                run_id=run_id,
-                node_id=node_id,
-                error=str(e),
-                error_type=type(e).__name__,
-            )
+        if node is None:
             return None
+
+        # Build result with required fields - direct access, crash on missing
+        # node_type is an enum, convert to string for display
+        result: NodeStateInfo = {
+            "node_id": node.node_id,
+            "plugin_name": node.plugin_name,
+            "node_type": node.node_type.value,
+        }
+
+        # Note: Full node state requires a token_id to look up execution state.
+        # When selecting a node in the tree (not a specific token), we only
+        # have the registered node info. Token-specific state (state_id,
+        # token_id, status, timing, hashes, errors) would be populated when
+        # the user selects a specific token-node combination.
+
+        return result
 
     def render(self) -> str:
         """Render the screen as text.

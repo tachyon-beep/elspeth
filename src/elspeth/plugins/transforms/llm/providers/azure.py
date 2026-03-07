@@ -167,21 +167,24 @@ class AzureLLMProvider:
 
             # Extract finish_reason from raw_response.
             # raw_response is the Azure SDK's deserialized API response (Tier 3
-            # external boundary — SDK structure may change between versions).
+            # external boundary — validate structure once, then direct access).
             finish_reason = None
             if response.raw_response is not None:
-                choices = response.raw_response.get("choices", [])
-                if choices:
-                    raw_fr = choices[0].get("finish_reason")
-                    if raw_fr is not None:
-                        finish_reason = parse_finish_reason(str(raw_fr))
-                else:
-                    # Missing choices means we can't detect truncation.
-                    # Log as warning with enough context to investigate.
+                if "choices" not in response.raw_response:
                     logger.warning(
                         "Azure SDK response missing choices — finish_reason unavailable, truncation undetectable",
                         raw_response_keys=list(response.raw_response.keys()),
                     )
+                else:
+                    choices = response.raw_response["choices"]
+                    if not choices:
+                        logger.warning(
+                            "Azure SDK response has empty choices — finish_reason unavailable",
+                        )
+                    else:
+                        raw_fr = choices[0].get("finish_reason")
+                        if raw_fr is not None:
+                            finish_reason = parse_finish_reason(str(raw_fr))
             else:
                 logger.warning(
                     "Azure SDK response has no raw_response — finish_reason unavailable, truncation undetectable",

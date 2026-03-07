@@ -194,11 +194,6 @@ allow_hits:
   reason: Optional gate connection route label lookup for coalesce provenance wiring
   safety: "Missing lookup returns None \u2014 handled explicitly by conditional check"
   expires: '2026-03-13'
-- key: core/dag/builder.py:R1:build_execution_graph:fp=f6fa12a712d944bf
-  owner: architecture
-  reason: Optional gate connection route label lookup for coalesce provenance wiring
-  safety: "Missing lookup returns None \u2014 handled explicitly by conditional check"
-  expires: '2026-03-13'
 - key: core/dag/builder.py:R1:build_execution_graph:fp=a95c870f790f30df
   owner: architecture
   reason: Optional gate connection route label lookup for coalesce provenance wiring

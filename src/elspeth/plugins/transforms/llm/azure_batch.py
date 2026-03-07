@@ -786,8 +786,8 @@ class AzureBatchLLMTransform(BaseTransform):
             response_data={
                 "batch_id": batch.id,
                 "status": batch.status,
-                "output_file_id": getattr(batch, "output_file_id", None),  # Tier 3: SDK attr may vary by version
-                "error_file_id": getattr(batch, "error_file_id", None),  # Tier 3: SDK attr may vary by version
+                "output_file_id": batch.output_file_id,
+                "error_file_id": batch.error_file_id,
             },
             latency_ms=retrieve_latency,
             provider="azure",
@@ -817,7 +817,7 @@ class AzureBatchLLMTransform(BaseTransform):
                 "batch_id": batch_id,
             }
             error_message = None
-            if hasattr(batch, "errors") and batch.errors:  # Tier 3: SDK errors attr is optional
+            if batch.errors:
                 error_info["errors"] = [{"message": e.message, "error_type": e.code} for e in batch.errors.data]
                 error_message = "; ".join(e.message for e in batch.errors.data)
 
