@@ -494,11 +494,12 @@ class _ExpressionEvaluator(ast.NodeVisitor):
     def visit_Dict(self, node: ast.Dict) -> Any:
         """Evaluate dict literals."""
         try:
-            return {
-                self.visit(k): self.visit(v)
-                for k, v in zip(node.keys, node.values, strict=True)
-                if k is not None  # Handle **spread (not allowed, but be safe)
-            }
+            keys: list[ast.expr] = []
+            for k in node.keys:
+                if k is None:
+                    raise ExpressionSecurityError("Dict spread (**) reached evaluator — validation bypass detected")
+                keys.append(k)
+            return {self.visit(k): self.visit(v) for k, v in zip(keys, node.values, strict=True)}
         except TypeError as e:
             # Unhashable key type in dict literal
             msg = f"cannot create dict literal: {e}"

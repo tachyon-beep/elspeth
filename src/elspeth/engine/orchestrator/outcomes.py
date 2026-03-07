@@ -116,6 +116,8 @@ def accumulate_row_outcomes(
         elif result.outcome == RowOutcome.BUFFERED:
             # Passthrough mode buffered token
             counters.rows_buffered += 1
+        else:
+            raise OrchestrationInvariantError(f"Unhandled RowOutcome variant: {result.outcome!r}. Token: {result.token}")
 
 
 def handle_coalesce_timeouts(

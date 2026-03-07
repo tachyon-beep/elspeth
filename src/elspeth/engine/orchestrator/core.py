@@ -514,37 +514,44 @@ class Orchestrator:
         step = sink_step
 
         for sink_name, token_outcome_pairs in pending_tokens.items():
-            if token_outcome_pairs and sink_name in config.sinks:
-                sink = config.sinks[sink_name]
-                sink_node_id = sink_id_map[SinkName(sink_name)]
+            if not token_outcome_pairs:
+                continue
+            if sink_name not in config.sinks:
+                raise OrchestrationInvariantError(
+                    f"Sink '{sink_name}' in pending_tokens not found in config.sinks. "
+                    f"Available: {sorted(config.sinks.keys())}. "
+                    f"This indicates a token routing bug."
+                )
+            sink = config.sinks[sink_name]
+            sink_node_id = sink_id_map[SinkName(sink_name)]
 
-                # Group tokens by pending_outcome for separate write() calls
-                # (sink_executor.write() takes a single PendingOutcome for all tokens in a batch)
-                # PendingOutcome carries error_hash for QUARANTINED tokens
-                def pending_sort_key(pair: tuple[TokenInfo, PendingOutcome | None]) -> tuple[bool, str, str]:
-                    pending = pair[1]
-                    if pending is None:
-                        return (True, "", "")  # None sorts first
-                    return (False, pending.outcome.value, pending.error_hash or "")
+            # Group tokens by pending_outcome for separate write() calls
+            # (sink_executor.write() takes a single PendingOutcome for all tokens in a batch)
+            # PendingOutcome carries error_hash for QUARANTINED tokens
+            def pending_sort_key(pair: tuple[TokenInfo, PendingOutcome | None]) -> tuple[bool, str, str]:
+                pending = pair[1]
+                if pending is None:
+                    return (True, "", "")  # None sorts first
+                return (False, pending.outcome.value, pending.error_hash or "")
 
-                sorted_pairs = sorted(token_outcome_pairs, key=pending_sort_key)
+            sorted_pairs = sorted(token_outcome_pairs, key=pending_sort_key)
 
-                # Build on_token_written callback (or None for resume)
-                on_token_written: Callable[[TokenInfo], None] | None = None
-                if on_token_written_factory is not None:
-                    on_token_written = on_token_written_factory(sink_node_id)
+            # Build on_token_written callback (or None for resume)
+            on_token_written: Callable[[TokenInfo], None] | None = None
+            if on_token_written_factory is not None:
+                on_token_written = on_token_written_factory(sink_node_id)
 
-                for pending_outcome, group in groupby(sorted_pairs, key=lambda x: x[1]):
-                    group_tokens = [token for token, _ in group]
-                    sink_executor.write(
-                        sink=sink,
-                        tokens=group_tokens,
-                        ctx=ctx,
-                        step_in_pipeline=step,
-                        sink_name=sink_name,
-                        pending_outcome=pending_outcome,
-                        on_token_written=on_token_written,
-                    )
+            for pending_outcome, group in groupby(sorted_pairs, key=lambda x: x[1]):
+                group_tokens = [token for token, _ in group]
+                sink_executor.write(
+                    sink=sink,
+                    tokens=group_tokens,
+                    ctx=ctx,
+                    step_in_pipeline=step,
+                    sink_name=sink_name,
+                    pending_outcome=pending_outcome,
+                    on_token_written=on_token_written,
+                )
 
     def _cleanup_plugins(
         self,

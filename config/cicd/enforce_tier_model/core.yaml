@@ -263,37 +263,37 @@ allow_hits:
   reason: "Framework boundary \u2014 urllib.parse query values can be str or list[str] depending on parameter multiplicity"
   safety: Disambiguates URL query parsing output before type coercion; no silent data loss
   expires: '2026-05-02'
-- key: core/landscape/exporter.py:R1:LandscapeExporter:_iter_records:fp=bdf70d40ac5a290f
+- key: core/landscape/exporter.py:R1:LandscapeExporter:_iter_records:fp=5066e6cacd103350
   owner: P2-2026-02-02-76r
   reason: Sparse lookup - not all rows have tokens (batch export uses pre-loaded dicts)
-- key: core/landscape/exporter.py:R1:LandscapeExporter:_iter_records:fp=1fec338bee7008df
+- key: core/landscape/exporter.py:R1:LandscapeExporter:_iter_records:fp=e6f7a4e3397b6386
   owner: P2-2026-02-02-76r
   reason: Sparse lookup - not all rows have tokens (batch export uses pre-loaded dicts)
-- key: core/landscape/exporter.py:R1:LandscapeExporter:_iter_records:fp=7340cf61eddf334b
+- key: core/landscape/exporter.py:R1:LandscapeExporter:_iter_records:fp=9c638c2bf812cd37
   owner: P2-2026-02-02-76r
   reason: Sparse lookup - not all rows have tokens (batch export uses pre-loaded dicts)
-- key: core/landscape/exporter.py:R1:LandscapeExporter:_iter_records:fp=de009c879caf27c1
+- key: core/landscape/exporter.py:R1:LandscapeExporter:_iter_records:fp=5094d4f310eb8139
   owner: P2-2026-02-02-76r
   reason: Sparse lookup - not all rows have tokens (batch export uses pre-loaded dicts)
-- key: core/landscape/exporter.py:R1:LandscapeExporter:_iter_records:fp=9db8144e76cb6acd
+- key: core/landscape/exporter.py:R1:LandscapeExporter:_iter_records:fp=9c97854e42a1da2d
   owner: P2-2026-02-02-76r
   reason: Sparse lookup - not all rows have tokens (batch export uses pre-loaded dicts)
-- key: core/landscape/exporter.py:R5:LandscapeExporter:_iter_records:fp=d60dea61ce124284
+- key: core/landscape/exporter.py:R5:LandscapeExporter:_iter_records:fp=ee8ae6e8e59e3c39
   owner: P2-2026-02-02-76r
   reason: "Discriminated union \u2014 NodeState is union of Open/Pending/Completed/Failed with different fields"
-- key: core/landscape/exporter.py:R5:LandscapeExporter:_iter_records:fp=39e1befe435c5eee
+- key: core/landscape/exporter.py:R5:LandscapeExporter:_iter_records:fp=342831d6cc091d3b
   owner: P2-2026-02-02-76r
   reason: "Discriminated union \u2014 NodeState is union of Open/Pending/Completed/Failed with different fields"
-- key: core/landscape/exporter.py:R5:LandscapeExporter:_iter_records:fp=7588f8e11af4b6fd
+- key: core/landscape/exporter.py:R5:LandscapeExporter:_iter_records:fp=005d1f4a9099557b
   owner: P2-2026-02-02-76r
   reason: "Discriminated union \u2014 NodeState is union of Open/Pending/Completed/Failed with different fields"
-- key: core/landscape/exporter.py:R1:LandscapeExporter:_iter_records:fp=f9e16e5b0417705a
+- key: core/landscape/exporter.py:R1:LandscapeExporter:_iter_records:fp=a7b76f22649d9cce
   owner: P2-2026-02-02-76r
   reason: Sparse lookup - not all rows have tokens (batch export uses pre-loaded dicts)
-- key: core/landscape/exporter.py:R1:LandscapeExporter:_iter_records:fp=152741376f77db35
+- key: core/landscape/exporter.py:R1:LandscapeExporter:_iter_records:fp=20984f8699e0e952
   owner: P2-2026-02-02-76r
   reason: Sparse lookup - not all rows have tokens (batch export uses pre-loaded dicts)
-- key: core/landscape/exporter.py:R1:LandscapeExporter:_iter_records:fp=11915b078315fcd0
+- key: core/landscape/exporter.py:R1:LandscapeExporter:_iter_records:fp=86a2391e76f67a96
   owner: P2-2026-02-02-76r
   reason: Sparse lookup - not all rows have tokens (batch export uses pre-loaded dicts)
 - key: core/landscape/data_flow_repository.py:R6:DataFlowRepository:create_row:fp=258b3bec3eb551dd

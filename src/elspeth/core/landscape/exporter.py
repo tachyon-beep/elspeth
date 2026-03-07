@@ -29,6 +29,7 @@ from elspeth.contracts import (
     TokenOutcome,
     TokenParent,
 )
+from elspeth.contracts.errors import AuditIntegrityError
 from elspeth.core.canonical import canonical_json
 from elspeth.core.landscape.database import LandscapeDB
 from elspeth.core.landscape.recorder import LandscapeRecorder
@@ -87,6 +88,16 @@ class LandscapeExporter:
         self._db = db
         self._recorder = LandscapeRecorder(db)
         self._signing_key = signing_key
+
+    @staticmethod
+    def _parse_tier1_json(raw_json: str, field_name: str, context: str) -> Any:
+        """Parse JSON from Tier 1 audit data, crashing with context on corruption."""
+        try:
+            return json.loads(raw_json)
+        except json.JSONDecodeError as exc:
+            raise AuditIntegrityError(
+                f"Corrupt {field_name} for {context}: database corruption (Tier 1 violation). Parse error: {exc}"
+            ) from exc
 
     def _sign_record(self, record: dict[str, Any]) -> str:
         """Compute HMAC-SHA256 signature for a record.
@@ -192,7 +203,7 @@ class LandscapeExporter:
             "canonical_version": run.canonical_version,
             "config_hash": run.config_hash,
             # Full resolved settings for audit trail portability (not just hash)
-            "settings": json.loads(run.settings_json),
+            "settings": self._parse_tier1_json(run.settings_json, "settings_json", f"run {run_id}"),
             "reproducibility_grade": run.reproducibility_grade,
         }
 
@@ -223,7 +234,7 @@ class LandscapeExporter:
                 "determinism": node.determinism.value,
                 "config_hash": node.config_hash,
                 # Full resolved config for audit trail portability (not just hash)
-                "config": json.loads(node.config_json),
+                "config": self._parse_tier1_json(node.config_json, "config_json", f"node {node.node_id} in run {run_id}"),
                 "schema_hash": node.schema_hash,
                 "schema_mode": node.schema_mode,
                 "schema_fields": node.schema_fields,

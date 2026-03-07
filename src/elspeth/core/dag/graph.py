@@ -1320,6 +1320,8 @@ class ExecutionGraph:
         """
         incoming = list(self._graph.in_edges(coalesce_id, data=True))
 
+        if not incoming:
+            raise GraphValidationError(f"Coalesce '{coalesce_id}' has no incoming edges — this is a graph construction bug")
         if len(incoming) < 2:
             return  # Degenerate case (1 branch) - always compatible
 

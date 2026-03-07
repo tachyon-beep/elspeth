@@ -1008,6 +1008,12 @@ class CoalesceExecutor:
                             failure_reason="all_branches_lost",
                         )
                     )
+                else:
+                    raise OrchestrationInvariantError(
+                        f"Pending coalesce entry for {coalesce_name!r} (row {_row_id}) "
+                        f"has zero branches and zero lost branches — "
+                        f"this is a coalesce state invariant violation"
+                    )
 
             elif settings.policy == "quorum":
                 if settings.quorum_count is None:
