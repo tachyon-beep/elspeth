@@ -181,8 +181,9 @@ RULES = {
     },
     "R3": {
         "name": "hasattr",
-        "description": "hasattr() can hide missing attribute bugs by branching around them",
-        "remediation": "Use protocols, enums, or fix the type contract instead of runtime attribute checking",
+        "description": "hasattr() is banned — use isinstance, protocols, or try/except AttributeError",
+        "remediation": "Replace with isinstance() for type checks, try/except AttributeError for attribute probing, or protocols for structural typing",
+        "banned": True,
     },
     "R4": {
         "name": "broad-except",
@@ -694,10 +695,21 @@ def scan_layer_imports_directory(
 # =============================================================================
 
 
+_BANNED_RULES = frozenset(rule_id for rule_id, rule_def in RULES.items() if rule_def.get("banned"))
+
+
 def _parse_allow_hits(data: dict[str, Any], source_file: str = "") -> list[AllowlistEntry]:
     """Parse allow_hits entries from a YAML data dict."""
     entries: list[AllowlistEntry] = []
     for item in data.get("allow_hits", []):
+        key = item.get("key", "")
+        parts = key.split(":")
+        if len(parts) >= 2 and parts[1] in _BANNED_RULES:
+            print(
+                f"Error: allow_hits entry uses banned rule {parts[1]} (cannot be allowlisted): {key}",
+                file=sys.stderr,
+            )
+            sys.exit(1)
         expires_str = item.get("expires")
         expires_date = None
         if expires_str:
@@ -726,6 +738,14 @@ def _parse_per_file_rules(data: dict[str, Any], source_file: str = "") -> list[P
     """Parse per_file_rules entries from a YAML data dict."""
     per_file_rules: list[PerFileRule] = []
     for item in data.get("per_file_rules", []):
+        banned_in_entry = set(item.get("rules", [])) & _BANNED_RULES
+        if banned_in_entry:
+            print(
+                f"Error: per_file_rules entry for '{item.get('pattern', '?')}' uses banned rule(s) "
+                f"{banned_in_entry} (cannot be allowlisted)",
+                file=sys.stderr,
+            )
+            sys.exit(1)
         expires_str = item.get("expires")
         expires_date = None
         if expires_str:
@@ -1021,10 +1041,10 @@ def run_check(args: argparse.Namespace) -> int:
         all_findings.extend(layer_v)
         all_tc_findings.extend(layer_tc)
 
-    # Filter out allowlisted findings
+    # Filter out allowlisted findings (banned rules are never suppressible)
     violations: list[Finding] = []
     for finding in all_findings:
-        if allowlist.match(finding) is None:
+        if finding.rule_id in _BANNED_RULES or allowlist.match(finding) is None:
             violations.append(finding)
 
     # Filter TYPE_CHECKING findings through allowlist (unmatched remain as warnings)

@@ -994,13 +994,14 @@ class AzureBatchLLMTransform(BaseTransform):
         # Azure Batch API puts per-request errors in a separate error_file_id
         # Tier 3 boundary: SDK must expose this attribute — None = no errors,
         # missing attribute = SDK version mismatch (crash, don't silently skip)
-        if not hasattr(batch, "error_file_id"):
+        try:
+            error_file_id = batch.error_file_id
+        except AttributeError:
             raise RuntimeError(
                 f"Azure batch object missing 'error_file_id' attribute. "
                 f"Ensure Azure OpenAI SDK version >= 1.14.0 supports batch error files. "
                 f"batch_id={batch.id}"
-            )
-        error_file_id = batch.error_file_id
+            ) from None
         if error_file_id is not None:
             error_download_request = {
                 "operation": "files.content",

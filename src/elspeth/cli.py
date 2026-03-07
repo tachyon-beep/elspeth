@@ -1073,7 +1073,7 @@ def validate(
         _format_validation_error(
             title="YAML Syntax Error",
             message=f"Failed to parse {settings_path.name}",
-            details=[str(e.problem)] if hasattr(e, "problem") else None,
+            details=[str(e.problem)] if e.problem is not None else None,
             hint="Check for unclosed brackets, incorrect indentation, or invalid characters.",
         )
         raise typer.Exit(1) from None

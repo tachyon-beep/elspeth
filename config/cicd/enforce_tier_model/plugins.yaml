@@ -3,7 +3,6 @@ per_file_rules:
   rules:
   - R1
   - R2
-  - R3
   - R4
   - R6
   - R9
@@ -25,7 +24,6 @@ per_file_rules:
   rules:
   - R1
   - R2
-  - R3
   - R4
   - R6
   - R9
@@ -41,7 +39,6 @@ per_file_rules:
   rules:
   - R1
   - R2
-  - R3
   - R4
   - R6
   - R9
