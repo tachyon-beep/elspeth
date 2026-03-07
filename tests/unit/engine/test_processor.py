@@ -1657,6 +1657,48 @@ class TestDrainWorkQueueIterationGuard:
 
 
 # =============================================================================
+# _process_single_token: Inner Traversal Cycle Guard
+# =============================================================================
+
+
+class TestInnerTraversalCycleGuard:
+    """Tests for the inner_iterations cycle guard in _process_single_token."""
+
+    def test_cycle_in_node_to_next_raises(self) -> None:
+        """Cycle in node_to_next map triggers inner traversal iteration guard.
+
+        Uses structural nodes (not in node_to_plugin) to avoid DB interactions
+        during traversal — structural nodes are traversed but not executed.
+        """
+        _db, recorder = _make_recorder()
+
+        # Build a topology with a cycle of structural nodes: s-1 -> s-2 -> s-1
+        s1 = NodeID("s-1")
+        s2 = NodeID("s-2")
+
+        processor = _make_processor(
+            recorder,
+            node_to_plugin={},  # no plugin nodes — all structural
+            node_to_next={
+                NodeID("source-0"): s1,
+                s1: s2,
+                s2: s1,  # cycle back
+            },
+            node_step_map={NodeID("source-0"): 0, s1: 1, s2: 2},
+            first_transform_node_id=None,
+        )
+        ctx = make_context(landscape=recorder)
+        token = make_token_info(data={"value": 1})
+
+        with pytest.raises(OrchestrationInvariantError, match=r"Inner traversal exceeded.*Possible cycle"):
+            processor._process_single_token(
+                token=token,
+                ctx=ctx,
+                current_node_id=s1,
+            )
+
+
+# =============================================================================
 # _execute_transform_with_retry: No retry manager
 # =============================================================================
 

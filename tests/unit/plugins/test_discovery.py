@@ -99,6 +99,85 @@ class MissingNameSource(BaseSource):
             discover_plugins_in_directory(tmp_path, BaseSource)
 
 
+class TestDiscoverPluginsEdgeCases:
+    """Test edge cases in plugin discovery."""
+
+    def test_nonexistent_directory_raises_file_not_found(self, tmp_path: Path) -> None:
+        """discover_plugins_in_directory raises FileNotFoundError for non-existent directory."""
+        bogus_dir = tmp_path / "does_not_exist"
+
+        with pytest.raises(FileNotFoundError, match="Plugin directory does not exist"):
+            discover_plugins_in_directory(bogus_dir, BaseSource)
+
+    def test_non_string_name_attribute_raises(self, tmp_path: Path) -> None:
+        """Plugin with non-string name attribute raises ValueError."""
+        plugin_file = tmp_path / "bad_name.py"
+        plugin_file.write_text("""
+from elspeth.plugins.infrastructure.base import BaseSource
+
+class BadNameSource(BaseSource):
+    name = 42  # Not a string!
+    output_schema = None
+    node_id = None
+    determinism = "deterministic"
+    plugin_version = "1.0.0"
+
+    def __init__(self, config):
+        self.config = config
+        self.on_success = "continue"
+        self._on_validation_failure = "discard"
+
+    def load(self, ctx):
+        return iter([])
+
+    def close(self):
+        pass
+
+    def on_start(self, ctx):
+        pass
+
+    def on_complete(self, ctx):
+        pass
+""")
+
+        with pytest.raises(ValueError, match="invalid 'name' value"):
+            discover_plugins_in_directory(tmp_path, BaseSource)
+
+    def test_empty_name_attribute_raises(self, tmp_path: Path) -> None:
+        """Plugin with empty-after-strip name attribute raises ValueError."""
+        plugin_file = tmp_path / "empty_name.py"
+        plugin_file.write_text("""
+from elspeth.plugins.infrastructure.base import BaseSource
+
+class EmptyNameSource(BaseSource):
+    name = "   "  # Whitespace only, empty after strip
+    output_schema = None
+    node_id = None
+    determinism = "deterministic"
+    plugin_version = "1.0.0"
+
+    def __init__(self, config):
+        self.config = config
+        self.on_success = "continue"
+        self._on_validation_failure = "discard"
+
+    def load(self, ctx):
+        return iter([])
+
+    def close(self):
+        pass
+
+    def on_start(self, ctx):
+        pass
+
+    def on_complete(self, ctx):
+        pass
+""")
+
+        with pytest.raises(ValueError, match="invalid 'name' value"):
+            discover_plugins_in_directory(tmp_path, BaseSource)
+
+
 class TestDiscoverAllPlugins:
     """Test discovery across all plugin directories."""
 

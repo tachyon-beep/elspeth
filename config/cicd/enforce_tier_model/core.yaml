@@ -1,10 +1,15 @@
 per_file_rules:
 - pattern: core/expression_parser.py
   rules:
-  - R5
   - R3
-  reason: AST-based expression parser requires isinstance() for node type dispatch and try/except for unknown AST node types
+  reason: AST-based expression parser requires try/except for unknown AST node types
   expires: null
+- pattern: core/expression_parser.py
+  rules:
+  - R5
+  reason: AST-based expression parser requires isinstance() for node type dispatch
+  expires: null
+  max_hits: 30
 - pattern: core/templates.py
   rules:
   - R5
@@ -14,10 +19,15 @@ per_file_rules:
 - pattern: core/config.py
   rules:
   - R1
-  - R5
   - R6
-  reason: Configuration loading parses user YAML (Tier 3) - defensive type checking and optional field access required
+  reason: Configuration loading parses user YAML (Tier 3) - defensive optional field access required
   expires: null
+- pattern: core/config.py
+  rules:
+  - R5
+  reason: Type discrimination for Pydantic validator dispatch and config parsing
+  expires: null
+  max_hits: 42
 - pattern: core/security/*
   rules:
   - R1

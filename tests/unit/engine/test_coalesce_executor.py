@@ -2002,3 +2002,470 @@ class TestSelectBranchNotArrivedFailure:
         assert outcome.held is False
         assert outcome.failure_reason == "select_branch_not_arrived"
         assert outcome.outcomes_recorded is True
+
+
+# ===========================================================================
+# Checkpoint/restore round-trip (elspeth-c44cdc5ffe)
+# ===========================================================================
+
+
+class TestCheckpointRestoreRoundTrip:
+    """Verify that partial coalesce state survives checkpoint/restore and
+    the restored executor can complete the merge successfully.
+
+    Bug: elspeth-c44cdc5ffe — Coalesce checkpoint/restore round-trip not tested.
+    """
+
+    def test_partial_accept_checkpoint_restore_then_merge(self):
+        """Accept branch a → checkpoint → restore to new executor → accept branch b → merge succeeds."""
+        executor, _recorder, _tm, _clock = _make_executor()
+        s = _settings(branches=["a", "b"], policy="require_all")
+        executor.register_coalesce(s, "node_1")
+
+        # Accept first branch
+        outcome_a = executor.accept(_make_token(branch_name="a", token_id="t1"), "merge")
+        assert outcome_a.held is True
+
+        # Checkpoint
+        checkpoint = executor.get_checkpoint_state()
+        assert len(checkpoint.pending) == 1
+        assert checkpoint.pending[0].coalesce_name == "merge"
+        assert checkpoint.pending[0].row_id == "row_1"
+        assert "a" in checkpoint.pending[0].branches
+
+        # Restore to a fresh executor
+        executor2, _recorder2, _tm2, _clock2 = _make_executor()
+        executor2.register_coalesce(s, "node_1")
+        executor2.restore_from_checkpoint(checkpoint)
+
+        # Verify pending state was restored
+        assert ("merge", "row_1") in executor2._pending
+        pending = executor2._pending[("merge", "row_1")]
+        assert "a" in pending.branches
+        assert pending.branches["a"].token.token_id == "t1"
+        assert pending.branches["a"].token.row_data.to_dict() == {"amount": 100}
+
+        # Accept second branch on restored executor — should trigger merge
+        outcome_b = executor2.accept(
+            _make_token(branch_name="b", token_id="t2", data={"amount": 200}),
+            "merge",
+        )
+        assert outcome_b.held is False
+        assert outcome_b.merged_token is not None
+        assert outcome_b.failure_reason is None
+
+    def test_lost_branches_survive_checkpoint_restore(self):
+        """lost_branches recorded before checkpoint must be present after restore."""
+        executor, *_ = _make_executor()
+        s = _settings(branches=["a", "b", "c"], policy="best_effort", timeout_seconds=60.0)
+        executor.register_coalesce(s, "node_1")
+
+        # Accept one branch and lose another
+        executor.accept(_make_token(branch_name="a", token_id="t1"), "merge")
+        executor.notify_branch_lost("merge", "row_1", "b", "upstream_error")
+
+        # Verify lost_branches in pending
+        pending = executor._pending[("merge", "row_1")]
+        assert pending.lost_branches == {"b": "upstream_error"}
+
+        # Checkpoint
+        checkpoint = executor.get_checkpoint_state()
+        assert checkpoint.pending[0].lost_branches == {"b": "upstream_error"}
+
+        # Restore to fresh executor
+        executor2, *_ = _make_executor()
+        executor2.register_coalesce(s, "node_1")
+        executor2.restore_from_checkpoint(checkpoint)
+
+        # lost_branches must survive
+        restored_pending = executor2._pending[("merge", "row_1")]
+        assert restored_pending.lost_branches == {"b": "upstream_error"}
+
+        # Losing the last remaining branch should trigger merge (all accounted for)
+        outcome = executor2.notify_branch_lost("merge", "row_1", "c", "timeout")
+        assert outcome is not None
+        # arrived=1 + lost=2 = 3 = total_branches → merge with the one arrived branch
+        assert outcome.merged_token is not None
+
+    def test_lost_branches_checkpoint_then_accept_remaining_merges(self):
+        """After restoring lost_branches, accepting the remaining branch completes the merge."""
+        executor, *_ = _make_executor()
+        s = _settings(branches=["a", "b", "c"], policy="best_effort", timeout_seconds=60.0)
+        executor.register_coalesce(s, "node_1")
+
+        # Lose branch a, accept branch b
+        executor.notify_branch_lost("merge", "row_1", "a", "error_routed")
+        executor.accept(_make_token(branch_name="b", token_id="t1"), "merge")
+
+        # Checkpoint with 1 lost, 1 arrived, 1 pending
+        checkpoint = executor.get_checkpoint_state()
+
+        # Restore
+        executor2, *_ = _make_executor()
+        executor2.register_coalesce(s, "node_1")
+        executor2.restore_from_checkpoint(checkpoint)
+
+        # Accept remaining branch c — all 3 accounted for (1 lost + 2 arrived)
+        outcome = executor2.accept(
+            _make_token(branch_name="c", token_id="t2", data={"amount": 300}),
+            "merge",
+        )
+        assert outcome.held is False
+        assert outcome.merged_token is not None
+
+    def test_checkpoint_preserves_arrival_time_offsets(self):
+        """Branch arrival time offsets survive round-trip for correct timeout evaluation."""
+        clock = MockClock(start=100.0)
+        executor, *_ = _make_executor(clock=clock)
+        s = _settings(branches=["a", "b", "c"], policy="require_all", timeout_seconds=30.0)
+        executor.register_coalesce(s, "node_1")
+
+        # Accept branch a at t=100
+        executor.accept(_make_token(branch_name="a", token_id="t1"), "merge")
+
+        # Advance 10s, accept branch b at t=110
+        clock.advance(10.0)
+        executor.accept(_make_token(branch_name="b", token_id="t2"), "merge")
+
+        # Checkpoint at t=110
+        checkpoint = executor.get_checkpoint_state()
+
+        # Verify offsets in checkpoint
+        branches = checkpoint.pending[0].branches
+        assert branches["a"].arrival_offset_seconds == pytest.approx(0.0)
+        assert branches["b"].arrival_offset_seconds == pytest.approx(10.0)
+
+        # Restore at t=200 (different clock)
+        clock2 = MockClock(start=200.0)
+        executor2, *_ = _make_executor(clock=clock2)
+        executor2.register_coalesce(s, "node_1")
+        executor2.restore_from_checkpoint(checkpoint)
+
+        # The restored pending should maintain the relative offset between branches
+        restored = executor2._pending[("merge", "row_1")]
+        arrival_a = restored.branches["a"].arrival_time
+        arrival_b = restored.branches["b"].arrival_time
+        assert (arrival_b - arrival_a) == pytest.approx(10.0)
+
+    def test_version_mismatch_raises_audit_integrity_error(self):
+        """Restoring from a checkpoint with wrong version must raise AuditIntegrityError."""
+        from elspeth.contracts.coalesce_checkpoint import CoalesceCheckpointState
+
+        executor, *_ = _make_executor()
+        executor.register_coalesce(_settings(), "node_1")
+
+        state = CoalesceCheckpointState(
+            version="99.99",
+            pending=(),
+            completed_keys=(),
+        )
+        with pytest.raises(AuditIntegrityError, match="Incompatible coalesce checkpoint version"):
+            executor.restore_from_checkpoint(state)
+
+    def test_checkpoint_row_data_survives_round_trip(self):
+        """Row data and schema contract must be identical after checkpoint/restore."""
+        contract = _make_contract(
+            [
+                make_field("amount", original_name="amount", python_type=int, required=True, source="declared"),
+                make_field("label", original_name="label", python_type=str, required=False, source="declared"),
+            ]
+        )
+        executor, *_ = _make_executor()
+        s = _settings(branches=["a", "b"], policy="require_all")
+        executor.register_coalesce(s, "node_1")
+
+        token = _make_token(
+            branch_name="a",
+            token_id="t1",
+            data={"amount": 42, "label": "test"},
+            contract=contract,
+        )
+        executor.accept(token, "merge")
+
+        checkpoint = executor.get_checkpoint_state()
+        executor2, *_ = _make_executor()
+        executor2.register_coalesce(s, "node_1")
+        executor2.restore_from_checkpoint(checkpoint)
+
+        restored = executor2._pending[("merge", "row_1")]
+        restored_token = restored.branches["a"].token
+        assert restored_token.row_data.to_dict() == {"amount": 42, "label": "test"}
+        assert restored_token.token_id == "t1"
+        assert restored_token.row_id == "row_1"
+        assert restored_token.branch_name == "a"
+
+
+# ===========================================================================
+# notify_branch_lost / _evaluate_after_loss (elspeth-bc0461a50e)
+# ===========================================================================
+
+
+class TestNotifyBranchLostEvaluateAfterLoss:
+    """Targeted tests for notify_branch_lost and _evaluate_after_loss logic.
+
+    Bug: elspeth-bc0461a50e — notify_branch_lost and _evaluate_after_loss untested.
+
+    Tests are grouped by merge policy to verify each policy's loss-handling semantics.
+    """
+
+    # --- require_all policy ---
+
+    def test_require_all_single_loss_immediate_failure(self):
+        """require_all: ANY lost branch causes immediate failure, even with no arrivals."""
+        executor, *_ = _make_executor()
+        s = _settings(branches=["a", "b", "c"], policy="require_all")
+        executor.register_coalesce(s, "node_1")
+
+        result = executor.notify_branch_lost("merge", "row_1", "a", "upstream_crash")
+        assert result is not None
+        assert result.held is False
+        assert result.failure_reason is not None
+        assert "branch_lost" in result.failure_reason
+        assert "a" in result.failure_reason
+        assert result.outcomes_recorded is True
+
+    def test_require_all_loss_after_partial_arrivals_fails(self):
+        """require_all: loss after some branches arrived still fails immediately."""
+        executor, *_ = _make_executor()
+        s = _settings(branches=["a", "b", "c"], policy="require_all")
+        executor.register_coalesce(s, "node_1")
+
+        executor.accept(_make_token(branch_name="a", token_id="t1"), "merge")
+        executor.accept(_make_token(branch_name="b", token_id="t2"), "merge")
+
+        result = executor.notify_branch_lost("merge", "row_1", "c", "error_routed")
+        assert result is not None
+        assert "branch_lost" in result.failure_reason
+        assert "c" in result.failure_reason
+        assert result.outcomes_recorded is True
+        # Consumed tokens should include the arrived branches
+        assert len(result.consumed_tokens) == 2
+
+    def test_require_all_failure_metadata_includes_lost_branches(self):
+        """require_all failure metadata should record which branches were lost."""
+        executor, *_ = _make_executor()
+        s = _settings(branches=["a", "b", "c"], policy="require_all")
+        executor.register_coalesce(s, "node_1")
+
+        executor.accept(_make_token(branch_name="a", token_id="t1"), "merge")
+        result = executor.notify_branch_lost("merge", "row_1", "b", "error_routed")
+        assert result.coalesce_metadata is not None
+        assert result.coalesce_metadata.branches_lost == {"b": "error_routed"}
+
+    # --- quorum policy ---
+
+    def test_quorum_loss_makes_quorum_impossible(self):
+        """quorum: when remaining live branches < quorum_count, fail immediately."""
+        executor, *_ = _make_executor()
+        s = _settings(branches=["a", "b", "c"], policy="quorum", quorum_count=3)
+        executor.register_coalesce(s, "node_1")
+
+        # Lose one branch: max_possible = 3-1 = 2 < quorum_count=3
+        result = executor.notify_branch_lost("merge", "row_1", "a", "error_routed")
+        assert result is not None
+        assert "quorum_impossible" in result.failure_reason
+        assert "need=3" in result.failure_reason
+        assert "max_possible=2" in result.failure_reason
+
+    def test_quorum_loss_still_achievable_returns_none(self):
+        """quorum: if quorum is still achievable after loss, keep waiting."""
+        executor, *_ = _make_executor()
+        s = _settings(branches=["a", "b", "c", "d"], policy="quorum", quorum_count=2)
+        executor.register_coalesce(s, "node_1")
+
+        # Lose one: max_possible = 4-1 = 3 >= 2, arrived=0 < 2 → wait
+        result = executor.notify_branch_lost("merge", "row_1", "d", "error_routed")
+        assert result is None
+
+    def test_quorum_one_arrival_one_loss_still_meets_quorum(self):
+        """quorum: 1 arrived + 1 lost with quorum=1 — quorum met, merge triggers."""
+        executor, *_ = _make_executor()
+        # 3 branches, quorum=1: one arrival should meet quorum on accept.
+        # Instead: 4 branches, quorum=2, 1 arrived, 1 lost.
+        # max_possible = 4-1 = 3 >= 2 (still possible), arrived=1 < 2 → wait on first loss.
+        # Then accept 2nd → quorum met on accept. That path is through _should_merge.
+        # Test the path in _evaluate_after_loss where arrived >= quorum after loss:
+        # Use _evaluate_after_loss directly since accept() eagerly merges on quorum.
+        s = _settings(branches=["a", "b", "c"], policy="quorum", quorum_count=2)
+        executor.register_coalesce(s, "node_1")
+
+        # Accept one branch — quorum not met (1 < 2), held
+        outcome = executor.accept(_make_token(branch_name="a", token_id="t1"), "merge")
+        assert outcome.held is True
+
+        # Lose one branch — max_possible=2 >= 2 (still possible), arrived=1 < 2 → wait
+        result = executor.notify_branch_lost("merge", "row_1", "b", "error_routed")
+        assert result is None
+
+        # Accept second branch — quorum met (2 >= 2), merge triggers via _should_merge
+        outcome2 = executor.accept(_make_token(branch_name="c", token_id="t2"), "merge")
+        assert outcome2.held is False
+        assert outcome2.merged_token is not None
+
+    # --- best_effort policy ---
+
+    def test_best_effort_all_accounted_after_loss_triggers_merge(self):
+        """best_effort: merge fires when arrived + lost == total branches."""
+        executor, *_ = _make_executor()
+        s = _settings(branches=["a", "b", "c"], policy="best_effort", timeout_seconds=60.0)
+        executor.register_coalesce(s, "node_1")
+
+        executor.accept(_make_token(branch_name="a", token_id="t1"), "merge")
+        executor.accept(_make_token(branch_name="b", token_id="t2"), "merge")
+
+        # Losing c means all 3 accounted for (2 arrived + 1 lost)
+        result = executor.notify_branch_lost("merge", "row_1", "c", "error_routed")
+        assert result is not None
+        assert result.merged_token is not None
+        assert result.failure_reason is None
+
+    def test_best_effort_not_all_accounted_returns_none(self):
+        """best_effort: if some branches remain unaccounted, keep waiting."""
+        executor, *_ = _make_executor()
+        s = _settings(branches=["a", "b", "c", "d"], policy="best_effort", timeout_seconds=60.0)
+        executor.register_coalesce(s, "node_1")
+
+        executor.accept(_make_token(branch_name="a", token_id="t1"), "merge")
+        # Lose b: arrived=1 + lost=1 = 2 < 4 total → wait
+        result = executor.notify_branch_lost("merge", "row_1", "b", "error_routed")
+        assert result is None
+
+    def test_best_effort_all_lost_no_arrivals_fails(self):
+        """best_effort: if all branches are lost with zero arrivals, fail."""
+        executor, *_ = _make_executor()
+        s = _settings(branches=["a", "b"], policy="best_effort", timeout_seconds=60.0)
+        executor.register_coalesce(s, "node_1")
+
+        executor.notify_branch_lost("merge", "row_1", "a", "error1")
+        result = executor.notify_branch_lost("merge", "row_1", "b", "error2")
+
+        assert result is not None
+        assert result.failure_reason == "all_branches_lost"
+        assert result.merged_token is None
+        assert result.outcomes_recorded is True
+
+    # --- first policy ---
+
+    def test_first_policy_loss_returns_none(self):
+        """first: branch loss has no effect — merge should have happened on first arrival."""
+        executor, *_ = _make_executor()
+        s = _settings(branches=["a", "b", "c"], policy="first")
+        executor.register_coalesce(s, "node_1")
+
+        result = executor.notify_branch_lost("merge", "row_1", "b", "error_routed")
+        assert result is None
+
+    # --- Edge cases ---
+
+    def test_branch_lost_before_any_branch_arrives_creates_pending(self):
+        """Edge case (lines 1148-1156): branch lost with no pending entry creates one."""
+        executor, *_ = _make_executor()
+        s = _settings(branches=["a", "b", "c"], policy="best_effort", timeout_seconds=60.0)
+        executor.register_coalesce(s, "node_1")
+
+        # No accept() calls — no pending entry exists yet
+        assert ("merge", "row_1") not in executor._pending
+
+        result = executor.notify_branch_lost("merge", "row_1", "a", "upstream_crash")
+
+        # Pending entry must have been created
+        assert ("merge", "row_1") in executor._pending
+        pending = executor._pending[("merge", "row_1")]
+        assert pending.branches == {}  # No arrived branches
+        assert pending.lost_branches == {"a": "upstream_crash"}
+        # 1 lost + 0 arrived = 1 < 3 total → still waiting
+        assert result is None
+
+    def test_branch_lost_before_any_arrival_require_all_fails_immediately(self):
+        """require_all: even with no pending entry, branch loss should fail."""
+        executor, *_ = _make_executor()
+        s = _settings(branches=["a", "b"], policy="require_all")
+        executor.register_coalesce(s, "node_1")
+
+        result = executor.notify_branch_lost("merge", "row_1", "a", "upstream_crash")
+        assert result is not None
+        assert "branch_lost" in result.failure_reason
+        # Key should be completed after failure
+        assert ("merge", "row_1") in executor._completed_keys
+        assert ("merge", "row_1") not in executor._pending
+
+    def test_duplicate_loss_same_branch_raises_invariant_error(self):
+        """Reporting the same branch as lost twice raises OrchestrationInvariantError."""
+        executor, *_ = _make_executor()
+        s = _settings(branches=["a", "b", "c"], policy="best_effort", timeout_seconds=60.0)
+        executor.register_coalesce(s, "node_1")
+
+        executor.notify_branch_lost("merge", "row_1", "a", "first_reason")
+        with pytest.raises(OrchestrationInvariantError, match="already marked lost"):
+            executor.notify_branch_lost("merge", "row_1", "a", "second_reason")
+
+    def test_lost_branch_that_already_arrived_raises_invariant_error(self):
+        """A branch that already arrived cannot be reported as lost."""
+        executor, *_ = _make_executor()
+        s = _settings(branches=["a", "b"], policy="require_all")
+        executor.register_coalesce(s, "node_1")
+
+        executor.accept(_make_token(branch_name="a", token_id="t1"), "merge")
+        with pytest.raises(OrchestrationInvariantError, match="already arrived"):
+            executor.notify_branch_lost("merge", "row_1", "a", "error_routed")
+
+    def test_loss_for_already_completed_coalesce_returns_none(self):
+        """If the coalesce already completed (merged), loss notification is a no-op."""
+        executor, *_ = _make_executor()
+        s = _settings(branches=["a", "b"], policy="require_all")
+        executor.register_coalesce(s, "node_1")
+
+        # Complete the coalesce
+        executor.accept(_make_token(branch_name="a", token_id="t1"), "merge")
+        executor.accept(_make_token(branch_name="b", token_id="t2"), "merge")
+        assert ("merge", "row_1") in executor._completed_keys
+
+        # Loss notification after completion is a no-op
+        result = executor.notify_branch_lost("merge", "row_1", "a", "late_error")
+        assert result is None
+
+    def test_loss_for_unregistered_coalesce_raises(self):
+        """notify_branch_lost on unregistered coalesce raises OrchestrationInvariantError."""
+        executor, *_ = _make_executor()
+        with pytest.raises(OrchestrationInvariantError, match="not registered"):
+            executor.notify_branch_lost("ghost", "row_1", "a", "reason")
+
+    def test_loss_for_unknown_branch_raises(self):
+        """notify_branch_lost with unknown branch name raises OrchestrationInvariantError."""
+        executor, *_ = _make_executor()
+        s = _settings(branches=["a", "b"])
+        executor.register_coalesce(s, "node_1")
+
+        with pytest.raises(OrchestrationInvariantError, match="not in expected branches"):
+            executor.notify_branch_lost("merge", "row_1", "z", "reason")
+
+    def test_multiple_losses_then_final_arrival_merges(self):
+        """best_effort: multiple losses followed by last arrival triggers merge."""
+        executor, *_ = _make_executor()
+        s = _settings(branches=["a", "b", "c", "d"], policy="best_effort", timeout_seconds=60.0)
+        executor.register_coalesce(s, "node_1")
+
+        # Lose 3 branches
+        executor.notify_branch_lost("merge", "row_1", "a", "err1")
+        executor.notify_branch_lost("merge", "row_1", "b", "err2")
+        executor.notify_branch_lost("merge", "row_1", "c", "err3")
+
+        # Accept the last branch — all 4 accounted for (3 lost + 1 arrived)
+        outcome = executor.accept(
+            _make_token(branch_name="d", token_id="t1", data={"amount": 99}),
+            "merge",
+        )
+        assert outcome.held is False
+        assert outcome.merged_token is not None
+
+    def test_quorum_loss_before_any_arrival_impossible(self):
+        """quorum: loss before any arrival making quorum impossible triggers failure."""
+        executor, *_ = _make_executor()
+        # 2 branches, quorum=2 — losing either one makes quorum impossible
+        s = _settings(branches=["a", "b"], policy="quorum", quorum_count=2)
+        executor.register_coalesce(s, "node_1")
+
+        result = executor.notify_branch_lost("merge", "row_1", "a", "error_routed")
+        assert result is not None
+        assert "quorum_impossible" in result.failure_reason
+        assert result.outcomes_recorded is True

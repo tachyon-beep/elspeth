@@ -5,39 +5,54 @@ per_file_rules:
   - R2
   - R3
   - R4
-  - R5
   - R6
   - R9
   reason: Source plugins ingest external data (Tier 3) - all defensive patterns legitimate
   expires: null
+- pattern: plugins/sources/*
+  rules:
+  - R5
+  reason: Type discrimination for schema inference and config parsing at Tier 3 boundary
+  expires: null
+  max_hits: 5
 - pattern: plugins/infrastructure/config_base.py
   rules:
-  - R1
   - R5
-  reason: Plugin config parsing handles user YAML config (Tier 3) - defensive access for optional fields
+  reason: Type discrimination for config field validation and coercion
   expires: null
+  max_hits: 6
 - pattern: plugins/transforms/llm/*
   rules:
   - R1
   - R2
   - R3
   - R4
-  - R5
   - R6
   - R9
   reason: LLM API responses are external data (Tier 3) - all defensive patterns legitimate
   expires: null
+- pattern: plugins/transforms/llm/*
+  rules:
+  - R5
+  reason: Type discrimination for LLM response validation and provider dispatch
+  expires: null
+  max_hits: 62
 - pattern: plugins/transforms/azure/*
   rules:
   - R1
   - R2
   - R3
   - R4
-  - R5
   - R6
   - R9
   reason: Azure API responses are external data (Tier 3) - all defensive patterns legitimate
   expires: null
+- pattern: plugins/transforms/azure/*
+  rules:
+  - R5
+  reason: Type discrimination for Azure API response validation
+  expires: null
+  max_hits: 7
 - pattern: plugins/infrastructure/clients/http.py
   rules:
   - R5

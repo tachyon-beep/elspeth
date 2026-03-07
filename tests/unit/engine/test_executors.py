@@ -925,6 +925,69 @@ class TestTransformExecutor:
         assert updated_token is token
         assert updated_token.row_data is token.row_data
 
+    # --- Invariant guard tests (elspeth-8c9b58a679) ---
+
+    def test_on_start_not_called_raises_plugin_contract_violation(self) -> None:
+        """Lifecycle guard: executing a transform before on_start() raises PluginContractViolation."""
+        recorder = _make_recorder()
+        executor = TransformExecutor(recorder, _make_span_factory(), _make_step_resolver())
+        transform = _make_transform()
+        transform._on_start_called = False  # Simulate missing lifecycle call
+        token = _make_token()
+        ctx = make_context()
+
+        with pytest.raises(PluginContractViolation, match="before on_start"):
+            executor.execute_transform(transform, token, ctx)
+
+    def test_on_error_none_raises_orchestration_invariant_error(self) -> None:
+        """on_error=None invariant: last-line defense if config layer regresses."""
+        recorder = _make_recorder()
+        executor = TransformExecutor(recorder, _make_span_factory(), _make_step_resolver())
+        transform = _make_transform(on_error=None)  # Simulate config regression
+        transform.process.return_value = TransformResult.error(
+            reason={"reason": "test_error"},
+        )
+        token = _make_token()
+        ctx = make_context(landscape=recorder)
+
+        with pytest.raises(OrchestrationInvariantError, match="on_error=None"):
+            executor.execute_transform(transform, token, ctx)
+
+    def test_error_reason_none_raises_orchestration_invariant_error(self) -> None:
+        """reason=None invariant: prevents incomplete audit records from error results."""
+        recorder = _make_recorder()
+        executor = TransformExecutor(recorder, _make_span_factory(), _make_step_resolver())
+        transform = _make_transform(on_error="discard")
+        # Construct a valid error result, then corrupt it to bypass __post_init__
+        # This simulates a hypothetical bug in TransformResult construction.
+        result = TransformResult.error(reason={"reason": "placeholder"})
+        object.__setattr__(result, "reason", None)
+        transform.process.return_value = result
+        token = _make_token()
+        ctx = make_context(landscape=recorder)
+
+        with pytest.raises(OrchestrationInvariantError, match="reason is None"):
+            executor.execute_transform(transform, token, ctx)
+
+    def test_success_with_no_output_data_raises_runtime_error(self) -> None:
+        """Success with no output data: prevents empty results entering audit trail."""
+        recorder = _make_recorder()
+        executor = TransformExecutor(recorder, _make_span_factory(), _make_step_resolver())
+        transform = _make_transform()
+        # Construct a valid success result, then strip output to bypass __post_init__
+        result = TransformResult.success(
+            make_row({"value": "test"}, contract=_make_contract()),
+            success_reason={"action": "test"},
+        )
+        object.__setattr__(result, "row", None)
+        object.__setattr__(result, "rows", None)
+        transform.process.return_value = result
+        token = _make_token()
+        ctx = make_context()
+
+        with pytest.raises(RuntimeError, match="success but has no output data"):
+            executor.execute_transform(transform, token, ctx)
+
 
 # =============================================================================
 # TestGateExecutor
@@ -4136,6 +4199,341 @@ class TestReRaiseGuardPattern:
             f"Expected at least 15 re-raise guards, found {count}. "
             f"A FrameworkBugError/AuditIntegrityError re-raise guard may have been removed."
         )
+
+
+# =============================================================================
+# TestTransformExecutorBatchPath
+# =============================================================================
+
+
+class TestTransformExecutorBatchPath:
+    """Tests for the BatchTransformMixin code path in TransformExecutor.
+
+    The executor has an entirely separate branch for transforms that implement
+    BatchTransformMixin: adapter creation, register(), accept(), waiter.wait(),
+    and timeout-eviction. These tests verify that branch at the executor level.
+    """
+
+    # --- Helpers ---
+
+    @staticmethod
+    def _make_batch_transform(
+        name: str = "batch_transform",
+        node_id: str | None = "node_batch",
+        on_error: str | None = None,
+        pool_size: int = 5,
+        batch_wait_timeout: float = 10.0,
+    ) -> MagicMock:
+        """Create a mock transform that passes isinstance(BatchTransformMixin).
+
+        Uses spec_set on a real subclass so isinstance checks succeed while
+        all methods remain mockable.
+        """
+        from elspeth.plugins.infrastructure.batching.mixin import BatchTransformMixin
+
+        # Build a concrete subclass to use as spec target — only needed for isinstance
+        class _FakeBatchTransform(BatchTransformMixin):
+            pass
+
+        t = MagicMock(spec=_FakeBatchTransform)
+        t.name = name
+        t.node_id = node_id
+        t.on_error = on_error
+        t.declared_output_fields = frozenset()
+        t.validate_input = False
+        t._on_start_called = True
+        t._pool_size = pool_size
+        t._batch_wait_timeout = batch_wait_timeout
+        return t
+
+    # --- Mixin detection ---
+
+    def test_batch_path_invoked_for_mixin_transform(self) -> None:
+        """When transform implements BatchTransformMixin, accept() is called instead of process()."""
+        from elspeth.engine.batch_adapter import SharedBatchAdapter
+
+        recorder = _make_recorder()
+        executor = TransformExecutor(recorder, _make_span_factory(), _make_step_resolver())
+        contract = _make_contract()
+        transform = self._make_batch_transform()
+
+        # Configure the adapter's waiter to return a successful result
+        success_result = TransformResult.success(
+            make_row({"value": "batch_out"}, contract=contract),
+            success_reason={"action": "batched"},
+        )
+
+        # Mock _get_batch_adapter to return a controlled adapter
+        mock_adapter = MagicMock(spec=SharedBatchAdapter)
+        mock_waiter = MagicMock()
+        mock_waiter.wait.return_value = success_result
+        mock_adapter.register.return_value = mock_waiter
+        executor._get_batch_adapter = MagicMock(return_value=mock_adapter)  # type: ignore[method-assign]
+
+        token = _make_token(contract=contract)
+        ctx = make_context()
+
+        result, _updated_token, error_sink = executor.execute_transform(transform, token, ctx)
+
+        # accept() called (batch path taken)
+        transform.accept.assert_called_once()
+        assert result.status == "success"
+        assert error_sink is None
+
+    def test_non_batch_transform_uses_process(self) -> None:
+        """A regular transform (no BatchTransformMixin) uses process(), not accept()."""
+        recorder = _make_recorder()
+        executor = TransformExecutor(recorder, _make_span_factory(), _make_step_resolver())
+        contract = _make_contract()
+        transform = _make_transform()
+        transform.process.return_value = TransformResult.success(
+            make_row({"value": "sync_out"}, contract=contract),
+            success_reason={"action": "synced"},
+        )
+        token = _make_token(contract=contract)
+        ctx = make_context()
+
+        result, _, _ = executor.execute_transform(transform, token, ctx)
+
+        transform.process.assert_called_once()
+        assert result.status == "success"
+
+    # --- Adapter creation and caching ---
+
+    def test_get_batch_adapter_creates_and_caches(self) -> None:
+        """_get_batch_adapter creates one adapter per node_id and reuses it."""
+        from elspeth.engine.batch_adapter import SharedBatchAdapter
+
+        recorder = _make_recorder()
+        executor = TransformExecutor(recorder, _make_span_factory(), _make_step_resolver())
+        transform = self._make_batch_transform(node_id="node_A")
+
+        adapter1 = executor._get_batch_adapter(transform)
+        adapter2 = executor._get_batch_adapter(transform)
+
+        assert isinstance(adapter1, SharedBatchAdapter)
+        assert adapter1 is adapter2
+        # connect_output called exactly once (on first creation)
+        transform.connect_output.assert_called_once()
+
+    def test_get_batch_adapter_separate_per_node_id(self) -> None:
+        """Different node_ids get different adapters."""
+        recorder = _make_recorder()
+        executor = TransformExecutor(recorder, _make_span_factory(), _make_step_resolver())
+        transform_a = self._make_batch_transform(node_id="node_A")
+        transform_b = self._make_batch_transform(node_id="node_B")
+
+        adapter_a = executor._get_batch_adapter(transform_a)
+        adapter_b = executor._get_batch_adapter(transform_b)
+
+        assert adapter_a is not adapter_b
+
+    def test_get_batch_adapter_raises_without_node_id(self) -> None:
+        """_get_batch_adapter raises OrchestrationInvariantError if node_id is None."""
+        recorder = _make_recorder()
+        executor = TransformExecutor(recorder, _make_span_factory(), _make_step_resolver())
+        transform = self._make_batch_transform(node_id=None)
+
+        with pytest.raises(OrchestrationInvariantError, match="node_id must be set"):
+            executor._get_batch_adapter(transform)
+
+    def test_get_batch_adapter_caps_max_pending_to_max_workers(self) -> None:
+        """When executor has max_workers, adapter max_pending is capped."""
+        recorder = _make_recorder()
+        executor = TransformExecutor(
+            recorder,
+            _make_span_factory(),
+            _make_step_resolver(),
+            max_workers=3,
+        )
+        transform = self._make_batch_transform(pool_size=10)
+
+        executor._get_batch_adapter(transform)
+
+        # connect_output should receive min(pool_size=10, max_workers=3) = 3
+        transform.connect_output.assert_called_once()
+        call_kwargs = transform.connect_output.call_args
+        assert call_kwargs[1]["max_pending"] == 3
+
+    def test_get_batch_adapter_uses_pool_size_when_no_max_workers(self) -> None:
+        """Without max_workers, adapter max_pending equals transform pool_size."""
+        recorder = _make_recorder()
+        executor = TransformExecutor(recorder, _make_span_factory(), _make_step_resolver())
+        transform = self._make_batch_transform(pool_size=7)
+
+        executor._get_batch_adapter(transform)
+
+        call_kwargs = transform.connect_output.call_args
+        assert call_kwargs[1]["max_pending"] == 7
+
+    # --- Register / accept / wait flow ---
+
+    def test_register_called_before_accept(self) -> None:
+        """register() is called before accept() for correct waiter ordering."""
+        from elspeth.engine.batch_adapter import SharedBatchAdapter
+
+        recorder = _make_recorder()
+        executor = TransformExecutor(recorder, _make_span_factory(), _make_step_resolver())
+        contract = _make_contract()
+        transform = self._make_batch_transform()
+
+        success_result = TransformResult.success(
+            make_row({"value": "out"}, contract=contract),
+            success_reason={"action": "test"},
+        )
+        mock_adapter = MagicMock(spec=SharedBatchAdapter)
+        mock_waiter = MagicMock()
+        mock_waiter.wait.return_value = success_result
+        mock_adapter.register.return_value = mock_waiter
+        executor._get_batch_adapter = MagicMock(return_value=mock_adapter)  # type: ignore[method-assign]
+
+        token = _make_token(contract=contract)
+        ctx = make_context()
+
+        executor.execute_transform(transform, token, ctx)
+
+        # Verify ordering: register called with (token_id, state_id)
+        mock_adapter.register.assert_called_once_with(token.token_id, "state_001")
+        transform.accept.assert_called_once()
+
+        # Verify register was called before accept (via call_args_list order is not
+        # available across objects, so we verify both were called — the production code
+        # structurally guarantees register-before-accept by line order)
+        mock_waiter.wait.assert_called_once_with(timeout=transform._batch_wait_timeout)
+
+    # --- Timeout and eviction ---
+
+    def test_timeout_triggers_evict_submission(self) -> None:
+        """TimeoutError from waiter.wait() calls evict_submission() on the mixin."""
+        from elspeth.engine.batch_adapter import SharedBatchAdapter
+
+        recorder = _make_recorder()
+        executor = TransformExecutor(recorder, _make_span_factory(), _make_step_resolver())
+        contract = _make_contract()
+        transform = self._make_batch_transform()
+
+        mock_adapter = MagicMock(spec=SharedBatchAdapter)
+        mock_waiter = MagicMock()
+        mock_waiter.wait.side_effect = TimeoutError("timed out")
+        mock_adapter.register.return_value = mock_waiter
+        executor._get_batch_adapter = MagicMock(return_value=mock_adapter)  # type: ignore[method-assign]
+
+        token = _make_token(contract=contract)
+        ctx = make_context()
+
+        with pytest.raises(TimeoutError, match="timed out"):
+            executor.execute_transform(transform, token, ctx)
+
+        # evict_submission called with (token_id, state_id)
+        transform.evict_submission.assert_called_once_with(token.token_id, "state_001")
+
+        # Node state recorded as FAILED before re-raise
+        recorder.complete_node_state.assert_called_once()
+        kwargs = recorder.complete_node_state.call_args[1]
+        assert kwargs["status"] == NodeStateStatus.FAILED
+
+    def test_eviction_failure_wraps_in_runtime_error(self) -> None:
+        """If evict_submission() fails, the error is wrapped in RuntimeError."""
+        from elspeth.engine.batch_adapter import SharedBatchAdapter
+
+        recorder = _make_recorder()
+        executor = TransformExecutor(recorder, _make_span_factory(), _make_step_resolver())
+        contract = _make_contract()
+        transform = self._make_batch_transform()
+
+        mock_adapter = MagicMock(spec=SharedBatchAdapter)
+        mock_waiter = MagicMock()
+        mock_waiter.wait.side_effect = TimeoutError("timed out")
+        mock_adapter.register.return_value = mock_waiter
+        executor._get_batch_adapter = MagicMock(return_value=mock_adapter)  # type: ignore[method-assign]
+
+        # Make evict_submission raise
+        transform.evict_submission.side_effect = KeyError("buffer gone")
+
+        token = _make_token(contract=contract)
+        ctx = make_context()
+
+        with pytest.raises(RuntimeError, match="Failed to evict timed-out submission"):
+            executor.execute_transform(transform, token, ctx)
+
+    def test_non_timeout_exception_does_not_evict(self) -> None:
+        """Non-TimeoutError exceptions do NOT trigger eviction."""
+        from elspeth.engine.batch_adapter import SharedBatchAdapter
+
+        recorder = _make_recorder()
+        executor = TransformExecutor(recorder, _make_span_factory(), _make_step_resolver())
+        contract = _make_contract()
+        transform = self._make_batch_transform()
+
+        mock_adapter = MagicMock(spec=SharedBatchAdapter)
+        mock_waiter = MagicMock()
+        mock_waiter.wait.side_effect = ValueError("not a timeout")
+        mock_adapter.register.return_value = mock_waiter
+        executor._get_batch_adapter = MagicMock(return_value=mock_adapter)  # type: ignore[method-assign]
+
+        token = _make_token(contract=contract)
+        ctx = make_context()
+
+        with pytest.raises(ValueError, match="not a timeout"):
+            executor.execute_transform(transform, token, ctx)
+
+        transform.evict_submission.assert_not_called()
+
+    # --- Error result path (batch) ---
+
+    def test_batch_error_result_routes_to_error_sink(self) -> None:
+        """Batch transform returning TransformResult.error() routes via on_error."""
+        from elspeth.engine.batch_adapter import SharedBatchAdapter
+
+        recorder = _make_recorder()
+        executor = TransformExecutor(recorder, _make_span_factory(), _make_step_resolver())
+        transform = self._make_batch_transform(on_error="discard")
+
+        error_result = TransformResult.error(reason={"reason": "batch_failed"})
+
+        mock_adapter = MagicMock(spec=SharedBatchAdapter)
+        mock_waiter = MagicMock()
+        mock_waiter.wait.return_value = error_result
+        mock_adapter.register.return_value = mock_waiter
+        executor._get_batch_adapter = MagicMock(return_value=mock_adapter)  # type: ignore[method-assign]
+
+        token = _make_token()
+        ctx = make_context(landscape=recorder)
+
+        _, _, error_sink = executor.execute_transform(transform, token, ctx)
+
+        assert error_sink == "discard"
+
+    # --- Audit fields populated ---
+
+    def test_batch_result_has_audit_fields(self) -> None:
+        """Batch transform results have input_hash, output_hash, duration_ms populated."""
+        from elspeth.engine.batch_adapter import SharedBatchAdapter
+
+        recorder = _make_recorder()
+        executor = TransformExecutor(recorder, _make_span_factory(), _make_step_resolver())
+        contract = _make_contract()
+        transform = self._make_batch_transform()
+
+        success_result = TransformResult.success(
+            make_row({"value": "out"}, contract=contract),
+            success_reason={"action": "batched"},
+        )
+        mock_adapter = MagicMock(spec=SharedBatchAdapter)
+        mock_waiter = MagicMock()
+        mock_waiter.wait.return_value = success_result
+        mock_adapter.register.return_value = mock_waiter
+        executor._get_batch_adapter = MagicMock(return_value=mock_adapter)  # type: ignore[method-assign]
+
+        token = _make_token(contract=contract)
+        ctx = make_context()
+
+        result, _, _ = executor.execute_transform(transform, token, ctx)
+
+        assert result.input_hash is not None
+        assert result.output_hash is not None
+        assert result.duration_ms is not None
+        assert result.duration_ms >= 0
 
 
 def _is_framework_audit_handler(handler: object) -> bool:

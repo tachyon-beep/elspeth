@@ -755,6 +755,136 @@ class TestDatabaseSinkFalseSuccess:
     but still recorded SUCCESS in the audit trail.
     """
 
+    def test_extra_fields_at_write_time_rejected(self, tmp_path: Path) -> None:
+        """write() raises ValueError when row has fields not in table schema.
+
+        After table creation, any row with extra fields (not in table columns)
+        must be rejected to prevent silent data loss from SQLAlchemy dropping
+        unknown keys.
+        """
+        db_path = tmp_path / "test.db"
+        sink = DatabaseSink(
+            {
+                "url": f"sqlite:///{db_path}",
+                "table": "test_table",
+                "schema": STRICT_SCHEMA,
+            }
+        )
+        ctx = make_operation_context(
+            node_id="sink-0",
+            plugin_name="database",
+            node_type="SINK",
+            operation_type="sink_write",
+        )
+
+        # First write creates the table with columns [id, name]
+        sink.write([{"id": 1, "name": "alice"}], ctx)
+
+        # Second write has an extra field not in the table schema
+        with pytest.raises(ValueError, match="extra_field"):
+            sink.write([{"id": 2, "name": "bob", "extra_field": "bad"}], ctx)
+
+        sink.close()
+
+    def test_insert_failure_records_error_and_reraises(self, tmp_path: Path) -> None:
+        """When INSERT fails, ctx.record_call is invoked with ERROR status
+        and the original exception is re-raised.
+        """
+        from unittest.mock import patch
+
+        from elspeth.contracts import CallStatus
+
+        db_path = tmp_path / "test.db"
+        sink = DatabaseSink(
+            {
+                "url": f"sqlite:///{db_path}",
+                "table": "test_table",
+                "schema": STRICT_SCHEMA,
+            }
+        )
+        ctx = make_operation_context(
+            node_id="sink-0",
+            plugin_name="database",
+            node_type="SINK",
+            operation_type="sink_write",
+        )
+
+        # First write to create the table
+        sink.write([{"id": 1, "name": "alice"}], ctx)
+
+        # Patch the engine's begin() to raise on the next INSERT
+        def failing_begin():
+            raise RuntimeError("simulated INSERT failure")
+
+        with patch.object(sink._engine, "begin", side_effect=failing_begin):
+            # Track record_call invocations
+            original_record_call = ctx.record_call
+
+            recorded_statuses: list[CallStatus] = []
+
+            def tracking_record_call(**kwargs: object) -> None:
+                recorded_statuses.append(kwargs.get("status"))  # type: ignore[arg-type]
+                original_record_call(**kwargs)
+
+            with (
+                patch.object(ctx, "record_call", side_effect=tracking_record_call),
+                pytest.raises(RuntimeError, match="simulated INSERT failure"),
+            ):
+                sink.write([{"id": 2, "name": "bob"}], ctx)
+
+        # Verify record_call was invoked with ERROR status
+        assert CallStatus.ERROR in recorded_statuses
+
+        sink.close()
+
+    def test_serialize_any_typed_fields_observed_mode(self, tmp_path: Path) -> None:
+        """In observed-mode schemas, dict values are serialized to JSON strings.
+
+        When schema mode is 'observed', _serialize_any_typed_fields checks ALL
+        fields for dict/list values and serializes them to JSON strings for
+        storage in SQL TEXT columns.
+        """
+        import json
+
+        db_path = tmp_path / "test.db"
+        sink = DatabaseSink(
+            {
+                "url": f"sqlite:///{db_path}",
+                "table": "test_table",
+                "schema": {"mode": "observed"},
+            }
+        )
+        ctx = make_operation_context(
+            node_id="sink-0",
+            plugin_name="database",
+            node_type="SINK",
+            operation_type="sink_write",
+        )
+
+        # Write a row with a dict value — should be serialized to JSON string
+        original_dict = {"key": "value", "nested": [1, 2, 3]}
+        sink.write([{"id": 1, "data": original_dict, "plain": "text"}], ctx)
+        sink.close()
+
+        # Verify data was stored as JSON string, not Python dict
+        from sqlalchemy import MetaData, Table, create_engine, select
+
+        engine = create_engine(f"sqlite:///{db_path}")
+        metadata = MetaData()
+        table = Table("test_table", metadata, autoload_with=engine)
+
+        with engine.connect() as conn:
+            rows = list(conn.execute(select(table)))
+
+        row_dict = dict(rows[0]._mapping)
+        # The dict value should have been serialized to a JSON string
+        assert isinstance(row_dict["data"], str)
+        assert json.loads(row_dict["data"]) == original_dict
+        # Plain string value should be unchanged
+        assert row_dict["plain"] == "text"
+
+        engine.dispose()
+
     def test_none_engine_at_insert_raises_invariant_error(self, tmp_path: Path) -> None:
         """If _ensure_table fails to set engine/table, assertion catches it.
 

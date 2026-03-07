@@ -243,6 +243,28 @@ class TestPluginConfigInheritance:
         assert cfg.custom_field == "custom"
 
 
+class TestPluginConfigFromDictSchemaGuard:
+    """Tests for PluginConfig.from_dict schema type guard."""
+
+    @pytest.mark.parametrize(
+        ("schema_value", "type_name"),
+        [
+            (None, "NoneType"),
+            ("observed", "str"),
+            (["mode", "observed"], "list"),
+            (42, "int"),
+        ],
+    )
+    def test_from_dict_rejects_non_dict_schema(self, schema_value: object, type_name: str) -> None:
+        """from_dict raises PluginConfigError when schema is not a dict."""
+
+        class MyConfig(PluginConfig):
+            name: str
+
+        with pytest.raises(PluginConfigError, match=rf"'schema' must be a dict, got {type_name}"):
+            MyConfig.from_dict({"name": "test", "schema": schema_value})
+
+
 class TestPluginConfigWithSchema:
     """Tests for schema in plugin config."""
 
@@ -386,6 +408,83 @@ class TestSourceDataConfig:
         assert config.path == "data/input.csv"
         assert config.schema_config is not None
         assert config.schema_config.mode == "fixed"
+
+
+class TestAzureAuthConfigValidator:
+    """Tests for AzureAuthConfig model validator — mutual exclusivity and missing fields."""
+
+    def test_no_auth_method_raises(self) -> None:
+        """No auth method configured raises ValueError."""
+        from pydantic import ValidationError
+
+        from elspeth.plugins.infrastructure.azure_auth import AzureAuthConfig
+
+        with pytest.raises(ValidationError, match="No authentication method configured"):
+            AzureAuthConfig()
+
+    def test_multiple_auth_methods_raises(self) -> None:
+        """Multiple auth methods configured raises ValueError."""
+        from pydantic import ValidationError
+
+        from elspeth.plugins.infrastructure.azure_auth import AzureAuthConfig
+
+        with pytest.raises(ValidationError, match="Multiple authentication methods configured"):
+            AzureAuthConfig(
+                connection_string="DefaultEndpointsProtocol=https;AccountName=test",
+                sas_token="sv=2020-08-04&ss=b",
+                account_url="https://test.blob.core.windows.net",
+            )
+
+    def test_sas_token_without_account_url_raises(self) -> None:
+        """SAS token without account_url raises ValueError."""
+        from pydantic import ValidationError
+
+        from elspeth.plugins.infrastructure.azure_auth import AzureAuthConfig
+
+        with pytest.raises(ValidationError, match="SAS token auth requires account_url"):
+            AzureAuthConfig(sas_token="sv=2020-08-04&ss=b")
+
+    def test_managed_identity_without_account_url_raises(self) -> None:
+        """Managed Identity without account_url raises ValueError."""
+        from pydantic import ValidationError
+
+        from elspeth.plugins.infrastructure.azure_auth import AzureAuthConfig
+
+        with pytest.raises(ValidationError, match="Managed Identity auth requires account_url"):
+            AzureAuthConfig(use_managed_identity=True)
+
+    def test_partial_service_principal_raises(self) -> None:
+        """Incomplete service principal config raises ValueError listing missing fields."""
+        from pydantic import ValidationError
+
+        from elspeth.plugins.infrastructure.azure_auth import AzureAuthConfig
+
+        with pytest.raises(ValidationError, match=r"Service Principal auth requires all fields.*Missing.*client_secret"):
+            AzureAuthConfig(
+                tenant_id="tenant-123",
+                client_id="client-456",
+                account_url="https://test.blob.core.windows.net",
+            )
+
+    def test_service_principal_without_account_url_raises(self) -> None:
+        """Service principal with all 3 SP fields but no account_url raises ValueError."""
+        from pydantic import ValidationError
+
+        from elspeth.plugins.infrastructure.azure_auth import AzureAuthConfig
+
+        with pytest.raises(ValidationError, match="Service Principal auth requires account_url"):
+            AzureAuthConfig(
+                tenant_id="tenant-123",
+                client_id="client-456",
+                client_secret="secret-789",
+            )
+
+    def test_valid_connection_string_auth(self) -> None:
+        """Valid connection string auth succeeds."""
+        from elspeth.plugins.infrastructure.azure_auth import AzureAuthConfig
+
+        config = AzureAuthConfig(connection_string="DefaultEndpointsProtocol=https;AccountName=test")
+        assert config.auth_method == "connection_string"
 
 
 class TestTransformDataConfig:
