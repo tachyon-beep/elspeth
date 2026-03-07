@@ -38,10 +38,76 @@ per_file_rules:
   - R9
   reason: Azure API responses are external data (Tier 3) - all defensive patterns legitimate
   expires: null
+- pattern: plugins/infrastructure/clients/http.py
+  rules:
+  - R5
+  reason: Tier 3 external JSON NaN detection
+  expires: null
+  max_hits: 3
+- pattern: plugins/infrastructure/clients/llm.py
+  rules:
+  - R5
+  reason: Deep-freeze guards and programming error detection in telemetry
+  expires: null
+  max_hits: 4
+- pattern: plugins/infrastructure/clients/replayer.py
+  rules:
+  - R5
+  reason: Deep-freeze guards for recorded call data
+  expires: null
+  max_hits: 2
+- pattern: plugins/infrastructure/schema_factory.py
+  rules:
+  - R5
+  reason: Numpy floating type detection for schema inference
+  expires: null
+  max_hits: 1
+- pattern: plugins/infrastructure/utils.py
+  rules:
+  - R5
+  reason: Type discrimination for nested field path traversal
+  expires: null
+  max_hits: 1
+- pattern: plugins/sinks/database_sink.py
+  rules:
+  - R5
+  reason: Type discrimination for JSON serialization of complex values
+  expires: null
+  max_hits: 1
+- pattern: plugins/sinks/json_sink.py
+  rules:
+  - R5
+  reason: Tier 3 JSONL file content validation
+  expires: null
+  max_hits: 1
+- pattern: plugins/transforms/batch_stats.py
+  rules:
+  - R5
+  reason: Float type discrimination for NaN/Infinity guard
+  expires: null
+  max_hits: 2
+- pattern: plugins/transforms/json_explode.py
+  rules:
+  - R5
+  reason: Contract enforcement — array field must be list
+  expires: null
+  max_hits: 1
+- pattern: plugins/transforms/keyword_filter.py
+  rules:
+  - R5
+  reason: Contract enforcement — non-string field rejection
+  expires: null
+  max_hits: 1
+- pattern: plugins/transforms/safety_utils.py
+  rules:
+  - R5
+  reason: Config discrimination and field type selection for scanning
+  expires: null
+  max_hits: 4
 allow_hits:
 - key: plugins/infrastructure/manager.py:R4:PluginManager:register:fp=157bcdba7017b610
   owner: bugfix
-  reason: "Rollback protection — catch any rollback failure so secondary exception doesn't bury original diagnostic"
+  reason: Rollback protection — catch any rollback failure so secondary exception doesn't bury original diagnostic
   safety: Logs rollback error then re-raises the original exception unchanged
   expires: null
 - key: plugins/infrastructure/clients/http.py:R6:AuditedHTTPClient:_filter_request_headers:fp=8e6fe9689cede063
@@ -61,18 +127,13 @@ allow_hits:
   expires: '2026-05-02'
 - key: plugins/infrastructure/clients/http.py:R1:AuditedHTTPClient:_follow_redirects_safe:fp=612c0a827c6a7dec
   owner: architecture
-  reason: "httpx Client.get() method call \u2014 ephemeral client per redirect hop for TLS isolation"
+  reason: httpx Client.get() method call — ephemeral client per redirect hop for TLS isolation
   safety: This is the actual external HTTP call, not a defensive dict access
 - key: plugins/sinks/database_sink.py:R1:DatabaseSink:__init__:fp=ff7dd9a78d26df58
   owner: architecture
   reason: Optional field access at trust boundary
   safety: Code reviewed - legitimate pattern
   expires: '2026-05-02'
-- key: plugins/sinks/database_sink.py:R5:DatabaseSink:_serialize_any_typed_fields:fp=c5085e0711149ec5
-  owner: bugfix
-  reason: "Tier 2 contract enforcement \u2014 isinstance distinguishes dict/list fields for JSON serialization before DB insert"
-  safety: Only dict/list values serialized; all other types pass through unchanged
-  expires: '2026-05-17'
 - key: plugins/sinks/csv_sink.py:R1:CSVSink:validate_output_target:fp=078b519642e8758d
   owner: feature
   reason: Display header mapping - fields not in map keep original name (transform-added fields)
@@ -85,11 +146,6 @@ allow_hits:
   owner: feature
   reason: Intentional fallback - display mapping may not contain all fields (transform-added)
   safety: Falls back to normalized field name - correct behavior for fields not in source
-- key: plugins/sinks/json_sink.py:R5:JSONSink:validate_output_target:fp=045f7ef64c2fb8cf
-  owner: architecture
-  reason: AST/type checking - required for safe parsing or discriminated unions
-  safety: Code reviewed - legitimate pattern
-  expires: '2026-05-02'
 - key: plugins/sinks/json_sink.py:R1:JSONSink:validate_output_target:fp=9505f48c9f134ae3
   owner: feature
   reason: Display header mapping - fields not in map keep original name (transform-added fields)
@@ -99,54 +155,10 @@ allow_hits:
   reason: sys.modules.pop cleanup on import failure — module may not be registered yet
   safety: Legitimate cleanup pattern in error path
   expires: '2026-05-02'
-- key: plugins/infrastructure/utils.py:R5:get_nested_field:fp=535546cd2f8310ed
-  owner: architecture
-  reason: AST/type checking - required for safe parsing or discriminated unions
-  safety: Code reviewed - legitimate pattern
-  expires: '2026-05-02'
-- key: plugins/transforms/batch_stats.py:R5:BatchStats:process:fp=65d5cd4fa4f770d9
-  owner: architecture
-  reason: "Tier 2 row value type discrimination \u2014 float vs int for NaN/Infinity check (ints always finite)"
-  safety: Preserves int precision for values > 2^53; only floats need isfinite() guard
-- key: plugins/transforms/batch_stats.py:R5:BatchStats:process:fp=ec447dc62acdef72
-  owner: architecture
-  reason: "Tier 2 row value type discrimination \u2014 float vs int for NaN/Infinity check (ints always finite)"
-  safety: Preserves int precision for values > 2^53; only floats need isfinite() guard
-- key: plugins/transforms/keyword_filter.py:R5:KeywordFilter:process:fp=c885752e7084b01c
-  owner: architecture
-  reason: "Tier 2 row value type check \u2014 fail-closed on non-string values in explicitly named fields"
-  safety: Returns TransformResult.error() with reason='non_string_field'; 'all' mode unaffected
-  expires: '2026-05-27'
-- key: plugins/transforms/safety_utils.py:R5:get_fields_to_scan:fp=923f1d897fa60538
-  owner: architecture
-  reason: "Tier 2 row filtering \u2014 isinstance selects str fields for 'all' mode scanning"
-  safety: Only string fields are scanned; non-string fields silently skipped in 'all' mode
-  expires: '2026-05-27'
-- key: plugins/transforms/safety_utils.py:R5:get_fields_to_scan:fp=d55823ebad96e97c
-  owner: architecture
-  reason: "Tier 2 row filtering \u2014 isinstance selects str fields for 'all' mode scanning"
-  safety: Only string fields are scanned; non-string fields silently skipped in 'all' mode
-  expires: '2026-05-27'
-- key: plugins/transforms/safety_utils.py:R5:validate_fields_not_empty:fp=76efe29dcebb2132
-  owner: architecture
-  reason: "Config boundary \u2014 isinstance(v, str) to distinguish str vs list[str] fields config"
-  safety: Rejects empty fields at config time; security transforms must scan at least one field
-  expires: '2026-05-27'
-- key: plugins/transforms/safety_utils.py:R5:validate_fields_not_empty:fp=2055669c5b56e874
-  owner: architecture
-  reason: "Config boundary \u2014 isinstance(v, str) to distinguish str vs list[str] fields config"
-  safety: Rejects empty fields at config time; security transforms must scan at least one field
-  expires: '2026-05-27'
-- key: plugins/transforms/json_explode.py:R5:JSONExplode:process:fp=9b2237faf60e6af2
-  owner: architecture
-  reason: AST/type checking - required for safe parsing or discriminated unions
-  safety: Code reviewed - legitimate pattern
-  expires: '2026-05-02'
-
 - key: plugins/transforms/field_mapper.py:R8:FieldMapperConfig:_reject_duplicate_targets:fp=affbb9c145371427
   owner: bugfix
   reason: setdefault used for grouping sources-by-target to detect duplicate target field names
-  safety: "Grouping is deterministic; ValueError raised if duplicates found \u2014 prevents silent data loss"
+  safety: Grouping is deterministic; ValueError raised if duplicates found — prevents silent data loss
   expires: '2026-05-17'
 - key: plugins/sources/field_normalization.py:R8:check_normalization_collisions:fp=e1d67143967b76c3
   owner: architecture
@@ -203,21 +215,6 @@ allow_hits:
   reason: Cleanup/pop with default - key may not exist in race or optional scenarios
   safety: Code reviewed - legitimate pattern
   expires: '2026-05-02'
-- key: plugins/infrastructure/clients/http.py:R5:_contains_non_finite:fp=63c4d3ce97a01f95
-  owner: architecture
-  reason: isinstance() on float to detect NaN/Infinity in JSON - type discrimination for serialization
-  safety: Rejects non-finite values that would break RFC 8785 canonicalization
-  expires: '2026-05-02'
-- key: plugins/infrastructure/clients/http.py:R5:_contains_non_finite:fp=b8915287cbbee8ea
-  owner: architecture
-  reason: isinstance() on float to detect NaN/Infinity in JSON - type discrimination for serialization
-  safety: Rejects non-finite values that would break RFC 8785 canonicalization
-  expires: '2026-05-02'
-- key: plugins/infrastructure/clients/http.py:R5:_contains_non_finite:fp=a52a1570b3d0043f
-  owner: architecture
-  reason: isinstance() on float to detect NaN/Infinity in JSON - type discrimination for serialization
-  safety: Rejects non-finite values that would break RFC 8785 canonicalization
-  expires: '2026-05-02'
 - key: plugins/infrastructure/clients/http.py:R1:AuditedHTTPClient:_filter_request_headers:fp=4b851ee51e744fd7
   owner: architecture
   reason: os.environ.get() for optional ELSPETH_ALLOW_RAW_SECRETS override
@@ -253,38 +250,3 @@ allow_hits:
   reason: HTTP redirect Location header - external system boundary, header may be absent
   safety: Missing Location header breaks redirect loop naturally (no redirect target)
   expires: '2026-05-02'
-- key: plugins/infrastructure/clients/llm.py:R5:AuditedLLMClient:chat_completion:fp=8b2ff0c136176a21
-  owner: bugfix
-  reason: "Programming error re-raise guard — isinstance() detects TypeError/AttributeError/KeyError/NameError in LLM telemetry code"
-  safety: "Re-raises immediately — crashes on bugs, only swallows runtime telemetry failures"
-- key: plugins/infrastructure/clients/llm.py:R5:AuditedLLMClient:chat_completion:fp=3b55736c2cbfaf13
-  owner: bugfix
-  reason: "Programming error re-raise guard — isinstance() detects TypeError/AttributeError/KeyError/NameError in LLM telemetry code"
-  safety: "Re-raises immediately — crashes on bugs, only swallows runtime telemetry failures"
-- key: plugins/infrastructure/clients/llm.py:R5:AuditedLLMClient:chat_completion:fp=0725c4bef855bc97
-  owner: bugfix
-  reason: "Programming error re-raise guard — isinstance() detects TypeError/AttributeError/KeyError/NameError in null-content telemetry code"
-  safety: "Re-raises immediately — crashes on bugs, only swallows runtime telemetry failures"
-- key: 'plugins/infrastructure/clients/llm.py:R5:LLMResponse:__post_init__:fp=f9ac8421b167934a'
-  owner: architecture
-  reason: Deep-freeze conversion guard — isinstance() checks for MappingProxyType/tuple wrapping, not defensive data access
-  safety: Construction-time type conversion, crashes on unexpected types
-  expires: null
-
-- key: 'plugins/infrastructure/clients/replayer.py:R5:ReplayedCall:__post_init__:fp=faa8e0ac424c2f2d'
-  owner: architecture
-  reason: Deep-freeze conversion guard — isinstance() checks for MappingProxyType/tuple wrapping, not defensive data access
-  safety: Construction-time type conversion, crashes on unexpected types
-  expires: null
-
-- key: 'plugins/infrastructure/clients/replayer.py:R5:ReplayedCall:__post_init__:fp=a37f80284ecb327b'
-  owner: architecture
-  reason: Deep-freeze conversion guard — isinstance() checks for MappingProxyType/tuple wrapping, not defensive data access
-  safety: Construction-time type conversion, crashes on unexpected types
-  expires: null
-
-- key: 'plugins/infrastructure/schema_factory.py:R5:_find_non_finite_value_path:fp=1cf1757ce29167fd'
-  owner: architecture
-  reason: "Tier-3 boundary — isinstance(np.floating) detects numpy scalar NaN/Infinity in observed schema values"
-  safety: Returns path string for error message; caller raises ValueError with location detail
-  expires: null

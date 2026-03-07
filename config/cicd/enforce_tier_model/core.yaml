@@ -10,6 +10,7 @@ per_file_rules:
   - R5
   reason: Jinja2 template AST walker requires isinstance() for node type traversal - fundamental to field extraction
   expires: null
+  max_hits: 22
 - pattern: core/config.py
   rules:
   - R1
@@ -22,15 +23,93 @@ per_file_rules:
   - R1
   reason: Security utilities access optional environment variables (Tier 3) - defensive access for missing keys
   expires: null
+- pattern: core/canonical.py
+  rules:
+  - R5
+  reason: Type dispatch for numpy/pandas normalization and NaN rejection
+  expires: null
+  max_hits: 19
+- pattern: core/checkpoint/serialization.py
+  rules:
+  - R5
+  reason: Type envelope detection, NaN rejection, and reserved key escaping
+  expires: null
+  max_hits: 11
+- pattern: core/dag/builder.py
+  rules:
+  - R5
+  reason: Config format discrimination (str vs dict field specs)
+  expires: null
+  max_hits: 5
+- pattern: core/dag/graph.py
+  rules:
+  - R5
+  reason: Optional schema access for mixed node types
+  expires: null
+  max_hits: 2
+- pattern: core/landscape/database.py
+  rules:
+  - R5
+  reason: urllib.parse union type narrowing (str vs list[str])
+  expires: null
+  max_hits: 1
+- pattern: core/landscape/execution_repository.py
+  rules:
+  - R5
+  reason: Discriminated union narrowing and invariant validation
+  expires: null
+  max_hits: 2
+- pattern: core/landscape/exporter.py
+  rules:
+  - R5
+  reason: Discriminated union handling for NodeState subtypes
+  expires: null
+  max_hits: 3
+- pattern: core/landscape/formatters.py
+  rules:
+  - R5
+  reason: Recursive dataclass/enum/list serialization dispatch
+  expires: null
+  max_hits: 11
+- pattern: core/landscape/journal.py
+  rules:
+  - R5
+  reason: SQL parameter format normalization (list/tuple/dict)
+  expires: null
+  max_hits: 4
+- pattern: core/landscape/row_data.py
+  rules:
+  - R5
+  reason: Deep-freeze guard for row data immutability
+  expires: null
+  max_hits: 1
+- pattern: core/landscape/run_lifecycle_repository.py
+  rules:
+  - R5
+  reason: Tier 1 integrity validation on deserialized audit data
+  expires: null
+  max_hits: 4
+- pattern: core/operations.py
+  rules:
+  - R5
+  reason: Exception type discrimination for error prioritization
+  expires: null
+  max_hits: 1
+- pattern: core/security/web.py
+  rules:
+  - R5
+  reason: Union type narrowing for thread-safe URL validation
+  expires: null
+  max_hits: 2
 allow_hits:
 - key: core/payload_store.py:R6:FilesystemPayloadStore:delete:fp=6467dcaaf8795f52
   owner: architecture
-  reason: "Idempotent delete \u2014 FileNotFoundError means content already deleted (retention purge or duplicate call)"
-  safety: "Returns False on missing file \u2014 caller informed, no silent data loss"
+  reason: Idempotent delete — FileNotFoundError means content already deleted (retention purge or duplicate call)
+  safety: Returns False on missing file — caller informed, no silent data loss
   expires: null
 - key: core/landscape/query_repository.py:R6:QueryRepository:explain_row:fp=b2c9221a83ad28a8
   owner: architecture
-  reason: "KeyError from PayloadStore when payload purged by retention policy \u2014 expected, not corruption"
+  reason: KeyError from PayloadStore when payload purged by retention policy — expected, not corruption
 - key: core/canonical.py:R6:_normalize_value:fp=20ccee9926534392
   owner: architecture
   reason: Silent recovery with explicit error handling path
@@ -38,12 +117,12 @@ allow_hits:
   expires: '2026-05-02'
 - key: core/rate_limit/limiter.py:R6:RateLimiter:try_acquire:fp=860b9a4a7e64c817
   owner: architecture
-  reason: "Silent recovery with explicit error handling path \u2014 returns False when bucket full"
+  reason: Silent recovery with explicit error handling path — returns False when bucket full
   safety: Caller checks return value; no silent data loss
   expires: '2026-05-02'
 - key: core/rate_limit/limiter.py:R6:RateLimiter:close:fp=35b37e8f13a03454
   owner: architecture
-  reason: "Framework boundary \u2014 pyrate-limiter _leaker attribute may not exist across library versions"
+  reason: Framework boundary — pyrate-limiter _leaker attribute may not exist across library versions
   safety: Graceful degradation to no cleanup if attribute missing; thread dies naturally
   expires: '2026-05-02'
 - key: core/security/secret_loader.py:R6:CompositeSecretLoader:get_secret:fp=cb4d8fc57f9917d4
@@ -51,124 +130,11 @@ allow_hits:
   reason: Intentional fallback pattern - CompositeSecretLoader tries loaders in priority order
   safety: SecretNotFoundError from one loader triggers fallback to next; raises if all fail
   expires: null
-- key: core/operations.py:R5:track_operation:fp=b8ecfb94263c6241
-  owner: architecture
-  reason: "isinstance re-raise guard \u2014 FrameworkBugError/AuditIntegrityError from complete_operation() must supersede\
-    \ any original exception"
-  safety: Tier 1 violations always propagate; original exception chained via __cause__
-  expires: '2026-05-15'
 - key: core/events.py:R1:EventBus:emit:fp=a3366ec5825ceb37
   owner: architecture
   reason: Optional field access at trust boundary
   safety: Code reviewed - legitimate pattern
   expires: '2026-05-02'
-- key: core/canonical.py:R5:_normalize_value:fp=69352998cb8173ba
-  owner: architecture
-  reason: AST/type checking - required for safe parsing or discriminated unions
-  safety: Code reviewed - legitimate pattern
-  expires: '2026-05-02'
-- key: core/canonical.py:R5:_normalize_value:fp=9d6500f0e3ae43cb
-  owner: architecture
-  reason: AST/type checking - required for safe parsing or discriminated unions
-  safety: Code reviewed - legitimate pattern
-  expires: '2026-05-02'
-- key: core/canonical.py:R5:_normalize_value:fp=9f698ad6d52a1f91
-  owner: architecture
-  reason: AST/type checking - required for safe parsing or discriminated unions
-  safety: Code reviewed - legitimate pattern
-  expires: '2026-05-02'
-- key: core/canonical.py:R5:_normalize_value:fp=9eb5577ca1c9c1ee
-  owner: architecture
-  reason: AST/type checking - required for safe parsing or discriminated unions
-  safety: Code reviewed - legitimate pattern
-  expires: '2026-05-02'
-- key: core/canonical.py:R5:_normalize_value:fp=471b81de5234ef34
-  owner: architecture
-  reason: AST/type checking - required for safe parsing or discriminated unions
-  safety: Code reviewed - legitimate pattern
-  expires: '2026-05-02'
-- key: core/canonical.py:R5:_normalize_value:fp=8350fcf16c6d9146
-  owner: architecture
-  reason: AST/type checking - required for safe parsing or discriminated unions
-  safety: Code reviewed - legitimate pattern
-  expires: '2026-05-02'
-- key: core/canonical.py:R5:_normalize_value:fp=2c77d3e7e9fc8e10
-  owner: architecture
-  reason: AST/type checking - required for safe parsing or discriminated unions
-  safety: Code reviewed - legitimate pattern
-  expires: '2026-05-02'
-- key: core/canonical.py:R5:_normalize_value:fp=639b5ea8ae45d3a8
-  owner: architecture
-  reason: AST/type checking - required for safe parsing or discriminated unions
-  safety: Code reviewed - legitimate pattern
-  expires: '2026-05-02'
-- key: core/canonical.py:R5:_normalize_value:fp=318ccd32fa9a3358
-  owner: architecture
-  reason: AST/type checking - required for safe parsing or discriminated unions
-  safety: Code reviewed - legitimate pattern
-  expires: '2026-05-02'
-- key: core/canonical.py:R5:_normalize_value:fp=c08972b9035d5c5c
-  owner: architecture
-  reason: AST/type checking - required for safe parsing or discriminated unions
-  safety: Code reviewed - legitimate pattern
-  expires: '2026-05-02'
-- key: core/canonical.py:R5:_normalize_value:fp=2fc6930c38ee3e38
-  owner: architecture
-  reason: AST/type checking - required for safe parsing or discriminated unions
-  safety: Code reviewed - legitimate pattern
-  expires: '2026-05-02'
-- key: core/canonical.py:R5:_normalize_value:fp=e4ea2169d8f76d9a
-  owner: architecture
-  reason: AST/type checking - required for safe parsing or discriminated unions
-  safety: Code reviewed - legitimate pattern
-  expires: '2026-05-02'
-- key: core/canonical.py:R5:_normalize_for_canonical:fp=d8a87d5edc661516
-  owner: P1-2026-02-05-typecheck
-  reason: PipelineRow type detection for canonical JSON serialization after mypy typecheck
-  safety: isinstance() required to convert PipelineRow to dict for RFC8785 compliance
-- key: core/canonical.py:R5:_normalize_for_canonical:fp=551a6c2a9d7396cf
-  owner: P1-2026-02-05-typecheck
-  reason: PipelineRow type detection for canonical JSON serialization after mypy typecheck
-  safety: isinstance() required to convert PipelineRow to dict for RFC8785 compliance
-- key: core/canonical.py:R5:_normalize_for_canonical:fp=43891aca024737ee
-  owner: P1-2026-02-05-typecheck
-  reason: PipelineRow type detection for canonical JSON serialization after mypy typecheck
-  safety: isinstance() required to convert PipelineRow to dict for RFC8785 compliance
-- key: core/canonical.py:R5:sanitize_for_canonical:fp=694d1071c3a2b166
-  owner: bugfix
-  reason: "Tier-3 boundary \u2014 isinstance required for recursive dict/list/float traversal to sanitize quarantine data"
-  safety: Replaces NaN/Infinity with None; audit trail records original error separately
-  expires: '2026-05-12'
-- key: core/canonical.py:R5:sanitize_for_canonical:fp=0bd5afb857865b88
-  owner: bugfix
-  reason: "Tier-3 boundary \u2014 isinstance required for recursive dict/list/float traversal to sanitize quarantine data"
-  safety: Replaces NaN/Infinity with None; audit trail records original error separately
-  expires: '2026-05-12'
-- key: core/canonical.py:R5:sanitize_for_canonical:fp=7ebfc28c5dadd1a5
-  owner: bugfix
-  reason: "Tier-3 boundary \u2014 isinstance required for recursive dict/list/float traversal to sanitize quarantine data"
-  safety: Replaces NaN/Infinity with None; audit trail records original error separately
-  expires: '2026-05-12'
-- key: core/dag/builder.py:R5:_field_name_type:fp=f9ea2b8c0078e5f7
-  owner: ARCH-15
-  reason: isinstance check for dict vs str field spec in schema parsing helper
-  safety: "Crashes with ValueError on unrecognised format \u2014 no silent fallback"
-  expires: '2026-05-13'
-- key: core/dag/builder.py:R5:_field_name_type:fp=91812b8d5ebba874
-  owner: ARCH-15
-  reason: isinstance check for dict vs str field spec in schema parsing helper
-  safety: "Crashes with ValueError on unrecognised format \u2014 no silent fallback"
-  expires: '2026-05-13'
-- key: core/dag/builder.py:R5:_field_required:fp=f009f67385760195
-  owner: bugfix
-  reason: isinstance check for str field spec format in schema optionality helper
-  safety: "Crashes with default True on unrecognised format \u2014 no silent fallback"
-  expires: '2026-05-13'
-- key: core/dag/builder.py:R5:_field_required:fp=5251dcd1e1e89b49
-  owner: bugfix
-  reason: isinstance check for str field spec format in schema optionality helper
-  safety: "Crashes with default True on unrecognised format \u2014 no silent fallback"
-  expires: '2026-05-13'
 - key: core/dag/builder.py:R2:build_execution_graph:fp=8ed33e14723fc932
   owner: architecture
   reason: Optional _output_schema_config metadata is present only on select plugins
@@ -187,52 +153,37 @@ allow_hits:
 - key: core/dag/builder.py:R1:build_execution_graph:fp=c95fb13d5d70bc2b
   owner: architecture
   reason: Optional gate connection route label lookup for coalesce provenance wiring
-  safety: "Missing lookup returns None \u2014 handled explicitly by conditional check"
+  safety: Missing lookup returns None — handled explicitly by conditional check
   expires: '2026-03-13'
 - key: core/dag/builder.py:R1:build_execution_graph:fp=55b93ddc4605fa6b
   owner: architecture
   reason: Optional gate connection route label lookup for coalesce provenance wiring
-  safety: "Missing lookup returns None \u2014 handled explicitly by conditional check"
+  safety: Missing lookup returns None — handled explicitly by conditional check
   expires: '2026-03-13'
 - key: core/dag/builder.py:R1:build_execution_graph:fp=a95c870f790f30df
   owner: architecture
   reason: Optional gate connection route label lookup for coalesce provenance wiring
-  safety: "Missing lookup returns None \u2014 handled explicitly by conditional check"
+  safety: Missing lookup returns None — handled explicitly by conditional check
   expires: '2026-03-13'
 - key: core/dag/builder.py:R1:build_execution_graph:fp=40cb470bb626c0dc
   owner: architecture
   reason: Optional gate connection route label lookup for coalesce provenance wiring
-  safety: "Missing lookup returns None \u2014 handled explicitly by conditional check"
+  safety: Missing lookup returns None — handled explicitly by conditional check
   expires: '2026-03-13'
 - key: core/dag/builder.py:R1:build_execution_graph:fp=eb16ce69d9a8251f
   owner: architecture
   reason: Optional gate connection route label lookup for coalesce provenance wiring
-  safety: "Missing lookup returns None \u2014 handled explicitly by conditional check"
-  expires: '2026-03-13'
-- key: core/dag/builder.py:R5:build_execution_graph:fp=7b266601a2ca0161
-  owner: architecture
-  reason: isinstance check for dict vs NodeConfig on config field during schema population
-  safety: Crashes on type mismatch - no silent fallback
+  safety: Missing lookup returns None — handled explicitly by conditional check
   expires: '2026-03-13'
 - key: core/dag/graph.py:R1:ExecutionGraph:get_schema_config_from_node:fp=e73629e37afb81d6
   owner: architecture
   reason: Optional schema access for mixed node types (source/sink/gate/coalesce)
   safety: Crashes on malformed schema payloads; None is an intentional non-schema state
   expires: '2026-03-10'
-- key: core/dag/graph.py:R5:ExecutionGraph:get_schema_config_from_node:fp=cf389b7a44b245c2
-  owner: architecture
-  reason: Runtime shape check before coercing schema dict to SchemaConfig
-  safety: Non-dict payloads are rejected and converted to explicit validation failures
-  expires: '2026-03-10'
 - key: core/dag/graph.py:R1:ExecutionGraph:get_required_fields:fp=a7a72c372c1fef1c
   owner: architecture
   reason: Optional required_input_fields key supports transforms with implicit/no required field contract
   safety: Missing key yields empty set; downstream schema checks still enforce compatibility
-  expires: '2026-03-10'
-- key: core/dag/graph.py:R5:ExecutionGraph:get_required_fields:fp=836fc35f6138553b
-  owner: architecture
-  reason: Options payload shape check at config boundary before extracting nested required_input_fields
-  safety: Non-dict options are treated as no declared requirements and never silently coerced
   expires: '2026-03-10'
 - key: core/retention/purge.py:R6:PurgeManager:purge_payloads:fp=70cd8fe1b61dd607
   owner: bugfix
@@ -244,25 +195,12 @@ allow_hits:
   safety: Exception caught and logged, ref added to failed_refs, loop continues
 - key: core/landscape/execution_repository.py:R6:ExecutionRepository:begin_node_state:fp=41ef0c6c46683aba
   owner: bugfix
-  reason: "Tier-3 boundary \u2014 quarantined row data may contain NaN/Infinity that stable_hash rejects"
+  reason: Tier-3 boundary — quarantined row data may contain NaN/Infinity that stable_hash rejects
   safety: Falls back to repr_hash which always succeeds; audit trail integrity maintained
   expires: '2026-05-12'
-- key: core/landscape/execution_repository.py:R5:ExecutionRepository:complete_node_state:fp=cda22d74ffe397b0
-  owner: architecture
-  reason: Type narrowing after DB update - discriminated union requires isinstance to verify terminal state
-  safety: Raises AuditIntegrityError if wrong state - explicit failure, not masking
-- key: core/landscape/execution_repository.py:R5:ExecutionRepository:complete_node_state:fp=5907d34d5ef23bb7
-  owner: architecture
-  reason: Type narrowing after DB update - discriminated union requires isinstance to verify terminal state
-  safety: Raises AuditIntegrityError if wrong state - explicit failure, not masking
 - key: core/landscape/execution_repository.py:R6:ExecutionRepository:get_call_response_data:fp=562330cc4a5808f6
   owner: architecture
   reason: Graceful handling of purged payloads - retention policy may have deleted response data
-- key: core/landscape/database.py:R5:LandscapeDB:_create_sqlcipher_engine:fp=c0dcff3319d92b07
-  owner: architecture
-  reason: "Framework boundary \u2014 urllib.parse query values can be str or list[str] depending on parameter multiplicity"
-  safety: Disambiguates URL query parsing output before type coercion; no silent data loss
-  expires: '2026-05-02'
 - key: core/landscape/exporter.py:R1:LandscapeExporter:_iter_records:fp=5066e6cacd103350
   owner: P2-2026-02-02-76r
   reason: Sparse lookup - not all rows have tokens (batch export uses pre-loaded dicts)
@@ -278,15 +216,6 @@ allow_hits:
 - key: core/landscape/exporter.py:R1:LandscapeExporter:_iter_records:fp=9c97854e42a1da2d
   owner: P2-2026-02-02-76r
   reason: Sparse lookup - not all rows have tokens (batch export uses pre-loaded dicts)
-- key: core/landscape/exporter.py:R5:LandscapeExporter:_iter_records:fp=ee8ae6e8e59e3c39
-  owner: P2-2026-02-02-76r
-  reason: "Discriminated union \u2014 NodeState is union of Open/Pending/Completed/Failed with different fields"
-- key: core/landscape/exporter.py:R5:LandscapeExporter:_iter_records:fp=342831d6cc091d3b
-  owner: P2-2026-02-02-76r
-  reason: "Discriminated union \u2014 NodeState is union of Open/Pending/Completed/Failed with different fields"
-- key: core/landscape/exporter.py:R5:LandscapeExporter:_iter_records:fp=005d1f4a9099557b
-  owner: P2-2026-02-02-76r
-  reason: "Discriminated union \u2014 NodeState is union of Open/Pending/Completed/Failed with different fields"
 - key: core/landscape/exporter.py:R1:LandscapeExporter:_iter_records:fp=a7b76f22649d9cce
   owner: P2-2026-02-02-76r
   reason: Sparse lookup - not all rows have tokens (batch export uses pre-loaded dicts)
@@ -298,12 +227,12 @@ allow_hits:
   reason: Sparse lookup - not all rows have tokens (batch export uses pre-loaded dicts)
 - key: core/landscape/data_flow_repository.py:R6:DataFlowRepository:create_row:fp=258b3bec3eb551dd
   owner: bugfix
-  reason: "Tier-3 boundary \u2014 quarantined row data may contain NaN/Infinity that stable_hash rejects"
+  reason: Tier-3 boundary — quarantined row data may contain NaN/Infinity that stable_hash rejects
   safety: Falls back to repr_hash which always succeeds; audit trail integrity maintained
   expires: '2026-05-12'
 - key: core/landscape/data_flow_repository.py:R6:DataFlowRepository:create_row:fp=3a27fa898aa03de9
   owner: bugfix
-  reason: "Tier-3 boundary \u2014 quarantined row data may contain NaN/Infinity that stable_hash rejects"
+  reason: Tier-3 boundary — quarantined row data may contain NaN/Infinity that stable_hash rejects
   safety: Falls back to repr_hash which always succeeds; audit trail integrity maintained
   expires: '2026-05-12'
 - key: core/landscape/data_flow_repository.py:R6:DataFlowRepository:record_validation_error:fp=8f20b735c04d84a6
@@ -312,161 +241,14 @@ allow_hits:
   safety: Falls back to repr() with logging - audit trail preserved with metadata
 - key: core/landscape/data_flow_repository.py:R6:DataFlowRepository:record_transform_error:fp=867daff8b670485f
   owner: bugfix
-  reason: "Tier-3 boundary \u2014 quarantined row data may contain NaN/Infinity that canonical_json rejects"
-  safety: "Falls back to repr() with logging \u2014 audit trail preserved with metadata"
-- key: core/landscape/journal.py:R5:LandscapeJournal:_normalize_parameters:fp=6f7c6c1669761388
-  owner: architecture
-  reason: AST/type checking - required for safe parsing or discriminated unions
-- key: core/landscape/journal.py:R5:LandscapeJournal:_normalize_parameters:fp=b891d78d1e3e60a8
-  owner: architecture
-  reason: AST/type checking - required for safe parsing or discriminated unions
-- key: core/landscape/journal.py:R5:LandscapeJournal:_normalize_parameters:fp=51dff408854578a2
-  owner: architecture
-  reason: AST/type checking - required for safe parsing or discriminated unions
-- key: core/landscape/journal.py:R5:LandscapeJournal:_columns_to_values:fp=1e2aeaeaabf8a7f9
-  owner: architecture
-  reason: AST/type checking - required for safe parsing or discriminated unions
-- key: core/landscape/run_lifecycle_repository.py:R5:RunLifecycleRepository:get_source_field_resolution:fp=7cd6d62cc37449df
-  owner: feature
-  reason: Tier 1 trust validation - crash on corruption from our own audit database
-  safety: AuditIntegrityError raised on corrupt data - explicit failure, not silent coercion
-- key: core/landscape/run_lifecycle_repository.py:R5:RunLifecycleRepository:get_source_field_resolution:fp=3c57f7fd5152f540
-  owner: feature
-  reason: Tier 1 trust validation - crash on corruption from our own audit database
-  safety: AuditIntegrityError raised on corrupt data - explicit failure, not silent coercion
-- key: core/landscape/run_lifecycle_repository.py:R5:RunLifecycleRepository:get_source_field_resolution:fp=c9a95c3140d0468c
-  owner: feature
-  reason: Tier 1 trust validation - crash on corruption from our own audit database
-  safety: AuditIntegrityError raised on corrupt data - explicit failure, not silent coercion
-- key: core/landscape/run_lifecycle_repository.py:R5:RunLifecycleRepository:get_source_field_resolution:fp=203e3445250c11d5
-  owner: feature
-  reason: Tier 1 trust validation - crash on corruption from our own audit database
-  safety: AuditIntegrityError raised on corrupt data - explicit failure, not silent coercion
-- key: core/landscape/formatters.py:R5:serialize_datetime:fp=fccc26ac5316baac
-  owner: architecture
-  reason: AST/type checking - required for safe parsing or discriminated unions
-  safety: Code reviewed - legitimate pattern
-  expires: '2026-05-02'
-- key: core/landscape/formatters.py:R5:serialize_datetime:fp=ed00f0aae4d1e534
-  owner: architecture
-  reason: AST/type checking - required for safe parsing or discriminated unions
-  safety: Code reviewed - legitimate pattern
-  expires: '2026-05-02'
-- key: core/landscape/formatters.py:R5:serialize_datetime:fp=19e973af0066c976
-  owner: architecture
-  reason: AST/type checking - required for safe parsing or discriminated unions
-  safety: Code reviewed - legitimate pattern
-  expires: '2026-05-02'
-- key: core/landscape/formatters.py:R5:serialize_datetime:fp=18faa236daba717d
-  owner: architecture
-  reason: AST/type checking - required for safe parsing or discriminated unions
-  safety: Code reviewed - legitimate pattern
-  expires: '2026-05-02'
-- key: core/landscape/formatters.py:R5:dataclass_to_dict:fp=df66698debb85823
-  owner: architecture
-  reason: AST/type checking - required for safe parsing or discriminated unions
-  safety: Code reviewed - legitimate pattern
-  expires: '2026-05-02'
-- key: core/landscape/formatters.py:R5:dataclass_to_dict:fp=848be496100ac05b
-  owner: architecture
-  reason: AST/type checking - required for safe parsing or discriminated unions
-  safety: Code reviewed - legitimate pattern
-  expires: '2026-05-02'
-- key: core/landscape/formatters.py:R5:dataclass_to_dict:fp=08ebbc13d087e1b4
-  owner: architecture
-  reason: AST/type checking - required for safe parsing or discriminated unions
-  safety: Code reviewed - legitimate pattern
-  expires: '2026-05-02'
-- key: core/landscape/formatters.py:R5:dataclass_to_dict:fp=7cfb43609b390394
-  owner: architecture
-  reason: AST/type checking - required for safe parsing or discriminated unions
-  safety: Code reviewed - legitimate pattern
-  expires: '2026-05-02'
-- key: core/landscape/formatters.py:R5:dataclass_to_dict:fp=471817a696073c90
-  owner: architecture
-  reason: AST/type checking - required for safe parsing or discriminated unions
-  safety: Code reviewed - legitimate pattern
-  expires: '2026-05-02'
-- key: core/landscape/formatters.py:R5:CSVFormatter:flatten:fp=6d09d4ddafba686c
-  owner: architecture
-  reason: AST/type checking - required for safe parsing or discriminated unions
-  safety: Code reviewed - legitimate pattern
-  expires: '2026-05-02'
-- key: core/landscape/formatters.py:R5:CSVFormatter:flatten:fp=e07953dc5cba41f2
-  owner: architecture
-  reason: AST/type checking - required for safe parsing or discriminated unions
-  safety: Code reviewed - legitimate pattern
-  expires: '2026-05-02'
+  reason: Tier-3 boundary — quarantined row data may contain NaN/Infinity that canonical_json rejects
+  safety: Falls back to repr() with logging — audit trail preserved with metadata
 - key: core/security/web.py:R4:validate_url_for_ssrf:_resolve_worker:fp=5d2732269e796176
   owner: bugfix
   reason: DNS resolver worker catches BaseException to relay ALL errors through the queue to the caller thread
   safety: Every caught exception is put on the queue and re-raised by the caller; nothing is suppressed
   expires: '2026-05-12'
-- key: core/security/web.py:R5:validate_url_for_ssrf:fp=862390c26f4a758e
-  owner: bugfix
-  reason: "Type narrowing assert for mypy \u2014 queue returns union type, assert narrows to BaseException after status==\"\
-    error\""
-  safety: This is a code invariant assertion, not defensive programming; violation is a bug in our queue protocol
-  expires: '2026-05-12'
-- key: core/security/web.py:R5:validate_url_for_ssrf:fp=7985908b307d14da
-  owner: bugfix
-  reason: "Type narrowing assert for mypy \u2014 queue returns union type, assert narrows to BaseException after status==\"\
-    error\""
-  safety: This is a code invariant assertion, not defensive programming; violation is a bug in our queue protocol
-  expires: '2026-05-12'
 - key: core/security/secret_loader.py:R6:KeyVaultSecretLoader:get_secret:fp=06600ea3f1149706
   owner: bugfix
-  reason: "Sentinel class definition in except ImportError \u2014 not a runtime error handler"
+  reason: Sentinel class definition in except ImportError — not a runtime error handler
   safety: _get_client() raises ImportError before any Azure API call; sentinel class is never caught
-- key: core/checkpoint/serialization.py:R5:CheckpointEncoder:default:fp=df102ea32f3cd996
-  owner: architecture
-  reason: "AST/type checking \u2014 isinstance for datetime in JSON encoder"
-  safety: "Code reviewed \u2014 fundamental to checkpoint serialization"
-- key: core/checkpoint/serialization.py:R5:_reject_nan_infinity:fp=fccc26ac5316baac
-  owner: bugfix
-  reason: "Tier-3 boundary validation \u2014 rejects NaN/Infinity for audit integrity"
-- key: core/checkpoint/serialization.py:R5:_reject_nan_infinity:fp=7aae3700fabfd617
-  owner: bugfix
-  reason: "Tier-3 boundary validation \u2014 rejects NaN/Infinity for audit integrity"
-- key: core/checkpoint/serialization.py:R5:_reject_nan_infinity:fp=6d017a7a75797d2f
-  owner: bugfix
-  reason: "Tier-3 boundary validation \u2014 rejects NaN/Infinity for audit integrity"
-- key: core/checkpoint/serialization.py:R5:_escape_reserved_keys:fp=64c4f2b469eabfb3
-  owner: bugfix
-  reason: "Tier 1 type restoration \u2014 isinstance checks for datetime/dict/list during key escaping"
-  safety: Required for collision-safe checkpoint envelope format
-- key: core/checkpoint/serialization.py:R5:_escape_reserved_keys:fp=42e6874d610da144
-  owner: bugfix
-  reason: "Tier 1 type restoration \u2014 isinstance checks for datetime/dict/list during key escaping"
-  safety: Required for collision-safe checkpoint envelope format
-- key: core/checkpoint/serialization.py:R5:_escape_reserved_keys:fp=980d38e45964b3eb
-  owner: bugfix
-  reason: "Tier 1 type restoration \u2014 isinstance checks for datetime/dict/list during key escaping"
-  safety: Required for collision-safe checkpoint envelope format
-- key: core/checkpoint/serialization.py:R5:_restore_types:fp=181ecf7ac43c5407
-  owner: architecture
-  reason: "AST/type checking \u2014 isinstance for dict during recursive type restoration"
-  safety: "Code reviewed \u2014 fundamental to checkpoint deserialization"
-- key: core/checkpoint/serialization.py:R5:_restore_types:fp=5fe2f671ab0e0f27
-  owner: architecture
-  reason: "AST/type checking \u2014 isinstance for dict during recursive type restoration"
-  safety: "Code reviewed \u2014 fundamental to checkpoint deserialization"
-- key: core/checkpoint/serialization.py:R5:_restore_types:fp=fb7d7b27adb71e43
-  owner: architecture
-  reason: "AST/type checking \u2014 isinstance for dict during recursive type restoration"
-  safety: "Code reviewed \u2014 fundamental to checkpoint deserialization"
-- key: core/checkpoint/serialization.py:R5:_restore_types:fp=4180d6bd9f8f7faf
-  owner: architecture
-  reason: "AST/type checking \u2014 isinstance for dict during recursive type restoration"
-  safety: "Code reviewed \u2014 fundamental to checkpoint deserialization"
-- key: 'core/landscape/row_data.py:R5:RowDataResult:__post_init__:fp=d9e8cfe6e01d6ab4'
-  owner: architecture
-  reason: Deep-freeze conversion guard — isinstance() checks for MappingProxyType/tuple wrapping, not defensive data access
-  safety: Construction-time type conversion, crashes on unexpected types
-  expires: null
-
-- key: 'core/canonical.py:R5:sanitize_for_canonical:fp=e1d2345f7d0befe5'
-  owner: architecture
-  reason: "Tier-3 boundary — isinstance(np.floating) detects numpy scalar NaN/Infinity for quarantine sanitization"
-  safety: Replaces non-finite with None; audit trail records original error separately
-  expires: null

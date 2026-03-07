@@ -4,6 +4,49 @@ per_file_rules:
   - R5
   reason: Test factories accept dict|PipelineRow for convenience - isinstance() for input coercion, not bug masking
   expires: null
+  max_hits: 7
+- pattern: testing/chaosengine/config_loader.py
+  rules:
+  - R5
+  reason: Tier 3 YAML config parsing and recursive merge dispatch
+  expires: null
+  max_hits: 3
+- pattern: testing/chaosengine/metrics_store.py
+  rules:
+  - R5
+  reason: Numeric type filtering for metric aggregation
+  expires: null
+  max_hits: 1
+- pattern: testing/chaosllm/config.py
+  rules:
+  - R5
+  reason: Pydantic before-validator for Tier 3 YAML range parsing
+  expires: null
+  max_hits: 1
+- pattern: testing/chaosllm/response_generator.py
+  rules:
+  - R5
+  reason: Tier 3 JSONL line validation
+  expires: null
+  max_hits: 1
+- pattern: testing/chaosweb/config.py
+  rules:
+  - R5
+  reason: Type dispatch in test configuration
+  expires: null
+  max_hits: 1
+- pattern: testing/chaosweb/content_generator.py
+  rules:
+  - R5
+  reason: Deep-freeze guard and Tier 3 JSONL validation
+  expires: null
+  max_hits: 2
+- pattern: testing/chaosweb/server.py
+  rules:
+  - R5
+  reason: str|bytes union dispatch for HTTP response encoding
+  expires: null
+  max_hits: 4
 allow_hits:
 - key: testing/chaosllm_mcp/server.py:R6:_find_metrics_databases:fp=2bcfbfc1388cd9d8
   owner: architecture
@@ -49,16 +92,6 @@ allow_hits:
   owner: architecture
   reason: External HTTP request body - optional fields per OpenAI spec (Tier 3)
   safety: dict.get with defaults for optional response fields from external clients
-  expires: '2026-05-13'
-- key: testing/chaosllm/config.py:R5:ErrorInjectionConfig:parse_range:fp=2ed0559ba3ee2f2a
-  owner: architecture
-  reason: Pydantic before-validator - isinstance checks raw YAML value type for range coercion
-  safety: Validates Tier 3 YAML input before Pydantic model creation
-  expires: '2026-05-13'
-- key: testing/chaosllm/response_generator.py:R5:PresetBank:from_jsonl:fp=593a4c8edf92ba3e
-  owner: architecture
-  reason: Tier 3 boundary - isinstance validates parsed JSONL line is dict
-  safety: Validates external file content structure
   expires: '2026-05-13'
 - key: testing/chaosllm/response_generator.py:R1:ResponseGenerator:_generate_template_response:fp=f642019fb02b81fc
   owner: architecture
@@ -130,7 +163,6 @@ allow_hits:
   reason: Optional field access at trust boundary
   safety: Code reviewed - legitimate pattern
   expires: '2026-05-02'
-
 - key: testing/chaosengine/metrics_store.py:R7:MetricsStore:_cleanup_stale_connections:fp=faccf6cb8df9362d
   owner: architecture
   reason: contextlib.suppress on ProgrammingError during stale connection cleanup
@@ -141,11 +173,6 @@ allow_hits:
   reason: dict.pop extracts latency_ms from classified metrics row - field is optional in variable-shape metrics data
   safety: None default is correct - latency is not present in all metric types
   expires: '2026-05-13'
-- key: testing/chaosengine/metrics_store.py:R5:MetricsStore:rebuild_timeseries:fp=dcaaed8260b41dfc
-  owner: architecture
-  reason: isinstance(int) filters numeric metric values for aggregation - variable-shape metrics contain mixed types
-  safety: Non-int values are correctly skipped during summation
-  expires: '2026-05-13'
 - key: testing/chaosengine/metrics_store.py:R1:MetricsStore:rebuild_timeseries:fp=fbb4b167260cd930
   owner: architecture
   reason: dict.get with default 0 for running totals accumulator - key may not exist on first encounter
@@ -155,26 +182,6 @@ allow_hits:
   owner: architecture
   reason: contextlib.suppress on ProgrammingError during connection cleanup
   safety: Only suppresses error for already-closed connections during teardown
-  expires: '2026-05-13'
-- key: testing/chaosengine/config_loader.py:R5:deep_merge:fp=4a04f6a4dc88456d
-  owner: architecture
-  reason: Type dispatch for recursive merge - isinstance(dict) for nested structure
-  safety: Recursive merge must distinguish dict from leaf values
-  expires: '2026-05-13'
-- key: testing/chaosengine/config_loader.py:R5:deep_merge:fp=b7d4ff3159d129f9
-  owner: architecture
-  reason: Type dispatch for recursive merge - isinstance(dict) for nested structure
-  safety: Recursive merge must distinguish dict from leaf values
-  expires: '2026-05-13'
-- key: testing/chaosengine/config_loader.py:R5:load_preset:fp=b04fcfaa890ae7ed
-  owner: architecture
-  reason: Tier 3 boundary - isinstance validates parsed YAML is dict before Pydantic
-  safety: Validates external file content structure type
-  expires: '2026-05-13'
-- key: testing/chaosweb/content_generator.py:R5:PresetBank:from_jsonl:fp=38773d43b9cc4562
-  owner: architecture
-  reason: Tier 3 boundary - isinstance validates JSONL line is dict before constructing preset entry
-  safety: Non-dict lines are skipped with warning - no silent data loss
   expires: '2026-05-13'
 - key: testing/chaosweb/content_generator.py:R1:PresetBank:from_jsonl:fp=c6838e4ad64cd92e
   owner: architecture
@@ -206,43 +213,13 @@ allow_hits:
   reason: Tier 3 boundary - .get() on Starlette path_params dict (HTTP request data)
   safety: Missing path defaults to empty string - correct for catch-all route
   expires: '2026-05-06'
-- key: testing/chaosweb/server.py:R5:ChaosWebServer:_handle_connection_error:fp=31840da5ea3be151
-  owner: architecture
-  reason: isinstance check on content generator output (str vs bytes) for encoding
-  safety: Both branches produce valid bytes for HTTP response body
-  expires: '2026-05-06'
 - key: testing/chaosweb/server.py:R1:ChaosWebServer:_handle_http_error:fp=ab0361735f62084e
   owner: architecture
   reason: .get() on error message mapping - fallback for error types not in mapping
   safety: Falls back to generic status code message - never swallows errors
   expires: '2026-05-06'
-- key: testing/chaosweb/server.py:R5:ChaosWebServer:_handle_malformed_content:fp=2da5cb077f4b58bb
-  owner: architecture
-  reason: isinstance check on WebResponse.content (str|bytes) to extract str for corruption helpers
-  safety: Bytes decoded with replace - corruption helpers always receive valid str input
-  expires: '2026-05-06'
-- key: testing/chaosweb/server.py:R5:ChaosWebServer:_handle_malformed_content:fp=dbdf7bb448162147
-  owner: architecture
-  reason: isinstance check on WebResponse.content (str|bytes) to extract str for corruption helpers
-  safety: Bytes decoded with replace - corruption helpers always receive valid str input
-  expires: '2026-05-06'
-- key: testing/chaosweb/server.py:R5:ChaosWebServer:_handle_success:fp=894e20a89b9b3174
-  owner: architecture
-  reason: isinstance check on content generator output (str vs bytes) for HTTP response encoding
-  safety: Both branches produce valid bytes for Response body
-  expires: '2026-05-06'
-- key: testing/chaosweb/config.py:R5:WebErrorInjectionConfig:parse_range:fp=bf95ca2e3ead1c78
-  owner: architecture
-  reason: Pydantic before-validator - isinstance checks raw YAML value type for range coercion
-  safety: Validates Tier 3 YAML input before Pydantic model creation
-  expires: '2026-05-13'
 - key: testing/chaosweb/cli.py:R6:_version_callback:fp=52811a3edba6aac3
   owner: architecture
   reason: Silent recovery with explicit error handling path
   safety: Falls back to 'version unknown' on ImportError - correct for optional version detection
   expires: '2026-05-06'
-- key: 'testing/chaosweb/content_generator.py:R5:WebResponse:__post_init__:fp=1656051cfc4dcc2e'
-  owner: architecture
-  reason: Deep-freeze conversion guard — isinstance() checks for MappingProxyType/tuple wrapping, not defensive data access
-  safety: Construction-time type conversion, crashes on unexpected types
-  expires: null

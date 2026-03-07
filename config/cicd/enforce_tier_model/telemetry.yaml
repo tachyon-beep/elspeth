@@ -10,6 +10,18 @@ per_file_rules:
   - R9
   reason: Telemetry services are external (Tier 3) - all defensive patterns legitimate
   expires: null
+- pattern: telemetry/factory.py
+  rules:
+  - R5
+  reason: PluginValidationError discrimination for cleanup logic
+  expires: null
+  max_hits: 1
+- pattern: telemetry/manager.py
+  rules:
+  - R5
+  reason: FrameworkBugError/AuditIntegrityError re-raise guards
+  expires: null
+  max_hits: 4
 allow_hits:
 - key: telemetry/manager.py:R6:TelemetryManager:_drop_oldest_and_enqueue_newest:fp=fa9c7097f1c1e794
   owner: architecture
@@ -26,10 +38,6 @@ allow_hits:
   reason: Silent recovery with explicit error handling path
   safety: Code reviewed - legitimate pattern
   expires: '2026-05-15'
-- key: telemetry/factory.py:R5:_discover_exporter_registry:fp=cc2f0023b88f7df6
-  owner: architecture
-  reason: isinstance() distinguishes PluginValidationError from ValueError to determine safe unregister
-  safety: Only calls unregister() when plugin was successfully registered; both paths raise TelemetryExporterError
 - key: telemetry/manager.py:R1:TelemetryManager:_export_loop:fp=04ec4af80e150373
   owner: architecture
   reason: Optional field access at trust boundary
@@ -44,16 +52,6 @@ allow_hits:
   owner: architecture
   reason: Broad exception handling at external boundary with logging
   safety: Code reviewed - legitimate pattern
-  expires: '2026-05-15'
-- key: telemetry/manager.py:R5:TelemetryManager:_export_loop:fp=50def723680b47b8
-  owner: architecture
-  reason: "isinstance re-raise guard \u2014 FrameworkBugError/AuditIntegrityError must not be silently swallowed by telemetry"
-  safety: Stores exception for re-raise on flush()/close(); breaks export loop immediately
-  expires: '2026-05-15'
-- key: telemetry/manager.py:R5:TelemetryManager:_dispatch_to_exporters:fp=ba8eae6a6679e9d2
-  owner: architecture
-  reason: "isinstance re-raise guard \u2014 FrameworkBugError/AuditIntegrityError must propagate through telemetry"
-  safety: Re-raises system-level exceptions; regular exporter errors counted and logged
   expires: '2026-05-15'
 - key: telemetry/manager.py:R1:TelemetryManager:_dispatch_to_exporters:fp=e1f68308bf32d73b
   owner: architecture
@@ -85,18 +83,8 @@ allow_hits:
   reason: Sentinel reinsertion loop handles bounded queue contention
   safety: Full queue retries with bounded drain then explicit RuntimeError fail-fast
   expires: '2026-05-15'
-- key: telemetry/manager.py:R5:TelemetryManager:flush:fp=a135f2c7281bae5b
-  owner: architecture
-  reason: "isinstance re-raise guard \u2014 FrameworkBugError/AuditIntegrityError must propagate through flush()"
-  safety: Re-raises system-level exceptions; regular exporter flush errors logged as warnings
-  expires: '2026-05-15'
 - key: telemetry/manager.py:R6:TelemetryManager:close:fp=c862da771fbaee18
   owner: architecture
   reason: Silent recovery with explicit error handling path
   safety: Code reviewed - legitimate pattern
-  expires: '2026-05-15'
-- key: telemetry/manager.py:R5:TelemetryManager:close:fp=2e21487f004ac047
-  owner: architecture
-  reason: "isinstance re-raise guard \u2014 FrameworkBugError/AuditIntegrityError must propagate through close()"
-  safety: Re-raises system-level exceptions; regular exporter close errors logged as warnings
   expires: '2026-05-15'
