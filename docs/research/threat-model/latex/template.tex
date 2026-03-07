@@ -182,6 +182,16 @@
 \usepackage{xurl}                      % Better URL line breaking
 \urlstyle{same}
 
+% --- Unicode box-drawing characters in verbatim (pdflatex) ---
+\usepackage{pmboxdraw}
+\usepackage{newunicodechar}
+\usepackage{textcomp}
+\usepackage{amssymb}
+\newunicodechar{▼}{\ensuremath{\blacktriangledown}}
+\newunicodechar{←}{\ensuremath{\leftarrow}}
+\newunicodechar{→}{\ensuremath{\rightarrow}}
+\newunicodechar{—}{\textemdash}
+
 % --- Emergency line breaking ---
 \setlength{\emergencystretch}{3em}
 

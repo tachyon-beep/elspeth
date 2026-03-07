@@ -120,12 +120,27 @@ This threat is distinct from the supply chain model in three critical ways:
 Consider a government system that processes security classifications:
 
 ```python
-# Human-authored (correct for high-assurance context)
+# Best: offensive programming — crash with maximum diagnostic context
+def get_document_classification(record):
+    if "security_classification" not in record:
+        raise DataIntegrityError(
+            f"Missing security_classification for document {record.get('id', '?')}. "
+            f"This is a data integrity failure — investigate the source system. "
+            f"Fields present: {sorted(record.keys())}"
+        )
+    return record["security_classification"]
+    # If the field is missing, the operator knows exactly which document,
+    # exactly what fields were present, and exactly what to investigate.
+    # The error message is the incident response runbook.
+
+# Acceptable: bare access — crashes, but with a generic KeyError
 def get_document_classification(record):
     classification = record["security_classification"]
     # If the field is missing, this crashes — which is correct.
     # A missing classification is a data integrity failure,
     # not a scenario to handle gracefully.
+    # But the operator gets "KeyError: 'security_classification'" with
+    # no context about which document or why.
     return classification
 
 # Agent-authored (plausible, test-passing, catastrophically wrong)
@@ -137,6 +152,8 @@ def get_document_classification(record):
     # is now labelled OFFICIAL and treated accordingly.
     return classification
 ```
+
+The three versions illustrate a spectrum. The offensive version turns a crash into an actionable incident — the operator knows which document, what data was present, and what to investigate. The bare access version at least crashes, which is correct behaviour for a data integrity failure, but the operator gets a generic `KeyError` with no diagnostic context. The agent-generated version is the worst outcome: it doesn't crash at all, silently fabricating a classification that downstream access control decisions will treat as authoritative.
 
 The agent-generated version:
 - Is syntactically valid Python
