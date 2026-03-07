@@ -399,13 +399,17 @@ class ResponseGenerator:
                 if len(template_override) > max_len:
                     raise ValueError(f"Template override exceeds max length ({len(template_override)} > {max_len})")
                 # Header-override template is Tier 3 (external data from request header).
-                # Let TemplateError propagate — the test client sent a bad template.
-                template = self._jinja_env.from_string(template_override)
-                content = template.render(
-                    request=request,
-                    messages=request.get("messages", []),
-                    model=request.get("model"),
-                )
+                # Return error content instead of crashing — the server must produce
+                # a deterministic response, not an unplanned 500.
+                try:
+                    template = self._jinja_env.from_string(template_override)
+                    content = template.render(
+                        request=request,
+                        messages=request.get("messages", []),
+                        model=request.get("model"),
+                    )
+                except jinja2.TemplateError as exc:
+                    content = f"[template_override_error: {exc}]"
             else:
                 content = self._generate_template_response(request)
         elif mode == "echo":
@@ -413,7 +417,10 @@ class ResponseGenerator:
         elif mode == "preset":
             content = self._generate_preset_response()
         else:
-            raise ValueError(f"Unknown response mode: {mode}")
+            # Config mode is Pydantic Literal-validated, so invalid config mode
+            # is impossible. This branch is only reachable via mode_override from
+            # the X-Fake-Response-Mode header (Tier 3 external data).
+            content = f"[unknown_mode: {mode!r}]"
 
         # Estimate token counts
         prompt_text = self._extract_prompt_text(request)

@@ -423,7 +423,7 @@ class ContentGenerator:
             # Config mode is Pydantic Literal-validated, so invalid config mode
             # is impossible. This branch is only reachable via mode_override from
             # the X-Fake-Content-Mode header (Tier 3 external data).
-            raise ValueError(f"Unknown content mode: {mode!r}")
+            content = f"<html><body>[unknown_mode: {mode!r}]</body></html>"
 
         return WebResponse(
             content=content,

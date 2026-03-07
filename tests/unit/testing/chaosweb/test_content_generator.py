@@ -346,6 +346,20 @@ class TestInjectMalformedMeta:
         assert 'http-equiv="refresh"' in result
 
 
+class TestModeOverrideErrors:
+    """Tests for graceful handling of invalid header overrides."""
+
+    def test_unknown_mode_override_returns_error_content(self) -> None:
+        """Unknown X-Fake-Content-Mode returns error in content, not crash."""
+        config = WebContentConfig(mode="random")
+        generator = ContentGenerator(config)
+
+        response = generator.generate(path="/test", mode_override="typo_mode")
+
+        assert isinstance(response, WebResponse)
+        assert "unknown_mode" in response.content
+
+
 class TestGenerateWrongContentType:
     """Tests for generate_wrong_content_type helper."""
 

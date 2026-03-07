@@ -512,6 +512,47 @@ class TestTemplateMode:
         with pytest.raises(jinja2.UndefinedError):
             generator.generate(request)
 
+    def test_malformed_template_override_returns_error_content(self) -> None:
+        """Malformed X-Fake-Template override returns error in content, not crash."""
+        config = ResponseConfig(
+            mode="template",
+            template=TemplateResponseConfig(body="Normal response"),
+        )
+        generator = ResponseGenerator(config)
+
+        request = {"model": "gpt-4", "messages": []}
+        # Syntax error in Jinja2 template — unclosed block
+        response = generator.generate(request, template_override="{% if unclosed %}")
+
+        # Should return a valid OpenAIResponse with error description, not raise
+        assert isinstance(response, OpenAIResponse)
+        assert "template_override_error" in response.content
+
+    def test_template_override_undefined_var_returns_error_content(self) -> None:
+        """Override template with undefined variable returns error, not crash."""
+        config = ResponseConfig(
+            mode="template",
+            template=TemplateResponseConfig(body="Normal response"),
+        )
+        generator = ResponseGenerator(config)
+
+        request = {"model": "gpt-4", "messages": []}
+        response = generator.generate(request, template_override="{{ nonexistent_var }}")
+
+        assert isinstance(response, OpenAIResponse)
+        assert "template_override_error" in response.content
+
+    def test_unknown_mode_override_returns_error_content(self) -> None:
+        """Unknown mode override returns error in content, not crash."""
+        config = ResponseConfig(mode="random")
+        generator = ResponseGenerator(config)
+
+        request = {"model": "gpt-4", "messages": []}
+        response = generator.generate(request, mode_override="typo_mode")
+
+        assert isinstance(response, OpenAIResponse)
+        assert "unknown_mode" in response.content
+
 
 class TestEchoMode:
     """Tests for echo response generation mode."""
