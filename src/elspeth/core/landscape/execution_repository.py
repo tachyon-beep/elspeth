@@ -1108,15 +1108,6 @@ class ExecutionRepository:
         Raises:
             AuditIntegrityError: If batch not found or current status is terminal
         """
-        current = self.get_batch(batch_id)
-        if current is None:
-            raise AuditIntegrityError(f"Cannot update batch status: batch {batch_id} not found")
-        if current.status in _TERMINAL_BATCH_STATUSES:
-            raise AuditIntegrityError(
-                f"Cannot transition batch {batch_id} from terminal status {current.status.value!r} "
-                f"to {status.value!r}. Terminal batches are immutable."
-            )
-
         updates: dict[str, Any] = {"status": status}
 
         if trigger_type is not None:
@@ -1128,7 +1119,26 @@ class ExecutionRepository:
         if status in (BatchStatus.COMPLETED, BatchStatus.FAILED):
             updates["completed_at"] = now()
 
-        self._ops.execute_update(batches_table.update().where(batches_table.c.batch_id == batch_id).values(**updates))
+        # Atomic conditional UPDATE: constrain current status to non-terminal in the
+        # WHERE clause so the check-and-set is a single statement, eliminating the
+        # TOCTOU race between the old get_batch() read and the subsequent update.
+        terminal_values = [s.value for s in _TERMINAL_BATCH_STATUSES]
+        with self._db.connection() as conn:
+            result = conn.execute(
+                batches_table.update()
+                .where(batches_table.c.batch_id == batch_id)
+                .where(batches_table.c.status.notin_(terminal_values))
+                .values(**updates)
+            )
+            if result.rowcount == 0:
+                # Distinguish "not found" from "already terminal".
+                existing = conn.execute(select(batches_table.c.status).where(batches_table.c.batch_id == batch_id)).fetchone()
+                if existing is not None:
+                    raise AuditIntegrityError(
+                        f"Cannot transition batch {batch_id} from terminal status {existing.status!r} "
+                        f"to {status.value!r}. Terminal batches are immutable."
+                    )
+                raise AuditIntegrityError(f"Cannot update batch status: batch {batch_id} not found")
 
     def complete_batch(
         self,

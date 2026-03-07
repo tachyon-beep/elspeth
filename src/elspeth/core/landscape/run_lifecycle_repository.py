@@ -346,16 +346,22 @@ class RunLifecycleRepository:
             record is final. FAILED and INTERRUPTED runs CAN be transitioned back
             to RUNNING during resume (orchestrator recovery path).
         """
-        current = self.get_run(run_id)
-        if current is None:
-            raise AuditIntegrityError(f"Cannot update run status to {status.value!r}: run {run_id} not found")
-        if current.status == RunStatus.COMPLETED:
-            raise AuditIntegrityError(
-                f"Cannot transition run {run_id} from COMPLETED to {status.value!r}. "
-                f"Completed runs are immutable. "
-                f"FAILED/INTERRUPTED runs can be resumed via update_run_status."
+        with self._db.connection() as conn:
+            result = conn.execute(
+                runs_table.update()
+                .where(runs_table.c.run_id == run_id)
+                .where(runs_table.c.status != RunStatus.COMPLETED.value)
+                .values(status=status)
             )
-        self._ops.execute_update(runs_table.update().where(runs_table.c.run_id == run_id).values(status=status))
+            if result.rowcount == 0:
+                existing = conn.execute(select(runs_table.c.status).where(runs_table.c.run_id == run_id)).fetchone()
+                if existing is not None and existing.status == RunStatus.COMPLETED.value:
+                    raise AuditIntegrityError(
+                        f"Cannot transition run {run_id} from COMPLETED to {status.value!r}. "
+                        f"Completed runs are immutable. "
+                        f"FAILED/INTERRUPTED runs can be resumed via update_run_status."
+                    )
+                raise AuditIntegrityError(f"Cannot update run status to {status.value!r}: run {run_id} not found")
 
     def update_run_contract(self, run_id: str, contract: SchemaContract) -> None:
         """Update run with schema contract after first-row inference.

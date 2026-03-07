@@ -698,6 +698,13 @@ class AzureBatchLLMTransform(BaseTransform):
         """
         if not checkpoint.requests and not checkpoint.row_mapping:
             return  # No requests were submitted (e.g., all templates failed)
+        if bool(checkpoint.requests) != bool(checkpoint.row_mapping):
+            raise RuntimeError(
+                f"Checkpoint invariant violation: requests and row_mapping must both be "
+                f"empty or both be populated, but got "
+                f"{len(checkpoint.requests)} requests and {len(checkpoint.row_mapping)} row_mapping entries "
+                f"for batch {checkpoint.batch_id!r}. This indicates checkpoint corruption."
+            )
 
         for custom_id, original_request in checkpoint.requests.items():
             row_index = checkpoint.row_mapping[custom_id].index

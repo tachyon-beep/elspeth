@@ -345,6 +345,7 @@ class CSVSource(BaseSource):
 
         # Process data rows with manual iteration to catch csv.Error per row
         row_num = 0  # Logical row number (data rows only)
+        blank_line_count = 0
         while True:
             try:
                 # Try to read next row - csv.Error raised here for malformed rows
@@ -381,6 +382,7 @@ class CSVSource(BaseSource):
             # Skip empty rows (blank lines in CSV)
             # csv.reader returns [] for blank lines, which would cause field count mismatch
             if not values:
+                blank_line_count += 1
                 continue
 
             row_num += 1
@@ -469,6 +471,14 @@ class CSVSource(BaseSource):
                         error=str(e),
                         destination=self._on_validation_failure,
                     )
+
+        if blank_line_count > 0:
+            ctx.record_validation_error(
+                row={"__blank_lines__": blank_line_count},
+                error=f"CSV contained {blank_line_count} blank line(s) that were skipped during processing",
+                schema_mode="parse",
+                destination="discard",
+            )
 
         # CRITICAL: Handle empty source case (all rows quarantined or no rows)
         # If no valid rows were processed, the contract is still unlocked.
