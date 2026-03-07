@@ -201,6 +201,10 @@ class RateLimiter:
             TimeoutError: If timeout expires before tokens are acquired
         """
         if timeout is not None:
+            if type(timeout) not in (int, float):
+                raise TypeError(
+                    f"timeout must be int or float, got {type(timeout).__name__}: {timeout!r} — this is a bug in the calling code"
+                )
             if not math.isfinite(timeout):
                 raise ValueError(f"timeout must be finite, got {timeout!r}")
             if timeout < 0:

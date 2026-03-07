@@ -196,7 +196,7 @@ class HTTPCallRequest:
 
     def __post_init__(self) -> None:
         if not isinstance(self.headers, MappingProxyType):
-            object.__setattr__(self, "headers", MappingProxyType(self.headers))
+            object.__setattr__(self, "headers", MappingProxyType(dict(self.headers)))
         if self.json is not None and not isinstance(self.json, MappingProxyType):
             object.__setattr__(self, "json", deep_freeze(self.json))
         if self.params is not None and not isinstance(self.params, MappingProxyType):
@@ -248,7 +248,7 @@ class HTTPCallResponse:
 
     def __post_init__(self) -> None:
         if not isinstance(self.headers, MappingProxyType):
-            object.__setattr__(self, "headers", MappingProxyType(self.headers))
+            object.__setattr__(self, "headers", MappingProxyType(dict(self.headers)))
         if self.body is not None and isinstance(self.body, dict):
             object.__setattr__(self, "body", deep_freeze(self.body))
 
