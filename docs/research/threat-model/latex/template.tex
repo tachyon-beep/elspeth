@@ -40,8 +40,12 @@
 % DTA brand colours (from brand guidelines)
 \definecolor{dtanavy}{HTML}{2C3E5D}     % DTA navy — headings, logo lockup
 \definecolor{dtabody}{HTML}{414141}     % DTA body text — #414141 per brand guidelines
-\definecolor{codebackground}{HTML}{F5F5F5}
+\definecolor{dtapage}{HTML}{EFEFEF}     % DTA off-white page background
+\definecolor{codebackground}{HTML}{E8E8E8} % Code blocks — slightly darker than page
 \definecolor{ruleblue}{HTML}{2E5090}    % Horizontal rule accent
+
+% --- Page background colour ---
+\pagecolor{dtapage}
 
 % --- Headers and footers (PSPF classification marking) ---
 \usepackage{fancyhdr}
@@ -115,7 +119,7 @@
 \newcommand{\VERB}{\Verb[commandchars=\\\{\}]}
 \DefineVerbatimEnvironment{Highlighting}{Verbatim}{commandchars=\\\{\},fontsize=\small}
 \usepackage{framed}
-\definecolor{shadecolor}{HTML}{F5F5F5}
+\definecolor{shadecolor}{HTML}{E2E2E2}  % Code block shade — visible against #EFEFEF page
 \newenvironment{Shaded}{\begin{snugshade}}{\end{snugshade}}
 
 % Pandoc syntax highlighting token definitions
