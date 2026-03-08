@@ -280,6 +280,43 @@ class TestAuditedHTTPClient:
         # Non-auth headers still recorded
         assert recorded_headers["Content-Type"] == "application/json"
 
+    def test_sensitive_header_without_fingerprint_key_raises(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Sensitive headers without fingerprint key (and not dev mode) raise FrameworkBugError.
+
+        Regression test for elspeth-780f6e39b1: previously this path silently
+        dropped the header with only a logger.warning, leaving no audit trail
+        for missing auth configuration.
+        """
+        from elspeth.contracts.errors import FrameworkBugError
+
+        # No fingerprint key AND not dev mode
+        monkeypatch.delenv("ELSPETH_FINGERPRINT_KEY", raising=False)
+        monkeypatch.delenv("ELSPETH_ALLOW_RAW_SECRETS", raising=False)
+
+        recorder = self._create_mock_recorder()
+
+        mock_response = MagicMock(spec=httpx.Response)
+        mock_response.status_code = 200
+        mock_response.headers = {}
+        mock_response.content = b""
+
+        with patch("httpx.Client") as mock_client_class:
+            client = AuditedHTTPClient(
+                recorder=recorder,
+                state_id="state_123",
+                run_id="run_abc",
+                telemetry_emit=lambda event: None,
+                headers={
+                    "Authorization": "Bearer secret-token",
+                    "Content-Type": "application/json",
+                },
+            )
+            mock_client = mock_client_class.return_value
+            mock_client.post.return_value = mock_response
+
+            with pytest.raises(FrameworkBugError, match="Sensitive header 'Authorization' cannot be fingerprinted"):
+                client.post("https://api.example.com/v1/process")
+
     def test_base_url_prepended(self) -> None:
         """Base URL is prepended to request path."""
         recorder = self._create_mock_recorder()

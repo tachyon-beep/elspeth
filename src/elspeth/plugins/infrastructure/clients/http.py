@@ -260,14 +260,16 @@ class AuditedHTTPClient(AuditedClientBase):
                     fp = secret_fingerprint(v)
                     result[k] = f"<fingerprint:{fp}>"
                 else:
-                    # No key and not dev mode - this shouldn't happen in production
-                    # Remove header to avoid leaking secrets (fail-safe)
-                    logger.warning(
-                        "Sensitive header '%s' dropped: no fingerprint key available. "
-                        "Set ELSPETH_FINGERPRINT_KEY or ELSPETH_ALLOW_RAW_SECRETS=true",
-                        k,
+                    # No key and not dev mode — config error that prevents auditable operation.
+                    # A sensitive header exists but we can't fingerprint it, so we can't
+                    # record a verifiable audit entry. Crash per offensive programming:
+                    # this is a detectable invalid state, not a data quality issue.
+                    raise FrameworkBugError(
+                        f"Sensitive header '{k}' cannot be fingerprinted: "
+                        f"ELSPETH_FINGERPRINT_KEY is not set and ELSPETH_ALLOW_RAW_SECRETS is not 'true'. "
+                        f"Authenticated HTTP calls require a fingerprint key for audit integrity. "
+                        f"Set ELSPETH_FINGERPRINT_KEY or ELSPETH_ALLOW_RAW_SECRETS=true for dev mode."
                     )
-                    # Don't include this header
             else:
                 # Non-sensitive header: include as-is
                 result[k] = v

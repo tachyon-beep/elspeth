@@ -117,7 +117,7 @@ class BatchStats(BaseTransform):
         # Extract numeric values - enforce type contract
         # Tier 2 pipeline data should already be validated; wrong types = upstream bug
         values: list[int | float] = []
-        skipped_non_finite = 0
+        skipped_non_finite_indices: list[int] = []
         for i, row in enumerate(rows):
             # Direct access - field must exist (KeyError = upstream bug)
             raw_value = row[self._value_field]
@@ -136,7 +136,7 @@ class BatchStats(BaseTransform):
             # garbage in arithmetic and crash downstream canonical JSON (RFC 8785).
             # Integers are always finite — only check floats.
             if isinstance(raw_value, float) and not math.isfinite(raw_value):
-                skipped_non_finite += 1
+                skipped_non_finite_indices.append(i)
                 continue
 
             # Preserve original type: int stays int (arbitrary precision),
@@ -165,8 +165,9 @@ class BatchStats(BaseTransform):
         elif self._compute_mean:
             result["mean"] = None
 
-        if skipped_non_finite > 0:
-            result["skipped_non_finite"] = skipped_non_finite
+        if skipped_non_finite_indices:
+            result["skipped_non_finite"] = len(skipped_non_finite_indices)
+            result["skipped_non_finite_indices"] = skipped_non_finite_indices
 
         # Include group_by field — validate homogeneity across batch.
         # group_by is configured contract, so missing field is an upstream bug.
@@ -192,8 +193,9 @@ class BatchStats(BaseTransform):
         fields_added = ["count", "sum", "batch_size"]
         if self._compute_mean:
             fields_added.append("mean")
-        if skipped_non_finite > 0:
+        if skipped_non_finite_indices:
             fields_added.append("skipped_non_finite")
+            fields_added.append("skipped_non_finite_indices")
         if self._group_by and rows:
             fields_added.append(self._group_by)
 

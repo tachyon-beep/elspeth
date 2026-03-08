@@ -208,7 +208,7 @@ class TestBatchStatsFloatOverflow:
         return make_context()
 
     def test_nan_input_skipped_from_computation(self, ctx: PluginContext) -> None:
-        """NaN values are skipped from sum/mean, tracked in skipped_non_finite."""
+        """NaN values are skipped from sum/mean, tracked in skipped_non_finite with indices."""
         from elspeth.plugins.transforms.batch_stats import BatchStats
 
         transform = BatchStats({"schema": DYNAMIC_SCHEMA, "value_field": "amount"})
@@ -227,9 +227,10 @@ class TestBatchStatsFloatOverflow:
         assert result.row["sum"] == 40.0
         assert result.row["mean"] == 20.0
         assert result.row["skipped_non_finite"] == 1
+        assert result.row["skipped_non_finite_indices"] == [1]
 
     def test_inf_input_skipped_from_computation(self, ctx: PluginContext) -> None:
-        """Infinity values are skipped from sum/mean, tracked in skipped_non_finite."""
+        """Infinity values are skipped from sum/mean, tracked in skipped_non_finite with indices."""
         from elspeth.plugins.transforms.batch_stats import BatchStats
 
         transform = BatchStats({"schema": DYNAMIC_SCHEMA, "value_field": "amount"})
@@ -247,6 +248,7 @@ class TestBatchStatsFloatOverflow:
         assert result.row["count"] == 1
         assert result.row["sum"] == 10.0
         assert result.row["skipped_non_finite"] == 2
+        assert result.row["skipped_non_finite_indices"] == [1, 2]
 
     def test_all_non_finite_produces_zero_count(self, ctx: PluginContext) -> None:
         """Batch with only NaN/Inf values produces count=0, sum=0."""
@@ -267,6 +269,7 @@ class TestBatchStatsFloatOverflow:
         assert result.row["sum"] == 0.0
         assert result.row["mean"] is None
         assert result.row["skipped_non_finite"] == 2
+        assert result.row["skipped_non_finite_indices"] == [0, 1]
 
     def test_sum_overflow_returns_error(self, ctx: PluginContext) -> None:
         """Summing large valid floats that overflow to inf returns error."""
@@ -301,6 +304,7 @@ class TestBatchStatsFloatOverflow:
         assert result.status == "success"
         assert result.row is not None
         assert "skipped_non_finite" not in result.row.to_dict()
+        assert "skipped_non_finite_indices" not in result.row.to_dict()
 
 
 class TestBatchStatsGroupByHomogeneity:
