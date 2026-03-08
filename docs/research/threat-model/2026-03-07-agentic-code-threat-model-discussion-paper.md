@@ -5,13 +5,13 @@
 **Classification:** OFFICIAL
 **Prepared by:** John Morrissey, Digital Transformation Agency
 
-| Version | Date | Changes |
+| Version | Date | Summary |
 |---------|------|---------|
-| 0.1 | 7 March 2026 | Initial draft for community discussion |
-| 0.2 | 8 March 2026 | Calibration revision: explicit genre framing, methodological note (§1.4), readership guidance (§1.5), scope qualifiers on abstract, taxonomy layer framing (§3.1), STRIDE analogical extensions noted, terminology tightened (trust boundary/tier/validation boundary). Factual corrections: ISM-2074 description (notification → usage policy), NIST SSDF hierarchy (consistent practice-level citation), velocity argument reframed around review-surface generation velocity vs. published productivity evidence (§1.2.1 rewritten), OWASP LLM05 acknowledged. Added: NIST SP 800-218A citation, Perry et al. 2023, Peng et al. 2023, Cui et al. 2024, METR 2025 RCT. Recommendations framed as candidate controls for consultation. Added governance perimeter expansion axis (§1.2.8, §6.6) — non-developer code production outside SDLC channels. Added GitHub PR restrictions evidence (§1.2.2, §4.1) as material evidence of review capacity exhaustion. De-identification transparency (§8). Contracted-out development open question (§9.8). Sharpened §2.4 (persistent learning), §8.4 (enforcement gate framing), §8.5 (agents as compliance subjects — mirror of persistent-learning problem), Appendix B (production not hypothetical) |
-| 0.2.1 | 8 March 2026 | Minor typographical fixes, enhanced discussion on Cloudbleed (§1.2.4), §1.6 provenance rewrite, cross-references added (§4.2, §9.8) |
-| 0.2.2 | 8 March 2026 | New ACF-S3 (structural identity spoofing) — `hasattr()` gate bypass as Spoofing + Elevation of Privilege pattern. Taxonomy expanded to 13 failure modes. Updated summary table, detection capability summary, language specificity notes, §3.2 examples, §6.1.2 controls gap, ACF-E1 cross-reference. Appendix B reframed: distinguished existing pattern-matching CI gate from proposed AST-based enhancement; §7.2 and §8.4 cross-references updated |
-| 0.3 | 8 March 2026 | Appendix B rewrite: new §B.1 design history documenting three iterations of adversarial agent design (language modification → pattern-matching gate → provenance-aware taint analysis). §B.2–B.6 updated to reflect Iteration 3 architecture: two-dimensional taint model (provenance × validation status, 7 effective states), 7-rule set with 49-cell severity matrix, 4-class exceptionability governance replacing dual enforcement profiles (rejected as unsolvable authorship attribution), per-rule precision thresholds with 80% immutable floor. Companion roundtable synthesis referenced for full specification. |
+| 0.1 | 7 March 2026 | Initial draft |
+| 0.2 | 8 March 2026 | Calibration revision — genre framing, methodology, terminology, factual corrections, governance perimeter axis |
+| 0.2.1 | 8 March 2026 | Typographical fixes, Cloudbleed enhancement, cross-references |
+| 0.2.2 | 8 March 2026 | ACF-S3 (structural identity spoofing), taxonomy expanded to 13 failure modes |
+| 0.3 | 8 March 2026 | Appendix B rewrite — design history, Iteration 3 architecture (2D taint model, exceptionability governance) |
 
 ---
 
@@ -462,7 +462,7 @@ A secondary mechanism: when automated analysis tools produce too many findings o
 
 **Agentic variant:** Data from a lower trust level is used in a higher-trust context without explicit validation, effectively elevating the data's privilege level.
 
-**Mechanism:** Closely related to Tampering (Section 3.2, T), but focused on the *consequence* rather than the *mechanism*. When external data enters internal processing without validation, any actions taken based on that data inherit a trust level they haven't earned.
+**Mechanism:** Closely related to Tampering (Section 3.2, T), but focussed on the *consequence* rather than the *mechanism*. When external data enters internal processing without validation, any actions taken based on that data inherit a trust level they haven't earned.
 
 **Examples:**
 
