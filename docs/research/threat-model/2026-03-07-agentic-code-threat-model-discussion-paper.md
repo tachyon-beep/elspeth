@@ -52,6 +52,7 @@ Current cybersecurity guidance — including the Australian Information Security
 8. [Case Study: Agentic Development Under Compliance Constraints](#8-case-study-agentic-development-under-compliance-constraints)
 9. [Open Questions for the Community](#9-open-questions-for-the-community)
 10. [Recommendations](#10-recommendations)
+
 - [Appendix A: Agentic Code Failure Taxonomy](#appendix-a-agentic-code-failure-taxonomy)
 - [Appendix B: Technical Feasibility of Automated Enforcement](#appendix-b-technical-feasibility-of-automated-enforcement)
 
@@ -68,6 +69,7 @@ The use of AI agents — large language models operating as autonomous or semi-a
 The underlying dynamics identified here — correlated patterns, consistent surface quality, review capacity exhaustion — generalise beyond code to any agent-assisted production pipeline (policy documents, security assessments, risk registers). This paper addresses the code case as the most concrete and technically tractable instance.
 
 This paper does not address:
+
 - AI as an *attack tool* (adversarial prompt injection, model poisoning)
 - AI-generated content beyond source code (documents, communications) — though the threat dynamics identified here apply by analogy
 - The procurement or accreditation of AI platforms themselves
@@ -237,6 +239,7 @@ def get_document_classification(record):
 The three versions illustrate a spectrum. The offensive version turns a crash into an actionable incident — the operator knows which document, what data was present, and what to investigate. The bare access version at least crashes, which is correct behaviour for a data integrity failure, but the operator gets a generic `KeyError` with no diagnostic context. The agent-generated version is the worst outcome: it doesn't crash at all, silently fabricating a classification that downstream access control decisions will treat as authoritative.
 
 The agent-generated version:
+
 - Is syntactically valid Python
 - Passes every unit test (tests probably don't include "field missing" cases, because why would they?)
 - Follows the `.get()` pattern that appears in millions of Python files in the agent's training data
@@ -270,6 +273,7 @@ Some agent frameworks now support project-level instructions (system prompts, do
 The vast majority of open-source Python code uses defensive patterns: `.get()` with defaults, `getattr()` with fallbacks, broad `try/except` blocks, `or` chains that silently substitute values. These patterns are appropriate for applications where graceful degradation is preferable to crashing — which is most applications.
 
 They are catastrophically inappropriate for applications where:
+
 - Silent data corruption is worse than a crash
 - Every decision must be traceable to its source
 - The absence of data is itself evidence (not an invitation to fabricate a default)
@@ -508,6 +512,7 @@ The availability of parallel agent generation creates a structural pressure that
 ### 4.3 The Advisory Fatigue Problem
 
 Static analysis tools that flag agent-generated code patterns as warnings face a paradox:
+
 - If agents produce many warnings, reviewers habituate to dismissing them
 - If agents learn to avoid warning-triggering patterns, they may produce code that satisfies the tool but still violates the semantic intent
 - Advisory-only tools have no enforcement mechanism for agents, which have no memory across sessions — a warning shown to an agent in one session is forgotten in the next
@@ -695,6 +700,7 @@ The Essential Eight maturity model does not directly address software developmen
 Across all current frameworks, there is a consistent structural gap: substantial guidance exists for securing AI systems themselves (the model, the training pipeline, the inference infrastructure), but almost no guidance exists for securing systems that AI systems build or modify.
 
 This gap is not surprising — agentic coding is a recent capability and guidance takes time to develop. But the gap is widening faster than it is closing, because:
+
 - Agent adoption is accelerating (driven by generation velocity gains and expanded capability — Section 1.2, Section 8)
 - The failure modes are subtle (they pass all existing automated checks — Section 2.2)
 - The vocabulary for discussing these failures doesn't exist yet in policy contexts (this paper's taxonomy is a first attempt)
@@ -736,6 +742,7 @@ The sections below are ordered from weakest to strongest assurance, not from lea
 Mandate security-focused review (not just correctness review) for agent-generated code. Require reviewers to attest that trust boundaries were verified, not just that the code "looks right." This is a process change, not a technology change, but it requires explicit recognition that agent code needs different review criteria than human code.
 
 Specifically, review checklists for agent-generated code should include:
+
 - Were trust boundaries maintained? (Does external data pass through validation before internal use?)
 - Are error handlers audit-preserving? (Do `except` blocks propagate to the audit system, or swallow and continue?)
 - Are default values justified? (Does every `.get()` or `getattr` with a default represent a legitimate design decision, or a fabrication of missing data?)
@@ -774,6 +781,7 @@ The right question is: **"How do you know it's correct?"**
 This question applies recursively. If the security enforcement tool is itself built by an agent (which is increasingly likely for any new tool), then the tool's correctness is subject to the same threat model it exists to address. The verification mechanism — not the implementation size — is the assurance argument.
 
 This reframing has direct implications for policy:
+
 - **Accreditation should evaluate the verification story**, not the implementation scope. A small tool with a rigorous golden corpus, self-hosting gate, and measured precision is stronger than a large tool without these properties.
 - **"How do you know the agent wrote it correctly?"** is the question that applies to all agent-generated code, including the tools that check agent-generated code. The answer must be grounded in independent verification (test corpus, self-hosting, measured false positive/negative rates), not in the development process used to produce it.
 - **The line between "tool" and "assurance argument" blurs.** The design of a semantic boundary enforcer (Appendix B) is essentially a structured answer to "how do you know the code is correct?" — and that answer is valuable independent of whether the specific tool gets built.
@@ -783,6 +791,7 @@ This reframing directly informs Recommendations 7 and 8 — accreditation should
 **Automated semantic boundary enforcement.** Static analysis tools that verify data provenance and trust tier flow — not just type shape — at the code level. These tools check that external data passes through validation boundaries before reaching internal processing, that error handling preserves audit trails, and that defensive patterns are not used on data that should crash on anomaly.
 
 **Technical feasibility finding:** A proof-of-concept semantic boundary enforcer for Python has been designed (see Appendix B) with the following properties:
+
 - Zero external dependencies (uses only Python's standard library AST module)
 - Works with standard Python — no language modifications, no runtime dependencies
 - Produces findings in SARIF format (industry standard for static analysis results)
@@ -802,6 +811,7 @@ In the case study deployment (Section 8), periodic full-codebase agent crawls �
 **Standardised vocabulary.** The taxonomy in this paper (Section 3 and Appendix A) provides a starting point. Government cybersecurity guidance needs terminology for agentic code failure modes — "competence spoofing," "trust tier conflation," "audit trail destruction through defensive patterns" — that practitioners can use in security assessments, risk registers, and accreditation documentation.
 
 **Accreditation criteria for agentic development workflows.** IRAP assessments and similar accreditation processes need criteria for evaluating whether an organisation's use of AI coding agents maintains the security posture required by the system's classification. This includes:
+
 - How agent output is validated before integration
 - How review effectiveness is maintained under volume pressure
 - How trust boundaries are verified in agent-generated code
@@ -852,6 +862,7 @@ The pattern is clear: **agents excel at tasks where correctness is structurally 
 ### 8.4 Where the Current Process Fails
 
 The team has observed agent-generated code of questionable quality passing human review. In each case, the code was:
+
 - Syntactically correct
 - Consistent with project conventions
 - Passing all existing tests
@@ -878,6 +889,7 @@ The question for organisations without this kind of enforcement is not whether t
 The team's experience reveals that automated semantic enforcement doesn't *add* tedium — it **redirects existing tedium** toward higher-value activities.
 
 Without automated enforcement, humans manually review every agent output for trust boundary violations. This is:
+
 - **Error-prone:** The failure modes look like correct code (Section 3)
 - **Fatigue-inducing:** Reviewing dozens of agent-generated functions per day for subtle semantic violations degrades review quality (Section 4.2)
 - **Unscalable:** As agent velocity increases, review capacity doesn't
@@ -924,6 +936,7 @@ A related question: does the trust classification of agent code change over time
 Current IRAP assessment criteria do not specifically address AI code generation. Should they? If so, what evidence should an organisation provide to demonstrate that its use of agents maintains the required security posture?
 
 Candidate evidence requirements (for discussion):
+
 - Demonstration that agent output passes through a defined validation boundary (Section 5.3)
 - Measured review effectiveness metrics (not just "we have a review process" but "here is evidence the process catches the failure modes in Appendix A")
 - Provenance records showing which code was agent-generated (Section 7.1)
@@ -946,6 +959,7 @@ The design work in Appendix B suggests a middle ground: static analysis as the p
 Current accreditation processes assume that code review provides a certain level of assurance. If review quality degrades under volume pressure (Section 4), the assurance claim is no longer valid. How should organisations measure and demonstrate that their review process remains effective?
 
 Possible metrics (all have limitations):
+
 - **Defect escape rate:** How many agent-introduced defects are found post-review? Requires knowing the total defect count, which requires a detection mechanism independent of the review process.
 - **Review depth sampling:** Periodically audit review decisions for thoroughness. Resource-intensive but directly measures quality.
 - **Automated pre-screening coverage:** What percentage of the failure modes in Appendix A are caught by automated tools before reaching human review? This doesn't measure review quality directly but measures how much the review process is being supplemented.
@@ -960,6 +974,7 @@ Many agent workflows already include self-checking loops — agents run linters,
 Pre-generation self-checking (where the agent validates its own output against security rules before submission) closes the feedback loop at the point of maximum leverage — before the code enters the repository. This is technically feasible (Appendix B describes a `--stdin` mode for exactly this purpose).
 
 But current practice and the proposal both raise questions:
+
 - Does self-checking constitute validation, or must validation be independent? The agent checking its own output against structural rules is different from the agent evaluating whether its output is semantically correct — the first is a mechanical verification, the second is the same judgment that produced the code.
 - Can an agent meaningfully check for the failure modes it is predisposed to produce? If the agent's training data biases it toward `.get()` with defaults, will it also generate code that satisfies a rule against that pattern, or will it generate code that evades the rule while preserving the same semantic flaw?
 - If self-checking catches 80% of structural violations before human review, does this improve or degrade human review quality? It might improve it (reviewers focus on harder problems) or degrade it (reviewers assume the pre-check caught everything and reduce scrutiny).
@@ -971,6 +986,7 @@ The answer becomes more nuanced when considering structured perspective diversit
 **Should there be a common agentic code security standard across Australian Government?**
 
 Individual organisations developing their own agentic code policies will produce inconsistent and potentially conflicting approaches. A common standard — even a lightweight one — would provide:
+
 - A shared vocabulary for discussing agentic code risks (the taxonomy in Appendix A is a candidate starting point)
 - A minimum bar for controls that all agencies using agentic coding must implement
 - A basis for mutual recognition of agentic development practices across agencies
@@ -985,6 +1001,7 @@ The counterargument: standardisation too early may lock in controls that prove i
 Traditional software risk models assume that defects are approximately independent — a bug in one function doesn't predict a bug in another. Agent-generated code violates this assumption (Section 2.4). A single training data bias produces the same failure mode across every function the agent generates.
 
 This has implications for:
+
 - **Testing strategy:** Independent sampling (testing a random subset of functions) underestimates defect rates when failures are correlated. If you find a trust boundary violation in one agent-generated function, the probability that the same violation exists in other agent-generated functions is much higher than if a human had written them.
 - **Risk assessment:** The risk of a single agent-generated defect may be low, but the risk of a *systematic* defect affecting dozens or hundreds of functions is qualitatively different. How should risk registers capture correlated agent failure risk?
 - **Remediation scope:** When a defect pattern is found in agent code, remediation should not be limited to the specific instance. The entire codebase should be scanned for the same pattern — because correlated failures mean the pattern is likely repeated.
@@ -1457,6 +1474,7 @@ The design includes four independent verification mechanisms:
 **4. Deterministic output.** Identical input must produce byte-identical output. Verified by running the tool twice and diffing. Non-determinism in a security tool is a defect.
 
 These properties are **independently evaluable by an assessor.** An IRAP assessor (or equivalent) can verify:
+
 - The corpus exists and covers the claimed rules
 - The self-hosting gate is enforced in CI
 - Precision tracking data is available and shows the claimed rates
