@@ -23,6 +23,7 @@ from datetime import UTC, datetime
 from threading import Lock
 from typing import Any
 
+import structlog
 from pydantic import Field
 
 from elspeth.contracts import BatchPendingError, CallStatus, CallType, Determinism, RowErrorEntry, TransformErrorReason, TransformResult
@@ -47,6 +48,8 @@ from elspeth.plugins.transforms.llm.tracing import (
     parse_tracing_config,
     validate_tracing_config,
 )
+
+logger = structlog.get_logger(__name__)
 
 
 class AzureBatchConfig(TransformDataConfig):
@@ -1001,6 +1004,7 @@ class AzureBatchLLMTransform(BaseTransform):
         # Azure Batch API puts per-request errors in a separate error_file_id
         # Tier 3 boundary: SDK must expose this attribute — None = no errors,
         # missing attribute = SDK version mismatch (crash, don't silently skip)
+        error_file_download_failed = False
         try:
             error_file_id = batch.error_file_id
         except AttributeError:
@@ -1023,8 +1027,11 @@ class AzureBatchLLMTransform(BaseTransform):
             except (TypeError, AttributeError, KeyError, NameError):
                 raise  # Programming errors — crash to surface the bug
             except Exception as e:
-                # Error file download failed — log but don't fail the batch
-                # The output file was already downloaded successfully
+                # Error file download failed — record in audit trail and flag for downstream
+                # The output file was already downloaded successfully, but per-row error
+                # details from the error file are now permanently lost. Rows that had
+                # Azure-side errors will be misclassified as result_not_found without this flag.
+                error_file_download_failed = True
                 error_latency = (time.perf_counter() - start) * 1000
                 ctx.record_call(
                     call_type=CallType.HTTP,
@@ -1033,6 +1040,15 @@ class AzureBatchLLMTransform(BaseTransform):
                     response_data={"error": str(e), "error_type": type(e).__name__},
                     latency_ms=error_latency,
                     provider="azure",
+                )
+                logger.warning(
+                    "error_file_download_failed",
+                    batch_id=batch.id,
+                    error_file_id=error_file_id,
+                    error=str(e),
+                    error_type=type(e).__name__,
+                    impact="per-row error details from Azure Batch error file are lost; "
+                    "affected rows will be classified as error_details_unavailable",
                 )
                 error_text = None
             else:
@@ -1163,6 +1179,34 @@ class AzureBatchLLMTransform(BaseTransform):
                 }
             )
 
+        # Partial malformed: some lines parsed, some didn't — record the malformed ones
+        # so the audit trail shows WHY certain rows have no results. Without this,
+        # malformed lines silently vanish and their rows get misclassified as result_not_found.
+        if malformed_lines and results_by_id:
+            logger.warning(
+                "partial_malformed_jsonl_lines",
+                batch_id=batch.id,
+                malformed_count=len(malformed_lines),
+                parsed_count=len(results_by_id),
+                errors=malformed_lines[:10],
+                impact="affected rows will appear as result_not_found or error_details_unavailable",
+            )
+            ctx.record_call(
+                call_type=CallType.HTTP,
+                status=CallStatus.ERROR,
+                request_data={
+                    "operation": "parse_batch_jsonl",
+                    "batch_id": batch.id,
+                },
+                response_data={
+                    "malformed_count": len(malformed_lines),
+                    "parsed_count": len(results_by_id),
+                    "total_lines": len(malformed_lines) + len(results_by_id),
+                    "errors": malformed_lines[:20],
+                },
+                provider="azure",
+            )
+
         # Assemble output rows in original order
         output_rows: list[dict[str, Any]] = []
         row_errors: list[RowErrorEntry] = []
@@ -1192,16 +1236,33 @@ class AzureBatchLLMTransform(BaseTransform):
             custom_id = idx_to_custom_id[idx]
 
             if custom_id not in results_by_id:
-                # Result not found in Azure batch output - request was sent but no response received
-                # This is rare but can happen with Azure Batch API edge cases
+                # Row's custom_id not found in parsed results. Two distinct causes:
+                # 1. Error file download failed — row's error details were in the error
+                #    file which couldn't be downloaded (error_details_unavailable)
+                # 2. Malformed JSONL — row's line was unparseable, custom_id never extracted
+                # 3. True absence — Azure Batch API edge case, no output produced
+                # The error_file_download_failed flag distinguishes cause 1.
+                if error_file_download_failed:
+                    error_reason = "error_details_unavailable"
+                    error_detail = (
+                        "Row may have had per-row errors from Azure, but the error file "
+                        "download failed. Error details are permanently lost."
+                    )
+                else:
+                    error_reason = "result_not_found"
+                    error_detail = None
+
                 output_row = row.to_dict()
                 output_row[self._response_field] = None
-                output_row[f"{self._response_field}_error"] = {
-                    "reason": "result_not_found",
+                error_info: dict[str, Any] = {
+                    "reason": error_reason,
                     "custom_id": custom_id,
                 }
+                if error_detail is not None:
+                    error_info["detail"] = error_detail
+                output_row[f"{self._response_field}_error"] = error_info
                 output_rows.append(output_row)
-                row_errors.append({"row_index": idx, "reason": "result_not_found"})
+                row_errors.append({"row_index": idx, "reason": error_reason})
 
                 # Record Call for audit trail completeness - request WAS made but no response
                 # Without this, explain(token_id) would show incomplete lineage
@@ -1216,7 +1277,7 @@ class AzureBatchLLMTransform(BaseTransform):
                         **original_request,
                     },
                     response_data=None,
-                    error={"reason": "result_not_found", "custom_id": custom_id},
+                    error={"reason": error_reason, "custom_id": custom_id},
                     provider="azure",
                 )
                 continue

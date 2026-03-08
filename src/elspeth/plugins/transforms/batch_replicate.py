@@ -14,14 +14,18 @@ row, with parent linkage to track deaggregation lineage.
 import copy
 from typing import Any
 
+import structlog
 from pydantic import Field, model_validator
 
+from elspeth.contracts import CallStatus, CallType
 from elspeth.contracts.contexts import TransformContext
 from elspeth.contracts.errors import TransformSuccessReason
 from elspeth.contracts.schema_contract import FieldContract, PipelineRow, SchemaContract
 from elspeth.plugins.infrastructure.base import BaseTransform
 from elspeth.plugins.infrastructure.config_base import TransformDataConfig
 from elspeth.plugins.infrastructure.results import TransformResult
+
+logger = structlog.get_logger(__name__)
 
 
 class BatchReplicateConfig(TransformDataConfig):
@@ -212,6 +216,37 @@ class BatchReplicate(BaseTransform):
             for key in all_keys
         )
         output_contract = SchemaContract(mode="OBSERVED", fields=fields, locked=True)
+
+        # Record each quarantine decision in the audit trail so an auditor
+        # can trace which specific source rows were dropped and why.
+        # Without this, quarantined rows are only in success_reason metadata —
+        # invisible to Landscape queries and explain(token_id).
+        if quarantined:
+            logger.warning(
+                "batch_replicate_rows_quarantined",
+                quarantined_count=len(quarantined),
+                total_rows=len(rows),
+                valid_count=len(valid_rows),
+                quarantined_indices=quarantined_indices,
+            )
+            for q_info in quarantined:
+                ctx.record_call(
+                    call_type=CallType.HTTP,
+                    status=CallStatus.ERROR,
+                    request_data={
+                        "operation": "batch_replicate_validate",
+                        "field": q_info["field"],
+                        "value": q_info["value"],
+                    },
+                    response_data=None,
+                    error={
+                        "reason": "row_quarantined",
+                        "quarantine_reason": q_info["reason"],
+                        "field": q_info["field"],
+                        "value": q_info["value"],
+                    },
+                    provider="batch_replicate",
+                )
 
         success_reason: TransformSuccessReason = {
             "action": "processed",
