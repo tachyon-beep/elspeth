@@ -34,6 +34,7 @@
 % --- Micro-typography ---
 \usepackage{microtype}
 \usepackage{parskip}                   % Space between paragraphs, no indent
+\usepackage{needspace}                 % \needspace{Nlines} prevents orphaned lead-ins
 
 % --- Colours ---
 \usepackage{xcolor}
@@ -158,6 +159,13 @@
 % --- Lists ---
 \providecommand{\tightlist}{%
   \setlength{\itemsep}{0pt}\setlength{\parskip}{0pt}}
+
+% Prevent orphaned lead-in lines before lists: ensure at least 4 lines
+% of space before starting any itemize environment. This keeps "Foo:"
+% and its bullets together rather than splitting across pages.
+\AtBeginEnvironment{itemize}{\needspace{4\baselineskip}}
+\AtBeginEnvironment{enumerate}{\needspace{4\baselineskip}}
+\AtBeginEnvironment{Shaded}{\needspace{4\baselineskip}}
 
 % --- Block quotes ---
 \renewenvironment{quote}{%
