@@ -1,23 +1,42 @@
 # When Agents Write Code: A Threat Model for AI-Assisted Software Development in Government Systems
 
-**Discussion Paper — DRAFT v0.1**
-**Date:** 7 March 2026
+**Discussion Paper — DRAFT v0.2**
+**Date:** 8 March 2026
 **Classification:** OFFICIAL
 **Prepared by:** John Morrissey, Digital Transformation Agency
 
 | Version | Date | Changes |
 |---------|------|---------|
 | 0.1 | 7 March 2026 | Initial draft for community discussion |
+| 0.2 | 8 March 2026 | Calibration revision: explicit genre framing, methodological note (§1.4), readership guidance (§1.5), scope qualifiers on abstract, taxonomy layer framing (§3.1), STRIDE analogical extensions noted, terminology tightened (trust boundary/tier/validation boundary). Factual corrections: ISM-2074 description (notification → usage policy), NIST SSDF hierarchy (consistent practice-level citation), velocity argument reframed around review-surface generation velocity vs. published productivity evidence (§1.2.1 rewritten), OWASP LLM05 acknowledged. Added: NIST SP 800-218A citation, Perry et al. 2023, Peng et al. 2023, Cui et al. 2024, METR 2025 RCT. Recommendations framed as candidate controls for consultation. Added governance perimeter expansion axis (§1.2.8, §6.6) — non-developer code production outside SDLC channels. Added GitHub PR restrictions evidence (§1.2.2, §4.1) as material evidence of review capacity exhaustion. De-identification transparency (§8). Contracted-out development open question (§9.8). Sharpened §2.4 (persistent learning), §8.4 (enforcement gate framing), §8.5 (agents as compliance subjects — mirror of persistent-learning problem), Appendix B (production not hypothetical) |
 
 ---
 
 ## Abstract
 
-AI coding agents generate syntactically correct, test-passing code at 5–20x human velocity. The intuitive risk — that agents write malicious code — is real but well-understood. The novel and more dangerous risk is *plausible-but-wrong code at volume*: code that silently fabricates default values where data absence should crash, that treats external API responses as trusted internal data, and that wraps audit-critical operations in error handlers that destroy the evidence trail. This code passes every automated check in common use. It looks like careful, defensive programming. In high-assurance government systems, it is catastrophic.
+This is a discussion paper — an issue-spotting and vocabulary-building contribution grounded in observed patterns from compliance-constrained agentic development, not a settled empirical finding or normative standard. Its claims are analytical rather than experimental, its taxonomy is a starting point for community refinement, and its recommendations are candidate controls for consultation.
 
-This paper presents a threat model for agentic code generation grounded in the STRIDE framework, identifying six categories of failure that evade existing review processes. It proposes the Agentic Code Failure (ACF) taxonomy — a structured vocabulary for discussing these failures in security assessments, risk registers, and accreditation documentation. The central finding is that the review process itself becomes an attack surface: agents produce code at a volume that degrades human review from active verification to passive scanning, precisely when the code's failure modes demand *more* scrutiny, not less.
+AI coding agents generate syntactically correct, test-passing code and can produce plausible, convention-conforming output faster than human review processes were designed to absorb. The intuitive risk — that agents write malicious code — is real but well-understood. The novel risk that this paper foregrounds is *plausible-but-wrong code at volume*: code that silently fabricates default values where data absence should crash, that treats external API responses as trusted internal data, and that wraps audit-critical operations in error handlers that destroy the evidence trail. This code can pass every automated check in common use. It looks like careful, defensive programming. In high-assurance government systems, it is catastrophic.
 
-Current cybersecurity guidance — including the Australian Information Security Manual (ISM), NIST SP 800-218 (SSDF), and the Essential Eight — addresses software supply chain risk for human-authored code but does not yet provide controls for the distinct risk profile of agent-generated code: correlated failures from shared training data, consistent surface quality that defeats reviewer calibration, and semantic errors invisible to syntactic analysis. Five of the twelve failure modes in the ACF taxonomy are completely undetectable by existing tooling, including both Critical-rated entries. The paper examines technical feasibility of automated semantic boundary enforcement as a complementary control, proposes candidate ISM extensions, and poses open questions for the Australian cybersecurity community regarding accreditation, trust boundaries, and review effectiveness at agent-generated scale.
+This paper presents a threat model for agentic code generation grounded in the STRIDE framework, identifying six categories of failure that evade existing review processes. It proposes the Agentic Code Failure (ACF) taxonomy — a structured vocabulary for discussing these failures in security assessments, risk registers, and accreditation documentation. The central finding is that the review process itself becomes an attack surface: agents produce code at a volume that degrades human review from active verification to passive scanning, precisely when the code's failure modes demand *more* scrutiny, not less. This risk is compounded by the widening population of non-specialist software producers using agentic tools outside traditional development teams and SDLC controls.
+
+Current cybersecurity guidance — including the Australian Information Security Manual (ISM), NIST SP 800-218 (SSDF), and the Essential Eight — addresses software supply chain risk for human-authored code but does not yet provide controls for the distinct risk profile of agent-generated code: correlated failures from shared training data, consistent surface quality that defeats reviewer calibration, and semantic errors invisible to syntactic analysis. Within the scope of this analysis, five of the twelve failure modes in the ACF taxonomy have no existing tool coverage, including both Critical-rated entries. The paper examines technical feasibility of automated semantic boundary enforcement for Python as a complementary control, proposes candidate ISM extensions for community consultation, and poses open questions for the Australian cybersecurity community regarding accreditation, trust boundaries, and review effectiveness at agent-generated scale.
+
+---
+
+## Executive Summary
+
+**The problem.** AI coding agents produce plausible, test-passing, convention-conforming code faster than human review processes were designed to absorb. The novel risk is not malicious code — it is *plausible-but-wrong* code at volume. Consider: `authenticated_user = session.get("username", "root")` — this line looks up the current user and, if the field is missing, assigns a plausible default. It is syntactically valid, passes tests, and looks like careful error handling. It also silently grants root access whenever the session data is incomplete. At scale, agents produce this class of error — silent data fabrication, trust boundary violations, audit trail destruction — systematically, not occasionally. These failures are invisible to existing automated checks and difficult to catch under review volume pressure.
+
+**The gap.** Current cybersecurity guidance (ISM, NIST SSDF, Essential Eight) addresses software supply chain risk for human-authored code but does not yet provide controls for the distinct risk profile of agent-generated code: correlated failures from shared training data, consistent surface quality that defeats reviewer calibration, and semantic errors invisible to syntactic analysis. Five of the twelve failure modes identified in this paper's taxonomy have no existing tool coverage, including both Critical-rated entries. The governance perimeter is also expanding — agentic tools are enabling non-developers to produce executable logic outside traditional SDLC channels, bypassing controls entirely.
+
+**What to do (three priority recommendations):**
+
+- *Issue guidance on treating agent output as a trust boundary* (Recommendation 2, §10.1) — this provides the conceptual foundation all other controls build on.
+- *Extend ISM controls for agent-generated code* (Recommendation 3, §10.1) — the June 2025 ISM overhaul provides strong foundations that need only targeted extensions for agentic code.
+- *Document institutional security knowledge in machine-readable form* (Recommendation 11, §10.3) — this is the most direct defence against agents that lack institutional context, and requires no new tooling.
+
+**Where to read more.** The threat model (§2–§5), gap analysis (§6), and case study (§8) provide the evidence base. The ACF taxonomy summary table (Appendix A) catalogues all twelve failure modes with risk ratings and detection status. The full set of 16 recommendations is in §10, grouped by audience: policy bodies (§10.1), IRAP assessors (§10.2), and organisations (§10.3).
 
 ---
 
@@ -33,10 +52,14 @@ Current cybersecurity guidance — including the Australian Information Security
 8. [Case Study: Agentic Development Under Compliance Constraints](#8-case-study-agentic-development-under-compliance-constraints)
 9. [Open Questions for the Community](#9-open-questions-for-the-community)
 10. [Recommendations](#10-recommendations)
-11. [Appendix A: Agentic Code Failure Taxonomy](#appendix-a-agentic-code-failure-taxonomy)
-12. [Appendix B: Technical Feasibility of Automated Enforcement](#appendix-b-technical-feasibility-of-automated-enforcement)
+- [Appendix A: Agentic Code Failure Taxonomy](#appendix-a-agentic-code-failure-taxonomy)
+- [Appendix B: Technical Feasibility of Automated Enforcement](#appendix-b-technical-feasibility-of-automated-enforcement)
 
 ---
+
+> *"The concern is not that AI outputs are always poor, but that they may become persuasive, efficient, and operationally privileged faster than institutions adapt their assurance methods."*
+>
+> — ChatGPT 5.4, on being asked to review this paper
 
 ## 1. Introduction and Scope
 
@@ -54,21 +77,23 @@ This paper does not address:
 
 ### 1.2 Why Now
 
-Several converging factors make this urgent.
+Several converging factors make this urgent: published productivity evidence that understates the security risk, accelerating capability trajectories, code quality that defeats review heuristics, historical precedent, adoption pressure in government, the case against prohibition, legacy modernisation risk, and the expansion of code production beyond professional developers.
 
-#### 1.2.1 Velocity vs. Productivity — The Distinction That Matters
+#### 1.2.1 Review-Surface Velocity vs. Published Productivity Evidence
 
-Two claims about AI coding agents are often conflated, and this conflation obscures the threat:
+Most readers will approach agentic coding through the lens of the published productivity literature, which reports **modest average gains** on bounded tasks. A 2023 controlled study of GitHub Copilot found developers completed a task 55.8% faster (Peng et al. 2023). A pooled analysis across three field experiments and 4,867 developers found gains ranging from 12.9% to 21.8% more pull requests merged per week, with substantial variation across settings and developer experience levels (Cui et al. 2024). Google's CEO reported that "more than a quarter of all new code at Google is generated by AI, then reviewed and accepted by engineers" (Pichai, Q3 2024 earnings call). One rigorous randomised trial (METR 2025) found experienced developers on mature open-source codebases were actually 19% *slower* with AI tools, despite believing they were 20% faster — a perception-reality gap with direct relevance to the automation bias argument in Section 4.2.
 
-- **Generation velocity** — how fast agents produce code — is unambiguously 5-20x faster than human developers. This is not speculative. Organisations are already shipping agent-generated code to production. The volume of code entering review pipelines has increased by an order of magnitude while the review capacity has not.
+That evidence base is real, but it is **increasingly incomplete for security purposes.** By construction, published productivity research lags the engineering frontier — the studies above measured earlier-generation tools (primarily inline autocomplete, not autonomous agents), shorter task horizons, and narrower human-in-the-loop workflows than what current-generation agents are capable of. The engineering frontier has moved: vendor evidence now describes agents operating across multi-file features, multi-hour task horizons, and scaffolded environments where the agent plans, executes, tests, and iterates with limited human intervention. Whether these capabilities deliver net productivity gains in compliance-constrained environments is an open and context-dependent question (see Section 8). But for security, it is the wrong question.
 
-- **End-to-end development productivity** — how fast teams ship working, compliant, production-ready software — is contested. It depends on the system's compliance burden, the maturity of automated enforcement, the institutional knowledge gap between what the language permits and what the system requires, and the cost of post-generation review and rework (see Section 8 for a case study). In compliance-constrained environments, generation velocity gains are partially offset by the review, validation, and rework overhead that agent-generated code demands.
+**The security-relevant variable is not average productivity uplift. It is review-surface generation velocity** — the rate at which an agent can produce plausible, syntactically valid, convention-conforming code that arrives at a human review boundary. This is a different quantity from "how much faster do developers ship," and it is poorly served by a single multiplier. The answer depends on the task type (boilerplate generation vs. novel architecture), the codebase (greenfield vs. mature), the compliance burden (see Section 8.2), and the degree of human supervision. What is clear is that the volume of locally credible code arriving at review boundaries is increasing faster than traditional assurance processes were designed to absorb.
 
-**The threat model in this paper is driven by generation velocity, not end-to-end productivity.** Whether agentic development delivers a net productivity gain is an interesting question, but it is irrelevant to the security argument. The threat is the volume of code entering the review pipeline — code that may contain the subtle semantic failures described in Section 3. That volume is determined by generation velocity, and generation velocity is unambiguously high and increasing. Even if the overall development cycle is only modestly faster (or, in some compliance contexts, no faster at all), the *review process* faces 5-20x the volume of code per unit time. The review bottleneck is a function of generation speed, not delivery speed.
+The threat model in this paper is driven by this review-surface problem, not by the average productivity debate. Even if the overall development cycle is only modestly faster — or, as the METR trial suggests, sometimes slower — the *review process* faces materially more code per unit time. The review bottleneck is a function of how fast plausible code can be generated, not how fast compliant software can be delivered.
 
 #### 1.2.2 Trajectory
 
 These trends are accelerating, not plateauing. Agent capability improves with each model generation; review capacity does not. The attention gap between what agents produce and what humans can meaningfully verify is widening — and unlike previous productivity tools, the failure modes of agent-generated output are specifically the kind that require *more* attention per unit of output, not less. The problem is not that review is hard today; it is that the ratio of generation velocity to review capacity will be worse in twelve months than it is now.
+
+This is not a theoretical concern. In February 2026, GitHub implemented platform-level restrictions on pull requests — maintainers can now disable pull requests entirely or restrict creation to collaborators only — in direct response to the volume of agent-generated contributions overwhelming open-source maintainers (Wolf 2026; Ghoshal 2026). GitHub's Director of Open Source Programs framed the problem in terms that directly parallel this paper's analysis: "The cost to create has dropped but the cost to review has not" (Wolf 2026). Projects including curl ended bug bounty programs after AI-generated security reports overwhelmed validation capacity, and multiple major projects now explicitly restrict AI-generated contributions. A maintainer of a major container runtime project described the situation as a "breakdown in the trust model behind code reviews," noting that reviewers can no longer assume contributors understand what they submit, and that AI-generated PRs may appear structurally sound while being logically flawed. GitHub itself drew an analogy to a denial-of-service attack on human attention — a framing that directly mirrors the STRIDE-D application in Section 3.2 of this paper. When the world's largest code hosting platform ships technical controls because its review process can no longer absorb the volume of plausible-looking contributions, the review-surface problem described in this paper is no longer hypothetical.
 
 #### 1.2.3 Capability
 
@@ -92,6 +117,14 @@ The response to these risks is not to ban agentic coding. Beyond the velocity ga
 
 Legacy systems often encode implicit trust boundaries in their rigidity — a COBOL program that crashes on a NULL field is enforcing, accidentally, the same crash-on-corruption principle that high-assurance systems require deliberately. When agents are tasked with "translating" or refactoring legacy code into modern languages, they will seamlessly replace that rigidity with modern defensive patterns (null coalescing, optional chaining, default values), permanently destroying the institutional knowledge that was baked into the old code's behaviour. The legacy system's implicit security properties are paved over with idiomatic, test-passing, wrong code.
 
+#### 1.2.8 Coding Is No Longer Confined to Developers
+
+A second shift compounds the review-surface problem. Agentic tooling is changing not only how fast code is produced, but *who produces it*. A business analyst generating plugins for a BI platform, an operations officer assembling workflow automations, or a policy team building internal tools with agent assistance may not regard themselves as software developers, yet they are producing executable logic that can affect trust boundaries, audit trails, access control, and data integrity.
+
+This widens the threat surface beyond formal engineering teams. Every governance model examined in this paper — the ISM's software development controls, the SSDF's practice groups, IRAP assessment scoping — assumes that consequential code enters systems through recognised SDLC channels: repositories, pull requests, code review gates, CI/CD pipelines. When executable logic is produced by non-developers outside those channels, it bypasses the controls entirely — not through evasion, but because the governance perimeter was drawn around "software development" and the new production doesn't cross that line in any way the organisation recognises.
+
+The problem is therefore not only that frontier engineering teams can generate reviewable artefacts faster than assurance processes can absorb them (a **volume problem** inside the SDLC), but that organisations increasingly contain many more software producers than their assurance processes recognise (a **perimeter problem** around the SDLC). One breaks the volume model. The other breaks the governance boundary model. Together, they are materially worse than either alone.
+
 ### 1.3 Terminology
 
 | Term | Definition |
@@ -99,9 +132,41 @@ Legacy systems often encode implicit trust boundaries in their rigidity — a CO
 | **Agent** | An AI system (typically an LLM) that generates, modifies, or reviews source code with limited or no human intervention per output. This paper focuses on autonomous and semi-autonomous agents that operate across multiple files and decisions (e.g., building a feature end-to-end), not inline autocomplete tools that suggest single-line completions. While both introduce volume, agents produce *correlated* errors across a module or feature, whereas autocomplete errors are typically isolated to individual expressions. |
 | **Agentic code** | Source code generated or substantially modified by an agent |
 | **Autocomplete** | Inline code suggestion tools (e.g., standard GitHub Copilot) that complete individual lines or expressions within a human-directed editing session. Distinct from agents in that the human maintains architectural control and errors are uncorrelated. |
-| **Trust boundary** | A point in a system where data crosses between different levels of trust (e.g., external input entering internal processing) |
-| **Trust tier** | A classification of data based on its provenance and the degree to which it can be trusted (see Section 5) |
-| **Defensive anti-pattern** | A coding pattern that silently suppresses errors rather than making them visible — also referred to as "defensive programming" or "defensive patterns" throughout this paper (e.g., catching all exceptions and returning a default value) |
+| **Agent deployment spectrum** | Agent risk profiles vary significantly by deployment model. At one end: a developer pasting chat output into an editor, where the human maintains full architectural context and reviews each fragment before integration — a workflow closer to "autocomplete with extra steps" than to autonomous generation. At the other: a CI-integrated autonomous agent that generates multi-file changes against a project-level instruction set, where the human reviews a completed changeset after generation. This paper's threat model applies primarily to the latter — agents operating with enough autonomy and context to produce *correlated* changes across a module or feature. Chat-pasted fragments carry their own risks (principally ACF-S1 and ACF-S2) but lack the cross-cutting correlation that makes autonomous deployments dangerous at the architectural level. In practice, teams often traverse this spectrum naturally as confidence grows — beginning with chat-assisted prototyping where every line is understood, then progressing to scaffolded agent workflows as the codebase matures. The threat model shifts qualitatively at each stage, and organisations should reassess their controls as their deployment model evolves. |
+| **Trust boundary** | A point in a system where data crosses between different levels of trust (e.g., external input entering internal processing). Refers to the *boundary itself* — the crossing point |
+| **Trust tier** | A classification of data based on its provenance and the degree to which it can be trusted (see Section 5). Refers to the *classification level* — Tier 1 (internal), Tier 2 (validated), Tier 3 (external) |
+| **Validation boundary** | The specific mechanism (code, process, or tool) that enforces a trust boundary — the control that data must pass through to cross from a lower to a higher trust tier (see Section 5.3) |
+| **Defensive anti-pattern** | Context-inappropriate defensive patterns — coding patterns (`.get()` with defaults, broad exception handling, graceful degradation) that silently suppress errors. These patterns are appropriate in most software; this paper addresses their misapplication in high-assurance contexts where silent data corruption is worse than a crash. Also referred to as "defensive programming" or "defensive patterns" throughout |
+
+### 1.4 Methodology and Scope of Claims
+
+This paper makes three kinds of claims, and the reader should be able to distinguish them:
+
+- **Observed patterns** are drawn from direct experience with agentic development in compliance-constrained environments. The case study (Section 8) describes a composite, de-identified account. The failure modes in the ACF taxonomy (Appendix A) were identified through observed agent behaviour, not theoretical analysis alone. Quantitative signals (e.g., the violation rate reported in Section 8.4) are drawn from a single project and should be read as illustrative, not as population-level statistics.
+
+- **Analytical inferences** extend observed patterns through structured reasoning. The STRIDE mapping (Section 3), the gap analysis (Section 6), and the compounding-effect argument (Section 3.3) are analytical — they apply established frameworks to observed phenomena. The conclusions follow from the analysis, but the analysis rests on a narrow empirical base.
+
+- **Hypotheses for community validation** are claims the paper advances as plausible but does not have the evidence to confirm. The model monoculture argument (Section 2.4), the cross-organisational correlation risk (Section 9.6), the review degradation dynamics (Section 4.2), and the governance perimeter expansion (Section 1.2.8) are hypotheses grounded in analogies to other domains or emerging adoption patterns but not yet validated in the agentic coding context specifically.
+
+**Falsifiability.** The ACF taxonomy (Appendix A) would be weakened or invalidated by evidence that: (a) agents trained on general-purpose code corpora do not systematically produce defensive anti-patterns when generating code for high-assurance contexts; (b) standard code review processes reliably catch semantic trust boundary violations in agent-generated code without purpose-built tooling or checklists; or (c) the failure modes described are artefacts of a specific model generation and do not persist across model updates. The authors would welcome empirical studies that test these propositions.
+
+The paper is intended as a structured starting point for community discussion, not a definitive treatment. Its taxonomy, threat model, and recommendations are presented for refinement, not adoption as-is.
+
+### 1.5 Intended Readership
+
+This paper serves three audiences simultaneously:
+
+- **Policy and security practitioners** (risk managers, IRAP assessors, CISOs): Sections 1–7, 9–10 provide the threat model, gap analysis, and recommendations. The ACF Summary Table (Appendix A) and Detection Capability Summary provide a complete overview without requiring code fluency.
+- **Technical practitioners** (developers, architects, DevSecOps): The full paper including code examples, Appendix A detailed entries, and Appendix B technical feasibility analysis.
+- **Tool builders** (static analysis, CI/CD pipeline developers): Appendix A detection approaches and Appendix B design properties.
+
+Where the register shifts between audiences, the text notes what can be safely skipped.
+
+### 1.6 A Note on Provenance
+
+This paper practices what it preaches. The author is a technical advisor and software engineer, not a security researcher. The threat model, STRIDE mapping, ISM gap analysis, and ACF taxonomy were developed through the same process the paper describes: a practitioner with direct observational access to the phenomena — 18 months of daily agentic development on a compliance-constrained system — using prompted AI collaboration to adopt analytical frames (security architecture, policy analysis, threat modelling) outside their primary expertise. The intelligence analysis tradecraft of the paper — structured assessments, explicit confidence levels, falsification criteria, separation of observation from inference — reflects the author's professional background; the domain-specific security analysis reflects prompted polymorphic review of the kind described in Section 7.1.
+
+The reader should therefore treat this paper the way Section 5 recommends treating any agent-assisted output: as Tier 3 input — plausible, structured, and worth validating — not as authoritative guidance. The "discussion paper" classification is not modesty; it is the appropriate trust tier for the methodology. The paper's value, if any, lies in the observed patterns and the vocabulary it proposes, not in the authority of its source. Community validation is the validation boundary.
 
 ---
 
@@ -125,7 +190,9 @@ This threat is distinct from the supply chain model in three critical ways:
 
 **It is not adversarial.** The agent is not trying to compromise the system. It is producing its best output based on training data that is overwhelmingly composed of open-source code with no security classification requirements, no audit trail obligations, and no trust boundary enforcement. The agent reproduces the patterns it learned — which are the patterns of code that doesn't need to be secure.
 
-**It is invisible to existing detection.** The generated code is syntactically valid. It passes type checkers, linters, and unit tests. It follows project conventions (agents are good at pattern-matching the surrounding codebase). It is, by every automated measure currently in common use, "correct code." The failure is semantic — the code does the wrong thing in the security context while doing the right thing in every other context.
+**It is invisible to existing detection.** The generated code is syntactically valid. It passes type checkers, linters, and unit tests. It follows project conventions (agents are good at pattern-matching the surrounding codebase). It is, by the automated measures most organisations currently rely on, "correct code." The failure is semantic — the code does the wrong thing in the security context while doing the right thing in every other context.
+
+**The absence of reported incidents is itself predicted by this model.** The failure modes described in this paper — silent data corruption, trust boundary violations masked by defensive patterns, audit trails that record fabricated defaults as real values — are specifically the kind that *do not produce observable incidents*. A traditional vulnerability creates a detectable event: a crash, an intrusion alert, an anomalous log entry. A `.get()` that silently returns `"UNCLASSIFIED"` for a missing classification field produces no crash, no alert, and a log entry that looks entirely normal. The system continues operating with a confident wrong answer. The question is not "has this caused a breach?" but "would we know if it had?" For organisations that lack semantic boundary enforcement tooling (Section 7.2), the honest answer is: probably not. The measured violation rate reported in Section 8.4 — from a project that *does* have such tooling — suggests the phenomenon is occurring at a rate that would be invisible without purpose-built detection.
 
 **It scales with the benefit.** The faster agents generate code, the more plausible-but-wrong code enters the review pipeline. The same velocity that makes agents productive makes them dangerous — and you cannot capture the benefit without accepting the risk, because they are the same mechanism.
 
@@ -184,7 +251,9 @@ This is not a hypothetical. This is the pattern that defensive programming produ
 
 The threat model for agent-generated code is not simply "human-authored code but more of it." Several properties are qualitatively different:
 
-**Limited persistent learning.** A human developer who receives review feedback on a trust boundary violation learns from it and is less likely to repeat the mistake. Agents have limited or no persistent memory across sessions. Some agent frameworks now support project-level instructions (system prompts, documentation files, memory stores) that provide partial mitigation. An agent can be told "don't use `.get()` on audit data" and will follow that instruction within a session. But these are explicit rules, not internalised judgment. The agent cannot generalise from "don't use `.get()` on audit data" to "don't fabricate defaults anywhere that data absence is meaningful" unless that generalisation is also spelled out. Every correction must be encoded as a rule; the agent does not learn the *principle* behind the correction. This means that *review feedback improves the generator only to the extent that it is captured as machine-readable rules* — and the coverage of those rules is always trailing the set of possible failure modes.
+**Limited persistent learning.** A human developer who receives review feedback on a trust boundary violation learns from it and is less likely to repeat the mistake. Agents have limited or no persistent memory across sessions. The practical consequence is stark: the agent isn't circumventing project rules, and it isn't ignoring instructions — it followed them perfectly in the last session. It just doesn't *have* a last session. Every invocation is the first day on the job, and on the first day, you write `.get()` with a default because that's what Python looks like in the training data.
+
+Some agent frameworks now support project-level instructions (system prompts, documentation files, memory stores) that provide partial mitigation. An agent can be told "don't use `.get()` on audit data" and will follow that instruction within a session. But these are explicit rules, not internalised judgment. The agent cannot generalise from "don't use `.get()` on audit data" to "don't fabricate defaults anywhere that data absence is meaningful" unless that generalisation is also spelled out. Every correction must be encoded as a rule; the agent does not learn the *principle* behind the correction. This means that *review feedback improves the generator only to the extent that it is captured as machine-readable rules* — and the coverage of those rules is always trailing the set of possible failure modes.
 
 **Consistent surface quality.** Human code has variable surface quality — hasty code looks hasty, careful code looks careful. Reviewers use surface quality as a signal for where to focus attention. Agent code has uniformly high surface quality regardless of semantic correctness. A function with a critical trust boundary violation looks exactly as polished as a function without one. The reviewer's natural calibration signal — "this code looks sloppy, I should look more carefully" — is absent.
 
@@ -218,7 +287,9 @@ Government systems handling classified information, financial records, health da
 
 STRIDE (Spoofing, Tampering, Repudiation, Information Disclosure, Denial of Service, Elevation of Privilege) is the established threat modelling framework used in Australian government security assessments. Applying it to agentic code output provides a structured vocabulary that policy audiences already understand, rather than inventing new terminology.
 
-The application below extends STRIDE to treat **agent-generated code as an input** to the system — analogous to treating user input as untrusted. The agent is not an adversary, but its output has the same trust properties as any external input: it may be well-formed, it may be reasonable, but it has not been validated against the system's security requirements.
+The application below extends STRIDE to treat **agent-generated code as an input** to the system — analogous to treating user input as untrusted. The agent is not an adversary, but its output has the same trust properties as any external input: it may be well-formed, it may be reasonable, but it has not been validated against the system's security requirements. Two of the six categories below — "competence spoofing" (S) and the process-level DoS entries (D) — are **analogical extensions** of STRIDE's original technical-system categories to development-process analysis, not standard applications. STRIDE-LM (adding Lateral Movement; see e.g., Meier et al. on CSF Tools) and the emerging ASTRIDE variant (adding AI Agent-Specific Attacks; Dutta et al. 2025) provide precedent for such extensions; nonetheless, the reader should understand these as novel mappings rather than established STRIDE doctrine.
+
+**A note on taxonomy levels.** The threat categories below deliberately mix code-level semantic failures (S, T, I, E), process-level failures (D), and assurance degradation. This mixing is intentional, not accidental. The threat model's central argument is that these levels *interact*: code-level failures (e.g., trust tier conflation) pass review *because* of process-level failures (finding flood, review capacity exhaustion). Separating them into clean categories would be more formally tidy but would obscure the compounding effect (Section 3.3) that makes the threat model novel. Where an entry is a process threat rather than a code pattern, it is marked as such.
 
 ### 3.2 Threat Categories
 
@@ -352,7 +423,7 @@ except Exception as e:
 
 *Note: This is an extended application of STRIDE to the development lifecycle, not the runtime system. The "service" being denied is the review process — a security control, not a user-facing system. This extension is deliberate: if the review process is a security control (and it is, per ISM-2060/2061), then degrading that control's effectiveness is a denial-of-service against the security posture, even though no runtime system is affected.*
 
-**Mechanism:** This is not a code pattern — it is a *process* threat. When agents generate code at 10x velocity, the review queue grows 10x. Reviewers under volume pressure shift from careful semantic review to surface-level scanning. The review process — which is a security control — degrades to a rubber stamp.
+**Mechanism:** This is not a code pattern — it is a *process* threat. When agents generate code at multiples of human velocity, the review queue grows proportionally. Reviewers under volume pressure shift from careful semantic review to surface-level scanning. The review process — which is a security control — degrades to a rubber stamp.
 
 A secondary mechanism: when automated analysis tools produce too many findings on agent-generated code, reviewers habituate to dismissing findings, and genuine security issues are lost in the noise.
 
@@ -420,9 +491,11 @@ Human code review evolved as a control for human-authored code at human pace. It
 | **Error rate** | Human error rate is ~1-5% per function | Agent error rate for *semantic* correctness is unknown and context-dependent |
 | **Feedback** | Reviewer feedback improves the author | Agent has no persistent memory across review cycles |
 
+The consequences of this asymmetry are already visible at scale. GitHub's February 2026 announcement of platform-level PR restrictions (Section 1.2.2) is a direct institutional response to the volume assumption breaking down in the open-source ecosystem.
+
 ### 4.2 The Habituation Effect
 
-When agents generate code that consistently passes tests and follows conventions, reviewers develop trust in the agent's output. This trust is not earned — it is a cognitive shortcut driven by volume pressure. In human factors engineering, this phenomenon is known as **automation bias**: the tendency to over-rely on automated systems and under-scrutinise their output. The effect is well-documented in aviation safety, medical decision support, and industrial automation — domains where humans routinely accept machine output without independent verification once the machine has established a track record of being "usually right."
+When agents generate code that consistently passes tests and follows conventions, reviewers develop trust in the agent's output. This trust is not earned — it is a cognitive shortcut driven by volume pressure. In human factors engineering, this phenomenon is known as **automation bias**: the tendency to over-rely on automated systems and under-scrutinise their output. The effect is well-documented in aviation safety, medical decision support, and industrial automation (Parasuraman & Manzey 2010) — and recent research demonstrates it manifests specifically in AI-assisted software development. Perry et al. (2023) found that developers with AI coding access wrote less secure code while simultaneously *feeling more confident* about their code's security — a textbook automation bias outcome. The METR randomised controlled trial (2025) found experienced developers predicted AI would speed them up by 24%, believed after using it that they were 20% faster, but were measured as 19% *slower* — a 43-percentage-point perception-reality gap that demonstrates the phenomenon operating in real-world coding conditions.
 
 The reviewer's mental model shifts from "verify this code is correct" to "check this code isn't obviously wrong." The difference is enormous: the first is an active search for defects; the second is a passive scan that catches only gross errors.
 
@@ -430,28 +503,11 @@ The habituation effect described above has been directly observed in practice. I
 
 This is the "Shifting the Burden" systems archetype: the agent's consistent surface-quality output becomes the symptomatic fix that weakens the fundamental solution (thorough human review). The more the agent produces acceptable-looking code, the less carefully humans review it, and the more dependent the process becomes on the agent being correct — which is exactly the assumption the review process exists to check.
 
-A related but distinct mechanism compounds this effect. Agent-assisted velocity increases the *parallelisation* of work, not just its speed. When an agent assists in producing multiple interdependent artifacts simultaneously — a design specification, an implementation, and a policy document — semantic inconsistencies *between* artifacts become invisible because no single review pass covers all of them. The review window for cross-document consistency shrinks in proportion to the velocity gain. The reviewer is not only less careful per artifact, but also unable to hold the full production context in working memory at the rate artifacts are produced.
+A related but distinct mechanism compounds this effect. Agent-assisted velocity increases the *parallelisation* of work, not just its speed. When an agent assists in producing multiple interdependent artefacts simultaneously — a design specification, an implementation, and a policy document — semantic inconsistencies *between* artefacts become invisible because no single review pass covers all of them. The review window for cross-document consistency shrinks in proportion to the velocity gain. The reviewer is not only less careful per artefact, but also unable to hold the full production context in working memory at the rate artefacts are produced.
 
-The availability of parallel agent generation creates a structural pressure that procedural and behavioural controls may mitigate but are unlikely to eliminate, because the same incentives driving adoption also reward bypassing throughput-constraining review practices. An organisation can prohibit developers from running multiple agents concurrently, but the prohibition runs directly against the productivity incentive that justified adopting agentic development. Controls that depend on sustained human restraint in the face of convenience are inherently fragile — a principle well-established in security engineering but easy to overlook when the convenience is "write code five times faster." The implications for control selection are examined in Section 7.
+The availability of parallel agent generation creates a structural pressure that procedural and behavioural controls may mitigate but are unlikely to eliminate, because the same incentives driving adoption also reward bypassing throughput-constraining review practices. An organisation can prohibit developers from running multiple agents concurrently, but the prohibition runs directly against the productivity incentive that justified adopting agentic development. Controls that depend on sustained human restraint in the face of convenience are inherently fragile — a principle well-established in security engineering but easy to overlook when the convenience is "generate code faster than you can review it." The implications for control selection are examined in Section 7.
 
-### 4.3 The Wrong Question
-
-When organisations evaluate the feasibility of security tooling for agentic code (as examined in Appendix B), the instinctive question is: *"How big is it? How many lines of code? How many hours to build?"*
-
-This is the wrong question. It inherits the assumption that scope correlates with assurance — that a 200-line tool provides less assurance than a 2000-line tool, or that 220 hours of development is insufficient for a security-critical control.
-
-The right question is: **"How do you know it's correct?"**
-
-This question applies recursively. If the security enforcement tool is itself built by an agent (which is increasingly likely for any new tool), then the tool's correctness is subject to the same threat model it exists to address. The verification mechanism — not the implementation size — is the assurance argument.
-
-This reframing has direct implications for policy:
-- **Accreditation should evaluate the verification story**, not the implementation scope. A small tool with a rigorous golden corpus, self-hosting gate, and measured precision is stronger than a large tool without these properties.
-- **"How do you know the agent wrote it correctly?"** is the question that applies to all agent-generated code, including the tools that check agent-generated code. The answer must be grounded in independent verification (test corpus, self-hosting, measured false positive/negative rates), not in the development process used to produce it.
-- **The line between "tool" and "assurance argument" blurs.** The design of a semantic boundary enforcer (Appendix B) is essentially a structured answer to "how do you know the code is correct?" — and that answer is valuable independent of whether the specific tool gets built.
-
-This reframing directly informs Recommendations 1 and 5 — accreditation should evaluate the verification story, and IRAP assessors should assess review quality, not just review process.
-
-### 4.4 The Advisory Fatigue Problem
+### 4.3 The Advisory Fatigue Problem
 
 Static analysis tools that flag agent-generated code patterns as warnings face a paradox:
 - If agents produce many warnings, reviewers habituate to dismissing them
@@ -571,7 +627,7 @@ The following gap areas have no corresponding ISM control. Each represents a cat
 
 **Agent output as trust boundary** — *ACF-T1 (trust tier conflation), ACF-E1 (implicit privilege grant)*
 
-No control addresses the trust classification of AI-generated artifacts. Agent code is neither "in-house" (human-authored) nor "third-party" (external component) — it's a new category. ISM-2074 (Dec-25) requires organisations to notify ASD of AI use in ICT, but this is a governance/notification control, not a technical trust boundary control.
+No control addresses the trust classification of AI-generated artefacts. Agent code is neither "in-house" (human-authored) nor "third-party" (external component) — it's a new category. ISM-2074 (Dec-25) requires organisations to develop, implement, and maintain an AI usage policy, but this is a governance control, not a technical trust boundary control.
 
 **Review capacity scaling** — *ACF-D1 (finding flood), ACF-D2 (review capacity exhaustion)*
 
@@ -587,7 +643,7 @@ No control addresses the distinct risk profile of correlated defects. Testing an
 
 **Code provenance tracking** — *ACF-D2 (review capacity exhaustion)*
 
-No control requires organisations to track which code was generated by AI agents vs. authored by humans. ISM-2074 requires notification of AI use but not per-artifact provenance. Without provenance, risk assessment cannot distinguish between code populations with different failure characteristics.
+No control requires organisations to track which code was generated by AI agents vs. authored by humans. ISM-2074 requires an AI usage policy but not per-artefact provenance. Without provenance, risk assessment cannot distinguish between code populations with different failure characteristics.
 
 #### 6.1.3 Candidate ISM Extensions
 
@@ -612,11 +668,13 @@ SP 800-218 defines practices for secure software development organised into four
 | Practice Group | SSDF Practices | Agentic Code Coverage |
 |---------------|----------------|----------------------|
 | **Prepare the Organization (PO)** | Define security requirements, roles, training | Does not address training requirements for reviewing agent output (which requires different skills than reviewing human output) or organisational capacity planning for agent-scale review volume |
-| **Protect the Software (PS)** | Protect code, integrity verification | Addresses integrity of code artifacts but not the trust classification of code based on its generation method. An agent-generated commit and a human-authored commit are indistinguishable in the VCS |
-| **Produce Well-Secured Software (PW)** | Design, code review, testing | The most relevant group. PW.5 (code review), PW.7 (testing), and PW.8 (verification) all partially apply. However, PW assumes a human developer who can be trained, who learns from feedback, and whose error rate is independent across functions — none of which hold for agents |
+| **Protect the Software (PS)** | Protect code, integrity verification | Addresses integrity of code artefacts but not the trust classification of code based on its generation method. An agent-generated commit and a human-authored commit are indistinguishable in the VCS |
+| **Produce Well-Secured Software (PW)** | Design, code review, testing | The most relevant group. Practice PW.5 (secure coding practices), Practice PW.7 (code review), and Practice PW.8 (testing) all partially apply. However, PW assumes a human developer who can be trained, who learns from feedback, and whose error rate is independent across functions — none of which hold for agents |
 | **Respond to Vulnerabilities (RV)** | Vulnerability response, disclosure | Does not address the correlated nature of agent-introduced defects. Standard vulnerability response treats each finding independently; agent defects require pattern-wide remediation (Section 9.7) |
 
-**Key SSDF gap:** PW.1.1 recommends "using forms of risk-based analysis to determine how much effort is adequate" for security practices. This implicitly assumes that risk is assessable per-component. Agent-generated code introduces *systematic* risk across many components from a single source — the analysis framework needs to account for correlation, not just per-component risk.
+**Key SSDF gap:** Practice PW.1 ("Design Software to Meet Security Requirements and Mitigate Security Risks") includes task PW.1.1, which recommends "using forms of risk-based analysis to determine how much effort is adequate" for security practices. This implicitly assumes that risk is assessable per-component. Agent-generated code introduces *systematic* risk across many components from a single source — the analysis framework needs to account for correlation, not just per-component risk.
+
+**NIST's own recognition of this gap:** NIST published SP 800-218A (July 2024) as a supplement to the SSDF specifically for generative AI and dual-use foundation model development contexts, acknowledging that the original framework's human-centred assumptions need AI-specific augmentation. However, SP 800-218A's focus is on secure practices for AI *model* development across the SDLC — not on the assurance of source code *generated by* AI systems. This is precisely the gap this paper addresses: substantial guidance now exists for building AI safely, but almost none for securing what AI builds.
 
 ### 6.3 Essential Eight
 
@@ -628,7 +686,7 @@ The Essential Eight maturity model does not directly address software developmen
 
 ### 6.4 OWASP and Industry Guidance
 
-**OWASP Top 10 for LLM Applications (2025)** addresses threats *to* LLM systems — prompt injection, training data poisoning, model denial of service, insecure output handling. The last category ("Insecure Output Handling") comes closest to the concerns in this paper, but it addresses LLM output used as *data* (e.g., inserting LLM-generated text into a web page without sanitisation), not LLM output used as *source code* that becomes part of the system itself.
+**OWASP Top 10 for LLM Applications (2025)** primarily addresses threats *to* LLM systems — prompt injection, training data poisoning, model denial of service. The closest entry to this paper's concerns is **LLM02 (Insecure Output Handling)**, whose attack scenarios explicitly include LLM-generated code introducing vulnerabilities such as SQL injection. However, even LLM02 frames this as an application-level output-handling problem — advising developers to treat LLM output with "zero-trust" validation — rather than providing a comprehensive treatment of the distinct failure characteristics of AI-assisted code generation (correlated defects, review capacity exhaustion, context-inappropriate patterns). The project has since evolved into the broader **OWASP GenAI Security Project**, covering LLM applications, agentic AI systems, and AI-driven applications — but no OWASP project specifically targets the assurance of AI-generated source code in government systems in the sense addressed by this paper.
 
 **OWASP Secure Coding Practices** provides a checklist of defensive coding practices. Ironically, several "secure" practices in the OWASP checklist are precisely the anti-patterns that the agentic threat model identifies as dangerous in high-assurance contexts. For example, "validate all input" is correct, but "provide a default value when input is missing" is context-dependent — in audit-critical systems, a missing value should crash, not default. This illustrates the gap between generic secure coding guidance and domain-specific trust boundary requirements.
 
@@ -653,6 +711,7 @@ No current framework provides:
 5. **Accreditation criteria for agentic development workflows** — what evidence must organisations provide to demonstrate that agentic coding maintains the required security posture?
 6. **Vocabulary for context-dependent code weaknesses** — patterns that are correct in general but dangerous in specific security contexts
 7. **Correlated failure risk models** — testing and remediation strategies that account for the non-independent failure distribution of agent-generated code
+8. **Governance perimeter expansion** — controls for executable logic produced by non-developers using agentic tools outside traditional SDLC channels (Section 1.2.8). Current frameworks scope software development controls to recognised development teams and established code repositories; agent-generated automations, integrations, and plugins produced by analysts and operators outside these channels are not addressed
 
 ---
 
@@ -674,7 +733,9 @@ The sections below are ordered from weakest to strongest assurance, not from lea
 
 **What government already does, adapted for agentic velocity:**
 
-**Enhanced code review protocols.** Mandate security-focused review (not just correctness review) for agent-generated code. Require reviewers to attest that trust boundaries were verified, not just that the code "looks right." This is a process change, not a technology change, but it requires explicit recognition that agent code needs different review criteria than human code.
+#### Enhanced code review protocols
+
+Mandate security-focused review (not just correctness review) for agent-generated code. Require reviewers to attest that trust boundaries were verified, not just that the code "looks right." This is a process change, not a technology change, but it requires explicit recognition that agent code needs different review criteria than human code.
 
 Specifically, review checklists for agent-generated code should include:
 - Were trust boundaries maintained? (Does external data pass through validation before internal use?)
@@ -682,23 +743,44 @@ Specifically, review checklists for agent-generated code should include:
 - Are default values justified? (Does every `.get()` or `getattr` with a default represent a legitimate design decision, or a fabrication of missing data?)
 - Is the code's failure mode correct for the context? (Should this code crash, quarantine, or continue on error?)
 
-**Separation of generation and review.** The person (or agent) who generates the code must not be the sole reviewer. This already applies to human-authored code in most government contexts; extending it to agent-generated code means ensuring that agent self-review (e.g., an agent checking its own output) does not count as an independent review. This has a subtlety: multi-agent workflows where one agent generates code and another reviews it using different models are not independent review in the statistical sense — the models share overlapping training corpora and failure modes. However, a more nuanced form of multi-agent review offers meaningful value.
+#### Separation of generation and review
 
-**Structured perspective diversity in agent-assisted review.** While model diversity (using different models) provides limited independence, *perspective diversity* (prompting the same model with different analytical frames) produces meaningfully different coverage. An agent prompted as a security boundary reviewer will attend to trust tier flow; the same agent prompted as an operational resilience reviewer will attend to error handling and audit trail preservation; prompted as a data quality reviewer, it will attend to default value fabrication and silent coercion.
+The person (or agent) who generates the code must not be the sole reviewer. This already applies to human-authored code in most government contexts; extending it to agent-generated code means ensuring that agent self-review (e.g., an agent checking its own output) does not count as an independent review. This has a subtlety: multi-agent workflows where one agent generates code and another reviews it using different models are not independent review in the statistical sense — the models share overlapping training corpora and failure modes. However, a more nuanced form of multi-agent review offers meaningful value.
 
-This is not independence — the underlying model's blind spots persist across all frames — but it is *faceted analysis* that surfaces different subsets of the failure taxonomy in Appendix A. The failure modes in that taxonomy span different analytical domains: ACF-S1 (competence spoofing) is a data semantics problem, ACF-R1 (audit trail destruction) is an operational integrity problem, and ACF-T1 (trust tier conflation) is a data flow problem. No single review perspective — human or agent — covers all of them equally well. A reviewer with a security mindset catches T1; a reviewer with an operations mindset catches R1; a reviewer thinking about data quality catches S1. Prompted perspectives exploit this structure deliberately.
+#### Structured perspective diversity in agent-assisted review
 
-The practical value is coverage breadth at agent speed: five prompted perspectives can pre-screen a change in the time a single human reviewer completes one pass, reducing the volume of issues that reach human review while increasing the diversity of issues caught. Organisations should develop *domain-specific review prompts* aligned to their threat model — not generic "review this code" instructions. The prompts themselves become reviewable, version-controlled security artifacts: institutional knowledge encoded in a different form than the machine-readable rules described in Section 7.2, but serving a complementary function.
+While model diversity (using different models) provides limited independence, *perspective diversity* — prompting the same model with different analytical frames — can produce meaningfully different coverage. One useful way to organise these perspectives is by *cognitive function* rather than by domain. Illustrative functions include: an **architectural reviewer** ("Is the shape right?"), a **problem-framing reviewer** ("Is this solving the right problem at the right location?"), an **implementation reviewer** ("Was it implemented correctly?"), and a **quality reviewer** ("Are the tests and verification strategy adequate?"). These lenses are not independent, but they surface different classes of issue. A trust boundary violation (ACF-T1) may be an implementation defect; the *reason* it exists may be an architectural misplacement — a validation that belongs in a different layer; and the tests may still pass while verifying the wrong thing. The problem-framing perspective is particularly underexplored: evaluating whether a change addresses the root cause or patches a symptom often requires holding broader dependency context in working memory — something agents may assist with and time-pressured human review often struggles to sustain.
+
+This is not independence — the underlying model's blind spots persist across all frames — but it is *faceted analysis* that surfaces different failure classes. In practice, a small set of prompted perspectives may provide broader first-pass coverage at agent speed than a single undifferentiated review pass, reducing the volume of issues that reach human review while increasing the diversity of issues caught. Organisations should develop *role-specific review prompts* aligned to their threat model and architecture — not generic "review this code" instructions. The prompts themselves become reviewable, version-controlled security artefacts: institutional knowledge encoded in a different form than the machine-readable rules described in Section 7.2, but serving a complementary function.
 
 The honest caveat: this is still a procedural control, not a technical one. It depends on someone actually running the prompted reviews, and the quality depends on prompt design. It sits in the middle tier of the control strength hierarchy in this section. But it is achievable now with no tooling investment, which makes it a useful bridge while automated enforcement tooling matures.
 
-**Volume-aware review capacity planning.** If agents increase code generation by 10x, review capacity must be addressed — either through additional reviewers, automated pre-screening that reduces the human review burden, or rate-limiting agent output to match review capacity. Ignoring the volume mismatch means the review control degrades silently.
+#### Volume-aware review capacity planning
 
-**Project-level instructions as a generation-time control.** Most agent frameworks support project-level configuration — system prompts, instruction files, memory stores — that shape agent behaviour within a session. These instructions can encode project-specific rules ("never use `.get()` on audit data," "all error handlers for audit-write operations must propagate, not catch-and-continue") and reduce the frequency of the failure modes in Appendix A at generation time. This is a behavioural control (weakest tier): it depends on the agent respecting the instructions, the instructions being comprehensive enough to cover all failure modes, and the agent not generalising incorrectly from specific rules. Instructions that say "don't use `.get()` on audit data" do not teach the agent the underlying principle "don't fabricate defaults where data absence is meaningful" — every specific rule must be spelled out. Nonetheless, project-level instructions are an immediately deployable, zero-cost control that measurably reduces (without eliminating) the volume of semantic violations reaching the review pipeline.
+If agents materially increase code generation volume, review capacity must be addressed — either through additional reviewers, automated pre-screening that reduces the human review burden, or rate-limiting agent output to match review capacity. Ignoring the volume mismatch means the review control degrades silently.
 
-**Provenance tracking for agent output.** Organisations should maintain records of which code was generated by agents, which was human-authored, and which was agent-generated then human-modified. This metadata is relevant for both security assessment (understanding the trust profile of different code regions) and for incident response (when a defect is found, knowing whether it originated from agent generation helps diagnose the failure mode).
+#### Project-level instructions as a generation-time control
+
+Most agent frameworks support project-level configuration — system prompts, instruction files, memory stores — that shape agent behaviour within a session. These instructions can encode project-specific rules ("never use `.get()` on audit data," "all error handlers for audit-write operations must propagate, not catch-and-continue") and reduce the frequency of the failure modes in Appendix A at generation time. This is a behavioural control (weakest tier): it depends on the agent respecting the instructions, the instructions being comprehensive enough to cover all failure modes, and the agent not generalising incorrectly from specific rules. Instructions that say "don't use `.get()` on audit data" do not teach the agent the underlying principle "don't fabricate defaults where data absence is meaningful" — every specific rule must be spelled out. Nonetheless, project-level instructions are an immediately deployable, zero-cost control that measurably reduces (without eliminating) the volume of semantic violations reaching the review pipeline.
+
+#### Provenance tracking for agent output
+
+Organisations should maintain records of which code was generated by agents, which was human-authored, and which was agent-generated then human-modified. This metadata is relevant for both security assessment (understanding the trust profile of different code regions) and for incident response (when a defect is found, knowing whether it originated from agent generation helps diagnose the failure mode).
 
 ### 7.2 Technical Controls (What's Buildable)
+
+When organisations evaluate the feasibility of security tooling for agentic code, the instinctive question is: *"How big is it? How many lines of code? How many hours to build?"* This is the wrong question. It inherits the assumption that scope correlates with assurance — that a 200-line tool provides less assurance than a 2000-line tool, or that 220 hours of development is insufficient for a security-critical control.
+
+The right question is: **"How do you know it's correct?"**
+
+This question applies recursively. If the security enforcement tool is itself built by an agent (which is increasingly likely for any new tool), then the tool's correctness is subject to the same threat model it exists to address. The verification mechanism — not the implementation size — is the assurance argument.
+
+This reframing has direct implications for policy:
+- **Accreditation should evaluate the verification story**, not the implementation scope. A small tool with a rigorous golden corpus, self-hosting gate, and measured precision is stronger than a large tool without these properties.
+- **"How do you know the agent wrote it correctly?"** is the question that applies to all agent-generated code, including the tools that check agent-generated code. The answer must be grounded in independent verification (test corpus, self-hosting, measured false positive/negative rates), not in the development process used to produce it.
+- **The line between "tool" and "assurance argument" blurs.** The design of a semantic boundary enforcer (Appendix B) is essentially a structured answer to "how do you know the code is correct?" — and that answer is valuable independent of whether the specific tool gets built.
+
+This reframing directly informs Recommendations 7 and 8 — accreditation should evaluate the verification story, and IRAP assessors should assess review quality, not just review process. The technical controls below should be evaluated on this basis.
 
 **Automated semantic boundary enforcement.** Static analysis tools that verify data provenance and trust tier flow — not just type shape — at the code level. These tools check that external data passes through validation boundaries before reaching internal processing, that error handling preserves audit trails, and that defensive patterns are not used on data that should crash on anomaly.
 
@@ -709,7 +791,11 @@ The honest caveat: this is still a procedural control, not a technical one. It d
 - Can operate as a pre-commit check, CI gate, or agent self-check before code submission
 - Verification properties (golden corpus, self-hosting gate, measured precision) are independently auditable — see Appendix B, Section B.5
 
-This is not the only possible technical control, but it demonstrates that the problem is tractable. Similar tools could be built for other languages or integrated into existing static analysis platforms.
+This is not the only possible technical control, but it demonstrates that the problem is tractable. Existing static analysis platforms — Semgrep (custom rule authoring), CodeQL (dataflow analysis), and Pysa/Pyre (taint tracking) — could be extended with rules targeting the ACF taxonomy's failure modes, particularly trust tier flow (ACF-T1) and validation boundary gaps (ACF-T2). The design in Appendix B chose AST-level analysis with zero dependencies for deployment simplicity, but organisations with existing static analysis infrastructure should evaluate whether their current tools can be adapted before building new ones.
+
+**Agent-assisted semantic analysis.** The prompted perspective diversity described in Section 7.1 applies not only to reviewing changes but to *analysing existing code*. An agent prompted with a specific analytical frame can perform a cold read of a source file — tracing execution flow, following data through trust boundaries, and evaluating error-handling paths — with a level of context-sensitive analysis that traditional static analysis often cannot match and that human reviewers cannot sustain at scale. Static analysers are strongest at structural, syntactic, and formally encoded dataflow patterns; they cannot reliably determine whether a `.get()` default is *contextually appropriate* without project-specific semantic rules. Human reviewers can make that judgement, but cannot practically sustain file-by-file semantic tracing across multiple analytical lenses at codebase scale. Agent-assisted analysis therefore occupies a previously sparse middle ground: semantic inspection applied at a scale that was economically impractical for human review alone. This is not a replacement for either static analysis or human review — it catches a different class of issue from both, and its blind spots differ from both. In most settings, it is likely to be most useful as a non-blocking discovery control, complementing CI-integrated static analysis and targeted human review rather than replacing either.
+
+In the case study deployment (Section 8), periodic full-codebase agent crawls — every file analysed through prompted analytical frames — routinely surfaced dozens of findings per pass, the majority of which would not have been caught by conventional static analysis, incremental code review, or unprompted agent review. The findings emerge specifically *because* the analytical frames are non-default — neither human reviewers under time pressure nor agents given generic review instructions naturally adopt the perspective of, say, an architectural reviewer evaluating layer responsibility or a problem-framing reviewer asking whether a fix addresses root cause or symptom. This points to a human limitation that is distinct from time pressure: *cognitive range*. A senior backend engineer cannot practically adopt a PyTorch engineer's analytical frame, or a security architect's, or a data quality auditor's — not because they lack intelligence, but because genuine expertise in each frame takes years to develop. Prompted agents do not have deeper expertise in any single frame than a domain specialist, but they can adopt multiple frames without the switching cost and domain-knowledge barriers that make it impractical for any individual human reviewer to cover more than one or two perspectives well. In this sense, prompted agents are *polymorphic* reviewers — not deeper than a specialist in any single frame, but able to provide breadth of analytical coverage that no individual human can match regardless of time budget. Most findings are individually low-impact — edge cases in cold paths, minor deviations from stated invariants, inconsistencies that do not currently trigger in testing — but they represent legitimate deviations from the codebase's architectural rules, and in an auditable system, each deviation is a gap in the assurance argument regardless of its current exploitability. The cost is non-trivial (such crawls consume substantial API quota), but the defect yield suggests the economics may favour periodic comprehensive analysis over exclusive reliance on per-change review.
 
 **Key architectural principle — "parasitic, not parallel":** Effective tools for this space must extend existing programming language machinery (annotations, type hints, decorators) rather than creating parallel systems that require adoption of new syntax or tools. Tools that require developers to learn a new language or adopt a new framework face adoption resistance that undermines their security value. Critically, enforcement must live inside the existing CI/CD pipeline — pre-commit hooks, CI gates, pull request checks — not in a separate workflow. If a security tool slows down the very velocity the organisation bought the AI agent to achieve, the tool will be bypassed. The enforcement mechanism succeeds by being invisible to the fast path and blocking only on genuine violations.
 
@@ -725,11 +811,13 @@ This is not the only possible technical control, but it demonstrates that the pr
 
 **Agent output classification.** A formal determination of how agent-generated code should be treated in the trust model — as external input (Tier 3), as tool output (requiring specific validation), or as a new category requiring its own controls.
 
+**Extend SDLC-equivalent controls to executable logic produced outside formal development teams.** Organisations should inventory and govern agent-generated plugins, automations, BI extensions, workflow scripts, low-code components, and similar artefacts produced by analysts, operators, and other non-developer staff (see Section 1.2.8). Where such artefacts affect trust boundaries, access control, audit trails, or data integrity, they should be subject to provenance, review, and validation controls proportionate to their impact — even when the producers do not consider themselves developers and the artefacts do not live in a formal version control system. This is the policy response to the governance perimeter problem: the SDLC boundary has expanded, and controls must follow it.
+
 ---
 
 ## 8. Case Study: Agentic Development Under Compliance Constraints
 
-*This section presents a composite, de-identified account drawn from experience with agentic development in compliance-constrained environments. Specific implementation details have been generalised.*
+*This section presents a composite, de-identified account drawn from experience with agentic development in compliance-constrained environments. Specific implementation details have been generalised. The system and tooling described are open-source, Commonwealth-owned assets; they are de-identified here to keep focus on the generalisable threat model rather than implementation-specific design choices.*
 
 ### 8.1 Context
 
@@ -781,9 +869,11 @@ The failure modes map directly to the taxonomy in Section 3:
 
 In each case, the defect was caught later — by the project's existing static analysis tool, by a different reviewer examining adjacent code, or by a test failure in a downstream component that received malformed data. The initial review process, which was supposed to catch these issues, had signed off.
 
-The project's automated semantic boundary enforcement tool (Section 7.2, Appendix B) provides a rough empirical signal. In steady-state development on a ~80,000-line Python codebase with agents generating the majority of new code, the tool catches approximately 1–2 trust boundary violations per day — patterns from the ACF taxonomy (primarily ACF-S1, ACF-R1, and ACF-T1) that the generating agent introduced and that would otherwise enter the human review queue alongside functionally correct code. Over a quarter, this accumulates to roughly 90–180 violations that automated tooling caught at the boundary.
+The project's automated semantic boundary enforcement tool (Section 7.2, Appendix B) provides a rough empirical signal. In steady-state development on a ~80,000-line Python codebase with agents generating the majority of new code, the CI gate catches approximately 1–2 trust boundary violations per day — patterns from the ACF taxonomy (primarily ACF-S1, ACF-R1, and ACF-T1) that the generating agent introduced. These violations never enter the repository. They are caught at the pre-commit or CI boundary before a human reviewer ever sees them. Without the gate, they would enter the codebase through normal code review, because they look like correct defensive Python — which is exactly what makes them dangerous (Section 2.3). Over a quarter, this accumulates to roughly 90–180 violations that automated tooling caught at the boundary.
 
-Two aspects of this number merit attention. First, it represents the violations the tool detects — the tool's coverage of the ACF taxonomy is incomplete (Appendix A, Detection Capability Summary), so the true rate of semantic violations is higher. Second, and more important for the policy argument: these are not exotic edge cases. They are the routine, daily output of a well-prompted agent operating on a well-documented codebase with project-level instructions that explicitly prohibit the patterns in question. The agent still produces them, because the patterns are deeply embedded in its training data. The question for organisations without automated enforcement is not whether this is happening in their codebases — it is whether they are catching it.
+Three aspects of this number merit attention. First, it represents only the violations the tool detects — the tool's coverage of the ACF taxonomy is incomplete (Appendix A, Detection Capability Summary), so the true rate of semantic violations is higher. Second, and more important for the policy argument: these are not exotic edge cases. They are the routine, daily output of a well-prompted agent operating on a well-documented codebase with project-level instructions that explicitly prohibit the patterns in question. The agent still produces them, because the patterns are deeply embedded in its training data — and because the agent has no persistent memory across sessions (Section 2.4), the same patterns recur regardless of how many times they have been caught previously. Third, the enforcement model is not advisory — it is a gate with an allowlist. A pattern flagged by the enforcer either gets fixed by the agent or requires a human-authored exception with a rationale, a reviewer identity, and an expiry date (Appendix B, Section B.4). Legitimate uses of otherwise-restricted patterns go through; unconscious pattern completion from training data does not.
+
+The question for organisations without this kind of enforcement is not whether these patterns exist in their agent-generated code — it is whether anything is catching them.
 
 ### 8.5 The Redirection Insight
 
@@ -806,6 +896,14 @@ This is a genuine improvement in security posture, not just efficiency:
 | "Is this validation function actually validating?" | Human evaluates (requires domain knowledge) | Machine checks structural presence of control flow; human evaluates semantic adequacy |
 
 The total review burden may be similar, but the **distribution of human attention shifts** from low-value pattern scanning to high-value semantic evaluation. The compliance tax is the same; the assurance yield is higher.
+
+A less obvious but equally important effect: **more compliance work is actually executed in an agentic workflow than in a purely human one.** The same property that makes agents dangerous — no persistent learning, no internalised shortcuts — makes them unusually compliant enforcement subjects. A developer fixing a one-line bug at 4:55pm on a Friday is not going to recalculate 500 allowlist hashes, rerun the full CI pipeline, and write a whitelist rationale for the `.get()` they just introduced. They will commit, push, and deal with it Monday. The agent doesn't have a Friday. It doesn't have a deadline. It lacks the judgment to decide "this governance step isn't worth it for a one-liner." It just does the work. Every session it hits the pre-commit hook fresh, grapples with it fresh, and either satisfies it or fails. It never develops the human instinct of "I'll fix that later" — because there is no later for it.
+
+This is the mirror image of the persistent-learning problem described in Section 2.4. The agent doesn't learn your security rules, but it also doesn't learn which rules it can get away with skipping. The net effect is that the agent pays the governance tax that humans under deadline pressure quietly defer. For anyone who has audited a development team and found the gap between "documented process" and "what actually happens under delivery pressure," this is a significant finding: agents are simultaneously the worst authors and the best compliance subjects.
+
+This also adds nuance to the control-strength hierarchy in Section 7. The paper argues behavioural controls are weakest because they require sustained restraint against incentives. That is true for humans. For agents, behavioural controls are weak for a *different* reason — not because the agent will choose to skip them, but because it won't remember them next session. Technical controls (CI gates, pre-commit hooks) are strong for agents for the same reason they are strong for humans — they are environmental, not volitional — but they gain an additional benefit: the agent won't resent the gate, won't lobby to have it removed, won't find a workaround, and won't develop learned helplessness about false positives. It will run into the wall, fix the issue, and move on. Every single time.
+
+The underlying lesson from the case study is this: **agentic development is viable precisely because the agent will execute governance that humans under pressure quietly defer — but it requires governance designed for the agent's actual failure modes, not the human's.** Human governance assumes the author remembers last session's feedback, can be trained over time, and will exercise judgment about which rules matter. Agent governance must assume none of those things. It must be environmental (CI gates, not documentation), boundary-enforced (pre-commit, not post-review), and stateless (every session is the first session). Organisations that apply human-shaped governance to agents will get the agent's compliance without catching the agent's mistakes. Organisations that design agent-shaped governance will get both.
 
 ---
 
@@ -894,15 +992,28 @@ This has implications for:
 - **Remediation scope:** When a defect pattern is found in agent code, remediation should not be limited to the specific instance. The entire codebase should be scanned for the same pattern — because correlated failures mean the pattern is likely repeated.
 - **Triage model:** Correlated failures mean 50 firings of the same rule across a codebase is one systematic issue requiring a systematic fix, not 50 independent tickets. Organisations that triage agent-generated defects as independent findings will overwhelm their remediation capacity on what is, operationally, a single root cause.
 
+### 9.8 Contracted-Out Development
+
+**How does the threat model apply when most code is written by contractors, not agencies?**
+
+The majority of software development for Australian Government systems is performed by contracted service providers, not by agency staff. This paper's threat model applies to contractors' agents with the same force — an agent operated by Accenture, Leidos, or a boutique consultancy produces the same correlated, context-inappropriate patterns as an agent operated in-house. But the governance implications differ:
+
+- **Visibility:** The contracting agency may have limited visibility into whether a contractor is using agentic tools, what proportion of deliverables are agent-generated, and whether the contractor's review processes address the failure modes in Appendix A. ISM-2074's AI usage policy requirement applies to the agency's own use; it is less clear how it flows down to contracted development.
+- **Acceptance criteria:** Current delivery acceptance criteria for contracted software development typically focus on functional requirements, test coverage, and compliance with coding standards. They do not typically address the semantic correctness properties this paper identifies — trust boundary maintenance, audit trail integrity, context-appropriate error handling. A contractor could deliver code that meets every contractual requirement while containing systematic ACF-pattern violations.
+- **Review responsibility:** When a contractor delivers agent-generated code, who is responsible for the security-focused review — the contractor's internal review process, the agency's acceptance review, or both? If the agency relies on the contractor's review, the agency inherits the contractor's review capacity constraints and habituation dynamics (Section 4.2).
+- **Correlated risk across contracts:** If multiple agencies contract the same provider, and that provider uses the same agent tooling and prompts across engagements, the correlated failure problem (Section 9.7) extends across agency boundaries through the contractor, even if the agencies have no direct relationship.
+
+This is arguably the most operationally significant gap for ASD to address, because it is where the majority of government code is actually produced.
+
 ---
 
 ## 10. Recommendations
 
-The following recommendations are grouped by audience. For organisations seeking immediate priorities, three recommendations have the highest leverage and are achievable in the near term:
+The following recommendations are **candidate controls presented for community consultation**, not normative guidance. They reflect the authors' assessment of what is achievable and useful, grounded in the observed patterns and analytical framework in this paper. They are grouped by audience. For organisations seeking immediate priorities, three recommendations have the highest leverage and are achievable in the near term:
 
-- **Recommendation 2** (for policy bodies): Issue guidance on treating agent output as a trust boundary — this provides the conceptual foundation all other controls build on.
-- **Recommendation 9** (for organisations): Document institutional security knowledge in machine-readable form — this is the most direct defence against agents that lack institutional context, and requires no new tooling.
-- **Recommendation 3** (for policy bodies): Extend ISM controls — the June 2025 ISM overhaul provides strong foundations that need only targeted extensions for agentic code.
+- **Recommendation 2** (§10.1, for policy bodies): *Issue guidance on treating agent output as a trust boundary.* This provides the conceptual foundation all other controls build on.
+- **Recommendation 3** (§10.1, for policy bodies): *Extend ISM controls for agent-generated code.* The June 2025 ISM overhaul provides strong foundations that need only targeted extensions.
+- **Recommendation 11** (§10.3, for organisations): *Document institutional security knowledge in machine-readable form.* This is the most direct defence against agents that lack institutional context, and requires no new tooling.
 
 ### 10.1 For Security Policy Bodies (ASD, ACSC)
 
@@ -925,33 +1036,41 @@ The following recommendations are grouped by audience. For organisations seeking
    - Evaluate whether automated enforcement meaningfully reduces defect escape rates in practice
    - Develop criteria for assessing the assurance properties of enforcement tools themselves (Appendix B, Section B.5)
 
+5. **Extend SDLC-equivalent controls to executable logic produced outside formal development teams.** Agentic tools are expanding the population of software producers beyond professional developers (Section 1.2.8). Organisations should inventory and govern agent-generated plugins, automations, BI extensions, workflow scripts, low-code components, and similar artefacts produced by analysts, operators, and other non-developer staff. Where such artefacts affect trust boundaries, access control, audit trails, or data integrity, they should be subject to provenance, review, and validation controls proportionate to their impact — even when the producers do not consider themselves developers and the artefacts do not live in a formal version control system. The governance perimeter has expanded; controls must follow it.
+
+6. **Address agent-generated code in contracted development.** The majority of software development for Australian Government systems is performed by contracted service providers (Section 9.8). Contracted developers' agents produce the same correlated, context-inappropriate patterns as in-house agents, but with additional governance challenges. Candidate controls:
+   - Contract clauses requiring disclosure of agentic tool use and provenance tracking for agent-generated deliverables
+   - Acceptance criteria that include semantic correctness properties (trust boundary maintenance, audit trail integrity, context-appropriate error handling), not just functional requirements and test coverage
+   - Clarification of how ISM-2074's AI usage policy requirement flows down to contracted development
+   - Assessment of correlated failure risk when the same contractor and agent tooling serves multiple agencies — a systematic defect introduced by a contractor's agent may propagate across agency boundaries through the shared provider
+
 ### 10.2 For IRAP Assessors
 
-5. **Include agentic development practices in assessment scope** when organisations use AI coding agents in assessed systems. Evaluate:
+7. **Include agentic development practices in assessment scope** when organisations use AI coding agents in assessed systems. Evaluate:
    - The validation boundary between agent output and code integration (Section 5.3)
    - Evidence of review effectiveness under volume, not just existence of review process
    - Provenance tracking for agent-generated code
    - Whether the organisation has identified and addressed the failure modes relevant to their system's classification and data sensitivity
 
-6. **Assess review quality, not just review process.** A documented code review process that is overwhelmed by volume provides less assurance than a smaller, more thorough review supported by automated pre-screening. Ask for evidence: defect escape rates, review depth audits, or automated pre-screening coverage metrics (Section 9.4).
+8. **Assess review quality, not just review process.** A documented code review process that is overwhelmed by volume provides less assurance than a smaller, more thorough review supported by automated pre-screening. Ask for evidence: defect escape rates, review depth audits, or automated pre-screening coverage metrics (Section 9.4).
 
-7. **Consider correlated failure risk.** Traditional defect models assume independent failures. Agent-generated code produces correlated failures (Section 9.7). When assessing test coverage and defect rates, verify that the organisation's testing strategy accounts for correlation — finding one instance of a failure pattern should trigger codebase-wide scanning for the same pattern.
+9. **Consider correlated failure risk.** Traditional defect models assume independent failures. Agent-generated code produces correlated failures (Section 9.7). When assessing test coverage and defect rates, verify that the organisation's testing strategy accounts for correlation — finding one instance of a failure pattern should trigger codebase-wide scanning for the same pattern.
 
 ### 10.3 For Organisations Using Agentic Coding
 
-8. **Treat agent-generated code as external input** requiring validation at the boundary. Do not assume agent output is correct because it passes tests and follows conventions. The failure modes in Appendix A are specifically designed to pass tests and look correct — that is what makes them dangerous.
+10. **Treat agent-generated code as external input** requiring validation at the boundary. Do not assume agent output is correct because it passes tests and follows conventions. The failure modes in Appendix A are specifically designed to pass tests and look correct — that is what makes them dangerous.
 
-9. **Document your institutional security knowledge in machine-readable form.** The gap between "what Python permits" and "what our system requires" is institutional knowledge that currently lives in documentation, team culture, and individual expertise. Encoding it in machine-checkable rules — whether through a purpose-built tool (Appendix B), project-specific linter rules, or structured review checklists — is the most direct defence against agents that don't share that knowledge.
+11. **Document your institutional security knowledge in machine-readable form.** The gap between "what Python permits" and "what our system requires" is institutional knowledge that currently lives in documentation, team culture, and individual expertise. Encoding it in machine-checkable rules — whether through a purpose-built tool (Appendix B), project-specific linter rules, or structured review checklists — is the most direct defence against agents that don't share that knowledge.
 
-10. **Invest in automated semantic boundary enforcement** as a complement to human review. The human review budget is finite; automated tools that handle structural trust boundary violations free human reviewers to focus on semantic issues that require institutional knowledge. The case study (Section 8.5) demonstrates that this is a redirection of existing effort, not additional overhead.
+12. **Invest in automated semantic boundary enforcement** as a complement to human review. The human review budget is finite; automated tools that handle structural trust boundary violations free human reviewers to focus on semantic issues that require institutional knowledge. The case study (Section 8.5) demonstrates that this is a redirection of existing effort, not additional overhead.
 
-11. **Measure and monitor review effectiveness** under agentic volume. If review quality is degrading, address it — through tooling, capacity, or rate-limiting — before it becomes a compliance gap. Don't wait for an incident to discover that the review process is no longer providing the assurance it claims.
+13. **Measure and monitor review effectiveness** under agentic volume. If review quality is degrading, address it — through tooling, capacity, or rate-limiting — before it becomes a compliance gap. Don't wait for an incident to discover that the review process is no longer providing the assurance it claims.
 
-12. **Develop domain-specific review prompts aligned to your threat model.** Rather than relying on generic "review this code" instructions, create prompted analytical perspectives that map to specific failure categories — security boundary review for ACF-T1/E1, operational resilience review for ACF-R1/R2, data quality review for ACF-S1/S2. These prompts are reviewable, version-controlled security artifacts that encode institutional knowledge in a form complementary to the machine-readable rules described in Section 7.2 and Appendix B. Run multiple prompted perspectives as a structured pre-screening step before human review to increase coverage breadth at agent speed (Section 7.1).
+14. **Develop domain-specific review prompts aligned to your threat model.** Rather than relying on generic "review this code" instructions, create prompted analytical perspectives that map to specific failure categories — security boundary review for ACF-T1/E1, operational resilience review for ACF-R1/R2, data quality review for ACF-S1/S2. These prompts are reviewable, version-controlled security artefacts that encode institutional knowledge in a form complementary to the machine-readable rules described in Section 7.2 and Appendix B. Run multiple prompted perspectives as a structured pre-screening step before human review to increase coverage breadth at agent speed (Section 7.1).
 
-13. **When an agent-generated defect is found, scan for the pattern, not just the instance.** Correlated failures mean the same defect likely exists in other agent-generated code. Treating each defect as isolated underestimates the actual risk.
+15. **When an agent-generated defect is found, scan for the pattern, not just the instance.** Correlated failures mean the same defect likely exists in other agent-generated code. Treating each defect as isolated underestimates the actual risk.
 
-14. **Contribute to the community vocabulary.** Document your organisation's experience with agentic code failure modes and share (at an appropriate classification) to build the collective understanding. The taxonomy in this paper was developed from a single project's experience; it needs validation and extension from diverse government contexts.
+16. **Contribute to the community vocabulary.** Document your organisation's experience with agentic code failure modes and share (at an appropriate classification) to build the collective understanding. The taxonomy in this paper was developed from a single project's experience; it needs validation and extension from diverse government contexts.
 
 ---
 
@@ -979,6 +1098,13 @@ A structured catalogue of failure modes, mapped to STRIDE categories, with detec
 ### Detailed Entries
 
 *Policy readers: the Summary Table above and the Detection Capability Summary at the end of this appendix provide a complete overview without requiring code fluency. The detailed entries below, which include Python code examples, are provided for technical practitioners, tool builders, and organisations implementing detection capabilities. Non-Python readers may rely on the Description, Why it's dangerous, and Detection approach fields for each entry.*
+
+**Language specificity.** The code examples throughout this appendix use Python, reflecting the case study environment. The failure modes vary in language-generality:
+
+- **Language-general** (applicable across Python, Java, C#, TypeScript, Go, etc.): ACF-T1 (trust tier conflation), ACF-T2 (silent coercion), ACF-R1 (audit trail destruction), ACF-R2 (partial completion), ACF-I1 (verbose error response), ACF-D1 (finding flood), ACF-D2 (review capacity exhaustion), ACF-E1 (implicit privilege grant), ACF-E2 (unvalidated delegation). The failure *patterns* differ by language (e.g., `catch (Exception e)` in Java, `catch` in C++, `recover()` in Go), but the failure *mode* is the same.
+- **Python-specific surface form** (same underlying failure, different manifestation in other languages): ACF-S1 (`.get()` with defaults — other languages have analogues like `Optional.orElse()` in Java or `??` in C#), ACF-S2 (`getattr()` with defaults — Python-specific, though dynamic languages like Ruby have `send`/`respond_to?`), ACF-I2 (stack trace exposure — the specific mechanisms are framework-dependent everywhere).
+
+Organisations working in other languages should read the *Description* and *Why it's dangerous* fields as language-general, and treat the *Example* and *Detection approach* fields as Python-specific reference implementations.
 
 #### ACF-S1: Competence Spoofing
 
@@ -1207,7 +1333,7 @@ except DatabaseError as e:
 
 **Description:** Agent code generation velocity exceeds the organisation's capacity for security-focused review, degrading review from active verification to passive scanning.
 
-**Why this happens:** Agents produce code 5-20x faster than humans. Review capacity doesn't scale at the same rate. The review process becomes a bottleneck, and the organisational response is often to lower the review bar rather than reduce the generation rate.
+**Why this happens:** Agents can generate plausible, convention-conforming code faster than review processes were designed to absorb (Section 1.2.1). Review capacity doesn't scale at the same rate. The review process becomes a bottleneck, and the organisational response is often to lower the review bar rather than reduce the generation rate.
 
 **Mitigation:** Automated pre-screening to reduce the human review burden, volume-aware capacity planning, and measured review effectiveness metrics (Section 9.4).
 
@@ -1274,7 +1400,7 @@ This distribution — 5 of 12 failure modes completely undetectable by existing 
 
 The threat model in this paper identifies failure modes that existing tools don't detect (Appendix A: 5 of 12 failure modes have no existing tool coverage). The natural question is: can these be detected automatically?
 
-A detailed design for a proof-of-concept tool has been produced through a structured adversarial design process (7 specialist perspectives, 8 rounds of challenge and synthesis). The design demonstrates that automated detection of the most critical agentic code failure modes is technically feasible, buildable at modest cost, and compatible with existing Python development workflows.
+A semantic boundary enforcement tool for Python has been designed, implemented, and deployed in production on the codebase described in the case study (Section 8). The tool runs as a CI gate, catching the violations reported in Section 8.4. It was produced through a structured adversarial design process (7 specialist perspectives, 8 rounds of challenge and synthesis). The production deployment demonstrates that automated detection of the most critical agentic code failure modes is technically feasible for Python, buildable at modest cost, and compatible with existing development workflows. The design is presented here so that other organisations can build equivalent tooling for their own codebases and languages — whether the approach generalises beyond Python is an open question (see Recommendation 4).
 
 ### B.2 Core Properties
 
@@ -1310,7 +1436,7 @@ A built-in heuristic list recognises common external call sites (`requests.*`, `
 
 ### B.4 Governance Model
 
-The tool addresses the agent circumvention problem (Section 7 of the threat model) through three mechanisms:
+The tool addresses the agent circumvention problem (Section 7 of the threat model) through three mechanisms, all of which are implemented and enforced in the production deployment described in Section 8:
 
 **Project-level manifest.** A `strict.toml` file declares trust topology, boundary functions, rule configuration, and structured exceptions. Exceptions require a rationale, reviewer identity, and expiry date.
 
@@ -1324,7 +1450,7 @@ For a policy audience, the relevant question about this tool is not "how big is 
 
 The design includes four independent verification mechanisms:
 
-**1. Golden corpus.** A collection of labeled Python snippets — true positives (code that should trigger findings) and true negatives (code that should not) — plus adversarial evasion samples (code that looks compliant but isn't). Minimum: 3 true positives + 2 true negatives per rule. The corpus is a first-class artifact, version-controlled, and a ship gate.
+**1. Golden corpus.** A collection of labelled Python snippets — true positives (code that should trigger findings) and true negatives (code that should not) — plus adversarial evasion samples (code that looks compliant but isn't). Minimum: 3 true positives + 2 true negatives per rule. The corpus is a first-class artefact, version-controlled, and a ship gate.
 
 **2. Self-hosting gate.** The tool's own source code must pass its own rules in CI from the first commit. If the tool cannot be written to its own standards, the standards are not understood.
 
@@ -1363,9 +1489,10 @@ The full design specification is available as a companion document: *Semantic Bo
 
 ## References
 
-- Australian Signals Directorate. *Information Security Manual.* Commonwealth of Australia. December 2025 revision. https://www.cyber.gov.au/resources-business-and-government/essential-cyber-security/ism — Controls referenced: ISM-0401 (Secure by Design), ISM-0402 (SAST/DAST/SCA), ISM-1419 (development environments), ISM-2026/2027/2028 (software artefact integrity), ISM-2060 (code review), ISM-2061 (security-focused peer review), ISM-2074 (AI use notification). Individual controls are searchable by number on the ASD website.
+- Australian Signals Directorate. *Information Security Manual.* Commonwealth of Australia. December 2025 revision. https://www.cyber.gov.au/resources-business-and-government/essential-cyber-security/ism — Controls referenced: ISM-0401 (Secure by Design), ISM-0402 (SAST/DAST/SCA), ISM-1419 (development environments), ISM-2026/2027/2028 (software artefact integrity), ISM-2060 (code review), ISM-2061 (security-focused peer review), ISM-2074 (AI usage policy). Individual controls are searchable by number on the ASD website.
 - Australian Signals Directorate. *Essential Eight Maturity Model.* Commonwealth of Australia. Updated periodically. https://www.cyber.gov.au/resources-business-and-government/essential-cyber-security/essential-eight
 - NIST. *SP 800-218: Secure Software Development Framework (SSDF), Version 1.1.* February 2022. https://csrc.nist.gov/publications/detail/sp/800-218/final
+- NIST. *SP 800-218A: Secure Software Development Practices for Generative AI and Dual-Use Foundation Models.* July 2024. https://csrc.nist.gov/publications/detail/sp/800-218a/final — (AI-specific SSDF supplement referenced in Section 6.2)
 - Microsoft. *The STRIDE Threat Model.* Microsoft Security Development Lifecycle. https://learn.microsoft.com/en-us/azure/security/develop/threat-modeling-tool-threats
 - OASIS. *Static Analysis Results Interchange Format (SARIF), Version 2.1.0.* March 2020. https://docs.oasis-open.org/sarif/sarif/v2.1.0/sarif-v2.1.0.html — (Output format referenced in Appendix B)
 - OWASP. *Top 10 for LLM Applications.* 2025. https://owasp.org/www-project-top-10-for-large-language-model-applications/
@@ -1373,8 +1500,21 @@ The full design specification is available as a companion document: *Semantic Bo
 - MITRE. *Common Weakness Enumeration (CWE).* The MITRE Corporation. https://cwe.mitre.org/ — (Taxonomy comparison in Section 6.4)
 - Meadows, D. *Thinking in Systems: A Primer.* Chelsea Green Publishing, 2008. (Systems archetypes referenced in Section 4.2)
 - Parasuraman, R. & Manzey, D. "Complacency and Bias in Human Use of Automation: An Attentional Integration." *Human Factors*, 52(3), 381-410, 2010. (Automation bias referenced in Section 4.2)
+- Perry, N. et al. "Do Users Write More Insecure Code with AI Assistants?" *ACM CCS*, 2023. (AI-assisted developers wrote less secure code while feeling more confident — Section 4.2)
+- Peng, S. et al. "The Impact of AI on Developer Productivity: Evidence from GitHub Copilot." 2023. (Controlled study: 55.8% faster task completion — Section 1.2.1)
+- Cui, K. et al. "The Effects of Generative AI on High Skilled Work: Evidence from Three Field Experiments with Software Developers." MIT/Microsoft/Accenture, 2024. (Field experiment: 12.9–21.8% more PRs/week at Microsoft — Section 1.2.1)
+- Dutta, P. et al. "ASTRIDE: A Security Threat Modeling Platform for Agentic-AI Applications." *arXiv:2512.04785*, December 2025. https://arxiv.org/abs/2512.04785 — (STRIDE extension for AI agent-specific attacks, referenced in Section 3.1)
+- Meier, J.D. et al. "STRIDE-LM Threat Model." *CSF Tools*. https://csf.tools/reference/stride-lm/ — (STRIDE extension adding Lateral Movement, referenced in Section 3.1)
+- METR. "Measuring the Impact of Early-2025 AI on Experienced Open-Source Developer Productivity." July 2025. (RCT: experienced developers 19% slower with AI despite believing 20% faster — Sections 1.2.1, 4.2)
+- Pichai, S. Alphabet Inc. Q3 2024 Earnings Call, 29 October 2024. "More than a quarter of all new code at Google is generated by AI, then reviewed and accepted by engineers." Reported in *The Verge*, 29 October 2024. https://www.theverge.com/2024/10/29/24282757/google-new-code-generated-ai-q3-2024 — (Section 1.2.1)
+- Wolf, A. "Welcome to the Eternal September of open source. Here's what we plan to do for maintainers." *GitHub Blog*, 12 February 2026 (updated 13 February 2026). https://github.blog/open-source/maintainers/welcome-to-the-eternal-september-of-open-source-heres-what-we-plan-to-do-for-maintainers/ — Primary source. GitHub's Director of Open Source Programs on the review capacity crisis: "The cost to create has dropped but the cost to review has not." Announces PR access controls, interaction limits, and automated triage. (Referenced in Sections 1.2.2 and 4.1)
+- Ghoshal, A. "GitHub eyes restrictions on pull requests to rein in AI-based code deluge on maintainers." *InfoWorld*, 4 February 2026. https://www.infoworld.com/article/4127156/github-eyes-restrictions-on-pull-requests-to-rein-in-ai-based-code-deluge-on-maintainers.html — Secondary reporting on the same events. GitHub described the problem as a denial-of-service attack on human attention. (Review capacity exhaustion evidence referenced in Sections 1.2.2 and 4.1)
 - Graham-Cumming, J. "Incident report on memory leak caused by Cloudflare parser bug." Cloudflare Blog, 23 February 2017. https://blog.cloudflare.com/incident-report-on-memory-leak-caused-by-cloudflare-parser-bug/ — (Precedent referenced in Section 1.2)
 
 ---
 
 *This is a discussion paper. It presents a threat model and preliminary analysis, not final guidance. Comments and contributions are welcome.*
+
+---
+
+**Suggested citation:** Morrissey, J. (ORCID: [0009-0000-5654-3782](https://orcid.org/0009-0000-5654-3782)). "When Agents Write Code: A Threat Model for AI-Assisted Software Development in Government Systems." Discussion Paper, DRAFT v0.2, 8 March 2026. Digital Transformation Agency.
