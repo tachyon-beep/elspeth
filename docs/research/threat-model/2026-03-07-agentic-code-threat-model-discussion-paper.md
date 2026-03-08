@@ -57,9 +57,7 @@ Current cybersecurity guidance — including the Australian Information Security
 
 ---
 
-> *"The concern is not that AI outputs are always poor, but that they may become persuasive, efficient, and operationally privileged faster than institutions adapt their assurance methods."*
->
-> — ChatGPT 5.4, on being asked to review this paper
+\epigraphbox{The concern is not that AI outputs are always poor, but that they may become persuasive, efficient, and operationally privileged faster than institutions adapt their assurance methods.}{ChatGPT 5.4, on being asked to review this paper}
 
 ## 1. Introduction and Scope
 
@@ -166,7 +164,7 @@ Where the register shifts between audiences, the text notes what can be safely s
 
 This paper practices what it preaches. The author is a technical advisor and software engineer, not a security researcher. The threat model, STRIDE mapping, ISM gap analysis, and ACF taxonomy were developed through the same process the paper describes: a practitioner with direct observational access to the phenomena — 18 months of daily agentic development on a compliance-constrained system — using prompted AI collaboration to adopt analytical frames (security architecture, policy analysis, threat modelling) outside their primary expertise. The intelligence analysis tradecraft of the paper — structured assessments, explicit confidence levels, falsification criteria, separation of observation from inference — reflects the author's professional background; the domain-specific security analysis reflects prompted polymorphic review of the kind described in Section 7.1.
 
-The reader should therefore treat this paper the way Section 5 recommends treating any agent-assisted output: as Tier 3 input — plausible, structured, and worth validating — not as authoritative guidance. The "discussion paper" classification is not modesty; it is the appropriate trust tier for the methodology. The paper's value, if any, lies in the observed patterns and the vocabulary it proposes, not in the authority of its source. Community validation is the validation boundary.
+In that sense, the paper is also an example of the phenomenon it describes: plausible, structured, and analytically useful, but appropriately treated as a discussion input to be validated rather than as authority in itself. The "discussion paper" classification is therefore methodological as well as procedural. Its value lies in the observed patterns and the vocabulary it proposes, not in the structured presentation that lends formal documents their persuasive weight. Community discussion is the validation boundary.
 
 ---
 
@@ -501,7 +499,7 @@ The reviewer's mental model shifts from "verify this code is correct" to "check 
 
 The habituation effect described above has been directly observed in practice. In compliance-constrained development environments, agent-generated code containing semantic defects — trust boundary violations, defensive patterns on audit-critical data, missing validation boundaries — has entered codebases after passing human review processes that were designed to catch exactly these issues. The defects were subsequently identified through other means: automated enforcement tooling, adjacent code review, or downstream test failures. The pattern is consistent with the automation bias literature: the code's surface quality satisfied the reviewer's heuristic threshold, and the semantic violation was not visible at the inspection depth that volume pressure permits.
 
-This is the "Shifting the Burden" systems archetype: the agent's consistent surface-quality output becomes the symptomatic fix that weakens the fundamental solution (thorough human review). The more the agent produces acceptable-looking code, the less carefully humans review it, and the more dependent the process becomes on the agent being correct — which is exactly the assumption the review process exists to check.
+This is the "Shifting the Burden" systems archetype (Meadows 2008): the agent's consistent surface-quality output becomes the symptomatic fix that weakens the fundamental solution (thorough human review). The more the agent produces acceptable-looking code, the less carefully humans review it, and the more dependent the process becomes on the agent being correct — which is exactly the assumption the review process exists to check.
 
 A related but distinct mechanism compounds this effect. Agent-assisted velocity increases the *parallelisation* of work, not just its speed. When an agent assists in producing multiple interdependent artefacts simultaneously — a design specification, an implementation, and a policy document — semantic inconsistencies *between* artefacts become invisible because no single review pass covers all of them. The review window for cross-document consistency shrinks in proportion to the velocity gain. The reviewer is not only less careful per artefact, but also unable to hold the full production context in working memory at the rate artefacts are produced.
 
@@ -1003,7 +1001,7 @@ The majority of software development for Australian Government systems is perfor
 - **Review responsibility:** When a contractor delivers agent-generated code, who is responsible for the security-focused review — the contractor's internal review process, the agency's acceptance review, or both? If the agency relies on the contractor's review, the agency inherits the contractor's review capacity constraints and habituation dynamics (Section 4.2).
 - **Correlated risk across contracts:** If multiple agencies contract the same provider, and that provider uses the same agent tooling and prompts across engagements, the correlated failure problem (Section 9.7) extends across agency boundaries through the contractor, even if the agencies have no direct relationship.
 
-This is arguably the most operationally significant gap for ASD to address, because it is where the majority of government code is actually produced.
+This is arguably the most operationally significant gap for ASD to address, because it is where the majority of government code is actually produced. (See Recommendation 6, §10.1, for candidate controls.)
 
 ---
 

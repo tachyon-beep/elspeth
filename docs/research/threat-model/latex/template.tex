@@ -168,6 +168,25 @@
   \end{minipage}\par\medskip
 }
 
+% --- Epigraph box (for pinned quotes with visible frame) ---
+\newcommand{\epigraphbox}[2]{%
+  \vfill
+  \noindent
+  \begin{center}
+  \fcolorbox{dtanavy}{dtapage}{%
+    \begin{minipage}{0.85\textwidth}
+    \vspace{0.6em}
+    \centering
+    \itshape\color{dtabody}
+    ``#1''
+    \par\vspace{0.4em}
+    \normalfont\small\color{dtanavy}--- #2
+    \vspace{0.6em}
+    \end{minipage}%
+  }
+  \end{center}
+}
+
 % --- Hyperlinks ---
 \usepackage{hyperref}
 \hypersetup{
