@@ -1,6 +1,6 @@
 # When Agents Write Code: A Threat Model for AI-Assisted Software Development in Government Systems
 
-**Discussion Paper — DRAFT v0.2**
+**Discussion Paper — DRAFT v0.2.1**
 **Date:** 8 March 2026
 **Classification:** OFFICIAL
 **Prepared by:** John Morrissey, Digital Transformation Agency
@@ -8,6 +8,7 @@
 | Version | Date | Changes |
 |---------|------|---------|
 | 0.1 | 7 March 2026 | Initial draft for community discussion |
+| 0.2.1 | 8 March 2026 | Minor typographical fixes, enhanced discussion on Cloudbleed (§1.2.4), §1.6 provenance rewrite, cross-references added (§4.2, §9.8) |
 | 0.2 | 8 March 2026 | Calibration revision: explicit genre framing, methodological note (§1.4), readership guidance (§1.5), scope qualifiers on abstract, taxonomy layer framing (§3.1), STRIDE analogical extensions noted, terminology tightened (trust boundary/tier/validation boundary). Factual corrections: ISM-2074 description (notification → usage policy), NIST SSDF hierarchy (consistent practice-level citation), velocity argument reframed around review-surface generation velocity vs. published productivity evidence (§1.2.1 rewritten), OWASP LLM05 acknowledged. Added: NIST SP 800-218A citation, Perry et al. 2023, Peng et al. 2023, Cui et al. 2024, METR 2025 RCT. Recommendations framed as candidate controls for consultation. Added governance perimeter expansion axis (§1.2.8, §6.6) — non-developer code production outside SDLC channels. Added GitHub PR restrictions evidence (§1.2.2, §4.1) as material evidence of review capacity exhaustion. De-identification transparency (§8). Contracted-out development open question (§9.8). Sharpened §2.4 (persistent learning), §8.4 (enforcement gate framing), §8.5 (agents as compliance subjects — mirror of persistent-learning problem), Appendix B (production not hypothetical) |
 
 ---
@@ -101,9 +102,11 @@ Current-generation agents (2025-2026) produce code that is syntactically correct
 
 #### 1.2.4 Precedent
 
-This is not a hypothetical threat model. In 2017, a boundary check error in a Cloudflare HTML parser leaked sensitive data — cookies, authentication tokens, HTTPS POST bodies — from millions of websites for months. The code was not malicious. It was plausible-but-wrong: it passed review, passed testing, and functioned normally until a Google researcher noticed anomalous data in search results. The bug was patched in hours, but the output — data cached by search engines worldwide — could not be fully recalled, and the true scope of exposure may never be known.
+This is not a hypothetical threat model. In 2017, a buffer overrun in Cloudflare's HTML parser leaked sensitive data — cookies, authentication tokens, HTTPS POST bodies — from millions of websites for five months. The code was not malicious. It was plausible-but-wrong: a pointer equality check (`==`) where a boundary check (`>=`) was needed, and a missing single-line rollback instruction (`fhold`) in an error handler. Both defects had existed in the Ragel-based parser for years without triggering, because the old buffer management *accidentally* prevented the error path from executing. When Cloudflare introduced a new parser (`cf-html`) that correctly set a buffer flag, it activated the dormant error path — and the boundary check that had never been tested was the one that failed. The new code didn't introduce the bug; it removed the accidental condition that suppressed it.
 
-That incident — known as Cloudbleed — was one developer, one function, at human velocity. The threat this paper addresses is what happens when the conditions that produced Cloudbleed — semantic errors invisible to review, amplified by infrastructure scale — become systematic rather than occasional, driven by agents replicating context-inappropriate patterns across entire codebases.
+The bug was found not by Cloudflare's monitoring, not by their testing, and not by code review — but by a Google researcher who noticed authentication tokens appearing in unrelated search results. The system produced no crashes, no alerts, and no anomalous logs. It ran correctly in every observable dimension except the one that mattered.
+
+That incident — known as Cloudbleed — was one parser, one boundary check, at human velocity. The threat this paper addresses is what happens when the conditions that produced Cloudbleed — semantic errors invisible to review, dormant failures activated by modernisation, and silent data corruption that produces no observable incident — become systematic rather than occasional, driven by agents replicating context-inappropriate patterns across entire codebases.
 
 #### 1.2.5 Adoption Pressure
 
@@ -115,7 +118,7 @@ The response to these risks is not to ban agentic coding. Beyond the velocity ga
 
 #### 1.2.7 Legacy Modernisation Risk
 
-Legacy systems often encode implicit trust boundaries in their rigidity — a COBOL program that crashes on a NULL field is enforcing, accidentally, the same crash-on-corruption principle that high-assurance systems require deliberately. When agents are tasked with "translating" or refactoring legacy code into modern languages, they will seamlessly replace that rigidity with modern defensive patterns (null coalescing, optional chaining, default values), permanently destroying the institutional knowledge that was baked into the old code's behaviour. The legacy system's implicit security properties are paved over with idiomatic, test-passing, wrong code.
+Legacy systems often encode implicit trust boundaries in their rigidity — a COBOL program that crashes on a NULL field is enforcing, accidentally, the same crash-on-corruption principle that high-assurance systems require deliberately. When agents are tasked with "translating" or refactoring legacy code into modern languages, they will seamlessly replace that rigidity with modern defensive patterns (null coalescing, optional chaining, default values), permanently destroying the institutional knowledge that was baked into the old code's behaviour. The legacy system's implicit security properties are paved over with idiomatic, test-passing, wrong code. This is the Cloudbleed pattern (Section 1.2.4) in reverse: where Cloudbleed was a boundary check that *accidentally* failed open, legacy modernisation by agents *deliberately* removes boundary checks that happened to fail closed — and the commit message says "fix: handle NULL gracefully."
 
 #### 1.2.8 Coding Is No Longer Confined to Developers
 
