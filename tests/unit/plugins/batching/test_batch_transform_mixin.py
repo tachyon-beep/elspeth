@@ -705,3 +705,96 @@ class TestReleaseLoopStaleTokenDetection:
             assert s1 == "state-1", "Error handler used stale state_id from previous row"
         finally:
             transform.shutdown_batch_processing(timeout=5.0)
+
+
+class AlwaysFailingOutputPort:
+    """Output port where every emit() raises — simulates a completely broken port."""
+
+    def emit(self, token: Any, result: Any, state_id: Any) -> None:
+        raise RuntimeError("Port is completely broken")
+
+
+class TestReleaseLoopCrashesOnBrokenPort:
+    """Regression tests for elspeth-dc2fff46fe: release loop must not silently
+    continue when the output port is completely broken.
+
+    Previously, a broken output port caused a ``critical`` log and the loop
+    continued, silently losing the token's result. The waiter would hang until
+    timeout with no indication of what went wrong.
+
+    Fix: raise FrameworkBugError to crash the release thread, making the
+    failure visible via waiter timeouts and thread-death detection.
+    """
+
+    def test_broken_port_kills_release_thread(self) -> None:
+        """When both original emit and ExceptionResult emit fail, the release
+        thread must crash (FrameworkBugError) rather than silently continuing."""
+        port = AlwaysFailingOutputPort()
+        transform = SimpleBatchTransform()
+        transform.init_batch_processing(
+            max_pending=5,
+            output=port,
+            name="broken-port-test",
+            max_workers=5,
+        )
+        transform._batch_initialized = True
+
+        token = make_token("row-0")
+        ctx = make_context(landscape=_make_recorder(), token=token, state_id="state-0")
+        transform.accept({"data": "test"}, ctx)
+
+        # Give the release thread time to process the result and crash
+        import time
+
+        time.sleep(2.0)
+
+        # Release thread should have died (FrameworkBugError), not silently continued
+        assert not transform._batch_release_thread.is_alive(), (
+            "Release thread is still alive after port failure — "
+            "it should have crashed with FrameworkBugError instead of silently continuing"
+        )
+
+        # Cleanup: shutdown won't raise because the thread is already dead
+        transform._batch_executor.shutdown(wait=True)
+        transform._batch_buffer.shutdown()
+
+
+class TestShutdownRaisesOnThreadTimeout:
+    """Regression test for elspeth-da9918e43a: shutdown_batch_processing must
+    raise when the release thread fails to stop, not just warn.
+
+    Previously, a warning was logged and the pipeline proceeded as if shutdown
+    succeeded — potentially reporting success with undrained results.
+
+    Fix: raise FrameworkBugError to prevent false success reporting.
+    """
+
+    def test_shutdown_completes_when_release_thread_already_crashed(self) -> None:
+        """When the release thread has already crashed (e.g., broken port),
+        shutdown_batch_processing completes without raising FrameworkBugError.
+
+        FrameworkBugError only fires when the thread is alive but didn't stop.
+        A crashed thread is already dead — join returns immediately.
+        """
+        port = AlwaysFailingOutputPort()
+        transform = SimpleBatchTransform()
+        transform.init_batch_processing(
+            max_pending=5,
+            output=port,
+            name="shutdown-after-crash",
+            max_workers=5,
+        )
+        transform._batch_initialized = True
+
+        token = make_token("row-0")
+        ctx = make_context(landscape=_make_recorder(), token=token, state_id="state-0")
+        transform.accept({"data": "test"}, ctx)
+
+        # Wait for release thread to crash from broken port
+        import time
+
+        time.sleep(2.0)
+        assert not transform._batch_release_thread.is_alive()
+
+        # Shutdown should complete without raising — thread is already dead
+        transform.shutdown_batch_processing(timeout=5.0)

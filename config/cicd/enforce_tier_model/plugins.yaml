@@ -217,11 +217,6 @@ allow_hits:
   reason: Silent recovery with explicit error handling path
   safety: Code reviewed - legitimate pattern
   expires: '2026-05-02'
-- key: plugins/infrastructure/batching/mixin.py:R4:BatchTransformMixin:_release_loop:fp=e105165f1036c9a2
-  owner: architecture
-  reason: Broad exception handling at external boundary with logging
-  safety: Code reviewed - legitimate pattern
-  expires: '2026-05-02'
 - key: plugins/infrastructure/batching/mixin.py:R9:BatchTransformMixin:evict_submission:fp=151fb8a0d0fdad4f
   owner: architecture
   reason: Cleanup/pop with default - key may not exist in race or optional scenarios
