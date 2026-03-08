@@ -233,6 +233,11 @@ class ResponseGenerator:
         # Setup Jinja2 environment with custom helpers
         self._jinja_env = self._create_jinja_env()
 
+        # Pre-compile template at construction — fail fast on syntax errors
+        self._compiled_template: jinja2.Template | None = None
+        if config.mode == "template":
+            self._compiled_template = self._jinja_env.from_string(config.template.body)
+
     @property
     def config(self) -> ResponseConfig:
         """Current response generation configuration (frozen/immutable)."""
@@ -305,9 +310,8 @@ class ResponseGenerator:
         Config-sourced templates are system data — a broken template is a
         config bug that should crash. Let TemplateError propagate.
         """
-        template_str = self._config.template.body
-        template = self._jinja_env.from_string(template_str)
-        return template.render(
+        assert self._compiled_template is not None, "mode must be 'template'"
+        return self._compiled_template.render(
             request=request,
             messages=request.get("messages", []),
             model=request.get("model"),

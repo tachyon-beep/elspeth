@@ -93,12 +93,12 @@ allow_hits:
   reason: External HTTP request body - optional fields per OpenAI spec (Tier 3)
   safety: dict.get with defaults for optional response fields from external clients
   expires: '2026-05-13'
-- key: testing/chaosllm/response_generator.py:R1:ResponseGenerator:_generate_template_response:fp=f642019fb02b81fc
+- key: testing/chaosllm/response_generator.py:R1:ResponseGenerator:_generate_template_response:fp=306843415fe82ff1
   owner: architecture
   reason: External HTTP request body - optional fields per OpenAI spec (Tier 3)
   safety: dict.get for optional fields in OpenAI-compatible request body
   expires: '2026-05-13'
-- key: testing/chaosllm/response_generator.py:R1:ResponseGenerator:_generate_template_response:fp=6099eb271b4a58a3
+- key: testing/chaosllm/response_generator.py:R1:ResponseGenerator:_generate_template_response:fp=52091e8e437a0ba2
   owner: architecture
   reason: External HTTP request body - optional fields per OpenAI spec (Tier 3)
   safety: dict.get for optional fields in OpenAI-compatible request body

@@ -261,7 +261,7 @@ class LandscapeJournal:
             return None, "payload_store_not_configured"
         try:
             content = self._payload_store.retrieve(ref)
-        except OSError as exc:
+        except (OSError, KeyError) as exc:
             logger.error("Landscape journal payload read failed: %s", exc)
             if self._fail_on_error:
                 raise
