@@ -379,23 +379,26 @@ def test_get_telemetry_failure_doesnt_corrupt_audit(http_client, mock_recorder, 
 
 
 @respx.mock
-def test_header_fingerprinting_with_missing_key(http_client, mock_recorder, monkeypatch):
-    """Sensitive headers should be removed when fingerprint key is missing."""
+def test_header_fingerprinting_with_missing_key_raises(http_client, mock_recorder, monkeypatch):
+    """Missing fingerprint key with sensitive headers raises FrameworkBugError.
+
+    Regression test for elspeth-780f6e39b1: previously this path silently
+    dropped the header with only a logger.warning.
+    """
+    from elspeth.contracts.errors import FrameworkBugError
+
     # Remove fingerprint key and raw secrets flag without clearing entire env
     monkeypatch.delenv("ELSPETH_FINGERPRINT_KEY", raising=False)
     monkeypatch.delenv("ELSPETH_ALLOW_RAW_SECRETS", raising=False)
 
     respx.post("https://api.example.com/secure").mock(return_value=httpx.Response(200, json={}))
 
-    http_client.post(
-        "https://api.example.com/secure",
-        json={},
-        headers={"Authorization": "Bearer secret"},
-    )
-
-    # Verify sensitive header was removed (not stored)
-    call_args = mock_recorder.record_call.call_args[1]
-    assert "Authorization" not in call_args["request_data"].to_dict()["headers"]
+    with pytest.raises(FrameworkBugError, match="Sensitive header 'Authorization' cannot be fingerprinted"):
+        http_client.post(
+            "https://api.example.com/secure",
+            json={},
+            headers={"Authorization": "Bearer secret"},
+        )
 
 
 @respx.mock

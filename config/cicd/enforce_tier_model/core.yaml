@@ -85,9 +85,9 @@ per_file_rules:
 - pattern: core/landscape/row_data.py
   rules:
   - R5
-  reason: Deep-freeze guard for row data immutability
+  reason: Deep-freeze guard for row/call data immutability
   expires: null
-  max_hits: 1
+  max_hits: 2
 - pattern: core/landscape/run_lifecycle_repository.py
   rules:
   - R5
@@ -198,14 +198,11 @@ allow_hits:
   owner: bugfix
   reason: Tier-3 boundary - PayloadStore.delete() is external I/O (filesystem/blob storage)
   safety: Exception caught and logged, ref added to failed_refs, loop continues
-- key: core/landscape/execution_repository.py:R6:ExecutionRepository:begin_node_state:fp=41ef0c6c46683aba
+- key: core/landscape/execution_repository.py:R6:ExecutionRepository:begin_node_state:fp=cc6f131cf3b9705e
   owner: bugfix
   reason: Tier-3 boundary — quarantined row data may contain NaN/Infinity that stable_hash rejects
   safety: Falls back to repr_hash which always succeeds; audit trail integrity maintained
   expires: '2026-05-12'
-- key: core/landscape/execution_repository.py:R6:ExecutionRepository:get_call_response_data:fp=562330cc4a5808f6
-  owner: architecture
-  reason: Graceful handling of purged payloads - retention policy may have deleted response data
 - key: core/landscape/exporter.py:R1:LandscapeExporter:_iter_records:fp=5066e6cacd103350
   owner: P2-2026-02-02-76r
   reason: Sparse lookup - not all rows have tokens (batch export uses pre-loaded dicts)

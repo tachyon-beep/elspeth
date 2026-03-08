@@ -176,13 +176,11 @@ allowed_dict_patterns:
   - "src/elspeth/core/landscape/execution_repository.py:ExecutionRepository.complete_node_state:output_data"
   - "src/elspeth/core/landscape/execution_repository.py:ExecutionRepository.begin_operation:input_data"
   - "src/elspeth/core/landscape/execution_repository.py:ExecutionRepository.complete_operation:output_data"
-  - "src/elspeth/core/landscape/execution_repository.py:ExecutionRepository.get_call_response_data:return"
   # Recorder delegation signatures (pass-through to ExecutionRepository)
   - "src/elspeth/core/landscape/recorder.py:LandscapeRecorder.begin_node_state:input_data"
   - "src/elspeth/core/landscape/recorder.py:LandscapeRecorder.complete_node_state:output_data"
   - "src/elspeth/core/landscape/recorder.py:LandscapeRecorder.begin_operation:input_data"
   - "src/elspeth/core/landscape/recorder.py:LandscapeRecorder.complete_operation:output_data"
-  - "src/elspeth/core/landscape/recorder.py:LandscapeRecorder.get_call_response_data:return"
 
   # Data flow recording
   - "src/elspeth/core/landscape/data_flow_repository.py:DataFlowRepository.create_row:data"

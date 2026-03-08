@@ -1417,5 +1417,7 @@ class AzureBatchLLMTransform(BaseTransform):
     def close(self) -> None:
         """Release resources and flush tracing."""
         self._tracer.flush()
-        self._client = None
+        if self._client is not None:
+            self._client.close()
+            self._client = None
         self._langfuse_client = None

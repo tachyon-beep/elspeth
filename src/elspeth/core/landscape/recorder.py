@@ -69,7 +69,7 @@ if TYPE_CHECKING:
     from elspeth.contracts.payload_store import PayloadStore
     from elspeth.contracts.schema import SchemaConfig
     from elspeth.contracts.schema_contract import PipelineRow, SchemaContract
-    from elspeth.core.landscape.row_data import RowDataResult
+    from elspeth.core.landscape.row_data import CallDataResult, RowDataResult
 
 from elspeth.core.landscape._database_ops import DatabaseOps
 from elspeth.core.landscape.data_flow_repository import DataFlowRepository
@@ -558,7 +558,7 @@ class LandscapeRecorder:
             sequence_index=sequence_index,
         )
 
-    def get_call_response_data(self, call_id: str) -> dict[str, Any] | None:
+    def get_call_response_data(self, call_id: str) -> CallDataResult:
         """Get response data for a call. Delegates to ExecutionRepository."""
         return self._execution.get_call_response_data(call_id)
 

@@ -24,6 +24,7 @@ from elspeth.contracts import CallStatus, CallType
 from elspeth.contracts.errors import AuditIntegrityError
 from elspeth.contracts.freeze import deep_freeze
 from elspeth.core.canonical import stable_hash
+from elspeth.core.landscape.row_data import CallDataState
 
 if TYPE_CHECKING:
     from elspeth.core.landscape.recorder import LandscapeRecorder
@@ -214,8 +215,8 @@ class CallReplayer:
         if call is None:
             raise ReplayMissError(request_hash, request_data)
 
-        # Get response data from payload store
-        response_data = self._recorder.get_call_response_data(call.call_id)
+        # Get response data from payload store with explicit state
+        call_data = self._recorder.get_call_response_data(call.call_id)
 
         # Parse error JSON if present — this is Tier 1 data (we wrote it),
         # so corrupt JSON is an AuditIntegrityError, not a data quality issue.
@@ -234,18 +235,16 @@ class CallReplayer:
         # Determine if this was an error call
         was_error = call.status == CallStatus.ERROR
 
-        # Fail if a response was expected but payload is unavailable.
-        # A response is expected if response_ref is set, response_hash is set,
-        # OR status is SUCCESS. response_ref proves a response was recorded even
-        # when response_hash is missing (e.g., error calls with response bodies).
-        # This catches both purged payloads AND runs recorded without a payload store.
-        response_expected = call.response_ref is not None or call.response_hash is not None or call.status == CallStatus.SUCCESS
-        if response_data is None and response_expected:
-            raise ReplayPayloadMissingError(call.call_id, request_hash)
-
-        # For calls that never had a response (response_ref is None), use empty dict
-        if response_data is None:
+        # Extract response data based on explicit state
+        if call_data.state == CallDataState.AVAILABLE:
+            response_data: dict[str, Any] = dict(call_data.data)  # type: ignore[arg-type]
+        elif call_data.state == CallDataState.NEVER_STORED:
+            # Call never had a response (e.g., connection timeout, DNS failure) — use empty dict
             response_data = {}
+        else:
+            # PURGED, STORE_NOT_CONFIGURED, or CALL_NOT_FOUND — response was
+            # expected but payload is unavailable. Raise with explicit reason.
+            raise ReplayPayloadMissingError(call.call_id, request_hash)
 
         # Cache for future lookups (includes call_id for debugging)
         self._cache[cache_key] = (

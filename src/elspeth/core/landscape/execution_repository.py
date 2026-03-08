@@ -52,6 +52,7 @@ from elspeth.core.landscape.model_loaders import (
     OperationLoader,
     RoutingEventLoader,
 )
+from elspeth.core.landscape.row_data import CallDataResult, CallDataState
 from elspeth.core.landscape.schema import (
     artifacts_table,
     batch_members_table,
@@ -953,45 +954,38 @@ class ExecutionRepository:
             return None
         return self._call_loader.load(row)
 
-    def get_call_response_data(self, call_id: str) -> dict[str, Any] | None:
-        """Retrieve the response data for a call.
+    def get_call_response_data(self, call_id: str) -> CallDataResult:
+        """Retrieve the response data for a call with explicit state.
 
-        Fetches response data from the payload store if response_ref is set,
-        otherwise returns None.
+        Returns a CallDataResult with explicit state indicating why data
+        may be unavailable. Callers match on state instead of guessing
+        why the previous `None` return occurred.
 
         Args:
             call_id: The call ID to get response data for
 
         Returns:
-            Response data dict if available, None if no response was recorded
-            or if payload store is not configured
-
-        Note:
-            Returns None if:
-            - Call not found
-            - No response_ref set on the call (error calls may not have response)
-            - Payload store not configured
-            - Response data has been purged from payload store
+            CallDataResult with state and data (if available)
         """
         # Get the call record first
         query = select(calls_table).where(calls_table.c.call_id == call_id)
         row = self._ops.execute_fetchone(query)
 
         if row is None:
-            return None
+            return CallDataResult(state=CallDataState.CALL_NOT_FOUND, data=None)
 
         if row.response_ref is None:
-            return None
+            return CallDataResult(state=CallDataState.NEVER_STORED, data=None)
 
         if self._payload_store is None:
-            return None
+            return CallDataResult(state=CallDataState.STORE_NOT_CONFIGURED, data=None)
 
         # Retrieve from payload store — KeyError means purged by retention policy,
         # OSError means storage backend failure (permissions, disk, etc.)
         try:
             payload_bytes = self._payload_store.retrieve(row.response_ref)
         except KeyError:
-            return None
+            return CallDataResult(state=CallDataState.PURGED, data=None)
         except OSError as e:
             raise AuditIntegrityError(
                 f"Payload retrieval failed for call_id={call_id} (ref={row.response_ref}): {type(e).__name__}: {e}"
@@ -1007,7 +1001,7 @@ class ExecutionRepository:
                 f"Corrupt call response payload for call_id={call_id} (ref={row.response_ref}): "
                 f"expected JSON object, got {type(decoded).__name__}"
             )
-        return decoded
+        return CallDataResult(state=CallDataState.AVAILABLE, data=decoded)
 
     # ── Batch recording ────────────────────────────────────────────────
 

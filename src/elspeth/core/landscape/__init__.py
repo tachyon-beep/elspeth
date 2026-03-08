@@ -70,7 +70,7 @@ from elspeth.core.landscape.reproducibility import (
     compute_grade,
     update_grade_after_purge,
 )
-from elspeth.core.landscape.row_data import RowDataResult, RowDataState
+from elspeth.core.landscape.row_data import CallDataResult, CallDataState, RowDataResult, RowDataState
 from elspeth.core.landscape.run_lifecycle_repository import RunLifecycleRepository
 from elspeth.core.landscape.schema import (
     artifacts_table,
@@ -96,6 +96,8 @@ __all__ = [
     "BatchOutput",
     "CSVFormatter",
     "Call",
+    "CallDataResult",
+    "CallDataState",
     "CallStatus",
     "CallType",
     "Checkpoint",

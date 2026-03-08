@@ -25,6 +25,9 @@ from elspeth.core.canonical import stable_hash
 if TYPE_CHECKING:
     from elspeth.core.landscape.recorder import LandscapeRecorder
 
+from elspeth.contracts.freeze import deep_thaw
+from elspeth.core.landscape.row_data import CallDataState
+
 
 @dataclass(frozen=True)
 class VerificationResult:
@@ -304,54 +307,51 @@ class CallVerifier:
             self._report.results.append(result)
             return result
 
-        # Get recorded response
-        recorded_response = self._recorder.get_call_response_data(call.call_id)
+        # Get recorded response with explicit state discrimination
+        call_data = self._recorder.get_call_response_data(call.call_id)
 
-        # Handle missing/purged payload explicitly.
-        # A response is expected only if there is concrete evidence it existed:
-        # response_hash (hash recorded) or response_ref (payload stored).
-        # Do NOT infer from status alone — some successful calls legitimately
-        # have no response body (e.g., DELETE, 204 No Content).
-        response_expected = call.response_hash is not None or call.response_ref is not None
-        if recorded_response is None and response_expected:
-            self._report.missing_payloads += 1
+        # Handle non-available states explicitly
+        if call_data.state != CallDataState.AVAILABLE:
+            # Payload was expected but is missing (purged or store not configured)
+            if call_data.state in (CallDataState.PURGED, CallDataState.STORE_NOT_CONFIGURED):
+                self._report.missing_payloads += 1
 
-            # When response_hash exists, perform hash-based
-            # verification even though the full payload is missing. Per CLAUDE.md:
-            # "Hashes survive payload deletion — integrity is always verifiable."
-            if call.response_hash is not None:
-                live_hash = stable_hash(live_response)
-                is_match = live_hash == call.response_hash
-                if is_match:
-                    self._report.matches += 1
-                else:
-                    self._report.mismatches += 1
-                result = VerificationResult.missing_payload(
-                    request_hash=request_hash,
-                    live_response=live_response,
-                    is_match=is_match,
-                    differences={
-                        "hash_mismatch": {
-                            "recorded_hash": call.response_hash,
-                            "live_hash": live_hash,
+                # When response_hash exists, perform hash-based
+                # verification even though the full payload is missing. Per CLAUDE.md:
+                # "Hashes survive payload deletion — integrity is always verifiable."
+                if call.response_hash is not None:
+                    live_hash = stable_hash(live_response)
+                    is_match = live_hash == call.response_hash
+                    if is_match:
+                        self._report.matches += 1
+                    else:
+                        self._report.mismatches += 1
+                    result = VerificationResult.missing_payload(
+                        request_hash=request_hash,
+                        live_response=live_response,
+                        is_match=is_match,
+                        differences={
+                            "hash_mismatch": {
+                                "recorded_hash": call.response_hash,
+                                "live_hash": live_hash,
+                            }
                         }
-                    }
-                    if not is_match
-                    else None,
-                )
-            else:
-                # No hash available — cannot verify, just mark as missing
-                result = VerificationResult.missing_payload(
-                    request_hash=request_hash,
-                    live_response=live_response,
-                )
+                        if not is_match
+                        else None,
+                    )
+                else:
+                    # No hash available — cannot verify, just mark as missing
+                    result = VerificationResult.missing_payload(
+                        request_hash=request_hash,
+                        live_response=live_response,
+                    )
 
-            self._report.results.append(result)
-            return result
+                self._report.results.append(result)
+                return result
 
-        # Call never had a response (e.g., connection timeout, DNS failure)
-        # Cannot compare, so not a match, but NOT a missing payload
-        if recorded_response is None:
+            # Call never had a response (e.g., connection timeout, DNS failure)
+            # Cannot compare, so not a match, but NOT a missing payload
+            # Covers NEVER_STORED and CALL_NOT_FOUND
             result = VerificationResult.no_recorded_response(
                 request_hash=request_hash,
                 live_response=live_response,
@@ -359,7 +359,10 @@ class CallVerifier:
             self._report.results.append(result)
             return result
 
-        # Compare using DeepDiff
+        # AVAILABLE — compare recorded response with live response using DeepDiff.
+        # CallDataResult.data is deep-frozen (dict→MappingProxyType, list→tuple).
+        # Thaw back to mutable types so DeepDiff compares content, not container types.
+        recorded_response = deep_thaw(call_data.data)
         diff = DeepDiff(
             recorded_response,
             live_response,

@@ -10,6 +10,7 @@ import pytest
 
 from elspeth.contracts import Call, CallStatus, CallType
 from elspeth.core.canonical import stable_hash
+from elspeth.core.landscape.row_data import CallDataResult, CallDataState
 from elspeth.plugins.infrastructure.clients.replayer import (
     CallReplayer,
     ReplayedCall,
@@ -108,7 +109,7 @@ class TestCallReplayer:
         """Create a mock LandscapeRecorder."""
         recorder = MagicMock()
         recorder.find_call_by_request_hash = MagicMock(return_value=None)
-        recorder.get_call_response_data = MagicMock(return_value=None)
+        recorder.get_call_response_data = MagicMock(return_value=CallDataResult(state=CallDataState.STORE_NOT_CONFIGURED, data=None))
         return recorder
 
     def _create_mock_call(
@@ -148,11 +149,14 @@ class TestCallReplayer:
 
         mock_call = self._create_mock_call(request_hash=request_hash, latency_ms=150.0)
         recorder.find_call_by_request_hash.return_value = mock_call
-        recorder.get_call_response_data.return_value = {
-            "content": "Hello, world!",
-            "model": "gpt-4",
-            "usage": {"prompt_tokens": 10, "completion_tokens": 5},
-        }
+        recorder.get_call_response_data.return_value = CallDataResult(
+            state=CallDataState.AVAILABLE,
+            data={
+                "content": "Hello, world!",
+                "model": "gpt-4",
+                "usage": {"prompt_tokens": 10, "completion_tokens": 5},
+            },
+        )
 
         replayer = CallReplayer(recorder, source_run_id="run_abc123")
         result = replayer.replay(call_type=CallType.LLM, request_data=request_data)
@@ -205,7 +209,7 @@ class TestCallReplayer:
 
         mock_call = self._create_mock_call(request_hash=request_hash)
         recorder.find_call_by_request_hash.return_value = mock_call
-        recorder.get_call_response_data.return_value = {"content": "cached"}
+        recorder.get_call_response_data.return_value = CallDataResult(state=CallDataState.AVAILABLE, data={"content": "cached"})
 
         replayer = CallReplayer(recorder, source_run_id="run_abc123")
 
@@ -255,7 +259,7 @@ class TestCallReplayer:
             response_ref=None,  # Never had a response
         )
         recorder.find_call_by_request_hash.return_value = mock_call
-        recorder.get_call_response_data.return_value = None
+        recorder.get_call_response_data.return_value = CallDataResult(state=CallDataState.NEVER_STORED, data=None)
 
         replayer = CallReplayer(recorder, source_run_id="run_abc123")
         result = replayer.replay(call_type=CallType.LLM, request_data=request_data)
@@ -291,7 +295,7 @@ class TestCallReplayer:
             response_hash=None,  # But hash is missing
         )
         recorder.find_call_by_request_hash.return_value = mock_call
-        recorder.get_call_response_data.return_value = None  # Payload unavailable
+        recorder.get_call_response_data.return_value = CallDataResult(state=CallDataState.PURGED, data=None)
 
         replayer = CallReplayer(recorder, source_run_id="run_abc123")
 
@@ -332,7 +336,7 @@ class TestCallReplayer:
             response_hash="hash_of_response",  # Hash proves response existed
         )
         recorder.find_call_by_request_hash.return_value = mock_call
-        recorder.get_call_response_data.return_value = None  # But payload is now missing
+        recorder.get_call_response_data.return_value = CallDataResult(state=CallDataState.PURGED, data=None)
 
         replayer = CallReplayer(recorder, source_run_id="run_abc123")
 
@@ -364,7 +368,7 @@ class TestCallReplayer:
             response_ref="payload_ref_123",  # Response was recorded
         )
         recorder.find_call_by_request_hash.return_value = mock_call
-        recorder.get_call_response_data.return_value = error_response  # And is available
+        recorder.get_call_response_data.return_value = CallDataResult(state=CallDataState.AVAILABLE, data=error_response)
 
         replayer = CallReplayer(recorder, source_run_id="run_abc123")
         result = replayer.replay(call_type=CallType.LLM, request_data=request_data)
@@ -382,7 +386,7 @@ class TestCallReplayer:
         # Original call took 250ms
         mock_call = self._create_mock_call(request_hash=request_hash, latency_ms=250.0)
         recorder.find_call_by_request_hash.return_value = mock_call
-        recorder.get_call_response_data.return_value = {"content": "test"}
+        recorder.get_call_response_data.return_value = CallDataResult(state=CallDataState.AVAILABLE, data={"content": "test"})
 
         replayer = CallReplayer(recorder, source_run_id="run_abc123")
         result = replayer.replay(call_type=CallType.LLM, request_data=request_data)
@@ -404,7 +408,7 @@ class TestCallReplayer:
 
         mock_call = self._create_mock_call(request_hash=request_hash)
         recorder.find_call_by_request_hash.return_value = mock_call
-        recorder.get_call_response_data.return_value = {"content": "test"}
+        recorder.get_call_response_data.return_value = CallDataResult(state=CallDataState.AVAILABLE, data={"content": "test"})
 
         replayer = CallReplayer(recorder, source_run_id="run_abc123")
 
@@ -436,7 +440,7 @@ class TestCallReplayer:
             response_ref="payload_ref_abc",  # Response WAS recorded
         )
         recorder.find_call_by_request_hash.return_value = mock_call
-        recorder.get_call_response_data.return_value = None  # Payload purged
+        recorder.get_call_response_data.return_value = CallDataResult(state=CallDataState.PURGED, data=None)
 
         replayer = CallReplayer(recorder, source_run_id="run_abc123")
 
@@ -467,7 +471,7 @@ class TestCallReplayer:
             latency_ms=100.0,
         )
         recorder.find_call_by_request_hash.return_value = mock_call
-        recorder.get_call_response_data.return_value = {"status": 200, "body": "OK"}
+        recorder.get_call_response_data.return_value = CallDataResult(state=CallDataState.AVAILABLE, data={"status": 200, "body": "OK"})
 
         replayer = CallReplayer(recorder, source_run_id="run_abc123")
         result = replayer.replay(call_type=CallType.HTTP, request_data=request_data)
@@ -511,11 +515,11 @@ class TestCallReplayer:
                     latency_ms=200.0,
                 )
 
-        def get_response_side_effect(call_id: str) -> dict[str, Any]:
+        def get_response_side_effect(call_id: str) -> CallDataResult:
             if call_id == "call_llm":
-                return {"type": "llm_response"}
+                return CallDataResult(state=CallDataState.AVAILABLE, data={"type": "llm_response"})
             else:
-                return {"type": "http_response"}
+                return CallDataResult(state=CallDataState.AVAILABLE, data={"type": "http_response"})
 
         recorder.find_call_by_request_hash.side_effect = find_call_side_effect
         recorder.get_call_response_data.side_effect = get_response_side_effect
@@ -589,13 +593,12 @@ class TestCallReplayer:
                 latency_ms=100.0,
             )
 
-        def get_response_side_effect(call_id: str) -> dict[str, Any]:
+        def get_response_side_effect(call_id: str) -> CallDataResult:
             """Return response data based on call_id."""
             for call_info in call_sequence:
                 if call_info["call_id"] == call_id:
-                    response: dict[str, Any] = call_info["response"]
-                    return response
-            return {}
+                    return CallDataResult(state=CallDataState.AVAILABLE, data=call_info["response"])
+            return CallDataResult(state=CallDataState.AVAILABLE, data={})
 
         recorder.find_call_by_request_hash.side_effect = find_call_side_effect
         recorder.get_call_response_data.side_effect = get_response_side_effect
@@ -640,7 +643,7 @@ class TestCallReplayer:
             error_json="not valid json {{{",  # Corrupt Tier 1 data
         )
         recorder.find_call_by_request_hash.return_value = mock_call
-        recorder.get_call_response_data.return_value = {}
+        recorder.get_call_response_data.return_value = CallDataResult(state=CallDataState.AVAILABLE, data={})
 
         replayer = CallReplayer(recorder, source_run_id="run_abc123")
 

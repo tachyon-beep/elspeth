@@ -6,6 +6,7 @@ from elspeth.contracts import CallStatus, CallType, FrameworkBugError, NodeType
 from elspeth.contracts.call_data import RawCallPayload
 from elspeth.core.canonical import stable_hash
 from elspeth.core.landscape import LandscapeDB, LandscapeRecorder
+from elspeth.core.landscape.row_data import CallDataResult, CallDataState
 from elspeth.core.landscape.schema import operations_table
 from tests.fixtures.landscape import make_landscape_db, make_recorder, make_recorder_with_run, register_test_node
 
@@ -838,7 +839,8 @@ class TestFindCallByRequestHash:
 class TestGetCallResponseData:
     """Tests for retrieving response data from the payload store."""
 
-    def test_returns_none_without_payload_store(self):
+    def test_returns_never_stored_without_payload_store(self):
+        """Without a payload store, response_ref is never set, so state is NEVER_STORED."""
         _db, recorder, state_id = _setup()
         idx = recorder.allocate_call_index(state_id)
         call = recorder.record_call(
@@ -852,9 +854,11 @@ class TestGetCallResponseData:
 
         result = recorder.get_call_response_data(call.call_id)
 
-        assert result is None
+        assert isinstance(result, CallDataResult)
+        assert result.state == CallDataState.NEVER_STORED
+        assert result.data is None
 
-    def test_returns_none_for_call_without_response(self):
+    def test_returns_never_stored_for_call_without_response(self):
         _db, recorder, state_id = _setup()
         idx = recorder.allocate_call_index(state_id)
         call = recorder.record_call(
@@ -868,7 +872,9 @@ class TestGetCallResponseData:
 
         result = recorder.get_call_response_data(call.call_id)
 
-        assert result is None
+        assert isinstance(result, CallDataResult)
+        assert result.state == CallDataState.NEVER_STORED
+        assert result.data is None
 
     def test_raises_on_non_dict_response_payload(self, tmp_path):
         """Bug gxan: non-dict JSON must raise AuditIntegrityError."""
@@ -931,6 +937,7 @@ class TestGetCallResponseData:
 
         result = recorder.get_call_response_data(call.call_id)
 
-        assert result is not None
-        assert isinstance(result, dict)
-        assert result["text"] == "world"
+        assert isinstance(result, CallDataResult)
+        assert result.state == CallDataState.AVAILABLE
+        assert result.data is not None
+        assert result.data["text"] == "world"

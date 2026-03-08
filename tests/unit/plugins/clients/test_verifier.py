@@ -7,6 +7,7 @@ from unittest.mock import MagicMock
 
 from elspeth.contracts import Call, CallStatus, CallType
 from elspeth.core.canonical import stable_hash
+from elspeth.core.landscape.row_data import CallDataResult, CallDataState
 from elspeth.plugins.infrastructure.clients.verifier import (
     CallVerifier,
     VerificationReport,
@@ -170,7 +171,7 @@ class TestCallVerifier:
         """Create a mock LandscapeRecorder."""
         recorder = MagicMock()
         recorder.find_call_by_request_hash = MagicMock(return_value=None)
-        recorder.get_call_response_data = MagicMock(return_value=None)
+        recorder.get_call_response_data = MagicMock(return_value=CallDataResult(state=CallDataState.STORE_NOT_CONFIGURED, data=None))
         return recorder
 
     def _create_mock_call(
@@ -214,7 +215,7 @@ class TestCallVerifier:
 
         mock_call = self._create_mock_call(request_hash=request_hash)
         recorder.find_call_by_request_hash.return_value = mock_call
-        recorder.get_call_response_data.return_value = recorded_response
+        recorder.get_call_response_data.return_value = CallDataResult(state=CallDataState.AVAILABLE, data=recorded_response)
 
         verifier = CallVerifier(recorder, source_run_id="run_abc123")
 
@@ -241,7 +242,7 @@ class TestCallVerifier:
 
         mock_call = self._create_mock_call(request_hash=request_hash)
         recorder.find_call_by_request_hash.return_value = mock_call
-        recorder.get_call_response_data.return_value = recorded_response
+        recorder.get_call_response_data.return_value = CallDataResult(state=CallDataState.AVAILABLE, data=recorded_response)
 
         verifier = CallVerifier(recorder, source_run_id="run_abc123")
 
@@ -288,7 +289,7 @@ class TestCallVerifier:
 
         mock_call = self._create_mock_call(request_hash=request_hash)
         recorder.find_call_by_request_hash.return_value = mock_call
-        recorder.get_call_response_data.return_value = recorded_response
+        recorder.get_call_response_data.return_value = CallDataResult(state=CallDataState.AVAILABLE, data=recorded_response)
 
         # Ignore latency in comparison
         verifier = CallVerifier(
@@ -322,8 +323,8 @@ class TestCallVerifier:
                 return None
             return self._create_mock_call(request_hash=request_hash)
 
-        def get_response_side_effect(call_id: str) -> dict[str, object]:
-            return {"content": "recorded"}
+        def get_response_side_effect(call_id: str) -> CallDataResult:
+            return CallDataResult(state=CallDataState.AVAILABLE, data={"content": "recorded"})
 
         recorder.find_call_by_request_hash.side_effect = find_call_side_effect
         recorder.get_call_response_data.side_effect = get_response_side_effect
@@ -365,7 +366,7 @@ class TestCallVerifier:
         # All calls match
         mock_call = self._create_mock_call()
         recorder.find_call_by_request_hash.return_value = mock_call
-        recorder.get_call_response_data.return_value = {"content": "match"}
+        recorder.get_call_response_data.return_value = CallDataResult(state=CallDataState.AVAILABLE, data={"content": "match"})
 
         verifier = CallVerifier(recorder, source_run_id="run_abc123")
 
@@ -381,7 +382,7 @@ class TestCallVerifier:
         assert report.success_rate == 100.0
 
         # Now add a mismatch
-        recorder.get_call_response_data.return_value = {"content": "different"}
+        recorder.get_call_response_data.return_value = CallDataResult(state=CallDataState.AVAILABLE, data={"content": "different"})
         verifier.verify(
             call_type=CallType.LLM,
             request_data={"id": 5},
@@ -396,7 +397,7 @@ class TestCallVerifier:
         recorder = self._create_mock_recorder()
         mock_call = self._create_mock_call()
         recorder.find_call_by_request_hash.return_value = mock_call
-        recorder.get_call_response_data.return_value = {"content": "match"}
+        recorder.get_call_response_data.return_value = CallDataResult(state=CallDataState.AVAILABLE, data={"content": "match"})
 
         verifier = CallVerifier(recorder, source_run_id="run_abc123")
 
@@ -447,7 +448,7 @@ class TestCallVerifier:
             latency_ms=100.0,
         )
         recorder.find_call_by_request_hash.return_value = mock_call
-        recorder.get_call_response_data.return_value = {"status": 200, "body": "OK"}
+        recorder.get_call_response_data.return_value = CallDataResult(state=CallDataState.AVAILABLE, data={"status": 200, "body": "OK"})
 
         verifier = CallVerifier(recorder, source_run_id="run_abc123")
         result = verifier.verify(
@@ -479,7 +480,7 @@ class TestCallVerifier:
             response_ref="payload_ref_123",  # Response WAS recorded
         )
         recorder.find_call_by_request_hash.return_value = mock_call
-        recorder.get_call_response_data.return_value = None  # But now missing
+        recorder.get_call_response_data.return_value = CallDataResult(state=CallDataState.PURGED, data=None)
 
         verifier = CallVerifier(recorder, source_run_id="run_abc123")
         result = verifier.verify(
@@ -516,7 +517,7 @@ class TestCallVerifier:
             response_ref=None,  # Never had a response
         )
         recorder.find_call_by_request_hash.return_value = mock_call
-        recorder.get_call_response_data.return_value = None
+        recorder.get_call_response_data.return_value = CallDataResult(state=CallDataState.NEVER_STORED, data=None)
 
         verifier = CallVerifier(recorder, source_run_id="run_abc123")
         result = verifier.verify(
@@ -550,7 +551,7 @@ class TestCallVerifier:
             response_hash="hash_of_response",  # Hash proves response existed
         )
         recorder.find_call_by_request_hash.return_value = mock_call
-        recorder.get_call_response_data.return_value = None  # But now purged
+        recorder.get_call_response_data.return_value = CallDataResult(state=CallDataState.PURGED, data=None)
 
         verifier = CallVerifier(recorder, source_run_id="run_abc123")
         result = verifier.verify(
@@ -582,7 +583,7 @@ class TestCallVerifier:
             response_hash=response_hash,
         )
         recorder.find_call_by_request_hash.return_value = mock_call
-        recorder.get_call_response_data.return_value = None  # Purged
+        recorder.get_call_response_data.return_value = CallDataResult(state=CallDataState.PURGED, data=None)
 
         verifier = CallVerifier(recorder, source_run_id="run_abc123")
         result = verifier.verify(
@@ -619,7 +620,7 @@ class TestCallVerifier:
             response_hash=response_hash,
         )
         recorder.find_call_by_request_hash.return_value = mock_call
-        recorder.get_call_response_data.return_value = None  # Purged
+        recorder.get_call_response_data.return_value = CallDataResult(state=CallDataState.PURGED, data=None)
 
         verifier = CallVerifier(recorder, source_run_id="run_abc123")
         result = verifier.verify(
@@ -659,7 +660,7 @@ class TestCallVerifier:
             response_hash=None,  # No response was ever recorded
         )
         recorder.find_call_by_request_hash.return_value = mock_call
-        recorder.get_call_response_data.return_value = None
+        recorder.get_call_response_data.return_value = CallDataResult(state=CallDataState.NEVER_STORED, data=None)
 
         verifier = CallVerifier(recorder, source_run_id="run_abc123")
         result = verifier.verify(
@@ -689,7 +690,7 @@ class TestCallVerifier:
 
         mock_call = self._create_mock_call(request_hash=request_hash)
         recorder.find_call_by_request_hash.return_value = mock_call
-        recorder.get_call_response_data.return_value = recorded_response
+        recorder.get_call_response_data.return_value = CallDataResult(state=CallDataState.AVAILABLE, data=recorded_response)
 
         verifier = CallVerifier(recorder, source_run_id="run_abc123")
         result = verifier.verify(
@@ -726,7 +727,7 @@ class TestCallVerifier:
 
         mock_call = self._create_mock_call(request_hash=request_hash)
         recorder.find_call_by_request_hash.return_value = mock_call
-        recorder.get_call_response_data.return_value = recorded_response
+        recorder.get_call_response_data.return_value = CallDataResult(state=CallDataState.AVAILABLE, data=recorded_response)
 
         verifier = CallVerifier(recorder, source_run_id="run_abc123")
         result = verifier.verify(
@@ -757,7 +758,7 @@ class TestCallVerifier:
 
         mock_call = self._create_mock_call(request_hash=request_hash)
         recorder.find_call_by_request_hash.return_value = mock_call
-        recorder.get_call_response_data.return_value = recorded_response
+        recorder.get_call_response_data.return_value = CallDataResult(state=CallDataState.AVAILABLE, data=recorded_response)
 
         # Ignore both timestamp and request_id
         verifier = CallVerifier(
@@ -804,10 +805,10 @@ class TestCallVerifier:
                 request_hash=request_hash,
             )
 
-        def get_response_side_effect(call_id: str) -> dict[str, str]:
+        def get_response_side_effect(call_id: str) -> CallDataResult:
             """Return response data based on call_id."""
             idx = int(call_id.split("_")[1])
-            return recorded_responses[idx]
+            return CallDataResult(state=CallDataState.AVAILABLE, data=recorded_responses[idx])
 
         recorder.find_call_by_request_hash.side_effect = find_call_side_effect
         recorder.get_call_response_data.side_effect = get_response_side_effect
@@ -855,7 +856,7 @@ class TestCallVerifier:
 
         mock_call = self._create_mock_call(request_hash=request_hash)
         recorder.find_call_by_request_hash.return_value = mock_call
-        recorder.get_call_response_data.return_value = recorded_response
+        recorder.get_call_response_data.return_value = CallDataResult(state=CallDataState.AVAILABLE, data=recorded_response)
 
         verifier = CallVerifier(recorder, source_run_id="run_abc123", ignore_order=False)
         result = verifier.verify(
@@ -881,7 +882,7 @@ class TestCallVerifier:
 
         mock_call = self._create_mock_call(request_hash=request_hash)
         recorder.find_call_by_request_hash.return_value = mock_call
-        recorder.get_call_response_data.return_value = recorded_response
+        recorder.get_call_response_data.return_value = CallDataResult(state=CallDataState.AVAILABLE, data=recorded_response)
 
         # With ignore_order=True (default): should match (same multiset)
         verifier_loose = CallVerifier(recorder, source_run_id="run_abc123", ignore_order=True)
@@ -922,7 +923,7 @@ class TestCallVerifier:
 
         mock_call = self._create_mock_call(request_hash=request_hash)
         recorder.find_call_by_request_hash.return_value = mock_call
-        recorder.get_call_response_data.return_value = recorded_response
+        recorder.get_call_response_data.return_value = CallDataResult(state=CallDataState.AVAILABLE, data=recorded_response)
 
         # With ignore_order=True: matches (recursive order-independence)
         verifier_loose = CallVerifier(recorder, source_run_id="run_abc123", ignore_order=True)
@@ -954,7 +955,7 @@ class TestCallVerifier:
 
         mock_call = self._create_mock_call(request_hash=request_hash)
         recorder.find_call_by_request_hash.return_value = mock_call
-        recorder.get_call_response_data.return_value = recorded_response
+        recorder.get_call_response_data.return_value = CallDataResult(state=CallDataState.AVAILABLE, data=recorded_response)
 
         # Both with and without ignore_order: dicts should match
         verifier_loose = CallVerifier(recorder, source_run_id="run_abc123", ignore_order=True)
@@ -984,7 +985,7 @@ class TestCallVerifier:
 
         mock_call = self._create_mock_call(request_hash=request_hash)
         recorder.find_call_by_request_hash.return_value = mock_call
-        recorder.get_call_response_data.return_value = recorded_response
+        recorder.get_call_response_data.return_value = CallDataResult(state=CallDataState.AVAILABLE, data=recorded_response)
 
         # Both settings should match
         for ignore_order in [True, False]:
@@ -1031,7 +1032,7 @@ class TestCallVerifier:
 
         mock_call = self._create_mock_call(request_hash=request_hash)
         recorder.find_call_by_request_hash.return_value = mock_call
-        recorder.get_call_response_data.return_value = recorded_response
+        recorder.get_call_response_data.return_value = CallDataResult(state=CallDataState.AVAILABLE, data=recorded_response)
 
         # With ignore_order=True (default): matches despite tool call reordering
         verifier_loose = CallVerifier(recorder, source_run_id="run_abc123", ignore_order=True)
