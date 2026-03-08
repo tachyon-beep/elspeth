@@ -307,6 +307,7 @@ class TestPurgeResultInvariantProperties:
             deleted_count=deleted,
             skipped_count=skipped,
             failed_refs=failed_refs,
+            grade_update_failures=(),
             duration_seconds=duration,
         )
 

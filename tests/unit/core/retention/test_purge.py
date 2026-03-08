@@ -278,7 +278,7 @@ class TestPurgeResultValidation:
     def test_valid_construction(self) -> None:
         from elspeth.core.retention.purge import PurgeResult
 
-        result = PurgeResult(deleted_count=5, skipped_count=2, failed_refs=("ref-1",), duration_seconds=1.5)
+        result = PurgeResult(deleted_count=5, skipped_count=2, failed_refs=("ref-1",), grade_update_failures=(), duration_seconds=1.5)
         assert result.deleted_count == 5
         assert result.failed_refs == ("ref-1",)
 
@@ -286,31 +286,33 @@ class TestPurgeResultValidation:
         from elspeth.core.retention.purge import PurgeResult
 
         with pytest.raises(ValueError, match="deleted_count must be non-negative"):
-            PurgeResult(deleted_count=-1, skipped_count=0, failed_refs=(), duration_seconds=0.0)
+            PurgeResult(deleted_count=-1, skipped_count=0, failed_refs=(), grade_update_failures=(), duration_seconds=0.0)
 
     def test_rejects_negative_skipped_count(self) -> None:
         from elspeth.core.retention.purge import PurgeResult
 
         with pytest.raises(ValueError, match="skipped_count must be non-negative"):
-            PurgeResult(deleted_count=0, skipped_count=-1, failed_refs=(), duration_seconds=0.0)
+            PurgeResult(deleted_count=0, skipped_count=-1, failed_refs=(), grade_update_failures=(), duration_seconds=0.0)
 
     def test_rejects_negative_duration(self) -> None:
         from elspeth.core.retention.purge import PurgeResult
 
         with pytest.raises(ValueError, match="duration_seconds must be non-negative"):
-            PurgeResult(deleted_count=0, skipped_count=0, failed_refs=(), duration_seconds=-0.01)
+            PurgeResult(deleted_count=0, skipped_count=0, failed_refs=(), grade_update_failures=(), duration_seconds=-0.01)
 
     def test_coerces_list_failed_refs_to_tuple(self) -> None:
         from elspeth.core.retention.purge import PurgeResult
 
-        result = PurgeResult(deleted_count=0, skipped_count=0, failed_refs=["ref-a", "ref-b"], duration_seconds=0.0)  # type: ignore[arg-type]
+        result = PurgeResult(
+            deleted_count=0, skipped_count=0, failed_refs=["ref-a", "ref-b"], grade_update_failures=(), duration_seconds=0.0
+        )  # type: ignore[arg-type]
         assert isinstance(result.failed_refs, tuple)
         assert result.failed_refs == ("ref-a", "ref-b")
 
     def test_accepts_zero_counts(self) -> None:
         from elspeth.core.retention.purge import PurgeResult
 
-        result = PurgeResult(deleted_count=0, skipped_count=0, failed_refs=(), duration_seconds=0.0)
+        result = PurgeResult(deleted_count=0, skipped_count=0, failed_refs=(), grade_update_failures=(), duration_seconds=0.0)
         assert result.deleted_count == 0
         assert result.skipped_count == 0
         assert result.duration_seconds == 0.0
@@ -724,6 +726,114 @@ class TestInterruptedRunNotPurgeEligible:
 
         refs = set(manager.find_expired_payload_refs(retention_days=30, as_of=now))
         assert "ref-interrupted-all" not in refs
+
+
+class TestPurgeGradeUpdateFailureResilience:
+    """Regression test for elspeth-dfc66ddc10: grade update failure after irreversible payload deletion.
+
+    Bug: After payloads are irreversibly deleted, the grade update loop
+    (update_grade_after_purge) could raise for one run_id and abort the
+    entire loop — leaving remaining runs with stale REPLAY_REPRODUCIBLE
+    grades when their payloads no longer exist.
+
+    Fix: Each grade update is wrapped individually. Failures are collected
+    in PurgeResult.grade_update_failures so the operator knows which runs
+    need manual correction.
+    """
+
+    def test_purge_result_has_grade_update_failures_field(self) -> None:
+        """PurgeResult must expose grade_update_failures as a tuple of run_ids."""
+        from elspeth.core.retention.purge import PurgeResult
+
+        result = PurgeResult(
+            deleted_count=1,
+            skipped_count=0,
+            failed_refs=(),
+            grade_update_failures=("run-bad",),
+            duration_seconds=1.0,
+        )
+        assert result.grade_update_failures == ("run-bad",)
+
+    def test_purge_result_grade_update_failures_defaults_empty(self) -> None:
+        """PurgeResult with no grade failures should have empty tuple."""
+        from elspeth.core.retention.purge import PurgeResult
+
+        result = PurgeResult(
+            deleted_count=0,
+            skipped_count=0,
+            failed_refs=(),
+            grade_update_failures=(),
+            duration_seconds=0.0,
+        )
+        assert result.grade_update_failures == ()
+
+    def test_grade_update_failure_does_not_abort_remaining_updates(self, db: LandscapeDB, monkeypatch: pytest.MonkeyPatch) -> None:
+        """If update_grade_after_purge raises for one run, other runs still get updated."""
+        from elspeth.contracts.errors import AuditIntegrityError
+
+        store = _ControlledStore()
+        ref = store.store(b"payload")
+        manager = PurgeManager(db, store)
+
+        # Simulate 3 affected runs
+        monkeypatch.setattr(
+            manager,
+            "_find_affected_run_ids",
+            lambda refs: {"run-ok-1", "run-bad", "run-ok-2"} if refs else set(),
+        )
+
+        grade_updates: list[str] = []
+
+        def _failing_grade_update(db_obj: LandscapeDB, run_id: str) -> None:
+            del db_obj
+            if run_id == "run-bad":
+                raise AuditIntegrityError(f"Cannot update: run '{run_id}' does not exist")
+            grade_updates.append(run_id)
+
+        monkeypatch.setattr(
+            "elspeth.core.retention.purge.update_grade_after_purge",
+            _failing_grade_update,
+        )
+
+        result = manager.purge_payloads([ref])
+
+        # All non-failing runs should still get their grade update
+        assert set(grade_updates) == {"run-ok-1", "run-ok-2"}
+        # The failure should be reported in the result
+        assert result.grade_update_failures == ("run-bad",)
+        # Payloads were still deleted (irreversible)
+        assert result.deleted_count == 1
+
+    def test_grade_update_failures_logged(
+        self, db: LandscapeDB, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        """Grade update failures must be logged with structlog."""
+        from elspeth.contracts.errors import AuditIntegrityError
+
+        store = _ControlledStore()
+        ref = store.store(b"payload")
+        manager = PurgeManager(db, store)
+
+        monkeypatch.setattr(
+            manager,
+            "_find_affected_run_ids",
+            lambda refs: {"run-fail"} if refs else set(),
+        )
+
+        def _always_fail(db_obj: LandscapeDB, run_id: str) -> None:
+            raise AuditIntegrityError(f"run '{run_id}' does not exist")
+
+        monkeypatch.setattr(
+            "elspeth.core.retention.purge.update_grade_after_purge",
+            _always_fail,
+        )
+
+        result = manager.purge_payloads([ref])
+        captured = capsys.readouterr()
+
+        assert result.grade_update_failures == ("run-fail",)
+        assert "grade_update_failed" in captured.out
+        assert "run-fail" in captured.out
 
 
 class TestPurgeUnboundedIN:

@@ -170,6 +170,7 @@ class TestPurgeBasicFlow:
             deleted_count=2,
             skipped_count=0,
             failed_refs=(),
+            grade_update_failures=(),
             duration_seconds=0.42,
         )
         mock_db, mock_ps, mock_pm = _make_purge_mocks(expired_refs=refs, purge_result=result_obj)
@@ -202,6 +203,7 @@ class TestPurgeBasicFlow:
             deleted_count=0,
             skipped_count=0,
             failed_refs=(bad_ref,),
+            grade_update_failures=(),
             duration_seconds=0.01,
         )
         mock_db, mock_ps, mock_pm = _make_purge_mocks(expired_refs=refs, purge_result=result_obj)
@@ -219,6 +221,7 @@ class TestPurgeBasicFlow:
             deleted_count=0,
             skipped_count=1,
             failed_refs=(),
+            grade_update_failures=(),
             duration_seconds=0.05,
         )
         mock_db, mock_ps, mock_pm = _make_purge_mocks(expired_refs=refs, purge_result=result_obj)

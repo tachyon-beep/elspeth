@@ -35,10 +35,12 @@ class PurgeResult:
     deleted_count: int
     skipped_count: int  # Refs that didn't exist (already purged/never stored)
     failed_refs: tuple[str, ...]  # Refs that existed but failed to delete
+    grade_update_failures: tuple[str, ...]  # Run IDs whose grade update failed after deletion
     duration_seconds: float
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "failed_refs", tuple(self.failed_refs))
+        object.__setattr__(self, "grade_update_failures", tuple(self.grade_update_failures))
         if self.deleted_count < 0:
             raise ValueError(f"deleted_count must be non-negative, got {self.deleted_count}")
         if self.skipped_count < 0:
@@ -451,9 +453,21 @@ class PurgeManager:
 
         # Step 3: Update reproducibility grades for affected runs
         # This degrades REPLAY_REPRODUCIBLE -> ATTRIBUTABLE_ONLY since
-        # nondeterministic runs can no longer be replayed without payloads
-        for run_id in affected_run_ids:
-            update_grade_after_purge(self._db, run_id)
+        # nondeterministic runs can no longer be replayed without payloads.
+        # Each update is wrapped individually because payloads are already
+        # irreversibly deleted — a failure for one run must not prevent
+        # grade updates for the remaining runs.
+        grade_update_failures: list[str] = []
+        for run_id in sorted(affected_run_ids):
+            try:
+                update_grade_after_purge(self._db, run_id)
+            except Exception:
+                logger.warning(
+                    "grade_update_failed",
+                    run_id=run_id,
+                    msg="Payloads already deleted but grade update failed — run may have stale reproducibility grade",
+                )
+                grade_update_failures.append(run_id)
 
         duration_seconds = perf_counter() - start_time
 
@@ -461,5 +475,6 @@ class PurgeManager:
             deleted_count=deleted_count,
             skipped_count=skipped_count,
             failed_refs=tuple(failed_refs),
+            grade_update_failures=tuple(grade_update_failures),
             duration_seconds=duration_seconds,
         )

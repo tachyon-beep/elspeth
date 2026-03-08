@@ -261,3 +261,7 @@ allow_hits:
   owner: bugfix
   reason: Sentinel class definition in except ImportError — not a runtime error handler
   safety: _get_client() raises ImportError before any Azure API call; sentinel class is never caught
+- key: core/retention/purge.py:R4:PurgeManager:purge_payloads:fp=89a9f75c15732f43
+  owner: bugfix
+  reason: Post-point-of-no-return recovery — payloads are already irreversibly deleted, so ANY failure in grade updates must not abort the loop for remaining runs
+  safety: Exception caught and logged via structlog, run_id added to grade_update_failures in PurgeResult, operator informed via CLI output

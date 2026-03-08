@@ -1468,6 +1468,10 @@ def purge(
             typer.echo(f"  Failed: {len(result.failed_refs)}")
             for ref in result.failed_refs[:5]:
                 typer.echo(f"    {ref[:16]}...")
+        if result.grade_update_failures:
+            typer.echo(f"  Grade update failures: {len(result.grade_update_failures)} (runs may have stale reproducibility grades)")
+            for run_id in result.grade_update_failures[:5]:
+                typer.echo(f"    {run_id}")
     finally:
         db.close()
 
