@@ -548,21 +548,39 @@ class TestLoadPayload:
         assert content == '{"key": "value"}'
         assert error is None
 
-    def test_read_failure_returns_error(self, tmp_path: Path) -> None:
+    def test_read_failure_missing_blob_returns_error(self, tmp_path: Path) -> None:
+        from elspeth.contracts.payload_store import PayloadNotFoundError
+
         journal = _make_journal(
             tmp_path,
             include_payloads=True,
             payload_base_path=str(tmp_path / "payloads"),
         )
         journal._payload_store = Mock()
-        journal._payload_store.retrieve.side_effect = FileNotFoundError("not found")
+        journal._payload_store.retrieve.side_effect = PayloadNotFoundError("deadbeef" * 8)
 
         content, error = journal._load_payload("some-ref")
         assert content is None
         assert error is not None
         assert "payload_read_failed" in error
 
-    def test_read_failure_with_fail_on_error_raises(self, tmp_path: Path) -> None:
+    def test_read_failure_os_error_returns_error(self, tmp_path: Path) -> None:
+        journal = _make_journal(
+            tmp_path,
+            include_payloads=True,
+            payload_base_path=str(tmp_path / "payloads"),
+        )
+        journal._payload_store = Mock()
+        journal._payload_store.retrieve.side_effect = OSError("disk failure")
+
+        content, error = journal._load_payload("some-ref")
+        assert content is None
+        assert error is not None
+        assert "payload_read_failed" in error
+
+    def test_read_failure_missing_blob_with_fail_on_error_raises(self, tmp_path: Path) -> None:
+        from elspeth.contracts.payload_store import PayloadNotFoundError
+
         journal = _make_journal(
             tmp_path,
             fail_on_error=True,
@@ -570,9 +588,22 @@ class TestLoadPayload:
             payload_base_path=str(tmp_path / "payloads"),
         )
         journal._payload_store = Mock()
-        journal._payload_store.retrieve.side_effect = FileNotFoundError("not found")
+        journal._payload_store.retrieve.side_effect = PayloadNotFoundError("deadbeef" * 8)
 
-        with pytest.raises(FileNotFoundError):
+        with pytest.raises(PayloadNotFoundError):
+            journal._load_payload("some-ref")
+
+    def test_read_failure_os_error_with_fail_on_error_raises(self, tmp_path: Path) -> None:
+        journal = _make_journal(
+            tmp_path,
+            fail_on_error=True,
+            include_payloads=True,
+            payload_base_path=str(tmp_path / "payloads"),
+        )
+        journal._payload_store = Mock()
+        journal._payload_store.retrieve.side_effect = OSError("disk failure")
+
+        with pytest.raises(OSError):
             journal._load_payload("some-ref")
 
     def test_programming_error_in_retrieve_not_caught(self, tmp_path: Path) -> None:

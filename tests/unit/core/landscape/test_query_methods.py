@@ -1544,9 +1544,11 @@ class TestExplainRowErrorHandling:
             repo.explain_row("run-1", "row-1")
 
     def test_purged_payload_returns_lineage_without_data(self):
-        """KeyError (purged) is the only graceful degradation — not a crash."""
+        """PayloadNotFoundError (purged) is the only graceful degradation — not a crash."""
+        from elspeth.contracts.payload_store import PayloadNotFoundError
+
         mock_store = MagicMock()
-        mock_store.retrieve.side_effect = KeyError("not found")
+        mock_store.retrieve.side_effect = PayloadNotFoundError("deadbeef" * 8)
         repo = self._make_repo_with_row(mock_store)
 
         lineage = repo.explain_row("run-1", "row-1")
@@ -1554,6 +1556,19 @@ class TestExplainRowErrorHandling:
         assert lineage is not None
         assert lineage.source_data is None
         assert lineage.payload_available is False
+
+    def test_get_row_data_purged_returns_purged_state(self):
+        """get_row_data returns PURGED when payload was removed by retention policy."""
+        from elspeth.contracts.payload_store import PayloadNotFoundError
+
+        mock_store = MagicMock()
+        mock_store.retrieve.side_effect = PayloadNotFoundError("deadbeef" * 8)
+        repo = self._make_repo_with_row(mock_store)
+
+        result = repo.get_row_data("row-1")
+
+        assert result.state == RowDataState.PURGED
+        assert result.data is None
 
     def test_run_id_mismatch_raises_value_error(self):
         """H3: Cross-run mismatch is a caller bug, not a normal 'not found'."""
