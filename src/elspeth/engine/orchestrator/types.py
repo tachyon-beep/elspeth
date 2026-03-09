@@ -202,6 +202,23 @@ class ExecutionCounters:
         for dest, count in result.routed_destinations.items():
             self.routed_destinations[dest] += count
 
+    def to_flush_result(self) -> AggregationFlushResult:
+        """Build an AggregationFlushResult from these counters.
+
+        Mirrors ``to_run_result()`` for the aggregation flush path.
+        """
+        return AggregationFlushResult(
+            rows_succeeded=self.rows_succeeded,
+            rows_failed=self.rows_failed,
+            rows_routed=self.rows_routed,
+            rows_quarantined=self.rows_quarantined,
+            rows_coalesced=self.rows_coalesced,
+            rows_forked=self.rows_forked,
+            rows_expanded=self.rows_expanded,
+            rows_buffered=self.rows_buffered,
+            routed_destinations=dict(self.routed_destinations),
+        )
+
     def to_run_result(self, run_id: str, status: RunStatus) -> RunResult:
         """Build a RunResult from these counters.
 

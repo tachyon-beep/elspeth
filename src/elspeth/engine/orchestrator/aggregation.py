@@ -28,9 +28,13 @@ from elspeth.engine.orchestrator.types import (
 )
 
 if TYPE_CHECKING:
+    from collections.abc import Mapping, Sequence
+
     from elspeth.contracts import TransformProtocol
     from elspeth.contracts.plugin_context import PluginContext
+    from elspeth.contracts.results import RowResult
     from elspeth.core.landscape import LandscapeRecorder
+    from elspeth.engine.dag_navigator import WorkItem
     from elspeth.engine.processor import RowProcessor
 
 
@@ -100,6 +104,35 @@ def handle_incomplete_batches(
             # Previous failure, retry
             recorder.retry_batch(batch.batch_id)
         # DRAFT batches continue normally (collection resumes)
+
+
+def _process_flush_results(
+    completed_results: Sequence[RowResult],
+    work_items: Sequence[WorkItem],
+    processor: RowProcessor,
+    ctx: PluginContext,
+    counters: ExecutionCounters,
+    sinks: Mapping[str, object],
+    pending_tokens: PendingTokenMap,
+) -> None:
+    """Accumulate completed results and route work items through remaining transforms.
+
+    Extracted from check_aggregation_timeouts and flush_remaining_aggregation_buffers
+    which had identical post-flush continuation loops.
+    """
+    accumulate_row_outcomes(completed_results, counters, sinks, pending_tokens)
+
+    for work_item in work_items:
+        if work_item.current_node_id is None:
+            raise OrchestrationInvariantError("Aggregation continuation work item missing current_node_id")
+        downstream_results = processor.process_token(
+            token=work_item.token,
+            ctx=ctx,
+            current_node_id=work_item.current_node_id,
+            coalesce_node_id=work_item.coalesce_node_id,
+            coalesce_name=work_item.coalesce_name,
+        )
+        accumulate_row_outcomes(downstream_results, counters, sinks, pending_tokens)
 
 
 def check_aggregation_timeouts(
@@ -190,34 +223,17 @@ def check_aggregation_timeouts(
             trigger_type=trigger_type,
         )
 
-        # Handle completed results (terminal tokens — go to sink)
-        accumulate_row_outcomes(completed_results, counters, config.sinks, pending_tokens)
+        _process_flush_results(
+            completed_results,
+            work_items,
+            processor,
+            ctx,
+            counters,
+            config.sinks,
+            pending_tokens,
+        )
 
-        # Process work items through remaining transforms
-        # These tokens need to continue through the pipeline
-        for work_item in work_items:
-            if work_item.current_node_id is None:
-                raise OrchestrationInvariantError("Aggregation continuation work item missing current_node_id")
-            downstream_results = processor.process_token(
-                token=work_item.token,
-                ctx=ctx,
-                current_node_id=work_item.current_node_id,
-                coalesce_node_id=work_item.coalesce_node_id,
-                coalesce_name=work_item.coalesce_name,
-            )
-            accumulate_row_outcomes(downstream_results, counters, config.sinks, pending_tokens)
-
-    return AggregationFlushResult(
-        rows_succeeded=counters.rows_succeeded,
-        rows_failed=counters.rows_failed,
-        rows_routed=counters.rows_routed,
-        rows_quarantined=counters.rows_quarantined,
-        rows_coalesced=counters.rows_coalesced,
-        rows_forked=counters.rows_forked,
-        rows_expanded=counters.rows_expanded,
-        rows_buffered=counters.rows_buffered,
-        routed_destinations=dict(counters.routed_destinations),
-    )
+    return counters.to_flush_result()
 
 
 def flush_remaining_aggregation_buffers(
@@ -278,31 +294,14 @@ def flush_remaining_aggregation_buffers(
             trigger_type=TriggerType.END_OF_SOURCE,
         )
 
-        # Handle completed results (terminal tokens — go to sink)
-        accumulate_row_outcomes(completed_results, counters, config.sinks, pending_tokens)
+        _process_flush_results(
+            completed_results,
+            work_items,
+            processor,
+            ctx,
+            counters,
+            config.sinks,
+            pending_tokens,
+        )
 
-        # Process work items through remaining transforms
-        # These tokens need to continue through the pipeline
-        for work_item in work_items:
-            if work_item.current_node_id is None:
-                raise OrchestrationInvariantError("Aggregation continuation work item missing current_node_id")
-            downstream_results = processor.process_token(
-                token=work_item.token,
-                ctx=ctx,
-                current_node_id=work_item.current_node_id,
-                coalesce_node_id=work_item.coalesce_node_id,
-                coalesce_name=work_item.coalesce_name,
-            )
-            accumulate_row_outcomes(downstream_results, counters, config.sinks, pending_tokens)
-
-    return AggregationFlushResult(
-        rows_succeeded=counters.rows_succeeded,
-        rows_failed=counters.rows_failed,
-        rows_routed=counters.rows_routed,
-        rows_quarantined=counters.rows_quarantined,
-        rows_coalesced=counters.rows_coalesced,
-        rows_forked=counters.rows_forked,
-        rows_expanded=counters.rows_expanded,
-        rows_buffered=counters.rows_buffered,
-        routed_destinations=dict(counters.routed_destinations),
-    )
+    return counters.to_flush_result()

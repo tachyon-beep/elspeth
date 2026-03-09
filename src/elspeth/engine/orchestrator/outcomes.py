@@ -28,7 +28,7 @@ from elspeth.engine.orchestrator.types import ExecutionCounters, PendingTokenMap
 if TYPE_CHECKING:
     from elspeth.contracts.plugin_context import PluginContext
     from elspeth.contracts.results import RowResult
-    from elspeth.engine.coalesce_executor import CoalesceExecutor
+    from elspeth.engine.coalesce_executor import CoalesceExecutor, CoalesceOutcome
     from elspeth.engine.processor import RowProcessor
 
 
@@ -121,6 +121,61 @@ def accumulate_row_outcomes(
             raise OrchestrationInvariantError(f"Unhandled RowOutcome variant: {result.outcome!r}. Token: {result.token}")
 
 
+def _validate_coalesce_outcome(outcome: CoalesceOutcome) -> bool:
+    """Validate CoalesceOutcome invariant and return whether it has a merged token.
+
+    Raises OrchestrationInvariantError if the outcome has both or neither of
+    merged_token and failure_reason — exactly one must be set.
+
+    Returns:
+        True if outcome has a merged token, False if it has a failure.
+    """
+    has_merged = outcome.merged_token is not None
+    has_failure = outcome.failure_reason is not None
+    if has_merged == has_failure:
+        raise OrchestrationInvariantError(
+            f"Invalid CoalesceOutcome state: merged={has_merged}, "
+            f"failure_reason={outcome.failure_reason!r}. "
+            f"Outcome must have exactly one of merged_token or failure_reason."
+        )
+    return has_merged
+
+
+def _process_merged_coalesce_outcome(
+    outcome: CoalesceOutcome,
+    coalesce_name: CoalesceName,
+    coalesce_node_map: dict[CoalesceName, NodeID],
+    processor: RowProcessor,
+    config_sinks: Mapping[str, object],
+    ctx: PluginContext,
+    counters: ExecutionCounters,
+    pending_tokens: PendingTokenMap,
+) -> None:
+    """Process a successfully merged CoalesceOutcome through the processor.
+
+    Extracted from handle_coalesce_timeouts and flush_coalesce_pending which
+    had identical merge routing logic.
+    """
+    counters.rows_coalesced += 1
+    merged_token = outcome.merged_token
+    if merged_token is None:
+        raise OrchestrationInvariantError("CoalesceOutcome has_merged=True but merged_token is None")
+    coalesce_node_id = coalesce_node_map[coalesce_name]
+    continuation_results = processor.process_token(
+        token=merged_token,
+        ctx=ctx,
+        current_node_id=coalesce_node_id,
+        coalesce_node_id=coalesce_node_id,
+        coalesce_name=coalesce_name,
+    )
+    accumulate_row_outcomes(
+        continuation_results,
+        counters,
+        config_sinks,
+        pending_tokens,
+    )
+
+
 def handle_coalesce_timeouts(
     coalesce_executor: CoalesceExecutor,
     coalesce_node_map: dict[CoalesceName, NodeID],
@@ -150,38 +205,19 @@ def handle_coalesce_timeouts(
     """
     for coalesce_name_str in coalesce_executor.get_registered_names():
         coalesce_name = CoalesceName(coalesce_name_str)
-        coalesce_node_id = coalesce_node_map[coalesce_name]
         timed_out = coalesce_executor.check_timeouts(
             coalesce_name=coalesce_name_str,
         )
         for outcome in timed_out:
-            has_merged = outcome.merged_token is not None
-            has_failure = outcome.failure_reason is not None
-            if has_merged == has_failure:
-                raise OrchestrationInvariantError(
-                    f"Invalid CoalesceOutcome state: merged={has_merged}, "
-                    f"failure_reason={outcome.failure_reason!r}. "
-                    f"Outcome must have exactly one of merged_token or failure_reason."
-                )
-            if has_merged:
-                counters.rows_coalesced += 1
-                merged_token = outcome.merged_token
-                if merged_token is None:
-                    raise OrchestrationInvariantError("CoalesceOutcome has_merged=True but merged_token is None")
-                # Route merged token through processor from the coalesce node.
-                # Processor internals decide terminal vs non-terminal using DAG
-                # continuation metadata and return COMPLETED with sink_name when terminal.
-                continuation_results = processor.process_token(
-                    token=merged_token,
-                    ctx=ctx,
-                    current_node_id=coalesce_node_id,
-                    coalesce_node_id=coalesce_node_id,
-                    coalesce_name=coalesce_name,
-                )
-                accumulate_row_outcomes(
-                    continuation_results,
-                    counters,
+            if _validate_coalesce_outcome(outcome):
+                _process_merged_coalesce_outcome(
+                    outcome,
+                    coalesce_name,
+                    coalesce_node_map,
+                    processor,
                     config_sinks,
+                    ctx,
+                    counters,
                     pending_tokens,
                 )
             else:
@@ -215,46 +251,23 @@ def flush_coalesce_pending(
     """
     pending_outcomes = coalesce_executor.flush_pending()
 
-    # Handle any merged tokens from flush
     for outcome in pending_outcomes:
-        has_merged = outcome.merged_token is not None
-        has_failure = outcome.failure_reason is not None
-        if has_merged == has_failure:
-            raise OrchestrationInvariantError(
-                f"Invalid CoalesceOutcome state: merged={has_merged}, "
-                f"failure_reason={outcome.failure_reason!r}. "
-                f"Outcome must have exactly one of merged_token or failure_reason."
-            )
-        if has_merged:
-            # Successful merge
-            counters.rows_coalesced += 1
-            # Business logic: coalesce_name is guaranteed non-None when merged_token is not None
+        if _validate_coalesce_outcome(outcome):
+            # flush_pending outcomes carry coalesce_name on the outcome itself
             if outcome.coalesce_name is None:
                 raise OrchestrationInvariantError(
                     "CoalesceOutcome has merged_token but coalesce_name is None. This indicates a bug in CoalesceExecutor.flush_pending()."
                 )
             coalesce_name = CoalesceName(outcome.coalesce_name)
-            merged_token = outcome.merged_token
-            if merged_token is None:
-                raise OrchestrationInvariantError("CoalesceOutcome has merged_token but value is None after invariant check")
-            # Route merged token through processor from the coalesce node.
-            # Processor internals decide terminal vs non-terminal using DAG
-            # continuation metadata and return COMPLETED with sink_name when terminal.
-            continuation_results = processor.process_token(
-                token=merged_token,
-                ctx=ctx,
-                current_node_id=coalesce_node_map[coalesce_name],
-                coalesce_node_id=coalesce_node_map[coalesce_name],
-                coalesce_name=coalesce_name,
-            )
-            accumulate_row_outcomes(
-                continuation_results,
-                counters,
+            _process_merged_coalesce_outcome(
+                outcome,
+                coalesce_name,
+                coalesce_node_map,
+                processor,
                 config_sinks,
+                ctx,
+                counters,
                 pending_tokens,
             )
         else:
-            # Coalesce failed (quorum_not_met, incomplete_branches)
-            # Audit trail recorded by executor: each consumed token has
-            # node_state with status="failed" and error_json explaining why.
             counters.rows_coalesce_failed += 1
