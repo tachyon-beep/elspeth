@@ -545,21 +545,6 @@ class TestRecordOperationCall:
         assert call.error_json is not None
         assert "table_not_found" in call.error_json
 
-    def test_operation_call_with_provider(self):
-        _db, recorder, _state_id, op_id = _setup_with_operation()
-
-        call = recorder.record_operation_call(
-            op_id,
-            CallType.LLM,
-            CallStatus.SUCCESS,
-            request_data=RawCallPayload({"prompt": "classify"}),
-            response_data=RawCallPayload({"label": "A"}),
-            provider="azure-openai",
-        )
-
-        assert call.call_id is not None
-        assert call.call_type == CallType.LLM
-
     def test_operation_call_with_refs(self):
         _db, recorder, _state_id, op_id = _setup_with_operation()
 

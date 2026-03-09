@@ -7,7 +7,7 @@ from __future__ import annotations
 
 import json
 from threading import Lock
-from typing import TYPE_CHECKING, Any, Literal, overload
+from typing import TYPE_CHECKING, Any, Literal, NamedTuple, overload
 from uuid import uuid4
 
 import structlog
@@ -72,6 +72,16 @@ if TYPE_CHECKING:
 logger = structlog.get_logger(__name__)
 
 _TERMINAL_BATCH_STATUSES = frozenset({BatchStatus.COMPLETED, BatchStatus.FAILED})
+
+
+class _PreparedCallData(NamedTuple):
+    """Intermediate result from _prepare_call_payloads — hashes, refs, and serialized error."""
+
+    request_hash: str
+    request_ref: str | None
+    response_hash: str | None
+    response_ref: str | None
+    error_json: str | None
 
 
 class ExecutionRepository:
@@ -505,6 +515,46 @@ class ExecutionRepository:
             self._call_indices[state_id] += 1
             return idx
 
+    def _prepare_call_payloads(
+        self,
+        request_data: CallPayload,
+        response_data: CallPayload | None,
+        error: CallPayload | None,
+        request_ref: str | None,
+        response_ref: str | None,
+    ) -> _PreparedCallData:
+        """Serialize, hash, and auto-persist call payloads.
+
+        Shared logic for record_call() and record_operation_call(). Converts
+        CallPayload objects to dicts, computes stable hashes, auto-persists
+        to the payload store when available, and serializes error payloads.
+        """
+        request_dict = request_data.to_dict()
+        response_dict = response_data.to_dict() if response_data is not None else None
+
+        request_hash = stable_hash(request_dict)
+        response_hash = stable_hash(response_dict) if response_dict is not None else None
+
+        # Auto-persist request to payload store if available and ref not provided
+        if request_ref is None and self._payload_store is not None:
+            request_bytes = canonical_json(request_dict).encode("utf-8")
+            request_ref = self._payload_store.store(request_bytes)
+
+        # Auto-persist response to payload store if available and ref not provided
+        if response_dict is not None and response_ref is None and self._payload_store is not None:
+            response_bytes = canonical_json(response_dict).encode("utf-8")
+            response_ref = self._payload_store.store(response_bytes)
+
+        error_json = canonical_json(error.to_dict()) if error is not None else None
+
+        return _PreparedCallData(
+            request_hash=request_hash,
+            request_ref=request_ref,
+            response_hash=response_hash,
+            response_ref=response_ref,
+            error_json=error_json,
+        )
+
     def record_call(
         self,
         state_id: str,
@@ -543,31 +593,13 @@ class ExecutionRepository:
         """
         call_id = generate_id()
         timestamp = now()
-
-        # Serialize CallPayload → dict at the recorder boundary
-        request_dict = request_data.to_dict()
-        response_dict = response_data.to_dict() if response_data is not None else None
-
-        # Hash request (always required)
-        request_hash = stable_hash(request_dict)
-
-        # Hash response (optional - None for errors without response)
-        response_hash = stable_hash(response_dict) if response_dict is not None else None
-
-        # Auto-persist request to payload store if available and ref not provided
-        # This enables replay/verify modes to retrieve the original request
-        if request_ref is None and self._payload_store is not None:
-            request_bytes = canonical_json(request_dict).encode("utf-8")
-            request_ref = self._payload_store.store(request_bytes)
-
-        # Auto-persist response to payload store if available and ref not provided
-        # This enables replay/verify modes to retrieve the original response
-        if response_dict is not None and response_ref is None and self._payload_store is not None:
-            response_bytes = canonical_json(response_dict).encode("utf-8")
-            response_ref = self._payload_store.store(response_bytes)
-
-        # Serialize error if present (CallPayload → dict → JSON)
-        error_json = canonical_json(error.to_dict()) if error is not None else None
+        prepared = self._prepare_call_payloads(
+            request_data,
+            response_data,
+            error,
+            request_ref,
+            response_ref,
+        )
 
         values = {
             "call_id": call_id,
@@ -576,11 +608,11 @@ class ExecutionRepository:
             "call_index": call_index,
             "call_type": call_type,
             "status": status,
-            "request_hash": request_hash,
-            "request_ref": request_ref,
-            "response_hash": response_hash,
-            "response_ref": response_ref,
-            "error_json": error_json,
+            "request_hash": prepared.request_hash,
+            "request_ref": prepared.request_ref,
+            "response_hash": prepared.response_hash,
+            "response_ref": prepared.response_ref,
+            "error_json": prepared.error_json,
             "latency_ms": latency_ms,
             "created_at": timestamp,
         }
@@ -590,16 +622,16 @@ class ExecutionRepository:
         return Call(
             call_id=call_id,
             call_index=call_index,
-            call_type=call_type,  # Pass enum directly per Call contract
-            status=status,  # Pass enum directly per Call contract
-            request_hash=request_hash,
+            call_type=call_type,
+            status=status,
+            request_hash=prepared.request_hash,
             created_at=timestamp,
-            state_id=state_id,  # Parent is node_state
-            operation_id=None,  # Not an operation call
-            request_ref=request_ref,
-            response_hash=response_hash,
-            response_ref=response_ref,
-            error_json=error_json,
+            state_id=state_id,
+            operation_id=None,
+            request_ref=prepared.request_ref,
+            response_hash=prepared.response_hash,
+            response_ref=prepared.response_ref,
+            error_json=prepared.error_json,
             latency_ms=latency_ms,
         )
 
@@ -756,7 +788,6 @@ class ExecutionRepository:
         *,
         request_ref: str | None = None,
         response_ref: str | None = None,
-        provider: str | None = None,
     ) -> Call:
         """Record an external call made during an operation.
 
@@ -773,7 +804,6 @@ class ExecutionRepository:
             latency_ms: Call duration in milliseconds
             request_ref: Optional payload store reference for request
             response_ref: Optional payload store reference for response
-            provider: Optional provider name for telemetry
 
         Returns:
             The recorded Call model
@@ -781,29 +811,13 @@ class ExecutionRepository:
         call_index = self.allocate_operation_call_index(operation_id)
         call_id = f"call_{operation_id}_{call_index}"
         timestamp = now()
-
-        # Serialize CallPayload → dict at the recorder boundary
-        request_dict = request_data.to_dict()
-        response_dict = response_data.to_dict() if response_data is not None else None
-
-        # Hash request (always required)
-        request_hash = stable_hash(request_dict)
-
-        # Hash response (optional - None for errors without response)
-        response_hash = stable_hash(response_dict) if response_dict is not None else None
-
-        # Auto-persist request to payload store if available and ref not provided
-        if request_ref is None and self._payload_store is not None:
-            request_bytes = canonical_json(request_dict).encode("utf-8")
-            request_ref = self._payload_store.store(request_bytes)
-
-        # Auto-persist response to payload store if available and ref not provided
-        if response_dict is not None and response_ref is None and self._payload_store is not None:
-            response_bytes = canonical_json(response_dict).encode("utf-8")
-            response_ref = self._payload_store.store(response_bytes)
-
-        # Serialize error if present (CallPayload → dict → JSON)
-        error_json = canonical_json(error.to_dict()) if error is not None else None
+        prepared = self._prepare_call_payloads(
+            request_data,
+            response_data,
+            error,
+            request_ref,
+            response_ref,
+        )
 
         values = {
             "call_id": call_id,
@@ -812,11 +826,11 @@ class ExecutionRepository:
             "call_index": call_index,
             "call_type": call_type,
             "status": status,
-            "request_hash": request_hash,
-            "request_ref": request_ref,
-            "response_hash": response_hash,
-            "response_ref": response_ref,
-            "error_json": error_json,
+            "request_hash": prepared.request_hash,
+            "request_ref": prepared.request_ref,
+            "response_hash": prepared.response_hash,
+            "response_ref": prepared.response_ref,
+            "error_json": prepared.error_json,
             "latency_ms": latency_ms,
             "created_at": timestamp,
         }
@@ -828,14 +842,14 @@ class ExecutionRepository:
             call_index=call_index,
             call_type=call_type,
             status=status,
-            request_hash=request_hash,
+            request_hash=prepared.request_hash,
             created_at=timestamp,
-            state_id=None,  # Not a node_state call
-            operation_id=operation_id,  # Parent is operation
-            request_ref=request_ref,
-            response_hash=response_hash,
-            response_ref=response_ref,
-            error_json=error_json,
+            state_id=None,
+            operation_id=operation_id,
+            request_ref=prepared.request_ref,
+            response_hash=prepared.response_hash,
+            response_ref=prepared.response_ref,
+            error_json=prepared.error_json,
             latency_ms=latency_ms,
         )
 

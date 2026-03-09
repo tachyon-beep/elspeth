@@ -282,7 +282,6 @@ class PluginContext:
                 response_data=RawCallPayload(response_data) if response_data is not None else None,
                 error=RawCallPayload(error) if error is not None else None,
                 latency_ms=latency_ms,
-                provider=provider,
             )
             parent_id = self.operation_id
 

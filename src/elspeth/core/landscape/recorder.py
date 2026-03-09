@@ -510,7 +510,6 @@ class LandscapeRecorder:
         *,
         request_ref: str | None = None,
         response_ref: str | None = None,
-        provider: str | None = None,
     ) -> Call:
         """Record an external call for an operation. Delegates to ExecutionRepository."""
         return self._execution.record_operation_call(
@@ -523,7 +522,6 @@ class LandscapeRecorder:
             latency_ms,
             request_ref=request_ref,
             response_ref=response_ref,
-            provider=provider,
         )
 
     def get_operation(self, operation_id: str) -> Operation | None:
