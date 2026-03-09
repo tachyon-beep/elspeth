@@ -804,10 +804,10 @@ class TestPurgeGradeUpdateFailureResilience:
         # Payloads were still deleted (irreversible)
         assert result.deleted_count == 1
 
-    def test_grade_update_failures_logged(
-        self, db: LandscapeDB, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
-    ) -> None:
+    def test_grade_update_failures_logged(self, db: LandscapeDB, monkeypatch: pytest.MonkeyPatch) -> None:
         """Grade update failures must be logged with structlog."""
+        import structlog.testing
+
         from elspeth.contracts.errors import AuditIntegrityError
 
         store = _ControlledStore()
@@ -828,12 +828,14 @@ class TestPurgeGradeUpdateFailureResilience:
             _always_fail,
         )
 
-        result = manager.purge_payloads([ref])
-        captured = capsys.readouterr()
+        with structlog.testing.capture_logs() as cap_logs:
+            result = manager.purge_payloads([ref])
 
         assert result.grade_update_failures == ("run-fail",)
-        assert "grade_update_failed" in captured.out
-        assert "run-fail" in captured.out
+        log_events = [e["event"] for e in cap_logs]
+        assert "grade_update_failed" in log_events
+        failed_log = next(e for e in cap_logs if e["event"] == "grade_update_failed")
+        assert failed_log["run_id"] == "run-fail"
 
 
 class TestPurgeUnboundedIN:
