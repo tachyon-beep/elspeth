@@ -258,7 +258,7 @@ class RunLifecycleRepository:
         """Get source field resolution mapping for a run.
 
         Returns the mapping from original header names to final (normalized) field names.
-        Used by sinks with restore_source_headers=True to restore original headers.
+        Used by sinks with headers: original to restore original headers.
 
         Args:
             run_id: Run to query

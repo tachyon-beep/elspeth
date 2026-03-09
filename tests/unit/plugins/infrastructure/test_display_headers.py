@@ -67,8 +67,8 @@ class TestGetEffectiveDisplayHeaders:
 
         sink = _StubSink(HeaderMode.ORIGINAL)
         contract = SchemaContract(
-            mode="observed",
-            fields=[
+            mode="OBSERVED",
+            fields=(
                 FieldContract(
                     normalized_name="amount",
                     original_name="Amount USD",
@@ -76,7 +76,7 @@ class TestGetEffectiveDisplayHeaders:
                     required=True,
                     source="declared",
                 ),
-            ],
+            ),
         )
         sink.set_output_contract(contract)
         result = get_effective_display_headers(sink)
@@ -230,6 +230,22 @@ class TestResolveDisplayHeadersIfNeeded:
         assert sink._resolved_display_headers == {"amount_usd": "Amount USD"}
         assert sink._display_headers_resolved is True
 
+    def test_duplicate_normalized_names_raises(self) -> None:
+        """Landscape returns mapping where two originals collapse to same normalized name."""
+        from elspeth.plugins.infrastructure.display_headers import (
+            resolve_display_headers_if_needed,
+        )
+
+        sink = _StubSink(HeaderMode.ORIGINAL)
+        ctx = MagicMock()
+        ctx.landscape.get_source_field_resolution.return_value = {
+            "Amount A": "amount",
+            "Amount B": "amount",  # Duplicate normalized name
+        }
+        ctx.run_id = "run-1"
+        with pytest.raises(ValueError, match="duplicate normalized names"):
+            resolve_display_headers_if_needed(sink, ctx)
+
 
 class TestSetResumeFieldResolution:
     """Test set_resume_field_resolution."""
@@ -252,6 +268,16 @@ class TestSetResumeFieldResolution:
         sink = _StubSink(HeaderMode.NORMALIZED)
         set_resume_field_resolution(sink, {"Amount USD": "amount_usd"})
         assert sink._resolved_display_headers is None
+
+    def test_duplicate_normalized_names_raises(self) -> None:
+        """Two original names mapping to same normalized name is a data integrity issue."""
+        from elspeth.plugins.infrastructure.display_headers import (
+            set_resume_field_resolution,
+        )
+
+        sink = _StubSink(HeaderMode.ORIGINAL)
+        with pytest.raises(ValueError, match="duplicate normalized names"):
+            set_resume_field_resolution(sink, {"A": "same", "B": "same"})
 
 
 class TestApplyDisplayHeaders:

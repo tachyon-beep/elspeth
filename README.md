@@ -383,18 +383,18 @@ sinks:
       path: output/results.csv
 
       # Option 1: Explicit mapping (full control)
-      display_headers:
+      headers:
         user_id: "User ID"
         amount: "Transaction Amount"
 
       # Option 2: Auto-restore from source (convenience)
-      # restore_source_headers: true
+      # headers: original
 ```
 
-| Option                   | Use When                                                          |
-| ------------------------ | ----------------------------------------------------------------- |
-| `display_headers`        | You need custom output names or don't want source coupling        |
-| `restore_source_headers` | You want to restore exact original headers from normalized source |
+| Option              | Use When                                                          |
+| ------------------- | ----------------------------------------------------------------- |
+| `headers: {map}`    | You need custom output names or don't want source coupling        |
+| `headers: original` | You want to restore exact original headers from normalized source |
 
 Transform-added fields (not in source) use their normalized names when restoring.
 

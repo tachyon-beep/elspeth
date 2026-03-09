@@ -461,6 +461,10 @@ class TestSinkProtocol:
             def set_resume_field_resolution(self, resolution_mapping: dict[str, str]) -> None:
                 pass  # Not needed for this test sink
 
+            @property
+            def needs_resume_field_resolution(self) -> bool:
+                return False
+
         sink = BatchMemorySink({})
         # Verify protocol conformance at runtime (see test_source_protocol_conformance).
         _conforms = isinstance(sink, SinkProtocol)
@@ -530,6 +534,10 @@ class TestSinkProtocol:
 
             def set_resume_field_resolution(self, resolution_mapping: dict[str, str]) -> None:
                 pass  # Not needed for this test sink
+
+            @property
+            def needs_resume_field_resolution(self) -> bool:
+                return False
 
         sink = MemorySink({})
 
