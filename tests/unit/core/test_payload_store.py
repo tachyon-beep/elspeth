@@ -66,14 +66,18 @@ class TestFilesystemPayloadStore:
         # Use valid hex format that doesn't exist in store
         assert store.exists("a" * 64) is False
 
-    def test_retrieve_nonexistent_raises(self, tmp_path: Path) -> None:
+    def test_retrieve_nonexistent_raises_payload_not_found_error(self, tmp_path: Path) -> None:
+        from elspeth.contracts.payload_store import PayloadNotFoundError
         from elspeth.core.payload_store import FilesystemPayloadStore
 
         store = FilesystemPayloadStore(base_path=tmp_path)
+        fake_hash = "b" * 64
 
-        # Use valid hex format that doesn't exist in store
-        with pytest.raises(KeyError):
-            store.retrieve("b" * 64)
+        with pytest.raises(PayloadNotFoundError) as exc_info:
+            store.retrieve(fake_hash)
+
+        assert exc_info.value.content_hash == fake_hash
+        assert fake_hash in str(exc_info.value)
 
     def test_store_is_idempotent(self, tmp_path: Path) -> None:
         from elspeth.core.payload_store import FilesystemPayloadStore

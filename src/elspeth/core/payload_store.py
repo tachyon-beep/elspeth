@@ -15,6 +15,7 @@ import tempfile
 from pathlib import Path
 
 import elspeth.contracts.payload_store as payload_contracts
+from elspeth.contracts.payload_store import PayloadNotFoundError
 
 __all__ = ["FilesystemPayloadStore"]
 
@@ -137,14 +138,14 @@ class FilesystemPayloadStore:
         """Retrieve content by hash with integrity verification.
 
         Raises:
-            KeyError: If content not found
+            PayloadNotFoundError: If content not found
             IntegrityError: If content doesn't match expected hash
         """
         path = self._path_for_hash(content_hash)
         try:
             content = path.read_bytes()
         except FileNotFoundError as exc:
-            raise KeyError(f"Payload not found: {content_hash}") from exc
+            raise PayloadNotFoundError(content_hash) from exc
         actual_hash = hashlib.sha256(content).hexdigest()
 
         # Use timing-safe comparison to prevent timing attacks that could

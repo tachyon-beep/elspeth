@@ -172,20 +172,24 @@ class TestIntegrityVerificationProperties:
 
     @given(content=nonempty_binary)
     @settings(max_examples=100)
-    def test_retrieve_nonexistent_raises_keyerror(self, content: bytes) -> None:
-        """Property: Retrieving non-existent content raises KeyError.
+    def test_retrieve_nonexistent_raises_payload_not_found_error(self, content: bytes) -> None:
+        """Property: Retrieving non-existent content raises PayloadNotFoundError.
 
         The store should not return garbage or empty bytes for
         content that doesn't exist.
         """
+        from elspeth.contracts.payload_store import PayloadNotFoundError
+
         with tempfile.TemporaryDirectory() as tmp_dir:
             store = FilesystemPayloadStore(Path(tmp_dir) / "payloads")
 
             # Generate hash without storing
             fake_hash = hashlib.sha256(content).hexdigest()
 
-            with pytest.raises(KeyError):
+            with pytest.raises(PayloadNotFoundError) as exc_info:
                 store.retrieve(fake_hash)
+
+            assert exc_info.value.content_hash == fake_hash
 
     @given(content=nonempty_binary)
     @settings(max_examples=50)
