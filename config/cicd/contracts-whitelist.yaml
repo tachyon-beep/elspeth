@@ -59,8 +59,8 @@ allowed_dict_patterns:
   - "src/elspeth/plugins/sinks/csv_sink.py:CSVSink._get_field_names_and_display:row"
   - "src/elspeth/plugins/sinks/json_sink.py:JSONSink.write:rows (list)"
   - "src/elspeth/plugins/sinks/json_sink.py:JSONSink._write_jsonl_batch:rows (list)"
-  - "src/elspeth/plugins/sinks/json_sink.py:JSONSink._apply_display_headers:rows (list)"
-  - "src/elspeth/plugins/sinks/json_sink.py:JSONSink._apply_display_headers:return (list)"
+  - "src/elspeth/plugins/infrastructure/display_headers.py:apply_display_headers:rows (list)"
+  - "src/elspeth/plugins/infrastructure/display_headers.py:apply_display_headers:return (list)"
 
   # Source plugins - row validation
   - "src/elspeth/plugins/sources/json_source.py:JSONSource._validate_and_yield:row"
@@ -275,8 +275,6 @@ allowed_dict_patterns:
   - "src/elspeth/plugins/sinks/azure_blob_sink.py:AzureBlobSink._serialize_jsonl:rows (list)"
   - "src/elspeth/plugins/sinks/azure_blob_sink.py:AzureBlobSink.write:rows (list)"
   - "src/elspeth/plugins/sinks/azure_blob_sink.py:AzureBlobSink._get_field_names_and_display:rows (list)"
-  - "src/elspeth/plugins/sinks/azure_blob_sink.py:AzureBlobSink._apply_display_headers:rows (list)"
-  - "src/elspeth/plugins/sinks/azure_blob_sink.py:AzureBlobSink._apply_display_headers:return (list)"
 
   # Azure safety transforms (base + content_safety + prompt_shield)
   - "src/elspeth/plugins/transforms/azure/base.py:BaseAzureSafetyTransform.__init__:config"

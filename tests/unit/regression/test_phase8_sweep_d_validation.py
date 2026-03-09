@@ -122,13 +122,19 @@ class TestJsonSinkHeaderCollision:
 
     def test_display_header_collision_raises(self) -> None:
         """Two fields mapping to same display name should raise ValueError."""
-        from elspeth.plugins.sinks.json_sink import JSONSink
+        from elspeth.contracts.header_modes import HeaderMode
+        from elspeth.plugins.infrastructure.display_headers import apply_display_headers
 
-        sink = JSONSink.__new__(JSONSink)
-        sink._get_effective_display_headers = MagicMock(return_value={"field_a": "Output", "field_b": "Output"})  # type: ignore[method-assign]
+        # Minimal stub satisfying DisplayHeaderHost protocol
+        stub = MagicMock()
+        stub._headers_mode = HeaderMode.CUSTOM
+        stub._headers_custom_mapping = {"field_a": "Output", "field_b": "Output"}
+        stub._resolved_display_headers = None
+        stub._display_headers_resolved = True
+        stub._output_contract = None
 
         with pytest.raises(ValueError, match="Header collision"):
-            sink._apply_display_headers([{"field_a": 1, "field_b": 2}])
+            apply_display_headers(stub, [{"field_a": 1, "field_b": 2}])
 
 
 class TestBatchReplicateMaxCopies:

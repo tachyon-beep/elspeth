@@ -42,6 +42,7 @@ from elspeth.contracts.schema_contract import PipelineRow
 
 if TYPE_CHECKING:
     from elspeth.contracts.contexts import LifecycleContext, SinkContext, SourceContext, TransformContext
+    from elspeth.contracts.header_modes import HeaderMode
     from elspeth.contracts.schema_contract import SchemaContract
     from elspeth.contracts.sink import OutputValidationResult
 from elspeth.plugins.infrastructure.results import (
@@ -413,20 +414,40 @@ class BaseSink(ABC):
 
         return OutputValidationResult.success()
 
+    @property
+    def needs_resume_field_resolution(self) -> bool:
+        """Whether this sink needs field resolution mapping for resume.
+
+        True when headers mode is ORIGINAL — the CLI resume path must
+        provide the source field resolution mapping before validation.
+
+        Set by init_display_headers(). Sinks that don't use display headers
+        return False (the default).
+        """
+        return getattr(self, "_needs_resume_field_resolution", False)
+
     def set_resume_field_resolution(self, resolution_mapping: dict[str, str]) -> None:
         """Set field resolution mapping for resume validation.
 
-        Default is a no-op. Only sinks that support restore_source_headers
-        (CSVSink, JSONSink) override this to use the mapping for validation.
+        Default is a no-op. Only sinks with headers: original mode
+        override this to use the mapping for validation.
 
         Args:
             resolution_mapping: Dict mapping original header name -> normalized field name.
         """
-        # Intentional no-op - most sinks don't use restore_source_headers
+        # Intentional no-op - most sinks don't use headers: original
         _ = resolution_mapping  # Explicitly consume the argument
 
     # Output contract for schema-aware sinks
     _output_contract: SchemaContract | None = None
+
+    # Display header state — set by init_display_headers() in subclass __init__.
+    # Declared here for mypy structural typing against DisplayHeaderHost protocol.
+    _headers_mode: HeaderMode
+    _headers_custom_mapping: dict[str, str] | None
+    _resolved_display_headers: dict[str, str] | None
+    _display_headers_resolved: bool
+    _needs_resume_field_resolution: bool
 
     def __init__(self, config: dict[str, Any]) -> None:
         """Initialize with configuration.

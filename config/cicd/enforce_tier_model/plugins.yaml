@@ -262,3 +262,13 @@ allow_hits:
   reason: Worker thread can raise any exception type — must catch broadly to prevent buffer slot leak
   safety: Exception converted to TransformResult.error (row gets quarantined), buffer stays consistent
   expires: '2026-06-08'
+- key: plugins/sinks/azure_blob_sink.py:R5:AzureBlobSinkConfig:headers_mapping:fp=6d360eee7a8a7185
+  owner: refactor
+  reason: isinstance(dict) check for config field type discrimination — same pattern as SinkPathConfig.headers_mapping
+  safety: Config validated by Pydantic before this property runs; isinstance only distinguishes dict from str
+  expires: null
+- key: plugins/infrastructure/base.py:R2:BaseSink:needs_resume_field_resolution:fp=370e5892f2b48c89
+  owner: refactor
+  reason: getattr default for sinks that don't call init_display_headers (e.g. DatabaseSink)
+  safety: Returns False (safe default); attribute always exists for sinks using display headers
+  expires: null

@@ -83,8 +83,8 @@ def export_landscape(
     sink = sinks[sink_name]
 
     # Create context for sink writes.
-    # LandscapeRecorder is needed by sinks that restore source headers
-    # (restore_source_headers=True calls ctx.landscape.get_source_field_resolution).
+    # LandscapeRecorder is needed by sinks with headers: original mode
+    # (ctx.landscape.get_source_field_resolution is called during lazy resolution).
     # Import inside function body to avoid circular imports (see module docstring).
     from elspeth.core.landscape.recorder import LandscapeRecorder
 

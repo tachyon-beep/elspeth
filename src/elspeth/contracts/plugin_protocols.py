@@ -13,6 +13,7 @@ from collections.abc import Iterator, Mapping
 from typing import TYPE_CHECKING, Any, Protocol, runtime_checkable
 
 from elspeth.contracts.enums import Determinism
+from elspeth.contracts.header_modes import HeaderMode
 
 if TYPE_CHECKING:
     from elspeth.contracts.contexts import LifecycleContext, SinkContext, SourceContext, TransformContext
@@ -521,20 +522,50 @@ class SinkProtocol(Protocol):
         """
         ...
 
+    @property
+    def needs_resume_field_resolution(self) -> bool:
+        """Whether this sink needs field resolution mapping for resume.
+
+        True when headers mode is ORIGINAL — the CLI resume path must
+        provide the source field resolution mapping before validation.
+        """
+        ...
+
     def set_resume_field_resolution(self, resolution_mapping: dict[str, str]) -> None:
         """Set field resolution mapping for resume validation.
 
         Called by CLI during `elspeth resume` to provide the source field resolution
         mapping BEFORE calling validate_output_target(). This allows sinks using
-        restore_source_headers=True to correctly compare expected display names
-        against existing file headers.
+        headers: original to correctly compare expected display names against
+        existing file headers.
 
         Args:
             resolution_mapping: Dict mapping original header name -> normalized field name.
                 This is the same format returned by Landscape.get_source_field_resolution().
 
         Note:
-            Default is a no-op. Only sinks that support restore_source_headers need
-            to override this (CSVSink, JSONSink).
+            Default is a no-op. Only sinks configured with headers: original need
+            to override this.
         """
         ...
+
+
+class DisplayHeaderHost(Protocol):
+    """Structural type for sinks that use display header functions.
+
+    Any sink that calls init_display_headers() will satisfy this protocol.
+    Provides type safety for the display_headers module functions instead
+    of using Any. This is an internal protocol — engine and CLI code should
+    use SinkProtocol, not this.
+
+    NOT @runtime_checkable — the protocol's members are private attributes,
+    and isinstance() only checks method signatures, not attribute presence.
+    Use mypy structural checking instead.
+    """
+
+    _headers_mode: HeaderMode
+    _headers_custom_mapping: dict[str, str] | None
+    _resolved_display_headers: dict[str, str] | None
+    _display_headers_resolved: bool
+    _needs_resume_field_resolution: bool
+    _output_contract: Any  # SchemaContract | None — Any to avoid circular import
