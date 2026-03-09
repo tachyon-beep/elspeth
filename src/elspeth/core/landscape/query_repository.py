@@ -155,6 +155,10 @@ class QueryRepository:
         if self._payload_store is None:
             raise ValueError("Cannot retrieve payload: payload store not configured")
 
+        # PayloadIntegrityError = hash mismatch (corruption/tampering),
+        # OSError = storage backend failure. Both translate to
+        # AuditIntegrityError with context, matching
+        # execution_repository.get_call_response_data().
         try:
             payload_bytes = self._payload_store.retrieve(source_data_ref)
         except PayloadIntegrityError as e:

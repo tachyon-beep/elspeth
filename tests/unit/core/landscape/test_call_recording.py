@@ -941,3 +941,36 @@ class TestGetCallResponseData:
         assert result.state == CallDataState.AVAILABLE
         assert result.data is not None
         assert result.data["text"] == "world"
+
+    def test_payload_integrity_error_raises_audit_integrity(self, tmp_path):
+        """PayloadIntegrityError (hash mismatch) must translate to AuditIntegrityError with context."""
+        from unittest.mock import MagicMock
+
+        from elspeth.contracts.errors import AuditIntegrityError
+        from elspeth.contracts.payload_store import IntegrityError as PayloadIntegrityError
+
+        db = make_landscape_db()
+        mock_store = MagicMock()
+        # store() succeeds during recording, retrieve() fails with hash mismatch
+        mock_store.store.return_value = "sha256-abc123"
+        mock_store.retrieve.side_effect = PayloadIntegrityError("hash mismatch: expected abc, got def")
+        recorder = LandscapeRecorder(db, payload_store=mock_store)
+        recorder.begin_run(config={}, canonical_version="v1", run_id="run-1")
+        register_test_node(recorder, "run-1", "source-0", node_type=NodeType.SOURCE, plugin_name="csv")
+        register_test_node(recorder, "run-1", "transform-1", plugin_name="transform")
+        recorder.create_row("run-1", "source-0", 0, {"name": "test"}, row_id="row-1")
+        recorder.create_token("row-1", token_id="tok-1")
+        state = recorder.begin_node_state("tok-1", "transform-1", "run-1", 0, {"name": "test"}, state_id="state-1")
+
+        idx = recorder.allocate_call_index(state.state_id)
+        call = recorder.record_call(
+            state.state_id,
+            idx,
+            CallType.LLM,
+            CallStatus.SUCCESS,
+            request_data=RawCallPayload({"prompt": "hello"}),
+            response_data=RawCallPayload({"text": "world"}),
+        )
+
+        with pytest.raises(AuditIntegrityError, match="Payload integrity check failed for call_id="):
+            recorder.get_call_response_data(call.call_id)

@@ -39,6 +39,7 @@ from elspeth.contracts import (
 from elspeth.contracts.call_data import CallPayload
 from elspeth.contracts.errors import AuditIntegrityError, ExecutionError, TransformErrorReason
 from elspeth.contracts.hashing import repr_hash
+from elspeth.contracts.payload_store import IntegrityError as PayloadIntegrityError
 from elspeth.core.canonical import canonical_json, stable_hash
 from elspeth.core.landscape._database_ops import DatabaseOps
 from elspeth.core.landscape._helpers import generate_id, now
@@ -981,11 +982,16 @@ class ExecutionRepository:
             return CallDataResult(state=CallDataState.STORE_NOT_CONFIGURED, data=None)
 
         # Retrieve from payload store — KeyError means purged by retention policy,
-        # OSError means storage backend failure (permissions, disk, etc.)
+        # PayloadIntegrityError means hash mismatch (corruption/tampering),
+        # OSError means storage backend failure (permissions, disk, etc.).
+        # All non-KeyError paths translate to AuditIntegrityError with context,
+        # matching query_repository._retrieve_and_parse_payload().
         try:
             payload_bytes = self._payload_store.retrieve(row.response_ref)
         except KeyError:
             return CallDataResult(state=CallDataState.PURGED, data=None)
+        except PayloadIntegrityError as e:
+            raise AuditIntegrityError(f"Payload integrity check failed for call_id={call_id} (ref={row.response_ref}): {e}") from e
         except OSError as e:
             raise AuditIntegrityError(
                 f"Payload retrieval failed for call_id={call_id} (ref={row.response_ref}): {type(e).__name__}: {e}"
