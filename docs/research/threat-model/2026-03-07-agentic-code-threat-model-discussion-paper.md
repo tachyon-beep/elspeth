@@ -126,6 +126,10 @@ Legacy systems often encode implicit trust boundaries in their rigidity — a CO
 
 A second shift compounds the review-surface problem. Agentic tooling is changing not only how fast code is produced, but *who produces it*. A business analyst generating plugins for a BI platform, an operations officer assembling workflow automations, or a policy team building internal tools with agent assistance may not regard themselves as software developers, yet they are producing executable logic that can affect trust boundaries, audit trails, access control, and data integrity.
 
+Consider a scenario most people who have worked in government IT will recognise in some form: a business analyst — someone the organisation already trusts with direct database access, because they have the domain knowledge and the legitimate need — uses an agentic tool to build a data integration plugin for the team's reporting platform. The plugin works. It pulls records from the project database using the analyst's own credentials, transforms them, and populates a dashboard the team has wanted for months. What nobody outside the team realises is that the plugin holds open long-running queries during business hours, and — because the agent defaulted to the pattern it learned from thousands of Stack Overflow examples — silently handles connection failures by writing partial results without any indication that data is missing. Three months later, someone asks why the project database has been intermittently locking up, and the investigation eventually traces it to a plugin that nobody in IT knew existed, built by someone who never filed a change request because they didn't think of what they'd done as "software development."
+
+There was no privilege escalation — the analyst already had the access. There was no negligence — they used a tool to do exactly the kind of work they were hired to do. The person simply had a new capability — turning domain knowledge into executable logic — that the organisation's governance model didn't account for. And, critically, the people most likely to reach for these tools are domain specialists — business analysts, database administrators, data engineers, operations staff — who are *not* developers but who typically hold *more* data access permissions than developers do, precisely because they are trusted to work directly with the systems they understand.
+
 This widens the threat surface beyond formal engineering teams. Every governance model examined in this paper — the ISM's software development controls, the SSDF's practice groups, IRAP assessment scoping — assumes that consequential code enters systems through recognised SDLC channels: repositories, pull requests, code review gates, CI/CD pipelines. When executable logic is produced by non-developers outside those channels, it bypasses the controls entirely — not through evasion, but because the governance perimeter was drawn around "software development" and the new production doesn't cross that line in any way the organisation recognises.
 
 The problem is therefore not only that frontier engineering teams can generate reviewable artefacts faster than assurance processes can absorb them (a **volume problem** inside the SDLC), but that organisations increasingly contain many more software producers than their assurance processes recognise (a **perimeter problem** around the SDLC). One breaks the volume model. The other breaks the governance boundary model. Together, they are materially worse than either alone.
@@ -252,12 +256,12 @@ The three versions illustrate a spectrum. The offensive version turns a crash in
 The agent-generated version:
 
 - Is syntactically valid Python
-- Passes every unit test (tests probably don't include "field missing" cases, because why would they?)
+- Passes every unit test (the default prevents even downstream and integration tests from detecting a problem)
 - Follows the `.get()` pattern that appears in millions of Python files in the agent's training data
 - Would pass casual code review (it looks like defensive, robust coding)
 - Silently downgrades document classifications when data integrity failures occur
 
-This is not a hypothetical. This is the pattern that defensive programming produces *by default* in Python, and agents are trained on defensive Python.
+While the example is ficticious, this is the pattern that defensive programming produces *by default* in Python, and agents are trained on defensive Python.
 
 ### 2.4 What Is Fundamentally Different About Agentic Code
 
@@ -739,7 +743,22 @@ This gap is not surprising — agentic coding is a recent capability and guidanc
 - The failure modes are subtle (they pass all existing automated checks — Section 2.2)
 - The vocabulary for discussing these failures doesn't exist yet in policy contexts (this paper's taxonomy is a first attempt)
 
-### 6.6 Summary of Gaps
+### 6.6 Detection Coverage Is Worst Where Risk Is Highest
+
+Before listing the structural gaps, it is worth stating the detection picture plainly. The ACF taxonomy (Appendix A) catalogues thirteen agentic code failure modes. Of those thirteen:
+
+| Detection Level | Count | Implication |
+|----------------|-------|-------------|
+| **None** — no existing tool detects it | 5 | Requires new tooling or new review practices |
+| **Partial** — some tools catch some cases | 5 | Existing tools provide incomplete coverage |
+| **Good** — existing tools generally catch it | 1 | Already addressed by current tooling |
+| **N/A** — process threat, not code pattern | 2 | Requires process controls, not technical controls |
+
+Five of thirteen failure modes have zero tool coverage. Both Critical-rated entries — ACF-T1 (trust tier conflation) and ACF-E1 (implicit privilege escalation) — are among the five with no detection capability whatsoever. The highest-risk failures are precisely the ones current tooling misses entirely. The full detection breakdown with specific failure IDs is in Appendix A.
+
+This is the gap in quantitative terms. The structural gaps follow.
+
+### 6.7 Structural Gaps
 
 No current framework provides:
 
