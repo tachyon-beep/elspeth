@@ -196,6 +196,15 @@ class CoalesceCheckpointState:
             if not isinstance(key, tuple) or len(key) != 2 or not all(isinstance(s, str) for s in key):
                 raise ValueError(f"completed_keys[{i}] must be a 2-element (str, str) tuple, got {type(key).__name__}: {key!r}")
 
+    @property
+    def has_resumable_state(self) -> bool:
+        """Whether this checkpoint contains state needed for correct resume.
+
+        True when there are pending barriers OR completed keys that must
+        survive a checkpoint round-trip to detect late arrivals.
+        """
+        return bool(self.pending) or bool(self.completed_keys)
+
     def to_dict(self) -> dict[str, Any]:
         return {
             "_version": self.version,

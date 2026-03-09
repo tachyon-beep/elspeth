@@ -411,7 +411,7 @@ class Orchestrator:
                     token_id=token.token_id,
                     node_id=sink_node_id,
                     aggregation_state=agg_state,
-                    coalesce_state=coalesce_state if coalesce_state is not None and coalesce_state.pending else None,
+                    coalesce_state=coalesce_state if coalesce_state is not None and coalesce_state.has_resumable_state else None,
                 )
 
             return callback
@@ -442,8 +442,9 @@ class Orchestrator:
 
         aggregation_state = loop_ctx.processor.get_aggregation_checkpoint_state()
         raw_coalesce = loop_ctx.processor.get_coalesce_checkpoint_state()
-        # Only persist coalesce state that has pending entries worth checkpointing
-        coalesce_state = raw_coalesce if raw_coalesce is not None and raw_coalesce.pending else None
+        # Persist coalesce state when it has pending barriers or completed keys
+        # needed for late-arrival detection on resume
+        coalesce_state = raw_coalesce if raw_coalesce is not None and raw_coalesce.has_resumable_state else None
 
         token_id: str | None = None
         node_id: str | None = None
@@ -454,7 +455,7 @@ class Orchestrator:
             token_id = agg_node_state.tokens[-1].token_id
             node_id = agg_node_id
             checkpoint_agg_state = aggregation_state
-        elif coalesce_state is not None:
+        elif coalesce_state is not None and coalesce_state.pending:
             pending_entry = coalesce_state.pending[-1]
             if pending_entry.branches:
                 last_branch = list(pending_entry.branches.values())[-1]

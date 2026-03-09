@@ -448,3 +448,46 @@ class TestCoalesceCheckpointStateFromDict:
         assert restored == original
         # Verify completed_keys are tuples after deserialization
         assert isinstance(restored.completed_keys[0], tuple)
+
+
+class TestHasResumableState:
+    """Tests for has_resumable_state property."""
+
+    def test_empty_state_is_not_resumable(self) -> None:
+        state = CoalesceCheckpointState(version="1.0", pending=(), completed_keys=())
+        assert state.has_resumable_state is False
+
+    def test_pending_only_is_resumable(self) -> None:
+        pending = CoalescePendingCheckpoint(
+            coalesce_name="merge_1",
+            row_id="row-1",
+            elapsed_age_seconds=0.0,
+            branches={},
+            lost_branches={},
+        )
+        state = CoalesceCheckpointState(version="1.0", pending=(pending,), completed_keys=())
+        assert state.has_resumable_state is True
+
+    def test_completed_keys_only_is_resumable(self) -> None:
+        """Regression: completed_keys without pending must still be resumable."""
+        state = CoalesceCheckpointState(
+            version="1.0",
+            pending=(),
+            completed_keys=(("merge_1", "row-1"),),
+        )
+        assert state.has_resumable_state is True
+
+    def test_both_pending_and_completed_keys_is_resumable(self) -> None:
+        pending = CoalescePendingCheckpoint(
+            coalesce_name="merge_1",
+            row_id="row-1",
+            elapsed_age_seconds=0.0,
+            branches={},
+            lost_branches={},
+        )
+        state = CoalesceCheckpointState(
+            version="1.0",
+            pending=(pending,),
+            completed_keys=(("merge_2", "row-2"),),
+        )
+        assert state.has_resumable_state is True
