@@ -18,6 +18,18 @@ class TestPayloadStoreProtocol:
         assert hasattr(PayloadStore, "exists")
         assert hasattr(PayloadStore, "delete")
 
+    def test_payload_not_found_error_is_not_a_keyerror(self) -> None:
+        """PayloadNotFoundError must NOT be catchable by except KeyError.
+
+        This is the whole point of the domain exception — callers that
+        catch KeyError (e.g. for dict lookups) must not accidentally
+        swallow a missing-payload condition.
+        """
+        from elspeth.contracts.payload_store import PayloadNotFoundError
+
+        assert not issubclass(PayloadNotFoundError, KeyError)
+        assert not issubclass(PayloadNotFoundError, LookupError)
+
 
 class TestFilesystemPayloadStore:
     """Test filesystem-based payload store."""

@@ -214,7 +214,7 @@ from elspeth.contracts.node_state_context import (
     PoolStatsSnapshot,
     QueryOrderEntry,
 )
-from elspeth.contracts.payload_store import IntegrityError, PayloadStore
+from elspeth.contracts.payload_store import IntegrityError, PayloadNotFoundError, PayloadStore
 from elspeth.contracts.plugin_context import (
     PluginContext,
     TransformErrorToken,
@@ -426,6 +426,7 @@ __all__ = [  # Grouped by category for readability
     "RetryPolicy",
     # payload_store
     "IntegrityError",
+    "PayloadNotFoundError",
     "PayloadStore",
     # contexts (phase-based protocols)
     "LifecycleContext",
