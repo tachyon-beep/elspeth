@@ -287,24 +287,13 @@ class TestExplainTokenMCPWrapper:
 
         assert result is None
 
-    @pytest.mark.xfail(
-        reason=(
-            "BUG: dataclass_to_dict does not convert tuples to lists of dicts. "
-            "LineageResult.routing_events is tuple[RoutingEvent, ...] which "
-            "passes through unconverted, causing TypeError on subscript access."
-        ),
-        raises=TypeError,
-        strict=True,
-    )
-    def test_explain_token_crashes_on_routing_events(self) -> None:
-        """explain_token crashes when routing_events is non-empty.
-
-        This documents the bug: dataclass_to_dict handles list but not tuple.
-        The fix is to add tuple handling in dataclass_to_dict.
-        """
+    def test_explain_token_with_routing_events(self) -> None:
+        """explain_token converts tuple[RoutingEvent, ...] to list of dicts."""
         p = _build_linear_pipeline()
-        # This should work but crashes due to the tuple conversion bug
-        explain_token(p["db"], p["recorder"], p["run_id"], token_id=p["token"].token_id)
+        result = explain_token(p["db"], p["recorder"], p["run_id"], token_id=p["token"].token_id)
+
+        assert result is not None
+        assert isinstance(result["routing_events"], list)
 
     def test_explain_token_works_without_routing_events(self) -> None:
         """explain_token succeeds when routing_events is empty (no conversion needed).
@@ -417,13 +406,7 @@ class TestGetFailureContext:
         assert result["patterns"]["validation_error_count"] == 1
 
     def test_failure_context_detects_retries(self) -> None:
-        """get_failure_context sets has_retries=True when attempt > 1.
-
-        NOTE: Production code uses ``attempt > 1`` which means attempts 0 and 1
-        are NOT considered retries. This is a potential off-by-one: attempt=0 is
-        the initial try, attempt=1 is the first retry, so ``attempt > 0`` would
-        be the correct threshold. We test the actual behavior here (attempt=2).
-        """
+        """get_failure_context sets has_retries=True when any attempt > 0."""
         setup = make_recorder_with_run(run_id="retry-run", source_node_id="src")
         db, recorder = setup.db, setup.recorder
 
@@ -453,6 +436,31 @@ class TestGetFailureContext:
         assert len(result["failed_node_states"]) == 3
         assert result["patterns"]["has_retries"] is True
         assert result["patterns"]["failure_count"] == 3
+
+    def test_failure_context_detects_first_retry(self) -> None:
+        """has_retries is True when only the first retry (attempt=1) exists."""
+        setup = make_recorder_with_run(run_id="first-retry-run", source_node_id="src")
+        db, recorder = setup.db, setup.recorder
+
+        register_test_node(recorder, "first-retry-run", "xform", node_type=NodeType.TRANSFORM, plugin_name="flaky")
+
+        row = recorder.create_row("first-retry-run", "src", row_index=0, data={"x": 1})
+        token = recorder.create_token(row.row_id)
+
+        # Attempt 0: initial try
+        ns0 = recorder.begin_node_state(token.token_id, "xform", "first-retry-run", step_index=1, input_data={"x": 1}, attempt=0)
+        recorder.complete_node_state(ns0.state_id, NodeStateStatus.FAILED, duration_ms=10.0, error={"reason": "test_failure"})
+
+        # Attempt 1: first retry — this alone should trigger has_retries
+        ns1 = recorder.begin_node_state(token.token_id, "xform", "first-retry-run", step_index=1, input_data={"x": 1}, attempt=1)
+        recorder.complete_node_state(ns1.state_id, NodeStateStatus.FAILED, duration_ms=10.0, error={"reason": "test_failure"})
+
+        recorder.record_token_outcome("first-retry-run", token.token_id, RowOutcome.FAILED, error_hash="e" * 64)
+        recorder.complete_run("first-retry-run", RunStatus.FAILED)
+
+        result = get_failure_context(db, recorder, "first-retry-run")
+
+        assert result["patterns"]["has_retries"] is True
 
     def test_failure_context_has_retries_false_for_single_attempt(self) -> None:
         """has_retries is False when all failures are attempt 0 (no retries)."""

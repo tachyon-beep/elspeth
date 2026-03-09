@@ -346,7 +346,7 @@ def get_failure_context(db: LandscapeDB, recorder: LandscapeRecorder, run_id: st
 
     # Identify patterns
     plugins_with_failures = list({s["plugin"] for s in failed_state_list if s["plugin"]})
-    has_retries = any(s["attempt"] > 1 for s in failed_state_list)
+    has_retries = any(s["attempt"] > 0 for s in failed_state_list)
 
     return {
         "run_id": run_id,

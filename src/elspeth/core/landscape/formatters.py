@@ -44,7 +44,7 @@ def serialize_datetime(obj: Any) -> Any:
         return obj.isoformat()
     if isinstance(obj, dict):
         return {k: serialize_datetime(v) for k, v in obj.items()}
-    if isinstance(obj, list):
+    if isinstance(obj, (list, tuple)):
         return [serialize_datetime(item) for item in obj]
     return obj
 
@@ -81,7 +81,7 @@ def dataclass_to_dict(obj: Any) -> Any:
             value = getattr(obj, field_name)
             if is_dataclass(value) and not isinstance(value, type):
                 result[field_name] = dataclass_to_dict(value)
-            elif isinstance(value, list):
+            elif isinstance(value, (list, tuple)):
                 result[field_name] = [dataclass_to_dict(item) for item in value]
             elif isinstance(value, Enum):
                 # Explicit Enum check instead of hasattr(value, "value")
