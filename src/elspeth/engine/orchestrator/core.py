@@ -390,6 +390,34 @@ class Orchestrator:
                 coalesce_state=coalesce_state,
             )
 
+    def _make_checkpoint_after_sink_factory(
+        self,
+        run_id: str,
+        processor: RowProcessor,
+    ) -> _CheckpointFactory:
+        """Create a per-sink checkpoint callback factory.
+
+        Returns a factory that, given a sink_node_id, produces a callback
+        invoked after each token is durably written to that sink.  Used by
+        both the normal execution path and the resume path.
+        """
+
+        def factory(sink_node_id: str) -> Callable[[TokenInfo], None]:
+            def callback(token: TokenInfo) -> None:
+                agg_state = processor.get_aggregation_checkpoint_state()
+                coalesce_state = processor.get_coalesce_checkpoint_state()
+                self._maybe_checkpoint(
+                    run_id=run_id,
+                    token_id=token.token_id,
+                    node_id=sink_node_id,
+                    aggregation_state=agg_state,
+                    coalesce_state=coalesce_state if coalesce_state is not None and coalesce_state.pending else None,
+                )
+
+            return callback
+
+        return factory
+
     def _checkpoint_interrupted_progress(
         self,
         run_id: str,
@@ -2409,29 +2437,13 @@ class Orchestrator:
 
             # 4. Sink writes — outside source_load track_operation context.
             # Each sink write has its own track_operation (sink_write) in SinkExecutor.
-            processor = run_ctx.processor
-
-            def checkpoint_after_sink(sink_node_id: str) -> Callable[[TokenInfo], None]:
-                def callback(token: TokenInfo) -> None:
-                    agg_state = processor.get_aggregation_checkpoint_state()
-                    coalesce_state = processor.get_coalesce_checkpoint_state()
-                    self._maybe_checkpoint(
-                        run_id=run_id,
-                        token_id=token.token_id,
-                        node_id=sink_node_id,
-                        aggregation_state=agg_state,
-                        coalesce_state=coalesce_state if coalesce_state is not None and coalesce_state.pending else None,
-                    )
-
-                return callback
-
             self._flush_and_write_sinks(
                 recorder,
                 run_id,
                 loop_ctx,
                 artifacts.sink_id_map,
                 loop_result.interrupted,
-                on_token_written_factory=checkpoint_after_sink,
+                on_token_written_factory=self._make_checkpoint_after_sink_factory(run_id, run_ctx.processor),
                 shutdown_checkpoint_source_id=artifacts.source_id,
             )
 
@@ -2765,29 +2777,13 @@ class Orchestrator:
             )
 
             # 4. Flush + write sinks with checkpoint advancement
-            processor = run_ctx.processor
-
-            def checkpoint_after_sink(sink_node_id: str) -> Callable[[TokenInfo], None]:
-                def callback(token: TokenInfo) -> None:
-                    agg_state = processor.get_aggregation_checkpoint_state()
-                    coalesce_state = processor.get_coalesce_checkpoint_state()
-                    self._maybe_checkpoint(
-                        run_id=run_id,
-                        token_id=token.token_id,
-                        node_id=sink_node_id,
-                        aggregation_state=agg_state,
-                        coalesce_state=coalesce_state if coalesce_state is not None and coalesce_state.pending else None,
-                    )
-
-                return callback
-
             self._flush_and_write_sinks(
                 recorder,
                 run_id,
                 loop_ctx,
                 artifacts.sink_id_map,
                 interrupted,
-                on_token_written_factory=checkpoint_after_sink,
+                on_token_written_factory=self._make_checkpoint_after_sink_factory(run_id, run_ctx.processor),
                 shutdown_checkpoint_source_id=artifacts.source_id,
             )
 
