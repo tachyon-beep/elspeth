@@ -318,9 +318,6 @@ class AzureBatchLLMTransform(BaseTransform):
         except (TypeError, AttributeError, KeyError, NameError):
             raise  # Programming errors in our Langfuse integration — crash to surface the bug
         except Exception as e:
-            import structlog
-
-            logger = structlog.get_logger(__name__)
             logger.warning("Failed to record Langfuse batch job", error=str(e), exc_info=True)
 
     def _get_client(self) -> Any:

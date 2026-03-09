@@ -7,19 +7,19 @@ ResponseFormat) used by both single and multi-query modes.
 
 from __future__ import annotations
 
-import logging
 import re
 from dataclasses import dataclass
 from enum import StrEnum
 from types import MappingProxyType
 from typing import Any
 
+import structlog
 from pydantic import Field, model_validator
 
 from elspeth.contracts.schema_contract import PipelineRow
 from elspeth.plugins.infrastructure.config_base import PluginConfig
 
-logger = logging.getLogger(__name__)
+logger = structlog.get_logger(__name__)
 
 
 class OutputFieldType(StrEnum):
@@ -245,9 +245,10 @@ def resolve_queries(
                 # Warn on reserved suffixes
                 if field.suffix in reserved_suffixes:
                     logger.warning(
-                        "Query '%s' output field suffix '%s' matches a reserved LLM suffix. This may cause output field conflicts.",
-                        spec.name,
-                        field.suffix,
+                        "reserved_suffix_conflict",
+                        query=spec.name,
+                        suffix=field.suffix,
+                        detail="Output field suffix matches a reserved LLM suffix, may cause conflicts",
                     )
                 # Check for cross-query output key collisions.
                 # Output keys are "{query_name}_{suffix}" (see MultiQueryStrategy),

@@ -10,12 +10,13 @@ to its output port. Could be a sink, could be another transform.
 
 from __future__ import annotations
 
-import logging
 import threading
 import traceback
 from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
 from typing import TYPE_CHECKING
+
+import structlog
 
 from elspeth.contracts.errors import AuditIntegrityError, FrameworkBugError
 from elspeth.plugins.infrastructure.batching.ports import OutputPort
@@ -33,7 +34,7 @@ if TYPE_CHECKING:
     from elspeth.contracts.identity import TokenInfo
     from elspeth.contracts.schema_contract import PipelineRow
 
-_logger = logging.getLogger(__name__)
+_logger = structlog.get_logger(__name__)
 
 
 class BatchTransformMixin:
@@ -266,9 +267,7 @@ class BatchTransformMixin:
             try:
                 self._batch_buffer.complete(ticket, (token, exception_result, state_id))
             except KeyError:
-                _logger.debug(
-                    "late_result_discarded", extra={"token_id": token.token_id, "state_id": state_id, "reason": "timeout_evicted"}
-                )
+                _logger.debug("late_result_discarded", token_id=token.token_id, state_id=state_id, reason="timeout_evicted")
             return
 
         # Mark complete — result will be released in FIFO order
@@ -277,7 +276,7 @@ class BatchTransformMixin:
         try:
             self._batch_buffer.complete(ticket, (token, result, state_id))
         except KeyError:
-            _logger.debug("late_result_discarded", extra={"token_id": token.token_id, "state_id": state_id, "reason": "timeout_evicted"})
+            _logger.debug("late_result_discarded", token_id=token.token_id, state_id=state_id, reason="timeout_evicted")
 
     def _release_loop(self) -> None:
         """Release thread: emit results in FIFO order to output port.

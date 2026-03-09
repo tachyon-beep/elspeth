@@ -10,12 +10,12 @@ from __future__ import annotations
 
 import io
 import json
-import logging
 import time
 from collections.abc import Iterator, Mapping
 from typing import TYPE_CHECKING, Any, Literal, Self
 
 import pandas as pd
+import structlog
 from pydantic import BaseModel, Field, ValidationError, field_validator, model_validator
 
 from elspeth.contracts import CallStatus, CallType, PluginSchema, SourceRow
@@ -31,7 +31,7 @@ from elspeth.plugins.sources.json_source import _reject_nonfinite_constant
 if TYPE_CHECKING:
     from azure.storage.blob import BlobClient
 
-logger = logging.getLogger(__name__)
+logger = structlog.get_logger(__name__)
 
 
 class CSVOptions(BaseModel):
@@ -476,10 +476,10 @@ class AzureBlobSource(BaseSource):
         else:
             size_str = f"{blob_size_kb:.1f} KB"
         logger.info(
-            "Downloaded blob '%s' from container '%s' (%s)",
-            self._blob_path,
-            self._container,
-            size_str,
+            "blob_downloaded",
+            blob_path=self._blob_path,
+            container=self._container,
+            size=size_str,
         )
 
         # Parse blob content based on format
@@ -616,7 +616,7 @@ class AzureBlobSource(BaseSource):
 
         # Log row count for operator visibility
         row_count = len(df)
-        logger.info("Parsed %d rows from CSV blob '%s'", row_count, self._blob_path)
+        logger.info("csv_blob_parsed", row_count=row_count, blob_path=self._blob_path)
 
         # DataFrame columns are strings from CSV headers
         for record in df.to_dict(orient="records"):
@@ -690,7 +690,7 @@ class AzureBlobSource(BaseSource):
             return
 
         # Log row count for operator visibility
-        logger.info("Parsed %d rows from JSON array blob '%s'", len(data), self._blob_path)
+        logger.info("json_blob_parsed", row_count=len(data), blob_path=self._blob_path)
 
         for row in data:
             yield from self._validate_and_yield(row, ctx)
@@ -735,7 +735,7 @@ class AzureBlobSource(BaseSource):
         # Split lines and count non-empty for logging
         lines = text_data.splitlines()
         non_empty_count = sum(1 for line in lines if line.strip())
-        logger.info("Parsed %d lines from JSONL blob '%s'", non_empty_count, self._blob_path)
+        logger.info("jsonl_blob_parsed", line_count=non_empty_count, blob_path=self._blob_path)
 
         for line_num, line in enumerate(lines, start=1):
             line = line.strip()
