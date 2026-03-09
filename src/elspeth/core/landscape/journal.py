@@ -11,6 +11,7 @@ import structlog
 from sqlalchemy import event
 from sqlalchemy.engine import Connection, Engine
 
+from elspeth.contracts.payload_store import PayloadNotFoundError
 from elspeth.core.landscape._helpers import now
 from elspeth.core.landscape.formatters import serialize_datetime
 from elspeth.core.payload_store import FilesystemPayloadStore
@@ -261,7 +262,7 @@ class LandscapeJournal:
             return None, "payload_store_not_configured"
         try:
             content = self._payload_store.retrieve(ref)
-        except (OSError, KeyError) as exc:
+        except (OSError, PayloadNotFoundError) as exc:
             logger.error("Landscape journal payload read failed: %s", exc)
             if self._fail_on_error:
                 raise

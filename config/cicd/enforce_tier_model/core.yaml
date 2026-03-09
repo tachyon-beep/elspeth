@@ -112,9 +112,9 @@ allow_hits:
   reason: Idempotent delete — FileNotFoundError means content already deleted (retention purge or duplicate call)
   safety: Returns False on missing file — caller informed, no silent data loss
   expires: null
-- key: core/landscape/query_repository.py:R6:QueryRepository:explain_row:fp=b2c9221a83ad28a8
+- key: core/landscape/query_repository.py:R6:QueryRepository:explain_row:fp=60bbaf31e9f6472d
   owner: architecture
-  reason: KeyError from PayloadStore when payload purged by retention policy — expected, not corruption
+  reason: PayloadNotFoundError from PayloadStore when payload purged by retention policy — expected, not corruption
 - key: core/canonical.py:R6:_normalize_value:fp=20ccee9926534392
   owner: architecture
   reason: Silent recovery with explicit error handling path
@@ -198,7 +198,7 @@ allow_hits:
   owner: bugfix
   reason: Tier-3 boundary - PayloadStore.delete() is external I/O (filesystem/blob storage)
   safety: Exception caught and logged, ref added to failed_refs, loop continues
-- key: core/landscape/execution_repository.py:R6:ExecutionRepository:begin_node_state:fp=364150217b7a8665
+- key: core/landscape/execution_repository.py:R6:ExecutionRepository:begin_node_state:fp=ce10fdbe76d4903a
   owner: bugfix
   reason: Tier-3 boundary — quarantined row data may contain NaN/Infinity that stable_hash rejects
   safety: Falls back to repr_hash which always succeeds; audit trail integrity maintained

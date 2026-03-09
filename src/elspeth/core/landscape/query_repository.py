@@ -9,6 +9,7 @@ from __future__ import annotations
 import json
 from typing import Any
 
+import structlog
 from sqlalchemy import select
 
 from elspeth.contracts import (
@@ -23,7 +24,7 @@ from elspeth.contracts import (
 )
 from elspeth.contracts.errors import AuditIntegrityError
 from elspeth.contracts.payload_store import IntegrityError as PayloadIntegrityError
-from elspeth.contracts.payload_store import PayloadStore
+from elspeth.contracts.payload_store import PayloadNotFoundError, PayloadStore
 from elspeth.core.landscape._database_ops import DatabaseOps
 from elspeth.core.landscape.model_loaders import (
     CallLoader,
@@ -44,6 +45,8 @@ from elspeth.core.landscape.schema import (
     token_parents_table,
     tokens_table,
 )
+
+logger = structlog.get_logger(__name__)
 
 
 class QueryRepository:
@@ -148,7 +151,7 @@ class QueryRepository:
             Parsed dict from the payload store
 
         Raises:
-            KeyError: Payload was purged by retention policy (caller decides handling)
+            PayloadNotFoundError: Payload was purged by retention policy (caller decides handling)
             AuditIntegrityError: Payload is corrupt, fails integrity check,
                 or cannot be retrieved due to infrastructure failure
         """
@@ -210,7 +213,8 @@ class QueryRepository:
             if set(data.keys()) == {"_repr"}:
                 return RowDataResult(state=RowDataState.REPR_FALLBACK, data=data)
             return RowDataResult(state=RowDataState.AVAILABLE, data=data)
-        except KeyError:
+        except PayloadNotFoundError as exc:
+            logger.debug("Payload purged, returning PURGED state", content_hash=exc.content_hash)
             return RowDataResult(state=RowDataState.PURGED, data=None)
 
     def get_token(self, token_id: str) -> Token | None:
@@ -527,9 +531,8 @@ class QueryRepository:
             try:
                 source_data = self._retrieve_and_parse_payload(row_id, row.source_data_ref)
                 payload_available = True
-            except KeyError:
-                # Payload purged by retention policy — expected, continue without data
-                pass
+            except PayloadNotFoundError as exc:
+                logger.debug("Payload purged, continuing without source data", content_hash=exc.content_hash)
 
         return RowLineage(
             row_id=row.row_id,

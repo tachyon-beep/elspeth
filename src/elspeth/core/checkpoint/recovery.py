@@ -15,7 +15,17 @@ from typing import TYPE_CHECKING, Any
 from sqlalchemy import select
 from sqlalchemy.engine import Row
 
-from elspeth.contracts import Checkpoint, PayloadStore, PluginSchema, ResumeCheck, ResumePoint, RowOutcome, RunStatus, SchemaContract
+from elspeth.contracts import (
+    Checkpoint,
+    PayloadNotFoundError,
+    PayloadStore,
+    PluginSchema,
+    ResumeCheck,
+    ResumePoint,
+    RowOutcome,
+    RunStatus,
+    SchemaContract,
+)
 from elspeth.contracts.aggregation_checkpoint import AggregationCheckpointState
 from elspeth.contracts.coalesce_checkpoint import CoalesceCheckpointState
 from elspeth.contracts.errors import AuditIntegrityError
@@ -251,8 +261,8 @@ class RecoveryManager:
             try:
                 payload_bytes = payload_store.retrieve(source_data_ref)
                 degraded_data = json.loads(payload_bytes.decode("utf-8"))
-            except KeyError as exc:
-                raise ValueError(f"Row {row_id} payload has been purged - cannot resume") from exc
+            except PayloadNotFoundError as exc:
+                raise ValueError(f"Row {row_id} payload has been purged (hash={exc.content_hash}) - cannot resume") from exc
 
             # TYPE FIDELITY RESTORATION:
             # Re-validate through source schema to restore types.

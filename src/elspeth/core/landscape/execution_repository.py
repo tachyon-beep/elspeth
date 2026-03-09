@@ -40,6 +40,7 @@ from elspeth.contracts.call_data import CallPayload
 from elspeth.contracts.errors import AuditIntegrityError, ExecutionError, TransformErrorReason
 from elspeth.contracts.hashing import repr_hash
 from elspeth.contracts.payload_store import IntegrityError as PayloadIntegrityError
+from elspeth.contracts.payload_store import PayloadNotFoundError
 from elspeth.core.canonical import canonical_json, stable_hash
 from elspeth.core.landscape._database_ops import DatabaseOps
 from elspeth.core.landscape._helpers import generate_id, now
@@ -995,14 +996,16 @@ class ExecutionRepository:
         if self._payload_store is None:
             return CallDataResult(state=CallDataState.STORE_NOT_CONFIGURED, data=None)
 
-        # Retrieve from payload store — KeyError means purged by retention policy,
-        # PayloadIntegrityError means hash mismatch (corruption/tampering),
-        # OSError means storage backend failure (permissions, disk, etc.).
-        # All non-KeyError paths translate to AuditIntegrityError with context,
-        # matching query_repository._retrieve_and_parse_payload().
+        # Retrieve from payload store — PayloadNotFoundError means purged by
+        # retention policy, PayloadIntegrityError means hash mismatch
+        # (corruption/tampering), OSError means storage backend failure
+        # (permissions, disk, etc.). All non-purge paths translate to
+        # AuditIntegrityError with context, matching
+        # query_repository._retrieve_and_parse_payload().
         try:
             payload_bytes = self._payload_store.retrieve(row.response_ref)
-        except KeyError:
+        except PayloadNotFoundError as exc:
+            logger.debug("Call response payload purged", content_hash=exc.content_hash, call_id=call_id)
             return CallDataResult(state=CallDataState.PURGED, data=None)
         except PayloadIntegrityError as e:
             raise AuditIntegrityError(f"Payload integrity check failed for call_id={call_id} (ref={row.response_ref}): {e}") from e
