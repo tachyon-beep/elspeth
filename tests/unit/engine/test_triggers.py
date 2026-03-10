@@ -682,6 +682,431 @@ class TestTriggerCheckpointRestore:
         )
 
 
+class TestCheckpointRestoreStateFidelity:
+    """Kill survivors in restore_from_checkpoint (lines 277-304).
+
+    The existing TestTriggerCheckpointRestore tests verify fire-time ordering
+    preservation, but don't assert on raw restored state (batch_count,
+    batch_age_seconds) or test condition trigger restoration. These tests
+    kill mutations in the assignment and arithmetic lines.
+    """
+
+    def test_batch_count_restored_correctly(self) -> None:
+        """batch_count must equal the restored value, not zero or something else.
+
+        Kills mutation: ``self._batch_count = batch_count`` → deleted or
+        ``self._batch_count = 0``.
+        """
+        from elspeth.core.config import TriggerConfig
+        from elspeth.engine.clock import MockClock
+        from elspeth.engine.triggers import TriggerEvaluator
+
+        clock = MockClock(start=100.0)
+        config = TriggerConfig(count=50)
+        evaluator = TriggerEvaluator(config, clock=clock)
+
+        evaluator.restore_from_checkpoint(
+            batch_count=42,
+            elapsed_age_seconds=10.0,
+            count_fire_offset=None,
+            condition_fire_offset=None,
+        )
+
+        assert evaluator.batch_count == 42
+
+    def test_batch_age_seconds_correct_after_restore(self) -> None:
+        """batch_age_seconds must reflect elapsed time from restored first_accept.
+
+        Kills line 293: ``current_time - elapsed_age_seconds`` → ``+``.
+        With addition, _first_accept_time = 1000 + 30 = 1030 (in the future),
+        so batch_age_seconds = 1000 - 1030 = -30.
+        With subtraction, _first_accept_time = 1000 - 30 = 970,
+        so batch_age_seconds = 1000 - 970 = 30.
+        """
+        from elspeth.core.config import TriggerConfig
+        from elspeth.engine.clock import MockClock
+        from elspeth.engine.triggers import TriggerEvaluator
+
+        clock = MockClock(start=1000.0)
+        config = TriggerConfig(timeout_seconds=60.0)
+        evaluator = TriggerEvaluator(config, clock=clock)
+
+        evaluator.restore_from_checkpoint(
+            batch_count=10,
+            elapsed_age_seconds=30.0,
+            count_fire_offset=None,
+            condition_fire_offset=None,
+        )
+
+        age = evaluator.batch_age_seconds
+        # Correct: first_accept = 1000 - 30 = 970, age = 1000 - 970 = 30.0
+        # Mutant:  first_accept = 1000 + 30 = 1030, age = 1000 - 1030 = -30.0
+        assert 29.0 <= age <= 31.0, (
+            f"batch_age_seconds should be ~30.0 after restore, got {age}. Sub→Add mutant on line 293 would produce -30.0."
+        )
+
+    def test_timeout_fires_correctly_after_restore(self) -> None:
+        """Timeout must fire based on restored elapsed time, not reset to zero.
+
+        If _first_accept_time is wrong (Sub→Add on line 293), timeout won't
+        fire at the expected time.
+        """
+        from elspeth.core.config import TriggerConfig
+        from elspeth.engine.clock import MockClock
+        from elspeth.engine.triggers import TriggerEvaluator
+
+        clock = MockClock(start=1000.0)
+        config = TriggerConfig(timeout_seconds=60.0)
+        evaluator = TriggerEvaluator(config, clock=clock)
+
+        # Restore with 50s already elapsed (10s remaining until timeout)
+        evaluator.restore_from_checkpoint(
+            batch_count=10,
+            elapsed_age_seconds=50.0,
+            count_fire_offset=None,
+            condition_fire_offset=None,
+        )
+
+        # Should not trigger yet (50s of 60s elapsed)
+        assert evaluator.should_trigger() is False
+
+        # Advance 10s — now at 60s total, should trigger
+        clock.advance(10.0)
+        assert evaluator.should_trigger() is True
+        assert evaluator.which_triggered() == "timeout"
+
+    def test_condition_fire_offset_restored(self) -> None:
+        """Condition fire time must be restored from offset, not lost.
+
+        Kills line 302: ``_first_accept_time + condition_fire_offset`` → ``-``.
+        With subtraction, condition fire time would be BEFORE first_accept,
+        which changes "first to fire wins" ordering.
+        """
+        from elspeth.core.config import TriggerConfig
+        from elspeth.engine.clock import MockClock
+        from elspeth.engine.triggers import TriggerEvaluator
+
+        clock = MockClock(start=500.0)
+        # Condition with timeout — condition should win because it fired first
+        config = TriggerConfig(
+            timeout_seconds=10.0,
+            condition="row['batch_count'] >= 5",
+        )
+        evaluator = TriggerEvaluator(config, clock=clock)
+
+        # Restore: condition fired at offset 2s, timeout would fire at 10s
+        # elapsed_age = 12s, so timeout has also fired
+        evaluator.restore_from_checkpoint(
+            batch_count=5,
+            elapsed_age_seconds=12.0,
+            count_fire_offset=None,
+            condition_fire_offset=2.0,
+        )
+
+        # Both condition (offset 2s) and timeout (offset 10s) have fired
+        # Condition should win (fired first)
+        assert evaluator.should_trigger() is True
+        assert evaluator.which_triggered() == "condition", (
+            "Condition fired at offset 2s, timeout at offset 10s. "
+            "Condition should win. Sub mutant on line 302 would make "
+            "condition fire time = first_accept - 2.0, which is before first_accept."
+        )
+
+    def test_count_fire_offset_restored(self) -> None:
+        """Count fire time must be restored from offset correctly.
+
+        Kills line 297: ``_first_accept_time + count_fire_offset`` → ``-``.
+        """
+        from elspeth.core.config import TriggerConfig
+        from elspeth.engine.clock import MockClock
+        from elspeth.engine.triggers import TriggerEvaluator
+
+        clock = MockClock(start=500.0)
+        # Count with timeout — count should win because it fired first
+        config = TriggerConfig(count=5, timeout_seconds=10.0)
+        evaluator = TriggerEvaluator(config, clock=clock)
+
+        # Restore: count fired at offset 3s, timeout fires at 10s
+        # elapsed_age = 12s, so timeout has also fired
+        evaluator.restore_from_checkpoint(
+            batch_count=5,
+            elapsed_age_seconds=12.0,
+            count_fire_offset=3.0,
+            condition_fire_offset=None,
+        )
+
+        assert evaluator.should_trigger() is True
+        assert evaluator.which_triggered() == "count", "Count fired at offset 3s, timeout at offset 10s. Count should win."
+
+    def test_none_fire_offsets_leave_triggers_unfired(self) -> None:
+        """When fire offsets are None, triggers must not spuriously report fired.
+
+        Kills lines 299/304: the ``else: self._*_fire_time = None`` branches.
+        If the None assignment is deleted, fire_time retains whatever value
+        __init__ set (also None, but the mutation could be to skip the branch).
+        More importantly, tests that count is NOT reported when offset is None
+        and count < threshold.
+        """
+        from elspeth.core.config import TriggerConfig
+        from elspeth.engine.clock import MockClock
+        from elspeth.engine.triggers import TriggerEvaluator
+
+        clock = MockClock(start=100.0)
+        config = TriggerConfig(count=50, timeout_seconds=3600.0)
+        evaluator = TriggerEvaluator(config, clock=clock)
+
+        # Restore with count below threshold and no fire offsets
+        evaluator.restore_from_checkpoint(
+            batch_count=10,
+            elapsed_age_seconds=5.0,
+            count_fire_offset=None,
+            condition_fire_offset=None,
+        )
+
+        # Neither trigger should fire (count=10 < 50, elapsed=5s < 3600s)
+        assert evaluator.should_trigger() is False
+        assert evaluator.which_triggered() is None
+
+    def test_zero_batch_count_valid(self) -> None:
+        """batch_count=0 is valid (empty batch restore after flush).
+
+        Kills line 277: ``batch_count < 0`` → ``<= 0``.
+        """
+        from elspeth.core.config import TriggerConfig
+        from elspeth.engine.clock import MockClock
+        from elspeth.engine.triggers import TriggerEvaluator
+
+        clock = MockClock(start=0.0)
+        config = TriggerConfig(count=10)
+        evaluator = TriggerEvaluator(config, clock=clock)
+
+        # Should NOT raise — 0 is a valid batch count
+        evaluator.restore_from_checkpoint(
+            batch_count=0,
+            elapsed_age_seconds=0.0,
+            count_fire_offset=None,
+            condition_fire_offset=None,
+        )
+        assert evaluator.batch_count == 0
+
+    def test_zero_elapsed_age_valid(self) -> None:
+        """elapsed_age_seconds=0.0 is valid (checkpoint taken immediately).
+
+        Kills line 279: ``elapsed_age_seconds < 0`` → ``<= 0``.
+        """
+        from elspeth.core.config import TriggerConfig
+        from elspeth.engine.clock import MockClock
+        from elspeth.engine.triggers import TriggerEvaluator
+
+        clock = MockClock(start=50.0)
+        config = TriggerConfig(timeout_seconds=10.0)
+        evaluator = TriggerEvaluator(config, clock=clock)
+
+        # Should NOT raise — 0.0 is valid
+        evaluator.restore_from_checkpoint(
+            batch_count=1,
+            elapsed_age_seconds=0.0,
+            count_fire_offset=None,
+            condition_fire_offset=None,
+        )
+        # Age should be ~0 since we just restored with 0 elapsed
+        assert evaluator.batch_age_seconds == 0.0
+
+    def test_zero_fire_offset_valid(self) -> None:
+        """Fire offset of 0.0 is valid (trigger fired at same instant as first accept).
+
+        Kills lines 281/283: ``offset < 0`` → ``<= 0``.
+        """
+        from elspeth.core.config import TriggerConfig
+        from elspeth.engine.clock import MockClock
+        from elspeth.engine.triggers import TriggerEvaluator
+
+        clock = MockClock(start=200.0)
+        config = TriggerConfig(count=5, timeout_seconds=60.0)
+        evaluator = TriggerEvaluator(config, clock=clock)
+
+        # Should NOT raise — 0.0 offset means fired at first_accept_time
+        evaluator.restore_from_checkpoint(
+            batch_count=5,
+            elapsed_age_seconds=10.0,
+            count_fire_offset=0.0,
+            condition_fire_offset=None,
+        )
+
+        # Count should be reported as triggered (fire offset 0.0 < timeout 60.0)
+        assert evaluator.should_trigger() is True
+        assert evaluator.which_triggered() == "count"
+
+    def test_negative_batch_count_rejected(self) -> None:
+        """Negative batch_count must raise ValueError."""
+        import pytest
+
+        from elspeth.core.config import TriggerConfig
+        from elspeth.engine.clock import MockClock
+        from elspeth.engine.triggers import TriggerEvaluator
+
+        clock = MockClock(start=0.0)
+        config = TriggerConfig(count=10)
+        evaluator = TriggerEvaluator(config, clock=clock)
+
+        with pytest.raises(ValueError, match="non-negative"):
+            evaluator.restore_from_checkpoint(
+                batch_count=-1,
+                elapsed_age_seconds=0.0,
+                count_fire_offset=None,
+                condition_fire_offset=None,
+            )
+
+    def test_negative_elapsed_age_rejected(self) -> None:
+        """Negative elapsed_age_seconds must raise ValueError."""
+        import pytest
+
+        from elspeth.core.config import TriggerConfig
+        from elspeth.engine.clock import MockClock
+        from elspeth.engine.triggers import TriggerEvaluator
+
+        clock = MockClock(start=0.0)
+        config = TriggerConfig(count=10)
+        evaluator = TriggerEvaluator(config, clock=clock)
+
+        with pytest.raises(ValueError, match="non-negative"):
+            evaluator.restore_from_checkpoint(
+                batch_count=1,
+                elapsed_age_seconds=-5.0,
+                count_fire_offset=None,
+                condition_fire_offset=None,
+            )
+
+    def test_nan_elapsed_age_rejected(self) -> None:
+        """NaN elapsed_age_seconds must raise ValueError."""
+        import math
+
+        import pytest
+
+        from elspeth.core.config import TriggerConfig
+        from elspeth.engine.clock import MockClock
+        from elspeth.engine.triggers import TriggerEvaluator
+
+        clock = MockClock(start=0.0)
+        config = TriggerConfig(count=10)
+        evaluator = TriggerEvaluator(config, clock=clock)
+
+        with pytest.raises(ValueError, match="finite"):
+            evaluator.restore_from_checkpoint(
+                batch_count=1,
+                elapsed_age_seconds=math.nan,
+                count_fire_offset=None,
+                condition_fire_offset=None,
+            )
+
+    def test_negative_fire_offset_rejected(self) -> None:
+        """Negative count_fire_offset must raise ValueError."""
+        import pytest
+
+        from elspeth.core.config import TriggerConfig
+        from elspeth.engine.clock import MockClock
+        from elspeth.engine.triggers import TriggerEvaluator
+
+        clock = MockClock(start=0.0)
+        config = TriggerConfig(count=10)
+        evaluator = TriggerEvaluator(config, clock=clock)
+
+        with pytest.raises(ValueError, match="non-negative"):
+            evaluator.restore_from_checkpoint(
+                batch_count=5,
+                elapsed_age_seconds=10.0,
+                count_fire_offset=-1.0,
+                condition_fire_offset=None,
+            )
+
+    def test_inf_condition_fire_offset_rejected(self) -> None:
+        """Infinity condition_fire_offset must raise ValueError."""
+        import math
+
+        import pytest
+
+        from elspeth.core.config import TriggerConfig
+        from elspeth.engine.clock import MockClock
+        from elspeth.engine.triggers import TriggerEvaluator
+
+        clock = MockClock(start=0.0)
+        config = TriggerConfig(count=10)
+        evaluator = TriggerEvaluator(config, clock=clock)
+
+        with pytest.raises(ValueError, match="finite"):
+            evaluator.restore_from_checkpoint(
+                batch_count=5,
+                elapsed_age_seconds=10.0,
+                count_fire_offset=None,
+                condition_fire_offset=math.inf,
+            )
+
+    def test_full_round_trip_checkpoint_restore(self) -> None:
+        """Full round-trip: accept rows, checkpoint, restore, verify behavior matches.
+
+        This exercises the complete checkpoint API (get_count_fire_offset,
+        get_condition_fire_offset, get_age_seconds) feeding into restore_from_checkpoint.
+        """
+        from elspeth.core.config import TriggerConfig
+        from elspeth.engine.clock import MockClock
+        from elspeth.engine.triggers import TriggerEvaluator
+
+        clock = MockClock(start=0.0)
+        config = TriggerConfig(
+            count=5,
+            timeout_seconds=30.0,
+            condition="row['batch_count'] >= 3",
+        )
+        evaluator = TriggerEvaluator(config, clock=clock)
+
+        # Accept 5 rows over 10 seconds
+        evaluator.record_accept()  # t=0
+        clock.advance(2.0)
+        evaluator.record_accept()  # t=2
+        clock.advance(2.0)
+        evaluator.record_accept()  # t=4 — condition fires (count=3 >= 3)
+        clock.advance(3.0)
+        evaluator.record_accept()  # t=7
+        evaluator.record_accept()  # t=7 — count fires (count=5 >= 5)
+
+        # Verify pre-checkpoint state
+        assert evaluator.should_trigger() is True
+        # Condition fired at t=4, count at t=7 → condition wins
+        assert evaluator.which_triggered() == "condition"
+
+        # Capture checkpoint data
+        elapsed = evaluator.get_age_seconds()
+        count_offset = evaluator.get_count_fire_offset()
+        condition_offset = evaluator.get_condition_fire_offset()
+        batch_ct = evaluator.batch_count
+
+        assert elapsed == 7.0
+        assert count_offset == 7.0
+        assert condition_offset == 4.0
+        assert batch_ct == 5
+
+        # --- CRASH AND RESUME ---
+        clock2 = MockClock(start=5000.0)
+        evaluator2 = TriggerEvaluator(config, clock=clock2)
+
+        evaluator2.restore_from_checkpoint(
+            batch_count=batch_ct,
+            elapsed_age_seconds=elapsed,
+            count_fire_offset=count_offset,
+            condition_fire_offset=condition_offset,
+        )
+
+        # Verify restored state matches
+        assert evaluator2.batch_count == 5
+        assert 6.5 <= evaluator2.batch_age_seconds <= 7.5
+
+        # Same trigger result: condition should still win
+        assert evaluator2.should_trigger() is True
+        assert evaluator2.which_triggered() == "condition", (
+            "Condition fired at offset 4s, count at offset 7s, timeout at 30s. Condition should still win after restore."
+        )
+
+
 class TestBatchAgeSecondsSignFlip:
     """Kill mutant: ``clock.monotonic() - first_accept_time`` → ``+ first_accept_time``.
 
