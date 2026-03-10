@@ -13,7 +13,7 @@ title: "ACF-R2: Partial Completion"
 | Property | Value |
 |----------|-------|
 | **STRIDE Category** | Repudiation |
-| **Risk Rating** | Medium |
+| **Risk Rating** | High |
 | **Existing Detection** | None |
 | **Detection Feasibility** | Human-judgment |
 

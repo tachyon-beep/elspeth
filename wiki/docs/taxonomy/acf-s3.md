@@ -13,7 +13,7 @@ title: "ACF-S3: Structural Identity Spoofing"
 | Property | Value |
 |----------|-------|
 | **STRIDE Category** | Spoofing |
-| **Risk Rating** | Medium |
+| **Risk Rating** | High |
 | **Existing Detection** | Partial |
 | **Detection Feasibility** | AST-matchable |
 

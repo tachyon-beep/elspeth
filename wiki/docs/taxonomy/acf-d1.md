@@ -13,8 +13,8 @@ title: "ACF-D1: Finding Flood"
 | Property | Value |
 |----------|-------|
 | **STRIDE Category** | Denial of Service |
-| **Risk Rating** | Medium |
-| **Existing Detection** | None |
+| **Risk Rating** | High |
+| **Existing Detection** | N/A |
 | **Detection Feasibility** | Process threat — not a code pattern |
 
 ## Description

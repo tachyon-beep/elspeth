@@ -13,8 +13,8 @@ title: "ACF-E2: Unvalidated Delegation"
 | Property | Value |
 |----------|-------|
 | **STRIDE Category** | Elevation of Privilege |
-| **Risk Rating** | Medium |
-| **Existing Detection** | None |
+| **Risk Rating** | High |
+| **Existing Detection** | Partial |
 | **Detection Feasibility** | Taint-required (partial) |
 
 ## Description

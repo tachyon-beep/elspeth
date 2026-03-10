@@ -14,7 +14,7 @@ title: "ACF-R1: Audit Trail Destruction"
 |----------|-------|
 | **STRIDE Category** | Repudiation |
 | **Risk Rating** | High |
-| **Existing Detection** | None |
+| **Existing Detection** | Partial |
 | **Detection Feasibility** | Annotation-required |
 
 ## Description

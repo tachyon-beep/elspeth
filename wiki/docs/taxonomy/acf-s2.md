@@ -13,7 +13,7 @@ title: "ACF-S2: Hallucinated Field Access"
 | Property | Value |
 |----------|-------|
 | **STRIDE Category** | Spoofing |
-| **Risk Rating** | Medium |
+| **Risk Rating** | High |
 | **Existing Detection** | Partial |
 | **Detection Feasibility** | AST-matchable (if typed) |
 
