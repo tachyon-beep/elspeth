@@ -595,24 +595,19 @@ Treating agent code as Tier 3 has specific implications:
 
 If agent output is Tier 3, the development workflow must include a **validation boundary** between agent generation and code integration:
 
-```text
-Agent generates code
-        │
-        v
-┌──────────────────────┐
-│  VALIDATION BOUNDARY │  ← This is the trust boundary
-│                      │
-│  • Automated semantic│     Not just syntax/type checking —
-│    boundary checking │     trust tier flow, defensive pattern
-│  • Human review of   │     detection, audit trail completeness
-│    semantic intent   │
-│  • Attestation       │     Reviewer attests validation was
-│                      │     meaningful, not rubber-stamped
-└──────────────────────┘
-        │
-        v
-Code enters repository
-(now Tier 2 — validated)
+```mermaid
+flowchart TD
+    A["Agent generates code<br/><em>Tier 3 — untrusted</em>"] --> B
+
+    subgraph B["VALIDATION BOUNDARY"]
+        direction TB
+        B1["Automated semantic boundary checking<br/><small>Trust tier flow, defensive pattern detection, audit trail completeness</small>"]
+        B2["Human review of semantic intent<br/><small>Not just syntax/type checking</small>"]
+        B3["Attestation<br/><small>Reviewer attests validation was meaningful, not rubber-stamped</small>"]
+        B1 --> B2 --> B3
+    end
+
+    B --> C["Code enters repository<br/><em>Tier 2 — validated</em>"]
 ```
 
 The key difference from current practice: **the validation is security-aware, not just correctness-aware.** Current code review asks "does this code work?" Security-aware validation asks "does this code maintain the system's trust boundaries?"
