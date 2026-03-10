@@ -401,3 +401,94 @@ class TestExplainGroupIdValidation:
         )
         with pytest.raises(AuditIntegrityError, match=r"multiple group IDs"):
             explain(recorder, "run-1", token_id="tok-1")
+
+
+# ===========================================================================
+# Sink filter mutation kills — kill `==` → `is` and `==` → `<=` survivors
+# ===========================================================================
+
+
+class TestExplainSinkFilterEquality:
+    """Kill mutants on line 122: ``o.sink_name == sink``.
+
+    Mutant 1: ``==`` → ``is``. Survives due to Python string interning —
+    short literal strings used in tests share the same object, so ``is``
+    returns True. In production, strings from SQLAlchemy are separate objects.
+
+    Mutant 2: ``==`` → ``<=``. Survives when only one outcome exists.
+    With multiple sinks, ``<=`` would match sinks alphabetically before
+    the target, changing the filter result set.
+    """
+
+    def test_sink_filter_uses_equality_not_identity(self) -> None:
+        """Kill mutant: ``==`` → ``is`` on sink_name comparison.
+
+        Construct the sink name at runtime from parts to prevent
+        Python's string interning from making ``is`` equivalent to ``==``.
+        """
+        # Build "output" from parts — runtime concatenation avoids interning
+        sink_name_for_query = "".join(["o", "u", "t", "p", "u", "t"])
+        # Verify it's a different object (interning defeated)
+        sink_name_in_outcome = "output"
+        assert sink_name_for_query == sink_name_in_outcome
+        # Not guaranteed to be different objects, but join() usually avoids interning.
+        # The real defense: if ``is`` mutant is active and objects differ, filter returns [].
+
+        token = _make_token(token_id="tok-1")
+        outcomes = [_make_outcome(token_id="tok-1", sink_name=sink_name_in_outcome)]
+        recorder = _make_recorder(
+            token=token,
+            row_lineage=_make_row_lineage(),
+            token_outcomes=outcomes,
+        )
+
+        result = explain(recorder, "run-1", row_id="row-1", sink=sink_name_for_query)
+        assert result is not None
+        assert result.token.token_id == "tok-1"
+
+    def test_sink_filter_uses_equality_not_lte(self) -> None:
+        """Kill mutant: ``==`` → ``<=`` on sink_name comparison.
+
+        With ``<=``, filtering for "beta" would also match "alpha"
+        (since "alpha" <= "beta" is True), producing 2 matches instead
+        of 1. The code would raise ValueError for multiple tokens at
+        the same sink, when it should succeed with a single match.
+        """
+        token_beta = _make_token(token_id="tok-beta")
+        outcomes = [
+            _make_outcome(token_id="tok-alpha", sink_name="alpha_sink"),
+            _make_outcome(token_id="tok-beta", sink_name="beta_sink"),
+        ]
+        recorder = _make_recorder(
+            token=token_beta,
+            row_lineage=_make_row_lineage(),
+            token_outcomes=outcomes,
+        )
+
+        # With ==: only "beta_sink" matches → resolves tok-beta → success
+        # With <=: "alpha_sink" <= "beta_sink" also matches → 2 results → raises ValueError
+        result = explain(recorder, "run-1", row_id="row-1", sink="beta_sink")
+        assert result is not None
+        recorder.get_token.assert_called_with("tok-beta")
+
+    def test_terminal_filter_excludes_non_terminal(self) -> None:
+        """Verify non-terminal outcomes are excluded when mixed with terminal.
+
+        Kills mutant: ``o.is_terminal`` → ``not o.is_terminal``.
+        With the mutant, only BUFFERED tokens are kept and the real
+        terminal token is dropped, returning None instead of a result.
+        """
+        token = _make_token(token_id="tok-terminal")
+        outcomes = [
+            _make_outcome(token_id="tok-buffered", is_terminal=False, outcome=RowOutcome.BUFFERED),
+            _make_outcome(token_id="tok-terminal", is_terminal=True, outcome=RowOutcome.COMPLETED),
+        ]
+        recorder = _make_recorder(
+            token=token,
+            row_lineage=_make_row_lineage(),
+            token_outcomes=outcomes,
+        )
+
+        result = explain(recorder, "run-1", row_id="row-1")
+        assert result is not None
+        recorder.get_token.assert_called_with("tok-terminal")
