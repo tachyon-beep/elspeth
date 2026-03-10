@@ -8,6 +8,7 @@ Tests targeting specific mutation survivors:
 import math
 
 import numpy as np
+import pandas as pd
 import pytest
 
 
@@ -277,3 +278,136 @@ class TestTopologyHashEdgeKeys:
             "Single-edge vs multi-edge between same pair must hash differently. "
             "If keys=False mutant is active, the extra edge is invisible."
         )
+
+
+class TestNonePassthroughAndNaTDetection:
+    """Kill survivors on lines 68 and 113 of _normalize_value.
+
+    Line 68: ``obj is None or isinstance(obj, str | int | bool)``
+        Mutant: ``or`` → ``and``. None would fail the isinstance check and
+        fall through to ``return obj`` at line 130. Currently equivalent
+        (returns None either way), but fragile — any new type check added
+        between lines 68-130 could intercept None and change behavior.
+
+    Line 113: ``obj is pd.NA or (isinstance(obj, type(pd.NaT)) and obj is pd.NaT)``
+        Mutant: ``and`` → ``or``. Would make any NaTType instance return None,
+        not just the pd.NaT singleton. Currently equivalent since pd.NaT is
+        the only instance, but pins the intended semantic.
+    """
+
+    def test_none_returns_none_directly(self) -> None:
+        """None must be caught at line 68, not fall through to line 130.
+
+        Kills mutant: ``or`` → ``and`` on line 68.
+        """
+        from elspeth.core.canonical import _normalize_value
+
+        result = _normalize_value(None)
+        assert result is None
+
+    def test_pd_nat_returns_none(self) -> None:
+        """pd.NaT must be normalized to None (intentional missing value).
+
+        Kills mutant: ``and`` → ``or`` on line 113.
+        """
+        from elspeth.core.canonical import _normalize_value
+
+        result = _normalize_value(pd.NaT)
+        assert result is None
+
+    def test_pd_na_returns_none(self) -> None:
+        """pd.NA (nullable integer NA) must also normalize to None."""
+        from elspeth.core.canonical import _normalize_value
+
+        result = _normalize_value(pd.NA)
+        assert result is None
+
+    def test_zero_dimensional_array_returns_scalar(self) -> None:
+        """0-D numpy array (e.g., np.array(42)) must return the scalar value.
+
+        Kills potential mutant on ndim == 0 check at line 91.
+        """
+        from elspeth.core.canonical import _normalize_value
+
+        result = _normalize_value(np.array(42))
+        assert result == 42
+        assert isinstance(result, int)
+
+    def test_zero_dimensional_float_array_returns_float(self) -> None:
+        """0-D float array must return Python float, not numpy scalar."""
+        from elspeth.core.canonical import _normalize_value
+
+        result = _normalize_value(np.array(3.14))
+        assert result == 3.14
+        assert type(result) is float
+
+    def test_zero_dimensional_nan_array_rejected(self) -> None:
+        """0-D NaN array must be rejected, not silently passed through."""
+        from elspeth.core.canonical import _normalize_value
+
+        with pytest.raises(ValueError, match="NaN"):
+            _normalize_value(np.array(float("nan")))
+
+
+class TestSanitizeForCanonicalNumpyEdgeCases:
+    """Kill survivors on line 281-282 of sanitize_for_canonical.
+
+    Line 281: ``isinstance(obj, np.floating) and not math.isfinite(float(obj))``
+        Mutant: comparison operator changes on the isinstance or isfinite check.
+        Tests ensure numpy floating NaN/Inf are sanitized to None while normal
+        numpy floats pass through unchanged.
+    """
+
+    def test_numpy_float64_nan_sanitized_to_none(self) -> None:
+        """np.float64 NaN must be replaced with None."""
+        from elspeth.core.canonical import sanitize_for_canonical
+
+        result = sanitize_for_canonical(np.float64("nan"))
+        assert result is None
+
+    def test_numpy_float64_positive_inf_sanitized_to_none(self) -> None:
+        """np.float64 +Inf must be replaced with None."""
+        from elspeth.core.canonical import sanitize_for_canonical
+
+        result = sanitize_for_canonical(np.float64("inf"))
+        assert result is None
+
+    def test_numpy_float64_negative_inf_sanitized_to_none(self) -> None:
+        """np.float64 -Inf must be replaced with None."""
+        from elspeth.core.canonical import sanitize_for_canonical
+
+        result = sanitize_for_canonical(np.float64("-inf"))
+        assert result is None
+
+    def test_numpy_float32_nan_sanitized_to_none(self) -> None:
+        """np.float32 NaN must also be caught (subtype of np.floating)."""
+        from elspeth.core.canonical import sanitize_for_canonical
+
+        result = sanitize_for_canonical(np.float32("nan"))
+        assert result is None
+
+    def test_numpy_float64_normal_value_passes_through(self) -> None:
+        """Normal np.float64 must NOT be sanitized — pass through unchanged."""
+        from elspeth.core.canonical import sanitize_for_canonical
+
+        result = sanitize_for_canonical(np.float64(42.0))
+        # sanitize_for_canonical doesn't convert types, just replaces non-finite
+        assert float(result) == 42.0
+
+    def test_numpy_float64_zero_passes_through(self) -> None:
+        """np.float64(0.0) is finite and must pass through."""
+        from elspeth.core.canonical import sanitize_for_canonical
+
+        result = sanitize_for_canonical(np.float64(0.0))
+        assert float(result) == 0.0
+
+    def test_sanitize_nested_dict_with_numpy_nan(self) -> None:
+        """Nested structures containing np.floating NaN are recursively sanitized."""
+        from elspeth.core.canonical import sanitize_for_canonical
+
+        data = {"a": np.float64(1.0), "b": {"c": np.float64("nan")}, "d": [np.float32("inf")]}
+        result = sanitize_for_canonical(data)
+
+        assert float(result["a"]) == 1.0
+        assert result["b"]["c"] is None
+        assert result["d"][0] is None
