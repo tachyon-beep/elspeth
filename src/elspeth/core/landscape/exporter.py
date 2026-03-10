@@ -30,6 +30,7 @@ from elspeth.contracts import (
     TokenParent,
 )
 from elspeth.contracts.errors import AuditIntegrityError
+from elspeth.contracts.freeze import deep_thaw
 from elspeth.core.canonical import canonical_json
 from elspeth.core.landscape.database import LandscapeDB
 from elspeth.core.landscape.recorder import LandscapeRecorder
@@ -237,7 +238,7 @@ class LandscapeExporter:
                 "config": self._parse_tier1_json(node.config_json, "config_json", f"node {node.node_id} in run {run_id}"),
                 "schema_hash": node.schema_hash,
                 "schema_mode": node.schema_mode,
-                "schema_fields": node.schema_fields,
+                "schema_fields": deep_thaw(node.schema_fields) if node.schema_fields is not None else None,
                 "sequence_in_pipeline": node.sequence_in_pipeline,
             }
 
