@@ -20,7 +20,7 @@ from __future__ import annotations
 from collections.abc import Iterable, Mapping
 from typing import TYPE_CHECKING
 
-from elspeth.contracts import PendingOutcome, RowOutcome
+from elspeth.contracts import PendingOutcome, RowOutcome, TokenInfo
 from elspeth.contracts.errors import OrchestrationInvariantError
 from elspeth.contracts.types import CoalesceName, NodeID
 from elspeth.engine.orchestrator.types import ExecutionCounters, PendingTokenMap
@@ -42,6 +42,32 @@ def _require_sink_name(result: RowResult) -> str:
     if name is None:
         raise OrchestrationInvariantError(f"Result with outcome {result.outcome} missing sink_name. Token: {result.token}")
     return name
+
+
+def _route_to_sink(
+    sink_name: str,
+    pending_tokens: PendingTokenMap,
+    token: TokenInfo,
+    pending_outcome: RowOutcome,
+) -> None:
+    """Validate sink exists in pending_tokens and append the token.
+
+    Extracted from accumulate_row_outcomes where three outcome branches
+    (COMPLETED, ROUTED, COALESCED) had identical validate+append logic.
+
+    Args:
+        sink_name: Target sink name from result.sink_name
+        pending_tokens: Sink-keyed accumulator to append to
+        token: The token to route
+        pending_outcome: The RowOutcome variant for the PendingOutcome
+            (note: COALESCED tokens use COMPLETED here since they're
+            finished from the sink's perspective)
+    """
+    if sink_name not in pending_tokens:
+        raise OrchestrationInvariantError(
+            f"Sink '{sink_name}' not in configured sinks. Available: {sorted(pending_tokens.keys())}. Token: {token}"
+        )
+    pending_tokens[sink_name].append((token, PendingOutcome(pending_outcome)))
 
 
 def accumulate_row_outcomes(
@@ -72,23 +98,13 @@ def accumulate_row_outcomes(
     for result in results:
         if result.outcome == RowOutcome.COMPLETED:
             counters.rows_succeeded += 1
-            # RowResult.__post_init__ guarantees sink_name is set for COMPLETED
             sink_name = _require_sink_name(result)
-            if sink_name not in pending_tokens:
-                raise OrchestrationInvariantError(
-                    f"Sink '{sink_name}' from result.sink_name not in configured sinks. "
-                    f"Available: {sorted(pending_tokens.keys())}. Token: {result.token}"
-                )
-            pending_tokens[sink_name].append((result.token, PendingOutcome(RowOutcome.COMPLETED)))
+            _route_to_sink(sink_name, pending_tokens, result.token, RowOutcome.COMPLETED)
         elif result.outcome == RowOutcome.ROUTED:
             counters.rows_routed += 1
             sink_name = _require_sink_name(result)
             counters.routed_destinations[sink_name] += 1
-            if sink_name not in pending_tokens:
-                raise OrchestrationInvariantError(
-                    f"Routed sink '{sink_name}' not in configured sinks. Available: {sorted(pending_tokens.keys())}. Token: {result.token}"
-                )
-            pending_tokens[sink_name].append((result.token, PendingOutcome(RowOutcome.ROUTED)))
+            _route_to_sink(sink_name, pending_tokens, result.token, RowOutcome.ROUTED)
         elif result.outcome == RowOutcome.FAILED:
             counters.rows_failed += 1
         elif result.outcome == RowOutcome.QUARANTINED:
@@ -100,17 +116,10 @@ def accumulate_row_outcomes(
             # Aggregated - will be counted when batch flushes
             pass
         elif result.outcome == RowOutcome.COALESCED:
-            # Merged token from coalesce - route to output sink
-            # Use result.sink_name set by on_success routing
             sink_name = _require_sink_name(result)
             counters.rows_coalesced += 1
             counters.rows_succeeded += 1
-            if sink_name not in pending_tokens:
-                raise OrchestrationInvariantError(
-                    f"Coalesced sink '{sink_name}' not in configured sinks. "
-                    f"Available: {sorted(pending_tokens.keys())}. Token: {result.token}"
-                )
-            pending_tokens[sink_name].append((result.token, PendingOutcome(RowOutcome.COMPLETED)))
+            _route_to_sink(sink_name, pending_tokens, result.token, RowOutcome.COMPLETED)
         elif result.outcome == RowOutcome.EXPANDED:
             # Deaggregation parent token - children counted separately
             counters.rows_expanded += 1
