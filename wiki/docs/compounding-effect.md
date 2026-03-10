@@ -14,19 +14,24 @@ Individual failure patterns are concerning but containable. The compound effect 
 These six threat categories do not operate independently. In practice, they compound. Consider the following scenario, where each step enables the next:
 
 1. **An agent generates code with trust tier conflation** — external API data is used directly without boundary validation. The agent treats untrusted external input with the same confidence as internally validated data.
-    <br/>→ [ACF-T1: Trust Tier Conflation](taxonomy/acf-t1.md) · [ACF-E1: Implicit Privilege Grant](taxonomy/acf-e1.md)
+
+    → [ACF-T1: Trust Tier Conflation](taxonomy/acf-t1.md) · [ACF-E1: Implicit Privilege Grant](taxonomy/acf-e1.md)
 
 2. **The missing validation means errors in that data are caught by a broad `except` block** — instead of being detected at the trust boundary, malformed external data propagates until it causes an exception somewhere downstream. A broad exception handler catches it and discards the diagnostic context that would have revealed the root cause.
-    <br/>→ [ACF-R1: Audit Trail Destruction](taxonomy/acf-r1.md)
+
+    → [ACF-R1: Audit Trail Destruction](taxonomy/acf-r1.md)
 
 3. **The `except` block returns a default value** — rather than propagating the failure, the handler silently substitutes a plausible-looking default. The system continues operating as if nothing went wrong. From the outside, the code appears to be handling errors gracefully.
-    <br/>→ [ACF-S1: Competence Spoofing](taxonomy/acf-s1.md)
+
+    → [ACF-S1: Competence Spoofing](taxonomy/acf-s1.md)
 
 4. **The default value is treated as authoritative data downstream** — the fabricated default is now indistinguishable from real data. Downstream components consume it, make decisions based on it, and record it in the audit trail as if it were a genuine value derived from the source system.
-    <br/>→ [ACF-T1: Trust Tier Conflation](taxonomy/acf-t1.md) · [ACF-T2: Silent Coercion](taxonomy/acf-t2.md)
+
+    → [ACF-T1: Trust Tier Conflation](taxonomy/acf-t1.md) · [ACF-T2: Silent Coercion](taxonomy/acf-t2.md)
 
 5. **The volume of agent-generated code means the reviewer doesn't catch any of this** — each individual line of code looks reasonable in isolation. The `.get()` with a default looks defensive. The `except` block looks robust. The downstream usage looks normal. At the velocity of agent-generated code, no reviewer examines the five-step chain end to end.
-    <br/>→ [ACF-D1: Finding Flood](taxonomy/acf-d1.md) · [ACF-D2: Review Capacity Exhaustion](taxonomy/acf-d2.md)
+
+    → [ACF-D1: Finding Flood](taxonomy/acf-d1.md) · [ACF-D2: Review Capacity Exhaustion](taxonomy/acf-d2.md)
 
 ## Why the interaction matters
 

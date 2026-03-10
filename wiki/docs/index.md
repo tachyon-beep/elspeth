@@ -2,7 +2,9 @@
 
 A threat model for AI-assisted software development in government systems.
 
-**Classification:** OFFICIAL | **Status:** DRAFT v0.3 | **Date:** March 2026
+**Classification:** OFFICIAL<br/>
+**Status:** DRAFT v0.3<br/>
+**Date:** March 2026
 
 ## The Risk
 

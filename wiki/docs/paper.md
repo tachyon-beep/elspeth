@@ -5,7 +5,9 @@ title: "Full Paper"
 !!! info "Navigation"
     This is the complete discussion paper. For guided reading paths, see [Reading Guides](reading-guides.md). For the executive summary, see [Executive Brief](executive-brief.md).
 
-    **Classification:** OFFICIAL | **Status:** DRAFT v0.3 | **Date:** March 2026
+    **Classification:** OFFICIAL<br/>
+    **Status:** DRAFT v0.3<br/>
+    **Date:** March 2026
 
 ---
 
@@ -1188,7 +1190,9 @@ Organisations working in other languages should read the *Description* and *Why 
 
 #### ACF-S1: Competence Spoofing
 
-**STRIDE:** Spoofing | **Risk:** High | **Detection:** None
+**STRIDE:** Spoofing<br/>
+**Risk:** High<br/>
+**Detection:** None
 
 **Description:** Default values fabricate data where the absence of data should be surfaced as a failure, error, or explicit "unknown." The code presents a confident result that is actually based on fabricated input.
 
@@ -1226,7 +1230,9 @@ def assess_risk_level(record):
 
 #### ACF-S2: Hallucinated Field Access
 
-**STRIDE:** Spoofing | **Risk:** High | **Detection:** Partial
+**STRIDE:** Spoofing<br/>
+**Risk:** High<br/>
+**Detection:** Partial
 
 **Description:** Agent accesses a field name that doesn't exist on the target object, masked by `getattr()` with a default. The code operates on fabricated data while appearing to access a real field.
 
@@ -1252,7 +1258,9 @@ if threshold > 5:
 
 #### ACF-S3: Structural Identity Spoofing
 
-**STRIDE:** Spoofing (+ Elevation of Privilege consequence) | **Risk:** High | **Detection:** Partial
+**STRIDE:** Spoofing (+ Elevation of Privilege consequence)<br/>
+**Risk:** High<br/>
+**Detection:** Partial
 
 **Description:** A `hasattr()` check is used as a capability or privilege gate, allowing any object that declares the expected attribute to pass — regardless of whether the object is of the correct type. The gate accepts structural presence as proof of identity.
 
@@ -1298,7 +1306,9 @@ This is the capability-based equivalent of ACF-S1's competence spoofing: ACF-S1 
 
 #### ACF-T1: Trust Tier Conflation
 
-**STRIDE:** Tampering | **Risk:** Critical | **Detection:** None
+**STRIDE:** Tampering<br/>
+**Risk:** Critical<br/>
+**Detection:** None
 
 **Description:** Data from an external (untrusted) source is used in an internal (trusted) context without passing through a validation boundary. The data's effective trust level is silently elevated.
 
@@ -1345,7 +1355,9 @@ def sync_partner_records(partner_api_url):
 
 #### ACF-T2: Silent Coercion
 
-**STRIDE:** Tampering | **Risk:** Medium | **Detection:** None
+**STRIDE:** Tampering<br/>
+**Risk:** Medium<br/>
+**Detection:** None
 
 **Description:** Type coercion across trust boundaries hides data quality issues. Values are silently converted to a compatible type rather than being flagged as invalid.
 
@@ -1373,7 +1385,9 @@ amount = float(row["transaction_amount"])
 
 #### ACF-R1: Audit Trail Destruction
 
-**STRIDE:** Repudiation | **Risk:** High | **Detection:** Partial
+**STRIDE:** Repudiation<br/>
+**Risk:** High<br/>
+**Detection:** Partial
 
 **Description:** Broad exception handlers catch errors from audit-critical operations and log-and-continue rather than propagating the failure to the audit system.
 
@@ -1400,7 +1414,9 @@ except Exception as e:
 
 #### ACF-R2: Partial Completion
 
-**STRIDE:** Repudiation | **Risk:** High | **Detection:** None
+**STRIDE:** Repudiation<br/>
+**Risk:** High<br/>
+**Detection:** None
 
 **Description:** A sequence of operations that should be atomic (all-or-nothing) is implemented without rollback, so partial failure leaves the system in an inconsistent state.
 
@@ -1425,7 +1441,9 @@ def reclassify_document(doc_id, new_classification):
 
 #### ACF-I1: Verbose Error Response
 
-**STRIDE:** Information Disclosure | **Risk:** Medium | **Detection:** Partial
+**STRIDE:** Information Disclosure<br/>
+**Risk:** Medium<br/>
+**Detection:** Partial
 
 **Description:** Error handlers expose internal system details (database schemas, file paths, query parameters, library versions) in error responses.
 
@@ -1444,7 +1462,9 @@ except DatabaseError as e:
 
 #### ACF-I2: Stack Trace Exposure
 
-**STRIDE:** Information Disclosure | **Risk:** Low | **Detection:** Good
+**STRIDE:** Information Disclosure<br/>
+**Risk:** Low<br/>
+**Detection:** Good
 
 *Note: This entry is included for taxonomy completeness. It is well-covered by existing tooling and is lower risk than other entries. It could reasonably be treated as a sub-variant of ACF-I1.*
 
@@ -1458,7 +1478,9 @@ except DatabaseError as e:
 
 #### ACF-D1: Finding Flood
 
-**STRIDE:** Denial of Service | **Risk:** High | **Detection:** N/A (process threat)
+**STRIDE:** Denial of Service<br/>
+**Risk:** High<br/>
+**Detection:** N/A (process threat)
 
 **Description:** The volume of static analysis findings on agent-generated code overwhelms reviewers, causing them to rubber-stamp findings without evaluation.
 
@@ -1470,7 +1492,9 @@ except DatabaseError as e:
 
 #### ACF-D2: Review Capacity Exhaustion
 
-**STRIDE:** Denial of Service | **Risk:** High | **Detection:** N/A (process threat)
+**STRIDE:** Denial of Service<br/>
+**Risk:** High<br/>
+**Detection:** N/A (process threat)
 
 **Description:** Agent code generation velocity exceeds the organisation's capacity for security-focused review, degrading review from active verification to passive scanning.
 
@@ -1482,7 +1506,9 @@ except DatabaseError as e:
 
 #### ACF-E1: Implicit Privilege Grant
 
-**STRIDE:** Elevation of Privilege | **Risk:** Critical | **Detection:** None
+**STRIDE:** Elevation of Privilege<br/>
+**Risk:** Critical<br/>
+**Detection:** None
 
 **Description:** External system assertions are accepted without independent verification, granting privileges based on unvalidated claims.
 
@@ -1507,7 +1533,9 @@ if partner_verification.get("verified", False):
 
 #### ACF-E2: Unvalidated Delegation
 
-**STRIDE:** Elevation of Privilege | **Risk:** High | **Detection:** Partial
+**STRIDE:** Elevation of Privilege<br/>
+**Risk:** High<br/>
+**Detection:** Partial
 
 **Description:** User-supplied parameters are used directly in privileged operations (database queries, file access, system commands) without validation or restriction.
 
