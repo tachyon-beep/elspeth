@@ -824,8 +824,8 @@ class TestFindCallByRequestHash:
 class TestGetCallResponseData:
     """Tests for retrieving response data from the payload store."""
 
-    def test_returns_never_stored_without_payload_store(self):
-        """Without a payload store, response_ref is never set, so state is NEVER_STORED."""
+    def test_returns_hash_only_without_payload_store(self):
+        """Without a payload store, response_ref is never set but response_hash is — state is HASH_ONLY."""
         _db, recorder, state_id = _setup()
         idx = recorder.allocate_call_index(state_id)
         call = recorder.record_call(
@@ -840,7 +840,7 @@ class TestGetCallResponseData:
         result = recorder.get_call_response_data(call.call_id)
 
         assert isinstance(result, CallDataResult)
-        assert result.state == CallDataState.NEVER_STORED
+        assert result.state == CallDataState.HASH_ONLY
         assert result.data is None
 
     def test_returns_never_stored_for_call_without_response(self):
@@ -854,6 +854,54 @@ class TestGetCallResponseData:
             request_data=RawCallPayload({"prompt": "fail"}),
             error=RawCallPayload({"code": "error"}),
         )
+
+        result = recorder.get_call_response_data(call.call_id)
+
+        assert isinstance(result, CallDataResult)
+        assert result.state == CallDataState.NEVER_STORED
+        assert result.data is None
+
+    def test_returns_hash_only_when_response_recorded_without_payload_store(self):
+        """When response_data is provided but no payload store exists,
+        response_hash is set but response_ref is NULL — state should be HASH_ONLY."""
+        _db, recorder, state_id = _setup()
+        idx = recorder.allocate_call_index(state_id)
+        call = recorder.record_call(
+            state_id,
+            idx,
+            CallType.LLM,
+            CallStatus.SUCCESS,
+            request_data=RawCallPayload({"prompt": "hello"}),
+            response_data=RawCallPayload({"text": "world"}),
+        )
+
+        # Precondition: response_hash is set, response_ref is not
+        assert call.response_hash is not None
+        assert call.response_ref is None
+
+        result = recorder.get_call_response_data(call.call_id)
+
+        assert isinstance(result, CallDataResult)
+        assert result.state == CallDataState.HASH_ONLY
+        assert result.data is None
+
+    def test_returns_never_stored_for_call_truly_without_response(self):
+        """When no response_data is provided at all (e.g., timeout),
+        both response_hash and response_ref are NULL — state should be NEVER_STORED."""
+        _db, recorder, state_id = _setup()
+        idx = recorder.allocate_call_index(state_id)
+        call = recorder.record_call(
+            state_id,
+            idx,
+            CallType.LLM,
+            CallStatus.ERROR,
+            request_data=RawCallPayload({"prompt": "fail"}),
+            error=RawCallPayload({"code": "timeout"}),
+        )
+
+        # Precondition: both response_hash and response_ref are None
+        assert call.response_hash is None
+        assert call.response_ref is None
 
         result = recorder.get_call_response_data(call.call_id)
 

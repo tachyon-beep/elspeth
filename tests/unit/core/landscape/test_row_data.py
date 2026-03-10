@@ -7,7 +7,7 @@ from typing import Any
 
 import pytest
 
-from elspeth.core.landscape.row_data import RowDataResult, RowDataState
+from elspeth.core.landscape.row_data import CallDataResult, CallDataState, RowDataResult, RowDataState
 
 
 def test_row_data_state_values() -> None:
@@ -75,3 +75,23 @@ def test_row_data_result_repr_fallback_rejects_non_dict(non_dict_data: Any) -> N
     """REPR_FALLBACK state requires dict data, not other types."""
     with pytest.raises(TypeError, match="repr_fallback state requires dict data"):
         RowDataResult(state=RowDataState.REPR_FALLBACK, data=non_dict_data)
+
+
+# --- CallDataState HASH_ONLY tests ---
+
+
+def test_call_data_state_hash_only_value() -> None:
+    assert CallDataState.HASH_ONLY.value == "hash_only"
+
+
+def test_call_data_result_hash_only_with_none_data() -> None:
+    """HASH_ONLY state requires None data (hash exists but no payload)."""
+    result = CallDataResult(state=CallDataState.HASH_ONLY, data=None)
+    assert result.state == CallDataState.HASH_ONLY
+    assert result.data is None
+
+
+def test_call_data_result_hash_only_rejects_data() -> None:
+    """HASH_ONLY state must not have data (no payload available)."""
+    with pytest.raises(ValueError, match="state requires None data"):
+        CallDataResult(state=CallDataState.HASH_ONLY, data={"unexpected": "payload"})

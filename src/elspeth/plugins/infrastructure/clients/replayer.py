@@ -238,6 +238,8 @@ class CallReplayer:
         # Extract response data based on explicit state
         if call_data.state == CallDataState.AVAILABLE:
             response_data: dict[str, Any] = dict(call_data.data)  # type: ignore[arg-type]
+        elif call_data.state == CallDataState.HASH_ONLY:
+            raise ReplayPayloadMissingError(call.call_id, request_hash)
         elif call_data.state == CallDataState.NEVER_STORED:
             # Call never had a response (e.g., connection timeout, DNS failure) — use empty dict
             response_data = {}

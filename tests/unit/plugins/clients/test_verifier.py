@@ -679,6 +679,65 @@ class TestCallVerifier:
         assert report.matches == 0
         assert report.mismatches == 0
 
+    def test_verify_hash_only_uses_hash_based_verification(self) -> None:
+        """HASH_ONLY state (response_hash exists, no payload) should use hash-based
+        verification — same path as PURGED and STORE_NOT_CONFIGURED."""
+        recorder = self._create_mock_recorder()
+        request_data = {"model": "gpt-4", "messages": []}
+        request_hash = stable_hash(request_data)
+        original_response = {"content": "Hello, world!", "model": "gpt-4"}
+        response_hash = stable_hash(original_response)
+
+        mock_call = self._create_mock_call(
+            request_hash=request_hash,
+            response_hash=response_hash,
+        )
+        recorder.find_call_by_request_hash.return_value = mock_call
+        recorder.get_call_response_data.return_value = CallDataResult(state=CallDataState.HASH_ONLY, data=None)
+
+        verifier = CallVerifier(recorder, source_run_id="run_abc123")
+        result = verifier.verify(
+            call_type=CallType.LLM,
+            request_data=request_data,
+            live_response=original_response,  # Same response — hash should match
+        )
+
+        assert result.is_match is True
+        assert result.payload_missing is True
+        assert result.has_differences is False
+        report = verifier.get_report()
+        assert report.matches == 1
+        assert report.missing_payloads == 1
+
+    def test_verify_hash_only_mismatch(self) -> None:
+        """HASH_ONLY state with different live response detects hash mismatch."""
+        recorder = self._create_mock_recorder()
+        request_data = {"model": "gpt-4", "messages": []}
+        request_hash = stable_hash(request_data)
+        original_response = {"content": "Hello, world!"}
+        response_hash = stable_hash(original_response)
+
+        mock_call = self._create_mock_call(
+            request_hash=request_hash,
+            response_hash=response_hash,
+        )
+        recorder.find_call_by_request_hash.return_value = mock_call
+        recorder.get_call_response_data.return_value = CallDataResult(state=CallDataState.HASH_ONLY, data=None)
+
+        verifier = CallVerifier(recorder, source_run_id="run_abc123")
+        result = verifier.verify(
+            call_type=CallType.LLM,
+            request_data=request_data,
+            live_response={"content": "DIFFERENT"},
+        )
+
+        assert result.is_match is False
+        assert result.payload_missing is True
+        assert "hash_mismatch" in result.differences
+        report = verifier.get_report()
+        assert report.mismatches == 1
+        assert report.missing_payloads == 1
+
     def test_verify_order_independent_with_default_config(self) -> None:
         """Default configuration (ignore_order=True) ignores list ordering."""
         recorder = self._create_mock_recorder()

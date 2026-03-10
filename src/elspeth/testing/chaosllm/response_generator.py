@@ -415,11 +415,17 @@ class ResponseGenerator:
                 except jinja2.TemplateError as exc:
                     content = f"[template_override_error: {exc}]"
             else:
-                content = self._generate_template_response(request)
+                if self._compiled_template is None:
+                    content = "[template_mode_unavailable: server not configured for template mode]"
+                else:
+                    content = self._generate_template_response(request)
         elif mode == "echo":
             content = self._generate_echo_response(request)
         elif mode == "preset":
-            content = self._generate_preset_response()
+            if mode_override is not None and self._config.mode != "preset":
+                content = "[preset_mode_unavailable: server not configured for preset mode]"
+            else:
+                content = self._generate_preset_response()
         else:
             # Config mode is Pydantic Literal-validated, so invalid config mode
             # is impossible. This branch is only reachable via mode_override from

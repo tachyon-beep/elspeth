@@ -623,6 +623,28 @@ class TestCallReplayer:
             f"Third replay should return third response, got: {result3.response_data}"
         )
 
+    def test_replay_hash_only_raises_payload_missing(self) -> None:
+        """HASH_ONLY state means response was recorded (hash exists) but payload
+        was never persisted. Replayer cannot replay without actual data."""
+        recorder = self._create_mock_recorder()
+        request_data = {"model": "gpt-4", "messages": []}
+        request_hash = stable_hash(request_data)
+
+        mock_call = self._create_mock_call(
+            request_hash=request_hash,
+            response_hash="hash_of_response",  # Hash proves response existed
+        )
+        recorder.find_call_by_request_hash.return_value = mock_call
+        recorder.get_call_response_data.return_value = CallDataResult(state=CallDataState.HASH_ONLY, data=None)
+
+        replayer = CallReplayer(recorder, source_run_id="run_abc123")
+
+        with pytest.raises(ReplayPayloadMissingError) as exc_info:
+            replayer.replay(call_type=CallType.LLM, request_data=request_data)
+
+        assert exc_info.value.call_id == "call_123"
+        assert exc_info.value.request_hash == request_hash
+
     def test_replay_corrupt_error_json_raises_audit_integrity_error(self) -> None:
         """Corrupt error_json raises AuditIntegrityError, not JSONDecodeError.
 

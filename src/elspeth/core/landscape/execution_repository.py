@@ -991,6 +991,8 @@ class ExecutionRepository:
             return CallDataResult(state=CallDataState.CALL_NOT_FOUND, data=None)
 
         if row.response_ref is None:
+            if row.response_hash is not None:
+                return CallDataResult(state=CallDataState.HASH_ONLY, data=None)
             return CallDataResult(state=CallDataState.NEVER_STORED, data=None)
 
         if self._payload_store is None:

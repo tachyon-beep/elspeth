@@ -313,7 +313,7 @@ class CallVerifier:
         # Handle non-available states explicitly
         if call_data.state != CallDataState.AVAILABLE:
             # Payload was expected but is missing (purged or store not configured)
-            if call_data.state in (CallDataState.PURGED, CallDataState.STORE_NOT_CONFIGURED):
+            if call_data.state in (CallDataState.PURGED, CallDataState.STORE_NOT_CONFIGURED, CallDataState.HASH_ONLY):
                 self._report.missing_payloads += 1
 
                 # When response_hash exists, perform hash-based

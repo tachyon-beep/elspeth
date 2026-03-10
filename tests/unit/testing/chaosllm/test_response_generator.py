@@ -741,6 +741,38 @@ class TestModeOverride:
         response = generator.generate(request, mode_override="echo")
         assert response.content == "Echo: Hello world"
 
+    def test_mode_override_to_template_without_compiled_template(self) -> None:
+        """Override to template mode from non-template base without template_override crashes."""
+        config = ResponseConfig(mode="random")
+        generator = ResponseGenerator(config)
+
+        request = {"model": "gpt-4", "messages": []}
+
+        # Override to template mode — no compiled template exists, no template_override provided
+        response = generator.generate(request, mode_override="template")
+        assert response.content.startswith("[template_mode_unavailable")
+
+    def test_mode_override_to_template_with_template_override_body(self) -> None:
+        """Override to template mode with template_override body works from any base mode."""
+        config = ResponseConfig(mode="random")
+        generator = ResponseGenerator(config)
+
+        request = {"model": "gpt-4", "messages": []}
+
+        response = generator.generate(request, mode_override="template", template_override="Hello {{ model }}")
+        assert response.content == "Hello gpt-4"
+
+    def test_mode_override_to_preset_without_preset_file(self) -> None:
+        """Override to preset mode from non-preset base without preset file crashes."""
+        config = ResponseConfig(mode="random")
+        generator = ResponseGenerator(config)
+
+        request = {"model": "gpt-4", "messages": []}
+
+        # Override to preset mode — default preset file doesn't exist
+        response = generator.generate(request, mode_override="preset")
+        assert response.content.startswith("[preset_mode_unavailable")
+
 
 class TestTokenEstimation:
     """Tests for token count estimation."""

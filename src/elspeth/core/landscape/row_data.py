@@ -16,7 +16,8 @@ Row data states:
 Call data states:
     AVAILABLE: Response data was found and returned
     PURGED: Response existed but was deleted (retention policy)
-    NEVER_STORED: Call exists but response_ref was never set
+    HASH_ONLY: Response was recorded (hash exists) but payload was never persisted
+    NEVER_STORED: Call exists but no response was ever recorded (hash and ref both NULL)
     STORE_NOT_CONFIGURED: No payload store configured
     CALL_NOT_FOUND: Call ID doesn't exist in the database
 """
@@ -98,6 +99,7 @@ class CallDataState(StrEnum):
 
     AVAILABLE = "available"
     PURGED = "purged"
+    HASH_ONLY = "hash_only"
     NEVER_STORED = "never_stored"
     STORE_NOT_CONFIGURED = "store_not_configured"
     CALL_NOT_FOUND = "call_not_found"
