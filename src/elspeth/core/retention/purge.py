@@ -8,10 +8,10 @@ for audit integrity.
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from time import perf_counter
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 import structlog
-from sqlalchemy import and_, or_, select, union
+from sqlalchemy import ColumnElement, CompoundSelect, FromClause, and_, or_, select, union
 
 from elspeth.contracts.payload_store import PayloadStore
 from elspeth.core.landscape.reproducibility import update_grade_after_purge
@@ -69,6 +69,64 @@ class PurgeManager:
         self._db = db
         self._payload_store = payload_store
 
+    def _build_ref_union_query(
+        self,
+        run_condition: ColumnElement[bool],
+        *,
+        rows_join: FromClause,
+        operation_join: FromClause,
+        call_state_join: FromClause,
+        call_op_join: FromClause,
+        routing_join: FromClause,
+    ) -> CompoundSelect[Any]:
+        """Build a UNION of all 8 payload ref sub-queries for a given run condition.
+
+        Each sub-query selects a single ref column from a different table/join,
+        filtered by the run condition and a NOT NULL guard on the ref column.
+
+        Args:
+            run_condition: SQLAlchemy WHERE clause for run filtering
+                (e.g. expired condition or active condition)
+            rows_join: Pre-built join for rows → runs
+            operation_join: Pre-built join for operations → runs
+            call_state_join: Pre-built join for calls → node_states → runs
+            call_op_join: Pre-built join for calls → operations → runs
+            routing_join: Pre-built join for routing_events → node_states → runs
+
+        Returns:
+            UNION of all 8 sub-queries
+        """
+        return union(
+            # 1. Row payloads
+            select(rows_table.c.source_data_ref)
+            .select_from(rows_join)
+            .where(and_(run_condition, rows_table.c.source_data_ref.isnot(None))),
+            # 2. Operation input payloads
+            select(operations_table.c.input_data_ref)
+            .select_from(operation_join)
+            .where(and_(run_condition, operations_table.c.input_data_ref.isnot(None))),
+            # 3. Operation output payloads
+            select(operations_table.c.output_data_ref)
+            .select_from(operation_join)
+            .where(and_(run_condition, operations_table.c.output_data_ref.isnot(None))),
+            # 4. Call request payloads (transform calls via state_id)
+            select(calls_table.c.request_ref)
+            .select_from(call_state_join)
+            .where(and_(run_condition, calls_table.c.request_ref.isnot(None))),
+            # 5. Call response payloads (transform calls via state_id)
+            select(calls_table.c.response_ref)
+            .select_from(call_state_join)
+            .where(and_(run_condition, calls_table.c.response_ref.isnot(None))),
+            # 6. Call request payloads (source/sink calls via operation_id)
+            select(calls_table.c.request_ref).select_from(call_op_join).where(and_(run_condition, calls_table.c.request_ref.isnot(None))),
+            # 7. Call response payloads (source/sink calls via operation_id)
+            select(calls_table.c.response_ref).select_from(call_op_join).where(and_(run_condition, calls_table.c.response_ref.isnot(None))),
+            # 8. Routing reason payloads
+            select(routing_events_table.c.reason_ref)
+            .select_from(routing_join)
+            .where(and_(run_condition, routing_events_table.c.reason_ref.isnot(None))),
+        )
+
     def find_expired_payload_refs(
         self,
         retention_days: int,
@@ -119,159 +177,38 @@ class PurgeManager:
             runs_table.c.status == "running",
         )
 
-        # === Build queries for refs from EXPIRED runs ===
-
-        # 1. Row payloads from expired runs
-        row_expired_query = (
-            select(rows_table.c.source_data_ref)
-            .select_from(rows_table.join(runs_table, rows_table.c.run_id == runs_table.c.run_id))
-            .where(and_(run_expired_condition, rows_table.c.source_data_ref.isnot(None)))
-        )
-
-        # 2. Operation input/output payloads from expired runs
-        operation_expired_join = operations_table.join(runs_table, operations_table.c.run_id == runs_table.c.run_id)
-
-        operation_input_expired_query = (
-            select(operations_table.c.input_data_ref)
-            .select_from(operation_expired_join)
-            .where(and_(run_expired_condition, operations_table.c.input_data_ref.isnot(None)))
-        )
-
-        operation_output_expired_query = (
-            select(operations_table.c.output_data_ref)
-            .select_from(operation_expired_join)
-            .where(and_(run_expired_condition, operations_table.c.output_data_ref.isnot(None)))
-        )
-
-        # 3. Call payloads from expired runs (transform calls via state_id)
+        # === Build joins (shared between expired and active queries) ===
         # NOTE: Use node_states.run_id directly (denormalized column) instead of
         # joining through nodes table. The nodes table has composite PK (node_id, run_id),
         # so joining on node_id alone would be ambiguous when node_id is reused across runs.
+        rows_join = rows_table.join(runs_table, rows_table.c.run_id == runs_table.c.run_id)
+        operation_join = operations_table.join(runs_table, operations_table.c.run_id == runs_table.c.run_id)
         call_state_join = calls_table.join(node_states_table, calls_table.c.state_id == node_states_table.c.state_id).join(
             runs_table, node_states_table.c.run_id == runs_table.c.run_id
         )
-
-        call_state_request_expired_query = (
-            select(calls_table.c.request_ref)
-            .select_from(call_state_join)
-            .where(and_(run_expired_condition, calls_table.c.request_ref.isnot(None)))
-        )
-
-        call_state_response_expired_query = (
-            select(calls_table.c.response_ref)
-            .select_from(call_state_join)
-            .where(and_(run_expired_condition, calls_table.c.response_ref.isnot(None)))
-        )
-
-        # 4. Call payloads from expired runs (source/sink calls via operation_id)
         # XOR constraint: calls have either state_id OR operation_id, not both
         call_op_join = calls_table.join(operations_table, calls_table.c.operation_id == operations_table.c.operation_id).join(
             runs_table, operations_table.c.run_id == runs_table.c.run_id
         )
-
-        call_op_request_expired_query = (
-            select(calls_table.c.request_ref)
-            .select_from(call_op_join)
-            .where(and_(run_expired_condition, calls_table.c.request_ref.isnot(None)))
-        )
-
-        call_op_response_expired_query = (
-            select(calls_table.c.response_ref)
-            .select_from(call_op_join)
-            .where(and_(run_expired_condition, calls_table.c.response_ref.isnot(None)))
-        )
-
-        # 5. Routing payloads from expired runs
-        # NOTE: Same pattern as call_state_join - use node_states.run_id directly
         routing_join = routing_events_table.join(node_states_table, routing_events_table.c.state_id == node_states_table.c.state_id).join(
             runs_table, node_states_table.c.run_id == runs_table.c.run_id
         )
 
-        routing_expired_query = (
-            select(routing_events_table.c.reason_ref)
-            .select_from(routing_join)
-            .where(and_(run_expired_condition, routing_events_table.c.reason_ref.isnot(None)))
+        expired_refs_query = self._build_ref_union_query(
+            run_expired_condition,
+            rows_join=rows_join,
+            operation_join=operation_join,
+            call_state_join=call_state_join,
+            call_op_join=call_op_join,
+            routing_join=routing_join,
         )
-
-        # Combine all expired refs
-        expired_refs_query = union(
-            row_expired_query,
-            operation_input_expired_query,
-            operation_output_expired_query,
-            call_state_request_expired_query,
-            call_state_response_expired_query,
-            call_op_request_expired_query,
-            call_op_response_expired_query,
-            routing_expired_query,
-        )
-
-        # === Build queries for refs from ACTIVE runs (to exclude) ===
-
-        # 1. Row payloads from active runs
-        row_active_query = (
-            select(rows_table.c.source_data_ref)
-            .select_from(rows_table.join(runs_table, rows_table.c.run_id == runs_table.c.run_id))
-            .where(and_(run_active_condition, rows_table.c.source_data_ref.isnot(None)))
-        )
-
-        # 2. Operation input/output payloads from active runs
-        operation_active_join = operations_table.join(runs_table, operations_table.c.run_id == runs_table.c.run_id)
-
-        operation_input_active_query = (
-            select(operations_table.c.input_data_ref)
-            .select_from(operation_active_join)
-            .where(and_(run_active_condition, operations_table.c.input_data_ref.isnot(None)))
-        )
-
-        operation_output_active_query = (
-            select(operations_table.c.output_data_ref)
-            .select_from(operation_active_join)
-            .where(and_(run_active_condition, operations_table.c.output_data_ref.isnot(None)))
-        )
-
-        # 3. Call payloads from active runs (transform calls via state_id)
-        call_state_request_active_query = (
-            select(calls_table.c.request_ref)
-            .select_from(call_state_join)
-            .where(and_(run_active_condition, calls_table.c.request_ref.isnot(None)))
-        )
-
-        call_state_response_active_query = (
-            select(calls_table.c.response_ref)
-            .select_from(call_state_join)
-            .where(and_(run_active_condition, calls_table.c.response_ref.isnot(None)))
-        )
-
-        # 4. Call payloads from active runs (source/sink calls via operation_id)
-        call_op_request_active_query = (
-            select(calls_table.c.request_ref)
-            .select_from(call_op_join)
-            .where(and_(run_active_condition, calls_table.c.request_ref.isnot(None)))
-        )
-
-        call_op_response_active_query = (
-            select(calls_table.c.response_ref)
-            .select_from(call_op_join)
-            .where(and_(run_active_condition, calls_table.c.response_ref.isnot(None)))
-        )
-
-        # 5. Routing payloads from active runs
-        routing_active_query = (
-            select(routing_events_table.c.reason_ref)
-            .select_from(routing_join)
-            .where(and_(run_active_condition, routing_events_table.c.reason_ref.isnot(None)))
-        )
-
-        # Combine all active refs
-        active_refs_query = union(
-            row_active_query,
-            operation_input_active_query,
-            operation_output_active_query,
-            call_state_request_active_query,
-            call_state_response_active_query,
-            call_op_request_active_query,
-            call_op_response_active_query,
-            routing_active_query,
+        active_refs_query = self._build_ref_union_query(
+            run_active_condition,
+            rows_join=rows_join,
+            operation_join=operation_join,
+            call_state_join=call_state_join,
+            call_op_join=call_op_join,
+            routing_join=routing_join,
         )
 
         # === Execute both queries and compute set difference ===

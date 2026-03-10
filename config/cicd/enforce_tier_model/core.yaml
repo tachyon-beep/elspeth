@@ -190,11 +190,11 @@ allow_hits:
   reason: Optional required_input_fields key supports transforms with implicit/no required field contract
   safety: Missing key yields empty set; downstream schema checks still enforce compatibility
   expires: '2026-03-10'
-- key: core/retention/purge.py:R6:PurgeManager:purge_payloads:fp=70cd8fe1b61dd607
+- key: core/retention/purge.py:R6:PurgeManager:purge_payloads:fp=c6f0842e656af7ef
   owner: bugfix
   reason: Tier-3 boundary - PayloadStore.exists() is external I/O (filesystem/blob storage)
   safety: Exception caught and logged, ref added to failed_refs, loop continues
-- key: core/retention/purge.py:R6:PurgeManager:purge_payloads:fp=b7386a0ddf473c18
+- key: core/retention/purge.py:R6:PurgeManager:purge_payloads:fp=f5cbee7fcef66980
   owner: bugfix
   reason: Tier-3 boundary - PayloadStore.delete() is external I/O (filesystem/blob storage)
   safety: Exception caught and logged, ref added to failed_refs, loop continues
@@ -258,7 +258,7 @@ allow_hits:
   owner: bugfix
   reason: Sentinel class definition in except ImportError — not a runtime error handler
   safety: _get_client() raises ImportError before any Azure API call; sentinel class is never caught
-- key: core/retention/purge.py:R4:PurgeManager:purge_payloads:fp=89a9f75c15732f43
+- key: core/retention/purge.py:R4:PurgeManager:purge_payloads:fp=9fde5e26634c7bd9
   owner: bugfix
   reason: Post-point-of-no-return recovery — payloads are already irreversibly deleted, so ANY failure in grade updates must not abort the loop for remaining runs
   safety: Exception caught and logged via structlog, run_id added to grade_update_failures in PurgeResult, operator informed via CLI output
