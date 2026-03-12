@@ -12,7 +12,9 @@ import math
 import os
 import re
 import time
+from collections.abc import Sequence
 from datetime import UTC, datetime
+from ipaddress import IPv4Network, IPv6Network
 from json import JSONDecodeError
 from typing import TYPE_CHECKING, Any
 
@@ -639,6 +641,7 @@ class AuditedHTTPClient(AuditedClientBase):
         headers: dict[str, str] | None = None,
         follow_redirects: bool = False,
         max_redirects: int = 10,
+        allowed_ranges: Sequence[IPv4Network | IPv6Network] = (),
     ) -> httpx.Response:
         """GET with SSRF-safe IP pinning and redirect validation.
 
@@ -714,6 +717,7 @@ class AuditedHTTPClient(AuditedClientBase):
                     effective_timeout,
                     merged_headers,
                     original_url=request.original_url,
+                    allowed_ranges=allowed_ranges,
                 )
 
             latency_ms = (time.perf_counter() - start) * 1000
@@ -874,6 +878,8 @@ class AuditedHTTPClient(AuditedClientBase):
         timeout: float,
         original_headers: dict[str, str],
         original_url: str,
+        *,
+        allowed_ranges: Sequence[IPv4Network | IPv6Network] = (),
     ) -> tuple[httpx.Response, int]:
         """Follow HTTP redirects with SSRF validation at each hop.
 
@@ -916,7 +922,7 @@ class AuditedHTTPClient(AuditedClientBase):
             redirect_url = str(hostname_url.join(location))
 
             # CRITICAL: Validate the redirect target for SSRF
-            redirect_request = validate_url_for_ssrf(redirect_url)
+            redirect_request = validate_url_for_ssrf(redirect_url, allowed_ranges=allowed_ranges)
 
             # Update hostname_url to the redirect target for the next iteration.
             # If this was an absolute redirect to a different host, hostname_url

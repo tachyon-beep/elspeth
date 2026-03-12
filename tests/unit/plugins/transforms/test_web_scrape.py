@@ -941,3 +941,261 @@ class TestWebScrapeDeclaredOutputFields:
         )
 
         assert transform.declared_output_fields
+
+
+# ===========================================================================
+# allowed_hosts config validation
+# ===========================================================================
+
+
+class TestAllowedHostsConfig:
+    """Config validation for allowed_hosts field."""
+
+    def test_default_is_public_only(self) -> None:
+        """Default allowed_hosts is public_only (no allowlist)."""
+        t = WebScrapeTransform(
+            {
+                "schema": {"mode": "observed"},
+                "url_field": "url",
+                "content_field": "content",
+                "fingerprint_field": "fingerprint",
+                "http": {
+                    "abuse_contact": "test@example.com",
+                    "scraping_reason": "Test",
+                },
+            }
+        )
+        assert t._allowed_ranges == ()
+
+    def test_public_only_keyword(self) -> None:
+        """public_only keyword produces empty allowed_ranges."""
+        t = WebScrapeTransform(
+            {
+                "schema": {"mode": "observed"},
+                "url_field": "url",
+                "content_field": "content",
+                "fingerprint_field": "fingerprint",
+                "http": {
+                    "abuse_contact": "test@example.com",
+                    "scraping_reason": "Test",
+                    "allowed_hosts": "public_only",
+                },
+            }
+        )
+        assert t._allowed_ranges == ()
+
+    def test_allow_private_keyword(self) -> None:
+        """allow_private keyword produces 0.0.0.0/0 + ::/0."""
+        t = WebScrapeTransform(
+            {
+                "schema": {"mode": "observed"},
+                "url_field": "url",
+                "content_field": "content",
+                "fingerprint_field": "fingerprint",
+                "http": {
+                    "abuse_contact": "test@example.com",
+                    "scraping_reason": "Test",
+                    "allowed_hosts": "allow_private",
+                },
+            }
+        )
+        range_strs = {str(r) for r in t._allowed_ranges}
+        assert "0.0.0.0/0" in range_strs
+        assert "::/0" in range_strs
+
+    def test_cidr_list(self) -> None:
+        """List of CIDR ranges parsed correctly."""
+        t = WebScrapeTransform(
+            {
+                "schema": {"mode": "observed"},
+                "url_field": "url",
+                "content_field": "content",
+                "fingerprint_field": "fingerprint",
+                "http": {
+                    "abuse_contact": "test@example.com",
+                    "scraping_reason": "Test",
+                    "allowed_hosts": ["127.0.0.0/8", "10.0.0.0/8"],
+                },
+            }
+        )
+        range_strs = {str(r) for r in t._allowed_ranges}
+        assert "127.0.0.0/8" in range_strs
+        assert "10.0.0.0/8" in range_strs
+
+    def test_single_ip_expanded_to_32(self) -> None:
+        """Single IP address expanded to /32."""
+        t = WebScrapeTransform(
+            {
+                "schema": {"mode": "observed"},
+                "url_field": "url",
+                "content_field": "content",
+                "fingerprint_field": "fingerprint",
+                "http": {
+                    "abuse_contact": "test@example.com",
+                    "scraping_reason": "Test",
+                    "allowed_hosts": ["127.0.0.1"],
+                },
+            }
+        )
+        range_strs = {str(r) for r in t._allowed_ranges}
+        assert "127.0.0.1/32" in range_strs
+
+    def test_ipv6_cidr_accepted(self) -> None:
+        """IPv6 CIDR entries are accepted."""
+        t = WebScrapeTransform(
+            {
+                "schema": {"mode": "observed"},
+                "url_field": "url",
+                "content_field": "content",
+                "fingerprint_field": "fingerprint",
+                "http": {
+                    "abuse_contact": "test@example.com",
+                    "scraping_reason": "Test",
+                    "allowed_hosts": ["::1/128"],
+                },
+            }
+        )
+        assert len(t._allowed_ranges) == 1
+
+    def test_empty_list_rejected(self) -> None:
+        """Empty list is rejected (ambiguous — use allow_private if intended)."""
+        with pytest.raises((PluginConfigError, ValueError)):
+            WebScrapeTransform(
+                {
+                    "schema": {"mode": "observed"},
+                    "url_field": "url",
+                    "content_field": "content",
+                    "fingerprint_field": "fingerprint",
+                    "http": {
+                        "abuse_contact": "test@example.com",
+                        "scraping_reason": "Test",
+                        "allowed_hosts": [],
+                    },
+                }
+            )
+
+    def test_invalid_cidr_rejected(self) -> None:
+        """Unparseable CIDR entry crashes at config time."""
+        with pytest.raises((PluginConfigError, ValueError)):
+            WebScrapeTransform(
+                {
+                    "schema": {"mode": "observed"},
+                    "url_field": "url",
+                    "content_field": "content",
+                    "fingerprint_field": "fingerprint",
+                    "http": {
+                        "abuse_contact": "test@example.com",
+                        "scraping_reason": "Test",
+                        "allowed_hosts": ["not-a-cidr"],
+                    },
+                }
+            )
+
+    def test_invalid_keyword_rejected(self) -> None:
+        """Unknown string keyword is rejected."""
+        with pytest.raises((PluginConfigError, ValueError)):
+            WebScrapeTransform(
+                {
+                    "schema": {"mode": "observed"},
+                    "url_field": "url",
+                    "content_field": "content",
+                    "fingerprint_field": "fingerprint",
+                    "http": {
+                        "abuse_contact": "test@example.com",
+                        "scraping_reason": "Test",
+                        "allowed_hosts": "allow_all",
+                    },
+                }
+            )
+
+    def test_keyword_case_sensitive(self) -> None:
+        """Keywords are case-sensitive — 'Public_Only' is rejected."""
+        with pytest.raises((PluginConfigError, ValueError)):
+            WebScrapeTransform(
+                {
+                    "schema": {"mode": "observed"},
+                    "url_field": "url",
+                    "content_field": "content",
+                    "fingerprint_field": "fingerprint",
+                    "http": {
+                        "abuse_contact": "test@example.com",
+                        "scraping_reason": "Test",
+                        "allowed_hosts": "Public_Only",
+                    },
+                }
+            )
+
+    def test_host_bits_set_normalized_by_strict_false(self) -> None:
+        """CIDR with host bits set is silently normalized via strict=False."""
+        t = WebScrapeTransform(
+            {
+                "schema": {"mode": "observed"},
+                "url_field": "url",
+                "content_field": "content",
+                "fingerprint_field": "fingerprint",
+                "http": {
+                    "abuse_contact": "test@example.com",
+                    "scraping_reason": "Test",
+                    "allowed_hosts": ["127.0.0.1/8"],
+                },
+            }
+        )
+        range_strs = {str(r) for r in t._allowed_ranges}
+        assert "127.0.0.0/8" in range_strs
+
+    def test_always_blocked_overlap_accepted_in_config(self) -> None:
+        """Entries overlapping ALWAYS_BLOCKED_RANGES are accepted in config."""
+        t = WebScrapeTransform(
+            {
+                "schema": {"mode": "observed"},
+                "url_field": "url",
+                "content_field": "content",
+                "fingerprint_field": "fingerprint",
+                "http": {
+                    "abuse_contact": "test@example.com",
+                    "scraping_reason": "Test",
+                    "allowed_hosts": ["169.254.0.0/16"],
+                },
+            }
+        )
+        assert len(t._allowed_ranges) == 1
+
+
+# ===========================================================================
+# _parse_allowed_ranges unit tests
+# ===========================================================================
+
+
+class TestParseAllowedRanges:
+    """Direct unit tests for _parse_allowed_ranges helper."""
+
+    def test_mixed_ipv4_and_ipv6(self) -> None:
+        """Mixed address families in a single list."""
+        from elspeth.plugins.transforms.web_scrape import _parse_allowed_ranges
+
+        result = _parse_allowed_ranges(["10.0.0.0/8", "::1/128"])
+        assert len(result) == 2
+        range_strs = {str(r) for r in result}
+        assert "10.0.0.0/8" in range_strs
+        assert "::1/128" in range_strs
+
+    def test_single_ipv6_expanded_to_128(self) -> None:
+        """Single IPv6 address without prefix is expanded to /128."""
+        from elspeth.plugins.transforms.web_scrape import _parse_allowed_ranges
+
+        result = _parse_allowed_ranges(["::1"])
+        assert str(result[0]) == "::1/128"
+
+    def test_host_bits_normalized(self) -> None:
+        """Host bits are cleared by strict=False."""
+        from elspeth.plugins.transforms.web_scrape import _parse_allowed_ranges
+
+        result = _parse_allowed_ranges(["10.0.0.1/8"])
+        assert str(result[0]) == "10.0.0.0/8"
+
+    def test_returns_tuple(self) -> None:
+        """Return type is tuple (immutable)."""
+        from elspeth.plugins.transforms.web_scrape import _parse_allowed_ranges
+
+        result = _parse_allowed_ranges(["127.0.0.0/8"])
+        assert isinstance(result, tuple)

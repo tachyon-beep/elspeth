@@ -15,7 +15,9 @@ Audit Trail:
 - Generates fingerprints for change detection
 """
 
-from typing import Any, Literal
+import ipaddress
+from ipaddress import IPv4Network, IPv6Network
+from typing import Any, Literal, cast
 
 import httpx
 from pydantic import BaseModel, Field, field_validator, model_validator
@@ -73,12 +75,32 @@ class WebScrapeHTTPConfig(BaseModel):
         gt=0,
         description="Request timeout in seconds",
     )
+    allowed_hosts: str | list[str] = Field(
+        default="public_only",
+        description="SSRF allowlist: 'public_only' (default), 'allow_private', or list of CIDR ranges",
+    )
 
     @field_validator("abuse_contact", "scraping_reason")
     @classmethod
     def _reject_empty(cls, v: str, info: Any) -> str:
         if not v.strip():
             raise ValueError(f"{info.field_name} must not be empty")
+        return v
+
+    @field_validator("allowed_hosts")
+    @classmethod
+    def _validate_allowed_hosts(cls, v: str | list[str]) -> str | list[str]:
+        if isinstance(v, str):
+            if v not in ("public_only", "allow_private"):
+                raise ValueError(f"allowed_hosts must be 'public_only', 'allow_private', or a list of CIDR ranges, got {v!r}")
+            return v
+        if not v:
+            raise ValueError("allowed_hosts list must not be empty (use 'allow_private' to allow all)")
+        for entry in v:
+            try:
+                ipaddress.ip_network(entry, strict=False)
+            except ValueError as e:
+                raise ValueError(f"Invalid CIDR in allowed_hosts: {entry!r}: {e}") from e
         return v
 
 
@@ -105,6 +127,19 @@ class WebScrapeConfig(TransformDataConfig):
         if self.content_field == self.fingerprint_field:
             raise ValueError(f"content_field and fingerprint_field must differ, both are '{self.content_field}'")
         return self
+
+
+def _parse_allowed_ranges(entries: list[str]) -> tuple[IPv4Network | IPv6Network, ...]:
+    """Parse allowed_hosts list entries into ip_network objects.
+
+    Single IPs (no /) are expanded to /32 (IPv4) or /128 (IPv6).
+    Uses strict=False so "10.0.0.1/8" is accepted as "10.0.0.0/8".
+    """
+    networks: list[IPv4Network | IPv6Network] = []
+    for entry in entries:
+        network = ipaddress.ip_network(entry, strict=False)
+        networks.append(network)
+    return tuple(networks)
 
 
 class WebScrapeTransform(BaseTransform):
@@ -183,6 +218,18 @@ class WebScrapeTransform(BaseTransform):
         self._scraping_reason = cfg.http.scraping_reason
         self._timeout = cfg.http.timeout
 
+        # Compute allowed_ranges from allowed_hosts config
+        allowed_hosts = cfg.http.allowed_hosts
+        if allowed_hosts == "public_only":
+            self._allowed_ranges: tuple[IPv4Network | IPv6Network, ...] = ()
+        elif allowed_hosts == "allow_private":
+            self._allowed_ranges = (
+                ipaddress.ip_network("0.0.0.0/0"),
+                ipaddress.ip_network("::/0"),
+            )
+        else:
+            self._allowed_ranges = _parse_allowed_ranges(cast(list[str], allowed_hosts))
+
         # Element stripping
         self._strip_elements = cfg.strip_elements
 
@@ -228,7 +275,7 @@ class WebScrapeTransform(BaseTransform):
 
         # Validate URL and pin resolved IP (SSRF prevention with DNS rebinding defense)
         try:
-            safe_request = validate_url_for_ssrf(url)
+            safe_request = validate_url_for_ssrf(url, allowed_ranges=self._allowed_ranges)
         except (SSRFBlockedError, SSRFNetworkError, TypeError) as e:
             # Security violations, DNS failures, and invalid url types (e.g. None)
             # are non-retryable
@@ -350,6 +397,7 @@ class WebScrapeTransform(BaseTransform):
                 safe_request,
                 headers=headers,
                 follow_redirects=True,
+                allowed_ranges=self._allowed_ranges,
             )
 
             # Check status code and raise appropriate errors

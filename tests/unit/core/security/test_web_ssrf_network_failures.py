@@ -2,11 +2,18 @@
 
 from __future__ import annotations
 
+import ipaddress
 import time
 
 import pytest
 
-from elspeth.core.security.web import NetworkError, SSRFBlockedError, validate_url_for_ssrf
+from elspeth.core.security.web import (
+    ALWAYS_BLOCKED_RANGES,
+    NetworkError,
+    SSRFBlockedError,
+    _validate_ip_address,
+    validate_url_for_ssrf,
+)
 
 
 class TestSSRFDnsFailureBranches:
@@ -126,3 +133,123 @@ class TestPortParsing:
         )
         result = validate_url_for_ssrf("http://example.com/path")
         assert result.port == 80
+
+
+# ===========================================================================
+# ALWAYS_BLOCKED_RANGES: unconditional blocking
+# ===========================================================================
+
+
+class TestAlwaysBlockedRanges:
+    """ALWAYS_BLOCKED_RANGES cannot be bypassed by allowed_ranges."""
+
+    def test_cloud_metadata_blocked_even_with_allow_private(self) -> None:
+        """169.254.169.254 blocked even when allowed_ranges covers everything."""
+        allow_private = (ipaddress.ip_network("0.0.0.0/0"), ipaddress.ip_network("::/0"))
+        with pytest.raises(SSRFBlockedError, match="Always-blocked"):
+            _validate_ip_address("169.254.169.254", allowed_ranges=allow_private)
+
+    def test_ipv6_link_local_always_blocked(self) -> None:
+        """fe80:: addresses are always blocked (IPv6 link-local)."""
+        allow_private = (ipaddress.ip_network("0.0.0.0/0"), ipaddress.ip_network("::/0"))
+        with pytest.raises(SSRFBlockedError, match="Always-blocked"):
+            _validate_ip_address("fe80::1", allowed_ranges=allow_private)
+
+    def test_ipv4_broadcast_always_blocked(self) -> None:
+        """255.255.255.255 is always blocked."""
+        allow_private = (ipaddress.ip_network("0.0.0.0/0"), ipaddress.ip_network("::/0"))
+        with pytest.raises(SSRFBlockedError, match="Always-blocked"):
+            _validate_ip_address("255.255.255.255", allowed_ranges=allow_private)
+
+    def test_ipv4_multicast_always_blocked(self) -> None:
+        """224.x.x.x is always blocked."""
+        allow_private = (ipaddress.ip_network("0.0.0.0/0"), ipaddress.ip_network("::/0"))
+        with pytest.raises(SSRFBlockedError, match="Always-blocked"):
+            _validate_ip_address("224.0.0.1", allowed_ranges=allow_private)
+
+    def test_ipv6_multicast_always_blocked(self) -> None:
+        """ff02::1 is always blocked."""
+        allow_private = (ipaddress.ip_network("0.0.0.0/0"), ipaddress.ip_network("::/0"))
+        with pytest.raises(SSRFBlockedError, match="Always-blocked"):
+            _validate_ip_address("ff02::1", allowed_ranges=allow_private)
+
+    def test_constant_contains_expected_ranges(self) -> None:
+        """Verify ALWAYS_BLOCKED_RANGES has all documented entries."""
+        range_strs = {str(r) for r in ALWAYS_BLOCKED_RANGES}
+        assert "169.254.0.0/16" in range_strs
+        assert "fe80::/10" in range_strs
+        assert "255.255.255.255/32" in range_strs
+        assert "224.0.0.0/4" in range_strs
+        assert "ff00::/8" in range_strs
+
+
+# ===========================================================================
+# allowed_ranges: selective blocklist bypass
+# ===========================================================================
+
+
+class TestAllowedRanges:
+    """allowed_ranges parameter enables selective blocklist bypass."""
+
+    def test_loopback_allowed_when_in_allowed_ranges(self) -> None:
+        """127.0.0.1 passes when 127.0.0.0/8 is in allowed_ranges."""
+        allowed = (ipaddress.ip_network("127.0.0.0/8"),)
+        _validate_ip_address("127.0.0.1", allowed_ranges=allowed)  # Should not raise
+
+    def test_loopback_blocked_without_allowed_ranges(self) -> None:
+        """127.0.0.1 is still blocked when allowed_ranges is empty (default)."""
+        with pytest.raises(SSRFBlockedError, match="Blocked IP range"):
+            _validate_ip_address("127.0.0.1")
+
+    def test_precise_allowlist_only_allows_matching_ip(self) -> None:
+        """Allowing 127.0.0.1/32 does NOT allow 127.0.0.2."""
+        allowed = (ipaddress.ip_network("127.0.0.1/32"),)
+        _validate_ip_address("127.0.0.1", allowed_ranges=allowed)  # OK
+        with pytest.raises(SSRFBlockedError):
+            _validate_ip_address("127.0.0.2", allowed_ranges=allowed)
+
+    def test_private_range_allowed_selectively(self) -> None:
+        """10.0.0.0/8 allowed does not allow 192.168.1.1."""
+        allowed = (ipaddress.ip_network("10.0.0.0/8"),)
+        _validate_ip_address("10.1.2.3", allowed_ranges=allowed)  # OK
+        with pytest.raises(SSRFBlockedError):
+            _validate_ip_address("192.168.1.1", allowed_ranges=allowed)
+
+    def test_public_ip_still_allowed_without_allowlist(self) -> None:
+        """Public IPs pass even when allowed_ranges is empty."""
+        _validate_ip_address("8.8.8.8")  # Should not raise
+
+    def test_cross_family_no_match(self) -> None:
+        """IPv4 allowlist does not match IPv6 addresses (cross-family)."""
+        allowed = (ipaddress.ip_network("127.0.0.0/8"),)
+        # IPv4-mapped IPv6 for 127.0.0.1 — should NOT match IPv4 allowlist
+        with pytest.raises(SSRFBlockedError):
+            _validate_ip_address("::ffff:127.0.0.1", allowed_ranges=allowed)
+
+    def test_ipv6_allowlist_works(self) -> None:
+        """IPv6 allowlist entry matches IPv6 addresses."""
+        allowed = (ipaddress.ip_network("::1/128"),)
+        _validate_ip_address("::1", allowed_ranges=allowed)  # OK
+
+
+# ===========================================================================
+# allowed_ranges through validate_url_for_ssrf
+# ===========================================================================
+
+
+class TestAllowedRangesFullPath:
+    """allowed_ranges works end-to-end through validate_url_for_ssrf."""
+
+    def test_loopback_allowed_via_full_validation(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """127.0.0.1 passes full validation when allowed."""
+        monkeypatch.setattr("elspeth.core.security.web._resolve_hostname", lambda h: ["127.0.0.1"])
+        allowed = (ipaddress.ip_network("127.0.0.0/8"),)
+        result = validate_url_for_ssrf("http://localhost/page", allowed_ranges=allowed)
+        assert result.resolved_ip == "127.0.0.1"
+
+    def test_cloud_metadata_blocked_via_full_validation(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """169.254.169.254 blocked via full path even with allow_private."""
+        monkeypatch.setattr("elspeth.core.security.web._resolve_hostname", lambda h: ["169.254.169.254"])
+        allow_private = (ipaddress.ip_network("0.0.0.0/0"), ipaddress.ip_network("::/0"))
+        with pytest.raises(SSRFBlockedError, match="Always-blocked"):
+            validate_url_for_ssrf("http://metadata/", allowed_ranges=allow_private)

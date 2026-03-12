@@ -27,6 +27,7 @@ from elspeth.core.security.secret_loader import (
     SecretRef,
 )
 from elspeth.core.security.web import (
+    ALWAYS_BLOCKED_RANGES,
     NetworkError,
     SSRFBlockedError,
     SSRFSafeRequest,
@@ -35,6 +36,7 @@ from elspeth.core.security.web import (
 )
 
 __all__ = [
+    "ALWAYS_BLOCKED_RANGES",
     "CachedSecretLoader",
     "CompositeSecretLoader",
     "EnvSecretLoader",

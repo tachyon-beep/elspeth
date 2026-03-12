@@ -46,6 +46,8 @@ transforms:
       abuse_contact: test@example.com
       scraping_reason: ChaosWeb resilience testing example
       timeout: 10
+      allowed_hosts:
+        - "127.0.0.0/8"
     schema:
       mode: observed
 
