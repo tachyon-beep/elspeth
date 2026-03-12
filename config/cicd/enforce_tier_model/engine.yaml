@@ -110,7 +110,7 @@ allow_hits:
   owner: architecture
   reason: dict.get() correct - not all branch names have coalesce point mapping
   safety: Crashes on type mismatch - no silent fallback
-  expires: '2026-03-11'
+  expires: '2026-05-12'
 - key: engine/orchestrator/core.py:R4:Orchestrator:_cleanup_plugins:fp=7fe503e7426de116
   owner: architecture
   reason: Plugin cleanup must attempt all closures; broad catch collects errors then raises
