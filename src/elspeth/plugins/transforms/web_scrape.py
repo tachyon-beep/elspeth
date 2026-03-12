@@ -203,6 +203,7 @@ class WebScrapeTransform(BaseTransform):
                 cfg.fingerprint_field,
                 "fetch_status",
                 "fetch_url_final",
+                "fetch_url_final_ip",
                 "fetch_request_hash",
                 "fetch_response_raw_hash",
                 "fetch_response_processed_hash",
@@ -289,7 +290,7 @@ class WebScrapeTransform(BaseTransform):
 
         # Fetch URL using pinned IP (prevents DNS rebinding between validation and fetch)
         try:
-            response = self._fetch_url(safe_request, ctx)
+            response, final_hostname_url = self._fetch_url(safe_request, ctx)
         except WebScrapeError as e:
             if e.retryable:
                 # Re-raise retryable errors for engine RetryManager
@@ -338,7 +339,8 @@ class WebScrapeTransform(BaseTransform):
         output[self._content_field] = content
         output[self._fingerprint_field] = fingerprint
         output["fetch_status"] = response.status_code
-        output["fetch_url_final"] = str(response.url)
+        output["fetch_url_final"] = final_hostname_url
+        output["fetch_url_final_ip"] = str(response.url)
         output["fetch_request_hash"] = request_hash
         output["fetch_response_raw_hash"] = response_raw_hash
         output["fetch_response_processed_hash"] = response_processed_hash
@@ -357,7 +359,7 @@ class WebScrapeTransform(BaseTransform):
             },
         )
 
-    def _fetch_url(self, safe_request: SSRFSafeRequest, ctx: TransformContext) -> httpx.Response:
+    def _fetch_url(self, safe_request: SSRFSafeRequest, ctx: TransformContext) -> tuple[httpx.Response, str]:
         """Fetch URL using SSRF-safe IP pinning with audit recording.
 
         Args:
@@ -365,7 +367,9 @@ class WebScrapeTransform(BaseTransform):
             ctx: Plugin context
 
         Returns:
-            httpx.Response object
+            Tuple of (httpx.Response, final hostname URL as string).
+            The hostname URL is the logical URL after redirects — distinct
+            from response.url which is IP-based due to SSRF pinning.
 
         Raises:
             WebScrapeError: For retryable or non-retryable failures
@@ -393,7 +397,7 @@ class WebScrapeTransform(BaseTransform):
         }
 
         try:
-            response = client.get_ssrf_safe(
+            response, final_hostname_url = client.get_ssrf_safe(
                 safe_request,
                 headers=headers,
                 follow_redirects=True,
@@ -416,7 +420,7 @@ class WebScrapeTransform(BaseTransform):
                 # Unresolved redirect (e.g. 3xx without Location header) — treat as error
                 raise InvalidURLError(f"Unresolved redirect HTTP {response.status_code}: {url} (missing or empty Location header)")
 
-            return response
+            return response, final_hostname_url
 
         except httpx.TimeoutException as e:
             raise NetworkError(f"Timeout fetching {safe_request.original_url}: {e}") from e

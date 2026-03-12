@@ -642,7 +642,7 @@ class AuditedHTTPClient(AuditedClientBase):
         follow_redirects: bool = False,
         max_redirects: int = 10,
         allowed_ranges: Sequence[IPv4Network | IPv6Network] = (),
-    ) -> httpx.Response:
+    ) -> tuple[httpx.Response, str]:
         """GET with SSRF-safe IP pinning and redirect validation.
 
         Connects to the pre-validated IP in the SSRFSafeRequest, setting the
@@ -656,7 +656,11 @@ class AuditedHTTPClient(AuditedClientBase):
             max_redirects: Maximum redirect hops when follow_redirects=True
 
         Returns:
-            httpx.Response object
+            Tuple of (httpx.Response, final hostname URL as string).
+            The hostname URL is the logical URL after all redirects —
+            distinct from response.url which is IP-based due to SSRF pinning.
+            When follow_redirects is False or no redirects occurred, this is
+            the original request URL.
 
         Raises:
             httpx.HTTPError: For network/HTTP errors
@@ -710,8 +714,9 @@ class AuditedHTTPClient(AuditedClientBase):
 
             # Handle redirects with SSRF validation at each hop
             redirect_count = 0
+            final_hostname_url = request.original_url
             if follow_redirects:
-                response, redirect_count = self._follow_redirects_safe(
+                response, redirect_count, final_hostname_url = self._follow_redirects_safe(
                     response,
                     max_redirects,
                     effective_timeout,
@@ -814,7 +819,7 @@ class AuditedHTTPClient(AuditedClientBase):
                     exc_info=True,
                 )
 
-            return response
+            return response, final_hostname_url
 
         except (FrameworkBugError, AuditIntegrityError):
             # Telemetry re-raise after successful Landscape record_call.
@@ -880,7 +885,7 @@ class AuditedHTTPClient(AuditedClientBase):
         original_url: str,
         *,
         allowed_ranges: Sequence[IPv4Network | IPv6Network] = (),
-    ) -> tuple[httpx.Response, int]:
+    ) -> tuple[httpx.Response, int, str]:
         """Follow HTTP redirects with SSRF validation at each hop.
 
         Each redirect target is independently resolved and validated against
@@ -898,7 +903,10 @@ class AuditedHTTPClient(AuditedClientBase):
                 preserve correct Host headers and TLS SNI.
 
         Returns:
-            Tuple of (final non-redirect response, number of redirects followed)
+            Tuple of (final non-redirect response, number of redirects followed,
+            final hostname URL as string). The hostname URL is the logical URL
+            after all redirects — distinct from response.url which is IP-based
+            due to SSRF pinning.
 
         Raises:
             SSRFBlockedError: If any redirect target resolves to a blocked IP
@@ -1013,4 +1021,4 @@ class AuditedHTTPClient(AuditedClientBase):
                 request=response.request,
             )
 
-        return response, redirects_followed
+        return response, redirects_followed, str(hostname_url)

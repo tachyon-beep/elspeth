@@ -506,17 +506,14 @@ def test_web_scrape_with_pipeline_row(mock_ctx):
     assert result.row["fetch_status"] == 200
 
 
-@pytest.mark.xfail(reason="Redirect testing with respx requires special httpx configuration - documents desired behavior")
 @respx.mock
 def test_web_scrape_follows_redirects_301(mock_ctx):
     """HTTP 301 redirect should be followed and final URL recorded.
 
     Edge case: 301 Moved Permanently redirects are common for URL migrations.
     The scraper should follow the redirect and record both the requested URL
-    and the final URL after redirect resolution.
-
-    **Status:** This test documents desired behavior. The redirect following now
-    happens via _follow_redirects_safe() which re-validates each hop for SSRF.
+    and the final URL after redirect resolution. Both the logical hostname URL
+    and the IP-based connection URL are recorded for audit comparison.
     """
     respx.get(f"https://{_TEST_IP}:443/old").mock(return_value=httpx.Response(301, headers={"Location": "https://example.com/new"}))
     respx.get(f"https://{_TEST_IP}:443/new").mock(return_value=httpx.Response(200, text="<html><body><h1>New Location</h1></body></html>"))
@@ -544,9 +541,10 @@ def test_web_scrape_follows_redirects_301(mock_ctx):
     assert "# New Location" in result.row["page_content"]
     assert result.row["fetch_status"] == 200
     assert result.row["fetch_url_final"] == "https://example.com/new"
+    assert _TEST_IP in result.row["fetch_url_final_ip"]
+    assert result.row["fetch_url_final_ip"].endswith("/new")
 
 
-@pytest.mark.xfail(reason="Redirect chain testing with respx requires integration test setup - documents desired behavior")
 @respx.mock
 def test_web_scrape_follows_redirect_chain(mock_ctx):
     """Multiple redirects (301->302->200) should be followed to final destination."""
@@ -579,12 +577,19 @@ def test_web_scrape_follows_redirect_chain(mock_ctx):
     assert "# Final Destination" in result.row["page_content"]
     assert result.row["fetch_status"] == 200
     assert result.row["fetch_url_final"] == "https://example.com/end"
+    assert _TEST_IP in result.row["fetch_url_final_ip"]
+    assert result.row["fetch_url_final_ip"].endswith("/end")
 
 
-@pytest.mark.xfail(reason="Redirect loop testing with respx requires integration test setup - documents desired behavior")
 @respx.mock
 def test_web_scrape_redirect_limit_exceeded(mock_ctx):
-    """Excessive redirects should fail with network error."""
+    """Excessive redirects should return non-retryable error result.
+
+    A redirect loop is a configuration problem, not a transient failure.
+    The TooManyRedirects exception from httpx is caught by _fetch_url and
+    re-raised as InvalidURLError (non-retryable), which process() converts
+    to a TransformResult.error() for row quarantine.
+    """
     respx.get(f"https://{_TEST_IP}:443/a").mock(return_value=httpx.Response(301, headers={"Location": "https://example.com/b"}))
     respx.get(f"https://{_TEST_IP}:443/b").mock(return_value=httpx.Response(301, headers={"Location": "https://example.com/a"}))
 
@@ -604,8 +609,12 @@ def test_web_scrape_redirect_limit_exceeded(mock_ctx):
     )
     transform.on_start(mock_ctx)
 
-    with patch("socket.getaddrinfo", _mock_getaddrinfo()), pytest.raises(NetworkError, match=r"redirect|too many redirects"):
-        transform.process(make_pipeline_row({"url": "https://example.com/a"}), mock_ctx)
+    with patch("socket.getaddrinfo", _mock_getaddrinfo()):
+        result = transform.process(make_pipeline_row({"url": "https://example.com/a"}), mock_ctx)
+
+    assert result.status == "error"
+    assert "InvalidURLError" in result.reason["error_type"]
+    assert "redirect" in result.reason["error"].lower()
 
 
 @respx.mock
@@ -882,6 +891,7 @@ class TestWebScrapeDeclaredOutputFields:
 
         assert "fetch_status" in transform.declared_output_fields
         assert "fetch_url_final" in transform.declared_output_fields
+        assert "fetch_url_final_ip" in transform.declared_output_fields
         assert "fetch_request_hash" in transform.declared_output_fields
         assert "fetch_response_raw_hash" in transform.declared_output_fields
         assert "fetch_response_processed_hash" in transform.declared_output_fields

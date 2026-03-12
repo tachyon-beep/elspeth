@@ -206,6 +206,7 @@ def test_contract_includes_output_fields(transform, mock_ctx):
         assert "page_fingerprint" in field_names, "fingerprint_field must be in output contract"
         assert "fetch_status" in field_names, "fetch_status must be in output contract"
         assert "fetch_url_final" in field_names, "fetch_url_final must be in output contract"
+        assert "fetch_url_final_ip" in field_names, "fetch_url_final_ip must be in output contract"
         assert "fetch_request_hash" in field_names, "fetch_request_hash must be in output contract"
         assert "fetch_response_raw_hash" in field_names, "fetch_response_raw_hash must be in output contract"
         assert "fetch_response_processed_hash" in field_names, "fetch_response_processed_hash must be in output contract"
@@ -229,6 +230,7 @@ def test_contract_field_types_are_correct(transform, mock_ctx):
         assert field_by_name["page_fingerprint"].python_type is str
         assert field_by_name["fetch_status"].python_type is int
         assert field_by_name["fetch_url_final"].python_type is str
+        assert field_by_name["fetch_url_final_ip"].python_type is str
         assert field_by_name["fetch_request_hash"].python_type is str
         assert field_by_name["fetch_response_raw_hash"].python_type is str
         assert field_by_name["fetch_response_processed_hash"].python_type is str

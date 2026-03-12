@@ -237,12 +237,12 @@ allow_hits:
   reason: Telemetry emission failure - must not crash main request flow
   safety: Logged and continues - telemetry is non-critical to HTTP processing
   expires: '2026-05-06'
-- key: plugins/infrastructure/clients/http.py:R1:AuditedHTTPClient:get_ssrf_safe:fp=68fe5eaa9f6a083d
+- key: plugins/infrastructure/clients/http.py:R1:AuditedHTTPClient:get_ssrf_safe:fp=fb067fea846e1894
   owner: architecture
-  reason: httpx Client.get() method call - ephemeral client for TLS/SNI isolation
-  safety: This is the actual external HTTP call with IP pinning
+  reason: HTTP response content-type header - external system boundary, header may be missing
+  safety: Falls back to binary encoding if content-type absent
   expires: '2026-05-02'
-- key: plugins/infrastructure/clients/http.py:R4:AuditedHTTPClient:get_ssrf_safe:fp=03bab683cf063427
+- key: plugins/infrastructure/clients/http.py:R4:AuditedHTTPClient:get_ssrf_safe:fp=b73b22eec46af6a0
   owner: architecture
   reason: Telemetry emission failure - must not crash main request flow
   safety: Logged and continues - telemetry is non-critical to HTTP processing

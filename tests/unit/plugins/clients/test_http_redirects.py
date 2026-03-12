@@ -94,7 +94,7 @@ class TestRelativeRedirectResolution:
         mock_validate.return_value = _make_ssrf_request("https://example.com/new-path")
         http_client._ephemeral_mock.get.return_value = final_response
 
-        result, count = http_client._follow_redirects_safe(
+        result, count, _final_url = http_client._follow_redirects_safe(
             response=redirect_response,
             max_redirects=5,
             timeout=10.0,
@@ -166,7 +166,7 @@ class TestChainedRedirects:
         ]
         http_client._ephemeral_mock.get.side_effect = [redirect2, final_response]
 
-        result, count = http_client._follow_redirects_safe(
+        result, count, _final_url = http_client._follow_redirects_safe(
             response=redirect1,
             max_redirects=5,
             timeout=10.0,
@@ -193,7 +193,7 @@ class TestChainedRedirects:
         ]
         http_client._ephemeral_mock.get.side_effect = [redirect2, final_response]
 
-        result, count = http_client._follow_redirects_safe(
+        result, count, _final_url = http_client._follow_redirects_safe(
             response=redirect1,
             max_redirects=5,
             timeout=10.0,
@@ -264,7 +264,7 @@ class TestNonRedirectPassthrough:
         """A 200 response should be returned without modification."""
         response = _make_final_response()
 
-        result, count = http_client._follow_redirects_safe(
+        result, count, _final_url = http_client._follow_redirects_safe(
             response=response,
             max_redirects=5,
             timeout=10.0,
