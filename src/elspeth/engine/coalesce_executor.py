@@ -829,12 +829,6 @@ class CoalesceExecutor:
                             collisions[field].append(branch_name)
                         field_origins[field] = branch_name
                     merged.update(branch_data)
-            if collisions:
-                slog.warning(
-                    "union_merge_field_collisions",
-                    collisions=dict(collisions),
-                    winner_branch={f: branches_list[-1] for f, branches_list in collisions.items()},
-                )
             return merged, collisions
 
         elif settings.merge == "nested":

@@ -1006,8 +1006,7 @@ class ExecutionRepository:
         # query_repository._retrieve_and_parse_payload().
         try:
             payload_bytes = self._payload_store.retrieve(row.response_ref)
-        except PayloadNotFoundError as exc:
-            logger.debug("Call response payload purged", content_hash=exc.content_hash, call_id=call_id)
+        except PayloadNotFoundError:
             return CallDataResult(state=CallDataState.PURGED, data=None)
         except PayloadIntegrityError as e:
             raise AuditIntegrityError(f"Payload integrity check failed for call_id={call_id} (ref={row.response_ref}): {e}") from e

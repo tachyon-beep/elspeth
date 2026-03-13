@@ -331,7 +331,11 @@ class SingleQueryStrategy:
 
         return TransformResult.success(
             PipelineRow(output, output_contract),
-            success_reason={"action": "enriched", "fields_added": [self.response_field]},
+            success_reason={
+                "action": "enriched",
+                "fields_added": [self.response_field],
+                "metadata": {"model": result.model, **result.usage.to_dict()},
+            },
         )
 
 
@@ -729,6 +733,8 @@ class MultiQueryStrategy:
             success_reason={
                 "action": "multi_query_enriched",
                 "queries_completed": len(self.query_specs),
+                "fields_added": list(accumulated_outputs.keys()),
+                "metadata": {"model": self.model},
             },
         )
 
@@ -837,6 +843,8 @@ class MultiQueryStrategy:
             success_reason={
                 "action": "multi_query_enriched",
                 "queries_completed": len(self.query_specs),
+                "fields_added": list(accumulated_outputs.keys()),
+                "metadata": {"model": self.model},
             },
         )
 

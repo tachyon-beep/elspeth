@@ -1,10 +1,7 @@
 """TransformExecutor - wraps transform.process() with audit recording."""
 
-import logging
 import time
 from typing import TYPE_CHECKING, Any, cast
-
-import structlog
 
 from elspeth.contracts import (
     ExecutionError,
@@ -27,9 +24,6 @@ from elspeth.plugins.infrastructure.results import TransformResult
 
 if TYPE_CHECKING:
     from elspeth.engine.batch_adapter import SharedBatchAdapter
-
-logger = logging.getLogger(__name__)
-slog = structlog.get_logger(__name__)
 
 
 class TransformExecutor:
@@ -415,13 +409,6 @@ class TransformExecutor:
                 # For multi-row results, keep original row_data (engine will expand tokens later)
                 if result.row is not None:
                     # Single-row result: transforms return PipelineRow with correct contract
-                    slog.debug(
-                        "pipeline_row_created",
-                        token_id=token.token_id,
-                        transform=transform.name,
-                        contract_mode=result.row.contract.mode,
-                    )
-
                     updated_token = token.with_updated_data(result.row)
                 else:
                     # Multi-row result: keep original row_data (engine will expand tokens later)
