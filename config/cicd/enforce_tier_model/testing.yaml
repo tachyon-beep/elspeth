@@ -63,87 +63,87 @@ allow_hits:
   reason: Metrics isolation - recording is best-effort side-effect that must not crash HTTP responses
   safety: Exception logged via structlog with request_id and exc_info; intended chaos response always served
   expires: '2026-05-13'
-- key: testing/chaosllm/server.py:R1:ChaosLLMServer:_handle_completion_request:fp=8dfc3644e09dd810
+- key: testing/chaosllm/server.py:R1:ChaosLLMServer:_handle_completion_request:fp=786fbff1794cda31
   owner: architecture
   reason: External HTTP request body - optional fields per OpenAI spec (Tier 3)
   safety: dict.get with defaults for optional fields from external HTTP clients
   expires: '2026-05-13'
-- key: testing/chaosllm/server.py:R1:ChaosLLMServer:_handle_completion_request:fp=0b8d54153a8d09c4
+- key: testing/chaosllm/server.py:R1:ChaosLLMServer:_handle_completion_request:fp=14f8ad9db30db385
   owner: architecture
   reason: External HTTP request body - optional fields per OpenAI spec (Tier 3)
   safety: dict.get with defaults for optional fields from external HTTP clients
   expires: '2026-05-13'
-- key: testing/chaosllm/server.py:R1:ChaosLLMServer:_handle_completion_request:fp=81ed9975e12cf77e
+- key: testing/chaosllm/server.py:R1:ChaosLLMServer:_handle_completion_request:fp=4e9ee12d49d66d1c
   owner: architecture
   reason: External HTTP request body - optional fields per OpenAI spec (Tier 3)
   safety: dict.get with defaults for optional fields from external HTTP clients
   expires: '2026-05-13'
-- key: testing/chaosllm/server.py:R1:ChaosLLMServer:_handle_completion_request:fp=de9713e753b23372
+- key: testing/chaosllm/server.py:R1:ChaosLLMServer:_handle_completion_request:fp=dc896e6aa7c6bca4
   owner: architecture
   reason: External HTTP request body - optional fields per OpenAI spec (Tier 3)
   safety: dict.get with defaults for optional fields from external HTTP clients
   expires: '2026-05-13'
-- key: testing/chaosllm/server.py:R1:ChaosLLMServer:_handle_success_response:fp=8442c25ab3109348
+- key: testing/chaosllm/server.py:R1:ChaosLLMServer:_handle_success_response:fp=c44f40e022c51ef6
   owner: architecture
   reason: External HTTP request body - optional fields per OpenAI spec (Tier 3)
   safety: dict.get with defaults for optional response fields from external clients
   expires: '2026-05-13'
-- key: testing/chaosllm/server.py:R1:ChaosLLMServer:_handle_success_response:fp=2bb35bfdd0816b9c
+- key: testing/chaosllm/server.py:R1:ChaosLLMServer:_handle_success_response:fp=577eb83133678825
   owner: architecture
   reason: External HTTP request body - optional fields per OpenAI spec (Tier 3)
   safety: dict.get with defaults for optional response fields from external clients
   expires: '2026-05-13'
-- key: testing/chaosllm/response_generator.py:R1:ResponseGenerator:_generate_template_response:fp=306843415fe82ff1
+- key: testing/chaosllm/response_generator.py:R1:ResponseGenerator:_generate_template_response:fp=1a7fd7d40dd31166
   owner: architecture
   reason: External HTTP request body - optional fields per OpenAI spec (Tier 3)
   safety: dict.get for optional fields in OpenAI-compatible request body
   expires: '2026-05-13'
-- key: testing/chaosllm/response_generator.py:R1:ResponseGenerator:_generate_template_response:fp=52091e8e437a0ba2
+- key: testing/chaosllm/response_generator.py:R1:ResponseGenerator:_generate_template_response:fp=e1f5f3ec1f54d3bf
   owner: architecture
   reason: External HTTP request body - optional fields per OpenAI spec (Tier 3)
   safety: dict.get for optional fields in OpenAI-compatible request body
   expires: '2026-05-13'
-- key: testing/chaosllm/response_generator.py:R1:ResponseGenerator:_generate_echo_response:fp=7b614a5d235bb3ff
+- key: testing/chaosllm/response_generator.py:R1:ResponseGenerator:_generate_echo_response:fp=9c62f554bd84bf39
   owner: architecture
   reason: External HTTP request body - optional fields per OpenAI spec (Tier 3)
   safety: dict.get for optional fields in OpenAI-compatible request body
   expires: '2026-05-13'
-- key: testing/chaosllm/response_generator.py:R1:ResponseGenerator:_generate_echo_response:fp=81ffa6240255e973
+- key: testing/chaosllm/response_generator.py:R1:ResponseGenerator:_generate_echo_response:fp=b6537e738ece4111
   owner: architecture
   reason: External HTTP request body - optional fields per OpenAI spec (Tier 3)
   safety: dict.get for optional fields in OpenAI-compatible request body
   expires: '2026-05-13'
-- key: testing/chaosllm/response_generator.py:R1:ResponseGenerator:_generate_echo_response:fp=209a8dffcf270a91
+- key: testing/chaosllm/response_generator.py:R1:ResponseGenerator:_generate_echo_response:fp=2a224c15e71afef6
   owner: architecture
   reason: External HTTP request body - optional fields per OpenAI spec (Tier 3)
   safety: dict.get for optional fields in OpenAI-compatible request body
   expires: '2026-05-13'
-- key: testing/chaosllm/response_generator.py:R1:ResponseGenerator:_generate_echo_response:fp=4067051f07cce68a
+- key: testing/chaosllm/response_generator.py:R1:ResponseGenerator:_generate_echo_response:fp=44d90ac2f4e4bfa7
   owner: architecture
   reason: External HTTP request body - optional fields per OpenAI spec (Tier 3)
   safety: dict.get for optional fields in OpenAI-compatible request body
   expires: '2026-05-13'
-- key: testing/chaosllm/response_generator.py:R1:ResponseGenerator:_extract_prompt_text:fp=bf98b433894b6565
+- key: testing/chaosllm/response_generator.py:R1:ResponseGenerator:_extract_prompt_text:fp=2f3a1d36755885b4
   owner: architecture
   reason: External HTTP request body - messages array traversal per OpenAI spec (Tier 3)
   safety: dict.get for optional content field in message objects
   expires: '2026-05-13'
-- key: testing/chaosllm/response_generator.py:R1:ResponseGenerator:_extract_prompt_text:fp=b5a13badd4722906
+- key: testing/chaosllm/response_generator.py:R1:ResponseGenerator:_extract_prompt_text:fp=2db2cccbba96b8ff
   owner: architecture
   reason: External HTTP request body - messages array traversal per OpenAI spec (Tier 3)
   safety: dict.get for optional content field in message objects
   expires: '2026-05-13'
-- key: testing/chaosllm/response_generator.py:R1:ResponseGenerator:_extract_prompt_text:fp=d341e92755fd03c0
+- key: testing/chaosllm/response_generator.py:R1:ResponseGenerator:_extract_prompt_text:fp=fcc7a8be1155676a
   owner: architecture
   reason: External HTTP request body - messages array traversal per OpenAI spec (Tier 3)
   safety: dict.get for optional content field in message objects
   expires: '2026-05-13'
-- key: testing/chaosllm/response_generator.py:R1:ResponseGenerator:generate:fp=92e04a6d069b4cfa
+- key: testing/chaosllm/response_generator.py:R1:ResponseGenerator:generate:fp=cae9f531fcf2bab7
   owner: architecture
   reason: External HTTP request body - optional fields per OpenAI spec (Tier 3)
   safety: dict.get for optional fields in request body from external clients
   expires: '2026-05-13'
-- key: testing/chaosllm/response_generator.py:R1:ResponseGenerator:generate:fp=385f65c921bf0662
+- key: testing/chaosllm/response_generator.py:R1:ResponseGenerator:generate:fp=594c17d534f0eeec
   owner: architecture
   reason: External HTTP request body - optional fields per OpenAI spec (Tier 3)
   safety: dict.get for optional fields in request body from external clients
@@ -153,77 +153,77 @@ allow_hits:
   reason: Tier 3 boundary - template override from X-Fake-Template header may be malformed
   safety: Catches jinja2.TemplateError and returns error-describing content in valid OpenAIResponse
   expires: '2026-05-13'
-- key: testing/chaosllm/response_generator.py:R1:ResponseGenerator:generate:fp=397d82176b20b131
+- key: testing/chaosllm/response_generator.py:R1:ResponseGenerator:generate:fp=5d1ff44e9886b040
   owner: architecture
   reason: External HTTP request body - optional fields per OpenAI spec (Tier 3)
   safety: dict.get for optional fields in request body from external clients
   expires: '2026-05-13'
-- key: testing/chaosllm/cli.py:R6:_version_callback:fp=c0ae86dd87e88554
+- key: testing/chaosllm/cli.py:R6:_version_callback:fp=07d1f709bb5fde2a
   owner: architecture
   reason: Silent recovery with explicit error handling path
   safety: Code reviewed - legitimate pattern
   expires: '2026-05-06'
-- key: testing/chaosllm_mcp/server.py:R1:create_server:call_tool:fp=09e22428cdf62c21
+- key: testing/chaosllm_mcp/server.py:R1:create_server:call_tool:fp=e1b2cc34d0a57eea
   owner: architecture
   reason: Optional field access at trust boundary
   safety: Code reviewed - legitimate pattern
   expires: '2026-05-02'
-- key: testing/chaosengine/metrics_store.py:R7:MetricsStore:_cleanup_stale_connections:fp=faccf6cb8df9362d
+- key: testing/chaosengine/metrics_store.py:R7:MetricsStore:_cleanup_stale_connections:fp=b1b840bcf067814d
   owner: architecture
   reason: contextlib.suppress on ProgrammingError during stale connection cleanup
   safety: Only suppresses error for already-closed connections from dead threads during cleanup
   expires: '2026-05-13'
-- key: testing/chaosengine/metrics_store.py:R9:MetricsStore:rebuild_timeseries:fp=f3bbc26fd44539a5
+- key: testing/chaosengine/metrics_store.py:R9:MetricsStore:rebuild_timeseries:fp=dfb516aeb64113be
   owner: architecture
   reason: dict.pop extracts latency_ms from classified metrics row - field is optional in variable-shape metrics data
   safety: None default is correct - latency is not present in all metric types
   expires: '2026-05-13'
-- key: testing/chaosengine/metrics_store.py:R1:MetricsStore:rebuild_timeseries:fp=fbb4b167260cd930
+- key: testing/chaosengine/metrics_store.py:R1:MetricsStore:rebuild_timeseries:fp=06bbb83bf410a1e6
   owner: architecture
   reason: dict.get with default 0 for running totals accumulator - key may not exist on first encounter
   safety: Standard accumulator pattern - 0 default is mathematically correct for summation
   expires: '2026-05-13'
-- key: testing/chaosengine/metrics_store.py:R7:MetricsStore:close:fp=7b519a007dbfe8da
+- key: testing/chaosengine/metrics_store.py:R7:MetricsStore:close:fp=314d97263c63f4ef
   owner: architecture
   reason: contextlib.suppress on ProgrammingError during connection cleanup
   safety: Only suppresses error for already-closed connections during teardown
   expires: '2026-05-13'
-- key: testing/chaosweb/content_generator.py:R1:PresetBank:from_jsonl:fp=c6838e4ad64cd92e
+- key: testing/chaosweb/content_generator.py:R1:PresetBank:from_jsonl:fp=5a56fd078a04bea1
   owner: architecture
   reason: Tier 3 boundary - .get() on parsed JSONL object for optional url field
   safety: Missing url defaults to empty string - correct for optional preset metadata
   expires: '2026-05-13'
-- key: testing/chaosweb/content_generator.py:R1:PresetBank:from_jsonl:fp=a8745d654a3c8041
+- key: testing/chaosweb/content_generator.py:R1:PresetBank:from_jsonl:fp=0a35848c5039f4fa
   owner: architecture
   reason: Tier 3 boundary - .get() on parsed JSONL object for optional url field
   safety: Missing url defaults to empty string - correct for optional preset metadata
   expires: '2026-05-13'
-- key: testing/chaosweb/server.py:R1:ChaosWebServer:_redirect_hop_endpoint:fp=38b7f0f1049100bb
+- key: testing/chaosweb/server.py:R1:ChaosWebServer:_redirect_hop_endpoint:fp=353446cc5ae0a294
   owner: architecture
   reason: Tier 3 boundary - .get() on HTTP query params for redirect chain state (hop counter)
   safety: Missing hop defaults to 1 (chain start) - correct for redirect loop protocol
   expires: '2026-05-06'
-- key: testing/chaosweb/server.py:R1:ChaosWebServer:_redirect_hop_endpoint:fp=a980076f16a44910
+- key: testing/chaosweb/server.py:R1:ChaosWebServer:_redirect_hop_endpoint:fp=6485eb681ce3693c
   owner: architecture
   reason: Tier 3 boundary - .get() on HTTP query params for redirect chain state (hop counter)
   safety: Missing hop defaults to 1 (chain start) - correct for redirect loop protocol
   expires: '2026-05-06'
-- key: testing/chaosweb/server.py:R1:ChaosWebServer:_redirect_hop_endpoint:fp=b3c8870573123677
+- key: testing/chaosweb/server.py:R1:ChaosWebServer:_redirect_hop_endpoint:fp=6e5cda63332f92c6
   owner: architecture
   reason: Tier 3 boundary - .get() on HTTP query params for redirect chain state (hop counter)
   safety: Missing hop defaults to 1 (chain start) - correct for redirect loop protocol
   expires: '2026-05-06'
-- key: testing/chaosweb/server.py:R1:ChaosWebServer:_page_endpoint:fp=2c8b904b721920d5
+- key: testing/chaosweb/server.py:R1:ChaosWebServer:_page_endpoint:fp=326763a1dcd2638e
   owner: architecture
   reason: Tier 3 boundary - .get() on Starlette path_params dict (HTTP request data)
   safety: Missing path defaults to empty string - correct for catch-all route
   expires: '2026-05-06'
-- key: testing/chaosweb/server.py:R1:ChaosWebServer:_handle_http_error:fp=ab0361735f62084e
+- key: testing/chaosweb/server.py:R1:ChaosWebServer:_handle_http_error:fp=23c0ec3dbebb03d5
   owner: architecture
   reason: .get() on error message mapping - fallback for error types not in mapping
   safety: Falls back to generic status code message - never swallows errors
   expires: '2026-05-06'
-- key: testing/chaosweb/cli.py:R6:_version_callback:fp=52811a3edba6aac3
+- key: testing/chaosweb/cli.py:R6:_version_callback:fp=02270eb369259576
   owner: architecture
   reason: Silent recovery with explicit error handling path
   safety: Falls back to 'version unknown' on ImportError - correct for optional version detection

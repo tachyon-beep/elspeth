@@ -92,71 +92,71 @@ allow_hits:
   reason: TYPE_CHECKING import of TelemetryManager — Orchestrator accepts telemetry manager for span emission
   safety: No runtime coupling — annotation-only import behind TYPE_CHECKING guard
   expires: null
-- key: engine/batch_adapter.py:R9:RowWaiter:wait:fp=a2f87728c1257a92
+- key: engine/batch_adapter.py:R9:RowWaiter:wait:fp=281637010027cfeb
   owner: architecture
   reason: Cleanup/pop with default - entry may not exist due to race between timeout and emit
   safety: Documented TOCTOU race pattern - pop(None) is intentional cleanup of possibly-absent entry
   expires: '2026-05-02'
-- key: engine/dag_navigator.py:R1:DAGNavigator:create_continuation_work_item:fp=3f18b7103604104a
+- key: engine/dag_navigator.py:R1:DAGNavigator:create_continuation_work_item:fp=ff169983eb391d6b
   owner: bugfix
   reason: _node_to_plugin.get() needed — not all node IDs are in plugin map (source nodes, coalesce pseudo-nodes)
   safety: None return from .get() is the correct signal for non-gate nodes; isinstance(None, GateSettings) → False
   expires: '2026-05-15'
-- key: engine/processor.py:R8:RowProcessor:__init__:fp=62fc84a69f4debd9
+- key: engine/processor.py:R8:RowProcessor:__init__:fp=33c69ffef1dee922
   owner: architecture
   reason: Local dedup dict — setdefault on locally-constructed dict for deduplication by identity, not hiding missing keys
   safety: Dict is created locally at line 335, default is the value itself — no silent fallback
-- key: engine/processor.py:R1:RowProcessor:_notify_coalesce_of_lost_branch:fp=5c902236276d8e5a
+- key: engine/processor.py:R1:RowProcessor:_notify_coalesce_of_lost_branch:fp=2c87707b5464ab57
   owner: architecture
   reason: dict.get() correct - not all branch names have coalesce point mapping
   safety: Crashes on type mismatch - no silent fallback
   expires: '2026-05-12'
-- key: engine/orchestrator/core.py:R4:Orchestrator:_cleanup_plugins:fp=7fe503e7426de116
+- key: engine/orchestrator/core.py:R4:Orchestrator:_cleanup_plugins:fp=978ce16eec87ec86
   owner: architecture
   reason: Plugin cleanup must attempt all closures; broad catch collects errors then raises
   safety: Code reviewed - collects all cleanup errors into list, raises ExceptionGroup after all attempted
   expires: '2026-05-02'
-- key: engine/orchestrator/core.py:R4:Orchestrator:_cleanup_plugins:fp=8c3269592526948e
+- key: engine/orchestrator/core.py:R4:Orchestrator:_cleanup_plugins:fp=d752bed13d8d623c
   owner: architecture
   reason: Plugin cleanup must attempt all closures; broad catch collects errors then raises
   safety: Code reviewed - collects all cleanup errors into list, raises ExceptionGroup after all attempted
   expires: '2026-05-02'
-- key: engine/orchestrator/core.py:R4:Orchestrator:_cleanup_plugins:fp=f571be5885dd536b
+- key: engine/orchestrator/core.py:R4:Orchestrator:_cleanup_plugins:fp=f7a9a29193c998e6
   owner: architecture
   reason: Plugin cleanup must attempt all closures; broad catch collects errors then raises
   safety: Code reviewed - collects all cleanup errors into list, raises ExceptionGroup after all attempted
   expires: '2026-05-02'
-- key: engine/orchestrator/core.py:R4:Orchestrator:_cleanup_plugins:fp=ba7a80be0257cadb
+- key: engine/orchestrator/core.py:R4:Orchestrator:_cleanup_plugins:fp=d8052b508d4214c3
   owner: architecture
   reason: Plugin cleanup must attempt all closures; broad catch collects errors then raises
   safety: Code reviewed - collects all cleanup errors into list, raises ExceptionGroup after all attempted
   expires: '2026-05-02'
-- key: engine/orchestrator/core.py:R4:Orchestrator:_cleanup_plugins:fp=702df8fd7b80bb07
+- key: engine/orchestrator/core.py:R4:Orchestrator:_cleanup_plugins:fp=174dced7d417d548
   owner: architecture
   reason: Plugin cleanup must attempt all closures; broad catch collects errors then raises
   safety: Code reviewed - collects all cleanup errors into list, raises ExceptionGroup after all attempted
   expires: '2026-05-02'
-- key: engine/orchestrator/core.py:R4:Orchestrator:_cleanup_plugins:fp=3e6a780be4ccd5c1
+- key: engine/orchestrator/core.py:R4:Orchestrator:_cleanup_plugins:fp=00a7c3bce0b72aca
   owner: architecture
   reason: Plugin cleanup must attempt all closures; broad catch collects errors then raises
   safety: Code reviewed - collects all cleanup errors into list, raises ExceptionGroup after all attempted
   expires: '2026-05-02'
-- key: engine/orchestrator/core.py:R6:Orchestrator:_handle_quarantine_row:fp=af0c505a9be777ff
+- key: engine/orchestrator/core.py:R6:Orchestrator:_handle_quarantine_row:fp=60ffec009f61ba02
   owner: bugfix
   reason: Tier-3 boundary — quarantined row data may contain NaN/Infinity that stable_hash rejects
   safety: Falls back to repr_hash with debug logging; audit trail uses separate hashing path
   expires: '2026-05-12'
-- key: engine/orchestrator/export.py:R1:_json_schema_to_python_type:fp=de64806bdb037416
+- key: engine/orchestrator/export.py:R1:_json_schema_to_python_type:fp=68c02edb0f31f966
   owner: bugfix
   reason: Framework boundary - Pydantic JSON schema anyOf entries may be $ref (no "type" key) or typed (has "type" key); .get()
     filters null vs non-null items
   safety: Non-null items fed to recursive resolver which crashes on unrecognized schemas
-- key: engine/executors/gate.py:R1:GateExecutor:_record_routing:fp=090cde7fe45ccede
+- key: engine/executors/gate.py:R1:GateExecutor:_record_routing:fp=38dabd7f2719bfd0
   owner: architecture
   reason: Optional edge_id lookup - edge map may not have all node combinations during routing
   safety: Falls back to generating edge_id when not in prebuilt map
   expires: '2026-05-13'
-- key: engine/executors/gate.py:R1:GateExecutor:_record_routing:fp=0ac1715c12694551
+- key: engine/executors/gate.py:R1:GateExecutor:_record_routing:fp=7957c7b3993f565b
   owner: architecture
   reason: Optional edge_id lookup - edge map may not have all node combinations during routing
   safety: Falls back to generating edge_id when not in prebuilt map

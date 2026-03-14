@@ -22,9 +22,9 @@ allow_hits:
 - key: mcp/server.py:R6:_prompt_for_database:fp=4bf1b74c95450844
   owner: architecture
   reason: Silent recovery with explicit error handling path
-- key: mcp/server.py:R6:_prompt_for_database:fp=7ab747297caa9558
+- key: mcp/server.py:R6:_prompt_for_database:fp=db88995ea304163f
   owner: architecture
   reason: Silent recovery with explicit error handling path
-- key: mcp/server.py:R6:_prompt_for_database:fp=174305b995f0c962
+- key: mcp/server.py:R6:_prompt_for_database:fp=ca7cd80408f8d4f3
   owner: architecture
   reason: Silent recovery with explicit error handling path
