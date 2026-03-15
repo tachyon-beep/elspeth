@@ -106,16 +106,6 @@ class RateLimitRegistry:
 
             return self._limiters[service_name]
 
-    def reset_all(self) -> None:
-        """Reset all limiters (for testing).
-
-        Closes all existing limiters and clears the registry.
-        """
-        with self._lock:
-            for limiter in self._limiters.values():
-                limiter.close()
-            self._limiters.clear()
-
     def close(self) -> None:
         """Close all limiters and release resources.
 

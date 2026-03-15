@@ -5,7 +5,9 @@ in the audit trail.  These provide consistent shapes for executor error
 recording.
 """
 
+from collections.abc import Mapping
 from dataclasses import dataclass
+from types import MappingProxyType
 from typing import TYPE_CHECKING, Any, Literal, NotRequired, TypedDict
 
 if TYPE_CHECKING:
@@ -30,6 +32,17 @@ class ExecutionError:
     traceback: str | None = None  # Optional full traceback
     phase: str | None = None  # Optional phase indicator (e.g., "flush" for sink flush errors)
 
+    def __post_init__(self) -> None:
+        """Validate that required error fields are non-empty.
+
+        These fields are recorded in the audit trail. Empty strings would
+        produce valid-looking but uninformative error records.
+        """
+        if not self.exception:
+            raise ValueError("ExecutionError.exception must not be empty")
+        if not self.exception_type:
+            raise ValueError("ExecutionError.exception_type must not be empty")
+
     def to_dict(self) -> dict[str, Any]:
         """Serialize to audit-trail dict.
 
@@ -47,19 +60,6 @@ class ExecutionError:
             d["phase"] = self.phase
         return d
 
-    @classmethod
-    def from_dict(cls, data: dict[str, Any]) -> "ExecutionError":
-        """Reconstruct from audit-trail dict.
-
-        Reverses the ``to_dict()`` key rename: ``"type"`` → ``exception_type``.
-        """
-        return cls(
-            exception=data["exception"],
-            exception_type=data["type"],
-            traceback=data.get("traceback"),
-            phase=data.get("phase"),
-        )
-
 
 @dataclass(frozen=True, slots=True)
 class CoalesceFailureReason:
@@ -70,11 +70,22 @@ class CoalesceFailureReason:
     """
 
     failure_reason: str  # Why coalesce failed (e.g., "quorum_not_met")
-    expected_branches: list[str]  # Branches expected to arrive
-    branches_arrived: list[str]  # Branches that actually arrived
+    expected_branches: tuple[str, ...]  # Branches expected to arrive
+    branches_arrived: tuple[str, ...]  # Branches that actually arrived
     merge_policy: str  # Merge policy in effect
     timeout_ms: int | None = None  # Timeout that triggered failure (if applicable)
     select_branch: str | None = None  # Target branch for select policy (if applicable)
+
+    def __post_init__(self) -> None:
+        """Validate coalesce failure record invariants."""
+        if not self.failure_reason:
+            raise ValueError("CoalesceFailureReason.failure_reason must not be empty")
+        if not self.merge_policy:
+            raise ValueError("CoalesceFailureReason.merge_policy must not be empty")
+        if not self.expected_branches:
+            raise ValueError("CoalesceFailureReason.expected_branches must not be empty")
+        if self.timeout_ms is not None and self.timeout_ms < 0:
+            raise ValueError(f"CoalesceFailureReason.timeout_ms must be non-negative, got {self.timeout_ms}")
 
     def to_dict(self) -> dict[str, Any]:
         """Serialize to audit-trail dict.
@@ -83,8 +94,8 @@ class CoalesceFailureReason:
         """
         d: dict[str, Any] = {
             "failure_reason": self.failure_reason,
-            "expected_branches": self.expected_branches,
-            "branches_arrived": self.branches_arrived,
+            "expected_branches": list(self.expected_branches),
+            "branches_arrived": list(self.branches_arrived),
             "merge_policy": self.merge_policy,
         }
         if self.timeout_ms is not None:
@@ -316,12 +327,15 @@ TransformErrorCategory = Literal[
     "non_finite_usage",  # LLM API returned NaN/Infinity in usage metadata
     # Executor lifecycle
     "shutdown_requested",  # Worker stopped mid-retry due to executor shutdown
+    "unexpected_pool_error",  # Worker future raised unexpected exception — buffer slot recovered
     # Generic (for tests and edge cases)
     "test_error",
     "property_test_error",
     "simulated_failure",
     "deliberate_failure",
     "intentional_failure",
+    # Batch processing
+    "empty_batch",
 ]
 
 
@@ -634,7 +648,9 @@ class GracefulShutdownError(Exception):
         self.rows_failed = rows_failed
         self.rows_quarantined = rows_quarantined
         self.rows_routed = rows_routed
-        self.routed_destinations: dict[str, int] = routed_destinations if routed_destinations is not None else {}
+        self.routed_destinations: Mapping[str, int] = (
+            MappingProxyType(routed_destinations) if routed_destinations is not None else MappingProxyType({})
+        )
         super().__init__(
             f"Pipeline interrupted after {rows_processed} rows (run_id={run_id}). Resume with: elspeth resume {run_id} --execute"
         )

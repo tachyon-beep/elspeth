@@ -84,8 +84,8 @@ class TestBatchReplicateHappyPath:
         assert result.rows is not None
         assert len(result.rows) == 5  # 2 (default) + 3
 
-    def test_empty_batch_returns_marker(self, ctx: PluginContext) -> None:
-        """Empty batch returns success with marker row."""
+    def test_empty_batch_returns_error(self, ctx: PluginContext) -> None:
+        """Empty batch returns error — not fabricated data."""
         from elspeth.plugins.transforms.batch_replicate import BatchReplicate
 
         transform = BatchReplicate(
@@ -97,9 +97,10 @@ class TestBatchReplicateHappyPath:
 
         result = transform.process([], ctx)
 
-        assert result.status == "success"
-        assert result.row is not None
-        assert result.row["batch_empty"] is True
+        assert result.status == "error"
+        assert result.reason is not None
+        assert result.reason["reason"] == "empty_batch"
+        assert not result.retryable
 
 
 class TestBatchReplicateTypeEnforcement:

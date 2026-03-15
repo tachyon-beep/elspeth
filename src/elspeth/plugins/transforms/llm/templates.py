@@ -22,7 +22,7 @@ class TemplateError(Exception):
     """Error in template rendering (including sandbox violations)."""
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, slots=True)
 class RenderedPrompt:
     """A rendered prompt with audit metadata."""
 
@@ -248,4 +248,18 @@ class PromptTemplate:
             lookup_hash=self._lookup_hash,
             lookup_source=self._lookup_source,
             contract_hash=contract_hash,
+        )
+
+    def with_template_override(
+        self,
+        template_string: str,
+        *,
+        template_source: str | None = None,
+    ) -> PromptTemplate:
+        """Create a new template that preserves this template's lookup context."""
+        return PromptTemplate(
+            template_string,
+            template_source=template_source,
+            lookup_data=self._lookup_data,
+            lookup_source=self._lookup_source,
         )

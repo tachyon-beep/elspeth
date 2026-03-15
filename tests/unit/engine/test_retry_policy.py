@@ -3,6 +3,8 @@
 
 from typing import ClassVar
 
+import pytest
+
 from elspeth.contracts import RetryPolicy
 from elspeth.contracts.config import POLICY_DEFAULTS, RuntimeRetryConfig
 
@@ -70,33 +72,31 @@ class TestRetryPolicy:
         config = RuntimeRetryConfig.from_policy(policy)
         assert config.exponential_base == 3.0
 
-    def test_retry_policy_exponential_base_clamped(self) -> None:
-        """exponential_base should be clamped to minimum 1.01."""
-        # Invalid base < 1 should be clamped
+    def test_retry_policy_exponential_base_low_rejected(self) -> None:
+        """exponential_base < 1.0 should be rejected (no silent clamping)."""
         policy: RetryPolicy = {"exponential_base": 0.5}
-        config = RuntimeRetryConfig.from_policy(policy)
-        assert config.exponential_base >= 1.01
+        with pytest.raises(ValueError, match=r"exponential_base must be > 1\.0"):
+            RuntimeRetryConfig.from_policy(policy)
 
-    def test_retry_policy_exponential_base_exactly_one_clamped(self) -> None:
-        """exponential_base=1.0 should be clamped (would cause no backoff growth).
+    def test_retry_policy_exponential_base_exactly_one_rejected(self) -> None:
+        """exponential_base=1.0 should be rejected (would cause no backoff growth).
 
         A base of exactly 1.0 would mean 1^n = 1 for all n, resulting in
-        constant delay instead of exponential backoff. This must be rejected.
+        constant delay instead of exponential backoff.
         """
         policy: RetryPolicy = {"exponential_base": 1.0}
-        config = RuntimeRetryConfig.from_policy(policy)
-        assert config.exponential_base > 1.0, "exponential_base=1.0 must be clamped"
-        assert config.exponential_base >= 1.01
+        with pytest.raises(ValueError, match=r"exponential_base must be > 1\.0"):
+            RuntimeRetryConfig.from_policy(policy)
 
-    def test_retry_policy_exponential_base_negative_clamped(self) -> None:
-        """Negative exponential_base should be clamped to minimum.
+    def test_retry_policy_exponential_base_negative_rejected(self) -> None:
+        """Negative exponential_base should be rejected.
 
         Negative bases would cause alternating positive/negative delays
         which is nonsensical for retry timing.
         """
         policy: RetryPolicy = {"exponential_base": -5.0}
-        config = RuntimeRetryConfig.from_policy(policy)
-        assert config.exponential_base >= 1.01
+        with pytest.raises(ValueError, match=r"exponential_base must be > 1\.0"):
+            RuntimeRetryConfig.from_policy(policy)
 
 
 class TestRetrySchemaAlignment:

@@ -6,6 +6,7 @@ import random
 from pathlib import Path
 from typing import Any
 
+import jinja2
 import pytest
 
 from elspeth.testing.chaosllm.config import (
@@ -498,8 +499,8 @@ class TestTemplateMode:
 
         assert response.content == "Overridden: gpt-4"
 
-    def test_template_undefined_variable_returns_error_content(self) -> None:
-        """Template with undefined variable returns error content and logs warning."""
+    def test_template_undefined_variable_raises(self) -> None:
+        """Template with undefined variable raises — config bug, not content."""
         config = ResponseConfig(
             mode="template",
             template=TemplateResponseConfig(body="{{ undefined_var }}"),
@@ -508,9 +509,49 @@ class TestTemplateMode:
 
         request = {"model": "gpt-4", "messages": []}
 
-        response = generator.generate(request)
-        assert "Template rendering error" in response.content
-        assert "UndefinedError" in response.content
+        with pytest.raises(jinja2.UndefinedError):
+            generator.generate(request)
+
+    def test_malformed_template_override_returns_error_content(self) -> None:
+        """Malformed X-Fake-Template override returns error in content, not crash."""
+        config = ResponseConfig(
+            mode="template",
+            template=TemplateResponseConfig(body="Normal response"),
+        )
+        generator = ResponseGenerator(config)
+
+        request = {"model": "gpt-4", "messages": []}
+        # Syntax error in Jinja2 template — unclosed block
+        response = generator.generate(request, template_override="{% if unclosed %}")
+
+        # Should return a valid OpenAIResponse with error description, not raise
+        assert isinstance(response, OpenAIResponse)
+        assert "template_override_error" in response.content
+
+    def test_template_override_undefined_var_returns_error_content(self) -> None:
+        """Override template with undefined variable returns error, not crash."""
+        config = ResponseConfig(
+            mode="template",
+            template=TemplateResponseConfig(body="Normal response"),
+        )
+        generator = ResponseGenerator(config)
+
+        request = {"model": "gpt-4", "messages": []}
+        response = generator.generate(request, template_override="{{ nonexistent_var }}")
+
+        assert isinstance(response, OpenAIResponse)
+        assert "template_override_error" in response.content
+
+    def test_unknown_mode_override_returns_error_content(self) -> None:
+        """Unknown mode override returns error in content, not crash."""
+        config = ResponseConfig(mode="random")
+        generator = ResponseGenerator(config)
+
+        request = {"model": "gpt-4", "messages": []}
+        response = generator.generate(request, mode_override="typo_mode")
+
+        assert isinstance(response, OpenAIResponse)
+        assert "unknown_mode" in response.content
 
 
 class TestEchoMode:
@@ -699,6 +740,38 @@ class TestModeOverride:
 
         response = generator.generate(request, mode_override="echo")
         assert response.content == "Echo: Hello world"
+
+    def test_mode_override_to_template_without_compiled_template(self) -> None:
+        """Override to template mode from non-template base without template_override crashes."""
+        config = ResponseConfig(mode="random")
+        generator = ResponseGenerator(config)
+
+        request = {"model": "gpt-4", "messages": []}
+
+        # Override to template mode — no compiled template exists, no template_override provided
+        response = generator.generate(request, mode_override="template")
+        assert response.content.startswith("[template_mode_unavailable")
+
+    def test_mode_override_to_template_with_template_override_body(self) -> None:
+        """Override to template mode with template_override body works from any base mode."""
+        config = ResponseConfig(mode="random")
+        generator = ResponseGenerator(config)
+
+        request = {"model": "gpt-4", "messages": []}
+
+        response = generator.generate(request, mode_override="template", template_override="Hello {{ model }}")
+        assert response.content == "Hello gpt-4"
+
+    def test_mode_override_to_preset_without_preset_file(self) -> None:
+        """Override to preset mode from non-preset base without preset file crashes."""
+        config = ResponseConfig(mode="random")
+        generator = ResponseGenerator(config)
+
+        request = {"model": "gpt-4", "messages": []}
+
+        # Override to preset mode — default preset file doesn't exist
+        response = generator.generate(request, mode_override="preset")
+        assert response.content.startswith("[preset_mode_unavailable")
 
 
 class TestTokenEstimation:

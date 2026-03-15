@@ -101,8 +101,12 @@ def _discover_in_file(py_file: Path, base_class: type) -> list[type]:
     parent_name = py_file.parent.name
     module_name = f"elspeth.plugins._discovered.{parent_name}.{py_file.stem}"
     spec = importlib.util.spec_from_file_location(module_name, py_file)
-    if spec is None or spec.loader is None:
-        return []
+    if spec is None:
+        raise RuntimeError(
+            f"Failed to create module spec for {py_file} (module_name={module_name!r}): spec_from_file_location() returned None"
+        )
+    if spec.loader is None:
+        raise RuntimeError(f"Module spec for {py_file} (module_name={module_name!r}) has no loader")
 
     module = importlib.util.module_from_spec(spec)
     # Register module in sys.modules BEFORE exec_module
@@ -248,8 +252,7 @@ def get_plugin_description(plugin_cls: type) -> str:
                 return cleaned
 
     # Fallback to name-based description
-    name = getattr(plugin_cls, "name", plugin_cls.__name__)
-    return f"{name} plugin"
+    return f"{plugin_cls.name} plugin"  # type: ignore[attr-defined]  # validated by _discover_in_file
 
 
 def create_dynamic_hookimpl(

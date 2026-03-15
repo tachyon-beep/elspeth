@@ -7,18 +7,19 @@ ResponseFormat) used by both single and multi-query modes.
 
 from __future__ import annotations
 
-import logging
 import re
 from dataclasses import dataclass
 from enum import StrEnum
+from types import MappingProxyType
 from typing import Any
 
+import structlog
 from pydantic import Field, model_validator
 
 from elspeth.contracts.schema_contract import PipelineRow
 from elspeth.plugins.infrastructure.config_base import PluginConfig
 
-logger = logging.getLogger(__name__)
+logger = structlog.get_logger(__name__)
 
 
 class OutputFieldType(StrEnum):
@@ -96,9 +97,9 @@ class QuerySpec:
     """
 
     name: str
-    input_fields: dict[str, str]
+    input_fields: MappingProxyType[str, str]
     response_format: ResponseFormat = ResponseFormat.STANDARD
-    output_fields: list[OutputFieldConfig] | None = None
+    output_fields: tuple[OutputFieldConfig, ...] | None = None
     template: str | None = None
     max_tokens: int | None = None
 
@@ -107,6 +108,9 @@ class QuerySpec:
             raise ValueError("name must be non-empty")
         if not self.input_fields:
             raise ValueError("input_fields must be non-empty")
+        object.__setattr__(self, "input_fields", MappingProxyType(dict(self.input_fields)))
+        if self.output_fields is not None:
+            object.__setattr__(self, "output_fields", tuple(self.output_fields))
 
     def build_template_context(self, row: PipelineRow | dict[str, Any]) -> dict[str, Any]:
         """Build template context mapping named variables to row values.
@@ -166,11 +170,11 @@ def resolve_queries(
             output_fields = None
             raw_output_fields = definition.get("output_fields")
             if raw_output_fields is not None:
-                output_fields = [OutputFieldConfig(**of) if isinstance(of, dict) else of for of in raw_output_fields]
+                output_fields = tuple(OutputFieldConfig(**of) if isinstance(of, dict) else of for of in raw_output_fields)
             specs.append(
                 QuerySpec(
                     name=name,
-                    input_fields=definition["input_fields"],
+                    input_fields=MappingProxyType(definition["input_fields"]),
                     response_format=ResponseFormat(definition["response_format"])
                     if "response_format" in definition
                     else ResponseFormat.STANDARD,
@@ -190,11 +194,11 @@ def resolve_queries(
                 output_fields = None
                 raw_output_fields = item.get("output_fields")
                 if raw_output_fields is not None:
-                    output_fields = [OutputFieldConfig(**of) if isinstance(of, dict) else of for of in raw_output_fields]
+                    output_fields = tuple(OutputFieldConfig(**of) if isinstance(of, dict) else of for of in raw_output_fields)
                 specs.append(
                     QuerySpec(
                         name=item["name"],
-                        input_fields=item["input_fields"],
+                        input_fields=MappingProxyType(item["input_fields"]),
                         response_format=ResponseFormat(item.get("response_format", "standard")),
                         output_fields=output_fields,
                         template=item.get("template"),
@@ -241,9 +245,10 @@ def resolve_queries(
                 # Warn on reserved suffixes
                 if field.suffix in reserved_suffixes:
                     logger.warning(
-                        "Query '%s' output field suffix '%s' matches a reserved LLM suffix. This may cause output field conflicts.",
-                        spec.name,
-                        field.suffix,
+                        "reserved_suffix_conflict",
+                        query=spec.name,
+                        suffix=field.suffix,
+                        detail="Output field suffix matches a reserved LLM suffix, may cause conflicts",
                     )
                 # Check for cross-query output key collisions.
                 # Output keys are "{query_name}_{suffix}" (see MultiQueryStrategy),

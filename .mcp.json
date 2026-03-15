@@ -2,7 +2,7 @@
   "mcpServers": {
     "elspeth-landscape": {
       "type": "stdio",
-      "command": "/home/john/elspeth-rapid/.venv/bin/elspeth-mcp",
+      "command": "/home/john/elspeth/.venv/bin/elspeth-mcp",
       "args": [
         "--database",
         "sqlite:///./state/audit.db"
@@ -10,11 +10,12 @@
     },
     "filigree": {
       "type": "stdio",
-      "command": "/home/john/elspeth-rapid/.venv/bin/filigree-mcp",
+      "command": "/home/john/elspeth/.venv/bin/filigree-mcp",
       "args": [
         "--project",
-        "/home/john/elspeth-rapid"
-      ]
+        "/home/john/elspeth"
+      ],
+      "env": {}
     }
   }
 }

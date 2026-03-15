@@ -156,6 +156,15 @@ class BurstConfig(BaseModel):
         gt=0,
         description="How long each burst lasts in seconds",
     )
+
+    @model_validator(mode="after")
+    def _validate_burst_timing(self) -> "BurstConfig":
+        if self.enabled and self.duration_sec >= self.interval_sec:
+            raise ValueError(
+                f"duration_sec ({self.duration_sec}) must be less than interval_sec ({self.interval_sec}) when burst is enabled"
+            )
+        return self
+
     rate_limit_pct: float = Field(
         default=80.0,
         ge=0.0,

@@ -32,6 +32,7 @@ from unittest.mock import MagicMock
 import pytest
 from hypothesis import given, settings
 
+from elspeth.contracts.errors import AuditIntegrityError
 from elspeth.core.landscape.lineage import LineageResult, explain
 from tests.strategies.ids import id_strings, sink_names
 
@@ -251,8 +252,8 @@ class TestLineageResultStructureProperties:
     def test_optional_fields_have_defaults(self) -> None:
         """Property: Optional fields have default values."""
         optional_with_defaults = {
-            "validation_errors": list,
-            "transform_errors": list,
+            "validation_errors": tuple,
+            "transform_errors": tuple,
             "outcome": type(None),
         }
 
@@ -261,20 +262,24 @@ class TestLineageResultStructureProperties:
                 # Field should have a default or default_factory
                 assert field_obj.default is not None or field_obj.default_factory is not None
 
-    def test_error_lists_default_to_empty(self) -> None:
-        """Property: Error lists default to empty (not None)."""
-        # Create minimal valid LineageResult
+    def test_error_tuples_default_to_empty(self) -> None:
+        """Property: Error tuples default to empty (not None)."""
+        # Create minimal valid LineageResult with matching row_ids
+        token = MagicMock()
+        token.row_id = "row-1"
+        source_row = MagicMock()
+        source_row.row_id = "row-1"
         result = LineageResult(
-            token=MagicMock(),
-            source_row=MagicMock(),
-            node_states=[],
-            routing_events=[],
-            calls=[],
-            parent_tokens=[],
+            token=token,
+            source_row=source_row,
+            node_states=(),
+            routing_events=(),
+            calls=(),
+            parent_tokens=(),
         )
 
-        assert result.validation_errors == []
-        assert result.transform_errors == []
+        assert result.validation_errors == ()
+        assert result.transform_errors == ()
         assert result.outcome is None
 
 
@@ -313,7 +318,7 @@ class TestExplainTierOneTrustProperties:
         recorder.get_token_parents.return_value = [parent_ref]
         recorder.get_token.side_effect = lambda tid: token if tid == token_id else None
 
-        with pytest.raises(ValueError, match="Audit integrity violation"):
+        with pytest.raises(AuditIntegrityError, match="Audit integrity violation"):
             explain(recorder, run_id, token_id=token_id)
 
 
@@ -338,15 +343,15 @@ class TestExplainReturnValueProperties:
 
     @given(run_id=id_strings, token_id=id_strings)
     @settings(max_examples=30)
-    def test_source_row_not_found_returns_none(self, run_id: str, token_id: str) -> None:
-        """Property: Token exists but source row missing returns None."""
+    def test_source_row_not_found_raises_audit_integrity(self, run_id: str, token_id: str) -> None:
+        """Property: Token exists but source row missing is Tier 1 corruption — crash."""
         recorder = MagicMock()
 
         token = MagicMock()
         token.row_id = "row_123"
+        token.token_id = token_id
         recorder.get_token.return_value = token
         recorder.explain_row.return_value = None
 
-        result = explain(recorder, run_id, token_id=token_id)
-
-        assert result is None
+        with pytest.raises(AuditIntegrityError, match="does not exist in rows table"):
+            explain(recorder, run_id, token_id=token_id)

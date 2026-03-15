@@ -11,12 +11,8 @@ from elspeth.contracts.schema_contract import PipelineRow
 from elspeth.plugins.infrastructure.base import BaseTransform
 from elspeth.plugins.infrastructure.config_base import TransformDataConfig
 from elspeth.plugins.infrastructure.results import TransformResult
-from elspeth.plugins.transforms.safety_utils import (
-    get_fields_to_scan,
-)
-from elspeth.plugins.transforms.safety_utils import (
-    validate_fields_not_empty as _validate_fields,
-)
+from elspeth.plugins.transforms.safety_utils import get_fields_to_scan
+from elspeth.plugins.transforms.safety_utils import validate_fields_not_empty as _validate_fields
 
 # ReDoS detection: patterns with nested quantifiers cause catastrophic backtracking
 # on adversarial input. E.g., (a+)+ on "aaa...!" is O(2^n).
@@ -85,12 +81,17 @@ class KeywordFilterConfig(TransformDataConfig):
     @field_validator("blocked_patterns")
     @classmethod
     def validate_patterns_not_empty(cls, v: list[str]) -> list[str]:
-        """Ensure at least one non-empty pattern is provided."""
+        """Ensure patterns are non-empty, valid regex, and ReDoS-safe."""
         if not v:
             raise ValueError("blocked_patterns cannot be empty")
         for i, pattern in enumerate(v):
             if pattern == "":
                 raise ValueError(f"blocked_patterns[{i}] cannot be empty (empty regex matches everything)")
+            _validate_regex_safety(pattern)
+            try:
+                re.compile(pattern)
+            except re.error as exc:
+                raise ValueError(f"blocked_patterns[{i}] is not a valid regex: {exc}") from exc
         return v
 
 
@@ -131,10 +132,7 @@ class KeywordFilter(BaseTransform):
         cfg = KeywordFilterConfig.from_dict(config)
         self._fields = cfg.fields
 
-        # Compile patterns at init - fail fast on invalid regex
-        # Validate for ReDoS-prone constructs before compiling
-        for pattern in cfg.blocked_patterns:
-            _validate_regex_safety(pattern)
+        # Patterns already validated (regex syntax + ReDoS safety) by config validator
         self._compiled_patterns: list[tuple[str, re.Pattern[str]]] = [(pattern, re.compile(pattern)) for pattern in cfg.blocked_patterns]
 
         self.input_schema, self.output_schema = self._create_schemas(cfg.schema_config, "KeywordFilter")
@@ -154,7 +152,7 @@ class KeywordFilter(BaseTransform):
             TransformResult.success(row) if no patterns match
             TransformResult.error(reason) if any pattern matches
         """
-        fields_to_scan = self._get_fields_to_scan(row)
+        fields_to_scan = get_fields_to_scan(self._fields, row)
         named_fields = self._fields != "all"
 
         for field_name in fields_to_scan:
@@ -202,10 +200,6 @@ class KeywordFilter(BaseTransform):
             row,
             success_reason={"action": "filtered"},
         )
-
-    def _get_fields_to_scan(self, row: PipelineRow) -> list[str]:
-        """Determine which fields to scan based on config."""
-        return get_fields_to_scan(self._fields, row)
 
     def close(self) -> None:
         """Release resources."""

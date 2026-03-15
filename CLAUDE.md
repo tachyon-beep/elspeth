@@ -174,6 +174,24 @@ def process(self, row: PipelineRow, ctx: PluginContext) -> TransformResult:
 
 **Serialization does not change trust tier.** Data we wrote to our own database or checkpoint file is still Tier 1 when we read it back, even though it passes through `json.loads()` or SQLAlchemy deserialization. The trust boundary is about *who authored the data*, not the transport format. Checkpoints, audit records, and Landscape tables are all our data — we defined the schema, we wrote the values, we own the invariants. If a deserialized checkpoint is missing a `"tokens"` key or a `"row_id"` field, that is corruption in our system, not a data quality issue to handle gracefully. Crash immediately.
 
+### Pipeline Templates as Tier 2 Data
+
+Pipeline templates (Jinja2 prompt templates in YAML config) are **Tier 2 — user-provided, validated at load time, trusted during rendering**. This creates two distinct error categories:
+
+| Failure Type | When | Effect | Example |
+|-------------|------|--------|---------|
+| **Structural** (parse) | Init time | Stop run — no row will ever succeed | `{% if unclosed` (syntax error) |
+| **Operational** (render) | Per-row | Quarantine row, continue pipeline | `{{ row.missing_field }}` (undefined variable) |
+
+**Rules:**
+
+- Templates are parsed **once** at plugin construction (`__init__` / `__post_init__`), never re-parsed per-row
+- `TemplateSyntaxError` during parse → `TemplateError` propagates up → run fails at setup
+- `UndefinedError` / `SecurityError` during render → `TemplateError` caught by transform → `TransformResult.error()` → row quarantined
+- Per-query template overrides (multi-query LLM transforms) are pre-compiled in `MultiQueryStrategy.__post_init__`, not deferred to first row
+
+**Why this matters:** A broken template can never produce valid results for any row. Deferring the parse error to render time would misclassify a config error (structural) as a data error (operational), quarantining the first row instead of stopping the run. The operator would see "row 1 failed: template syntax error" instead of "pipeline config is invalid" — wasting their time investigating row data that was never the problem.
+
 ## Plugin Ownership: System Code, Not User Code
 
 All plugins (Sources, Transforms, Aggregations, Sinks) are **system-owned code**, not user-provided extensions. Gates are config-driven system operations, not plugins. ELSPETH uses `pluggy` for clean architecture, NOT to accept arbitrary user plugins. Plugins are developed, tested, and deployed as part of ELSPETH with the same rigor as engine code.
@@ -392,6 +410,24 @@ transforms:
 
 The DAG validates that upstream `guaranteed_fields` satisfy downstream `required_input_fields`. For template-based transforms, use `elspeth.core.templates.extract_jinja2_fields()` to discover template dependencies during development.
 
+### Header Normalization and Engine Custody
+
+**Source field names are normalized to valid Python identifiers at the source boundary.** This is non-negotiable — it's not cosmetic cleanup, it's a language boundary requirement.
+
+User-chosen field names must cross multiple language boundaries during pipeline execution: Python attribute access (`row.field`), Jinja2 templates (`{{ row.field }}`), expression parser AST nodes, SQL column names, and JSON keys. Each has different reserved words, quoting rules, and valid character sets. A field named `"Amount (USD)"` or `" Customer ID "` is a syntax error in Jinja2, ambiguous in SQL, and requires bracket access in Python. Normalizing once at the source boundary (Tier 3 → Tier 2 transition) means every downstream consumer gets names that are valid in every context.
+
+**The engine takes custody of the original headers.** The `SchemaContract` preserves `original_name` metadata on every field throughout the pipeline. At the sink boundary, three header modes control output:
+
+| Mode | Output | Use Case |
+|------|--------|----------|
+| `NORMALIZED` | `customer_id` | Default — pipeline working names |
+| `ORIGINAL` | `Customer ID` | Restore what the source provided |
+| `CUSTOM` | Explicit mapping | External system handover with specific naming requirements |
+
+This is a **restoration**, not a transformation — the engine preserved the originals as metadata and gives them back on request. The `CUSTOM` mode deliberately refuses to silently fall back to normalized names for unmapped fields, because wrong column names in an external system handover are worse than a crash.
+
+**Collision detection operates on normalized names.** The transform executor (`engine/executors/transform.py`) centrally enforces field collision detection pre-execution for any transform that declares `declared_output_fields`. This is mandatory and engine-level — plugins don't opt in, they declare their output fields and the engine prevents collisions before the transform runs.
+
 ### Transform Subtypes
 
 | Type | Behavior |
@@ -512,6 +548,53 @@ Telemetry provides **real-time operational visibility** alongside the Landscape 
 **Correlation:** Telemetry events include `run_id` and `token_id`. Use these to cross-reference with `elspeth explain` or the Landscape MCP server.
 
 Full configuration guide (exporters, granularity levels, backpressure): `docs/guides/telemetry.md`.
+
+## Logging Policy
+
+**The Landscape audit system is a must-fire system with absolute primacy.** At every emission point, audit writes first — synchronously, transactionally, crash-on-failure. Only after audit succeeds does telemetry fire (async, best-effort). This ordering is non-negotiable. Logging (`logger`/`structlog`) is the channel of last resort, not a parallel record of pipeline activity.
+
+**Permitted uses of `logger`/`structlog`:**
+
+| Use Case | Example | Why Logging |
+|----------|---------|-------------|
+| **Transitory debugging** | `slog.debug("pool_state", active=3, idle=2)` | Temporary diagnostic, removed before merge or kept at DEBUG level |
+| **Audit system failures** | `logger.error("Landscape write failed", exc_info=True)` | The audit system itself is broken — can't record to it |
+| **Telemetry system failures** | `logger.error("Exporter crashed", exc_info=True)` | Both observability systems are down — logging is the last resort |
+
+**Forbidden uses:**
+
+| Anti-Pattern | Why Wrong | Correct Alternative |
+|-------------|-----------|-------------------|
+| Logging row-level decisions | Duplicates `node_states.success_reason_json` | Enrich `success_reason` metadata |
+| Logging transform outcomes | Duplicates `node_states` status + context | Already in Landscape |
+| Logging call results | Duplicates `calls` table | Already recorded by `record_call()` |
+| Logging for alerting on data patterns | Logs are ephemeral, Landscape is queryable | Query `context_after_json` via MCP |
+| Logging infrastructure lifecycle | Startup/shutdown/config events belong in telemetry | Emit via `_emit_telemetry()` — telemetry exporters route to dashboards |
+
+**The superset rule:** Everything that goes to telemetry should also go to audit, unless it lacks probative value — meaning an auditor subpoenaed to explain a past run's outcomes would never reference it. The key determinant is evidential value, not volume. A high-frequency event that carries probative value (e.g., per-row gate decisions) must be audited regardless of volume. A low-frequency event that lacks probative value (e.g., "cache evicted 3 keys") should not be audited regardless of how easy it would be to include.
+
+**Telemetry-only exemptions** (no audit required):
+
+| Category | Example | Why no probative value |
+|----------|---------|----------------------|
+| **Operational metrics** | Checkpoint size, cache eviction counts, throughput counters | Describe system pressure, not data outcomes — no auditor asks "what was the checkpoint size when row 42 was processed?" |
+| **System health** | Exporter failure counts, journal drop rates, payload store errors | Meta-operational — about the observability infrastructure itself, not the data flowing through the pipeline |
+
+**Must audit** (even if also telemetered):
+
+| Category | Example | Why probative |
+|----------|---------|--------------|
+| **Pipeline decisions** | Row processed, gate routed, transform applied, call made | Directly explains what happened to each row |
+| **Run lifecycle** | Run started/finished, phase transitions | Establishes timeline and system state for the run |
+| **Infrastructure lifecycle** | Plugin initialised, config loaded, provider connected, model selected | Establishes what the system state was when decisions were made — "which model was active?" is a valid audit question |
+
+**The primacy test:** Audit always fires first, synchronously. Telemetry fires second, asynchronously. Logs fire only when the other two can't.
+
+| Question | Channel |
+|----------|---------|
+| Does this have probative value for explaining a past run's outcomes? | **Audit + Telemetry** — audit first (permanent record), then telemetry (real-time view) |
+| Is this useful for operational visibility but not for explaining outcomes? | **Telemetry only** |
+| Is the audit or telemetry system itself broken? | **Logging** (last resort) |
 
 ## Critical Implementation Patterns
 
@@ -734,7 +817,15 @@ Resolution options in priority order:
 
 ### What's Forbidden (Defensive Programming)
 
-Do not use `.get()`, `getattr()`, `hasattr()`, `isinstance()`, or silent exception handling to suppress errors from nonexistent attributes, malformed data, or incorrect types. **Access typed dataclass fields directly** (`obj.field`), not defensively (`obj.get("field")`).
+Do not use `.get()`, `getattr()`, `isinstance()`, or silent exception handling to suppress errors from nonexistent attributes, malformed data, or incorrect types. **Access typed dataclass fields directly** (`obj.field`), not defensively (`obj.get("field")`).
+
+**`hasattr()` is unconditionally banned.** It is not allowlistable in the tier model enforcer. Everything `hasattr` does can be done more safely:
+
+| Instead of `hasattr` | Use | Why |
+|---------------------|-----|-----|
+| `hasattr(obj, "attr")` before access | `try: obj.attr` / `except AttributeError:` | `hasattr` swallows all exceptions from `@property` getters, not just missing attributes |
+| `hasattr(self, "method_" + name)` for dispatch | Explicit allowset (`frozenset`) + `isinstance` | `hasattr` lets you bypass the gate just by defining a method — no review required |
+| `hasattr(e, "field")` on caught exceptions | `isinstance(e, SpecificType)` or direct access | Exception types define their attributes — if the type is in the `except` clause, the attribute exists |
 
 A common anti-pattern: an LLM hallucinates a field name, code fails, and the "fix" is `getattr(obj, "hallucinated_field", None)`. This hides the real bug. Fix the actual cause instead.
 
@@ -795,3 +886,165 @@ if result.rowcount == 0:
 | Would this fail due to a bug in code we control? | — | ❌ Let it crash |
 | Am I adding this because "something might be None"? | — | ❌ Fix the root cause |
 | Am I silently swallowing an error with a default value? | — | ❌ That's defensive — forbidden |
+
+<!-- filigree:instructions:v1.4.1:c706f2df -->
+## Filigree Issue Tracker
+
+Use `filigree` for all task tracking in this project. Data lives in `.filigree/`.
+
+### MCP Tools (Preferred)
+
+When MCP is configured, prefer `mcp__filigree__*` tools over CLI commands — they're
+faster and return structured data. Key tools:
+
+- `get_ready` / `get_blocked` — find available work
+- `get_issue` / `list_issues` / `search_issues` — read issues
+- `create_issue` / `update_issue` / `close_issue` — manage issues
+- `claim_issue` / `claim_next` — atomic claiming
+- `add_comment` / `add_label` — metadata
+- `create_plan` / `get_plan` — milestone planning
+- `get_stats` / `get_metrics` — project health
+- `get_valid_transitions` — workflow navigation
+
+Fall back to CLI (`filigree <command>`) when MCP is unavailable.
+
+### CLI Quick Reference
+
+```bash
+# Finding work
+filigree ready                              # Show issues ready to work (no blockers)
+filigree list --status=open                 # All open issues
+filigree list --status=in_progress          # Active work
+filigree show <id>                          # Detailed issue view
+
+# Creating & updating
+filigree create "Title" --type=task --priority=2          # New issue
+filigree update <id> --status=in_progress                # Claim work
+filigree close <id>                                      # Mark complete
+filigree close <id> --reason="explanation"               # Close with reason
+
+# Dependencies
+filigree add-dep <issue> <depends-on>       # Add dependency
+filigree remove-dep <issue> <depends-on>    # Remove dependency
+filigree blocked                            # Show blocked issues
+
+# Comments & labels
+filigree add-comment <id> "text"            # Add comment
+filigree get-comments <id>                  # List comments
+filigree add-label <id> <label>             # Add label
+filigree remove-label <id> <label>          # Remove label
+
+# Workflow templates
+filigree types                              # List registered types with state flows
+filigree type-info <type>                   # Full workflow definition for a type
+filigree transitions <id>                   # Valid next states for an issue
+filigree packs                              # List enabled workflow packs
+filigree validate <id>                      # Validate issue against template
+filigree guide <pack>                       # Display workflow guide for a pack
+
+# Atomic claiming
+filigree claim <id> --assignee <name>            # Claim issue (optimistic lock)
+filigree claim-next --assignee <name>            # Claim highest-priority ready issue
+
+# Batch operations
+filigree batch-update <ids...> --priority=0      # Update multiple issues
+filigree batch-close <ids...>                    # Close multiple with error reporting
+
+# Planning
+filigree create-plan --file plan.json            # Create milestone/phase/step hierarchy
+
+# Event history
+filigree changes --since 2026-01-01T00:00:00    # Events since timestamp
+filigree events <id>                             # Event history for issue
+filigree explain-state <type> <state>            # Explain a workflow state
+
+# All commands support --json and --actor flags
+filigree --actor bot-1 create "Title"            # Specify actor identity
+filigree list --json                             # Machine-readable output
+
+# Project health
+filigree stats                              # Project statistics
+filigree search "query"                     # Search issues
+filigree doctor                             # Health check
+```
+
+### File Records & Scan Findings (API)
+
+The dashboard exposes REST endpoints for file tracking and scan result ingestion.
+Use `GET /api/files/_schema` for available endpoints and valid field values.
+
+Key endpoints:
+- `GET /api/files/_schema` — Discovery: valid enums, endpoint catalog
+- `POST /api/v1/scan-results` — Ingest scan results (SARIF-lite format)
+- `GET /api/files` — List tracked files with filtering and sorting
+- `GET /api/files/{file_id}` — File detail with associations and findings summary
+- `GET /api/files/{file_id}/findings` — Findings for a specific file
+
+### Workflow
+1. `filigree ready` to find available work
+2. `filigree show <id>` to review details
+3. `filigree transitions <id>` to see valid state changes
+4. `filigree update <id> --status=in_progress` to claim it
+5. Do the work, commit code
+6. `filigree close <id>` when done
+
+### Session Start
+When beginning a new session, run `filigree session-context` to load the project
+snapshot (ready work, in-progress items, critical path). This provides the
+context needed to pick up where the previous session left off.
+
+### Priority Scale
+- P0: Critical (drop everything)
+- P1: High (do next)
+- P2: Medium (default)
+- P3: Low
+- P4: Backlog
+<!-- /filigree:instructions -->
+
+### How We Use Filigree
+
+Filigree is the single source of truth for all work tracking in ELSPETH. The project hierarchy follows a consistent pattern: **milestones** (delivery themes like "Core Platform Maturation") contain **phases** (workstreams like "Architecture Refactoring"), which contain the actual work items — **epics**, **features**, **tasks**, and **bugs**. Releases (RC 3.4, RC 4) exist alongside this hierarchy to track what ships when. We use the MCP tools (`mcp__filigree__*`) for all issue operations when available, falling back to the CLI only when MCP is down.
+
+Issues should be created at the right granularity from the start, but **retyping is encouraged** when the scope becomes clearer — a task that grows into multi-session work should be promoted to a feature or epic with child tasks, and an epic that turns out to be a single grind session should be demoted to a task. To retype, create a new issue with the correct type (transferring description, labels, parent, and dependencies), then close the old one with a reason linking to the replacement. Filigree's `update_issue` doesn't support changing types directly, so this create-and-close pattern is the standard approach.
+
+### Issue Type Usage
+
+Filigree has types across three packs — use the right type for the right granularity:
+
+| Type | When to use | Granularity test |
+| ---- | ----------- | ---------------- |
+| **milestone** | Top-level delivery theme | "What are we shipping this quarter?" |
+| **phase** | Logical workstream within a milestone | "What area of the codebase does this touch?" |
+| **epic** | Large body of work needing decomposition | "Does this need multiple features or tasks to complete?" |
+| **feature** | User-facing capability with design decisions | "Does this need a user story, acceptance criteria, or design notes?" |
+| **task** | Atomic unit of work one person can do in one sitting | "Can I start and finish this without needing to decompose further?" |
+| **bug** | Defective behavior in existing code | "Is something broken, or is this a design evaluation?" |
+
+**If a task has 3+ distinct deliverables or an unresolved design decision, promote it** to a feature or epic and create child tasks. XL-effort single tasks are untrackable — you can't mark them 50% done.
+
+**If an epic has no children and the work is a single grind session, demote it** to a task. Epics without decomposition are just tasks with delusions of grandeur.
+
+**Design evaluations are tasks, not bugs.** "Evaluate whether X should be eliminated" is a task. "X crashes when Y" is a bug.
+
+### Issue Naming Conventions
+
+**Title structure by type:**
+
+| Type | Pattern | Example |
+| ---- | ------- | ------- |
+| **milestone** | Noun phrase (theme) | "Core Platform Maturation" |
+| **phase** | Noun phrase (workstream) | "Architecture Refactoring" |
+| **epic** | `Topic — scope summary` | "Landscape repository maturation — table-scoped access, CQRS split, unit-of-work" |
+| **feature** | `Capability — what it enables` | "Server mode — persistent API service with REST + WebSocket" |
+| **bug** | `Symptom — observable consequence` | "Coalesce timeouts only fire on next token arrival — no true idle flush" |
+| **task** | `Action phrase — scope boundary` | "Unify reorder buffer implementations — single RowReorderBuffer for batching and pooling" |
+
+**Rules:**
+
+1. **No internal tracking prefixes** — no `T20:`, `#7`, `C1:`, `M1:`, `H2:`, or similar sweep/scan-group identifiers
+2. **No stale metrics in titles** — no line counts, entry counts, or other numbers that will drift. Put these in descriptions
+3. **No process artifacts** — no "from 7-agent deep-dive", "from PR review". The provenance belongs in the description or a label
+4. **No product prefixes** — no `ELSPETH-NEXT:`, `Use case:`
+5. **Bugs describe the problem, not the fix** — lead with the observable symptom, not the action to take
+6. **Em-dash separator** (`—`) between short name and expanded detail
+7. **Sentence case, no trailing period**

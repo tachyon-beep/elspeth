@@ -12,7 +12,9 @@ import math
 import os
 import re
 import time
+from collections.abc import Sequence
 from datetime import UTC, datetime
+from ipaddress import IPv4Network, IPv6Network
 from json import JSONDecodeError
 from typing import TYPE_CHECKING, Any
 
@@ -85,6 +87,8 @@ def _parse_json_strict(text: str) -> tuple[Any, str | None]:
 
 if TYPE_CHECKING:
     from elspeth.core.landscape.recorder import LandscapeRecorder
+    from elspeth.core.rate_limit import NoOpLimiter
+    from elspeth.core.rate_limit.limiter import RateLimiter
 
 
 class AuditedHTTPClient(AuditedClientBase):
@@ -124,7 +128,7 @@ class AuditedHTTPClient(AuditedClientBase):
         timeout: float = 30.0,
         base_url: str | None = None,
         headers: dict[str, str] | None = None,
-        limiter: Any = None,  # RateLimiter | NoOpLimiter | None
+        limiter: RateLimiter | NoOpLimiter | None = None,
         token_id: str | None = None,
     ) -> None:
         """Initialize audited HTTP client.
@@ -258,14 +262,16 @@ class AuditedHTTPClient(AuditedClientBase):
                     fp = secret_fingerprint(v)
                     result[k] = f"<fingerprint:{fp}>"
                 else:
-                    # No key and not dev mode - this shouldn't happen in production
-                    # Remove header to avoid leaking secrets (fail-safe)
-                    logger.warning(
-                        "Sensitive header '%s' dropped: no fingerprint key available. "
-                        "Set ELSPETH_FINGERPRINT_KEY or ELSPETH_ALLOW_RAW_SECRETS=true",
-                        k,
+                    # No key and not dev mode — config error that prevents auditable operation.
+                    # A sensitive header exists but we can't fingerprint it, so we can't
+                    # record a verifiable audit entry. Crash per offensive programming:
+                    # this is a detectable invalid state, not a data quality issue.
+                    raise FrameworkBugError(
+                        f"Sensitive header '{k}' cannot be fingerprinted: "
+                        f"ELSPETH_FINGERPRINT_KEY is not set and ELSPETH_ALLOW_RAW_SECRETS is not 'true'. "
+                        f"Authenticated HTTP calls require a fingerprint key for audit integrity. "
+                        f"Set ELSPETH_FINGERPRINT_KEY or ELSPETH_ALLOW_RAW_SECRETS=true for dev mode."
                     )
-                    # Don't include this header
             else:
                 # Non-sensitive header: include as-is
                 result[k] = v
@@ -420,6 +426,7 @@ class AuditedHTTPClient(AuditedClientBase):
                 run_id=self._run_id,
                 state_id=self._state_id,
                 call_type="http",
+                exc_info=True,
             )
 
     def _execute_request(
@@ -634,7 +641,8 @@ class AuditedHTTPClient(AuditedClientBase):
         headers: dict[str, str] | None = None,
         follow_redirects: bool = False,
         max_redirects: int = 10,
-    ) -> httpx.Response:
+        allowed_ranges: Sequence[IPv4Network | IPv6Network] = (),
+    ) -> tuple[httpx.Response, str]:
         """GET with SSRF-safe IP pinning and redirect validation.
 
         Connects to the pre-validated IP in the SSRFSafeRequest, setting the
@@ -648,7 +656,11 @@ class AuditedHTTPClient(AuditedClientBase):
             max_redirects: Maximum redirect hops when follow_redirects=True
 
         Returns:
-            httpx.Response object
+            Tuple of (httpx.Response, final hostname URL as string).
+            The hostname URL is the logical URL after all redirects —
+            distinct from response.url which is IP-based due to SSRF pinning.
+            When follow_redirects is False or no redirects occurred, this is
+            the original request URL.
 
         Raises:
             httpx.HTTPError: For network/HTTP errors
@@ -702,13 +714,15 @@ class AuditedHTTPClient(AuditedClientBase):
 
             # Handle redirects with SSRF validation at each hop
             redirect_count = 0
+            final_hostname_url = request.original_url
             if follow_redirects:
-                response, redirect_count = self._follow_redirects_safe(
+                response, redirect_count, final_hostname_url = self._follow_redirects_safe(
                     response,
                     max_redirects,
                     effective_timeout,
                     merged_headers,
                     original_url=request.original_url,
+                    allowed_ranges=allowed_ranges,
                 )
 
             latency_ms = (time.perf_counter() - start) * 1000
@@ -802,9 +816,10 @@ class AuditedHTTPClient(AuditedClientBase):
                     run_id=self._run_id,
                     state_id=self._state_id,
                     call_type="http_ssrf_safe",
+                    exc_info=True,
                 )
 
-            return response
+            return response, final_hostname_url
 
         except (FrameworkBugError, AuditIntegrityError):
             # Telemetry re-raise after successful Landscape record_call.
@@ -856,6 +871,7 @@ class AuditedHTTPClient(AuditedClientBase):
                     run_id=self._run_id,
                     state_id=self._state_id,
                     call_type="http_ssrf_safe",
+                    exc_info=True,
                 )
 
             raise
@@ -867,7 +883,9 @@ class AuditedHTTPClient(AuditedClientBase):
         timeout: float,
         original_headers: dict[str, str],
         original_url: str,
-    ) -> tuple[httpx.Response, int]:
+        *,
+        allowed_ranges: Sequence[IPv4Network | IPv6Network] = (),
+    ) -> tuple[httpx.Response, int, str]:
         """Follow HTTP redirects with SSRF validation at each hop.
 
         Each redirect target is independently resolved and validated against
@@ -885,7 +903,10 @@ class AuditedHTTPClient(AuditedClientBase):
                 preserve correct Host headers and TLS SNI.
 
         Returns:
-            Tuple of (final non-redirect response, number of redirects followed)
+            Tuple of (final non-redirect response, number of redirects followed,
+            final hostname URL as string). The hostname URL is the logical URL
+            after all redirects — distinct from response.url which is IP-based
+            due to SSRF pinning.
 
         Raises:
             SSRFBlockedError: If any redirect target resolves to a blocked IP
@@ -909,7 +930,7 @@ class AuditedHTTPClient(AuditedClientBase):
             redirect_url = str(hostname_url.join(location))
 
             # CRITICAL: Validate the redirect target for SSRF
-            redirect_request = validate_url_for_ssrf(redirect_url)
+            redirect_request = validate_url_for_ssrf(redirect_url, allowed_ranges=allowed_ranges)
 
             # Update hostname_url to the redirect target for the next iteration.
             # If this was an absolute redirect to a different host, hostname_url
@@ -927,7 +948,7 @@ class AuditedHTTPClient(AuditedClientBase):
 
             # Acquire rate limit for each redirect hop — each hop is a separate
             # outbound network request that must be throttled independently.
-            # See P2-2026-02-14-redirect-hops-bypass-rate-limiter.
+            # Bug fix: redirect hops were bypassing the rate limiter.
             self._acquire_rate_limit()
 
             hop_start = time.perf_counter()
@@ -1000,4 +1021,4 @@ class AuditedHTTPClient(AuditedClientBase):
                 request=response.request,
             )
 
-        return response, redirects_followed
+        return response, redirects_followed, str(hostname_url)

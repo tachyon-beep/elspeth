@@ -30,12 +30,8 @@ from elspeth.plugins.infrastructure.pooling import CapacityError, is_capacity_er
 from elspeth.plugins.infrastructure.results import TransformResult
 from elspeth.plugins.infrastructure.schema_factory import create_schema_from_config
 from elspeth.plugins.transforms.azure.errors import MalformedResponseError
-from elspeth.plugins.transforms.safety_utils import (
-    get_fields_to_scan,
-)
-from elspeth.plugins.transforms.safety_utils import (
-    validate_fields_not_empty as _validate_fields,
-)
+from elspeth.plugins.transforms.safety_utils import get_fields_to_scan
+from elspeth.plugins.transforms.safety_utils import validate_fields_not_empty as _validate_fields
 
 if TYPE_CHECKING:
     from elspeth.core.landscape.recorder import LandscapeRecorder
@@ -64,6 +60,13 @@ class BaseAzureSafetyConfig(TransformDataConfig):
         description="Field name(s) to analyze, or 'all' for all string fields",
     )
     max_capacity_retry_seconds: int = Field(3600, gt=0, description="Max seconds to retry capacity errors")
+
+    @field_validator("endpoint", "api_key")
+    @classmethod
+    def _reject_empty_credentials(cls, v: str, info: Any) -> str:
+        if not v.strip():
+            raise ValueError(f"{info.field_name} must not be empty")
+        return v
 
     @field_validator("fields")
     @classmethod
@@ -235,7 +238,7 @@ class BaseAzureSafetyTransform(BaseTransform, BatchTransformMixin):
         Raises:
             CapacityError: On rate limit errors (for worker pool retry)
         """
-        fields_to_scan = self._get_fields_to_scan(row)
+        fields_to_scan = get_fields_to_scan(self._fields, row)
         all_mode = self._fields == "all"
 
         for field_name in fields_to_scan:
@@ -323,10 +326,6 @@ class BaseAzureSafetyTransform(BaseTransform, BatchTransformMixin):
         _process_single_with_state().
         """
         raise NotImplementedError
-
-    def _get_fields_to_scan(self, row: PipelineRow) -> list[str]:
-        """Determine which fields to scan based on config."""
-        return get_fields_to_scan(self._fields, row)
 
     def _get_http_client(self, state_id: str, *, token_id: str | None = None) -> Any:
         """Get or create audited HTTP client for a state_id.

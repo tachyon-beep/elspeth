@@ -52,6 +52,26 @@ class TestTokenInfo:
 
         assert token.branch_name == "sentiment"
 
+    def test_rejects_empty_row_id(self) -> None:
+        """TokenInfo rejects empty row_id at construction time."""
+        from elspeth.contracts import TokenInfo
+
+        contract = _make_contract()
+        pipeline_row = PipelineRow({}, contract)
+
+        with pytest.raises(ValueError, match="row_id must not be empty"):
+            TokenInfo(row_id="", token_id="tok-1", row_data=pipeline_row)
+
+    def test_rejects_empty_token_id(self) -> None:
+        """TokenInfo rejects empty token_id at construction time."""
+        from elspeth.contracts import TokenInfo
+
+        contract = _make_contract()
+        pipeline_row = PipelineRow({}, contract)
+
+        with pytest.raises(ValueError, match="token_id must not be empty"):
+            TokenInfo(row_id="row-1", token_id="", row_data=pipeline_row)
+
     def test_token_info_row_data_immutable(self) -> None:
         """TokenInfo.row_data (PipelineRow) is immutable for audit integrity."""
         from elspeth.contracts import TokenInfo

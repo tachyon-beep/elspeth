@@ -38,6 +38,7 @@ class FinishReason(StrEnum):
     TOOL_CALLS = "tool_calls"
 
 
+@dataclass(frozen=True, slots=True)
 class UnrecognizedFinishReason:
     """Sentinel for finish reasons not in our FinishReason enum.
 
@@ -46,21 +47,11 @@ class UnrecognizedFinishReason:
     (provider sent a value we don't know about).
     """
 
-    __slots__ = ("raw",)
+    raw: str
 
-    def __init__(self, raw: str) -> None:
-        self.raw = raw
-
-    def __repr__(self) -> str:
-        return f"UnrecognizedFinishReason({self.raw!r})"
-
-    def __eq__(self, other: object) -> bool:
-        if isinstance(other, UnrecognizedFinishReason):
-            return self.raw == other.raw
-        return NotImplemented
-
-    def __hash__(self) -> int:
-        return hash(self.raw)
+    def __post_init__(self) -> None:
+        if not isinstance(self.raw, str):
+            raise TypeError(f"raw must be a string, got {type(self.raw).__name__}: {self.raw!r}")
 
 
 #: Type alias for parsed finish reasons.  ``None`` means the provider did
@@ -90,12 +81,11 @@ def parse_finish_reason(raw: str | None) -> ParsedFinishReason:
         return FinishReason(raw)
     except ValueError:
         logger.warning(
-            "Unknown LLM finish_reason — treating as normal completion",
+            "Unknown LLM finish_reason — will be rejected by transform (fail-closed)",
             finish_reason=raw,
             known_values=[e.value for e in FinishReason],
-            action="Unrecognized finish reasons are not treated as errors. "
-            "If this value indicates a problem (e.g. safety filter), "
-            "add it to FinishReason enum and handle in LLMTransform.",
+            action="Add to FinishReason enum if this is a known-good completion reason. "
+            "Unrecognized finish reasons are rejected as errors by LLMTransform.",
         )
         return UnrecognizedFinishReason(raw)
 

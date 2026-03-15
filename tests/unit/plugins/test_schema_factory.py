@@ -551,6 +551,22 @@ class TestNonFiniteFloatRejection:
         with pytest.raises(ValidationError, match=r"[Nn]on-finite"):
             Schema(data={"nested": [1.0, float("inf")]})
 
+    def test_observed_schema_rejects_numpy_longdouble_nan(self) -> None:
+        """np.longdouble NaN must be caught — name heuristic missed non-'float' numpy types."""
+        import numpy as np
+
+        from elspeth.contracts.schema import SchemaConfig
+        from elspeth.plugins.infrastructure.schema_factory import create_schema_from_config
+
+        config = SchemaConfig.from_dict({"mode": "observed"})
+        Schema = create_schema_from_config(config, "ObservedSchema")
+
+        with pytest.raises(ValidationError):
+            Schema.model_validate({"value": np.longdouble("nan")})
+
+        with pytest.raises(ValidationError):
+            Schema.model_validate({"value": np.longdouble("inf")})
+
     def test_explicit_schema_no_validator_at_transform_boundary(self) -> None:
         """Transform boundary (allow_coercion=False) does not add non-finite validator.
 

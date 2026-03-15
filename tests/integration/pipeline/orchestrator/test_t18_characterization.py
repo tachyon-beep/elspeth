@@ -11,6 +11,7 @@ after an extraction commit, the extraction introduced a regression.
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from typing import Any
 from unittest.mock import patch
 
@@ -80,7 +81,7 @@ class QuarantiningSource(_TestSourceBase):
             else:
                 yield make_source_row(row)
 
-    def get_field_resolution(self) -> tuple[dict[str, str], str] | None:
+    def get_field_resolution(self) -> tuple[Mapping[str, str], str] | None:
         return ({"value": "value", "valid": "valid"}, "identity")
 
 
@@ -479,6 +480,7 @@ class TestT18CharacterizationResumePath:
             graph=graph,
             unprocessed_rows=[(row_id, 0, {"value": 1})],
             restored_aggregation_state={},
+            restored_coalesce_state=None,
             payload_store=payload_store,
             schema_contract=resume_contract,
         )
@@ -588,6 +590,7 @@ class TestT18CharacterizationResumePath:
                 graph=graph,
                 unprocessed_rows=[],
                 restored_aggregation_state={},
+                restored_coalesce_state=None,
                 payload_store=payload_store,
                 schema_contract=schema_contract,
             )

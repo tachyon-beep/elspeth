@@ -15,6 +15,7 @@ from elspeth.contracts.call_data import RawCallPayload
 from elspeth.contracts.schema import SchemaConfig
 from elspeth.core.landscape.database import LandscapeDB
 from elspeth.core.landscape.recorder import LandscapeRecorder
+from elspeth.core.landscape.row_data import CallDataState
 from elspeth.core.payload_store import FilesystemPayloadStore
 
 
@@ -466,8 +467,9 @@ class TestCallPayloadPersistence:
             assert call.response_ref is not None
 
             # The response should be retrievable
-            retrieved = recorder.get_call_response_data(call.call_id)
-            assert retrieved == response_data
+            result = recorder.get_call_response_data(call.call_id)
+            assert result.state == CallDataState.AVAILABLE
+            assert dict(result.data) == response_data
 
     def test_auto_persist_request_when_payload_store_configured(self, payload_store) -> None:
         """When payload store exists, request_data is auto-persisted and ref populated."""
@@ -509,9 +511,10 @@ class TestCallPayloadPersistence:
         assert call.request_ref is None
         assert call.response_ref is None
 
-        # get_call_response_data should return None
-        retrieved = recorder.get_call_response_data(call.call_id)
-        assert retrieved is None
+        # get_call_response_data should indicate hash-only (no payload store)
+        result = recorder.get_call_response_data(call.call_id)
+        assert result.state == CallDataState.HASH_ONLY
+        assert result.data is None
 
     def test_explicit_ref_not_overwritten(self, payload_store) -> None:
         """If caller provides explicit ref, it should not be overwritten."""

@@ -11,13 +11,23 @@ Trust-tier notes
   the old inline dict construction for hash stability.
 * ``raw_response`` on ``LLMCallResponse`` is intentionally ``dict[str, Any]``
   because it's Tier 3 SDK data that varies across providers/versions.
+
+Deep immutability
+-----------------
+All mutable containers (``dict``, ``list``) are converted to immutable
+equivalents (``MappingProxyType``, ``tuple``) in ``__post_init__``.
+``to_dict()`` methods convert back to plain ``dict``/``list`` for wire
+format stability.
 """
 
 from __future__ import annotations
 
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
+from types import MappingProxyType
 from typing import Any, Protocol, runtime_checkable
 
+from elspeth.contracts.freeze import deep_freeze, deep_thaw
 from elspeth.contracts.token_usage import TokenUsage
 
 # ---------------------------------------------------------------------------
@@ -45,10 +55,14 @@ class RawCallPayload:
     the internal dict through the returned reference.
     """
 
-    data: dict[str, Any]
+    data: Mapping[str, Any]
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.data, MappingProxyType):
+            object.__setattr__(self, "data", deep_freeze(self.data))
 
     def to_dict(self) -> dict[str, Any]:
-        return dict(self.data)
+        return {k: deep_thaw(v) for k, v in self.data.items()}
 
 
 # ---------------------------------------------------------------------------
@@ -65,13 +79,22 @@ class LLMCallRequest:
     """Audit record for an outbound LLM API request."""
 
     model: str
-    messages: list[dict[str, Any]]
+    messages: Sequence[Mapping[str, Any]]
     temperature: float
     provider: str
     max_tokens: int | None = None
-    extra_kwargs: dict[str, Any] = field(default_factory=dict)
+    extra_kwargs: Mapping[str, Any] = field(default_factory=lambda: MappingProxyType({}))
 
     def __post_init__(self) -> None:
+        # Always deep-freeze inner message dicts — a pre-built tuple may
+        # still contain mutable inner dicts (e.g. tuple([{"role": "user"}])).
+        object.__setattr__(
+            self,
+            "messages",
+            tuple(deep_freeze(m) for m in self.messages),
+        )
+        if not isinstance(self.extra_kwargs, MappingProxyType):
+            object.__setattr__(self, "extra_kwargs", deep_freeze(self.extra_kwargs))
         if collisions := (_LLM_REQUEST_RESERVED_KEYS & self.extra_kwargs.keys()):
             msg = f"extra_kwargs contains reserved key(s) that would overwrite audit fields: {collisions}"
             raise ValueError(msg)
@@ -84,10 +107,10 @@ class LLMCallRequest:
         """
         d: dict[str, Any] = {
             "model": self.model,
-            "messages": self.messages,
+            "messages": [deep_thaw(m) for m in self.messages],
             "temperature": self.temperature,
             "provider": self.provider,
-            **self.extra_kwargs,
+            **deep_thaw(self.extra_kwargs),
         }
         if self.max_tokens is not None:
             d["max_tokens"] = self.max_tokens
@@ -101,7 +124,11 @@ class LLMCallResponse:
     content: str
     model: str
     usage: TokenUsage
-    raw_response: dict[str, Any]
+    raw_response: Mapping[str, Any]
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.raw_response, MappingProxyType):
+            object.__setattr__(self, "raw_response", deep_freeze(self.raw_response))
 
     def to_dict(self) -> dict[str, Any]:
         """Serialize to audit-trail dict.
@@ -112,7 +139,7 @@ class LLMCallResponse:
             "content": self.content,
             "model": self.model,
             "usage": self.usage.to_dict(),
-            "raw_response": self.raw_response,
+            "raw_response": deep_thaw(self.raw_response),
         }
 
 
@@ -123,6 +150,12 @@ class LLMCallError:
     type: str
     message: str
     retryable: bool
+
+    def __post_init__(self) -> None:
+        if not self.type:
+            raise ValueError("LLMCallError.type must not be empty")
+        if not self.message:
+            raise ValueError("LLMCallError.message must not be empty")
 
     def to_dict(self) -> dict[str, Any]:
         """Serialize to audit-trail dict.
@@ -154,14 +187,20 @@ class HTTPCallRequest:
 
     method: str
     url: str
-    headers: dict[str, str]
-    json: dict[str, Any] | None = None
-    params: dict[str, Any] | None = None
+    headers: Mapping[str, str]
+    json: Mapping[str, Any] | None = None
+    params: Mapping[str, Any] | None = None
     resolved_ip: str | None = None
     hop_number: int | None = None
     redirect_from: str | None = None
 
     def __post_init__(self) -> None:
+        if not isinstance(self.headers, MappingProxyType):
+            object.__setattr__(self, "headers", MappingProxyType(dict(self.headers)))
+        if self.json is not None and not isinstance(self.json, MappingProxyType):
+            object.__setattr__(self, "json", deep_freeze(self.json))
+        if self.params is not None and not isinstance(self.params, MappingProxyType):
+            object.__setattr__(self, "params", deep_freeze(self.params))
         if self.hop_number is not None and self.resolved_ip is None:
             msg = "hop_number requires resolved_ip (redirect hops are always SSRF-safe)"
             raise ValueError(msg)
@@ -183,13 +222,13 @@ class HTTPCallRequest:
             d["hop_number"] = self.hop_number
         if self.redirect_from is not None:
             d["redirect_from"] = self.redirect_from
-        d["headers"] = self.headers
+        d["headers"] = dict(self.headers)
         # Standard path only: include method-specific body/params
         if self.resolved_ip is None:
             if self.method == "POST":
-                d["json"] = self.json
+                d["json"] = deep_thaw(self.json) if self.json is not None else None
             elif self.method == "GET":
-                d["params"] = self.params
+                d["params"] = deep_thaw(self.params) if self.params is not None else None
         return d
 
 
@@ -202,10 +241,16 @@ class HTTPCallResponse:
     """
 
     status_code: int
-    headers: dict[str, str]
+    headers: Mapping[str, str]
     body_size: int | None = None
-    body: dict[str, Any] | str | None = None
+    body: Mapping[str, Any] | str | None = None
     redirect_count: int = 0
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.headers, MappingProxyType):
+            object.__setattr__(self, "headers", MappingProxyType(dict(self.headers)))
+        if self.body is not None and isinstance(self.body, dict):
+            object.__setattr__(self, "body", deep_freeze(self.body))
 
     def to_dict(self) -> dict[str, Any]:
         """Serialize to audit-trail dict.
@@ -215,11 +260,14 @@ class HTTPCallResponse:
         """
         d: dict[str, Any] = {
             "status_code": self.status_code,
-            "headers": self.headers,
+            "headers": dict(self.headers),
         }
         if self.body_size is not None:
             d["body_size"] = self.body_size
-            d["body"] = self.body
+            if isinstance(self.body, (MappingProxyType, dict)):
+                d["body"] = deep_thaw(self.body)
+            else:
+                d["body"] = self.body
         if self.redirect_count > 0:
             d["redirect_count"] = self.redirect_count
         return d
@@ -236,6 +284,12 @@ class HTTPCallError:
     type: str
     message: str
     status_code: int | None = None
+
+    def __post_init__(self) -> None:
+        if not self.type:
+            raise ValueError("HTTPCallError.type must not be empty")
+        if not self.message:
+            raise ValueError("HTTPCallError.message must not be empty")
 
     def to_dict(self) -> dict[str, Any]:
         """Serialize to audit-trail dict.

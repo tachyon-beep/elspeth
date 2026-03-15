@@ -288,7 +288,7 @@ class TestSanitizedWebhookUrl:
         2. Both credentials contribute to the fingerprint
         3. The fingerprint matches the expected HMAC
         """
-        from elspeth.core.security.fingerprint import secret_fingerprint
+        from elspeth.core.security import secret_fingerprint
 
         monkeypatch.setenv("ELSPETH_FINGERPRINT_KEY", "test-key")
         url_userpass = "https://user:pass@api.example.com/webhook"
@@ -673,7 +673,7 @@ class TestFragmentTokenSanitization:
 
     def test_fragment_fingerprint_matches_expected(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """Fragment token fingerprint matches expected HMAC value."""
-        from elspeth.core.security.fingerprint import secret_fingerprint
+        from elspeth.core.security import secret_fingerprint
 
         monkeypatch.setenv("ELSPETH_FINGERPRINT_KEY", "test-key")
         url = "https://example.com/callback#access_token=my-token"
@@ -689,7 +689,7 @@ class TestFragmentTokenSanitization:
         """Fingerprint combines secrets from both query and fragment."""
         import json as json_module
 
-        from elspeth.core.security.fingerprint import secret_fingerprint
+        from elspeth.core.security import secret_fingerprint
 
         monkeypatch.setenv("ELSPETH_FINGERPRINT_KEY", "test-key")
         url = "https://example.com/callback?api_key=key1#access_token=key2"

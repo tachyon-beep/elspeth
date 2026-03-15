@@ -1,11 +1,7 @@
 """QueryRepository: read-only queries for audit trail entities.
 
-Extracted from QueryMethodsMixin as part of T19 (Landscape mixin ->
-composed repository decomposition).
-
 Provides the external read-only API used by MCP server, exporter, CLI,
-and TUI. Does NOT need LandscapeDB -- only DatabaseOps for queries.
-This makes it the lightest-weight repository.
+and TUI. Does NOT need LandscapeDB — only DatabaseOps for queries.
 """
 
 from __future__ import annotations
@@ -13,6 +9,7 @@ from __future__ import annotations
 import json
 from typing import Any
 
+import structlog
 from sqlalchemy import select
 
 from elspeth.contracts import (
@@ -27,7 +24,7 @@ from elspeth.contracts import (
 )
 from elspeth.contracts.errors import AuditIntegrityError
 from elspeth.contracts.payload_store import IntegrityError as PayloadIntegrityError
-from elspeth.contracts.payload_store import PayloadStore
+from elspeth.contracts.payload_store import PayloadNotFoundError, PayloadStore
 from elspeth.core.landscape._database_ops import DatabaseOps
 from elspeth.core.landscape.model_loaders import (
     CallLoader,
@@ -48,6 +45,8 @@ from elspeth.core.landscape.schema import (
     token_parents_table,
     tokens_table,
 )
+
+logger = structlog.get_logger(__name__)
 
 
 class QueryRepository:
@@ -115,7 +114,6 @@ class QueryRepository:
             List of NodeState models (discriminated union), ordered by (step_index, attempt)
         """
         # Order by (step_index, attempt) for deterministic ordering across retries
-        # Bug fix: P2-2026-01-19-node-state-ordering-missing-attempt
         query = (
             select(node_states_table)
             .where(node_states_table.c.token_id == token_id)
@@ -153,13 +151,17 @@ class QueryRepository:
             Parsed dict from the payload store
 
         Raises:
-            KeyError: Payload was purged by retention policy (caller decides handling)
+            PayloadNotFoundError: Payload was purged by retention policy (caller decides handling)
             AuditIntegrityError: Payload is corrupt, fails integrity check,
                 or cannot be retrieved due to infrastructure failure
         """
         if self._payload_store is None:
             raise ValueError("Cannot retrieve payload: payload store not configured")
 
+        # PayloadIntegrityError = hash mismatch (corruption/tampering),
+        # OSError = storage backend failure. Both translate to
+        # AuditIntegrityError with context, matching
+        # execution_repository.get_call_response_data().
         try:
             payload_bytes = self._payload_store.retrieve(source_data_ref)
         except PayloadIntegrityError as e:
@@ -211,7 +213,8 @@ class QueryRepository:
             if set(data.keys()) == {"_repr"}:
                 return RowDataResult(state=RowDataState.REPR_FALLBACK, data=data)
             return RowDataResult(state=RowDataState.AVAILABLE, data=data)
-        except KeyError:
+        except PayloadNotFoundError as exc:
+            logger.debug("Payload purged, returning PURGED state", content_hash=exc.content_hash)
             return RowDataResult(state=RowDataState.PURGED, data=None)
 
     def get_token(self, token_id: str) -> Token | None:
@@ -507,8 +510,8 @@ class QueryRepository:
             RowLineage with hash and optionally source data, or None if row not found
 
         Raises:
-            ValueError: If row exists but belongs to a different run
-            AuditIntegrityError: If payload data is corrupt, fails integrity check,
+            AuditIntegrityError: If row exists but belongs to a different run,
+                payload data is corrupt, fails integrity check,
                 or cannot be retrieved due to infrastructure failure
         """
         row = self.get_row(row_id)
@@ -518,7 +521,7 @@ class QueryRepository:
         # Validate row belongs to the specified run — cross-run mismatch is a
         # caller bug or data corruption, not a normal "not found" case
         if row.run_id != run_id:
-            raise ValueError(f"Row {row_id} belongs to run {row.run_id}, not {run_id}")
+            raise AuditIntegrityError(f"Row {row_id} belongs to run {row.run_id}, not {run_id}")
 
         # Try to load payload
         source_data: dict[str, Any] | None = None
@@ -528,9 +531,8 @@ class QueryRepository:
             try:
                 source_data = self._retrieve_and_parse_payload(row_id, row.source_data_ref)
                 payload_available = True
-            except KeyError:
-                # Payload purged by retention policy — expected, continue without data
-                pass
+            except PayloadNotFoundError as exc:
+                logger.debug("Payload purged, continuing without source data", content_hash=exc.content_hash)
 
         return RowLineage(
             row_id=row.row_id,

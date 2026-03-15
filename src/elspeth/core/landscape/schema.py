@@ -24,6 +24,11 @@ from sqlalchemy import (
 # Shared metadata for all tables
 metadata = MetaData()
 
+# Explicit SQLite schema epoch for pre-1.0 compatibility policy.
+# Stored in PRAGMA user_version so future releases can distinguish
+# "intentionally old schema, needs migration" from "runtime-required field".
+SQLITE_SCHEMA_EPOCH = 1
+
 # Column width for node_id across all tables. Referenced by dag.py
 # for validation — changing this value requires an Alembic migration.
 NODE_ID_COLUMN_LENGTH = 64
@@ -43,10 +48,10 @@ runs_table = Table(
     # Source schema for resume type restoration
     # Stores serialized PluginSchema class info to enable proper type coercion
     # when resuming from payloads (datetime/Decimal string -> typed values)
-    Column("source_schema_json", Text),  # Nullable for backward compatibility
+    Column("source_schema_json", Text),  # Nullable — populated on new runs, NULL for runs created before this column
     # Field resolution mapping from source.load() - captures original→final header mapping
     # when normalize_fields or field_mapping is used. Stored at run level since one source per run.
-    Column("source_field_resolution_json", Text),  # Nullable for backward compatibility
+    Column("source_field_resolution_json", Text),  # Nullable — populated on new runs, NULL for runs created before this column
     Column("status", String(32), nullable=False),
     # Export tracking - separate from run status so export failures
     # don't mask successful pipeline completion
@@ -476,6 +481,7 @@ checkpoints_table = Table(
     Column("node_id", String(64), nullable=False),  # Part of composite FK to nodes
     Column("sequence_number", Integer, nullable=False),  # Monotonic progress marker
     Column("aggregation_state_json", Text),  # Serialized aggregation buffers (if any)
+    Column("coalesce_state_json", Text),  # Serialized pending coalesce state (if any)
     Column("created_at", DateTime(timezone=True), nullable=False),
     # Topology validation (topological checkpoint compatibility)
     Column("upstream_topology_hash", String(64), nullable=False),  # Hash of nodes + edges upstream of checkpoint
@@ -484,7 +490,8 @@ checkpoints_table = Table(
     # Version 1: Pre-deterministic node IDs (legacy, rejected)
     # Version 2: Deterministic node IDs (2026-01-24+)
     # Version 3: Phase 2 traversal refactor checkpoint break
-    Column("format_version", Integer, nullable=True),  # Nullable for backwards compat with existing checkpoints
+    # Version 4: Pending coalesce state persisted in checkpoints
+    Column("format_version", Integer, nullable=True),  # Nullable — populated on new runs, NULL for checkpoints created before this column
     # Composite FK to nodes (node_id, run_id)
     ForeignKeyConstraint(
         ["node_id", "run_id"],

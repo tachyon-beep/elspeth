@@ -68,6 +68,11 @@ from elspeth.contracts.call_data import (
 )
 from elspeth.contracts.checkpoint import ResumeCheck, ResumePoint
 from elspeth.contracts.cli import ExecutionResult, ProgressEvent
+from elspeth.contracts.coalesce_checkpoint import (
+    CoalesceCheckpointState,
+    CoalescePendingCheckpoint,
+    CoalesceTokenCheckpoint,
+)
 from elspeth.contracts.coalesce_metadata import ArrivalOrderEntry, CoalesceMetadata
 
 # =============================================================================
@@ -77,7 +82,7 @@ from elspeth.contracts.coalesce_metadata import ArrivalOrderEntry, CoalesceMetad
 # must be imported directly from elspeth.core.config:
 #     from elspeth.core.config import RetrySettings, ElspethSettings
 #
-# FIX: P2-2026-01-20-contracts-config-reexport-breaks-leaf-boundary
+# Config protocols are in contracts; Settings classes remain in core.config.
 # =============================================================================
 from elspeth.contracts.config import (
     # Alignment documentation
@@ -104,17 +109,17 @@ from elspeth.contracts.contexts import (
     TransformContext,
 )
 
-# Schema contracts (Phase 2: Source Integration)
+# Schema contracts — builder
 from elspeth.contracts.contract_builder import ContractBuilder
 
-# Schema contracts (Phase 3: Pipeline Integration)
+# Schema contracts — pipeline propagation
 from elspeth.contracts.contract_propagation import (
     merge_contract_with_output,
     narrow_contract_to_output,
     propagate_contract,
 )
 
-# Schema contracts (Phase 4: Audit Trail Integration)
+# Schema contracts — audit trail records
 from elspeth.contracts.contract_records import (
     ContractAuditRecord,
     FieldAuditRecord,
@@ -137,6 +142,7 @@ from elspeth.contracts.enums import (
     ExportStatus,
     NodeStateStatus,
     NodeType,
+    ReproducibilityGrade,
     RoutingKind,
     RoutingMode,
     RowOutcome,
@@ -208,7 +214,7 @@ from elspeth.contracts.node_state_context import (
     PoolStatsSnapshot,
     QueryOrderEntry,
 )
-from elspeth.contracts.payload_store import IntegrityError, PayloadStore
+from elspeth.contracts.payload_store import IntegrityError, PayloadNotFoundError, PayloadStore
 from elspeth.contracts.plugin_context import (
     PluginContext,
     TransformErrorToken,
@@ -237,7 +243,7 @@ from elspeth.contracts.routing import (
     RoutingSpec,
 )
 
-# Schema contracts (Phase 1: Core Contracts)
+# Schema contracts — core types
 from elspeth.contracts.schema_contract import (
     FieldContract,
     PipelineRow,
@@ -352,6 +358,7 @@ __all__ = [  # Grouped by category for readability
     "ExportStatus",
     "NodeStateStatus",
     "NodeType",
+    "ReproducibilityGrade",
     "RoutingKind",
     "RoutingMode",
     "RowOutcome",
@@ -369,6 +376,9 @@ __all__ = [  # Grouped by category for readability
     "AggregationCheckpointState",
     "AggregationNodeCheckpoint",
     "AggregationTokenCheckpoint",
+    "CoalesceCheckpointState",
+    "CoalescePendingCheckpoint",
+    "CoalesceTokenCheckpoint",
     "ResumeCheck",
     "ResumePoint",
     # coalesce metadata
@@ -416,6 +426,7 @@ __all__ = [  # Grouped by category for readability
     "RetryPolicy",
     # payload_store
     "IntegrityError",
+    "PayloadNotFoundError",
     "PayloadStore",
     # contexts (phase-based protocols)
     "LifecycleContext",
@@ -469,7 +480,7 @@ __all__ = [  # Grouped by category for readability
     "LLMCallRequest",
     "LLMCallResponse",
     "RawCallPayload",
-    # schema contracts (Phase 1: Core Contracts)
+    # Schema contracts — core types
     "ContractBuilder",
     "create_contract_from_config",
     "FieldContract",
@@ -477,11 +488,11 @@ __all__ = [  # Grouped by category for readability
     "normalize_type_for_contract",
     "PipelineRow",
     "SchemaContract",
-    # schema contracts (Phase 4: Audit Trail Integration)
+    # Schema contracts — audit trail records
     "ContractAuditRecord",
     "FieldAuditRecord",
     "ValidationErrorWithContract",
-    # schema contracts (Phase 3: Pipeline Integration)
+    # Schema contracts — pipeline propagation
     "create_output_contract_from_schema",
     "HeaderMode",
     "merge_contract_with_output",

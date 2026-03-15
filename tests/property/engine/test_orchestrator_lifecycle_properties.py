@@ -18,6 +18,7 @@ from __future__ import annotations
 
 from collections import Counter
 from dataclasses import fields
+from types import MappingProxyType
 
 import pytest
 from hypothesis import given, settings
@@ -433,20 +434,20 @@ class TestToRunResultProperties:
     @given(counters=execution_counters())
     @settings(max_examples=100)
     def test_routed_destinations_snapshot(self, counters: ExecutionCounters) -> None:
-        """Property: routed_destinations is a plain dict snapshot (not a Counter reference).
+        """Property: routed_destinations is an immutable snapshot (not a Counter reference).
 
         This ensures mutations to counters after to_run_result() don't
         affect the RunResult.
         """
         result = counters.to_run_result("run-1", status=RunStatus.RUNNING)
 
-        # Must be a plain dict, not a Counter reference
-        assert type(result.routed_destinations) is dict
+        # Must be an immutable MappingProxyType, not a mutable Counter reference
+        assert isinstance(result.routed_destinations, MappingProxyType)
         assert result.routed_destinations == dict(counters.routed_destinations)
 
         # Mutating counters after snapshot must not affect result
         counters.routed_destinations["new_sink"] += 999
-        assert "new_sink" not in result.routed_destinations or result.routed_destinations["new_sink"] != 999
+        assert "new_sink" not in result.routed_destinations
 
     @given(counters=execution_counters())
     @settings(max_examples=50)

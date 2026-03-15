@@ -15,6 +15,7 @@ from dataclasses import dataclass, field
 from typing import Any, Literal
 
 from elspeth.contracts.errors import (
+    AuditIntegrityError,
     ContractMergeError,
     ContractViolation,
     ExtraFieldViolation,
@@ -101,8 +102,6 @@ class SchemaContract:
 
         by_norm: dict[str, FieldContract] = {fc.normalized_name: fc for fc in self.fields}
         by_orig: dict[str, str] = {fc.original_name: fc.normalized_name for fc in self.fields}
-        object.__setattr__(self, "_by_normalized", by_norm)
-        object.__setattr__(self, "_by_original", by_orig)
         object.__setattr__(self, "_by_normalized", types.MappingProxyType(by_norm))
         object.__setattr__(self, "_by_original", types.MappingProxyType(by_orig))
 
@@ -404,18 +403,20 @@ class SchemaContract:
                 locked=data["locked"],
             )
         except KeyError as e:
-            raise KeyError(f"Corrupt SchemaContract checkpoint: missing key {e}. Top-level keys: {sorted(data.keys())}") from e
+            raise AuditIntegrityError(f"Corrupt SchemaContract checkpoint: missing key {e}. Top-level keys: {sorted(data.keys())}") from e
 
         # Verify integrity (Tier 1 audit requirement)
         # Per CLAUDE.md: "Bad data in the audit trail = crash immediately"
         # to_checkpoint_format() ALWAYS writes version_hash, so missing = corruption
         try:
             expected_hash = data["version_hash"]
-        except KeyError:
-            raise KeyError(f"Corrupt SchemaContract checkpoint: missing 'version_hash'. Top-level keys: {sorted(data.keys())}") from None
+        except KeyError as exc:
+            raise AuditIntegrityError(
+                f"Corrupt SchemaContract checkpoint: missing 'version_hash'. Top-level keys: {sorted(data.keys())}"
+            ) from exc
         actual_hash = contract.version_hash()
         if actual_hash != expected_hash:
-            raise ValueError(
+            raise AuditIntegrityError(
                 f"Contract integrity violation: hash mismatch. "
                 f"Expected {expected_hash}, got {actual_hash}. "
                 f"Checkpoint may be corrupted or from different version."
@@ -743,26 +744,28 @@ class PipelineRow:
             Restored PipelineRow
 
         Raises:
-            KeyError: If checkpoint is missing required keys or contract version
-                not in registry. Error messages include available keys for debugging.
+            AuditIntegrityError: If checkpoint is missing required keys or contract
+                version not in registry (Tier 1 data corruption).
         """
         try:
             version = checkpoint_data["contract_version"]
-        except KeyError:
-            raise KeyError(
+        except KeyError as exc:
+            raise AuditIntegrityError(
                 f"Corrupt PipelineRow checkpoint: missing 'contract_version'. Available keys: {sorted(checkpoint_data.keys())}"
-            ) from None
+            ) from exc
 
         try:
             contract = contract_registry[version]
-        except KeyError:
-            raise KeyError(
+        except KeyError as exc:
+            raise AuditIntegrityError(
                 f"Contract version '{version}' not in registry. Available versions: {sorted(contract_registry.keys())}"
-            ) from None
+            ) from exc
 
         try:
             data = checkpoint_data["data"]
-        except KeyError:
-            raise KeyError(f"Corrupt PipelineRow checkpoint: missing 'data'. Available keys: {sorted(checkpoint_data.keys())}") from None
+        except KeyError as exc:
+            raise AuditIntegrityError(
+                f"Corrupt PipelineRow checkpoint: missing 'data'. Available keys: {sorted(checkpoint_data.keys())}"
+            ) from exc
 
         return cls(data=data, contract=contract)

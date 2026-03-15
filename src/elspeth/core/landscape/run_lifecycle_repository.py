@@ -2,13 +2,12 @@
 
 Owns all run lifecycle operations: begin, complete, finalize, status updates,
 schema contracts, secret resolutions, export status, and reproducibility grading.
-
-Extracted from RunRecordingMixin as part of T19 (mixin → composition).
 """
 
 from __future__ import annotations
 
 import json
+from collections.abc import Mapping
 from typing import TYPE_CHECKING, Any
 
 from sqlalchemy import select
@@ -16,6 +15,7 @@ from sqlalchemy import select
 from elspeth.contracts import (
     ContractAuditRecord,
     ExportStatus,
+    ReproducibilityGrade,
     Run,
     RunStatus,
     SecretResolution,
@@ -27,7 +27,7 @@ from elspeth.core.landscape._database_ops import DatabaseOps
 from elspeth.core.landscape._helpers import generate_id, now
 from elspeth.core.landscape.database import LandscapeDB
 from elspeth.core.landscape.model_loaders import RunLoader
-from elspeth.core.landscape.reproducibility import ReproducibilityGrade, compute_grade
+from elspeth.core.landscape.reproducibility import compute_grade
 from elspeth.core.landscape.schema import (
     runs_table,
     secret_resolutions_table,
@@ -191,7 +191,7 @@ class RunLifecycleRepository:
             Source schema JSON string
 
         Raises:
-            ValueError: If run not found or has no source schema
+            AuditIntegrityError: If run not found or has no source schema
 
         Note:
             This encapsulates Landscape schema access for Orchestrator resume.
@@ -201,11 +201,11 @@ class RunLifecycleRepository:
         run_row = self._ops.execute_fetchone(query)
 
         if run_row is None:
-            raise ValueError(f"Run {run_id} not found in database")
+            raise AuditIntegrityError(f"Run {run_id} not found in database")
 
         source_schema_json = run_row.source_schema_json
         if source_schema_json is None:
-            raise ValueError(
+            raise AuditIntegrityError(
                 f"Run {run_id} has no source schema stored. "
                 f"This run was created before source schema storage was implemented. "
                 f"Cannot resume without schema - type fidelity would be violated."
@@ -221,7 +221,7 @@ class RunLifecycleRepository:
     def record_source_field_resolution(
         self,
         run_id: str,
-        resolution_mapping: dict[str, str],
+        resolution_mapping: Mapping[str, str],
         normalization_version: str | None,
     ) -> None:
         """Record field resolution mapping computed during source.load().
@@ -258,7 +258,7 @@ class RunLifecycleRepository:
         """Get source field resolution mapping for a run.
 
         Returns the mapping from original header names to final (normalized) field names.
-        Used by sinks with restore_source_headers=True to restore original headers.
+        Used by sinks with headers: original to restore original headers.
 
         Args:
             run_id: Run to query
@@ -275,7 +275,7 @@ class RunLifecycleRepository:
         result = self._ops.execute_fetchone(query)
 
         if result is None:
-            raise ValueError(f"Run {run_id} not found in database")
+            raise AuditIntegrityError(f"Run {run_id} not found in database")
 
         resolution_json = result.source_field_resolution_json
         if resolution_json is None:
@@ -336,8 +336,7 @@ class RunLifecycleRepository:
             status: New RunStatus
 
         Raises:
-            ValueError: If run_id not found
-            AuditIntegrityError: If current status is COMPLETED (immutable)
+            AuditIntegrityError: If run_id not found or current status is COMPLETED (immutable)
 
         Note:
             This encapsulates run status updates for Orchestrator recovery.
@@ -347,16 +346,22 @@ class RunLifecycleRepository:
             record is final. FAILED and INTERRUPTED runs CAN be transitioned back
             to RUNNING during resume (orchestrator recovery path).
         """
-        current = self.get_run(run_id)
-        if current is None:
-            raise ValueError(f"Cannot update run status to {status.value!r}: run {run_id} not found")
-        if current.status == RunStatus.COMPLETED:
-            raise AuditIntegrityError(
-                f"Cannot transition run {run_id} from COMPLETED to {status.value!r}. "
-                f"Completed runs are immutable. "
-                f"FAILED/INTERRUPTED runs can be resumed via update_run_status."
+        with self._db.connection() as conn:
+            result = conn.execute(
+                runs_table.update()
+                .where(runs_table.c.run_id == run_id)
+                .where(runs_table.c.status != RunStatus.COMPLETED.value)
+                .values(status=status)
             )
-        self._ops.execute_update(runs_table.update().where(runs_table.c.run_id == run_id).values(status=status))
+            if result.rowcount == 0:
+                existing = conn.execute(select(runs_table.c.status).where(runs_table.c.run_id == run_id)).fetchone()
+                if existing is not None and existing.status == RunStatus.COMPLETED.value:
+                    raise AuditIntegrityError(
+                        f"Cannot transition run {run_id} from COMPLETED to {status.value!r}. "
+                        f"Completed runs are immutable. "
+                        f"FAILED/INTERRUPTED runs can be resumed via update_run_status."
+                    )
+                raise AuditIntegrityError(f"Cannot update run status to {status.value!r}: run {run_id} not found")
 
     def update_run_contract(self, run_id: str, contract: SchemaContract) -> None:
         """Update run with schema contract after first-row inference.
@@ -402,7 +407,7 @@ class RunLifecycleRepository:
                         f"contract already exists. update_run_contract is only valid "
                         f"when no contract was set at begin_run()."
                     )
-                raise ValueError(f"Cannot update schema contract: run {run_id} not found")
+                raise AuditIntegrityError(f"Cannot update schema contract: run {run_id} not found")
 
     def get_run_contract(self, run_id: str) -> SchemaContract | None:
         """Get schema contract for a run.
@@ -416,9 +421,8 @@ class RunLifecycleRepository:
             SchemaContract if stored, None if run exists but no contract was stored
 
         Raises:
-            ValueError: If run_id not found in database
-            AuditIntegrityError: If stored contract hash doesn't match recomputed hash,
-                or if hash is NULL while JSON is present
+            AuditIntegrityError: If run_id not found, stored contract hash doesn't match
+                recomputed hash, or hash is NULL while JSON is present
         """
         query = select(
             runs_table.c.run_id,
@@ -428,7 +432,7 @@ class RunLifecycleRepository:
         row = self._ops.execute_fetchone(query)
 
         if row is None:
-            raise ValueError(f"Run {run_id} not found in database")
+            raise AuditIntegrityError(f"Run {run_id} not found in database")
 
         schema_contract_json = row.schema_contract_json
         if schema_contract_json is None:

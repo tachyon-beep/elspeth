@@ -12,6 +12,7 @@ IMPORTANT:
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from types import MappingProxyType
 from typing import TYPE_CHECKING, Any, Literal
 
 from elspeth.contracts.url import SanitizedDatabaseUrl, SanitizedWebhookUrl
@@ -23,6 +24,7 @@ if TYPE_CHECKING:
 
 from elspeth.contracts.enums import RowOutcome
 from elspeth.contracts.errors import (
+    FrameworkBugError,
     OrchestrationInvariantError,
     PluginContractViolation,
     TransformErrorReason,
@@ -114,7 +116,7 @@ class TransformResult:
     row: PipelineRow | None
     reason: TransformErrorReason | None
     retryable: bool = False
-    rows: list[PipelineRow] | None = None
+    rows: tuple[PipelineRow, ...] | None = None
 
     # Success metadata - REQUIRED for success results, None for error results
     # Invariant: status="success" implies success_reason is not None
@@ -127,7 +129,7 @@ class TransformResult:
 
     # Context snapshot for audit trail (optional)
     # Contains operational metadata like pool stats, ordering info
-    # P3-2026-02-02: Enables pool metadata to flow to context_after_json
+    # Enables pool metadata to flow to context_after_json
     context_after: NodeStateContext | None = field(default=None, repr=False)
 
     def __post_init__(self) -> None:
@@ -211,7 +213,7 @@ class TransformResult:
     @classmethod
     def success_multi(
         cls,
-        rows: list[PipelineRow],
+        rows: list[PipelineRow] | tuple[PipelineRow, ...],
         *,
         success_reason: TransformSuccessReason,
         context_after: NodeStateContext | None = None,
@@ -259,7 +261,7 @@ class TransformResult:
             status="success",
             row=None,
             reason=None,
-            rows=rows,
+            rows=tuple(rows),
             success_reason=success_reason,
             context_after=context_after,
         )
@@ -329,16 +331,14 @@ class GateResult:
         from elspeth.contracts.schema_contract import PipelineRow
 
         if self.contract is None:
-            raise ValueError("GateResult has no contract - cannot create PipelineRow")
+            raise FrameworkBugError(
+                "GateResult has no contract - cannot create PipelineRow. "
+                "The engine must set contract on GateResult before calling to_pipeline_row()."
+            )
         return PipelineRow(self.row, self.contract)
 
 
-# NOTE: AcceptResult was deleted in aggregation structural cleanup.
-# Aggregation is now engine-controlled via batch-aware transforms.
-# The engine buffers rows and decides when to flush via TriggerEvaluator.
-
-
-@dataclass(frozen=True)
+@dataclass(frozen=True, slots=True)
 class RowResult:
     """Final result of processing a row through the pipeline.
 
@@ -371,7 +371,7 @@ class RowResult:
             raise OrchestrationInvariantError("COALESCED outcome requires sink_name to be set")
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, slots=True)
 class ArtifactDescriptor:
     """Descriptor for an artifact written by a sink.
 
@@ -387,7 +387,11 @@ class ArtifactDescriptor:
     path_or_uri: str
     content_hash: str  # REQUIRED - audit integrity
     size_bytes: int  # REQUIRED - verification
-    metadata: dict[str, object] | None = None
+    metadata: MappingProxyType[str, object] | None = None
+
+    def __post_init__(self) -> None:
+        if self.metadata is not None:
+            object.__setattr__(self, "metadata", MappingProxyType(dict(self.metadata)))
 
     @classmethod
     def for_file(
@@ -433,7 +437,7 @@ class ArtifactDescriptor:
             path_or_uri=f"db://{table}@{url.sanitized_url}",
             content_hash=content_hash,
             size_bytes=payload_size,
-            metadata=metadata,
+            metadata=MappingProxyType(metadata),
         )
 
     @classmethod
@@ -464,11 +468,11 @@ class ArtifactDescriptor:
             path_or_uri=f"webhook://{url.sanitized_url}",
             content_hash=content_hash,
             size_bytes=request_size,
-            metadata=metadata,
+            metadata=MappingProxyType(metadata),
         )
 
 
-@dataclass
+@dataclass(frozen=True, slots=True)
 class SourceRow:
     """Result from source loading - either valid data or quarantined invalid data.
 

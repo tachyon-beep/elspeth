@@ -15,10 +15,12 @@ from typing import TYPE_CHECKING, Any
 
 import structlog
 
+from elspeth.contracts.errors import AuditIntegrityError, FrameworkBugError
 from elspeth.telemetry.errors import TelemetryExporterError
 from elspeth.telemetry.exporters.otlp import (
     _derive_trace_id,
     _generate_span_id,
+    _serialize_event_attributes,
     _SyntheticReadableSpan,
 )
 
@@ -226,6 +228,10 @@ class AzureMonitorExporter:
             if len(self._buffer) >= self._batch_size:
                 self._flush_batch()
         except Exception as e:
+            if isinstance(e, (FrameworkBugError, AuditIntegrityError)):
+                raise
+            if isinstance(e, (TypeError, AttributeError, KeyError, NameError)):
+                raise  # Programming errors must crash
             # Export MUST NOT raise - log and continue
             logger.warning(
                 "Failed to buffer telemetry event",
@@ -260,6 +266,10 @@ class AzureMonitorExporter:
                 span_count=len(spans),
             )
         except Exception as e:
+            if isinstance(e, (FrameworkBugError, AuditIntegrityError)):
+                raise
+            if isinstance(e, (TypeError, AttributeError, KeyError, NameError)):
+                raise  # Programming errors must crash
             logger.warning(
                 "Failed to export Azure Monitor batch",
                 exporter=self._name,
@@ -322,45 +332,10 @@ class AzureMonitorExporter:
 
         return span
 
-    def _serialize_event_attributes(self, event: TelemetryEvent) -> dict[str, Any]:
-        """Serialize event fields as span attributes.
-
-        Handles type conversions for OpenTelemetry compatibility:
-        - datetime -> ISO 8601 string
-        - Enum -> value
-        - dict -> JSON string (Azure Monitor doesn't support nested attributes)
-        - tuple -> list
-
-        Args:
-            event: The telemetry event
-
-        Returns:
-            Dictionary of attribute key-value pairs
-        """
-        import json
-        from datetime import datetime
-        from enum import Enum
-
-        data = event.to_dict()
-        data["event_type"] = type(event).__name__
-
-        result: dict[str, Any] = {}
-        for key, value in data.items():
-            if value is None:
-                continue  # Skip None values
-            elif isinstance(value, datetime):
-                result[key] = value.isoformat()
-            elif isinstance(value, Enum):
-                result[key] = value.value
-            elif isinstance(value, dict):
-                # Azure Monitor doesn't support nested attributes, serialize as JSON
-                result[key] = json.dumps(value)
-            elif isinstance(value, tuple):
-                result[key] = list(value)
-            else:
-                result[key] = value
-
-        return result
+    @staticmethod
+    def _serialize_event_attributes(event: TelemetryEvent) -> dict[str, Any]:
+        """Serialize event fields as span attributes."""
+        return _serialize_event_attributes(event)
 
     def flush(self) -> None:
         """Flush any buffered events to Azure Monitor.
@@ -371,6 +346,10 @@ class AzureMonitorExporter:
         try:
             self._flush_batch()
         except Exception as e:
+            if isinstance(e, (FrameworkBugError, AuditIntegrityError)):
+                raise
+            if isinstance(e, (TypeError, AttributeError, KeyError, NameError)):
+                raise  # Programming errors must crash
             logger.warning(
                 "Failed to flush Azure Monitor exporter",
                 exporter=self._name,
@@ -389,6 +368,10 @@ class AzureMonitorExporter:
             try:
                 self._azure_exporter.shutdown()
             except Exception as e:
+                if isinstance(e, (FrameworkBugError, AuditIntegrityError)):
+                    raise
+                if isinstance(e, (TypeError, AttributeError, KeyError, NameError)):
+                    raise  # Programming errors must crash
                 logger.warning(
                     "Failed to shutdown Azure Monitor exporter",
                     exporter=self._name,

@@ -226,7 +226,12 @@ def mock_azure_openai_multi_query(
         mock_response.choices = [mock_choice]
         mock_response.model = "gpt-4o"
         mock_response.usage = mock_usage
-        mock_response.model_dump = Mock(return_value={"model": "gpt-4o"})
+        mock_response.model_dump = Mock(
+            return_value={
+                "model": "gpt-4o",
+                "choices": [{"finish_reason": "stop", "message": {"content": content}}],
+            }
+        )
 
         return mock_response
 
@@ -328,6 +333,7 @@ class TestMultiQueryIntegration:
         with mock_azure_openai_multi_query(responses) as mock_client:
             transform = LLMTransform(make_full_config())
             transform.node_id = node_id
+            transform.on_error = "discard"
 
             ctx = make_context(
                 run_id=run_id,
@@ -449,6 +455,7 @@ class TestMultiQueryIntegration:
         with mock_azure_openai_multi_query(responses) as mock_client:
             transform = LLMTransform(config)
             transform.node_id = node_id
+            transform.on_error = "discard"
 
             ctx = make_context(
                 run_id=run_id,

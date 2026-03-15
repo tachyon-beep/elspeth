@@ -7,7 +7,7 @@ and transforms. Migrated from tests/conftest.py with no behavioral changes.
 
 from __future__ import annotations
 
-from collections.abc import Callable, Iterator
+from collections.abc import Callable, Iterator, Mapping
 from typing import TYPE_CHECKING, Any, cast
 
 from elspeth.contracts import Determinism, PluginSchema, SourceRow
@@ -78,7 +78,7 @@ class _TestSourceBase:
     def close(self) -> None:
         pass
 
-    def get_field_resolution(self) -> tuple[dict[str, str], str | None] | None:
+    def get_field_resolution(self) -> tuple[Mapping[str, str], str | None] | None:
         return None
 
     def get_schema_contract(self) -> SchemaContract | None:

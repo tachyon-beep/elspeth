@@ -3,9 +3,12 @@
 import os
 from dataclasses import dataclass
 from pathlib import Path
+from types import MappingProxyType
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
+    from collections.abc import Mapping, Sequence
+
     from elspeth.contracts import SinkProtocol, SourceProtocol, TransformProtocol
     from elspeth.core.config import AggregationSettings, ElspethSettings, LandscapeSettings, SourceSettings
     from elspeth.core.dag import WiredTransform
@@ -23,9 +26,17 @@ class PluginBundle:
 
     source: "SourceProtocol"
     source_settings: "SourceSettings"
-    transforms: "list[WiredTransform]"
-    sinks: "dict[str, SinkProtocol]"
-    aggregations: "dict[str, tuple[TransformProtocol, AggregationSettings]]"
+    transforms: "Sequence[WiredTransform]"
+    sinks: "Mapping[str, SinkProtocol]"
+    aggregations: "Mapping[str, tuple[TransformProtocol, AggregationSettings]]"
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.transforms, tuple):
+            object.__setattr__(self, "transforms", tuple(self.transforms))
+        if not isinstance(self.sinks, MappingProxyType):
+            object.__setattr__(self, "sinks", MappingProxyType(self.sinks))
+        if not isinstance(self.aggregations, MappingProxyType):
+            object.__setattr__(self, "aggregations", MappingProxyType(self.aggregations))
 
 
 def instantiate_plugins_from_config(config: "ElspethSettings") -> PluginBundle:

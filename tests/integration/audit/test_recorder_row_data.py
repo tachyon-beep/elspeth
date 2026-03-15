@@ -99,7 +99,7 @@ class TestGetRowDataExplicitStates:
         assert result.data is None
 
     def test_purged(self, tmp_path: Path, payload_store) -> None:
-        """Returns PURGED when payload_store raises KeyError."""
+        """Returns PURGED when payload has been deleted (PayloadNotFoundError)."""
         db = LandscapeDB.in_memory()
         payload_store = FilesystemPayloadStore(tmp_path / "payloads")
         recorder = LandscapeRecorder(db, payload_store=payload_store)

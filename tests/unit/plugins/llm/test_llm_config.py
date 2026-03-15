@@ -330,6 +330,35 @@ class TestQuerySpec:
         with pytest.raises(KeyError, match="text"):
             spec.build_template_context({"other": "value"})
 
+    def test_input_fields_is_deeply_immutable(self) -> None:
+        """input_fields dict must be truly immutable — shared across rows."""
+        from types import MappingProxyType
+
+        from elspeth.plugins.transforms.llm.multi_query import QuerySpec
+
+        original = {"text": "text_col", "cat": "category_col"}
+        spec = QuerySpec(name="q1", input_fields=original)
+
+        assert isinstance(spec.input_fields, MappingProxyType)
+        with pytest.raises(TypeError):
+            spec.input_fields["injected"] = "evil"  # type: ignore[index]
+
+        # Caller's original dict must be decoupled
+        original["injected"] = "evil"
+        assert "injected" not in spec.input_fields
+
+    def test_output_fields_is_tuple(self) -> None:
+        """output_fields list must be stored as tuple when provided."""
+        from elspeth.plugins.transforms.llm.multi_query import OutputFieldConfig, OutputFieldType, QuerySpec
+
+        fields = [OutputFieldConfig(suffix="label", type=OutputFieldType.STRING)]
+        spec = QuerySpec(name="q1", input_fields={"text": "col"}, output_fields=fields)
+
+        assert isinstance(spec.output_fields, tuple)
+        # Caller's original list must be decoupled
+        fields.append(OutputFieldConfig(suffix="extra", type=OutputFieldType.STRING))
+        assert len(spec.output_fields) == 1
+
 
 # ---------------------------------------------------------------------------
 # resolve_queries()

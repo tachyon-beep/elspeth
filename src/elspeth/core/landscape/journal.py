@@ -3,20 +3,20 @@
 from __future__ import annotations
 
 import json
-import logging
 from pathlib import Path
 from threading import Lock
 from typing import Any, NotRequired, TypedDict, cast
 
+import structlog
 from sqlalchemy import event
 from sqlalchemy.engine import Connection, Engine
 
-from elspeth.contracts.errors import AuditIntegrityError, FrameworkBugError
+from elspeth.contracts.payload_store import PayloadNotFoundError
 from elspeth.core.landscape._helpers import now
 from elspeth.core.landscape.formatters import serialize_datetime
 from elspeth.core.payload_store import FilesystemPayloadStore
 
-logger = logging.getLogger(__name__)
+logger = structlog.get_logger(__name__)
 
 _BUFFER_KEY = "landscape_journal_buffer"
 
@@ -136,15 +136,16 @@ class LandscapeJournal:
         payload = "\n".join(self._serialize_record(record) for record in records) + "\n"
         with self._lock:
             if self._disabled:
-                # Periodically attempt recovery instead of staying silent forever
                 self._total_dropped += len(records)
-                if self._total_dropped % 100 == 0:
-                    logger.warning(
-                        "Landscape journal still disabled after %d consecutive failures, %d records dropped",
-                        self._consecutive_failures,
-                        self._total_dropped,
-                    )
-                    # Attempt recovery
+                attempt_recovery = self._total_dropped % 100 == 0
+                logger.warning(
+                    "journal_recovery_attempt" if attempt_recovery else "journal_records_dropped",
+                    event_type="journal_records_dropped",
+                    consecutive_failures=self._consecutive_failures,
+                    total_dropped=self._total_dropped,
+                    batch_size=len(records),
+                )
+                if attempt_recovery:
                     self._disabled = False
                 else:
                     return
@@ -154,37 +155,47 @@ class LandscapeJournal:
                     handle.write(payload)
                 if self._consecutive_failures > 0:
                     logger.info(
-                        "Landscape journal recovered after %d consecutive failures (%d records were dropped)",
-                        self._consecutive_failures,
-                        self._total_dropped,
+                        "journal_recovered",
+                        consecutive_failures=self._consecutive_failures,
+                        total_dropped=self._total_dropped,
                     )
                 self._consecutive_failures = 0
-            except (FrameworkBugError, AuditIntegrityError):
-                raise  # System bugs and audit corruption must crash immediately
-            except Exception as exc:
+            except OSError as exc:
                 self._consecutive_failures += 1
                 self._total_dropped += len(records)
                 logger.error(
-                    "Landscape journal write failed (attempt %d/%d): %s",
-                    self._consecutive_failures,
-                    self._MAX_CONSECUTIVE_FAILURES,
-                    exc,
+                    "journal_write_failed",
+                    event_type="journal_records_dropped",
+                    consecutive_failures=self._consecutive_failures,
+                    max_failures=self._MAX_CONSECUTIVE_FAILURES,
+                    records_dropped=len(records),
+                    total_dropped=self._total_dropped,
+                    error=str(exc),
                 )
                 if self._fail_on_error:
                     raise
                 if self._consecutive_failures >= self._MAX_CONSECUTIVE_FAILURES:
                     logger.error(
-                        "Landscape journal disabled after %d consecutive failures. "
-                        "Will retry every 100 dropped records. %d records dropped so far.",
-                        self._consecutive_failures,
-                        self._total_dropped,
+                        "journal_disabled",
+                        event_type="journal_records_dropped",
+                        consecutive_failures=self._consecutive_failures,
+                        total_dropped=self._total_dropped,
                     )
                     self._disabled = True
 
     @staticmethod
     def _serialize_record(record: JournalRecord) -> str:
         safe = serialize_datetime(record)
-        return json.dumps(safe, default=str)
+        try:
+            return json.dumps(safe, allow_nan=False)
+        except TypeError as exc:
+            from elspeth.contracts.errors import AuditIntegrityError
+
+            raise AuditIntegrityError(
+                f"Journal record failed to serialize — non-JSON-serializable type in "
+                f"SQL parameters (Tier 1 violation). Statement: "
+                f"{record['statement']!r}. Error: {exc}"
+            ) from exc
 
     @staticmethod
     def _normalize_parameters(parameters: Any) -> Any:
@@ -251,9 +262,7 @@ class LandscapeJournal:
             return None, "payload_store_not_configured"
         try:
             content = self._payload_store.retrieve(ref)
-        except (FrameworkBugError, AuditIntegrityError):
-            raise  # System bugs and audit corruption must crash immediately
-        except Exception as exc:
+        except (OSError, PayloadNotFoundError) as exc:
             logger.error("Landscape journal payload read failed: %s", exc)
             if self._fail_on_error:
                 raise

@@ -7,9 +7,13 @@ Per Data Manifesto: The audit database is OUR data. If we read
 garbage from it, something catastrophic happened - crash immediately.
 """
 
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from datetime import datetime
+from types import MappingProxyType
 from typing import TYPE_CHECKING, Any, ClassVar, Literal, TypedDict
+
+from elspeth.contracts.freeze import deep_freeze
 
 if TYPE_CHECKING:
     pass  # Placeholder for future type-only imports
@@ -22,6 +26,7 @@ from elspeth.contracts.enums import (
     ExportStatus,
     NodeStateStatus,
     NodeType,
+    ReproducibilityGrade,
     RoutingMode,
     RowOutcome,
     RunStatus,
@@ -54,7 +59,7 @@ class Run:
     canonical_version: str
     status: RunStatus  # Strict: enum only
     completed_at: datetime | None = None
-    reproducibility_grade: str | None = None
+    reproducibility_grade: ReproducibilityGrade | None = None
     export_status: ExportStatus | None = None  # Strict: enum only
     export_error: str | None = None
     exported_at: datetime | None = None
@@ -64,6 +69,7 @@ class Run:
     def __post_init__(self) -> None:
         """Validate enum fields - Tier 1 crash on invalid types."""
         _validate_enum(self.status, RunStatus, "status")
+        _validate_enum(self.reproducibility_grade, ReproducibilityGrade, "reproducibility_grade")
         _validate_enum(self.export_status, ExportStatus, "export_status")
 
 
@@ -87,12 +93,18 @@ class Node:
     sequence_in_pipeline: int | None = None
     # Schema configuration for audit trail (WP-11.99)
     schema_mode: str | None = None  # "observed", "fixed", "flexible", "parse"
-    schema_fields: list[dict[str, object]] | None = None  # Field definitions if explicit
+    schema_fields: Sequence[Mapping[str, object]] | None = None  # Field definitions if explicit
 
     def __post_init__(self) -> None:
         """Validate enum fields - Tier 1 crash on invalid types."""
         _validate_enum(self.node_type, NodeType, "node_type")
         _validate_enum(self.determinism, Determinism, "determinism")
+        if self.schema_fields is not None and not isinstance(self.schema_fields, tuple):
+            object.__setattr__(
+                self,
+                "schema_fields",
+                tuple(deep_freeze(d) for d in self.schema_fields),
+            )
 
 
 @dataclass(frozen=True, slots=True)
@@ -386,11 +398,12 @@ class Checkpoint:
     Format Versions:
         Version 1: Pre-deterministic node IDs (legacy, incompatible)
         Version 2: Deterministic node IDs (2026-01-24+)
-        Version 3: Phase 2 traversal refactor checkpoint break (current)
+        Version 3: Phase 2 traversal refactor checkpoint break
+        Version 4: Pending coalesce state persisted in checkpoints (current)
     """
 
     # Current checkpoint format version (ClassVar excludes from dataclass fields)
-    CURRENT_FORMAT_VERSION: ClassVar[int] = 3
+    CURRENT_FORMAT_VERSION: ClassVar[int] = 4
 
     checkpoint_id: str
     run_id: str
@@ -404,6 +417,7 @@ class Checkpoint:
     checkpoint_node_config_hash: str  # Hash of checkpoint node config only
     # Optional fields (with defaults) MUST come after required fields in dataclass
     aggregation_state_json: str | None = None
+    coalesce_state_json: str | None = None
     # Format version for compatibility checking
     format_version: int | None = None
 
@@ -439,8 +453,12 @@ class RowLineage:
     created_at: datetime
 
     # Resolved payload (from PayloadStore)
-    source_data: dict[str, object] | None  # None if purged
+    source_data: Mapping[str, object] | None  # None if purged
     payload_available: bool
+
+    def __post_init__(self) -> None:
+        if self.source_data is not None and not isinstance(self.source_data, MappingProxyType):
+            object.__setattr__(self, "source_data", MappingProxyType(self.source_data))
 
 
 class ExportStatusUpdate(TypedDict, total=False):

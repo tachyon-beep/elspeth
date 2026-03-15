@@ -8,9 +8,10 @@ for audit integrity.
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from time import perf_counter
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
-from sqlalchemy import and_, or_, select, union
+import structlog
+from sqlalchemy import ColumnElement, CompoundSelect, FromClause, and_, or_, select, union
 
 from elspeth.contracts.payload_store import PayloadStore
 from elspeth.core.landscape.reproducibility import update_grade_after_purge
@@ -27,21 +28,28 @@ if TYPE_CHECKING:
     from elspeth.core.landscape.database import LandscapeDB
 
 
-@dataclass
+@dataclass(frozen=True, slots=True)
 class PurgeResult:
-    """Result of a purge operation.
-
-    Note: bytes_freed is always 0 in the current implementation because
-    PayloadStoreProtocol.delete() does not return the size of deleted content.
-    This field is retained for future compatibility when PayloadStore provides
-    size information on deletion.
-    """
+    """Result of a purge operation."""
 
     deleted_count: int
-    bytes_freed: int
     skipped_count: int  # Refs that didn't exist (already purged/never stored)
-    failed_refs: list[str]  # Refs that existed but failed to delete
+    failed_refs: tuple[str, ...]  # Refs that existed but failed to delete
+    grade_update_failures: tuple[str, ...]  # Run IDs whose grade update failed after deletion
     duration_seconds: float
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "failed_refs", tuple(self.failed_refs))
+        object.__setattr__(self, "grade_update_failures", tuple(self.grade_update_failures))
+        if self.deleted_count < 0:
+            raise ValueError(f"deleted_count must be non-negative, got {self.deleted_count}")
+        if self.skipped_count < 0:
+            raise ValueError(f"skipped_count must be non-negative, got {self.skipped_count}")
+        if self.duration_seconds < 0:
+            raise ValueError(f"duration_seconds must be non-negative, got {self.duration_seconds}")
+
+
+logger = structlog.get_logger()
 
 
 class PurgeManager:
@@ -61,52 +69,63 @@ class PurgeManager:
         self._db = db
         self._payload_store = payload_store
 
-    def find_expired_row_payloads(
+    def _build_ref_union_query(
         self,
-        retention_days: int,
-        as_of: datetime | None = None,
-    ) -> list[str]:
-        """Find row payloads eligible for deletion based on retention policy.
+        run_condition: ColumnElement[bool],
+        *,
+        rows_join: FromClause,
+        operation_join: FromClause,
+        call_state_join: FromClause,
+        call_op_join: FromClause,
+        routing_join: FromClause,
+    ) -> CompoundSelect[Any]:
+        """Build a UNION of all 8 payload ref sub-queries for a given run condition.
+
+        Each sub-query selects a single ref column from a different table/join,
+        filtered by the run condition and a NOT NULL guard on the ref column.
 
         Args:
-            retention_days: Number of days to retain payloads after run completion
-            as_of: Reference datetime for cutoff calculation (defaults to now)
+            run_condition: SQLAlchemy WHERE clause for run filtering
+                (e.g. expired condition or active condition)
+            rows_join: Pre-built join for rows → runs
+            operation_join: Pre-built join for operations → runs
+            call_state_join: Pre-built join for calls → node_states → runs
+            call_op_join: Pre-built join for calls → operations → runs
+            routing_join: Pre-built join for routing_events → node_states → runs
 
         Returns:
-            List of source_data_ref values for expired payloads
+            UNION of all 8 sub-queries
         """
-        if as_of is None:
-            as_of = datetime.now(UTC)
-
-        cutoff = as_of - timedelta(days=retention_days)
-
-        # Query rows from finished runs (completed OR failed) older than cutoff
-        # Only return non-null source_data_ref values
-        # Use distinct() because multiple rows can reference the same payload
-        # (content-addressed storage means identical content shares one blob)
-        #
-        # Note: Both completed and failed runs are eligible for purge. Only
-        # running runs (status="running") are excluded - they haven't finished
-        # and their payloads may still be needed.
-        query = (
+        return union(
+            # 1. Row payloads
             select(rows_table.c.source_data_ref)
-            .distinct()
-            .select_from(rows_table.join(runs_table, rows_table.c.run_id == runs_table.c.run_id))
-            .where(
-                and_(
-                    runs_table.c.status.in_(("completed", "failed")),
-                    runs_table.c.completed_at.isnot(None),
-                    runs_table.c.completed_at < cutoff,
-                    rows_table.c.source_data_ref.isnot(None),
-                )
-            )
+            .select_from(rows_join)
+            .where(and_(run_condition, rows_table.c.source_data_ref.isnot(None))),
+            # 2. Operation input payloads
+            select(operations_table.c.input_data_ref)
+            .select_from(operation_join)
+            .where(and_(run_condition, operations_table.c.input_data_ref.isnot(None))),
+            # 3. Operation output payloads
+            select(operations_table.c.output_data_ref)
+            .select_from(operation_join)
+            .where(and_(run_condition, operations_table.c.output_data_ref.isnot(None))),
+            # 4. Call request payloads (transform calls via state_id)
+            select(calls_table.c.request_ref)
+            .select_from(call_state_join)
+            .where(and_(run_condition, calls_table.c.request_ref.isnot(None))),
+            # 5. Call response payloads (transform calls via state_id)
+            select(calls_table.c.response_ref)
+            .select_from(call_state_join)
+            .where(and_(run_condition, calls_table.c.response_ref.isnot(None))),
+            # 6. Call request payloads (source/sink calls via operation_id)
+            select(calls_table.c.request_ref).select_from(call_op_join).where(and_(run_condition, calls_table.c.request_ref.isnot(None))),
+            # 7. Call response payloads (source/sink calls via operation_id)
+            select(calls_table.c.response_ref).select_from(call_op_join).where(and_(run_condition, calls_table.c.response_ref.isnot(None))),
+            # 8. Routing reason payloads
+            select(routing_events_table.c.reason_ref)
+            .select_from(routing_join)
+            .where(and_(run_condition, routing_events_table.c.reason_ref.isnot(None))),
         )
-
-        with self._db.connection() as conn:
-            result = conn.execute(query)
-            refs = [row[0] for row in result]
-
-        return refs
 
     def find_expired_payload_refs(
         self,
@@ -158,159 +177,38 @@ class PurgeManager:
             runs_table.c.status == "running",
         )
 
-        # === Build queries for refs from EXPIRED runs ===
-
-        # 1. Row payloads from expired runs
-        row_expired_query = (
-            select(rows_table.c.source_data_ref)
-            .select_from(rows_table.join(runs_table, rows_table.c.run_id == runs_table.c.run_id))
-            .where(and_(run_expired_condition, rows_table.c.source_data_ref.isnot(None)))
-        )
-
-        # 2. Operation input/output payloads from expired runs
-        operation_expired_join = operations_table.join(runs_table, operations_table.c.run_id == runs_table.c.run_id)
-
-        operation_input_expired_query = (
-            select(operations_table.c.input_data_ref)
-            .select_from(operation_expired_join)
-            .where(and_(run_expired_condition, operations_table.c.input_data_ref.isnot(None)))
-        )
-
-        operation_output_expired_query = (
-            select(operations_table.c.output_data_ref)
-            .select_from(operation_expired_join)
-            .where(and_(run_expired_condition, operations_table.c.output_data_ref.isnot(None)))
-        )
-
-        # 3. Call payloads from expired runs (transform calls via state_id)
+        # === Build joins (shared between expired and active queries) ===
         # NOTE: Use node_states.run_id directly (denormalized column) instead of
         # joining through nodes table. The nodes table has composite PK (node_id, run_id),
         # so joining on node_id alone would be ambiguous when node_id is reused across runs.
+        rows_join = rows_table.join(runs_table, rows_table.c.run_id == runs_table.c.run_id)
+        operation_join = operations_table.join(runs_table, operations_table.c.run_id == runs_table.c.run_id)
         call_state_join = calls_table.join(node_states_table, calls_table.c.state_id == node_states_table.c.state_id).join(
             runs_table, node_states_table.c.run_id == runs_table.c.run_id
         )
-
-        call_state_request_expired_query = (
-            select(calls_table.c.request_ref)
-            .select_from(call_state_join)
-            .where(and_(run_expired_condition, calls_table.c.request_ref.isnot(None)))
-        )
-
-        call_state_response_expired_query = (
-            select(calls_table.c.response_ref)
-            .select_from(call_state_join)
-            .where(and_(run_expired_condition, calls_table.c.response_ref.isnot(None)))
-        )
-
-        # 4. Call payloads from expired runs (source/sink calls via operation_id)
         # XOR constraint: calls have either state_id OR operation_id, not both
         call_op_join = calls_table.join(operations_table, calls_table.c.operation_id == operations_table.c.operation_id).join(
             runs_table, operations_table.c.run_id == runs_table.c.run_id
         )
-
-        call_op_request_expired_query = (
-            select(calls_table.c.request_ref)
-            .select_from(call_op_join)
-            .where(and_(run_expired_condition, calls_table.c.request_ref.isnot(None)))
-        )
-
-        call_op_response_expired_query = (
-            select(calls_table.c.response_ref)
-            .select_from(call_op_join)
-            .where(and_(run_expired_condition, calls_table.c.response_ref.isnot(None)))
-        )
-
-        # 5. Routing payloads from expired runs
-        # NOTE: Same pattern as call_state_join - use node_states.run_id directly
         routing_join = routing_events_table.join(node_states_table, routing_events_table.c.state_id == node_states_table.c.state_id).join(
             runs_table, node_states_table.c.run_id == runs_table.c.run_id
         )
 
-        routing_expired_query = (
-            select(routing_events_table.c.reason_ref)
-            .select_from(routing_join)
-            .where(and_(run_expired_condition, routing_events_table.c.reason_ref.isnot(None)))
+        expired_refs_query = self._build_ref_union_query(
+            run_expired_condition,
+            rows_join=rows_join,
+            operation_join=operation_join,
+            call_state_join=call_state_join,
+            call_op_join=call_op_join,
+            routing_join=routing_join,
         )
-
-        # Combine all expired refs
-        expired_refs_query = union(
-            row_expired_query,
-            operation_input_expired_query,
-            operation_output_expired_query,
-            call_state_request_expired_query,
-            call_state_response_expired_query,
-            call_op_request_expired_query,
-            call_op_response_expired_query,
-            routing_expired_query,
-        )
-
-        # === Build queries for refs from ACTIVE runs (to exclude) ===
-
-        # 1. Row payloads from active runs
-        row_active_query = (
-            select(rows_table.c.source_data_ref)
-            .select_from(rows_table.join(runs_table, rows_table.c.run_id == runs_table.c.run_id))
-            .where(and_(run_active_condition, rows_table.c.source_data_ref.isnot(None)))
-        )
-
-        # 2. Operation input/output payloads from active runs
-        operation_active_join = operations_table.join(runs_table, operations_table.c.run_id == runs_table.c.run_id)
-
-        operation_input_active_query = (
-            select(operations_table.c.input_data_ref)
-            .select_from(operation_active_join)
-            .where(and_(run_active_condition, operations_table.c.input_data_ref.isnot(None)))
-        )
-
-        operation_output_active_query = (
-            select(operations_table.c.output_data_ref)
-            .select_from(operation_active_join)
-            .where(and_(run_active_condition, operations_table.c.output_data_ref.isnot(None)))
-        )
-
-        # 3. Call payloads from active runs (transform calls via state_id)
-        call_state_request_active_query = (
-            select(calls_table.c.request_ref)
-            .select_from(call_state_join)
-            .where(and_(run_active_condition, calls_table.c.request_ref.isnot(None)))
-        )
-
-        call_state_response_active_query = (
-            select(calls_table.c.response_ref)
-            .select_from(call_state_join)
-            .where(and_(run_active_condition, calls_table.c.response_ref.isnot(None)))
-        )
-
-        # 4. Call payloads from active runs (source/sink calls via operation_id)
-        call_op_request_active_query = (
-            select(calls_table.c.request_ref)
-            .select_from(call_op_join)
-            .where(and_(run_active_condition, calls_table.c.request_ref.isnot(None)))
-        )
-
-        call_op_response_active_query = (
-            select(calls_table.c.response_ref)
-            .select_from(call_op_join)
-            .where(and_(run_active_condition, calls_table.c.response_ref.isnot(None)))
-        )
-
-        # 5. Routing payloads from active runs
-        routing_active_query = (
-            select(routing_events_table.c.reason_ref)
-            .select_from(routing_join)
-            .where(and_(run_active_condition, routing_events_table.c.reason_ref.isnot(None)))
-        )
-
-        # Combine all active refs
-        active_refs_query = union(
-            row_active_query,
-            operation_input_active_query,
-            operation_output_active_query,
-            call_state_request_active_query,
-            call_state_response_active_query,
-            call_op_request_active_query,
-            call_op_response_active_query,
-            routing_active_query,
+        active_refs_query = self._build_ref_union_query(
+            run_active_condition,
+            rows_join=rows_join,
+            operation_join=operation_join,
+            call_state_join=call_state_join,
+            call_op_join=call_op_join,
+            routing_join=routing_join,
         )
 
         # === Execute both queries and compute set difference ===
@@ -447,23 +345,32 @@ class PurgeManager:
         # Step 1: Delete the payloads, tracking which refs were actually deleted
         deleted_count = 0
         skipped_count = 0
-        bytes_freed = 0  # Not tracked by current PayloadStore protocol
         failed_refs: list[str] = []
         deleted_refs: list[str] = []
 
         for ref in refs:
             try:
                 exists = self._payload_store.exists(ref)
-            except OSError:
-                # I/O error checking existence - record as failure, continue with others
+            except OSError as e:
+                logger.warning(
+                    "payload_existence_check_failed",
+                    ref=ref,
+                    error_type=type(e).__name__,
+                    error=str(e),
+                )
                 failed_refs.append(ref)
                 continue
 
             if exists:
                 try:
                     deleted = self._payload_store.delete(ref)
-                except OSError:
-                    # I/O error during deletion - record as failure, continue with others
+                except OSError as e:
+                    logger.warning(
+                        "payload_deletion_failed",
+                        ref=ref,
+                        error_type=type(e).__name__,
+                        error=str(e),
+                    )
                     failed_refs.append(ref)
                     continue
 
@@ -483,16 +390,28 @@ class PurgeManager:
 
         # Step 3: Update reproducibility grades for affected runs
         # This degrades REPLAY_REPRODUCIBLE -> ATTRIBUTABLE_ONLY since
-        # nondeterministic runs can no longer be replayed without payloads
-        for run_id in affected_run_ids:
-            update_grade_after_purge(self._db, run_id)
+        # nondeterministic runs can no longer be replayed without payloads.
+        # Each update is wrapped individually because payloads are already
+        # irreversibly deleted — a failure for one run must not prevent
+        # grade updates for the remaining runs.
+        grade_update_failures: list[str] = []
+        for run_id in sorted(affected_run_ids):
+            try:
+                update_grade_after_purge(self._db, run_id)
+            except Exception:
+                logger.warning(
+                    "grade_update_failed",
+                    run_id=run_id,
+                    msg="Payloads already deleted but grade update failed — run may have stale reproducibility grade",
+                )
+                grade_update_failures.append(run_id)
 
         duration_seconds = perf_counter() - start_time
 
         return PurgeResult(
             deleted_count=deleted_count,
-            bytes_freed=bytes_freed,
             skipped_count=skipped_count,
-            failed_refs=failed_refs,
+            failed_refs=tuple(failed_refs),
+            grade_update_failures=tuple(grade_update_failures),
             duration_seconds=duration_seconds,
         )

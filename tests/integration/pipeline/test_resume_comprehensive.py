@@ -21,6 +21,7 @@ import pytest
 from sqlalchemy import select
 
 from elspeth.contracts import Determinism, NodeType, RoutingMode, RowOutcome, RunStatus
+from elspeth.contracts.errors import AuditIntegrityError
 from elspeth.contracts.types import NodeID, SinkName
 from elspeth.core.dag import ExecutionGraph
 from elspeth.core.landscape.database import LandscapeDB
@@ -1412,7 +1413,7 @@ class TestResumeComprehensive:
         resume_graph.set_transform_id_map({0: NodeID("xform")})
 
         # CRITICAL: Must crash with clear error, not silently degrade to str
-        with pytest.raises(ValueError, match=r"unsupported type 'geo-point'"):
+        with pytest.raises(AuditIntegrityError, match=r"unsupported type 'geo-point'"):
             orchestrator.resume(
                 resume_point=resume_point,
                 config=config,

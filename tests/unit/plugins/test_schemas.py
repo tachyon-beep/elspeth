@@ -104,7 +104,7 @@ class TestSchemaCompatibility:
         # Producer outputs all fields consumer needs
         result = check_compatibility(ProducerOutput, ConsumerInput)
         assert result.compatible is True
-        assert result.missing_fields == []
+        assert result.missing_fields == ()
 
     def test_incompatible_schemas_missing_field(self) -> None:
         from elspeth.contracts import PluginSchema, check_compatibility
@@ -177,7 +177,7 @@ class TestSchemaCompatibility:
 
         result = check_compatibility(Producer, Consumer)
         assert result.compatible is True
-        assert result.type_mismatches == []
+        assert result.type_mismatches == ()
 
     def test_union_to_optional_float_coercion(self) -> None:
         """int | None is compatible with Optional[float] via coercion.
@@ -198,7 +198,7 @@ class TestSchemaCompatibility:
 
         result = check_compatibility(Producer, Consumer)
         assert result.compatible is True
-        assert result.type_mismatches == []
+        assert result.type_mismatches == ()
 
     def test_any_accepts_all_types(self) -> None:
         """Any type in consumer accepts any producer type.
@@ -217,7 +217,7 @@ class TestSchemaCompatibility:
 
         result = check_compatibility(Producer, Consumer)
         assert result.compatible is True
-        assert result.type_mismatches == []
+        assert result.type_mismatches == ()
 
     def test_error_message_includes_full_type_names(self) -> None:
         """Error messages should show full type names like 'int | None' not 'Union'.
@@ -281,7 +281,7 @@ class TestSchemaCompatibility:
 
         result = check_compatibility(Producer, PermissiveConsumer)
         assert result.compatible is True
-        assert result.extra_fields == []
+        assert result.extra_fields == ()
 
     def test_combined_error_message_format(self) -> None:
         """Error message should combine missing fields, type mismatches, and extra fields."""
@@ -303,10 +303,10 @@ class TestSchemaCompatibility:
         assert result.compatible is False
 
         # All three error types should be present
-        assert result.missing_fields == ["required"]
+        assert result.missing_fields == ("required",)
         assert len(result.type_mismatches) == 1
         assert result.type_mismatches[0][0] == "x"  # Field name
-        assert result.extra_fields == ["extra"]
+        assert result.extra_fields == ("extra",)
 
         # Error message should contain all parts
         error = result.error_message
@@ -359,7 +359,7 @@ class TestSchemaCompatibility:
 
         result = check_compatibility(Producer, PermissiveConsumer)
         assert result.compatible is True
-        assert result.type_mismatches == []
+        assert result.type_mismatches == ()
 
     def test_strict_schema_rejects_int_to_optional_float(self) -> None:
         """Strict schemas should reject int->Optional[float] coercion too.

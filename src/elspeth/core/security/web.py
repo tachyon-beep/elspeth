@@ -23,8 +23,10 @@ import ipaddress
 import queue
 import socket
 import urllib.parse
+from collections.abc import Sequence
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
+from ipaddress import IPv4Network, IPv6Network
 
 
 class SSRFBlockedError(Exception):
@@ -58,6 +60,25 @@ BLOCKED_IP_RANGES = [
     ipaddress.ip_network("fe80::/10"),  # IPv6 link-local (RFC 4291) - can reach metadata
     ipaddress.ip_network("::ffff:0:0/96"),  # IPv4-mapped IPv6 - CRITICAL: bypass vector!
 ]
+
+# Unconditionally blocked — no allowlist can bypass these.
+# Cloud metadata endpoints are the #1 SSRF target (IAM credential exfiltration).
+# Broadcast/multicast are never valid HTTP targets.
+#
+# NOTE: ::ffff:0:0/96 (IPv4-mapped IPv6) is intentionally NOT here. It is in
+# BLOCKED_IP_RANGES where it can be bypassed by allowed_ranges. This is correct:
+# in "allow_private" mode, ::ffff:10.x.x.x should be allowed (the operator asked
+# for allow_private access). Cloud metadata via ::ffff:169.254.x.x is still
+# blocked because 169.254.0.0/16 IS in ALWAYS_BLOCKED_RANGES — the IPv4-mapped
+# form hits the standard blocklist's ::ffff:0:0/96, but the underlying 169.254.x.x
+# is caught by the always-blocked check before the allowlist runs.
+ALWAYS_BLOCKED_RANGES = (
+    ipaddress.ip_network("169.254.0.0/16"),  # IPv4 link-local (AWS/Azure/GCP metadata)
+    ipaddress.ip_network("fe80::/10"),  # IPv6 link-local (same attack surface)
+    ipaddress.ip_network("255.255.255.255/32"),  # IPv4 broadcast
+    ipaddress.ip_network("224.0.0.0/4"),  # IPv4 multicast
+    ipaddress.ip_network("ff00::/8"),  # IPv6 multicast
+)
 
 # Bounded thread pool for DNS resolution.  Caps concurrent getaddrinfo threads
 # so repeated timeouts (e.g. blackholed resolver) cannot exhaust OS threads.
@@ -106,14 +127,25 @@ def _resolve_hostname(hostname: str) -> list[str]:
         raise NetworkError(f"DNS resolution failed: {hostname}: {e}") from e
 
 
-def _validate_ip_address(ip_str: str) -> None:
+def _validate_ip_address(
+    ip_str: str,
+    *,
+    allowed_ranges: Sequence[IPv4Network | IPv6Network] = (),
+) -> None:
     """Validate that an IP address is not in any blocked range.
+
+    Three-tier check order:
+    1. ALWAYS_BLOCKED_RANGES — unconditional, no allowlist bypass
+    2. allowed_ranges — if IP matches, skip blocklist (early return)
+    3. BLOCKED_IP_RANGES — standard blocklist
 
     Args:
         ip_str: IP address string (IPv4 or IPv6)
+        allowed_ranges: IP networks that bypass the standard blocklist.
+            Does NOT bypass ALWAYS_BLOCKED_RANGES.
 
     Raises:
-        SSRFBlockedError: If IP is in a blocked range or unparseable (fail-closed)
+        SSRFBlockedError: If IP is blocked or unparseable (fail-closed)
     """
     try:
         ip = ipaddress.ip_address(ip_str)
@@ -121,6 +153,22 @@ def _validate_ip_address(ip_str: str) -> None:
         # Fail CLOSED: if we can't parse the IP (e.g. zone-scoped IPv6 like
         # "fe80::1%eth0"), block the request rather than allowing it through.
         raise SSRFBlockedError(f"Unparseable IP address: {ip_str!r}: {e}") from e
+
+    # 1. Always-blocked — unconditional, no bypass
+    for never_allow in ALWAYS_BLOCKED_RANGES:
+        if ip in never_allow:
+            raise SSRFBlockedError(f"Always-blocked IP range: {ip_str} in {never_allow}")
+
+    # 2. Allowlist — if IP matches an allowed range, skip blocklist
+    for allowed in allowed_ranges:
+        try:
+            if ip in allowed:
+                return
+        except TypeError:
+            # Cross-family check (e.g. IPv6 address in IPv4 network) — treat as no match
+            continue
+
+    # 3. Standard blocklist
     for blocked in BLOCKED_IP_RANGES:
         if ip in blocked:
             raise SSRFBlockedError(f"Blocked IP range: {ip_str} in {blocked}")
@@ -178,7 +226,12 @@ class SSRFSafeRequest:
         return self.host_header
 
 
-def validate_url_for_ssrf(url: str, timeout: float = 5.0) -> SSRFSafeRequest:
+def validate_url_for_ssrf(
+    url: str,
+    timeout: float = 5.0,
+    *,
+    allowed_ranges: Sequence[IPv4Network | IPv6Network] = (),
+) -> SSRFSafeRequest:
     """Validate URL and return request with pinned IP for SSRF-safe connection.
 
     This is the primary entry point for SSRF-safe HTTP requests. It:
@@ -250,15 +303,15 @@ def validate_url_for_ssrf(url: str, timeout: float = 5.0) -> SSRFSafeRequest:
 
     try:
         status, value = result_queue.get(timeout=timeout)
-    except queue.Empty:
-        raise NetworkError(f"DNS resolution timeout ({timeout}s): {hostname}") from None
+    except queue.Empty as exc:
+        raise NetworkError(f"DNS resolution timeout ({timeout}s): {hostname}") from exc
 
     if status == "error":
-        exc = value
-        assert isinstance(exc, BaseException)
-        if isinstance(exc, (SSRFBlockedError, NetworkError)):
-            raise exc
-        raise NetworkError(f"DNS resolution failed: {hostname}: {exc}") from exc
+        err = value
+        assert isinstance(err, BaseException)
+        if isinstance(err, (SSRFBlockedError, NetworkError)):
+            raise err
+        raise NetworkError(f"DNS resolution failed: {hostname}: {err}") from err
 
     ip_list: list[str] = value  # type: ignore[assignment]
 
@@ -268,7 +321,7 @@ def validate_url_for_ssrf(url: str, timeout: float = 5.0) -> SSRFSafeRequest:
     # Step 4: Validate ALL resolved IPs
     # Attacker could return a mix of safe and unsafe IPs - block if ANY is unsafe
     for ip_str in ip_list:
-        _validate_ip_address(ip_str)
+        _validate_ip_address(ip_str, allowed_ranges=allowed_ranges)
 
     # Select IP to use (prefer IPv4 for compatibility)
     ipv4_addrs = [ip for ip in ip_list if ":" not in ip]

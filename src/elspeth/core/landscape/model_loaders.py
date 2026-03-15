@@ -41,13 +41,13 @@ from elspeth.contracts.enums import (
     ExportStatus,
     NodeStateStatus,
     NodeType,
+    ReproducibilityGrade,
     RoutingMode,
     RowOutcome,
     RunStatus,
     TriggerType,
 )
 from elspeth.contracts.errors import AuditIntegrityError
-from elspeth.core.landscape.reproducibility import ReproducibilityGrade
 
 
 class RunLoader:

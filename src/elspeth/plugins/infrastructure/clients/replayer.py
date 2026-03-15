@@ -15,22 +15,27 @@ from __future__ import annotations
 
 import json
 from collections import defaultdict
+from collections.abc import Mapping
 from dataclasses import dataclass
+from types import MappingProxyType
 from typing import TYPE_CHECKING, Any
 
 from elspeth.contracts import CallStatus, CallType
+from elspeth.contracts.errors import AuditIntegrityError
+from elspeth.contracts.freeze import deep_freeze
 from elspeth.core.canonical import stable_hash
+from elspeth.core.landscape.row_data import CallDataState
 
 if TYPE_CHECKING:
     from elspeth.core.landscape.recorder import LandscapeRecorder
 
 
-@dataclass
+@dataclass(frozen=True, slots=True)
 class ReplayedCall:
     """A replayed call result.
 
-    Contains the response data from a previously recorded call,
-    along with metadata about the original call.
+    Frozen: replayed call results are immutable evidence of a recorded
+    response — the data must not be modified after reconstruction.
 
     Attributes:
         response_data: The recorded response payload
@@ -40,11 +45,24 @@ class ReplayedCall:
         error_data: Error details if was_error is True
     """
 
-    response_data: dict[str, Any]
+    response_data: Mapping[str, Any]
     original_latency_ms: float | None
     request_hash: str
     was_error: bool = False
-    error_data: dict[str, Any] | None = None
+    error_data: Mapping[str, Any] | None = None
+
+    def __post_init__(self) -> None:
+        # was_error=True with error_data=None is valid: error happened but
+        # no error details were recorded (e.g., connection timeout).
+        # was_error=False with error_data set is invalid: contradictory state.
+        if not self.was_error and self.error_data is not None:
+            raise ValueError(
+                f"ReplayedCall invariant violation: error_data provided but was_error=False (request_hash={self.request_hash!r})"
+            )
+        if not isinstance(self.response_data, MappingProxyType):
+            object.__setattr__(self, "response_data", deep_freeze(self.response_data))
+        if self.error_data is not None and not isinstance(self.error_data, MappingProxyType):
+            object.__setattr__(self, "error_data", deep_freeze(self.error_data))
 
 
 class ReplayMissError(Exception):
@@ -197,29 +215,38 @@ class CallReplayer:
         if call is None:
             raise ReplayMissError(request_hash, request_data)
 
-        # Get response data from payload store
-        response_data = self._recorder.get_call_response_data(call.call_id)
+        # Get response data from payload store with explicit state
+        call_data = self._recorder.get_call_response_data(call.call_id)
 
-        # Parse error JSON if present
+        # Parse error JSON if present — this is Tier 1 data (we wrote it),
+        # so corrupt JSON is an AuditIntegrityError, not a data quality issue.
         error_data: dict[str, Any] | None = None
         if call.error_json is not None:
-            error_data = json.loads(call.error_json)
+            try:
+                error_data = json.loads(call.error_json)
+            except json.JSONDecodeError as exc:
+                raise AuditIntegrityError(
+                    f"Corrupt error_json for call {call.call_id} in run "
+                    f"{self._source_run_id}: failed to parse stored JSON — "
+                    f"database corruption (Tier 1 violation). "
+                    f"Parse error: {exc}"
+                ) from exc
 
         # Determine if this was an error call
         was_error = call.status == CallStatus.ERROR
 
-        # Fail if a response was expected but payload is unavailable.
-        # A response is expected if response_ref is set, response_hash is set,
-        # OR status is SUCCESS. response_ref proves a response was recorded even
-        # when response_hash is missing (e.g., error calls with response bodies).
-        # This catches both purged payloads AND runs recorded without a payload store.
-        response_expected = call.response_ref is not None or call.response_hash is not None or call.status == CallStatus.SUCCESS
-        if response_data is None and response_expected:
+        # Extract response data based on explicit state
+        if call_data.state == CallDataState.AVAILABLE:
+            response_data: dict[str, Any] = dict(call_data.data)  # type: ignore[arg-type]
+        elif call_data.state == CallDataState.HASH_ONLY:
             raise ReplayPayloadMissingError(call.call_id, request_hash)
-
-        # For calls that never had a response (response_ref is None), use empty dict
-        if response_data is None:
+        elif call_data.state == CallDataState.NEVER_STORED:
+            # Call never had a response (e.g., connection timeout, DNS failure) — use empty dict
             response_data = {}
+        else:
+            # PURGED, STORE_NOT_CONFIGURED, or CALL_NOT_FOUND — response was
+            # expected but payload is unavailable. Raise with explicit reason.
+            raise ReplayPayloadMissingError(call.call_id, request_hash)
 
         # Cache for future lookups (includes call_id for debugging)
         self._cache[cache_key] = (

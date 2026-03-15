@@ -12,10 +12,11 @@ from typing import TYPE_CHECKING, Any
 import pytest
 
 from elspeth.cli_helpers import instantiate_plugins_from_config
-from elspeth.contracts import Determinism, NodeType, PipelineRow, RoutingMode, RunStatus, SinkName
+from elspeth.contracts import Determinism, NodeType, PipelineRow, RoutingMode, RunStatus, SinkName, SourceRow
+from elspeth.contracts.errors import OrchestrationInvariantError
 from elspeth.plugins.infrastructure.base import BaseTransform
-from elspeth.testing import make_pipeline_row
-from tests.fixtures.base_classes import _TestSchema, as_sink, as_source, as_transform
+from elspeth.testing import make_pipeline_row, make_source_row
+from tests.fixtures.base_classes import _TestSchema, _TestSourceBase, as_sink, as_source, as_transform
 from tests.fixtures.landscape import make_recorder
 from tests.fixtures.pipeline import build_production_graph
 from tests.fixtures.plugins import CollectSink, ListSource, PassTransform
@@ -81,6 +82,32 @@ class MultiplyTwoTransform(BaseTransform):
         return TransformResult.success(make_pipeline_row({"value": row["value"] * 2}), success_reason={"action": "multiply_two"})
 
 
+class ValidationErrorAfterValidRowSource(_TestSourceBase):
+    """Source that records a validation error after a valid row has been processed."""
+
+    name = "validation_error_after_valid_row"
+    output_schema = _TestSchema
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.on_success = "default"
+        self._on_validation_failure = "quarantine"
+
+    def load(self, ctx: Any) -> Any:
+        yield make_source_row({"value": 1})
+        ctx.record_validation_error(
+            row={"value": "bad"},
+            error="source parse failed on second row",
+            schema_mode="parse",
+            destination="quarantine",
+        )
+        yield SourceRow.quarantined(
+            row={"value": "bad"},
+            error="source parse failed on second row",
+            destination="quarantine",
+        )
+
+
 # ---------------------------------------------------------------------------
 # Tests
 # ---------------------------------------------------------------------------
@@ -110,6 +137,42 @@ class TestOrchestrator:
         assert run_result.rows_processed == 3
         assert len(sink.results) == 3
         assert sink.results[0] == {"value": 1, "doubled": 2}
+
+    def test_source_validation_error_after_transform_is_attributed_to_source_node(self, landscape_db: LandscapeDB, payload_store) -> None:
+        """Later generator-step validation errors must not inherit transform node_id."""
+        from elspeth.engine.orchestrator import Orchestrator, PipelineConfig
+
+        source = ValidationErrorAfterValidRowSource()
+        transform = PassTransform()
+        transform.on_success = "default"
+        default_sink = CollectSink(name="default")
+        quarantine_sink = CollectSink(name="quarantine")
+
+        config = PipelineConfig(
+            source=as_source(source),
+            transforms=[as_transform(transform)],
+            sinks={
+                "default": as_sink(default_sink),
+                "quarantine": as_sink(quarantine_sink),
+            },
+        )
+
+        orchestrator = Orchestrator(landscape_db)
+        graph = build_production_graph(config)
+        run_result = orchestrator.run(config, graph=graph, payload_store=payload_store)
+
+        assert run_result.status == RunStatus.COMPLETED
+        assert run_result.rows_processed == 2
+        assert run_result.rows_quarantined == 1
+        assert len(default_sink.results) == 1
+        assert len(quarantine_sink.results) == 1
+
+        recorder = make_recorder(landscape_db)
+        errors = recorder.get_validation_errors_for_run(run_result.run_id)
+        assert len(errors) == 1
+        assert errors[0].node_id == source.node_id
+        assert errors[0].node_id != transform.node_id
+        assert errors[0].error == "source parse failed on second row"
 
     def test_run_with_gate_routing(self, landscape_db: LandscapeDB, payload_store) -> None:
         from elspeth.core.config import GateSettings
@@ -608,5 +671,5 @@ class TestOrchestratorAcceptsGraph:
         orchestrator = Orchestrator(landscape_db)
 
         # graph=None should raise ValueError
-        with pytest.raises(ValueError, match="ExecutionGraph is required"):
+        with pytest.raises(OrchestrationInvariantError, match="ExecutionGraph is required"):
             orchestrator.run(config, graph=None, payload_store=payload_store)

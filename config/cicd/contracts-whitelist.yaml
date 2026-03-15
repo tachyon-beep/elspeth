@@ -30,7 +30,7 @@ allowed_dict_patterns:
   - "src/elspeth/engine/tokens.py:TokenManager.expand_token:expanded_rows (list)"
   - "src/elspeth/core/expression_parser.py:_ExpressionEvaluator.__init__:row"
   - "src/elspeth/core/expression_parser.py:ExpressionParser.evaluate:row"
-  - "src/elspeth/engine/coalesce_executor.py:CoalesceExecutor._merge_data:return"
+
 
   # Node state guard - row data is Tier 2 pipeline data
   - "src/elspeth/engine/executors/state_guard.py:NodeStateGuard.__init__:input_data"
@@ -59,8 +59,8 @@ allowed_dict_patterns:
   - "src/elspeth/plugins/sinks/csv_sink.py:CSVSink._get_field_names_and_display:row"
   - "src/elspeth/plugins/sinks/json_sink.py:JSONSink.write:rows (list)"
   - "src/elspeth/plugins/sinks/json_sink.py:JSONSink._write_jsonl_batch:rows (list)"
-  - "src/elspeth/plugins/sinks/json_sink.py:JSONSink._apply_display_headers:rows (list)"
-  - "src/elspeth/plugins/sinks/json_sink.py:JSONSink._apply_display_headers:return (list)"
+  - "src/elspeth/plugins/infrastructure/display_headers.py:apply_display_headers:rows (list)"
+  - "src/elspeth/plugins/infrastructure/display_headers.py:apply_display_headers:return (list)"
 
   # Source plugins - row validation
   - "src/elspeth/plugins/sources/json_source.py:JSONSource._validate_and_yield:row"
@@ -176,13 +176,11 @@ allowed_dict_patterns:
   - "src/elspeth/core/landscape/execution_repository.py:ExecutionRepository.complete_node_state:output_data"
   - "src/elspeth/core/landscape/execution_repository.py:ExecutionRepository.begin_operation:input_data"
   - "src/elspeth/core/landscape/execution_repository.py:ExecutionRepository.complete_operation:output_data"
-  - "src/elspeth/core/landscape/execution_repository.py:ExecutionRepository.get_call_response_data:return"
   # Recorder delegation signatures (pass-through to ExecutionRepository)
   - "src/elspeth/core/landscape/recorder.py:LandscapeRecorder.begin_node_state:input_data"
   - "src/elspeth/core/landscape/recorder.py:LandscapeRecorder.complete_node_state:output_data"
   - "src/elspeth/core/landscape/recorder.py:LandscapeRecorder.begin_operation:input_data"
   - "src/elspeth/core/landscape/recorder.py:LandscapeRecorder.complete_operation:output_data"
-  - "src/elspeth/core/landscape/recorder.py:LandscapeRecorder.get_call_response_data:return"
 
   # Data flow recording
   - "src/elspeth/core/landscape/data_flow_repository.py:DataFlowRepository.create_row:data"
@@ -199,6 +197,7 @@ allowed_dict_patterns:
 
   # Operations tracking - source/sink I/O audit trail
   - "src/elspeth/core/operations.py:track_operation:input_data"
+  - "src/elspeth/core/operations.py:OperationHandle.__init__:output_data"
 
   # ═══════════════════════════════════════════════════════════════════════════
   # FORMATTERS - Record formatting for export
@@ -256,8 +255,7 @@ allowed_dict_patterns:
 
   # Unified LLM transform (T10 consolidation — dispatches to Azure/OpenRouter providers)
   - "src/elspeth/plugins/transforms/llm/transform.py:LLMTransform.__init__:config"
-  # Multi-query partial output (keys are dynamic: query-spec-dependent field names)
-  - "src/elspeth/plugins/transforms/llm/transform.py:MultiQueryStrategy._execute_one_query:return"
+  # Multi-query partial output (keys are dynamic: query-spec-dependent field names — _QuerySuccess.fields)
   # Pool work context (PooledExecutor row interface is dict[str, Any])
   - "src/elspeth/plugins/transforms/llm/transform.py:MultiQueryStrategy._process_fn:work"
 
@@ -277,8 +275,6 @@ allowed_dict_patterns:
   - "src/elspeth/plugins/sinks/azure_blob_sink.py:AzureBlobSink._serialize_jsonl:rows (list)"
   - "src/elspeth/plugins/sinks/azure_blob_sink.py:AzureBlobSink.write:rows (list)"
   - "src/elspeth/plugins/sinks/azure_blob_sink.py:AzureBlobSink._get_field_names_and_display:rows (list)"
-  - "src/elspeth/plugins/sinks/azure_blob_sink.py:AzureBlobSink._apply_display_headers:rows (list)"
-  - "src/elspeth/plugins/sinks/azure_blob_sink.py:AzureBlobSink._apply_display_headers:return (list)"
 
   # Azure safety transforms (base + content_safety + prompt_shield)
   - "src/elspeth/plugins/transforms/azure/base.py:BaseAzureSafetyTransform.__init__:config"
@@ -296,6 +292,16 @@ allowed_dict_patterns:
   - "src/elspeth/plugins/infrastructure/clients/replayer.py:CallReplayer.replay:request_data"
   - "src/elspeth/plugins/infrastructure/clients/verifier.py:CallVerifier.verify:request_data"
   - "src/elspeth/plugins/infrastructure/clients/verifier.py:CallVerifier.verify:live_response"
+  # VerificationResult factory classmethods — dict[str, Any] for external API responses (Tier 3 data)
+  - "src/elspeth/plugins/infrastructure/clients/verifier.py:VerificationResult.matched:live_response"
+  - "src/elspeth/plugins/infrastructure/clients/verifier.py:VerificationResult.matched:recorded_response"
+  - "src/elspeth/plugins/infrastructure/clients/verifier.py:VerificationResult.mismatched:live_response"
+  - "src/elspeth/plugins/infrastructure/clients/verifier.py:VerificationResult.mismatched:recorded_response"
+  - "src/elspeth/plugins/infrastructure/clients/verifier.py:VerificationResult.mismatched:differences"
+  - "src/elspeth/plugins/infrastructure/clients/verifier.py:VerificationResult.missing_recording:live_response"
+  - "src/elspeth/plugins/infrastructure/clients/verifier.py:VerificationResult.missing_payload:live_response"
+  - "src/elspeth/plugins/infrastructure/clients/verifier.py:VerificationResult.missing_payload:differences"
+  - "src/elspeth/plugins/infrastructure/clients/verifier.py:VerificationResult.no_recorded_response:live_response"
 
   # ═══════════════════════════════════════════════════════════════════════════
   # TUI - Display of dynamic audit data
@@ -308,7 +314,6 @@ allowed_dict_patterns:
   # The input must be dict[str, Any] because it's the unvalidated type before validation.
   - "src/elspeth/tui/widgets/node_detail.py:_validate_execution_error:data"
   - "src/elspeth/tui/widgets/node_detail.py:_validate_transform_error:data"
-  - "src/elspeth/tui/widgets/node_detail.py:_has_full_coalesce_shape:data"
   - "src/elspeth/tui/widgets/node_detail.py:_validate_coalesce_error:data"
   - "src/elspeth/tui/widgets/node_detail.py:_validate_artifact:data"
 
@@ -317,6 +322,7 @@ allowed_dict_patterns:
   # Exporter serialization returns dict[str, Any] by design for OTLP/JSON payloads.
   # ═══════════════════════════════════════════════════════════════════════════
   - "src/elspeth/telemetry/exporters/azure_monitor.py:AzureMonitorExporter._serialize_event_attributes:return"
+  - "src/elspeth/telemetry/exporters/otlp.py:_serialize_event_attributes:return"
   - "src/elspeth/telemetry/exporters/otlp.py:OTLPExporter._serialize_event_attributes:return"
   - "src/elspeth/telemetry/exporters/otlp.py:_SyntheticReadableSpan.__init__:attributes"
   - "src/elspeth/telemetry/exporters/console.py:ConsoleExporter._serialize_event:return"
@@ -443,6 +449,9 @@ allowed_dict_patterns:
 
   # Azure blob sink - row serialization
   - "src/elspeth/plugins/sinks/azure_blob_sink.py:AzureBlobSink._get_fieldnames_from_schema_or_rows:rows (list)"
+
+  # LLM finish-reason error builder — constructs dynamic error reason dicts with optional fields
+  - "src/elspeth/plugins/transforms/llm/transform.py:_build_reason:return"
 
   # Multi-query config base (JSON schema building for LLM structured output)
   - "src/elspeth/plugins/transforms/llm/multi_query.py:OutputFieldConfig.to_json_schema:return"

@@ -15,6 +15,7 @@ from __future__ import annotations
 import pytest
 
 from elspeth.contracts import Determinism, NodeType
+from elspeth.contracts.errors import AuditIntegrityError
 from elspeth.contracts.schema import SchemaConfig
 from elspeth.core.landscape import LandscapeDB, LandscapeRecorder
 from elspeth.core.landscape.reproducibility import (
@@ -160,7 +161,7 @@ class TestComputeGrade:
 
     def test_nonexistent_run_raises(self) -> None:
         db, _recorder = _setup()
-        with pytest.raises(ValueError, match="does not exist"):
+        with pytest.raises(AuditIntegrityError, match="does not exist"):
             compute_grade(db, "nonexistent-run")
 
 
@@ -197,13 +198,15 @@ class TestUpdateGradeAfterPurge:
         assert run is not None
         assert run.reproducibility_grade == ReproducibilityGrade.ATTRIBUTABLE_ONLY
 
-    def test_nonexistent_run_is_noop(self) -> None:
+    def test_nonexistent_run_raises(self) -> None:
+        """Purging a nonexistent run is a caller bug — must crash."""
         db, _recorder = _setup()
-        update_grade_after_purge(db, "nonexistent")  # Should not raise
+        with pytest.raises(AuditIntegrityError, match="does not exist"):
+            update_grade_after_purge(db, "nonexistent")
 
     def test_null_grade_raises(self) -> None:
         """NULL reproducibility_grade is Tier 1 corruption — must crash."""
         db, _recorder = _setup()
         # begin_run doesn't set a grade by default, so it's NULL
-        with pytest.raises(ValueError, match="NULL reproducibility_grade"):
+        with pytest.raises(AuditIntegrityError, match="NULL reproducibility_grade"):
             update_grade_after_purge(db, "run-1")

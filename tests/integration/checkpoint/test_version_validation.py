@@ -13,6 +13,7 @@ from unittest.mock import Mock
 import pytest
 
 from elspeth.contracts.aggregation_checkpoint import AggregationCheckpointState
+from elspeth.contracts.errors import AuditIntegrityError
 from elspeth.contracts.schema_contract import FieldContract, SchemaContract
 from elspeth.contracts.types import NodeID
 from elspeth.core.config import AggregationSettings, TriggerConfig
@@ -94,7 +95,7 @@ class TestCheckpointVersionValidation:
             }
         )
 
-        with pytest.raises(ValueError) as exc_info:
+        with pytest.raises(AuditIntegrityError) as exc_info:
             executor.restore_from_checkpoint(incompatible_state)
 
         # Verify error message is clear
@@ -124,12 +125,12 @@ class TestCheckpointVersionValidation:
             },
         }
 
-        with pytest.raises(ValueError) as exc_info:
+        with pytest.raises(AuditIntegrityError) as exc_info:
             AggregationCheckpointState.from_dict(old_format_state)
 
         # Verify error mentions corruption (missing _version is Tier 1 corruption)
         error_msg = str(exc_info.value)
-        assert "Corrupted checkpoint" in error_msg
+        assert "Corrupted aggregation checkpoint" in error_msg
         assert "_version" in error_msg
 
     def test_restore_succeeds_with_valid_version(self) -> None:

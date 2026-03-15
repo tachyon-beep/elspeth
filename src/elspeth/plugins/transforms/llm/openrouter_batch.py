@@ -28,7 +28,7 @@ from pydantic import Field
 from elspeth.contracts import CallStatus, CallType, Determinism, TransformResult
 from elspeth.contracts.contexts import LifecycleContext, TransformContext
 from elspeth.contracts.schema import SchemaConfig
-from elspeth.contracts.schema_contract import PipelineRow
+from elspeth.contracts.schema_contract import FieldContract, PipelineRow, SchemaContract
 from elspeth.contracts.token_usage import TokenUsage
 from elspeth.plugins.infrastructure.base import BaseTransform
 from elspeth.plugins.infrastructure.clients.http import AuditedHTTPClient
@@ -67,16 +67,20 @@ def _warn_telemetry_before_start(event: Any) -> None:
 
 
 @dataclass(frozen=True, slots=True)
-class _RowOutcome:
-    """Internal result type for single-row processing in OpenRouter batch.
+class _RowSuccess:
+    """Successful single-row result in OpenRouter batch."""
 
-    Uses an explicit boolean flag instead of key-presence detection to avoid
-    collisions with user data fields (e.g., a source row with an 'error' field).
-    """
+    row: dict[str, Any]
 
-    ok: bool
-    row: dict[str, Any] | None = None
-    error: dict[str, Any] | None = None
+
+@dataclass(frozen=True, slots=True)
+class _RowFailure:
+    """Failed single-row result in OpenRouter batch."""
+
+    error: dict[str, Any]
+
+
+_RowOutcome = _RowSuccess | _RowFailure
 
 
 class OpenRouterBatchConfig(LLMConfig):
@@ -453,23 +457,21 @@ class OpenRouterBatchLLMTransform(BaseTransform):
                 }
                 output_rows.append(output_row)
 
-            elif not result.ok:
+            elif isinstance(result, _RowFailure):
                 # Row-level error from _process_single_row
                 output_row = rows[idx].to_dict()
                 output_row[self._response_field] = None
                 output_row[f"{self._response_field}_error"] = result.error
                 output_rows.append(output_row)
 
-            else:
-                # Success — result.row is always set when ok=True
-                if result.row is None:
-                    raise RuntimeError("result.row is None when ok=True — BatchQueryResult contract violated")
+            elif isinstance(result, _RowSuccess):
                 output_rows.append(result.row)
+
+            else:
+                raise RuntimeError(f"Unexpected result type: {type(result).__name__}")
 
         # Create OBSERVED contract from union of ALL output row keys (not just first)
         # Error rows may have extra fields (e.g. _error) that the first row lacks
-        from elspeth.contracts.schema_contract import FieldContract, SchemaContract
-
         all_keys: dict[str, None] = {}
         for r in output_rows:
             for key in r:
@@ -524,7 +526,7 @@ class OpenRouterBatchLLMTransform(BaseTransform):
     ) -> _RowOutcome:
         """Process a single row through OpenRouter API.
 
-        Called by worker threads. Returns a _RowOutcome with ok=True and
+        Called by worker threads. Returns a _RowSuccess with
         the processed row dict on success, or ok=False with error details
         on failure.
 
@@ -538,7 +540,7 @@ class OpenRouterBatchLLMTransform(BaseTransform):
             ctx: Plugin context
 
         Returns:
-            _RowOutcome with ok=True/row on success, ok=False/error on failure
+            _RowSuccess on success, _RowFailure on failure
         """
         # 1. Render template (THEIR DATA - wrap)
         try:
@@ -562,7 +564,7 @@ class OpenRouterBatchLLMTransform(BaseTransform):
                 latency_ms=None,
                 provider="openrouter",
             )
-            return _RowOutcome(ok=False, error={"reason": "template_rendering_failed", "error": str(e)})
+            return _RowFailure(error={"reason": "template_rendering_failed", "error": str(e)})
 
         # 2. Build request body (OUR CODE - let exceptions crash)
         messages: list[dict[str, str]] = []
@@ -618,8 +620,7 @@ class OpenRouterBatchLLMTransform(BaseTransform):
                 model=self._model,
                 extra_metadata={"row_index": idx},
             )
-            return _RowOutcome(
-                ok=False,
+            return _RowFailure(
                 error={
                     "reason": "api_call_failed",
                     "error": str(e),
@@ -637,8 +638,7 @@ class OpenRouterBatchLLMTransform(BaseTransform):
                 model=self._model,
                 extra_metadata={"row_index": idx},
             )
-            return _RowOutcome(
-                ok=False,
+            return _RowFailure(
                 error={
                     "reason": "api_call_failed",
                     "error": str(e),
@@ -650,8 +650,7 @@ class OpenRouterBatchLLMTransform(BaseTransform):
         try:
             data = json.loads(response.content, parse_constant=reject_nonfinite_constant)
         except (ValueError, TypeError) as e:
-            return _RowOutcome(
-                ok=False,
+            return _RowFailure(
                 error={
                     "reason": "invalid_json_response",
                     "error": str(e),
@@ -661,8 +660,7 @@ class OpenRouterBatchLLMTransform(BaseTransform):
 
         # 5. Validate response structure (EXTERNAL DATA - validate at boundary)
         if not isinstance(data, dict):
-            return _RowOutcome(
-                ok=False,
+            return _RowFailure(
                 error={
                     "reason": "invalid_json_type",
                     "expected": "object",
@@ -674,12 +672,11 @@ class OpenRouterBatchLLMTransform(BaseTransform):
         try:
             choices = data["choices"]
             if not choices:
-                return _RowOutcome(ok=False, error={"reason": "empty_choices", "response": data})
+                return _RowFailure(error={"reason": "empty_choices", "response": data})
 
             content = choices[0]["message"]["content"]
         except (KeyError, IndexError, TypeError) as e:
-            return _RowOutcome(
-                ok=False,
+            return _RowFailure(
                 error={
                     "reason": "malformed_response",
                     "error": f"{type(e).__name__}: {e}",
@@ -690,8 +687,7 @@ class OpenRouterBatchLLMTransform(BaseTransform):
         # Null content = content filtered by provider (Tier 3 boundary).
         # Matches the unified provider pattern in providers/openrouter.py.
         if content is None:
-            return _RowOutcome(
-                ok=False,
+            return _RowFailure(
                 error={
                     "reason": "content_filtered",
                     "error": "LLM returned null content (likely content-filtered by provider)",
@@ -700,8 +696,8 @@ class OpenRouterBatchLLMTransform(BaseTransform):
 
         # Note: "usage" and "model" are optional in OpenAI/OpenRouter API responses
         # (e.g., streaming responses may omit usage). Tier 3 boundary: coerce to TokenUsage.
-        usage = TokenUsage.from_dict(data.get("usage") or {})
-        response_model = data.get("model", self._model)
+        usage = TokenUsage.from_dict(data.get("usage"))
+        response_model = data.get("model")
 
         # Record to Langfuse (per-call tracing — unlike Azure Batch, we control each call)
         self._tracer.record_success(
@@ -730,7 +726,7 @@ class OpenRouterBatchLLMTransform(BaseTransform):
             system_prompt_source=self._system_prompt_source,
         )
 
-        return _RowOutcome(ok=True, row=output)
+        return _RowSuccess(row=output)
 
     def close(self) -> None:
         """Release resources and flush tracing."""

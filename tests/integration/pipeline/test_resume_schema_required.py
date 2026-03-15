@@ -13,6 +13,7 @@ import pytest
 
 from elspeth.contracts import Determinism, NodeType, RunStatus
 from elspeth.contracts.contexts import LifecycleContext, SourceContext
+from elspeth.contracts.errors import AuditIntegrityError
 from elspeth.contracts.results import SourceRow
 from elspeth.core.checkpoint import CheckpointManager
 from elspeth.core.dag import ExecutionGraph
@@ -162,8 +163,8 @@ class TestResumeSchemaRequired:
         # Mark run as failed (so it can be resumed)
         recorder.complete_run(run.run_id, status=RunStatus.FAILED)
 
-        # 3. Test production code: recorder.get_source_schema() should raise ValueError
-        with pytest.raises(ValueError) as exc_info:
+        # 3. Test production code: recorder.get_source_schema() should raise AuditIntegrityError
+        with pytest.raises(AuditIntegrityError) as exc_info:
             recorder.get_source_schema(run.run_id)
 
         # 4. Verify error message is clear and helpful

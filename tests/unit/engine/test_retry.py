@@ -138,17 +138,15 @@ class TestRetryManager:
 
         assert config.max_attempts == 1
 
-    def test_from_policy_handles_malformed(self) -> None:
-        """Malformed policy values are clamped to safe minimums."""
-        config = RuntimeRetryConfig.from_policy(
-            {
-                "max_attempts": -5,  # Invalid, should clamp to 1
-                "base_delay": -1,  # Invalid, should clamp to 0.01
-            }
-        )
-
-        assert config.max_attempts == 1
-        assert config.base_delay >= 0.01
+    def test_from_policy_rejects_malformed(self) -> None:
+        """Malformed policy values are rejected with ValueError (no silent clamping)."""
+        with pytest.raises(ValueError, match="max_attempts must be >= 1"):
+            RuntimeRetryConfig.from_policy(
+                {
+                    "max_attempts": -5,  # Invalid, should raise
+                    "base_delay": -1,  # Also invalid
+                }
+            )
 
 
 class TestRuntimeRetryConfig:

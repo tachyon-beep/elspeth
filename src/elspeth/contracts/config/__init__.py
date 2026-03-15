@@ -47,8 +47,6 @@ from elspeth.contracts.config.alignment import (
 from elspeth.contracts.config.defaults import (
     INTERNAL_DEFAULTS,
     POLICY_DEFAULTS,
-    get_internal_default,
-    get_policy_default,
 )
 
 # =============================================================================
@@ -86,7 +84,6 @@ from elspeth.contracts.config.runtime import (
 # Import Settings from elspeth.core.config:
 #     from elspeth.core.config import RetrySettings, ElspethSettings
 #
-# FIX: P2-2026-01-20-contracts-config-reexport-breaks-leaf-boundary
 # =============================================================================
 
 __all__ = [
@@ -107,8 +104,6 @@ __all__ = [
     "RuntimeServiceRateLimit",
     "RuntimeTelemetryConfig",
     "RuntimeTelemetryProtocol",
-    "get_internal_default",
-    "get_policy_default",
     "get_runtime_field_name",
     "get_settings_field_name",
     "is_exempt_settings",

@@ -6,8 +6,8 @@ Delegates to 4 composed domain repositories:
 - DataFlowRepository: rows, tokens, errors
 - QueryRepository: read-only queries, bulk retrieval, lineage
 
-The public API is 100% unchanged -- all ~91 methods delegate directly
-to the appropriate repository. No logic in this file.
+All public methods delegate directly to the appropriate repository.
+No logic in this file.
 
 Repository split rationale (domain cohesion, not CQRS):
     The 4 repositories are split by pipeline-phase domain, not by
@@ -15,12 +15,12 @@ Repository split rationale (domain cohesion, not CQRS):
     get_batches() live in ExecutionRepository (not QueryRepository)
     because they belong to the execution domain. QueryRepository holds
     only cross-cutting read methods used by external consumers (MCP,
-    exporter, TUI). A CQRS split would be warranted if read and write
-    scaling needs diverge, but that is not the case today.
+    exporter, TUI).
 """
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from typing import TYPE_CHECKING, Any, Literal, overload
 
 from elspeth.contracts import CallType, Determinism, RunStatus
@@ -45,6 +45,7 @@ if TYPE_CHECKING:
         NodeStateStatus,
         NodeType,
         Operation,
+        ReproducibilityGrade,
         RoutingEvent,
         RoutingMode,
         RoutingReason,
@@ -68,8 +69,7 @@ if TYPE_CHECKING:
     from elspeth.contracts.payload_store import PayloadStore
     from elspeth.contracts.schema import SchemaConfig
     from elspeth.contracts.schema_contract import PipelineRow, SchemaContract
-    from elspeth.core.landscape.reproducibility import ReproducibilityGrade
-    from elspeth.core.landscape.row_data import RowDataResult
+    from elspeth.core.landscape.row_data import CallDataResult, RowDataResult
 
 from elspeth.core.landscape._database_ops import DatabaseOps
 from elspeth.core.landscape.data_flow_repository import DataFlowRepository
@@ -147,10 +147,10 @@ class LandscapeRecorder:
         self._artifact_loader = ArtifactLoader()
         self._batch_member_loader = BatchMemberLoader()
 
-        # Composed repository for run lifecycle (extracted from mixin in T19)
+        # Composed repository for run lifecycle
         self._run_lifecycle = RunLifecycleRepository(db, self._ops, self._run_loader)
 
-        # Composed repository for execution recording (extracted from 3 mixins in T19)
+        # Composed repository for execution recording
         self._execution = ExecutionRepository(
             db,
             self._ops,
@@ -164,7 +164,7 @@ class LandscapeRecorder:
             payload_store=payload_store,
         )
 
-        # Composed repository for data flow recording (extracted from 3 mixins in T19)
+        # Composed repository for data flow recording
         self._data_flow = DataFlowRepository(
             db,
             self._ops,
@@ -176,7 +176,7 @@ class LandscapeRecorder:
             payload_store=payload_store,
         )
 
-        # Composed repository for read-only queries (extracted from mixin in T19)
+        # Composed repository for read-only queries
         self._query = QueryRepository(
             self._ops,
             row_loader=self._row_loader,
@@ -238,7 +238,7 @@ class LandscapeRecorder:
     def record_source_field_resolution(
         self,
         run_id: str,
-        resolution_mapping: dict[str, str],
+        resolution_mapping: Mapping[str, str],
         normalization_version: str | None,
     ) -> None:
         """Record field resolution mapping. Delegates to RunLifecycleRepository."""
@@ -510,7 +510,6 @@ class LandscapeRecorder:
         *,
         request_ref: str | None = None,
         response_ref: str | None = None,
-        provider: str | None = None,
     ) -> Call:
         """Record an external call for an operation. Delegates to ExecutionRepository."""
         return self._execution.record_operation_call(
@@ -523,7 +522,6 @@ class LandscapeRecorder:
             latency_ms,
             request_ref=request_ref,
             response_ref=response_ref,
-            provider=provider,
         )
 
     def get_operation(self, operation_id: str) -> Operation | None:
@@ -558,7 +556,7 @@ class LandscapeRecorder:
             sequence_index=sequence_index,
         )
 
-    def get_call_response_data(self, call_id: str) -> dict[str, Any] | None:
+    def get_call_response_data(self, call_id: str) -> CallDataResult:
         """Get response data for a call. Delegates to ExecutionRepository."""
         return self._execution.get_call_response_data(call_id)
 
@@ -880,9 +878,11 @@ class LandscapeRecorder:
         """Get all nodes for a run. Delegates to DataFlowRepository."""
         return self._data_flow.get_nodes(run_id)
 
-    def get_node_contracts(self, run_id: str, node_id: str) -> tuple[SchemaContract | None, SchemaContract | None]:
+    def get_node_contracts(
+        self, run_id: str, node_id: str, *, allow_missing: bool = False
+    ) -> tuple[SchemaContract | None, SchemaContract | None]:
         """Get node contracts. Delegates to DataFlowRepository."""
-        return self._data_flow.get_node_contracts(run_id, node_id)
+        return self._data_flow.get_node_contracts(run_id, node_id, allow_missing=allow_missing)
 
     def get_edges(self, run_id: str) -> list[Edge]:
         """Get all edges for a run. Delegates to DataFlowRepository."""

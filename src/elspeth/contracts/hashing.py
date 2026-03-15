@@ -41,7 +41,7 @@ def _reject_non_finite(obj: Any) -> None:
     elif isinstance(obj, dict):
         for v in obj.values():
             _reject_non_finite(v)
-    elif isinstance(obj, list):
+    elif isinstance(obj, (list, tuple)):
         for item in obj:
             _reject_non_finite(item)
 

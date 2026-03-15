@@ -122,6 +122,29 @@ class TestBaseTransform:
         assert hasattr(BaseTransform, "on_start")
         assert hasattr(BaseTransform, "on_complete")
 
+    def test_on_start_sets_lifecycle_guard(self) -> None:
+        """BaseTransform.on_start() sets _on_start_called = True."""
+        from elspeth.contracts.contexts import TransformContext
+        from elspeth.plugins.infrastructure.base import BaseTransform
+        from elspeth.plugins.infrastructure.results import TransformResult
+
+        class SimpleTransform(BaseTransform):
+            name = "simple_lifecycle"
+            input_schema = None  # type: ignore[assignment]
+            output_schema = None  # type: ignore[assignment]
+
+            def process(self, row: PipelineRow, ctx: TransformContext) -> TransformResult:
+                return TransformResult.success(make_pipeline_row(row.to_dict()), success_reason={"action": "test"})
+
+        transform = SimpleTransform({})
+        assert transform._on_start_called is False
+
+        recorder = make_recorder()
+        ctx = make_context(landscape=recorder)
+        transform.on_start(ctx)
+
+        assert transform._on_start_called is True
+
 
 class TestBaseAggregationDeleted:
     """Verify BaseAggregation has been deleted (aggregation is structural now)."""

@@ -520,6 +520,26 @@ class TestSanitizeForCanonical:
         result = sanitize_for_canonical({"x": 3.14, "y": 0.0, "z": -1.5})
         assert result == {"x": 3.14, "y": 0.0, "z": -1.5}
 
+    def test_sanitize_numpy_longdouble_nan(self) -> None:
+        """np.longdouble NaN/Inf must be sanitized — name heuristic must catch all numpy floats."""
+        from elspeth.core.canonical import sanitize_for_canonical
+
+        result = sanitize_for_canonical({"x": np.longdouble("nan")})
+        assert result == {"x": None}
+
+        result = sanitize_for_canonical({"x": np.longdouble("inf")})
+        assert result == {"x": None}
+
+        result = sanitize_for_canonical({"x": np.longdouble("-inf")})
+        assert result == {"x": None}
+
+    def test_sanitize_numpy_longdouble_finite_unchanged(self) -> None:
+        """Finite np.longdouble values pass through unchanged."""
+        from elspeth.core.canonical import sanitize_for_canonical
+
+        result = sanitize_for_canonical({"x": np.longdouble(3.14)})
+        assert result == {"x": np.longdouble(3.14)}
+
 
 class TestNumpyDatetime64Normalization:
     """np.datetime64 values must be normalized to ISO 8601 strings.

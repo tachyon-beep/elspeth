@@ -1,4 +1,4 @@
-"""Unified LLM transform with strategy pattern (Task 9 of T10).
+"""Unified LLM transform with strategy pattern.
 
 LLMTransform dispatches to SingleQueryStrategy or MultiQueryStrategy
 based on whether queries are configured. Provider dispatch (Azure,
@@ -17,8 +17,8 @@ from __future__ import annotations
 
 import json
 import time
-from collections.abc import Callable
-from dataclasses import dataclass
+from collections.abc import Callable, Sequence
+from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, Protocol, cast
 
 import structlog
@@ -42,7 +42,7 @@ from elspeth.plugins.transforms.llm import (
 from elspeth.plugins.transforms.llm.base import LLMConfig
 from elspeth.plugins.transforms.llm.langfuse import LangfuseTracer, create_langfuse_tracer
 from elspeth.plugins.transforms.llm.multi_query import QuerySpec, ResponseFormat, resolve_queries
-from elspeth.plugins.transforms.llm.provider import FinishReason, LLMProvider
+from elspeth.plugins.transforms.llm.provider import FinishReason, LLMProvider, ParsedFinishReason, UnrecognizedFinishReason
 from elspeth.plugins.transforms.llm.providers.azure import AzureLLMProvider, AzureOpenAIConfig, _configure_azure_monitor
 from elspeth.plugins.transforms.llm.providers.openrouter import OpenRouterConfig, OpenRouterLLMProvider
 from elspeth.plugins.transforms.llm.templates import PromptTemplate, TemplateError
@@ -60,6 +60,94 @@ def _warn_telemetry_before_start(event: Any) -> None:
     logger.warning(
         "telemetry_emit called before on_start() — event dropped",
         event_type=type(event).__name__,
+    )
+
+
+_FINISH_REASON_ERRORS: dict[FinishReason, tuple[str, str]] = {
+    FinishReason.LENGTH: ("response_truncated", "Response truncated (finish_reason=length)"),
+    FinishReason.CONTENT_FILTER: ("content_filtered", "Response blocked by provider content filter"),
+}
+
+
+@dataclass(frozen=True, slots=True)
+class _FinishReasonError:
+    """Bundles the transform result and tracer message for a terminal finish reason."""
+
+    result: TransformResult
+    error_message: str
+
+
+def _finish_reason_error(
+    finish_reason: ParsedFinishReason,
+    *,
+    query_name: str | None = None,
+    query_index: int | None = None,
+    content_length: int | None = None,
+) -> _FinishReasonError | None:
+    """Fail closed on non-STOP finish reasons.
+
+    Only explicit STOP is allowlisted.  Absent finish_reason (None) is
+    treated as a retryable error — known-bad reasons get specific error
+    messages, unknown/unrecognized reasons get a generic rejection.
+    This ensures new provider finish reasons are never silently treated
+    as success.
+    """
+
+    def _build_reason(**base_fields: str) -> dict[str, Any]:
+        reason: dict[str, Any] = dict(base_fields)
+        if query_name is not None:
+            reason["query_name"] = query_name
+        if query_index is not None:
+            reason["query_index"] = query_index
+        if content_length is not None:
+            reason["content_length"] = content_length
+        return reason
+
+    # Allowlist: explicit STOP is a known-good completion.
+    if finish_reason == FinishReason.STOP:
+        return None
+
+    # Absent finish_reason (None) means the provider couldn't extract it
+    # (e.g. Azure SDK omits raw_response or choices in some configurations).
+    # The provider already validated content is non-empty via LLMQueryResult,
+    # and logged a warning about "truncation undetectable". Accept the
+    # response — rejecting every row when the SDK shape varies makes the
+    # provider unusable.
+    if finish_reason is None:
+        return None
+
+    # Known-bad reasons with specific error messages.
+    if isinstance(finish_reason, FinishReason):
+        entry = _FINISH_REASON_ERRORS.get(finish_reason)
+        if entry is not None:
+            reason_key, error_message = entry
+            return _FinishReasonError(
+                result=TransformResult.error(
+                    cast(
+                        TransformErrorReason,
+                        _build_reason(reason=reason_key, finish_reason=finish_reason.value),
+                    ),
+                    retryable=False,
+                ),
+                error_message=error_message,
+            )
+        # Known enum member not in STOP or error dict — fail closed.
+        raw_value = finish_reason.value
+    elif isinstance(finish_reason, UnrecognizedFinishReason):
+        raw_value = finish_reason.raw
+    else:  # pragma: no cover — exhaustive, but fail closed on new subtypes
+        raw_value = str(finish_reason)  # type: ignore[unreachable]
+
+    # Catch-all: any finish reason not explicitly allowlisted is an error.
+    return _FinishReasonError(
+        result=TransformResult.error(
+            cast(
+                TransformErrorReason,
+                _build_reason(reason="unexpected_finish_reason", finish_reason=raw_value),
+            ),
+            retryable=False,
+        ),
+        error_message=f"Unexpected finish reason: {raw_value}",
     )
 
 
@@ -188,24 +276,21 @@ class SingleQueryStrategy:
 
         latency_ms = (time.monotonic() - start_time) * 1000
 
-        # 4. Check truncation (finish_reason=LENGTH)
-        if result.finish_reason == FinishReason.LENGTH:
+        # 4. Fail closed on provider-signaled terminal finish reasons.
+        finish_reason_error = _finish_reason_error(
+            result.finish_reason,
+            content_length=len(result.content),
+        )
+        if finish_reason_error is not None:
             tracer.record_error(
                 token_id=token_id,
                 query_name="single",
                 prompt=rendered.prompt,
-                error_message="Response truncated (finish_reason=length)",
+                error_message=finish_reason_error.error_message,
                 model=self.model,
                 latency_ms=latency_ms,
             )
-            return TransformResult.error(
-                {
-                    "reason": "response_truncated",
-                    "finish_reason": "length",
-                    "content_length": len(result.content),
-                },
-                retryable=False,
-            )
+            return finish_reason_error.result
 
         # 5. Strip markdown fences
         content = strip_markdown_fences(result.content)
@@ -246,7 +331,11 @@ class SingleQueryStrategy:
 
         return TransformResult.success(
             PipelineRow(output, output_contract),
-            success_reason={"action": "enriched", "fields_added": [self.response_field]},
+            success_reason={
+                "action": "enriched",
+                "fields_added": [self.response_field],
+                "metadata": {"model": result.model, **result.usage.to_dict()},
+            },
         )
 
 
@@ -264,7 +353,7 @@ class MultiQueryStrategy:
     successful query results.
     """
 
-    query_specs: list[QuerySpec]
+    query_specs: Sequence[QuerySpec]
     template: PromptTemplate
     system_prompt: str | None
     system_prompt_source: str | None
@@ -273,6 +362,21 @@ class MultiQueryStrategy:
     max_tokens: int | None
     response_field: str
     executor: PooledExecutor | None = None
+    _query_templates: dict[str, PromptTemplate] = field(init=False, default_factory=dict)
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.query_specs, tuple):
+            object.__setattr__(self, "query_specs", tuple(self.query_specs))
+
+        # Pre-compile per-query template overrides — structural validation at
+        # init time.  Templates are Tier 2 data: validated once at load, trusted
+        # thereafter.  A TemplateSyntaxError here is a structural failure that
+        # propagates up through LLMTransform.__init__ and stops the run at setup.
+        query_templates: dict[str, PromptTemplate] = {}
+        for spec in self.query_specs:
+            if spec.template is not None:
+                query_templates[spec.name] = self.template.with_template_override(spec.template)
+        object.__setattr__(self, "_query_templates", query_templates)
 
     def execute(
         self,
@@ -294,6 +398,17 @@ class MultiQueryStrategy:
             return self._execute_parallel(row, state_id, token_id, provider, tracer)
         return self._execute_sequential(row, state_id, token_id, provider, tracer)
 
+    @dataclass(frozen=True, slots=True)
+    class _QuerySuccess:
+        """Partial output fields from a successful single-query execution.
+
+        Tagged success type replacing bare ``dict`` in the union return of
+        ``_execute_one_query``, so callers can exhaustively match on
+        ``_QuerySuccess | TransformResult`` instead of ``dict | TransformResult``.
+        """
+
+        fields: dict[str, Any]
+
     def _execute_one_query(
         self,
         query_idx: int,
@@ -303,11 +418,11 @@ class MultiQueryStrategy:
         token_id: str,
         provider: LLMProvider,
         tracer: LangfuseTracer,
-    ) -> dict[str, Any] | TransformResult:
+    ) -> _QuerySuccess | TransformResult:
         """Execute a single query within a multi-query row.
 
         Returns:
-            dict[str, Any]: Partial output fields on success
+            _QuerySuccess: Partial output fields on success
             TransformResult: Error result on failure
 
         Raises:
@@ -328,10 +443,9 @@ class MultiQueryStrategy:
                 retryable=False,
             )
 
-        # Use per-query template if provided, else config-level template
-        query_template = self.template
-        if spec.template is not None:
-            query_template = PromptTemplate(spec.template)
+        # Use pre-compiled per-query template (already structurally validated
+        # in __post_init__), falling back to config-level template.
+        query_template = self._query_templates.get(spec.name, self.template)
 
         # Render template — use contract=None because template_ctx is a
         # synthetic dict (keys are template variable names from input_fields,
@@ -437,25 +551,22 @@ class MultiQueryStrategy:
 
         latency_ms = (time.monotonic() - start_time) * 1000
 
-        # Check truncation
-        if result.finish_reason == FinishReason.LENGTH:
+        # Fail closed on provider-signaled terminal finish reasons.
+        finish_reason_error = _finish_reason_error(
+            result.finish_reason,
+            query_name=spec.name,
+            query_index=query_idx,
+        )
+        if finish_reason_error is not None:
             tracer.record_error(
                 token_id=token_id,
                 query_name=spec.name,
                 prompt=rendered.prompt,
-                error_message="Response truncated (finish_reason=length)",
+                error_message=finish_reason_error.error_message,
                 model=self.model,
                 latency_ms=latency_ms,
             )
-            return TransformResult.error(
-                {
-                    "reason": "response_truncated",
-                    "query_name": spec.name,
-                    "query_index": query_idx,
-                    "finish_reason": "length",
-                },
-                retryable=False,
-            )
+            return finish_reason_error.result
 
         # Strip fences and store content
         content = strip_markdown_fences(result.content)
@@ -551,7 +662,7 @@ class MultiQueryStrategy:
             system_prompt_source=self.system_prompt_source,
         )
 
-        return partial
+        return self._QuerySuccess(fields=partial)
 
     def _execute_sequential(
         self,
@@ -595,12 +706,19 @@ class MultiQueryStrategy:
 
             # Error from template/JSON/validation/non-retryable LLM
             if isinstance(result, TransformResult):
-                # Add discarded count for error reporting
+                # Add discarded count for error reporting — copy first to avoid
+                # mutating the original dict (which may be shared with audit records)
                 if result.reason is not None:
-                    result.reason["discarded_successful_queries"] = query_idx
+                    augmented_reason = cast(TransformErrorReason, dict(result.reason))
+                    augmented_reason["discarded_successful_queries"] = query_idx
+                    return TransformResult.error(
+                        augmented_reason,
+                        retryable=result.retryable,
+                        context_after=result.context_after,
+                    )
                 return result
 
-            accumulated_outputs.update(result)
+            accumulated_outputs.update(result.fields)
 
         # All queries succeeded — build output row
         output = {**row.to_dict(), **accumulated_outputs}
@@ -615,6 +733,8 @@ class MultiQueryStrategy:
             success_reason={
                 "action": "multi_query_enriched",
                 "queries_completed": len(self.query_specs),
+                "fields_added": list(accumulated_outputs.keys()),
+                "metadata": {"model": self.model},
             },
         )
 
@@ -666,7 +786,7 @@ class MultiQueryStrategy:
             )
             if isinstance(result, TransformResult):
                 return result  # Error passthrough
-            # Success: wrap partial dict in TransformResult for pool interface
+            # Success: wrap partial fields in TransformResult for pool interface
             observed = SchemaContract(
                 mode="OBSERVED",
                 fields=tuple(
@@ -677,12 +797,12 @@ class MultiQueryStrategy:
                         required=False,
                         source="inferred",
                     )
-                    for k, v in result.items()
+                    for k, v in result.fields.items()
                 ),
                 locked=True,
             )
             return TransformResult.success(
-                PipelineRow(result, observed),
+                PipelineRow(result.fields, observed),
                 success_reason={"action": "query_completed", "metadata": {"query_name": work["spec"].name}},
             )
 
@@ -723,6 +843,8 @@ class MultiQueryStrategy:
             success_reason={
                 "action": "multi_query_enriched",
                 "queries_completed": len(self.query_specs),
+                "fields_added": list(accumulated_outputs.keys()),
+                "metadata": {"model": self.model},
             },
         )
 

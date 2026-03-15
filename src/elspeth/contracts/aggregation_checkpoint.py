@@ -17,8 +17,14 @@ Trust-tier notes
 
 from __future__ import annotations
 
+import math
+from collections.abc import Mapping
 from dataclasses import dataclass
+from types import MappingProxyType
 from typing import Any
+
+from elspeth.contracts.errors import AuditIntegrityError
+from elspeth.contracts.freeze import deep_freeze, deep_thaw
 
 
 @dataclass(frozen=True, slots=True)
@@ -42,8 +48,20 @@ class AggregationTokenCheckpoint:
     fork_group_id: str | None
     join_group_id: str | None
     expand_group_id: str | None
-    row_data: dict[str, Any]
+    row_data: Mapping[str, Any]
     contract_version: str
+
+    def __post_init__(self) -> None:
+        if not self.token_id:
+            raise ValueError("AggregationTokenCheckpoint.token_id must not be empty")
+        if not self.row_id:
+            raise ValueError("AggregationTokenCheckpoint.row_id must not be empty")
+        if not self.contract_version:
+            raise ValueError("AggregationTokenCheckpoint.contract_version must not be empty")
+        if not isinstance(self.row_data, (dict, MappingProxyType)):
+            raise ValueError(f"row_data must be a dict, got {type(self.row_data).__name__}: {self.row_data!r}")
+        if not isinstance(self.row_data, MappingProxyType):
+            object.__setattr__(self, "row_data", deep_freeze(self.row_data))
 
     def to_dict(self) -> dict[str, Any]:
         """Serialize to checkpoint dict format."""
@@ -54,7 +72,7 @@ class AggregationTokenCheckpoint:
             "fork_group_id": self.fork_group_id,
             "join_group_id": self.join_group_id,
             "expand_group_id": self.expand_group_id,
-            "row_data": self.row_data,
+            "row_data": deep_thaw(self.row_data),
             "contract_version": self.contract_version,
         }
 
@@ -66,7 +84,7 @@ class AggregationTokenCheckpoint:
             data: Token dict from checkpoint.
 
         Raises:
-            ValueError: If required keys are missing.
+            AuditIntegrityError: If required keys are missing.
         """
         required_fields = {
             "token_id",
@@ -80,7 +98,9 @@ class AggregationTokenCheckpoint:
         }
         missing = required_fields - set(data.keys())
         if missing:
-            raise ValueError(f"Checkpoint token missing required fields: {missing}. Found: {set(data.keys())}")
+            raise AuditIntegrityError(
+                f"Corrupted aggregation token checkpoint: missing required fields {missing}. Found: {set(data.keys())}"
+            )
         return cls(
             token_id=data["token_id"],
             row_id=data["row_id"],
@@ -111,7 +131,25 @@ class AggregationNodeCheckpoint:
     elapsed_age_seconds: float
     count_fire_offset: float | None
     condition_fire_offset: float | None
-    contract: dict[str, Any]
+    contract: Mapping[str, Any]
+
+    def __post_init__(self) -> None:
+        if not self.batch_id:
+            raise ValueError("AggregationNodeCheckpoint.batch_id must not be empty")
+        if self.elapsed_age_seconds < 0 or not math.isfinite(self.elapsed_age_seconds):
+            raise ValueError(
+                f"AggregationNodeCheckpoint.elapsed_age_seconds must be non-negative and finite, got {self.elapsed_age_seconds}"
+            )
+        if self.count_fire_offset is not None and (self.count_fire_offset < 0 or not math.isfinite(self.count_fire_offset)):
+            raise ValueError(f"AggregationNodeCheckpoint.count_fire_offset must be non-negative and finite, got {self.count_fire_offset}")
+        if self.condition_fire_offset is not None and (self.condition_fire_offset < 0 or not math.isfinite(self.condition_fire_offset)):
+            raise ValueError(
+                f"AggregationNodeCheckpoint.condition_fire_offset must be non-negative and finite, got {self.condition_fire_offset}"
+            )
+        if not isinstance(self.contract, (dict, MappingProxyType)):
+            raise ValueError(f"contract must be a dict, got {type(self.contract).__name__}: {self.contract!r}")
+        if not isinstance(self.contract, MappingProxyType):
+            object.__setattr__(self, "contract", deep_freeze(self.contract))
 
     def to_dict(self) -> dict[str, Any]:
         """Serialize to checkpoint dict format."""
@@ -121,7 +159,7 @@ class AggregationNodeCheckpoint:
             "elapsed_age_seconds": self.elapsed_age_seconds,
             "count_fire_offset": self.count_fire_offset,
             "condition_fire_offset": self.condition_fire_offset,
-            "contract": self.contract,
+            "contract": deep_thaw(self.contract),
         }
 
     @classmethod
@@ -133,26 +171,32 @@ class AggregationNodeCheckpoint:
             data: Node-level dict from checkpoint.
 
         Raises:
-            ValueError: If structure is invalid.
+            AuditIntegrityError: If required keys are missing or structure is invalid.
         """
-        if "tokens" not in data:
-            raise ValueError(f"Invalid checkpoint format for node {node_id}: missing 'tokens' key. Found keys: {list(data.keys())}.")
-        tokens_data = data["tokens"]
-        if not isinstance(tokens_data, list):
-            raise ValueError(f"Invalid checkpoint format for node {node_id}: 'tokens' must be a list, got {type(tokens_data).__name__}")
-
-        if "batch_id" not in data:
-            raise ValueError(f"Invalid checkpoint format for node {node_id}: missing 'batch_id' key. Found keys: {list(data.keys())}.")
-        batch_id = data["batch_id"]
-        if batch_id is None:
-            raise ValueError(
-                f"Invalid checkpoint format for node {node_id}: 'batch_id' is None. Checkpoint entries with tokens must include a batch_id."
+        required_fields = {
+            "tokens",
+            "batch_id",
+            "elapsed_age_seconds",
+            "count_fire_offset",
+            "condition_fire_offset",
+            "contract",
+        }
+        missing = required_fields - set(data.keys())
+        if missing:
+            raise AuditIntegrityError(
+                f"Corrupted aggregation node checkpoint '{node_id}': missing required fields {missing}. Found: {set(data.keys())}"
             )
 
-        if "contract" not in data:
-            raise ValueError(
-                f"Invalid checkpoint format for node {node_id}: missing 'contract' key. "
-                "Checkpoint format requires contract for PipelineRow restoration."
+        tokens_data = data["tokens"]
+        if not isinstance(tokens_data, list):
+            raise AuditIntegrityError(
+                f"Corrupted aggregation node checkpoint '{node_id}': 'tokens' must be a list, got {type(tokens_data).__name__}"
+            )
+
+        batch_id = data["batch_id"]
+        if batch_id is None:
+            raise AuditIntegrityError(
+                f"Corrupted aggregation node checkpoint '{node_id}': 'batch_id' is None. Checkpoint entries with tokens must include a batch_id."
             )
 
         tokens = tuple(AggregationTokenCheckpoint.from_dict(t) for t in tokens_data)
@@ -161,8 +205,8 @@ class AggregationNodeCheckpoint:
             tokens=tokens,
             batch_id=batch_id,
             elapsed_age_seconds=data["elapsed_age_seconds"],
-            count_fire_offset=data.get("count_fire_offset"),
-            condition_fire_offset=data.get("condition_fire_offset"),
+            count_fire_offset=data["count_fire_offset"],
+            condition_fire_offset=data["condition_fire_offset"],
             contract=data["contract"],
         )
 
@@ -185,7 +229,13 @@ class AggregationCheckpointState:
     """
 
     version: str
-    nodes: dict[str, AggregationNodeCheckpoint]
+    nodes: Mapping[str, AggregationNodeCheckpoint]
+
+    def __post_init__(self) -> None:
+        if not self.version:
+            raise ValueError("AggregationCheckpointState.version must not be empty")
+        if not isinstance(self.nodes, MappingProxyType):
+            object.__setattr__(self, "nodes", MappingProxyType(self.nodes))
 
     def to_dict(self) -> dict[str, Any]:
         """Serialize to flat wire-format dict.
@@ -205,10 +255,10 @@ class AggregationCheckpointState:
             data: Flat checkpoint dict with ``_version`` key and node_id keys.
 
         Raises:
-            ValueError: If ``_version`` is missing or structure is invalid.
+            AuditIntegrityError: If ``_version`` is missing or structure is invalid.
         """
         if "_version" not in data:
-            raise ValueError(f"Corrupted checkpoint: missing '_version' key. Found keys: {sorted(data.keys())}.")
+            raise AuditIntegrityError(f"Corrupted aggregation checkpoint: missing '_version' key. Found keys: {sorted(data.keys())}.")
         version = data["_version"]
 
         nodes: dict[str, AggregationNodeCheckpoint] = {}

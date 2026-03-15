@@ -18,6 +18,7 @@ Usage:
 
 import asyncio
 import json
+import sqlite3
 import time
 import uuid
 from datetime import UTC, datetime
@@ -214,9 +215,8 @@ class ChaosWebServer:
     async def _redirect_hop_endpoint(self, request: Request) -> Response:
         """Handle GET /redirect — enforce redirect loop hop limits.
 
-        Implements the stateless query-parameter approach (PC-2 decision):
-        each hop increments the counter until max is reached, then terminates
-        with a 200 response.  Without this handler, redirect URLs would fall
+        Each hop increments the counter until max is reached, then terminates
+        with a 200 response. Without this handler, redirect URLs would fall
         through to the catch-all route and the hop/max params would be ignored.
         """
         hop = int(request.query_params.get("hop", "1"))
@@ -282,7 +282,7 @@ class ChaosWebServer:
         request_id = str(uuid.uuid4())
         start_time = time.monotonic()
         timestamp_utc = datetime.now(UTC).isoformat()
-        path = "/" + request.path_params.get("path", "")
+        path = "/" + request.path_params["path"]
 
         # Extract header overrides if allowed
         mode_override: str | None = None
@@ -391,7 +391,7 @@ class ChaosWebServer:
                 headers={"Location": target or "http://169.254.169.254/"},
             )
 
-        # Redirect loop — stateless query-parameter approach (PC-2 decision)
+        # Redirect loop — stateless query-parameter approach
         hops = decision.redirect_hops or 10
         self._record_request(
             request_id=request_id,
@@ -820,8 +820,8 @@ class ChaosWebServer:
                 redirect_target=redirect_target,
                 redirect_hops=redirect_hops,
             )
-        except Exception:
-            logger.warning(
+        except sqlite3.Error:
+            logger.error(
                 "metrics_recording_failed",
                 request_id=request_id,
                 path=path,

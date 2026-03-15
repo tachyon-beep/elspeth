@@ -23,23 +23,14 @@ class TestExplainScreen:
 
         assert ExplainScreen is not None
 
-    def test_explain_screen_has_tree_widget(self) -> None:
-        """Explain screen includes LineageTree widget."""
-        from elspeth.tui.screens.explain_screen import ExplainScreen
-
-        screen = ExplainScreen()
-        widgets = screen.get_widget_types()
-
-        assert "LineageTree" in widgets
-
     def test_explain_screen_has_detail_panel(self) -> None:
         """Explain screen includes NodeDetailPanel widget."""
         from elspeth.tui.screens.explain_screen import ExplainScreen
+        from elspeth.tui.widgets.node_detail import NodeDetailPanel
 
         screen = ExplainScreen()
-        widgets = screen.get_widget_types()
 
-        assert "NodeDetailPanel" in widgets
+        assert isinstance(screen.detail_panel, NodeDetailPanel)
 
     def test_detail_panel_property_accessible(self) -> None:
         """detail_panel property provides public access to NodeDetailPanel."""

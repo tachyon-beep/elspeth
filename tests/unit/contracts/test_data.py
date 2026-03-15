@@ -164,7 +164,7 @@ class TestCheckCompatibilityAnnotated:
 
         result = check_compatibility(ProducerSchema, ConsumerSchema)
         assert result.compatible is True
-        assert result.type_mismatches == []
+        assert result.type_mismatches == ()
 
     def test_annotated_producer_plain_consumer(self) -> None:
         """Producer with Annotated[float, ...] compatible with consumer plain float."""

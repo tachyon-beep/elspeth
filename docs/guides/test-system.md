@@ -34,7 +34,7 @@ tests/
 │   ├── external.py                      # messy_headers, normalizable_headers, python_keywords
 │   ├── ids.py                           # id_strings, sink_names, branch_names, path_names
 │   ├── binary.py                        # binary_content, nonempty_binary, small_binary
-│   ├── config.py                        # valid_max_attempts, valid_delays, valid_jitter
+│   ├── config.py                        # valid_max_attempts, valid_base_delays, valid_jitter
 │   ├── mutable.py                       # mutable_nested_data, deeply_nested_data
 │   └── settings.py                      # DETERMINISM / STATE_MACHINE / STANDARD / SLOW / QUICK
 │
@@ -1589,7 +1589,7 @@ Migrated from `tests/property/conftest.py` into individual modules:
 | `external.py` | `messy_headers`, `normalizable_headers`, `python_keywords` |
 | `ids.py` | `id_strings`, `sink_names`, `path_names`, `branch_names`, `unique_branches`, `multiple_branches` |
 | `binary.py` | `binary_content`, `nonempty_binary`, `small_binary` |
-| `config.py` | `valid_max_attempts`, `valid_delays`, `valid_jitter` |
+| `config.py` | `valid_max_attempts`, `valid_base_delays`, `valid_jitter` |
 | `mutable.py` | `mutable_nested_data`, `deeply_nested_data` |
 | `settings.py` | `DETERMINISM_SETTINGS`, `STATE_MACHINE_SETTINGS`, `STANDARD_SETTINGS`, `SLOW_SETTINGS`, `QUICK_SETTINGS` |
 
@@ -1765,7 +1765,7 @@ conftest.py (root)
     ├── external.py: messy_headers, normalizable_headers
     ├── ids.py: id_strings, sink_names, branch_names
     ├── binary.py: binary_content, nonempty_binary
-    ├── config.py: valid_max_attempts, valid_delays
+    ├── config.py: valid_max_attempts, valid_base_delays
     ├── mutable.py: mutable_nested_data, deeply_nested_data
     └── settings.py: DETERMINISM / STANDARD / SLOW / QUICK
 ```

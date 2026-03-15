@@ -18,9 +18,12 @@ from __future__ import annotations
 
 import json
 import math
+from collections.abc import Mapping
 from dataclasses import dataclass
+from types import MappingProxyType
 from typing import Any
 
+from elspeth.contracts.freeze import deep_freeze
 from elspeth.plugins.transforms.llm.multi_query import OutputFieldConfig, OutputFieldType
 
 
@@ -88,14 +91,18 @@ def validate_field_value(
     return None
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, slots=True)
 class ValidationSuccess:
     """Successful validation result containing parsed data."""
 
-    data: dict[str, Any]
+    data: Mapping[str, Any]
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.data, MappingProxyType):
+            object.__setattr__(self, "data", deep_freeze(self.data))
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, slots=True)
 class ValidationError:
     """Failed validation result with error details."""
 

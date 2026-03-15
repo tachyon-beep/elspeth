@@ -2,10 +2,13 @@
 
 from __future__ import annotations
 
+import math
 import re
 import time
+from collections.abc import Mapping
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
+from types import MappingProxyType
 from typing import TYPE_CHECKING, Any
 
 import structlog
@@ -14,26 +17,25 @@ from elspeth.contracts import CallStatus, CallType
 from elspeth.contracts.call_data import LLMCallError, LLMCallRequest, LLMCallResponse
 from elspeth.contracts.errors import AuditIntegrityError, FrameworkBugError
 from elspeth.contracts.events import ExternalCallCompleted
+from elspeth.contracts.freeze import deep_freeze
 from elspeth.contracts.token_usage import TokenUsage
 from elspeth.core.canonical import stable_hash
 from elspeth.plugins.infrastructure.clients.base import AuditedClientBase, TelemetryEmitCallback
 
 if TYPE_CHECKING:
     from elspeth.core.landscape.recorder import LandscapeRecorder
+    from elspeth.core.rate_limit import NoOpLimiter
+    from elspeth.core.rate_limit.limiter import RateLimiter
 
 logger = structlog.get_logger(__name__)
 
 
-@dataclass
+@dataclass(frozen=True, slots=True)
 class LLMResponse:
     """Response from an LLM call.
 
-    Provides structured access to LLM response data including:
-    - Generated content
-    - Model used (may differ from requested model)
-    - Token usage statistics
-    - Latency measurement
-    - Raw response for debugging
+    Frozen: LLM responses are immutable evidence — the content, model,
+    usage, and raw response must not be modified after construction.
 
     Attributes:
         content: The generated text response
@@ -47,7 +49,13 @@ class LLMResponse:
     model: str
     usage: TokenUsage = field(default_factory=TokenUsage.unknown)
     latency_ms: float = 0.0
-    raw_response: dict[str, Any] | None = None
+    raw_response: Mapping[str, Any] | None = None
+
+    def __post_init__(self) -> None:
+        if self.latency_ms < 0 or not math.isfinite(self.latency_ms):
+            raise ValueError(f"LLMResponse.latency_ms must be non-negative and finite, got {self.latency_ms}")
+        if self.raw_response is not None and not isinstance(self.raw_response, MappingProxyType):
+            object.__setattr__(self, "raw_response", deep_freeze(self.raw_response))
 
     @property
     def total_tokens(self) -> int | None:
@@ -185,25 +193,6 @@ def _classify_llm_error(exception: Exception) -> str:
     return "unknown"
 
 
-def _is_retryable_error(exception: Exception) -> bool:
-    """Determine if an LLM error is retryable.
-
-    Retryable errors (transient):
-    - Rate limits (429)
-    - Server errors (500, 502, 503, 504, 529)
-    - Network/connection errors (timeout, connection refused, etc.)
-
-    Non-retryable errors (permanent):
-    - Client errors (400, 401, 403, 404, 422)
-    - Content policy violations
-    - Context length exceeded
-
-    Returns:
-        True if error is likely transient and should be retried
-    """
-    return _classify_llm_error(exception) in {"rate_limit", "server", "network"}
-
-
 class AuditedLLMClient(AuditedClientBase):
     """LLM client that automatically records all calls to audit trail.
 
@@ -243,7 +232,7 @@ class AuditedLLMClient(AuditedClientBase):
         underlying_client: Any,  # openai.OpenAI or openai.AzureOpenAI
         *,
         provider: str = "openai",
-        limiter: Any = None,  # RateLimiter | NoOpLimiter | None
+        limiter: RateLimiter | NoOpLimiter | None = None,
         token_id: str | None = None,
     ) -> None:
         """Initialize audited LLM client.
@@ -366,6 +355,8 @@ class AuditedLLMClient(AuditedClientBase):
             except (FrameworkBugError, AuditIntegrityError):
                 raise  # System bugs and audit integrity violations must crash
             except Exception as tel_err:
+                if isinstance(tel_err, (TypeError, AttributeError, KeyError, NameError)):
+                    raise  # Programming errors must crash
                 # Telemetry failure must not corrupt the error handling flow
                 logger.warning(
                     "telemetry_emit_failed",
@@ -374,6 +365,7 @@ class AuditedLLMClient(AuditedClientBase):
                     run_id=self._run_id,
                     state_id=self._state_id,
                     call_type="llm",
+                    exc_info=True,
                 )
 
             # Raise specific exception type based on error classification
@@ -395,7 +387,93 @@ class AuditedLLMClient(AuditedClientBase):
         # instead of being misclassified as LLM errors
         latency_ms = (time.perf_counter() - start) * 1000
 
-        content = response.choices[0].message.content or ""
+        # Tier 3 boundary: validate LLM response structure immediately
+        if not response.choices:
+            raise LLMClientError(
+                "LLM returned empty choices array — abnormal response",
+                retryable=False,
+            )
+        content = response.choices[0].message.content
+        if content is None:
+            # Tool call responses legitimately have no text content
+            if response.choices[0].finish_reason == "tool_calls":
+                content = ""
+            else:
+                # Record the call BEFORE raising — the LLM call happened and must
+                # appear in the audit trail even though the response is unusable.
+                # Without this, content-filtered calls vanish from the audit trail
+                # and create unexplained call-index gaps.
+                error_msg = "LLM returned null content (likely content-filtered by provider)"
+                raw_response = response.model_dump()
+                usage = (
+                    TokenUsage.known(
+                        prompt_tokens=response.usage.prompt_tokens,
+                        completion_tokens=response.usage.completion_tokens,
+                    )
+                    if response.usage is not None
+                    else TokenUsage.unknown()
+                )
+                response_dto = LLMCallResponse(
+                    content="",  # Null content normalized for DTO
+                    model=response.model,
+                    usage=usage,
+                    raw_response=raw_response,
+                )
+                self._recorder.record_call(
+                    state_id=self._state_id,
+                    call_index=call_index,
+                    call_type=CallType.LLM,
+                    status=CallStatus.ERROR,
+                    request_data=request_dto,
+                    response_data=response_dto,
+                    error=LLMCallError(
+                        type="ContentPolicyError",
+                        message=error_msg,
+                        retryable=False,
+                    ),
+                    latency_ms=latency_ms,
+                )
+
+                # Telemetry emitted AFTER successful Landscape recording (even for null-content errors)
+                # Unlike SDK errors, we have response data here — the HTTP call succeeded
+                response_data = response_dto.to_dict()
+                try:
+                    self._telemetry_emit(
+                        ExternalCallCompleted(
+                            timestamp=datetime.now(UTC),
+                            run_id=self._run_id,
+                            call_type=CallType.LLM,
+                            provider=self._provider,
+                            status=CallStatus.ERROR,
+                            latency_ms=latency_ms,
+                            state_id=self._state_id,
+                            operation_id=None,
+                            token_id=self._telemetry_token_id(),
+                            request_hash=stable_hash(request_data),
+                            response_hash=stable_hash(response_data),
+                            request_payload=request_dto,
+                            response_payload=response_dto,
+                            token_usage=usage if usage.has_data else None,
+                        )
+                    )
+                except (FrameworkBugError, AuditIntegrityError):
+                    raise  # System bugs and audit integrity violations must crash
+                except Exception as tel_err:
+                    if isinstance(tel_err, (TypeError, AttributeError, KeyError, NameError)):
+                        raise  # Programming errors must crash
+                    # Telemetry failure must not corrupt the error handling flow
+                    logger.warning(
+                        "telemetry_emit_failed",
+                        error=str(tel_err),
+                        error_type=type(tel_err).__name__,
+                        run_id=self._run_id,
+                        state_id=self._state_id,
+                        call_type="llm",
+                        exc_info=True,
+                    )
+
+                raise ContentPolicyError(error_msg)
+
         # Guard against providers that omit usage data (streaming, certain configs)
         if response.usage is not None:
             usage = TokenUsage.known(
@@ -408,7 +486,29 @@ class AuditedLLMClient(AuditedClientBase):
         # Capture full raw response for audit completeness
         # raw_response includes: all choices, finish_reason, tool_calls, logprobs, etc.
         # NOTE: model_dump() is guaranteed present - we require openai>=2.15 in pyproject.toml
-        raw_response = response.model_dump()
+        try:
+            raw_response = response.model_dump()
+        except Exception as dump_exc:
+            # The LLM call happened — record it before re-raising so the
+            # audit trail reflects the consumed tokens even though we can't
+            # fully serialize the response.
+            self._recorder.record_call(
+                state_id=self._state_id,
+                call_index=call_index,
+                call_type=CallType.LLM,
+                status=CallStatus.ERROR,
+                request_data=request_dto,
+                error=LLMCallError(
+                    type="ResponseProcessingError",
+                    message=f"Failed to serialize LLM response: {dump_exc}",
+                    retryable=False,
+                ),
+                latency_ms=latency_ms,
+            )
+            raise LLMClientError(
+                f"Failed to serialize LLM response: {dump_exc}",
+                retryable=False,
+            ) from dump_exc
 
         response_dto = LLMCallResponse(
             content=content,
@@ -453,6 +553,8 @@ class AuditedLLMClient(AuditedClientBase):
         except (FrameworkBugError, AuditIntegrityError):
             raise  # System bugs and audit integrity violations must crash
         except Exception as tel_err:
+            if isinstance(tel_err, (TypeError, AttributeError, KeyError, NameError)):
+                raise  # Programming errors must crash
             # Telemetry failure must not corrupt the successful call
             # Landscape has the record - telemetry is operational visibility only
             logger.warning(
@@ -462,6 +564,7 @@ class AuditedLLMClient(AuditedClientBase):
                 run_id=self._run_id,
                 state_id=self._state_id,
                 call_type="llm",
+                exc_info=True,
             )
 
         return LLMResponse(

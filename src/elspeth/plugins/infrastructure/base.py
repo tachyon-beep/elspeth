@@ -34,7 +34,7 @@ Lifecycle Contract (all hooks called on main thread by orchestrator):
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
-from collections.abc import Iterator
+from collections.abc import Iterator, Mapping
 from typing import TYPE_CHECKING, Any
 
 from elspeth.contracts import ArtifactDescriptor, Determinism, PluginSchema, SourceRow
@@ -42,6 +42,7 @@ from elspeth.contracts.schema_contract import PipelineRow
 
 if TYPE_CHECKING:
     from elspeth.contracts.contexts import LifecycleContext, SinkContext, SourceContext, TransformContext
+    from elspeth.contracts.header_modes import HeaderMode
     from elspeth.contracts.schema_contract import SchemaContract
     from elspeth.contracts.sink import OutputValidationResult
 from elspeth.plugins.infrastructure.results import (
@@ -132,7 +133,7 @@ class BaseTransform(ABC):
     output_schema: type[PluginSchema]
     node_id: str | None = None  # Set by orchestrator after registration
 
-    # Metadata for Phase 3 audit/reproducibility
+    # Audit metadata
     determinism: Determinism = Determinism.DETERMINISTIC
     plugin_version: str = "0.0.0"
 
@@ -158,7 +159,7 @@ class BaseTransform(ABC):
     # When True, executor validates input against input_schema before process().
     validate_input: bool = False
 
-    # Error routing configuration (WP-11.99b)
+    # Error routing configuration.
     # Transforms extending TransformDataConfig override this from config.
     # Always non-None at runtime (TransformSettings requires on_error).
     # Base class default is None because injection happens post-construction
@@ -172,10 +173,6 @@ class BaseTransform(ABC):
     # via cli_helpers bridge (set from TransformSettings.on_success).
     on_success: str | None = None
 
-    # Lifecycle guard (centralized in TransformExecutor).
-    # Set to True by on_start(). The executor checks this before process().
-    _on_start_called: bool = False
-
     def __init__(self, config: dict[str, Any]) -> None:
         """Initialize with configuration.
 
@@ -183,6 +180,10 @@ class BaseTransform(ABC):
             config: Plugin configuration
         """
         self.config = config
+        # Lifecycle guard (centralized in TransformExecutor).
+        # Set to True by on_start(). The executor checks this before process().
+        # Per-instance, not per-class — class-level bool would be shared across instances.
+        self._on_start_called: bool = False
 
     @staticmethod
     def _create_schemas(
@@ -305,14 +306,6 @@ class BaseTransform(ABC):
         pass
 
 
-# NOTE: BaseAggregation was DELETED in aggregation structural cleanup.
-# Aggregation is now fully structural:
-# - Engine buffers rows internally
-# - Engine evaluates triggers (WP-06)
-# - Engine calls batch-aware Transform.process(rows: list[dict])
-# Use is_batch_aware=True on BaseTransform for batch processing.
-
-
 class BaseSink(ABC):
     """Base class for sink plugins.
 
@@ -371,11 +364,10 @@ class BaseSink(ABC):
     idempotent: bool = False
     node_id: str | None = None  # Set by orchestrator after registration
 
-    # Metadata for Phase 3 audit/reproducibility
+    # Audit metadata
     determinism: Determinism = Determinism.IO_WRITE
     plugin_version: str = "0.0.0"
 
-    # Resume capability (Phase 5 - Checkpoint/Resume)
     # Default: sinks don't support resume. Override in subclasses that can append.
     supports_resume: bool = False
 
@@ -422,20 +414,40 @@ class BaseSink(ABC):
 
         return OutputValidationResult.success()
 
+    @property
+    def needs_resume_field_resolution(self) -> bool:
+        """Whether this sink needs field resolution mapping for resume.
+
+        True when headers mode is ORIGINAL — the CLI resume path must
+        provide the source field resolution mapping before validation.
+
+        Set by init_display_headers(). Sinks that don't use display headers
+        return False (the default).
+        """
+        return getattr(self, "_needs_resume_field_resolution", False)
+
     def set_resume_field_resolution(self, resolution_mapping: dict[str, str]) -> None:
         """Set field resolution mapping for resume validation.
 
-        Default is a no-op. Only sinks that support restore_source_headers
-        (CSVSink, JSONSink) override this to use the mapping for validation.
+        Default is a no-op. Only sinks with headers: original mode
+        override this to use the mapping for validation.
 
         Args:
             resolution_mapping: Dict mapping original header name -> normalized field name.
         """
-        # Intentional no-op - most sinks don't use restore_source_headers
+        # Intentional no-op - most sinks don't use headers: original
         _ = resolution_mapping  # Explicitly consume the argument
 
-    # Output contract for schema-aware sinks (Phase 3)
+    # Output contract for schema-aware sinks
     _output_contract: SchemaContract | None = None
+
+    # Display header state — set by init_display_headers() in subclass __init__.
+    # Declared here for mypy structural typing against DisplayHeaderHost protocol.
+    _headers_mode: HeaderMode
+    _headers_custom_mapping: dict[str, str] | None
+    _resolved_display_headers: dict[str, str] | None
+    _display_headers_resolved: bool
+    _needs_resume_field_resolution: bool
 
     def __init__(self, config: dict[str, Any]) -> None:
         """Initialize with configuration.
@@ -479,7 +491,7 @@ class BaseSink(ABC):
         """
         ...
 
-    # === Output Contract Support (Phase 3) ===
+    # === Output Contract Support ===
 
     def get_output_contract(self) -> SchemaContract | None:
         """Get the current output contract.
@@ -571,7 +583,7 @@ class BaseSource(ABC):
     output_schema: type[PluginSchema]
     node_id: str | None = None  # Set by orchestrator after registration
 
-    # Metadata for Phase 3 audit/reproducibility
+    # Audit metadata
     determinism: Determinism = Determinism.IO_READ
     plugin_version: str = "0.0.0"
 
@@ -583,7 +595,7 @@ class BaseSource(ABC):
     # All sources must set this - config-based sources get it from SourceDataConfig
     on_success: str
 
-    # Schema contract for row validation (Phase 2)
+    # Schema contract for row validation
     _schema_contract: SchemaContract | None = None
 
     def __init__(self, config: dict[str, Any]) -> None:
@@ -621,7 +633,7 @@ class BaseSource(ABC):
         """
         ...
 
-    # === Schema Contract Support (Phase 2) ===
+    # === Schema Contract Support ===
 
     def get_schema_contract(self) -> SchemaContract | None:
         """Get the current schema contract.
@@ -671,7 +683,7 @@ class BaseSource(ABC):
 
     # === Audit Trail Metadata ===
 
-    def get_field_resolution(self) -> tuple[dict[str, str], str | None] | None:
+    def get_field_resolution(self) -> tuple[Mapping[str, str], str | None] | None:
         """Return field resolution mapping computed during load().
 
         Sources that perform field normalization (e.g., CSVSource with normalize_fields)

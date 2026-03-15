@@ -10,12 +10,12 @@ from __future__ import annotations
 
 import io
 import json
-import logging
 import time
-from collections.abc import Iterator
+from collections.abc import Iterator, Mapping
 from typing import TYPE_CHECKING, Any, Literal, Self
 
 import pandas as pd
+import structlog
 from pydantic import BaseModel, Field, ValidationError, field_validator, model_validator
 
 from elspeth.contracts import CallStatus, CallType, PluginSchema, SourceRow
@@ -26,16 +26,12 @@ from elspeth.plugins.infrastructure.base import BaseSource
 from elspeth.plugins.infrastructure.config_base import DataPluginConfig
 from elspeth.plugins.infrastructure.schema_factory import create_schema_from_config
 from elspeth.plugins.sources.field_normalization import FieldResolution, resolve_field_names
+from elspeth.plugins.sources.json_source import _reject_nonfinite_constant
 
 if TYPE_CHECKING:
     from azure.storage.blob import BlobClient
 
-logger = logging.getLogger(__name__)
-
-
-def _reject_nonfinite_constant(value: str) -> None:
-    """Reject non-standard JSON constants (NaN, Infinity, -Infinity)."""
-    raise ValueError(f"Non-standard JSON constant '{value}' not allowed. Use null for missing values, not NaN/Infinity.")
+logger = structlog.get_logger(__name__)
 
 
 class CSVOptions(BaseModel):
@@ -47,6 +43,24 @@ class CSVOptions(BaseModel):
     has_header: bool = True
     encoding: str = "utf-8"
 
+    @field_validator("delimiter")
+    @classmethod
+    def _validate_delimiter(cls, v: str) -> str:
+        if len(v) != 1:
+            raise ValueError(f"delimiter must be a single character, got {v!r}")
+        return v
+
+    @field_validator("encoding")
+    @classmethod
+    def _validate_encoding(cls, v: str) -> str:
+        import codecs
+
+        try:
+            codecs.lookup(v)
+        except LookupError as exc:
+            raise ValueError(f"unknown encoding: {v!r}") from exc
+        return v
+
 
 class JSONOptions(BaseModel):
     """JSON parsing options."""
@@ -55,6 +69,17 @@ class JSONOptions(BaseModel):
 
     encoding: str = "utf-8"
     data_key: str | None = None
+
+    @field_validator("encoding")
+    @classmethod
+    def _validate_encoding(cls, v: str) -> str:
+        import codecs
+
+        try:
+            codecs.lookup(v)
+        except LookupError as exc:
+            raise ValueError(f"unknown encoding: {v!r}") from exc
+        return v
 
 
 class AzureBlobSourceConfig(DataPluginConfig):
@@ -356,8 +381,6 @@ class AzureBlobSource(BaseSource):
         # Lazy-loaded blob client
         self._blob_client: BlobClient | None = None
 
-        # PHASE 1: Validate self-consistency
-
     def _get_blob_client(self) -> BlobClient:
         """Get or create the Azure Blob client.
 
@@ -423,6 +446,8 @@ class AzureBlobSource(BaseSource):
         except ImportError:
             # Re-raise ImportError as-is for clear dependency messaging
             raise
+        except (TypeError, AttributeError, KeyError, NameError):
+            raise  # Programming errors in our auth/client code — crash to surface the bug
         except Exception as e:
             latency_ms = (time.perf_counter() - start_time) * 1000
 
@@ -451,10 +476,10 @@ class AzureBlobSource(BaseSource):
         else:
             size_str = f"{blob_size_kb:.1f} KB"
         logger.info(
-            "Downloaded blob '%s' from container '%s' (%s)",
-            self._blob_path,
-            self._container,
-            size_str,
+            "blob_downloaded",
+            blob_path=self._blob_path,
+            container=self._container,
+            size=size_str,
         )
 
         # Parse blob content based on format
@@ -489,10 +514,28 @@ class AzureBlobSource(BaseSource):
         try:
             text_data = blob_data.decode(encoding)
         except UnicodeDecodeError as e:
-            raise ValueError(f"Failed to decode blob as {encoding}: {e}") from e
+            error_msg = f"Failed to decode CSV blob as {encoding}: {e}"
+            raw_row = {
+                "container": self._container,
+                "blob_path": self._blob_path,
+                "error": error_msg,
+            }
+            ctx.record_validation_error(
+                row=raw_row,
+                error=error_msg,
+                schema_mode="parse",
+                destination=self._on_validation_failure,
+            )
+            if self._on_validation_failure != "discard":
+                yield SourceRow.quarantined(
+                    row=raw_row,
+                    error=error_msg,
+                    destination=self._on_validation_failure,
+                )
+            return
 
-        # BUG-BLOB-01 fix: Wrap pandas CSV parsing to quarantine on structural errors
-        # Even with pandas' robustness, severely malformed CSVs can cause parse failures
+        # Wrap pandas CSV parsing to quarantine on structural errors.
+        # Even with pandas' robustness, severely malformed CSVs can cause parse failures.
         try:
             # Use pandas for robust CSV parsing (consistent with CSVSource)
             header_arg = 0 if has_header else None
@@ -514,7 +557,7 @@ class AzureBlobSource(BaseSource):
                 keep_default_na=False,  # Don't convert empty strings to NaN
                 on_bad_lines="error",  # Quarantine parse failures; never silently drop malformed lines
             )
-        except Exception as e:
+        except (pd.errors.ParserError, pd.errors.EmptyDataError) as e:
             # Catastrophic CSV structure failure - entire file unparseable
             # This is rare with pandas but can happen with severely malformed files
             error_msg = f"CSV parse error: Unable to parse blob structure: {e}"
@@ -544,8 +587,8 @@ class AzureBlobSource(BaseSource):
                 columns=None,
             )
             final_headers = self._field_resolution.final_headers
-            if final_headers != raw_headers:
-                df.columns = final_headers
+            if list(final_headers) != raw_headers:
+                df.columns = list(final_headers)
         elif self._columns is not None:
             self._field_resolution = resolve_field_names(
                 raw_headers=None,
@@ -554,8 +597,8 @@ class AzureBlobSource(BaseSource):
                 columns=self._columns,
             )
             final_headers = self._field_resolution.final_headers
-            if list(df.columns) != final_headers:
-                df.columns = final_headers
+            if list(df.columns) != list(final_headers):
+                df.columns = list(final_headers)
 
         # Create contract now that field_resolution is known (CSV path)
         if self._contract_builder is None and self._format == "csv":
@@ -573,7 +616,7 @@ class AzureBlobSource(BaseSource):
 
         # Log row count for operator visibility
         row_count = len(df)
-        logger.info("Parsed %d rows from CSV blob '%s'", row_count, self._blob_path)
+        logger.info("csv_blob_parsed", row_count=row_count, blob_path=self._blob_path)
 
         # DataFrame columns are strings from CSV headers
         for record in df.to_dict(orient="records"):
@@ -647,7 +690,7 @@ class AzureBlobSource(BaseSource):
             return
 
         # Log row count for operator visibility
-        logger.info("Parsed %d rows from JSON array blob '%s'", len(data), self._blob_path)
+        logger.info("json_blob_parsed", row_count=len(data), blob_path=self._blob_path)
 
         for row in data:
             yield from self._validate_and_yield(row, ctx)
@@ -692,7 +735,7 @@ class AzureBlobSource(BaseSource):
         # Split lines and count non-empty for logging
         lines = text_data.splitlines()
         non_empty_count = sum(1 for line in lines if line.strip())
-        logger.info("Parsed %d lines from JSONL blob '%s'", non_empty_count, self._blob_path)
+        logger.info("jsonl_blob_parsed", line_count=non_empty_count, blob_path=self._blob_path)
 
         for line_num, line in enumerate(lines, start=1):
             line = line.strip()
@@ -748,7 +791,7 @@ class AzureBlobSource(BaseSource):
             if self._contract_builder is not None and not self._first_valid_row_processed:
                 # Use field_resolution from CSV if available, else identity mapping for JSON/JSONL
                 if self._field_resolution is not None:
-                    field_resolution_map = self._field_resolution.resolution_mapping
+                    field_resolution_map: Mapping[str, str] = self._field_resolution.resolution_mapping
                 else:
                     # JSON/JSONL without normalization - identity mapping
                     field_resolution_map = {k: k for k in validated_row}
@@ -803,7 +846,7 @@ class AzureBlobSource(BaseSource):
         """Release resources (no-op for Azure Blob source)."""
         self._blob_client = None
 
-    def get_field_resolution(self) -> tuple[dict[str, str], str | None] | None:
+    def get_field_resolution(self) -> tuple[Mapping[str, str], str | None] | None:
         """Return field resolution mapping for audit trail (CSV only)."""
         if self._field_resolution is None:
             return None

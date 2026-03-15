@@ -2,7 +2,10 @@
 
 from __future__ import annotations
 
+import pytest
+
 from elspeth.contracts import NodeType, RunStatus
+from elspeth.contracts.errors import AuditIntegrityError
 from elspeth.contracts.schema import SchemaConfig
 
 # Dynamic schema for tests that don't care about specific fields
@@ -236,15 +239,15 @@ class TestReproducibilityGradeComputation:
         # Empty pipeline is trivially reproducible
         assert grade == ReproducibilityGrade.FULL_REPRODUCIBLE
 
-    def test_update_grade_after_purge_nonexistent_run(self) -> None:
-        """update_grade_after_purge() silently handles nonexistent run."""
+    def test_update_grade_after_purge_nonexistent_run_raises(self) -> None:
+        """update_grade_after_purge() crashes on nonexistent run — caller bug or corruption."""
         from elspeth.core.landscape.database import LandscapeDB
         from elspeth.core.landscape.reproducibility import update_grade_after_purge
 
         db = LandscapeDB.in_memory()
 
-        # Should not raise - silently returns for nonexistent run
-        update_grade_after_purge(db, "nonexistent_run_id")
+        with pytest.raises(AuditIntegrityError, match="does not exist"):
+            update_grade_after_purge(db, "nonexistent_run_id")
 
     def test_attributable_only_unchanged_after_purge(self) -> None:
         """ATTRIBUTABLE_ONLY remains unchanged after purge (already at lowest grade)."""

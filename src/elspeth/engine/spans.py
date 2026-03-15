@@ -146,9 +146,9 @@ class SpanFactory:
 
         Args:
             transform_name: Name of the transform plugin
-            node_id: Unique node identifier for disambiguation (P2-2026-01-21 fix)
+            node_id: Unique node identifier for disambiguation
             input_hash: Optional input data hash
-            token_id: Token identifier for single-row transforms (P2-2026-01-21 fix)
+            token_id: Token identifier for single-row transforms
             token_ids: Token identifiers for batch transforms (aggregation flush)
 
         Note:
@@ -173,7 +173,7 @@ class SpanFactory:
                 span.set_attribute("node.id", node_id)
             if input_hash is not None:
                 span.set_attribute("input.hash", input_hash)
-            # Token tracking for accurate child token attribution (P2-2026-01-21)
+            # Token tracking for accurate child token attribution
             if token_ids is not None:
                 span.set_attribute("token.ids", tuple(token_ids))
             elif token_id is not None:
@@ -193,9 +193,9 @@ class SpanFactory:
 
         Args:
             gate_name: Name of the gate (from GateSettings)
-            node_id: Unique node identifier for disambiguation (P2-2026-01-21 fix)
+            node_id: Unique node identifier for disambiguation
             input_hash: Optional input data hash
-            token_id: Token identifier for the token being evaluated (P2-2026-01-21 fix)
+            token_id: Token identifier for the token being evaluated
 
         Yields:
             Span or NoOpSpan
@@ -229,10 +229,10 @@ class SpanFactory:
 
         Args:
             aggregation_name: Name of the aggregation plugin
-            node_id: Unique node identifier for disambiguation (P2-2026-01-21 fix)
-            input_hash: Input data hash for trace-to-audit correlation (P3-2026-02-01 fix)
+            node_id: Unique node identifier for disambiguation
+            input_hash: Input data hash for trace-to-audit correlation
             batch_id: Optional batch identifier
-            token_ids: Token identifiers in the batch (P2-2026-01-21 fix)
+            token_ids: Token identifiers in the batch
 
         Note:
             Aggregation batches process multiple tokens, so this uses token_ids (plural).
@@ -270,8 +270,8 @@ class SpanFactory:
 
         Args:
             sink_name: Name of the sink plugin
-            node_id: Unique node identifier for disambiguation (P2-2026-01-21 fix)
-            token_ids: Token identifiers being written in this batch (P2-2026-01-21 fix)
+            node_id: Unique node identifier for disambiguation
+            token_ids: Token identifiers being written in this batch
 
         Note:
             Sinks batch-write multiple tokens, so this uses token_ids (plural).

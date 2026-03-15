@@ -1072,3 +1072,57 @@ class TestPooledExecutorShutdownRace:
 
         assert len(entries) == 10
         assert executor.pending_count == 0
+
+
+class TestPooledExecutorFutureException:
+    """Regression tests: unguarded future.result() leaves buffer corrupt."""
+
+    def test_future_exception_completes_buffer_slot_with_error(self) -> None:
+        """When a future raises an unexpected exception, the buffer slot must
+        be completed with an error TransformResult instead of leaking."""
+        config = PoolConfig(pool_size=3)
+        executor = PooledExecutor(config)
+
+        def exploding_process(row: dict[str, Any], state_id: str) -> TransformResult:
+            if row["idx"] == 1:
+                raise RuntimeError("Unexpected kaboom")
+            return TransformResult.success(
+                make_pipeline_row(row),
+                success_reason={"action": "ok"},
+            )
+
+        contexts = [RowContext(row={"idx": i}, state_id=f"s_{i}", row_index=i) for i in range(3)]
+
+        entries = executor.execute_batch(contexts, exploding_process)
+
+        assert len(entries) == 3
+        assert executor.pending_count == 0
+
+        # The exploding row should have an error result, not crash the batch
+        error_entries = [e for e in entries if e.result.status == "error"]
+        assert len(error_entries) == 1
+        assert "unexpected_pool_error" in error_entries[0].result.reason["reason"]
+
+        # Other rows should succeed normally
+        success_entries = [e for e in entries if e.result.status == "success"]
+        assert len(success_entries) == 2
+
+        executor.shutdown()
+
+    def test_all_futures_exploding_returns_all_errors(self) -> None:
+        """When every future raises, all buffer slots get error results."""
+        config = PoolConfig(pool_size=2)
+        executor = PooledExecutor(config)
+
+        def always_explode(row: dict[str, Any], state_id: str) -> TransformResult:
+            raise ValueError(f"Row {row['idx']} failed")
+
+        contexts = [RowContext(row={"idx": i}, state_id=f"s_{i}", row_index=i) for i in range(4)]
+
+        entries = executor.execute_batch(contexts, always_explode)
+
+        assert len(entries) == 4
+        assert executor.pending_count == 0
+        assert all(e.result.status == "error" for e in entries)
+
+        executor.shutdown()

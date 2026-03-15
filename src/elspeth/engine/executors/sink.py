@@ -114,7 +114,6 @@ class SinkExecutor:
         - Invariant 3: "COMPLETED/ROUTED implies the token has a completed sink node_state"
         - Invariant 4: "Completed sink node_state implies a terminal token_outcome"
 
-        Fix: P1-2026-01-31-quarantine-outcome-before-durability
         Uses PendingOutcome to carry error_hash for QUARANTINED outcomes through to
         recording, ensuring outcomes are only recorded after sink durability.
 
@@ -221,8 +220,8 @@ class SinkExecutor:
             input_data={"sink_plugin": sink.name, "row_count": len(tokens)},
         ) as handle:
             # Execute sink write with timing and span
-            # P2-2026-01-21: Pass all token_ids being written for accurate attribution
-            # P2-2026-01-21: Pass node_id for disambiguation when multiple sinks exist
+            # Pass all token_ids being written for accurate attribution
+            # Pass node_id for disambiguation when multiple sinks exist
             sink_token_ids = [t.token_id for t in tokens]
             with self._spans.sink_span(
                 sink.name,
@@ -353,7 +352,7 @@ class SinkExecutor:
         # 4. artifact is registered
         # Recording here ensures Invariant 3: "COMPLETED/ROUTED implies completed sink node_state"
         #
-        # Fix: P1-2026-01-31 - PendingOutcome carries error_hash for QUARANTINED outcomes
+        # PendingOutcome carries error_hash for QUARANTINED outcomes
         # pending_outcome is REQUIRED - all sink-bound tokens must have outcomes recorded
         for token, _ in states:
             self._recorder.record_token_outcome(
@@ -368,7 +367,7 @@ class SinkExecutor:
         # CRITICAL: Sink write + flush are durable - we CANNOT roll them back.
         # If checkpoint creation fails, we log the error but don't raise.
         # The sink artifact exists, but no checkpoint record → resume will replay
-        # these rows → duplicate writes (acceptable for RC-1, see Bug #10 docs).
+        # these rows → duplicate writes (acceptable, idempotent sink writes planned).
         if on_token_written is not None:
             for token in tokens:
                 try:

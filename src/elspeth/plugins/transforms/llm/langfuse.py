@@ -36,7 +36,7 @@ class LangfuseTracer(Protocol):
         query_name: str,
         prompt: str,
         response_content: str,
-        model: str,
+        model: str | None,
         usage: TokenUsage | None = None,
         latency_ms: float | None = None,
         extra_metadata: dict[str, Any] | None = None,
@@ -70,7 +70,7 @@ class NoOpLangfuseTracer:
         query_name: str,
         prompt: str,
         response_content: str,
-        model: str,
+        model: str | None,
         usage: TokenUsage | None = None,
         latency_ms: float | None = None,
         extra_metadata: dict[str, Any] | None = None,
@@ -106,7 +106,7 @@ class ActiveLangfuseTracer:
         query_name: str,
         prompt: str,
         response_content: str,
-        model: str,
+        model: str | None,
         usage: TokenUsage | None = None,
         latency_ms: float | None = None,
         extra_metadata: dict[str, Any] | None = None,
@@ -206,6 +206,8 @@ def _handle_trace_failure(
     TelemetryEmitCallback expects ExternalCallCompleted (from plugins/clients/base.py),
     which does not match tracing failure events.
     """
+    if isinstance(error, (TypeError, AttributeError, KeyError, NameError)):
+        raise  # Programming errors must crash — not Langfuse SDK failures
     logger.warning(
         event_name,
         plugin=transform_name,
@@ -248,11 +250,11 @@ def create_langfuse_tracer(
             tracing_enabled=tracing_config.tracing_enabled,
         )
         return ActiveLangfuseTracer(transform_name=transform_name, client=client)
-    except ImportError:
+    except ImportError as exc:
         # User explicitly configured Langfuse tracing but the package is missing.
         # This is a startup error, not a silent degradation — the user has a
         # reasonable expectation that configured tracing is active.
         raise RuntimeError(
             "Langfuse tracing is configured but the 'langfuse' package is not installed. "
             "Install with: uv pip install 'elspeth[tracing-langfuse]'"
-        ) from None
+        ) from exc

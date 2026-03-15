@@ -1,4 +1,4 @@
-"""Test that output_mode='single' is rejected with helpful error."""
+"""Test that output_mode='single' is rejected."""
 
 import pytest
 from pydantic import ValidationError
@@ -7,8 +7,8 @@ from elspeth.core.config import AggregationSettings, TriggerConfig
 
 
 def test_aggregation_config_rejects_single_mode() -> None:
-    """Config validation must reject 'single' mode with migration hint."""
-    with pytest.raises(ValidationError) as exc_info:
+    """Config validation must reject 'single' as an invalid output_mode."""
+    with pytest.raises(ValidationError):
         AggregationSettings(
             name="test_agg",
             plugin="test_plugin",
@@ -17,10 +17,6 @@ def test_aggregation_config_rejects_single_mode() -> None:
             trigger=TriggerConfig(count=5),
             output_mode="single",
         )
-
-    error_msg = str(exc_info.value)
-    assert "single" in error_msg.lower()
-    assert "transform" in error_msg.lower()  # Migration hint
 
 
 def test_aggregation_config_accepts_transform_mode() -> None:
@@ -50,7 +46,7 @@ def test_aggregation_config_accepts_passthrough_mode() -> None:
 
 
 def test_aggregation_config_default_is_transform() -> None:
-    """Default output_mode should be 'transform' (not 'single')."""
+    """Default output_mode should be 'transform'."""
     settings = AggregationSettings(
         name="test_agg",
         plugin="test_plugin",

@@ -9,11 +9,12 @@ NOTE: Non-standard JSON constants (NaN, Infinity, -Infinity) are rejected
 at parse time per canonical JSON policy. Use null for missing values.
 """
 
+import codecs
 import json
 from collections.abc import Iterator, Mapping
 from typing import Any, Literal
 
-from pydantic import ValidationError
+from pydantic import ValidationError, field_validator, model_validator
 
 from elspeth.contracts import PluginSchema, SourceRow
 from elspeth.contracts.contexts import SourceContext
@@ -68,6 +69,23 @@ class JSONSourceConfig(SourceDataConfig):
     format: Literal["json", "jsonl"] | None = None
     data_key: str | None = None
     encoding: str = "utf-8"
+
+    @field_validator("encoding")
+    @classmethod
+    def _validate_encoding(cls, v: str) -> str:
+        try:
+            codecs.lookup(v)
+        except LookupError as exc:
+            raise ValueError(f"unknown encoding: {v!r}") from exc
+        return v
+
+    @model_validator(mode="after")
+    def _reject_data_key_with_jsonl(self) -> "JSONSourceConfig":
+        if self.format == "jsonl" and self.data_key is not None:
+            raise ValueError(
+                "data_key is not supported with format='jsonl' — JSONL reads line-by-line, data_key extracts from a JSON object root"
+            )
+        return self
 
 
 class JSONSource(BaseSource):

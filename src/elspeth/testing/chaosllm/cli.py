@@ -48,11 +48,11 @@ def _version_callback(value: bool) -> None:
     """Print version and exit."""
     if value:
         # Use elspeth version
-        try:
-            from elspeth import __version__
+        from importlib.metadata import PackageNotFoundError, version
 
-            typer.echo(f"chaosllm (elspeth {__version__})")
-        except ImportError:
+        try:
+            typer.echo(f"chaosllm (elspeth {version('elspeth')})")
+        except PackageNotFoundError:
             typer.echo("chaosllm (version unknown)")
         raise typer.Exit()
 
@@ -448,7 +448,7 @@ def show_config(
     except FileNotFoundError as e:
         typer.secho(f"Error: {e}", fg=typer.colors.RED, err=True)
         raise typer.Exit(1) from e
-    except Exception as e:
+    except (pydantic.ValidationError, yaml.YAMLError, ValueError) as e:
         typer.secho(f"Configuration error: {e}", fg=typer.colors.RED, err=True)
         raise typer.Exit(1) from e
 
@@ -457,14 +457,7 @@ def show_config(
     if output_format == "json":
         typer.echo(json.dumps(config_dict, indent=2))
     else:
-        # YAML output
-        try:
-            import yaml
-
-            typer.echo(yaml.dump(config_dict, default_flow_style=False, sort_keys=False))
-        except ImportError:
-            # Fall back to JSON if yaml not available
-            typer.echo(json.dumps(config_dict, indent=2))
+        typer.echo(yaml.dump(config_dict, default_flow_style=False, sort_keys=False))
 
 
 # MCP server CLI - separate entry point

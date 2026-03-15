@@ -16,19 +16,25 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 from elspeth.contracts.enums import TriggerType
+from elspeth.contracts.errors import OrchestrationInvariantError
 from elspeth.contracts.types import NodeID
 from elspeth.engine.orchestrator.outcomes import accumulate_row_outcomes
 from elspeth.engine.orchestrator.types import (
     AggNodeEntry,
     AggregationFlushResult,
     ExecutionCounters,
+    PendingTokenMap,
     PipelineConfig,
 )
 
 if TYPE_CHECKING:
-    from elspeth.contracts import PendingOutcome, TokenInfo, TransformProtocol
+    from collections.abc import Mapping, Sequence
+
+    from elspeth.contracts import TransformProtocol
     from elspeth.contracts.plugin_context import PluginContext
+    from elspeth.contracts.results import RowResult
     from elspeth.core.landscape import LandscapeRecorder
+    from elspeth.engine.dag_navigator import WorkItem
     from elspeth.engine.processor import RowProcessor
 
 
@@ -61,7 +67,7 @@ def find_aggregation_transform(
             break
 
     if agg_transform is None:
-        raise RuntimeError(
+        raise OrchestrationInvariantError(
             f"No batch-aware transform found for aggregation '{agg_name}' "
             f"(node_id={agg_node_id_str}). This indicates a bug in graph construction "
             f"or pipeline configuration. "
@@ -100,11 +106,40 @@ def handle_incomplete_batches(
         # DRAFT batches continue normally (collection resumes)
 
 
+def _process_flush_results(
+    completed_results: Sequence[RowResult],
+    work_items: Sequence[WorkItem],
+    processor: RowProcessor,
+    ctx: PluginContext,
+    counters: ExecutionCounters,
+    sinks: Mapping[str, object],
+    pending_tokens: PendingTokenMap,
+) -> None:
+    """Accumulate completed results and route work items through remaining transforms.
+
+    Extracted from check_aggregation_timeouts and flush_remaining_aggregation_buffers
+    which had identical post-flush continuation loops.
+    """
+    accumulate_row_outcomes(completed_results, counters, sinks, pending_tokens)
+
+    for work_item in work_items:
+        if work_item.current_node_id is None:
+            raise OrchestrationInvariantError("Aggregation continuation work item missing current_node_id")
+        downstream_results = processor.process_token(
+            token=work_item.token,
+            ctx=ctx,
+            current_node_id=work_item.current_node_id,
+            coalesce_node_id=work_item.coalesce_node_id,
+            coalesce_name=work_item.coalesce_name,
+        )
+        accumulate_row_outcomes(downstream_results, counters, sinks, pending_tokens)
+
+
 def check_aggregation_timeouts(
     config: PipelineConfig,
     processor: RowProcessor,
     ctx: PluginContext,
-    pending_tokens: dict[str, list[tuple[TokenInfo, PendingOutcome | None]]],
+    pending_tokens: PendingTokenMap,
     agg_transform_lookup: dict[str, AggNodeEntry] | None = None,
 ) -> AggregationFlushResult:
     """Check and flush any aggregations whose timeout has expired.
@@ -113,8 +148,7 @@ def check_aggregation_timeouts(
     processing, not just at end-of-source. Checking BEFORE buffering ensures
     timed-out batches don't include the newly arriving row.
 
-    Bug fix: P1-2026-01-22-aggregation-timeout-idle-never-fires
-    Before this fix, should_flush() was only called from buffer_row(),
+    Before this was added, should_flush() was only called from buffer_row(),
     meaning timeouts never fired during idle periods between rows.
 
     KNOWN LIMITATION (True Idle):
@@ -162,7 +196,7 @@ def check_aggregation_timeouts(
         # Skip count triggers — they are handled in buffer_row.
         # Timeout AND condition triggers can be time-based (e.g.,
         # batch_age_seconds >= 5) and must flush before the next row is buffered.
-        # P1-2026-02-05: condition triggers were previously skipped here.
+        # Condition triggers can also be time-based and must be checked here.
         if trigger_type not in (TriggerType.TIMEOUT, TriggerType.CONDITION):
             continue
 
@@ -189,41 +223,24 @@ def check_aggregation_timeouts(
             trigger_type=trigger_type,
         )
 
-        # Handle completed results (terminal tokens — go to sink)
-        accumulate_row_outcomes(completed_results, counters, config.sinks, pending_tokens)
+        _process_flush_results(
+            completed_results,
+            work_items,
+            processor,
+            ctx,
+            counters,
+            config.sinks,
+            pending_tokens,
+        )
 
-        # Process work items through remaining transforms
-        # These tokens need to continue through the pipeline
-        for work_item in work_items:
-            if work_item.current_node_id is None:
-                raise RuntimeError("Aggregation continuation work item missing current_node_id")
-            downstream_results = processor.process_token(
-                token=work_item.token,
-                ctx=ctx,
-                current_node_id=work_item.current_node_id,
-                coalesce_node_id=work_item.coalesce_node_id,
-                coalesce_name=work_item.coalesce_name,
-            )
-            accumulate_row_outcomes(downstream_results, counters, config.sinks, pending_tokens)
-
-    return AggregationFlushResult(
-        rows_succeeded=counters.rows_succeeded,
-        rows_failed=counters.rows_failed,
-        rows_routed=counters.rows_routed,
-        rows_quarantined=counters.rows_quarantined,
-        rows_coalesced=counters.rows_coalesced,
-        rows_forked=counters.rows_forked,
-        rows_expanded=counters.rows_expanded,
-        rows_buffered=counters.rows_buffered,
-        routed_destinations=dict(counters.routed_destinations),
-    )
+    return counters.to_flush_result()
 
 
 def flush_remaining_aggregation_buffers(
     config: PipelineConfig,
     processor: RowProcessor,
     ctx: PluginContext,
-    pending_tokens: dict[str, list[tuple[TokenInfo, PendingOutcome | None]]],
+    pending_tokens: PendingTokenMap,
 ) -> AggregationFlushResult:
     """Flush remaining aggregation buffers at end-of-source.
 
@@ -277,31 +294,14 @@ def flush_remaining_aggregation_buffers(
             trigger_type=TriggerType.END_OF_SOURCE,
         )
 
-        # Handle completed results (terminal tokens — go to sink)
-        accumulate_row_outcomes(completed_results, counters, config.sinks, pending_tokens)
+        _process_flush_results(
+            completed_results,
+            work_items,
+            processor,
+            ctx,
+            counters,
+            config.sinks,
+            pending_tokens,
+        )
 
-        # Process work items through remaining transforms
-        # These tokens need to continue through the pipeline
-        for work_item in work_items:
-            if work_item.current_node_id is None:
-                raise RuntimeError("Aggregation continuation work item missing current_node_id")
-            downstream_results = processor.process_token(
-                token=work_item.token,
-                ctx=ctx,
-                current_node_id=work_item.current_node_id,
-                coalesce_node_id=work_item.coalesce_node_id,
-                coalesce_name=work_item.coalesce_name,
-            )
-            accumulate_row_outcomes(downstream_results, counters, config.sinks, pending_tokens)
-
-    return AggregationFlushResult(
-        rows_succeeded=counters.rows_succeeded,
-        rows_failed=counters.rows_failed,
-        rows_routed=counters.rows_routed,
-        rows_quarantined=counters.rows_quarantined,
-        rows_coalesced=counters.rows_coalesced,
-        rows_forked=counters.rows_forked,
-        rows_expanded=counters.rows_expanded,
-        rows_buffered=counters.rows_buffered,
-        routed_destinations=dict(counters.routed_destinations),
-    )
+    return counters.to_flush_result()

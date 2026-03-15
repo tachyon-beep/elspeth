@@ -43,6 +43,7 @@ from elspeth.engine.processor import (
     MAX_WORK_QUEUE_ITERATIONS,
     DAGTraversalContext,
     RowProcessor,
+    _FlushContext,
 )
 from elspeth.engine.retry import RetryManager
 from elspeth.engine.spans import SpanFactory
@@ -838,7 +839,7 @@ class TestAggregationFailureMatrix:
             patch.object(processor._aggregation_executor, "execute_flush", side_effect=execute_flush_side_effect),
             patch.object(processor._recorder, "record_token_outcome"),
             patch.object(processor, "_emit_transform_completed"),
-            pytest.raises(ValueError, match="same number of output rows"),
+            pytest.raises(OrchestrationInvariantError, match="same number of output rows"),
         ):
             processor.process_row(
                 row_index=0,
@@ -875,7 +876,7 @@ class TestAggregationFailureMatrix:
                 trigger_type=TriggerType.TIMEOUT,
             )
 
-        assert results == []
+        assert results == ()
         assert len(child_items) == 1
         assert child_items[0].current_node_id == downstream_node
 
@@ -1653,6 +1654,48 @@ class TestDrainWorkQueueIterationGuard:
     def test_max_iterations_constant_is_reasonable(self) -> None:
         """MAX_WORK_QUEUE_ITERATIONS should be at least 1000."""
         assert MAX_WORK_QUEUE_ITERATIONS >= 1000
+
+
+# =============================================================================
+# _process_single_token: Inner Traversal Cycle Guard
+# =============================================================================
+
+
+class TestInnerTraversalCycleGuard:
+    """Tests for the inner_iterations cycle guard in _process_single_token."""
+
+    def test_cycle_in_node_to_next_raises(self) -> None:
+        """Cycle in node_to_next map triggers inner traversal iteration guard.
+
+        Uses structural nodes (not in node_to_plugin) to avoid DB interactions
+        during traversal — structural nodes are traversed but not executed.
+        """
+        _db, recorder = _make_recorder()
+
+        # Build a topology with a cycle of structural nodes: s-1 -> s-2 -> s-1
+        s1 = NodeID("s-1")
+        s2 = NodeID("s-2")
+
+        processor = _make_processor(
+            recorder,
+            node_to_plugin={},  # no plugin nodes — all structural
+            node_to_next={
+                NodeID("source-0"): s1,
+                s1: s2,
+                s2: s1,  # cycle back
+            },
+            node_step_map={NodeID("source-0"): 0, s1: 1, s2: 2},
+            first_transform_node_id=None,
+        )
+        ctx = make_context(landscape=recorder)
+        token = make_token_info(data={"value": 1})
+
+        with pytest.raises(OrchestrationInvariantError, match=r"Inner traversal exceeded.*Possible cycle"):
+            processor._process_single_token(
+                token=token,
+                ctx=ctx,
+                current_node_id=s1,
+            )
 
 
 # =============================================================================
@@ -2986,7 +3029,7 @@ class TestTerminalWorkItemInvariant:
         )
 
         assert result is not None
-        assert not isinstance(result, list)
+        assert not isinstance(result, tuple)
         assert result.outcome == RowOutcome.COMPLETED
         assert result.sink_name == "terminal_sink"
 
@@ -3080,7 +3123,7 @@ class TestGateSinkRoutingNotifiesCoalesce:
             )
 
         # Gate should produce ROUTED result
-        if isinstance(result, list):
+        if isinstance(result, tuple):
             routed = [r for r in result if r.outcome == RowOutcome.ROUTED]
             assert len(routed) == 1
             assert routed[0].sink_name == "error_sink"
@@ -3173,7 +3216,7 @@ class TestGateSinkRoutingNotifiesCoalesce:
             )
 
         # Result must be a list: ROUTED (current) + FAILED (sibling)
-        assert isinstance(result, list)
+        assert isinstance(result, tuple)
         assert len(result) == 2
 
         routed = [r for r in result if r.outcome == RowOutcome.ROUTED]
@@ -3252,7 +3295,7 @@ class TestGateSinkRoutingNotifiesCoalesce:
 
         # Should still route correctly
         assert result is not None
-        assert not isinstance(result, list)
+        assert not isinstance(result, tuple)
         assert result.outcome == RowOutcome.ROUTED
         assert result.sink_name == "error_sink"
 
@@ -3584,3 +3627,36 @@ class TestProcessorOutcomeTypes:
         gt = _GateTerminal(result=Mock())
         with pytest.raises(AttributeError):
             gt.result = Mock()  # type: ignore[misc]
+
+
+class TestFlushContextImmutability:
+    """_FlushContext.buffered_tokens must be truly immutable."""
+
+    def test_buffered_tokens_is_immutable(self) -> None:
+        """buffered_tokens must not be mutable after construction.
+
+        Bug: frozen=True prevents reassignment but list contents remain mutable.
+        Fix: store as tuple instead of list.
+        """
+        token = make_token_info(data={"value": 1})
+        original_list = [token]
+
+        fctx = _FlushContext(
+            node_id=NodeID("node-1"),
+            transform=Mock(),
+            settings=Mock(),
+            buffered_tokens=original_list,
+            batch_id="batch-1",
+            error_msg="test",
+            expand_parent_token=token,
+            triggering_token=None,
+            coalesce_node_id=None,
+            coalesce_name=None,
+        )
+
+        # buffered_tokens must be a tuple (immutable), not a list
+        assert isinstance(fctx.buffered_tokens, tuple)
+
+        # Mutating the original list must not affect the frozen context
+        original_list.append(make_token_info(data={"value": 2}))
+        assert len(fctx.buffered_tokens) == 1

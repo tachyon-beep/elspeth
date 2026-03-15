@@ -15,15 +15,22 @@ import os
 from collections.abc import Sequence
 from typing import IO, TYPE_CHECKING, Any, Literal
 
+from pydantic import field_validator
+
 from elspeth.contracts import ArtifactDescriptor, PluginSchema
 
 if TYPE_CHECKING:
-    from elspeth.contracts.schema_contract import SchemaContract
     from elspeth.contracts.sink import OutputValidationResult
-from elspeth.contracts.contexts import LifecycleContext, SinkContext
-from elspeth.contracts.header_modes import HeaderMode, resolve_headers
+from elspeth.contracts.contexts import SinkContext
 from elspeth.plugins.infrastructure.base import BaseSink
 from elspeth.plugins.infrastructure.config_base import SinkPathConfig
+from elspeth.plugins.infrastructure.display_headers import (
+    get_effective_display_headers,
+    init_display_headers,
+    resolve_contract_from_context_if_needed,
+    resolve_display_headers_if_needed,
+    set_resume_field_resolution,
+)
 from elspeth.plugins.infrastructure.schema_factory import create_schema_from_config
 
 
@@ -40,6 +47,24 @@ class CSVSinkConfig(SinkPathConfig):
     encoding: str = "utf-8"
     validate_input: bool = False  # Optional runtime validation of incoming rows
     mode: Literal["write", "append"] = "write"
+
+    @field_validator("delimiter")
+    @classmethod
+    def _validate_delimiter(cls, v: str) -> str:
+        if len(v) != 1:
+            raise ValueError(f"delimiter must be a single character, got {v!r}")
+        return v
+
+    @field_validator("encoding")
+    @classmethod
+    def _validate_encoding(cls, v: str) -> str:
+        import codecs
+
+        try:
+            codecs.lookup(v)
+        except LookupError as exc:
+            raise ValueError(f"unknown encoding: {v!r}") from exc
+        return v
 
 
 class CSVSink(BaseSink):
@@ -128,7 +153,7 @@ class CSVSink(BaseSink):
 
         # When display headers are configured, the file contains display names
         # Map expected fields to their display equivalents for comparison
-        display_map = self._get_effective_display_headers()
+        display_map = get_effective_display_headers(self)
         if display_map is not None:
             # Map normalized -> display for comparison against file headers
             expected = [display_map.get(f, f) for f in expected_normalized]
@@ -171,17 +196,8 @@ class CSVSink(BaseSink):
         self.validate_input = cfg.validate_input
         self._mode = cfg.mode
 
-        # Header mode configuration
-        self._headers_mode: HeaderMode = cfg.headers_mode
-        self._headers_custom_mapping: dict[str, str] | None = cfg.headers_mapping
-        # Populated lazily on first write if headers mode is ORIGINAL
-        # Must be lazy because field resolution is only recorded AFTER first source iteration,
-        # which happens after on_start() is called.
-        self._resolved_display_headers: dict[str, str] | None = None
-        self._display_headers_resolved: bool = False
-
-        # Output contract for header resolution (set via set_output_contract)
-        self._output_contract: SchemaContract | None = None
+        # Display header state (shared module handles all modes)
+        init_display_headers(self, cfg.headers_mode, cfg.headers_mapping)
 
         # Store schema config for audit trail
         # PathConfig (via DataPluginConfig) ensures schema_config is not None
@@ -240,11 +256,11 @@ class CSVSink(BaseSink):
         # Lazy resolution of contract from context for headers: original mode
         # ctx.contract is set by orchestrator after first valid source row
         # MUST happen BEFORE display header resolution (contract takes precedence over Landscape)
-        self._resolve_contract_from_context_if_needed(ctx)
+        resolve_contract_from_context_if_needed(self, ctx)
 
         # Lazy resolution of display headers from Landscape (fallback when no contract)
         # Must happen AFTER source iteration begins (when field resolution is recorded)
-        self._resolve_display_headers_if_needed(ctx)
+        resolve_display_headers_if_needed(self, ctx)
 
         # Lazy initialization - open file on first write
         if self._file is None:
@@ -349,7 +365,7 @@ class CSVSink(BaseSink):
 
                 # In append mode with display headers, we need to map existing file headers
                 # back to data field names for the DictWriter
-                display_map = self._get_effective_display_headers()
+                display_map = get_effective_display_headers(self)
                 if display_map is not None:
                     # Reverse the display map to get display_name -> data_field
                     reverse_map = {v: k for k, v in display_map.items()}
@@ -442,7 +458,7 @@ class CSVSink(BaseSink):
             data_fields = list(row.keys())
 
         # Apply display header mapping if configured
-        display_map = self._get_effective_display_headers()
+        display_map = get_effective_display_headers(self)
         if display_map is None:
             return data_fields, data_fields
 
@@ -451,149 +467,8 @@ class CSVSink(BaseSink):
         display_fields = [display_map.get(field, field) for field in data_fields]
         return data_fields, display_fields
 
-    def _get_effective_display_headers(self) -> dict[str, str] | None:
-        """Get the effective display header mapping.
-
-        Priority order:
-        1. NORMALIZED mode - no mapping
-        2. CUSTOM mode - use custom mapping from 'headers' config
-        3. ORIGINAL mode with contract - use resolve_headers()
-        4. ORIGINAL mode with resolved headers (from Landscape query)
-        5. None (fallback to normalized names)
-
-        Returns:
-            Dict mapping normalized field name -> display name, or None if no
-            display headers are configured or if using NORMALIZED mode.
-        """
-        if self._headers_mode == HeaderMode.NORMALIZED:
-            return None
-
-        if self._headers_mode == HeaderMode.CUSTOM:
-            return self._headers_custom_mapping
-
-        # ORIGINAL mode - use contract to resolve headers
-        if self._output_contract is not None:
-            return resolve_headers(
-                contract=self._output_contract,
-                mode=HeaderMode.ORIGINAL,
-                custom_mapping=None,
-            )
-        # Fallback to lazily-resolved display headers from Landscape
-        if self._resolved_display_headers is not None:
-            return self._resolved_display_headers
-        return None
-
-    # === Contract Support ===
-
-    def set_output_contract(self, contract: SchemaContract) -> None:
-        """Set output contract for header resolution.
-
-        When headers mode is ORIGINAL, this contract is used to map
-        normalized field names back to their original source header names.
-
-        Args:
-            contract: Schema contract with field metadata including original names
-        """
-        self._output_contract = contract
-
-    def get_output_contract(self) -> SchemaContract | None:
-        """Get the output contract.
-
-        Returns:
-            The SchemaContract if set, None otherwise
-        """
-        return self._output_contract
-
-    def _resolve_contract_from_context_if_needed(self, ctx: SinkContext) -> None:
-        """Lazily resolve output contract from context for headers: original mode.
-
-        Called on first write() to capture ctx.contract if _output_contract is not
-        already set. This allows the new headers: original mode to work without
-        explicit orchestrator wiring of set_output_contract().
-
-        The orchestrator sets ctx.contract after the first valid source row is
-        processed (see orchestrator/core.py line ~1164). By the time write() is
-        called, the contract is available.
-
-        Note:
-            This only has effect when:
-            1. headers mode is ORIGINAL
-            2. _output_contract is not already set (via set_output_contract)
-            3. ctx.contract is available
-
-        Args:
-            ctx: Plugin context with potential contract from orchestrator
-        """
-        # Only resolve if:
-        # 1. We're in ORIGINAL mode (otherwise contract is irrelevant)
-        # 2. Contract isn't already set (explicit set_output_contract takes precedence)
-        # 3. Context has a contract to provide
-        if self._headers_mode != HeaderMode.ORIGINAL:
-            return
-        if self._output_contract is not None:
-            return  # Already set explicitly
-        if ctx.contract is not None:
-            self._output_contract = ctx.contract
-
     def set_resume_field_resolution(self, resolution_mapping: dict[str, str]) -> None:
-        """Set field resolution mapping for resume validation.
-
-        Called by CLI during `elspeth resume` to provide the source field resolution
-        mapping BEFORE calling validate_output_target(). This allows validation to
-        correctly compare expected display names against existing file headers when
-        headers mode is ORIGINAL.
-
-        Args:
-            resolution_mapping: Dict mapping original header name -> normalized field name.
-                This is the same format returned by Landscape.get_source_field_resolution().
-        """
-        if self._headers_mode != HeaderMode.ORIGINAL:
-            return  # Only needed for ORIGINAL mode
-
-        # Build reverse mapping: normalized -> original (display name)
-        self._resolved_display_headers = {v: k for k, v in resolution_mapping.items()}
-        self._display_headers_resolved = True
-
-    def _resolve_display_headers_if_needed(self, ctx: SinkContext) -> None:
-        """Lazily resolve display headers from Landscape if headers mode is ORIGINAL.
-
-        Called on first write() to fetch field resolution mapping. This MUST be lazy
-        because the orchestrator calls sink.on_start() BEFORE source.load() iterates,
-        and record_source_field_resolution() only happens after the first source row.
-
-        Args:
-            ctx: Plugin context with Landscape access.
-
-        Raises:
-            ValueError: If Landscape is unavailable or source didn't record resolution.
-        """
-        if self._display_headers_resolved:
-            return  # Already resolved (or not needed)
-
-        self._display_headers_resolved = True
-
-        if self._headers_mode != HeaderMode.ORIGINAL:
-            return  # Nothing to resolve
-
-        # Skip if contract already provides header resolution (takes precedence)
-        if self._output_contract is not None:
-            return
-
-        # Fetch source field resolution from Landscape
-        if ctx.landscape is None:
-            raise ValueError(
-                "headers: original requires Landscape to be available. This is a framework bug - context should have landscape set."
-            )
-
-        resolution_mapping = ctx.landscape.get_source_field_resolution(ctx.run_id)
-        if resolution_mapping is None:
-            raise ValueError(
-                "headers: original but source did not record field resolution. "
-                "Ensure source uses normalize_fields: true to enable header restoration."
-            )
-
-        # Build reverse mapping: final (normalized) -> original
-        self._resolved_display_headers = {v: k for k, v in resolution_mapping.items()}
+        set_resume_field_resolution(self, resolution_mapping)
 
     def flush(self) -> None:
         """Flush buffered data to disk with fsync for durability.
@@ -616,18 +491,3 @@ class CSVSink(BaseSink):
             self._file.close()
             self._file = None
             self._writer = None
-
-    # === Lifecycle Hooks ===
-
-    def on_start(self, ctx: LifecycleContext) -> None:
-        """Called before processing begins.
-
-        Note: ORIGINAL header resolution is done lazily in write() because
-        the field resolution mapping is only recorded AFTER source iteration begins,
-        which happens after on_start() is called.
-        """
-        pass
-
-    def on_complete(self, ctx: LifecycleContext) -> None:
-        """Called after processing completes."""
-        pass

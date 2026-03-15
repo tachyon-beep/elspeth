@@ -10,6 +10,8 @@ Covers:
 
 from __future__ import annotations
 
+from types import MappingProxyType
+
 import pytest
 
 from elspeth.plugins.transforms.llm.multi_query import OutputFieldConfig, OutputFieldType
@@ -154,12 +156,13 @@ class TestValidateJsonObjectResponse:
         assert result.reason == "invalid_json"
 
     def test_nested_object_returns_success(self) -> None:
-        """Nested JSON object should return ValidationSuccess."""
+        """Nested JSON object should return ValidationSuccess with deep-frozen contents."""
         content = '{"outer": {"inner": "value"}, "list": [1, 2]}'
         result = validate_json_object_response(content)
         assert isinstance(result, ValidationSuccess)
-        assert result.data["outer"] == {"inner": "value"}
-        assert result.data["list"] == [1, 2]
+        # deep_freeze converts inner dicts to MappingProxyType and lists to tuples
+        assert result.data["outer"] == MappingProxyType({"inner": "value"})
+        assert result.data["list"] == (1, 2)
 
     def test_empty_object_returns_success(self) -> None:
         """Empty JSON object {} should return ValidationSuccess."""

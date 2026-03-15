@@ -235,7 +235,7 @@ class TestNodeLoader:
         assert result.schema_hash == "sch123"
         assert result.sequence_in_pipeline == 3
         assert result.schema_mode == "fixed"
-        assert result.schema_fields == schema_fields
+        assert result.schema_fields == tuple(schema_fields)
 
     def test_valid_load_minimal_fields(self) -> None:
         sa_row = self._make_node_row()
@@ -278,18 +278,18 @@ class TestNodeLoader:
         result = loader.load(sa_row)
         assert result.schema_fields is None
 
-    def test_schema_fields_json_valid_json_becomes_list(self) -> None:
+    def test_schema_fields_json_valid_json_becomes_tuple(self) -> None:
         fields = [{"name": "amount", "type": "float"}]
         sa_row = self._make_node_row(schema_fields_json=json.dumps(fields))
         loader = NodeLoader()
         result = loader.load(sa_row)
-        assert result.schema_fields == fields
+        assert result.schema_fields == tuple(fields)
 
     def test_schema_fields_json_empty_list(self) -> None:
         sa_row = self._make_node_row(schema_fields_json="[]")
         loader = NodeLoader()
         result = loader.load(sa_row)
-        assert result.schema_fields == []
+        assert result.schema_fields == ()
 
     def test_schema_fields_json_null_raises_value_error(self) -> None:
         sa_row = self._make_node_row(schema_fields_json="null")

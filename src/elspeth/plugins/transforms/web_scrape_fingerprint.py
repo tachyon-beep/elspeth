@@ -35,7 +35,6 @@ def compute_fingerprint(content: str, mode: str) -> str:
     if mode == "content":
         content = normalize_for_fingerprint(content)
     elif mode == "structure":
-        # Structure mode not implemented yet - defer to later task
         raise NotImplementedError("Structure mode not yet implemented")
     # mode == "full" uses raw content as-is
 

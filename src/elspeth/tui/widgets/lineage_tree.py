@@ -63,7 +63,7 @@ class LineageTree:
         source_name = source["name"]
         source_node_id = source["node_id"]
         source_node = TreeNode(
-            label=f"Source: {source_name}",
+            label=f"Source: {source_name or '(unknown)'}",
             node_id=source_node_id,
             node_type="source",
         )
@@ -91,7 +91,14 @@ class LineageTree:
             transform_name = transform["name"]
             transform_node_id = transform["node_id"]
             raw_type = transform["node_type"]
-            type_label = _TYPE_LABELS[raw_type]
+            try:
+                type_label = _TYPE_LABELS[raw_type]
+            except KeyError:
+                raise ValueError(
+                    f"Unknown node type {raw_type!r} for transform {transform_name!r}. "
+                    f"Update _TYPE_LABELS in lineage_tree.py to include this type. "
+                    f"Known types: {sorted(_TYPE_LABELS)}"
+                ) from None
             transform_node = TreeNode(
                 label=f"{type_label}: {transform_name}",
                 node_id=transform_node_id,

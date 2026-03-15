@@ -40,6 +40,7 @@ from elspeth.contracts import (
     NodeStateFailed,
     NodeStateOpen,
     NodeStateStatus,
+    ReproducibilityGrade,
     RoutingEvent,
     RoutingSpec,
     Row,
@@ -66,11 +67,10 @@ from elspeth.core.landscape.lineage import LineageResult, explain
 from elspeth.core.landscape.query_repository import QueryRepository
 from elspeth.core.landscape.recorder import LandscapeRecorder
 from elspeth.core.landscape.reproducibility import (
-    ReproducibilityGrade,
     compute_grade,
     update_grade_after_purge,
 )
-from elspeth.core.landscape.row_data import RowDataResult, RowDataState
+from elspeth.core.landscape.row_data import CallDataResult, CallDataState, RowDataResult, RowDataState
 from elspeth.core.landscape.run_lifecycle_repository import RunLifecycleRepository
 from elspeth.core.landscape.schema import (
     artifacts_table,
@@ -96,6 +96,8 @@ __all__ = [
     "BatchOutput",
     "CSVFormatter",
     "Call",
+    "CallDataResult",
+    "CallDataState",
     "CallStatus",
     "CallType",
     "Checkpoint",

@@ -11,7 +11,7 @@ import hmac
 
 import pytest
 
-from elspeth.contracts.payload_store import IntegrityError, PayloadStore
+from elspeth.contracts.payload_store import IntegrityError, PayloadNotFoundError, PayloadStore
 
 
 class MockPayloadStore:
@@ -31,7 +31,7 @@ class MockPayloadStore:
 
     def retrieve(self, content_hash: str) -> bytes:
         if content_hash not in self._storage:
-            raise KeyError(f"Payload not found: {content_hash}")
+            raise PayloadNotFoundError(content_hash)
         content = self._storage[content_hash]
         actual_hash = hashlib.sha256(content).hexdigest()
         if not hmac.compare_digest(actual_hash, content_hash):

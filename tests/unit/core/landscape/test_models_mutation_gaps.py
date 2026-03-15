@@ -40,6 +40,7 @@ from elspeth.contracts import (
     NodeStatePending,
     NodeStateStatus,
     NodeType,
+    ReproducibilityGrade,
     RoutingEvent,
     RoutingMode,
     Row,
@@ -116,7 +117,7 @@ class TestRunDataclass:
             canonical_version="sha256-rfc8785-v1",
             status=RunStatus.COMPLETED,
             completed_at=now,
-            reproducibility_grade="FULL_REPRODUCIBLE",
+            reproducibility_grade=ReproducibilityGrade.FULL_REPRODUCIBLE,
             export_status=ExportStatus.COMPLETED,
             export_error=None,
             exported_at=now,
@@ -124,7 +125,7 @@ class TestRunDataclass:
             export_sink="output",
         )
         assert run.completed_at == now
-        assert run.reproducibility_grade == "FULL_REPRODUCIBLE"
+        assert run.reproducibility_grade == ReproducibilityGrade.FULL_REPRODUCIBLE
         assert run.export_status == ExportStatus.COMPLETED
         assert run.export_format == "csv"
 

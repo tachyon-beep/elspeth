@@ -137,6 +137,22 @@ class TestLLMCallRequest:
         with pytest.raises(AttributeError):
             obj.model = "gpt-3.5"  # type: ignore[misc]
 
+    def test_pre_tupled_messages_inner_dicts_frozen(self) -> None:
+        """Messages passed as a tuple must still have inner dicts deep-frozen."""
+        from types import MappingProxyType
+
+        inner = {"role": "user", "content": "Hello"}
+        obj = LLMCallRequest(
+            model="gpt-4",
+            messages=(inner,),
+            temperature=0.0,
+            provider="openai",
+        )
+        # Inner message should be MappingProxyType, not a mutable dict
+        assert isinstance(obj.messages[0], MappingProxyType)
+        # Original dict should not have been mutated into proxy
+        assert isinstance(inner, dict)
+
     def test_extra_kwargs_collision_raises(self) -> None:
         with pytest.raises(ValueError, match="reserved key"):
             LLMCallRequest(

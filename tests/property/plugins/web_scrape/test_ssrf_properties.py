@@ -20,7 +20,7 @@ import socket
 from unittest.mock import patch
 
 import pytest
-from hypothesis import given, settings
+from hypothesis import assume, given, settings
 from hypothesis import strategies as st
 
 from elspeth.core.security.web import (
@@ -133,7 +133,7 @@ class TestBlockedIPv4Ranges:
     def test_all_blocked_ipv4_rejected(self, data: tuple[str, ipaddress.IPv4Network]) -> None:
         """Property: Any IPv4 in BLOCKED_IP_RANGES raises SSRFBlockedError."""
         ip_str, _network = data
-        with pytest.raises(SSRFBlockedError, match="Blocked IP range"):
+        with pytest.raises(SSRFBlockedError, match=r"[Bb]locked IP range"):
             _validate_ip_address(ip_str)
 
     @given(data=blocked_ipv4_from_range())
@@ -153,7 +153,7 @@ class TestBlockedIPv6Ranges:
     def test_all_blocked_ipv6_rejected(self, data: tuple[str, ipaddress.IPv6Network]) -> None:
         """Property: Any IPv6 in blocked ranges raises SSRFBlockedError."""
         ip_str, _network = data
-        with pytest.raises(SSRFBlockedError, match="Blocked IP range"):
+        with pytest.raises(SSRFBlockedError, match=r"[Bb]locked IP range"):
             _validate_ip_address(ip_str)
 
 
@@ -434,3 +434,74 @@ class TestFullPathValidation:
             result = validate_url_for_ssrf("https://example.com/")
         # IPv4 preferred for compatibility
         assert result.resolved_ip == safe_ip
+
+
+# =============================================================================
+# Property Tests: Allowlist-Blocklist Interaction Invariants
+# =============================================================================
+
+
+class TestAllowlistBlocklistInvariants:
+    """Properties governing the interaction between allowed_ranges and blocklists."""
+
+    @given(data=blocked_ipv4_from_range())
+    @settings(max_examples=200)
+    def test_allowed_ip_bypasses_blocklist(self, data: tuple[str, ipaddress.IPv4Network]) -> None:
+        """Property: An IP in allowed_ranges is NOT blocked by BLOCKED_IP_RANGES."""
+        ip_str, network = data
+        from elspeth.core.security.web import ALWAYS_BLOCKED_RANGES
+
+        ip = ipaddress.ip_address(ip_str)
+        assume(not any(ip in abr for abr in ALWAYS_BLOCKED_RANGES))
+        allowed = (network,)
+        _validate_ip_address(ip_str, allowed_ranges=allowed)  # Should not raise
+
+    @given(data=blocked_ipv4_from_range())
+    @settings(max_examples=200)
+    def test_without_allowlist_still_blocked(self, data: tuple[str, ipaddress.IPv4Network]) -> None:
+        """Property: Same IPs are blocked when allowed_ranges is empty."""
+        ip_str, _ = data
+        with pytest.raises(SSRFBlockedError):
+            _validate_ip_address(ip_str)
+
+    @given(safe_ip=safe_public_ipv4())
+    @settings(max_examples=100)
+    def test_public_ip_unaffected_by_allowlist(self, safe_ip: str) -> None:
+        """Property: Public IPs pass regardless of allowed_ranges content."""
+        # With no allowlist
+        _validate_ip_address(safe_ip)
+        # With an allowlist for private ranges
+        allowed = (ipaddress.ip_network("10.0.0.0/8"),)
+        _validate_ip_address(safe_ip, allowed_ranges=allowed)
+
+
+class TestAlwaysBlockedInvariants:
+    """Properties: ALWAYS_BLOCKED_RANGES cannot be overridden."""
+
+    @given(
+        ip_int=st.integers(
+            min_value=int(ipaddress.ip_address("169.254.0.0")),
+            max_value=int(ipaddress.ip_address("169.254.255.255")),
+        )
+    )
+    @settings(max_examples=200)
+    def test_link_local_never_allowed(self, ip_int: int) -> None:
+        """Property: Any 169.254.x.x IP is always blocked, even with allowlist."""
+        ip_str = str(ipaddress.IPv4Address(ip_int))
+        allow_private = (ipaddress.ip_network("0.0.0.0/0"), ipaddress.ip_network("::/0"))
+        with pytest.raises(SSRFBlockedError, match="Always-blocked"):
+            _validate_ip_address(ip_str, allowed_ranges=allow_private)
+
+    @given(
+        ip_int=st.integers(
+            min_value=int(ipaddress.ip_address("224.0.0.0")),
+            max_value=int(ipaddress.ip_address("239.255.255.255")),
+        )
+    )
+    @settings(max_examples=100)
+    def test_multicast_never_allowed(self, ip_int: int) -> None:
+        """Property: Any 224.x.x.x-239.x.x.x IP is always blocked."""
+        ip_str = str(ipaddress.IPv4Address(ip_int))
+        allow_private = (ipaddress.ip_network("0.0.0.0/0"),)
+        with pytest.raises(SSRFBlockedError, match="Always-blocked"):
+            _validate_ip_address(ip_str, allowed_ranges=allow_private)

@@ -1,5 +1,6 @@
 """Tests for CLI helper functions."""
 
+from collections.abc import Mapping
 from pathlib import Path
 
 import pytest
@@ -154,7 +155,7 @@ sinks:
     assert bundle.sinks["output"].name == "csv"
     assert bundle.sinks["output"].config["path"] == "output.csv"
 
-    assert isinstance(bundle.aggregations, dict)
+    assert isinstance(bundle.aggregations, Mapping)
     assert len(bundle.aggregations) == 0
 
     # source_settings is the SourceSettings config object

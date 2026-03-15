@@ -368,3 +368,76 @@ class TestDispatchGateAfterRetry:
                 f"expected >= {config.min_dispatch_delay_ms}ms. "
                 f"This indicates the retry bypassed the dispatch gate."
             )
+
+
+class TestCapacityErrorShutdownPath:
+    """Test that shutdown during CapacityError retry exits cleanly.
+
+    Covers the code path at executor.py:500-507 where a retryable error
+    is caught but the shutdown event has been set before the next retry.
+    """
+
+    def test_shutdown_during_capacity_error_retry_returns_error(self) -> None:
+        """Worker exits with shutdown_requested error instead of retrying."""
+        config = PoolConfig(
+            pool_size=1,
+            max_capacity_retry_seconds=10,  # Long timeout — shutdown should preempt
+            min_dispatch_delay_ms=0,
+        )
+
+        call_count = [0]
+
+        def process_fn(row: dict[str, Any], state_id: str) -> TransformResult:
+            call_count[0] += 1
+            if call_count[0] == 1:
+                # First call fails with CapacityError, triggering retry path.
+                # Signal shutdown before the retry attempt.
+                executor._shutdown_event.set()
+                raise CapacityError(status_code=429, message="Rate limit")
+            # Should never reach here — shutdown should preempt retry
+            return TransformResult.success(
+                make_pipeline_row({"result": "unreachable"}),
+                success_reason={"action": "test"},
+            )
+
+        executor = PooledExecutor(config)
+        contexts = [RowContext(row={"id": 1}, state_id="test-1", row_index=0)]
+
+        results = executor.execute_batch(contexts, process_fn)
+
+        assert len(results) == 1
+        assert results[0].result.status == "error"
+        assert results[0].result.reason is not None
+        assert results[0].result.reason["reason"] == "shutdown_requested"
+        assert call_count[0] == 1  # Only one call — no retry after shutdown
+
+    def test_shutdown_during_llm_retryable_error_returns_error(self) -> None:
+        """Shutdown also preempts LLMClientError retry, not just CapacityError."""
+        config = PoolConfig(
+            pool_size=1,
+            max_capacity_retry_seconds=10,
+            min_dispatch_delay_ms=0,
+        )
+
+        call_count = [0]
+
+        def process_fn(row: dict[str, Any], state_id: str) -> TransformResult:
+            call_count[0] += 1
+            if call_count[0] == 1:
+                executor._shutdown_event.set()
+                raise NetworkError("Connection timeout")
+            return TransformResult.success(
+                make_pipeline_row({"result": "unreachable"}),
+                success_reason={"action": "test"},
+            )
+
+        executor = PooledExecutor(config)
+        contexts = [RowContext(row={"id": 1}, state_id="test-1", row_index=0)]
+
+        results = executor.execute_batch(contexts, process_fn)
+
+        assert len(results) == 1
+        assert results[0].result.status == "error"
+        assert results[0].result.reason is not None
+        assert results[0].result.reason["reason"] == "shutdown_requested"
+        assert call_count[0] == 1

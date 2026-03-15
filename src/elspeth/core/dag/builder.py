@@ -11,7 +11,8 @@ from __future__ import annotations
 
 import copy
 import hashlib
-from collections import Counter
+from collections import Counter, defaultdict
+from collections.abc import Mapping, Sequence
 from types import MappingProxyType
 from typing import TYPE_CHECKING, Any
 
@@ -95,11 +96,11 @@ def build_execution_graph(
     cls: type[ExecutionGraph],
     source: SourceProtocol,
     source_settings: SourceSettings,
-    transforms: list[WiredTransform],
-    sinks: dict[str, SinkProtocol],
-    aggregations: dict[str, tuple[TransformProtocol, AggregationSettings]],
-    gates: list[GateSettings],
-    coalesce_settings: list[CoalesceSettings] | None = None,
+    transforms: Sequence[WiredTransform],
+    sinks: Mapping[str, SinkProtocol],
+    aggregations: Mapping[str, tuple[TransformProtocol, AggregationSettings]],
+    gates: Sequence[GateSettings],
+    coalesce_settings: Sequence[CoalesceSettings] | None = None,
 ) -> ExecutionGraph:
     """Build an ExecutionGraph from plugin instances.
 
@@ -158,7 +159,7 @@ def build_execution_graph(
 
         Returns a deep copy to prevent aliasing — mutations to the returned
         dict must not affect the source node's schema or other nodes that
-        received the same schema. BUG FIX: P1-2026-02-14.
+        received the same schema.
         """
         info = graph.get_node_info(nid)
         if info.output_schema_config is not None:
@@ -293,7 +294,7 @@ def build_execution_graph(
             elif SinkName(target) in sink_ids:
                 target_sink_id = sink_ids[SinkName(target)]
                 graph.add_edge(gid, target_sink_id, label=route_label, mode=RoutingMode.MOVE)
-                graph.add_route_label_entry(gid, target, route_label)
+                graph.add_route_label_entry(gid, SinkName(target), route_label)
                 graph.add_route_resolution_entry(gid, route_label, RouteDestination.sink(SinkName(target)))
             else:
                 gate_route_connections.append((gid, route_label, target))
@@ -450,7 +451,7 @@ def build_execution_graph(
     # ===== BUILD PRODUCER REGISTRY =====
     producers: dict[str, tuple[NodeID, str]] = {}
     producer_desc: dict[str, str] = {}
-    gate_connection_route_labels: dict[tuple[NodeID, str], list[str]] = {}
+    gate_connection_route_labels: defaultdict[tuple[NodeID, str], list[str]] = defaultdict(list)
 
     def register_producer(connection_name: str, node_id: NodeID, label: str, description: str) -> None:
         if connection_name in producers:
@@ -497,7 +498,7 @@ def build_execution_graph(
 
     for gate_id, route_label, target in gate_route_connections:
         gate_connection_key = (gate_id, target)
-        gate_connection_route_labels.setdefault(gate_connection_key, []).append(route_label)
+        gate_connection_route_labels[gate_connection_key].append(route_label)
 
         # Multiple routes from the same gate may converge to the same target
         # (e.g., {"true": "next_gate", "false": "next_gate"}). Only register
@@ -596,7 +597,7 @@ def build_execution_graph(
     for connection_name, consumer_id in consumers.items():
         producer_id, producer_label = producers[connection_name]
         if producer_id in gate_node_ids and producer_label != "continue":
-            route_labels = gate_connection_route_labels.get((producer_id, connection_name))
+            route_labels = gate_connection_route_labels[(producer_id, connection_name)]
             if route_labels:
                 for route_label in route_labels:
                     graph.add_edge(producer_id, consumer_id, label=route_label, mode=RoutingMode.MOVE)
@@ -605,10 +606,9 @@ def build_execution_graph(
             # Preserve gate fallthrough semantics for RoutingAction.continue_():
             # when a gate has a single downstream processing target, continue
             # should route there even if explicit route labels are present.
-            existing_target = gate_default_continue_targets.get(producer_id)
-            if existing_target is None:
+            if producer_id not in gate_default_continue_targets:
                 gate_default_continue_targets[producer_id] = consumer_id
-            elif existing_target != consumer_id:
+            elif gate_default_continue_targets[producer_id] != consumer_id:
                 # Ambiguous continue fallthrough (multiple processing targets).
                 # Leave unresolved; GateExecutor will fail closed if a gate
                 # emits continue_() without a unique continuation edge.
@@ -760,8 +760,8 @@ def build_execution_graph(
             cycle = nx.find_cycle(graph._graph)
             cycle_str = " -> ".join(f"{edge[0]}" for edge in cycle)
             raise GraphValidationError(f"Pipeline contains a cycle: {cycle_str}")
-        except nx.NetworkXNoCycle:
-            raise GraphValidationError("Pipeline contains a cycle") from None
+        except nx.NetworkXNoCycle as exc:
+            raise GraphValidationError("Pipeline contains a cycle") from exc
     pipeline_nodes = [node_id for node_id in topo_order if node_id in processing_node_ids]
 
     branch_info: dict[BranchName, BranchInfo] = {}
@@ -831,10 +831,14 @@ def build_execution_graph(
             seen_types: dict[str, tuple[str, bool, str]] = {}  # field → (type, required, first_branch)
             all_observed = False
             for branch_name, schema_dict in branch_to_schema.items():
-                if schema_dict.get("mode") == "observed":
+                if schema_dict["mode"] == "observed":
                     all_observed = True
                     break
-                fields_list = schema_dict.get("fields")
+                # Non-observed schemas must have "fields" — to_dict() always emits
+                # it, and from_dict() rejects explicit schemas without it.  Absence
+                # here is a bug in the upstream schema provider (_best_schema_dict).
+                # See: elspeth-ba100104c2 (coalesce merge should use SchemaConfig).
+                fields_list = schema_dict["fields"]
                 if not fields_list:
                     continue
                 for field_spec in fields_list:
@@ -866,17 +870,24 @@ def build_execution_graph(
             # Propagate contract fields from branches:
             #   guaranteed_fields = intersection (guaranteed by ALL branches)
             #   audit_fields = union (any audit field from any branch)
+            #
+            # Every branch participates — absent guaranteed_fields means "I
+            # guarantee nothing", not "I abstain from the vote".  An undeclared
+            # branch collapses the intersection to ∅, which is correct: we
+            # can't promise downstream what an undeclared branch provides.
+            # (Upstream should provide SchemaConfig objects, not dicts that
+            # may or may not carry optional keys — see bug ticket below.)
             guaranteed_sets: list[set[str]] = []
             audit_sets: list[set[str]] = []
             for schema_dict in branch_to_schema.values():
                 gf = schema_dict.get("guaranteed_fields")
-                if gf is not None:
-                    guaranteed_sets.append(set(gf))
+                guaranteed_sets.append(set(gf) if gf is not None else set())
                 af = schema_dict.get("audit_fields")
                 if af is not None:
                     audit_sets.append(set(af))
-            if guaranteed_sets:
-                merged["guaranteed_fields"] = sorted(set.intersection(*guaranteed_sets))
+            merged_guaranteed = set.intersection(*guaranteed_sets) if guaranteed_sets else set()
+            if merged_guaranteed:
+                merged["guaranteed_fields"] = sorted(merged_guaranteed)
             if audit_sets:
                 merged["audit_fields"] = sorted(set.union(*audit_sets))
             graph.get_node_info(coalesce_id).config["schema"] = merged
@@ -923,7 +934,7 @@ def build_execution_graph(
     # Note: This is a shallow freeze (top-level only). Deep immutability is
     # not enforced because downstream code (SchemaConfig.from_dict, etc.)
     # expects dict/list types, not MappingProxyType/tuple. The aliasing bug
-    # (P1-2026-02-14) is fixed by deep-copying in _best_schema_dict() instead.
+    # The aliasing bug is fixed by deep-copying in _best_schema_dict() instead.
     for _, attrs in graph._graph.nodes(data=True):
         info = attrs["info"]
         if isinstance(info.config, dict):

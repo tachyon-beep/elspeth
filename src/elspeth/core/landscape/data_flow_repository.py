@@ -1,19 +1,15 @@
 """DataFlowRepository: token/row lifecycle, graph structure, and error recording.
 
-Extracted from TokenRecordingMixin + GraphRecordingMixin + ErrorRecordingMixin
-as part of T19 (Landscape mixin -> composed repository decomposition).
-
 Atomic transactions in fork/coalesce/expand preserved via direct
-LandscapeDB.connection() usage. Token ownership validation deduplicated
-between Token and Error recording.
+LandscapeDB.connection() usage.
 """
 
 from __future__ import annotations
 
 import json
-import logging
 from typing import TYPE_CHECKING, Any
 
+import structlog
 from sqlalchemy import select
 
 from elspeth.contracts import (
@@ -57,7 +53,7 @@ from elspeth.core.landscape.schema import (
     validation_errors_table,
 )
 
-logger = logging.getLogger(__name__)
+logger = structlog.get_logger(__name__)
 
 if TYPE_CHECKING:
     from elspeth.contracts.errors import ContractViolation
@@ -69,7 +65,6 @@ if TYPE_CHECKING:
 class DataFlowRepository:
     """Records data flow: tokens, rows, graph structure, and errors.
 
-    Consolidates TokenRecordingMixin + GraphRecordingMixin + ErrorRecordingMixin.
     Atomic transactions in fork/coalesce/expand preserved via direct
     LandscapeDB.connection() usage.
 
@@ -476,7 +471,7 @@ class DataFlowRepository:
                 timestamp = now()
 
                 # Create child token (run_id derived from parent -- already validated)
-                conn.execute(
+                result = conn.execute(
                     tokens_table.insert().values(
                         token_id=child_id,
                         row_id=row_id,
@@ -487,15 +482,23 @@ class DataFlowRepository:
                         created_at=timestamp,
                     )
                 )
+                if result.rowcount == 0:
+                    raise AuditIntegrityError(
+                        f"fork_token: child token INSERT affected zero rows (token_id={child_id}, branch={branch_name!r})"
+                    )
 
                 # Record parent relationship
-                conn.execute(
+                result = conn.execute(
                     token_parents_table.insert().values(
                         token_id=child_id,
                         parent_token_id=parent_token_id,
                         ordinal=ordinal,
                     )
                 )
+                if result.rowcount == 0:
+                    raise AuditIntegrityError(
+                        f"fork_token: token_parent INSERT affected zero rows (child={child_id}, parent={parent_token_id})"
+                    )
 
                 children.append(
                     Token(
@@ -511,7 +514,7 @@ class DataFlowRepository:
 
             # 2. Record parent FORKED outcome in SAME transaction (atomic)
             outcome_id = f"out_{generate_id()[:12]}"
-            conn.execute(
+            result = conn.execute(
                 token_outcomes_table.insert().values(
                     outcome_id=outcome_id,
                     run_id=run_id,
@@ -523,6 +526,10 @@ class DataFlowRepository:
                     expected_branches_json=json.dumps(branches),
                 )
             )
+            if result.rowcount == 0:
+                raise AuditIntegrityError(
+                    f"fork_token: FORKED outcome INSERT affected zero rows (parent={parent_token_id}, outcome_id={outcome_id})"
+                )
 
         return children, fork_group_id
 
@@ -578,7 +585,7 @@ class DataFlowRepository:
 
         with self._db.connection() as conn:
             # Create merged token
-            conn.execute(
+            result = conn.execute(
                 tokens_table.insert().values(
                     token_id=token_id,
                     row_id=row_id,
@@ -588,16 +595,22 @@ class DataFlowRepository:
                     created_at=timestamp,
                 )
             )
+            if result.rowcount == 0:
+                raise AuditIntegrityError(f"coalesce_tokens: merged token INSERT affected zero rows (token_id={token_id})")
 
             # Record all parent relationships
             for ordinal, parent_id in enumerate(parent_token_ids):
-                conn.execute(
+                result = conn.execute(
                     token_parents_table.insert().values(
                         token_id=token_id,
                         parent_token_id=parent_id,
                         ordinal=ordinal,
                     )
                 )
+                if result.rowcount == 0:
+                    raise AuditIntegrityError(
+                        f"coalesce_tokens: token_parent INSERT affected zero rows (child={token_id}, parent={parent_id})"
+                    )
 
         return Token(
             token_id=token_id,
@@ -666,7 +679,7 @@ class DataFlowRepository:
                 timestamp = now()
 
                 # Create child token with expand_group_id (run_id from parent -- already validated)
-                conn.execute(
+                result = conn.execute(
                     tokens_table.insert().values(
                         token_id=child_id,
                         row_id=row_id,
@@ -676,15 +689,23 @@ class DataFlowRepository:
                         created_at=timestamp,
                     )
                 )
+                if result.rowcount == 0:
+                    raise AuditIntegrityError(
+                        f"expand_token: child token INSERT affected zero rows (token_id={child_id}, ordinal={ordinal})"
+                    )
 
                 # Record parent relationship
-                conn.execute(
+                result = conn.execute(
                     token_parents_table.insert().values(
                         token_id=child_id,
                         parent_token_id=parent_token_id,
                         ordinal=ordinal,
                     )
                 )
+                if result.rowcount == 0:
+                    raise AuditIntegrityError(
+                        f"expand_token: token_parent INSERT affected zero rows (child={child_id}, parent={parent_token_id})"
+                    )
 
                 children.append(
                     Token(
@@ -705,7 +726,7 @@ class DataFlowRepository:
             # parent token gets CONSUMED_IN_BATCH instead of EXPANDED.
             if record_parent_outcome:
                 outcome_id = f"out_{generate_id()[:12]}"
-                conn.execute(
+                result = conn.execute(
                     token_outcomes_table.insert().values(
                         outcome_id=outcome_id,
                         run_id=run_id,
@@ -718,6 +739,10 @@ class DataFlowRepository:
                         expected_branches_json=json.dumps({"count": count}),
                     )
                 )
+                if result.rowcount == 0:
+                    raise AuditIntegrityError(
+                        f"expand_token: EXPANDED outcome INSERT affected zero rows (parent={parent_token_id}, outcome_id={outcome_id})"
+                    )
 
         return children, expand_group_id
 
@@ -1069,7 +1094,9 @@ class DataFlowRepository:
         rows = self._ops.execute_fetchall(query)
         return [self._node_loader.load(row) for row in rows]
 
-    def get_node_contracts(self, run_id: str, node_id: str) -> tuple[SchemaContract | None, SchemaContract | None]:
+    def get_node_contracts(
+        self, run_id: str, node_id: str, *, allow_missing: bool = False
+    ) -> tuple[SchemaContract | None, SchemaContract | None]:
         """Get input and output contracts for a node.
 
         Retrieves stored schema contracts and verifies integrity via hash.
@@ -1077,11 +1104,16 @@ class DataFlowRepository:
         Args:
             run_id: Run ID the node belongs to
             node_id: Node ID to query
+            allow_missing: If False (default), crash when node not found
+                (Tier 1 invariant — our audit data must be present).
+                Set to True only for external query paths (MCP, analysis).
 
         Returns:
             Tuple of (input_contract, output_contract), either may be None
+            if the node exists but has no contracts recorded.
 
         Raises:
+            AuditIntegrityError: If node not found and allow_missing is False
             ValueError: If stored contract fails integrity verification
         """
         query = select(
@@ -1091,7 +1123,11 @@ class DataFlowRepository:
         row = self._ops.execute_fetchone(query)
 
         if row is None:
-            return None, None
+            if allow_missing:
+                return None, None
+            raise AuditIntegrityError(
+                f"Node not found in audit trail: node_id={node_id!r}, run_id={run_id!r}. Expected node to exist (Tier 1 data)."
+            )
 
         input_contract: SchemaContract | None = None
         output_contract: SchemaContract | None = None
@@ -1133,12 +1169,12 @@ class DataFlowRepository:
             Edge model
 
         Raises:
-            ValueError: If edge not found (audit integrity violation)
+            AuditIntegrityError: If edge not found (audit integrity violation)
         """
         query = select(edges_table).where(edges_table.c.edge_id == edge_id)
         row = self._ops.execute_fetchone(query)
         if row is None:
-            raise ValueError(
+            raise AuditIntegrityError(
                 f"Audit integrity violation: edge '{edge_id}' not found. "
                 f"A routing_event references a non-existent edge. "
                 f"This indicates database corruption."
@@ -1155,7 +1191,7 @@ class DataFlowRepository:
             Dictionary mapping (from_node_id, label) to edge_id
 
         Raises:
-            ValueError: If run has no edges registered (data corruption).
+            AuditIntegrityError: If run has no edges registered (data corruption).
                 DAG compilation always registers edges, so an empty map
                 indicates the run was never properly initialized.
 
@@ -1171,7 +1207,7 @@ class DataFlowRepository:
             edge_map[(edge.from_node_id, edge.label)] = edge.edge_id
 
         if not edge_map:
-            raise ValueError(
+            raise AuditIntegrityError(
                 f"Run {run_id!r} has no edges registered — cannot build edge map. "
                 f"DAG compilation always registers edges; an empty map indicates "
                 f"the run was never properly initialized or database corruption."
@@ -1352,14 +1388,30 @@ class DataFlowRepository:
                 }
             )
 
+        # row_data may contain NaN/Infinity (valid floats that passed source
+        # validation). Wrap serialization with the same fallback pattern used
+        # in record_validation_error — losing the error record is worse than
+        # using a repr-based hash.
+        try:
+            row_hash = stable_hash(row_data)
+            row_data_json = canonical_json(row_data)
+        except (ValueError, TypeError) as e:
+            logger.warning(
+                "Transform error row data not canonically serializable (using repr fallback): %s",
+                str(e),
+            )
+            row_hash = repr_hash(row_data)
+            metadata = NonCanonicalMetadata.from_error(row_data, e)
+            row_data_json = json.dumps(metadata.to_dict())
+
         self._ops.execute_insert(
             transform_errors_table.insert().values(
                 error_id=error_id,
                 run_id=run_id,
                 token_id=token_id,
                 transform_id=transform_id,
-                row_hash=stable_hash(row_data),
-                row_data_json=canonical_json(row_data),
+                row_hash=row_hash,
+                row_data_json=row_data_json,
                 error_details_json=error_details_json,
                 destination=destination,
                 created_at=now(),

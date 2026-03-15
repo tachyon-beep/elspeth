@@ -92,7 +92,9 @@ class TokenManager:
         """
         # Guard: source must provide contract
         if source_row.contract is None:
-            raise ValueError("SourceRow must have contract to create token. Source plugins must set contract on all valid rows.")
+            raise OrchestrationInvariantError(
+                "SourceRow must have contract to create token. Source plugins must set contract on all valid rows."
+            )
 
         # Convert to PipelineRow
         pipeline_row = source_row.to_pipeline_row()
@@ -140,10 +142,10 @@ class TokenManager:
             TokenInfo with row and token IDs
 
         Raises:
-            ValueError: If source_row is not quarantined
+            OrchestrationInvariantError: If source_row is not quarantined
         """
         if not source_row.is_quarantined:
-            raise ValueError("create_quarantine_token requires a quarantined SourceRow")
+            raise OrchestrationInvariantError("create_quarantine_token requires a quarantined SourceRow")
 
         # For quarantine rows, row may not be a dict (could be malformed external data)
         # Ensure we have a dict for the audit trail
@@ -357,7 +359,7 @@ class TokenManager:
         # Expansion writes child tokens and may record parent EXPANDED outcome
         # atomically in the recorder; validate preconditions first.
         if not output_contract.locked:
-            raise ValueError(
+            raise OrchestrationInvariantError(
                 f"Output contract must be locked before token expansion. "
                 f"Contract mode={output_contract.mode}, locked={output_contract.locked}"
             )
@@ -379,7 +381,7 @@ class TokenManager:
         # CRITICAL: Use deepcopy to prevent nested mutable objects from being
         # shared across expanded children. Same reasoning as fork_token - without
         # this, mutations in one sibling leak to others, corrupting audit trail.
-        # Bug: P2-2026-01-21-expand-token-shared-row-data
+        # Bug fix: expand_token was sharing row_data references across tokens
         child_infos = [
             TokenInfo(
                 row_id=parent_token.row_id,

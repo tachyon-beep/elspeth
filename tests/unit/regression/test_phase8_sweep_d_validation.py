@@ -122,13 +122,19 @@ class TestJsonSinkHeaderCollision:
 
     def test_display_header_collision_raises(self) -> None:
         """Two fields mapping to same display name should raise ValueError."""
-        from elspeth.plugins.sinks.json_sink import JSONSink
+        from elspeth.contracts.header_modes import HeaderMode
+        from elspeth.plugins.infrastructure.display_headers import apply_display_headers
 
-        sink = JSONSink.__new__(JSONSink)
-        sink._get_effective_display_headers = MagicMock(return_value={"field_a": "Output", "field_b": "Output"})  # type: ignore[method-assign]
+        # Minimal stub satisfying DisplayHeaderHost protocol
+        stub = MagicMock()
+        stub._headers_mode = HeaderMode.CUSTOM
+        stub._headers_custom_mapping = {"field_a": "Output", "field_b": "Output"}
+        stub._resolved_display_headers = None
+        stub._display_headers_resolved = True
+        stub._output_contract = None
 
         with pytest.raises(ValueError, match="Header collision"):
-            sink._apply_display_headers([{"field_a": 1, "field_b": 2}])
+            apply_display_headers(stub, [{"field_a": 1, "field_b": 2}])
 
 
 class TestBatchReplicateMaxCopies:
@@ -170,11 +176,16 @@ class TestTracingConfigValidation:
             parse_tracing_config({"provider": "datadog_magic"})
 
     def test_known_providers_accepted(self) -> None:
-        """All known providers should be accepted."""
+        """All known providers should be accepted with required fields."""
         from elspeth.plugins.transforms.llm.tracing import parse_tracing_config
 
-        for provider in ("none", "azure_ai", "langfuse"):
-            result = parse_tracing_config({"provider": provider})
+        configs = {
+            "none": {"provider": "none"},
+            "azure_ai": {"provider": "azure_ai", "connection_string": "InstrumentationKey=test"},
+            "langfuse": {"provider": "langfuse", "public_key": "pk-test", "secret_key": "sk-test"},
+        }
+        for provider, config in configs.items():
+            result = parse_tracing_config(config)
             assert result is not None
             assert result.provider == provider
 
@@ -199,12 +210,12 @@ class TestFieldBaseIdentifierValidation:
         result = get_llm_guaranteed_fields("llm_response")
         assert "llm_response" in result
 
-    def test_invalid_output_prefix_rejected(self) -> None:
-        """output_prefix with special chars should raise ValueError."""
-        from elspeth.plugins.transforms.llm import get_multi_query_guaranteed_fields
+    def test_invalid_response_field_hyphen_rejected(self) -> None:
+        """response_field with hyphens should raise ValueError."""
+        from elspeth.plugins.transforms.llm import get_llm_guaranteed_fields
 
         with pytest.raises(ValueError, match="not a valid Python identifier"):
-            get_multi_query_guaranteed_fields("my-prefix")
+            get_llm_guaranteed_fields("my-prefix")
 
     def test_invalid_audit_field_rejected(self) -> None:
         """response_field in audit function also validated."""
@@ -244,14 +255,14 @@ class TestSecretFingerprintEmptyKey:
 
     def test_empty_bytes_key_rejected(self) -> None:
         """key=b'' should raise ValueError."""
-        from elspeth.core.security.fingerprint import secret_fingerprint
+        from elspeth.core.security import secret_fingerprint
 
         with pytest.raises(ValueError, match="must not be empty"):
             secret_fingerprint("some-secret", key=b"")
 
     def test_valid_key_accepted(self) -> None:
         """Non-empty key should produce valid fingerprint."""
-        from elspeth.core.security.fingerprint import secret_fingerprint
+        from elspeth.core.security import secret_fingerprint
 
         fp = secret_fingerprint("some-secret", key=b"valid-key")
         assert len(fp) == 64  # SHA256 hex digest

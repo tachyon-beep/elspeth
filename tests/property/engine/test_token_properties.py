@@ -32,6 +32,7 @@ from hypothesis import given, settings
 from hypothesis import strategies as st
 
 from elspeth.contracts import TokenInfo
+from elspeth.contracts.errors import OrchestrationInvariantError
 from elspeth.contracts.schema_contract import FieldContract, PipelineRow, SchemaContract
 from elspeth.contracts.types import NodeID
 from elspeth.engine.tokens import TokenManager
@@ -623,7 +624,7 @@ class TestExpandParentPreservationProperties:
 
         import pytest
 
-        with pytest.raises(ValueError, match="locked"):
+        with pytest.raises(OrchestrationInvariantError, match="locked"):
             manager.expand_token(
                 parent_token=parent,
                 expanded_rows=expanded_rows,

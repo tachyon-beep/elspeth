@@ -12,9 +12,10 @@ Also provides content corruption helpers for malformation error injection.
 import html
 import json
 import random as random_module
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
+from types import MappingProxyType
 
 import jinja2
 import jinja2.sandbox
@@ -55,8 +56,16 @@ class WebResponse:
     content: str | bytes
     content_type: str
     status_code: int = 200
-    headers: dict[str, str] | None = None
+    headers: Mapping[str, str] | None = None
     encoding: str = "utf-8"
+
+    def __post_init__(self) -> None:
+        if not (100 <= self.status_code <= 599):
+            raise ValueError(f"WebResponse.status_code must be a valid HTTP status (100-599), got {self.status_code}")
+        if not self.content_type:
+            raise ValueError("WebResponse.content_type must not be empty")
+        if self.headers is not None and not isinstance(self.headers, MappingProxyType):
+            object.__setattr__(self, "headers", MappingProxyType(self.headers))
 
 
 class PresetBank:
@@ -176,7 +185,7 @@ class ContentGenerator:
         """Create Jinja2 SandboxedEnvironment with template helpers.
 
         Uses SandboxedEnvironment to prevent arbitrary code execution
-        in user-provided templates (review condition S3).
+        in user-provided templates.
         """
         env = jinja2.sandbox.SandboxedEnvironment(
             autoescape=True,  # HTML context — auto-escape for safety
@@ -258,9 +267,6 @@ class ContentGenerator:
         words_used = 0
         while words_used < total_words:
             remaining = total_words - words_used
-            if remaining <= 0:
-                break
-
             tag, kind = self._rng.choice(_BLOCK_ELEMENTS)
 
             if kind == "heading":
@@ -301,7 +307,7 @@ class ContentGenerator:
         """Generate HTML from Jinja2 template.
 
         Template rendering errors are caught and return a generic error page
-        (review condition: no Python tracebacks in responses).
+        to avoid leaking Python tracebacks in responses.
         """
         template_str = self._config.template.body
         max_len = self._config.max_template_length
@@ -316,7 +322,7 @@ class ContentGenerator:
                 query_params={},
             )
         except jinja2.TemplateError as exc:
-            logger.warning(
+            logger.error(
                 "template_rendering_failed",
                 error=str(exc),
                 error_type=type(exc).__name__,
@@ -333,8 +339,7 @@ class ContentGenerator:
     def _generate_echo_html(self, path: str, headers: dict[str, str]) -> str:
         """Generate HTML that reflects request information.
 
-        All reflected content is HTML-escaped to prevent XSS
-        (review condition: echo mode XSS sanitization).
+        All reflected content is HTML-escaped to prevent XSS.
         """
         escaped_path = html.escape(path)
         header_rows = "\n".join(f"<tr><td>{html.escape(k)}</td><td>{html.escape(v)}</td></tr>" for k, v in sorted(headers.items()))
@@ -363,7 +368,7 @@ class ContentGenerator:
         page = bank.next()
         return WebResponse(
             content=page["content"],
-            content_type=page.get("content_type", self._config.default_content_type),
+            content_type=page["content_type"],
         )
 
     def _get_preset_bank(self) -> PresetBank:
@@ -415,7 +420,10 @@ class ContentGenerator:
         elif mode == "preset":
             return self._generate_preset_html()
         else:
-            content = self._error_page("Error", f"Unknown content mode: {mode}")
+            # Config mode is Pydantic Literal-validated, so invalid config mode
+            # is impossible. This branch is only reachable via mode_override from
+            # the X-Fake-Content-Mode header (Tier 3 external data).
+            content = f"<html><body>[unknown_mode: {mode!r}]</body></html>"
 
         return WebResponse(
             content=content,

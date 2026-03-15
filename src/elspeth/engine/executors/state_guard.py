@@ -153,6 +153,8 @@ class NodeStateGuard:
             )
         except (FrameworkBugError, AuditIntegrityError):
             raise  # System bugs and audit corruption must crash immediately
+        except (TypeError, AttributeError, KeyError, NameError):
+            raise  # Programming errors in recorder — crash to surface the bug
         except Exception:
             # If we cannot record the failure (e.g. DB is down), log but don't
             # mask the original exception — the caller needs to see it.

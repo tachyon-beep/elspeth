@@ -21,15 +21,24 @@ import time
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any, Literal, Self
 
-from jinja2 import StrictUndefined
+from jinja2 import StrictUndefined, TemplateSyntaxError
 from jinja2.sandbox import SandboxedEnvironment
 from pydantic import BaseModel, Field, field_validator, model_validator
 
 from elspeth.contracts import ArtifactDescriptor, CallStatus, CallType, PluginSchema
-from elspeth.contracts.contexts import LifecycleContext, SinkContext
+from elspeth.contracts.contexts import SinkContext
+from elspeth.contracts.header_modes import HeaderMode, parse_header_mode
 from elspeth.plugins.infrastructure.azure_auth import AzureAuthConfig
 from elspeth.plugins.infrastructure.base import BaseSink
-from elspeth.plugins.infrastructure.config_base import DataPluginConfig
+from elspeth.plugins.infrastructure.config_base import DataPluginConfig, validate_headers_value
+from elspeth.plugins.infrastructure.display_headers import (
+    apply_display_headers,
+    get_effective_display_headers,
+    init_display_headers,
+    resolve_contract_from_context_if_needed,
+    resolve_display_headers_if_needed,
+    set_resume_field_resolution,
+)
 from elspeth.plugins.infrastructure.schema_factory import create_schema_from_config
 
 if TYPE_CHECKING:
@@ -44,6 +53,24 @@ class CSVWriteOptions(BaseModel):
     delimiter: str = ","
     encoding: str = "utf-8"
     include_header: bool = True
+
+    @field_validator("delimiter")
+    @classmethod
+    def _validate_delimiter(cls, v: str) -> str:
+        if len(v) != 1:
+            raise ValueError(f"delimiter must be a single character, got {v!r}")
+        return v
+
+    @field_validator("encoding")
+    @classmethod
+    def _validate_encoding(cls, v: str) -> str:
+        import codecs
+
+        try:
+            codecs.lookup(v)
+        except LookupError as exc:
+            raise ValueError(f"unknown encoding: {v!r}") from exc
+        return v
 
 
 class AzureBlobSinkConfig(DataPluginConfig):
@@ -143,14 +170,27 @@ class AzureBlobSinkConfig(DataPluginConfig):
         default_factory=CSVWriteOptions,
         description="CSV writing options (delimiter, encoding, include_header)",
     )
-    display_headers: dict[str, str] | None = Field(
+    headers: str | dict[str, str] | None = Field(
         default=None,
-        description="Explicit mapping from normalized field names to display names.",
+        description="Header output mode: 'normalized', 'original', or {field: header} mapping",
     )
-    restore_source_headers: bool = Field(
-        default=False,
-        description="Restore original source headers from field normalization (requires normalize_fields at source).",
-    )
+
+    @field_validator("headers")
+    @classmethod
+    def _validate_headers(cls, v: str | dict[str, str] | None) -> str | dict[str, str] | None:
+        return validate_headers_value(v)
+
+    @property
+    def headers_mode(self) -> HeaderMode:
+        if self.headers is not None:
+            return parse_header_mode(self.headers)
+        return HeaderMode.NORMALIZED
+
+    @property
+    def headers_mapping(self) -> dict[str, str] | None:
+        if isinstance(self.headers, dict):
+            return self.headers
+        return None
 
     @model_validator(mode="after")
     def validate_auth_config(self) -> Self:
@@ -170,17 +210,6 @@ class AzureBlobSinkConfig(DataPluginConfig):
             client_id=self.client_id,
             client_secret=self.client_secret,
         )
-        return self
-
-    @model_validator(mode="after")
-    def validate_display_options(self) -> Self:
-        """Validate display header option interactions."""
-        if self.display_headers is not None and self.restore_source_headers:
-            raise ValueError(
-                "Cannot use both display_headers and restore_source_headers. "
-                "Use display_headers for explicit control, or restore_source_headers "
-                "to automatically restore source field names."
-            )
         return self
 
     def get_auth_config(self) -> AzureAuthConfig:
@@ -285,13 +314,20 @@ class AzureBlobSink(BaseSink):
         self._format = cfg.format
         self._overwrite = cfg.overwrite
 
+        # Pre-compile blob path template at init — structural validation.
+        # A TemplateSyntaxError here is a config error that should stop the run
+        # at setup, not be deferred to the first write() call.
+        env = SandboxedEnvironment(undefined=StrictUndefined)
+        try:
+            self._blob_path_compiled = env.from_string(self._blob_path_template)
+        except TemplateSyntaxError as e:
+            raise ValueError(f"Invalid blob_path template: {e}") from e
+
         # CSV options are already validated Pydantic model
         self._csv_options = cfg.csv_options
-        self._display_headers = cfg.display_headers
-        self._restore_source_headers = cfg.restore_source_headers
-        # Populated lazily on first write if restore_source_headers=True
-        self._resolved_display_headers: dict[str, str] | None = None
-        self._display_headers_resolved: bool = False
+
+        # Display header state (shared module handles all modes)
+        init_display_headers(self, cfg.headers_mode, cfg.headers_mapping)
 
         # Store schema config for audit trail
         # DataPluginConfig ensures schema_config is not None
@@ -356,11 +392,10 @@ class AzureBlobSink(BaseSink):
                 This is intentional fail-fast behavior to catch config typos
                 (e.g., {{ runid }} instead of {{ run_id }}).
         """
-        # Use StrictUndefined to fail fast on typos in blob_path template.
-        # A typo like {{ runid }} should error, not silently become empty.
-        env = SandboxedEnvironment(undefined=StrictUndefined)
-        template = env.from_string(self._blob_path_template)
-        return template.render(
+        # Use pre-compiled template (structurally validated in __init__).
+        # Render-time UndefinedError from typos like {{ runid }} still fails
+        # fast here — StrictUndefined was set at compile time.
+        return self._blob_path_compiled.render(
             run_id=ctx.run_id,
             timestamp=datetime.now(tz=UTC).isoformat(),
         )
@@ -435,7 +470,7 @@ class AzureBlobSink(BaseSink):
         """Get data field names and display names for CSV output."""
         data_fields = self._get_fieldnames_from_schema_or_rows(rows)
 
-        display_map = self._get_effective_display_headers()
+        display_map = get_effective_display_headers(self)
         if display_map is None:
             return data_fields, data_fields
 
@@ -492,56 +527,8 @@ class AzureBlobSink(BaseSink):
         lines = [json.dumps(row) for row in rows]
         return "\n".join(lines).encode("utf-8")
 
-    # === Display Header Support ===
-
-    def _get_effective_display_headers(self) -> dict[str, str] | None:
-        """Get the effective display header mapping."""
-        if self._display_headers is not None:
-            return self._display_headers
-        if self._resolved_display_headers is not None:
-            return self._resolved_display_headers
-        return None
-
     def set_resume_field_resolution(self, resolution_mapping: dict[str, str]) -> None:
-        """Set field resolution mapping for resume validation."""
-        if not self._restore_source_headers:
-            return
-
-        self._resolved_display_headers = {v: k for k, v in resolution_mapping.items()}
-        self._display_headers_resolved = True
-
-    def _resolve_display_headers_if_needed(self, ctx: SinkContext) -> None:
-        """Lazily resolve display headers from Landscape if restore_source_headers=True."""
-        if self._display_headers_resolved:
-            return
-
-        self._display_headers_resolved = True
-
-        if not self._restore_source_headers:
-            return
-
-        if ctx.landscape is None:
-            raise ValueError(
-                "restore_source_headers=True requires Landscape to be available. "
-                "This is a framework bug - context should have landscape set."
-            )
-
-        resolution_mapping = ctx.landscape.get_source_field_resolution(ctx.run_id)
-        if resolution_mapping is None:
-            raise ValueError(
-                "restore_source_headers=True but source did not record field resolution. "
-                "Ensure source uses normalize_fields: true to enable header restoration."
-            )
-
-        self._resolved_display_headers = {v: k for k, v in resolution_mapping.items()}
-
-    def _apply_display_headers(self, rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
-        """Apply display header mapping to row keys for JSON outputs."""
-        display_map = self._get_effective_display_headers()
-        if display_map is None:
-            return rows
-
-        return [{display_map[k] if k in display_map else k: v for k, v in row.items()} for row in rows]  # noqa: SIM401
+        set_resume_field_resolution(self, resolution_mapping)
 
     def write(self, rows: list[dict[str, Any]], ctx: SinkContext) -> ArtifactDescriptor:
         """Write a batch of rows to Azure Blob Storage.
@@ -568,11 +555,12 @@ class AzureBlobSink(BaseSink):
                 size_bytes=0,
             )
 
-        self._resolve_display_headers_if_needed(ctx)
+        resolve_contract_from_context_if_needed(self, ctx)
+        resolve_display_headers_if_needed(self, ctx)
 
         output_rows = rows
         if self._format in {"json", "jsonl"}:
-            output_rows = self._apply_display_headers(rows)
+            output_rows = apply_display_headers(self, rows)
 
         # Render the blob path once per instance and reuse it across writes.
         rendered_path = self._get_or_init_blob_path(ctx)
@@ -630,6 +618,8 @@ class AzureBlobSink(BaseSink):
         except ImportError:
             # Re-raise ImportError as-is for clear dependency messaging
             raise
+        except (TypeError, AttributeError, KeyError, NameError):
+            raise  # Programming errors in our auth/client code — crash to surface the bug
         except Exception as e:
             latency_ms = (time.perf_counter() - start_time) * 1000
             error_data: dict[str, Any] = {"type": type(e).__name__, "message": str(e)}
@@ -694,13 +684,3 @@ class AzureBlobSink(BaseSink):
         self._buffered_rows = []
         self._resolved_blob_path = None
         self._has_uploaded = False
-
-    # === Lifecycle Hooks ===
-
-    def on_start(self, ctx: LifecycleContext) -> None:
-        """Called before processing begins."""
-        pass
-
-    def on_complete(self, ctx: LifecycleContext) -> None:
-        """Called after processing completes."""
-        pass

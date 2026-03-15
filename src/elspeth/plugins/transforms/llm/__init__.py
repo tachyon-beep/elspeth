@@ -122,42 +122,12 @@ def get_llm_audit_fields(response_field: str) -> tuple[str, ...]:
     return tuple(f"{response_field}{suffix}" for suffix in LLM_AUDIT_SUFFIXES)
 
 
-def get_multi_query_guaranteed_fields(output_prefix: str) -> tuple[str, ...]:
-    """Return contract-stable metadata field names for multi-query LLM transforms.
-
-    Multi-query transforms emit suffixed output fields (e.g., category_score,
-    category_rationale) but NOT the base field itself. This function returns
-    only the metadata fields (_usage, _model) without the base field.
-
-    For the output mapping fields (score, rationale, etc.), multi-query
-    computes those separately from the output_mapping config.
-
-    Args:
-        output_prefix: Output field prefix (e.g., "category"). Must not be empty
-            or whitespace-only.
-
-    Returns:
-        Tuple of metadata field names that are guaranteed to exist.
-
-    Raises:
-        ValueError: If output_prefix is empty or whitespace-only.
-    """
-    if not output_prefix or not output_prefix.strip():
-        raise ValueError("output_prefix cannot be empty or whitespace-only")
-    if not output_prefix.isidentifier():
-        raise ValueError(
-            f"output_prefix '{output_prefix}' is not a valid Python identifier. "
-            f"Use only letters, digits, and underscores, starting with a letter or underscore."
-        )
-    return tuple(f"{output_prefix}{suffix}" for suffix in MULTI_QUERY_GUARANTEED_SUFFIXES)
-
-
 def populate_llm_metadata_fields(
     output: dict[str, object],
     field_prefix: str,
     *,
     usage: TokenUsage | None,
-    model: str,
+    model: str | None,
     template_hash: str,
     variables_hash: str,
     template_source: str | None,
@@ -176,7 +146,7 @@ def populate_llm_metadata_fields(
         output: Mutable row dict to populate.
         field_prefix: Response field name (e.g., "llm_response").
         usage: Token usage (``TokenUsage`` or ``None``).
-        model: Model identifier that actually responded.
+        model: Model identifier that actually responded (None if API omitted it).
         template_hash: SHA-256 of prompt template.
         variables_hash: SHA-256 of rendered template variables.
         template_source: Config file path of template (None if inline).
@@ -327,6 +297,5 @@ __all__ = [
     "_build_multi_query_output_schema",
     "get_llm_audit_fields",
     "get_llm_guaranteed_fields",
-    "get_multi_query_guaranteed_fields",
     "populate_llm_metadata_fields",
 ]

@@ -2,7 +2,7 @@
 
 import logging
 import time
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 import structlog
@@ -45,14 +45,22 @@ logger = logging.getLogger(__name__)
 slog = structlog.get_logger(__name__)
 
 
-@dataclass
+@dataclass(frozen=True, slots=True)
 class _RouteDispatchOutcome:
     """Internal routing dispatch result used by gate executors."""
 
     action: RoutingAction
-    child_tokens: list[TokenInfo] = field(default_factory=list)
+    child_tokens: tuple[TokenInfo, ...] = ()
     sink_name: str | None = None
     next_node_id: NodeID | None = None
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "child_tokens", tuple(self.child_tokens))
+        if self.sink_name is not None and self.next_node_id is not None:
+            raise ValueError(
+                f"_RouteDispatchOutcome invariant violation: sink_name={self.sink_name!r} and "
+                f"next_node_id={self.next_node_id!r} are mutually exclusive."
+            )
 
 
 class GateExecutor:
@@ -109,8 +117,8 @@ class GateExecutor:
         """Resolve route label to concrete destination or fail closed."""
         try:
             return self._route_resolution_map[(NodeID(node_id), route_label)]
-        except KeyError:
-            raise MissingEdgeError(node_id=NodeID(node_id), label=route_label) from None
+        except KeyError as exc:
+            raise MissingEdgeError(node_id=NodeID(node_id), label=route_label) from exc
 
     def _dispatch_resolved_destination(
         self,
@@ -164,7 +172,7 @@ class GateExecutor:
                 run_id=ctx.run_id,
                 row_data=token.row_data,
             )
-            return _RouteDispatchOutcome(action=action, child_tokens=child_tokens)
+            return _RouteDispatchOutcome(action=action, child_tokens=tuple(child_tokens))
 
         route_action = RoutingAction.route(route_label, mode=mode, reason=reason)
         self._record_routing(

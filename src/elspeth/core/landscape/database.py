@@ -14,7 +14,7 @@ from sqlalchemy.engine import Engine
 from sqlalchemy.engine.url import make_url
 
 from elspeth.core.landscape.journal import LandscapeJournal
-from elspeth.core.landscape.schema import metadata
+from elspeth.core.landscape.schema import SQLITE_SCHEMA_EPOCH, metadata
 
 
 class SchemaCompatibilityError(Exception):
@@ -25,7 +25,7 @@ class SchemaCompatibilityError(Exception):
 
 # Required columns that have been added since initial schema.
 # Used by _validate_schema() to detect outdated SQLite databases.
-_REQUIRED_COLUMNS: list[tuple[str, str]] = [
+_REQUIRED_COLUMNS: tuple[tuple[str, str], ...] = (
     ("tokens", "expand_group_id"),
     # Added for run ownership — prevents cross-run contamination of token-linked records
     ("tokens", "run_id"),
@@ -48,16 +48,18 @@ _REQUIRED_COLUMNS: list[tuple[str, str]] = [
     # Operation I/O hashes - survive payload purge for integrity verification
     ("operations", "input_data_hash"),
     ("operations", "output_data_hash"),
-]
+    # Coalesce state for checkpoint recovery - serialized pending merge state
+    ("checkpoints", "coalesce_state_json"),
+)
 
 # Required foreign keys for audit integrity (Tier 1 trust).
 # Format: (table_name, column_name, referenced_table)
-# Bug fix: P2-2026-01-19-error-tables-missing-foreign-keys
-_REQUIRED_FOREIGN_KEYS: list[tuple[str, str, str]] = [
+# Bug fix: error tables were missing foreign keys to nodes/tokens
+_REQUIRED_FOREIGN_KEYS: tuple[tuple[str, str, str], ...] = (
     ("validation_errors", "node_id", "nodes"),
     ("transform_errors", "token_id", "tokens"),
     ("transform_errors", "transform_id", "nodes"),
-]
+)
 
 
 class LandscapeDB:
@@ -105,6 +107,7 @@ class LandscapeDB:
         self._setup_engine()
         self._validate_schema()  # Check BEFORE create_tables
         self._create_tables()
+        self._sync_sqlite_schema_epoch()
 
     def _setup_engine(self) -> None:
         """Create and configure the database engine."""
@@ -173,12 +176,12 @@ class LandscapeDB:
         """
         try:
             import sqlcipher3
-        except ImportError:
+        except ImportError as exc:
             raise ImportError(
                 "sqlcipher3 is required for encrypted audit databases. "
                 "Install it with: uv pip install 'elspeth[security]'\n"
                 "Note: requires libsqlcipher-dev system package."
-            ) from None
+            ) from exc
 
         parsed = make_url(url)
 
@@ -256,6 +259,57 @@ class LandscapeDB:
         """Create all tables if they don't exist."""
         metadata.create_all(self.engine)
 
+    def _get_sqlite_schema_epoch(self) -> int:
+        """Return SQLite schema epoch from PRAGMA user_version.
+
+        Uses SQLite's built-in schema version slot as a lightweight marker for
+        intentional pre-1.0 schema breaks. This is not a migration system; it
+        simply gives future migration code a stable entry point.
+        """
+        if not self.connection_string.startswith("sqlite"):
+            return 0
+
+        with self.engine.connect() as conn:
+            return int(conn.exec_driver_sql("PRAGMA user_version").scalar_one())
+
+    def _set_sqlite_schema_epoch(self, epoch: int) -> None:
+        """Persist the SQLite schema epoch in PRAGMA user_version."""
+        if not self.connection_string.startswith("sqlite"):
+            return
+
+        with self.engine.begin() as conn:
+            conn.exec_driver_sql(f"PRAGMA user_version = {int(epoch)}")
+
+    def _sync_sqlite_schema_epoch(self) -> None:
+        """Stamp compatible SQLite databases with the current schema epoch.
+
+        New databases get the epoch immediately after create_all(). Existing
+        compatible databases without an epoch are upgraded in place to the
+        current stamp, which preserves a future migration path without requiring
+        a full migration framework today. Call this only from schema-managing
+        paths; read-only/inspection opens must not mutate the database.
+
+        Raises:
+            SchemaCompatibilityError: If the database has a newer epoch than
+                this code version expects (prevents silent downgrades).
+        """
+        if not self.connection_string.startswith("sqlite"):
+            return
+
+        current_epoch = self._get_sqlite_schema_epoch()
+        if current_epoch > SQLITE_SCHEMA_EPOCH:
+            raise SchemaCompatibilityError(
+                "Cannot sync schema epoch: database has a newer epoch than this "
+                "ELSPETH version supports.\n\n"
+                f"Database epoch: {current_epoch}\n"
+                f"Current epoch: {SQLITE_SCHEMA_EPOCH}\n\n"
+                "This database was created or stamped by a newer ELSPETH version. "
+                "Upgrade ELSPETH to open this database.\n\n"
+                f"Database: {self.connection_string}"
+            )
+        if current_epoch < SQLITE_SCHEMA_EPOCH:
+            self._set_sqlite_schema_epoch(SQLITE_SCHEMA_EPOCH)
+
     def _validate_schema(self) -> None:
         """Validate that existing database has all required columns and foreign keys.
 
@@ -290,6 +344,7 @@ class LandscapeDB:
             raise
         expected_tables = set(metadata.tables.keys())
         present_landscape_tables = existing_tables & expected_tables
+        schema_epoch = self._get_sqlite_schema_epoch()
 
         # If this looks like an existing Landscape database, all known tables must exist.
         # For brand-new DB files (no Landscape tables yet), creation happens in create_all().
@@ -302,6 +357,16 @@ class LandscapeDB:
                 "Database does not contain any Landscape tables.\n\n"
                 "This does not appear to be an ELSPETH audit database. "
                 "Verify the database path is correct.\n\n"
+                f"Database: {self.connection_string}"
+            )
+        if present_landscape_tables and schema_epoch not in (0, SQLITE_SCHEMA_EPOCH):
+            raise SchemaCompatibilityError(
+                "Landscape database schema epoch is incompatible.\n\n"
+                f"Database epoch: {schema_epoch}\n"
+                f"Current epoch: {SQLITE_SCHEMA_EPOCH}\n\n"
+                "This ELSPETH version is using an incompatible SQLite schema epoch.\n"
+                "Pre-1.0 releases may require either recreating the database or "
+                "running a future migration command.\n\n"
                 f"Database: {self.connection_string}"
             )
         missing_tables = sorted(expected_tables - existing_tables) if present_landscape_tables else []
@@ -385,6 +450,29 @@ class LandscapeDB:
         self.close()
 
     @classmethod
+    def _from_parts(
+        cls,
+        connection_string: str,
+        engine: Engine,
+        *,
+        passphrase: str | None = None,
+        journal: LandscapeJournal | None = None,
+        require_existing_schema: bool = False,
+    ) -> Self:
+        """Construct instance from pre-created components.
+
+        Single place that sets all instance attributes — eliminates drift risk
+        from parallel ``cls.__new__()`` paths that manually assign fields.
+        """
+        instance = cls.__new__(cls)
+        instance.connection_string = connection_string
+        instance._passphrase = passphrase
+        instance._engine = engine
+        instance._journal = journal
+        instance._require_existing_schema = require_existing_schema
+        return instance
+
+    @classmethod
     def in_memory(cls) -> Self:
         """Create an in-memory SQLite database for testing.
 
@@ -396,12 +484,8 @@ class LandscapeDB:
         engine = create_engine("sqlite:///:memory:", echo=False)
         cls._configure_sqlite(engine)
         metadata.create_all(engine)
-        instance = cls.__new__(cls)
-        instance.connection_string = "sqlite:///:memory:"
-        instance._passphrase = None
-        instance._engine = engine
-        instance._journal = None
-        instance._require_existing_schema = False
+        instance = cls._from_parts("sqlite:///:memory:", engine)
+        instance._sync_sqlite_schema_epoch()
         return instance
 
     @classmethod
@@ -443,25 +527,24 @@ class LandscapeDB:
             if url.startswith("sqlite"):
                 cls._configure_sqlite(engine)
 
-        # Create instance first - _validate_schema needs self.connection_string and self.engine
-        instance = cls.__new__(cls)
-        instance.connection_string = url
-        instance._passphrase = passphrase
-        instance._engine = engine
-        instance._journal = None
+        journal: LandscapeJournal | None = None
         if dump_to_jsonl:
             journal_path = dump_to_jsonl_path or cls._derive_journal_path(url)
-            instance._journal = LandscapeJournal(
+            journal = LandscapeJournal(
                 journal_path,
                 fail_on_error=dump_to_jsonl_fail_on_error,
                 include_payloads=dump_to_jsonl_include_payloads,
                 payload_base_path=dump_to_jsonl_payload_base_path,
             )
-            instance._journal.attach(engine)
+            journal.attach(engine)
 
-        # When create_tables=False, require existing Landscape schema.
-        # Otherwise a wrong/empty DB passes validation and fails on first query.
-        instance._require_existing_schema = not create_tables
+        instance = cls._from_parts(
+            url,
+            engine,
+            passphrase=passphrase,
+            journal=journal,
+            require_existing_schema=not create_tables,
+        )
 
         # Validate BEFORE create_all - catches old schema with missing columns
         # before we try to use it. For fresh DBs, validation passes (no tables yet).
@@ -469,6 +552,7 @@ class LandscapeDB:
 
         if create_tables:
             metadata.create_all(engine)
+            instance._sync_sqlite_schema_epoch()
         return instance
 
     @staticmethod

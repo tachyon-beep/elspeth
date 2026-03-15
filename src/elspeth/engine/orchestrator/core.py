@@ -22,13 +22,17 @@ import json
 import signal
 import threading
 import time
-from collections.abc import Callable, Iterator, Mapping
+from collections.abc import Callable, Iterator, Mapping, Sequence
 from contextlib import contextmanager, nullcontext
+from dataclasses import replace
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
 
+import structlog
+
 if TYPE_CHECKING:
     from elspeth.contracts.aggregation_checkpoint import AggregationCheckpointState
+    from elspeth.contracts.coalesce_checkpoint import CoalesceCheckpointState
     from elspeth.contracts.events import TelemetryEvent
     from elspeth.contracts.payload_store import PayloadStore
     from elspeth.core.events import EventBusProtocol
@@ -108,6 +112,7 @@ from elspeth.engine.orchestrator.types import (
     GraphArtifacts,
     LoopContext,
     LoopResult,
+    PendingTokenMap,
     PipelineConfig,
     ResumeState,
     RouteValidationError,
@@ -133,6 +138,8 @@ if TYPE_CHECKING:
     from elspeth.core.rate_limit import RateLimitRegistry
     from elspeth.engine.clock import Clock
     from elspeth.engine.coalesce_executor import CoalesceExecutor
+
+slog = structlog.get_logger(__name__)
 
 
 class Orchestrator:
@@ -182,6 +189,14 @@ class Orchestrator:
         self._current_graph: ExecutionGraph | None = None  # Set during execution for checkpointing
         self._telemetry = telemetry_manager  # Optional, disabled by default
 
+    def _reset_checkpoint_sequence(self) -> None:
+        """Reset checkpoint ordering for a fresh run."""
+        self._sequence_number = 0
+
+    def _rebase_checkpoint_sequence(self, sequence_number: int) -> None:
+        """Continue checkpoint ordering from a previously persisted checkpoint."""
+        self._sequence_number = sequence_number
+
     def _emit_telemetry(self, event: TelemetryEvent) -> None:
         """Emit telemetry event if manager is configured.
 
@@ -211,11 +226,9 @@ class Orchestrator:
         """
         import sys
 
-        import structlog
-
         from elspeth.telemetry.errors import TelemetryExporterError
 
-        logger = structlog.get_logger()
+        logger = slog
         pending_exc = sys.exc_info()[0]
 
         try:
@@ -319,6 +332,7 @@ class Orchestrator:
         token_id: str,
         node_id: str,
         aggregation_state: AggregationCheckpointState | None = None,
+        coalesce_state: CoalesceCheckpointState | None = None,
     ) -> None:
         """Create checkpoint if configured.
 
@@ -335,6 +349,7 @@ class Orchestrator:
             token_id: Token that was just written to sink
             node_id: Sink node that received the token
             aggregation_state: Typed aggregation checkpoint state for crash recovery
+            coalesce_state: Typed pending coalesce state for crash recovery
         """
         if not self._checkpoint_config or not self._checkpoint_config.enabled:
             return
@@ -342,7 +357,7 @@ class Orchestrator:
             return
         if self._current_graph is None:
             # Should never happen - graph is set during execution
-            raise RuntimeError("Cannot create checkpoint: execution graph not available")
+            raise OrchestrationInvariantError("Cannot create checkpoint: execution graph not available")
 
         self._sequence_number += 1
 
@@ -372,7 +387,116 @@ class Orchestrator:
                 sequence_number=self._sequence_number,
                 graph=self._current_graph,
                 aggregation_state=aggregation_state,
+                coalesce_state=coalesce_state,
             )
+
+    def _make_checkpoint_after_sink_factory(
+        self,
+        run_id: str,
+        processor: RowProcessor,
+    ) -> _CheckpointFactory:
+        """Create a per-sink checkpoint callback factory.
+
+        Returns a factory that, given a sink_node_id, produces a callback
+        invoked after each token is durably written to that sink.  Used by
+        both the normal execution path and the resume path.
+        """
+
+        def factory(sink_node_id: str) -> Callable[[TokenInfo], None]:
+            def callback(token: TokenInfo) -> None:
+                agg_state = processor.get_aggregation_checkpoint_state()
+                coalesce_state = processor.get_coalesce_checkpoint_state()
+                self._maybe_checkpoint(
+                    run_id=run_id,
+                    token_id=token.token_id,
+                    node_id=sink_node_id,
+                    aggregation_state=agg_state,
+                    coalesce_state=coalesce_state if coalesce_state is not None and coalesce_state.has_resumable_state else None,
+                )
+
+            return callback
+
+        return factory
+
+    def _checkpoint_interrupted_progress(
+        self,
+        run_id: str,
+        loop_ctx: LoopContext,
+        sink_id_map: Mapping[SinkName, NodeID],
+        source_id: NodeID,
+    ) -> None:
+        """Persist a resumable checkpoint for graceful shutdown.
+
+        Shutdown is an explicit operator action, so it creates a recovery
+        checkpoint even if normal checkpoint frequency would skip this row.
+        This preserves resumability for runs that stop before any sink-token
+        checkpoint has been emitted, especially buffered aggregation/coalesce
+        pipelines that intentionally skip end-of-source flushes on shutdown.
+        """
+        if not self._checkpoint_config or not self._checkpoint_config.enabled:
+            return
+        if self._checkpoint_manager is None:
+            return
+        if self._current_graph is None:
+            raise OrchestrationInvariantError("Cannot create shutdown checkpoint: execution graph not available")
+
+        aggregation_state = loop_ctx.processor.get_aggregation_checkpoint_state()
+        raw_coalesce = loop_ctx.processor.get_coalesce_checkpoint_state()
+        # Persist coalesce state when it has pending barriers or completed keys
+        # needed for late-arrival detection on resume
+        coalesce_state = raw_coalesce if raw_coalesce is not None and raw_coalesce.has_resumable_state else None
+
+        token_id: str | None = None
+        node_id: str | None = None
+        checkpoint_agg_state: AggregationCheckpointState | None = None
+
+        if aggregation_state.nodes:
+            agg_node_id, agg_node_state = next(iter(aggregation_state.nodes.items()))
+            token_id = agg_node_state.tokens[-1].token_id
+            node_id = agg_node_id
+            checkpoint_agg_state = aggregation_state
+        elif coalesce_state is not None and coalesce_state.pending:
+            pending_entry = coalesce_state.pending[-1]
+            if pending_entry.branches:
+                last_branch = list(pending_entry.branches.values())[-1]
+                token_id = last_branch.token_id
+                node_id = str(loop_ctx.coalesce_node_map[CoalesceName(pending_entry.coalesce_name)])
+        else:
+            for sink_name, token_outcome_pairs in loop_ctx.pending_tokens.items():
+                if not token_outcome_pairs:
+                    continue
+                token_id = token_outcome_pairs[-1][0].token_id
+                node_id = str(sink_id_map[SinkName(sink_name)])
+                break
+
+        if token_id is None and loop_ctx.last_token_id is not None:
+            token_id = loop_ctx.last_token_id
+            node_id = str(source_id)
+
+        if token_id is None or node_id is None:
+            slog.warning(
+                "shutdown_checkpoint_skipped",
+                run_id=run_id,
+                reason="no_token_or_node_id_available",
+                has_aggregation_nodes=bool(aggregation_state.nodes),
+                has_coalesce_pending=coalesce_state is not None,
+                has_pending_sink_tokens=any(bool(pairs) for pairs in loop_ctx.pending_tokens.values()),
+                last_token_id=loop_ctx.last_token_id,
+                resolved_token_id=token_id,
+                resolved_node_id=node_id,
+            )
+            return
+
+        self._sequence_number += 1
+        self._checkpoint_manager.create_checkpoint(
+            run_id=run_id,
+            token_id=token_id,
+            node_id=node_id,
+            sequence_number=self._sequence_number,
+            graph=self._current_graph,
+            aggregation_state=checkpoint_agg_state,
+            coalesce_state=coalesce_state,
+        )
 
     def _delete_checkpoints(self, run_id: str) -> None:
         """Delete all checkpoints for a run after successful completion.
@@ -389,7 +513,7 @@ class Orchestrator:
         run_id: str,
         config: PipelineConfig,
         ctx: PluginContext,
-        pending_tokens: dict[str, list[tuple[TokenInfo, PendingOutcome | None]]],
+        pending_tokens: PendingTokenMap,
         sink_id_map: dict[SinkName, NodeID],
         sink_step: int,
         *,
@@ -420,37 +544,44 @@ class Orchestrator:
         step = sink_step
 
         for sink_name, token_outcome_pairs in pending_tokens.items():
-            if token_outcome_pairs and sink_name in config.sinks:
-                sink = config.sinks[sink_name]
-                sink_node_id = sink_id_map[SinkName(sink_name)]
+            if not token_outcome_pairs:
+                continue
+            if sink_name not in config.sinks:
+                raise OrchestrationInvariantError(
+                    f"Sink '{sink_name}' in pending_tokens not found in config.sinks. "
+                    f"Available: {sorted(config.sinks.keys())}. "
+                    f"This indicates a token routing bug."
+                )
+            sink = config.sinks[sink_name]
+            sink_node_id = sink_id_map[SinkName(sink_name)]
 
-                # Group tokens by pending_outcome for separate write() calls
-                # (sink_executor.write() takes a single PendingOutcome for all tokens in a batch)
-                # Fix: P1-2026-01-31 - PendingOutcome carries error_hash for QUARANTINED
-                def pending_sort_key(pair: tuple[TokenInfo, PendingOutcome | None]) -> tuple[bool, str, str]:
-                    pending = pair[1]
-                    if pending is None:
-                        return (True, "", "")  # None sorts first
-                    return (False, pending.outcome.value, pending.error_hash or "")
+            # Group tokens by pending_outcome for separate write() calls
+            # (sink_executor.write() takes a single PendingOutcome for all tokens in a batch)
+            # PendingOutcome carries error_hash for QUARANTINED tokens
+            def pending_sort_key(pair: tuple[TokenInfo, PendingOutcome | None]) -> tuple[bool, str, str]:
+                pending = pair[1]
+                if pending is None:
+                    return (True, "", "")  # None sorts first
+                return (False, pending.outcome.value, pending.error_hash or "")
 
-                sorted_pairs = sorted(token_outcome_pairs, key=pending_sort_key)
+            sorted_pairs = sorted(token_outcome_pairs, key=pending_sort_key)
 
-                # Build on_token_written callback (or None for resume)
-                on_token_written: Callable[[TokenInfo], None] | None = None
-                if on_token_written_factory is not None:
-                    on_token_written = on_token_written_factory(sink_node_id)
+            # Build on_token_written callback (or None for resume)
+            on_token_written: Callable[[TokenInfo], None] | None = None
+            if on_token_written_factory is not None:
+                on_token_written = on_token_written_factory(sink_node_id)
 
-                for pending_outcome, group in groupby(sorted_pairs, key=lambda x: x[1]):
-                    group_tokens = [token for token, _ in group]
-                    sink_executor.write(
-                        sink=sink,
-                        tokens=group_tokens,
-                        ctx=ctx,
-                        step_in_pipeline=step,
-                        sink_name=sink_name,
-                        pending_outcome=pending_outcome,
-                        on_token_written=on_token_written,
-                    )
+            for pending_outcome, group in groupby(sorted_pairs, key=lambda x: x[1]):
+                group_tokens = [token for token, _ in group]
+                sink_executor.write(
+                    sink=sink,
+                    tokens=group_tokens,
+                    ctx=ctx,
+                    step_in_pipeline=step,
+                    sink_name=sink_name,
+                    pending_outcome=pending_outcome,
+                    on_token_written=on_token_written,
+                )
 
     def _cleanup_plugins(
         self,
@@ -488,9 +619,7 @@ class Orchestrator:
         """
         import sys
 
-        import structlog
-
-        logger = structlog.get_logger()
+        logger = slog
         pending_exc = sys.exc_info()[1]
         cleanup_errors: list[str] = []
 
@@ -510,6 +639,7 @@ class Orchestrator:
                 plugin=plugin_name,
                 error=str(error),
                 error_type=type(error).__name__,
+                exc_info=error,
             )
             cleanup_errors.append(f"{hook}({plugin_name}): {type(error).__name__}: {error}")
 
@@ -594,7 +724,7 @@ class Orchestrator:
                 # Already has node_id (e.g., aggregation transform) - skip
                 continue
             if seq not in transform_id_map:
-                raise ValueError(
+                raise OrchestrationInvariantError(
                     f"Transform at sequence {seq} not found in graph. Graph has mappings for sequences: {list(transform_id_map.keys())}"
                 )
             transform.node_id = transform_id_map[seq]
@@ -631,8 +761,7 @@ class Orchestrator:
 
         node_to_next: dict[NodeID, NodeID | None] = {}
         source_id = graph.get_source()
-        if source_id is not None:
-            node_to_next[source_id] = graph.get_next_node(source_id)
+        node_to_next[source_id] = graph.get_next_node(source_id)
         for node_id in graph.get_pipeline_node_sequence():
             node_to_next[node_id] = graph.get_next_node(node_id)
         for coalesce_node_id in graph.get_coalesce_id_map().values():
@@ -661,7 +790,8 @@ class Orchestrator:
         config_gate_id_map: dict[GateName, NodeID],
         coalesce_id_map: dict[CoalesceName, NodeID],
         payload_store: PayloadStore,
-        restored_aggregation_state: dict[NodeID, AggregationCheckpointState] | None = None,
+        restored_aggregation_state: Mapping[NodeID, AggregationCheckpointState] | None = None,
+        restored_coalesce_state: CoalesceCheckpointState | None = None,
     ) -> tuple[RowProcessor, dict[CoalesceName, NodeID], CoalesceExecutor | None]:
         """Build a RowProcessor with all supporting infrastructure.
 
@@ -721,6 +851,8 @@ class Orchestrator:
             for coalesce_settings_entry in settings.coalesce:
                 coalesce_node_id = coalesce_id_map[CoalesceName(coalesce_settings_entry.name)]
                 coalesce_executor.register_coalesce(coalesce_settings_entry, coalesce_node_id)
+            if restored_coalesce_state is not None:
+                coalesce_executor.restore_from_checkpoint(restored_coalesce_state)
 
         # Derive coalesce on_success from graph's terminal sink map (graph-authoritative),
         # falling back to settings for non-terminal coalesce nodes.
@@ -955,14 +1087,15 @@ class Orchestrator:
                 Skips signal handler installation when provided.
 
         Raises:
-            ValueError: If graph or payload_store is not provided
+            OrchestrationInvariantError: If graph or payload_store is not provided
         """
         if graph is None:
-            raise ValueError("ExecutionGraph is required. Build with ExecutionGraph.from_plugin_instances()")
+            raise OrchestrationInvariantError("ExecutionGraph is required. Build with ExecutionGraph.from_plugin_instances()")
         if payload_store is None:
-            raise ValueError("PayloadStore is required for audit compliance.")
+            raise OrchestrationInvariantError("PayloadStore is required for audit compliance.")
 
         # Schema validation now happens in ExecutionGraph.validate() during graph construction
+        self._reset_checkpoint_sequence()
 
         # DATABASE phase - create recorder and begin run
         recorder, run = self._initialize_database_phase(
@@ -993,7 +1126,7 @@ class Orchestrator:
 
             # Complete run with reproducibility grade computation
             recorder.finalize_run(run.run_id, status=RunStatus.COMPLETED)
-            result.status = RunStatus.COMPLETED
+            result = replace(result, status=RunStatus.COMPLETED)
             run_completed = True
 
             # Emit telemetry AFTER Landscape finalize succeeds
@@ -1189,8 +1322,6 @@ class Orchestrator:
         # Build node_id -> plugin instance mapping for metadata extraction
         # Source: single plugin from config.source
         source_id = graph.get_source()
-        if source_id is None:
-            raise ValueError("Graph has no source node")
         transform_id_map: dict[int, NodeID] = graph.get_transform_id_map()
         sink_id_map: dict[SinkName, NodeID] = graph.get_sink_id_map()
         config_gate_id_map: dict[GateName, NodeID] = graph.get_config_gate_id_map()
@@ -1316,7 +1447,8 @@ class Orchestrator:
         payload_store: PayloadStore,
         *,
         include_source_on_start: bool = True,
-        restored_aggregation_state: dict[str, AggregationCheckpointState] | None = None,
+        restored_aggregation_state: Mapping[str, AggregationCheckpointState] | None = None,
+        restored_coalesce_state: CoalesceCheckpointState | None = None,
     ) -> RunContext:
         """Initialize run context: assign node IDs, create PluginContext, call on_start, build processor.
 
@@ -1324,6 +1456,7 @@ class Orchestrator:
             include_source_on_start: If True, call source.on_start(). False for resume
                 (source was fully consumed in original run).
             restored_aggregation_state: Map of node_id -> state for resume path.
+            restored_coalesce_state: Pending coalesce state for resume path.
 
         Returns:
             RunContext with ctx, processor, coalesce_executor, coalesce_node_map,
@@ -1395,6 +1528,7 @@ class Orchestrator:
                 restored_aggregation_state={NodeID(k): v for k, v in restored_aggregation_state.items()}
                 if restored_aggregation_state
                 else None,
+                restored_coalesce_state=restored_coalesce_state,
             )
         except Exception:
             self._cleanup_plugins(config, ctx, include_source=include_source_on_start)
@@ -1433,8 +1567,6 @@ class Orchestrator:
         """
         # Get explicit node ID mappings from graph
         source_id = graph.get_source()
-        if source_id is None:
-            raise ValueError("Graph has no source node")
         sink_id_map = graph.get_sink_id_map()
         transform_id_map = graph.get_transform_id_map()
         config_gate_id_map = graph.get_config_gate_id_map()
@@ -1493,6 +1625,7 @@ class Orchestrator:
         interrupted_by_shutdown: bool,
         *,
         on_token_written_factory: _CheckpointFactory | None = None,
+        shutdown_checkpoint_source_id: NodeID | None = None,
     ) -> None:
         """Write all pending tokens to sinks and handle post-loop bookkeeping.
 
@@ -1518,8 +1651,16 @@ class Orchestrator:
         )
 
         # If shutdown interrupted the loop, raise after all pending work is flushed.
-        # At this point: aggregation buffers flushed, coalesce flushed, sink writes done.
+        # At this point: sink writes are done, and any buffered aggregation/coalesce
+        # state that we intentionally preserved can be checkpointed for resume.
         if interrupted_by_shutdown:
+            if shutdown_checkpoint_source_id is not None:
+                self._checkpoint_interrupted_progress(
+                    run_id=run_id,
+                    loop_ctx=loop_ctx,
+                    sink_id_map=sink_id_map,
+                    source_id=shutdown_checkpoint_source_id,
+                )
             raise GracefulShutdownError(
                 rows_processed=counters.rows_processed,
                 run_id=run_id,
@@ -1590,7 +1731,8 @@ class Orchestrator:
         # floats (NaN, Infinity) with None so downstream canonical JSON
         # and stable_hash operations succeed. The quarantine_error records
         # what was originally wrong with the data.
-        source_item.row = sanitize_for_canonical(source_item.row)
+        # SourceRow is frozen — create a new instance with sanitized row data.
+        source_item = replace(source_item, row=sanitize_for_canonical(source_item.row))
 
         # Create a token for the quarantined row using specialized method
         # (quarantine rows don't have contracts - they failed validation)
@@ -1629,14 +1771,14 @@ class Orchestrator:
         quarantine_edge_key = (source_id, "__quarantine__")
         try:
             quarantine_edge_id = edge_map[quarantine_edge_key]
-        except KeyError:
+        except KeyError as exc:
             raise OrchestrationInvariantError(
                 f"Quarantine row reached orchestrator but no __quarantine__ "
                 f"DIVERT edge exists in DAG for source '{source_id}'. "
                 f"This is a DAG construction bug — "
                 f"on_validation_failure should have created a DIVERT edge "
                 f"in from_plugin_instances()."
-            ) from None
+            ) from exc
         recorder.record_routing_event(
             state_id=source_state.state_id,
             edge_id=quarantine_edge_id,
@@ -1652,7 +1794,12 @@ class Orchestrator:
         # to repr_hash for non-canonical data.
         try:
             quarantine_content_hash = stable_hash(source_item.row)
-        except (ValueError, TypeError):
+        except (ValueError, TypeError) as e:
+            slog.debug(
+                "stable_hash_fallback_to_repr_hash",
+                error_type=type(e).__name__,
+                error=str(e),
+            )
             quarantine_content_hash = repr_hash(source_item.row)
         self._emit_telemetry(
             RowCreated(
@@ -1666,8 +1813,7 @@ class Orchestrator:
 
         # Compute error_hash for QUARANTINED outcome audit trail
         # Per CLAUDE.md: every row must reach exactly one terminal state
-        # Fix: P1-2026-01-31 - Do NOT record outcome here!
-        # Record outcome AFTER sink durability in SinkExecutor.write()
+        # Do NOT record outcome here — record after sink durability in SinkExecutor.write()
         quarantine_error_hash = hashlib.sha256(quarantine_error_msg.encode()).hexdigest()[:16]
 
         # Pass PendingOutcome with error_hash - outcome recorded after sink durability
@@ -1742,6 +1888,24 @@ class Orchestrator:
         ctx.contract = schema_contract
         return True
 
+    def _restore_source_iteration_context(
+        self,
+        ctx: PluginContext,
+        *,
+        source_id: NodeID,
+        source_operation_id: str,
+    ) -> None:
+        """Restore source-scoped context before source generator code resumes.
+
+        Source plugins run partly in `load(ctx)` setup and partly on each
+        generator `next()` call. Transform execution mutates the shared
+        PluginContext with transform-scoped node/state identity, so we must
+        restore the source identity before the next generator step or any
+        source-side validation/error recording will be misattributed.
+        """
+        ctx.node_id = source_id
+        ctx.operation_id = source_operation_id
+
     _PROGRESS_ROW_INTERVAL = 100
     _PROGRESS_TIME_INTERVAL = 5.0  # seconds
 
@@ -1792,12 +1956,17 @@ class Orchestrator:
         source_operation_id: str,
         field_resolution_recorded: bool,
         schema_contract_recorded: bool,
+        *,
+        interrupted_by_shutdown: bool,
     ) -> None:
-        """Post-loop work after source iteration completes (or is interrupted).
+        """Post-loop work after source iteration completes or is interrupted.
 
-        Restores operation_id, flushes remaining aggregation buffers, flushes
-        pending coalesce operations, and records deferred field resolution /
-        schema contract for empty sources.
+        Restores operation_id, optionally flushes end-of-source aggregation and
+        coalesce state, and records deferred field resolution / schema contract.
+
+        On graceful shutdown we intentionally skip end-of-source flushes. A
+        shutdown stops after the current row; it must not synthesize
+        END_OF_SOURCE aggregation outputs or force pending coalesces to resolve.
         """
         config = loop_ctx.config
         ctx = loop_ctx.ctx
@@ -1815,31 +1984,34 @@ class Orchestrator:
         # calls — those must be attributed to source_load, not orphaned.
         ctx.operation_id = source_operation_id
 
-        # CRITICAL: Flush remaining aggregation buffers at end-of-source
-        if config.aggregation_settings:
-            # NOTE: Aggregation-flushed tokens are NOT checkpointed here.
-            # They go into pending_tokens and are checkpointed only after
-            # SinkExecutor.write() achieves sink durability, via the
-            # checkpoint_after_sink callback.
-            flush_result = flush_remaining_aggregation_buffers(
-                config=config,
-                processor=processor,
-                ctx=ctx,
-                pending_tokens=pending_tokens,
-            )
-            counters.accumulate_flush_result(flush_result)
+        if not interrupted_by_shutdown:
+            # CRITICAL: Flush remaining aggregation buffers only at true end-of-source.
+            # A graceful shutdown is resumable and must preserve buffered state
+            # instead of forcing an END_OF_SOURCE flush.
+            if config.aggregation_settings:
+                # NOTE: Aggregation-flushed tokens are NOT checkpointed here.
+                # They go into pending_tokens and are checkpointed only after
+                # SinkExecutor.write() achieves sink durability, via the
+                # checkpoint_after_sink callback.
+                flush_result = flush_remaining_aggregation_buffers(
+                    config=config,
+                    processor=processor,
+                    ctx=ctx,
+                    pending_tokens=pending_tokens,
+                )
+                counters.accumulate_flush_result(flush_result)
 
-        # Flush pending coalesce operations at end-of-source
-        if coalesce_executor is not None:
-            flush_coalesce_pending(
-                coalesce_executor=coalesce_executor,
-                coalesce_node_map=coalesce_node_map,
-                processor=processor,
-                config_sinks=config.sinks,
-                ctx=ctx,
-                counters=counters,
-                pending_tokens=pending_tokens,
-            )
+            # Flush pending coalesce operations only when the source is actually exhausted.
+            if coalesce_executor is not None:
+                flush_coalesce_pending(
+                    coalesce_executor=coalesce_executor,
+                    coalesce_node_map=coalesce_node_map,
+                    processor=processor,
+                    config_sinks=config.sinks,
+                    ctx=ctx,
+                    counters=counters,
+                    pending_tokens=pending_tokens,
+                )
 
         # Record field resolution for empty sources (header-only files).
         # For sources with rows, this was recorded inside the loop on first iteration.
@@ -1934,6 +2106,11 @@ class Orchestrator:
             source_operation_id = source_op_handle.operation.operation_id
 
             source_iterator = self._load_source_with_events(config, run_id, ctx)
+            self._restore_source_iteration_context(
+                ctx,
+                source_id=source_id,
+                source_operation_id=source_operation_id,
+            )
 
             # Deferred recording flags — field resolution after first iteration,
             # schema contract after first VALID row. If begin_run already stored
@@ -1974,12 +2151,19 @@ class Orchestrator:
                             edge_map,
                             loop_ctx,
                         )
+                        quarantine_sink = source_item.quarantine_destination
+                        if quarantine_sink is not None and loop_ctx.pending_tokens[quarantine_sink]:
+                            loop_ctx.last_token_id = loop_ctx.pending_tokens[quarantine_sink][-1][0].token_id
                         last_progress_time = self._maybe_emit_progress(
                             counters,
                             start_time,
                             last_progress_time,
                         )
-                        ctx.operation_id = source_operation_id
+                        self._restore_source_iteration_context(
+                            ctx,
+                            source_id=source_id,
+                            source_operation_id=source_operation_id,
+                        )
                         if shutdown_event is not None and shutdown_event.is_set():
                             interrupted_by_shutdown = True
                             break
@@ -1992,7 +2176,7 @@ class Orchestrator:
                     # Clear operation_id — source item is fetched, transforms set their own state_id
                     ctx.operation_id = None
 
-                    # Check aggregation timeouts BEFORE processing (P1-2026-01-22: flush OLD batch first)
+                    # Check aggregation timeouts BEFORE processing (flush OLD batch first)
                     timeout_result = check_aggregation_timeouts(
                         config=config,
                         processor=processor,
@@ -2008,9 +2192,11 @@ class Orchestrator:
                         transforms=config.transforms,
                         ctx=ctx,
                     )
+                    if results:
+                        loop_ctx.last_token_id = results[-1].token.token_id
                     accumulate_row_outcomes(results, counters, config.sinks, pending_tokens)
 
-                    # Check coalesce timeouts after each row (P1-2026-01-22 fix)
+                    # Check coalesce timeouts after each row
                     if coalesce_executor is not None:
                         handle_coalesce_timeouts(
                             coalesce_executor=coalesce_executor,
@@ -2034,7 +2220,11 @@ class Orchestrator:
                         break
 
                     # Restore operation_id for next iteration (generators execute on next())
-                    ctx.operation_id = source_operation_id
+                    self._restore_source_iteration_context(
+                        ctx,
+                        source_id=source_id,
+                        source_operation_id=source_operation_id,
+                    )
 
                 # Post-loop: restore operation_id, flush aggregation/coalesce, record deferred state
                 self._finalize_source_iteration(
@@ -2045,6 +2235,7 @@ class Orchestrator:
                     source_operation_id,
                     field_resolution_recorded,
                     schema_contract_recorded,
+                    interrupted_by_shutdown=interrupted_by_shutdown,
                 )
 
             except BatchPendingError:
@@ -2063,15 +2254,16 @@ class Orchestrator:
     def _run_resume_processing_loop(
         self,
         loop_ctx: LoopContext,
-        unprocessed_rows: list[tuple[str, int, dict[str, Any]]],
+        unprocessed_rows: Sequence[tuple[str, int, dict[str, Any]]],
         schema_contract: SchemaContract,
         *,
         shutdown_event: threading.Event | None = None,
     ) -> bool:
         """Run the resume processing loop: iterate unprocessed rows, transform, flush, accumulate.
 
-        Includes end-of-loop aggregation flush and coalesce flush (same as the main
-        loop — these must complete before _flush_and_write_sinks() writes to sinks).
+        Includes end-of-loop aggregation/coalesce flushes only when the resume
+        source is actually exhausted. On graceful shutdown we keep buffered state
+        pending rather than forcing end-of-source semantics.
 
         Simpler than the main loop:
         - No quarantine handling (rows already validated)
@@ -2093,25 +2285,22 @@ class Orchestrator:
         coalesce_node_map = dict(loop_ctx.coalesce_node_map)
         agg_transform_lookup = dict(loop_ctx.agg_transform_lookup)
 
-        interrupted_by_shutdown = False
+        # A buffered-only resume can have zero unprocessed rows but still carry
+        # restored aggregation/coalesce state. If shutdown is already requested,
+        # honor it before any end-of-source flush work so buffered state is
+        # checkpointed again instead of being flushed to sinks.
+        interrupted_by_shutdown = shutdown_event is not None and shutdown_event.is_set()
 
         # Process each unprocessed row using process_existing_row
         # (rows already exist in DB, only tokens need to be created)
-        #
-        # NOTE: No checkpointing during resume processing.
-        # This is intentional for the following reasons:
-        # 1. Resume typically handles few rows (those after the original checkpoint)
-        # 2. Adding checkpointing during resume increases complexity significantly
-        # 3. If resume crashes, re-running from the original checkpoint is acceptable
-        # 4. For very large resume scenarios, a future enhancement could add checkpoint
-        #    support, but the current design prioritizes simplicity over edge-case
-        #    optimization
         for row_id, _row_index, row_data in unprocessed_rows:
+            if interrupted_by_shutdown:
+                break
             counters.rows_processed += 1
 
             # ─────────────────────────────────────────────────────────────────
             # Check for timed-out aggregations BEFORE processing this row
-            # (BUG FIX: P1-2026-01-22 - ensures timeout flushes OLD batch)
+            # Ensures timeout flushes OLD batch before processing new row
             # ─────────────────────────────────────────────────────────────────
             # Call module function directly (no wrapper method)
             timeout_result = check_aggregation_timeouts(
@@ -2133,13 +2322,15 @@ class Orchestrator:
                 transforms=config.transforms,
                 ctx=ctx,
             )
+            if results:
+                loop_ctx.last_token_id = results[-1].token.token_id
 
             # Handle all results from this row
             accumulate_row_outcomes(results, counters, config.sinks, pending_tokens)
 
             # ─────────────────────────────────────────────────────────────────
             # Check for timed-out coalesces after processing each row
-            # (BUG FIX: P1-2026-01-22 - check_timeouts was never called)
+            # Must check coalesce timeouts after each row to flush stale barriers
             # ─────────────────────────────────────────────────────────────────
             if coalesce_executor is not None:
                 handle_coalesce_timeouts(
@@ -2162,31 +2353,29 @@ class Orchestrator:
                 interrupted_by_shutdown = True
                 break
 
-        # ─────────────────────────────────────────────────────────────────
-        # CRITICAL: Flush remaining aggregation buffers at end-of-source
-        # ─────────────────────────────────────────────────────────────────
-        if config.aggregation_settings:
-            # Call module function directly (no wrapper method)
-            # No checkpointing during resume
-            flush_result = flush_remaining_aggregation_buffers(
-                config=config,
-                processor=processor,
-                ctx=ctx,
-                pending_tokens=pending_tokens,
-            )
-            counters.accumulate_flush_result(flush_result)
+        if not interrupted_by_shutdown:
+            # CRITICAL: Flush remaining aggregation buffers only at true end-of-source.
+            if config.aggregation_settings:
+                # Call module function directly (no wrapper method)
+                flush_result = flush_remaining_aggregation_buffers(
+                    config=config,
+                    processor=processor,
+                    ctx=ctx,
+                    pending_tokens=pending_tokens,
+                )
+                counters.accumulate_flush_result(flush_result)
 
-        # Flush pending coalesce operations
-        if coalesce_executor is not None:
-            flush_coalesce_pending(
-                coalesce_executor=coalesce_executor,
-                coalesce_node_map=coalesce_node_map,
-                processor=processor,
-                config_sinks=config.sinks,
-                ctx=ctx,
-                counters=counters,
-                pending_tokens=pending_tokens,
-            )
+            # Flush pending coalesce operations only when resume processing exhausted all rows.
+            if coalesce_executor is not None:
+                flush_coalesce_pending(
+                    coalesce_executor=coalesce_executor,
+                    coalesce_node_map=coalesce_node_map,
+                    processor=processor,
+                    config_sinks=config.sinks,
+                    ctx=ctx,
+                    counters=counters,
+                    pending_tokens=pending_tokens,
+                )
 
         return interrupted_by_shutdown
 
@@ -2249,27 +2438,14 @@ class Orchestrator:
 
             # 4. Sink writes — outside source_load track_operation context.
             # Each sink write has its own track_operation (sink_write) in SinkExecutor.
-            processor = run_ctx.processor
-
-            def checkpoint_after_sink(sink_node_id: str) -> Callable[[TokenInfo], None]:
-                def callback(token: TokenInfo) -> None:
-                    agg_state = processor.get_aggregation_checkpoint_state()
-                    self._maybe_checkpoint(
-                        run_id=run_id,
-                        token_id=token.token_id,
-                        node_id=sink_node_id,
-                        aggregation_state=agg_state,
-                    )
-
-                return callback
-
             self._flush_and_write_sinks(
                 recorder,
                 run_id,
                 loop_ctx,
                 artifacts.sink_id_map,
                 loop_result.interrupted,
-                on_token_written_factory=checkpoint_after_sink,
+                on_token_written_factory=self._make_checkpoint_after_sink_factory(run_id, run_ctx.processor),
+                shutdown_checkpoint_source_id=artifacts.source_id,
             )
 
             # 5. Final progress + PROCESS phase completion — AFTER sink writes
@@ -2338,12 +2514,15 @@ class Orchestrator:
         restored_state: dict[str, AggregationCheckpointState] = {}
         if resume_point.aggregation_state is not None:
             restored_state[resume_point.node_id] = resume_point.aggregation_state
+        restored_coalesce_state = resume_point.coalesce_state
 
         # 4. Get unprocessed row data from payload store
         from elspeth.core.checkpoint import RecoveryManager
 
         if self._checkpoint_manager is None:
-            raise ValueError("CheckpointManager is required for resume - Orchestrator must be initialized with checkpoint_manager")
+            raise OrchestrationInvariantError(
+                "CheckpointManager is required for resume - Orchestrator must be initialized with checkpoint_manager"
+            )
         recovery = RecoveryManager(self._db, self._checkpoint_manager)
 
         # TYPE FIDELITY: Retrieve source schema from audit trail for type restoration
@@ -2382,6 +2561,7 @@ class Orchestrator:
             recorder=recorder,
             run_id=run_id,
             restored_aggregation_state=restored_state,
+            restored_coalesce_state=restored_coalesce_state,
             unprocessed_rows=unprocessed_rows,
             schema_contract=schema_contract,
         )
@@ -2415,20 +2595,22 @@ class Orchestrator:
             ValueError: If payload_store is not provided
         """
         if payload_store is None:
-            raise ValueError("payload_store is required for resume - row data must be retrieved from stored payloads")
+            raise OrchestrationInvariantError("payload_store is required for resume - row data must be retrieved from stored payloads")
 
+        self._rebase_checkpoint_sequence(resume_point.sequence_number)
         state = self._reconstruct_resume_state(resume_point, payload_store)
         run_id = state.run_id
         recorder = state.recorder
         restored_state = state.restored_aggregation_state
+        restored_coalesce_state = state.restored_coalesce_state
         schema_contract = state.schema_contract
         unprocessed_rows = state.unprocessed_rows
 
-        if not unprocessed_rows:
+        if not unprocessed_rows and not restored_state and restored_coalesce_state is None:
             # All rows were processed - complete the run
             recorder.finalize_run(run_id, status=RunStatus.COMPLETED)
 
-            # Delete checkpoints on successful completion (Bug #8 fix)
+            # Delete checkpoints on successful completion
             self._delete_checkpoints(run_id)
 
             return RunResult(
@@ -2459,6 +2641,7 @@ class Orchestrator:
                     graph=graph,
                     unprocessed_rows=unprocessed_rows,
                     restored_aggregation_state=restored_state,
+                    restored_coalesce_state=restored_coalesce_state,
                     settings=settings,
                     payload_store=payload_store,
                     schema_contract=schema_contract,
@@ -2471,7 +2654,7 @@ class Orchestrator:
             # Fix: elspeth-rapid-sg0q — previously this was after the finally block,
             # meaning RunFinished was emitted after telemetry flush (never exported).
             recorder.finalize_run(run_id, status=RunStatus.COMPLETED)
-            result.status = RunStatus.COMPLETED
+            result = replace(result, status=RunStatus.COMPLETED)
 
             # 7. Emit RunFinished telemetry
             resume_duration_ms = (time.perf_counter() - resume_start_time) * 1000
@@ -2523,8 +2706,9 @@ class Orchestrator:
         run_id: str,
         config: PipelineConfig,
         graph: ExecutionGraph,
-        unprocessed_rows: list[tuple[str, int, dict[str, Any]]],
-        restored_aggregation_state: dict[str, AggregationCheckpointState],
+        unprocessed_rows: Sequence[tuple[str, int, dict[str, Any]]],
+        restored_aggregation_state: Mapping[str, AggregationCheckpointState],
+        restored_coalesce_state: CoalesceCheckpointState | None,
         settings: ElspethSettings | None = None,
         *,
         payload_store: PayloadStore,
@@ -2547,7 +2731,7 @@ class Orchestrator:
         # Schema contract:        Skipped (passed via parameter)
         # operation_id lifecycle: Not applicable (no source track_operation)
         # Progress emission:      None (known gap — T24 follow-up)
-        # Checkpointing:          None (on_token_written_factory=None)
+        # Checkpointing:          Same post-sink + shutdown semantics as run()
         # ─────────────────────────────────────────────────────────────────
 
         self._current_graph = graph
@@ -2567,6 +2751,7 @@ class Orchestrator:
             payload_store,
             include_source_on_start=False,
             restored_aggregation_state=restored_aggregation_state,
+            restored_coalesce_state=restored_coalesce_state,
         )
 
         # Restore contract from parameter (already retrieved by resume() caller)
@@ -2592,13 +2777,15 @@ class Orchestrator:
                 shutdown_event=shutdown_event,
             )
 
-            # 4. Flush + write sinks (no checkpointing during resume)
+            # 4. Flush + write sinks with checkpoint advancement
             self._flush_and_write_sinks(
                 recorder,
                 run_id,
                 loop_ctx,
                 artifacts.sink_id_map,
                 interrupted,
+                on_token_written_factory=self._make_checkpoint_after_sink_factory(run_id, run_ctx.processor),
+                shutdown_checkpoint_source_id=artifacts.source_id,
             )
 
         finally:

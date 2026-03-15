@@ -11,6 +11,7 @@ from sqlalchemy import create_engine, text
 
 import elspeth.core.landscape.database as database_module
 from elspeth.core.landscape.database import LandscapeDB, SchemaCompatibilityError
+from elspeth.core.landscape.schema import SQLITE_SCHEMA_EPOCH, metadata
 
 
 def _make_instance(url: str) -> LandscapeDB:
@@ -24,8 +25,89 @@ def _make_instance(url: str) -> LandscapeDB:
     return instance
 
 
+class TestSyncSchemaEpochDirectionalGuard:
+    """Coverage for _sync_sqlite_schema_epoch directional guard."""
+
+    def test_sync_rejects_future_epoch(self, tmp_path: Path) -> None:
+        """_sync_sqlite_schema_epoch must refuse to downgrade a future epoch.
+
+        Regression: The method used != comparison, so a database from a
+        newer ELSPETH version (epoch 2 when code expects 1) would be
+        silently overwritten — destroying the newer epoch stamp.
+        """
+        db_path = tmp_path / "future_epoch.db"
+        engine = create_engine(f"sqlite:///{db_path}")
+        metadata.create_all(engine)
+        with engine.begin() as conn:
+            conn.exec_driver_sql(f"PRAGMA user_version = {SQLITE_SCHEMA_EPOCH + 1}")
+        engine.dispose()
+
+        instance = _make_instance(f"sqlite:///{db_path}")
+
+        with pytest.raises(SchemaCompatibilityError, match=r"newer.*epoch"):
+            instance._sync_sqlite_schema_epoch()
+
+        # Epoch must NOT have been downgraded
+        with instance.engine.connect() as conn:
+            epoch = conn.exec_driver_sql("PRAGMA user_version").scalar_one()
+        assert epoch == SQLITE_SCHEMA_EPOCH + 1
+        instance.close()
+
+    def test_sync_upgrades_epoch_zero(self, tmp_path: Path) -> None:
+        """_sync_sqlite_schema_epoch upgrades unstamped databases (epoch 0)."""
+        db_path = tmp_path / "unstamped.db"
+        engine = create_engine(f"sqlite:///{db_path}")
+        metadata.create_all(engine)
+        engine.dispose()
+
+        instance = _make_instance(f"sqlite:///{db_path}")
+        instance._sync_sqlite_schema_epoch()
+
+        with instance.engine.connect() as conn:
+            epoch = conn.exec_driver_sql("PRAGMA user_version").scalar_one()
+        assert epoch == SQLITE_SCHEMA_EPOCH
+        instance.close()
+
+    def test_sync_noops_on_current_epoch(self, tmp_path: Path) -> None:
+        """_sync_sqlite_schema_epoch is a no-op when epoch already matches."""
+        db_path = tmp_path / "current_epoch.db"
+        engine = create_engine(f"sqlite:///{db_path}")
+        metadata.create_all(engine)
+        with engine.begin() as conn:
+            conn.exec_driver_sql(f"PRAGMA user_version = {SQLITE_SCHEMA_EPOCH}")
+        engine.dispose()
+
+        instance = _make_instance(f"sqlite:///{db_path}")
+        instance._sync_sqlite_schema_epoch()  # Should not raise
+
+        with instance.engine.connect() as conn:
+            epoch = conn.exec_driver_sql("PRAGMA user_version").scalar_one()
+        assert epoch == SQLITE_SCHEMA_EPOCH
+        instance.close()
+
+
 class TestSchemaCompatibilityGuards:
     """Coverage for fail-fast schema compatibility checks."""
+
+    def test_validate_schema_rejects_incompatible_schema_epoch(self, tmp_path: Path) -> None:
+        """Stamped SQLite schema epochs provide an explicit future migration seam."""
+        db_path = tmp_path / "wrong_epoch.db"
+        engine = create_engine(f"sqlite:///{db_path}")
+        metadata.create_all(engine)
+        with engine.begin() as conn:
+            conn.exec_driver_sql(f"PRAGMA user_version = {SQLITE_SCHEMA_EPOCH + 1}")
+        engine.dispose()
+
+        instance = _make_instance(f"sqlite:///{db_path}")
+
+        with pytest.raises(SchemaCompatibilityError) as exc_info:
+            instance._validate_schema()
+
+        msg = str(exc_info.value)
+        assert "schema epoch is incompatible" in msg
+        assert f"Database epoch: {SQLITE_SCHEMA_EPOCH + 1}" in msg
+        assert f"Current epoch: {SQLITE_SCHEMA_EPOCH}" in msg
+        instance.close()
 
     def test_validate_schema_reports_missing_tables_with_actionable_guidance(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         """Existing partial Landscape DBs must fail with clear remediation text."""
@@ -125,6 +207,37 @@ class TestSchemaCompatibilityGuards:
 
 class TestJournalPathGuards:
     """Coverage for from_url journal path derivation failure modes."""
+
+    def test_from_url_stamps_schema_epoch_for_compatible_sqlite_db(self, tmp_path: Path) -> None:
+        """Compatible SQLite databases should be stamped for future migrations."""
+        db_path = tmp_path / "epoch_stamp.db"
+
+        db = LandscapeDB.from_url(f"sqlite:///{db_path}")
+        db.close()
+
+        engine = create_engine(f"sqlite:///{db_path}")
+        with engine.connect() as conn:
+            epoch = conn.exec_driver_sql("PRAGMA user_version").scalar_one()
+        engine.dispose()
+
+        assert epoch == SQLITE_SCHEMA_EPOCH
+
+    def test_from_url_create_tables_false_does_not_stamp_schema_epoch(self, tmp_path: Path) -> None:
+        """Read-only opens must not mutate compatible legacy SQLite databases."""
+        db_path = tmp_path / "readonly_epoch.db"
+        engine = create_engine(f"sqlite:///{db_path}")
+        metadata.create_all(engine)
+        engine.dispose()
+
+        db = LandscapeDB.from_url(f"sqlite:///{db_path}", create_tables=False)
+        db.close()
+
+        engine = create_engine(f"sqlite:///{db_path}")
+        with engine.connect() as conn:
+            epoch = conn.exec_driver_sql("PRAGMA user_version").scalar_one()
+        engine.dispose()
+
+        assert epoch == 0
 
     def test_from_url_dump_to_jsonl_requires_explicit_path_for_non_sqlite(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """Non-SQLite URLs must provide dump_to_jsonl_path explicitly."""

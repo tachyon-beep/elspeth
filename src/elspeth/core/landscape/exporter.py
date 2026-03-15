@@ -29,6 +29,8 @@ from elspeth.contracts import (
     TokenOutcome,
     TokenParent,
 )
+from elspeth.contracts.errors import AuditIntegrityError
+from elspeth.contracts.freeze import deep_thaw
 from elspeth.core.canonical import canonical_json
 from elspeth.core.landscape.database import LandscapeDB
 from elspeth.core.landscape.recorder import LandscapeRecorder
@@ -87,6 +89,16 @@ class LandscapeExporter:
         self._db = db
         self._recorder = LandscapeRecorder(db)
         self._signing_key = signing_key
+
+    @staticmethod
+    def _parse_tier1_json(raw_json: str, field_name: str, context: str) -> Any:
+        """Parse JSON from Tier 1 audit data, crashing with context on corruption."""
+        try:
+            return json.loads(raw_json)
+        except json.JSONDecodeError as exc:
+            raise AuditIntegrityError(
+                f"Corrupt {field_name} for {context}: database corruption (Tier 1 violation). Parse error: {exc}"
+            ) from exc
 
     def _sign_record(self, record: dict[str, Any]) -> str:
         """Compute HMAC-SHA256 signature for a record.
@@ -192,7 +204,7 @@ class LandscapeExporter:
             "canonical_version": run.canonical_version,
             "config_hash": run.config_hash,
             # Full resolved settings for audit trail portability (not just hash)
-            "settings": json.loads(run.settings_json),
+            "settings": self._parse_tier1_json(run.settings_json, "settings_json", f"run {run_id}"),
             "reproducibility_grade": run.reproducibility_grade,
         }
 
@@ -223,10 +235,10 @@ class LandscapeExporter:
                 "determinism": node.determinism.value,
                 "config_hash": node.config_hash,
                 # Full resolved config for audit trail portability (not just hash)
-                "config": json.loads(node.config_json),
+                "config": self._parse_tier1_json(node.config_json, "config_json", f"node {node.node_id} in run {run_id}"),
                 "schema_hash": node.schema_hash,
                 "schema_mode": node.schema_mode,
-                "schema_fields": node.schema_fields,
+                "schema_fields": deep_thaw(node.schema_fields) if node.schema_fields is not None else None,
                 "sequence_in_pipeline": node.sequence_in_pipeline,
             }
 
@@ -264,7 +276,6 @@ class LandscapeExporter:
                 "completed_at": operation.completed_at.isoformat() if operation.completed_at else None,
                 "duration_ms": operation.duration_ms,
                 "error_message": operation.error_message,
-                # BUG #9: Add payload reference fields
                 "input_data_ref": operation.input_data_ref,
                 "input_data_hash": operation.input_data_hash,
                 "output_data_ref": operation.output_data_ref,
@@ -285,7 +296,6 @@ class LandscapeExporter:
                     "request_hash": call.request_hash,
                     "response_hash": call.response_hash,
                     "latency_ms": call.latency_ms,
-                    # BUG #9: Add payload references, error, and timestamp
                     "request_ref": call.request_ref,
                     "response_ref": call.response_ref,
                     "error_json": call.error_json,
@@ -406,7 +416,6 @@ class LandscapeExporter:
                             "duration_ms": None,
                             "started_at": state.started_at.isoformat(),
                             "completed_at": None,
-                            # BUG #9: Add context, error, and success reason fields
                             "context_before_json": state.context_before_json,
                             "context_after_json": None,  # OPEN states don't have after context
                             "error_json": None,  # OPEN states aren't failed
@@ -427,7 +436,6 @@ class LandscapeExporter:
                             "duration_ms": state.duration_ms,
                             "started_at": state.started_at.isoformat(),
                             "completed_at": state.completed_at.isoformat(),
-                            # BUG #9: Add context, error, and success reason fields
                             "context_before_json": state.context_before_json,
                             "context_after_json": state.context_after_json,
                             "error_json": None,  # PENDING states aren't failed
@@ -448,7 +456,6 @@ class LandscapeExporter:
                             "duration_ms": state.duration_ms,
                             "started_at": state.started_at.isoformat(),
                             "completed_at": state.completed_at.isoformat(),
-                            # BUG #9: Add context, error, and success reason fields
                             "context_before_json": state.context_before_json,
                             "context_after_json": state.context_after_json,
                             "error_json": None,  # COMPLETED states aren't failed
@@ -469,7 +476,6 @@ class LandscapeExporter:
                             "duration_ms": state.duration_ms,
                             "started_at": state.started_at.isoformat(),
                             "completed_at": state.completed_at.isoformat(),
-                            # BUG #9: Add context, error, and success reason fields
                             "context_before_json": state.context_before_json,
                             "context_after_json": state.context_after_json,
                             "error_json": state.error_json,
@@ -488,7 +494,6 @@ class LandscapeExporter:
                             "ordinal": event.ordinal,
                             "mode": event.mode.value,
                             "reason_hash": event.reason_hash,
-                            # BUG #9: Add payload reference and timestamp
                             "reason_ref": event.reason_ref,
                             "created_at": event.created_at.isoformat() if event.created_at else None,
                         }

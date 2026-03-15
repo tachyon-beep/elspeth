@@ -131,8 +131,8 @@ class TestExemptSettings:
         for entry in self.EXPECTED_EXEMPT:
             assert entry in EXEMPT_SETTINGS, f"{entry} missing from EXEMPT_SETTINGS"
 
-    def test_is_a_set(self) -> None:
-        assert isinstance(EXEMPT_SETTINGS, set)
+    def test_is_a_frozenset(self) -> None:
+        assert isinstance(EXEMPT_SETTINGS, frozenset)
 
     def test_all_entries_are_nonempty_strings(self) -> None:
         for entry in EXEMPT_SETTINGS:

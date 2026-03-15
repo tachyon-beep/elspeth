@@ -9,7 +9,6 @@ The PluginContext carries everything a plugin needs during execution:
 
 from __future__ import annotations
 
-import copy
 import logging
 from collections.abc import Callable
 from dataclasses import dataclass, field
@@ -101,7 +100,7 @@ class PluginContext:
     # Maps row index in the batch to the originating token_id. Batch transforms
     # use this to pass per-row token_id to audited clients for correct telemetry
     # attribution. When None, the transform falls back to ctx.token (single-token mode).
-    batch_token_ids: list[str] | None = field(default=None)
+    batch_token_ids: tuple[str, ...] | None = field(default=None)
 
     # === Schema Contract ===
     # Set by executor when processing transforms to enable contract-aware template
@@ -116,7 +115,7 @@ class PluginContext:
     state_id: str | None = field(default=None)  # For transform calls (via node_states)
     operation_id: str | None = field(default=None)  # For source/sink calls (via operations)
     # Note: call_index allocation is delegated to LandscapeRecorder.allocate_call_index()
-    # to ensure coordination with audited clients. See P1-2026-01-31-context-record-call-bypasses-allocator.
+    # to ensure coordination with audited clients.
 
     # === Telemetry Callback ===
     # Callback to emit telemetry events for external calls.
@@ -255,7 +254,7 @@ class PluginContext:
             # Delegate call_index allocation to centralized LandscapeRecorder.
             # This ensures UNIQUE(state_id, call_index) when mixing ctx.record_call()
             # with audited clients (AuditedLLMClient, AuditedHTTPClient), which also
-            # use recorder.allocate_call_index(). See P1-2026-01-31-context-record-call-bypasses-allocator.
+            # use recorder.allocate_call_index().
             if self.state_id is None:
                 raise FrameworkBugError("record_call has_state=True but state_id is None")
             call_index = self.landscape.allocate_call_index(self.state_id)
@@ -283,14 +282,13 @@ class PluginContext:
                 response_data=RawCallPayload(response_data) if response_data is not None else None,
                 error=RawCallPayload(error) if error is not None else None,
                 latency_ms=latency_ms,
-                provider=provider,
             )
             parent_id = self.operation_id
 
         # Resolve token_id from authoritative state_id lookup BEFORE telemetry.
         # This is a data integrity check — FrameworkBugError must NOT be swallowed
         # by the telemetry error handler below.
-        # See P2-2026-02-14-plugincontext-record-call-can-emit-the-wrong-token-id.
+        # Resolve from state_id, not from self.token_id which may be stale.
         token_id = None
         if has_state:
             if self.state_id is None:
@@ -318,8 +316,13 @@ class PluginContext:
             from elspeth.contracts.events import ExternalCallCompleted
 
             # Snapshot payloads so async telemetry exports can't drift from call-time values.
-            request_snapshot = copy.deepcopy(request_data)
-            response_snapshot = copy.deepcopy(response_data) if response_data is not None else None
+            # Use deep_thaw instead of deepcopy — frozen checkpoint data contains
+            # MappingProxyType which can't be pickled/deepcopied. deep_thaw creates
+            # the mutable copy we need and handles frozen containers correctly.
+            from elspeth.contracts.freeze import deep_thaw
+
+            request_snapshot = deep_thaw(request_data)
+            response_snapshot = deep_thaw(response_data) if response_data is not None else None
 
             # Extract token usage for LLM calls if available.
             # response_snapshot is a serialized dict from LLMCallResponse.to_dict(),
@@ -363,6 +366,8 @@ class PluginContext:
         except (FrameworkBugError, AuditIntegrityError):
             raise  # System bugs and audit integrity violations must crash
         except Exception as tel_err:
+            if isinstance(tel_err, (TypeError, AttributeError, KeyError, NameError)):
+                raise
             # Telemetry failure must not corrupt the call recording
             logger.warning(
                 "telemetry_emit_failed in record_call",

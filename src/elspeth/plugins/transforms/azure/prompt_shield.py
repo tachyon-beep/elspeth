@@ -151,23 +151,36 @@ class AzurePromptShield(BaseAzureSafetyTransform):
         except Exception as e:
             raise MalformedResponseError(f"Invalid JSON in response: {e}") from e
 
+        # Tier 3 boundary: validate top-level response structure first
+        if not isinstance(data, dict):
+            raise MalformedResponseError(f"Response must be dict, got {type(data).__name__}")
+
         user_attack = False
         doc_attack = False
 
         # Validate and extract user prompt analysis (skip if analysis_type="document")
         if self._analysis_type != "document":
-            user_prompt_analysis = data.get("userPromptAnalysis") if isinstance(data, dict) else None
+            try:
+                user_prompt_analysis = data["userPromptAnalysis"]
+            except KeyError as exc:
+                raise MalformedResponseError("Response missing required key 'userPromptAnalysis'") from exc
             if not isinstance(user_prompt_analysis, dict):
                 raise MalformedResponseError(f"userPromptAnalysis must be dict, got {type(user_prompt_analysis).__name__}")
 
-            detected = user_prompt_analysis.get("attackDetected")
+            try:
+                detected = user_prompt_analysis["attackDetected"]
+            except KeyError as exc:
+                raise MalformedResponseError("userPromptAnalysis missing required key 'attackDetected'") from exc
             if not isinstance(detected, bool):
                 raise MalformedResponseError(f"userPromptAnalysis.attackDetected must be bool, got {type(detected).__name__}")
             user_attack = detected
 
         # Validate and extract document analysis (skip if analysis_type="user_prompt")
         if self._analysis_type != "user_prompt":
-            documents_analysis = data.get("documentsAnalysis") if isinstance(data, dict) else None
+            try:
+                documents_analysis = data["documentsAnalysis"]
+            except KeyError as exc:
+                raise MalformedResponseError("Response missing required key 'documentsAnalysis'") from exc
             if not isinstance(documents_analysis, list):
                 raise MalformedResponseError(f"documentsAnalysis must be list, got {type(documents_analysis).__name__}")
 
@@ -178,16 +191,16 @@ class AzurePromptShield(BaseAzureSafetyTransform):
                     f"documentsAnalysis must have exactly 1 entry (matching submitted document count), got {len(documents_analysis)}"
                 )
 
-            for i, doc in enumerate(documents_analysis):
-                if not isinstance(doc, dict):
-                    raise MalformedResponseError(f"documentsAnalysis[{i}] must be dict, got {type(doc).__name__}")
-                attack_detected = doc.get("attackDetected")
-                if not isinstance(attack_detected, bool):
-                    raise MalformedResponseError(
-                        f"documentsAnalysis[{i}].attackDetected must be bool, got {type(attack_detected).__name__}"
-                    )
-                if attack_detected:
-                    doc_attack = True
+            doc = documents_analysis[0]
+            if not isinstance(doc, dict):
+                raise MalformedResponseError(f"documentsAnalysis[0] must be dict, got {type(doc).__name__}")
+            try:
+                attack_detected = doc["attackDetected"]
+            except KeyError as exc:
+                raise MalformedResponseError("documentsAnalysis[0] missing required key 'attackDetected'") from exc
+            if not isinstance(attack_detected, bool):
+                raise MalformedResponseError(f"documentsAnalysis[0].attackDetected must be bool, got {type(attack_detected).__name__}")
+            doc_attack = attack_detected
 
         return {
             "user_prompt_attack": user_attack,

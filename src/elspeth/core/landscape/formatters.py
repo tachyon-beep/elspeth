@@ -12,6 +12,8 @@ from datetime import datetime
 from enum import Enum
 from typing import TYPE_CHECKING, Any, Protocol
 
+from elspeth.contracts.errors import AuditIntegrityError
+
 if TYPE_CHECKING:
     from elspeth.core.landscape.lineage import LineageResult
 
@@ -29,20 +31,20 @@ def serialize_datetime(obj: Any) -> Any:
         The same structure with datetime objects replaced by ISO strings
 
     Raises:
-        ValueError: If NaN or Infinity values are encountered
+        AuditIntegrityError: If NaN or Infinity values are encountered
     """
     # Reject NaN and Infinity - audit trail must be pristine
     if isinstance(obj, float):
         if math.isnan(obj):
-            raise ValueError("NaN values are not allowed in audit data (violates audit integrity)")
+            raise AuditIntegrityError("NaN values are not allowed in audit data (violates audit integrity)")
         if math.isinf(obj):
-            raise ValueError("Infinity values are not allowed in audit data (violates audit integrity)")
+            raise AuditIntegrityError("Infinity values are not allowed in audit data (violates audit integrity)")
 
     if isinstance(obj, datetime):
         return obj.isoformat()
     if isinstance(obj, dict):
         return {k: serialize_datetime(v) for k, v in obj.items()}
-    if isinstance(obj, list):
+    if isinstance(obj, (list, tuple)):
         return [serialize_datetime(item) for item in obj]
     return obj
 
@@ -55,7 +57,7 @@ def dataclass_to_dict(obj: Any) -> Any:
     - Lists of dataclasses
     - Enum values (converted to .value)
     - Datetime values (converted to ISO strings)
-    - None (returns empty dict)
+    - None (returns None — preserves absence semantics)
     - Plain values (pass through)
 
     Uses stdlib is_dataclass() and isinstance(Enum) for explicit type checking
@@ -68,7 +70,7 @@ def dataclass_to_dict(obj: Any) -> Any:
         dict for dataclasses, list for lists, or the original value
     """
     if obj is None:
-        return {}
+        return None
     if isinstance(obj, list):
         return [dataclass_to_dict(item) for item in obj]
     if is_dataclass(obj) and not isinstance(obj, type):
@@ -79,7 +81,7 @@ def dataclass_to_dict(obj: Any) -> Any:
             value = getattr(obj, field_name)
             if is_dataclass(value) and not isinstance(value, type):
                 result[field_name] = dataclass_to_dict(value)
-            elif isinstance(value, list):
+            elif isinstance(value, (list, tuple)):
                 result[field_name] = [dataclass_to_dict(item) for item in value]
             elif isinstance(value, Enum):
                 # Explicit Enum check instead of hasattr(value, "value")

@@ -118,18 +118,16 @@ class TestResolveHeaders:
 
         assert headers == {"amount_usd": "AMOUNT", "customer_id": "CUSTOMER"}
 
-    def test_custom_partial_mapping(self, contract: SchemaContract) -> None:
-        """CUSTOM mode with partial mapping falls back to normalized."""
+    def test_custom_partial_mapping_raises(self, contract: SchemaContract) -> None:
+        """CUSTOM mode with partial mapping raises — silent fallback is data corruption."""
         custom = {"amount_usd": "AMOUNT"}  # customer_id not mapped
 
-        headers = resolve_headers(
-            contract=contract,
-            mode=HeaderMode.CUSTOM,
-            custom_mapping=custom,
-        )
-
-        assert headers["amount_usd"] == "AMOUNT"
-        assert headers["customer_id"] == "customer_id"  # Fallback
+        with pytest.raises(ValueError, match="customer_id"):
+            resolve_headers(
+                contract=contract,
+                mode=HeaderMode.CUSTOM,
+                custom_mapping=custom,
+            )
 
     def test_no_contract_returns_identity(self) -> None:
         """Without contract, returns identity mapping for known fields."""
@@ -142,29 +140,44 @@ class TestResolveHeaders:
 
         assert headers == {"a": "a", "b": "b"}
 
-    def test_no_contract_no_fields_returns_empty(self) -> None:
-        """Without contract and without field_names, returns empty dict."""
-        headers = resolve_headers(
-            contract=None,
-            mode=HeaderMode.NORMALIZED,
-            custom_mapping=None,
-        )
+    def test_no_contract_no_fields_raises(self) -> None:
+        """Without contract and without field_names, raises — caller bug."""
+        with pytest.raises(ValueError, match=r"contract.*field_names"):
+            resolve_headers(
+                contract=None,
+                mode=HeaderMode.NORMALIZED,
+                custom_mapping=None,
+            )
 
-        assert headers == {}
-
-    def test_no_contract_custom_mode(self) -> None:
-        """CUSTOM mode without contract uses mapping with fallback."""
+    def test_no_contract_custom_partial_raises(self) -> None:
+        """CUSTOM mode without contract raises on unmapped field."""
         custom = {"a": "A_HEADER"}
 
-        headers = resolve_headers(
-            contract=None,
-            mode=HeaderMode.CUSTOM,
-            custom_mapping=custom,
-            field_names=["a", "b"],
-        )
+        with pytest.raises(ValueError, match="b"):
+            resolve_headers(
+                contract=None,
+                mode=HeaderMode.CUSTOM,
+                custom_mapping=custom,
+                field_names=["a", "b"],
+            )
 
-        assert headers["a"] == "A_HEADER"
-        assert headers["b"] == "b"  # Fallback to identity
+    def test_custom_none_mapping_raises(self, contract: SchemaContract) -> None:
+        """CUSTOM mode with None mapping raises — config error."""
+        with pytest.raises(ValueError, match="custom_mapping"):
+            resolve_headers(
+                contract=contract,
+                mode=HeaderMode.CUSTOM,
+                custom_mapping=None,
+            )
+
+    def test_custom_empty_mapping_raises(self, contract: SchemaContract) -> None:
+        """CUSTOM mode with empty mapping raises — config error."""
+        with pytest.raises(ValueError, match="custom_mapping"):
+            resolve_headers(
+                contract=contract,
+                mode=HeaderMode.CUSTOM,
+                custom_mapping={},
+            )
 
 
 class TestHeaderModeEnum:

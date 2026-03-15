@@ -28,9 +28,12 @@ if TYPE_CHECKING:
     from elspeth.plugins.infrastructure.config_base import PluginConfig
 
 
-@dataclass
+@dataclass(frozen=True, slots=True)
 class ValidationError:
     """Structured validation error.
+
+    Frozen: error records are immutable evidence — once created, the
+    captured field, message, and value must not be modified.
 
     Attributes:
         field: Field name that failed validation
@@ -41,6 +44,12 @@ class ValidationError:
     field: str
     message: str
     value: Any
+
+    def __post_init__(self) -> None:
+        if not self.field:
+            raise ValueError("ValidationError.field must not be empty")
+        if not self.message:
+            raise ValueError("ValidationError.message must not be empty")
 
 
 class PluginConfigValidator:
@@ -171,6 +180,9 @@ class PluginConfigValidator:
         """
         cause = error.__cause__
 
+        if cause is None:
+            return [ValidationError(field="config", message=str(error), value=config)]
+
         if type(cause) is PydanticValidationError:
             return self._extract_errors(cause)
 
@@ -179,7 +191,7 @@ class PluginConfigValidator:
                 return [ValidationError(field="schema", message=str(cause), value=config["schema"])]
             return [ValidationError(field="config", message=str(cause), value=config)]
 
-        raise error
+        raise
 
     def validate_schema_config(
         self,
@@ -281,16 +293,6 @@ class PluginConfigValidator:
                 from elspeth.plugins.transforms.llm.base import LLMConfig
 
                 return LLMConfig
-        elif transform_type in {
-            "azure_llm",
-            "openrouter_llm",
-            "azure_multi_query_llm",
-            "openrouter_multi_query_llm",
-        }:
-            provider = "azure" if "azure" in transform_type else "openrouter"
-            raise ValueError(
-                f"Plugin '{transform_type}' has been replaced by 'llm' with a 'provider' field. Example: plugin: llm, provider: {provider}"
-            )
         elif transform_type == "azure_batch_llm":
             from elspeth.plugins.transforms.llm.azure_batch import AzureBatchConfig
 
@@ -341,7 +343,9 @@ class PluginConfigValidator:
 
         for err in pydantic_error.errors():
             # Pydantic error dict has: loc, msg, type, ctx
-            field_path = ".".join(str(loc) for loc in err["loc"])
+            # Model-level validators (@model_validator) produce loc=() — empty tuple.
+            # Use "__model__" sentinel so the field is never empty.
+            field_path = ".".join(str(loc) for loc in err["loc"]) or "__model__"
             message = err["msg"]
 
             # Pydantic error dict includes failing input value.

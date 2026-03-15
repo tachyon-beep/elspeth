@@ -264,7 +264,7 @@ class OpenRouterLLMProvider:
                 )
 
             # Validate usage (non-finite rejection)
-            raw_usage = data.get("usage") or {}
+            raw_usage = data.get("usage")
             if isinstance(raw_usage, dict):
                 for usage_key, usage_val in raw_usage.items():
                     if isinstance(usage_val, float) and not math.isfinite(usage_val):

@@ -306,7 +306,7 @@ class TestLoadScenarios:
     def test_rate_limit_error_handling(self) -> None:
         """Verify plugin handles rate limit errors correctly via provider mock."""
         from elspeth.plugins.infrastructure.clients.llm import RateLimitError
-        from elspeth.plugins.transforms.llm.provider import LLMQueryResult
+        from elspeth.plugins.transforms.llm.provider import FinishReason, LLMQueryResult
 
         config = _make_config()
 
@@ -338,6 +338,7 @@ class TestLoadScenarios:
                 content=json.dumps({"score": 85, "rationale": "OK"}),
                 usage=TokenUsage.known(10, 5),
                 model="gpt-4o",
+                finish_reason=FinishReason.STOP,
             )
 
         mock_provider.execute_query.side_effect = mock_execute_query
@@ -434,7 +435,7 @@ class TestRowAtomicity:
         processed.
         """
         from elspeth.plugins.infrastructure.clients.llm import RateLimitError
-        from elspeth.plugins.transforms.llm.provider import LLMQueryResult
+        from elspeth.plugins.transforms.llm.provider import FinishReason, LLMQueryResult
 
         config = _make_config()
 
@@ -466,6 +467,7 @@ class TestRowAtomicity:
                 content=json.dumps({"score": 85 + llm_call_count[0], "rationale": f"R{llm_call_count[0]}"}),
                 usage=TokenUsage.known(10, 5),
                 model="gpt-4o",
+                finish_reason=FinishReason.STOP,
             )
 
         mock_provider.execute_query.side_effect = mock_execute_query
@@ -535,7 +537,7 @@ class TestRowAtomicity:
     def test_row_atomicity_high_failure_rate(self) -> None:
         """Verify row atomicity with 80% failure rate (extreme stress test)."""
         from elspeth.plugins.infrastructure.clients.llm import RateLimitError
-        from elspeth.plugins.transforms.llm.provider import LLMQueryResult
+        from elspeth.plugins.transforms.llm.provider import FinishReason, LLMQueryResult
 
         config = _make_config()
 
@@ -568,6 +570,7 @@ class TestRowAtomicity:
                 content=json.dumps({"score": 85, "rationale": "OK"}),
                 usage=TokenUsage.known(10, 5),
                 model="gpt-4o",
+                finish_reason=FinishReason.STOP,
             )
 
         mock_provider.execute_query.side_effect = mock_execute_query
@@ -633,7 +636,7 @@ class TestRowAtomicity:
         - Plugin must still maintain per-row atomicity
         """
         from elspeth.plugins.infrastructure.clients.llm import RateLimitError
-        from elspeth.plugins.transforms.llm.provider import LLMQueryResult
+        from elspeth.plugins.transforms.llm.provider import FinishReason, LLMQueryResult
 
         config = _make_config()
 
@@ -666,6 +669,7 @@ class TestRowAtomicity:
                 content=json.dumps({"score": 85, "rationale": "OK"}),
                 usage=TokenUsage.known(10, 5),
                 model="gpt-4o",
+                finish_reason=FinishReason.STOP,
             )
 
         mock_provider.execute_query.side_effect = mock_execute_query

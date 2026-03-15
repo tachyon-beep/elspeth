@@ -156,6 +156,15 @@ class WebBurstConfig(BaseModel):
         gt=0,
         description="Time between burst starts in seconds",
     )
+
+    @model_validator(mode="after")
+    def _validate_burst_timing(self) -> "WebBurstConfig":
+        if self.enabled and self.duration_sec >= self.interval_sec:
+            raise ValueError(
+                f"duration_sec ({self.duration_sec}) must be less than interval_sec ({self.interval_sec}) when burst is enabled"
+            )
+        return self
+
     duration_sec: int = Field(
         default=5,
         gt=0,

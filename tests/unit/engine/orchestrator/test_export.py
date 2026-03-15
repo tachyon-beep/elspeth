@@ -23,6 +23,7 @@ import pytest
 from pydantic import ValidationError
 
 from elspeth.contracts import SinkProtocol
+from elspeth.contracts.errors import AuditIntegrityError
 from elspeth.engine.orchestrator.export import (
     _export_csv_multifile,
     _json_schema_to_python_type,
@@ -214,14 +215,11 @@ class TestExportCSVMultifile:
         export_dir = tmp_path / "audit_export"
         exporter = Mock()
         exporter.export_run_grouped.return_value = {}
-        ctx = Mock()
-
         _export_csv_multifile(
             exporter=exporter,
             run_id="run-1",
             artifact_path=str(export_dir),
             sign=False,
-            ctx=ctx,
         )
 
         assert export_dir.exists()
@@ -231,14 +229,11 @@ class TestExportCSVMultifile:
         export_path = tmp_path / "output.csv"
         exporter = Mock()
         exporter.export_run_grouped.return_value = {}
-        ctx = Mock()
-
         _export_csv_multifile(
             exporter=exporter,
             run_id="run-1",
             artifact_path=str(export_path),
             sign=False,
-            ctx=ctx,
         )
 
         # Directory should be "output" (no .csv extension)
@@ -263,14 +258,11 @@ class TestExportCSVMultifile:
                     {"node_id": "n2", "type": "sink"},
                 ],
             }
-            ctx = Mock()
-
             _export_csv_multifile(
                 exporter=exporter,
                 run_id="run-1",
                 artifact_path=str(export_dir),
                 sign=False,
-                ctx=ctx,
             )
 
         # Check files exist
@@ -303,14 +295,11 @@ class TestExportCSVMultifile:
                 "runs": [{"run_id": "r1"}],
                 "empty_type": [],
             }
-            ctx = Mock()
-
             _export_csv_multifile(
                 exporter=exporter,
                 run_id="run-1",
                 artifact_path=str(export_dir),
                 sign=False,
-                ctx=ctx,
             )
 
         assert (export_dir / "runs.csv").exists()
@@ -328,14 +317,11 @@ class TestExportCSVMultifile:
             exporter.export_run_grouped.return_value = {
                 "data": [{"zebra": "z", "alpha": "a", "mid": "m"}],
             }
-            ctx = Mock()
-
             _export_csv_multifile(
                 exporter=exporter,
                 run_id="run-1",
                 artifact_path=str(export_dir),
                 sign=False,
-                ctx=ctx,
             )
 
         with open(export_dir / "data.csv") as f:
@@ -358,14 +344,11 @@ class TestExportCSVMultifile:
                     {"common": "c2", "only_b": "b1"},
                 ],
             }
-            ctx = Mock()
-
             _export_csv_multifile(
                 exporter=exporter,
                 run_id="run-1",
                 artifact_path=str(export_dir),
                 sign=False,
-                ctx=ctx,
             )
 
         with open(export_dir / "mixed.csv") as f:
@@ -694,7 +677,7 @@ class TestReconstructSchemaAnyOf:
             },
             "required": ["weird"],
         }
-        with pytest.raises(ValueError, match="unsupported anyOf"):
+        with pytest.raises(AuditIntegrityError, match="unsupported anyOf"):
             reconstruct_schema_from_json(schema)
 
 
@@ -708,12 +691,12 @@ class TestReconstructSchemaErrors:
 
     def test_missing_properties_raises(self) -> None:
         """Schema without 'properties' key is malformed."""
-        with pytest.raises(ValueError, match="no 'properties'"):
+        with pytest.raises(AuditIntegrityError, match="no 'properties'"):
             reconstruct_schema_from_json({"type": "object"})
 
     def test_empty_properties_without_additional_raises(self) -> None:
         """Empty properties without additionalProperties=true is invalid."""
-        with pytest.raises(ValueError, match="zero fields"):
+        with pytest.raises(AuditIntegrityError, match="zero fields"):
             reconstruct_schema_from_json({"properties": {}})
 
     def test_empty_properties_with_additional_creates_dynamic(self) -> None:
@@ -730,7 +713,7 @@ class TestReconstructSchemaErrors:
             "properties": {"x": {"type": "custom_type"}},
             "required": ["x"],
         }
-        with pytest.raises(ValueError, match=r"unsupported type.*custom_type"):
+        with pytest.raises(AuditIntegrityError, match=r"unsupported type.*custom_type"):
             reconstruct_schema_from_json(schema)
 
     def test_field_missing_type_raises(self) -> None:
@@ -739,7 +722,7 @@ class TestReconstructSchemaErrors:
             "properties": {"x": {"description": "no type here"}},
             "required": ["x"],
         }
-        with pytest.raises(ValueError, match="no 'type'"):
+        with pytest.raises(AuditIntegrityError, match="no 'type'"):
             reconstruct_schema_from_json(schema)
 
 

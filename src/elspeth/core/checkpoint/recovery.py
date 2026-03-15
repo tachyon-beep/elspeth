@@ -15,8 +15,20 @@ from typing import TYPE_CHECKING, Any
 from sqlalchemy import select
 from sqlalchemy.engine import Row
 
-from elspeth.contracts import PayloadStore, PluginSchema, ResumeCheck, ResumePoint, RowOutcome, RunStatus, SchemaContract
+from elspeth.contracts import (
+    Checkpoint,
+    PayloadNotFoundError,
+    PayloadStore,
+    PluginSchema,
+    ResumeCheck,
+    ResumePoint,
+    RowOutcome,
+    RunStatus,
+    SchemaContract,
+)
 from elspeth.contracts.aggregation_checkpoint import AggregationCheckpointState
+from elspeth.contracts.coalesce_checkpoint import CoalesceCheckpointState
+from elspeth.contracts.errors import AuditIntegrityError
 from elspeth.core.checkpoint.compatibility import CheckpointCompatibilityValidator
 from elspeth.core.checkpoint.manager import CheckpointCorruptionError, CheckpointManager, IncompatibleCheckpointError
 from elspeth.core.checkpoint.serialization import checkpoint_loads
@@ -159,12 +171,18 @@ class RecoveryManager:
             raw = checkpoint_loads(checkpoint.aggregation_state_json)
             agg_state = AggregationCheckpointState.from_dict(raw)
 
+        coalesce_state = None
+        if checkpoint.coalesce_state_json:
+            raw = checkpoint_loads(checkpoint.coalesce_state_json)
+            coalesce_state = CoalesceCheckpointState.from_dict(raw)
+
         return ResumePoint(
             checkpoint=checkpoint,
             token_id=checkpoint.token_id,
             node_id=checkpoint.node_id,
             sequence_number=checkpoint.sequence_number,
             aggregation_state=agg_state,
+            coalesce_state=coalesce_state,
         )
 
     def get_unprocessed_row_data(
@@ -232,19 +250,19 @@ class RecoveryManager:
 
         for row_id in row_ids:
             if row_id not in row_metadata:
-                raise ValueError(f"Row {row_id} not found in database")
+                raise AuditIntegrityError(f"Row {row_id} not found in database — audit data corruption (Tier 1 violation)")
 
             row_index, source_data_ref = row_metadata[row_id]
 
             if source_data_ref is None:
-                raise ValueError(f"Row {row_id} has no source_data_ref - cannot resume without payload")
+                raise AuditIntegrityError(f"Row {row_id} has no source_data_ref — cannot resume without payload (Tier 1 violation)")
 
             # Retrieve from payload store
             try:
                 payload_bytes = payload_store.retrieve(source_data_ref)
                 degraded_data = json.loads(payload_bytes.decode("utf-8"))
-            except KeyError:
-                raise ValueError(f"Row {row_id} payload has been purged - cannot resume") from None
+            except PayloadNotFoundError as exc:
+                raise ValueError(f"Row {row_id} payload has been purged (hash={exc.content_hash}) - cannot resume") from exc
 
             # TYPE FIDELITY RESTORATION:
             # Re-validate through source schema to restore types.
@@ -299,15 +317,7 @@ class RecoveryManager:
         # These buffered tokens will be restored from checkpoint state and must not
         # trigger duplicate reprocessing, but row-level exclusion is unsafe when a row
         # has mixed buffered and non-buffered incomplete tokens.
-        buffered_token_ids: set[str] = set()
-        if checkpoint.aggregation_state_json:
-            # Use checkpoint_loads for consistency (handles datetime type tags)
-            raw = checkpoint_loads(checkpoint.aggregation_state_json)
-            agg_state = AggregationCheckpointState.from_dict(raw)
-            # Typed iteration — no startswith("_") hack needed
-            for node_checkpoint in agg_state.nodes.values():
-                for token in node_checkpoint.tokens:
-                    buffered_token_ids.add(token.token_id)
+        buffered_token_ids = self._get_buffered_checkpoint_token_ids(checkpoint)
 
         with self._db.engine.connect() as conn:
             # CORRECT SEMANTICS FOR FORK/AGGREGATION/COALESCE RECOVERY:
@@ -449,6 +459,26 @@ class RecoveryManager:
 
         return unprocessed
 
+    def _get_buffered_checkpoint_token_ids(self, checkpoint: Checkpoint) -> set[str]:
+        """Collect token IDs restored from checkpoint state."""
+        buffered_token_ids: set[str] = set()
+
+        if checkpoint.aggregation_state_json:
+            raw = checkpoint_loads(checkpoint.aggregation_state_json)
+            agg_state = AggregationCheckpointState.from_dict(raw)
+            for node_checkpoint in agg_state.nodes.values():
+                for token in node_checkpoint.tokens:
+                    buffered_token_ids.add(token.token_id)
+
+        if checkpoint.coalesce_state_json:
+            raw = checkpoint_loads(checkpoint.coalesce_state_json)
+            coalesce_state = CoalesceCheckpointState.from_dict(raw)
+            for pending in coalesce_state.pending:
+                for coalesce_token in pending.branches.values():
+                    buffered_token_ids.add(coalesce_token.token_id)
+
+        return buffered_token_ids
+
     def _get_run(self, run_id: str) -> Row[Any] | None:
         """Get run metadata from the database.
 
@@ -485,12 +515,20 @@ class RecoveryManager:
 
         try:
             contract = recorder.get_run_contract(run_id)
-        except ValueError as e:
-            # get_run_contract raises ValueError when hash verification fails
-            # Convert to CheckpointCorruptionError for checkpoint-specific context
+        except AuditIntegrityError as e:
+            # get_run_contract raises AuditIntegrityError for hash verification failures
+            # and run-not-found. Convert to CheckpointCorruptionError for checkpoint-specific context.
             raise CheckpointCorruptionError(
                 f"Contract integrity verification failed for run '{run_id}': {e}. "
                 f"Resume aborted - audit trail may be corrupted or tampered with."
+            ) from e
+        except (ValueError, KeyError) as e:
+            # ContractAuditRecord.from_json() raises json.JSONDecodeError (subclass of
+            # ValueError) for malformed JSON, or KeyError for missing required fields.
+            # Both indicate Tier 1 data corruption — stored contract JSON is garbage.
+            raise CheckpointCorruptionError(
+                f"Contract integrity verification failed for run '{run_id}': {e}. "
+                f"Resume aborted - stored contract JSON is malformed (database corruption)."
             ) from e
 
         if contract is None:

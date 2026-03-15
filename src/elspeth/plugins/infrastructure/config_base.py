@@ -39,7 +39,7 @@ class PluginConfig(BaseModel):
     (DataPluginConfig) require schema to be specified.
     """
 
-    model_config = {"extra": "forbid"}  # Reject unknown fields
+    model_config = {"extra": "forbid", "frozen": True}  # Reject unknown fields, immutable after construction
 
     schema_config: SchemaConfig | None = None
 
@@ -65,8 +65,7 @@ class PluginConfig(BaseModel):
                 schema_dict = config_copy.pop("schema")
                 # Type guard: schema must be a dict (not None, string, list, etc.)
                 if not isinstance(schema_dict, dict):
-                    raise PluginConfigError(
-                        f"Invalid configuration for {cls.__name__}: "
+                    raise ValueError(
                         f"'schema' must be a dict, got {type(schema_dict).__name__}. "
                         f"Use 'schema: {{mode: observed}}' or provide explicit field definitions."
                     )
@@ -203,6 +202,26 @@ class TabularSourceDataConfig(SourceDataConfig):
         return self
 
 
+def validate_headers_value(v: str | dict[str, str] | None) -> str | dict[str, str] | None:
+    """Validate a headers config value — shared by SinkPathConfig and AzureBlobSinkConfig.
+
+    Returns the validated value unchanged. Raises ValueError for invalid inputs.
+    """
+    if v is None:
+        return v
+    if isinstance(v, dict):
+        targets = list(v.values())
+        duplicates = [t for t in targets if targets.count(t) > 1]
+        if duplicates:
+            raise ValueError(f"Duplicate header mapping targets: {sorted(set(duplicates))}. Each output header must be unique.")
+        return v
+    if isinstance(v, str):
+        if v not in ("normalized", "original"):
+            raise ValueError(f"Invalid header mode '{v}'. Expected 'normalized', 'original', or mapping dict.")
+        return v
+    raise ValueError(f"headers must be 'normalized', 'original', or a dict mapping, got {type(v).__name__}")
+
+
 class SinkPathConfig(PathConfig):
     """Base config for file-based sink plugins with header output mode.
 
@@ -225,26 +244,7 @@ class SinkPathConfig(PathConfig):
     @field_validator("headers")
     @classmethod
     def _validate_headers(cls, v: str | dict[str, str] | None) -> str | dict[str, str] | None:
-        """Validate headers field value.
-
-        Must be 'normalized', 'original', a dict mapping, or None.
-        """
-        if v is None:
-            return v
-
-        if isinstance(v, dict):
-            targets = list(v.values())
-            duplicates = [t for t in targets if targets.count(t) > 1]
-            if duplicates:
-                raise ValueError(f"Duplicate header mapping targets: {sorted(set(duplicates))}. Each output header must be unique.")
-            return v
-
-        if isinstance(v, str):
-            if v not in ("normalized", "original"):
-                raise ValueError(f"Invalid header mode '{v}'. Expected 'normalized', 'original', or mapping dict.")
-            return v
-
-        raise ValueError(f"headers must be 'normalized', 'original', or a dict mapping, got {type(v).__name__}")
+        return validate_headers_value(v)
 
     @property
     def headers_mode(self) -> HeaderMode:

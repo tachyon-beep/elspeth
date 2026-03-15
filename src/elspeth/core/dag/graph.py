@@ -8,6 +8,7 @@ is a thin facade that delegates to builder.build_execution_graph().
 from __future__ import annotations
 
 from collections import Counter
+from collections.abc import Mapping, Sequence
 from typing import TYPE_CHECKING, cast
 
 import networkx as nx
@@ -65,7 +66,7 @@ class ExecutionGraph:
         self._aggregation_id_map: dict[AggregationName, NodeID] = {}  # agg_name -> node_id
         self._coalesce_id_map: dict[CoalesceName, NodeID] = {}  # coalesce_name -> node_id
         self._branch_info: dict[BranchName, BranchInfo] = {}  # branch_name -> coalesce + gate info
-        self._route_label_map: dict[tuple[NodeID, str], str] = {}  # (gate_node, sink_name) -> route_label
+        self._route_label_map: dict[tuple[NodeID, SinkName], str] = {}  # (gate_node, sink_name) -> route_label
         self._route_resolution_map: dict[tuple[NodeID, str], RouteDestination] = {}
         self._pipeline_nodes: list[NodeID] | None = None  # Ordered processing nodes (no source/sinks); None = not yet populated
         self._node_step_map: dict[NodeID, int] = {}  # node_id -> audit step (source=0)
@@ -164,6 +165,7 @@ class ExecutionGraph:
         3. At least one sink node exists
         4. All nodes are reachable from source (no disconnected/orphaned nodes)
         5. Edge labels are unique per source node
+        6. Every gate→sink MOVE edge has a corresponding route label entry
 
         Does NOT check schema compatibility - plugins validate their own
         schemas during construction.
@@ -178,8 +180,8 @@ class ExecutionGraph:
                 # MultiDiGraph returns (u, v, key) tuples; extract just u for display
                 cycle_str = " -> ".join(f"{edge[0]}" for edge in cycle)
                 raise GraphValidationError(f"Graph contains a cycle: {cycle_str}")
-            except nx.NetworkXNoCycle:
-                raise GraphValidationError("Graph contains a cycle") from None
+            except nx.NetworkXNoCycle as exc:
+                raise GraphValidationError("Graph contains a cycle") from exc
 
         # Check for exactly one source
         # All nodes have "info" - added via add_node(), direct access is safe
@@ -225,6 +227,52 @@ class ExecutionGraph:
                     )
                 labels_seen.add(edge_key)
 
+        # Route label completeness: every gate→sink MOVE edge must have a
+        # corresponding _route_label_map entry.  Missing entries mean the builder
+        # created the edge but forgot to register the label — a construction bug
+        # that would silently misrecord routing decisions in the audit trail.
+        #
+        # WHY MOVE-only:  Gates produce two kinds of edges to sinks:
+        #   - MOVE edges: routing decisions (gate evaluates condition → routes row
+        #     to a sink).  These MUST have route labels for audit recording.
+        #   - COPY edges: fork paths (gate forks token → copies flow to parallel
+        #     destinations).  These are NOT routing decisions — they're structural
+        #     fan-out.  No route label needed.
+        # The builder creates MOVE edges via routes={} and COPY edges via fork_to=[].
+        # See builder.py lines ~293 (MOVE+label) vs ~414 (COPY, no label).
+        #
+        # WHY skip when _sink_id_map is empty:  Manual unit-test graphs for
+        # isolated algorithms (cycle detection, topo sort) don't populate the
+        # sink ID map.  This check only applies to builder-constructed graphs.
+        if not self._sink_id_map:
+            return
+        for node_id_str in self._graph.nodes():
+            node_info = cast(NodeInfo, self._graph.nodes[node_id_str]["info"])
+            if node_info.node_type != NodeType.GATE:
+                continue
+            for _, to_id, _key, edge_data in self._graph.out_edges(node_id_str, keys=True, data=True):
+                to_info = cast(NodeInfo, self._graph.nodes[to_id]["info"])
+                if to_info.node_type != NodeType.SINK:
+                    continue
+                if edge_data["mode"] != RoutingMode.MOVE:
+                    continue
+                sink_name = next(
+                    (name for name, nid in self._sink_id_map.items() if nid == NodeID(to_id)),
+                    None,
+                )
+                if sink_name is None:
+                    raise GraphValidationError(
+                        f"Sink node '{to_id}' exists in the graph but is not registered "
+                        "in the sink ID map. This indicates a graph construction bug."
+                    )
+                if (NodeID(node_id_str), sink_name) not in self._route_label_map:
+                    raise GraphValidationError(
+                        f"Gate '{node_id_str}' has a direct edge to sink node '{to_id}' "
+                        f"(sink name '{sink_name}') but no registered route label. "
+                        "This indicates a graph construction bug — every gate→sink edge "
+                        "must have a corresponding route label entry."
+                    )
+
     def topological_order(self) -> list[str]:
         """Return nodes in topological order.
 
@@ -239,15 +287,20 @@ class ExecutionGraph:
         except nx.NetworkXUnfeasible as e:
             raise GraphValidationError(f"Cannot sort graph: {e}") from e
 
-    def get_source(self) -> NodeID | None:
+    def get_source(self) -> NodeID:
         """Get the source node ID.
 
         Returns:
-            The source node ID, or None if not exactly one source exists.
+            The source node ID.
+
+        Raises:
+            GraphValidationError: If not exactly one source exists (construction bug).
         """
         # All nodes have "info" - added via add_node(), direct access is safe
         sources = [NodeID(node_id) for node_id, data in self._graph.nodes(data=True) if data["info"].node_type == NodeType.SOURCE]
-        return sources[0] if len(sources) == 1 else None
+        if len(sources) != 1:
+            raise GraphValidationError(f"Expected exactly 1 source node, found {len(sources)}. This indicates a graph construction bug.")
+        return sources[0]
 
     def get_sinks(self) -> list[NodeID]:
         """Get all sink node IDs.
@@ -360,8 +413,6 @@ class ExecutionGraph:
             or None for source-only pipelines.
         """
         source_id = self.get_source()
-        if source_id is None:
-            return None
         return self.get_next_node(source_id)
 
     def get_next_node(self, node_id: NodeID) -> NodeID | None:
@@ -417,8 +468,6 @@ class ExecutionGraph:
     def build_step_map(self) -> dict[NodeID, int]:
         """Build node -> audit step map (source=0, processing nodes start at 1)."""
         source_id = self.get_source()
-        if source_id is None:
-            return {}
 
         step_map: dict[NodeID, int] = {source_id: 0}
         for idx, node_id in enumerate(self.get_pipeline_node_sequence(), start=1):
@@ -477,11 +526,11 @@ class ExecutionGraph:
         cls,
         source: SourceProtocol,
         source_settings: SourceSettings,
-        transforms: list[WiredTransform],
-        sinks: dict[str, SinkProtocol],
-        aggregations: dict[str, tuple[TransformProtocol, AggregationSettings]],
-        gates: list[GateSettings],
-        coalesce_settings: list[CoalesceSettings] | None = None,
+        transforms: Sequence[WiredTransform],
+        sinks: Mapping[str, SinkProtocol],
+        aggregations: Mapping[str, tuple[TransformProtocol, AggregationSettings]],
+        gates: Sequence[GateSettings],
+        coalesce_settings: Sequence[CoalesceSettings] | None = None,
     ) -> ExecutionGraph:
         """Build ExecutionGraph from plugin instances.
 
@@ -551,7 +600,7 @@ class ExecutionGraph:
         """Set the branch_name -> BranchInfo mapping (coalesce + gate)."""
         self._branch_info = dict(mapping)
 
-    def set_route_label_map(self, mapping: dict[tuple[NodeID, str], str]) -> None:
+    def set_route_label_map(self, mapping: dict[tuple[NodeID, SinkName], str]) -> None:
         """Set the (gate_node, sink_name) -> route_label mapping."""
         self._route_label_map = dict(mapping)
 
@@ -567,7 +616,7 @@ class ExecutionGraph:
         """Add a single entry to the route resolution map."""
         self._route_resolution_map[(gate_id, label)] = dest
 
-    def add_route_label_entry(self, gate_id: NodeID, sink_name: str, label: str) -> None:
+    def add_route_label_entry(self, gate_id: NodeID, sink_name: SinkName, label: str) -> None:
         """Add a single entry to the route label map."""
         self._route_label_map[(gate_id, sink_name)] = label
 
@@ -792,21 +841,23 @@ class ExecutionGraph:
                 result[NodeID(from_id)] = sink_node_to_name[NodeID(to_id)]
         return result
 
-    def get_route_label(self, from_node_id: str, sink_name: str) -> str:
-        """Get the route label for an edge from a gate to a sink.
+    def get_route_label(self, from_node_id: str, sink_name: SinkName) -> str:
+        """Get the route label for an edge from a node to a sink.
+
+        Pure map lookup with "continue" fallback for indirect paths.
+        Route-label completeness is enforced at construction time by validate();
+        a missing entry here means the node reaches the sink via continue edges.
 
         Args:
-            from_node_id: The gate node ID
-            sink_name: The sink name (not node ID)
+            from_node_id: The originating node ID
+            sink_name: The sink name
 
         Returns:
-            The route label (e.g., "suspicious") or "continue" for default path
+            The route label (e.g., "suspicious") or "continue" for default path.
         """
-        # Check explicit route mapping first
-        if (NodeID(from_node_id), sink_name) in self._route_label_map:
-            return self._route_label_map[(NodeID(from_node_id), sink_name)]
-
-        # Default path uses "continue" label
+        key = (NodeID(from_node_id), sink_name)
+        if key in self._route_label_map:
+            return self._route_label_map[key]
         return "continue"
 
     def get_route_resolution_map(self) -> dict[tuple[NodeID, str], RouteDestination]:
@@ -1097,20 +1148,24 @@ class ExecutionGraph:
             if merge_strategy == "select":
                 # Select merge passes through the selected branch's data unchanged.
                 # Trace back to that branch's producer schema for type validation.
-                select_branch = node_info.config.get("select_branch")
-                if select_branch is not None:
-                    # Identity branch: COPY edge from gate to coalesce with label == select_branch
-                    for from_id, _, edge_data in self._graph.in_edges(node_id, data=True):
-                        if edge_data.get("mode") == RoutingMode.COPY and edge_data.get("label") == select_branch:
-                            result = self.get_effective_producer_schema(from_id, _cache)
-                            _cache[node_id] = result
-                            return result
-                    # Transform branch: last transform's edge has label "continue", not
-                    # the branch name. Trace backward to find the last transform node.
-                    _first, last = self._trace_branch_endpoints(NodeID(node_id), select_branch)
-                    result = self.get_effective_producer_schema(last, _cache)
-                    _cache[node_id] = result
-                    return result
+                if "select_branch" not in node_info.config:
+                    raise GraphValidationError(
+                        f"Coalesce node '{node_id}' has merge strategy 'select' but "
+                        "no 'select_branch' in config. This indicates a graph construction bug."
+                    )
+                select_branch = node_info.config["select_branch"]
+                # Identity branch: COPY edge from gate to coalesce with label == select_branch
+                for from_id, _, edge_data in self._graph.in_edges(node_id, data=True):
+                    if edge_data["mode"] == RoutingMode.COPY and edge_data["label"] == select_branch:
+                        result = self.get_effective_producer_schema(from_id, _cache)
+                        _cache[node_id] = result
+                        return result
+                # Transform branch: last transform's edge has label "continue", not
+                # the branch name. Trace backward to find the last transform node.
+                _first, last = self._trace_branch_endpoints(NodeID(node_id), select_branch)
+                result = self.get_effective_producer_schema(last, _cache)
+                _cache[node_id] = result
+                return result
             _cache[node_id] = None
             return None
 
@@ -1132,7 +1187,6 @@ class ExecutionGraph:
                 all_schemas.append((from_id, schema))
 
             # For multi-input nodes, check for mixed observed/explicit schemas first
-            # BUG FIX: P2-2026-02-01-dynamic-branch-schema-mismatch-not-detected
             # Mixed observed/explicit branches create semantic mismatches that cause runtime failures
             if len(all_schemas) > 1:
                 observed_branches = [(nid, s) for nid, s in all_schemas if self._is_observed_schema(s)]
@@ -1266,6 +1320,8 @@ class ExecutionGraph:
         """
         incoming = list(self._graph.in_edges(coalesce_id, data=True))
 
+        if not incoming:
+            raise GraphValidationError(f"Coalesce '{coalesce_id}' has no incoming edges — this is a graph construction bug")
         if len(incoming) < 2:
             return  # Degenerate case (1 branch) - always compatible
 
@@ -1284,7 +1340,7 @@ class ExecutionGraph:
             schema = self.get_effective_producer_schema(from_id, _cache=_schema_cache)
             all_schemas.append((from_id, schema))
 
-        # Reject mixed observed/explicit schemas (P2-2026-02-01 fix)
+        # Reject mixed observed/explicit schemas
         observed_branches = [(nid, s) for nid, s in all_schemas if self._is_observed_schema(s)]
         explicit_branches = [(nid, s) for nid, s in all_schemas if not self._is_observed_schema(s)]
 
@@ -1440,7 +1496,7 @@ class ExecutionGraph:
         guarantees. This is because gates copy raw config["schema"] from upstream,
         which may not include computed guarantees from output_schema_config
         (e.g., LLM transforms compute additional guaranteed_fields like *_usage).
-        See P1-2026-01-31-gate-drops-computed-schema-guarantees for details.
+        Gates copy raw config["schema"] which may omit computed guarantees.
 
         Args:
             node_id: Node to get effective guarantees for

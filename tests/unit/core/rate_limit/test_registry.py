@@ -252,30 +252,6 @@ class TestRateLimitRegistryThreadSafety:
 class TestRateLimitRegistryCleanup:
     """Tests for RateLimitRegistry cleanup methods."""
 
-    def test_reset_all_clears_limiters(self) -> None:
-        """reset_all() closes all limiters and clears the registry."""
-        settings = RateLimitSettings(
-            enabled=True,
-            default_requests_per_minute=10,
-        )
-        config = RuntimeRateLimitConfig.from_settings(settings)
-        registry = RateLimitRegistry(config)
-
-        # Create some limiters
-        limiter1 = registry.get_limiter("service_a")
-        limiter2 = registry.get_limiter("service_b")
-
-        # Mock close on the limiters
-        with patch.object(limiter1, "close") as mock_close1, patch.object(limiter2, "close") as mock_close2:
-            registry.reset_all()
-            mock_close1.assert_called_once()
-            mock_close2.assert_called_once()
-
-        # New request should create new limiter (not cached)
-        new_limiter = registry.get_limiter("service_a")
-        assert new_limiter is not limiter1
-        registry.close()
-
     def test_close_releases_resources(self) -> None:
         """close() closes all limiters."""
         settings = RateLimitSettings(
@@ -310,8 +286,8 @@ class TestRateLimitRegistryCleanup:
         registry.close()
         registry.close()
 
-    def test_reset_all_allows_new_limiters(self) -> None:
-        """After reset_all(), new limiters can be created."""
+    def test_close_allows_new_limiters(self) -> None:
+        """After close(), new limiters can be created."""
         settings = RateLimitSettings(
             enabled=True,
             default_requests_per_minute=10,
@@ -320,9 +296,9 @@ class TestRateLimitRegistryCleanup:
         registry = RateLimitRegistry(config)
 
         original = registry.get_limiter("service")
-        registry.reset_all()
+        registry.close()
         new = registry.get_limiter("service")
 
-        # Should be a different instance after reset
+        # Should be a different instance after close
         assert original is not new
         registry.close()

@@ -160,9 +160,6 @@ def main(
         )
 
 
-# === Subcommand stubs (to be implemented in later tasks) ===
-
-
 def _ensure_output_directories(config: ElspethSettings) -> list[str]:
     """Ensure required output directories exist, creating them if needed.
 
@@ -424,14 +421,14 @@ def run(
         typer.echo(f"Error loading secrets: {e}", err=True)
         raise typer.Exit(1) from None
 
-    # NEW: Instantiate plugins BEFORE graph construction
+    # Instantiate plugins before graph construction
     try:
         plugins = instantiate_plugins_from_config(config)
     except Exception as e:
         typer.echo(f"Error instantiating plugins: {e}", err=True)
         raise typer.Exit(1) from None
 
-    # NEW: Build and validate graph from plugin instances
+    # Build and validate graph from plugin instances
     # Exclude export sink from graph - it's used post-run, not during pipeline execution.
     # The export sink receives audit records after the run completes, not pipeline data.
     execution_sinks = plugins.sinks
@@ -862,7 +859,7 @@ def _orchestrator_context(
 
     # Unpack pre-instantiated plugins
     source: SourceProtocol = plugins.source
-    sinks: dict[str, SinkProtocol] = plugins.sinks
+    sinks: dict[str, SinkProtocol] = dict(plugins.sinks)
 
     # Build transforms list: row_plugins + aggregations (with node_id)
     transforms: list[RowPlugin] = [wired.plugin for wired in plugins.transforms]
@@ -1076,7 +1073,7 @@ def validate(
         _format_validation_error(
             title="YAML Syntax Error",
             message=f"Failed to parse {settings_path.name}",
-            details=[str(e.problem)] if hasattr(e, "problem") else None,
+            details=[str(e.problem)] if e.problem is not None else None,
             hint="Check for unclosed brackets, incorrect indentation, or invalid characters.",
         )
         raise typer.Exit(1) from None
@@ -1202,7 +1199,7 @@ plugins_app = typer.Typer(help="Plugin management commands.")
 app.add_typer(plugins_app, name="plugins")
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, slots=True)
 class PluginInfo:
     """Metadata for a registered plugin.
 
@@ -1471,6 +1468,10 @@ def purge(
             typer.echo(f"  Failed: {len(result.failed_refs)}")
             for ref in result.failed_refs[:5]:
                 typer.echo(f"    {ref[:16]}...")
+        if result.grade_update_failures:
+            typer.echo(f"  Grade update failures: {len(result.grade_update_failures)} (runs may have stale reproducibility grades)")
+            for run_id in result.grade_update_failures[:5]:
+                typer.echo(f"    {run_id}")
     finally:
         db.close()
 
@@ -1751,6 +1752,7 @@ def resume(
                 "node_id": resume_point.node_id,
                 "sequence_number": resume_point.sequence_number,
                 "has_aggregation_state": resume_point.aggregation_state is not None,
+                "has_coalesce_state": resume_point.coalesce_state is not None,
             },
             "unprocessed_rows": len(unprocessed_row_ids),
         }
@@ -1772,6 +1774,10 @@ def resume(
                 typer.echo("  Has aggregation state: Yes")
             else:
                 typer.echo("  Has aggregation state: No")
+            if resume_point.coalesce_state is not None:
+                typer.echo("  Has coalesce state: Yes")
+            else:
+                typer.echo("  Has coalesce state: No")
             typer.echo(f"  Unprocessed rows: {len(unprocessed_row_ids)}")
 
         if not execute:
@@ -1826,11 +1832,9 @@ def resume(
                 typer.echo(f"Error: {e}", err=True)
                 raise typer.Exit(1) from None
 
-            # For sinks with restore_source_headers=True, provide field resolution
+            # For sinks with headers: original, provide field resolution
             # mapping BEFORE validation so they can correctly compare display names
-            sink_opts = dict(settings_config.sinks[sink_name].options)
-            restore_source_headers = sink_opts.get("restore_source_headers", False)
-            if restore_source_headers:
+            if sink.needs_resume_field_resolution:
                 from elspeth.core.landscape import LandscapeRecorder
 
                 recorder = LandscapeRecorder(db)
@@ -1904,7 +1908,25 @@ def resume(
                 typer.echo(f"Resume with: elspeth resume {e.run_id} --execute")
             raise typer.Exit(3)  # noqa: B904 -- distinct exit code: 0=success, 1=error, 3=interrupted
         except Exception as e:
-            typer.echo(f"Error during resume: {e}", err=True)
+            import traceback
+
+            if output_format == "json":
+                import json as json_mod_err
+
+                typer.echo(
+                    json_mod_err.dumps(
+                        {
+                            "event": "error",
+                            "error": str(e),
+                            "error_type": type(e).__name__,
+                            "traceback": traceback.format_exc(),
+                        }
+                    ),
+                    err=True,
+                )
+            else:
+                typer.echo(f"Error during resume: {e}", err=True)
+                typer.echo(traceback.format_exc(), err=True)
             raise typer.Exit(1) from None
 
         if output_format == "json":
@@ -1967,11 +1989,8 @@ def health(
         elspeth health --verbose
     """
     import json as json_module
-    import os
     import subprocess
     import sys
-
-    from elspeth import __version__
 
     # Health check results
     checks: dict[str, dict[str, str | bool]] = {}
@@ -1996,12 +2015,12 @@ def health(
             )
             if git_result.returncode == 0:
                 git_sha = git_result.stdout.strip()
-        except Exception:
-            git_sha = "unknown"
+        except (subprocess.SubprocessError, FileNotFoundError, OSError):
+            git_sha = "unavailable"
 
     checks["commit"] = {
-        "status": "ok" if git_sha and git_sha != "unknown" else "warn",
-        "value": git_sha or "unknown",
+        "status": "ok" if git_sha and git_sha != "unavailable" else "warn",
+        "value": git_sha or "unavailable",
     }
 
     # Check 3: Python version

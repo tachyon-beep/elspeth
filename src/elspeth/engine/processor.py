@@ -18,12 +18,14 @@ from types import MappingProxyType
 from typing import TYPE_CHECKING, Any, cast
 
 from elspeth.contracts import RouteDestination, RowOutcome, RowResult, SourceRow, TokenInfo, TransformResult
+from elspeth.contracts.freeze import deep_freeze
 from elspeth.contracts.schema_contract import PipelineRow
 from elspeth.contracts.types import BranchName, CoalesceName, NodeID, SinkName, StepResolver
 from elspeth.engine.dag_navigator import DAGNavigator, WorkItem
 
 if TYPE_CHECKING:
     from elspeth.contracts.aggregation_checkpoint import AggregationCheckpointState
+    from elspeth.contracts.coalesce_checkpoint import CoalesceCheckpointState
     from elspeth.contracts.events import TelemetryEvent
     from elspeth.contracts.payload_store import PayloadStore
     from elspeth.engine.clock import Clock
@@ -72,11 +74,11 @@ class DAGTraversalContext:
     branch_first_node: Mapping[str, NodeID] = MappingProxyType({})
 
     def __post_init__(self) -> None:
-        object.__setattr__(self, "node_step_map", MappingProxyType(dict(self.node_step_map)))
-        object.__setattr__(self, "node_to_plugin", MappingProxyType(dict(self.node_to_plugin)))
-        object.__setattr__(self, "node_to_next", MappingProxyType(dict(self.node_to_next)))
-        object.__setattr__(self, "coalesce_node_map", MappingProxyType(dict(self.coalesce_node_map)))
-        object.__setattr__(self, "branch_first_node", MappingProxyType(dict(self.branch_first_node)))
+        object.__setattr__(self, "node_step_map", deep_freeze(self.node_step_map))
+        object.__setattr__(self, "node_to_plugin", deep_freeze(self.node_to_plugin))
+        object.__setattr__(self, "node_to_next", deep_freeze(self.node_to_next))
+        object.__setattr__(self, "coalesce_node_map", deep_freeze(self.coalesce_node_map))
+        object.__setattr__(self, "branch_first_node", deep_freeze(self.branch_first_node))
 
 
 @dataclass(frozen=True, slots=True)
@@ -98,7 +100,7 @@ class _FlushContext:
     node_id: NodeID
     transform: TransformProtocol
     settings: AggregationSettings
-    buffered_tokens: list[TokenInfo]
+    buffered_tokens: tuple[TokenInfo, ...]
     batch_id: str
     error_msg: str
     expand_parent_token: TokenInfo
@@ -106,8 +108,26 @@ class _FlushContext:
     coalesce_node_id: NodeID | None
     coalesce_name: CoalesceName | None
 
+    def __post_init__(self) -> None:
+        if not self.node_id:
+            raise ValueError("_FlushContext.node_id must not be empty")
+        # Freeze before validation so emptiness check works on generators too
+        object.__setattr__(self, "buffered_tokens", tuple(self.buffered_tokens))
+        if not self.buffered_tokens:
+            raise ValueError("_FlushContext.buffered_tokens must not be empty")
+        if not self.batch_id:
+            raise ValueError("_FlushContext.batch_id must not be empty")
+        # coalesce_node_id and coalesce_name must be both-or-neither
+        has_id = self.coalesce_node_id is not None
+        has_name = self.coalesce_name is not None
+        if has_id != has_name:
+            raise ValueError(
+                f"_FlushContext: coalesce_node_id and coalesce_name must be both set or both None, "
+                f"got node_id={self.coalesce_node_id!r}, name={self.coalesce_name!r}"
+            )
 
-# --- T18: Discriminated union types for _process_single_token extraction ---
+
+# --- Discriminated union types for _process_single_token extraction ---
 
 
 @dataclass(frozen=True, slots=True)
@@ -122,7 +142,7 @@ class _TransformContinue:
 class _TransformTerminal:
     """Token has reached a terminal state (completed, failed, quarantined, etc.)."""
 
-    result: RowResult | list[RowResult]
+    result: RowResult | tuple[RowResult, ...]
 
 
 type _TransformOutcome = _TransformContinue | _TransformTerminal
@@ -141,7 +161,7 @@ class _GateContinue:
 class _GateTerminal:
     """Gate has routed, forked, or diverted the token to a terminal state."""
 
-    result: RowResult | list[RowResult]
+    result: RowResult | tuple[RowResult, ...]
 
 
 type _GateOutcome = _GateContinue | _GateTerminal
@@ -221,7 +241,7 @@ class RowProcessor:
         branch_to_sink: dict[BranchName, SinkName] | None = None,
         sink_names: frozenset[str] | None = None,
         coalesce_on_success_map: dict[CoalesceName, str] | None = None,
-        restored_aggregation_state: dict[NodeID, AggregationCheckpointState] | None = None,
+        restored_aggregation_state: Mapping[NodeID, AggregationCheckpointState] | None = None,
         payload_store: PayloadStore | None = None,
         clock: Clock | None = None,
         max_workers: int | None = None,
@@ -260,11 +280,11 @@ class RowProcessor:
         self._source_node_id: NodeID = source_node_id
         self._source_on_success: str = source_on_success
         self._traversal = traversal
-        self._node_step_map: dict[NodeID, int] = dict(traversal.node_step_map)
+        self._node_step_map: Mapping[NodeID, int] = traversal.node_step_map
         self._step_resolver: StepResolver = make_step_resolver(traversal.node_step_map, source_node_id)
-        self._node_to_plugin: dict[NodeID, RowPlugin | GateSettings] = dict(traversal.node_to_plugin)
+        self._node_to_plugin: Mapping[NodeID, RowPlugin | GateSettings] = traversal.node_to_plugin
         self._first_transform_node_id: NodeID | None = traversal.first_transform_node_id
-        self._node_to_next: dict[NodeID, NodeID | None] = dict(traversal.node_to_next)
+        self._node_to_next: Mapping[NodeID, NodeID | None] = traversal.node_to_next
         self._retry_manager = retry_manager
         self._coalesce_executor = coalesce_executor
         self._coalesce_node_ids: dict[CoalesceName, NodeID] = dict(traversal.coalesce_node_map)
@@ -329,10 +349,13 @@ class RowProcessor:
         )
         self._telemetry_manager = telemetry_manager
 
-        # Restore aggregation state if provided (crash recovery)
+        # Restore aggregation state if provided (crash recovery / resume)
         if restored_aggregation_state:
-            for node_id, state in restored_aggregation_state.items():
-                self._aggregation_executor.restore_state(node_id, state)
+            restored_states: dict[int, AggregationCheckpointState] = {}
+            for state in restored_aggregation_state.values():
+                restored_states.setdefault(id(state), state)
+            for state in restored_states.values():
+                self._aggregation_executor.restore_from_checkpoint(state)
 
     @property
     def token_manager(self) -> TokenManager:
@@ -514,7 +537,7 @@ class RowProcessor:
 
     # ─────────────────────────────────────────────────────────────────────────
     # Public facade for aggregation timeout checking
-    # (Bug fix: P1-2026-01-22 - provides clean API for orchestrator timeout checks)
+    # Provides clean API for orchestrator timeout checks
     # ─────────────────────────────────────────────────────────────────────────
 
     def check_aggregation_timeout(self, node_id: NodeID) -> tuple[bool, TriggerType | None]:
@@ -560,6 +583,12 @@ class RowProcessor:
         """
         return self._aggregation_executor.get_checkpoint_state()
 
+    def get_coalesce_checkpoint_state(self) -> CoalesceCheckpointState | None:
+        """Get checkpoint state for pending coalesces."""
+        if self._coalesce_executor is None:
+            return None
+        return self._coalesce_executor.get_checkpoint_state()
+
     # ─────────────────────────────────────────────────────────────────────────
     # Aggregation flush helpers (shared by handle_timeout_flush and
     # _process_batch_aggregation_node flush path)
@@ -584,10 +613,10 @@ class RowProcessor:
     def _handle_flush_error(
         self,
         fctx: _FlushContext,
-    ) -> list[RowResult]:
+    ) -> tuple[RowResult, ...]:
         """Handle failed aggregation flush for both passthrough and transform modes.
 
-        T26: Both modes now have BUFFERED (non-terminal) at buffer time,
+        Both modes now have BUFFERED (non-terminal) at buffer time,
         so FAILED can be recorded as the terminal outcome for all tokens.
         """
         error_hash = hashlib.sha256(fctx.error_msg.encode()).hexdigest()[:16]
@@ -604,13 +633,13 @@ class RowProcessor:
             self._emit_token_completed(token, RowOutcome.FAILED)
             results.append(RowResult(token=token, final_data=token.row_data, outcome=RowOutcome.FAILED, error=failure))
 
-        return results
+        return tuple(results)
 
     def _route_passthrough_results(
         self,
         fctx: _FlushContext,
         result: TransformResult,
-    ) -> tuple[list[RowResult], list[WorkItem]]:
+    ) -> tuple[tuple[RowResult, ...], list[WorkItem]]:
         """Route passthrough aggregation results after successful flush.
 
         Passthrough mode: original tokens continue with enriched data.
@@ -618,7 +647,7 @@ class RowProcessor:
         downstream processing or COMPLETED outcome.
         """
         if not result.is_multi_row:
-            raise ValueError(
+            raise OrchestrationInvariantError(
                 f"Passthrough mode requires multi-row result, "
                 f"but transform '{fctx.transform.name}' returned single row. "
                 f"Use TransformResult.success_multi() for passthrough."
@@ -626,7 +655,7 @@ class RowProcessor:
         if result.rows is None:
             raise RuntimeError("Multi-row result has rows=None")
         if len(result.rows) != len(fctx.buffered_tokens):
-            raise ValueError(
+            raise OrchestrationInvariantError(
                 f"Passthrough mode requires same number of output rows "
                 f"as input rows. Transform '{fctx.transform.name}' returned "
                 f"{len(result.rows)} rows but received {len(fctx.buffered_tokens)} input rows."
@@ -663,24 +692,24 @@ class RowProcessor:
                     )
                 )
 
-        return results, child_items
+        return tuple(results), child_items
 
     def _route_transform_results(
         self,
         fctx: _FlushContext,
         result: TransformResult,
-    ) -> tuple[list[RowResult], list[WorkItem]]:
+    ) -> tuple[tuple[RowResult, ...], list[WorkItem]]:
         """Route transform-mode aggregation results after successful flush.
 
         Transform mode: N input rows → M output rows with new tokens via expand_token.
         Records per-token terminal outcomes (CONSUMED_IN_BATCH or QUARANTINED),
         emits deferred TokenCompleted telemetry, then routes expanded tokens downstream.
 
-        T26: Batch transforms can quarantine individual rows. Quarantined tokens
+        Batch transforms can quarantine individual rows. Quarantined tokens
         get QUARANTINED terminal state instead of CONSUMED_IN_BATCH, identified
         via quarantined_indices in the result's success_reason metadata.
         """
-        # T26: Extract quarantined indices from result metadata.
+        # Extract quarantined indices from result metadata.
         # metadata is optional in TransformSuccessReason — only present when
         # the batch transform quarantines rows.
         quarantined_index_set: set[int] = set()
@@ -690,7 +719,7 @@ class RowProcessor:
                 quarantined_index_set = set(metadata["quarantined_indices"])
 
         # Record terminal outcomes for ALL buffered tokens (deferred from buffer time).
-        # T26: Quarantined tokens get QUARANTINED; valid tokens get CONSUMED_IN_BATCH.
+        # Quarantined tokens get QUARANTINED; valid tokens get CONSUMED_IN_BATCH.
         for i, token in enumerate(fctx.buffered_tokens):
             if i in quarantined_index_set:
                 error_hash = hashlib.sha256(f"quarantined_in_batch:{fctx.batch_id}:{i}".encode()).hexdigest()[:16]
@@ -723,7 +752,7 @@ class RowProcessor:
                     f"TransformResult.success(row) or rows via TransformResult.success_multi(rows). "
                     f"This is a plugin bug."
                 )
-            output_rows = [result.row]
+            output_rows = (result.row,)
 
         # Enforce expected_output_count if configured
         if fctx.settings.expected_output_count is not None:
@@ -791,7 +820,7 @@ class RowProcessor:
                         )
                     )
 
-        return results, child_items
+        return tuple(results), child_items
 
     def handle_timeout_flush(
         self,
@@ -799,7 +828,7 @@ class RowProcessor:
         transform: TransformProtocol,
         ctx: PluginContext,
         trigger_type: TriggerType,
-    ) -> tuple[list[RowResult], list[WorkItem]]:
+    ) -> tuple[tuple[RowResult, ...], list[WorkItem]]:
         """Handle an aggregation flush triggered outside normal row processing.
 
         Handles TIMEOUT (between row arrivals) and END_OF_SOURCE (remaining buffers)
@@ -831,7 +860,7 @@ class RowProcessor:
             node_id=node_id,
             transform=transform,
             settings=settings,
-            buffered_tokens=buffered_tokens,
+            buffered_tokens=tuple(buffered_tokens),
             batch_id=batch_id,
             error_msg="Batch transform failed during timeout flush",
             expand_parent_token=buffered_tokens[0],
@@ -851,7 +880,7 @@ class RowProcessor:
             return self._route_passthrough_results(fctx, result)
         if settings.output_mode == OutputMode.TRANSFORM:
             return self._route_transform_results(fctx, result)
-        raise ValueError(f"Unknown output_mode: {settings.output_mode}")
+        raise OrchestrationInvariantError(f"Unknown output_mode: {settings.output_mode}")
 
     def _process_batch_aggregation_node(
         self,
@@ -861,14 +890,14 @@ class RowProcessor:
         child_items: list[WorkItem],
         coalesce_node_id: NodeID | None = None,
         coalesce_name: CoalesceName | None = None,
-    ) -> tuple[RowResult | list[RowResult], list[WorkItem]]:
+    ) -> tuple[RowResult | tuple[RowResult, ...], list[WorkItem]]:
         """Process a row at an aggregation node using engine buffering.
 
         Engine buffers rows and calls transform.process(rows: list[dict])
         when the trigger fires. Flush handling is delegated to shared helpers
         (_handle_flush_error, _route_passthrough_results, _route_transform_results).
 
-        TEMPORAL DECOUPLING (Bug P2-2026-02-01, updated T26):
+        TEMPORAL DECOUPLING:
 
         Both modes now record BUFFERED (non-terminal) at buffer time, with
         terminal outcomes deferred to flush time. This enables per-token
@@ -905,7 +934,7 @@ class RowProcessor:
         # Buffer the row
         self._aggregation_executor.buffer_row(node_id, current_token)
 
-        # T26: Record BUFFERED for this token BEFORE checking flush.
+        # Record BUFFERED for this token BEFORE checking flush.
         # On count-threshold flush, the triggering token would otherwise have
         # no BUFFERED record — it goes directly to CONSUMED_IN_BATCH/FAILED.
         # Recording here ensures BUFFERED → terminal for every aggregation token.
@@ -936,7 +965,7 @@ class RowProcessor:
                 node_id=node_id,
                 transform=transform,
                 settings=settings,
-                buffered_tokens=buffered_tokens,
+                buffered_tokens=tuple(buffered_tokens),
                 batch_id=batch_id,
                 error_msg="Batch transform failed",
                 expand_parent_token=current_token,
@@ -960,14 +989,14 @@ class RowProcessor:
                 flush_results, flush_child_items = self._route_transform_results(fctx, result)
                 child_items.extend(flush_child_items)
                 return flush_results, child_items
-            raise ValueError(f"Unknown output_mode: {output_mode}")
+            raise OrchestrationInvariantError(f"Unknown output_mode: {output_mode}")
 
         # Not flushing yet — BUFFERED already recorded above.
         # Terminal outcome is deferred to flush time for both modes:
         # - passthrough: BUFFERED → COMPLETED/FAILED at flush
         # - transform: BUFFERED → CONSUMED_IN_BATCH/QUARANTINED/FAILED at flush
         # NOTE: Do NOT emit TokenCompleted telemetry here!
-        # Bug P2-2026-02-01: TokenCompleted must be deferred to flush time so that
+        # TokenCompleted must be deferred to flush time so that
         # TransformCompleted can be emitted first.
         return (
             RowResult(
@@ -998,7 +1027,7 @@ class RowProcessor:
         if on_error is None:
             raise OrchestrationInvariantError(
                 f"Transform '{transform.name}' has on_error=None — this should be impossible since TransformSettings requires on_error"
-            ) from None
+            )
 
         error_details: TransformErrorReason = {"reason": reason, "error": str(exc)}
         ctx.record_transform_error(
@@ -1014,14 +1043,14 @@ class RowProcessor:
         if on_error != "discard":
             try:
                 error_edge_id = self._error_edge_ids[NodeID(transform.node_id)]
-            except KeyError:
+            except KeyError as key_err:
                 raise OrchestrationInvariantError(
                     f"Transform '{transform.node_id}' has on_error={on_error!r} but no DIVERT edge registered."
-                ) from exc
+                ) from key_err
             if ctx.state_id is None:
                 raise OrchestrationInvariantError(
                     f"ctx.state_id must be set by TransformExecutor before exception propagated (transform={transform.node_id})"
-                ) from None
+                )
             self._recorder.record_routing_event(
                 state_id=ctx.state_id,
                 edge_id=error_edge_id,
@@ -1485,7 +1514,7 @@ class RowProcessor:
                 )
 
                 if result is not None:
-                    if isinstance(result, list):
+                    if isinstance(result, tuple):
                         results.extend(result)
                     else:
                         results.append(result)
@@ -1560,7 +1589,7 @@ class RowProcessor:
                 error=FailureInfo.from_max_retries_exceeded(e),
             )
             if sibling_results:
-                return _TransformTerminal(result=[current_result, *sibling_results])
+                return _TransformTerminal(result=(current_result, *sibling_results))
             return _TransformTerminal(result=current_result)
 
         # 2. Handle error status
@@ -1677,7 +1706,7 @@ class RowProcessor:
                 outcome=RowOutcome.QUARANTINED,
             )
             if sibling_results:
-                return _TransformTerminal(result=[current_result, *sibling_results])
+                return _TransformTerminal(result=(current_result, *sibling_results))
             return _TransformTerminal(result=current_result)
 
         # Routed to error sink
@@ -1695,7 +1724,7 @@ class RowProcessor:
             sink_name=error_sink,
         )
         if sibling_results:
-            return _TransformTerminal(result=[current_result, *sibling_results])
+            return _TransformTerminal(result=(current_result, *sibling_results))
         return _TransformTerminal(result=current_result)
 
     def _handle_gate_node(
@@ -1763,7 +1792,7 @@ class RowProcessor:
                 sink_name=outcome.sink_name,
             )
             if sibling_results:
-                return _GateTerminal(result=[current_result, *sibling_results])
+                return _GateTerminal(result=(current_result, *sibling_results))
             return _GateTerminal(result=current_result)
 
         # 4. Fork to paths
@@ -1962,7 +1991,7 @@ class RowProcessor:
         coalesce_node_id: NodeID | None = None,
         coalesce_name: CoalesceName | None = None,
         on_success_sink: str | None = None,
-    ) -> tuple[RowResult | list[RowResult] | None, list[WorkItem]]:
+    ) -> tuple[RowResult | tuple[RowResult, ...] | None, list[WorkItem]]:
         """Process a single token through processing nodes starting at node_id.
 
         Args:

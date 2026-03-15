@@ -1,10 +1,7 @@
 """TransformExecutor - wraps transform.process() with audit recording."""
 
-import logging
 import time
 from typing import TYPE_CHECKING, Any, cast
-
-import structlog
 
 from elspeth.contracts import (
     ExecutionError,
@@ -27,9 +24,6 @@ from elspeth.plugins.infrastructure.results import TransformResult
 
 if TYPE_CHECKING:
     from elspeth.engine.batch_adapter import SharedBatchAdapter
-
-logger = logging.getLogger(__name__)
-slog = structlog.get_logger(__name__)
 
 
 class TransformExecutor:
@@ -256,12 +250,12 @@ class TransformExecutor:
             # Set token on context for ALL transforms (not just batch-mixin).
             # Regular transforms also need ctx.token for telemetry correlation
             # when using audited clients (e.g., WebScrapeTransform uses ctx.token.token_id).
-            # See P2-2026-02-14-transformexecutor-only-sets-ctx-token-for-batch-mixin.
+            # Bug fix: ctx.token was previously only set for batch-mixin transforms.
             ctx.token = token
 
             # Execute with timing and span
-            # P2-2026-01-21: Pass token_id for accurate child token attribution in traces
-            # P2-2026-01-21: Pass node_id for disambiguation when multiple plugin instances exist
+            # Pass token_id for accurate child token attribution in traces
+            # Pass node_id for disambiguation when multiple plugin instances exist
             with self._spans.transform_span(
                 transform.name,
                 node_id=transform.node_id,
@@ -415,13 +409,6 @@ class TransformExecutor:
                 # For multi-row results, keep original row_data (engine will expand tokens later)
                 if result.row is not None:
                     # Single-row result: transforms return PipelineRow with correct contract
-                    slog.debug(
-                        "pipeline_row_created",
-                        token_id=token.token_id,
-                        transform=transform.name,
-                        contract_mode=result.row.contract.mode,
-                    )
-
                     updated_token = token.with_updated_data(result.row)
                 else:
                     # Multi-row result: keep original row_data (engine will expand tokens later)
@@ -449,7 +436,7 @@ class TransformExecutor:
 
                 # Record error event (always, even for discard - audit completeness)
                 # Use node_id (unique DAG identifier), not name (plugin type)
-                # Bug fix: P2-2026-01-19-transform-errors-ambiguous-transform-id
+                # Bug fix: use node_id (unique) not name (shared across instances)
                 #
                 # result.reason MUST be set for error results - TransformResult.error() requires it.
                 # If None, that's a bug in the transform (constructed error result without reason).
@@ -473,12 +460,12 @@ class TransformExecutor:
                 if on_error != "discard":
                     try:
                         error_edge_id = self._error_edge_ids[NodeID(transform.node_id)]
-                    except KeyError:
+                    except KeyError as exc:
                         raise OrchestrationInvariantError(
                             f"Transform '{transform.node_id}' has on_error={on_error!r} but no "
                             f"DIVERT edge registered. DAG construction should have created an "
                             f"__error_{{name}}__ edge in from_plugin_instances()."
-                        ) from None
+                        ) from exc
                     self._recorder.record_routing_event(
                         state_id=guard.state_id,
                         edge_id=error_edge_id,

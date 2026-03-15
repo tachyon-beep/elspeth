@@ -21,6 +21,7 @@ from unittest.mock import MagicMock, Mock, patch
 
 import pytest
 
+from elspeth.contracts.errors import AuditIntegrityError
 from elspeth.core.landscape.journal import JournalRecord, LandscapeJournal
 
 # ---------------------------------------------------------------------------
@@ -143,6 +144,24 @@ class TestSerializeRecord:
         result = LandscapeJournal._serialize_record(record)
         parsed = json.loads(result)
         assert parsed["timestamp"] == "2026-01-15T12:00:00+00:00"
+
+    def test_non_serializable_type_raises(self) -> None:
+        """Non-JSON types must crash with AuditIntegrityError, not silently convert via str()."""
+        record = cast(JournalRecord, {"timestamp": "t", "statement": "INSERT", "parameters": {b"bytes": "value"}, "executemany": False})
+        with pytest.raises(AuditIntegrityError, match="Tier 1 violation"):
+            LandscapeJournal._serialize_record(record)
+
+    def test_nan_rejected(self) -> None:
+        """NaN in journal data must be rejected — audit integrity."""
+        record = cast(JournalRecord, {"timestamp": "t", "statement": "INSERT", "parameters": {"val": float("nan")}, "executemany": False})
+        with pytest.raises(AuditIntegrityError, match="NaN"):
+            LandscapeJournal._serialize_record(record)
+
+    def test_set_type_raises(self) -> None:
+        """Sets are not JSON-serializable — must crash with AuditIntegrityError."""
+        record = cast(JournalRecord, {"timestamp": "t", "statement": "INSERT", "parameters": {"ids": {1, 2, 3}}, "executemany": False})
+        with pytest.raises(AuditIntegrityError, match="Tier 1 violation"):
+            LandscapeJournal._serialize_record(record)
 
 
 # ===========================================================================
@@ -447,6 +466,32 @@ class TestAppendRecordsFailureHandling:
 
         assert journal._consecutive_failures == 0
 
+    def test_programming_error_not_caught(self, tmp_path: Path) -> None:
+        """AuditIntegrityError from serialization must crash, not be silently swallowed."""
+        journal = _make_journal(tmp_path)
+        record = cast(JournalRecord, {"timestamp": "t", "statement": "INSERT", "parameters": {}, "executemany": False})
+
+        with (
+            patch.object(journal, "_serialize_record", side_effect=AuditIntegrityError("bad serialize")),
+            pytest.raises(AuditIntegrityError, match="bad serialize"),
+        ):
+            journal._append_records([record])
+
+    def test_disabled_drop_always_logs(self, tmp_path: Path) -> None:
+        """Every drop in disabled state must be logged, not just every 100th."""
+        journal = _make_journal(tmp_path)
+        journal._disabled = True
+        journal._consecutive_failures = 5
+        journal._total_dropped = 5  # Not a multiple of 100
+
+        record = cast(JournalRecord, {"timestamp": "t", "statement": "INSERT", "parameters": {}, "executemany": False})
+        with patch("elspeth.core.landscape.journal.logger") as mock_logger:
+            journal._append_records([record])
+
+        mock_logger.warning.assert_called_once()
+        call_kwargs = mock_logger.warning.call_args
+        assert "journal_records_dropped" in str(call_kwargs)
+
 
 # ===========================================================================
 # Attach
@@ -503,21 +548,39 @@ class TestLoadPayload:
         assert content == '{"key": "value"}'
         assert error is None
 
-    def test_read_failure_returns_error(self, tmp_path: Path) -> None:
+    def test_read_failure_missing_blob_returns_error(self, tmp_path: Path) -> None:
+        from elspeth.contracts.payload_store import PayloadNotFoundError
+
         journal = _make_journal(
             tmp_path,
             include_payloads=True,
             payload_base_path=str(tmp_path / "payloads"),
         )
         journal._payload_store = Mock()
-        journal._payload_store.retrieve.side_effect = FileNotFoundError("not found")
+        journal._payload_store.retrieve.side_effect = PayloadNotFoundError("deadbeef" * 8)
 
         content, error = journal._load_payload("some-ref")
         assert content is None
         assert error is not None
         assert "payload_read_failed" in error
 
-    def test_read_failure_with_fail_on_error_raises(self, tmp_path: Path) -> None:
+    def test_read_failure_os_error_returns_error(self, tmp_path: Path) -> None:
+        journal = _make_journal(
+            tmp_path,
+            include_payloads=True,
+            payload_base_path=str(tmp_path / "payloads"),
+        )
+        journal._payload_store = Mock()
+        journal._payload_store.retrieve.side_effect = OSError("disk failure")
+
+        content, error = journal._load_payload("some-ref")
+        assert content is None
+        assert error is not None
+        assert "payload_read_failed" in error
+
+    def test_read_failure_missing_blob_with_fail_on_error_raises(self, tmp_path: Path) -> None:
+        from elspeth.contracts.payload_store import PayloadNotFoundError
+
         journal = _make_journal(
             tmp_path,
             fail_on_error=True,
@@ -525,9 +588,35 @@ class TestLoadPayload:
             payload_base_path=str(tmp_path / "payloads"),
         )
         journal._payload_store = Mock()
-        journal._payload_store.retrieve.side_effect = FileNotFoundError("not found")
+        journal._payload_store.retrieve.side_effect = PayloadNotFoundError("deadbeef" * 8)
 
-        with pytest.raises(FileNotFoundError):
+        with pytest.raises(PayloadNotFoundError):
+            journal._load_payload("some-ref")
+
+    def test_read_failure_os_error_with_fail_on_error_raises(self, tmp_path: Path) -> None:
+        journal = _make_journal(
+            tmp_path,
+            fail_on_error=True,
+            include_payloads=True,
+            payload_base_path=str(tmp_path / "payloads"),
+        )
+        journal._payload_store = Mock()
+        journal._payload_store.retrieve.side_effect = OSError("disk failure")
+
+        with pytest.raises(OSError):
+            journal._load_payload("some-ref")
+
+    def test_programming_error_in_retrieve_not_caught(self, tmp_path: Path) -> None:
+        """TypeError/AttributeError in payload store must crash, not be silently swallowed."""
+        journal = _make_journal(
+            tmp_path,
+            include_payloads=True,
+            payload_base_path=str(tmp_path / "payloads"),
+        )
+        journal._payload_store = Mock()
+        journal._payload_store.retrieve.side_effect = TypeError("bad type in store")
+
+        with pytest.raises(TypeError, match="bad type in store"):
             journal._load_payload("some-ref")
 
     def test_decode_failure_returns_error(self, tmp_path: Path) -> None:

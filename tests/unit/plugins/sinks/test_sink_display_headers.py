@@ -346,54 +346,6 @@ class TestJSONSinkHeaders:
             assert row == {"user_id": "u1", "amount": 100.0}
 
 
-class TestFieldResolutionReverseMapping:
-    """Tests for FieldResolution.reverse_mapping property."""
-
-    def test_reverse_mapping(self) -> None:
-        """reverse_mapping inverts resolution_mapping."""
-        from elspeth.plugins.sources.field_normalization import FieldResolution
-
-        resolution = FieldResolution(
-            final_headers=["user_id", "case_study_1"],
-            resolution_mapping={
-                "User ID": "user_id",
-                "case StUdY --- 1!!": "case_study_1",
-            },
-            normalization_version="1.0.0",
-        )
-
-        reverse = resolution.reverse_mapping
-        assert reverse == {
-            "user_id": "User ID",
-            "case_study_1": "case StUdY --- 1!!",
-        }
-
-    def test_reverse_mapping_empty(self) -> None:
-        """reverse_mapping handles empty mapping."""
-        from elspeth.plugins.sources.field_normalization import FieldResolution
-
-        resolution = FieldResolution(
-            final_headers=[],
-            resolution_mapping={},
-            normalization_version=None,
-        )
-
-        assert resolution.reverse_mapping == {}
-
-    def test_reverse_mapping_passthrough(self) -> None:
-        """reverse_mapping handles identity mapping (no normalization)."""
-        from elspeth.plugins.sources.field_normalization import FieldResolution
-
-        resolution = FieldResolution(
-            final_headers=["id", "name"],
-            resolution_mapping={"id": "id", "name": "name"},
-            normalization_version=None,
-        )
-
-        reverse = resolution.reverse_mapping
-        assert reverse == {"id": "id", "name": "name"}
-
-
 class TestCSVCustomHeadersAppendMode:
     """Tests for CSV append mode with custom headers."""
 

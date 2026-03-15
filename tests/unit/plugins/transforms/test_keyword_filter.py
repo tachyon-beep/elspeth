@@ -161,10 +161,11 @@ class TestValidateRegexSafety:
         _validate_regex_safety(pattern)  # Should not raise
 
     def test_instantiation_rejects_redos_pattern(self) -> None:
-        """KeywordFilter __init__ rejects ReDoS-prone patterns."""
+        """KeywordFilter config validation rejects ReDoS-prone patterns."""
+        from elspeth.plugins.infrastructure.config_base import PluginConfigError
         from elspeth.plugins.transforms.keyword_filter import KeywordFilter
 
-        with pytest.raises(ValueError, match="nested quantifiers"):
+        with pytest.raises(PluginConfigError, match="nested quantifiers"):
             KeywordFilter(
                 {
                     "fields": ["content"],
@@ -230,12 +231,11 @@ class TestKeywordFilterInstantiation:
         assert result.status == "error"
 
     def test_transform_rejects_invalid_regex(self) -> None:
-        """Transform fails at init if regex pattern is invalid."""
-        import re
-
+        """Transform fails at config validation if regex pattern is invalid."""
+        from elspeth.plugins.infrastructure.config_base import PluginConfigError
         from elspeth.plugins.transforms.keyword_filter import KeywordFilter
 
-        with pytest.raises(re.error):
+        with pytest.raises(PluginConfigError, match="not a valid regex"):
             KeywordFilter(
                 {
                     "fields": ["content"],

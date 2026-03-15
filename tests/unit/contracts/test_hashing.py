@@ -37,6 +37,14 @@ class TestCanonicalJsonNanRejection:
         with pytest.raises(ValueError, match="NaN"):
             canonical_json({"a": {"b": [{"c": float("nan")}]}})
 
+    def test_rejects_nan_nested_in_tuple(self) -> None:
+        with pytest.raises(ValueError, match="NaN"):
+            canonical_json({"key": (1, 2, float("nan"))})
+
+    def test_rejects_nan_deeply_nested_in_tuple(self) -> None:
+        with pytest.raises(ValueError, match="NaN"):
+            canonical_json({"a": ({"b": (float("nan"),)},)})
+
     def test_rejects_infinity_in_dict_value(self) -> None:
         with pytest.raises(ValueError, match="Infinity"):
             canonical_json({"amount": float("inf")})

@@ -10,8 +10,11 @@ import hashlib
 import json
 import os
 import time
+from collections.abc import Mapping
+from types import MappingProxyType
 from typing import TYPE_CHECKING, Any, Literal
 
+from pydantic import field_validator
 from sqlalchemy import Boolean, Column, Float, Integer, MetaData, Table, Text, create_engine, insert
 
 if TYPE_CHECKING:
@@ -20,7 +23,7 @@ from sqlalchemy.engine import Engine
 from sqlalchemy.types import TypeEngine
 
 from elspeth.contracts import ArtifactDescriptor, CallStatus, CallType, PluginSchema
-from elspeth.contracts.contexts import LifecycleContext, SinkContext
+from elspeth.contracts.contexts import SinkContext
 from elspeth.contracts.url import SanitizedDatabaseUrl
 from elspeth.core.canonical import canonical_json
 from elspeth.plugins.infrastructure.base import BaseSink
@@ -31,13 +34,15 @@ from elspeth.plugins.infrastructure.schema_factory import create_schema_from_con
 # Text (not String) is used for string columns because String() without a length
 # argument causes truncation or errors on MySQL/MSSQL — Text maps to TEXT on all
 # backends and accepts arbitrary-length values without portability issues.
-SCHEMA_TYPE_TO_SQLALCHEMY: dict[str, type[TypeEngine[Any]]] = {
-    "str": Text,
-    "int": Integer,
-    "float": Float,
-    "bool": Boolean,
-    "any": Text,  # Fallback to Text for 'any' type
-}
+SCHEMA_TYPE_TO_SQLALCHEMY: Mapping[str, type[TypeEngine[Any]]] = MappingProxyType(
+    {
+        "str": Text,
+        "int": Integer,
+        "float": Float,
+        "bool": Boolean,
+        "any": Text,  # Fallback to Text for 'any' type
+    }
+)
 
 
 class DatabaseSinkConfig(DataPluginConfig):
@@ -50,6 +55,13 @@ class DatabaseSinkConfig(DataPluginConfig):
     table: str
     if_exists: Literal["append", "replace"] = "append"
     validate_input: bool = False  # Optional runtime validation of incoming rows
+
+    @field_validator("table")
+    @classmethod
+    def _reject_empty_table(cls, v: str) -> str:
+        if not v.strip():
+            raise ValueError("table name must not be empty")
+        return v
 
 
 class DatabaseSink(BaseSink):
@@ -268,7 +280,6 @@ class DatabaseSink(BaseSink):
 
         DDL operations (DROP TABLE, CREATE TABLE) are instrumented via
         ctx.record_call for audit trail completeness.
-        See P2-2026-02-14-ddl-calls-bypass-ctx-record-call.
         """
         self._ensure_engine_and_metadata_initialized()
         if self._engine is None:
@@ -331,10 +342,10 @@ class DatabaseSink(BaseSink):
         (SQLite, PostgreSQL, MySQL, etc.).
 
         DDL is instrumented via ctx.record_call for audit trail completeness.
-        See P2-2026-02-14-ddl-calls-bypass-ctx-record-call.
         """
-        if self._engine is None:
-            return
+        assert self._engine is not None, (
+            "engine is None at DROP TABLE time — invariant violation (_ensure_engine_and_metadata_initialized must run first)"
+        )
 
         from sqlalchemy import MetaData, Table, inspect
 
@@ -471,11 +482,13 @@ class DatabaseSink(BaseSink):
 
         # Insert all rows in batch with call recording for audit trail
         # (ctx.operation_id is set by executor)
+        assert self._engine is not None and self._table is not None, (
+            "engine/table is None at INSERT time — invariant violation (_ensure_table must set both before write)"
+        )
         start_time = time.perf_counter()
         try:
-            if self._engine is not None and self._table is not None:
-                with self._engine.begin() as conn:
-                    conn.execute(insert(self._table), insert_rows)
+            with self._engine.begin() as conn:
+                conn.execute(insert(self._table), insert_rows)
             latency_ms = (time.perf_counter() - start_time) * 1000
 
             # Record successful INSERT in audit trail
@@ -539,13 +552,3 @@ class DatabaseSink(BaseSink):
             self._table = None
             self._metadata = None
             self._table_replaced = False
-
-    # === Lifecycle Hooks ===
-
-    def on_start(self, ctx: LifecycleContext) -> None:
-        """Called before processing begins."""
-        pass
-
-    def on_complete(self, ctx: LifecycleContext) -> None:
-        """Called after processing completes."""
-        pass

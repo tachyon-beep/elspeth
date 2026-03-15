@@ -18,6 +18,7 @@ inputs, not just specific test cases.
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from typing import Any, cast
 
 from hypothesis import given, settings
@@ -406,26 +407,26 @@ class TestRoutingActionProperties:
 class TestRoutingActionReasonImmutability:
     """Property tests for RoutingAction reason immutability.
 
-    RoutingAction uses deep copy to prevent external mutation. The frozen
-    dataclass prevents reassignment of the reason field, but the dict
-    itself is a regular dict (not MappingProxyType) for TypedDict compatibility.
+    RoutingAction uses deep_freeze to make reason fully immutable.
+    The frozen dataclass prevents field reassignment; deep_freeze converts
+    dicts to MappingProxyType to prevent content mutation.
     """
 
     @given(reason=st.dictionaries(dict_keys, json_primitives, min_size=1, max_size=3))
     @settings(max_examples=100)
-    def test_reason_preserves_type(self, reason: dict[str, Any]) -> None:
-        """Property: Reason dict is a dict after construction.
+    def test_reason_preserves_content(self, reason: dict[str, Any]) -> None:
+        """Property: Reason content is preserved after construction.
 
-        RoutingAction.reason is a deep-copied dict (for TypedDict compatibility).
-        The frozen dataclass prevents reassignment; deep copy prevents
-        external mutation via retained references.
+        RoutingAction.reason is deep-frozen (MappingProxyType) for immutability.
+        The frozen dataclass prevents reassignment; deep_freeze prevents
+        content mutation via retained references.
         """
         # Cast arbitrary dict to ConfigGateReason for type checking
         # This test verifies immutability behavior, not reason content
         action = RoutingAction.continue_(reason=cast(ConfigGateReason, reason))
 
-        # Reason is a dict (TypedDict compatible)
-        assert isinstance(action.reason, dict)
+        # Reason is a Mapping with identical content
+        assert isinstance(action.reason, Mapping)
         assert action.reason == reason
 
     @given(reason=st.dictionaries(dict_keys, json_primitives, min_size=1, max_size=3))

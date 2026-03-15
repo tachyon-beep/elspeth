@@ -9,10 +9,11 @@ Plugin Types:
 - Sink: Outputs data (one or more per run)
 """
 
-from collections.abc import Iterator
+from collections.abc import Iterator, Mapping
 from typing import TYPE_CHECKING, Any, Protocol, runtime_checkable
 
 from elspeth.contracts.enums import Determinism
+from elspeth.contracts.header_modes import HeaderMode
 
 if TYPE_CHECKING:
     from elspeth.contracts.contexts import LifecycleContext, SinkContext, SourceContext, TransformContext
@@ -20,12 +21,6 @@ if TYPE_CHECKING:
     from elspeth.contracts.results import ArtifactDescriptor, SourceRow, TransformResult
     from elspeth.contracts.schema_contract import PipelineRow
     from elspeth.contracts.sink import OutputValidationResult
-
-
-# NOTE: PluginProtocol was DELETED. It was a speculative base protocol
-# that was never imported or used anywhere in the codebase. The concrete
-# protocols (SourceProtocol, TransformProtocol, SinkProtocol) each declare
-# their own metadata attributes directly.
 
 
 @runtime_checkable
@@ -64,7 +59,7 @@ class SourceProtocol(Protocol):
     node_id: str | None  # Set by orchestrator after registration
     config: dict[str, Any]  # Configuration dict stored by all plugins
 
-    # Metadata for Phase 3 audit/reproducibility
+    # Audit metadata
     determinism: Determinism
     plugin_version: str
 
@@ -112,7 +107,7 @@ class SourceProtocol(Protocol):
 
     # === Audit Trail Metadata ===
 
-    def get_field_resolution(self) -> tuple[dict[str, str], str | None] | None:
+    def get_field_resolution(self) -> tuple[Mapping[str, str], str | None] | None:
         """Return field resolution mapping computed during load().
 
         Sources that perform field normalization should override this to return
@@ -161,7 +156,7 @@ class TransformProtocol(Protocol):
     on_complete/close run inside a finally block and are individually
     protected (one plugin's failure does not prevent others from cleaning up).
 
-    Error Routing (WP-11.99b):
+    Error Routing:
         All transforms must have on_error set (required by TransformSettings).
         on_error specifies where errored rows go: a sink name or "discard".
 
@@ -186,7 +181,7 @@ class TransformProtocol(Protocol):
     node_id: str | None  # Set by orchestrator after registration
     config: dict[str, Any]  # Configuration dict stored by all plugins
 
-    # Metadata for Phase 3 audit/reproducibility
+    # Audit metadata
     determinism: Determinism
     plugin_version: str
 
@@ -217,13 +212,13 @@ class TransformProtocol(Protocol):
     # Defaults to False — only enabled via plugin config (validate_input: true).
     validate_input: bool
 
-    # Error routing configuration (WP-11.99b)
+    # Error routing configuration
     # Injected by cli_helpers.py bridge from TransformSettings.on_error.
     # Always non-None at runtime (TransformSettings requires on_error).
     # Protocol retains str | None because injection happens post-construction.
     on_error: str | None
 
-    # Success routing configuration (Phase 3: lifted from options to settings)
+    # Success routing configuration
     # Injected by cli_helpers.py bridge from TransformSettings.on_success.
     # Always non-None at runtime (TransformSettings requires on_success).
     # Protocol retains str | None because injection happens post-construction.
@@ -291,7 +286,7 @@ class BatchTransformProtocol(Protocol):
     on_complete/close run inside a finally block and are individually
     protected (one plugin's failure does not prevent others from cleaning up).
 
-    Error Routing (WP-11.99b):
+    Error Routing:
         Batch transforms that can return TransformResult.error() must set on_error
         to specify where errored batches go.
 
@@ -320,7 +315,7 @@ class BatchTransformProtocol(Protocol):
     node_id: str | None  # Set by orchestrator after registration
     config: dict[str, Any]  # Configuration dict stored by all plugins
 
-    # Metadata for Phase 3 audit/reproducibility
+    # Audit metadata
     determinism: Determinism
     plugin_version: str
 
@@ -332,11 +327,11 @@ class BatchTransformProtocol(Protocol):
     # and new tokens will be created for each output row.
     creates_tokens: bool
 
-    # Error routing configuration (WP-11.99b)
+    # Error routing configuration
     # Injected by cli_helpers.py bridge from AggregationSettings/TransformSettings.
     on_error: str | None
 
-    # Success routing configuration (Phase 3: lifted from options to settings)
+    # Success routing configuration
     # Injected by cli_helpers.py bridge from AggregationSettings.on_success.
     on_success: str | None
 
@@ -373,23 +368,6 @@ class BatchTransformProtocol(Protocol):
     def on_complete(self, ctx: "LifecycleContext") -> None:
         """Called after all rows processed or on error, before close(). Individually protected."""
         ...
-
-
-# NOTE: CoalescePolicy enum was DELETED. The engine uses
-# Literal["require_all", "quorum", "best_effort", "first"] via CoalesceSettings.
-
-# NOTE: AggregationProtocol was DELETED in aggregation structural cleanup.
-# Aggregation is now fully structural:
-# - Engine buffers rows internally
-# - Engine evaluates triggers (WP-06)
-# - Engine calls batch-aware Transform.process(rows: list[dict])
-# Use is_batch_aware=True on BaseTransform for batch processing.
-
-# NOTE: CoalesceProtocol was DELETED. Coalesce is fully structural:
-# - Engine holds tokens via CoalesceExecutor (engine/coalesce_executor.py)
-# - Engine evaluates merge conditions based on CoalesceSettings policy
-# - Engine merges data according to CoalesceSettings merge strategy (union/nested/select)
-# - No plugin-level coalesce interface. Configure via YAML coalesce: section.
 
 
 @runtime_checkable
@@ -441,11 +419,11 @@ class SinkProtocol(Protocol):
     node_id: str | None  # Set by orchestrator after registration
     config: dict[str, Any]  # Configuration dict stored by all plugins
 
-    # Metadata for Phase 3 audit/reproducibility
+    # Audit metadata
     determinism: Determinism
     plugin_version: str
 
-    # Resume capability (Phase 5 - Checkpoint/Resume)
+    # Resume capability
     supports_resume: bool  # Can this sink append to existing output on resume?
 
     # Required-field enforcement (centralized in SinkExecutor).
@@ -544,20 +522,50 @@ class SinkProtocol(Protocol):
         """
         ...
 
+    @property
+    def needs_resume_field_resolution(self) -> bool:
+        """Whether this sink needs field resolution mapping for resume.
+
+        True when headers mode is ORIGINAL — the CLI resume path must
+        provide the source field resolution mapping before validation.
+        """
+        ...
+
     def set_resume_field_resolution(self, resolution_mapping: dict[str, str]) -> None:
         """Set field resolution mapping for resume validation.
 
         Called by CLI during `elspeth resume` to provide the source field resolution
         mapping BEFORE calling validate_output_target(). This allows sinks using
-        restore_source_headers=True to correctly compare expected display names
-        against existing file headers.
+        headers: original to correctly compare expected display names against
+        existing file headers.
 
         Args:
             resolution_mapping: Dict mapping original header name -> normalized field name.
                 This is the same format returned by Landscape.get_source_field_resolution().
 
         Note:
-            Default is a no-op. Only sinks that support restore_source_headers need
-            to override this (CSVSink, JSONSink).
+            Default is a no-op. Only sinks configured with headers: original need
+            to override this.
         """
         ...
+
+
+class DisplayHeaderHost(Protocol):
+    """Structural type for sinks that use display header functions.
+
+    Any sink that calls init_display_headers() will satisfy this protocol.
+    Provides type safety for the display_headers module functions instead
+    of using Any. This is an internal protocol — engine and CLI code should
+    use SinkProtocol, not this.
+
+    NOT @runtime_checkable — the protocol's members are private attributes,
+    and isinstance() only checks method signatures, not attribute presence.
+    Use mypy structural checking instead.
+    """
+
+    _headers_mode: HeaderMode
+    _headers_custom_mapping: dict[str, str] | None
+    _resolved_display_headers: dict[str, str] | None
+    _display_headers_resolved: bool
+    _needs_resume_field_resolution: bool
+    _output_contract: Any  # SchemaContract | None — Any to avoid circular import

@@ -1,8 +1,5 @@
 """ExecutionRepository: node state recording, call tracking, and batch management.
 
-Extracted from NodeStateRecordingMixin + CallRecordingMixin + BatchRecordingMixin
-as part of T19 (Landscape mixin -> composed repository decomposition).
-
 Owns thread-safe call index allocation (Lock + per-state and per-operation dicts).
 """
 
@@ -10,7 +7,8 @@ from __future__ import annotations
 
 import json
 from threading import Lock
-from typing import TYPE_CHECKING, Any, Literal, overload
+from typing import TYPE_CHECKING, Any, Literal, NamedTuple, overload
+from uuid import uuid4
 
 import structlog
 from sqlalchemy import func, select
@@ -41,6 +39,8 @@ from elspeth.contracts import (
 from elspeth.contracts.call_data import CallPayload
 from elspeth.contracts.errors import AuditIntegrityError, ExecutionError, TransformErrorReason
 from elspeth.contracts.hashing import repr_hash
+from elspeth.contracts.payload_store import IntegrityError as PayloadIntegrityError
+from elspeth.contracts.payload_store import PayloadNotFoundError
 from elspeth.core.canonical import canonical_json, stable_hash
 from elspeth.core.landscape._database_ops import DatabaseOps
 from elspeth.core.landscape._helpers import generate_id, now
@@ -54,6 +54,7 @@ from elspeth.core.landscape.model_loaders import (
     OperationLoader,
     RoutingEventLoader,
 )
+from elspeth.core.landscape.row_data import CallDataResult, CallDataState
 from elspeth.core.landscape.schema import (
     artifacts_table,
     batch_members_table,
@@ -72,6 +73,16 @@ if TYPE_CHECKING:
 logger = structlog.get_logger(__name__)
 
 _TERMINAL_BATCH_STATUSES = frozenset({BatchStatus.COMPLETED, BatchStatus.FAILED})
+
+
+class _PreparedCallData(NamedTuple):
+    """Intermediate result from _prepare_call_payloads — hashes, refs, and serialized error."""
+
+    request_hash: str
+    request_ref: str | None
+    response_hash: str | None
+    response_ref: str | None
+    error_json: str | None
 
 
 class ExecutionRepository:
@@ -111,7 +122,7 @@ class ExecutionRepository:
         self._call_index_lock = Lock()
         self._operation_call_indices: dict[str, int] = {}
 
-    # ── Node state recording (from NodeStateRecordingMixin) ───────────
+    # ── Node state recording ────────────────────────────────────────────
 
     def begin_node_state(
         self,
@@ -453,7 +464,7 @@ class ExecutionRepository:
 
         return events
 
-    # ── Call recording (from CallRecordingMixin) ──────────────────────
+    # ── Call recording ─────────────────────────────────────────────────
 
     def allocate_call_index(self, state_id: str) -> int:
         """Allocate next call index for a state_id (thread-safe).
@@ -505,6 +516,46 @@ class ExecutionRepository:
             self._call_indices[state_id] += 1
             return idx
 
+    def _prepare_call_payloads(
+        self,
+        request_data: CallPayload,
+        response_data: CallPayload | None,
+        error: CallPayload | None,
+        request_ref: str | None,
+        response_ref: str | None,
+    ) -> _PreparedCallData:
+        """Serialize, hash, and auto-persist call payloads.
+
+        Shared logic for record_call() and record_operation_call(). Converts
+        CallPayload objects to dicts, computes stable hashes, auto-persists
+        to the payload store when available, and serializes error payloads.
+        """
+        request_dict = request_data.to_dict()
+        response_dict = response_data.to_dict() if response_data is not None else None
+
+        request_hash = stable_hash(request_dict)
+        response_hash = stable_hash(response_dict) if response_dict is not None else None
+
+        # Auto-persist request to payload store if available and ref not provided
+        if request_ref is None and self._payload_store is not None:
+            request_bytes = canonical_json(request_dict).encode("utf-8")
+            request_ref = self._payload_store.store(request_bytes)
+
+        # Auto-persist response to payload store if available and ref not provided
+        if response_dict is not None and response_ref is None and self._payload_store is not None:
+            response_bytes = canonical_json(response_dict).encode("utf-8")
+            response_ref = self._payload_store.store(response_bytes)
+
+        error_json = canonical_json(error.to_dict()) if error is not None else None
+
+        return _PreparedCallData(
+            request_hash=request_hash,
+            request_ref=request_ref,
+            response_hash=response_hash,
+            response_ref=response_ref,
+            error_json=error_json,
+        )
+
     def record_call(
         self,
         state_id: str,
@@ -543,31 +594,13 @@ class ExecutionRepository:
         """
         call_id = generate_id()
         timestamp = now()
-
-        # Serialize CallPayload → dict at the recorder boundary
-        request_dict = request_data.to_dict()
-        response_dict = response_data.to_dict() if response_data is not None else None
-
-        # Hash request (always required)
-        request_hash = stable_hash(request_dict)
-
-        # Hash response (optional - None for errors without response)
-        response_hash = stable_hash(response_dict) if response_dict is not None else None
-
-        # Auto-persist request to payload store if available and ref not provided
-        # This enables replay/verify modes to retrieve the original request
-        if request_ref is None and self._payload_store is not None:
-            request_bytes = canonical_json(request_dict).encode("utf-8")
-            request_ref = self._payload_store.store(request_bytes)
-
-        # Auto-persist response to payload store if available and ref not provided
-        # This enables replay/verify modes to retrieve the original response
-        if response_dict is not None and response_ref is None and self._payload_store is not None:
-            response_bytes = canonical_json(response_dict).encode("utf-8")
-            response_ref = self._payload_store.store(response_bytes)
-
-        # Serialize error if present (CallPayload → dict → JSON)
-        error_json = canonical_json(error.to_dict()) if error is not None else None
+        prepared = self._prepare_call_payloads(
+            request_data,
+            response_data,
+            error,
+            request_ref,
+            response_ref,
+        )
 
         values = {
             "call_id": call_id,
@@ -576,11 +609,11 @@ class ExecutionRepository:
             "call_index": call_index,
             "call_type": call_type,
             "status": status,
-            "request_hash": request_hash,
-            "request_ref": request_ref,
-            "response_hash": response_hash,
-            "response_ref": response_ref,
-            "error_json": error_json,
+            "request_hash": prepared.request_hash,
+            "request_ref": prepared.request_ref,
+            "response_hash": prepared.response_hash,
+            "response_ref": prepared.response_ref,
+            "error_json": prepared.error_json,
             "latency_ms": latency_ms,
             "created_at": timestamp,
         }
@@ -590,16 +623,16 @@ class ExecutionRepository:
         return Call(
             call_id=call_id,
             call_index=call_index,
-            call_type=call_type,  # Pass enum directly per Call contract
-            status=status,  # Pass enum directly per Call contract
-            request_hash=request_hash,
+            call_type=call_type,
+            status=status,
+            request_hash=prepared.request_hash,
             created_at=timestamp,
-            state_id=state_id,  # Parent is node_state
-            operation_id=None,  # Not an operation call
-            request_ref=request_ref,
-            response_hash=response_hash,
-            response_ref=response_ref,
-            error_json=error_json,
+            state_id=state_id,
+            operation_id=None,
+            request_ref=prepared.request_ref,
+            response_hash=prepared.response_hash,
+            response_ref=prepared.response_ref,
+            error_json=prepared.error_json,
             latency_ms=latency_ms,
         )
 
@@ -627,8 +660,6 @@ class ExecutionRepository:
         Returns:
             Operation with operation_id for call attribution
         """
-        from uuid import uuid4
-
         # Use pure UUID for operation_id - run_id + node_id can exceed 64 chars
         # (run_id=36 + node_id=45 + prefixes would be 94+ chars)
         operation_id = f"op_{uuid4().hex}"  # "op_" + 32 hex = 35 chars, well under 64
@@ -758,7 +789,6 @@ class ExecutionRepository:
         *,
         request_ref: str | None = None,
         response_ref: str | None = None,
-        provider: str | None = None,
     ) -> Call:
         """Record an external call made during an operation.
 
@@ -775,7 +805,6 @@ class ExecutionRepository:
             latency_ms: Call duration in milliseconds
             request_ref: Optional payload store reference for request
             response_ref: Optional payload store reference for response
-            provider: Optional provider name for telemetry
 
         Returns:
             The recorded Call model
@@ -783,29 +812,13 @@ class ExecutionRepository:
         call_index = self.allocate_operation_call_index(operation_id)
         call_id = f"call_{operation_id}_{call_index}"
         timestamp = now()
-
-        # Serialize CallPayload → dict at the recorder boundary
-        request_dict = request_data.to_dict()
-        response_dict = response_data.to_dict() if response_data is not None else None
-
-        # Hash request (always required)
-        request_hash = stable_hash(request_dict)
-
-        # Hash response (optional - None for errors without response)
-        response_hash = stable_hash(response_dict) if response_dict is not None else None
-
-        # Auto-persist request to payload store if available and ref not provided
-        if request_ref is None and self._payload_store is not None:
-            request_bytes = canonical_json(request_dict).encode("utf-8")
-            request_ref = self._payload_store.store(request_bytes)
-
-        # Auto-persist response to payload store if available and ref not provided
-        if response_dict is not None and response_ref is None and self._payload_store is not None:
-            response_bytes = canonical_json(response_dict).encode("utf-8")
-            response_ref = self._payload_store.store(response_bytes)
-
-        # Serialize error if present (CallPayload → dict → JSON)
-        error_json = canonical_json(error.to_dict()) if error is not None else None
+        prepared = self._prepare_call_payloads(
+            request_data,
+            response_data,
+            error,
+            request_ref,
+            response_ref,
+        )
 
         values = {
             "call_id": call_id,
@@ -814,11 +827,11 @@ class ExecutionRepository:
             "call_index": call_index,
             "call_type": call_type,
             "status": status,
-            "request_hash": request_hash,
-            "request_ref": request_ref,
-            "response_hash": response_hash,
-            "response_ref": response_ref,
-            "error_json": error_json,
+            "request_hash": prepared.request_hash,
+            "request_ref": prepared.request_ref,
+            "response_hash": prepared.response_hash,
+            "response_ref": prepared.response_ref,
+            "error_json": prepared.error_json,
             "latency_ms": latency_ms,
             "created_at": timestamp,
         }
@@ -830,14 +843,14 @@ class ExecutionRepository:
             call_index=call_index,
             call_type=call_type,
             status=status,
-            request_hash=request_hash,
+            request_hash=prepared.request_hash,
             created_at=timestamp,
-            state_id=None,  # Not a node_state call
-            operation_id=operation_id,  # Parent is operation
-            request_ref=request_ref,
-            response_hash=response_hash,
-            response_ref=response_ref,
-            error_json=error_json,
+            state_id=None,
+            operation_id=operation_id,
+            request_ref=prepared.request_ref,
+            response_hash=prepared.response_hash,
+            response_ref=prepared.response_ref,
+            error_json=prepared.error_json,
             latency_ms=latency_ms,
         )
 
@@ -957,45 +970,46 @@ class ExecutionRepository:
             return None
         return self._call_loader.load(row)
 
-    def get_call_response_data(self, call_id: str) -> dict[str, Any] | None:
-        """Retrieve the response data for a call.
+    def get_call_response_data(self, call_id: str) -> CallDataResult:
+        """Retrieve the response data for a call with explicit state.
 
-        Fetches response data from the payload store if response_ref is set,
-        otherwise returns None.
+        Returns a CallDataResult with explicit state indicating why data
+        may be unavailable. Callers match on state instead of guessing
+        why the previous `None` return occurred.
 
         Args:
             call_id: The call ID to get response data for
 
         Returns:
-            Response data dict if available, None if no response was recorded
-            or if payload store is not configured
-
-        Note:
-            Returns None if:
-            - Call not found
-            - No response_ref set on the call (error calls may not have response)
-            - Payload store not configured
-            - Response data has been purged from payload store
+            CallDataResult with state and data (if available)
         """
         # Get the call record first
         query = select(calls_table).where(calls_table.c.call_id == call_id)
         row = self._ops.execute_fetchone(query)
 
         if row is None:
-            return None
+            return CallDataResult(state=CallDataState.CALL_NOT_FOUND, data=None)
 
         if row.response_ref is None:
-            return None
+            if row.response_hash is not None:
+                return CallDataResult(state=CallDataState.HASH_ONLY, data=None)
+            return CallDataResult(state=CallDataState.NEVER_STORED, data=None)
 
         if self._payload_store is None:
-            return None
+            return CallDataResult(state=CallDataState.STORE_NOT_CONFIGURED, data=None)
 
-        # Retrieve from payload store — KeyError means purged by retention policy,
-        # OSError means storage backend failure (permissions, disk, etc.)
+        # Retrieve from payload store — PayloadNotFoundError means purged by
+        # retention policy, PayloadIntegrityError means hash mismatch
+        # (corruption/tampering), OSError means storage backend failure
+        # (permissions, disk, etc.). All non-purge paths translate to
+        # AuditIntegrityError with context, matching
+        # query_repository._retrieve_and_parse_payload().
         try:
             payload_bytes = self._payload_store.retrieve(row.response_ref)
-        except KeyError:
-            return None
+        except PayloadNotFoundError:
+            return CallDataResult(state=CallDataState.PURGED, data=None)
+        except PayloadIntegrityError as e:
+            raise AuditIntegrityError(f"Payload integrity check failed for call_id={call_id} (ref={row.response_ref}): {e}") from e
         except OSError as e:
             raise AuditIntegrityError(
                 f"Payload retrieval failed for call_id={call_id} (ref={row.response_ref}): {type(e).__name__}: {e}"
@@ -1011,9 +1025,9 @@ class ExecutionRepository:
                 f"Corrupt call response payload for call_id={call_id} (ref={row.response_ref}): "
                 f"expected JSON object, got {type(decoded).__name__}"
             )
-        return decoded
+        return CallDataResult(state=CallDataState.AVAILABLE, data=decoded)
 
-    # ── Batch recording (from BatchRecordingMixin) ────────────────────
+    # ── Batch recording ────────────────────────────────────────────────
 
     def create_batch(
         self,
@@ -1112,15 +1126,6 @@ class ExecutionRepository:
         Raises:
             AuditIntegrityError: If batch not found or current status is terminal
         """
-        current = self.get_batch(batch_id)
-        if current is None:
-            raise AuditIntegrityError(f"Cannot update batch status: batch {batch_id} not found")
-        if current.status in _TERMINAL_BATCH_STATUSES:
-            raise AuditIntegrityError(
-                f"Cannot transition batch {batch_id} from terminal status {current.status.value!r} "
-                f"to {status.value!r}. Terminal batches are immutable."
-            )
-
         updates: dict[str, Any] = {"status": status}
 
         if trigger_type is not None:
@@ -1132,7 +1137,26 @@ class ExecutionRepository:
         if status in (BatchStatus.COMPLETED, BatchStatus.FAILED):
             updates["completed_at"] = now()
 
-        self._ops.execute_update(batches_table.update().where(batches_table.c.batch_id == batch_id).values(**updates))
+        # Atomic conditional UPDATE: constrain current status to non-terminal in the
+        # WHERE clause so the check-and-set is a single statement, eliminating the
+        # TOCTOU race between the old get_batch() read and the subsequent update.
+        terminal_values = [s.value for s in _TERMINAL_BATCH_STATUSES]
+        with self._db.connection() as conn:
+            result = conn.execute(
+                batches_table.update()
+                .where(batches_table.c.batch_id == batch_id)
+                .where(batches_table.c.status.notin_(terminal_values))
+                .values(**updates)
+            )
+            if result.rowcount == 0:
+                # Distinguish "not found" from "already terminal".
+                existing = conn.execute(select(batches_table.c.status).where(batches_table.c.batch_id == batch_id)).fetchone()
+                if existing is not None:
+                    raise AuditIntegrityError(
+                        f"Cannot transition batch {batch_id} from terminal status {existing.status!r} "
+                        f"to {status.value!r}. Terminal batches are immutable."
+                    )
+                raise AuditIntegrityError(f"Cannot update batch status: batch {batch_id} not found")
 
     def complete_batch(
         self,
@@ -1173,7 +1197,7 @@ class ExecutionRepository:
                 .where(batches_table.c.batch_id == batch_id)
                 .values(
                     status=status,
-                    trigger_type=trigger_type if trigger_type is not None else None,
+                    trigger_type=trigger_type,
                     trigger_reason=trigger_reason,
                     aggregation_state_id=state_id,
                     completed_at=timestamp,
@@ -1373,28 +1397,6 @@ class ExecutionRepository:
         if new_row is None:
             raise AuditIntegrityError(f"retry_batch: new batch {new_batch_id} not found after INSERT")
         return self._batch_loader.load(new_row)
-
-    def _find_batch_by_attempt(
-        self,
-        run_id: str,
-        aggregation_node_id: str,
-        attempt: int,
-    ) -> Batch | None:
-        """Find an existing batch by (run_id, aggregation_node_id, attempt).
-
-        Used for retry idempotency — prevents creating duplicate draft
-        batches when recovery restarts after a mid-recovery crash.
-        """
-        query = (
-            select(batches_table)
-            .where(batches_table.c.run_id == run_id)
-            .where(batches_table.c.aggregation_node_id == aggregation_node_id)
-            .where(batches_table.c.attempt == attempt)
-        )
-        row = self._ops.execute_fetchone(query)
-        if row is None:
-            return None
-        return self._batch_loader.load(row)
 
     # === Artifact Registration ===
 

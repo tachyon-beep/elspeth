@@ -94,7 +94,7 @@ class TestRelativeRedirectResolution:
         mock_validate.return_value = _make_ssrf_request("https://example.com/new-path")
         http_client._ephemeral_mock.get.return_value = final_response
 
-        result, count = http_client._follow_redirects_safe(
+        result, count, _final_url = http_client._follow_redirects_safe(
             response=redirect_response,
             max_redirects=5,
             timeout=10.0,
@@ -103,7 +103,7 @@ class TestRelativeRedirectResolution:
         )
 
         # validate_url_for_ssrf should receive hostname-based URL
-        mock_validate.assert_called_once_with("https://example.com/new-path")
+        mock_validate.assert_called_once_with("https://example.com/new-path", allowed_ranges=())
         assert result.status_code == 200
         assert count == 1
 
@@ -124,7 +124,7 @@ class TestRelativeRedirectResolution:
             original_url="https://api.example.com/api/v1/resource",
         )
 
-        mock_validate.assert_called_once_with("https://api.example.com/api/v2/resource")
+        mock_validate.assert_called_once_with("https://api.example.com/api/v2/resource", allowed_ranges=())
 
 
 class TestAbsoluteRedirectResolution:
@@ -147,7 +147,7 @@ class TestAbsoluteRedirectResolution:
             original_url="https://example.com/start",
         )
 
-        mock_validate.assert_called_once_with("https://other.com/page")
+        mock_validate.assert_called_once_with("https://other.com/page", allowed_ranges=())
 
 
 class TestChainedRedirects:
@@ -166,7 +166,7 @@ class TestChainedRedirects:
         ]
         http_client._ephemeral_mock.get.side_effect = [redirect2, final_response]
 
-        result, count = http_client._follow_redirects_safe(
+        result, count, _final_url = http_client._follow_redirects_safe(
             response=redirect1,
             max_redirects=5,
             timeout=10.0,
@@ -175,8 +175,8 @@ class TestChainedRedirects:
         )
 
         assert mock_validate.call_count == 2
-        mock_validate.assert_any_call("https://example.com/step2")
-        mock_validate.assert_any_call("https://example.com/step3")
+        mock_validate.assert_any_call("https://example.com/step2", allowed_ranges=())
+        mock_validate.assert_any_call("https://example.com/step3", allowed_ranges=())
         assert result.status_code == 200
         assert count == 2
 
@@ -193,7 +193,7 @@ class TestChainedRedirects:
         ]
         http_client._ephemeral_mock.get.side_effect = [redirect2, final_response]
 
-        result, count = http_client._follow_redirects_safe(
+        result, count, _final_url = http_client._follow_redirects_safe(
             response=redirect1,
             max_redirects=5,
             timeout=10.0,
@@ -202,8 +202,8 @@ class TestChainedRedirects:
         )
 
         assert mock_validate.call_count == 2
-        mock_validate.assert_any_call("https://new.com/")
-        mock_validate.assert_any_call("https://new.com/page")
+        mock_validate.assert_any_call("https://new.com/", allowed_ranges=())
+        mock_validate.assert_any_call("https://new.com/page", allowed_ranges=())
         assert result.status_code == 200
         assert count == 2
 
@@ -264,7 +264,7 @@ class TestNonRedirectPassthrough:
         """A 200 response should be returned without modification."""
         response = _make_final_response()
 
-        result, count = http_client._follow_redirects_safe(
+        result, count, _final_url = http_client._follow_redirects_safe(
             response=response,
             max_redirects=5,
             timeout=10.0,

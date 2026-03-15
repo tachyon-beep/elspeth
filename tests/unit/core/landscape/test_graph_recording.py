@@ -6,6 +6,7 @@ from typing import Literal
 import pytest
 
 from elspeth.contracts import Determinism, NodeType, RoutingMode
+from elspeth.contracts.errors import AuditIntegrityError
 from elspeth.contracts.schema import SchemaConfig
 from elspeth.contracts.schema_contract import FieldContract, SchemaContract
 from elspeth.core.landscape import LandscapeDB, LandscapeRecorder
@@ -1163,14 +1164,14 @@ class TestGetEdge:
         assert fetched.default_mode == RoutingMode.MOVE
         assert fetched.run_id == "run-1"
 
-    def test_raises_value_error_for_unknown_edge(self) -> None:
+    def test_raises_audit_integrity_error_for_unknown_edge(self) -> None:
         _db, recorder = _setup()
-        with pytest.raises(ValueError, match="Audit integrity violation"):
+        with pytest.raises(AuditIntegrityError, match="Audit integrity violation"):
             recorder.get_edge("nonexistent-edge")
 
-    def test_raises_value_error_message_includes_edge_id(self) -> None:
+    def test_raises_audit_integrity_error_message_includes_edge_id(self) -> None:
         _db, recorder = _setup()
-        with pytest.raises(ValueError, match="nonexistent-xyz"):
+        with pytest.raises(AuditIntegrityError, match="nonexistent-xyz"):
             recorder.get_edge("nonexistent-xyz")
 
 
@@ -1230,15 +1231,15 @@ class TestGetEdgeMap:
         assert edge_map[("gate", "low_risk")] == edge_b.edge_id
 
     def test_raises_for_no_edges(self) -> None:
-        """get_edge_map raises ValueError when run has no edges registered."""
+        """get_edge_map raises AuditIntegrityError when run has no edges registered."""
         _db, recorder = _setup()
-        with pytest.raises(ValueError, match="no edges registered"):
+        with pytest.raises(AuditIntegrityError, match="no edges registered"):
             recorder.get_edge_map("run-1")
 
     def test_raises_for_unknown_run(self) -> None:
-        """get_edge_map raises ValueError for unknown run (no edges either)."""
+        """get_edge_map raises AuditIntegrityError for unknown run (no edges either)."""
         _db, recorder = _setup()
-        with pytest.raises(ValueError, match="no edges registered"):
+        with pytest.raises(AuditIntegrityError, match="no edges registered"):
             recorder.get_edge_map("no-such-run")
 
     def test_multiple_source_nodes_with_different_labels(self) -> None:
@@ -1330,13 +1331,18 @@ class TestGetNodeContracts:
         assert inp is None
         assert out is None
 
-    def test_returns_none_none_for_unknown_node(self) -> None:
+    def test_crashes_for_unknown_node_by_default(self) -> None:
         _db, recorder = _setup()
-        inp, out = recorder.get_node_contracts("run-1", "nonexistent")
+        with pytest.raises(AuditIntegrityError, match="Node not found"):
+            recorder.get_node_contracts("run-1", "nonexistent")
+
+    def test_returns_none_none_for_unknown_node_when_allowed(self) -> None:
+        _db, recorder = _setup()
+        inp, out = recorder.get_node_contracts("run-1", "nonexistent", allow_missing=True)
         assert inp is None
         assert out is None
 
-    def test_returns_none_none_for_unknown_run(self) -> None:
+    def test_crashes_for_unknown_run_by_default(self) -> None:
         _db, recorder = _setup()
         recorder.register_node(
             run_id="run-1",
@@ -1347,7 +1353,21 @@ class TestGetNodeContracts:
             node_id="src",
             schema_config=_DYNAMIC_SCHEMA,
         )
-        inp, out = recorder.get_node_contracts("run-999", "src")
+        with pytest.raises(AuditIntegrityError, match="Node not found"):
+            recorder.get_node_contracts("run-999", "src")
+
+    def test_returns_none_none_for_unknown_run_when_allowed(self) -> None:
+        _db, recorder = _setup()
+        recorder.register_node(
+            run_id="run-1",
+            plugin_name="csv",
+            node_type=NodeType.SOURCE,
+            plugin_version="1.0.0",
+            config={},
+            node_id="src",
+            schema_config=_DYNAMIC_SCHEMA,
+        )
+        inp, out = recorder.get_node_contracts("run-999", "src", allow_missing=True)
         assert inp is None
         assert out is None
 

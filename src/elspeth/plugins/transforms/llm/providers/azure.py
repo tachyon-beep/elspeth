@@ -13,7 +13,7 @@ evicting the wrong cache entry during retry races.
 from __future__ import annotations
 
 from threading import Lock
-from typing import TYPE_CHECKING, Any, Literal, Self
+from typing import TYPE_CHECKING, Any, Literal
 
 import structlog
 from pydantic import Field, model_validator
@@ -66,12 +66,15 @@ class AzureOpenAIConfig(LLMConfig):
         description="Tier 2 tracing configuration (azure_ai, langfuse, or none)",
     )
 
-    @model_validator(mode="after")
-    def _set_model_from_deployment(self) -> Self:
+    @model_validator(mode="before")
+    @classmethod
+    def _set_model_from_deployment(cls, data: Any) -> Any:
         """Set model to deployment_name if not explicitly provided."""
-        if not self.model:
-            self.model = self.deployment_name
-        return self
+        if isinstance(data, dict) and not data.get("model"):
+            deployment = data.get("deployment_name")
+            if deployment:
+                data["model"] = deployment
+        return data
 
 
 class AzureLLMProvider:
@@ -164,21 +167,24 @@ class AzureLLMProvider:
 
             # Extract finish_reason from raw_response.
             # raw_response is the Azure SDK's deserialized API response (Tier 3
-            # external boundary — SDK structure may change between versions).
+            # external boundary — validate structure once, then direct access).
             finish_reason = None
             if response.raw_response is not None:
-                choices = response.raw_response.get("choices", [])
-                if choices:
-                    raw_fr = choices[0].get("finish_reason")
-                    if raw_fr is not None:
-                        finish_reason = parse_finish_reason(str(raw_fr))
-                else:
-                    # Missing choices means we can't detect truncation.
-                    # Log as warning with enough context to investigate.
+                if "choices" not in response.raw_response:
                     logger.warning(
                         "Azure SDK response missing choices — finish_reason unavailable, truncation undetectable",
                         raw_response_keys=list(response.raw_response.keys()),
                     )
+                else:
+                    choices = response.raw_response["choices"]
+                    if not choices:
+                        logger.warning(
+                            "Azure SDK response has empty choices — finish_reason unavailable",
+                        )
+                    else:
+                        raw_fr = choices[0].get("finish_reason")
+                        if raw_fr is not None:
+                            finish_reason = parse_finish_reason(str(raw_fr))
             else:
                 logger.warning(
                     "Azure SDK response has no raw_response — finish_reason unavailable, truncation undetectable",

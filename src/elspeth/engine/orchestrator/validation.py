@@ -75,7 +75,7 @@ def validate_route_destinations(
             continue
 
         if destination.sink_name is None:
-            raise ValueError(
+            raise OrchestrationInvariantError(
                 f"Route destination for gate_node_id={gate_node_id!r}, route_label={route_label!r} has kind='sink' but sink_name is None"
             )
 
@@ -136,7 +136,7 @@ def validate_source_quarantine_destination(
 
     Called at pipeline initialization, BEFORE any rows are processed.
     This catches config errors early instead of silently dropping quarantined
-    rows at runtime (P2-2026-01-19-source-quarantine-silent-drop).
+    rows at runtime.
 
     Args:
         source: Source plugin instance

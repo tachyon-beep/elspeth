@@ -11,7 +11,7 @@ This is the row-level equivalent of ReorderBuffer (used for queries within a row
 from __future__ import annotations
 
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from threading import Condition, Lock
 from typing import Any
 
@@ -22,7 +22,23 @@ class ShutdownError(RuntimeError):
     pass
 
 
-@dataclass(frozen=True)
+class _RowSentinel:
+    """Internal sentinel for unfilled buffer slots.
+
+    Distinguishes "not yet completed" from a legitimate None result.
+    Using a dedicated class so it cannot be confused with any valid T value.
+    """
+
+    __slots__ = ()
+
+    def __repr__(self) -> str:
+        return "<_UNFILLED_ROW>"
+
+
+_UNFILLED_ROW = _RowSentinel()
+
+
+@dataclass(frozen=True, slots=True)
 class RowTicket:
     """Handle for a row submitted to the buffer.
 
@@ -34,8 +50,14 @@ class RowTicket:
     row_id: str
     submitted_at: float
 
+    def __post_init__(self) -> None:
+        if self.sequence < 0:
+            raise ValueError(f"RowTicket.sequence must be non-negative, got {self.sequence}")
+        if not self.row_id:
+            raise ValueError("RowTicket.row_id must not be empty")
 
-@dataclass
+
+@dataclass(frozen=True, slots=True)
 class RowBufferEntry[T]:
     """Entry emitted from the buffer with timing metadata."""
 
@@ -46,6 +68,14 @@ class RowBufferEntry[T]:
     completed_at: float
     buffer_wait_ms: float  # Time between completion and release
 
+    def __post_init__(self) -> None:
+        if self.sequence < 0:
+            raise ValueError(f"RowBufferEntry.sequence must be non-negative, got {self.sequence}")
+        if not self.row_id:
+            raise ValueError("RowBufferEntry.row_id must not be empty")
+        if self.buffer_wait_ms < 0:
+            raise ValueError(f"RowBufferEntry.buffer_wait_ms must be non-negative, got {self.buffer_wait_ms}")
+
 
 @dataclass
 class _PendingEntry[T]:
@@ -55,7 +85,8 @@ class _PendingEntry[T]:
     row_id: str
     submitted_at: float
     completed_at: float | None = None
-    result: T | None = None
+    # Use sentinel default so None is a valid result value
+    result: Any = field(default=_UNFILLED_ROW)
     is_complete: bool = False
 
 
@@ -248,8 +279,8 @@ class RowReorderBuffer[T]:
                     if entry.is_complete:
                         # Ready to release!
                         # Invariants: is_complete implies result and completed_at are set
-                        if entry.result is None:
-                            raise RuntimeError("Invariant violation: is_complete=True but result is None")
+                        if entry.result is _UNFILLED_ROW:
+                            raise RuntimeError("Invariant violation: is_complete=True but result is unfilled")
                         if entry.completed_at is None:
                             raise RuntimeError("Invariant violation: is_complete=True but completed_at is None")
 

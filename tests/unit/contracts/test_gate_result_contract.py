@@ -3,6 +3,7 @@
 import pytest
 
 from elspeth.contracts import GateResult, RoutingAction
+from elspeth.contracts.errors import FrameworkBugError
 from elspeth.contracts.schema_contract import PipelineRow, SchemaContract
 from elspeth.testing import make_field
 
@@ -64,7 +65,7 @@ class TestGateResultContract:
             row={"amount": 100},
             action=RoutingAction.continue_(),
         )
-        with pytest.raises(ValueError, match="no contract"):
+        with pytest.raises(FrameworkBugError, match="no contract"):
             result.to_pipeline_row()
 
     def test_contract_not_in_repr(self) -> None:

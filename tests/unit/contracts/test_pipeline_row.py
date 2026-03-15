@@ -168,14 +168,16 @@ class TestPipelineRowCheckpoint:
         assert restored.contract.version_hash() == contract.version_hash()
 
     def test_from_checkpoint_unknown_contract_raises(self) -> None:
-        """from_checkpoint() raises if contract not in registry."""
+        """from_checkpoint() raises AuditIntegrityError if contract not in registry."""
+        from elspeth.contracts.errors import AuditIntegrityError
+
         checkpoint = {
             "data": {"x": 1},
             "contract_version": "unknown_hash_123",
         }
         registry: dict[str, SchemaContract] = {}
 
-        with pytest.raises(KeyError):
+        with pytest.raises(AuditIntegrityError, match="not in registry"):
             PipelineRow.from_checkpoint(checkpoint, registry)
 
 

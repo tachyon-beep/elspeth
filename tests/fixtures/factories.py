@@ -90,13 +90,18 @@ def make_context(
     """
     from elspeth.contracts.plugin_context import PluginContext
 
+    if token is None:
+        token = make_token_info()
+
     if landscape is None:
         landscape = Mock()
         landscape.record_external_call = Mock()
         landscape.record_call = Mock()
-
-    if token is None:
-        token = make_token_info()
+        # Configure get_node_state() to return a mock with matching token_id
+        # so that PluginContext.record_call() token consistency checks pass.
+        node_state_mock = Mock()
+        node_state_mock.token_id = token.token_id
+        landscape.get_node_state = Mock(return_value=node_state_mock)
 
     return PluginContext(
         run_id=run_id,

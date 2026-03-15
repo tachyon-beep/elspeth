@@ -10,12 +10,13 @@ to its output port. Could be a sink, could be another transform.
 
 from __future__ import annotations
 
-import contextlib
 import threading
 import traceback
 from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
 from typing import TYPE_CHECKING
+
+import structlog
 
 from elspeth.contracts.errors import AuditIntegrityError, FrameworkBugError
 from elspeth.plugins.infrastructure.batching.ports import OutputPort
@@ -32,6 +33,8 @@ if TYPE_CHECKING:
     from elspeth.contracts.contexts import TransformContext
     from elspeth.contracts.identity import TokenInfo
     from elspeth.contracts.schema_contract import PipelineRow
+
+_logger = structlog.get_logger(__name__)
 
 
 class BatchTransformMixin:
@@ -258,18 +261,22 @@ class BatchTransformMixin:
             from elspeth.contracts import ExceptionResult
 
             exception_result = ExceptionResult(exception=e, traceback=tb)
-            # KeyError means ticket was evicted due to timeout - discard late result.
+            # KeyError means ticket was evicted due to timeout — discard late result.
             # This is expected when a waiter times out and retry proceeds
             # while the original worker was still processing.
-            with contextlib.suppress(KeyError):
+            try:
                 self._batch_buffer.complete(ticket, (token, exception_result, state_id))
+            except KeyError:
+                _logger.debug("late_result_discarded", token_id=token.token_id, state_id=state_id, reason="timeout_evicted")
             return
 
-        # Mark complete - result will be released in FIFO order
+        # Mark complete — result will be released in FIFO order
         # Include state_id for retry-safe waiter matching
-        # KeyError means ticket was evicted due to timeout - discard late result.
-        with contextlib.suppress(KeyError):
+        # KeyError means ticket was evicted due to timeout — discard late result.
+        try:
             self._batch_buffer.complete(ticket, (token, result, state_id))
+        except KeyError:
+            _logger.debug("late_result_discarded", token_id=token.token_id, state_id=state_id, reason="timeout_evicted")
 
     def _release_loop(self) -> None:
         """Release thread: emit results in FIFO order to output port.
@@ -340,15 +347,15 @@ class BatchTransformMixin:
                 except (FrameworkBugError, AuditIntegrityError):
                     raise  # System bugs and audit corruption must crash immediately
                 except Exception as emit_err:
-                    # Port is completely broken - log critical and continue
-                    # Other results might still be deliverable if port is intermittently failing
-                    import logging
-
-                    logging.getLogger(__name__).critical(
-                        f"Cannot deliver exception to waiter for {self._batch_name}. "
-                        f"Waiter will hang until timeout. "
-                        f"Original error: {e}\nEmit error: {emit_err}\n{tb}"
-                    )
+                    # Port is completely broken — crash the release thread.
+                    # A broken output port is a system bug: silently continuing
+                    # would lose this token's result (waiter hangs until timeout)
+                    # and potentially lose subsequent results too.
+                    raise FrameworkBugError(
+                        f"Output port for {self._batch_name} is broken: "
+                        f"cannot deliver exception result to waiter. "
+                        f"Original error: {e!r}. Emit error: {emit_err!r}"
+                    ) from emit_err
 
     def flush_batch_processing(self, timeout: float = 300.0) -> None:
         """Wait for all pending rows to complete and emit.
@@ -441,9 +448,10 @@ class BatchTransformMixin:
         # 4. Wait for release thread to finish
         self._batch_release_thread.join(timeout=timeout)
         if self._batch_release_thread.is_alive():
-            import logging
-
-            logging.getLogger(__name__).warning(f"Release thread for {self._batch_name} did not stop cleanly")
+            raise FrameworkBugError(
+                f"Release thread for {self._batch_name} did not stop within {timeout}s. "
+                f"In-flight results may not have been drained — pipeline cannot report success."
+            )
 
     # --- Observability ---
 

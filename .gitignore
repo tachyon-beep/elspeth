@@ -166,3 +166,8 @@ landscape.db-wal
 # FINAL RULE: Always keep .gitkeep files (preserve directory structure)
 # This must be at the end to override any earlier ignore patterns
 !.gitkeep
+
+# Temporary
+.filigree-backups/
+mutation-testing-report-2026-03-07.md
+wiki/site/

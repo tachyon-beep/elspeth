@@ -11,6 +11,7 @@ from datetime import datetime
 import pytest
 
 from elspeth.contracts.errors import (
+    AuditIntegrityError,
     ContractViolation,
     ExtraFieldViolation,
     MissingFieldViolation,
@@ -262,7 +263,7 @@ class TestContractAuditRecord:
             ),
         )
 
-        with pytest.raises(ValueError, match="integrity"):
+        with pytest.raises(AuditIntegrityError, match="integrity"):
             record.to_schema_contract()
 
     def test_fields_tuple_immutable(self, sample_schema_contract: SchemaContract) -> None:
@@ -482,7 +483,7 @@ class TestContractRecordsIntegration:
         # Tamper with mode
         tampered = json_str.replace('"FIXED"', '"BROKEN"')
 
-        with pytest.raises(ValueError, match="Invalid contract mode 'BROKEN'"):
+        with pytest.raises(AuditIntegrityError, match="Invalid contract mode 'BROKEN'"):
             ContractAuditRecord.from_json(tampered)
 
     def test_from_json_rejects_invalid_source(self) -> None:
@@ -503,7 +504,7 @@ class TestContractRecordsIntegration:
         json_str = valid_record.to_json()
         tampered = json_str.replace('"inferred"', '"mystery"')
 
-        with pytest.raises(ValueError, match="Invalid field source 'mystery'"):
+        with pytest.raises(AuditIntegrityError, match="Invalid field source 'mystery'"):
             ContractAuditRecord.from_json(tampered)
 
     def test_from_json_rejects_invalid_python_type(self) -> None:
@@ -525,7 +526,7 @@ class TestContractRecordsIntegration:
         json_str = valid_record.to_json()
         tampered = json_str.replace('"int"', '"vector"')
 
-        with pytest.raises(ValueError, match="Invalid python_type 'vector'"):
+        with pytest.raises(AuditIntegrityError, match="Invalid python_type 'vector'"):
             ContractAuditRecord.from_json(tampered)
 
     def test_to_schema_contract_rejects_invalid_mode(self) -> None:
@@ -555,7 +556,7 @@ class TestContractRecordsIntegration:
             ),
         )
 
-        with pytest.raises(ValueError, match="Invalid contract mode 'BROKEN'"):
+        with pytest.raises(AuditIntegrityError, match="Invalid contract mode 'BROKEN'"):
             record.to_schema_contract()
 
     def test_to_schema_contract_rejects_invalid_source(self) -> None:
@@ -584,7 +585,7 @@ class TestContractRecordsIntegration:
             ),
         )
 
-        with pytest.raises(ValueError, match="Invalid field source 'mystery'"):
+        with pytest.raises(AuditIntegrityError, match="Invalid field source 'mystery'"):
             record.to_schema_contract()
 
     def test_to_schema_contract_rejects_invalid_python_type(self) -> None:
@@ -613,7 +614,7 @@ class TestContractRecordsIntegration:
             ),
         )
 
-        with pytest.raises(ValueError, match="Invalid python_type 'tensor'"):
+        with pytest.raises(AuditIntegrityError, match="Invalid python_type 'tensor'"):
             record.to_schema_contract()
 
     def test_audit_record_with_validation_errors(self, sample_schema_contract: SchemaContract) -> None:

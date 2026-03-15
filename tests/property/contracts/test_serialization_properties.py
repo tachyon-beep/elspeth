@@ -27,6 +27,7 @@ from hypothesis import strategies as st
 from elspeth.contracts import TransformErrorReason
 from elspeth.contracts.enums import RoutingKind, RoutingMode
 from elspeth.contracts.errors import ConfigGateReason, TransformSuccessReason
+from elspeth.contracts.freeze import deep_thaw
 from elspeth.contracts.identity import TokenInfo
 from elspeth.contracts.results import TransformResult
 from elspeth.contracts.routing import RoutingAction
@@ -559,5 +560,5 @@ def _routing_action_to_dict(action: RoutingAction) -> dict[str, Any]:
         "kind": action.kind.value,
         "destinations": list(action.destinations),
         "mode": action.mode.value,
-        "reason": action.reason,
+        "reason": deep_thaw(action.reason) if action.reason is not None else None,
     }

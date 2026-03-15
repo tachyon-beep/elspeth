@@ -13,6 +13,7 @@ from unittest.mock import Mock, patch
 
 import pytest
 
+from elspeth.contracts.results import TransformResult
 from elspeth.contracts.schema_contract import PipelineRow
 from elspeth.contracts.token_usage import TokenUsage
 from elspeth.plugins.infrastructure.clients.llm import (
@@ -23,7 +24,7 @@ from elspeth.plugins.infrastructure.clients.llm import (
     RateLimitError,
     ServerError,
 )
-from elspeth.plugins.transforms.llm.provider import FinishReason, LLMQueryResult
+from elspeth.plugins.transforms.llm.provider import FinishReason, LLMQueryResult, UnrecognizedFinishReason
 from elspeth.testing import make_pipeline_row
 
 # ---------------------------------------------------------------------------
@@ -232,6 +233,7 @@ class TestSingleQuerySuccess:
             content="result",
             usage=TokenUsage.known(10, 5),
             model="gpt-4o",
+            finish_reason=FinishReason.STOP,
         )
 
         row = _make_row()
@@ -298,6 +300,119 @@ class TestTruncationDetection:
         # The error reason should indicate truncation
         reason_str = str(result.reason).lower()
         assert "truncat" in reason_str or "length" in reason_str
+
+    def test_content_filtered_single_query_returns_error(self) -> None:
+        """Provider content filtering must not be recorded as success."""
+        transform, mock_provider = _make_transform_with_mock_provider()
+        mock_provider.execute_query.return_value = LLMQueryResult(
+            content="provider fallback text",
+            usage=TokenUsage.known(10, 5),
+            model="gpt-4o",
+            finish_reason=FinishReason.CONTENT_FILTER,
+        )
+
+        result = transform._process_row(_make_row(), _make_ctx())
+        assert result.status == "error"
+        assert result.row is None
+        assert result.reason is not None
+        assert result.reason["reason"] == "content_filtered"
+        assert result.reason["finish_reason"] == "content_filter"
+
+    def test_tool_calls_finish_reason_returns_error(self) -> None:
+        """TOOL_CALLS finish reason must not be treated as successful text output."""
+        transform, mock_provider = _make_transform_with_mock_provider()
+        mock_provider.execute_query.return_value = LLMQueryResult(
+            content="some content alongside tool call",
+            usage=TokenUsage.known(10, 20),
+            model="gpt-4o",
+            finish_reason=FinishReason.TOOL_CALLS,
+        )
+
+        result = transform._process_row(_make_row(), _make_ctx())
+        assert result.status == "error"
+        assert result.reason is not None
+        assert result.reason["reason"] == "unexpected_finish_reason"
+        assert result.reason["finish_reason"] == "tool_calls"
+        assert result.retryable is False
+
+    def test_missing_finish_reason_accepted_as_success(self) -> None:
+        """Absent finish_reason (None) is accepted — provider already validated content.
+
+        The Azure provider legitimately returns finish_reason=None when the SDK
+        omits raw_response or choices. Content was validated as non-empty by
+        LLMQueryResult.__post_init__. The provider already logged a warning about
+        "truncation undetectable". Rejecting every row makes the provider unusable.
+        """
+        transform, mock_provider = _make_transform_with_mock_provider()
+        mock_provider.execute_query.return_value = LLMQueryResult(
+            content="content with no finish_reason",
+            usage=TokenUsage.known(10, 5),
+            model="gpt-4o",
+            finish_reason=None,
+        )
+
+        result = transform._process_row(_make_row(), _make_ctx())
+        assert result.status == "success"
+
+    def test_unrecognized_finish_reason_returns_error(self) -> None:
+        """Unknown finish reasons must fail closed, not pass through as success."""
+        transform, mock_provider = _make_transform_with_mock_provider()
+        mock_provider.execute_query.return_value = LLMQueryResult(
+            content="filtered by new safety system",
+            usage=TokenUsage.known(10, 15),
+            model="gpt-4o",
+            finish_reason=UnrecognizedFinishReason("safety_filter"),
+        )
+
+        result = transform._process_row(_make_row(), _make_ctx())
+        assert result.status == "error"
+        assert result.reason is not None
+        assert result.reason["reason"] == "unexpected_finish_reason"
+        assert result.reason["finish_reason"] == "safety_filter"
+        assert result.retryable is False
+
+    def test_multi_query_unrecognized_finish_reason_returns_error(self) -> None:
+        """Unknown finish reasons in multi-query mode must also fail closed."""
+        from elspeth.plugins.transforms.llm.transform import LLMTransform
+
+        config = _make_config(
+            template="Evaluate: {{ row.text_content }}",
+            queries={
+                "q1": {"input_fields": {"text_content": "text"}},
+                "q2": {"input_fields": {"text_content": "text"}},
+            },
+        )
+        transform = LLMTransform(config)
+
+        call_count = [0]
+
+        def mock_execute_query(messages, *, model, temperature, max_tokens, state_id, token_id, response_format=None):
+            call_count[0] += 1
+            if call_count[0] == 2:
+                return LLMQueryResult(
+                    content="blocked by moderation",
+                    usage=TokenUsage.known(10, 15),
+                    model="gpt-4o",
+                    finish_reason=UnrecognizedFinishReason("moderation"),
+                )
+            return LLMQueryResult(
+                content='{"result": "ok"}',
+                usage=TokenUsage.known(10, 20),
+                model="gpt-4o",
+                finish_reason=FinishReason.STOP,
+            )
+
+        mock_provider = Mock()
+        mock_provider.execute_query.side_effect = mock_execute_query
+        transform._provider = mock_provider
+
+        result = transform._process_row(_make_row(), _make_ctx())
+        assert result.status == "error"
+        assert result.reason is not None
+        assert result.reason["reason"] == "unexpected_finish_reason"
+        assert result.reason["finish_reason"] == "moderation"
+        assert result.reason["query_name"] == "q2"
+        assert result.reason["query_index"] == 1
 
 
 # ---------------------------------------------------------------------------
@@ -383,6 +498,82 @@ class TestTracerWiring:
 # ---------------------------------------------------------------------------
 
 
+class TestTemplateTierPolicy:
+    """Template trust tier: structural errors at init, operational errors per-row."""
+
+    def test_per_query_template_syntax_error_raises_at_construction(self) -> None:
+        """A syntactically invalid per-query template must fail at construction,
+        not be deferred to the first row (structural = Tier 2 init-time validation)."""
+        from elspeth.plugins.transforms.llm.templates import TemplateError
+        from elspeth.plugins.transforms.llm.transform import LLMTransform
+
+        config = _make_multi_query_config()
+        config["queries"]["quality"]["template"] = "{% if unclosed"
+
+        with pytest.raises(TemplateError, match="Invalid template syntax"):
+            LLMTransform(config)
+
+    def test_valid_per_query_template_override_compiles_at_init(self) -> None:
+        """Valid per-query templates are pre-compiled — no re-parsing at render time."""
+        from elspeth.plugins.transforms.llm.transform import LLMTransform
+
+        config = _make_multi_query_config()
+        config["queries"]["quality"]["template"] = "Custom: {{ row.text_content }}"
+        # Should construct without error
+        transform = LLMTransform(config)
+
+        # Strategy should have pre-compiled template
+        strategy = transform._strategy
+        assert hasattr(strategy, "_query_templates")
+        assert "quality" in strategy._query_templates
+
+    def test_pre_compiled_per_query_template_renders_correctly(self) -> None:
+        """Pre-compiled per-query template must actually be used at execution time,
+        producing different rendered output than the config-level template."""
+        from elspeth.plugins.transforms.llm.transform import LLMTransform
+
+        config = _make_config(
+            template="Default: {{ row.text_content }}",
+            queries={
+                "q1": {
+                    "input_fields": {"text_content": "text"},
+                    "template": "Custom: {{ row.text_content }}",
+                },
+            },
+        )
+        transform = LLMTransform(config)
+        mock_provider = Mock()
+        mock_provider.execute_query.return_value = LLMQueryResult(
+            content="result",
+            usage=TokenUsage.known(10, 5),
+            model="gpt-4o",
+            finish_reason=FinishReason.STOP,
+        )
+        transform._provider = mock_provider
+
+        result = transform._process_row(_make_row(), _make_ctx())
+        assert result.status == "success"
+
+        # Verify the custom per-query template was used, not the default
+        call_messages = mock_provider.execute_query.call_args.args[0]
+        assert call_messages == [{"role": "user", "content": "Custom: hello"}]
+
+    def test_render_undefined_variable_is_row_error_not_structural(self) -> None:
+        """A render-time UndefinedError must produce TransformResult.error,
+        not propagate as an exception (operational = per-row quarantine)."""
+        config = _make_config(
+            template="{{ row.nonexistent_field }}",
+            required_input_fields=[],
+        )
+        transform, _mock_provider = _make_transform_with_mock_provider(config)
+        row = _make_row({"text": "hello"})
+        ctx = _make_ctx()
+
+        result = transform._process_row(row, ctx)
+        assert result.status == "error"
+        assert result.reason["reason"] == "template_rendering_failed"
+
+
 class TestMultiQueryPartialFailure:
     """Verify multi-query atomicity — partial failure discards all results."""
 
@@ -432,6 +623,49 @@ class TestMultiQueryPartialFailure:
         # No output data should exist
         assert result.row is None
 
+    def test_multi_query_content_filter_discards_successful_results(self) -> None:
+        """A content-filtered query must fail the whole multi-query row."""
+        from elspeth.plugins.transforms.llm.transform import LLMTransform
+
+        config = _make_config(
+            template="Evaluate: {{ row.text_content }}",
+            queries={
+                "q1": {"input_fields": {"text_content": "text"}},
+                "q2": {"input_fields": {"text_content": "text"}},
+            },
+        )
+        transform = LLMTransform(config)
+
+        call_count = [0]
+
+        def mock_execute_query(messages, *, model, temperature, max_tokens, state_id, token_id, response_format=None):
+            call_count[0] += 1
+            if call_count[0] == 2:
+                return LLMQueryResult(
+                    content="provider fallback text",
+                    usage=TokenUsage.known(10, 5),
+                    model="gpt-4o",
+                    finish_reason=FinishReason.CONTENT_FILTER,
+                )
+            return LLMQueryResult(
+                content='{"result": "success_1"}',
+                usage=TokenUsage.known(10, 5),
+                model="gpt-4o",
+                finish_reason=FinishReason.STOP,
+            )
+
+        mock_provider = Mock()
+        mock_provider.execute_query.side_effect = mock_execute_query
+        transform._provider = mock_provider
+
+        result = transform._process_row(_make_row(), _make_ctx())
+        assert result.status == "error"
+        assert result.row is None
+        assert result.reason is not None
+        assert result.reason["reason"] == "content_filtered"
+        assert result.reason["query_name"] == "q2"
+        assert result.reason["query_index"] == 1
+
 
 # ---------------------------------------------------------------------------
 # Multi-query JSON parsing and field extraction
@@ -440,6 +674,70 @@ class TestMultiQueryPartialFailure:
 
 class TestMultiQueryJSONExtraction:
     """Verify multi-query JSON parsing and field extraction when output_fields configured."""
+
+    def test_per_query_template_override_inherits_lookup_context(self) -> None:
+        """Per-query template overrides should retain shared lookup data."""
+        from elspeth.plugins.transforms.llm.transform import LLMTransform
+
+        lookup = {"labels": {"base": "BASE", "q1": "OVERRIDE"}}
+        config = _make_config(
+            template="Base {{ lookup.labels.base }}: {{ row.text_content }}",
+            lookup=lookup,
+            queries={
+                "q1": {
+                    "input_fields": {"text_content": "text"},
+                    "template": "Override {{ lookup.labels.q1 }}: {{ row.text_content }}",
+                },
+            },
+        )
+        transform = LLMTransform(config)
+        mock_provider = Mock()
+        mock_provider.execute_query.return_value = LLMQueryResult(
+            content="override result",
+            usage=TokenUsage.known(10, 5),
+            model="gpt-4o",
+            finish_reason=FinishReason.STOP,
+        )
+        transform._provider = mock_provider
+
+        result = transform._process_row(_make_row(), _make_ctx())
+        assert result.status == "success"
+        assert result.row is not None
+        assert result.row["q1_llm_response"] == "override result"
+        call_messages = mock_provider.execute_query.call_args.args[0]
+        assert call_messages == [{"role": "user", "content": "Override OVERRIDE: hello"}]
+
+    def test_per_query_template_override_preserves_lookup_audit_metadata(self) -> None:
+        """Per-query template overrides should keep lookup provenance fields."""
+        from elspeth.plugins.transforms.llm.transform import LLMTransform
+
+        config = _make_config(
+            template="Base {{ lookup.labels.base }}: {{ row.text_content }}",
+            lookup={"labels": {"base": "BASE", "q1": "OVERRIDE"}},
+            lookup_source="prompts/lookups.yaml",
+            queries={
+                "q1": {
+                    "input_fields": {"text_content": "text"},
+                    "template": "Override {{ lookup.labels.q1 }}: {{ row.text_content }}",
+                },
+            },
+        )
+        transform = LLMTransform(config)
+        mock_provider = Mock()
+        mock_provider.execute_query.return_value = LLMQueryResult(
+            content="override result",
+            usage=TokenUsage.known(10, 5),
+            model="gpt-4o",
+            finish_reason=FinishReason.STOP,
+        )
+        transform._provider = mock_provider
+
+        result = transform._process_row(_make_row(), _make_ctx())
+        assert result.status == "success"
+        assert result.row is not None
+        output = result.row.to_dict()
+        assert output["q1_llm_response_lookup_hash"] is not None
+        assert output["q1_llm_response_lookup_source"] == "prompts/lookups.yaml"
 
     def test_output_fields_extracts_typed_fields_from_json(self) -> None:
         """When output_fields is configured, JSON is parsed and fields extracted."""
@@ -1527,6 +1825,99 @@ class TestMultiQuerySequentialRetryBehavior:
         result = transform._process_row(_make_row(), _make_ctx())
         assert result.status == "error"
         assert result.retryable is False
+
+
+class TestMultiQuerySequentialReasonImmutability:
+    """Sequential path must not mutate TransformResult.reason in-place.
+
+    Bug: _execute_sequential line 707 mutates result.reason directly with
+    result.reason["discarded_successful_queries"] = query_idx. If the reason
+    dict is shared with an already-recorded audit entry, the audit trail
+    contains post-hoc mutations — a data integrity violation.
+
+    The parallel path correctly copies with dict(result.reason) first.
+    """
+
+    def test_sequential_returned_error_does_not_mutate_original_reason(self) -> None:
+        """When _execute_one_query returns TransformResult (not raises), reason must not be mutated.
+
+        Trigger: query 1 succeeds, query 2 returns non-JSON with output_fields configured,
+        so _execute_one_query returns TransformResult.error({"reason": "json_parse_failed", ...}).
+        Then _execute_sequential adds "discarded_successful_queries" — this must NOT mutate
+        the original reason dict.
+
+        We verify by holding a direct reference to the reason dict created inside
+        _execute_one_query and checking whether it gets mutated.
+        """
+        from elspeth.plugins.transforms.llm.transform import LLMTransform
+
+        config = _make_config(
+            template="Classify: {{ row.text_content }}",
+            queries={
+                "q1": {
+                    "input_fields": {"text_content": "text"},
+                    "output_fields": [{"suffix": "category", "type": "string"}],
+                },
+                "q2": {
+                    "input_fields": {"text_content": "text"},
+                    "output_fields": [{"suffix": "sentiment", "type": "string"}],
+                },
+            },
+            pool_size=1,  # Forces sequential path
+        )
+        transform = LLMTransform(config)
+
+        call_count = [0]
+
+        def mock_execute(messages, *, model, temperature, max_tokens, state_id, token_id, response_format=None):
+            call_count[0] += 1
+            if call_count[0] == 1:
+                return LLMQueryResult(
+                    content='{"category": "positive"}',
+                    usage=TokenUsage.known(10, 5),
+                    model="gpt-4o",
+                    finish_reason=FinishReason.STOP,
+                )
+            # Query 2: non-JSON → json_parse_failed from _execute_one_query
+            return LLMQueryResult(
+                content="not valid json at all",
+                usage=TokenUsage.known(10, 5),
+                model="gpt-4o",
+                finish_reason=FinishReason.STOP,
+            )
+
+        mock_provider = Mock()
+        mock_provider.execute_query.side_effect = mock_execute
+        transform._provider = mock_provider
+
+        # Capture direct references to reason dicts at TransformResult construction
+        # (NOT copies — we want to detect in-place mutation)
+        captured_reason_refs: list[dict] = []
+        _original_error = TransformResult.error.__func__  # type: ignore[attr-defined]
+
+        def tracking_error(cls, reason, *, retryable=False, context_after=None):
+            captured_reason_refs.append(reason)  # Hold direct reference
+            return _original_error(cls, reason, retryable=retryable, context_after=context_after)
+
+        with patch.object(TransformResult, "error", classmethod(tracking_error)):
+            result = transform._process_row(_make_row(), _make_ctx())
+
+        assert result.status == "error"
+        assert result.reason is not None
+        assert result.reason["reason"] == "json_parse_failed"
+        assert "discarded_successful_queries" in result.reason
+
+        # The KEY assertion: the FIRST reason dict (from _execute_one_query's
+        # TransformResult.error call) should NOT have been mutated with
+        # "discarded_successful_queries". If it was mutated, that means
+        # _execute_sequential modified the original dict in-place instead
+        # of making a copy first.
+        first_reason_ref = captured_reason_refs[0]
+        assert "discarded_successful_queries" not in first_reason_ref, (
+            "Original TransformResult.reason was mutated in-place! "
+            "Sequential path must copy the dict before adding discarded_successful_queries. "
+            f"Original reason dict now contains: {first_reason_ref}"
+        )
 
 
 class TestMultiQueryParallelExecution:

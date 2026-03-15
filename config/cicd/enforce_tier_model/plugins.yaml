@@ -3,109 +3,175 @@ per_file_rules:
   rules:
   - R1
   - R2
-  - R3
   - R4
-  - R5
   - R6
   - R9
   reason: Source plugins ingest external data (Tier 3) - all defensive patterns legitimate
   expires: null
+- pattern: plugins/sources/*
+  rules:
+  - R5
+  reason: Type discrimination for schema inference and config parsing at Tier 3 boundary
+  expires: null
+  max_hits: 5
 - pattern: plugins/infrastructure/config_base.py
   rules:
-  - R1
   - R5
-  reason: Plugin config parsing handles user YAML config (Tier 3) - defensive access for optional fields
+  reason: Type discrimination for config field validation and coercion
   expires: null
+  max_hits: 6
 - pattern: plugins/transforms/llm/*
   rules:
   - R1
   - R2
-  - R3
   - R4
-  - R5
   - R6
   - R9
   reason: LLM API responses are external data (Tier 3) - all defensive patterns legitimate
   expires: null
+- pattern: plugins/transforms/llm/*
+  rules:
+  - R5
+  reason: Type discrimination for LLM response validation and provider dispatch
+  expires: null
+  max_hits: 62
 - pattern: plugins/transforms/azure/*
   rules:
   - R1
   - R2
-  - R3
   - R4
-  - R5
   - R6
   - R9
   reason: Azure API responses are external data (Tier 3) - all defensive patterns legitimate
   expires: null
+- pattern: plugins/transforms/azure/*
+  rules:
+  - R5
+  reason: Type discrimination for Azure API response validation
+  expires: null
+  max_hits: 7
+- pattern: plugins/infrastructure/clients/http.py
+  rules:
+  - R5
+  reason: Tier 3 external JSON NaN detection
+  expires: null
+  max_hits: 3
+- pattern: plugins/infrastructure/clients/llm.py
+  rules:
+  - R5
+  reason: Deep-freeze guards and programming error detection in telemetry
+  expires: null
+  max_hits: 4
+- pattern: plugins/infrastructure/clients/replayer.py
+  rules:
+  - R5
+  reason: Deep-freeze guards for recorded call data
+  expires: null
+  max_hits: 2
+- pattern: plugins/infrastructure/schema_factory.py
+  rules:
+  - R5
+  reason: Numpy floating type detection for schema inference
+  expires: null
+  max_hits: 1
+- pattern: plugins/infrastructure/utils.py
+  rules:
+  - R5
+  reason: Type discrimination for nested field path traversal
+  expires: null
+  max_hits: 1
+- pattern: plugins/sinks/database_sink.py
+  rules:
+  - R5
+  reason: Type discrimination for JSON serialization of complex values
+  expires: null
+  max_hits: 1
+- pattern: plugins/sinks/json_sink.py
+  rules:
+  - R5
+  reason: Tier 3 JSONL file content validation
+  expires: null
+  max_hits: 1
+- pattern: plugins/transforms/batch_stats.py
+  rules:
+  - R5
+  reason: Float type discrimination for NaN/Infinity guard
+  expires: null
+  max_hits: 2
+- pattern: plugins/transforms/json_explode.py
+  rules:
+  - R5
+  reason: Contract enforcement — array field must be list
+  expires: null
+  max_hits: 1
+- pattern: plugins/transforms/keyword_filter.py
+  rules:
+  - R5
+  reason: Contract enforcement — non-string field rejection
+  expires: null
+  max_hits: 1
+- pattern: plugins/transforms/safety_utils.py
+  rules:
+  - R5
+  reason: Config discrimination and field type selection for scanning
+  expires: null
+  max_hits: 4
 allow_hits:
-- key: plugins/infrastructure/batching/mixin.py:R6:BatchTransformMixin:_release_loop:fp=e4d9d56404402b3d
+- key: plugins/infrastructure/manager.py:R4:PluginManager:register:fp=11625f985e95cd76
+  owner: bugfix
+  reason: Rollback protection — catch any rollback failure so secondary exception doesn't bury original diagnostic
+  safety: Logs rollback error then re-raises the original exception unchanged
+  expires: null
+- key: plugins/infrastructure/clients/http.py:R6:AuditedHTTPClient:_filter_request_headers:fp=24e482e71988b3c5
   owner: architecture
-  reason: Silent recovery with explicit error handling path
-  safety: Code reviewed - legitimate pattern
+  reason: except ValueError on HMAC fingerprinting - external secret may be invalid bytes
+  safety: Falls back to [REDACTED] placeholder instead of crashing on malformed secrets
   expires: '2026-05-02'
-- key: plugins/infrastructure/batching/mixin.py:R6:BatchTransformMixin:_release_loop:fp=87f604a1cbe3da51
+- key: plugins/infrastructure/clients/http.py:R1:AuditedHTTPClient:_execute_request:fp=4e79314904cf0229
   owner: architecture
-  reason: Silent recovery with explicit error handling path
-  safety: Code reviewed - legitimate pattern
+  reason: httpx Client.get() method call - dispatched based on HTTP method
+  safety: This is the actual external HTTP call, not a defensive dict access
   expires: '2026-05-02'
-- key: plugins/infrastructure/discovery.py:R9:_discover_in_file:fp=77f2deccecaa5aea
+- key: plugins/infrastructure/clients/http.py:R1:AuditedHTTPClient:get_ssrf_safe:fp=0b820be5ecd0b599
   owner: architecture
-  reason: Cleanup/pop with default - key may not exist in race or optional scenarios
-  safety: Code reviewed - legitimate pattern
+  reason: httpx Client.get() method call - ephemeral client for TLS/SNI isolation
+  safety: This is the actual external HTTP call with IP pinning
   expires: '2026-05-02'
-- key: plugins/infrastructure/discovery.py:R2:get_plugin_description:fp=0806b3aad609f380
+- key: plugins/infrastructure/clients/http.py:R1:AuditedHTTPClient:_follow_redirects_safe:fp=0295809997e9ae36
   owner: architecture
-  reason: getattr for optional attribute access
-  safety: Code reviewed - legitimate pattern
-  expires: '2026-05-02'
-- key: plugins/infrastructure/utils.py:R5:get_nested_field:fp=b9f0121cf1ecd05f
-  owner: architecture
-  reason: AST/type checking - required for safe parsing or discriminated unions
-  safety: Code reviewed - legitimate pattern
-  expires: '2026-05-02'
-- key: plugins/sinks/database_sink.py:R1:DatabaseSink:__init__:fp=1ad7abf6393764cd
+  reason: httpx Client.get() method call — ephemeral client per redirect hop for TLS isolation
+  safety: This is the actual external HTTP call, not a defensive dict access
+- key: plugins/sinks/database_sink.py:R1:DatabaseSink:__init__:fp=67d8cd6ce6ab133f
   owner: architecture
   reason: Optional field access at trust boundary
   safety: Code reviewed - legitimate pattern
   expires: '2026-05-02'
-- key: plugins/sinks/json_sink.py:R5:JSONSink:validate_output_target:fp=78857e43dc69519e
+- key: plugins/sinks/csv_sink.py:R1:CSVSink:validate_output_target:fp=79de1ac15fd8954b
+  owner: feature
+  reason: Display header mapping - fields not in map keep original name (transform-added fields)
+  safety: Intentional fallback to original field name, not bug hiding
+- key: plugins/sinks/csv_sink.py:R1:CSVSink:_open_file:fp=48e3e1cfb4ade393
+  owner: feature
+  reason: Intentional fallback - reverse mapping may not contain all fields (transform-added)
+  safety: Falls back to original field name - correct behavior for fields not in source
+- key: plugins/sinks/csv_sink.py:R1:CSVSink:_get_field_names_and_display:fp=4de1ab42b67c14e5
+  owner: feature
+  reason: Intentional fallback - display mapping may not contain all fields (transform-added)
+  safety: Falls back to normalized field name - correct behavior for fields not in source
+- key: plugins/sinks/json_sink.py:R1:JSONSink:validate_output_target:fp=6734d84d40b2178e
+  owner: feature
+  reason: Display header mapping - fields not in map keep original name (transform-added fields)
+  safety: Intentional fallback to original field name, not bug hiding
+- key: plugins/infrastructure/discovery.py:R9:_discover_in_file:fp=4de39e296bd4a878
   owner: architecture
-  reason: AST/type checking - required for safe parsing or discriminated unions
-  safety: Code reviewed - legitimate pattern
+  reason: sys.modules.pop cleanup on import failure — module may not be registered yet
+  safety: Legitimate cleanup pattern in error path
   expires: '2026-05-02'
-# keyword_filter — Tier 2 row value type check (fail-closed on non-string named fields)
-- key: plugins/transforms/keyword_filter.py:R5:KeywordFilter:process:fp=0ec8ae3ead35ec1c
-  owner: architecture
-  reason: Tier 2 row value type check — fail-closed on non-string values in explicitly named fields
-  safety: Returns TransformResult.error() with reason='non_string_field'; 'all' mode unaffected
-  expires: '2026-05-27'
-# safety_utils — shared security transform utilities (extracted from keyword_filter, content_safety, prompt_shield)
-- key: plugins/transforms/safety_utils.py:R5:get_fields_to_scan:fp=26483b11b49bdac1
-  owner: architecture
-  reason: Tier 2 row filtering — isinstance selects str fields for 'all' mode scanning
-  safety: Only string fields are scanned; non-string fields silently skipped in 'all' mode
-  expires: '2026-05-27'
-- key: plugins/transforms/safety_utils.py:R5:get_fields_to_scan:fp=cc62a63651610eba
-  owner: architecture
-  reason: Config type discrimination — isinstance(fields_config, str) to distinguish single field from list
-  safety: Pydantic-validated config; isinstance distinguishes str vs list[str] union type
-  expires: '2026-05-27'
-- key: plugins/transforms/safety_utils.py:R5:validate_fields_not_empty:fp=991b2c4c011449a4
-  owner: architecture
-  reason: Config boundary — isinstance(v, str) to distinguish str vs list[str] fields config
-  safety: Rejects empty fields at config time; security transforms must scan at least one field
-  expires: '2026-05-27'
-- key: plugins/transforms/safety_utils.py:R5:validate_fields_not_empty:fp=e1456b8ddcaf0a67
-  owner: architecture
-  reason: Config boundary — isinstance(name, str) validates each entry in fields list
-  safety: Rejects non-string or empty entries; prevents silent no-op security transform
-  expires: '2026-05-27'
-- key: plugins/transforms/json_explode.py:R5:JSONExplode:process:fp=f13d515a1364a785
-  owner: architecture
-  reason: AST/type checking - required for safe parsing or discriminated unions
-  safety: Code reviewed - legitimate pattern
-  expires: '2026-05-02'
+- key: plugins/transforms/field_mapper.py:R8:FieldMapperConfig:_reject_duplicate_targets:fp=53b77afeb7d71fec
+  owner: bugfix
+  reason: setdefault used for grouping sources-by-target to detect duplicate target field names
+  safety: Grouping is deterministic; ValueError raised if duplicates found — prevents silent data loss
+  expires: '2026-05-17'
 - key: plugins/sources/field_normalization.py:R8:check_normalization_collisions:fp=5d89837a5521627f
   owner: architecture
   reason: setdefault for lazy initialization
@@ -116,179 +182,98 @@ allow_hits:
   reason: setdefault for lazy initialization
   safety: Code reviewed - legitimate pattern
   expires: '2026-05-02'
-- key: plugins/infrastructure/pooling/executor.py:R5:PooledExecutor:_execute_single:fp=15ac82f41543f682
-  owner: architecture
-  reason: AST/type checking - required for safe parsing or discriminated unions
-  safety: Code reviewed - legitimate pattern
-  expires: '2026-05-02'
-- key: plugins/infrastructure/pooling/executor.py:R5:PooledExecutor:_execute_single:fp=cb58b06afce84275
-  owner: architecture
-  reason: AST/type checking - required for safe parsing or discriminated unions
-  safety: Code reviewed - legitimate pattern
-  expires: '2026-05-02'
-- key: plugins/infrastructure/batching/mixin.py:R4:BatchTransformMixin:_process_and_complete:fp=be288a5ada050286
-  owner: architecture
-  reason: Broad exception handling at external boundary with logging
-  safety: Code reviewed - legitimate pattern
-  expires: '2026-05-02'
-- key: plugins/infrastructure/batching/mixin.py:R7:BatchTransformMixin:_process_and_complete:fp=e6255759dac3493f
-  owner: architecture
-  reason: contextlib.suppress for expected exceptions
-  safety: Code reviewed - legitimate pattern
-  expires: '2026-05-02'
-- key: plugins/infrastructure/batching/mixin.py:R7:BatchTransformMixin:_process_and_complete:fp=281e59ace7ae2d0b
-  owner: architecture
-  reason: contextlib.suppress for expected exceptions
-  safety: Code reviewed - legitimate pattern
-  expires: '2026-05-02'
-- key: plugins/infrastructure/batching/mixin.py:R9:BatchTransformMixin:_release_loop:fp=9f4094bfaee40f43
-  owner: architecture
-  reason: Cleanup/pop with default - key may not exist in race or optional scenarios
-  safety: Code reviewed - legitimate pattern
-  expires: '2026-05-02'
-- key: plugins/infrastructure/batching/mixin.py:R4:BatchTransformMixin:_release_loop:fp=e64b46ff93a6d7d2
-  owner: architecture
-  reason: Broad exception handling at external boundary with logging
-  safety: Code reviewed - legitimate pattern
-  expires: '2026-05-02'
-- key: plugins/infrastructure/batching/mixin.py:R9:BatchTransformMixin:evict_submission:fp=c8e9f311ac82979e
-  owner: architecture
-  reason: Cleanup/pop with default - key may not exist in race or optional scenarios
-  safety: Code reviewed - legitimate pattern
-  expires: '2026-05-02'
-# azure/base.py, content_safety.py, prompt_shield.py — covered by per_file_rules wildcard
-# (14 individual allow_hits removed: fingerprints changed after import rewrite, per_file_rules covers all)
-- key: plugins/infrastructure/clients/llm.py:R4:AuditedLLMClient:chat_completion:fp=9ca32dec0e12da22
-  owner: architecture
-  reason: Telemetry emission failure - must not crash main LLM call flow
-  safety: Logged and continues - telemetry is non-critical to LLM processing
-  expires: '2026-05-02'
-- key: plugins/infrastructure/clients/llm.py:R4:AuditedLLMClient:chat_completion:fp=ff320ab13f5aa31f
-  owner: architecture
-  reason: Telemetry emission failure — must not crash main LLM call flow
-  safety: Logged and continues — telemetry is non-critical to LLM processing
-  expires: '2026-05-02'
-- key: plugins/sinks/csv_sink.py:R1:CSVSink:_open_file:fp=58b19b185d408859
-  owner: feature
-  reason: Intentional fallback - reverse mapping may not contain all fields (transform-added)
-  safety: Falls back to original field name - correct behavior for fields not in source
-  expires: null
-- key: plugins/sinks/csv_sink.py:R1:CSVSink:_get_field_names_and_display:fp=017cf6843f27cf8c
-  owner: feature
-  reason: Intentional fallback - display mapping may not contain all fields (transform-added)
-  safety: Falls back to normalized field name - correct behavior for fields not in source
-  expires: null
-- key: plugins/sinks/csv_sink.py:R1:CSVSink:validate_output_target:fp=b85c6ebf7d83a196
-  owner: feature
-  reason: Display header mapping - fields not in map keep original name (transform-added fields)
-  safety: Intentional fallback to original field name, not bug hiding
-  expires: null
-- key: plugins/sinks/json_sink.py:R1:JSONSink:validate_output_target:fp=6734d84d40b2178e
-  owner: feature
-  reason: Display header mapping - fields not in map keep original name (transform-added fields)
-  safety: Intentional fallback to original field name, not bug hiding
-  expires: null
-- key: plugins/transforms/batch_stats.py:R5:BatchStats:process:fp=1ea4521698a5c2c6
-  owner: architecture
-  reason: Tier 2 row value type discrimination — float vs int for NaN/Infinity check (ints always finite)
-  safety: Preserves int precision for values > 2^53; only floats need isfinite() guard
-  expires: null
-- key: plugins/transforms/batch_stats.py:R5:BatchStats:process:fp=80ca47a3d9f55504
-  owner: architecture
-  reason: Tier 2 overflow guard — only float sums can overflow to Infinity (int sums use arbitrary precision)
-  safety: Returns TransformResult.error() on overflow; int path cannot trigger this
-  expires: null
-- key: plugins/infrastructure/clients/http.py:R5:_contains_non_finite:fp=d10b793e18bb7929
-  owner: architecture
-  reason: isinstance() on float to detect NaN/Infinity in JSON - type discrimination for serialization
-  safety: Rejects non-finite values that would break RFC 8785 canonicalization
-  expires: '2026-05-02'
-- key: plugins/infrastructure/clients/http.py:R5:_contains_non_finite:fp=ac06b528e07d46ec
-  owner: architecture
-  reason: isinstance() on dict for recursive NaN/Infinity scan - type discrimination for serialization
-  safety: Traverses JSON structure to find non-finite floats before audit recording
-  expires: '2026-05-02'
-- key: plugins/infrastructure/clients/http.py:R5:_contains_non_finite:fp=9946aa209328d775
-  owner: architecture
-  reason: isinstance() on list for recursive NaN/Infinity scan - type discrimination for serialization
-  safety: Traverses JSON structure to find non-finite floats before audit recording
-  expires: '2026-05-02'
-# web_scrape.py — Tier 3 boundary: extract_content can fail on external HTML
-- key: plugins/transforms/web_scrape.py:R4:WebScrapeTransform:process:fp=474b6c75ad503f46
-  owner: architecture
-  reason: Tier 3 boundary — response.text is external data, extract_content() can fail unpredictably
-  safety: Returns TransformResult.error() for quarantine with reason, error_type, and URL
-# Refactored: post()/get() shared logic now in _execute_request/_parse_response_body/_record_and_emit
-- key: plugins/infrastructure/clients/http.py:R1:AuditedHTTPClient:_filter_request_headers:fp=ded76dbbb1479f9c
-  owner: architecture
-  reason: os.environ.get() for optional ELSPETH_ALLOW_RAW_SECRETS override
-  safety: Environment variable access with default - not a dict.get() on data
-  expires: '2026-05-02'
-- key: plugins/infrastructure/clients/http.py:R6:AuditedHTTPClient:_filter_request_headers:fp=8e6fe9689cede063
-  owner: architecture
-  reason: except ValueError on HMAC fingerprinting - external secret may be invalid bytes
-  safety: Falls back to [REDACTED] placeholder instead of crashing on malformed secrets
-  expires: '2026-05-02'
-- key: plugins/infrastructure/clients/http.py:R1:AuditedHTTPClient:_parse_response_body:fp=df1154a7e3a315ad
-  owner: architecture
-  reason: HTTP response content-type header - external system boundary, header may be missing
-  safety: Falls back to binary encoding if content-type absent
-  expires: '2026-05-02'
-- key: plugins/infrastructure/clients/http.py:R4:AuditedHTTPClient:_record_and_emit:fp=e14aa43d9db1c890
-  owner: architecture
-  reason: Telemetry emission failure - must not crash main request flow
-  safety: Logged and continues - telemetry is non-critical to HTTP processing
-  expires: '2026-05-02'
-- key: plugins/infrastructure/clients/http.py:R1:AuditedHTTPClient:_execute_request:fp=5039a2d920d07c4b
-  owner: architecture
-  reason: httpx Client.get() method call - dispatched based on HTTP method
-  safety: This is the actual external HTTP call, not a defensive dict access
-  expires: '2026-05-02'
-- key: plugins/infrastructure/clients/http.py:R1:AuditedHTTPClient:get_ssrf_safe:fp=7d29973950e45976
-  owner: architecture
-  reason: httpx Client.get() method call - ephemeral client for TLS/SNI isolation
-  safety: This is the actual external HTTP call with IP pinning
-  expires: '2026-05-02'
-- key: plugins/infrastructure/clients/http.py:R1:AuditedHTTPClient:get_ssrf_safe:fp=bc217a157b57dee9
-  owner: architecture
-  reason: HTTP response content-type header - external system boundary, header may be missing
-  safety: Falls back to binary encoding if content-type absent
-  expires: '2026-05-02'
-- key: plugins/infrastructure/clients/http.py:R4:AuditedHTTPClient:get_ssrf_safe:fp=06a1d98c7c83a107
-  owner: architecture
-  reason: Telemetry emission failure - must not crash main request flow
-  safety: Logged and continues - telemetry is non-critical to HTTP processing
-  expires: '2026-05-02'
-- key: plugins/infrastructure/clients/http.py:R4:AuditedHTTPClient:get_ssrf_safe:fp=1a4cad31efb5b07e
-  owner: architecture
-  reason: Telemetry emission failure - must not crash main request flow
-  safety: Logged and continues - telemetry is non-critical to HTTP processing
-  expires: '2026-05-02'
-- key: plugins/infrastructure/clients/http.py:R1:AuditedHTTPClient:_follow_redirects_safe:fp=5ef0154f8de4066c
-  owner: architecture
-  reason: HTTP redirect Location header - external system boundary, header may be absent
-  safety: Missing Location header breaks redirect loop naturally (no redirect target)
-  expires: '2026-05-02'
-# http.py — redirect hop client.get() method call
-- key: plugins/infrastructure/clients/http.py:R1:AuditedHTTPClient:_follow_redirects_safe:fp=612c0a827c6a7dec
-  owner: architecture
-  reason: httpx Client.get() method call — ephemeral client per redirect hop for TLS isolation
-  safety: This is the actual external HTTP call, not a defensive dict access
-# pooling/executor.py — RuntimeError on thread pool shutdown during batch submission
 - key: plugins/infrastructure/pooling/executor.py:R6:PooledExecutor:_execute_batch_locked:fp=2b6aaa13ba738c12
   owner: bugfix
   reason: Thread pool may be shut down concurrently; RuntimeError caught to complete buffer slot with error result
   safety: Buffer slot filled with deterministic error result; row gets proper error instead of silent drop
   expires: '2026-05-17'
-# database_sink.py — isinstance for dict/list JSON serialization of ANY-typed fields
-- key: plugins/sinks/database_sink.py:R5:DatabaseSink:_serialize_any_typed_fields:fp=99b7b72714bd97fa
+- key: plugins/infrastructure/batching/mixin.py:R4:BatchTransformMixin:_process_and_complete:fp=490f29827f866cf3
+  owner: architecture
+  reason: Broad exception handling at external boundary with logging
+  safety: Code reviewed - legitimate pattern
+  expires: '2026-05-02'
+- key: plugins/infrastructure/batching/mixin.py:R6:BatchTransformMixin:_process_and_complete:fp=256b06df909123e9
+  owner: architecture
+  reason: try/except KeyError with debug logging for expected ticket eviction race
+  safety: KeyError from timeout-evicted ticket is expected concurrency behavior; logged at DEBUG
+  expires: '2026-05-02'
+- key: plugins/infrastructure/batching/mixin.py:R6:BatchTransformMixin:_process_and_complete:fp=f37bf8208eca0a55
+  owner: architecture
+  reason: try/except KeyError with debug logging for expected ticket eviction race
+  safety: KeyError from timeout-evicted ticket is expected concurrency behavior; logged at DEBUG
+  expires: '2026-05-02'
+- key: plugins/infrastructure/batching/mixin.py:R9:BatchTransformMixin:_release_loop:fp=aa0e7f45e675138a
+  owner: architecture
+  reason: Cleanup/pop with default - key may not exist in race or optional scenarios
+  safety: Code reviewed - legitimate pattern
+  expires: '2026-05-02'
+- key: plugins/infrastructure/batching/mixin.py:R6:BatchTransformMixin:_release_loop:fp=b289fc3f96e46221
+  owner: architecture
+  reason: Silent recovery with explicit error handling path
+  safety: Code reviewed - legitimate pattern
+  expires: '2026-05-02'
+- key: plugins/infrastructure/batching/mixin.py:R6:BatchTransformMixin:_release_loop:fp=e2d3894a2ca091d4
+  owner: architecture
+  reason: Silent recovery with explicit error handling path
+  safety: Code reviewed - legitimate pattern
+  expires: '2026-05-02'
+- key: plugins/infrastructure/batching/mixin.py:R9:BatchTransformMixin:evict_submission:fp=9ec8b816c9b1da7a
+  owner: architecture
+  reason: Cleanup/pop with default - key may not exist in race or optional scenarios
+  safety: Code reviewed - legitimate pattern
+  expires: '2026-05-02'
+- key: plugins/infrastructure/clients/http.py:R1:AuditedHTTPClient:_filter_request_headers:fp=16e39f36db178a15
+  owner: architecture
+  reason: os.environ.get() for optional ELSPETH_ALLOW_RAW_SECRETS override
+  safety: Environment variable access with default - not a dict.get() on data
+  expires: '2026-05-02'
+- key: plugins/infrastructure/clients/http.py:R1:AuditedHTTPClient:_parse_response_body:fp=dbe48f8106742459
+  owner: architecture
+  reason: HTTP response content-type header - external system boundary, header may be missing
+  safety: Falls back to binary encoding if content-type absent
+  expires: '2026-05-02'
+- key: plugins/infrastructure/clients/http.py:R4:AuditedHTTPClient:_record_and_emit:fp=1a0afad77e3812dc
+  owner: architecture
+  reason: Telemetry emission failure - must not crash main request flow
+  safety: Logged and continues - telemetry is non-critical to HTTP processing
+  expires: '2026-05-06'
+- key: plugins/infrastructure/clients/http.py:R1:AuditedHTTPClient:get_ssrf_safe:fp=3c1d4034d1962f96
+  owner: architecture
+  reason: HTTP response content-type header - external system boundary, header may be missing
+  safety: Falls back to binary encoding if content-type absent
+  expires: '2026-05-02'
+- key: plugins/infrastructure/clients/http.py:R4:AuditedHTTPClient:get_ssrf_safe:fp=412c61367177a4ba
+  owner: architecture
+  reason: Telemetry emission failure - must not crash main request flow
+  safety: Logged and continues - telemetry is non-critical to HTTP processing
+  expires: '2026-05-06'
+- key: plugins/infrastructure/clients/http.py:R4:AuditedHTTPClient:get_ssrf_safe:fp=00dcfdf7b9a89863
+  owner: architecture
+  reason: Telemetry emission failure - must not crash main request flow
+  safety: Logged and continues - telemetry is non-critical to HTTP processing
+  expires: '2026-05-06'
+- key: plugins/infrastructure/clients/http.py:R1:AuditedHTTPClient:_follow_redirects_safe:fp=4bc40163c3a61bea
+  owner: architecture
+  reason: HTTP redirect Location header - external system boundary, header may be absent
+  safety: Missing Location header breaks redirect loop naturally (no redirect target)
+  expires: '2026-05-02'
+- key: plugins/infrastructure/pooling/executor.py:R4:PooledExecutor:_execute_batch_locked:fp=5f6e4b59e528052c
   owner: bugfix
-  reason: Tier 2 contract enforcement — isinstance distinguishes dict/list fields for JSON serialization before DB insert
-  safety: Only dict/list values serialized; all other types pass through unchanged
-  expires: '2026-05-17'
-# field_mapper.py — setdefault for duplicate target collision grouping
-- key: plugins/transforms/field_mapper.py:R8:FieldMapperConfig:_reject_duplicate_targets:fp=53b77afeb7d71fec
-  owner: bugfix
-  reason: setdefault used for grouping sources-by-target to detect duplicate target field names
-  safety: Grouping is deterministic; ValueError raised if duplicates found — prevents silent data loss
-  expires: '2026-05-17'
+  reason: Worker thread can raise any exception type — must catch broadly to prevent buffer slot leak
+  safety: Exception converted to TransformResult.error (row gets quarantined), buffer stays consistent
+  expires: '2026-06-08'
+- key: plugins/sinks/azure_blob_sink.py:R5:AzureBlobSinkConfig:headers_mapping:fp=f00b44dd7d4e2fea
+  owner: refactor
+  reason: isinstance(dict) check for config field type discrimination — same pattern as SinkPathConfig.headers_mapping
+  safety: Config validated by Pydantic before this property runs; isinstance only distinguishes dict from str
+  expires: null
+- key: plugins/infrastructure/base.py:R2:BaseSink:needs_resume_field_resolution:fp=aa78bde542b4abfa
+  owner: refactor
+  reason: getattr default for sinks that don't call init_display_headers (e.g. DatabaseSink)
+  safety: Returns False (safe default); attribute always exists for sinks using display headers
+  expires: null
+- key: plugins/transforms/web_scrape.py:R5:WebScrapeHTTPConfig:_validate_allowed_hosts:fp=9535cac5e3ad0a53
+  owner: architecture
+  reason: Pydantic field_validator wraps ipaddress.ip_network() on user-provided CIDR strings — Tier 3 config boundary
+  safety: ValueError re-raised as Pydantic ValidationError; invalid config crashes at load time, not at runtime
+  expires: null
