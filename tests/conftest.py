@@ -145,3 +145,15 @@ def _auto_close_telemetry_managers() -> Iterator[None]:
                 RuntimeWarning,
                 stacklevel=1,
             )
+
+
+@pytest.fixture(autouse=True)
+def _allow_raw_secrets_in_tests(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Allow raw secrets in all tests — CI has no .env file.
+
+    Locally, .env sets ELSPETH_ALLOW_RAW_SECRETS=true which bypasses
+    the fingerprint key requirement for test API keys.  CI doesn't load
+    .env, so tests that create AuditedHTTPClient with auth headers fail
+    with FrameworkBugError.  This fixture ensures consistent behaviour.
+    """
+    monkeypatch.setenv("ELSPETH_ALLOW_RAW_SECRETS", "true")
