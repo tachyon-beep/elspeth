@@ -1,4 +1,3 @@
-# src/elspeth/cli_formatters.py
 """CLI event formatter factories for pipeline execution output.
 
 Provides factory functions that return event handler maps for console

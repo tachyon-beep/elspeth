@@ -23,7 +23,6 @@ from hypothesis import assume, given, settings
 from hypothesis import strategies as st
 
 from elspeth.core.canonical import (
-    CANONICAL_VERSION,
     canonical_json,
     stable_hash,
 )
@@ -146,10 +145,10 @@ class TestStableHashDeterminism:
 
     @given(data=row_data)
     @settings(max_examples=200)
-    def test_hash_version_parameter_works(self, data: dict[str, Any]) -> None:
-        """Property: Version parameter is accepted (for future compatibility)."""
+    def test_hash_determinism_across_calls(self, data: dict[str, Any]) -> None:
+        """Property: Same data always produces same hash across separate calls."""
         hash1 = stable_hash(data)
-        hash2 = stable_hash(data, version=CANONICAL_VERSION)
+        hash2 = stable_hash(data)
         assert hash1 == hash2
 
 

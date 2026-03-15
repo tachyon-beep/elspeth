@@ -1,4 +1,3 @@
-# src/elspeth/engine/clock.py
 """Clock abstraction for testable timeout logic.
 
 This module provides a Clock protocol that abstracts time access,

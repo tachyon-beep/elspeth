@@ -547,7 +547,7 @@ sinks:
         assert settings.concurrency.max_workers == 4  # Default
 
     def test_load_default_sink_in_yaml_rejected(self, tmp_path: Path) -> None:
-        """default_sink in YAML is rejected with migration message."""
+        """default_sink in YAML is rejected as unknown key."""
         from elspeth.core.config import load_settings
 
         config_file = tmp_path / "settings.yaml"
@@ -568,9 +568,6 @@ default_sink: results
 
         error_msg = str(exc_info.value)
         assert "default_sink" in error_msg
-        assert "source.on_success" in error_msg
-        assert "transforms[].on_success" in error_msg
-        assert "not inside plugin options" in error_msg
 
 
 class TestExportSinkValidation:
@@ -760,7 +757,7 @@ class TestElspethSettingsArchitecture:
             ElspethSettings(
                 source=SourceSettings(plugin="csv", on_success="results"),
                 sinks={"results": SinkSettings(plugin="csv")},
-                **{"default_sink": "results"},  # type: ignore[arg-type]  # testing rejected field
+                **{"default_sink": "results"},  # testing rejected field
             )
 
         assert "default_sink" in str(exc_info.value)
@@ -2721,6 +2718,37 @@ sinks:
         assert "url_password_fingerprint" not in result["landscape"]
         assert result["landscape"]["url_password_redacted"] is True
 
+    def test_dsn_unparsable_with_credentials_raises(self) -> None:
+        """Unparsable URLs with credential patterns must not pass through."""
+        from elspeth.core.config import SecretFingerprintError, _sanitize_dsn
+
+        # JDBC-style URL — make_url() raises ArgumentError, but password is present
+        url = "jdbc:postgresql://user:secret@host/db"
+
+        with pytest.raises(SecretFingerprintError, match="credentials"):
+            _sanitize_dsn(url)
+
+    def test_dsn_unparsable_no_scheme_with_credentials_raises(self) -> None:
+        """URLs without scheme but with credentials must not pass through."""
+        from elspeth.core.config import SecretFingerprintError, _sanitize_dsn
+
+        url = "://user:secret@host/db"
+
+        with pytest.raises(SecretFingerprintError, match="credentials"):
+            _sanitize_dsn(url)
+
+    def test_dsn_unparsable_without_credentials_passes_through(self) -> None:
+        """Unparsable URLs without credential patterns should pass through."""
+        from elspeth.core.config import _sanitize_dsn
+
+        # Not a SQLAlchemy URL and no credential pattern
+        url = "not-a-url-at-all"
+        sanitized, fingerprint, had_password = _sanitize_dsn(url)
+
+        assert sanitized == url
+        assert fingerprint is None
+        assert had_password is False
+
 
 class TestRunModeSettings:
     """Tests for run_mode configuration."""
@@ -3289,11 +3317,12 @@ sinks:
 
 transforms:
   - name: t1
-    plugin: openrouter_llm
+    plugin: llm
     input: source_out
     on_success: output
     on_error: discard
     options:
+      provider: openrouter
       model: test
       template_file: prompts/test.j2
       lookup_file: prompts/lookups.yaml
@@ -3459,17 +3488,16 @@ class TestSinkNameCasing:
         assert "sink_123" in settings.sinks
 
     def test_default_sink_rejected(self) -> None:
-        """default_sink is rejected with migration guidance."""
+        """default_sink is rejected by extra='forbid'."""
         from elspeth.core.config import ElspethSettings
 
         with pytest.raises(ValidationError) as exc_info:
             ElspethSettings(
                 source={"plugin": "csv"},
                 sinks={"output": {"plugin": "csv"}},
-                **{"default_sink": "nonexistent"},  # type: ignore[arg-type]  # testing rejected field
+                **{"default_sink": "nonexistent"},  # testing rejected field
             )
         assert "default_sink" in str(exc_info.value)
-        assert "on_success" in str(exc_info.value)
 
     def test_load_settings_rejects_mixed_case_sink_names(self, tmp_path: Path) -> None:
         """Mixed-case sink names from YAML are rejected with helpful error."""
@@ -3496,7 +3524,7 @@ class TestPluginConfigSchemaValidation:
 
     def test_schema_null_gives_clear_error(self) -> None:
         """schema: null should give a clear error, not TypeError."""
-        from elspeth.plugins.config_base import PluginConfig, PluginConfigError
+        from elspeth.plugins.infrastructure.config_base import PluginConfig, PluginConfigError
 
         with pytest.raises(PluginConfigError) as exc_info:
             PluginConfig.from_dict({"schema": None})
@@ -3507,7 +3535,7 @@ class TestPluginConfigSchemaValidation:
 
     def test_schema_string_gives_clear_error(self) -> None:
         """schema: 'invalid' should give a clear error."""
-        from elspeth.plugins.config_base import PluginConfig, PluginConfigError
+        from elspeth.plugins.infrastructure.config_base import PluginConfig, PluginConfigError
 
         with pytest.raises(PluginConfigError) as exc_info:
             PluginConfig.from_dict({"schema": "invalid"})
@@ -3516,7 +3544,7 @@ class TestPluginConfigSchemaValidation:
 
     def test_schema_list_gives_clear_error(self) -> None:
         """schema: [fields] should give a clear error."""
-        from elspeth.plugins.config_base import PluginConfig, PluginConfigError
+        from elspeth.plugins.infrastructure.config_base import PluginConfig, PluginConfigError
 
         with pytest.raises(PluginConfigError) as exc_info:
             PluginConfig.from_dict({"schema": ["fields"]})
@@ -3525,7 +3553,7 @@ class TestPluginConfigSchemaValidation:
 
     def test_schema_int_gives_clear_error(self) -> None:
         """schema: 123 should give a clear error."""
-        from elspeth.plugins.config_base import PluginConfig, PluginConfigError
+        from elspeth.plugins.infrastructure.config_base import PluginConfig, PluginConfigError
 
         with pytest.raises(PluginConfigError) as exc_info:
             PluginConfig.from_dict({"schema": 123})
@@ -3534,7 +3562,7 @@ class TestPluginConfigSchemaValidation:
 
     def test_valid_schema_dict_works(self) -> None:
         """Valid schema dict should work fine."""
-        from elspeth.plugins.config_base import PluginConfig
+        from elspeth.plugins.infrastructure.config_base import PluginConfig
 
         config = PluginConfig.from_dict({"schema": {"mode": "observed"}})
         assert config.schema_config is not None

@@ -20,16 +20,18 @@ from sqlalchemy import select
 
 from elspeth.contracts import NodeType, PluginSchema, TokenInfo, TransformResult
 from elspeth.contracts.config import RuntimeRetryConfig
-from elspeth.contracts.plugin_context import PluginContext
+from elspeth.contracts.contexts import TransformContext
+from elspeth.contracts.errors import MaxRetriesExceeded
 from elspeth.contracts.schema_contract import FieldContract, PipelineRow, SchemaContract
-from elspeth.core.landscape.database import LandscapeDB
 from elspeth.core.landscape.recorder import LandscapeRecorder
 from elspeth.core.landscape.schema import node_states_table
 from elspeth.engine.executors import TransformExecutor
-from elspeth.engine.retry import MaxRetriesExceeded, RetryManager
+from elspeth.engine.retry import RetryManager
 from elspeth.engine.spans import SpanFactory
-from elspeth.plugins.base import BaseTransform
+from elspeth.plugins.infrastructure.base import BaseTransform
 from elspeth.testing import make_pipeline_row
+from tests.fixtures.factories import make_context
+from tests.fixtures.landscape import make_landscape_db, make_recorder
 
 
 def _make_contract(data: dict[str, Any]) -> SchemaContract:
@@ -64,7 +66,7 @@ class FlakyTransform(BaseTransform):
         self.fail_count = 0
         self.max_fails = config.get("max_fails", 2)
 
-    def process(self, row: PipelineRow, ctx: PluginContext) -> TransformResult:
+    def process(self, row: PipelineRow, ctx: TransformContext) -> TransformResult:
         """Fail max_fails times, then succeed."""
         self.fail_count += 1
         if self.fail_count <= self.max_fails:
@@ -87,7 +89,7 @@ class AlwaysFailTransform(BaseTransform):
         super().__init__(config)
         self.fail_count = 0
 
-    def process(self, row: PipelineRow, ctx: PluginContext) -> TransformResult:
+    def process(self, row: PipelineRow, ctx: TransformContext) -> TransformResult:
         """Always fail with retryable error."""
         self.fail_count += 1
         raise ConnectionError(f"Permanent failure attempt {self.fail_count}")
@@ -99,8 +101,8 @@ class TestRetryAuditTrail:
     @pytest.fixture
     def test_env(self) -> dict[str, Any]:
         """Set up test environment with in-memory database."""
-        db = LandscapeDB.in_memory()
-        recorder = LandscapeRecorder(db)
+        db = make_landscape_db()
+        recorder = make_recorder(db)
 
         # Create a noop span factory
         span_factory = Mock(spec=SpanFactory)
@@ -227,9 +229,9 @@ class TestRetryAuditTrail:
         transform_executor = TransformExecutor(recorder, span_factory, step_resolver)
 
         # Create retry manager with 3 attempts (enough to succeed)
-        retry_manager = RetryManager(RuntimeRetryConfig(max_attempts=3, base_delay=0.001, max_delay=60.0, jitter=0.0, exponential_base=2.0))
+        retry_manager = RetryManager(RuntimeRetryConfig(max_attempts=3, base_delay=0.01, max_delay=60.0, jitter=0.0, exponential_base=2.0))
 
-        ctx = PluginContext(run_id=run_id, config={})
+        ctx = make_context(run_id=run_id, landscape=recorder)
         transform.on_start(ctx)
 
         # Track attempt number manually since _execute_transform_with_retry
@@ -328,9 +330,9 @@ class TestRetryAuditTrail:
         transform_executor = TransformExecutor(recorder, span_factory, step_resolver)
 
         # Create retry manager with only 2 attempts
-        retry_manager = RetryManager(RuntimeRetryConfig(max_attempts=2, base_delay=0.001, max_delay=60.0, jitter=0.0, exponential_base=2.0))
+        retry_manager = RetryManager(RuntimeRetryConfig(max_attempts=2, base_delay=0.01, max_delay=60.0, jitter=0.0, exponential_base=2.0))
 
-        ctx = PluginContext(run_id=run_id, config={})
+        ctx = make_context(run_id=run_id, landscape=recorder)
         transform.on_start(ctx)
 
         # Track attempt number
@@ -431,7 +433,7 @@ class TestRetryAuditTrail:
         step_resolver = lambda node_id: 1  # noqa: E731
         transform_executor = TransformExecutor(recorder, span_factory, step_resolver)
 
-        ctx = PluginContext(run_id=run_id, config={})
+        ctx = make_context(run_id=run_id, landscape=recorder)
         transform.on_start(ctx)
 
         # Execute without retry manager (single attempt)
@@ -567,48 +569,6 @@ class TestRetryExponentialBackoff:
         assert config.exponential_base == 3.0, (
             "exponential_base not mapped from RetrySettings to RetryConfig. This is the P2-2026-01-21 bug."
         )
-
-    def test_retry_manager_uses_exponential_base(self) -> None:
-        """Verify RetryManager passes exponential_base to tenacity.
-
-        Tests the full chain:
-        RetrySettings -> RetryConfig -> RetryManager -> wait_exponential_jitter
-
-        If exponential_base is not passed to tenacity, backoff uses default (2.0).
-        """
-        from elspeth.contracts.config import RuntimeRetryConfig
-        from elspeth.core.config import RetrySettings
-        from elspeth.engine.retry import RetryManager
-
-        # Create config with large exponential_base
-        settings = RetrySettings(
-            max_attempts=2,
-            initial_delay_seconds=0.01,
-            max_delay_seconds=10.0,
-            exponential_base=10.0,  # Very high base - should cause noticeable delay
-        )
-        config = RuntimeRetryConfig.from_settings(settings)
-        manager = RetryManager(config)
-
-        # Verify config has the exponential_base
-        assert config.exponential_base == 10.0
-
-        # The actual tenacity usage is tested in test_exponential_base_affects_backoff_timing
-        # This test just verifies the wiring is complete
-        call_count = 0
-
-        def always_succeeds() -> str:
-            nonlocal call_count
-            call_count += 1
-            return "ok"
-
-        result = manager.execute_with_retry(
-            always_succeeds,
-            is_retryable=lambda e: True,
-        )
-
-        assert result == "ok"
-        assert call_count == 1  # No retries needed
 
 
 class TestExponentialBaseRegressionP2_2026_01_21:

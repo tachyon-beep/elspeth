@@ -99,6 +99,7 @@ class TestCrossTypeNameCollisions:
                         plugin="passthrough",
                         input="agg_input",
                         on_success="output",
+                        on_error="discard",
                         trigger=TriggerConfig(count=1),
                         options={"schema": {"mode": "observed"}},
                     ),

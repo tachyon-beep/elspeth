@@ -61,7 +61,7 @@ class TestAzureMonitorIntegration:
         exporter.configure({"connection_string": connection_string, "batch_size": 1})
 
         # Patch the SDK's export to capture instead of send
-        exporter._azure_exporter.export = capture_export  # type: ignore[method-assign,union-attr]
+        exporter._azure_exporter.export = capture_export
 
         return exporter, captured
 
@@ -193,7 +193,7 @@ class TestAzureMonitorIntegration:
             "InstrumentationKey=00000000-0000-0000-0000-000000000000;IngestionEndpoint=https://test.in.applicationinsights.azure.com/"
         )
         exporter.configure({"connection_string": connection_string, "batch_size": 3})
-        exporter._azure_exporter.export = capture_export  # type: ignore[method-assign,union-attr]  # type: ignore[method-assign,union-attr]
+        exporter._azure_exporter.export = capture_export  # type: ignore[method-assign,union-attr]
 
         # Send 3 events (should trigger batch)
         for i in range(3):
@@ -224,7 +224,7 @@ class TestAzureMonitorIntegration:
             "InstrumentationKey=00000000-0000-0000-0000-000000000000;IngestionEndpoint=https://test.in.applicationinsights.azure.com/"
         )
         exporter.configure({"connection_string": connection_string, "batch_size": 10})
-        exporter._azure_exporter.export = capture_export  # type: ignore[method-assign,union-attr]  # type: ignore[method-assign,union-attr]
+        exporter._azure_exporter.export = capture_export  # type: ignore[method-assign,union-attr]
 
         # Send 2 events (less than batch_size of 10)
         for i in range(2):
@@ -265,7 +265,7 @@ class TestAzureMonitorSpanFormat:
             "InstrumentationKey=00000000-0000-0000-0000-000000000000;IngestionEndpoint=https://test.in.applicationinsights.azure.com/"
         )
         exporter.configure({"connection_string": connection_string, "batch_size": 1})
-        exporter._azure_exporter.export = capture_export  # type: ignore[method-assign,union-attr]
+        exporter._azure_exporter.export = capture_export
 
         return exporter, captured
 

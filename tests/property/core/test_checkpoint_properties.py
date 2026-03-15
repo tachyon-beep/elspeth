@@ -103,16 +103,16 @@ sequence_numbers = st.integers(min_value=1, max_value=1_000_000)
 def create_test_graph(num_transforms: int = 2) -> ExecutionGraph:
     """Create a simple linear test graph."""
     graph = ExecutionGraph()
-    graph.add_node("source", node_type="source", plugin_name="test_source")
+    graph.add_node("source", node_type=NodeType.SOURCE, plugin_name="test_source")
 
     prev = "source"
     for i in range(num_transforms):
         node_id = f"transform_{i}"
-        graph.add_node(node_id, node_type="transform", plugin_name="test_transform")
+        graph.add_node(node_id, node_type=NodeType.TRANSFORM, plugin_name="test_transform")
         graph.add_edge(prev, node_id, label="continue")
         prev = node_id
 
-    graph.add_node("sink", node_type="sink", plugin_name="test_sink")
+    graph.add_node("sink", node_type=NodeType.SINK, plugin_name="test_sink")
     graph.add_edge(prev, "sink", label="continue")
 
     return graph
@@ -540,20 +540,20 @@ class TestTopologyHashProperties:
         """
         # Create diamond graph with two sinks
         graph1 = ExecutionGraph()
-        graph1.add_node("source", node_type="source", plugin_name="test_source")
-        graph1.add_node("transform", node_type="transform", plugin_name="test_transform")
-        graph1.add_node("sink_a", node_type="sink", plugin_name="test_sink_a")
-        graph1.add_node("sink_b", node_type="sink", plugin_name="test_sink_b")
+        graph1.add_node("source", node_type=NodeType.SOURCE, plugin_name="test_source")
+        graph1.add_node("transform", node_type=NodeType.TRANSFORM, plugin_name="test_transform")
+        graph1.add_node("sink_a", node_type=NodeType.SINK, plugin_name="test_sink_a")
+        graph1.add_node("sink_b", node_type=NodeType.SINK, plugin_name="test_sink_b")
         graph1.add_edge("source", "transform", label="continue")
         graph1.add_edge("transform", "sink_a", label="route_a")
         graph1.add_edge("transform", "sink_b", label="route_b")
 
         # Create same graph but change sink_b's plugin
         graph2 = ExecutionGraph()
-        graph2.add_node("source", node_type="source", plugin_name="test_source")
-        graph2.add_node("transform", node_type="transform", plugin_name="test_transform")
-        graph2.add_node("sink_a", node_type="sink", plugin_name="test_sink_a")
-        graph2.add_node("sink_b", node_type="sink", plugin_name="different_sink")  # Changed!
+        graph2.add_node("source", node_type=NodeType.SOURCE, plugin_name="test_source")
+        graph2.add_node("transform", node_type=NodeType.TRANSFORM, plugin_name="test_transform")
+        graph2.add_node("sink_a", node_type=NodeType.SINK, plugin_name="test_sink_a")
+        graph2.add_node("sink_b", node_type=NodeType.SINK, plugin_name="different_sink")  # Changed!
         graph2.add_edge("source", "transform", label="continue")
         graph2.add_edge("transform", "sink_a", label="route_a")
         graph2.add_edge("transform", "sink_b", label="route_b")
@@ -644,14 +644,14 @@ class TestCompatibilityValidationProperties:
 
             # Graph with specific config
             graph1 = ExecutionGraph()
-            graph1.add_node("source", node_type="source", plugin_name="test_source")
+            graph1.add_node("source", node_type=NodeType.SOURCE, plugin_name="test_source")
             graph1.add_node(
                 "transform_0",
-                node_type="transform",
+                node_type=NodeType.TRANSFORM,
                 plugin_name="test_transform",
                 config={"param": "value_a"},
             )
-            graph1.add_node("sink", node_type="sink", plugin_name="test_sink")
+            graph1.add_node("sink", node_type=NodeType.SINK, plugin_name="test_sink")
             graph1.add_edge("source", "transform_0", label="continue")
             graph1.add_edge("transform_0", "sink", label="continue")
 
@@ -667,14 +667,14 @@ class TestCompatibilityValidationProperties:
 
             # Same structure but different config
             graph2 = ExecutionGraph()
-            graph2.add_node("source", node_type="source", plugin_name="test_source")
+            graph2.add_node("source", node_type=NodeType.SOURCE, plugin_name="test_source")
             graph2.add_node(
                 "transform_0",
-                node_type="transform",
+                node_type=NodeType.TRANSFORM,
                 plugin_name="test_transform",
                 config={"param": "value_b"},  # Changed!
             )
-            graph2.add_node("sink", node_type="sink", plugin_name="test_sink")
+            graph2.add_node("sink", node_type=NodeType.SINK, plugin_name="test_sink")
             graph2.add_edge("source", "transform_0", label="continue")
             graph2.add_edge("transform_0", "sink", label="continue")
 

@@ -242,20 +242,20 @@ class TestDeaggregationAuditTrail:
 
         plugins = instantiate_plugins_from_config(settings)
         graph = ExecutionGraph.from_plugin_instances(
-            source=plugins["source"],
-            source_settings=plugins["source_settings"],
-            transforms=plugins["transforms"],
-            sinks=plugins["sinks"],
-            aggregations=plugins["aggregations"],
+            source=plugins.source,
+            source_settings=plugins.source_settings,
+            transforms=plugins.transforms,
+            sinks=plugins.sinks,
+            aggregations=plugins.aggregations,
             gates=list(settings.gates),
         )
 
         # Build pipeline config using the SAME plugin instances as the graph
         # This ensures the test exercises the production code path
         pipeline_config = PipelineConfig(
-            source=plugins["source"],
-            transforms=[wired.plugin for wired in plugins["transforms"]],
-            sinks=plugins["sinks"],
+            source=plugins.source,
+            transforms=[wired.plugin for wired in plugins.transforms],
+            sinks=plugins.sinks,
             config=resolve_config(settings),
         )
 
@@ -267,10 +267,10 @@ class TestDeaggregationAuditTrail:
 
     def test_records_token_expansion(self, run_pipeline: tuple[str, LandscapeDB]) -> None:
         """9 tokens created: 3 source tokens + 6 expanded tokens."""
-        from elspeth.core.landscape.recorder import LandscapeRecorder
+        from tests.fixtures.landscape import make_recorder
 
         run_id, db = run_pipeline
-        recorder = LandscapeRecorder(db)
+        recorder = make_recorder(db)
 
         # Get all rows for this run
         rows = recorder.get_rows(run_id)
@@ -287,10 +287,10 @@ class TestDeaggregationAuditTrail:
 
     def test_records_parent_relationships(self, run_pipeline: tuple[str, LandscapeDB]) -> None:
         """6 parent relationships in token_parents (one per expanded token)."""
-        from elspeth.core.landscape.recorder import LandscapeRecorder
+        from tests.fixtures.landscape import make_recorder
 
         run_id, db = run_pipeline
-        recorder = LandscapeRecorder(db)
+        recorder = make_recorder(db)
 
         # Get all rows and their tokens
         rows = recorder.get_rows(run_id)
@@ -308,10 +308,10 @@ class TestDeaggregationAuditTrail:
 
     def test_expand_group_id_set(self, run_pipeline: tuple[str, LandscapeDB]) -> None:
         """6 tokens have expand_group_id set (the expanded tokens)."""
-        from elspeth.core.landscape.recorder import LandscapeRecorder
+        from tests.fixtures.landscape import make_recorder
 
         run_id, db = run_pipeline
-        recorder = LandscapeRecorder(db)
+        recorder = make_recorder(db)
 
         # Get all rows and their tokens
         rows = recorder.get_rows(run_id)

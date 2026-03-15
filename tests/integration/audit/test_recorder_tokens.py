@@ -537,7 +537,7 @@ class TestExpandToken:
 
 
 class TestAtomicTokenOperations:
-    """Tests verifying atomic behavior of fork_token and expand_token.
+    """Tests verifying atomic behavior of fork_token, coalesce_tokens, and expand_token.
 
     These operations atomically create children AND record parent outcomes
     in a single transaction to eliminate crash windows.
@@ -582,7 +582,7 @@ class TestAtomicTokenOperations:
         # Verify parent has FORKED outcome recorded atomically
         outcome = recorder.get_token_outcome(parent_token.token_id)
         assert outcome is not None, "Parent token should have FORKED outcome"
-        assert outcome.outcome == RowOutcome.FORKED.value
+        assert outcome.outcome == RowOutcome.FORKED
         assert outcome.fork_group_id == fork_group_id
         assert outcome.is_terminal == 1
 
@@ -665,7 +665,7 @@ class TestAtomicTokenOperations:
         # Verify parent has EXPANDED outcome recorded atomically
         outcome = recorder.get_token_outcome(parent_token.token_id)
         assert outcome is not None, "Parent token should have EXPANDED outcome"
-        assert outcome.outcome == RowOutcome.EXPANDED.value
+        assert outcome.outcome == RowOutcome.EXPANDED
         assert outcome.expand_group_id == expand_group_id
         assert outcome.is_terminal == 1
 
@@ -708,6 +708,202 @@ class TestAtomicTokenOperations:
         assert outcome.expected_branches_json is not None
         expected = json.loads(outcome.expected_branches_json)
         assert expected == {"count": 5}
+
+    def test_coalesce_tokens_atomically_creates_merged_token_and_parent_links(self) -> None:
+        """coalesce_tokens atomically creates merged token + parent links in one transaction.
+
+        Unlike fork_token and expand_token, coalesce_tokens does NOT record
+        COALESCED outcomes on parent tokens — that responsibility belongs to
+        the engine's CoalesceExecutor. The atomicity contract here covers:
+        (1) merged token creation with join_group_id, and
+        (2) parent-link records in token_parents table.
+        """
+        db = LandscapeDB.in_memory()
+        recorder = LandscapeRecorder(db)
+        run = recorder.begin_run(config={}, canonical_version="v1")
+        source = recorder.register_node(
+            run_id=run.run_id,
+            plugin_name="source",
+            node_type=NodeType.SOURCE,
+            plugin_version="1.0",
+            config={},
+            schema_config=DYNAMIC_SCHEMA,
+        )
+        row = recorder.create_row(
+            run_id=run.run_id,
+            source_node_id=source.node_id,
+            row_index=0,
+            data={},
+        )
+        parent = recorder.create_token(row_id=row.row_id)
+        children, _fork_group_id = recorder.fork_token(
+            parent_token_id=parent.token_id,
+            row_id=row.row_id,
+            branches=["a", "b"],
+            run_id=run.run_id,
+        )
+
+        # Coalesce the two fork children
+        merged = recorder.coalesce_tokens(
+            parent_token_ids=[c.token_id for c in children],
+            row_id=row.row_id,
+        )
+
+        # Verify merged token has join_group_id
+        assert merged.join_group_id is not None
+        assert merged.row_id == row.row_id
+
+        # Verify parent links created atomically with merged token
+        parents = recorder.get_token_parents(merged.token_id)
+        assert len(parents) == 2
+        parent_ids = {p.parent_token_id for p in parents}
+        assert parent_ids == {c.token_id for c in children}
+
+    def test_coalesce_then_record_parent_outcomes_full_lifecycle(self) -> None:
+        """Full coalesce lifecycle: create merged token, then record parent COALESCED outcomes.
+
+        This mirrors the real engine flow where CoalesceExecutor calls
+        coalesce_tokens first, then record_token_outcome for each parent.
+        """
+
+        from elspeth.contracts.enums import RowOutcome
+
+        db = LandscapeDB.in_memory()
+        recorder = LandscapeRecorder(db)
+        run = recorder.begin_run(config={}, canonical_version="v1")
+        source = recorder.register_node(
+            run_id=run.run_id,
+            plugin_name="source",
+            node_type=NodeType.SOURCE,
+            plugin_version="1.0",
+            config={},
+            schema_config=DYNAMIC_SCHEMA,
+        )
+        row = recorder.create_row(
+            run_id=run.run_id,
+            source_node_id=source.node_id,
+            row_index=0,
+            data={},
+        )
+        parent = recorder.create_token(row_id=row.row_id)
+        children, _fork_group_id = recorder.fork_token(
+            parent_token_id=parent.token_id,
+            row_id=row.row_id,
+            branches=["a", "b"],
+            run_id=run.run_id,
+        )
+
+        # Step 1: Coalesce creates merged token + parent links
+        merged = recorder.coalesce_tokens(
+            parent_token_ids=[c.token_id for c in children],
+            row_id=row.row_id,
+        )
+
+        # Step 2: Record COALESCED outcomes on each parent (as CoalesceExecutor does)
+        for child in children:
+            recorder.record_token_outcome(
+                run_id=run.run_id,
+                token_id=child.token_id,
+                outcome=RowOutcome.COALESCED,
+                join_group_id=merged.join_group_id,
+            )
+
+        # Verify each parent has COALESCED outcome with correct join_group_id
+        for child in children:
+            outcome = recorder.get_token_outcome(child.token_id)
+            assert outcome is not None, f"Parent {child.token_id} should have COALESCED outcome"
+            assert outcome.outcome == RowOutcome.COALESCED
+            assert outcome.join_group_id == merged.join_group_id
+            assert outcome.is_terminal == 1
+
+    def test_coalesce_tokens_creates_parent_links(self) -> None:
+        """coalesce_tokens records parent-child relationships in token_parents table.
+
+        The merged token must have entries in token_parents linking back to
+        each parent token with correct ordinals, enabling lineage traversal.
+        """
+        db = LandscapeDB.in_memory()
+        recorder = LandscapeRecorder(db)
+        run = recorder.begin_run(config={}, canonical_version="v1")
+        source = recorder.register_node(
+            run_id=run.run_id,
+            plugin_name="source",
+            node_type=NodeType.SOURCE,
+            plugin_version="1.0",
+            config={},
+            schema_config=DYNAMIC_SCHEMA,
+        )
+        row = recorder.create_row(
+            run_id=run.run_id,
+            source_node_id=source.node_id,
+            row_index=0,
+            data={},
+        )
+        parent = recorder.create_token(row_id=row.row_id)
+        children, _fork_group_id = recorder.fork_token(
+            parent_token_id=parent.token_id,
+            row_id=row.row_id,
+            branches=["x", "y", "z"],
+            run_id=run.run_id,
+        )
+
+        # Coalesce all three fork children
+        merged = recorder.coalesce_tokens(
+            parent_token_ids=[c.token_id for c in children],
+            row_id=row.row_id,
+        )
+
+        # Verify token_parents entries
+        parents = recorder.get_token_parents(merged.token_id)
+        assert len(parents) == 3, f"Expected 3 parent links, got {len(parents)}"
+
+        # Verify ordinals are sequential and parent IDs match
+        parent_ids = [p.parent_token_id for p in sorted(parents, key=lambda p: p.ordinal)]
+        expected_ids = [c.token_id for c in children]
+        assert parent_ids == expected_ids
+
+        ordinals = sorted(p.ordinal for p in parents)
+        assert ordinals == [0, 1, 2]
+
+    def test_coalesce_tokens_stores_join_group_id_on_merged_token(self) -> None:
+        """coalesce_tokens stores join_group_id on the merged token for lineage queries."""
+        db = LandscapeDB.in_memory()
+        recorder = LandscapeRecorder(db)
+        run = recorder.begin_run(config={}, canonical_version="v1")
+        source = recorder.register_node(
+            run_id=run.run_id,
+            plugin_name="source",
+            node_type=NodeType.SOURCE,
+            plugin_version="1.0",
+            config={},
+            schema_config=DYNAMIC_SCHEMA,
+        )
+        row = recorder.create_row(
+            run_id=run.run_id,
+            source_node_id=source.node_id,
+            row_index=0,
+            data={},
+        )
+        parent = recorder.create_token(row_id=row.row_id)
+        children, _fork_group_id = recorder.fork_token(
+            parent_token_id=parent.token_id,
+            row_id=row.row_id,
+            branches=["a", "b"],
+            run_id=run.run_id,
+        )
+
+        merged = recorder.coalesce_tokens(
+            parent_token_ids=[c.token_id for c in children],
+            row_id=row.row_id,
+        )
+
+        # join_group_id must be set on the merged token itself
+        assert merged.join_group_id is not None
+
+        # Verify it survives DB roundtrip
+        retrieved = recorder.get_token(merged.token_id)
+        assert retrieved is not None
+        assert retrieved.join_group_id == merged.join_group_id
 
     def test_expand_token_skips_parent_outcome_for_batch_aggregation(self) -> None:
         """expand_token with record_parent_outcome=False skips EXPANDED recording.

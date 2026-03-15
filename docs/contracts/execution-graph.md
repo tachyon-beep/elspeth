@@ -285,7 +285,7 @@ The `ExecutionGraph` maintains several lookup maps for O(1) access during execut
 | `_aggregation_id_map` | `dict[AggregationName, NodeID]` | Aggregation name → node ID |
 | `_coalesce_id_map` | `dict[CoalesceName, NodeID]` | Coalesce name → node ID |
 | `_branch_to_coalesce` | `dict[BranchName, CoalesceName]` | Fork branch → coalesce destination |
-| `_route_label_map` | `dict[tuple[NodeID, str], str]` | (gate, sink_name) → route_label |
+| `_route_label_map` | `dict[tuple[NodeID, SinkName], str]` | (gate, sink_name) → route_label |
 | `_route_resolution_map` | `dict[tuple[NodeID, str], str]` | (gate, label) → "continue" or sink_name |
 | `_coalesce_gate_index` | `dict[CoalesceName, int]` | Coalesce name → producing gate pipeline index |
 
@@ -587,7 +587,7 @@ The `ExecutionGraph` class provides these methods for querying the graph:
 
 | Method | Returns | Purpose |
 |--------|---------|---------|
-| `get_source()` | `NodeID \| None` | Get the single source node |
+| `get_source()` | `NodeID` | Get the single source node (raises `GraphValidationError` if not exactly one) |
 | `get_sinks()` | `list[NodeID]` | Get all sink nodes |
 | `get_node_info(node_id)` | `NodeInfo` | Get metadata for any node |
 | `get_nodes()` | `list[NodeInfo]` | Get all nodes |

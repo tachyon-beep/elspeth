@@ -23,7 +23,13 @@ from elspeth.contracts.aggregation_checkpoint import (
     AggregationNodeCheckpoint,
     AggregationTokenCheckpoint,
 )
+from elspeth.contracts.coalesce_checkpoint import (
+    CoalesceCheckpointState,
+    CoalescePendingCheckpoint,
+    CoalesceTokenCheckpoint,
+)
 from elspeth.contracts.contract_records import ContractAuditRecord
+from elspeth.contracts.errors import AuditIntegrityError
 from elspeth.contracts.schema_contract import FieldContract, SchemaContract
 from elspeth.core.checkpoint import CheckpointCorruptionError, CheckpointManager, RecoveryManager
 from elspeth.core.checkpoint.manager import IncompatibleCheckpointError
@@ -172,6 +178,7 @@ def _create_failed_run_with_checkpoint(
     checkpoint_node_id: str = "checkpoint-node",
     with_contract: bool = True,
     aggregation_state: AggregationCheckpointState | None = None,
+    coalesce_state: CoalesceCheckpointState | None = None,
     graph: ExecutionGraph | None = None,
 ) -> ExecutionGraph:
     active_graph = graph or _create_graph(node_id=checkpoint_node_id)
@@ -190,6 +197,7 @@ def _create_failed_run_with_checkpoint(
         sequence_number=1,
         graph=active_graph,
         aggregation_state=aggregation_state,
+        coalesce_state=coalesce_state,
     )
     return active_graph
 
@@ -506,6 +514,185 @@ def test_get_unprocessed_rows_chunks_buffered_token_query(
     assert unprocessed == ["row-b"]
 
 
+def _make_coalesce_token(token_id: str, row_id: str, branch_name: str) -> CoalesceTokenCheckpoint:
+    """Build a minimal CoalesceTokenCheckpoint for testing."""
+    return CoalesceTokenCheckpoint(
+        token_id=token_id,
+        row_id=row_id,
+        branch_name=branch_name,
+        fork_group_id=None,
+        join_group_id=None,
+        expand_group_id=None,
+        row_data={},
+        contract={},
+        state_id="state-1",
+        arrival_offset_seconds=0.0,
+    )
+
+
+def _make_coalesce_state(*pendings: CoalescePendingCheckpoint) -> CoalesceCheckpointState:
+    """Build a CoalesceCheckpointState with the given pending entries."""
+    return CoalesceCheckpointState(
+        version="1.0",
+        pending=pendings,
+        completed_keys=(),
+    )
+
+
+def test_get_unprocessed_rows_excludes_coalesce_buffered_rows(
+    db: LandscapeDB,
+    checkpoint_manager: CheckpointManager,
+    recovery_manager: RecoveryManager,
+) -> None:
+    """Rows whose only incomplete tokens are buffered in coalesce state should be excluded."""
+    run_id = "run-coalesce-buffered"
+    graph = _create_graph(node_id="checkpoint-node")
+    with db.connection() as conn:
+        _insert_run(conn, run_id, status=RunStatus.FAILED, with_contract=True)
+        _insert_node(conn, run_id, "source-node", node_type=NodeType.SOURCE)
+        _insert_node(conn, run_id, "checkpoint-node")
+
+        # row-coalesce-buffered: incomplete token buffered in coalesce -> excluded
+        _insert_row(conn, run_id, "row-coalesce-buffered", row_index=0, source_data_ref=None)
+        _insert_token(conn, run_id, "tok-coalesce-buf", "row-coalesce-buffered")
+
+        # row-pending: incomplete token NOT buffered anywhere -> included
+        _insert_row(conn, run_id, "row-pending", row_index=1, source_data_ref=None)
+        _insert_token(conn, run_id, "tok-pending", "row-pending")
+
+    checkpoint_manager.create_checkpoint(
+        run_id=run_id,
+        token_id="tok-coalesce-buf",
+        node_id="checkpoint-node",
+        sequence_number=1,
+        graph=graph,
+        coalesce_state=_make_coalesce_state(
+            CoalescePendingCheckpoint(
+                coalesce_name="merge1",
+                row_id="row-coalesce-buffered",
+                elapsed_age_seconds=0.0,
+                branches={"path_a": _make_coalesce_token("tok-coalesce-buf", "row-coalesce-buffered", "path_a")},
+                lost_branches={},
+            ),
+        ),
+    )
+
+    unprocessed = recovery_manager.get_unprocessed_rows(run_id)
+    assert unprocessed == ["row-pending"]
+
+
+def test_get_unprocessed_rows_combines_aggregation_and_coalesce_buffered(
+    db: LandscapeDB,
+    checkpoint_manager: CheckpointManager,
+    recovery_manager: RecoveryManager,
+) -> None:
+    """Buffered token IDs from both aggregation and coalesce state should be merged."""
+    run_id = "run-combined-buffered"
+    graph = _create_graph(node_id="checkpoint-node")
+    with db.connection() as conn:
+        _insert_run(conn, run_id, status=RunStatus.FAILED, with_contract=True)
+        _insert_node(conn, run_id, "source-node", node_type=NodeType.SOURCE)
+        _insert_node(conn, run_id, "checkpoint-node")
+
+        # row-agg: buffered in aggregation -> excluded
+        _insert_row(conn, run_id, "row-agg", row_index=0, source_data_ref=None)
+        _insert_token(conn, run_id, "tok-agg", "row-agg")
+
+        # row-coal: buffered in coalesce -> excluded
+        _insert_row(conn, run_id, "row-coal", row_index=1, source_data_ref=None)
+        _insert_token(conn, run_id, "tok-coal", "row-coal")
+
+        # row-free: not buffered -> included
+        _insert_row(conn, run_id, "row-free", row_index=2, source_data_ref=None)
+        _insert_token(conn, run_id, "tok-free", "row-free")
+
+    checkpoint_manager.create_checkpoint(
+        run_id=run_id,
+        token_id="tok-agg",
+        node_id="checkpoint-node",
+        sequence_number=1,
+        graph=graph,
+        aggregation_state=AggregationCheckpointState(
+            version="3.0",
+            nodes={
+                "agg-node": AggregationNodeCheckpoint(
+                    tokens=(
+                        AggregationTokenCheckpoint(
+                            token_id="tok-agg",
+                            row_id="row-agg",
+                            branch_name=None,
+                            fork_group_id=None,
+                            join_group_id=None,
+                            expand_group_id=None,
+                            row_data={},
+                            contract_version="test",
+                        ),
+                    ),
+                    batch_id="batch-001",
+                    elapsed_age_seconds=0.0,
+                    count_fire_offset=None,
+                    condition_fire_offset=None,
+                    contract={"mode": "FLEXIBLE", "locked": False, "version_hash": "test", "fields": []},
+                ),
+            },
+        ),
+        coalesce_state=_make_coalesce_state(
+            CoalescePendingCheckpoint(
+                coalesce_name="merge1",
+                row_id="row-coal",
+                elapsed_age_seconds=0.0,
+                branches={"path_a": _make_coalesce_token("tok-coal", "row-coal", "path_a")},
+                lost_branches={},
+            ),
+        ),
+    )
+
+    unprocessed = recovery_manager.get_unprocessed_rows(run_id)
+    assert unprocessed == ["row-free"]
+
+
+def test_get_unprocessed_rows_coalesce_multi_branch_collects_all_tokens(
+    db: LandscapeDB,
+    checkpoint_manager: CheckpointManager,
+    recovery_manager: RecoveryManager,
+) -> None:
+    """All branch tokens from a coalesce pending entry should be recognized as buffered."""
+    run_id = "run-coalesce-multi"
+    graph = _create_graph(node_id="checkpoint-node")
+    with db.connection() as conn:
+        _insert_run(conn, run_id, status=RunStatus.FAILED, with_contract=True)
+        _insert_node(conn, run_id, "source-node", node_type=NodeType.SOURCE)
+        _insert_node(conn, run_id, "checkpoint-node")
+
+        # row with two tokens, both buffered in different coalesce branches -> excluded
+        _insert_row(conn, run_id, "row-multi", row_index=0, source_data_ref=None)
+        _insert_token(conn, run_id, "tok-branch-a", "row-multi")
+        _insert_token(conn, run_id, "tok-branch-b", "row-multi")
+
+    checkpoint_manager.create_checkpoint(
+        run_id=run_id,
+        token_id="tok-branch-a",
+        node_id="checkpoint-node",
+        sequence_number=1,
+        graph=graph,
+        coalesce_state=_make_coalesce_state(
+            CoalescePendingCheckpoint(
+                coalesce_name="merge1",
+                row_id="row-multi",
+                elapsed_age_seconds=0.0,
+                branches={
+                    "path_a": _make_coalesce_token("tok-branch-a", "row-multi", "path_a"),
+                    "path_b": _make_coalesce_token("tok-branch-b", "row-multi", "path_b"),
+                },
+                lost_branches={},
+            ),
+        ),
+    )
+
+    unprocessed = recovery_manager.get_unprocessed_rows(run_id)
+    assert unprocessed == []
+
+
 class _SimpleSchema(PluginSchema):
     model_config = ConfigDict(strict=False)
     id: int
@@ -530,7 +717,7 @@ def test_get_unprocessed_row_data_errors_when_row_missing_from_metadata(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setattr(recovery_manager, "get_unprocessed_rows", lambda _run_id: ["row-missing"])
-    with pytest.raises(ValueError, match="Row row-missing not found in database"):
+    with pytest.raises(AuditIntegrityError, match="Row row-missing not found in database"):
         recovery_manager.get_unprocessed_row_data("run", payload_store, source_schema_class=_SimpleSchema)
 
 
@@ -546,7 +733,7 @@ def test_get_unprocessed_row_data_errors_on_missing_source_data_ref(
         _insert_row(conn, "run-meta", "row-1", row_index=1, source_data_ref=None)
 
     monkeypatch.setattr(recovery_manager, "get_unprocessed_rows", lambda _run_id: ["row-1"])
-    with pytest.raises(ValueError, match="has no source_data_ref"):
+    with pytest.raises(AuditIntegrityError, match="has no source_data_ref"):
         recovery_manager.get_unprocessed_row_data("run-meta", payload_store, source_schema_class=_SimpleSchema)
 
 
@@ -645,6 +832,50 @@ def test_verify_contract_integrity_raises_on_hash_mismatch(
 
     with pytest.raises(CheckpointCorruptionError, match="Contract integrity verification failed"):
         recovery_manager.verify_contract_integrity("run-contract-bad-hash")
+
+
+def test_verify_contract_integrity_raises_on_malformed_json(
+    db: LandscapeDB,
+    recovery_manager: RecoveryManager,
+) -> None:
+    """Malformed contract JSON must raise CheckpointCorruptionError, not raw JSONDecodeError.
+
+    When schema_contract_json is garbage (not valid JSON), the recorder's
+    get_run_contract will raise json.JSONDecodeError (via ContractAuditRecord.from_json).
+    verify_contract_integrity must catch this and wrap it as CheckpointCorruptionError
+    for consistent corruption handling.
+    """
+    with db.connection() as conn:
+        _insert_run(
+            conn,
+            "run-contract-malformed",
+            status=RunStatus.FAILED,
+            contract_json_override="not valid json {{{",
+        )
+
+    with pytest.raises(CheckpointCorruptionError, match="Contract integrity verification failed"):
+        recovery_manager.verify_contract_integrity("run-contract-malformed")
+
+
+def test_verify_contract_integrity_raises_on_missing_keys(
+    db: LandscapeDB,
+    recovery_manager: RecoveryManager,
+) -> None:
+    """Contract JSON missing required keys must raise CheckpointCorruptionError.
+
+    If the stored JSON is valid but missing 'mode' or 'fields', the KeyError
+    from ContractAuditRecord.from_json must be wrapped as CheckpointCorruptionError.
+    """
+    with db.connection() as conn:
+        _insert_run(
+            conn,
+            "run-contract-missing-keys",
+            status=RunStatus.FAILED,
+            contract_json_override='{"unexpected": "schema"}',
+        )
+
+    with pytest.raises(CheckpointCorruptionError, match="Contract integrity verification failed"):
+        recovery_manager.verify_contract_integrity("run-contract-missing-keys")
 
 
 def test_get_run_private_helper_returns_none_for_missing_run(recovery_manager: RecoveryManager) -> None:

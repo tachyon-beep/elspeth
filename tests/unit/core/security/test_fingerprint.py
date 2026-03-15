@@ -3,7 +3,7 @@
 
 import pytest
 
-from elspeth.core.security.fingerprint import get_fingerprint_key, secret_fingerprint
+from elspeth.contracts.security import get_fingerprint_key, secret_fingerprint
 
 
 class TestSecretFingerprint:

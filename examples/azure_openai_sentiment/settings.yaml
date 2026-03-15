@@ -10,12 +10,13 @@ source:
       - 'text: str'
     on_validation_failure: discard
 transforms:
-- name: azure_llm_0
-  plugin: azure_llm
+- name: llm_0
+  plugin: llm
   input: source_out
   on_success: output
   on_error: quarantine
   options:
+    provider: azure
     deployment_name: ${AZURE_OPENAI_DEPLOYMENT}
     endpoint: ${AZURE_OPENAI_ENDPOINT}
     api_key: ${AZURE_OPENAI_KEY}

@@ -140,9 +140,8 @@ TRANSFORMS:
   keyword_filter       - Filter rows containing blocked content patterns.
   azure_content_safety - Analyze content using Azure Content Safety API.
   azure_prompt_shield  - Detect jailbreak attempts and prompt injection.
-  azure_llm            - LLM transform using Azure OpenAI.
+  llm                  - LLM transform (provider: azure, openrouter).
   azure_batch_llm      - Batch LLM transform using Azure OpenAI Batch API.
-  openrouter_llm       - LLM transform using OpenRouter API.
   batch_stats          - Compute aggregate statistics over a batch.
   batch_replicate      - Replicate rows based on a copies field.
 
@@ -432,7 +431,7 @@ ls -la examples/audit_export/output/audit_trail.json
 
 For more complex scenarios, see the configuration reference:
 
-- **LLM Sentiment Analysis** - Using `openrouter_llm` plugin with templates
+- **LLM Sentiment Analysis** - Using `llm` plugin (with provider: openrouter) and templates
 - **Content Moderation with Routing** - Gates with condition expressions
 - **Fork/Join Patterns** - Parallel processing with coalesce
 

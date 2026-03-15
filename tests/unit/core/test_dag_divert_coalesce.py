@@ -36,7 +36,7 @@ def _make_coalesce_config(
         branches=branches,
         policy=policy,
         merge="union",
-        **kwargs,  # type: ignore[arg-type]
+        **kwargs,
     )
 
 

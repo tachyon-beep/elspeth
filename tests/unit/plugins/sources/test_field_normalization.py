@@ -2,10 +2,13 @@
 
 import concurrent.futures
 import keyword
+from types import MappingProxyType
 
 import pytest
 from hypothesis import given
 from hypothesis import strategies as st
+
+from elspeth.plugins.sources.field_normalization import FieldResolution
 
 
 class TestNormalizeFieldName:
@@ -53,11 +56,9 @@ class TestNormalizeFieldName:
         """Algorithm version is accessible for audit trail."""
         from elspeth.plugins.sources.field_normalization import (
             NORMALIZATION_ALGORITHM_VERSION,
-            get_normalization_version,
         )
 
         assert NORMALIZATION_ALGORITHM_VERSION == "1.0.0"
-        assert get_normalization_version() == "1.0.0"
 
     def test_unicode_bom_stripped(self) -> None:
         """BOM character at start is stripped."""
@@ -269,7 +270,7 @@ class TestResolveFieldNames:
             columns=None,
         )
 
-        assert result.final_headers == ["user_id", "amount"]
+        assert result.final_headers == ("user_id", "amount")
         assert result.resolution_mapping == {
             "User ID": "user_id",
             "Amount $": "amount",
@@ -288,7 +289,7 @@ class TestResolveFieldNames:
             columns=None,
         )
 
-        assert result.final_headers == ["uid", "amount"]
+        assert result.final_headers == ("uid", "amount")
         assert result.resolution_mapping == {
             "User ID": "uid",
             "Amount $": "amount",
@@ -305,7 +306,7 @@ class TestResolveFieldNames:
             columns=["id", "name", "amount"],
         )
 
-        assert result.final_headers == ["id", "name", "amount"]
+        assert result.final_headers == ("id", "name", "amount")
         assert result.resolution_mapping == {
             "id": "id",
             "name": "name",
@@ -324,7 +325,7 @@ class TestResolveFieldNames:
             columns=["id", "name"],
         )
 
-        assert result.final_headers == ["customer_id", "name"]
+        assert result.final_headers == ("customer_id", "name")
         assert result.resolution_mapping == {
             "id": "customer_id",
             "name": "name",
@@ -342,7 +343,7 @@ class TestResolveFieldNames:
             columns=None,
         )
 
-        assert result.final_headers == ["User ID", "Amount $"]
+        assert result.final_headers == ("User ID", "Amount $")
         assert result.resolution_mapping == {
             "User ID": "User ID",
             "Amount $": "Amount $",
@@ -379,3 +380,53 @@ class TestResolveFieldNames:
         error = str(exc_info.value)
         assert "nonexistent" in error
         assert "user_id" in error  # Shows available headers
+
+
+class TestFieldResolutionImmutability:
+    """FieldResolution containers must be deeply immutable.
+
+    FieldResolution crosses source→audit→sink boundaries, so mutation
+    after construction would cause audit inconsistency.
+    """
+
+    def test_final_headers_is_tuple(self) -> None:
+        """final_headers must be stored as tuple, not list."""
+        resolution = FieldResolution(
+            final_headers=["name", "amount"],
+            resolution_mapping={"Name": "name", "Amount": "amount"},
+            normalization_version="v1",
+        )
+        assert isinstance(resolution.final_headers, tuple)
+
+    def test_resolution_mapping_is_immutable(self) -> None:
+        """resolution_mapping must be wrapped in MappingProxyType."""
+        resolution = FieldResolution(
+            final_headers=["name", "amount"],
+            resolution_mapping={"Name": "name", "Amount": "amount"},
+            normalization_version="v1",
+        )
+        assert isinstance(resolution.resolution_mapping, MappingProxyType)
+        with pytest.raises(TypeError):
+            resolution.resolution_mapping["injected"] = "evil"  # type: ignore[index]
+
+    def test_caller_list_mutation_does_not_affect_instance(self) -> None:
+        """Defensive copy: mutating the original list must not affect the frozen instance."""
+        original_headers = ["name", "amount"]
+        resolution = FieldResolution(
+            final_headers=original_headers,
+            resolution_mapping={"Name": "name", "Amount": "amount"},
+            normalization_version="v1",
+        )
+        original_headers.append("injected")
+        assert len(resolution.final_headers) == 2
+
+    def test_caller_dict_mutation_does_not_affect_instance(self) -> None:
+        """Defensive copy: mutating the original dict must not affect the frozen instance."""
+        original_mapping = {"Name": "name", "Amount": "amount"}
+        resolution = FieldResolution(
+            final_headers=["name", "amount"],
+            resolution_mapping=original_mapping,
+            normalization_version="v1",
+        )
+        original_mapping["injected"] = "evil"
+        assert "injected" not in resolution.resolution_mapping

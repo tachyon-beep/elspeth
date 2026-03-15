@@ -1,4 +1,3 @@
-# src/elspeth/telemetry/exporters/console.py
 """Console exporter for telemetry events.
 
 Writes telemetry events to stdout or stderr in JSON or human-readable format.
@@ -17,6 +16,7 @@ from typing import TYPE_CHECKING, Any, Literal, TextIO, TypeGuard
 
 import structlog
 
+from elspeth.contracts.errors import AuditIntegrityError, FrameworkBugError
 from elspeth.telemetry.errors import TelemetryExporterError
 
 if TYPE_CHECKING:
@@ -134,6 +134,10 @@ class ConsoleExporter:
 
             print(line, file=self._stream)
         except Exception as e:
+            if isinstance(e, (FrameworkBugError, AuditIntegrityError)):
+                raise
+            if isinstance(e, (TypeError, AttributeError, KeyError, NameError)):
+                raise  # Programming errors must crash
             # Export MUST NOT raise - log and continue
             logger.warning(
                 "Failed to export telemetry event",
@@ -227,6 +231,10 @@ class ConsoleExporter:
         try:
             self._stream.flush()
         except Exception as e:
+            if isinstance(e, (FrameworkBugError, AuditIntegrityError)):
+                raise
+            if isinstance(e, (TypeError, AttributeError, KeyError, NameError)):
+                raise  # Programming errors must crash
             logger.warning(
                 "Failed to flush console stream",
                 exporter=self._name,

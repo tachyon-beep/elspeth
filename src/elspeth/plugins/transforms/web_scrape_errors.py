@@ -37,13 +37,6 @@ class ServerError(WebScrapeError):
         super().__init__(message, retryable=True)
 
 
-class TimeoutError(WebScrapeError):
-    """HTTP 408 Request Timeout."""
-
-    def __init__(self, message: str) -> None:
-        super().__init__(message, retryable=True)
-
-
 # Non-retryable errors (return TransformResult.error())
 
 
@@ -68,13 +61,6 @@ class UnauthorizedError(WebScrapeError):
         super().__init__(message, retryable=False)
 
 
-class SSLError(WebScrapeError):
-    """SSL/TLS certificate validation failure."""
-
-    def __init__(self, message: str) -> None:
-        super().__init__(message, retryable=False)
-
-
 class InvalidURLError(WebScrapeError):
     """Malformed or invalid URL."""
 
@@ -82,29 +68,8 @@ class InvalidURLError(WebScrapeError):
         super().__init__(message, retryable=False)
 
 
-class ParseError(WebScrapeError):
-    """HTML parsing or conversion failed."""
-
-    def __init__(self, message: str) -> None:
-        super().__init__(message, retryable=False)
-
-
 class SSRFBlockedError(WebScrapeError):
     """URL resolves to blocked IP range (private, loopback, cloud metadata)."""
-
-    def __init__(self, message: str) -> None:
-        super().__init__(message, retryable=False)
-
-
-class ResponseTooLargeError(WebScrapeError):
-    """Response exceeds max_response_size_mb limit."""
-
-    def __init__(self, message: str) -> None:
-        super().__init__(message, retryable=False)
-
-
-class ConversionTimeoutError(WebScrapeError):
-    """HTML-to-text/markdown conversion exceeded timeout."""
 
     def __init__(self, message: str) -> None:
         super().__init__(message, retryable=False)

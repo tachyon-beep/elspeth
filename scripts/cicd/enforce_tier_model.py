@@ -29,7 +29,7 @@ from datetime import UTC, date, datetime
 from pathlib import Path
 from typing import Any
 
-import yaml  # type: ignore[import-untyped]
+import yaml
 
 # =============================================================================
 # Data Structures
@@ -100,6 +100,7 @@ class PerFileRule:
     rules: list[str]  # List of rule IDs like ["R1", "R4", "R6"]
     reason: str
     expires: date | None
+    max_hits: int | None = None  # Cap on allowed matches; None = unlimited
     matched_count: int = field(default=0, compare=False)
     source_file: str = field(default="", compare=False)
 
@@ -158,6 +159,10 @@ class Allowlist:
         """Return per-file rules that didn't match any finding."""
         return [r for r in self.per_file_rules if r.matched_count == 0]
 
+    def get_exceeded_file_rules(self) -> list[PerFileRule]:
+        """Return per-file rules where matched_count exceeds max_hits."""
+        return [r for r in self.per_file_rules if r.max_hits is not None and r.matched_count > r.max_hits]
+
 
 # =============================================================================
 # Rule Definitions
@@ -176,13 +181,19 @@ RULES = {
     },
     "R3": {
         "name": "hasattr",
-        "description": "hasattr() can hide missing attribute bugs by branching around them",
-        "remediation": "Use protocols, enums, or fix the type contract instead of runtime attribute checking",
+        "description": "hasattr() is banned — use isinstance, protocols, or try/except AttributeError",
+        "remediation": "Replace with isinstance() for type checks, try/except AttributeError for attribute probing, or protocols for structural typing",
+        "banned": True,
     },
     "R4": {
         "name": "broad-except",
         "description": "Broad exception handling can suppress bugs",
         "remediation": "Catch specific exceptions, or re-raise after logging/quarantining",
+    },
+    "TC": {
+        "name": "type-checking-layer",
+        "description": "TYPE_CHECKING import crosses layer boundary (annotation-only, no runtime coupling)",
+        "remediation": "Allowlist if the dependency is accepted, or move the type to a lower layer",
     },
     "R5": {
         "name": "isinstance",
@@ -209,7 +220,68 @@ RULES = {
         "description": "dict.pop(key, default) hides missing-key bugs with implicit defaults",
         "remediation": "Access keys directly and fix the schema/contract if KeyError occurs",
     },
+    "L1": {
+        "name": "upward-import",
+        "description": "Import from a higher layer violates the dependency hierarchy (contracts→core→engine→plugins)",
+        "remediation": "Move code down, extract primitives, or restructure caller (see CLAUDE.md Layer Dependency Rules)",
+    },
 }
+
+
+# =============================================================================
+# Layer Hierarchy (import direction enforcement)
+# =============================================================================
+
+# Layer numbers: lower = deeper (fewer allowed dependencies)
+LAYER_HIERARCHY: dict[str, int] = {
+    "contracts": 0,  # L0 — leaf, imports nothing above
+    "core": 1,  # L1 — can import contracts only
+    "engine": 2,  # L2 — can import core, contracts
+}
+# Everything else (plugins, mcp, tui, telemetry, testing, cli*) is implicitly L3.
+
+LAYER_NAMES: dict[int, str] = {
+    0: "L0/contracts",
+    1: "L1/core",
+    2: "L2/engine",
+    3: "L3/application",
+}
+
+
+def _get_file_layer(relative_path: str) -> int:
+    """Determine the layer from a path relative to the scan root.
+
+    Supports both ``--root=src/elspeth`` (paths like ``contracts/...``) and
+    ``--root=src`` (paths like ``elspeth/contracts/...``).
+    """
+    parts = relative_path.split("/")
+    idx = 1 if parts[0] == "elspeth" else 0
+    top = parts[idx] if idx < len(parts) else ""
+    return LAYER_HIERARCHY.get(top, 3)
+
+
+def _get_import_target_layer(module_name: str) -> int | None:
+    """Determine the target layer from a fully qualified import.
+
+    Returns None for non-elspeth imports.
+    """
+    if not module_name.startswith("elspeth."):
+        return None
+    parts = module_name.split(".")
+    if len(parts) < 2:
+        return None
+    return LAYER_HIERARCHY.get(parts[1], 3)
+
+
+def _find_type_checking_lines(tree: ast.Module) -> set[int]:
+    """Collect line numbers of import statements inside ``if TYPE_CHECKING:`` blocks."""
+    lines: set[int] = set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.If) and isinstance(node.test, ast.Name) and node.test.id == "TYPE_CHECKING":
+            for child in node.body:
+                if isinstance(child, (ast.Import, ast.ImportFrom)):
+                    lines.add(child.lineno)
+    return lines
 
 
 # =============================================================================
@@ -502,14 +574,142 @@ def scan_directory(
 
 
 # =============================================================================
+# Layer Import Scanning
+# =============================================================================
+
+
+def scan_layer_imports_file(
+    file_path: Path,
+    root: Path,
+) -> tuple[list[Finding], list[Finding]]:
+    """Scan a single file for upward layer imports.
+
+    Returns:
+        violations: Findings for runtime upward imports (fail CI unless allowlisted)
+        tc_findings: Findings for TYPE_CHECKING upward imports (warnings, allowlistable)
+    """
+    try:
+        source = file_path.read_text(encoding="utf-8")
+    except (OSError, UnicodeDecodeError):
+        return [], []
+
+    try:
+        tree = ast.parse(source, filename=str(file_path))
+    except SyntaxError:
+        return [], []
+
+    relative_path = str(file_path.relative_to(root))
+    source_lines = source.splitlines()
+    file_layer = _get_file_layer(relative_path)
+
+    # L3 files (plugins, mcp, tui, etc.) can import anything — skip
+    if file_layer >= 3:
+        return [], []
+
+    tc_lines = _find_type_checking_lines(tree)
+    violations: list[Finding] = []
+    tc_findings: list[Finding] = []
+
+    for node in ast.walk(tree):
+        # Collect (module_name, line, col) targets from import nodes
+        targets: list[tuple[str, int, int]] = []
+        if isinstance(node, ast.ImportFrom) and node.module and node.level == 0:
+            targets.append((node.module, node.lineno, node.col_offset))
+        elif isinstance(node, ast.Import):
+            for alias in node.names:
+                targets.append((alias.name, node.lineno, node.col_offset))
+
+        for module_name, line, col in targets:
+            target_layer = _get_import_target_layer(module_name)
+            if target_layer is None or target_layer <= file_layer:
+                continue
+
+            snippet = source_lines[line - 1].strip() if line <= len(source_lines) else "<source unavailable>"
+            from_name = LAYER_NAMES[file_layer]
+            to_name = LAYER_NAMES[target_layer]
+
+            if line in tc_lines:
+                tc_payload = f"TC|{relative_path}|{module_name}"
+                tc_fp = hashlib.sha256(tc_payload.encode()).hexdigest()[:16]
+                tc_findings.append(
+                    Finding(
+                        rule_id="TC",
+                        file_path=relative_path,
+                        line=line,
+                        col=col,
+                        symbol_context=(),
+                        fingerprint=tc_fp,
+                        code_snippet=snippet,
+                        message=f"TYPE_CHECKING import: {from_name} annotates with {to_name} ({module_name})",
+                    )
+                )
+            else:
+                # Fingerprint: keyed on file + imported module (stable across reformatting)
+                payload = f"L1|{relative_path}|{module_name}"
+                fp = hashlib.sha256(payload.encode()).hexdigest()[:16]
+
+                violations.append(
+                    Finding(
+                        rule_id="L1",
+                        file_path=relative_path,
+                        line=line,
+                        col=col,
+                        symbol_context=(),
+                        fingerprint=fp,
+                        code_snippet=snippet,
+                        message=f"Upward import: {from_name} imports from {to_name} ({module_name})",
+                    )
+                )
+
+    return violations, tc_findings
+
+
+def scan_layer_imports_directory(
+    root: Path,
+    exclude_patterns: list[str] | None = None,
+) -> tuple[list[Finding], list[Finding]]:
+    """Scan all Python files for upward layer imports."""
+    exclude_patterns = exclude_patterns or []
+    all_violations: list[Finding] = []
+    all_tc_findings: list[Finding] = []
+
+    for py_file in root.rglob("*.py"):
+        relative = py_file.relative_to(root)
+        skip = False
+        for pattern in exclude_patterns:
+            if relative.match(pattern) or str(relative).startswith(pattern.rstrip("*/")):
+                skip = True
+                break
+        if skip:
+            continue
+
+        violations, tc_findings = scan_layer_imports_file(py_file, root)
+        all_violations.extend(violations)
+        all_tc_findings.extend(tc_findings)
+
+    return all_violations, all_tc_findings
+
+
+# =============================================================================
 # Allowlist Handling
 # =============================================================================
+
+
+_BANNED_RULES = frozenset(rule_id for rule_id, rule_def in RULES.items() if rule_def.get("banned"))
 
 
 def _parse_allow_hits(data: dict[str, Any], source_file: str = "") -> list[AllowlistEntry]:
     """Parse allow_hits entries from a YAML data dict."""
     entries: list[AllowlistEntry] = []
     for item in data.get("allow_hits", []):
+        key = item.get("key", "")
+        parts = key.split(":")
+        if len(parts) >= 2 and parts[1] in _BANNED_RULES:
+            print(
+                f"Error: allow_hits entry uses banned rule {parts[1]} (cannot be allowlisted): {key}",
+                file=sys.stderr,
+            )
+            sys.exit(1)
         expires_str = item.get("expires")
         expires_date = None
         if expires_str:
@@ -538,6 +738,14 @@ def _parse_per_file_rules(data: dict[str, Any], source_file: str = "") -> list[P
     """Parse per_file_rules entries from a YAML data dict."""
     per_file_rules: list[PerFileRule] = []
     for item in data.get("per_file_rules", []):
+        banned_in_entry = set(item.get("rules", [])) & _BANNED_RULES
+        if banned_in_entry:
+            print(
+                f"Error: per_file_rules entry for '{item.get('pattern', '?')}' uses banned rule(s) "
+                f"{banned_in_entry} (cannot be allowlisted)",
+                file=sys.stderr,
+            )
+            sys.exit(1)
         expires_str = item.get("expires")
         expires_date = None
         if expires_str:
@@ -549,12 +757,16 @@ def _parse_per_file_rules(data: dict[str, Any], source_file: str = "") -> list[P
                     file=sys.stderr,
                 )
 
+        raw_max_hits = item.get("max_hits")
+        max_hits = int(raw_max_hits) if raw_max_hits is not None else None
+
         per_file_rules.append(
             PerFileRule(
                 pattern=item["pattern"],
                 rules=item.get("rules", []),
                 reason=item.get("reason", ""),
                 expires=expires_date,
+                max_hits=max_hits,
                 source_file=source_file,
             )
         )
@@ -688,6 +900,8 @@ def report_json(
     expired_entries: list[AllowlistEntry],
     expired_file_rules: list[PerFileRule] | None = None,
     unused_file_rules: list[PerFileRule] | None = None,
+    layer_warnings: list[Finding] | None = None,
+    exceeded_file_rules: list[PerFileRule] | None = None,
 ) -> str:
     """Generate JSON report."""
     result: dict[str, Any] = {
@@ -714,6 +928,22 @@ def report_json(
         ]
     if unused_file_rules:
         result["unused_file_rules"] = [{"pattern": r.pattern, "rules": r.rules, "reason": r.reason} for r in unused_file_rules]
+    if exceeded_file_rules:
+        result["exceeded_file_rules"] = [
+            {"pattern": r.pattern, "rules": r.rules, "matched": r.matched_count, "max_hits": r.max_hits, "reason": r.reason}
+            for r in exceeded_file_rules
+        ]
+    if layer_warnings:
+        result["layer_warnings"] = [
+            {
+                "rule_id": f.rule_id,
+                "file": f.file_path,
+                "line": f.line,
+                "message": f.message,
+                "key": f.canonical_key,
+            }
+            for f in layer_warnings
+        ]
     return json.dumps(result, indent=2)
 
 
@@ -788,6 +1018,7 @@ def run_check(args: argparse.Namespace) -> int:
     allowlist = load_allowlist(allowlist_path)
 
     # Scan for findings - either specific files or whole directory
+    all_tc_findings: list[Finding] = []
     if args.files:
         # Pre-commit mode: only scan the provided files that are under root
         all_findings = []
@@ -797,22 +1028,37 @@ def run_check(args: argparse.Namespace) -> int:
             try:
                 resolved.relative_to(root)
                 all_findings.extend(scan_file(resolved, root))
+                layer_v, layer_tc = scan_layer_imports_file(resolved, root)
+                all_findings.extend(layer_v)
+                all_tc_findings.extend(layer_tc)
             except ValueError:
                 # File is not under root, skip it
                 pass
     else:
         # Full directory scan mode
         all_findings = scan_directory(root, args.exclude)
+        layer_v, layer_tc = scan_layer_imports_directory(root, args.exclude)
+        all_findings.extend(layer_v)
+        all_tc_findings.extend(layer_tc)
 
-    # Filter out allowlisted findings
+    # Filter out allowlisted findings (banned rules are never suppressible)
     violations: list[Finding] = []
     for finding in all_findings:
-        if allowlist.match(finding) is None:
+        if finding.rule_id in _BANNED_RULES or allowlist.match(finding) is None:
             violations.append(finding)
+
+    # Filter TYPE_CHECKING findings through allowlist (unmatched remain as warnings)
+    layer_warnings: list[Finding] = []
+    for tc_finding in all_tc_findings:
+        if allowlist.match(tc_finding) is None:
+            layer_warnings.append(tc_finding)
 
     # Check for stale/expired allowlist entries (only in full-scan mode)
     # In file-specific mode (pre-commit), we only scan a subset of files,
     # so most allowlist entries won't match - that's expected, not stale.
+    # Exceeded per-file rules always checked (even in pre-commit mode)
+    exceeded_file_rules = allowlist.get_exceeded_file_rules()
+
     if args.files:
         stale_entries: list[AllowlistEntry] = []
         expired_entries: list[AllowlistEntry] = []
@@ -827,10 +1073,14 @@ def run_check(args: argparse.Namespace) -> int:
     # Report results
     # Include unused_file_rules in error condition - stale per-file rules should fail
     # the same way stale explicit entries do when fail_on_stale is enabled
-    has_errors = bool(violations or stale_entries or expired_entries or expired_file_rules or unused_file_rules)
+    has_errors = bool(violations or stale_entries or expired_entries or expired_file_rules or unused_file_rules or exceeded_file_rules)
 
     if args.format == "json":
-        print(report_json(violations, stale_entries, expired_entries, expired_file_rules, unused_file_rules))
+        print(
+            report_json(
+                violations, stale_entries, expired_entries, expired_file_rules, unused_file_rules, layer_warnings, exceeded_file_rules
+            )
+        )
     else:
         # Text format
         if violations:
@@ -839,6 +1089,16 @@ def run_check(args: argparse.Namespace) -> int:
             print("=" * 60)
             for v in violations:
                 print(format_finding_text(v))
+
+        if layer_warnings:
+            print(f"\n{'=' * 60}")
+            print(f"LAYER WARNINGS (TYPE_CHECKING imports): {len(layer_warnings)}")
+            print("(Allowlist with rule TC to suppress — not a failure)")
+            print("=" * 60)
+            for w in layer_warnings:
+                print(f"  {w.file_path}:{w.line} — {w.message}")
+                print(f"    Code: {w.code_snippet}")
+                print(f"    Allowlist key: {w.canonical_key}")
 
         if stale_entries:
             print(f"\n{'=' * 60}")
@@ -875,6 +1135,17 @@ def run_check(args: argparse.Namespace) -> int:
             for r in unused_file_rules:
                 print(f"\n  Pattern: {r.pattern}")
                 print(f"  Rules: {r.rules}")
+                print(f"  Reason: {r.reason}")
+
+        if exceeded_file_rules:
+            print(f"\n{'=' * 60}")
+            print(f"EXCEEDED PER-FILE RULES: {len(exceeded_file_rules)}")
+            print("(These rules matched more findings than max_hits allows - review new additions)")
+            print("=" * 60)
+            for r in exceeded_file_rules:
+                print(f"\n  Pattern: {r.pattern}")
+                print(f"  Rules: {r.rules}")
+                print(f"  Matched: {r.matched_count} (max_hits: {r.max_hits})")
                 print(f"  Reason: {r.reason}")
 
         if has_errors:

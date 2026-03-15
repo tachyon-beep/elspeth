@@ -4,8 +4,6 @@
 
 ELSPETH is a **domain-agnostic framework for auditable Sense/Decide/Act (SDA) pipelines**. It provides scaffolding for data processing workflows where every decision must be traceable to its source, regardless of whether the "decide" step is an LLM, ML model, rules engine, or threshold check.
 
-**Current Status:** RC-3. Core architecture, plugins, and audit trail are complete. Quality sprint in progress — stabilization fixes, documentation updates, and contract hardening.
-
 ## Auditability Standard
 
 ELSPETH is built for **high-stakes accountability**. The audit trail must withstand formal inquiry.
@@ -104,41 +102,24 @@ Transforms that make external calls (LLM APIs, HTTP requests, database queries) 
 def process(self, row: PipelineRow, ctx: PluginContext) -> TransformResult:
     # row enters as Tier 2 (pipeline data - trust the schema)
 
-    # External call creates Tier 3 boundary
+    # 1. External call creates Tier 3 boundary — wrap it
     try:
         llm_response = self._llm_client.query(prompt)  # EXTERNAL DATA - zero trust
     except Exception as e:
-        return TransformResult.error(
-            {"reason": "llm_call_failed", "error": str(e)},
-            retryable=True,
-        )
+        return TransformResult.error({"reason": "llm_call_failed", "error": str(e)}, retryable=True)
 
-    # IMMEDIATELY validate at the boundary - don't let "their data" travel
+    # 2. IMMEDIATELY validate at the boundary — retryable=False (bad data, not transient)
     try:
         parsed = json.loads(llm_response.content)
     except json.JSONDecodeError:
-        return TransformResult.error(
-            {"reason": "invalid_json", "raw": llm_response.content[:200]},
-            retryable=False,
-        )
+        return TransformResult.error({"reason": "invalid_json", "raw": llm_response.content[:200]}, retryable=False)
 
-    # Validate structure type IMMEDIATELY
     if not isinstance(parsed, dict):
-        return TransformResult.error(
-            {
-                "reason": "invalid_json_type",
-                "expected": "object",
-                "actual": type(parsed).__name__
-            },
-            retryable=False,
-        )
+        return TransformResult.error({"reason": "invalid_json_type", "expected": "dict", "actual": type(parsed).__name__}, retryable=False)
 
-    # NOW it's our data (Tier 2) - add to row and continue
-    output = {**row.to_dict(), "llm_classification": parsed["category"]}  # Safe - validated above
-    return TransformResult.success(
-        output,
-        success_reason={"action": "llm_classified", "category": parsed["category"]},
-    )
+    # 3. NOW it's our data (Tier 2) — validated, trust it
+    output = {**row.to_dict(), "llm_classification": parsed["category"]}
+    return TransformResult.success(output, success_reason={"action": "llm_classified"})
 ```
 
 **The rule: Minimize the distance external data travels before you validate it.**
@@ -192,6 +173,24 @@ def process(self, row: PipelineRow, ctx: PluginContext) -> TransformResult:
 - **Accessing internal state?** Let it crash - that's a bug to fix.
 
 **Serialization does not change trust tier.** Data we wrote to our own database or checkpoint file is still Tier 1 when we read it back, even though it passes through `json.loads()` or SQLAlchemy deserialization. The trust boundary is about *who authored the data*, not the transport format. Checkpoints, audit records, and Landscape tables are all our data — we defined the schema, we wrote the values, we own the invariants. If a deserialized checkpoint is missing a `"tokens"` key or a `"row_id"` field, that is corruption in our system, not a data quality issue to handle gracefully. Crash immediately.
+
+### Pipeline Templates as Tier 2 Data
+
+Pipeline templates (Jinja2 prompt templates in YAML config) are **Tier 2 — user-provided, validated at load time, trusted during rendering**. This creates two distinct error categories:
+
+| Failure Type | When | Effect | Example |
+|-------------|------|--------|---------|
+| **Structural** (parse) | Init time | Stop run — no row will ever succeed | `{% if unclosed` (syntax error) |
+| **Operational** (render) | Per-row | Quarantine row, continue pipeline | `{{ row.missing_field }}` (undefined variable) |
+
+**Rules:**
+
+- Templates are parsed **once** at plugin construction (`__init__` / `__post_init__`), never re-parsed per-row
+- `TemplateSyntaxError` during parse → `TemplateError` propagates up → run fails at setup
+- `UndefinedError` / `SecurityError` during render → `TemplateError` caught by transform → `TransformResult.error()` → row quarantined
+- Per-query template overrides (multi-query LLM transforms) are pre-compiled in `MultiQueryStrategy.__post_init__`, not deferred to first row
+
+**Why this matters:** A broken template can never produce valid results for any row. Deferring the parse error to render time would misclassify a config error (structural) as a data error (operational), quarantining the first row instead of stopping the run. The operator would see "row 1 failed: template syntax error" instead of "pipeline config is invalid" — wasting their time investigating row data that was never the problem.
 
 ## Plugin Ownership: System Code, Not User Code
 
@@ -313,7 +312,7 @@ class RetryManager:
 | `contracts/config/runtime.py` | Runtime*Config dataclasses with `from_settings()` |
 | `contracts/config/alignment.py` | Field mapping documentation (`FIELD_MAPPINGS`) |
 | `contracts/config/defaults.py` | Default values (`POLICY_DEFAULTS`, `INTERNAL_DEFAULTS`) |
-| `tests/core/test_config_alignment.py` | Comprehensive alignment verification |
+| `tests/unit/core/test_config_alignment.py` | Comprehensive alignment verification |
 
 **Adding a new Settings field (checklist):**
 
@@ -322,7 +321,7 @@ class RetryManager:
 3. Map in `from_settings()` method (explicit assignment)
 4. If renamed: document in `FIELD_MAPPINGS` in `alignment.py`
 5. If internal-only: document in `INTERNAL_DEFAULTS` in `defaults.py`
-6. Run `.venv/bin/python -m scripts.check_contracts` and `pytest tests/core/test_config_alignment.py`
+6. Run `.venv/bin/python -m scripts.check_contracts` and `pytest tests/unit/core/test_config_alignment.py`
 
 ### Tier Model Enforcement Allowlist
 
@@ -411,6 +410,24 @@ transforms:
 
 The DAG validates that upstream `guaranteed_fields` satisfy downstream `required_input_fields`. For template-based transforms, use `elspeth.core.templates.extract_jinja2_fields()` to discover template dependencies during development.
 
+### Header Normalization and Engine Custody
+
+**Source field names are normalized to valid Python identifiers at the source boundary.** This is non-negotiable — it's not cosmetic cleanup, it's a language boundary requirement.
+
+User-chosen field names must cross multiple language boundaries during pipeline execution: Python attribute access (`row.field`), Jinja2 templates (`{{ row.field }}`), expression parser AST nodes, SQL column names, and JSON keys. Each has different reserved words, quoting rules, and valid character sets. A field named `"Amount (USD)"` or `" Customer ID "` is a syntax error in Jinja2, ambiguous in SQL, and requires bracket access in Python. Normalizing once at the source boundary (Tier 3 → Tier 2 transition) means every downstream consumer gets names that are valid in every context.
+
+**The engine takes custody of the original headers.** The `SchemaContract` preserves `original_name` metadata on every field throughout the pipeline. At the sink boundary, three header modes control output:
+
+| Mode | Output | Use Case |
+|------|--------|----------|
+| `NORMALIZED` | `customer_id` | Default — pipeline working names |
+| `ORIGINAL` | `Customer ID` | Restore what the source provided |
+| `CUSTOM` | Explicit mapping | External system handover with specific naming requirements |
+
+This is a **restoration**, not a transformation — the engine preserved the originals as metadata and gives them back on request. The `CUSTOM` mode deliberately refuses to silently fall back to normalized names for unmapped fields, because wrong column names in an external system handover are worse than a crash.
+
+**Collision detection operates on normalized names.** The transform executor (`engine/executors/transform.py`) centrally enforces field collision detection pre-execution for any transform that declares `declared_output_fields`. This is mandatory and engine-level — plugins don't opt in, they declare their output fields and the engine prevents collisions before the transform runs.
+
 ### Transform Subtypes
 
 | Type | Behavior |
@@ -495,6 +512,7 @@ elspeth-mcp --database sqlite:///./examples/my_pipeline/runs/audit.db  # Explici
 | Database | SQLAlchemy Core | Multi-backend without ORM overhead |
 | Migrations | Alembic | Schema versioning |
 | Retries | tenacity | Industry standard backoff |
+| Telemetry | OpenTelemetry (api, sdk, otlp exporter) | Distributed tracing and metrics |
 
 ### Acceleration Stack (avoid reinventing)
 
@@ -512,9 +530,11 @@ elspeth-mcp --database sqlite:///./examples/my_pipeline/runs/audit.db  # Explici
 | Pack | Technology | Use Case |
 | ---- | ---------- | -------- |
 | LLM | LiteLLM | 100+ LLM providers unified |
-| ML | scikit-learn, ONNX | Traditional ML inference |
-| Azure | azure-storage-blob | Azure cloud integration |
-| Telemetry | OpenTelemetry, ddtrace | Observability platform integration |
+| Azure | azure-storage-blob, azure-identity, azure-keyvault-secrets | Azure cloud integration |
+| Telemetry | ddtrace | Datadog APM integration |
+| Web | beautifulsoup4, html2text | Web scraping transforms |
+| Security | sqlcipher3 | Audit database encryption at rest |
+| MCP | mcp | Landscape analysis server protocol |
 
 ## Telemetry (Operational Visibility)
 
@@ -528,6 +548,53 @@ Telemetry provides **real-time operational visibility** alongside the Landscape 
 **Correlation:** Telemetry events include `run_id` and `token_id`. Use these to cross-reference with `elspeth explain` or the Landscape MCP server.
 
 Full configuration guide (exporters, granularity levels, backpressure): `docs/guides/telemetry.md`.
+
+## Logging Policy
+
+**The Landscape audit system is a must-fire system with absolute primacy.** At every emission point, audit writes first — synchronously, transactionally, crash-on-failure. Only after audit succeeds does telemetry fire (async, best-effort). This ordering is non-negotiable. Logging (`logger`/`structlog`) is the channel of last resort, not a parallel record of pipeline activity.
+
+**Permitted uses of `logger`/`structlog`:**
+
+| Use Case | Example | Why Logging |
+|----------|---------|-------------|
+| **Transitory debugging** | `slog.debug("pool_state", active=3, idle=2)` | Temporary diagnostic, removed before merge or kept at DEBUG level |
+| **Audit system failures** | `logger.error("Landscape write failed", exc_info=True)` | The audit system itself is broken — can't record to it |
+| **Telemetry system failures** | `logger.error("Exporter crashed", exc_info=True)` | Both observability systems are down — logging is the last resort |
+
+**Forbidden uses:**
+
+| Anti-Pattern | Why Wrong | Correct Alternative |
+|-------------|-----------|-------------------|
+| Logging row-level decisions | Duplicates `node_states.success_reason_json` | Enrich `success_reason` metadata |
+| Logging transform outcomes | Duplicates `node_states` status + context | Already in Landscape |
+| Logging call results | Duplicates `calls` table | Already recorded by `record_call()` |
+| Logging for alerting on data patterns | Logs are ephemeral, Landscape is queryable | Query `context_after_json` via MCP |
+| Logging infrastructure lifecycle | Startup/shutdown/config events belong in telemetry | Emit via `_emit_telemetry()` — telemetry exporters route to dashboards |
+
+**The superset rule:** Everything that goes to telemetry should also go to audit, unless it lacks probative value — meaning an auditor subpoenaed to explain a past run's outcomes would never reference it. The key determinant is evidential value, not volume. A high-frequency event that carries probative value (e.g., per-row gate decisions) must be audited regardless of volume. A low-frequency event that lacks probative value (e.g., "cache evicted 3 keys") should not be audited regardless of how easy it would be to include.
+
+**Telemetry-only exemptions** (no audit required):
+
+| Category | Example | Why no probative value |
+|----------|---------|----------------------|
+| **Operational metrics** | Checkpoint size, cache eviction counts, throughput counters | Describe system pressure, not data outcomes — no auditor asks "what was the checkpoint size when row 42 was processed?" |
+| **System health** | Exporter failure counts, journal drop rates, payload store errors | Meta-operational — about the observability infrastructure itself, not the data flowing through the pipeline |
+
+**Must audit** (even if also telemetered):
+
+| Category | Example | Why probative |
+|----------|---------|--------------|
+| **Pipeline decisions** | Row processed, gate routed, transform applied, call made | Directly explains what happened to each row |
+| **Run lifecycle** | Run started/finished, phase transitions | Establishes timeline and system state for the run |
+| **Infrastructure lifecycle** | Plugin initialised, config loaded, provider connected, model selected | Establishes what the system state was when decisions were made — "which model was active?" is a valid audit question |
+
+**The primacy test:** Audit always fires first, synchronously. Telemetry fires second, asynchronously. Logs fire only when the other two can't.
+
+| Question | Channel |
+|----------|---------|
+| Does this have probative value for explaining a past run's outcomes? | **Audit + Telemetry** — audit first (permanent record), then telemetry (real-time view) |
+| Is this useful for operational visibility but not for explaining outcomes? | **Telemetry only** |
+| Is the audit or telemetry system itself broken? | **Logging** (last resort) |
 
 ## Critical Implementation Patterns
 
@@ -569,8 +636,8 @@ Every row reaches exactly one terminal state - no silent drops:
 
 ### Retry Semantics
 
-- `(run_id, row_id, transform_seq, attempt)` is unique
-- Each attempt recorded separately
+- `(token_id, node_id, attempt)` is unique in the `node_states` table (also `(token_id, step_index, attempt)`)
+- Each attempt recorded as a separate `node_states` row
 - Backoff metadata captured
 
 ### Secret Handling
@@ -623,7 +690,10 @@ graph = ExecutionGraph.from_plugin_instances(source=source, transforms=transform
 For any output, the system must prove complete lineage:
 
 ```python
-lineage = landscape.explain(run_id, token_id=token_id, field=field)
+from elspeth.core.landscape.lineage import explain
+
+lineage = explain(recorder, run_id, token_id=token_id)
+assert lineage is not None
 assert lineage.source_row is not None
 assert len(lineage.node_states) > 0
 ```
@@ -642,12 +712,13 @@ src/elspeth/
 │   ├── config.py       # Configuration loading (Dynaconf + Pydantic)
 │   ├── canonical.py    # Deterministic JSON hashing (RFC 8785)
 │   ├── events.py       # Synchronous event bus for CLI observability
+│   ├── expression_parser.py # AST-based expression parsing (no eval)
 │   ├── identifiers.py  # ID generation utilities
 │   ├── logging.py      # Structured logging setup
 │   ├── operations.py   # Operation type definitions
 │   ├── payload_store.py # Content-addressable storage for large blobs
 │   └── templates.py    # Jinja2 field extraction
-├── contracts/          # Type contracts, schemas, and protocol definitions
+├── contracts/          # Type contracts, schemas, protocol definitions, hashing primitives, and phase-typed contexts
 ├── engine/
 │   ├── orchestrator/   # Full run lifecycle management (core, aggregation, export, outcomes, validation)
 │   ├── executors/      # Transform, gate, sink, aggregation executors
@@ -658,25 +729,57 @@ src/elspeth/
 │   ├── retry.py        # Tenacity-based retry with backoff
 │   ├── tokens.py       # Token identity and lineage management
 │   ├── triggers.py     # Aggregation trigger evaluation
-│   ├── expression_parser.py # AST-based expression parsing (no eval)
 │   ├── clock.py        # Clock abstraction for testing
 │   └── spans.py        # Telemetry span management
 ├── plugins/
+│   ├── infrastructure/ # Shared: base classes, protocols, config, clients, batching, pooling
 │   ├── sources/        # CSVSource, JSONSource, NullSource, AzureBlobSource
-│   ├── transforms/     # FieldMapper, Passthrough, Truncate, etc.
-│   ├── sinks/          # CSVSink, JSONSink, DatabaseSink, BlobSink
-│   ├── llm/            # Azure OpenAI transforms (batch, multi-query)
-│   ├── clients/        # HTTP, LLM, Replayer, Verifier clients
-│   ├── batching/       # Batch-aware transform adapters
-│   └── pooling/        # Thread pool management for plugins
+│   ├── transforms/     # FieldMapper, Passthrough, Truncate, LLM, Azure safety, etc.
+│   └── sinks/          # CSVSink, JSONSink, DatabaseSink, AzureBlobSink
 ├── telemetry/          # OpenTelemetry exporters and instrumentation
 ├── testing/            # ChaosLLM, ChaosWeb, ChaosEngine test servers
+│   ├── chaosllm/       # Fake OpenAI/Azure LLM server with error/latency injection
+│   ├── chaosweb/       # Fake web server with failure profiles
+│   ├── chaosengine/    # Engine-level test utilities
+│   └── chaosllm_mcp/   # MCP server for ChaosLLM metrics and control
 ├── mcp/                # Landscape MCP analysis server
+│   ├── analyzers/      # Domain-specific analysis tools (contracts, diagnostics, queries, reports)
+│   ├── server.py       # MCP server implementation
+│   └── types.py        # MCP type definitions
 ├── tui/                # Terminal UI (Textual) - explain screens and widgets
+│   ├── screens/        # TUI screen implementations
+│   ├── widgets/        # TUI widget components
+│   ├── explain_app.py  # Explain TUI application entry point
+│   └── constants.py    # TUI constants
 ├── cli.py              # Typer CLI
 ├── cli_helpers.py      # CLI utility functions
 └── cli_formatters.py   # Event formatting for CLI output
 ```
+
+## Layer Dependency Rules
+
+ELSPETH uses a strict 4-layer model. Imports must flow **downward only**.
+
+```text
+L0  contracts/     Leaf — imports nothing above. Shared types, enums, protocols.
+L1  core/          Can import L0 only. Landscape, DAG, config, canonical JSON.
+L2  engine/        Can import L0, L1. Orchestrator, processors, executors.
+L3  plugins/       Can import L0, L1, L2. Sources, transforms, sinks, clients.
+    mcp/ tui/ cli* telemetry/ testing/   — also L3 (application layer)
+```
+
+**Enforced by CI:** `scripts/cicd/enforce_tier_model.py` detects upward imports and fails the build. The allowlist mechanism (`config/cicd/enforce_tier_model/`) supports per-file and per-finding exemptions for legitimate exceptions.
+
+**TYPE_CHECKING imports** are reported as warnings, not failures. They're architecturally impure (the dependency still exists for type checkers) but don't create runtime coupling.
+
+### When a New Cross-Layer Need Arises
+
+Resolution options in priority order:
+
+1. **Move the code down.** If the needed code has no upward dependencies, move it to the lower layer. E.g., move a dataclass from `core/` to `contracts/`.
+2. **Extract the primitive.** If only a type or constant is needed, extract it into `contracts/` and import from there.
+3. **Restructure the caller.** Refactor so the higher-layer code isn't needed. Use dependency injection, callbacks, or protocols defined in `contracts/`.
+4. **NEVER:** Add a lazy import with an apologetic comment. This is the "Shifting the Burden" archetype — it defers the structural fix and the pattern will recur.
 
 ## No Legacy Code Policy
 
@@ -698,8 +801,6 @@ src/elspeth/
 - Don't add compatibility layers - change all call sites in the same commit
 - Don't create abstractions to hide breaking changes - make the breaking change
 
-If you are proposing a fix that involves "a patch or temporary workaround," STOP. We only have one chance to fix things pre-release. Make the fix right, not quick. This especially includes architectural defects. Lint failures, failing tests, and CI/CD issues must all be resolved to merge — no exceptions.
-
 ## Git Safety
 
 **Never run destructive git commands without explicit user permission:**
@@ -712,88 +813,238 @@ If you are proposing a fix that involves "a patch or temporary workaround," STOP
 
 **No git stash.** The stash/pop cycle has caused repeated data loss in this project — pre-commit hooks that stash/unstash silently destroy unstaged work when `stash pop` encounters conflicts. If you need to preserve work, commit it to a branch.
 
-## Prohibition on Defensive Programming Patterns
+## Defensive Programming: Forbidden. Offensive Programming: Encouraged
 
-This codebase prohibits defensive patterns that mask bugs instead of fixing them. Do not use `.get()`, `getattr()`, `hasattr()`, `isinstance()`, or silent exception handling to suppress errors from nonexistent attributes, malformed data, or incorrect types.
+### What's Forbidden (Defensive Programming)
+
+Do not use `.get()`, `getattr()`, `isinstance()`, or silent exception handling to suppress errors from nonexistent attributes, malformed data, or incorrect types. **Access typed dataclass fields directly** (`obj.field`), not defensively (`obj.get("field")`).
+
+**`hasattr()` is unconditionally banned.** It is not allowlistable in the tier model enforcer. Everything `hasattr` does can be done more safely:
+
+| Instead of `hasattr` | Use | Why |
+|---------------------|-----|-----|
+| `hasattr(obj, "attr")` before access | `try: obj.attr` / `except AttributeError:` | `hasattr` swallows all exceptions from `@property` getters, not just missing attributes |
+| `hasattr(self, "method_" + name)` for dispatch | Explicit allowset (`frozenset`) + `isinstance` | `hasattr` lets you bypass the gate just by defining a method — no review required |
+| `hasattr(e, "field")` on caught exceptions | `isinstance(e, SpecificType)` or direct access | Exception types define their attributes — if the type is in the `except` clause, the attribute exists |
 
 A common anti-pattern: an LLM hallucinates a field name, code fails, and the "fix" is `getattr(obj, "hallucinated_field", None)`. This hides the real bug. Fix the actual cause instead.
 
-**Access typed dataclass fields directly** (`obj.field`), not defensively (`obj.get("field")`). If code would fail without a defensive pattern, that failure is a bug to fix.
+Defensive handling IS appropriate at trust boundaries — see the **Coercion Rules** and **Operation Wrapping Rules** tables in the Three-Tier Trust Model section for the complete rules and examples.
 
-### Legitimate Uses
+### What's Encouraged (Offensive Programming)
 
-Defensive handling IS appropriate at trust boundaries (see Three-Tier Trust Model above for the full rules and examples):
+**Proactively detect invalid states and throw meaningful exceptions.** Don't wait for code to fail with a cryptic `KeyError` or `NoneType` crash three stack frames later. If you can detect that data is corrupt, a precondition is violated, or an invariant is broken — assert it explicitly and fail with a message that tells the operator *exactly what went wrong and why*.
 
-1. **Operations on row values** - Their data can cause operation failures (division by zero, parse errors). Wrap `row["x"] / row["y"]`, but NOT `self._x / self._y` (our bug if that fails).
-2. **External system boundaries** - Validate API/LLM responses immediately at the boundary.
-3. **Framework boundaries** - Plugin schema contracts, Pydantic config validation at load time.
-4. **Serialization** - pandas/numpy dtype normalization in canonical JSON.
+**Key principle:** The goal is not to prevent crashes — it's to make crashes **maximally informative**. A bare `KeyError: 'tokens'` tells an operator nothing. An `AuditIntegrityError("Corrupt field resolution JSON for run run-42: failed to parse stored JSON — database corruption (Tier 1 violation)")` tells them exactly what happened, which record is affected, and what trust tier was violated.
+
+**Examples of good offensive programming:**
+
+```python
+# Detect corruption at read time — don't let bad data propagate
+try:
+    data = json.loads(stored_json)
+except json.JSONDecodeError as exc:
+    raise AuditIntegrityError(
+        f"Corrupt JSON for run {run_id}: database corruption (Tier 1 violation). "
+        f"Parse error: {exc}"
+    ) from exc
+
+# Validate write-side invariants at construction — reject garbage before it enters the audit trail
+@dataclass(frozen=True)
+class SecretResolutionInput:
+    fingerprint: str
+    def __post_init__(self) -> None:
+        if len(self.fingerprint) != 64 or not all(c in "0123456789abcdef" for c in self.fingerprint):
+            raise ValueError(f"fingerprint must be 64-char lowercase hex, got {self.fingerprint!r}")
+
+# Use atomic guards to prevent TOCTOU races — detect the anomaly, don't just hope it doesn't happen
+result = conn.execute(
+    update(table).where(table.c.id == id).where(table.c.field.is_(None)).values(field=value)
+)
+if result.rowcount == 0:
+    # Distinguish "not found" from "already set" — different operator actions needed
+    existing = conn.execute(select(table.c.field).where(table.c.id == id)).fetchone()
+    if existing is not None and existing.field is not None:
+        raise AuditIntegrityError(f"Cannot overwrite: field already exists for {id}")
+    raise ValueError(f"Record {id} not found")
+```
+
+**When to add offensive checks:**
+
+- **Tier 1 read paths**: Data from our own database should be exactly what we expect. If it isn't, crash immediately with context — this is corruption or tampering.
+- **Write-side DTOs**: Validate invariants at construction (via `__post_init__`) before data enters the audit trail. Cheaper to reject garbage at the door than to discover it on read.
+- **State transitions**: When a method has preconditions (e.g., "contract must not already exist"), assert them with contextual error messages, not silent no-ops.
+- **Exception chains**: Always use `from exc` to preserve the original exception chain. `from None` destroys diagnostic information.
 
 ### The Decision Test
 
 | Question | If Yes | If No |
 |----------|--------|-------|
-| Is this protecting against user-provided data values? | ✅ Wrap it | — |
-| Is this at an external system boundary (API, file, DB)? | ✅ Wrap it | — |
+| Is this protecting against user-provided data values? | ✅ Wrap it (trust boundary) | — |
+| Is this at an external system boundary (API, file, DB)? | ✅ Wrap it (trust boundary) | — |
+| Can I detect an invalid state and throw a meaningful error? | ✅ Assert it (offensive) | — |
 | Would this fail due to a bug in code we control? | — | ❌ Let it crash |
 | Am I adding this because "something might be None"? | — | ❌ Fix the root cause |
+| Am I silently swallowing an error with a default value? | — | ❌ That's defensive — forbidden |
 
-If you're wrapping to hide a bug that "shouldn't happen," remove the wrapper and fix the bug.
+<!-- filigree:instructions:v1.4.1:c706f2df -->
+## Filigree Issue Tracker
 
-<!-- filigree:instructions -->
-## Issue Tracking (Filigree)
+Use `filigree` for all task tracking in this project. Data lives in `.filigree/`.
 
-All issue tracking uses **Filigree** — a local SQLite-backed tracker with enforced state machines. Data lives in `.filigree/`. The MCP server (`filigree-mcp`) provides 43 native tools; the CLI is for quick operations and subagent use.
+### MCP Tools (Preferred)
 
-### Issue Types
+When MCP is configured, prefer `mcp__filigree__*` tools over CLI commands — they're
+faster and return structured data. Key tools:
 
-Pick the right type — each has an enforced state flow that prevents skipping steps:
+- `get_ready` / `get_blocked` — find available work
+- `get_issue` / `list_issues` / `search_issues` — read issues
+- `create_issue` / `update_issue` / `close_issue` — manage issues
+- `claim_issue` / `claim_next` — atomic claiming
+- `add_comment` / `add_label` — metadata
+- `create_plan` / `get_plan` — milestone planning
+- `get_stats` / `get_metrics` — project health
+- `get_valid_transitions` — workflow navigation
 
-| Type | Use When | Flow |
-| ---- | -------- | ---- |
-| `bug` | Defect in existing code | `triage → confirmed → fixing → verifying → closed` |
-| `task` | Bounded work item | `open → in_progress → closed` |
-| `feature` | New capability | `proposed → approved → building → reviewing → done` |
-| `epic` | Large cross-cutting effort | `open → in_progress → closed` |
+Fall back to CLI (`filigree <command>`) when MCP is unavailable.
 
-**Bugs MUST use the `bug` type**, not `task`. The triage→confirmed→fixing→verifying flow exists to prevent "fix it and forget it" — every bug fix requires verification before closing. Use `filigree transitions <id>` to see valid next states.
-
-### Priority Scale
-
-| Priority | Meaning | Guidance |
-| -------- | ------- | -------- |
-| P0 | Critical | Drop everything. Pipeline correctness, data loss, audit integrity |
-| P1 | High | Do next. Security issues, contract violations, crash bugs |
-| P2 | Medium | Default. Standard bugs and tasks |
-| P3 | Low | When convenient. Code quality, minor UX issues |
-| P4 | Backlog | Someday. Nice-to-haves, speculative improvements |
-
-### Essential Commands
+### CLI Quick Reference
 
 ```bash
-filigree ready                                    # Starting point: unblocked work by priority
-filigree show <id>                                # Full details + dependencies + comments
-filigree create "Title" --type=bug --priority=1   # Create (always specify type + priority)
-filigree update <id> --status=in_progress         # Claim work
-filigree close <id> --reason="explanation"         # Close with context (reason is encouraged)
-filigree add-dep <issue> <depends-on>             # Track blockers
-filigree add-comment <id> "Decision rationale"    # Record decisions on the issue, not in chat
+# Finding work
+filigree ready                              # Show issues ready to work (no blockers)
+filigree list --status=open                 # All open issues
+filigree list --status=in_progress          # Active work
+filigree show <id>                          # Detailed issue view
+
+# Creating & updating
+filigree create "Title" --type=task --priority=2          # New issue
+filigree update <id> --status=in_progress                # Claim work
+filigree close <id>                                      # Mark complete
+filigree close <id> --reason="explanation"               # Close with reason
+
+# Dependencies
+filigree add-dep <issue> <depends-on>       # Add dependency
+filigree remove-dep <issue> <depends-on>    # Remove dependency
+filigree blocked                            # Show blocked issues
+
+# Comments & labels
+filigree add-comment <id> "text"            # Add comment
+filigree get-comments <id>                  # List comments
+filigree add-label <id> <label>             # Add label
+filigree remove-label <id> <label>          # Remove label
+
+# Workflow templates
+filigree types                              # List registered types with state flows
+filigree type-info <type>                   # Full workflow definition for a type
+filigree transitions <id>                   # Valid next states for an issue
+filigree packs                              # List enabled workflow packs
+filigree validate <id>                      # Validate issue against template
+filigree guide <pack>                       # Display workflow guide for a pack
+
+# Atomic claiming
+filigree claim <id> --assignee <name>            # Claim issue (optimistic lock)
+filigree claim-next --assignee <name>            # Claim highest-priority ready issue
+
+# Batch operations
+filigree batch-update <ids...> --priority=0      # Update multiple issues
+filigree batch-close <ids...>                    # Close multiple with error reporting
+
+# Planning
+filigree create-plan --file plan.json            # Create milestone/phase/step hierarchy
+
+# Event history
+filigree changes --since 2026-01-01T00:00:00    # Events since timestamp
+filigree events <id>                             # Event history for issue
+filigree explain-state <type> <state>            # Explain a workflow state
+
+# All commands support --json and --actor flags
+filigree --actor bot-1 create "Title"            # Specify actor identity
+filigree list --json                             # Machine-readable output
+
+# Project health
+filigree stats                              # Project statistics
+filigree search "query"                     # Search issues
+filigree doctor                             # Health check
 ```
 
-For the full command reference: `filigree --help` or `filigree <command> --help`.
+### File Records & Scan Findings (API)
+
+The dashboard exposes REST endpoints for file tracking and scan result ingestion.
+Use `GET /api/files/_schema` for available endpoints and valid field values.
+
+Key endpoints:
+- `GET /api/files/_schema` — Discovery: valid enums, endpoint catalog
+- `POST /api/v1/scan-results` — Ingest scan results (SARIF-lite format)
+- `GET /api/files` — List tracked files with filtering and sorting
+- `GET /api/files/{file_id}` — File detail with associations and findings summary
+- `GET /api/files/{file_id}/findings` — Findings for a specific file
 
 ### Workflow
+1. `filigree ready` to find available work
+2. `filigree show <id>` to review details
+3. `filigree transitions <id>` to see valid state changes
+4. `filigree update <id> --status=in_progress` to claim it
+5. Do the work, commit code
+6. `filigree close <id>` when done
 
-1. **Start of session**: `filigree ready` — see what's available and unblocked
-2. **Pick work**: `filigree show <id>` — read the issue, comments, and dependencies
-3. **Claim it**: `filigree update <id> --status=in_progress` (or `filigree claim <id>` for atomic locking in multi-agent scenarios)
-4. **Work**: Fix the code, write tests, verify
-5. **Document**: `filigree add-comment <id> "what was done and why"` — comments are the audit trail for decisions
-6. **Close**: `filigree close <id> --reason="fixed in <commit>"` — link to the commit
+### Session Start
+When beginning a new session, run `filigree session-context` to load the project
+snapshot (ready work, in-progress items, critical path). This provides the
+context needed to pick up where the previous session left off.
 
-**Don't skip states.** A bug must be confirmed before fixing. A feature must be approved before building. The state machine is there for a reason.
-
-### Dependencies
-
-Use dependencies to track blockers explicitly. `filigree blocked` shows all blocked issues. `filigree add-dep <blocked> <blocker>` creates the relationship. An issue won't appear in `filigree ready` until its blockers are resolved.
+### Priority Scale
+- P0: Critical (drop everything)
+- P1: High (do next)
+- P2: Medium (default)
+- P3: Low
+- P4: Backlog
 <!-- /filigree:instructions -->
+
+### How We Use Filigree
+
+Filigree is the single source of truth for all work tracking in ELSPETH. The project hierarchy follows a consistent pattern: **milestones** (delivery themes like "Core Platform Maturation") contain **phases** (workstreams like "Architecture Refactoring"), which contain the actual work items — **epics**, **features**, **tasks**, and **bugs**. Releases (RC 3.4, RC 4) exist alongside this hierarchy to track what ships when. We use the MCP tools (`mcp__filigree__*`) for all issue operations when available, falling back to the CLI only when MCP is down.
+
+Issues should be created at the right granularity from the start, but **retyping is encouraged** when the scope becomes clearer — a task that grows into multi-session work should be promoted to a feature or epic with child tasks, and an epic that turns out to be a single grind session should be demoted to a task. To retype, create a new issue with the correct type (transferring description, labels, parent, and dependencies), then close the old one with a reason linking to the replacement. Filigree's `update_issue` doesn't support changing types directly, so this create-and-close pattern is the standard approach.
+
+### Issue Type Usage
+
+Filigree has types across three packs — use the right type for the right granularity:
+
+| Type | When to use | Granularity test |
+| ---- | ----------- | ---------------- |
+| **milestone** | Top-level delivery theme | "What are we shipping this quarter?" |
+| **phase** | Logical workstream within a milestone | "What area of the codebase does this touch?" |
+| **epic** | Large body of work needing decomposition | "Does this need multiple features or tasks to complete?" |
+| **feature** | User-facing capability with design decisions | "Does this need a user story, acceptance criteria, or design notes?" |
+| **task** | Atomic unit of work one person can do in one sitting | "Can I start and finish this without needing to decompose further?" |
+| **bug** | Defective behavior in existing code | "Is something broken, or is this a design evaluation?" |
+
+**If a task has 3+ distinct deliverables or an unresolved design decision, promote it** to a feature or epic and create child tasks. XL-effort single tasks are untrackable — you can't mark them 50% done.
+
+**If an epic has no children and the work is a single grind session, demote it** to a task. Epics without decomposition are just tasks with delusions of grandeur.
+
+**Design evaluations are tasks, not bugs.** "Evaluate whether X should be eliminated" is a task. "X crashes when Y" is a bug.
+
+### Issue Naming Conventions
+
+**Title structure by type:**
+
+| Type | Pattern | Example |
+| ---- | ------- | ------- |
+| **milestone** | Noun phrase (theme) | "Core Platform Maturation" |
+| **phase** | Noun phrase (workstream) | "Architecture Refactoring" |
+| **epic** | `Topic — scope summary` | "Landscape repository maturation — table-scoped access, CQRS split, unit-of-work" |
+| **feature** | `Capability — what it enables` | "Server mode — persistent API service with REST + WebSocket" |
+| **bug** | `Symptom — observable consequence` | "Coalesce timeouts only fire on next token arrival — no true idle flush" |
+| **task** | `Action phrase — scope boundary` | "Unify reorder buffer implementations — single RowReorderBuffer for batching and pooling" |
+
+**Rules:**
+
+1. **No internal tracking prefixes** — no `T20:`, `#7`, `C1:`, `M1:`, `H2:`, or similar sweep/scan-group identifiers
+2. **No stale metrics in titles** — no line counts, entry counts, or other numbers that will drift. Put these in descriptions
+3. **No process artifacts** — no "from 7-agent deep-dive", "from PR review". The provenance belongs in the description or a label
+4. **No product prefixes** — no `ELSPETH-NEXT:`, `Use case:`
+5. **Bugs describe the problem, not the fix** — lead with the observable symptom, not the action to take
+6. **Em-dash separator** (`—`) between short name and expanded detail
+7. **Sentence case, no trailing period**

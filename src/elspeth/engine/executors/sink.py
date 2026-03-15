@@ -1,4 +1,3 @@
-# src/elspeth/engine/executors/sink.py
 """SinkExecutor - wraps sink.write() with artifact recording."""
 
 import logging
@@ -10,15 +9,20 @@ from elspeth.contracts import (
     ExecutionError,
     NodeStateOpen,
     PendingOutcome,
+    SinkProtocol,
     TokenInfo,
 )
 from elspeth.contracts.enums import NodeStateStatus
-from elspeth.contracts.errors import OrchestrationInvariantError, PluginContractViolation
+from elspeth.contracts.errors import (
+    AuditIntegrityError,
+    FrameworkBugError,
+    OrchestrationInvariantError,
+    PluginContractViolation,
+)
 from elspeth.contracts.plugin_context import PluginContext
 from elspeth.core.landscape import LandscapeRecorder
 from elspeth.core.operations import track_operation
 from elspeth.engine.spans import SpanFactory
-from elspeth.plugins.protocols import SinkProtocol
 
 logger = logging.getLogger(__name__)
 
@@ -110,7 +114,6 @@ class SinkExecutor:
         - Invariant 3: "COMPLETED/ROUTED implies the token has a completed sink node_state"
         - Invariant 4: "Completed sink node_state implies a terminal token_outcome"
 
-        Fix: P1-2026-01-31-quarantine-outcome-before-durability
         Uses PendingOutcome to carry error_hash for QUARANTINED outcomes through to
         recording, ensuring outcomes are only recorded after sink durability.
 
@@ -164,11 +167,11 @@ class SinkExecutor:
             # are left OPEN.  Complete them as FAILED before re-raising.
             # Fix for B3: sink state-opening loop terminality.
             if states:
-                begin_error: ExecutionError = {
-                    "exception": str(e),
-                    "type": type(e).__name__,
-                    "phase": "begin_node_state",
-                }
+                begin_error = ExecutionError(
+                    exception=str(e),
+                    exception_type=type(e).__name__,
+                    phase="begin_node_state",
+                )
                 self._complete_states_failed(
                     states=states,
                     duration_ms=0.0,
@@ -185,11 +188,11 @@ class SinkExecutor:
                 batch_contract = batch_contract.merge(token.row_data.contract)
         except Exception as e:
             merge_duration_ms = (time.perf_counter() - contract_merge_start) * 1000
-            merge_error: ExecutionError = {
-                "exception": str(e),
-                "type": type(e).__name__,
-                "phase": "contract_merge",
-            }
+            merge_error = ExecutionError(
+                exception=str(e),
+                exception_type=type(e).__name__,
+                phase="contract_merge",
+            )
             self._complete_states_failed(
                 states=states,
                 duration_ms=merge_duration_ms,
@@ -217,8 +220,8 @@ class SinkExecutor:
             input_data={"sink_plugin": sink.name, "row_count": len(tokens)},
         ) as handle:
             # Execute sink write with timing and span
-            # P2-2026-01-21: Pass all token_ids being written for accurate attribution
-            # P2-2026-01-21: Pass node_id for disambiguation when multiple sinks exist
+            # Pass all token_ids being written for accurate attribution
+            # Pass node_id for disambiguation when multiple sinks exist
             sink_token_ids = [t.token_id for t in tokens]
             with self._spans.sink_span(
                 sink.name,
@@ -252,11 +255,11 @@ class SinkExecutor:
                                     f"{missing}. This indicates an upstream transform/schema bug."
                                 )
                 except Exception as e:
-                    validation_error: ExecutionError = {
-                        "exception": str(e),
-                        "type": type(e).__name__,
-                        "phase": "pre_write_validation",
-                    }
+                    validation_error = ExecutionError(
+                        exception=str(e),
+                        exception_type=type(e).__name__,
+                        phase="pre_write_validation",
+                    )
                     self._complete_states_failed(
                         states=states,
                         duration_ms=0.0,
@@ -270,10 +273,10 @@ class SinkExecutor:
                     duration_ms = (time.perf_counter() - start) * 1000
                 except Exception as e:
                     duration_ms = (time.perf_counter() - start) * 1000
-                    error: ExecutionError = {
-                        "exception": str(e),
-                        "type": type(e).__name__,
-                    }
+                    error = ExecutionError(
+                        exception=str(e),
+                        exception_type=type(e).__name__,
+                    )
                     self._complete_states_failed(
                         states=states,
                         duration_ms=duration_ms,
@@ -289,11 +292,11 @@ class SinkExecutor:
             except Exception as e:
                 # Flush failed - complete all node_states as FAILED before crashing
                 # Without this, states remain OPEN permanently (audit integrity violation)
-                flush_error: ExecutionError = {
-                    "exception": str(e),
-                    "type": type(e).__name__,
-                    "phase": "flush",
-                }
+                flush_error = ExecutionError(
+                    exception=str(e),
+                    exception_type=type(e).__name__,
+                    phase="flush",
+                )
                 flush_duration_ms = (time.perf_counter() - start) * 1000
                 self._complete_states_failed(
                     states=states,
@@ -349,7 +352,7 @@ class SinkExecutor:
         # 4. artifact is registered
         # Recording here ensures Invariant 3: "COMPLETED/ROUTED implies completed sink node_state"
         #
-        # Fix: P1-2026-01-31 - PendingOutcome carries error_hash for QUARANTINED outcomes
+        # PendingOutcome carries error_hash for QUARANTINED outcomes
         # pending_outcome is REQUIRED - all sink-bound tokens must have outcomes recorded
         for token, _ in states:
             self._recorder.record_token_outcome(
@@ -364,11 +367,13 @@ class SinkExecutor:
         # CRITICAL: Sink write + flush are durable - we CANNOT roll them back.
         # If checkpoint creation fails, we log the error but don't raise.
         # The sink artifact exists, but no checkpoint record → resume will replay
-        # these rows → duplicate writes (acceptable for RC-1, see Bug #10 docs).
+        # these rows → duplicate writes (acceptable, idempotent sink writes planned).
         if on_token_written is not None:
             for token in tokens:
                 try:
                     on_token_written(token)
+                except (FrameworkBugError, AuditIntegrityError):
+                    raise  # System bugs and audit corruption must crash immediately
                 except Exception as e:
                     # Sink write is durable, can't undo. Log error and continue.
                     # Operator must manually clean up checkpoint inconsistency.

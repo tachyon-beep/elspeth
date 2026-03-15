@@ -31,6 +31,32 @@ class TestTokenUsageFactories:
         assert usage.prompt_tokens is None
         assert usage.completion_tokens is None
 
+    def test_known_rejects_negative_prompt_tokens(self) -> None:
+        """Negative token counts are physically impossible."""
+        import pytest
+
+        with pytest.raises(ValueError, match="prompt_tokens must be non-negative"):
+            TokenUsage.known(-1, 20)
+
+    def test_known_rejects_negative_completion_tokens(self) -> None:
+        import pytest
+
+        with pytest.raises(ValueError, match="completion_tokens must be non-negative"):
+            TokenUsage.known(10, -5)
+
+    def test_direct_construction_rejects_negative(self) -> None:
+        """Direct construction also validates (not just factories)."""
+        import pytest
+
+        with pytest.raises(ValueError, match="prompt_tokens must be non-negative"):
+            TokenUsage(prompt_tokens=-100, completion_tokens=None)
+
+    def test_zero_tokens_accepted(self) -> None:
+        """Zero is valid (cached responses may report 0 completion tokens)."""
+        usage = TokenUsage.known(0, 0)
+        assert usage.prompt_tokens == 0
+        assert usage.completion_tokens == 0
+
 
 class TestTokenUsageProperties:
     """Tests for total_tokens and is_known derived properties."""
@@ -140,23 +166,29 @@ class TestTokenUsageFromDict:
         assert usage == TokenUsage.known(10, 20)
 
     def test_from_dict_bool_coerced_to_none(self) -> None:
-        """bool is a subclass of int in Python, but we accept it since isinstance(True, int) is True."""
+        """bool is subclass of int in Python, but True/False are not valid token counts."""
         usage = TokenUsage.from_dict({"prompt_tokens": True, "completion_tokens": False})
-        # bool IS int in Python, so this actually passes isinstance check
-        assert usage.prompt_tokens == 1  # True == 1
-        assert usage.completion_tokens == 0  # False == 0
+        assert usage.prompt_tokens is None
+        assert usage.completion_tokens is None
+
+    def test_from_dict_bool_prompt_with_valid_completion(self) -> None:
+        """Bool in one field shouldn't affect valid int in the other."""
+        usage = TokenUsage.from_dict({"prompt_tokens": True, "completion_tokens": 20})
+        assert usage.prompt_tokens is None
+        assert usage.completion_tokens == 20
 
 
 class TestTokenUsageImmutability:
     """Tests for frozen dataclass invariants."""
 
     def test_frozen(self) -> None:
+        from dataclasses import FrozenInstanceError
+
+        import pytest
+
         usage = TokenUsage.known(10, 20)
-        try:
+        with pytest.raises(FrozenInstanceError):
             usage.prompt_tokens = 99  # type: ignore[misc]
-            raise AssertionError("Should have raised FrozenInstanceError")
-        except AttributeError:
-            pass  # Expected — frozen dataclass
 
     def test_equality(self) -> None:
         a = TokenUsage.known(10, 20)
@@ -196,4 +228,37 @@ class TestTokenUsageRoundTrip:
     def test_round_trip_partial(self) -> None:
         original = TokenUsage(prompt_tokens=10, completion_tokens=None)
         restored = TokenUsage.from_dict(original.to_dict())
+        assert restored == original
+
+    def test_json_round_trip_known(self) -> None:
+        """Round-trip through JSON serialization preserves known token counts.
+
+        This is the real persistence path: to_dict → json.dumps → json.loads → from_dict.
+        """
+        import json
+
+        original = TokenUsage.known(150, 42)
+        serialized = json.dumps(original.to_dict())
+        deserialized = json.loads(serialized)
+        restored = TokenUsage.from_dict(deserialized)
+        assert restored == original
+
+    def test_json_round_trip_unknown(self) -> None:
+        """JSON round-trip for fully unknown usage (empty dict)."""
+        import json
+
+        original = TokenUsage.unknown()
+        serialized = json.dumps(original.to_dict())
+        deserialized = json.loads(serialized)
+        restored = TokenUsage.from_dict(deserialized)
+        assert restored == original
+
+    def test_json_round_trip_partial(self) -> None:
+        """JSON round-trip for partial usage (one field known, one unknown)."""
+        import json
+
+        original = TokenUsage(prompt_tokens=10, completion_tokens=None)
+        serialized = json.dumps(original.to_dict())
+        deserialized = json.loads(serialized)
+        restored = TokenUsage.from_dict(deserialized)
         assert restored == original

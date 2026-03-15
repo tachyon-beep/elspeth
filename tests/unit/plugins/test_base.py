@@ -7,6 +7,8 @@ import pytest
 
 from elspeth.contracts import PipelineRow
 from elspeth.testing import make_pipeline_row
+from tests.fixtures.factories import make_context
+from tests.fixtures.landscape import make_recorder
 
 
 class TestBaseTransform:
@@ -14,16 +16,16 @@ class TestBaseTransform:
 
     def test_base_transform_creates_tokens_default_false(self) -> None:
         """BaseTransform.creates_tokens defaults to False."""
-        from elspeth.contracts.plugin_context import PluginContext
-        from elspeth.plugins.base import BaseTransform
-        from elspeth.plugins.results import TransformResult
+        from elspeth.contracts.contexts import TransformContext
+        from elspeth.plugins.infrastructure.base import BaseTransform
+        from elspeth.plugins.infrastructure.results import TransformResult
 
         class SimpleTransform(BaseTransform):
             name = "simple"
             input_schema = None  # type: ignore[assignment]  # Not needed for this test
             output_schema = None  # type: ignore[assignment]
 
-            def process(self, row: PipelineRow, ctx: PluginContext) -> TransformResult:
+            def process(self, row: PipelineRow, ctx: TransformContext) -> TransformResult:
                 return TransformResult.success(make_pipeline_row(row.to_dict()), success_reason={"action": "test"})
 
         transform = SimpleTransform({})
@@ -31,9 +33,9 @@ class TestBaseTransform:
 
     def test_base_transform_creates_tokens_settable(self) -> None:
         """BaseTransform.creates_tokens can be overridden to True."""
-        from elspeth.contracts.plugin_context import PluginContext
-        from elspeth.plugins.base import BaseTransform
-        from elspeth.plugins.results import TransformResult
+        from elspeth.contracts.contexts import TransformContext
+        from elspeth.plugins.infrastructure.base import BaseTransform
+        from elspeth.plugins.infrastructure.results import TransformResult
 
         class ExpandingTransform(BaseTransform):
             name = "expander"
@@ -41,7 +43,7 @@ class TestBaseTransform:
             input_schema = None  # type: ignore[assignment]
             output_schema = None  # type: ignore[assignment]
 
-            def process(self, row: PipelineRow, ctx: PluginContext) -> TransformResult:
+            def process(self, row: PipelineRow, ctx: TransformContext) -> TransformResult:
                 row_dict = row.to_dict()
                 return TransformResult.success_multi(
                     [make_pipeline_row(row_dict), make_pipeline_row(row_dict)], success_reason={"action": "expand"}
@@ -57,8 +59,7 @@ class TestBaseTransform:
         batch transforms to override process() with different signatures. Subclasses
         must still implement process() - the base implementation raises NotImplementedError.
         """
-        from elspeth.contracts.plugin_context import PluginContext
-        from elspeth.plugins.base import BaseTransform
+        from elspeth.plugins.infrastructure.base import BaseTransform
 
         # Create a minimal concrete subclass that doesn't override process()
         class IncompleteTransform(BaseTransform):
@@ -67,7 +68,8 @@ class TestBaseTransform:
             output_schema = None  # type: ignore[assignment]
 
         transform = IncompleteTransform({})
-        ctx = PluginContext(run_id="test", config={})
+        recorder = make_recorder()
+        ctx = make_context(landscape=recorder)
         row = make_pipeline_row({"x": 1})
 
         # Calling process() should raise NotImplementedError
@@ -78,9 +80,9 @@ class TestBaseTransform:
 
     def test_subclass_implementation(self) -> None:
         from elspeth.contracts import PluginSchema
-        from elspeth.contracts.plugin_context import PluginContext
-        from elspeth.plugins.base import BaseTransform
-        from elspeth.plugins.results import TransformResult
+        from elspeth.contracts.contexts import TransformContext
+        from elspeth.plugins.infrastructure.base import BaseTransform
+        from elspeth.plugins.infrastructure.results import TransformResult
 
         class InputSchema(PluginSchema):
             x: int
@@ -94,7 +96,7 @@ class TestBaseTransform:
             input_schema = InputSchema
             output_schema = OutputSchema
 
-            def process(self, row: PipelineRow, ctx: PluginContext) -> TransformResult:
+            def process(self, row: PipelineRow, ctx: TransformContext) -> TransformResult:
                 return TransformResult.success(
                     make_pipeline_row(
                         {
@@ -106,18 +108,42 @@ class TestBaseTransform:
                 )
 
         transform = DoubleTransform({"some": "config"})
-        ctx = PluginContext(run_id="test", config={})
+        recorder = make_recorder()
+        ctx = make_context(landscape=recorder)
 
         result = transform.process(make_pipeline_row({"x": 21}), ctx)
         assert result.row is not None
         assert result.row.to_dict() == {"x": 21, "doubled": 42}
 
     def test_lifecycle_hooks_exist(self) -> None:
-        from elspeth.plugins.base import BaseTransform
+        from elspeth.plugins.infrastructure.base import BaseTransform
 
         # These should exist as no-op methods
         assert hasattr(BaseTransform, "on_start")
         assert hasattr(BaseTransform, "on_complete")
+
+    def test_on_start_sets_lifecycle_guard(self) -> None:
+        """BaseTransform.on_start() sets _on_start_called = True."""
+        from elspeth.contracts.contexts import TransformContext
+        from elspeth.plugins.infrastructure.base import BaseTransform
+        from elspeth.plugins.infrastructure.results import TransformResult
+
+        class SimpleTransform(BaseTransform):
+            name = "simple_lifecycle"
+            input_schema = None  # type: ignore[assignment]
+            output_schema = None  # type: ignore[assignment]
+
+            def process(self, row: PipelineRow, ctx: TransformContext) -> TransformResult:
+                return TransformResult.success(make_pipeline_row(row.to_dict()), success_reason={"action": "test"})
+
+        transform = SimpleTransform({})
+        assert transform._on_start_called is False
+
+        recorder = make_recorder()
+        ctx = make_context(landscape=recorder)
+        transform.on_start(ctx)
+
+        assert transform._on_start_called is True
 
 
 class TestBaseAggregationDeleted:
@@ -125,7 +151,7 @@ class TestBaseAggregationDeleted:
 
     def test_base_aggregation_deleted(self) -> None:
         """BaseAggregation should be deleted - use is_batch_aware=True on BaseTransform."""
-        import elspeth.plugins.base as base
+        import elspeth.plugins.infrastructure.base as base
 
         assert not hasattr(base, "BaseAggregation"), "BaseAggregation should be deleted - use is_batch_aware=True on BaseTransform"
 
@@ -135,8 +161,8 @@ class TestBaseSink:
 
     def test_base_sink_implementation(self) -> None:
         from elspeth.contracts import ArtifactDescriptor, PluginSchema
-        from elspeth.contracts.plugin_context import PluginContext
-        from elspeth.plugins.base import BaseSink
+        from elspeth.contracts.contexts import SinkContext
+        from elspeth.plugins.infrastructure.base import BaseSink
 
         class InputSchema(PluginSchema):
             value: int
@@ -150,7 +176,7 @@ class TestBaseSink:
                 super().__init__(config)
                 self.rows: list[dict[str, Any]] = []
 
-            def write(self, rows: list[dict[str, Any]], ctx: PluginContext) -> ArtifactDescriptor:
+            def write(self, rows: list[dict[str, Any]], ctx: SinkContext) -> ArtifactDescriptor:
                 self.rows.extend(rows)
                 return ArtifactDescriptor.for_file(
                     path="/tmp/memory",
@@ -165,7 +191,8 @@ class TestBaseSink:
                 pass
 
         sink = MemorySink({})
-        ctx = PluginContext(run_id="test", config={})
+        recorder = make_recorder()
+        ctx = make_context(landscape=recorder)
 
         artifact = sink.write([{"value": 1}, {"value": 2}], ctx)
 
@@ -177,7 +204,7 @@ class TestBaseSink:
         """BaseSink.write() accepts batch and returns ArtifactDescriptor."""
         import inspect
 
-        from elspeth.plugins.base import BaseSink
+        from elspeth.plugins.infrastructure.base import BaseSink
 
         sig = inspect.signature(BaseSink.write)
         params = list(sig.parameters.keys())
@@ -188,8 +215,8 @@ class TestBaseSink:
     def test_base_sink_batch_implementation(self) -> None:
         """Test BaseSink subclass with batch write."""
         from elspeth.contracts import ArtifactDescriptor, PluginSchema
-        from elspeth.contracts.plugin_context import PluginContext
-        from elspeth.plugins.base import BaseSink
+        from elspeth.contracts.contexts import SinkContext
+        from elspeth.plugins.infrastructure.base import BaseSink
 
         class InputSchema(PluginSchema):
             value: int
@@ -203,7 +230,7 @@ class TestBaseSink:
                 super().__init__(config)
                 self.rows: list[dict[str, Any]] = []
 
-            def write(self, rows: list[dict[str, Any]], ctx: PluginContext) -> ArtifactDescriptor:
+            def write(self, rows: list[dict[str, Any]], ctx: SinkContext) -> ArtifactDescriptor:
                 self.rows.extend(rows)
                 return ArtifactDescriptor.for_file(
                     path="/tmp/batch",
@@ -218,7 +245,8 @@ class TestBaseSink:
                 pass
 
         sink = BatchMemorySink({})
-        ctx = PluginContext(run_id="test", config={})
+        recorder = make_recorder()
+        ctx = make_context(landscape=recorder)
 
         artifact = sink.write([{"value": 1}, {"value": 2}, {"value": 3}], ctx)
 
@@ -229,7 +257,7 @@ class TestBaseSink:
     def test_base_sink_has_io_write_determinism(self) -> None:
         """BaseSink should have IO_WRITE determinism by default."""
         from elspeth.contracts import Determinism
-        from elspeth.plugins.base import BaseSink
+        from elspeth.plugins.infrastructure.base import BaseSink
 
         assert BaseSink.determinism == Determinism.IO_WRITE
 
@@ -241,8 +269,8 @@ class TestBaseSource:
         from collections.abc import Iterator
 
         from elspeth.contracts import PluginSchema, SourceRow
-        from elspeth.contracts.plugin_context import PluginContext
-        from elspeth.plugins.base import BaseSource
+        from elspeth.contracts.contexts import SourceContext
+        from elspeth.plugins.infrastructure.base import BaseSource
 
         class OutputSchema(PluginSchema):
             value: int
@@ -255,7 +283,7 @@ class TestBaseSource:
                 super().__init__(config)
                 self._data = config["data"]
 
-            def load(self, ctx: PluginContext) -> Iterator[SourceRow]:
+            def load(self, ctx: SourceContext) -> Iterator[SourceRow]:
                 for _row in self._data:
                     yield SourceRow.valid(_row)
 
@@ -263,7 +291,8 @@ class TestBaseSource:
                 pass
 
         source = ListSource({"data": [{"value": 1}, {"value": 2}]})
-        ctx = PluginContext(run_id="test", config={})
+        recorder = make_recorder()
+        ctx = make_context(landscape=recorder)
 
         rows = list(source.load(ctx))
         assert len(rows) == 2
@@ -273,7 +302,7 @@ class TestBaseSource:
 
     def test_base_source_has_metadata_attributes(self) -> None:
         from elspeth.contracts import Determinism
-        from elspeth.plugins.base import BaseSource
+        from elspeth.plugins.infrastructure.base import BaseSource
 
         # Direct attribute access - will fail with AttributeError if missing
         assert BaseSource.determinism == Determinism.IO_READ
@@ -283,8 +312,8 @@ class TestBaseSource:
         from collections.abc import Iterator
 
         from elspeth.contracts import Determinism, PluginSchema
-        from elspeth.contracts.plugin_context import PluginContext
-        from elspeth.plugins.base import BaseSource
+        from elspeth.contracts.contexts import SourceContext
+        from elspeth.plugins.infrastructure.base import BaseSource
 
         class OutputSchema(PluginSchema):
             value: int
@@ -295,7 +324,7 @@ class TestBaseSource:
             determinism = Determinism.DETERMINISTIC
             plugin_version = "2.0.0"
 
-            def load(self, ctx: PluginContext) -> Iterator[dict[str, Any]]:  # type: ignore[override]
+            def load(self, ctx: SourceContext) -> Iterator[dict[str, Any]]:  # type: ignore[override]
                 yield {"value": 1}
 
             def close(self) -> None:
@@ -316,9 +345,9 @@ class TestNoValidationEnforcement:
         not during construction (__init__ calling _validate_self_consistency).
         """
         from elspeth.contracts import PluginSchema
-        from elspeth.contracts.plugin_context import PluginContext
-        from elspeth.plugins.base import BaseTransform
-        from elspeth.plugins.results import TransformResult
+        from elspeth.contracts.contexts import TransformContext
+        from elspeth.plugins.infrastructure.base import BaseTransform
+        from elspeth.plugins.infrastructure.results import TransformResult
 
         class TestSchema(PluginSchema):
             x: int
@@ -332,7 +361,7 @@ class TestNoValidationEnforcement:
                 super().__init__(config)
                 # NOT calling self._validate_self_consistency()
 
-            def process(self, row: PipelineRow, ctx: PluginContext) -> TransformResult:
+            def process(self, row: PipelineRow, ctx: TransformContext) -> TransformResult:
                 return TransformResult.success(make_pipeline_row(row.to_dict()), success_reason={"action": "test"})
 
         # Should instantiate without RuntimeError

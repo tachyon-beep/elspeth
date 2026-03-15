@@ -15,6 +15,7 @@ from __future__ import annotations
 import pytest
 
 from elspeth.contracts import Determinism, NodeType
+from elspeth.contracts.errors import AuditIntegrityError
 from elspeth.contracts.schema import SchemaConfig
 from elspeth.core.landscape import LandscapeDB, LandscapeRecorder
 from elspeth.core.landscape.reproducibility import (
@@ -23,14 +24,15 @@ from elspeth.core.landscape.reproducibility import (
     update_grade_after_purge,
 )
 from elspeth.core.landscape.schema import runs_table
+from tests.fixtures.landscape import make_landscape_db, make_recorder
 
 _DYNAMIC_SCHEMA = SchemaConfig.from_dict({"mode": "observed"})
 
 
 def _setup(*, run_id: str = "run-1") -> tuple[LandscapeDB, LandscapeRecorder]:
     """Create in-memory DB with a run."""
-    db = LandscapeDB.in_memory()
-    recorder = LandscapeRecorder(db)
+    db = make_landscape_db()
+    recorder = make_recorder(db)
     recorder.begin_run(config={}, canonical_version="v1", run_id=run_id)
     return db, recorder
 
@@ -159,7 +161,7 @@ class TestComputeGrade:
 
     def test_nonexistent_run_raises(self) -> None:
         db, _recorder = _setup()
-        with pytest.raises(ValueError, match="does not exist"):
+        with pytest.raises(AuditIntegrityError, match="does not exist"):
             compute_grade(db, "nonexistent-run")
 
 
@@ -178,7 +180,7 @@ class TestUpdateGradeAfterPurge:
         update_grade_after_purge(db, "run-1")
         run = recorder.get_run("run-1")
         assert run is not None
-        assert run.reproducibility_grade == ReproducibilityGrade.ATTRIBUTABLE_ONLY.value
+        assert run.reproducibility_grade == ReproducibilityGrade.ATTRIBUTABLE_ONLY
 
     def test_full_unchanged_after_purge(self) -> None:
         db, recorder = _setup()
@@ -186,7 +188,7 @@ class TestUpdateGradeAfterPurge:
         update_grade_after_purge(db, "run-1")
         run = recorder.get_run("run-1")
         assert run is not None
-        assert run.reproducibility_grade == ReproducibilityGrade.FULL_REPRODUCIBLE.value
+        assert run.reproducibility_grade == ReproducibilityGrade.FULL_REPRODUCIBLE
 
     def test_attributable_unchanged_after_purge(self) -> None:
         db, recorder = _setup()
@@ -194,15 +196,17 @@ class TestUpdateGradeAfterPurge:
         update_grade_after_purge(db, "run-1")
         run = recorder.get_run("run-1")
         assert run is not None
-        assert run.reproducibility_grade == ReproducibilityGrade.ATTRIBUTABLE_ONLY.value
+        assert run.reproducibility_grade == ReproducibilityGrade.ATTRIBUTABLE_ONLY
 
-    def test_nonexistent_run_is_noop(self) -> None:
+    def test_nonexistent_run_raises(self) -> None:
+        """Purging a nonexistent run is a caller bug — must crash."""
         db, _recorder = _setup()
-        update_grade_after_purge(db, "nonexistent")  # Should not raise
+        with pytest.raises(AuditIntegrityError, match="does not exist"):
+            update_grade_after_purge(db, "nonexistent")
 
     def test_null_grade_raises(self) -> None:
         """NULL reproducibility_grade is Tier 1 corruption — must crash."""
         db, _recorder = _setup()
         # begin_run doesn't set a grade by default, so it's NULL
-        with pytest.raises(ValueError, match="NULL reproducibility_grade"):
+        with pytest.raises(AuditIntegrityError, match="NULL reproducibility_grade"):
             update_grade_after_purge(db, "run-1")

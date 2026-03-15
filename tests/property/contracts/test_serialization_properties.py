@@ -27,6 +27,7 @@ from hypothesis import strategies as st
 from elspeth.contracts import TransformErrorReason
 from elspeth.contracts.enums import RoutingKind, RoutingMode
 from elspeth.contracts.errors import ConfigGateReason, TransformSuccessReason
+from elspeth.contracts.freeze import deep_thaw
 from elspeth.contracts.identity import TokenInfo
 from elspeth.contracts.results import TransformResult
 from elspeth.contracts.routing import RoutingAction
@@ -463,7 +464,7 @@ class TestRoutingActionJsonSerializationProperties:
         parsed = json.loads(serialized)
 
         assert isinstance(parsed, dict)
-        assert parsed["kind"] == RoutingKind.CONTINUE.value
+        assert parsed["kind"] == RoutingKind.CONTINUE
 
     @given(reason=routing_reasons)
     @settings(max_examples=100)
@@ -477,9 +478,9 @@ class TestRoutingActionJsonSerializationProperties:
         serialized = json.dumps(_routing_action_to_dict(action))
         parsed = json.loads(serialized)
 
-        assert parsed["kind"] == RoutingKind.CONTINUE.value
+        assert parsed["kind"] == RoutingKind.CONTINUE
         assert parsed["destinations"] == []
-        assert parsed["mode"] == RoutingMode.MOVE.value
+        assert parsed["mode"] == RoutingMode.MOVE
 
     @given(label=path_names, reason=routing_reasons)
     @settings(max_examples=100)
@@ -494,9 +495,9 @@ class TestRoutingActionJsonSerializationProperties:
         serialized = json.dumps(_routing_action_to_dict(action))
         parsed = json.loads(serialized)
 
-        assert parsed["kind"] == RoutingKind.ROUTE.value
+        assert parsed["kind"] == RoutingKind.ROUTE
         assert parsed["destinations"] == [label]
-        assert parsed["mode"] == RoutingMode.MOVE.value
+        assert parsed["mode"] == RoutingMode.MOVE
 
     @given(paths=unique_path_lists, reason=routing_reasons)
     @settings(max_examples=100)
@@ -511,9 +512,9 @@ class TestRoutingActionJsonSerializationProperties:
         serialized = json.dumps(_routing_action_to_dict(action))
         parsed = json.loads(serialized)
 
-        assert parsed["kind"] == RoutingKind.FORK_TO_PATHS.value
+        assert parsed["kind"] == RoutingKind.FORK_TO_PATHS
         assert parsed["destinations"] == paths
-        assert parsed["mode"] == RoutingMode.COPY.value
+        assert parsed["mode"] == RoutingMode.COPY
 
 
 class TestRoutingActionReasonSerializationProperties:
@@ -559,5 +560,5 @@ def _routing_action_to_dict(action: RoutingAction) -> dict[str, Any]:
         "kind": action.kind.value,
         "destinations": list(action.destinations),
         "mode": action.mode.value,
-        "reason": action.reason,
+        "reason": deep_thaw(action.reason) if action.reason is not None else None,
     }

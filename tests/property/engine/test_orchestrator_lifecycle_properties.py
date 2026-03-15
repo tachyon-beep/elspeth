@@ -18,6 +18,7 @@ from __future__ import annotations
 
 from collections import Counter
 from dataclasses import fields
+from types import MappingProxyType
 
 import pytest
 from hypothesis import given, settings
@@ -416,7 +417,7 @@ class TestToRunResultProperties:
     @settings(max_examples=200)
     def test_all_counter_fields_preserved(self, counters: ExecutionCounters) -> None:
         """Property: Every counter field appears identically in RunResult."""
-        result = counters.to_run_result("run-1")
+        result = counters.to_run_result("run-1", status=RunStatus.RUNNING)
 
         assert result.run_id == "run-1"
         assert result.rows_processed == counters.rows_processed
@@ -433,36 +434,25 @@ class TestToRunResultProperties:
     @given(counters=execution_counters())
     @settings(max_examples=100)
     def test_routed_destinations_snapshot(self, counters: ExecutionCounters) -> None:
-        """Property: routed_destinations is a plain dict snapshot (not a Counter reference).
+        """Property: routed_destinations is an immutable snapshot (not a Counter reference).
 
         This ensures mutations to counters after to_run_result() don't
         affect the RunResult.
         """
-        result = counters.to_run_result("run-1")
+        result = counters.to_run_result("run-1", status=RunStatus.RUNNING)
 
-        # Must be a plain dict, not a Counter reference
-        assert type(result.routed_destinations) is dict
+        # Must be an immutable MappingProxyType, not a mutable Counter reference
+        assert isinstance(result.routed_destinations, MappingProxyType)
         assert result.routed_destinations == dict(counters.routed_destinations)
 
         # Mutating counters after snapshot must not affect result
         counters.routed_destinations["new_sink"] += 999
-        assert "new_sink" not in result.routed_destinations or result.routed_destinations["new_sink"] != 999
-
-    @given(counters=execution_counters())
-    @settings(max_examples=100)
-    def test_default_status_is_running(self, counters: ExecutionCounters) -> None:
-        """Property: Default status is RUNNING."""
-        from elspeth.contracts import RunStatus
-
-        result = counters.to_run_result("run-1")
-        assert result.status == RunStatus.RUNNING
+        assert "new_sink" not in result.routed_destinations
 
     @given(counters=execution_counters())
     @settings(max_examples=50)
-    def test_status_override(self, counters: ExecutionCounters) -> None:
-        """Property: Status can be overridden by caller."""
-        from elspeth.contracts import RunStatus
-
+    def test_status_explicit(self, counters: ExecutionCounters) -> None:
+        """Property: Status must be passed explicitly (no default)."""
         result = counters.to_run_result("run-1", status=RunStatus.COMPLETED)
         assert result.status == RunStatus.COMPLETED
 
@@ -475,7 +465,7 @@ class TestToRunResultProperties:
         """Property: to_run_result produces a snapshot — further counter mutations
         do not affect the returned RunResult.
         """
-        result = counters.to_run_result("run-1")
+        result = counters.to_run_result("run-1", status=RunStatus.RUNNING)
         original_succeeded = result.rows_succeeded
 
         # Mutate counters
@@ -688,7 +678,7 @@ class TestRunResultFieldProperties:
         Every int field on RunResult (except run_id and status) must have a
         corresponding value from ExecutionCounters.
         """
-        result = counters.to_run_result("run-1")
+        result = counters.to_run_result("run-1", status=RunStatus.RUNNING)
         run_result_fields = {f.name for f in fields(result)}
         # Non-counter fields
         meta_fields = {"run_id", "status", "routed_destinations"}

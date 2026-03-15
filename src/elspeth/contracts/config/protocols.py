@@ -1,4 +1,3 @@
-# src/elspeth/contracts/config/protocols.py
 """Runtime protocols for Settings -> Runtime enforcement.
 
 These protocols define what engine components EXPECT from runtime config.

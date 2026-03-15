@@ -1,6 +1,6 @@
 [project]
 name = "elspeth"
-version = "0.3.0"
+version = "0.3.4"
 description = "Auditable Sense/Decide/Act pipelines for high-reliability systems"
 readme = "README.md"
 requires-python = ">=3.12"
@@ -75,7 +75,7 @@ dev = [
     "pytest-timeout>=2.3,<3",  # Test timeouts for stress tests
     "hypothesis>=6.98,<7",  # Property-based testing
     "mypy>=1.19,<2",  # Static type checking
-    "ruff==0.15.0",  # Linting and formatting
+    "ruff==0.15.4",  # Linting and formatting
     "pre-commit>=4.0,<5",  # Git hooks
     # Type stubs
     "pandas-stubs>=2.2,<3",  # Pandas type hints
@@ -104,6 +104,7 @@ azure = [
     "azure-identity>=1.25,<2",  # Azure authentication
     "azure-keyvault-secrets>=4.10,<5",  # Key Vault for fingerprint key
     "azure-monitor-opentelemetry-exporter>=1.0.0b46,<2",  # b46+ fixes LogData import error  # Azure Monitor / App Insights telemetry
+    "azure-monitor-opentelemetry>=1.6,<2",  # Azure Monitor OpenTelemetry Distro — required for azure_ai tracing
     "jinja2>=3.1,<4",  # Template engine for path templating
 ]
 
@@ -123,14 +124,6 @@ security = [
     "sqlcipher3>=0.5.4,<1",
 ]
 
-tracing-azure = [
-    # Tier 2: Azure AI tracing for LLM plugins
-    # Uses the "distro" package which bundles OpenTelemetry instrumentations
-    # Note: May conflict with Tier 1 OTLP telemetry - see docs/guides/tier2-tracing.md
-    # Ref: https://pypi.org/project/azure-monitor-opentelemetry/
-    "azure-monitor-opentelemetry>=1.6,<2",  # Azure Monitor OpenTelemetry Distro
-]
-
 tracing-langfuse = [
     # Tier 2: Langfuse tracing for LLM plugins
     # v3 built on OpenTelemetry standards - uses context managers for lifecycle
@@ -141,7 +134,8 @@ tracing-langfuse = [
 
 tracing = [
     # All Tier 2 tracing providers
-    "elspeth[tracing-azure,tracing-langfuse]",
+    # Azure AI tracing SDK is bundled with the azure extras (inseparable from Azure LLM provider)
+    "elspeth[azure,tracing-langfuse]",
 ]
 
 all = [
@@ -153,7 +147,7 @@ all = [
     "pytest-timeout>=2.3,<3",
     "hypothesis>=6.98,<7",
     "mypy>=1.19,<2",
-    "ruff==0.15.0",
+    "ruff==0.15.4",
     "pre-commit>=4.0,<5",
     "pandas-stubs>=2.2,<3",
     "types-networkx>=3.2,<4",
@@ -244,7 +238,6 @@ extend-immutable-calls = ["typer.Option", "typer.Argument"]
 "vulture_whitelist.py" = ["B018", "F821"]  # Vulture whitelist uses bare names
 # Package __init__ files use categorical __all__ grouping for readability
 "src/elspeth/contracts/__init__.py" = ["RUF022"]
-"src/elspeth/plugins/__init__.py" = ["RUF022"]
 
 # === Mypy Configuration ===
 [tool.mypy]
@@ -255,12 +248,10 @@ warn_unused_configs = true
 warn_unreachable = true
 show_error_codes = true
 plugins = ["pydantic.mypy"]
-# Allow unused ignores - needed for pre-commit which runs in isolated env
-warn_unused_ignores = false
+warn_unused_ignores = true
 
 [[tool.mypy.overrides]]
 module = [
-    "dynaconf.*",
     "pluggy.*",
     "rfc8785.*",
     "pyrate_limiter.*",
@@ -272,7 +263,16 @@ module = [
     "mcp.*",
     "ddtrace.*",
     "sqlcipher3.*",
+    "langfuse.*",
 ]
+ignore_missing_imports = true
+
+[[tool.mypy.overrides]]
+# dynaconf lacks type stubs; mypy non-deterministically resolves Dynaconf
+# depending on cache state, causing attr-defined on cold runs and
+# unused-ignore on warm runs. Skip analysis entirely.
+module = ["dynaconf", "dynaconf.*"]
+follow_imports = "skip"
 ignore_missing_imports = true
 
 [[tool.mypy.overrides]]

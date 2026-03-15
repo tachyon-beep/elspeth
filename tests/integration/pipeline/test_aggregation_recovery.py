@@ -34,22 +34,8 @@ from elspeth.contracts.types import NodeID
 from elspeth.core.checkpoint import CheckpointManager, RecoveryManager
 from elspeth.core.dag import ExecutionGraph
 from elspeth.core.landscape.database import LandscapeDB
-from elspeth.core.landscape.recorder import LandscapeRecorder
-
-
-def _make_contract(data: dict[str, Any]) -> SchemaContract:
-    """Create a contract from observed data fields."""
-    fields = tuple(
-        FieldContract(
-            normalized_name=k,
-            original_name=k,
-            python_type=object,
-            required=False,
-            source="inferred",
-        )
-        for k in data
-    )
-    return SchemaContract(mode="OBSERVED", fields=fields, locked=True)
+from tests.fixtures.base_classes import create_observed_contract
+from tests.fixtures.landscape import make_recorder
 
 
 def _create_test_schema_contract() -> SchemaContract:
@@ -75,7 +61,7 @@ class TestAggregationRecoveryIntegration:
         db = LandscapeDB(f"sqlite:///{tmp_path}/test.db")
         checkpoint_mgr = CheckpointManager(db)
         recovery_mgr = RecoveryManager(db, checkpoint_mgr)
-        recorder = LandscapeRecorder(db)
+        recorder = make_recorder(db)
 
         return {
             "db": db,
@@ -554,7 +540,7 @@ class TestAggregationRecoveryIntegration:
         assert evaluator.should_trigger() is False
 
         # Create checkpoint with aggregation state — typed DTO
-        contract = _make_contract({"id": 0, "value": 0})
+        contract = create_observed_contract({"id": 0, "value": 0})
         contract_version = contract.version_hash()
         elapsed = evaluator.get_age_seconds()
         sum_agg_node = AggregationNodeCheckpoint(
@@ -611,6 +597,7 @@ class TestAggregationRecoveryIntegration:
                 name="sum_aggregator",
                 plugin="test_aggregation",
                 input="source_out",
+                on_error="discard",
                 trigger=trigger_config,
                 output_mode="transform",
                 options={},

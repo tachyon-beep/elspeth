@@ -1,4 +1,3 @@
-# src/elspeth/testing/chaosweb/cli.py
 """CLI for ChaosWeb fake web server.
 
 Provides command-line interface for starting and managing the ChaosWeb
@@ -38,11 +37,11 @@ app = typer.Typer(
 def _version_callback(value: bool) -> None:
     """Print version and exit."""
     if value:
-        try:
-            from elspeth import __version__
+        from importlib.metadata import PackageNotFoundError, version
 
-            typer.echo(f"chaosweb (elspeth {__version__})")
-        except ImportError:
+        try:
+            typer.echo(f"chaosweb (elspeth {version('elspeth')})")
+        except PackageNotFoundError:
             typer.echo("chaosweb (version unknown)")
         raise typer.Exit()
 
@@ -344,7 +343,7 @@ def show_config(
     except FileNotFoundError as e:
         typer.secho(f"Error: {e}", fg=typer.colors.RED, err=True)
         raise typer.Exit(1) from e
-    except Exception as e:
+    except (pydantic.ValidationError, yaml.YAMLError, ValueError) as e:
         typer.secho(f"Configuration error: {e}", fg=typer.colors.RED, err=True)
         raise typer.Exit(1) from e
 
@@ -352,12 +351,7 @@ def show_config(
     if output_format == "json":
         typer.echo(json.dumps(config_dict, indent=2))
     else:
-        try:
-            import yaml
-
-            typer.echo(yaml.dump(config_dict, default_flow_style=False, sort_keys=False))
-        except ImportError:
-            typer.echo(json.dumps(config_dict, indent=2))
+        typer.echo(yaml.dump(config_dict, default_flow_style=False, sort_keys=False))
 
 
 def main() -> None:

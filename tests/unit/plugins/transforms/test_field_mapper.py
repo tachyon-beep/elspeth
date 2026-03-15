@@ -7,6 +7,8 @@ import pytest
 from elspeth.contracts.plugin_context import PluginContext
 from elspeth.contracts.schema_contract import PipelineRow, SchemaContract
 from elspeth.testing import make_field, make_pipeline_row
+from tests.fixtures.factories import make_context
+from tests.fixtures.landscape import make_recorder
 
 # Common schema config for dynamic field handling (accepts any fields)
 DYNAMIC_SCHEMA = {"mode": "observed"}
@@ -18,7 +20,7 @@ class TestFieldMapper:
     @pytest.fixture
     def ctx(self) -> PluginContext:
         """Create minimal plugin context."""
-        return PluginContext(run_id="test-run", config={})
+        return make_context()
 
     def test_has_required_attributes(self) -> None:
         """FieldMapper has name and schemas."""
@@ -235,7 +237,7 @@ class TestFieldMapper:
 
     def test_requires_schema_config(self) -> None:
         """FieldMapper requires schema configuration."""
-        from elspeth.plugins.config_base import PluginConfigError
+        from elspeth.plugins.infrastructure.config_base import PluginConfigError
         from elspeth.plugins.transforms.field_mapper import FieldMapper
 
         with pytest.raises(PluginConfigError, match="schema"):
@@ -313,7 +315,7 @@ class TestFieldMapperDuplicateTargetRejection:
 
     def test_duplicate_targets_rejected_at_config_time(self) -> None:
         """Two sources mapping to the same target raises PluginConfigError."""
-        from elspeth.plugins.config_base import PluginConfigError
+        from elspeth.plugins.infrastructure.config_base import PluginConfigError
         from elspeth.plugins.transforms.field_mapper import FieldMapper
 
         with pytest.raises(PluginConfigError, match="duplicate target"):
@@ -326,7 +328,7 @@ class TestFieldMapperDuplicateTargetRejection:
 
     def test_triple_duplicate_targets_rejected(self) -> None:
         """Three sources mapping to the same target raises PluginConfigError."""
-        from elspeth.plugins.config_base import PluginConfigError
+        from elspeth.plugins.infrastructure.config_base import PluginConfigError
         from elspeth.plugins.transforms.field_mapper import FieldMapper
 
         with pytest.raises(PluginConfigError, match="duplicate target"):
@@ -339,7 +341,7 @@ class TestFieldMapperDuplicateTargetRejection:
 
     def test_multiple_distinct_duplicate_targets_rejected(self) -> None:
         """Multiple groups of duplicate targets are all reported."""
-        from elspeth.plugins.config_base import PluginConfigError
+        from elspeth.plugins.infrastructure.config_base import PluginConfigError
         from elspeth.plugins.transforms.field_mapper import FieldMapper
 
         with pytest.raises(PluginConfigError, match="duplicate target"):
@@ -378,7 +380,7 @@ class TestFieldMapperDuplicateTargetRejection:
 
     def test_error_message_includes_collision_details(self) -> None:
         """Error message includes which sources collide on which target."""
-        from elspeth.plugins.config_base import PluginConfigError
+        from elspeth.plugins.infrastructure.config_base import PluginConfigError
         from elspeth.plugins.transforms.field_mapper import FieldMapper
 
         with pytest.raises(PluginConfigError, match="silent data loss"):
@@ -435,7 +437,7 @@ class TestFieldMapperContractPropagation:
     @pytest.fixture
     def ctx(self) -> PluginContext:
         """Create minimal plugin context."""
-        return PluginContext(run_id="test-run", config={})
+        return make_context()
 
     def test_contract_contains_renamed_field(self, ctx: PluginContext) -> None:
         """Output contract contains renamed field, not original field name."""
@@ -569,9 +571,11 @@ class TestFieldMapperContractPropagation:
                 "headers": "original",
             }
         )
+        sink_recorder = make_recorder()
         sink_ctx = PluginContext(
             run_id="test-run",
             config={},
+            landscape=sink_recorder,
             contract=result.row.contract,
         )
         sink.write([result.row.to_dict()], sink_ctx)

@@ -1,4 +1,3 @@
-# src/elspeth/contracts/url.py
 """URL sanitization types for audit-safe storage.
 
 These types GUARANTEE URLs cannot contain credentials when stored in the audit trail.
@@ -8,7 +7,7 @@ secret leaks impossible at the type level.
 Usage:
     from elspeth.contracts.url import SanitizedDatabaseUrl, SanitizedWebhookUrl
 
-    # Database URLs - reuses existing _sanitize_dsn infrastructure
+    # Database URLs - extracts password, fingerprints it, returns sanitized URL
     sanitized = SanitizedDatabaseUrl.from_raw_url("postgresql://user:secret@host/db")
     # sanitized.sanitized_url = "postgresql://user@host/db"
     # sanitized.fingerprint = "abc123..." (HMAC of password)
@@ -21,12 +20,40 @@ Usage:
 
 import json as json_module
 from dataclasses import dataclass
-from urllib.parse import parse_qs, urlencode, urlparse, urlunparse
+from urllib.parse import parse_qs, unquote, urlencode, urlparse, urlunparse
 
-# NOTE: Fingerprint functions are imported lazily inside methods to avoid
-# breaking the contracts leaf module boundary. Importing from elspeth.core
-# at module level would pull in 1,200+ modules (pandas, numpy, sqlalchemy, etc.)
-# FIX: P2-2026-01-20-contracts-config-reexport-breaks-leaf-boundary
+from elspeth.contracts.security import (
+    SecretFingerprintError,
+    get_fingerprint_key,
+    secret_fingerprint,
+)
+
+
+def _extract_raw_port(netloc: str) -> str:
+    """Extract raw port string (including colon) from a URL netloc.
+
+    Unlike ``urlparse().port`` — which calls ``int()`` and raises
+    ``ValueError`` on non-numeric ports — this function returns the raw
+    string.  This handles templated ports like ``${PORT}`` and malformed
+    DSNs that should be passed through unchanged.
+
+    Returns empty string if no port is present.
+    """
+    # Strip userinfo (user:pass@)
+    host_port = netloc.rsplit("@", 1)[-1]
+
+    if host_port.startswith("["):
+        # IPv6: [::1]:port or [::1]
+        bracket_close = host_port.find("]")
+        if bracket_close == -1:
+            return ""
+        after = host_port[bracket_close + 1 :]
+        return after if after.startswith(":") else ""
+
+    # Regular host or IPv4: host:port or host
+    colon = host_port.rfind(":")
+    return host_port[colon:] if colon != -1 else ""
+
 
 # Sensitive query parameter names that should be stripped from webhook URLs.
 # Expanded list per code review to cover OAuth, API keys, signed URLs, etc.
@@ -58,7 +85,7 @@ SENSITIVE_PARAMS = frozenset(
 )
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, slots=True)
 class SanitizedDatabaseUrl:
     """Database URL with credentials removed. Cannot contain secrets.
 
@@ -89,8 +116,9 @@ class SanitizedDatabaseUrl:
     ) -> "SanitizedDatabaseUrl":
         """Create sanitized URL from raw database connection URL.
 
-        Reuses existing `_sanitize_dsn` infrastructure from config.py to ensure
-        consistent behavior with Landscape database URL sanitization.
+        Uses stdlib ``urlparse`` to extract and remove passwords from database
+        connection URLs. Handles SQLAlchemy-style URLs like
+        ``postgresql+psycopg2://user:pass@host:5432/db``.
 
         Args:
             url: Raw database connection URL (SQLAlchemy format)
@@ -105,14 +133,66 @@ class SanitizedDatabaseUrl:
             SecretFingerprintError: If password found, no key available,
                                     and fail_if_no_key=True
         """
-        # Import here to avoid circular dependency (config imports from contracts)
-        from elspeth.core.config import _sanitize_dsn
+        parsed = urlparse(url)
 
-        sanitized, fingerprint, _ = _sanitize_dsn(url, fail_if_no_key=fail_if_no_key)
+        if parsed.password is None:
+            return cls(sanitized_url=url, fingerprint=None)
+
+        # Compute fingerprint if we have a key
+        fingerprint: str | None = None
+        try:
+            get_fingerprint_key()
+            have_key = True
+        except ValueError:
+            have_key = False
+
+        if have_key:
+            # Decode percent-encoding before fingerprinting so the fingerprint
+            # represents the actual secret value, not the URL encoding.
+            # urlparse().password preserves percent-encoding (e.g., "p%40ss" for "p@ss").
+            fingerprint = secret_fingerprint(unquote(parsed.password))
+        elif fail_if_no_key:
+            raise SecretFingerprintError(
+                "Database URL contains a password but ELSPETH_FINGERPRINT_KEY "
+                "is not set. Either set the environment variable or use "
+                "ELSPETH_ALLOW_RAW_SECRETS=true for development "
+                "(not recommended for production)."
+            )
+        # else: dev mode - just remove password without fingerprint
+
+        # Reconstruct netloc without password.
+        # hostname can be None for Unix-socket DSNs like
+        # postgresql://user:pass@/dbname?host=/var/run/postgresql
+        host_part = ""
+        if parsed.hostname:
+            if ":" in parsed.hostname:
+                # IPv6 addresses need brackets
+                host_part = f"[{parsed.hostname}]"
+            else:
+                host_part = parsed.hostname
+
+        port_str = _extract_raw_port(parsed.netloc)
+
+        if parsed.username:
+            netloc = f"{parsed.username}@{host_part}{port_str}"
+        else:
+            netloc = f"{host_part}{port_str}"
+
+        sanitized = urlunparse(
+            (
+                parsed.scheme,
+                netloc,
+                parsed.path,
+                parsed.params,
+                parsed.query,
+                parsed.fragment,
+            )
+        )
+
         return cls(sanitized_url=sanitized, fingerprint=fingerprint)
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, slots=True)
 class SanitizedWebhookUrl:
     """Webhook URL with tokens removed. Cannot contain secrets.
 
@@ -184,9 +264,6 @@ class SanitizedWebhookUrl:
             SecretFingerprintError: If secrets found, no key available,
                                     and fail_if_no_key=True
         """
-        # Import here to access the error type
-        from elspeth.core.config import SecretFingerprintError
-
         parsed = urlparse(url)
         query_params = parse_qs(parsed.query, keep_blank_values=True)
 
@@ -217,10 +294,12 @@ class SanitizedWebhookUrl:
         # SECURITY: Treat BOTH username and password as sensitive.
         # Many services use username for bearer tokens (e.g., https://token@github.com)
         has_basic_auth = parsed.username is not None or parsed.password is not None
+        # Decode percent-encoding before fingerprinting so the fingerprint
+        # represents the actual secret value, not the URL encoding.
         if parsed.username:
-            sensitive_values.append(parsed.username)
+            sensitive_values.append(unquote(parsed.username))
         if parsed.password:
-            sensitive_values.append(parsed.password)
+            sensitive_values.append(unquote(parsed.password))
 
         # If no sensitive keys in query, fragment, or Basic Auth found, return URL unchanged
         if not has_sensitive_query_keys and not has_sensitive_fragment_keys and not has_basic_auth:
@@ -229,12 +308,6 @@ class SanitizedWebhookUrl:
         # Compute fingerprint only if there are non-empty values
         fingerprint: str | None = None
         if sensitive_values:
-            # Lazy import to avoid breaking contracts leaf boundary
-            from elspeth.core.security.fingerprint import (
-                get_fingerprint_key,
-                secret_fingerprint,
-            )
-
             # We have non-empty secrets - need to fingerprint them
             try:
                 get_fingerprint_key()
@@ -269,12 +342,12 @@ class SanitizedWebhookUrl:
         # SECURITY: Strip entire userinfo section when credentials present
         if has_basic_auth:
             # Remove both username and password - rebuild netloc without userinfo
-            port_str = f":{parsed.port}" if parsed.port else ""
+            port_str = _extract_raw_port(parsed.netloc)
             # IPv6 addresses need brackets (hostname strips them, netloc preserves them)
             if parsed.hostname and ":" in parsed.hostname:
                 netloc = f"[{parsed.hostname}]{port_str}"
             else:
-                netloc = f"{parsed.hostname}{port_str}"
+                netloc = f"{parsed.hostname or ''}{port_str}"
         else:
             netloc = parsed.netloc
 

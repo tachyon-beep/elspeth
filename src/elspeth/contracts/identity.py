@@ -33,6 +33,18 @@ class TokenInfo:
     join_group_id: str | None = None
     expand_group_id: str | None = None
 
+    def __post_init__(self) -> None:
+        """Validate identity invariants at construction time.
+
+        row_id and token_id are the most fundamental identity fields in
+        the system — every audit trail record references them. Empty strings
+        would produce valid-looking but meaningless audit entries.
+        """
+        if not self.row_id:
+            raise ValueError("TokenInfo.row_id must not be empty")
+        if not self.token_id:
+            raise ValueError("TokenInfo.token_id must not be empty")
+
     def with_updated_data(self, new_data: PipelineRow) -> TokenInfo:
         """Return a new TokenInfo with updated row_data, preserving all lineage fields.
 

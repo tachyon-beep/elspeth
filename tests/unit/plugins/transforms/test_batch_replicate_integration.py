@@ -10,10 +10,10 @@ output rows, not just the first one (first-element bias fix).
 from __future__ import annotations
 
 from elspeth.contracts import PipelineRow
-from elspeth.contracts.plugin_context import PluginContext
 from elspeth.contracts.schema_contract import SchemaContract
 from elspeth.plugins.transforms.batch_replicate import BatchReplicate
 from elspeth.testing import make_field, make_row
+from tests.fixtures.factories import make_context
 
 
 def test_batch_replicate_returns_contract_with_multi_row_output():
@@ -47,7 +47,7 @@ def test_batch_replicate_returns_contract_with_multi_row_output():
         pipeline_rows.append(make_row(row, contract=contract))
 
     # Process batch
-    ctx = PluginContext(run_id="test-run", config={})
+    ctx = make_context()
     result = transform.process(pipeline_rows, ctx)
 
     # Verify multi-row result
@@ -106,7 +106,7 @@ def test_batch_replicate_contract_covers_all_output_shapes():
         make_row(row2_data, contract=SchemaContract(mode="OBSERVED", fields=fields2, locked=True)),
     ]
 
-    ctx = PluginContext(run_id="test-run", config={})
+    ctx = make_context()
     result = transform.process(pipeline_rows, ctx)
 
     assert result.is_multi_row
@@ -120,7 +120,7 @@ def test_batch_replicate_contract_covers_all_output_shapes():
 
 
 def test_batch_replicate_contract_empty_output():
-    """BatchReplicate returns marker row for empty batch (not multi-row)."""
+    """BatchReplicate returns error for empty batch — not fabricated data."""
     transform = BatchReplicate(
         {
             "schema": {"mode": "observed"},
@@ -130,14 +130,13 @@ def test_batch_replicate_contract_empty_output():
     )
 
     # Empty batch
-    ctx = PluginContext(run_id="test-run", config={})
+    ctx = make_context()
     result = transform.process([], ctx)
 
-    # Empty batches return a marker row (single-row success), not multi-row
-    # This is correct behavior per the plugin's empty batch handling
-    assert not result.is_multi_row, "Empty batch should return marker row, not multi-row"
-    assert result.row is not None, "Should return marker row"
-    assert result.row.get("batch_empty") is True, "Marker should indicate empty batch"
+    assert result.status == "error"
+    assert result.reason is not None
+    assert result.reason["reason"] == "empty_batch"
+    assert not result.retryable
 
 
 def test_batch_replicate_all_invalid_returns_error():
@@ -164,7 +163,7 @@ def test_batch_replicate_all_invalid_returns_error():
         contract = SchemaContract(mode="OBSERVED", fields=fields, locked=True)
         pipeline_rows.append(make_row(row, contract=contract))
 
-    ctx = PluginContext(run_id="test-run", config={})
+    ctx = make_context()
     result = transform.process(pipeline_rows, ctx)
 
     assert result.status == "error"
@@ -199,7 +198,7 @@ def test_batch_replicate_mixed_valid_invalid_excludes_quarantined():
         contract = SchemaContract(mode="OBSERVED", fields=fields, locked=True)
         pipeline_rows.append(make_row(row, contract=contract))
 
-    ctx = PluginContext(run_id="test-run", config={})
+    ctx = make_context()
     result = transform.process(pipeline_rows, ctx)
 
     assert result.status == "success"
@@ -218,3 +217,71 @@ def test_batch_replicate_mixed_valid_invalid_excludes_quarantined():
     assert result.success_reason["metadata"]["quarantined_count"] == 2
     assert result.success_reason["metadata"]["quarantined"][0]["row_data"]["id"] == 1
     assert result.success_reason["metadata"]["quarantined"][1]["row_data"]["id"] == 3
+
+
+def test_batch_replicate_quarantined_indices_in_success_reason():
+    """T26: Quarantined row indices must be in success_reason for audit trail.
+
+    The processor needs quarantined_indices to record QUARANTINED terminal
+    state (instead of CONSUMED_IN_BATCH) for quarantined tokens. Without
+    this, quarantined rows silently get CONSUMED_IN_BATCH, misleading
+    auditors into thinking the data was processed.
+    """
+    transform = BatchReplicate(
+        {
+            "schema": {"mode": "observed"},
+            "copies_field": "copies",
+        }
+    )
+
+    rows_data = [
+        {"id": 1, "copies": -1},  # quarantined (index 0)
+        {"id": 2, "copies": 2},  # valid (index 1)
+        {"id": 3, "copies": 0},  # quarantined (index 2)
+        {"id": 4, "copies": 1},  # valid (index 3)
+    ]
+
+    pipeline_rows = []
+    for row in rows_data:
+        fields = tuple(make_field(key, object, original_name=key, required=False, source="inferred") for key in row)
+        contract = SchemaContract(mode="OBSERVED", fields=fields, locked=True)
+        pipeline_rows.append(make_row(row, contract=contract))
+
+    ctx = make_context()
+    result = transform.process(pipeline_rows, ctx)
+
+    assert result.status == "success"
+    # Must include quarantined_indices for processor to record QUARANTINED outcomes
+    assert "quarantined_indices" in result.success_reason["metadata"], (
+        "success_reason must include quarantined_indices for audit trail recording"
+    )
+    assert result.success_reason["metadata"]["quarantined_indices"] == [0, 2]
+
+
+def test_batch_replicate_no_quarantine_no_indices():
+    """When no rows are quarantined, quarantined_indices should be absent or empty."""
+    transform = BatchReplicate(
+        {
+            "schema": {"mode": "observed"},
+            "copies_field": "copies",
+        }
+    )
+
+    rows_data = [
+        {"id": 1, "copies": 2},
+        {"id": 2, "copies": 1},
+    ]
+
+    pipeline_rows = []
+    for row in rows_data:
+        fields = tuple(make_field(key, object, original_name=key, required=False, source="inferred") for key in row)
+        contract = SchemaContract(mode="OBSERVED", fields=fields, locked=True)
+        pipeline_rows.append(make_row(row, contract=contract))
+
+    ctx = make_context()
+    result = transform.process(pipeline_rows, ctx)
+
+    assert result.status == "success"
+    # No quarantine metadata at all when no rows are quarantined —
+    # BatchReplicate only adds "metadata" key when quarantined is non-empty.
+    assert "metadata" not in result.success_reason

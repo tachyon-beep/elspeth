@@ -1,4 +1,3 @@
-# src/elspeth/contracts/cli.py
 """CLI-related type contracts."""
 
 from dataclasses import dataclass
@@ -7,7 +6,7 @@ from typing import NotRequired, TypedDict
 from elspeth.contracts.enums import RunStatus
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, slots=True)
 class ProgressEvent:
     """Progress event emitted during pipeline execution.
 

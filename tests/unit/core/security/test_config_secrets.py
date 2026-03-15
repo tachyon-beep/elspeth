@@ -99,27 +99,25 @@ class TestKeyVaultSource:
         assert len(resolutions) == 1
         record = resolutions[0]
 
-        # Verify all required fields are present
-        assert record["env_var_name"] == "MY_API_KEY"
-        assert record["source"] == "keyvault"
-        assert record["vault_url"] == "https://my-vault.vault.azure.net"
-        assert record["secret_name"] == "my-api-key-secret"
-        assert "timestamp" in record
-        assert "latency_ms" in record
+        # Verify typed dataclass fields (SecretResolutionInput)
+        assert record.env_var_name == "MY_API_KEY"
+        assert record.source == "keyvault"
+        assert record.vault_url == "https://my-vault.vault.azure.net"
+        assert record.secret_name == "my-api-key-secret"
+        assert isinstance(record.timestamp, float)
+        assert isinstance(record.resolution_latency_ms, float)
 
         # Verify fingerprint is present (not plaintext value)
-        assert "fingerprint" in record
-        assert "secret_value" not in record  # Plaintext must NOT be in record
-        assert len(record["fingerprint"]) == 64  # SHA256 hex digest
+        assert len(record.fingerprint) == 64  # SHA256 hex digest
 
         # Verify timestamp is reasonable
         import time
 
-        assert record["timestamp"] <= time.time()
-        assert record["timestamp"] > time.time() - 60  # Within last minute
+        assert record.timestamp <= time.time()
+        assert record.timestamp > time.time() - 60  # Within last minute
 
         # Verify latency is non-negative
-        assert record["latency_ms"] >= 0
+        assert record.resolution_latency_ms >= 0
 
     def test_keyvault_loads_multiple_secrets(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """Multiple secrets are loaded in a single call."""
@@ -509,8 +507,8 @@ class TestEdgeCases:
             resolutions = load_secrets_from_config(config)
 
         assert os.environ["UNICODE_KEY"] == unicode_value
-        assert "fingerprint" in resolutions[0]
-        assert "secret_value" not in resolutions[0]
+        assert hasattr(resolutions[0], "fingerprint")
+        assert resolutions[0].fingerprint  # non-empty
 
     def test_keyvault_secret_with_newlines(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """Multiline secrets (e.g., private keys) are preserved correctly."""
@@ -544,8 +542,8 @@ ygWyZbTbDqpVlTTSV1+xJ0VU1NM/X2rL
 
         assert os.environ["MULTILINE_KEY"] == multiline_value
         assert "\n" in os.environ["MULTILINE_KEY"]
-        assert "fingerprint" in resolutions[0]
-        assert "secret_value" not in resolutions[0]
+        assert hasattr(resolutions[0], "fingerprint")
+        assert resolutions[0].fingerprint  # non-empty
 
     def test_keyvault_very_long_secret(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """Very long secrets (25KB) are supported."""
@@ -575,8 +573,8 @@ ygWyZbTbDqpVlTTSV1+xJ0VU1NM/X2rL
             resolutions = load_secrets_from_config(config)
 
         assert os.environ["LONG_KEY"] == long_value
-        assert "fingerprint" in resolutions[0]
-        assert "secret_value" not in resolutions[0]
+        assert hasattr(resolutions[0], "fingerprint")
+        assert resolutions[0].fingerprint  # non-empty
 
 
 class TestIdempotency:
@@ -651,19 +649,17 @@ class TestIdempotency:
         assert resolutions1 is not resolutions2
 
         # Both should have fingerprint (not plaintext)
-        assert "fingerprint" in resolutions1[0]
-        assert "fingerprint" in resolutions2[0]
-        assert "secret_value" not in resolutions1[0]
-        assert "secret_value" not in resolutions2[0]
+        assert resolutions1[0].fingerprint
+        assert resolutions2[0].fingerprint
 
         # Same secret produces same fingerprint across calls
-        assert resolutions1[0]["fingerprint"] == resolutions2[0]["fingerprint"]
+        assert resolutions1[0].fingerprint == resolutions2[0].fingerprint
 
         # Both should have all required fields
         for res in [resolutions1[0], resolutions2[0]]:
-            assert "env_var_name" in res
-            assert "timestamp" in res
-            assert "latency_ms" in res
+            assert res.env_var_name
+            assert isinstance(res.timestamp, float)
+            assert isinstance(res.resolution_latency_ms, float)
 
 
 class TestSecretLoadErrorException:
@@ -782,9 +778,9 @@ landscape:
 
         # Resolution records returned for audit
         assert len(resolutions) == 1
-        assert resolutions[0]["env_var_name"] == "TEST_API_KEY"
-        assert resolutions[0]["source"] == "keyvault"
-        assert resolutions[0]["secret_name"] == "test-api-key-secret"
+        assert resolutions[0].env_var_name == "TEST_API_KEY"
+        assert resolutions[0].source == "keyvault"
+        assert resolutions[0].secret_name == "test-api-key-secret"
 
     def test_load_settings_with_secrets_raises_on_missing_secret(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         """SecretLoadError raised when Key Vault secret doesn't exist."""

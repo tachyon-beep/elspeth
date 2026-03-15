@@ -4,6 +4,7 @@
 import pytest
 
 from elspeth.core.landscape import LandscapeDB, LandscapeRecorder
+from tests.fixtures.landscape import make_landscape_db, make_recorder
 
 
 @pytest.fixture
@@ -12,13 +13,13 @@ def landscape_db() -> LandscapeDB:
 
     Function scope ensures test isolation — each test gets a fresh database.
     """
-    return LandscapeDB.in_memory()
+    return make_landscape_db()
 
 
 @pytest.fixture
 def recorder(landscape_db: LandscapeDB) -> LandscapeRecorder:
     """Create a LandscapeRecorder with the test database."""
-    return LandscapeRecorder(landscape_db)
+    return make_recorder(landscape_db)
 
 
 class TestTokenOutcomeDataclass:

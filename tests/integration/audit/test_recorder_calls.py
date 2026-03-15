@@ -11,9 +11,11 @@ import pytest
 from sqlalchemy.exc import IntegrityError
 
 from elspeth.contracts import CallStatus, CallType, NodeType
+from elspeth.contracts.call_data import RawCallPayload
 from elspeth.contracts.schema import SchemaConfig
 from elspeth.core.landscape.database import LandscapeDB
 from elspeth.core.landscape.recorder import LandscapeRecorder
+from elspeth.core.landscape.row_data import CallDataState
 from elspeth.core.payload_store import FilesystemPayloadStore
 
 
@@ -62,8 +64,8 @@ class TestRecordCall:
             call_index=0,
             call_type=CallType.LLM,
             status=CallStatus.SUCCESS,
-            request_data={"model": "gpt-4", "prompt": "Hello"},
-            response_data={"completion": "Hi there!"},
+            request_data=RawCallPayload({"model": "gpt-4", "prompt": "Hello"}),
+            response_data=RawCallPayload({"completion": "Hi there!"}),
             latency_ms=150.5,
         )
 
@@ -84,8 +86,8 @@ class TestRecordCall:
             call_index=0,
             call_type=CallType.HTTP,
             status=CallStatus.ERROR,
-            request_data={"url": "https://api.example.com"},
-            error={"code": 500, "message": "Internal Server Error"},
+            request_data=RawCallPayload({"url": "https://api.example.com"}),
+            error=RawCallPayload({"code": 500, "message": "Internal Server Error"}),
             latency_ms=50.0,
         )
 
@@ -101,16 +103,16 @@ class TestRecordCall:
             call_index=0,
             call_type=CallType.LLM,
             status=CallStatus.SUCCESS,
-            request_data={"prompt": "First"},
-            response_data={"response": "First response"},
+            request_data=RawCallPayload({"prompt": "First"}),
+            response_data=RawCallPayload({"response": "First response"}),
         )
         call2 = recorder.record_call(
             state_id=state_id,
             call_index=1,
             call_type=CallType.LLM,
             status=CallStatus.SUCCESS,
-            request_data={"prompt": "Second"},
-            response_data={"response": "Second response"},
+            request_data=RawCallPayload({"prompt": "Second"}),
+            response_data=RawCallPayload({"response": "Second response"}),
         )
 
         assert call1.call_index == 0
@@ -138,8 +140,8 @@ class TestRecordCall:
             call_index=0,
             call_type=CallType.LLM,
             status=CallStatus.SUCCESS,
-            request_data=request_data,
-            response_data=response_data,
+            request_data=RawCallPayload(request_data),
+            response_data=RawCallPayload(response_data),
             latency_ms=150.5,
         )
 
@@ -180,8 +182,8 @@ class TestRecordCall:
             call_index=0,
             call_type=CallType.HTTP,
             status=CallStatus.ERROR,
-            request_data=request_data,
-            error=error_data,
+            request_data=RawCallPayload(request_data),
+            error=RawCallPayload(error_data),
             latency_ms=50.0,
         )
 
@@ -213,8 +215,8 @@ class TestRecordCall:
             call_index=0,
             call_type=CallType.LLM,
             status=CallStatus.SUCCESS,
-            request_data={"prompt": "Large prompt..."},
-            response_data={"response": "Large response..."},
+            request_data=RawCallPayload({"prompt": "Large prompt..."}),
+            response_data=RawCallPayload({"response": "Large response..."}),
             request_ref="sha256:abc123...",
             response_ref="sha256:def456...",
         )
@@ -238,8 +240,8 @@ class TestRecordCall:
             call_index=0,
             call_type=CallType.LLM,
             status=CallStatus.SUCCESS,
-            request_data={"prompt": "First"},
-            response_data={"response": "First"},
+            request_data=RawCallPayload({"prompt": "First"}),
+            response_data=RawCallPayload({"response": "First"}),
         )
 
         # Duplicate call_index is rejected by DB constraint
@@ -249,8 +251,8 @@ class TestRecordCall:
                 call_index=0,  # Same index - rejected at DB level
                 call_type=CallType.LLM,
                 status=CallStatus.SUCCESS,
-                request_data={"prompt": "Second"},
-                response_data={"response": "Second"},
+                request_data=RawCallPayload({"prompt": "Second"}),
+                response_data=RawCallPayload({"response": "Second"}),
             )
 
     def test_invalid_state_id_raises_integrity_error(self, recorder: LandscapeRecorder) -> None:
@@ -261,8 +263,8 @@ class TestRecordCall:
                 call_index=0,
                 call_type=CallType.LLM,
                 status=CallStatus.SUCCESS,
-                request_data={"prompt": "Test"},
-                response_data={"response": "Test"},
+                request_data=RawCallPayload({"prompt": "Test"}),
+                response_data=RawCallPayload({"response": "Test"}),
             )
 
     def test_record_http_call(self, recorder: LandscapeRecorder, state_id: str) -> None:
@@ -272,8 +274,8 @@ class TestRecordCall:
             call_index=0,
             call_type=CallType.HTTP,
             status=CallStatus.SUCCESS,
-            request_data={"method": "GET", "url": "https://api.example.com/data"},
-            response_data={"status": 200, "body": {"data": "result"}},
+            request_data=RawCallPayload({"method": "GET", "url": "https://api.example.com/data"}),
+            response_data=RawCallPayload({"status": 200, "body": {"data": "result"}}),
             latency_ms=250.0,
         )
 
@@ -287,8 +289,8 @@ class TestRecordCall:
             call_index=0,
             call_type=CallType.SQL,
             status=CallStatus.SUCCESS,
-            request_data={"query": "SELECT * FROM users WHERE id = ?", "params": [42]},
-            response_data={"rows": [{"id": 42, "name": "Alice"}]},
+            request_data=RawCallPayload({"query": "SELECT * FROM users WHERE id = ?", "params": [42]}),
+            response_data=RawCallPayload({"rows": [{"id": 42, "name": "Alice"}]}),
             latency_ms=15.0,
         )
 
@@ -301,8 +303,8 @@ class TestRecordCall:
             call_index=0,
             call_type=CallType.FILESYSTEM,
             status=CallStatus.SUCCESS,
-            request_data={"operation": "read", "path": "/data/config.json"},
-            response_data={"content": '{"key": "value"}'},
+            request_data=RawCallPayload({"operation": "read", "path": "/data/config.json"}),
+            response_data=RawCallPayload({"content": '{"key": "value"}'}),
             latency_ms=5.0,
         )
 
@@ -315,8 +317,8 @@ class TestRecordCall:
             call_index=0,
             call_type=CallType.LLM,
             status=CallStatus.SUCCESS,
-            request_data={"prompt": "Test"},
-            response_data={"response": "Test response"},
+            request_data=RawCallPayload({"prompt": "Test"}),
+            response_data=RawCallPayload({"response": "Test response"}),
             # No latency_ms provided
         )
 
@@ -329,9 +331,9 @@ class TestRecordCall:
             call_index=0,
             call_type=CallType.HTTP,
             status=CallStatus.ERROR,
-            request_data={"url": "https://api.example.com/timeout"},
+            request_data=RawCallPayload({"url": "https://api.example.com/timeout"}),
             # No response_data - the call timed out
-            error={"type": "timeout", "message": "Request timed out after 30s"},
+            error=RawCallPayload({"type": "timeout", "message": "Request timed out after 30s"}),
             latency_ms=30000.0,
         )
 
@@ -347,8 +349,8 @@ class TestRecordCall:
             call_index=0,
             call_type=CallType.LLM,
             status=CallStatus.SUCCESS,
-            request_data={"prompt": "Test"},
-            response_data={"response": "Test"},
+            request_data=RawCallPayload({"prompt": "Test"}),
+            response_data=RawCallPayload({"response": "Test"}),
         )
 
         assert call.created_at is not None
@@ -362,8 +364,8 @@ class TestRecordCall:
             call_index=0,
             call_type=CallType.LLM,
             status=CallStatus.SUCCESS,
-            request_data=request_data,
-            response_data={"response": "Hi!"},
+            request_data=RawCallPayload(request_data),
+            response_data=RawCallPayload({"response": "Hi!"}),
         )
 
         # Create another state for second call
@@ -397,8 +399,8 @@ class TestRecordCall:
             call_index=0,
             call_type=CallType.LLM,
             status=CallStatus.SUCCESS,
-            request_data=request_data,  # Same request data
-            response_data={"response": "Hello!"},  # Different response
+            request_data=RawCallPayload(request_data),  # Same request data
+            response_data=RawCallPayload({"response": "Hello!"}),  # Different response
         )
 
         # Same request should produce same hash
@@ -457,16 +459,17 @@ class TestCallPayloadPersistence:
                 call_index=0,
                 call_type=CallType.LLM,
                 status=CallStatus.SUCCESS,
-                request_data={"prompt": "Hi"},
-                response_data=response_data,
+                request_data=RawCallPayload({"prompt": "Hi"}),
+                response_data=RawCallPayload(response_data),
             )
 
             # response_ref should be automatically populated
             assert call.response_ref is not None
 
             # The response should be retrievable
-            retrieved = recorder.get_call_response_data(call.call_id)
-            assert retrieved == response_data
+            result = recorder.get_call_response_data(call.call_id)
+            assert result.state == CallDataState.AVAILABLE
+            assert dict(result.data) == response_data
 
     def test_auto_persist_request_when_payload_store_configured(self, payload_store) -> None:
         """When payload store exists, request_data is auto-persisted and ref populated."""
@@ -482,8 +485,8 @@ class TestCallPayloadPersistence:
                 call_index=0,
                 call_type=CallType.LLM,
                 status=CallStatus.SUCCESS,
-                request_data=request_data,
-                response_data={"content": "Hi!"},
+                request_data=RawCallPayload(request_data),
+                response_data=RawCallPayload({"content": "Hi!"}),
             )
 
             # request_ref should be automatically populated
@@ -500,17 +503,18 @@ class TestCallPayloadPersistence:
             call_index=0,
             call_type=CallType.LLM,
             status=CallStatus.SUCCESS,
-            request_data={"prompt": "Hi"},
-            response_data={"content": "Hello!"},
+            request_data=RawCallPayload({"prompt": "Hi"}),
+            response_data=RawCallPayload({"content": "Hello!"}),
         )
 
         # Without payload store, refs should remain None
         assert call.request_ref is None
         assert call.response_ref is None
 
-        # get_call_response_data should return None
-        retrieved = recorder.get_call_response_data(call.call_id)
-        assert retrieved is None
+        # get_call_response_data should indicate hash-only (no payload store)
+        result = recorder.get_call_response_data(call.call_id)
+        assert result.state == CallDataState.HASH_ONLY
+        assert result.data is None
 
     def test_explicit_ref_not_overwritten(self, payload_store) -> None:
         """If caller provides explicit ref, it should not be overwritten."""
@@ -526,8 +530,8 @@ class TestCallPayloadPersistence:
                 call_index=0,
                 call_type=CallType.LLM,
                 status=CallStatus.SUCCESS,
-                request_data={"prompt": "Hi"},
-                response_data={"content": "Hello!"},
+                request_data=RawCallPayload({"prompt": "Hi"}),
+                response_data=RawCallPayload({"content": "Hello!"}),
                 response_ref=explicit_ref,  # Caller provides explicit ref
             )
 
@@ -547,9 +551,9 @@ class TestCallPayloadPersistence:
                 call_index=0,
                 call_type=CallType.HTTP,
                 status=CallStatus.ERROR,
-                request_data={"url": "https://api.example.com"},
+                request_data=RawCallPayload({"url": "https://api.example.com"}),
                 # No response_data - request failed before response
-                error={"type": "ConnectionError", "message": "Connection refused"},
+                error=RawCallPayload({"type": "ConnectionError", "message": "Connection refused"}),
             )
 
             # request_ref should be populated (we have request_data)
@@ -574,8 +578,8 @@ class TestFindCallByRequestHashRunIsolation:
         self,
         recorder: LandscapeRecorder,
         node_id: str,
-        request_data: dict[str, str],
-        response_data: dict[str, str],
+        request_data: RawCallPayload,
+        response_data: RawCallPayload,
     ) -> tuple[str, str]:
         """Create a run with a transform node and an LLM call.
 
@@ -651,16 +655,16 @@ class TestFindCallByRequestHashRunIsolation:
         _run_a_id, call_a_id = self._create_run_with_call(
             recorder,
             node_id=node_id,
-            request_data=request_data,
-            response_data={"content": "Response from Run A"},
+            request_data=RawCallPayload(request_data),
+            response_data=RawCallPayload({"content": "Response from Run A"}),
         )
 
         # Create Run B with call (same node_id, same request_hash)
         run_b_id, call_b_id = self._create_run_with_call(
             recorder,
             node_id=node_id,
-            request_data=request_data,
-            response_data={"content": "Response from Run B"},
+            request_data=RawCallPayload(request_data),
+            response_data=RawCallPayload({"content": "Response from Run B"}),
         )
 
         # Compute request hash for lookup
@@ -671,7 +675,7 @@ class TestFindCallByRequestHashRunIsolation:
         # Query for Run B's call
         result = recorder.find_call_by_request_hash(
             run_id=run_b_id,
-            call_type="llm",
+            call_type=CallType.LLM,
             request_hash=request_hash,
         )
 
@@ -701,8 +705,8 @@ class TestFindCallByRequestHashRunIsolation:
         _run_a_id, _ = self._create_run_with_call(
             recorder,
             node_id=node_id,
-            request_data=request_data,
-            response_data={"content": "Response from Run A"},
+            request_data=RawCallPayload(request_data),
+            response_data=RawCallPayload({"content": "Response from Run A"}),
         )
 
         # Create Run B WITHOUT any calls (just the node)
@@ -726,7 +730,7 @@ class TestFindCallByRequestHashRunIsolation:
         # Query for Run B's call (should not find Run A's)
         result = recorder.find_call_by_request_hash(
             run_id=run_b.run_id,
-            call_type="llm",
+            call_type=CallType.LLM,
             request_hash=request_hash,
         )
 

@@ -6,9 +6,9 @@ without a contract, causing ValueError at processor.py:712 in transform mode agg
 
 from __future__ import annotations
 
-from elspeth.contracts.plugin_context import PluginContext
 from elspeth.contracts.schema_contract import PipelineRow
 from elspeth.plugins.transforms.batch_stats import BatchStats
+from tests.fixtures.factories import make_context
 
 
 def test_batch_stats_returns_contract_in_transform_mode():
@@ -42,7 +42,7 @@ def test_batch_stats_returns_contract_in_transform_mode():
     ]
 
     # Process batch
-    ctx = PluginContext(run_id="test-run", config={})
+    ctx = make_context()
     result = transform.process(rows, ctx)
 
     # Verify single-row aggregated result
@@ -75,7 +75,7 @@ def test_batch_stats_returns_contract_in_transform_mode():
 
 
 def test_batch_stats_contract_empty_batch():
-    """BatchStats provides contract even for empty batch."""
+    """BatchStats returns error for empty batch — not fabricated statistics."""
     transform = BatchStats(
         {
             "schema": {"mode": "observed"},
@@ -85,23 +85,13 @@ def test_batch_stats_contract_empty_batch():
     )
 
     # Empty batch
-    ctx = PluginContext(run_id="test-run", config={})
+    ctx = make_context()
     result = transform.process([], ctx)
 
-    # Should return aggregated result with zeros
-    assert not result.is_multi_row
-    assert result.row is not None
-    assert result.row["count"] == 0
-    assert result.row["batch_empty"] is True
-
-    # CRITICAL: Contract must be provided even for empty batch (inside PipelineRow)
-    assert isinstance(result.row, PipelineRow), "Should provide PipelineRow with contract for empty batch"
-    assert result.row.contract.mode == "OBSERVED"
-
-    # Verify empty batch contract includes marker fields
-    expected_fields = {"count", "sum", "mean", "batch_empty"}
-    contract_field_names = {fc.normalized_name for fc in result.row.contract.fields}
-    assert contract_field_names == expected_fields
+    assert result.status == "error"
+    assert result.reason is not None
+    assert result.reason["reason"] == "empty_batch"
+    assert not result.retryable
 
 
 def test_batch_stats_contract_without_mean():
@@ -115,7 +105,7 @@ def test_batch_stats_contract_without_mean():
     )
 
     rows = [{"amount": 100}, {"amount": 200}]
-    ctx = PluginContext(run_id="test-run", config={})
+    ctx = make_context()
     result = transform.process(rows, ctx)
 
     # Verify mean is not in output
@@ -129,7 +119,7 @@ def test_batch_stats_contract_without_mean():
 
 
 def test_batch_stats_contract_empty_batch_without_mean():
-    """Empty batch contract also omits mean when compute_mean=False."""
+    """Empty batch returns error regardless of compute_mean setting."""
     transform = BatchStats(
         {
             "schema": {"mode": "observed"},
@@ -138,15 +128,9 @@ def test_batch_stats_contract_empty_batch_without_mean():
         }
     )
 
-    ctx = PluginContext(run_id="test-run", config={})
+    ctx = make_context()
     result = transform.process([], ctx)
 
-    assert not result.is_multi_row
-    assert result.row is not None
-    assert "mean" not in result.row
-    assert result.row["batch_empty"] is True
-
-    assert isinstance(result.row, PipelineRow)
-    contract_field_names = {fc.normalized_name for fc in result.row.contract.fields}
-    assert "mean" not in contract_field_names
-    assert contract_field_names == {"count", "sum", "batch_empty"}
+    assert result.status == "error"
+    assert result.reason is not None
+    assert result.reason["reason"] == "empty_batch"

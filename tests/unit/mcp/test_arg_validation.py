@@ -12,11 +12,9 @@ before they reach analyzer methods. These tests verify:
 
 from __future__ import annotations
 
-from typing import ClassVar
-
 import pytest
 
-from elspeth.mcp.server import _validate_tool_args
+from elspeth.mcp.server import _ToolDef, _validate_tool_args
 
 
 class TestRequiredStringFields:
@@ -151,45 +149,43 @@ class TestExtraFieldsIgnored:
 
 
 class TestAllToolsHaveSpecs:
-    """Every tool handler in call_tool has a matching _TOOL_ARGS entry."""
+    """Every tool in the registry has a valid _ToolDef entry."""
 
-    # Tools extracted from the call_tool if/elif chain
-    ALL_TOOLS: ClassVar[list[str]] = [
-        "list_runs",
-        "get_run",
-        "get_run_summary",
-        "list_nodes",
-        "list_rows",
-        "list_tokens",
-        "list_operations",
-        "get_operation_calls",
-        "explain_token",
-        "get_errors",
-        "get_node_states",
-        "get_calls",
-        "query",
-        "get_dag_structure",
-        "get_performance_report",
-        "get_error_analysis",
-        "get_llm_usage_report",
-        "describe_schema",
-        "get_outcome_analysis",
-        "diagnose",
-        "get_failure_context",
-        "get_recent_activity",
-        "get_run_contract",
-        "explain_field",
-        "list_contract_violations",
-    ]
-
-    @pytest.mark.parametrize("tool_name", ALL_TOOLS)
+    @pytest.mark.parametrize(
+        "tool_name",
+        [
+            "list_runs",
+            "get_run",
+            "get_run_summary",
+            "list_nodes",
+            "list_rows",
+            "list_tokens",
+            "list_operations",
+            "get_operation_calls",
+            "explain_token",
+            "get_errors",
+            "get_node_states",
+            "get_calls",
+            "query",
+            "get_dag_structure",
+            "get_performance_report",
+            "get_error_analysis",
+            "get_llm_usage_report",
+            "describe_schema",
+            "get_outcome_analysis",
+            "diagnose",
+            "get_failure_context",
+            "get_recent_activity",
+            "get_run_contract",
+            "explain_field",
+            "list_contract_violations",
+        ],
+    )
     def test_tool_has_arg_spec(self, tool_name: str) -> None:
-        """Every tool in call_tool must have a _TOOL_ARGS entry."""
-        from elspeth.mcp.server import _TOOL_ARGS
+        """Every tool must have a _TOOLS registry entry."""
+        from elspeth.mcp.server import _TOOLS
 
-        assert tool_name in _TOOL_ARGS, (
-            f"Tool '{tool_name}' has no _TOOL_ARGS entry -- arguments will not be validated at the Tier 3 boundary"
-        )
+        assert tool_name in _TOOLS, f"Tool '{tool_name}' has no _TOOLS entry -- arguments will not be validated at the Tier 3 boundary"
 
 
 class TestNoArgTools:
@@ -204,3 +200,29 @@ class TestNoArgTools:
     def test_no_arg_tool_ignores_extras(self, tool_name: str) -> None:
         args = _validate_tool_args(tool_name, {"spurious": "value"})
         assert args == {}
+
+
+class TestToolDefImmutability:
+    """_ToolDef.schema_properties must be truly immutable."""
+
+    def test_schema_properties_is_immutable(self) -> None:
+        """schema_properties dict must resist mutation after construction."""
+        from types import MappingProxyType
+
+        from elspeth.mcp.server import _ArgSpec
+
+        original = {"run_id": {"type": "string"}}
+        tool = _ToolDef(
+            description="test",
+            args=_ArgSpec(required_str=("run_id",)),
+            handler=lambda a, args: None,
+            schema_properties=original,
+        )
+
+        assert isinstance(tool.schema_properties, MappingProxyType)
+        with pytest.raises(TypeError):
+            tool.schema_properties["injected"] = "evil"  # type: ignore[index]
+
+        # Caller's original dict must be decoupled
+        original["injected"] = "evil"
+        assert "injected" not in tool.schema_properties

@@ -7,6 +7,7 @@ import structlog
 
 from elspeth.tui.types import (
     ArtifactDisplay,
+    CoalesceErrorDisplay,
     ExecutionErrorDisplay,
     NodeStateInfo,
     TransformErrorDisplay,
@@ -54,6 +55,38 @@ def _validate_transform_error(data: dict[str, Any]) -> TransformErrorDisplay:
     return result
 
 
+def _validate_coalesce_error(data: dict[str, Any]) -> CoalesceErrorDisplay:
+    """Validate and cast a dict to CoalesceErrorDisplay.
+
+    CoalesceFailureReason has required fields: failure_reason, expected_branches,
+    branches_arrived, merge_policy.
+
+    Raises AuditIntegrityError if required fields are missing (Tier 1 — crash
+    on corruption with diagnostic context, not a bare KeyError).
+    """
+    from elspeth.contracts.errors import AuditIntegrityError
+
+    required = ("failure_reason", "expected_branches", "branches_arrived", "merge_policy")
+    missing = [k for k in required if k not in data]
+    if missing:
+        raise AuditIntegrityError(
+            f"Corrupt coalesce error record: missing required fields {missing}. "
+            f"Available keys: {sorted(data.keys())}. "
+            f"This indicates database corruption (Tier 1 violation)."
+        )
+    result: CoalesceErrorDisplay = {
+        "failure_reason": data["failure_reason"],
+        "expected_branches": data["expected_branches"],
+        "branches_arrived": data["branches_arrived"],
+        "merge_policy": data["merge_policy"],
+    }
+    if "timeout_ms" in data:
+        result["timeout_ms"] = data["timeout_ms"]
+    if "select_branch" in data:
+        result["select_branch"] = data["select_branch"]
+    return result
+
+
 def _validate_artifact(data: dict[str, Any]) -> ArtifactDisplay:
     """Validate and cast a dict to ArtifactDisplay.
 
@@ -81,8 +114,8 @@ class NodeDetailPanel:
     Field access follows the three-tier trust model:
     - Required fields (node_id, plugin_name, node_type): Direct access.
       Missing = bug in _load_node_state, should crash.
-    - Optional fields: Use .get() without default, then explicit fallback
-      for display (e.g., `value or 'N/A'`).
+    - Optional fields: Use .get() without default, then explicit None check
+      for display (e.g., `value if value is not None else 'N/A'`).
     """
 
     def __init__(self, node_state: NodeStateInfo | None) -> None:
@@ -113,20 +146,20 @@ class NodeDetailPanel:
         # Identity - node_id is required, others are optional
         lines.append("Identity:")
         state_id = self._state.get("state_id")
-        lines.append(f"  State ID:  {state_id or 'N/A'}")
+        lines.append(f"  State ID:  {state_id if state_id is not None else 'N/A'}")
         lines.append(f"  Node ID:   {self._state['node_id']}")  # Required
         token_id = self._state.get("token_id")
-        lines.append(f"  Token ID:  {token_id or 'N/A'}")
+        lines.append(f"  Token ID:  {token_id if token_id is not None else 'N/A'}")
         lines.append("")
 
         # Status - all optional (may not have execution state yet)
         status = self._state.get("status")
         lines.append("Status:")
-        lines.append(f"  Status:     {status or 'N/A'}")
+        lines.append(f"  Status:     {status if status is not None else 'N/A'}")
         started_at = self._state.get("started_at")
-        lines.append(f"  Started:    {started_at or 'N/A'}")
+        lines.append(f"  Started:    {started_at if started_at is not None else 'N/A'}")
         completed_at = self._state.get("completed_at")
-        lines.append(f"  Completed:  {completed_at or 'N/A'}")
+        lines.append(f"  Completed:  {completed_at if completed_at is not None else 'N/A'}")
         duration = self._state.get("duration_ms")
         if duration is not None:
             lines.append(f"  Duration:   {duration} ms")
@@ -136,30 +169,32 @@ class NodeDetailPanel:
         lines.append("Data Hashes:")
         input_hash = self._state.get("input_hash")
         output_hash = self._state.get("output_hash")
-        lines.append(f"  Input:   {input_hash or '(none)'}")
-        lines.append(f"  Output:  {output_hash or '(none)'}")
+        lines.append(f"  Input:   {input_hash if input_hash is not None else '(none)'}")
+        lines.append(f"  Output:  {output_hash if output_hash is not None else '(none)'}")
         lines.append("")
 
         # Error (if present) - optional field
         # error_json is Tier 1 (our audit data) - if malformed, that's a bug
         error_json = self._state.get("error_json")
-        if error_json:
+        if error_json is not None:
             lines.append("Error:")
             # error_json MUST be a string (schema contract)
             if not isinstance(error_json, str):
                 raise TypeError(
                     f"error_json must be str, got {type(error_json).__name__} - "
-                    f"audit integrity violation in state {self._state.get('state_id')}"
+                    f"audit integrity violation in state {self._state['state_id']}"
                 )
             error = json.loads(error_json)  # Let JSONDecodeError crash - it's our data
             if not isinstance(error, dict):
                 raise TypeError(
                     f"error_json must parse to dict, got {type(error).__name__} - "
-                    f"audit integrity violation in state {self._state.get('state_id')}"
+                    f"audit integrity violation in state {self._state['state_id']}"
                 )
 
             # Discriminated union: determine error variant by field presence
-            # ExecutionError has "type" + "exception", TransformErrorReason has "reason"
+            # ExecutionError has "type" + "exception"
+            # CoalesceFailureReason has "failure_reason"
+            # TransformErrorReason has "reason"
             if "type" in error and "exception" in error:
                 # ExecutionError variant
                 validated = _validate_execution_error(error)
@@ -167,6 +202,17 @@ class NodeDetailPanel:
                 lines.append(f"  Message: {validated['exception']}")
                 if validated.get("phase"):
                     lines.append(f"  Phase:   {validated['phase']}")
+            elif "failure_reason" in error:
+                # CoalesceFailureReason variant
+                validated_coalesce = _validate_coalesce_error(error)
+                lines.append(f"  Failure: {validated_coalesce['failure_reason']}")
+                lines.append(f"  Policy:  {validated_coalesce['merge_policy']}")
+                lines.append(f"  Expected branches: {', '.join(validated_coalesce['expected_branches'])}")
+                lines.append(f"  Arrived branches:  {', '.join(validated_coalesce['branches_arrived']) or '(none)'}")
+                if validated_coalesce.get("timeout_ms") is not None:
+                    lines.append(f"  Timeout: {validated_coalesce['timeout_ms']} ms")
+                if validated_coalesce.get("select_branch"):
+                    lines.append(f"  Select branch: {validated_coalesce['select_branch']}")
             elif "reason" in error:
                 # TransformErrorReason variant
                 validated_transform = _validate_transform_error(error)
@@ -181,7 +227,7 @@ class NodeDetailPanel:
                 # Unknown error format - this is a bug in our recording code
                 raise ValueError(
                     f"error_json has unknown format (no 'type'+'exception' or 'reason') - "
-                    f"audit integrity violation in state {self._state.get('state_id')}: "
+                    f"audit integrity violation in state {self._state['state_id']}: "
                     f"keys={list(error.keys())}"
                 )
             lines.append("")
@@ -189,13 +235,12 @@ class NodeDetailPanel:
         # Artifact (if sink) - optional field
         # artifact is Tier 1 (our audit data) - if malformed, that's a bug
         artifact = self._state.get("artifact")
-        if artifact:
+        if artifact is not None:
             lines.append("Artifact:")
             # artifact MUST be a dict (schema contract)
             if not isinstance(artifact, dict):
                 raise TypeError(
-                    f"artifact must be dict, got {type(artifact).__name__} - "
-                    f"audit integrity violation in state {self._state.get('state_id')}"
+                    f"artifact must be dict, got {type(artifact).__name__} - audit integrity violation in state {self._state['state_id']}"
                 )
             # Validate and access fields directly (Tier 1 - crash on missing)
             validated_artifact = _validate_artifact(artifact)

@@ -3,7 +3,7 @@
 import pytest
 
 from elspeth.contracts.header_modes import HeaderMode
-from elspeth.plugins.config_base import SinkPathConfig
+from elspeth.plugins.infrastructure.config_base import SinkPathConfig
 
 
 class TestSinkHeaderConfig:
@@ -112,9 +112,35 @@ class TestSinkHeaderConfigValidation:
         assert config.headers_mode == HeaderMode.CUSTOM
         assert config.headers_mapping == {}
 
+    def test_invalid_type_headers_raises(self) -> None:
+        """Non-string, non-dict, non-None headers type is rejected."""
+        from elspeth.plugins.infrastructure.config_base import PluginConfigError
+
+        with pytest.raises(PluginConfigError, match="Invalid configuration for SinkPathConfig"):
+            SinkPathConfig.from_dict(
+                {
+                    "path": "output.csv",
+                    "schema": {"mode": "observed"},
+                    "headers": 42,
+                }
+            )
+
+    def test_duplicate_header_mapping_targets_raises(self) -> None:
+        """Duplicate values in custom header mapping raises ValueError."""
+        from elspeth.plugins.infrastructure.config_base import PluginConfigError
+
+        with pytest.raises(PluginConfigError, match="Duplicate header mapping targets"):
+            SinkPathConfig.from_dict(
+                {
+                    "path": "output.csv",
+                    "schema": {"mode": "observed"},
+                    "headers": {"field_a": "Name", "field_b": "Name"},
+                }
+            )
+
     def test_unknown_field_rejected(self) -> None:
         """Unknown fields like display_headers are rejected by extra=forbid."""
-        from elspeth.plugins.config_base import PluginConfigError
+        from elspeth.plugins.infrastructure.config_base import PluginConfigError
 
         with pytest.raises(PluginConfigError):
             SinkPathConfig.from_dict(

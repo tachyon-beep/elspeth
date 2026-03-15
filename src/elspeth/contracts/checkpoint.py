@@ -10,9 +10,10 @@ from dataclasses import dataclass
 
 from elspeth.contracts.aggregation_checkpoint import AggregationCheckpointState
 from elspeth.contracts.audit import Checkpoint
+from elspeth.contracts.coalesce_checkpoint import CoalesceCheckpointState
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, slots=True)
 class ResumeCheck:
     """Result of checking if a run can be resumed.
 
@@ -30,7 +31,7 @@ class ResumeCheck:
             raise ValueError("can_resume=False must have a reason explaining why")
 
 
-@dataclass
+@dataclass(frozen=True, slots=True)
 class ResumePoint:
     """Information needed to resume a run.
 
@@ -42,17 +43,19 @@ class ResumePoint:
     token_id: str
     node_id: str
     sequence_number: int
-    aggregation_state: AggregationCheckpointState | None
+    aggregation_state: AggregationCheckpointState | None = None
+    coalesce_state: CoalesceCheckpointState | None = None
 
     def __post_init__(self) -> None:
-        """Validate aggregation_state type — Tier 1 crash on invalid types.
+        """Validate resume point fields — Tier 1 crash on invalid data.
 
         Per CLAUDE.md Data Manifesto: Checkpoints are Tier 1 audit data.
-        If aggregation_state is not the expected typed DTO (when present),
-        this indicates corrupted checkpoint data — crash immediately.
+        Empty token_id/node_id or negative sequence_number indicates
+        corrupted checkpoint data — crash immediately.
         """
-        if self.aggregation_state is not None and not isinstance(self.aggregation_state, AggregationCheckpointState):
-            raise ValueError(
-                f"aggregation_state must be AggregationCheckpointState or None, "
-                f"got {type(self.aggregation_state).__name__}: {self.aggregation_state!r}"
-            )
+        if not self.token_id:
+            raise ValueError("ResumePoint.token_id must not be empty")
+        if not self.node_id:
+            raise ValueError("ResumePoint.node_id must not be empty")
+        if self.sequence_number < 0:
+            raise ValueError(f"ResumePoint.sequence_number must be non-negative, got {self.sequence_number}")

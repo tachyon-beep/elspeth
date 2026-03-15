@@ -1,4 +1,3 @@
-# src/elspeth/engine/orchestrator/types.py
 """Pipeline configuration and result types.
 
 These types define the interface for pipeline execution:
@@ -21,20 +20,33 @@ Keep types.py as pure data definitions with minimal dependencies.
 from __future__ import annotations
 
 from collections import Counter
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field
 from types import MappingProxyType
 from typing import TYPE_CHECKING, Any
 
-if TYPE_CHECKING:
-    from elspeth.core.config import AggregationSettings, CoalesceSettings, GateSettings
-    from elspeth.plugins.protocols import SinkProtocol, SourceProtocol
+from elspeth.contracts.freeze import deep_freeze
 
-from elspeth.contracts import RunStatus
+if TYPE_CHECKING:
+    from elspeth.contracts import PendingOutcome, SinkProtocol, SourceProtocol, TokenInfo
+    from elspeth.contracts.aggregation_checkpoint import AggregationCheckpointState
+    from elspeth.contracts.coalesce_checkpoint import CoalesceCheckpointState
+    from elspeth.contracts.plugin_context import PluginContext
+    from elspeth.contracts.schema_contract import SchemaContract
+    from elspeth.contracts.types import CoalesceName, GateName, NodeID, SinkName
+    from elspeth.core.config import AggregationSettings, CoalesceSettings, GateSettings
+    from elspeth.core.landscape.recorder import LandscapeRecorder
+    from elspeth.engine.coalesce_executor import CoalesceExecutor
+    from elspeth.engine.processor import RowProcessor
 
 # Import protocols at runtime (not TYPE_CHECKING) because RowPlugin type alias
 # is used in runtime annotations and isinstance() checks
-from elspeth.plugins.protocols import TransformProtocol
+from elspeth.contracts import RunStatus, TransformProtocol
+
+# Type alias for pending tokens accumulated during row processing.
+# Keys are sink names, values are lists of (token, optional outcome) pairs.
+# Used across LoopContext, accumulate_row_outcomes, flush functions, etc.
+PendingTokenMap = dict[str, list[tuple["TokenInfo", "PendingOutcome | None"]]]
 
 # Type alias for row-processing plugins in the transforms pipeline
 # NOTE: BaseAggregation was DELETED - aggregation is now handled by
@@ -43,21 +55,35 @@ RowPlugin = TransformProtocol
 """Row-processing plugin type for pipeline transforms list."""
 
 
-@dataclass
+def _freeze_fields(instance: Any, *field_names: str) -> None:
+    """Freeze named mapping fields on a dataclass via deep_freeze.
+
+    Wraps the common ``object.__setattr__(self, name, MappingProxyType(dict(...)))``
+    boilerplate used across frozen/slotted dataclass ``__post_init__`` methods.
+    """
+    for name in field_names:
+        object.__setattr__(instance, name, deep_freeze(getattr(instance, name)))
+
+
+@dataclass(frozen=True, slots=True)
 class PipelineConfig:
     """Configuration for a pipeline run.
 
     All plugin fields are now properly typed for IDE support and
-    static type checking.
+    static type checking. Frozen after construction — pipeline
+    configuration must not change during execution.
+
+    The ``frozen=True`` decorator prevents field reassignment after
+    construction, ensuring pipeline config is immutable during a run.
 
     Attributes:
         source: Source plugin instance
-        transforms: List of transform/gate plugin instances (processed first)
+        transforms: Transform plugin instances (processed in DAG order)
         sinks: Dict of sink_name -> sink plugin instance
         config: Additional run configuration
         gates: Config-driven gates (processed AFTER transforms, BEFORE sinks)
         aggregation_settings: Dict of node_id -> AggregationSettings
-        coalesce_settings: List of coalesce configurations for merging fork paths
+        coalesce_settings: Coalesce configurations for merging fork paths
     """
 
     source: SourceProtocol
@@ -68,8 +94,14 @@ class PipelineConfig:
     aggregation_settings: dict[str, AggregationSettings] = field(default_factory=dict)
     coalesce_settings: list[CoalesceSettings] = field(default_factory=list)
 
+    def __post_init__(self) -> None:
+        if not self.sinks:
+            from elspeth.contracts.errors import OrchestrationInvariantError
 
-@dataclass
+            raise OrchestrationInvariantError("PipelineConfig requires at least one sink")
+
+
+@dataclass(frozen=True, slots=True)
 class RunResult:
     """Result of a pipeline run."""
 
@@ -85,7 +117,10 @@ class RunResult:
     rows_coalesce_failed: int = 0  # Coalesce failures (quorum_not_met, incomplete_branches)
     rows_expanded: int = 0  # Deaggregation parent tokens
     rows_buffered: int = 0  # Passthrough mode buffered tokens
-    routed_destinations: dict[str, int] = field(default_factory=dict)  # sink_name -> count
+    routed_destinations: Mapping[str, int] = field(default_factory=lambda: MappingProxyType({}))
+
+    def __post_init__(self) -> None:
+        _freeze_fields(self, "routed_destinations")
 
 
 @dataclass(frozen=True, slots=True)
@@ -107,9 +142,7 @@ class AggregationFlushResult:
     routed_destinations: Mapping[str, int] = field(default_factory=lambda: MappingProxyType({}))
 
     def __post_init__(self) -> None:
-        """Freeze routed_destinations if passed as mutable dict."""
-        if not isinstance(self.routed_destinations, MappingProxyType):
-            object.__setattr__(self, "routed_destinations", MappingProxyType(self.routed_destinations))
+        _freeze_fields(self, "routed_destinations")
 
     def __add__(self, other: AggregationFlushResult) -> AggregationFlushResult:
         """Combine two results by summing all counters."""
@@ -169,12 +202,29 @@ class ExecutionCounters:
         for dest, count in result.routed_destinations.items():
             self.routed_destinations[dest] += count
 
-    def to_run_result(self, run_id: str, status: RunStatus = RunStatus.RUNNING) -> RunResult:
+    def to_flush_result(self) -> AggregationFlushResult:
+        """Build an AggregationFlushResult from these counters.
+
+        Mirrors ``to_run_result()`` for the aggregation flush path.
+        """
+        return AggregationFlushResult(
+            rows_succeeded=self.rows_succeeded,
+            rows_failed=self.rows_failed,
+            rows_routed=self.rows_routed,
+            rows_quarantined=self.rows_quarantined,
+            rows_coalesced=self.rows_coalesced,
+            rows_forked=self.rows_forked,
+            rows_expanded=self.rows_expanded,
+            rows_buffered=self.rows_buffered,
+            routed_destinations=dict(self.routed_destinations),
+        )
+
+    def to_run_result(self, run_id: str, status: RunStatus) -> RunResult:
         """Build a RunResult from these counters.
 
         Args:
             run_id: The run identifier.
-            status: Run status (default RUNNING, caller updates to COMPLETED).
+            status: Run status (callers must be explicit).
         """
         return RunResult(
             run_id=run_id,
@@ -200,3 +250,145 @@ class RouteValidationError(Exception):
     processed. It indicates a configuration problem that would cause
     failures during processing.
     """
+
+
+# --- Extraction return types ---
+
+
+@dataclass(frozen=True, slots=True)
+class GraphArtifacts:
+    """Return type for _register_graph_nodes_and_edges().
+
+    Named fields eliminate positional-swap hazards — several members share
+    compatible Mapping[..., NodeID] types that mypy cannot distinguish in a tuple.
+
+    All mapping fields are wrapped in MappingProxyType via __post_init__
+    to enforce deep immutability, matching the DAGTraversalContext precedent.
+    """
+
+    edge_map: Mapping[tuple[NodeID, str], str]
+    source_id: NodeID
+    sink_id_map: Mapping[SinkName, NodeID]
+    transform_id_map: Mapping[int, NodeID]
+    config_gate_id_map: Mapping[GateName, NodeID]
+    coalesce_id_map: Mapping[CoalesceName, NodeID]
+
+    def __post_init__(self) -> None:
+        _freeze_fields(
+            self,
+            "edge_map",
+            "sink_id_map",
+            "transform_id_map",
+            "config_gate_id_map",
+            "coalesce_id_map",
+        )
+
+
+@dataclass(frozen=True, slots=True)
+class AggNodeEntry:
+    """Named pair for aggregation lookup values.
+
+    Replaces tuple[TransformProtocol, NodeID] to prevent positional-swap bugs,
+    applying the same rationale as GraphArtifacts.
+    """
+
+    transform: TransformProtocol
+    node_id: NodeID
+
+
+@dataclass(frozen=True, slots=True)
+class RunContext:
+    """Return type for _initialize_run_context().
+
+    Bundles the five objects created during run initialization that are
+    consumed by subsequent phases. Short-lived: consumed immediately to
+    build LoopContext. Mapping fields are wrapped in MappingProxyType
+    for consistency with GraphArtifacts.
+    """
+
+    ctx: PluginContext
+    processor: RowProcessor
+    coalesce_executor: CoalesceExecutor | None
+    coalesce_node_map: Mapping[CoalesceName, NodeID]
+    agg_transform_lookup: Mapping[str, AggNodeEntry]
+
+    def __post_init__(self) -> None:
+        _freeze_fields(self, "coalesce_node_map", "agg_transform_lookup")
+
+
+@dataclass(slots=True)
+class LoopContext:
+    """Parameter bundle for _run_main_processing_loop() and _flush_and_write_sinks().
+
+    Reduces 10+ parameter signatures to (self, loop_ctx, ...) and prevents
+    parameter-list growth as the loop acquires new concerns.
+
+    NOT frozen: ``counters`` and ``pending_tokens`` are mutated in place
+    throughout the processing loop.
+
+    Convention: fields below the "Read-only" separator are never reassigned
+    after construction. They are not frozen because ``counters`` and
+    ``pending_tokens`` require in-place mutation. Treat read-only fields as
+    if they were on a frozen dataclass — mappings are wrapped in
+    MappingProxyType at construction time.
+    """
+
+    # --- Mutable state (updated row-by-row) ---
+    counters: ExecutionCounters
+    pending_tokens: PendingTokenMap
+
+    # --- Read-only after construction (not reassigned) ---
+    processor: RowProcessor
+    ctx: PluginContext
+    config: PipelineConfig
+    agg_transform_lookup: Mapping[str, AggNodeEntry]
+    coalesce_executor: CoalesceExecutor | None
+    coalesce_node_map: Mapping[CoalesceName, NodeID]
+    last_token_id: str | None = None
+
+    def __post_init__(self) -> None:
+        _freeze_fields(self, "agg_transform_lookup", "coalesce_node_map")
+
+
+@dataclass(frozen=True, slots=True)
+class LoopResult:
+    """Return value from _run_main_processing_loop().
+
+    Carries timing state back to the caller so that final progress emission
+    and PhaseCompleted can be emitted AFTER sink writes (not before).
+    The resume loop does not use this — it has no progress or phase events.
+    """
+
+    interrupted: bool
+    start_time: float
+    phase_start: float
+    last_progress_time: float
+
+
+@dataclass(frozen=True, slots=True)
+class ResumeState:
+    """Return type for _reconstruct_resume_state().
+
+    Bundles the state reconstruction results needed to process resumed rows.
+    Short-lived: consumed immediately by the resume method.
+    """
+
+    recorder: LandscapeRecorder
+    run_id: str
+    restored_aggregation_state: Mapping[str, AggregationCheckpointState]
+    restored_coalesce_state: CoalesceCheckpointState | None
+    unprocessed_rows: Sequence[tuple[str, int, dict[str, Any]]]
+    schema_contract: SchemaContract
+
+    def __post_init__(self) -> None:
+        _freeze_fields(self, "restored_aggregation_state")
+        # unprocessed_rows contains raw row dicts that PipelineRow expects as
+        # plain dict — deep_freeze would convert them to MappingProxyType.
+        if not isinstance(self.unprocessed_rows, tuple):
+            object.__setattr__(self, "unprocessed_rows", tuple(self.unprocessed_rows))
+
+
+# Factory that creates a per-sink checkpoint callback.
+# Takes a sink_node_id (str) and returns a callback invoked after each
+# token is written to that sink.
+type _CheckpointFactory = Callable[[str], Callable[[TokenInfo], None]]

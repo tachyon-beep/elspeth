@@ -1,4 +1,3 @@
-# src/elspeth/telemetry/hookspecs.py
 """pluggy hook specifications for telemetry exporters.
 
 Exporters implement these hooks to register themselves with the framework.

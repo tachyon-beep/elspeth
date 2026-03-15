@@ -6,9 +6,11 @@ from unittest.mock import MagicMock, Mock
 import pytest
 
 from elspeth.contracts import CallStatus, CallType
+from elspeth.contracts.events import ExternalCallCompleted
 from elspeth.contracts.token_usage import TokenUsage
-from elspeth.plugins.clients.llm import (
+from elspeth.plugins.infrastructure.clients.llm import (
     AuditedLLMClient,
+    ContentPolicyError,
     LLMClientError,
     LLMResponse,
     RateLimitError,
@@ -161,16 +163,16 @@ class TestAuditedLLMClient:
         assert call_kwargs["call_index"] == 0
         assert call_kwargs["call_type"] == CallType.LLM
         assert call_kwargs["status"] == CallStatus.SUCCESS
-        assert call_kwargs["request_data"]["model"] == "gpt-4"
-        assert call_kwargs["request_data"]["messages"] == [{"role": "user", "content": "Hello"}]
-        assert call_kwargs["response_data"]["content"] == "Hello!"
+        assert call_kwargs["request_data"].to_dict()["model"] == "gpt-4"
+        assert call_kwargs["request_data"].to_dict()["messages"] == [{"role": "user", "content": "Hello"}]
+        assert call_kwargs["response_data"].to_dict()["content"] == "Hello!"
         assert call_kwargs["latency_ms"] > 0
 
     def test_telemetry_emits_token_id_when_configured(self) -> None:
         """Telemetry event should carry token_id when provided."""
         recorder = self._create_mock_recorder()
         openai_client = self._create_mock_openai_client()
-        emitted_events: list[object] = []
+        emitted_events: list[ExternalCallCompleted] = []
 
         client = AuditedLLMClient(
             recorder=recorder,
@@ -193,7 +195,7 @@ class TestAuditedLLMClient:
         """Telemetry event should allow token_id=None when not provided."""
         recorder = self._create_mock_recorder()
         openai_client = self._create_mock_openai_client()
-        emitted_events: list[object] = []
+        emitted_events: list[ExternalCallCompleted] = []
 
         client = AuditedLLMClient(
             recorder=recorder,
@@ -264,9 +266,9 @@ class TestAuditedLLMClient:
         recorder.record_call.assert_called_once()
         call_kwargs = recorder.record_call.call_args[1]
         assert call_kwargs["status"] == CallStatus.ERROR
-        assert call_kwargs["error"]["type"] == "Exception"
-        assert "API connection failed" in call_kwargs["error"]["message"]
-        assert call_kwargs["error"]["retryable"] is False
+        assert call_kwargs["error"].type == "Exception"
+        assert "API connection failed" in call_kwargs["error"].message
+        assert call_kwargs["error"].retryable is False
 
     def test_rate_limit_error_marked_retryable(self) -> None:
         """Rate limit errors are marked as retryable."""
@@ -290,7 +292,7 @@ class TestAuditedLLMClient:
 
         # Verify error was recorded with retryable=True
         call_kwargs = recorder.record_call.call_args[1]
-        assert call_kwargs["error"]["retryable"] is True
+        assert call_kwargs["error"].retryable is True
 
     def test_rate_limit_detected_by_keyword(self) -> None:
         """Rate limit is detected by 'rate' keyword in error."""
@@ -335,7 +337,7 @@ class TestAuditedLLMClient:
         assert type(exc_info.value) is LLMClientError
         assert exc_info.value.retryable is False
         call_kwargs = recorder.record_call.call_args[1]
-        assert call_kwargs["error"]["retryable"] is False
+        assert call_kwargs["error"].retryable is False
 
     def test_temperature_and_max_tokens_recorded(self) -> None:
         """Temperature and max_tokens are recorded in request."""
@@ -358,8 +360,8 @@ class TestAuditedLLMClient:
         )
 
         call_kwargs = recorder.record_call.call_args[1]
-        assert call_kwargs["request_data"]["temperature"] == 0.7
-        assert call_kwargs["request_data"]["max_tokens"] == 100
+        assert call_kwargs["request_data"].to_dict()["temperature"] == 0.7
+        assert call_kwargs["request_data"].to_dict()["max_tokens"] == 100
 
     def test_provider_recorded_in_request(self) -> None:
         """Provider name is recorded in request data."""
@@ -381,7 +383,7 @@ class TestAuditedLLMClient:
         )
 
         call_kwargs = recorder.record_call.call_args[1]
-        assert call_kwargs["request_data"]["provider"] == "azure"
+        assert call_kwargs["request_data"].to_dict()["provider"] == "azure"
 
     def test_extra_kwargs_passed_to_client(self) -> None:
         """Extra kwargs are passed to underlying client and recorded."""
@@ -411,22 +413,28 @@ class TestAuditedLLMClient:
 
         # Verify extra kwargs were recorded
         call_kwargs = recorder.record_call.call_args[1]
-        assert call_kwargs["request_data"]["top_p"] == 0.9
-        assert call_kwargs["request_data"]["presence_penalty"] == 0.5
+        assert call_kwargs["request_data"].to_dict()["top_p"] == 0.9
+        assert call_kwargs["request_data"].to_dict()["presence_penalty"] == 0.5
 
     # NOTE: test_response_without_model_dump was removed because we require
     # openai>=2.15 which guarantees model_dump() exists on all responses.
     # Per CLAUDE.md "No Legacy Code Policy" - no backwards compatibility code.
 
-    def test_empty_content_handled(self) -> None:
-        """Handles responses with None content."""
+    def test_null_content_raises_content_policy_error(self) -> None:
+        """None content from LLM raises ContentPolicyError — not fabricated to "".
+
+        The OpenAI API returns content=None when the model refuses (content
+        filtering). Previously this was fabricated to "" via `or ""`, hiding
+        the refusal from the audit trail.
+        """
         recorder = self._create_mock_recorder()
 
         message = Mock()
-        message.content = None  # Explicitly None
+        message.content = None  # Content-filtered response
 
         choice = Mock()
         choice.message = message
+        choice.finish_reason = "content_filter"
 
         usage = Mock()
         usage.prompt_tokens = 10
@@ -449,13 +457,11 @@ class TestAuditedLLMClient:
             underlying_client=openai_client,
         )
 
-        result = client.chat_completion(
-            model="gpt-4",
-            messages=[{"role": "user", "content": "Hello"}],
-        )
-
-        # None content should become empty string
-        assert result.content == ""
+        with pytest.raises(ContentPolicyError):
+            client.chat_completion(
+                model="gpt-4",
+                messages=[{"role": "user", "content": "Hello"}],
+            )
 
     def test_full_raw_response_recorded_in_audit_trail(self) -> None:
         """Full raw_response from model_dump() is recorded in audit trail.
@@ -525,7 +531,7 @@ class TestAuditedLLMClient:
 
         # Verify raw_response is recorded in audit trail
         call_kwargs = recorder.record_call.call_args[1]
-        response_data = call_kwargs["response_data"]
+        response_data = call_kwargs["response_data"].to_dict()
 
         # Summary fields still present for convenience
         assert response_data["content"] == "Hello!"
@@ -600,7 +606,7 @@ class TestAuditedLLMClient:
 
         # Verify all choices are preserved in raw_response
         call_kwargs = recorder.record_call.call_args[1]
-        raw_response = call_kwargs["response_data"]["raw_response"]
+        raw_response = call_kwargs["response_data"].to_dict()["raw_response"]
 
         assert len(raw_response["choices"]) == 3
         assert raw_response["choices"][0]["message"]["content"] == "Option A"
@@ -652,6 +658,7 @@ class TestAuditedLLMClient:
 
         choice = Mock()
         choice.message = message
+        choice.finish_reason = "tool_calls"
 
         usage = Mock()
         usage.prompt_tokens = 50
@@ -681,7 +688,7 @@ class TestAuditedLLMClient:
 
         # Verify tool calls are preserved in raw_response
         call_kwargs = recorder.record_call.call_args[1]
-        raw_response = call_kwargs["response_data"]["raw_response"]
+        raw_response = call_kwargs["response_data"].to_dict()["raw_response"]
 
         assert raw_response["choices"][0]["finish_reason"] == "tool_calls"
         tool_calls = raw_response["choices"][0]["message"]["tool_calls"]
@@ -739,8 +746,8 @@ class TestAuditedLLMClient:
         recorder.record_call.assert_called_once()
         call_kwargs = recorder.record_call.call_args[1]
         assert call_kwargs["status"] == CallStatus.SUCCESS
-        assert call_kwargs["response_data"]["content"] == "Hello, I'm working!"
-        assert call_kwargs["response_data"]["usage"] == {}
+        assert call_kwargs["response_data"].to_dict()["content"] == "Hello, I'm working!"
+        assert call_kwargs["response_data"].to_dict()["usage"] == {}
 
 
 class TestBug4_6_SuccessPathOutsideTryExcept:
@@ -799,3 +806,275 @@ class TestBug4_6_SuccessPathOutsideTryExcept:
                 model="gpt-4",
                 messages=[{"role": "user", "content": "Hello"}],
             )
+
+
+class TestContentFabrication:
+    """Null content from LLM must raise, not fabricate empty string.
+
+    The OpenAI API returns content=None when the model refuses to respond
+    (content filtering). `content or ""` conflates None (refused) with ""
+    (legitimately empty), fabricating data in the audit trail.
+    """
+
+    @staticmethod
+    def _create_mock_recorder() -> Mock:
+        recorder = Mock()
+        recorder.allocate_call_index = Mock(return_value=0)
+        recorder.record_call = Mock()
+        return recorder
+
+    @staticmethod
+    def _create_client(recorder: Mock, openai_client: MagicMock) -> AuditedLLMClient:
+        return AuditedLLMClient(
+            recorder=recorder,
+            state_id="state_fab",
+            run_id="run_fab",
+            telemetry_emit=lambda event: None,
+            underlying_client=openai_client,
+        )
+
+    def test_null_content_raises_content_policy_error(self) -> None:
+        """content=None from LLM must raise ContentPolicyError, not fabricate ""."""
+        recorder = self._create_mock_recorder()
+
+        message = Mock()
+        message.content = None  # Content-filtered response
+
+        choice = Mock()
+        choice.message = message
+        choice.finish_reason = "content_filter"
+
+        usage = Mock()
+        usage.prompt_tokens = 10
+        usage.completion_tokens = 0
+
+        response = Mock()
+        response.choices = [choice]
+        response.model = "gpt-4"
+        response.usage = usage
+        response.model_dump = Mock(return_value={"id": "resp_null"})
+
+        openai_client = MagicMock()
+        openai_client.chat.completions.create.return_value = response
+
+        client = self._create_client(recorder, openai_client)
+
+        with pytest.raises(ContentPolicyError):
+            client.chat_completion(
+                model="gpt-4",
+                messages=[{"role": "user", "content": "Hello"}],
+            )
+
+    def test_null_content_records_call_before_raising(self) -> None:
+        """Null-content responses must be recorded in audit trail before raising.
+
+        The LLM call actually happened — the provider responded with content=None
+        (content-filtered). The audit trail must record this call so operators can
+        see why the call failed and there are no unexplained call-index gaps.
+        """
+        recorder = self._create_mock_recorder()
+
+        message = Mock()
+        message.content = None
+
+        choice = Mock()
+        choice.message = message
+        choice.finish_reason = "content_filter"
+
+        usage = Mock()
+        usage.prompt_tokens = 10
+        usage.completion_tokens = 0
+
+        response = Mock()
+        response.choices = [choice]
+        response.model = "gpt-4"
+        response.usage = usage
+        response.model_dump = Mock(return_value={"id": "resp_null", "choices": [{"finish_reason": "content_filter"}]})
+
+        openai_client = MagicMock()
+        openai_client.chat.completions.create.return_value = response
+
+        client = self._create_client(recorder, openai_client)
+
+        with pytest.raises(ContentPolicyError):
+            client.chat_completion(
+                model="gpt-4",
+                messages=[{"role": "user", "content": "Hello"}],
+            )
+
+        # The call MUST be recorded despite raising ContentPolicyError
+        recorder.record_call.assert_called_once()
+        call_kwargs = recorder.record_call.call_args[1]
+        assert call_kwargs["status"] == CallStatus.ERROR
+        assert call_kwargs["state_id"] == "state_fab"
+        assert call_kwargs["call_type"] == CallType.LLM
+        # Error should describe the content policy issue
+        assert call_kwargs["error"] is not None
+        assert "null content" in call_kwargs["error"].message.lower() or "content-filtered" in call_kwargs["error"].message.lower()
+        assert call_kwargs["error"].retryable is False
+        # Response data should still be recorded for audit completeness
+        assert call_kwargs["response_data"] is not None
+
+    def test_null_content_emits_telemetry_before_raising(self) -> None:
+        """Null-content responses must emit ExternalCallCompleted telemetry.
+
+        The audit trail records the call, but telemetry dashboards also need
+        the event to avoid undercounting content-filtered failures.
+        """
+        recorder = self._create_mock_recorder()
+
+        message = Mock()
+        message.content = None
+
+        choice = Mock()
+        choice.message = message
+        choice.finish_reason = "content_filter"
+
+        usage = Mock()
+        usage.prompt_tokens = 10
+        usage.completion_tokens = 0
+
+        response = Mock()
+        response.choices = [choice]
+        response.model = "gpt-4"
+        response.usage = usage
+        response.model_dump = Mock(return_value={"id": "resp_null", "choices": [{"finish_reason": "content_filter"}]})
+
+        openai_client = MagicMock()
+        openai_client.chat.completions.create.return_value = response
+
+        emitted_events: list[ExternalCallCompleted] = []
+        client = AuditedLLMClient(
+            recorder=recorder,
+            state_id="state_fab",
+            run_id="run_fab",
+            telemetry_emit=lambda event: emitted_events.append(event),
+            underlying_client=openai_client,
+        )
+
+        with pytest.raises(ContentPolicyError):
+            client.chat_completion(
+                model="gpt-4",
+                messages=[{"role": "user", "content": "Hello"}],
+            )
+
+        assert len(emitted_events) == 1
+        event = emitted_events[0]
+        assert event.status == CallStatus.ERROR
+        assert event.call_type == CallType.LLM
+        assert event.state_id == "state_fab"
+        assert event.run_id == "run_fab"
+        # Unlike SDK errors, null-content has response data (HTTP call succeeded)
+        assert event.response_hash is not None
+        assert event.response_payload is not None
+        assert event.token_usage is not None
+
+    def test_empty_choices_raises_error(self) -> None:
+        """Empty choices array must raise, not IndexError."""
+        recorder = self._create_mock_recorder()
+
+        response = Mock()
+        response.choices = []  # No choices at all
+        response.model = "gpt-4"
+        response.usage = Mock(prompt_tokens=10, completion_tokens=0)
+        response.model_dump = Mock(return_value={"id": "resp_empty"})
+
+        openai_client = MagicMock()
+        openai_client.chat.completions.create.return_value = response
+
+        client = self._create_client(recorder, openai_client)
+
+        with pytest.raises(LLMClientError, match="empty choices"):
+            client.chat_completion(
+                model="gpt-4",
+                messages=[{"role": "user", "content": "Hello"}],
+            )
+
+    def test_empty_string_content_is_valid(self) -> None:
+        """content="" is a legitimate response — must NOT raise."""
+        recorder = self._create_mock_recorder()
+
+        message = Mock()
+        message.content = ""  # Legitimately empty, not None
+
+        choice = Mock()
+        choice.message = message
+
+        usage = Mock()
+        usage.prompt_tokens = 10
+        usage.completion_tokens = 0
+
+        response = Mock()
+        response.choices = [choice]
+        response.model = "gpt-4"
+        response.usage = usage
+        response.model_dump = Mock(return_value={"id": "resp_empty_str"})
+
+        openai_client = MagicMock()
+        openai_client.chat.completions.create.return_value = response
+
+        client = self._create_client(recorder, openai_client)
+
+        result = client.chat_completion(
+            model="gpt-4",
+            messages=[{"role": "user", "content": "Hello"}],
+        )
+        assert result.content == ""
+
+
+class TestModelDumpFailureRecordsCall:
+    """Regression: model_dump() failure must still record the LLM call.
+
+    Bug: If response.model_dump() raises during success-path processing,
+    record_call(SUCCESS) never fires and the audit trail has no evidence
+    that tokens were consumed.
+    """
+
+    @staticmethod
+    def _create_mock_recorder() -> Mock:
+        recorder = Mock()
+        recorder.allocate_call_index = Mock(return_value=0)
+        recorder.record_call = Mock()
+        return recorder
+
+    def test_model_dump_failure_records_error_call(self) -> None:
+        """When model_dump() raises, an ERROR call must be recorded."""
+        recorder = self._create_mock_recorder()
+
+        message = Mock()
+        message.content = "Hello!"
+
+        choice = Mock()
+        choice.message = message
+
+        usage = Mock()
+        usage.prompt_tokens = 10
+        usage.completion_tokens = 5
+
+        response = Mock()
+        response.choices = [choice]
+        response.model = "gpt-4"
+        response.usage = usage
+        response.model_dump = Mock(side_effect=TypeError("Unserializable field"))
+
+        openai_client = MagicMock()
+        openai_client.chat.completions.create.return_value = response
+
+        client = AuditedLLMClient(
+            recorder=recorder,
+            state_id="state_dump_fail",
+            run_id="run_dump_fail",
+            telemetry_emit=lambda event: None,
+            underlying_client=openai_client,
+        )
+
+        with pytest.raises(LLMClientError, match="serialize"):
+            client.chat_completion(
+                model="gpt-4",
+                messages=[{"role": "user", "content": "Hello"}],
+            )
+
+        # The critical assertion: record_call was invoked despite the failure
+        recorder.record_call.assert_called_once()
+        call_kwargs = recorder.record_call.call_args
+        assert call_kwargs.kwargs["status"] == CallStatus.ERROR

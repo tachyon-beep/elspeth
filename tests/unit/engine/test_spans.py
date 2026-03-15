@@ -1,7 +1,14 @@
 # tests/unit/engine/test_spans.py
 """Tests for OpenTelemetry span factory."""
 
+from __future__ import annotations
+
+from typing import TYPE_CHECKING, Any
+
 import pytest
+
+if TYPE_CHECKING:
+    from elspeth.engine.spans import SpanFactory
 
 
 class TestSpanFactory:
@@ -837,3 +844,86 @@ class TestNodeIdOnSpans:
         attrs = dict(spans[0].attributes or {})
         # node.id should NOT be present when not provided
         assert "node.id" not in attrs
+
+
+class TestTruthinessChecks:
+    """Bug T3: Truthiness checks on span optional parameters.
+
+    `if node_id:` is wrong because it also excludes empty string "".
+    Should be `if node_id is not None:` — only exclude None, not falsy values.
+    """
+
+    def _make_factory(self) -> tuple[SpanFactory, Any]:
+        """Create a SpanFactory with in-memory exporter for attribute inspection."""
+        pytest.importorskip("opentelemetry")
+        from opentelemetry.sdk.trace import TracerProvider
+        from opentelemetry.sdk.trace.export.in_memory_span_exporter import InMemorySpanExporter
+
+        from elspeth.engine.spans import SpanFactory
+
+        exporter = InMemorySpanExporter()
+        provider = TracerProvider()
+        provider.add_span_processor(
+            __import__("opentelemetry.sdk.trace.export", fromlist=["SimpleSpanProcessor"]).SimpleSpanProcessor(exporter)
+        )
+        tracer = provider.get_tracer("test")
+        factory = SpanFactory(tracer=tracer)
+        return factory, exporter
+
+    def test_transform_span_empty_string_node_id_sets_attribute(self) -> None:
+        """Empty string node_id should still set the attribute (not be treated as None)."""
+        factory, exporter = self._make_factory()
+
+        with factory.transform_span("my_transform", node_id="", token_id="t-1"):
+            pass
+
+        spans = exporter.get_finished_spans()
+        attrs = dict(spans[0].attributes or {})
+        # Before fix: `if node_id:` skips "" → attribute missing
+        # After fix: `if node_id is not None:` sets "" → attribute present
+        assert "node.id" in attrs
+        assert attrs["node.id"] == ""
+
+    def test_transform_span_empty_string_input_hash_sets_attribute(self) -> None:
+        """Empty string input_hash should still set the attribute."""
+        factory, exporter = self._make_factory()
+
+        with factory.transform_span("my_transform", input_hash=""):
+            pass
+
+        spans = exporter.get_finished_spans()
+        attrs = dict(spans[0].attributes or {})
+        assert "input.hash" in attrs
+
+    def test_gate_span_empty_string_node_id_sets_attribute(self) -> None:
+        """Gate span: empty string node_id should set attribute."""
+        factory, exporter = self._make_factory()
+
+        with factory.gate_span("my_gate", node_id=""):
+            pass
+
+        spans = exporter.get_finished_spans()
+        attrs = dict(spans[0].attributes or {})
+        assert "node.id" in attrs
+
+    def test_aggregation_span_empty_string_batch_id_sets_attribute(self) -> None:
+        """Aggregation span: empty string batch_id should set attribute."""
+        factory, exporter = self._make_factory()
+
+        with factory.aggregation_span("my_agg", batch_id=""):
+            pass
+
+        spans = exporter.get_finished_spans()
+        attrs = dict(spans[0].attributes or {})
+        assert "batch.id" in attrs
+
+    def test_sink_span_empty_string_node_id_sets_attribute(self) -> None:
+        """Sink span: empty string node_id should set attribute."""
+        factory, exporter = self._make_factory()
+
+        with factory.sink_span("my_sink", node_id=""):
+            pass
+
+        spans = exporter.get_finished_spans()
+        attrs = dict(spans[0].attributes or {})
+        assert "node.id" in attrs

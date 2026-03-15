@@ -39,15 +39,16 @@ from hypothesis import strategies as st
 from elspeth.contracts import Determinism, PluginSchema, TransformResult
 from elspeth.contracts.schema_contract import PipelineRow
 from elspeth.testing import make_pipeline_row
+from tests.fixtures.factories import make_context
 
 if TYPE_CHECKING:
+    from elspeth.contracts import TransformProtocol
     from elspeth.contracts.plugin_context import PluginContext
-    from elspeth.plugins.protocols import TransformProtocol
 
 
 def _is_batch_transform(transform: TransformProtocol) -> bool:
     """Return True when transform uses BatchTransformMixin and lacks process()."""
-    from elspeth.plugins.batching.mixin import BatchTransformMixin
+    from elspeth.plugins.infrastructure.batching.mixin import BatchTransformMixin
 
     return isinstance(transform, BatchTransformMixin)
 
@@ -82,14 +83,7 @@ class TransformContractTestBase(ABC):
     @pytest.fixture
     def ctx(self) -> PluginContext:
         """Provide a PluginContext for testing."""
-        from elspeth.contracts.plugin_context import PluginContext
-
-        return PluginContext(
-            run_id="test-run-001",
-            config={},
-            node_id="test-transform",
-            plugin_name="test",
-        )
+        return make_context(run_id="test-run-001", node_id="test-transform")
 
     # =========================================================================
     # Protocol Attribute Contracts

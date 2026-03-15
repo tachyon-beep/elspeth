@@ -2,7 +2,7 @@
 
 import pytest
 
-from elspeth.plugins.base import BaseSink
+from elspeth.plugins.infrastructure.base import BaseSink
 
 
 def test_base_sink_supports_resume_default_false():
@@ -15,7 +15,7 @@ def test_base_sink_configure_for_resume_raises_not_implemented():
 
     class TestSink(BaseSink):
         name = "test"
-        input_schema = None  # type: ignore
+        input_schema = None
 
         def write(self, rows, ctx):
             pass

@@ -53,12 +53,11 @@ CONTRACTS_CONFIG_ITEMS = {
     "RuntimeConcurrencyConfig",
     "RuntimeRateLimitConfig",
     "RuntimeRetryConfig",
+    "RuntimeServiceRateLimit",
     "RuntimeTelemetryConfig",
     # Default registries
     "INTERNAL_DEFAULTS",
     "POLICY_DEFAULTS",
-    "get_internal_default",
-    "get_policy_default",
     # Alignment documentation
     "EXEMPT_SETTINGS",
     "FIELD_MAPPINGS",

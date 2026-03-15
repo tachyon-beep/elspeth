@@ -1,4 +1,3 @@
-# src/elspeth/mcp/analyzers/reports.py
 """Computed analysis report functions for the Landscape audit database.
 
 Functions: get_run_summary, get_dag_structure, get_performance_report,
@@ -321,7 +320,7 @@ def get_performance_report(db: LandscapeDB, recorder: LandscapeRecorder, run_id:
     bottlenecks = [n for n in node_performance if n["pct_of_total"] > 20]
 
     # Identify high-variance nodes (max > 5x avg)
-    high_variance = [n for n in node_performance if n["avg_ms"] and n["max_ms"] and n["max_ms"] > 5 * n["avg_ms"]]
+    high_variance = [n for n in node_performance if n["avg_ms"] is not None and n["max_ms"] is not None and n["max_ms"] > 5 * n["avg_ms"]]
 
     return {
         "run_id": run_id,
@@ -400,24 +399,24 @@ def get_error_analysis(db: LandscapeDB, recorder: LandscapeRecorder, run_id: str
 
     validation_summary = [
         {
-            "source_plugin": row.plugin_name or "unknown",
+            "source_plugin": row.plugin_name,
             "schema_mode": row.schema_mode,
             "count": row.count,
         }
         for row in val_rows
     ]
 
-    transform_summary = [{"transform_plugin": row.plugin_name or "unknown", "count": row.count} for row in trans_rows]
+    transform_summary = [{"transform_plugin": row.plugin_name, "count": row.count} for row in trans_rows]
 
     return {
         "run_id": run_id,
-        "validation_errors": {  # type: ignore[typeddict-item]  # structurally correct nested dict literals
+        "validation_errors": {
             "total": sum(r["count"] for r in validation_summary),
             "by_source": validation_summary,  # type: ignore[typeddict-item]
             "sample_data": [json.loads(r[0]) if r[0] else None for r in sample_val],
         },
-        "transform_errors": {  # type: ignore[typeddict-item]  # structurally correct nested dict literals
-            "total": sum(r["count"] for r in transform_summary),  # type: ignore[misc]  # SA Row attr types
+        "transform_errors": {
+            "total": sum(r["count"] for r in transform_summary),
             "by_transform": transform_summary,  # type: ignore[typeddict-item]
             "sample_details": [json.loads(r[0]) if r[0] else None for r in sample_trans],
         },
@@ -540,7 +539,7 @@ def get_llm_usage_report(db: LandscapeDB, recorder: LandscapeRecorder, run_id: s
         stats = llm_by_plugin[plugin]
         call_count: int = row.count  # type: ignore[assignment]  # SA Row attribute from COUNT() aggregate; typed as Any
         stats["total_calls"] += call_count
-        if row.status == CallStatus.SUCCESS.value:
+        if row.status == CallStatus.SUCCESS:
             stats["successful"] += call_count
         else:
             stats["failed"] += call_count

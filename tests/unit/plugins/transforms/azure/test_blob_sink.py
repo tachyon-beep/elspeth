@@ -9,8 +9,9 @@ import pytest
 
 from elspeth.contracts import ArtifactDescriptor
 from elspeth.contracts.plugin_context import PluginContext
-from elspeth.plugins.azure.blob_sink import AzureBlobSink
-from elspeth.plugins.config_base import PluginConfigError
+from elspeth.plugins.infrastructure.config_base import PluginConfigError
+from elspeth.plugins.sinks.azure_blob_sink import AzureBlobSink
+from tests.fixtures.factories import make_operation_context
 
 # Dynamic schema config for tests - DataPluginConfig requires schema
 DYNAMIC_SCHEMA = {"mode": "observed"}
@@ -31,14 +32,20 @@ TEST_CLIENT_SECRET = "test-secret-value"
 
 @pytest.fixture
 def ctx() -> PluginContext:
-    """Create a minimal plugin context."""
-    return PluginContext(run_id="test-run-123", config={})
+    """Create a plugin context with proper operation records for Azure blob audit trail."""
+    return make_operation_context(
+        run_id="test-run-123",
+        node_id="sink",
+        plugin_name="azure_blob_sink",
+        node_type="SINK",
+        operation_type="sink_write",
+    )
 
 
 @pytest.fixture
 def mock_container_client() -> Generator[MagicMock, None, None]:
     """Create a mock container client for testing."""
-    with patch("elspeth.plugins.azure.blob_sink.AzureBlobSink._get_container_client") as mock:
+    with patch("elspeth.plugins.sinks.azure_blob_sink.AzureBlobSink._get_container_client") as mock:
         yield mock
 
 
@@ -59,8 +66,7 @@ def make_config(
     format: str = "csv",
     overwrite: bool = True,
     csv_options: dict[str, Any] | None = None,
-    display_headers: dict[str, str] | None = None,
-    restore_source_headers: bool = False,
+    headers: str | dict[str, str] | None = None,
     schema: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Helper to create config dicts with defaults.
@@ -92,10 +98,8 @@ def make_config(
 
     if csv_options:
         config["csv_options"] = csv_options
-    if display_headers is not None:
-        config["display_headers"] = display_headers
-    if restore_source_headers:
-        config["restore_source_headers"] = True
+    if headers is not None:
+        config["headers"] = headers
     return config
 
 
@@ -160,6 +164,15 @@ class TestAzureBlobSinkConfigValidation:
         with pytest.raises(PluginConfigError, match="blob_path cannot be empty"):
             AzureBlobSink(make_config(blob_path=""))
 
+    def test_invalid_blob_path_template_raises_error(self) -> None:
+        """Invalid Jinja2 template in blob_path raises ValueError at init time.
+
+        Structural template errors must stop the run at setup, not be deferred
+        to the first write() call (Pipeline Templates as Tier 2 Data pattern).
+        """
+        with pytest.raises(ValueError, match="Invalid blob_path template"):
+            AzureBlobSink(make_config(blob_path="results/{% if unclosed %}/output.csv"))
+
     def test_missing_schema_raises_error(self) -> None:
         """Missing schema raises PluginConfigError."""
         with pytest.raises(PluginConfigError, match=r"schema_config[\s\S]*Field required"):
@@ -181,10 +194,17 @@ class TestAzureBlobSinkConfigValidation:
                 }
             )
 
-    def test_display_headers_and_restore_source_headers_mutually_exclusive(self) -> None:
-        """display_headers and restore_source_headers cannot both be set."""
-        with pytest.raises(PluginConfigError, match="Cannot use both display_headers and restore_source_headers"):
-            AzureBlobSink(make_config(display_headers={"id": "ID"}, restore_source_headers=True))
+    def test_old_config_keys_rejected(self) -> None:
+        """Old restore_source_headers and display_headers keys are rejected by extra=forbid."""
+        config = make_config()
+        config["restore_source_headers"] = True
+        with pytest.raises(PluginConfigError):
+            AzureBlobSink(config)
+
+        config2 = make_config()
+        config2["display_headers"] = {"id": "ID"}
+        with pytest.raises(PluginConfigError):
+            AzureBlobSink(config2)
 
 
 class TestAzureBlobSinkWriteCSV:
@@ -261,7 +281,7 @@ class TestAzureBlobSinkWriteCSV:
         mock_container.get_blob_client.return_value = mock_blob_client
         mock_container_client.return_value = mock_container
 
-        sink = AzureBlobSink(make_config(display_headers={"id": "ID", "name": "Full Name"}))
+        sink = AzureBlobSink(make_config(headers={"id": "ID", "name": "Full Name"}))
         rows = [{"id": 1, "name": "alice"}]
 
         sink.write(rows, ctx)
@@ -272,13 +292,13 @@ class TestAzureBlobSinkWriteCSV:
         assert "1,alice" in lines[1]
 
     def test_csv_restore_source_headers(self, mock_container_client: MagicMock, ctx: PluginContext) -> None:
-        """restore_source_headers uses field resolution mapping for headers."""
+        """headers='original' uses field resolution mapping for headers."""
         mock_blob_client = MagicMock()
         mock_container = MagicMock()
         mock_container.get_blob_client.return_value = mock_blob_client
         mock_container_client.return_value = mock_container
 
-        sink = AzureBlobSink(make_config(restore_source_headers=True))
+        sink = AzureBlobSink(make_config(headers="original"))
         sink.set_resume_field_resolution({"User ID": "user_id", "Amount $": "amount"})
         rows = [{"user_id": "1", "amount": "100"}]
 
@@ -370,7 +390,7 @@ class TestAzureBlobSinkWriteJSON:
         mock_container.get_blob_client.return_value = mock_blob_client
         mock_container_client.return_value = mock_container
 
-        sink = AzureBlobSink(make_config(format="json", display_headers={"id": "ID", "name": "Full Name"}))
+        sink = AzureBlobSink(make_config(format="json", headers={"id": "ID", "name": "Full Name"}))
         rows = [
             {"id": 1, "name": "alice"},
         ]
@@ -441,7 +461,7 @@ class TestAzureBlobSinkWriteJSONL:
         mock_container.get_blob_client.return_value = mock_blob_client
         mock_container_client.return_value = mock_container
 
-        sink = AzureBlobSink(make_config(format="jsonl", display_headers={"id": "ID"}))
+        sink = AzureBlobSink(make_config(format="jsonl", headers={"id": "ID"}))
         rows = [
             {"id": 1, "name": "alice"},
         ]
@@ -1184,3 +1204,80 @@ class TestAzureBlobSinkSchemaValidation:
         assert set(header_fields) == {"id", "name"}, "Fixed mode should only include declared fields"
 
         sink.close()
+
+
+class TestAzureBlobSinkDisplayHeaders:
+    """Tests for display header integration via shared module (B1, W3)."""
+
+    def test_contract_priority_over_landscape(self, mock_container_client: MagicMock, ctx: PluginContext) -> None:
+        """Contract-based headers take priority over Landscape field resolution.
+
+        B1 review finding: When headers='original' and ctx.contract provides
+        field metadata, the contract's original names must appear in output —
+        NOT the Landscape fallback mapping.
+        """
+        from elspeth.contracts.schema_contract import FieldContract, SchemaContract
+
+        mock_blob_client = MagicMock()
+        mock_container = MagicMock()
+        mock_container.get_blob_client.return_value = mock_blob_client
+        mock_container_client.return_value = mock_container
+
+        sink = AzureBlobSink(make_config(format="jsonl", headers="original"))
+
+        # Set up a contract with original names
+        contract = SchemaContract(
+            mode="observed",
+            fields=[
+                FieldContract(
+                    normalized_name="user_id",
+                    original_name="User ID",
+                    python_type=str,
+                    required=True,
+                    source="declared",
+                ),
+                FieldContract(
+                    normalized_name="amount",
+                    original_name="Amount $",
+                    python_type=float,
+                    required=True,
+                    source="declared",
+                ),
+            ],
+        )
+        # Inject contract via context (simulates orchestrator setting it)
+        ctx.contract = contract
+
+        rows = [{"user_id": "alice", "amount": 99.5}]
+        sink.write(rows, ctx)
+
+        uploaded_content = mock_blob_client.upload_blob.call_args[0][0]
+        import json
+
+        parsed = json.loads(uploaded_content.decode().strip())
+        # Assert output uses CONTRACT original names, not normalized
+        assert parsed == {"User ID": "alice", "Amount $": 99.5}
+
+    def test_resume_field_resolution_maps_headers(self, mock_container_client: MagicMock, ctx: PluginContext) -> None:
+        """set_resume_field_resolution provides display headers for resume path.
+
+        W3 review finding: Resume path injects field resolution before
+        validate_output_target(). Verify that output uses the resolved names.
+        """
+        mock_blob_client = MagicMock()
+        mock_container = MagicMock()
+        mock_container.get_blob_client.return_value = mock_blob_client
+        mock_container_client.return_value = mock_container
+
+        sink = AzureBlobSink(make_config(format="csv", headers="original"))
+        # CLI resume injects field resolution mapping (original → normalized)
+        sink.set_resume_field_resolution({"User ID": "user_id", "Total $": "total"})
+
+        rows = [{"user_id": "alice", "total": 100}]
+        sink.write(rows, ctx)
+
+        uploaded_content = mock_blob_client.upload_blob.call_args[0][0]
+        lines = uploaded_content.decode().strip().split("\n")
+        # Header row should use original names from the resolution mapping
+        assert "User ID" in lines[0]
+        assert "Total $" in lines[0]

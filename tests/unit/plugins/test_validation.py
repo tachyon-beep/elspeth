@@ -2,7 +2,7 @@
 
 import pytest
 
-from elspeth.plugins.validation import PluginConfigValidator
+from elspeth.plugins.infrastructure.validation import PluginConfigValidator
 
 
 def test_validator_accepts_valid_source_config():
@@ -356,3 +356,29 @@ def test_validator_returns_structured_error_for_invalid_plugin_schema(
     assert errors[0].field == "schema"
     assert errors[0].value == {"mode": "bad"}
     assert "mode" in errors[0].message.lower()
+
+
+def test_validator_returns_structured_error_for_model_level_validation():
+    """Model-level @model_validator errors use __model__ field, not empty string.
+
+    Pydantic emits loc=() for model-level validators (e.g., cross-field
+    conflicts like columns + normalize_fields). The validator must convert
+    this to a non-empty field name so ValidationError.__post_init__ doesn't
+    reject it.
+    """
+    validator = PluginConfigValidator()
+
+    config = {
+        "path": "/tmp/test.csv",
+        "columns": ["a", "b"],
+        "normalize_fields": True,
+        "on_validation_failure": "quarantine",
+        "schema": {"mode": "observed"},
+    }
+
+    errors = validator.validate_source_config("csv", config)
+
+    assert len(errors) > 0
+    model_errors = [e for e in errors if e.field == "__model__"]
+    assert len(model_errors) == 1
+    assert "normalize_fields" in model_errors[0].message

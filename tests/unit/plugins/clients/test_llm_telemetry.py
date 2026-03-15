@@ -11,7 +11,7 @@ import pytest
 from elspeth.contracts import CallStatus, CallType, TokenUsage
 from elspeth.contracts.call_data import LLMCallRequest, LLMCallResponse
 from elspeth.contracts.events import ExternalCallCompleted
-from elspeth.plugins.clients.llm import (
+from elspeth.plugins.infrastructure.clients.llm import (
     AuditedLLMClient,
     LLMClientError,
 )
@@ -111,7 +111,7 @@ class TestLLMClientTelemetry:
         # Typed DTO payloads are included for observability
         assert event.request_payload is not None
         assert isinstance(event.request_payload, LLMCallRequest)
-        assert event.request_payload.messages == [{"role": "user", "content": "Hello"}]
+        assert event.request_payload.to_dict()["messages"] == [{"role": "user", "content": "Hello"}]
         assert event.request_payload.model == "gpt-4"
         assert event.response_payload is not None
         assert isinstance(event.response_payload, LLMCallResponse)
@@ -163,7 +163,7 @@ class TestLLMClientTelemetry:
         # Typed request DTO is still included on error for debugging
         assert event.request_payload is not None
         assert isinstance(event.request_payload, LLMCallRequest)
-        assert event.request_payload.messages == [{"role": "user", "content": "Hello"}]
+        assert event.request_payload.to_dict()["messages"] == [{"role": "user", "content": "Hello"}]
         assert event.response_payload is None  # No response on error
         assert event.token_usage is None
 

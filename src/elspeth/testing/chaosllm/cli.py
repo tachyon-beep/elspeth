@@ -1,4 +1,3 @@
-# src/elspeth/testing/chaosllm/cli.py
 """CLI for ChaosLLM fake LLM server.
 
 Provides command-line interface for starting and managing the ChaosLLM
@@ -49,11 +48,11 @@ def _version_callback(value: bool) -> None:
     """Print version and exit."""
     if value:
         # Use elspeth version
-        try:
-            from elspeth import __version__
+        from importlib.metadata import PackageNotFoundError, version
 
-            typer.echo(f"chaosllm (elspeth {__version__})")
-        except ImportError:
+        try:
+            typer.echo(f"chaosllm (elspeth {version('elspeth')})")
+        except PackageNotFoundError:
             typer.echo("chaosllm (version unknown)")
         raise typer.Exit()
 
@@ -449,7 +448,7 @@ def show_config(
     except FileNotFoundError as e:
         typer.secho(f"Error: {e}", fg=typer.colors.RED, err=True)
         raise typer.Exit(1) from e
-    except Exception as e:
+    except (pydantic.ValidationError, yaml.YAMLError, ValueError) as e:
         typer.secho(f"Configuration error: {e}", fg=typer.colors.RED, err=True)
         raise typer.Exit(1) from e
 
@@ -458,14 +457,7 @@ def show_config(
     if output_format == "json":
         typer.echo(json.dumps(config_dict, indent=2))
     else:
-        # YAML output
-        try:
-            import yaml
-
-            typer.echo(yaml.dump(config_dict, default_flow_style=False, sort_keys=False))
-        except ImportError:
-            # Fall back to JSON if yaml not available
-            typer.echo(json.dumps(config_dict, indent=2))
+        typer.echo(yaml.dump(config_dict, default_flow_style=False, sort_keys=False))
 
 
 # MCP server CLI - separate entry point
@@ -538,12 +530,12 @@ def mcp_main(
     typer.secho(f"Starting ChaosLLM MCP server with database: {database}", fg=typer.colors.GREEN)
 
     # Import and start the MCP server
-    # The chaosllm_mcp module is implemented in a separate task
     try:
-        # Type ignore because module may not exist yet during development
-        import elspeth.testing.chaosllm_mcp.server as mcp_server  # type: ignore[import-not-found]  # conditional import: module may not be built yet
+        import asyncio
 
-        mcp_server.serve(database)  # type: ignore[attr-defined]  # serve() defined at module level, not in stubs
+        from elspeth.testing.chaosllm_mcp.server import run_server
+
+        asyncio.run(run_server(database))
     except ImportError as e:
         typer.secho(
             f"Error: MCP server not available. The chaosllm_mcp module may not be installed yet.\n{e}",

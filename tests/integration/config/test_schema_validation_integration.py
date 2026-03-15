@@ -15,7 +15,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from elspeth.plugins.manager import PluginManager
+    from elspeth.plugins.infrastructure.manager import PluginManager
 
 
 def test_schema_validation_end_to_end(tmp_path: Path, plugin_manager: PluginManager) -> None:
@@ -84,11 +84,11 @@ def test_schema_validation_end_to_end(tmp_path: Path, plugin_manager: PluginMana
     plugins = instantiate_plugins_from_config(config)
 
     graph = ExecutionGraph.from_plugin_instances(
-        source=plugins["source"],
-        source_settings=plugins["source_settings"],
-        transforms=plugins["transforms"],
-        sinks=plugins["sinks"],
-        aggregations=plugins["aggregations"],
+        source=plugins.source,
+        source_settings=plugins.source_settings,
+        transforms=plugins.transforms,
+        sinks=plugins.sinks,
+        aggregations=plugins.aggregations,
         gates=list(config.gates),
     )
 
@@ -111,10 +111,10 @@ def test_schema_validation_end_to_end(tmp_path: Path, plugin_manager: PluginMana
     transform_node = transform_nodes[0]
     sink_node = sink_nodes[0]
 
-    assert hasattr(source_node, "output_schema"), "Source node should have output_schema"
-    assert hasattr(transform_node, "input_schema"), "Transform node should have input_schema"
-    assert hasattr(transform_node, "output_schema"), "Transform node should have output_schema"
-    assert hasattr(sink_node, "input_schema"), "Sink node should have input_schema"
+    assert source_node.output_schema is not None, "Source node should have output_schema"
+    assert transform_node.input_schema is not None, "Transform node should have input_schema"
+    assert transform_node.output_schema is not None, "Transform node should have output_schema"
+    assert sink_node.input_schema is not None, "Sink node should have input_schema"
 
 
 def test_static_schema_validation(plugin_manager: PluginManager) -> None:
@@ -133,10 +133,10 @@ def test_static_schema_validation(plugin_manager: PluginManager) -> None:
     from typing import Any
 
     from elspeth.contracts import ArtifactDescriptor, PluginSchema, SourceRow
+    from elspeth.contracts.schema_contract import PipelineRow
     from elspeth.core.config import SourceSettings
     from elspeth.core.dag import ExecutionGraph
-    from elspeth.plugins.results import TransformResult
-    from elspeth.testing import make_pipeline_row
+    from elspeth.plugins.infrastructure.results import TransformResult
     from tests.fixtures.base_classes import (
         _TestSinkBase,
         _TestSourceBase,
@@ -178,8 +178,8 @@ def test_static_schema_validation(plugin_manager: PluginManager) -> None:
         output_schema = StaticSchema  # Class-level static schema
         on_success = "output"  # Terminal transform routes to output sink
 
-        def process(self, row: dict[str, Any], ctx: Any) -> TransformResult:
-            return TransformResult.success(make_pipeline_row(row), success_reason={"action": "passthrough"})
+        def process(self, row: PipelineRow, ctx: Any) -> TransformResult:
+            return TransformResult.success(row, success_reason={"action": "passthrough"})
 
     class StaticSchemaSink(_TestSinkBase):
         """Sink with static class-level input_schema."""

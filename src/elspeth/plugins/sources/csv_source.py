@@ -1,4 +1,3 @@
-# src/elspeth/plugins/sources/csv_source.py
 """CSV source plugin for ELSPETH.
 
 Loads rows from CSV files using csv.reader for proper multiline quoted field support.
@@ -7,19 +6,20 @@ IMPORTANT: Sources use allow_coercion=True to normalize external data.
 This is the ONLY place in the pipeline where coercion is allowed.
 """
 
+import codecs
 import csv
-from collections.abc import Iterator
+from collections.abc import Iterator, Mapping
 from typing import Any
 
-from pydantic import Field, ValidationError
+from pydantic import Field, ValidationError, field_validator
 
 from elspeth.contracts import PluginSchema, SourceRow
+from elspeth.contracts.contexts import SourceContext
 from elspeth.contracts.contract_builder import ContractBuilder
-from elspeth.contracts.plugin_context import PluginContext
 from elspeth.contracts.schema_contract_factory import create_contract_from_config
-from elspeth.plugins.base import BaseSource
-from elspeth.plugins.config_base import TabularSourceDataConfig
-from elspeth.plugins.schema_factory import create_schema_from_config
+from elspeth.plugins.infrastructure.base import BaseSource
+from elspeth.plugins.infrastructure.config_base import TabularSourceDataConfig
+from elspeth.plugins.infrastructure.schema_factory import create_schema_from_config
 from elspeth.plugins.sources.field_normalization import FieldResolution, resolve_field_names
 
 
@@ -34,6 +34,22 @@ class CSVSourceConfig(TabularSourceDataConfig):
     delimiter: str = ","
     encoding: str = "utf-8"
     skip_rows: int = Field(default=0, ge=0)
+
+    @field_validator("delimiter")
+    @classmethod
+    def _validate_delimiter(cls, v: str) -> str:
+        if len(v) != 1:
+            raise ValueError(f"delimiter must be a single character, got {v!r}")
+        return v
+
+    @field_validator("encoding")
+    @classmethod
+    def _validate_encoding(cls, v: str) -> str:
+        try:
+            codecs.lookup(v)
+        except LookupError as exc:
+            raise ValueError(f"unknown encoding: {v!r}") from exc
+        return v
 
 
 class CSVSource(BaseSource):
@@ -102,7 +118,7 @@ class CSVSource(BaseSource):
         # Contract creation deferred until load() when field_resolution is known
         self._contract_builder: ContractBuilder | None = None
 
-    def load(self, ctx: PluginContext) -> Iterator[SourceRow]:
+    def load(self, ctx: SourceContext) -> Iterator[SourceRow]:
         """Load rows from CSV file with optional field normalization.
 
         Uses csv.reader directly on file handle to properly support
@@ -156,11 +172,13 @@ class CSVSource(BaseSource):
         except UnicodeDecodeError as e:
             # Decode failure while reading rows — Tier 3 boundary.
             # Record parse-level error and stop (remaining rows may be corrupt).
-            physical_line = getattr(f, "lineno", None) or "unknown"
+            # File-level decode errors occur before CSV parsing — no meaningful
+            # line number exists. Don't fabricate "unknown" or use dead getattr
+            # (file objects don't have lineno; csv.reader does, but it's not
+            # in scope here).
             raw_row = {
                 "file_path": str(self._path),
                 "__encoding__": self._encoding,
-                "__line_number__": physical_line,
             }
             error_msg = f"CSV decode error (encoding '{self._encoding}'): {e}"
             ctx.record_validation_error(
@@ -178,7 +196,7 @@ class CSVSource(BaseSource):
         finally:
             f.close()
 
-    def _load_from_file(self, f: Any, ctx: PluginContext) -> Iterator[SourceRow]:
+    def _load_from_file(self, f: Any, ctx: SourceContext) -> Iterator[SourceRow]:
         """Load rows from an open CSV file handle.
 
         Extracted from load() to allow UnicodeDecodeError handling at the
@@ -327,6 +345,7 @@ class CSVSource(BaseSource):
 
         # Process data rows with manual iteration to catch csv.Error per row
         row_num = 0  # Logical row number (data rows only)
+        blank_line_count = 0
         while True:
             try:
                 # Try to read next row - csv.Error raised here for malformed rows
@@ -363,6 +382,7 @@ class CSVSource(BaseSource):
             # Skip empty rows (blank lines in CSV)
             # csv.reader returns [] for blank lines, which would cause field count mismatch
             if not values:
+                blank_line_count += 1
                 continue
 
             row_num += 1
@@ -452,6 +472,14 @@ class CSVSource(BaseSource):
                         destination=self._on_validation_failure,
                     )
 
+        if blank_line_count > 0:
+            ctx.record_validation_error(
+                row={"__blank_lines__": blank_line_count},
+                error=f"CSV contained {blank_line_count} blank line(s) that were skipped during processing",
+                schema_mode="parse",
+                destination="discard",
+            )
+
         # CRITICAL: Handle empty source case (all rows quarantined or no rows)
         # If no valid rows were processed, the contract is still unlocked.
         # Lock it now so downstream consumers have a consistent contract state.
@@ -462,7 +490,7 @@ class CSVSource(BaseSource):
         """Release resources (no-op for CSV source)."""
         pass
 
-    def get_field_resolution(self) -> tuple[dict[str, str], str | None] | None:
+    def get_field_resolution(self) -> tuple[Mapping[str, str], str | None] | None:
         """Return field resolution mapping for audit trail.
 
         Returns the mapping from original CSV headers to final field names,

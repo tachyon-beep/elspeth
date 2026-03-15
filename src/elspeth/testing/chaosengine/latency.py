@@ -1,4 +1,3 @@
-# src/elspeth/testing/chaosengine/latency.py
 """Latency simulation for chaos testing servers.
 
 The LatencySimulator adds configurable artificial delays to make fake

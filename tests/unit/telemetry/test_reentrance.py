@@ -11,6 +11,7 @@ Re-entrance scenarios to protect against:
 3. Recursive event chains (A triggers B triggers A)
 """
 
+from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Any
@@ -54,7 +55,7 @@ class ReentrantExporter:
         """Set the manager after construction (for circular reference)."""
         self._telemetry_manager = manager
 
-    def configure(self, config: dict[str, Any]) -> None:
+    def configure(self, config: Mapping[str, Any]) -> None:
         """No configuration needed for test exporter."""
         pass
 
@@ -102,7 +103,7 @@ class RecursiveEventExporter:
         """Set the manager after construction (for circular reference)."""
         self._telemetry_manager = manager
 
-    def configure(self, config: dict[str, Any]) -> None:
+    def configure(self, config: Mapping[str, Any]) -> None:
         """No configuration needed."""
         pass
 
@@ -452,7 +453,7 @@ class TestTelemetryManagerWithEventBus:
             def name(self) -> str:
                 return "eventbus_reentrant"
 
-            def configure(self, config: dict[str, Any]) -> None:
+            def configure(self, config: Mapping[str, Any]) -> None:
                 pass
 
             def export(self, event: TelemetryEvent) -> None:

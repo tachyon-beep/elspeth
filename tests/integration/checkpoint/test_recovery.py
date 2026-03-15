@@ -30,6 +30,7 @@ from elspeth.contracts.schema_contract import FieldContract, SchemaContract
 from elspeth.core.checkpoint import CheckpointManager
 from elspeth.core.dag import ExecutionGraph
 from elspeth.core.landscape.database import LandscapeDB
+from tests.fixtures.landscape import make_recorder
 
 
 def _create_test_schema_contract() -> tuple[str, str, SchemaContract]:
@@ -407,11 +408,10 @@ class TestCheckpointTopologyHashAtomicity:
         """
         from elspeth.contracts.schema import SchemaConfig
         from elspeth.core.canonical import compute_full_topology_hash
-        from elspeth.core.landscape.recorder import LandscapeRecorder
 
         checkpoint_mgr = test_env["checkpoint_manager"]
         db = test_env["db"]
-        recorder = LandscapeRecorder(db)
+        recorder = make_recorder(db)
 
         # Create initial graph with two nodes
         graph = ExecutionGraph()
@@ -496,11 +496,10 @@ class TestCheckpointTopologyHashAtomicity:
     def test_checkpoint_validates_graph_parameter(self, test_env: dict[str, Any]) -> None:
         """Verify create_checkpoint() rejects None graph (Bug #9 early fix)."""
         from elspeth.contracts.schema import SchemaConfig
-        from elspeth.core.landscape.recorder import LandscapeRecorder
 
         checkpoint_mgr = test_env["checkpoint_manager"]
         db = test_env["db"]
-        recorder = LandscapeRecorder(db)
+        recorder = make_recorder(db)
 
         # Create minimal run
         _cj, _ch, test_contract = _create_test_schema_contract()
@@ -535,17 +534,16 @@ class TestCheckpointTopologyHashAtomicity:
                 token_id=token.token_id,
                 node_id="test_node",
                 sequence_number=0,
-                graph=None,  # type: ignore
+                graph=None,
             )
 
     def test_checkpoint_validates_node_exists_in_graph(self, test_env: dict[str, Any]) -> None:
         """Verify create_checkpoint() rejects node_id not in graph (Bug #9 early fix)."""
         from elspeth.contracts.schema import SchemaConfig
-        from elspeth.core.landscape.recorder import LandscapeRecorder
 
         checkpoint_mgr = test_env["checkpoint_manager"]
         db = test_env["db"]
-        recorder = LandscapeRecorder(db)
+        recorder = make_recorder(db)
 
         # Create graph with one node
         graph = ExecutionGraph()
@@ -647,14 +645,13 @@ class TestResumeCheckpointCleanup:
         """
         from sqlalchemy import select
 
-        from elspeth.core.landscape.recorder import LandscapeRecorder
         from elspeth.core.landscape.schema import checkpoints_table, nodes_table
 
         db = test_env["db"]
         checkpoint_mgr = test_env["checkpoint_manager"]
 
         # Create run and required parent records
-        recorder = LandscapeRecorder(db)
+        recorder = make_recorder(db)
         _cj, _ch, test_contract = _create_test_schema_contract()
         run = recorder.begin_run(config={}, canonical_version="v1", schema_contract=test_contract)
 
@@ -745,13 +742,12 @@ class TestCanResumeErrorHandling:
         from sqlalchemy import update
 
         from elspeth.contracts.schema import SchemaConfig
-        from elspeth.core.landscape.recorder import LandscapeRecorder
         from elspeth.core.landscape.schema import checkpoints_table
 
         db = test_env["db"]
         checkpoint_mgr = test_env["checkpoint_manager"]
         recovery_mgr = test_env["recovery_manager"]
-        recorder = LandscapeRecorder(db)
+        recorder = make_recorder(db)
 
         # Create graph
         graph = ExecutionGraph()

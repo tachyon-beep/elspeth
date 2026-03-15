@@ -40,7 +40,7 @@ class TestPluginSchema:
             name: str
             value: int
 
-        schema = MySchema(name="test", value="42")  # type: ignore[arg-type]
+        schema = MySchema(name="test", value="42")
         assert schema.value == 42
         assert type(schema.value) is int
 
@@ -62,7 +62,7 @@ class TestPluginSchema:
         class MySchema(PluginSchema):
             name: str
 
-        schema = MySchema(name="test", unknown_field="value")  # type: ignore[call-arg]
+        schema = MySchema(name="test", unknown_field="value")
         assert schema.name == "test"
         field_names = set(MySchema.model_fields.keys())
         assert "unknown_field" not in field_names
@@ -164,7 +164,7 @@ class TestCheckCompatibilityAnnotated:
 
         result = check_compatibility(ProducerSchema, ConsumerSchema)
         assert result.compatible is True
-        assert result.type_mismatches == []
+        assert result.type_mismatches == ()
 
     def test_annotated_producer_plain_consumer(self) -> None:
         """Producer with Annotated[float, ...] compatible with consumer plain float."""

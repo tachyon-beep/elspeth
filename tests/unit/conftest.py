@@ -8,7 +8,7 @@ Provides shared in-memory fixtures (payload store, plugin manager).
 import pytest
 
 from elspeth.contracts.payload_store import PayloadStore
-from elspeth.plugins.manager import PluginManager
+from elspeth.plugins.infrastructure.manager import PluginManager
 from tests.fixtures.stores import MockPayloadStore
 
 

@@ -20,8 +20,6 @@ Fork terminology:
 
 from __future__ import annotations
 
-from typing import cast
-
 import pytest
 from hypothesis import given, settings
 from hypothesis import strategies as st
@@ -33,13 +31,13 @@ from elspeth.core.config import CoalesceSettings, GateSettings, SourceSettings
 from elspeth.core.dag import ExecutionGraph, GraphValidationError
 from elspeth.core.landscape import LandscapeDB
 from elspeth.engine.orchestrator import Orchestrator, PipelineConfig
-from elspeth.plugins.protocols import TransformProtocol
 from tests.fixtures.base_classes import (
     as_sink,
     as_source,
     as_transform,
 )
 from tests.fixtures.factories import wire_transforms
+from tests.fixtures.landscape import make_landscape_db
 from tests.fixtures.plugins import (
     CollectSink,
     ListSource,
@@ -200,7 +198,7 @@ def _build_production_graph(config: PipelineConfig) -> ExecutionGraph:
     source_on_success = "source_out" if transforms else sink_name
     wired_transforms = (
         wire_transforms(
-            cast(list[TransformProtocol], transforms),
+            transforms,
             source_connection=source_on_success,
             final_sink=sink_name,
         )
@@ -419,7 +417,7 @@ class TestForkJoinRuntimeBalance:
         """
         from elspeth.core.config import ElspethSettings
 
-        db = LandscapeDB.in_memory()
+        db = make_landscape_db()
         payload_store = MockPayloadStore()
 
         rows = [{"value": i} for i in range(n_rows)]
@@ -518,7 +516,7 @@ class TestForkJoinEdgeCases:
 
     def test_no_fork_no_fork_groups(self) -> None:
         """Pipeline without forks should have no fork groups."""
-        db = LandscapeDB.in_memory()
+        db = make_landscape_db()
         payload_store = MockPayloadStore()
 
         source = ListSource([{"value": 1}, {"value": 2}])
@@ -540,7 +538,7 @@ class TestForkJoinEdgeCases:
 
     def test_empty_source_no_fork_issues(self) -> None:
         """Empty source with fork config should not cause issues."""
-        db = LandscapeDB.in_memory()
+        db = make_landscape_db()
         payload_store = MockPayloadStore()
 
         source = ListSource([], on_success="sink_a")  # Empty
@@ -613,7 +611,7 @@ class TestForkRecoveryInvariant:
         from elspeth.core.config import ElspethSettings
         from elspeth.core.landscape.schema import token_outcomes_table
 
-        db = LandscapeDB.in_memory()
+        db = make_landscape_db()
         payload_store = MockPayloadStore()
 
         rows = [{"value": i} for i in range(n_rows)]

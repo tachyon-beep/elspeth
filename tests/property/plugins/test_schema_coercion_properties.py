@@ -23,7 +23,7 @@ from hypothesis import strategies as st
 from pydantic import ValidationError
 
 from elspeth.contracts.schema import SchemaConfig
-from elspeth.plugins.schema_factory import create_schema_from_config
+from elspeth.plugins.infrastructure.schema_factory import create_schema_from_config
 from tests.strategies.json import json_primitives, row_data
 
 # =============================================================================

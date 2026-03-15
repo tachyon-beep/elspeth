@@ -1,4 +1,3 @@
-# src/elspeth/core/config.py
 """
 Configuration schema and loading for Elspeth pipelines.
 
@@ -16,6 +15,7 @@ import yaml
 from pydantic import BaseModel, Field, field_validator, model_validator
 
 from elspeth.contracts.enums import OutputMode, RunMode
+from elspeth.contracts.security import SecretFingerprintError as SecretFingerprintError
 
 # Reserved edge labels that cannot be used as user-defined routing names.
 # "continue" is used for sequential edges, "fork" is a gate-only routing action,
@@ -220,20 +220,6 @@ class SecretsConfig(BaseModel):
         return self
 
 
-class SecretFingerprintError(Exception):
-    """Raised when secret fingerprinting fails.
-
-    This occurs when:
-    - Secret-like field names are found in config but ELSPETH_FINGERPRINT_KEY
-      is not set and ELSPETH_ALLOW_RAW_SECRETS is not 'true'
-    - A config dict contains both a secret field (e.g., 'api_key') and the
-      corresponding fingerprint field ('api_key_fingerprint'), which would
-      allow the pre-existing value to overwrite the computed HMAC fingerprint
-    """
-
-    pass
-
-
 class TriggerConfig(BaseModel):
     """Trigger configuration for aggregation batches.
 
@@ -292,7 +278,7 @@ class TriggerConfig(BaseModel):
         if v is None:
             return v
 
-        from elspeth.engine.expression_parser import (
+        from elspeth.core.expression_parser import (
             ExpressionParser,
             ExpressionSecurityError,
             ExpressionSyntaxError,
@@ -355,7 +341,7 @@ class TriggerConfig(BaseModel):
                 f"{invalid_display}. Allowed keys: row['batch_count'], row['batch_age_seconds']."
             )
 
-        # P2-2026-01-31: Reject non-boolean expressions
+        # Reject non-boolean expressions
         # Per CLAUDE.md: "if bool(result)" coercion is forbidden for our data
         if not parser.is_boolean_expression():
             raise ValueError(
@@ -403,6 +389,7 @@ class AggregationSettings(BaseModel):
         aggregations:
           - name: batch_stats
             plugin: stats_aggregation
+            on_error: discard
             trigger:
               count: 100
             output_mode: transform
@@ -420,6 +407,9 @@ class AggregationSettings(BaseModel):
     on_success: str | None = Field(
         default=None,
         description="Connection name or sink name for aggregation output",
+    )
+    on_error: str = Field(
+        description="Sink name for rows that fail batch processing, or 'discard'",
     )
     trigger: TriggerConfig = Field(description="When to flush the batch")
     output_mode: OutputMode = Field(
@@ -469,18 +459,6 @@ class AggregationSettings(BaseModel):
             return None
         value = v.strip()
         return _validate_connection_or_sink_name(value, field_label="Aggregation on_success connection name")
-
-    @field_validator("output_mode", mode="before")
-    @classmethod
-    def reject_single_mode(cls, v: Any) -> Any:
-        """Reject deprecated 'single' mode with helpful migration message."""
-        if v == "single":
-            raise ValueError(
-                "output_mode='single' has been removed (bug elspeth-rapid-nd3). "
-                "Use output_mode='transform' instead. For N->1 aggregations, add "
-                "expected_output_count=1 to validate cardinality."
-            )
-        return v
 
 
 class GateSettings(BaseModel):
@@ -548,7 +526,7 @@ class GateSettings(BaseModel):
     @classmethod
     def validate_condition_expression(cls, v: str) -> str:
         """Validate that condition is a valid expression at config time."""
-        from elspeth.engine.expression_parser import (
+        from elspeth.core.expression_parser import (
             ExpressionParser,
             ExpressionSecurityError,
             ExpressionSyntaxError,
@@ -636,7 +614,7 @@ class GateSettings(BaseModel):
         `row['amount'] > 1000` is a config error - the expression evaluates to
         True/False, not "above"/"below".
         """
-        from elspeth.engine.expression_parser import ExpressionParser
+        from elspeth.core.expression_parser import ExpressionParser
 
         parser = ExpressionParser(self.condition)
         if parser.is_boolean_expression():
@@ -829,8 +807,8 @@ class CoalesceSettings(BaseModel):
 class SourceSettings(BaseModel):
     """Source plugin configuration per architecture.
 
-    Phase 3 addition: on_success lifted from SourceDataConfig (options layer)
-    to settings level (3a3f-A). Source must declare where valid rows go.
+    on_success is at the settings level, not inside plugin options.
+    Source must declare where valid rows go.
     """
 
     model_config = {"frozen": True, "extra": "forbid"}
@@ -861,7 +839,7 @@ class TransformSettings(BaseModel):
     Note: Gate routing is now config-driven only (see GateSettings).
     Plugin-based gates were removed - use the gates: section instead.
 
-    Phase 3 additions (declarative DAG wiring):
+    Declarative DAG wiring fields:
         name: User-facing wiring label. Drives node IDs in the DAG and
             appears in Landscape audit records. Must be unique across all
             processing nodes (transforms, gates, aggregations, coalesce).
@@ -1244,14 +1222,6 @@ class TelemetrySettings(BaseModel):
         description="List of telemetry exporters to send events to",
     )
 
-    @model_validator(mode="after")
-    def validate_exporters_when_enabled(self) -> "TelemetrySettings":
-        """Warn if telemetry is enabled but no exporters are configured."""
-        # Note: This is a warning case, not an error. Telemetry with no exporters
-        # just means events are produced but not exported anywhere - useful for
-        # testing or when exporters are added dynamically.
-        return self
-
 
 class ElspethSettings(BaseModel):
     """Top-level Elspeth configuration matching architecture specification.
@@ -1608,8 +1578,22 @@ def _sanitize_dsn(
 
     try:
         parsed = make_url(url)
-    except ArgumentError:
-        # Not a valid SQLAlchemy URL - return as-is (might be a path or other format)
+    except ArgumentError as parse_err:
+        # Not a valid SQLAlchemy URL — but it might still contain credentials.
+        # A typo in the scheme (e.g. "postgreql://user:secret@host/db") bypasses
+        # make_url() parsing, so we must check for credential patterns before
+        # passing the raw URL through.  The RFC 3986 userinfo pattern is
+        # "://<user>:<password>@<host>".
+        import re
+
+        if re.search(r"://[^/@]+:[^/@]+@", url):
+            raise SecretFingerprintError(
+                "Unparsable database URL appears to contain credentials "
+                "(detected '://<user>:<password>@<host>' pattern). "
+                "Fix the URL so SQLAlchemy can parse it, or remove the "
+                "embedded password. Raw URL will NOT be passed through to "
+                "prevent credential leaks into the audit trail."
+            ) from parse_err
         return url, None, False
 
     if parsed.password is None:
@@ -1828,10 +1812,10 @@ def _resolve_template_path(file_ref: str, settings_path: Path, label: str) -> Pa
     # Containment check: resolved path must be under the config directory
     try:
         file_path.relative_to(config_root)
-    except ValueError:
+    except ValueError as exc:
         raise TemplateFileError(
             f"{label} path traversal blocked: {file_ref!r} resolves to {file_path} which is outside config directory {config_root}"
-        ) from None
+        ) from exc
 
     if not file_path.exists():
         raise TemplateFileError(f"{label} not found: {file_path}")
@@ -1991,7 +1975,7 @@ def load_settings(config_path: Path) -> ElspethSettings:
         ValidationError: If configuration fails Pydantic validation
         FileNotFoundError: If config file doesn't exist
     """
-    from dynaconf import Dynaconf  # type: ignore[attr-defined]  # dynaconf has no type stubs
+    from dynaconf import Dynaconf
 
     # Explicit check for file existence (Dynaconf silently accepts missing files)
     if not config_path.exists():
@@ -2009,17 +1993,6 @@ def load_settings(config_path: Path) -> ElspethSettings:
     # Dynaconf returns uppercase keys; convert to lowercase for Pydantic
     raw_dict = dynaconf_settings.as_dict()
     raw_config = _lowercase_schema_keys(raw_dict)
-
-    # Explicitly reject removed default_sink in YAML before allowlist filtering.
-    # This MUST happen before the allowlist (which would silently strip it).
-    if "default_sink" in raw_config:
-        raise ValueError(
-            "'default_sink' has been removed. Use explicit 'on_success' routing instead.\n"
-            "Migration: Set top-level 'source.on_success: <sink_or_connection_name>' and "
-            "top-level 'transforms[].on_success: <sink_or_connection_name>' (not inside "
-            "plugin options). Ensure each terminal path routes to a sink.\n"
-            "Then remove the 'default_sink' line from your pipeline YAML."
-        )
 
     # Reject unknown YAML keys before filtering. Only check keys that originate
     # from the YAML file, NOT from environment variables. Dynaconf captures ALL

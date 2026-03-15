@@ -6,6 +6,7 @@ import pytest
 
 from elspeth.contracts.plugin_context import PluginContext
 from elspeth.testing import make_pipeline_row
+from tests.fixtures.factories import make_source_context
 
 # Common schema config for dynamic field handling (accepts any fields)
 DYNAMIC_SCHEMA = {"mode": "observed"}
@@ -17,7 +18,7 @@ class TestPassThrough:
     @pytest.fixture
     def ctx(self) -> PluginContext:
         """Create minimal plugin context."""
-        return PluginContext(run_id="test-run", config={})
+        return make_source_context()
 
     def test_has_required_attributes(self) -> None:
         """PassThrough has name."""
@@ -86,7 +87,7 @@ class TestPassThrough:
 
     def test_requires_schema_config(self) -> None:
         """PassThrough requires schema configuration."""
-        from elspeth.plugins.config_base import PluginConfigError
+        from elspeth.plugins.infrastructure.config_base import PluginConfigError
         from elspeth.plugins.transforms.passthrough import PassThrough
 
         with pytest.raises(PluginConfigError, match="schema"):

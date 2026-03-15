@@ -8,7 +8,7 @@ They serve as completion criteria for the migration.
 
 import pytest
 
-from elspeth.plugins.manager import PluginManager
+from elspeth.plugins.infrastructure.manager import PluginManager
 
 
 def test_plugin_manager_has_validator():
@@ -62,15 +62,20 @@ def test_validator_handles_all_builtin_sources():
     manager = PluginManager()
     manager.register_builtin_plugins()
 
-    # From Task 0.2 inventory: 4 sources (csv, json, null_source, azure_blob_source)
-    source_types = ["csv", "json", "null_source", "azure_blob_source"]
+    # Registered plugin names: csv, json, null, azure_blob
+    source_types = ["csv", "json", "null", "azure_blob"]
 
     for source_type in source_types:
-        # Just verify no ImportError or ValueError for unknown type
+        # Verify the plugin type is recognized. Config validation errors
+        # (missing required fields) are expected — but "unknown plugin"
+        # errors must not be silently swallowed.
         try:
             manager.create_source(source_type, {})
-        except (ValueError, TypeError):
-            pass  # Config validation failure is expected
+        except (ValueError, TypeError) as e:
+            # Fail if the error is actually "unknown plugin" — that means
+            # the name is wrong, not that config validation caught a bad config.
+            if "unknown" in str(e).lower():
+                pytest.fail(f"Plugin type {source_type!r} not registered: {e}")
         except Exception as e:
             pytest.fail(f"Unexpected error for {source_type}: {e}")
 

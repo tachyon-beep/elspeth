@@ -12,8 +12,8 @@ This catches wiring bugs that unit tests miss.
 Tested plugins:
 - AuditedLLMClient -> ExternalCallCompleted (call_type=LLM)
 - AuditedHTTPClient -> ExternalCallCompleted (call_type=HTTP)
-- AzureLLMTransform (via AuditedLLMClient)
-- OpenRouterLLMTransform (via AuditedHTTPClient)
+- LLMTransform with provider="azure" (via AuditedLLMClient)
+- LLMTransform with provider="openrouter" (via AuditedHTTPClient)
 
 Each test verifies:
 1. Plugin is configured and run through production Orchestrator
@@ -24,166 +24,25 @@ Each test verifies:
 
 from __future__ import annotations
 
-from collections.abc import Iterator
-from typing import TYPE_CHECKING, Any, ClassVar
+from typing import Any
 from unittest.mock import MagicMock, Mock, patch
 
 import pytest
-from pydantic import ConfigDict
 
 from elspeth.contracts import (
-    ArtifactDescriptor,
     CallStatus,
     CallType,
-    Determinism,
-    PluginSchema,
-    SourceRow,
 )
 from elspeth.contracts.enums import RunStatus, TelemetryGranularity
 from elspeth.contracts.events import ExternalCallCompleted
-from elspeth.contracts.schema_contract import PipelineRow, SchemaContract
 from elspeth.core.landscape import LandscapeDB
 from elspeth.engine.orchestrator import Orchestrator, PipelineConfig
-from elspeth.plugins.results import TransformResult
 from elspeth.telemetry import TelemetryManager
-from elspeth.testing import make_field
-from tests.fixtures.base_classes import _TestSinkBase, _TestSourceBase, as_sink, as_source, as_transform
+from tests.fixtures.base_classes import as_sink, as_source, as_transform
+from tests.fixtures.landscape import make_landscape_db
+from tests.fixtures.pipeline import build_production_graph
+from tests.fixtures.plugins import CollectSink, ListSource, PassTransform
 from tests.fixtures.telemetry import MockTelemetryConfig, TelemetryTestExporter
-
-if TYPE_CHECKING:
-    from elspeth.core.dag import ExecutionGraph
-
-
-# =============================================================================
-# Test Fixtures
-# =============================================================================
-
-
-def _make_contract(data: dict[str, Any]) -> SchemaContract:
-    """Create a simple schema contract for test data."""
-    fields = tuple(make_field(k) for k in data)
-    return SchemaContract(mode="OBSERVED", fields=fields, locked=True)
-
-
-class DynamicSchema(PluginSchema):
-    """Dynamic schema for testing - allows any fields."""
-
-    model_config: ClassVar[ConfigDict] = ConfigDict(extra="allow")
-
-
-class SimpleSource(_TestSourceBase):
-    """Simple source that yields a fixed list of rows."""
-
-    name = "simple_source"
-    output_schema = DynamicSchema
-    on_success = "output"
-
-    def __init__(self, rows: list[dict[str, Any]] | None = None) -> None:
-        super().__init__()
-        self._rows = rows or [{"id": 1, "text": "test"}]
-
-    def load(self, ctx: Any) -> Iterator[SourceRow]:
-        for row in self._rows:
-            yield SourceRow.valid(row, contract=_make_contract(row))
-
-
-class SimpleSink(_TestSinkBase):
-    """Sink that collects rows for verification."""
-
-    name = "simple_sink"
-
-    def __init__(self) -> None:
-        super().__init__()
-        self.results: list[dict[str, Any]] = []
-
-    def write(self, rows: Any, ctx: Any) -> ArtifactDescriptor:
-        self.results.extend(rows)
-        return ArtifactDescriptor.for_file(
-            path="memory://test",
-            size_bytes=len(str(rows)),
-            content_hash="test-hash",
-        )
-
-
-class PassthroughTransform:
-    """Transform that passes through rows unchanged."""
-
-    name = "passthrough"
-    input_schema = DynamicSchema
-    output_schema = DynamicSchema
-    plugin_version = "1.0.0"
-    determinism = Determinism.DETERMINISTIC
-    config: ClassVar[dict[str, Any]] = {"schema": {"mode": "observed"}}
-    node_id: str | None = None
-    is_batch_aware = False
-    creates_tokens = False
-    on_error: str | None = "discard"
-    on_success: str | None = "output"
-    validate_input: bool = False
-    declared_output_fields: frozenset[str] = frozenset()
-
-    def process(self, row: Any, ctx: Any) -> TransformResult:
-        if isinstance(row, PipelineRow):
-            row_data = row.to_dict()
-            contract = row.contract
-        else:
-            row_data = row
-            contract = _make_contract(row_data)
-        return TransformResult.success(
-            PipelineRow(row_data, contract),
-            success_reason={"action": "passthrough"},
-        )
-
-    def on_start(self, ctx: Any) -> None:
-        pass
-
-    def on_complete(self, ctx: Any) -> None:
-        pass
-
-    def close(self) -> None:
-        pass
-
-
-def _create_test_graph(config: PipelineConfig) -> ExecutionGraph:
-    """Build a graph using the production factory path.
-
-    Replaces build_production_graph from old test helpers. Uses
-    ExecutionGraph.from_plugin_instances() directly for production-path
-    fidelity (see BUG-LINEAGE-01).
-    """
-    from elspeth.core.config import SourceSettings
-    from elspeth.core.dag import ExecutionGraph
-    from elspeth.plugins.protocols import TransformProtocol
-    from tests.fixtures.factories import wire_transforms
-
-    # Separate transforms (only TransformProtocol instances)
-    row_transforms: list[TransformProtocol] = []
-    for transform in config.transforms:
-        if isinstance(transform, TransformProtocol):
-            row_transforms.append(transform)
-
-    sink_name = next(iter(config.sinks))
-    source_on_success = "source_out" if row_transforms else sink_name
-    final_destination = config.gates[0].input if config.gates else sink_name
-    if not row_transforms and config.gates:
-        source_on_success = config.gates[0].input
-
-    config.source.on_success = source_on_success
-
-    return ExecutionGraph.from_plugin_instances(
-        source=config.source,
-        source_settings=SourceSettings(plugin=config.source.name, on_success=source_on_success, options={}),
-        transforms=wire_transforms(
-            row_transforms,
-            source_connection=source_on_success,
-            final_sink=final_destination,
-        ),
-        sinks=config.sinks,
-        aggregations={},
-        gates=list(config.gates),
-        coalesce_settings=list(config.coalesce_settings) if config.coalesce_settings else None,
-    )
-
 
 # =============================================================================
 # AuditedLLMClient Telemetry Contract Tests
@@ -235,7 +94,7 @@ class TestAuditedLLMClientTelemetryContract:
 
     def test_llm_client_emits_external_call_completed_on_success(self) -> None:
         """AuditedLLMClient emits ExternalCallCompleted on successful call."""
-        from elspeth.plugins.clients.llm import AuditedLLMClient
+        from elspeth.plugins.infrastructure.clients.llm import AuditedLLMClient
 
         recorder = self._create_mock_recorder()
         openai_client = self._create_mock_openai_client()
@@ -284,7 +143,7 @@ class TestAuditedLLMClientTelemetryContract:
 
     def test_llm_client_emits_external_call_completed_on_error(self) -> None:
         """AuditedLLMClient emits ExternalCallCompleted on failed call."""
-        from elspeth.plugins.clients.llm import AuditedLLMClient, LLMClientError
+        from elspeth.plugins.infrastructure.clients.llm import AuditedLLMClient, LLMClientError
 
         recorder = self._create_mock_recorder()
         openai_client = MagicMock()
@@ -344,7 +203,7 @@ class TestAuditedHTTPClientTelemetryContract:
 
     def test_http_client_emits_external_call_completed_on_success(self) -> None:
         """AuditedHTTPClient emits ExternalCallCompleted on successful POST."""
-        from elspeth.plugins.clients.http import AuditedHTTPClient
+        from elspeth.plugins.infrastructure.clients.http import AuditedHTTPClient
 
         recorder = self._create_mock_recorder()
 
@@ -393,7 +252,7 @@ class TestAuditedHTTPClientTelemetryContract:
         """AuditedHTTPClient emits ExternalCallCompleted on network error."""
         import httpx
 
-        from elspeth.plugins.clients.http import AuditedHTTPClient
+        from elspeth.plugins.infrastructure.clients.http import AuditedHTTPClient
 
         recorder = self._create_mock_recorder()
 
@@ -428,7 +287,7 @@ class TestAuditedHTTPClientTelemetryContract:
 
     def test_http_client_emits_external_call_completed_on_get(self) -> None:
         """AuditedHTTPClient emits ExternalCallCompleted on GET request."""
-        from elspeth.plugins.clients.http import AuditedHTTPClient
+        from elspeth.plugins.infrastructure.clients.http import AuditedHTTPClient
 
         recorder = self._create_mock_recorder()
 
@@ -482,7 +341,7 @@ class TestOrchestratorTelemetryWiringContract:
     @pytest.fixture
     def landscape_db(self) -> LandscapeDB:
         """Fresh in-memory database for each test."""
-        return LandscapeDB.in_memory()
+        return make_landscape_db()
 
     def test_orchestrator_wires_telemetry_emit_to_context(
         self,
@@ -497,17 +356,18 @@ class TestOrchestratorTelemetryWiringContract:
         # Capture the telemetry_emit callback from inside a transform
         captured_callback = None
 
-        class TelemetryCapturingTransform(PassthroughTransform):
+        class TelemetryCapturingTransform(PassTransform):
             """Transform that captures the telemetry_emit callback."""
 
             name = "telemetry_capturing"
 
             def on_start(self, ctx: Any) -> None:
+                super().on_start(ctx)
                 nonlocal captured_callback
                 captured_callback = ctx.telemetry_emit
 
-        source = SimpleSource()
-        sink = SimpleSink()
+        source = ListSource([{"id": 1, "text": "test"}])
+        sink = CollectSink()
 
         pipeline_config = PipelineConfig(
             source=as_source(source),
@@ -518,7 +378,7 @@ class TestOrchestratorTelemetryWiringContract:
         orchestrator = Orchestrator(landscape_db, telemetry_manager=telemetry_manager)
         orchestrator.run(
             pipeline_config,
-            graph=_create_test_graph(pipeline_config),
+            graph=build_production_graph(pipeline_config),
             payload_store=payload_store,
         )
 
@@ -539,19 +399,19 @@ class TestOrchestratorTelemetryWiringContract:
         config = MockTelemetryConfig(granularity=TelemetryGranularity.FULL)
         telemetry_manager = TelemetryManager(config, exporters=[exporter])
 
-        source = SimpleSource()
-        sink = SimpleSink()
+        source = ListSource([{"id": 1, "text": "test"}])
+        sink = CollectSink()
 
         pipeline_config = PipelineConfig(
             source=as_source(source),
-            transforms=[as_transform(PassthroughTransform())],
+            transforms=[as_transform(PassTransform())],
             sinks={"output": as_sink(sink)},
         )
 
         orchestrator = Orchestrator(landscape_db, telemetry_manager=telemetry_manager)
         result = orchestrator.run(
             pipeline_config,
-            graph=_create_test_graph(pipeline_config),
+            graph=build_production_graph(pipeline_config),
             payload_store=payload_store,
         )
 
@@ -583,8 +443,8 @@ class TestPluginTelemetryThroughAuditedClients:
     AuditedHTTPClient, the telemetry events are correctly emitted.
 
     Note: Full orchestrator integration tests for batch transforms (like
-    AzureLLMTransform) require more complex setup. These tests verify the
-    underlying client contracts that those plugins depend on.
+    LLMTransform with provider="azure") require more complex setup. These
+    tests verify the underlying client contracts that those plugins depend on.
     """
 
     def test_audited_llm_client_telemetry_flows_through_callback(self) -> None:
@@ -593,7 +453,7 @@ class TestPluginTelemetryThroughAuditedClients:
         This verifies that when a plugin creates an AuditedLLMClient with
         the telemetry_emit callback from PluginContext, events are emitted.
         """
-        from elspeth.plugins.clients.llm import AuditedLLMClient
+        from elspeth.plugins.infrastructure.clients.llm import AuditedLLMClient
 
         recorder = MagicMock()
         recorder.record_call.return_value = MagicMock(
@@ -644,7 +504,7 @@ class TestPluginTelemetryThroughAuditedClients:
         This verifies that when a plugin creates an AuditedHTTPClient with
         the telemetry_emit callback from PluginContext, events are emitted.
         """
-        from elspeth.plugins.clients.http import AuditedHTTPClient
+        from elspeth.plugins.infrastructure.clients.http import AuditedHTTPClient
 
         recorder = MagicMock()
         recorder.record_call.return_value = MagicMock(
@@ -701,7 +561,7 @@ class TestTelemetryEmissionOrderContract:
 
     def test_llm_client_emits_telemetry_after_landscape(self) -> None:
         """AuditedLLMClient emits telemetry AFTER Landscape recording."""
-        from elspeth.plugins.clients.llm import AuditedLLMClient
+        from elspeth.plugins.infrastructure.clients.llm import AuditedLLMClient
 
         call_order: list[str] = []
 
@@ -744,7 +604,7 @@ class TestTelemetryEmissionOrderContract:
 
     def test_http_client_emits_telemetry_after_landscape(self) -> None:
         """AuditedHTTPClient emits telemetry AFTER Landscape recording."""
-        from elspeth.plugins.clients.http import AuditedHTTPClient
+        from elspeth.plugins.infrastructure.clients.http import AuditedHTTPClient
 
         call_order: list[str] = []
 
@@ -788,7 +648,7 @@ class TestTelemetryEmissionOrderContract:
         This is critical: If Landscape fails, the event wasn't properly
         recorded. Emitting telemetry would be misleading.
         """
-        from elspeth.plugins.clients.llm import AuditedLLMClient
+        from elspeth.plugins.infrastructure.clients.llm import AuditedLLMClient
 
         recorder = MagicMock()
         recorder.record_call.side_effect = Exception("Database error")
@@ -843,7 +703,7 @@ class TestTelemetryFailureIsolationContract:
 
     def test_llm_client_isolates_telemetry_failure(self) -> None:
         """AuditedLLMClient isolates telemetry failure from call result."""
-        from elspeth.plugins.clients.llm import AuditedLLMClient
+        from elspeth.plugins.infrastructure.clients.llm import AuditedLLMClient
 
         recorder = MagicMock()
         recorder.record_call.return_value = MagicMock(
@@ -889,7 +749,7 @@ class TestTelemetryFailureIsolationContract:
 
     def test_http_client_isolates_telemetry_failure(self) -> None:
         """AuditedHTTPClient isolates telemetry failure from call result."""
-        from elspeth.plugins.clients.http import AuditedHTTPClient
+        from elspeth.plugins.infrastructure.clients.http import AuditedHTTPClient
 
         recorder = MagicMock()
         recorder.record_call.return_value = MagicMock(

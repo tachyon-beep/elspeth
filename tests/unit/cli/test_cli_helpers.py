@@ -1,17 +1,18 @@
 """Tests for CLI helper functions."""
 
+from collections.abc import Mapping
 from pathlib import Path
 
 import pytest
 
-from elspeth.cli_helpers import instantiate_plugins_from_config
+from elspeth.cli_helpers import PluginBundle, instantiate_plugins_from_config
 from elspeth.core.config import load_settings
 from elspeth.core.dag import WiredTransform
-from elspeth.plugins.base import BaseSink, BaseSource, BaseTransform
+from elspeth.plugins.infrastructure.base import BaseSink, BaseSource, BaseTransform
 
 
-def test_instantiate_plugins_from_config(tmp_path: Path):
-    """Verify helper instantiates all plugins from config."""
+def test_instantiate_returns_plugin_bundle(tmp_path: Path):
+    """instantiate_plugins_from_config returns a PluginBundle dataclass, not a dict."""
     config_yaml = """
 source:
   plugin: csv
@@ -47,40 +48,182 @@ sinks:
     config_file.write_text(config_yaml)
 
     config = load_settings(config_file)
-    plugins = instantiate_plugins_from_config(config)
+    bundle = instantiate_plugins_from_config(config)
 
-    # Verify structure
-    assert "source" in plugins
-    assert "transforms" in plugins
-    assert "sinks" in plugins
-    assert "aggregations" in plugins
+    # Must be a PluginBundle, not a dict
+    assert isinstance(bundle, PluginBundle)
 
-    # Verify types
-    assert isinstance(plugins["source"], BaseSource)
-    assert len(plugins["transforms"]) == 1
-    wired = plugins["transforms"][0]
+
+def test_plugin_bundle_is_frozen(tmp_path: Path):
+    """PluginBundle must be immutable (frozen dataclass)."""
+    config_yaml = """
+source:
+  plugin: csv
+  on_success: pass1
+  options:
+    path: test.csv
+    schema:
+      mode: observed
+    on_validation_failure: discard
+
+transforms:
+  - name: pass1
+    plugin: passthrough
+    input: pass1
+    on_success: output
+    on_error: discard
+    options:
+      schema:
+        mode: observed
+
+sinks:
+  output:
+    plugin: csv
+    options:
+      path: output.csv
+      schema:
+        mode: fixed
+        fields:
+          - "data: str"
+
+"""
+    config_file = tmp_path / "settings.yaml"
+    config_file.write_text(config_yaml)
+
+    config = load_settings(config_file)
+    bundle = instantiate_plugins_from_config(config)
+
+    with pytest.raises(AttributeError, match="cannot assign to field"):
+        bundle.source = None  # type: ignore[assignment,misc]
+
+
+def test_plugin_bundle_attribute_access(tmp_path: Path):
+    """PluginBundle fields are accessible as typed attributes."""
+    config_yaml = """
+source:
+  plugin: csv
+  on_success: pass1
+  options:
+    path: test.csv
+    schema:
+      mode: observed
+    on_validation_failure: discard
+
+transforms:
+  - name: pass1
+    plugin: passthrough
+    input: pass1
+    on_success: output
+    on_error: discard
+    options:
+      schema:
+        mode: observed
+
+sinks:
+  output:
+    plugin: csv
+    options:
+      path: output.csv
+      schema:
+        mode: fixed
+        fields:
+          - "data: str"
+
+"""
+    config_file = tmp_path / "settings.yaml"
+    config_file.write_text(config_yaml)
+
+    config = load_settings(config_file)
+    bundle = instantiate_plugins_from_config(config)
+
+    # Verify typed attribute access (not dict["key"])
+    assert isinstance(bundle.source, BaseSource)
+    assert bundle.source.name == "csv"
+    assert bundle.source.config["path"] == "test.csv"
+    assert bundle.source.config["on_validation_failure"] == "discard"
+    assert bundle.source.output_schema is not None
+
+    assert len(bundle.transforms) == 1
+    wired = bundle.transforms[0]
     assert isinstance(wired, WiredTransform)
     assert isinstance(wired.plugin, BaseTransform)
-    assert "output" in plugins["sinks"]
-    assert isinstance(plugins["sinks"]["output"], BaseSink)
-
-    # CRITICAL: Verify schemas NOT None
-    assert plugins["source"].output_schema is not None
+    assert wired.plugin.name == "passthrough"
     assert wired.plugin.input_schema is not None
 
-    # Verify plugin identity (not just type) - plugins must have correct name
-    assert plugins["source"].name == "csv", f"Expected source plugin 'csv', got '{plugins['source'].name}'"
-    assert wired.plugin.name == "passthrough", f"Expected transform plugin 'passthrough', got '{wired.plugin.name}'"
-    assert plugins["sinks"]["output"].name == "csv", f"Expected sink plugin 'csv', got '{plugins['sinks']['output'].name}'"
+    assert "output" in bundle.sinks
+    assert isinstance(bundle.sinks["output"], BaseSink)
+    assert bundle.sinks["output"].name == "csv"
+    assert bundle.sinks["output"].config["path"] == "output.csv"
 
-    # Verify config propagation - options must be preserved in plugin.config
-    assert plugins["source"].config["path"] == "test.csv", f"Source config path not propagated: {plugins['source'].config}"
-    assert plugins["source"].config["on_validation_failure"] == "discard", (
-        f"Source config on_validation_failure not propagated: {plugins['source'].config}"
-    )
-    assert plugins["sinks"]["output"].config["path"] == "output.csv", (
-        f"Sink config path not propagated: {plugins['sinks']['output'].config}"
-    )
+    assert isinstance(bundle.aggregations, Mapping)
+    assert len(bundle.aggregations) == 0
+
+    # source_settings is the SourceSettings config object
+    assert bundle.source_settings is config.source
+
+
+def test_plugin_bundle_supports_dataclasses_replace(tmp_path: Path):
+    """PluginBundle must support dataclasses.replace() for the resume path.
+
+    The resume path in cli.py uses dataclasses.replace() to swap the source
+    and sinks while preserving everything else. This test verifies the frozen
+    dataclass supports this operation correctly.
+    """
+    from dataclasses import replace
+
+    from elspeth.plugins.sources.null_source import NullSource
+
+    config_yaml = """
+source:
+  plugin: csv
+  on_success: pass1
+  options:
+    path: test.csv
+    schema:
+      mode: observed
+    on_validation_failure: discard
+
+transforms:
+  - name: pass1
+    plugin: passthrough
+    input: pass1
+    on_success: output
+    on_error: discard
+    options:
+      schema:
+        mode: observed
+
+sinks:
+  output:
+    plugin: csv
+    options:
+      path: output.csv
+      schema:
+        mode: fixed
+        fields:
+          - "data: str"
+
+"""
+    config_file = tmp_path / "settings.yaml"
+    config_file.write_text(config_yaml)
+
+    config = load_settings(config_file)
+    bundle = instantiate_plugins_from_config(config)
+
+    # Replace source (as resume path does)
+    null_source = NullSource({})
+    null_source.on_success = bundle.source.on_success
+    replaced = replace(bundle, source=null_source)
+
+    # Replaced field changed
+    assert isinstance(replaced, PluginBundle)
+    assert replaced.source is null_source
+
+    # Unchanged fields preserved by identity
+    assert replaced.transforms is bundle.transforms
+    assert replaced.sinks is bundle.sinks
+    assert replaced.aggregations is bundle.aggregations
+    assert replaced.source_settings is bundle.source_settings
 
 
 def test_instantiate_plugins_raises_on_invalid_plugin():
@@ -125,6 +268,7 @@ aggregations:
     plugin: passthrough
     input: my_batch
     on_success: output
+    on_error: discard
     options:
       schema:
         mode: observed
@@ -178,6 +322,7 @@ aggregations:
     plugin: batch_stats
     input: stats_batch
     on_success: output
+    on_error: discard
     options:
       schema:
         mode: observed
@@ -202,11 +347,10 @@ sinks:
     config = load_settings(config_file)
 
     # Should NOT raise - batch_stats has is_batch_aware=True
-    plugins = instantiate_plugins_from_config(config)
+    bundle = instantiate_plugins_from_config(config)
 
-    assert "aggregations" in plugins
-    assert "stats_batch" in plugins["aggregations"]
-    transform, _ = plugins["aggregations"]["stats_batch"]
+    assert "stats_batch" in bundle.aggregations
+    transform, _ = bundle.aggregations["stats_batch"]
     assert transform.is_batch_aware is True
 
 
@@ -237,7 +381,15 @@ def test_aggregation_rejects_transform_without_is_batch_aware_attribute():
     config_dict = {
         "source": {"plugin": "csv", "on_success": "broken_agg", "options": {"path": "t.csv", "on_validation_failure": "discard"}},
         "aggregations": [
-            {"name": "broken_agg", "plugin": "mock", "input": "broken_agg", "on_success": "out", "options": {}, "trigger": {"count": 5}}
+            {
+                "name": "broken_agg",
+                "plugin": "mock",
+                "input": "broken_agg",
+                "on_success": "out",
+                "on_error": "discard",
+                "options": {},
+                "trigger": {"count": 5},
+            }
         ],
         "sinks": {"out": {"plugin": "csv", "options": {"path": "o.csv"}}},
     }

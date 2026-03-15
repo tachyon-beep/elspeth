@@ -49,7 +49,7 @@ def test_edge_validation_detects_missing_fields() -> None:
 
 def test_edge_validation_allows_dynamic_schemas() -> None:
     """Dynamic schemas should be compatible with anything."""
-    from elspeth.plugins.schema_factory import _create_dynamic_schema
+    from elspeth.plugins.infrastructure.schema_factory import _create_dynamic_schema
 
     graph = ExecutionGraph()
 
@@ -427,7 +427,7 @@ def test_dynamic_producer_with_strict_consumer_passes() -> None:
     """
     from pydantic import ConfigDict
 
-    from elspeth.plugins.schema_factory import _create_dynamic_schema
+    from elspeth.plugins.infrastructure.schema_factory import _create_dynamic_schema
 
     class StrictConsumer(PluginSchema):
         """Consumer forbids extra fields."""

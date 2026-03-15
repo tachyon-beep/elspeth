@@ -19,15 +19,11 @@ import keyword
 import re
 import unicodedata
 from dataclasses import dataclass
+from types import MappingProxyType
 
 # Algorithm version for audit trail - frozen per major version
 # Increment when algorithm changes affect output
 NORMALIZATION_ALGORITHM_VERSION = "1.0.0"
-
-
-def get_normalization_version() -> str:
-    """Return current algorithm version for audit trail storage."""
-    return NORMALIZATION_ALGORITHM_VERSION
 
 
 # Pre-compiled regex patterns (module level for efficiency)
@@ -181,7 +177,7 @@ def check_duplicate_raw_headers(raw_headers: list[str]) -> None:
         raise ValueError("Duplicate raw header names:\n" + "\n".join(details))
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, slots=True)
 class FieldResolution:
     """Result of field name resolution.
 
@@ -191,25 +187,13 @@ class FieldResolution:
         normalization_version: Algorithm version used, or None if no normalization
     """
 
-    final_headers: list[str]
-    resolution_mapping: dict[str, str]
+    final_headers: tuple[str, ...]
+    resolution_mapping: MappingProxyType[str, str]
     normalization_version: str | None
 
-    @property
-    def reverse_mapping(self) -> dict[str, str]:
-        """Get mapping from final names back to original names.
-
-        Used by sinks with restore_source_headers=True to restore
-        original header names in output files.
-
-        Returns:
-            Dict mapping final field name -> original field name
-
-        Note:
-            This is a computed property. For hot paths, callers should
-            cache the result rather than calling repeatedly.
-        """
-        return {final: original for original, final in self.resolution_mapping.items()}
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "final_headers", tuple(self.final_headers))
+        object.__setattr__(self, "resolution_mapping", MappingProxyType(dict(self.resolution_mapping)))
 
 
 def resolve_field_names(
@@ -277,7 +261,7 @@ def resolve_field_names(
     resolution_mapping = dict(zip(original_names, final_headers, strict=True))
 
     return FieldResolution(
-        final_headers=final_headers,
-        resolution_mapping=resolution_mapping,
-        normalization_version=get_normalization_version() if used_normalization else None,
+        final_headers=tuple(final_headers),
+        resolution_mapping=MappingProxyType(resolution_mapping),
+        normalization_version=NORMALIZATION_ALGORITHM_VERSION if used_normalization else None,
     )

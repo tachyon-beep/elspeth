@@ -143,8 +143,8 @@ def test_schema_extraction_from_instance():
     plugins = instantiate_plugins_from_config(config)
 
     # CRITICAL: Schemas must NOT be None
-    assert plugins["source"].output_schema is not None, "Source schema should be populated"
-    assert plugins["sinks"]["out"].input_schema is not None, "Sink schema should be populated"
+    assert plugins.source.output_schema is not None, "Source schema should be populated"
+    assert plugins.sinks["out"].input_schema is not None, "Sink schema should be populated"
 
 
 def test_fork_join_validation():

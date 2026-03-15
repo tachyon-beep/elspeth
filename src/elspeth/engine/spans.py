@@ -1,4 +1,3 @@
-# src/elspeth/engine/spans.py
 """OpenTelemetry span factory for SDA Engine.
 
 Provides structured span creation for pipeline execution.
@@ -147,9 +146,9 @@ class SpanFactory:
 
         Args:
             transform_name: Name of the transform plugin
-            node_id: Unique node identifier for disambiguation (P2-2026-01-21 fix)
+            node_id: Unique node identifier for disambiguation
             input_hash: Optional input data hash
-            token_id: Token identifier for single-row transforms (P2-2026-01-21 fix)
+            token_id: Token identifier for single-row transforms
             token_ids: Token identifiers for batch transforms (aggregation flush)
 
         Note:
@@ -170,11 +169,11 @@ class SpanFactory:
         with self._tracer.start_as_current_span(f"transform:{transform_name}") as span:
             span.set_attribute("plugin.name", transform_name)
             span.set_attribute("plugin.type", "transform")
-            if node_id:
+            if node_id is not None:
                 span.set_attribute("node.id", node_id)
-            if input_hash:
+            if input_hash is not None:
                 span.set_attribute("input.hash", input_hash)
-            # Token tracking for accurate child token attribution (P2-2026-01-21)
+            # Token tracking for accurate child token attribution
             if token_ids is not None:
                 span.set_attribute("token.ids", tuple(token_ids))
             elif token_id is not None:
@@ -193,10 +192,10 @@ class SpanFactory:
         """Create a span for a gate operation.
 
         Args:
-            gate_name: Name of the gate plugin
-            node_id: Unique node identifier for disambiguation (P2-2026-01-21 fix)
+            gate_name: Name of the gate (from GateSettings)
+            node_id: Unique node identifier for disambiguation
             input_hash: Optional input data hash
-            token_id: Token identifier for the token being evaluated (P2-2026-01-21 fix)
+            token_id: Token identifier for the token being evaluated
 
         Yields:
             Span or NoOpSpan
@@ -208,9 +207,9 @@ class SpanFactory:
         with self._tracer.start_as_current_span(f"gate:{gate_name}") as span:
             span.set_attribute("plugin.name", gate_name)
             span.set_attribute("plugin.type", "gate")
-            if node_id:
+            if node_id is not None:
                 span.set_attribute("node.id", node_id)
-            if input_hash:
+            if input_hash is not None:
                 span.set_attribute("input.hash", input_hash)
             if token_id is not None:
                 span.set_attribute("token.id", token_id)
@@ -230,10 +229,10 @@ class SpanFactory:
 
         Args:
             aggregation_name: Name of the aggregation plugin
-            node_id: Unique node identifier for disambiguation (P2-2026-01-21 fix)
-            input_hash: Input data hash for trace-to-audit correlation (P3-2026-02-01 fix)
+            node_id: Unique node identifier for disambiguation
+            input_hash: Input data hash for trace-to-audit correlation
             batch_id: Optional batch identifier
-            token_ids: Token identifiers in the batch (P2-2026-01-21 fix)
+            token_ids: Token identifiers in the batch
 
         Note:
             Aggregation batches process multiple tokens, so this uses token_ids (plural).
@@ -249,11 +248,11 @@ class SpanFactory:
         with self._tracer.start_as_current_span(f"aggregation:{aggregation_name}") as span:
             span.set_attribute("plugin.name", aggregation_name)
             span.set_attribute("plugin.type", "aggregation")
-            if node_id:
+            if node_id is not None:
                 span.set_attribute("node.id", node_id)
-            if input_hash:
+            if input_hash is not None:
                 span.set_attribute("input.hash", input_hash)
-            if batch_id:
+            if batch_id is not None:
                 span.set_attribute("batch.id", batch_id)
             if token_ids is not None:
                 span.set_attribute("token.ids", tuple(token_ids))
@@ -271,8 +270,8 @@ class SpanFactory:
 
         Args:
             sink_name: Name of the sink plugin
-            node_id: Unique node identifier for disambiguation (P2-2026-01-21 fix)
-            token_ids: Token identifiers being written in this batch (P2-2026-01-21 fix)
+            node_id: Unique node identifier for disambiguation
+            token_ids: Token identifiers being written in this batch
 
         Note:
             Sinks batch-write multiple tokens, so this uses token_ids (plural).
@@ -288,7 +287,7 @@ class SpanFactory:
         with self._tracer.start_as_current_span(f"sink:{sink_name}") as span:
             span.set_attribute("plugin.name", sink_name)
             span.set_attribute("plugin.type", "sink")
-            if node_id:
+            if node_id is not None:
                 span.set_attribute("node.id", node_id)
             if token_ids is not None:
                 span.set_attribute("token.ids", tuple(token_ids))

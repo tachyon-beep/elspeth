@@ -75,3 +75,17 @@ class TestSourceRowWithContract:
 
         with pytest.raises(ValueError, match="quarantined"):
             source_row.to_pipeline_row()
+
+
+class TestSourceRowImmutability:
+    """SourceRow is frozen — fields cannot be reassigned after construction."""
+
+    def test_frozen_rejects_field_reassignment(self) -> None:
+        source_row = SourceRow.valid({"id": 1})
+        with pytest.raises(AttributeError):
+            source_row.row = {"id": 2}
+
+    def test_frozen_rejects_quarantine_field_reassignment(self) -> None:
+        source_row = SourceRow.quarantined(row={"bad": "data"}, error="failed", destination="quarantine")
+        with pytest.raises(AttributeError):
+            source_row.is_quarantined = False

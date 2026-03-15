@@ -16,7 +16,6 @@ if TYPE_CHECKING:
     import httpx
 
 from elspeth.contracts.identity import TokenInfo
-from elspeth.contracts.plugin_context import PluginContext
 from elspeth.testing import make_pipeline_row
 
 # Re-export chaosllm_server fixture so LLM tests can use it
@@ -27,62 +26,12 @@ from tests.fixtures.chaosllm import chaosllm_server  # noqa: F401
 DYNAMIC_SCHEMA = {"mode": "observed"}
 
 
-def make_azure_multi_query_config(**overrides: Any) -> dict[str, Any]:
-    """Create valid Azure Multi-Query config with optional overrides.
-
-    This is the canonical config factory for AzureMultiQueryLLMTransform tests.
-    Use overrides to customize specific fields.
-    """
-    config = {
-        "deployment_name": "gpt-4o",
-        "endpoint": "https://test.openai.azure.com",
-        "api_key": "test-key",
-        "template": "Input: {{ row.input_1 }}\nCriterion: {{ row.criterion.name }}",
-        "system_prompt": "You are an assessment AI. Respond in JSON.",
-        "case_studies": [
-            {"name": "cs1", "input_fields": ["cs1_bg", "cs1_sym", "cs1_hist"]},
-            {"name": "cs2", "input_fields": ["cs2_bg", "cs2_sym", "cs2_hist"]},
-        ],
-        "criteria": [
-            {"name": "diagnosis", "code": "DIAG"},
-            {"name": "treatment", "code": "TREAT"},
-        ],
-        "response_format": "standard",
-        "output_mapping": {
-            "score": {"suffix": "score", "type": "integer"},
-            "rationale": {"suffix": "rationale", "type": "string"},
-        },
-        "schema": DYNAMIC_SCHEMA,
-        "required_input_fields": [],  # Explicit opt-out for tests
-        "pool_size": 4,
-    }
-    config.update(overrides)
-    return config
-
-
 def make_token(row_id: str = "row-1", token_id: str | None = None) -> TokenInfo:
     """Create a TokenInfo for testing."""
     return TokenInfo(
         row_id=row_id,
         token_id=token_id or f"token-{row_id}",
         row_data=make_pipeline_row({}),
-    )
-
-
-def make_plugin_context(
-    state_id: str = "state-123",
-    token: TokenInfo | None = None,
-) -> PluginContext:
-    """Create a PluginContext with mocked landscape."""
-    mock_landscape = Mock()
-    mock_landscape.record_external_call = Mock()
-    mock_landscape.record_call = Mock()
-    return PluginContext(
-        run_id="run-123",
-        landscape=mock_landscape,
-        state_id=state_id,
-        config={},
-        token=token or make_token("row-1"),
     )
 
 

@@ -1,4 +1,3 @@
-# src/elspeth/contracts/data.py
 """Pydantic-based schema system for plugins.
 
 This is the ONLY location for PluginSchema - import from elspeth.contracts.
@@ -16,7 +15,6 @@ settings (extra="ignore", strict=False, frozen=False) per the Data Manifesto.
 """
 
 from dataclasses import dataclass
-from dataclasses import field as dataclass_field
 from types import UnionType
 from typing import Annotated, Any, TypeVar, Union, get_args, get_origin
 
@@ -104,14 +102,18 @@ def validate_row(
         return errors
 
 
-@dataclass
+@dataclass(frozen=True, slots=True)
 class CompatibilityResult:
-    """Result of schema compatibility check."""
+    """Result of schema compatibility check.
+
+    Frozen: compatibility results are immutable evidence of a schema check.
+    List fields use tuples for deep immutability.
+    """
 
     compatible: bool
-    missing_fields: list[str] = dataclass_field(default_factory=list)
-    type_mismatches: list[tuple[str, str, str]] = dataclass_field(default_factory=list)
-    extra_fields: list[str] = dataclass_field(default_factory=list)
+    missing_fields: tuple[str, ...] = ()
+    type_mismatches: tuple[tuple[str, str, str], ...] = ()
+    extra_fields: tuple[str, ...] = ()
 
     @property
     def error_message(self) -> str | None:
@@ -203,9 +205,9 @@ def check_compatibility(
 
     return CompatibilityResult(
         compatible=compatible,
-        missing_fields=missing,
-        type_mismatches=mismatches,
-        extra_fields=extra,
+        missing_fields=tuple(missing),
+        type_mismatches=tuple(mismatches),
+        extra_fields=tuple(extra),
     )
 
 
@@ -220,10 +222,13 @@ def _type_name(t: Any) -> str:
     if origin is not None:
         # Generic type - str() gives readable form like "list[str]" or "int | None"
         return str(t)
-    # For simple types, use __name__ if available
-    if hasattr(t, "__name__"):
+    # For simple types, use __name__ directly.
+    # Falls back to str(t) for typing module specials (e.g. typing.Any)
+    # that lack __name__.
+    try:
         return str(t.__name__)
-    return str(t)
+    except AttributeError:
+        return str(t)
 
 
 def _is_union_type(t: Any) -> bool:

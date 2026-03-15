@@ -19,14 +19,14 @@ from typing import Any, cast
 
 import pytest
 
-from elspeth.contracts import RunStatus
+from elspeth.contracts import RunStatus, SinkProtocol, SourceProtocol, TransformProtocol
 from elspeth.contracts.schema_contract import PipelineRow
 from elspeth.core.config import SourceSettings, TransformSettings
-from elspeth.plugins.base import BaseTransform
-from elspeth.plugins.protocols import SinkProtocol, SourceProtocol, TransformProtocol
+from elspeth.plugins.infrastructure.base import BaseTransform
 from elspeth.testing import make_pipeline_row
 from tests.fixtures.base_classes import _TestSchema, as_sink, as_source, as_transform
 from tests.fixtures.factories import wire_transforms
+from tests.fixtures.landscape import make_landscape_db
 from tests.fixtures.pipeline import build_production_graph
 from tests.fixtures.plugins import CollectSink, ListSource
 
@@ -38,20 +38,12 @@ SRC_ROOT = Path(__file__).resolve().parents[3] / "src" / "elspeth"
 # ---------------------------------------------------------------------------
 
 # Patterns that are ALLOWED to reference "default_sink" in src/elspeth/
-# These are rejection validators and comments explaining the removal.
+# These are docstrings/comments explaining why on_success replaced default_sink.
 ALLOWED_DEFAULT_SINK_PATTERNS = [
-    # config.py: rejection validators that tell users to migrate
-    re.compile(r"reject_default_sink"),
-    re.compile(r"'default_sink' has been removed"),
-    re.compile(r'"default_sink" in'),
-    re.compile(r"default_sink.*migration|remove.*default_sink.*line", re.IGNORECASE),
-    re.compile(r'""".*default_sink'),  # docstrings referencing the concept
-    # Comments/docstrings explaining the removal
     re.compile(r"#.*default_sink"),
     re.compile(r"no default_sink fallback"),
-    re.compile(r"old default_sink"),
-    re.compile(r"replaces.*default_sink"),
     re.compile(r"default_sink_name"),  # parameter name in docstrings
+    re.compile(r'""".*default_sink'),  # docstrings referencing the concept
 ]
 
 
@@ -107,7 +99,7 @@ class _OnSuccessTracingTransform(BaseTransform):
         super().__init__({"schema": {"mode": "observed"}})
 
     def process(self, row: PipelineRow, ctx: Any) -> Any:
-        from elspeth.plugins.results import TransformResult
+        from elspeth.plugins.infrastructure.results import TransformResult
 
         return TransformResult.success(
             make_pipeline_row(row.to_dict()),
@@ -132,10 +124,9 @@ class TestOnSuccessConfigAlignment:
 
     def test_on_success_from_transform_reaches_row_result(self, payload_store) -> None:
         """Terminal transform on_success flows through to RowResult sink_name."""
-        from elspeth.core.landscape import LandscapeDB
         from elspeth.engine.orchestrator import Orchestrator, PipelineConfig
 
-        db = LandscapeDB.in_memory()
+        db = make_landscape_db()
         source = ListSource([{"value": 42}], on_success="target_sink")
         transform = _OnSuccessTracingTransform()
         transform.on_success = "target_sink"
@@ -156,10 +147,9 @@ class TestOnSuccessConfigAlignment:
 
     def test_on_success_from_source_reaches_row_result_no_transforms(self, payload_store) -> None:
         """Source on_success flows through to RowResult when no transforms exist."""
-        from elspeth.core.landscape import LandscapeDB
         from elspeth.engine.orchestrator import Orchestrator, PipelineConfig
 
-        db = LandscapeDB.in_memory()
+        db = make_landscape_db()
         source = ListSource([{"value": 99}], on_success="direct_sink")
         sink = CollectSink(name="direct_sink")
 
@@ -186,8 +176,8 @@ class TestOnSuccessConfigAlignment:
     def test_config_on_success_parsed_into_transform(self) -> None:
         """TransformSettings.on_success is accepted by Pydantic and validated.
 
-        Note: on_success was lifted from TransformDataConfig (options layer)
-        to TransformSettings (settings level) as part of Phase 3 DAG wiring.
+        Note: on_success is at the TransformSettings (settings level),
+        not inside TransformDataConfig (options layer).
         """
         cfg = TransformSettings(
             name="test_transform",
@@ -214,7 +204,7 @@ class TestOnSuccessConfigAlignment:
         from pydantic import ValidationError
 
         with pytest.raises(ValidationError):
-            TransformSettings(
+            TransformSettings(  # type: ignore[call-arg]  # intentionally missing on_success
                 name="tracer_0",
                 plugin="on_success_tracer",
                 input="source_out",
@@ -224,10 +214,9 @@ class TestOnSuccessConfigAlignment:
     def test_multiple_sinks_routes_to_correct_one(self, payload_store) -> None:
         """With multiple sinks, rows route to the on_success-declared sink."""
         from elspeth.core.dag import ExecutionGraph
-        from elspeth.core.landscape import LandscapeDB
         from elspeth.engine.orchestrator import Orchestrator, PipelineConfig
 
-        db = LandscapeDB.in_memory()
+        db = make_landscape_db()
         source = ListSource([{"value": 1}], on_success="source_out")
         transform = _OnSuccessTracingTransform()
         transform.on_success = "sink_b"

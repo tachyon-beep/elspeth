@@ -9,13 +9,13 @@ If the source outputs wrong types, the transform crashes immediately.
 import copy
 from typing import Any
 
-from pydantic import Field
+from pydantic import Field, field_validator, model_validator
 
-from elspeth.contracts.plugin_context import PluginContext
+from elspeth.contracts.contexts import TransformContext
 from elspeth.contracts.schema_contract import PipelineRow
-from elspeth.plugins.base import BaseTransform
-from elspeth.plugins.config_base import TransformDataConfig
-from elspeth.plugins.results import TransformResult
+from elspeth.plugins.infrastructure.base import BaseTransform
+from elspeth.plugins.infrastructure.config_base import TransformDataConfig
+from elspeth.plugins.infrastructure.results import TransformResult
 
 
 class TruncateConfig(TransformDataConfig):
@@ -37,6 +37,24 @@ class TruncateConfig(TransformDataConfig):
         default=False,
         description="If True, error when a specified field is missing (default: False)",
     )
+
+    @field_validator("fields")
+    @classmethod
+    def _validate_field_lengths(cls, v: dict[str, int]) -> dict[str, int]:
+        for name, max_len in v.items():
+            if not name:
+                raise ValueError("field name must not be empty")
+            if max_len < 1:
+                raise ValueError(f"max_len for field '{name}' must be >= 1, got {max_len}")
+        return v
+
+    @model_validator(mode="after")
+    def _validate_suffix_fits(self) -> "TruncateConfig":
+        suffix_len = len(self.suffix)
+        for field_name, max_len in self.fields.items():
+            if suffix_len >= max_len:
+                raise ValueError(f"suffix length ({suffix_len}) must be less than max_len for field '{field_name}' ({max_len})")
+        return self
 
 
 class Truncate(BaseTransform):
@@ -76,16 +94,10 @@ class Truncate(BaseTransform):
         self._suffix = cfg.suffix
         self._strict = cfg.strict
 
-        # Validate suffix length doesn't exceed any max length
-        suffix_len = len(self._suffix)
-        for field_name, max_len in self._fields.items():
-            if suffix_len >= max_len:
-                raise ValueError(f"Suffix length ({suffix_len}) must be less than max length for field '{field_name}' ({max_len})")
-
         self._schema_config = cfg.schema_config
         self.input_schema, self.output_schema = self._create_schemas(cfg.schema_config, "Truncate")
 
-    def process(self, row: PipelineRow, ctx: PluginContext) -> TransformResult:
+    def process(self, row: PipelineRow, ctx: TransformContext) -> TransformResult:
         """Truncate specified fields in row.
 
         Args:

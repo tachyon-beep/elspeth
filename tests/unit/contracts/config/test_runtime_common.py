@@ -75,10 +75,10 @@ class TestRuntimeConfigImmutability:
     def test_frozen_dataclass(self, config_name: str) -> None:
         """Runtime configs are frozen (immutable) for thread safety."""
         config_cls = get_config_class(config_name)
-        config = config_cls.default()  # type: ignore[attr-defined]  # Runtime reflection: all Runtime*Config have .default() classmethod
+        config = config_cls.default()
 
         # Get first field name to attempt mutation
-        field_name = next(iter(config_cls.__dataclass_fields__.keys()))  # type: ignore[attr-defined]  # Runtime reflection: testing dataclass attribute
+        field_name = next(iter(config_cls.__dataclass_fields__.keys()))
 
         with pytest.raises(FrozenInstanceError):
             setattr(config, field_name, "mutated_value")
@@ -113,7 +113,7 @@ class TestRuntimeConfigProtocolCompliance:
         config_cls = get_config_class(config_name)
         protocol_cls = get_protocol_class(protocol_name)
 
-        config = config_cls.default()  # type: ignore[attr-defined]  # Runtime reflection: all Runtime*Config have .default() classmethod
+        config = config_cls.default()
 
         assert isinstance(config, protocol_cls), (
             f"{config_name} does not implement {protocol_name}. Check that all protocol properties are present with correct types."
@@ -141,10 +141,10 @@ class TestRuntimeConfigNoOrphanFields:
         settings_cls = get_settings_class(settings_name)
 
         # Get all runtime config fields
-        runtime_fields = set(config_cls.__dataclass_fields__.keys())  # type: ignore[attr-defined]  # Runtime reflection: testing dataclass attribute
+        runtime_fields = set(config_cls.__dataclass_fields__.keys())
 
         # Get Settings fields (with their runtime names via mapping)
-        settings_fields = set(settings_cls.model_fields.keys())  # type: ignore[attr-defined]  # Runtime reflection: testing Pydantic model attribute
+        settings_fields = set(settings_cls.model_fields.keys())
         field_mappings = FIELD_MAPPINGS.get(settings_name, {})
         runtime_from_settings = {field_mappings.get(f, f) for f in settings_fields}
 
@@ -175,10 +175,10 @@ class TestRuntimeConfigNoOrphanFields:
         settings_cls = get_settings_class(settings_name)
 
         # Get all runtime config fields
-        runtime_fields = set(config_cls.__dataclass_fields__.keys())  # type: ignore[attr-defined]  # Runtime reflection: testing dataclass attribute
+        runtime_fields = set(config_cls.__dataclass_fields__.keys())
 
         # Get Settings fields (with their runtime names via mapping)
-        settings_fields = set(settings_cls.model_fields.keys())  # type: ignore[attr-defined]  # Runtime reflection: testing Pydantic model attribute
+        settings_fields = set(settings_cls.model_fields.keys())
         field_mappings = FIELD_MAPPINGS.get(settings_name, {})
         runtime_from_settings = {field_mappings.get(f, f) for f in settings_fields}
 

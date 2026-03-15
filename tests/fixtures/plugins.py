@@ -11,10 +11,9 @@ from typing import Any, ClassVar
 
 from pydantic import ConfigDict
 
-from elspeth.contracts import ArtifactDescriptor, Determinism, PluginSchema, SourceRow
-from elspeth.contracts.routing import RoutingAction
-from elspeth.plugins.base import BaseTransform
-from elspeth.plugins.results import TransformResult
+from elspeth.contracts import ArtifactDescriptor, PluginSchema, SourceRow
+from elspeth.plugins.infrastructure.base import BaseTransform
+from elspeth.plugins.infrastructure.results import TransformResult
 from tests.fixtures.base_classes import _TestSchema, _TestSinkBase, _TestSourceBase
 
 
@@ -88,6 +87,66 @@ class CollectSink(_TestSinkBase):
 
     def close(self) -> None:
         pass
+
+
+class FailingSink(_TestSinkBase):
+    """Sink whose write() always raises RuntimeError.
+
+    For testing error handling in orchestrator, executors, and outcome recording.
+
+    Usage:
+        sink = FailingSink()
+        sink = FailingSink("broken_sink")
+        sink = FailingSink(error_message="Custom error")
+    """
+
+    def __init__(
+        self,
+        name: str = "failing_sink",
+        *,
+        node_id: str | None = None,
+        error_message: str = "Sink write failed",
+    ) -> None:
+        super().__init__()
+        self.name = name
+        self.node_id = node_id
+        self._error_message = error_message
+
+    def on_start(self, ctx: Any) -> None:
+        pass
+
+    def on_complete(self, ctx: Any) -> None:
+        pass
+
+    def write(self, rows: Any, ctx: Any) -> ArtifactDescriptor:
+        raise RuntimeError(self._error_message)
+
+    def close(self) -> None:
+        pass
+
+
+class FailingSource(ListSource):
+    """Source whose load() always raises RuntimeError.
+
+    For testing error handling during source loading (orchestrator cleanup,
+    export partial semantics, etc.).
+
+    Usage:
+        source = FailingSource()
+        source = FailingSource(error_message="Custom load failure")
+    """
+
+    def __init__(
+        self,
+        *,
+        name: str = "failing_source",
+        error_message: str = "Source failed intentionally",
+    ) -> None:
+        super().__init__(data=[], name=name)
+        self._error_message = error_message
+
+    def load(self, ctx: Any) -> Iterator[SourceRow]:
+        raise RuntimeError(self._error_message)
 
 
 class PassTransform(BaseTransform):
@@ -279,45 +338,3 @@ class ErrorOnNthTransform(BaseTransform):
         if self._call_count == self._error_on:
             return TransformResult.error({"reason": "simulated_failure", "error": f"nth_error_{self._error_on}"}, retryable=True)
         return TransformResult.success(row, success_reason={"action": "passed"})
-
-
-class RoutingGate:
-    """Gate that routes based on a field value.
-
-    Usage:
-        gate = RoutingGate("category", {"A": "sink_a", "B": "sink_b"})
-    """
-
-    name = "routing_gate"
-    input_schema: type[PluginSchema] = _TestSchema
-    output_schema: type[PluginSchema] = _TestSchema
-    node_id: str | None = None
-    determinism = Determinism.DETERMINISTIC
-    plugin_version = "1.0.0"
-
-    def __init__(self, field: str, route_map: dict[str, str], default: str = "continue") -> None:
-        self.config: dict[str, Any] = {"schema": {"mode": "observed"}}
-        self._field = field
-        self._route_map = route_map
-        self._default = default
-        self.routes = dict(route_map)
-        self.fork_to: list[str] = []
-
-    def evaluate(self, row: Any, ctx: Any) -> Any:
-        from elspeth.contracts.results import GateResult
-
-        row_dict = row if isinstance(row, dict) else row.to_dict()
-        value = row_dict[self._field]
-        sink = self._route_map.get(str(value))
-        if sink:
-            return GateResult(row=row_dict, action=RoutingAction.route(sink))
-        return GateResult(row=row_dict, action=RoutingAction.continue_())
-
-    def on_start(self, ctx: Any) -> None:
-        pass
-
-    def on_complete(self, ctx: Any) -> None:
-        pass
-
-    def close(self) -> None:
-        pass

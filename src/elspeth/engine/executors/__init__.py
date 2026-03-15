@@ -1,4 +1,3 @@
-# src/elspeth/engine/executors/__init__.py
 """Plugin executors that wrap plugin calls with audit recording.
 
 Each executor handles a specific plugin type:

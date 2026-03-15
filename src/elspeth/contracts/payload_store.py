@@ -1,4 +1,3 @@
-# src/elspeth/contracts/payload_store.py
 """PayloadStore protocol for content-addressable blob storage.
 
 This protocol defines the interface for payload storage backends used by:
@@ -6,6 +5,10 @@ This protocol defines the interface for payload storage backends used by:
 - core/retention/purge.py (PurgeManager for retention policy)
 
 Consolidated here to avoid circular imports and provide single source of truth.
+
+IntegrityError and PayloadNotFoundError are the complete exception vocabulary
+for this protocol — one for corruption, one for absence. Do not add further
+exception subtypes without strong justification.
 """
 
 from typing import Protocol, runtime_checkable
@@ -20,6 +23,20 @@ class IntegrityError(Exception):
     """
 
     pass
+
+
+class PayloadNotFoundError(Exception):
+    """Raised when a payload blob is not found (purged, stale reference).
+
+    This is a normal operational condition — retention policies purge old
+    payloads. Callers decide whether to degrade gracefully or propagate.
+    """
+
+    def __init__(self, content_hash: str) -> None:
+        if not content_hash:
+            raise ValueError("PayloadNotFoundError requires a non-empty content_hash")
+        self.content_hash = content_hash
+        super().__init__(f"Payload not found: {content_hash}")
 
 
 @runtime_checkable
@@ -51,7 +68,7 @@ class PayloadStore(Protocol):
             Original content bytes
 
         Raises:
-            KeyError: If content not found
+            PayloadNotFoundError: If content not found
             IntegrityError: If content doesn't match expected hash
         """
         ...

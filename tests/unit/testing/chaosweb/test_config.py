@@ -142,12 +142,12 @@ class TestChaosWebConfigDefaults:
     def test_blocks_external_bind_by_default(self) -> None:
         """Binding to 0.0.0.0 is blocked unless explicitly allowed."""
         with pytest.raises(ValidationError, match="exposes ChaosWeb"):
-            ChaosWebConfig(server={"host": "0.0.0.0", "port": 8200})  # type: ignore[arg-type]
+            ChaosWebConfig(server={"host": "0.0.0.0", "port": 8200})
 
     def test_allows_external_bind_when_enabled(self) -> None:
         """allow_external_bind=True permits 0.0.0.0."""
         config = ChaosWebConfig(
-            server={"host": "0.0.0.0", "port": 8200},  # type: ignore[arg-type]
+            server={"host": "0.0.0.0", "port": 8200},
             allow_external_bind=True,
         )
         assert config.server.host == "0.0.0.0"
@@ -219,7 +219,7 @@ class TestWebErrorInjectionConfig:
     def test_selection_mode_invalid(self) -> None:
         """Invalid selection mode raises ValidationError."""
         with pytest.raises(ValidationError):
-            WebErrorInjectionConfig(selection_mode="invalid_mode")  # type: ignore[arg-type]
+            WebErrorInjectionConfig(selection_mode="invalid_mode")
 
     def test_range_parses_from_list(self) -> None:
         """Range fields parse from list input."""
@@ -279,7 +279,7 @@ class TestWebContentConfig:
     def test_invalid_mode_rejected(self) -> None:
         """Invalid mode raises ValidationError."""
         with pytest.raises(ValidationError):
-            WebContentConfig(mode="nonexistent")  # type: ignore[arg-type]
+            WebContentConfig(mode="nonexistent")
 
     def test_frozen(self) -> None:
         """WebContentConfig is frozen."""

@@ -9,6 +9,7 @@ Handles the "infer-and-lock" pattern for OBSERVED and FLEXIBLE modes:
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from typing import Any
 
 from elspeth.contracts.schema_contract import SchemaContract
@@ -46,7 +47,7 @@ class ContractBuilder:
     def process_first_row(
         self,
         row: dict[str, Any],
-        field_resolution: dict[str, str],
+        field_resolution: Mapping[str, str],
     ) -> SchemaContract:
         """Process first row to infer types and lock contract.
 

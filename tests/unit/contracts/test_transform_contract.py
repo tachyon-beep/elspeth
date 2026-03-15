@@ -179,7 +179,7 @@ class TestSchemaFactoryOptionalFloat:
     def test_optional_float_preserves_float_type_and_enforces_validation(self) -> None:
         """Optional float should map to float type (None still allowed)."""
         from elspeth.contracts.schema import SchemaConfig
-        from elspeth.plugins.schema_factory import create_schema_from_config
+        from elspeth.plugins.infrastructure.schema_factory import create_schema_from_config
 
         cfg = SchemaConfig.from_dict(
             {

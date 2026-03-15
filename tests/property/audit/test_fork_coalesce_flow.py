@@ -25,8 +25,8 @@ from elspeth.core.config import CoalesceSettings, ElspethSettings, GateSettings,
 from elspeth.core.dag import ExecutionGraph
 from elspeth.core.landscape import LandscapeDB
 from elspeth.engine.orchestrator import Orchestrator, PipelineConfig
-from elspeth.plugins.base import BaseTransform
-from elspeth.plugins.results import TransformResult
+from elspeth.plugins.infrastructure.base import BaseTransform
+from elspeth.plugins.infrastructure.results import TransformResult
 from elspeth.testing import make_pipeline_row
 from tests.fixtures.base_classes import (
     _TestSchema,
@@ -37,6 +37,7 @@ from tests.fixtures.base_classes import (
     as_transform,
 )
 from tests.fixtures.factories import wire_transforms
+from tests.fixtures.landscape import make_landscape_db
 from tests.fixtures.stores import MockPayloadStore
 
 if TYPE_CHECKING:
@@ -244,7 +245,7 @@ class TestForkCoalesceFlow:
 
         Total terminal outcomes: N FORKED + 2*N COALESCED + N COMPLETED = 4*N
         """
-        db = LandscapeDB.in_memory()
+        db = make_landscape_db()
         payload_store = MockPayloadStore()
 
         rows = [{"value": i} for i in range(n_rows)]
@@ -341,7 +342,7 @@ class TestForkCoalesceFlow:
         This is critical for lineage tracking - we need to know which
         parent token(s) contributed to each coalesced result.
         """
-        db = LandscapeDB.in_memory()
+        db = make_landscape_db()
         payload_store = MockPayloadStore()
 
         rows = [{"value": i} for i in range(n_rows)]
@@ -411,7 +412,7 @@ class TestForkCoalesceFlow:
         Transforms that run before the fork should contribute their fields
         to the merged result after coalesce.
         """
-        db = LandscapeDB.in_memory()
+        db = make_landscape_db()
         payload_store = MockPayloadStore()
 
         rows = [{"value": i} for i in range(n_rows)]
@@ -479,7 +480,7 @@ class TestForkCoalesceEdgeCases:
 
     def test_empty_source_with_coalesce_config(self) -> None:
         """Empty source with coalesce config should not cause issues."""
-        db = LandscapeDB.in_memory()
+        db = make_landscape_db()
         payload_store = MockPayloadStore()
 
         source = _ListSource([])  # Empty
@@ -540,7 +541,7 @@ class TestForkCoalesceEdgeCases:
 
     def test_single_row_fork_coalesce(self) -> None:
         """Single row through fork->coalesce should work correctly."""
-        db = LandscapeDB.in_memory()
+        db = make_landscape_db()
         payload_store = MockPayloadStore()
 
         source = _ListSource([{"value": 42}])

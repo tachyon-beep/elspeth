@@ -10,13 +10,13 @@ will buffer rows and call process() with a list when the trigger fires.
 import math
 from typing import Any
 
-from pydantic import Field
+from pydantic import Field, field_validator
 
-from elspeth.contracts.plugin_context import PluginContext
+from elspeth.contracts.contexts import TransformContext
 from elspeth.contracts.schema_contract import FieldContract, PipelineRow, SchemaContract
-from elspeth.plugins.base import BaseTransform
-from elspeth.plugins.config_base import TransformDataConfig
-from elspeth.plugins.results import TransformResult
+from elspeth.plugins.infrastructure.base import BaseTransform
+from elspeth.plugins.infrastructure.config_base import TransformDataConfig
+from elspeth.plugins.infrastructure.results import TransformResult
 
 
 class BatchStatsConfig(TransformDataConfig):
@@ -34,6 +34,13 @@ class BatchStatsConfig(TransformDataConfig):
         default=True,
         description="Whether to compute mean in addition to sum/count",
     )
+
+    @field_validator("value_field")
+    @classmethod
+    def _reject_empty(cls, v: str) -> str:
+        if not v:
+            raise ValueError("value_field must not be empty")
+        return v
 
 
 class BatchStats(BaseTransform):
@@ -85,7 +92,7 @@ class BatchStats(BaseTransform):
         )
 
     def process(  # type: ignore[override] # Batch signature: list[PipelineRow] instead of PipelineRow
-        self, rows: list[PipelineRow], ctx: PluginContext
+        self, rows: list[PipelineRow], ctx: TransformContext
     ) -> TransformResult:
         """Compute statistics over a batch of rows.
 
@@ -101,40 +108,16 @@ class BatchStats(BaseTransform):
             TypeError: If value_field is not numeric (upstream bug)
         """
         if not rows:
-            # Empty batch - should not happen in normal operation
-            result_data: dict[str, Any] = {"count": 0, "sum": 0}
-            fields_added = ["count", "sum"]
-            if self._compute_mean:
-                result_data["mean"] = None
-                fields_added.append("mean")
-            result_data["batch_empty"] = True
-            fields_added.append("batch_empty")
-
-            # Create OBSERVED contract for transform mode (processor.py:712 requires it)
-            fields = tuple(
-                FieldContract(
-                    normalized_name=key,
-                    original_name=key,
-                    python_type=object,
-                    required=False,
-                    source="inferred",
-                )
-                for key in result_data
-            )
-            output_contract = SchemaContract(mode="OBSERVED", fields=fields, locked=True)
-
-            return TransformResult.success(
-                PipelineRow(result_data, output_contract),
-                success_reason={
-                    "action": "processed",
-                    "fields_added": fields_added,
-                    "metadata": {"empty_batch": True},
-                },
+            # Empty batch is an anomaly — return error, not fabricated statistics.
+            # Phantom sum=0/count=0/mean=None would flow to sinks as real data.
+            return TransformResult.error(
+                {"reason": "empty_batch"},
+                retryable=False,
             )
         # Extract numeric values - enforce type contract
         # Tier 2 pipeline data should already be validated; wrong types = upstream bug
         values: list[int | float] = []
-        skipped_non_finite = 0
+        skipped_non_finite_indices: list[int] = []
         for i, row in enumerate(rows):
             # Direct access - field must exist (KeyError = upstream bug)
             raw_value = row[self._value_field]
@@ -153,7 +136,7 @@ class BatchStats(BaseTransform):
             # garbage in arithmetic and crash downstream canonical JSON (RFC 8785).
             # Integers are always finite — only check floats.
             if isinstance(raw_value, float) and not math.isfinite(raw_value):
-                skipped_non_finite += 1
+                skipped_non_finite_indices.append(i)
                 continue
 
             # Preserve original type: int stays int (arbitrary precision),
@@ -182,8 +165,9 @@ class BatchStats(BaseTransform):
         elif self._compute_mean:
             result["mean"] = None
 
-        if skipped_non_finite > 0:
-            result["skipped_non_finite"] = skipped_non_finite
+        if skipped_non_finite_indices:
+            result["skipped_non_finite"] = len(skipped_non_finite_indices)
+            result["skipped_non_finite_indices"] = skipped_non_finite_indices
 
         # Include group_by field — validate homogeneity across batch.
         # group_by is configured contract, so missing field is an upstream bug.
@@ -209,13 +193,12 @@ class BatchStats(BaseTransform):
         fields_added = ["count", "sum", "batch_size"]
         if self._compute_mean:
             fields_added.append("mean")
-        if skipped_non_finite > 0:
+        if skipped_non_finite_indices:
             fields_added.append("skipped_non_finite")
+            fields_added.append("skipped_non_finite_indices")
         if self._group_by and rows:
             fields_added.append(self._group_by)
 
-        # Create OBSERVED contract from output fields for transform mode
-        # Aggregations in transform mode create new tokens (processor.py:712 requires contract)
         fields = tuple(
             FieldContract(
                 normalized_name=key,

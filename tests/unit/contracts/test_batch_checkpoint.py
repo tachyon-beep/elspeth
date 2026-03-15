@@ -12,6 +12,7 @@ from __future__ import annotations
 import pytest
 
 from elspeth.contracts.batch_checkpoint import BatchCheckpointState, RowMappingEntry
+from elspeth.contracts.errors import AuditIntegrityError
 
 # ---------------------------------------------------------------------------
 # RowMappingEntry
@@ -115,37 +116,37 @@ class TestBatchCheckpointState:
     def test_from_dict_missing_batch_id_crashes(self) -> None:
         d = _make_state().to_dict()
         del d["batch_id"]
-        with pytest.raises(KeyError, match="batch_id"):
+        with pytest.raises(AuditIntegrityError, match="missing required fields"):
             BatchCheckpointState.from_dict(d)
 
     def test_from_dict_missing_input_file_id_crashes(self) -> None:
         d = _make_state().to_dict()
         del d["input_file_id"]
-        with pytest.raises(KeyError, match="input_file_id"):
+        with pytest.raises(AuditIntegrityError, match="missing required fields"):
             BatchCheckpointState.from_dict(d)
 
     def test_from_dict_missing_row_mapping_crashes(self) -> None:
         d = _make_state().to_dict()
         del d["row_mapping"]
-        with pytest.raises(KeyError, match="row_mapping"):
+        with pytest.raises(AuditIntegrityError, match="missing required fields"):
             BatchCheckpointState.from_dict(d)
 
     def test_from_dict_missing_submitted_at_crashes(self) -> None:
         d = _make_state().to_dict()
         del d["submitted_at"]
-        with pytest.raises(KeyError, match="submitted_at"):
+        with pytest.raises(AuditIntegrityError, match="missing required fields"):
             BatchCheckpointState.from_dict(d)
 
     def test_from_dict_missing_row_count_crashes(self) -> None:
         d = _make_state().to_dict()
         del d["row_count"]
-        with pytest.raises(KeyError, match="row_count"):
+        with pytest.raises(AuditIntegrityError, match="missing required fields"):
             BatchCheckpointState.from_dict(d)
 
     def test_from_dict_missing_requests_crashes(self) -> None:
         d = _make_state().to_dict()
         del d["requests"]
-        with pytest.raises(KeyError, match="requests"):
+        with pytest.raises(AuditIntegrityError, match="missing required fields"):
             BatchCheckpointState.from_dict(d)
 
     def test_from_dict_nested_row_mapping_entry_crashes_on_corruption(self) -> None:
@@ -153,6 +154,43 @@ class TestBatchCheckpointState:
         d = _make_state().to_dict()
         d["row_mapping"]["row-0-aaa"] = {"variables_hash": "h0"}  # missing index
         with pytest.raises(KeyError, match="index"):
+            BatchCheckpointState.from_dict(d)
+
+    def test_round_trip_through_json_preserves_tuple_types(self) -> None:
+        """Round-trip through JSON serialization must restore tuples, not lists.
+
+        json.loads produces list[list] from list[tuple] — from_dict must convert back.
+        This is the real persistence path: to_dict → json.dumps → json.loads → from_dict.
+        """
+        import json
+
+        state = _make_state(
+            template_errors=[(0, "Missing field: text"), (3, "Invalid template")],
+        )
+        serialized = json.dumps(state.to_dict())
+        deserialized = json.loads(serialized)
+        restored = BatchCheckpointState.from_dict(deserialized)
+
+        # Must be tuples, not lists
+        for entry in restored.template_errors:
+            assert isinstance(entry, tuple), f"Expected tuple, got {type(entry).__name__}: {entry}"
+        assert restored.template_errors == ((0, "Missing field: text"), (3, "Invalid template"))
+
+    def test_from_dict_template_errors_are_tuples_not_lists(self) -> None:
+        """from_dict with list-of-lists (as JSON produces) must convert to tuples."""
+        d = _make_state().to_dict()
+        d["template_errors"] = [[0, "err0"], [1, "err1"]]  # JSON-style lists
+        restored = BatchCheckpointState.from_dict(d)
+
+        for entry in restored.template_errors:
+            assert isinstance(entry, tuple), f"Expected tuple, got {type(entry).__name__}"
+        assert restored.template_errors == ((0, "err0"), (1, "err1"))
+
+    def test_from_dict_template_error_wrong_length_crashes(self) -> None:
+        """Template error entries must be exactly 2-element (index, message)."""
+        d = _make_state().to_dict()
+        d["template_errors"] = [[0, "err", "extra"]]  # 3 elements — corrupt
+        with pytest.raises((ValueError, TypeError)):
             BatchCheckpointState.from_dict(d)
 
     def test_empty_batch_round_trips(self) -> None:

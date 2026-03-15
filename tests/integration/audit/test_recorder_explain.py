@@ -332,7 +332,7 @@ class TestExplainGracefulDegradation:
             )
 
     def test_explain_row_rejects_run_id_mismatch(self, tmp_path: Path, payload_store) -> None:
-        """explain_row() returns None when row belongs to different run."""
+        """explain_row() raises ValueError when row belongs to different run."""
         from elspeth.core.landscape.database import LandscapeDB
         from elspeth.core.landscape.recorder import LandscapeRecorder
         from elspeth.core.payload_store import FilesystemPayloadStore
@@ -363,13 +363,12 @@ class TestExplainGracefulDegradation:
             data=row_data,
         )
 
-        # Try to explain using run2's ID - should return None
-        lineage = recorder.explain_row(
-            run_id=run2.run_id,  # Wrong run!
-            row_id=row.row_id,
-        )
-
-        assert lineage is None
+        # Try to explain using run2's ID — cross-run mismatch raises AuditIntegrityError
+        with pytest.raises(AuditIntegrityError, match=f"Row {row.row_id} belongs to run {run1.run_id}, not {run2.run_id}"):
+            recorder.explain_row(
+                run_id=run2.run_id,  # Wrong run!
+                row_id=row.row_id,
+            )
 
         # Same row with correct run_id should work
         lineage_correct = recorder.explain_row(

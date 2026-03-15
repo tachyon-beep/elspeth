@@ -1,4 +1,3 @@
-# src/elspeth/testing/chaosllm/__init__.py
 """ChaosLLM: Fake LLM server for load testing and fault injection.
 
 ChaosLLM provides:
@@ -30,27 +29,40 @@ from elspeth.testing.chaosllm.config import (
     DEFAULT_MEMORY_DB,
     ChaosLLMConfig,
     ErrorInjectionConfig,
+    LatencyConfig,
+    MetricsConfig,
     ResponseConfig,
+    ServerConfig,
     list_presets,
     load_config,
     load_preset,
 )
 from elspeth.testing.chaosllm.error_injector import ErrorDecision, ErrorInjector
 from elspeth.testing.chaosllm.metrics import MetricsRecorder
-from elspeth.testing.chaosllm.response_generator import OpenAIResponse, ResponseGenerator
+from elspeth.testing.chaosllm.response_generator import (
+    ENGLISH_VOCABULARY,
+    LOREM_VOCABULARY,
+    OpenAIResponse,
+    ResponseGenerator,
+)
 from elspeth.testing.chaosllm.server import ChaosLLMServer, create_app
 
 __all__ = [
     "DEFAULT_MEMORY_DB",
+    "ENGLISH_VOCABULARY",
+    "LOREM_VOCABULARY",
     "ChaosLLMConfig",
     "ChaosLLMServer",
     "ErrorDecision",
     "ErrorInjectionConfig",
     "ErrorInjector",
+    "LatencyConfig",
+    "MetricsConfig",
     "MetricsRecorder",
     "OpenAIResponse",
     "ResponseConfig",
     "ResponseGenerator",
+    "ServerConfig",
     "create_app",
     "list_presets",
     "load_config",

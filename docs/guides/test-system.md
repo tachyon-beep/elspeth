@@ -34,7 +34,7 @@ tests/
 │   ├── external.py                      # messy_headers, normalizable_headers, python_keywords
 │   ├── ids.py                           # id_strings, sink_names, branch_names, path_names
 │   ├── binary.py                        # binary_content, nonempty_binary, small_binary
-│   ├── config.py                        # valid_max_attempts, valid_delays, valid_jitter
+│   ├── config.py                        # valid_max_attempts, valid_base_delays, valid_jitter
 │   ├── mutable.py                       # mutable_nested_data, deeply_nested_data
 │   └── settings.py                      # DETERMINISM / STATE_MACHINE / STANDARD / SLOW / QUICK
 │
@@ -466,7 +466,7 @@ dozens of tests broke.
 | Layer | Location | Contains | Imported by |
 |-------|----------|----------|-------------|
 | **Production factories** | `src/elspeth/testing/` | Factories for production types (SchemaContract, PipelineRow, SourceRow, TransformResult, GateResult, ArtifactDescriptor, events, result types) | Tests AND production benchmarks |
-| **Test-only factories** | `tests/fixtures/factories.py` | Re-exports from `elspeth.testing` + factories for test doubles (mock PluginContext, mock landscape, ExecutionGraph builders, populate_run) | Tests only |
+| **Test-only factories** | `tests/fixtures/factories.py` | Re-exports from `elspeth.testing` + factories for test doubles (mock PluginContext, mock landscape, ExecutionGraph builders) | Tests only |
 
 **The rule:** Tests NEVER call backbone constructors directly. They call factories.
 Production-type factories live in `elspeth.testing` (extending what's already there).
@@ -996,98 +996,10 @@ def make_run_record(
     )
 
 
-def populate_run(
-    recorder: Any,
-    db: Any,
-    *,
-    row_count: int = 5,
-    fail_rows: set[int] | None = None,
-    graph: Any | None = None,
-) -> dict[str, Any]:
-    """Create a complete run with rows, tokens, and outcomes.
 
-    Returns dict with run_id, row_ids, token_ids for assertions.
-
-    Usage:
-        result = populate_run(recorder, db, row_count=10, fail_rows={3, 7})
-        assert len(result["row_ids"]) == 10
-        assert result["row_ids"][3] in result["failed_row_ids"]
-    """
-    from elspeth.core.landscape.schema import (
-        nodes_table,
-        rows_table,
-        runs_table,
-        token_outcomes_table,
-        tokens_table,
-    )
-
-    fail_rows = fail_rows or set()
-    run_id = make_run_id()
-    now = datetime.now(UTC)
-
-    if graph is None:
-        graph = make_graph_linear()
-
-    row_ids = [f"row-{i:03d}" for i in range(row_count)]
-    token_ids = [f"tok-{i:03d}" for i in range(row_count)]
-    failed_row_ids = {row_ids[i] for i in fail_rows}
-
-    with db.engine.connect() as conn:
-        conn.execute(
-            runs_table.insert().values(
-                run_id=run_id,
-                started_at=now,
-                config_hash="test",
-                settings_json="{}",
-                canonical_version="sha256-rfc8785-v1",
-                status=RunStatus.COMPLETED,
-            )
-        )
-        conn.execute(
-            nodes_table.insert().values(
-                node_id="source-node", run_id=run_id, plugin_name="test",
-                node_type=NodeType.SOURCE, plugin_version="1.0",
-                determinism=Determinism.DETERMINISTIC, config_hash="x",
-                config_json="{}", registered_at=now,
-            )
-        )
-        conn.execute(
-            nodes_table.insert().values(
-                node_id="sink-node", run_id=run_id, plugin_name="test",
-                node_type=NodeType.SINK, plugin_version="1.0",
-                determinism=Determinism.DETERMINISTIC, config_hash="x",
-                config_json="{}", registered_at=now,
-            )
-        )
-        for i in range(row_count):
-            conn.execute(
-                rows_table.insert().values(
-                    row_id=row_ids[i], run_id=run_id, source_node_id="source-node",
-                    row_index=i, source_data_hash=f"hash{i}", created_at=now,
-                )
-            )
-            conn.execute(
-                tokens_table.insert().values(
-                    token_id=token_ids[i], row_id=row_ids[i], created_at=now,
-                )
-            )
-            outcome = RowOutcome.FAILED if i in fail_rows else RowOutcome.COMPLETED
-            conn.execute(
-                token_outcomes_table.insert().values(
-                    outcome_id=f"outcome-{i:03d}", run_id=run_id,
-                    token_id=token_ids[i], outcome=outcome.value,
-                    is_terminal=1, recorded_at=now, sink_name="sink-node",
-                )
-            )
-        conn.commit()
-
-    return {
-        "run_id": run_id,
-        "row_ids": row_ids,
-        "token_ids": token_ids,
-        "failed_row_ids": failed_row_ids,
-        "graph": graph,
-    }
+# populate_run() was removed — it bypassed LandscapeRecorder via raw SQL inserts,
+# which is the same class of violation as BUG-LINEAGE-01. Use make_run_record()
+# with recorder.create_row() / recorder.create_token() instead.
 ```
 
 **The PipelineRow Problem (archetype for all backbone type pain):**
@@ -1531,7 +1443,7 @@ def make_transform_error_token(
 | `make_graph_linear/fork()` | ExecutionGraph | 39 files | `fixtures/factories` (unit/property only) |
 | `make_run_id()` | str (uuid) | many | `fixtures/factories` |
 | `make_run_record()` | RunRecord | many | `fixtures/factories` (needs recorder) |
-| `populate_run()` | multi-table insert | many | `fixtures/factories` (needs DB) |
+| `make_run_record()` | RunRecord (via recorder.begin_run) | many | `fixtures/factories` (needs recorder) |
 | `make_run_result()` | RunResult | 7 files | `elspeth.testing` |
 | `make_flush_result()` | AggregationFlushResult | 9 files | `elspeth.testing` |
 | `make_execution_counters()` | ExecutionCounters | **0 files** | `elspeth.testing` |
@@ -1632,9 +1544,7 @@ Contains:
   - `recorder` (function-scoped) - wraps landscape_db
   - `real_landscape_recorder_with_payload_store` (function-scoped)
 - Helpers:
-  - `populate_run()` - create a run with N rows, optional failures
-  - `populate_fork_run()` - create a run with fork/coalesce topology
-  - `assert_lineage_complete()` - verify every token reaches terminal state
+  - `make_run_record()` - begin a run and return the RunRecord
 
 ### 7. `fixtures/pipeline.py`
 
@@ -1649,8 +1559,9 @@ Contains:
 - `build_linear_pipeline(source_data, transforms, sink)` -> `(source, transforms, sinks, graph)`
 - `build_fork_pipeline(source_data, gate, branch_transforms, sinks)` -> full pipeline
 - `build_aggregation_pipeline(source_data, trigger, sink)` -> full pipeline
-- `run_pipeline(source, transforms, sinks, graph, **kwargs)` -> RunResult
-- `PipelineResult` dataclass: `run_id`, `sink_results`, `landscape_db`, `recorder`
+- `run_audit_pipeline(tmp_path, source_data, transforms)` -> `AuditPipelineResult`
+- `AuditPipelineResult` dataclass: `run_id`, `db`, `payload_store`, `sink`
+- `build_production_graph(config)` -> `ExecutionGraph`
 
 ### 8. `fixtures/chaosllm.py`
 
@@ -1678,7 +1589,7 @@ Migrated from `tests/property/conftest.py` into individual modules:
 | `external.py` | `messy_headers`, `normalizable_headers`, `python_keywords` |
 | `ids.py` | `id_strings`, `sink_names`, `path_names`, `branch_names`, `unique_branches`, `multiple_branches` |
 | `binary.py` | `binary_content`, `nonempty_binary`, `small_binary` |
-| `config.py` | `valid_max_attempts`, `valid_delays`, `valid_jitter` |
+| `config.py` | `valid_max_attempts`, `valid_base_delays`, `valid_jitter` |
 | `mutable.py` | `mutable_nested_data`, `deeply_nested_data` |
 | `settings.py` | `DETERMINISM_SETTINGS`, `STATE_MACHINE_SETTINGS`, `STANDARD_SETTINGS`, `SLOW_SETTINGS`, `QUICK_SETTINGS` |
 
@@ -1831,15 +1742,15 @@ conftest.py (root)
 │   ├── make_recorder()
 │   ├── [fixture] landscape_db [function scope — fresh per test]
 │   ├── [fixture] recorder [function scope]
-│   ├── populate_run()
-│   └── assert_lineage_complete()
+│   └── make_run_record()
 │
 ├── fixtures/pipeline.py (depends on plugins, landscape)
 │   ├── build_linear_pipeline()
 │   ├── build_fork_pipeline()
 │   ├── build_aggregation_pipeline()
-│   ├── run_pipeline()
-│   └── PipelineResult
+│   ├── run_audit_pipeline()
+│   ├── AuditPipelineResult
+│   └── build_production_graph()
 │
 ├── fixtures/chaosllm.py
 │   ├── ChaosLLMFixture
@@ -1854,7 +1765,7 @@ conftest.py (root)
     ├── external.py: messy_headers, normalizable_headers
     ├── ids.py: id_strings, sink_names, branch_names
     ├── binary.py: binary_content, nonempty_binary
-    ├── config.py: valid_max_attempts, valid_delays
+    ├── config.py: valid_max_attempts, valid_base_delays
     ├── mutable.py: mutable_nested_data, deeply_nested_data
     └── settings.py: DETERMINISM / STANDARD / SLOW / QUICK
 ```

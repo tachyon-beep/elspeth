@@ -10,12 +10,13 @@ source:
       - 'text: str'
     on_validation_failure: discard
 transforms:
-- name: openrouter_llm_0
-  plugin: openrouter_llm
+- name: llm_0
+  plugin: llm
   input: source_out
   on_success: output
   on_error: quarantine
   options:
+    provider: openrouter
     api_key: fake-key-chaosllm-does-not-check
     base_url: http://127.0.0.1:8199/v1
     model: chaosllm/fake-gpt-4

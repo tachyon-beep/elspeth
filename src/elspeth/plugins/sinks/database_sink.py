@@ -1,4 +1,3 @@
-# src/elspeth/plugins/sinks/database_sink.py
 """Database sink plugin for ELSPETH.
 
 Writes rows to a database table using SQLAlchemy Core.
@@ -11,8 +10,11 @@ import hashlib
 import json
 import os
 import time
+from collections.abc import Mapping
+from types import MappingProxyType
 from typing import TYPE_CHECKING, Any, Literal
 
+from pydantic import field_validator
 from sqlalchemy import Boolean, Column, Float, Integer, MetaData, Table, Text, create_engine, insert
 
 if TYPE_CHECKING:
@@ -21,24 +23,26 @@ from sqlalchemy.engine import Engine
 from sqlalchemy.types import TypeEngine
 
 from elspeth.contracts import ArtifactDescriptor, CallStatus, CallType, PluginSchema
-from elspeth.contracts.plugin_context import PluginContext
+from elspeth.contracts.contexts import SinkContext
 from elspeth.contracts.url import SanitizedDatabaseUrl
 from elspeth.core.canonical import canonical_json
-from elspeth.plugins.base import BaseSink
-from elspeth.plugins.config_base import DataPluginConfig
-from elspeth.plugins.schema_factory import create_schema_from_config
+from elspeth.plugins.infrastructure.base import BaseSink
+from elspeth.plugins.infrastructure.config_base import DataPluginConfig
+from elspeth.plugins.infrastructure.schema_factory import create_schema_from_config
 
 # Map schema field types to SQLAlchemy column types.
 # Text (not String) is used for string columns because String() without a length
 # argument causes truncation or errors on MySQL/MSSQL — Text maps to TEXT on all
 # backends and accepts arbitrary-length values without portability issues.
-SCHEMA_TYPE_TO_SQLALCHEMY: dict[str, type[TypeEngine[Any]]] = {
-    "str": Text,
-    "int": Integer,
-    "float": Float,
-    "bool": Boolean,
-    "any": Text,  # Fallback to Text for 'any' type
-}
+SCHEMA_TYPE_TO_SQLALCHEMY: Mapping[str, type[TypeEngine[Any]]] = MappingProxyType(
+    {
+        "str": Text,
+        "int": Integer,
+        "float": Float,
+        "bool": Boolean,
+        "any": Text,  # Fallback to Text for 'any' type
+    }
+)
 
 
 class DatabaseSinkConfig(DataPluginConfig):
@@ -51,6 +55,13 @@ class DatabaseSinkConfig(DataPluginConfig):
     table: str
     if_exists: Literal["append", "replace"] = "append"
     validate_input: bool = False  # Optional runtime validation of incoming rows
+
+    @field_validator("table")
+    @classmethod
+    def _reject_empty_table(cls, v: str) -> str:
+        if not v.strip():
+            raise ValueError("table name must not be empty")
+        return v
 
 
 class DatabaseSink(BaseSink):
@@ -254,7 +265,7 @@ class DatabaseSink(BaseSink):
 
         return OutputValidationResult.success(target_fields=existing)
 
-    def _ensure_table(self, row: dict[str, Any], ctx: PluginContext) -> None:
+    def _ensure_table(self, row: dict[str, Any], ctx: SinkContext) -> None:
         """Create table, handling if_exists behavior.
 
         if_exists behavior (follows pandas to_sql semantics):
@@ -269,7 +280,6 @@ class DatabaseSink(BaseSink):
 
         DDL operations (DROP TABLE, CREATE TABLE) are instrumented via
         ctx.record_call for audit trail completeness.
-        See P2-2026-02-14-ddl-calls-bypass-ctx-record-call.
         """
         self._ensure_engine_and_metadata_initialized()
         if self._engine is None:
@@ -324,7 +334,7 @@ class DatabaseSink(BaseSink):
                 )
                 raise
 
-    def _drop_table_if_exists(self, ctx: PluginContext) -> None:
+    def _drop_table_if_exists(self, ctx: SinkContext) -> None:
         """Drop the table if it exists (for replace mode).
 
         Uses SQLAlchemy's Table.drop() for portable, dialect-safe drops.
@@ -332,10 +342,10 @@ class DatabaseSink(BaseSink):
         (SQLite, PostgreSQL, MySQL, etc.).
 
         DDL is instrumented via ctx.record_call for audit trail completeness.
-        See P2-2026-02-14-ddl-calls-bypass-ctx-record-call.
         """
-        if self._engine is None:
-            return
+        assert self._engine is not None, (
+            "engine is None at DROP TABLE time — invariant violation (_ensure_engine_and_metadata_initialized must run first)"
+        )
 
         from sqlalchemy import MetaData, Table, inspect
 
@@ -413,7 +423,7 @@ class DatabaseSink(BaseSink):
         # Fallback (shouldn't happen with valid config): use row keys
         return [Column(key, Text) for key in row]
 
-    def write(self, rows: list[dict[str, Any]], ctx: PluginContext) -> ArtifactDescriptor:
+    def write(self, rows: list[dict[str, Any]], ctx: SinkContext) -> ArtifactDescriptor:
         """Write a batch of rows to the database.
 
         CRITICAL: Hashes the canonical JSON payload BEFORE insert.
@@ -472,11 +482,13 @@ class DatabaseSink(BaseSink):
 
         # Insert all rows in batch with call recording for audit trail
         # (ctx.operation_id is set by executor)
+        assert self._engine is not None and self._table is not None, (
+            "engine/table is None at INSERT time — invariant violation (_ensure_table must set both before write)"
+        )
         start_time = time.perf_counter()
         try:
-            if self._engine is not None and self._table is not None:
-                with self._engine.begin() as conn:
-                    conn.execute(insert(self._table), insert_rows)
+            with self._engine.begin() as conn:
+                conn.execute(insert(self._table), insert_rows)
             latency_ms = (time.perf_counter() - start_time) * 1000
 
             # Record successful INSERT in audit trail
@@ -540,13 +552,3 @@ class DatabaseSink(BaseSink):
             self._table = None
             self._metadata = None
             self._table_replaced = False
-
-    # === Lifecycle Hooks ===
-
-    def on_start(self, ctx: PluginContext) -> None:
-        """Called before processing begins."""
-        pass
-
-    def on_complete(self, ctx: PluginContext) -> None:
-        """Called after processing completes."""
-        pass

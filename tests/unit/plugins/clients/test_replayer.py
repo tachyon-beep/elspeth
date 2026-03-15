@@ -10,7 +10,8 @@ import pytest
 
 from elspeth.contracts import Call, CallStatus, CallType
 from elspeth.core.canonical import stable_hash
-from elspeth.plugins.clients.replayer import (
+from elspeth.core.landscape.row_data import CallDataResult, CallDataState
+from elspeth.plugins.infrastructure.clients.replayer import (
     CallReplayer,
     ReplayedCall,
     ReplayMissError,
@@ -51,6 +52,37 @@ class TestReplayedCall:
             "message": "Too many requests",
         }
 
+    def test_was_error_true_without_error_data_is_valid(self) -> None:
+        """ReplayedCall allows was_error=True with error_data=None.
+
+        Error calls can legitimately have no error details (e.g., connection
+        timeout where we know it failed but have no JSON error body).
+        """
+        result = ReplayedCall(
+            response_data={},
+            original_latency_ms=50.0,
+            request_hash="abc123",
+            was_error=True,
+            error_data=None,
+        )
+        assert result.was_error is True
+        assert result.error_data is None
+
+    def test_error_data_without_was_error_rejected(self) -> None:
+        """ReplayedCall rejects error_data with was_error=False.
+
+        Regression: elspeth-dbd8b35d48 — was_error/error_data correlation
+        was unenforced, allowing semantically invalid states.
+        """
+        with pytest.raises(ValueError, match="error_data provided but was_error=False"):
+            ReplayedCall(
+                response_data={},
+                original_latency_ms=50.0,
+                request_hash="abc123",
+                was_error=False,
+                error_data={"type": "SomeError"},
+            )
+
 
 class TestReplayMissError:
     """Tests for ReplayMissError exception."""
@@ -77,7 +109,7 @@ class TestCallReplayer:
         """Create a mock LandscapeRecorder."""
         recorder = MagicMock()
         recorder.find_call_by_request_hash = MagicMock(return_value=None)
-        recorder.get_call_response_data = MagicMock(return_value=None)
+        recorder.get_call_response_data = MagicMock(return_value=CallDataResult(state=CallDataState.STORE_NOT_CONFIGURED, data=None))
         return recorder
 
     def _create_mock_call(
@@ -117,14 +149,17 @@ class TestCallReplayer:
 
         mock_call = self._create_mock_call(request_hash=request_hash, latency_ms=150.0)
         recorder.find_call_by_request_hash.return_value = mock_call
-        recorder.get_call_response_data.return_value = {
-            "content": "Hello, world!",
-            "model": "gpt-4",
-            "usage": {"prompt_tokens": 10, "completion_tokens": 5},
-        }
+        recorder.get_call_response_data.return_value = CallDataResult(
+            state=CallDataState.AVAILABLE,
+            data={
+                "content": "Hello, world!",
+                "model": "gpt-4",
+                "usage": {"prompt_tokens": 10, "completion_tokens": 5},
+            },
+        )
 
         replayer = CallReplayer(recorder, source_run_id="run_abc123")
-        result = replayer.replay(call_type="llm", request_data=request_data)
+        result = replayer.replay(call_type=CallType.LLM, request_data=request_data)
 
         assert result.response_data == {
             "content": "Hello, world!",
@@ -138,7 +173,7 @@ class TestCallReplayer:
         # Verify correct lookup parameters (now includes sequence_index)
         recorder.find_call_by_request_hash.assert_called_once_with(
             run_id="run_abc123",
-            call_type="llm",
+            call_type=CallType.LLM,
             request_hash=request_hash,
             sequence_index=0,
         )
@@ -152,7 +187,7 @@ class TestCallReplayer:
         request_data = {"model": "gpt-4", "messages": []}
 
         with pytest.raises(ReplayMissError) as exc_info:
-            replayer.replay(call_type="llm", request_data=request_data)
+            replayer.replay(call_type=CallType.LLM, request_data=request_data)
 
         assert exc_info.value.request_data == request_data
         assert exc_info.value.request_hash == stable_hash(request_data)
@@ -174,17 +209,17 @@ class TestCallReplayer:
 
         mock_call = self._create_mock_call(request_hash=request_hash)
         recorder.find_call_by_request_hash.return_value = mock_call
-        recorder.get_call_response_data.return_value = {"content": "cached"}
+        recorder.get_call_response_data.return_value = CallDataResult(state=CallDataState.AVAILABLE, data={"content": "cached"})
 
         replayer = CallReplayer(recorder, source_run_id="run_abc123")
 
         # First call - hits database (sequence_index=0)
-        result1 = replayer.replay(call_type="llm", request_data=request_data)
+        result1 = replayer.replay(call_type=CallType.LLM, request_data=request_data)
         assert recorder.find_call_by_request_hash.call_count == 1
 
         # Second call - hits database again (sequence_index=1, different from cache key)
         # This is the correct behavior: same request should return different response
-        result2 = replayer.replay(call_type="llm", request_data=request_data)
+        result2 = replayer.replay(call_type=CallType.LLM, request_data=request_data)
         assert recorder.find_call_by_request_hash.call_count == 2
 
         # Both results have same content (mock returns same response for any sequence)
@@ -197,7 +232,7 @@ class TestCallReplayer:
         assert replayer.cache_size() == 0
 
         # Third call after clear - hits database again (sequence_index=0 again)
-        result3 = replayer.replay(call_type="llm", request_data=request_data)
+        result3 = replayer.replay(call_type=CallType.LLM, request_data=request_data)
         assert recorder.find_call_by_request_hash.call_count == 3
         assert result3.response_data == {"content": "cached"}
 
@@ -224,10 +259,10 @@ class TestCallReplayer:
             response_ref=None,  # Never had a response
         )
         recorder.find_call_by_request_hash.return_value = mock_call
-        recorder.get_call_response_data.return_value = None
+        recorder.get_call_response_data.return_value = CallDataResult(state=CallDataState.NEVER_STORED, data=None)
 
         replayer = CallReplayer(recorder, source_run_id="run_abc123")
-        result = replayer.replay(call_type="llm", request_data=request_data)
+        result = replayer.replay(call_type=CallType.LLM, request_data=request_data)
 
         assert result.was_error is True
         assert result.error_data == error_details
@@ -260,13 +295,13 @@ class TestCallReplayer:
             response_hash=None,  # But hash is missing
         )
         recorder.find_call_by_request_hash.return_value = mock_call
-        recorder.get_call_response_data.return_value = None  # Payload unavailable
+        recorder.get_call_response_data.return_value = CallDataResult(state=CallDataState.PURGED, data=None)
 
         replayer = CallReplayer(recorder, source_run_id="run_abc123")
 
         # Should raise because response_ref proves a response existed
         with pytest.raises(ReplayPayloadMissingError) as exc_info:
-            replayer.replay(call_type="llm", request_data=request_data)
+            replayer.replay(call_type=CallType.LLM, request_data=request_data)
 
         assert exc_info.value.call_id == "call_123"
         assert exc_info.value.request_hash == request_hash
@@ -301,13 +336,13 @@ class TestCallReplayer:
             response_hash="hash_of_response",  # Hash proves response existed
         )
         recorder.find_call_by_request_hash.return_value = mock_call
-        recorder.get_call_response_data.return_value = None  # But payload is now missing
+        recorder.get_call_response_data.return_value = CallDataResult(state=CallDataState.PURGED, data=None)
 
         replayer = CallReplayer(recorder, source_run_id="run_abc123")
 
         # Should raise because response_hash exists but payload is missing
         with pytest.raises(ReplayPayloadMissingError) as exc_info:
-            replayer.replay(call_type="llm", request_data=request_data)
+            replayer.replay(call_type=CallType.LLM, request_data=request_data)
 
         assert exc_info.value.call_id == "call_123"
         assert exc_info.value.request_hash == request_hash
@@ -333,10 +368,10 @@ class TestCallReplayer:
             response_ref="payload_ref_123",  # Response was recorded
         )
         recorder.find_call_by_request_hash.return_value = mock_call
-        recorder.get_call_response_data.return_value = error_response  # And is available
+        recorder.get_call_response_data.return_value = CallDataResult(state=CallDataState.AVAILABLE, data=error_response)
 
         replayer = CallReplayer(recorder, source_run_id="run_abc123")
-        result = replayer.replay(call_type="llm", request_data=request_data)
+        result = replayer.replay(call_type=CallType.LLM, request_data=request_data)
 
         assert result.was_error is True
         assert result.error_data == error_details
@@ -351,10 +386,10 @@ class TestCallReplayer:
         # Original call took 250ms
         mock_call = self._create_mock_call(request_hash=request_hash, latency_ms=250.0)
         recorder.find_call_by_request_hash.return_value = mock_call
-        recorder.get_call_response_data.return_value = {"content": "test"}
+        recorder.get_call_response_data.return_value = CallDataResult(state=CallDataState.AVAILABLE, data={"content": "test"})
 
         replayer = CallReplayer(recorder, source_run_id="run_abc123")
-        result = replayer.replay(call_type="llm", request_data=request_data)
+        result = replayer.replay(call_type=CallType.LLM, request_data=request_data)
 
         assert result.original_latency_ms == 250.0
 
@@ -373,12 +408,12 @@ class TestCallReplayer:
 
         mock_call = self._create_mock_call(request_hash=request_hash)
         recorder.find_call_by_request_hash.return_value = mock_call
-        recorder.get_call_response_data.return_value = {"content": "test"}
+        recorder.get_call_response_data.return_value = CallDataResult(state=CallDataState.AVAILABLE, data={"content": "test"})
 
         replayer = CallReplayer(recorder, source_run_id="run_abc123")
 
         # Populate cache
-        replayer.replay(call_type="llm", request_data=request_data)
+        replayer.replay(call_type=CallType.LLM, request_data=request_data)
         assert replayer.cache_size() == 1
 
         # Clear cache
@@ -386,7 +421,7 @@ class TestCallReplayer:
         assert replayer.cache_size() == 0
 
         # Next call should hit database again
-        replayer.replay(call_type="llm", request_data=request_data)
+        replayer.replay(call_type=CallType.LLM, request_data=request_data)
         assert recorder.find_call_by_request_hash.call_count == 2
 
     def test_replay_with_purged_response_data(self) -> None:
@@ -405,12 +440,12 @@ class TestCallReplayer:
             response_ref="payload_ref_abc",  # Response WAS recorded
         )
         recorder.find_call_by_request_hash.return_value = mock_call
-        recorder.get_call_response_data.return_value = None  # Payload purged
+        recorder.get_call_response_data.return_value = CallDataResult(state=CallDataState.PURGED, data=None)
 
         replayer = CallReplayer(recorder, source_run_id="run_abc123")
 
         with pytest.raises(ReplayPayloadMissingError) as exc_info:
-            replayer.replay(call_type="llm", request_data=request_data)
+            replayer.replay(call_type=CallType.LLM, request_data=request_data)
 
         assert exc_info.value.call_id == "call_123"
         assert exc_info.value.request_hash == request_hash
@@ -436,15 +471,15 @@ class TestCallReplayer:
             latency_ms=100.0,
         )
         recorder.find_call_by_request_hash.return_value = mock_call
-        recorder.get_call_response_data.return_value = {"status": 200, "body": "OK"}
+        recorder.get_call_response_data.return_value = CallDataResult(state=CallDataState.AVAILABLE, data={"status": 200, "body": "OK"})
 
         replayer = CallReplayer(recorder, source_run_id="run_abc123")
-        result = replayer.replay(call_type="http", request_data=request_data)
+        result = replayer.replay(call_type=CallType.HTTP, request_data=request_data)
 
         assert result.response_data == {"status": 200, "body": "OK"}
         recorder.find_call_by_request_hash.assert_called_once_with(
             run_id="run_abc123",
-            call_type="http",
+            call_type=CallType.HTTP,
             request_hash=request_hash,
             sequence_index=0,
         )
@@ -480,11 +515,11 @@ class TestCallReplayer:
                     latency_ms=200.0,
                 )
 
-        def get_response_side_effect(call_id: str) -> dict[str, Any]:
+        def get_response_side_effect(call_id: str) -> CallDataResult:
             if call_id == "call_llm":
-                return {"type": "llm_response"}
+                return CallDataResult(state=CallDataState.AVAILABLE, data={"type": "llm_response"})
             else:
-                return {"type": "http_response"}
+                return CallDataResult(state=CallDataState.AVAILABLE, data={"type": "http_response"})
 
         recorder.find_call_by_request_hash.side_effect = find_call_side_effect
         recorder.get_call_response_data.side_effect = get_response_side_effect
@@ -492,11 +527,11 @@ class TestCallReplayer:
         replayer = CallReplayer(recorder, source_run_id="run_abc123")
 
         # Replay LLM call
-        llm_result = replayer.replay(call_type="llm", request_data=request_data)
+        llm_result = replayer.replay(call_type=CallType.LLM, request_data=request_data)
         assert llm_result.response_data["type"] == "llm_response"
 
         # Replay HTTP call with same request data
-        http_result = replayer.replay(call_type="http", request_data=request_data)
+        http_result = replayer.replay(call_type=CallType.HTTP, request_data=request_data)
         assert http_result.response_data["type"] == "http_response"
 
         # Both should be cached separately (different call_type, same sequence_index=0)
@@ -509,7 +544,7 @@ class TestCallReplayer:
         # Since the same request can legitimately return different responses,
         # the replayer now looks for the 2nd recorded call (which doesn't exist in this mock)
         # This matches the fix for P1-2026-01-21-replay-request-hash-collisions
-        llm_result2 = replayer.replay(call_type="llm", request_data=request_data)
+        llm_result2 = replayer.replay(call_type=CallType.LLM, request_data=request_data)
         # Mock returns the same response regardless of sequence_index, so still llm_response
         assert llm_result2.response_data["type"] == "llm_response"
         # Now makes a 3rd DB lookup because sequence_index is different (0 vs 1)
@@ -558,13 +593,12 @@ class TestCallReplayer:
                 latency_ms=100.0,
             )
 
-        def get_response_side_effect(call_id: str) -> dict[str, Any]:
+        def get_response_side_effect(call_id: str) -> CallDataResult:
             """Return response data based on call_id."""
             for call_info in call_sequence:
                 if call_info["call_id"] == call_id:
-                    response: dict[str, Any] = call_info["response"]
-                    return response
-            return {}
+                    return CallDataResult(state=CallDataState.AVAILABLE, data=call_info["response"])
+            return CallDataResult(state=CallDataState.AVAILABLE, data={})
 
         recorder.find_call_by_request_hash.side_effect = find_call_side_effect
         recorder.get_call_response_data.side_effect = get_response_side_effect
@@ -572,19 +606,71 @@ class TestCallReplayer:
         replayer = CallReplayer(recorder, source_run_id="run_abc123")
 
         # First replay - should get Response 1
-        result1 = replayer.replay(call_type="llm", request_data=request_data)
+        result1 = replayer.replay(call_type=CallType.LLM, request_data=request_data)
         assert result1.response_data["content"] == "Response 1 - first call", (
             f"First replay should return first response, got: {result1.response_data}"
         )
 
         # Second replay of SAME request - should get Response 2 (not cached Response 1!)
-        result2 = replayer.replay(call_type="llm", request_data=request_data)
+        result2 = replayer.replay(call_type=CallType.LLM, request_data=request_data)
         assert result2.response_data["content"] == "Response 2 - second call", (
             f"Second replay should return second response, got: {result2.response_data}"
         )
 
         # Third replay - should get Response 3
-        result3 = replayer.replay(call_type="llm", request_data=request_data)
+        result3 = replayer.replay(call_type=CallType.LLM, request_data=request_data)
         assert result3.response_data["content"] == "Response 3 - third call", (
             f"Third replay should return third response, got: {result3.response_data}"
         )
+
+    def test_replay_hash_only_raises_payload_missing(self) -> None:
+        """HASH_ONLY state means response was recorded (hash exists) but payload
+        was never persisted. Replayer cannot replay without actual data."""
+        recorder = self._create_mock_recorder()
+        request_data = {"model": "gpt-4", "messages": []}
+        request_hash = stable_hash(request_data)
+
+        mock_call = self._create_mock_call(
+            request_hash=request_hash,
+            response_hash="hash_of_response",  # Hash proves response existed
+        )
+        recorder.find_call_by_request_hash.return_value = mock_call
+        recorder.get_call_response_data.return_value = CallDataResult(state=CallDataState.HASH_ONLY, data=None)
+
+        replayer = CallReplayer(recorder, source_run_id="run_abc123")
+
+        with pytest.raises(ReplayPayloadMissingError) as exc_info:
+            replayer.replay(call_type=CallType.LLM, request_data=request_data)
+
+        assert exc_info.value.call_id == "call_123"
+        assert exc_info.value.request_hash == request_hash
+
+    def test_replay_corrupt_error_json_raises_audit_integrity_error(self) -> None:
+        """Corrupt error_json raises AuditIntegrityError, not JSONDecodeError.
+
+        Regression: elspeth-dbd8b35d48 — bare json.loads on Tier 1 replay data
+        surfaced as a generic Python exception instead of an AuditIntegrityError
+        with context about which replay record is corrupt.
+        """
+        from elspeth.contracts.errors import AuditIntegrityError
+
+        recorder = self._create_mock_recorder()
+        request_data = {"model": "gpt-4", "messages": []}
+        request_hash = stable_hash(request_data)
+
+        mock_call = self._create_mock_call(
+            call_id="call_corrupt",
+            request_hash=request_hash,
+            status=CallStatus.ERROR,
+            error_json="not valid json {{{",  # Corrupt Tier 1 data
+        )
+        recorder.find_call_by_request_hash.return_value = mock_call
+        recorder.get_call_response_data.return_value = CallDataResult(state=CallDataState.AVAILABLE, data={})
+
+        replayer = CallReplayer(recorder, source_run_id="run_abc123")
+
+        with pytest.raises(AuditIntegrityError, match="call_corrupt") as exc_info:
+            replayer.replay(call_type=CallType.LLM, request_data=request_data)
+
+        assert "Tier 1 violation" in str(exc_info.value)
+        assert "run_abc123" in str(exc_info.value)

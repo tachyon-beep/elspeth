@@ -1,4 +1,3 @@
-# src/elspeth/testing/chaosweb/metrics.py
 """Metrics storage and aggregation for ChaosWeb server.
 
 The WebMetricsRecorder provides typed wrappers around the shared MetricsStore
@@ -28,7 +27,7 @@ class WebOutcomeClassification(NamedTuple):
 # Schema definition for web metrics tables.
 WEB_METRICS_SCHEMA = MetricsSchema(
     request_columns=(
-        ColumnDef("request_id", "TEXT", primary_key=True),
+        ColumnDef("request_id", "TEXT", nullable=False, primary_key=True),
         ColumnDef("timestamp_utc", "TEXT", nullable=False),
         ColumnDef("path", "TEXT", nullable=False),
         ColumnDef("outcome", "TEXT", nullable=False),
@@ -43,7 +42,7 @@ WEB_METRICS_SCHEMA = MetricsSchema(
         ColumnDef("redirect_hops", "INTEGER"),
     ),
     timeseries_columns=(
-        ColumnDef("bucket_utc", "TEXT", primary_key=True),
+        ColumnDef("bucket_utc", "TEXT", nullable=False, primary_key=True),
         ColumnDef("requests_total", "INTEGER", nullable=False, default="0"),
         ColumnDef("requests_success", "INTEGER", nullable=False, default="0"),
         ColumnDef("requests_rate_limited", "INTEGER", nullable=False, default="0"),

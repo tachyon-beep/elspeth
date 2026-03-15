@@ -1,4 +1,3 @@
-# src/elspeth/engine/orchestrator/export.py
 """Post-run export and schema reconstruction functions.
 
 This module handles:
@@ -29,10 +28,11 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any, cast
 
 if TYPE_CHECKING:
+    from elspeth.contracts import SinkProtocol
     from elspeth.core.config import ElspethSettings
     from elspeth.core.landscape import LandscapeDB
-    from elspeth.plugins.protocols import SinkProtocol
 
+from elspeth.contracts.errors import AuditIntegrityError
 from elspeth.contracts.plugin_context import PluginContext
 
 
@@ -69,8 +69,8 @@ def export_landscape(
     if export_config.sign:
         try:
             key_str = os.environ["ELSPETH_SIGNING_KEY"]
-        except KeyError:
-            raise ValueError("ELSPETH_SIGNING_KEY environment variable required for signed export") from None
+        except KeyError as exc:
+            raise ValueError("ELSPETH_SIGNING_KEY environment variable required for signed export") from exc
         signing_key = key_str.encode("utf-8")
 
     # Create exporter
@@ -83,8 +83,8 @@ def export_landscape(
     sink = sinks[sink_name]
 
     # Create context for sink writes.
-    # LandscapeRecorder is needed by sinks that restore source headers
-    # (restore_source_headers=True calls ctx.landscape.get_source_field_resolution).
+    # LandscapeRecorder is needed by sinks with headers: original mode
+    # (ctx.landscape.get_source_field_resolution is called during lazy resolution).
     # Import inside function body to avoid circular imports (see module docstring).
     from elspeth.core.landscape.recorder import LandscapeRecorder
 
@@ -103,7 +103,6 @@ def export_landscape(
             run_id=run_id,
             artifact_path=artifact_path,
             sign=export_config.sign,
-            ctx=ctx,
         )
     else:
         # JSON export: batch all records for single write
@@ -122,7 +121,6 @@ def _export_csv_multifile(
     run_id: str,
     artifact_path: str,
     sign: bool,
-    ctx: PluginContext,  # - reserved for future use
 ) -> None:
     """Export audit trail as multiple CSV files (one per record type).
 
@@ -134,7 +132,6 @@ def _export_csv_multifile(
         run_id: The completed run ID
         artifact_path: Path from sink config (validated by caller)
         sign: Whether to sign records
-        ctx: Plugin context for sink operations (reserved for future use)
     """
     from elspeth.core.landscape.formatters import CSVFormatter
 
@@ -189,7 +186,8 @@ def reconstruct_schema_from_json(schema_dict: Mapping[str, object]) -> type:
         Dynamically created Pydantic model class
 
     Raises:
-        ValueError: If schema is malformed, empty, or contains unsupported types
+        AuditIntegrityError: If schema is malformed, empty, or contains unsupported types
+            (stored schema data is Tier 1 — our data from the Landscape DB)
     """
     from pydantic import ConfigDict, create_model
 
@@ -198,7 +196,7 @@ def reconstruct_schema_from_json(schema_dict: Mapping[str, object]) -> type:
     # Extract field definitions from Pydantic JSON schema
     # This is OUR data (from Landscape DB) - crash if malformed
     if "properties" not in schema_dict:
-        raise ValueError(
+        raise AuditIntegrityError(
             "Resume failed: Schema JSON has no 'properties' field. This indicates a malformed schema. Cannot reconstruct types."
         )
     properties = cast(Mapping[str, object], schema_dict["properties"])
@@ -215,7 +213,7 @@ def reconstruct_schema_from_json(schema_dict: Mapping[str, object]) -> type:
                 __config__=ConfigDict(extra="allow"),
             )
         # Empty properties WITHOUT additionalProperties=true is genuinely malformed
-        raise ValueError(
+        raise AuditIntegrityError(
             "Resume failed: Schema has zero fields defined and additionalProperties is not true. "
             "Cannot resume with empty fixed schema - this would silently discard all row data. "
             "For dynamic schemas, additionalProperties must be true."
@@ -303,7 +301,7 @@ def _json_schema_to_python_type(
         Python type for Pydantic field
 
     Raises:
-        ValueError: If field type is not supported (prevents silent degradation)
+        AuditIntegrityError: If field type is not supported (prevents silent degradation)
     """
     from datetime import date, datetime, time, timedelta
     from decimal import Decimal
@@ -341,7 +339,7 @@ def _json_schema_to_python_type(
             return inner_type | None
 
         # Unsupported anyOf pattern (e.g., Union[str, int] without null)
-        raise ValueError(
+        raise AuditIntegrityError(
             f"Resume failed: Field '{field_name}' has unsupported anyOf pattern. "
             f"Supported patterns: Decimal (number|string), nullable (T|null), nullable Decimal (number|string|null). "
             f"Schema definition: {field_info}. "
@@ -353,14 +351,14 @@ def _json_schema_to_python_type(
         ref = cast(str, field_info["$ref"])
         ref_prefix = "#/$defs/"
         if not ref.startswith(ref_prefix):
-            raise ValueError(
+            raise AuditIntegrityError(
                 f"Resume failed: Field '{field_name}' has unsupported $ref '{ref}'. Only local refs under '#/$defs/' are supported."
             )
         if schema_defs is None:
-            raise ValueError(f"Resume failed: Field '{field_name}' references '{ref}' but schema has no $defs section.")
+            raise AuditIntegrityError(f"Resume failed: Field '{field_name}' references '{ref}' but schema has no $defs section.")
         def_name = ref[len(ref_prefix) :]
         if def_name not in schema_defs:
-            raise ValueError(f"Resume failed: Field '{field_name}' references missing schema def '{def_name}'.")
+            raise AuditIntegrityError(f"Resume failed: Field '{field_name}' references missing schema def '{def_name}'.")
         return _json_schema_to_python_type(
             field_name,
             cast(Mapping[str, object], schema_defs[def_name]),
@@ -371,7 +369,7 @@ def _json_schema_to_python_type(
 
     # Get basic type - required for all non-anyOf fields
     if "type" not in field_info:
-        raise ValueError(
+        raise AuditIntegrityError(
             f"Resume failed: Field '{field_name}' has no 'type' in schema. "
             f"Schema definition: {field_info}. "
             f"Cannot determine Python type for field."
@@ -447,7 +445,7 @@ def _json_schema_to_python_type(
                 return dict.__class_getitem__((str, value_type))
             if additional is False:
                 return dict
-            raise ValueError(f"Resume failed: Field '{field_name}' has invalid additionalProperties value: {additional!r}.")
+            raise AuditIntegrityError(f"Resume failed: Field '{field_name}' has invalid additionalProperties value: {additional!r}.")
 
         # Generic dict (no specific structure)
         return dict
@@ -463,7 +461,7 @@ def _json_schema_to_python_type(
         return primitive_type_map[field_type_str]
 
     # Unknown type - CRASH instead of silent degradation
-    raise ValueError(
+    raise AuditIntegrityError(
         f"Resume failed: Field '{field_name}' has unsupported type '{field_type_str}'. "
         f"Supported types: string, integer, number, boolean, date-time, date, time, "
         f"duration, uuid, Decimal, array, object. "

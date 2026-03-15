@@ -1,4 +1,3 @@
-# src/elspeth/engine/batch_adapter.py
 """Adapter for batch transform integration with TransformExecutor.
 
 Allows TransformExecutor to call accept() and wait for results while
@@ -56,11 +55,25 @@ class _WaiterEntry:
 
     Replaces two parallel dicts (_waiters + _results) that were
     both keyed by WaiterKey. The event is set when a result arrives;
-    result starts as None and is populated by emit().
+    result starts as None and is populated by deliver().
+
+    The deliver() method atomically sets result and signals the event,
+    enforcing the invariant that result is always set before the event
+    is signaled.
     """
 
     event: threading.Event = field(default_factory=threading.Event)
     result: TransformResult | ExceptionResult | None = None
+
+    def deliver(self, result: TransformResult | ExceptionResult) -> None:
+        """Atomically set result and signal the event.
+
+        Enforces the invariant: result MUST be set before event.set().
+        This replaces the two-step pattern (entry.result = x; entry.event.set())
+        that relied on callers to maintain ordering.
+        """
+        self.result = result
+        self.event.set()
 
 
 class RowWaiter:
@@ -121,10 +134,13 @@ class RowWaiter:
             # Check for wrapped exception from worker thread
             # Plugin bugs should crash - re-raise the original exception
             if isinstance(entry.result, ExceptionResult):
-                raise entry.result.exception from None
+                raise entry.result.exception
 
             # result is guaranteed non-None here: emit() sets it before signaling event
-            assert entry.result is not None
+            if entry.result is None:
+                raise OrchestrationInvariantError(
+                    "BatchAdapter waiter signaled but result is None — emit() must set result before event.set()"
+                )
             return entry.result
 
 
@@ -228,9 +244,7 @@ class SharedBatchAdapter:
             if key in self._entries and not self._entries[key].event.is_set():
                 # First delivery: store result and wake the waiter.
                 # Entry stays until wait() pops it to retrieve the result.
-                entry = self._entries[key]
-                entry.result = result
-                entry.event.set()
+                self._entries[key].deliver(result)
             # If no entry exists or already signaled, result is discarded.
             # No entry: stale result from timed-out attempt.
             # Already signaled: duplicate emit — preserve first-result-wins.
@@ -266,7 +280,5 @@ class SharedBatchAdapter:
             if not matched_keys:
                 raise error
             for key in matched_keys:
-                entry = self._entries[key]
-                entry.result = exception_result
-                entry.event.set()
+                self._entries[key].deliver(exception_result)
                 # Entry stays until wait() pops it

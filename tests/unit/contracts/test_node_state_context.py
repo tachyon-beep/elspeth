@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import json
 from dataclasses import FrozenInstanceError
+from typing import Any
 
 import pytest
 
@@ -129,7 +130,7 @@ class TestPoolExecutionContext:
     def test_frozen(self) -> None:
         ctx = self._make_context()
         with pytest.raises(FrozenInstanceError):
-            ctx.pool_config = None  # type: ignore[misc]
+            ctx.pool_config = None  # type: ignore[misc, assignment]
 
     def test_canonical_json_produces_valid_json(self) -> None:
         ctx = self._make_context()
@@ -203,7 +204,7 @@ class TestAggregationFlushContext:
 class TestFromExecutorStats:
     """Tests for PoolExecutionContext.from_executor_stats() factory."""
 
-    def _make_stats(self) -> dict:
+    def _make_stats(self) -> dict[str, Any]:
         return {
             "pool_config": {
                 "pool_size": 4,
@@ -220,7 +221,7 @@ class TestFromExecutorStats:
             },
         }
 
-    def _make_entries(self):
+    def _make_entries(self) -> list[Any]:
         """Create mock BufferEntry objects with the required attributes."""
         from dataclasses import dataclass
 

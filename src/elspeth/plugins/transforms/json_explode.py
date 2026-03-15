@@ -22,14 +22,14 @@ and has no on_error configuration.
 import copy
 from typing import Any
 
-from pydantic import Field
+from pydantic import Field, field_validator, model_validator
 
+from elspeth.contracts.contexts import TransformContext
 from elspeth.contracts.contract_propagation import narrow_contract_to_output
-from elspeth.contracts.plugin_context import PluginContext
 from elspeth.contracts.schema_contract import FieldContract, PipelineRow, SchemaContract
-from elspeth.plugins.base import BaseTransform
-from elspeth.plugins.config_base import DataPluginConfig, PluginConfigError
-from elspeth.plugins.results import TransformResult
+from elspeth.plugins.infrastructure.base import BaseTransform
+from elspeth.plugins.infrastructure.config_base import DataPluginConfig, PluginConfigError
+from elspeth.plugins.infrastructure.results import TransformResult
 
 
 class JSONExplodeConfig(DataPluginConfig):
@@ -52,6 +52,19 @@ class JSONExplodeConfig(DataPluginConfig):
     array_field: str = Field(..., description="Name of the array field to explode")
     output_field: str = Field(default="item", description="Name for the exploded element")
     include_index: bool = Field(default=True, description="Whether to include item_index field")
+
+    @field_validator("array_field", "output_field")
+    @classmethod
+    def _reject_empty(cls, v: str, info: Any) -> str:
+        if not v:
+            raise ValueError(f"{info.field_name} must not be empty")
+        return v
+
+    @model_validator(mode="after")
+    def _reject_field_collision(self) -> "JSONExplodeConfig":
+        if self.output_field == self.array_field:
+            raise ValueError(f"output_field and array_field must differ, both are '{self.output_field}'")
+        return self
 
 
 class JSONExplode(BaseTransform):
@@ -120,7 +133,7 @@ class JSONExplode(BaseTransform):
             adds_fields=True,
         )
 
-    def process(self, row: PipelineRow, ctx: PluginContext) -> TransformResult:
+    def process(self, row: PipelineRow, ctx: TransformContext) -> TransformResult:
         """Explode array field into multiple rows.
 
         Args:
@@ -178,7 +191,6 @@ class JSONExplode(BaseTransform):
         if self._include_index:
             fields_added.append("item_index")
 
-        # B3: Validate schema homogeneity before using first row's schema
         if len(output_rows) > 1:
             first_keys = set(output_rows[0].keys())
             for i, output_row in enumerate(output_rows[1:], start=1):

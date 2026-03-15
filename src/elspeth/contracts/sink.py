@@ -1,4 +1,3 @@
-# src/elspeth/contracts/sink.py
 """Sink-specific contracts for cross-boundary data types.
 
 This module defines contracts for sink validation and output target compatibility.
@@ -7,7 +6,7 @@ This module defines contracts for sink validation and output target compatibilit
 from dataclasses import dataclass, field
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, slots=True)
 class OutputValidationResult:
     """Result of sink output target validation.
 
@@ -34,6 +33,11 @@ class OutputValidationResult:
     extra_fields: tuple[str, ...] = field(default_factory=tuple)
     order_mismatch: bool = False
     error_message: str | None = None
+
+    def __post_init__(self) -> None:
+        """Validate consistency between valid flag and error_message."""
+        if not self.valid and not self.error_message:
+            raise ValueError("OutputValidationResult with valid=False must have error_message")
 
     @classmethod
     def success(cls, target_fields: list[str] | None = None) -> "OutputValidationResult":

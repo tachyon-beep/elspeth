@@ -23,8 +23,8 @@ import pytest
 
 from elspeth.contracts import CallStatus, CallType, Determinism, TransformResult
 from elspeth.contracts.plugin_context import PluginContext
-from elspeth.plugins.config_base import PluginConfigError
-from elspeth.plugins.llm.openrouter_batch import (
+from elspeth.plugins.infrastructure.config_base import PluginConfigError
+from elspeth.plugins.transforms.llm.openrouter_batch import (
     OpenRouterBatchConfig,
     OpenRouterBatchLLMTransform,
 )

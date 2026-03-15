@@ -237,6 +237,190 @@ class TestAccumulateRowOutcomesCoalesced:
         assert pending_outcome.outcome == RowOutcome.COMPLETED
 
 
+class TestAccumulateRowOutcomesExclusiveCounters:
+    """Mutation-killing tests: each variant increments ONLY its counter(s).
+
+    These tests kill `==` -> `>=` mutants on RowOutcome comparisons.
+    RowOutcome is a StrEnum, so `>=` compares string values alphabetically:
+      buffered < coalesced < completed < consumed_in_batch < expanded
+      < failed < forked < quarantined < routed
+
+    If `== COMPLETED` mutates to `>= COMPLETED`, then CONSUMED_IN_BATCH,
+    EXPANDED, FAILED, FORKED, QUARANTINED, ROUTED would all incorrectly
+    enter the COMPLETED branch, incrementing rows_succeeded instead of
+    their own counter. By asserting every counter field per variant,
+    the wrong increment is caught.
+    """
+
+    def _assert_counters(
+        self,
+        counters: ExecutionCounters,
+        *,
+        succeeded: int = 0,
+        failed: int = 0,
+        quarantined: int = 0,
+        routed: int = 0,
+        forked: int = 0,
+        coalesced: int = 0,
+        expanded: int = 0,
+        buffered: int = 0,
+    ) -> None:
+        """Assert ALL counter fields match expected values."""
+        assert counters.rows_succeeded == succeeded, f"rows_succeeded: expected {succeeded}, got {counters.rows_succeeded}"
+        assert counters.rows_failed == failed, f"rows_failed: expected {failed}, got {counters.rows_failed}"
+        assert counters.rows_quarantined == quarantined, f"rows_quarantined: expected {quarantined}, got {counters.rows_quarantined}"
+        assert counters.rows_routed == routed, f"rows_routed: expected {routed}, got {counters.rows_routed}"
+        assert counters.rows_forked == forked, f"rows_forked: expected {forked}, got {counters.rows_forked}"
+        assert counters.rows_coalesced == coalesced, f"rows_coalesced: expected {coalesced}, got {counters.rows_coalesced}"
+        assert counters.rows_expanded == expanded, f"rows_expanded: expected {expanded}, got {counters.rows_expanded}"
+        assert counters.rows_buffered == buffered, f"rows_buffered: expected {buffered}, got {counters.rows_buffered}"
+
+    def test_completed_only_increments_succeeded(self) -> None:
+        counters = _make_counters()
+        pending = _make_pending()
+        accumulate_row_outcomes(
+            [_make_result(RowOutcome.COMPLETED, sink_name="output")],
+            counters,
+            {"output": Mock()},
+            pending,
+        )
+        self._assert_counters(counters, succeeded=1)
+        assert len(pending["output"]) == 1
+
+    def test_routed_only_increments_routed(self) -> None:
+        counters = _make_counters()
+        pending: dict[str, list[tuple[TokenInfo, PendingOutcome | None]]] = {"output": [], "risk": []}
+        accumulate_row_outcomes(
+            [_make_result(RowOutcome.ROUTED, sink_name="risk")],
+            counters,
+            {"output": Mock()},
+            pending,
+        )
+        self._assert_counters(counters, routed=1)
+        assert counters.routed_destinations["risk"] == 1
+        assert len(pending["risk"]) == 1
+        assert len(pending["output"]) == 0
+
+    def test_failed_only_increments_failed(self) -> None:
+        counters = _make_counters()
+        pending = _make_pending()
+        accumulate_row_outcomes(
+            [_make_result(RowOutcome.FAILED)],
+            counters,
+            {"output": Mock()},
+            pending,
+        )
+        self._assert_counters(counters, failed=1)
+        assert len(pending["output"]) == 0
+
+    def test_quarantined_only_increments_quarantined(self) -> None:
+        counters = _make_counters()
+        pending = _make_pending()
+        accumulate_row_outcomes(
+            [_make_result(RowOutcome.QUARANTINED)],
+            counters,
+            {"output": Mock()},
+            pending,
+        )
+        self._assert_counters(counters, quarantined=1)
+        assert len(pending["output"]) == 0
+
+    def test_forked_only_increments_forked(self) -> None:
+        counters = _make_counters()
+        pending = _make_pending()
+        accumulate_row_outcomes(
+            [_make_result(RowOutcome.FORKED)],
+            counters,
+            {"output": Mock()},
+            pending,
+        )
+        self._assert_counters(counters, forked=1)
+        assert len(pending["output"]) == 0
+
+    def test_consumed_in_batch_increments_nothing(self) -> None:
+        counters = _make_counters()
+        pending = _make_pending()
+        accumulate_row_outcomes(
+            [_make_result(RowOutcome.CONSUMED_IN_BATCH)],
+            counters,
+            {"output": Mock()},
+            pending,
+        )
+        self._assert_counters(counters)  # all zeros
+        assert len(pending["output"]) == 0
+
+    def test_coalesced_increments_coalesced_and_succeeded_only(self) -> None:
+        counters = _make_counters()
+        pending = _make_pending()
+        accumulate_row_outcomes(
+            [_make_result(RowOutcome.COALESCED, sink_name="output")],
+            counters,
+            {"output": Mock()},
+            pending,
+        )
+        self._assert_counters(counters, coalesced=1, succeeded=1)
+        assert len(pending["output"]) == 1
+
+    def test_expanded_only_increments_expanded(self) -> None:
+        counters = _make_counters()
+        pending = _make_pending()
+        accumulate_row_outcomes(
+            [_make_result(RowOutcome.EXPANDED)],
+            counters,
+            {"output": Mock()},
+            pending,
+        )
+        self._assert_counters(counters, expanded=1)
+        assert len(pending["output"]) == 0
+
+    def test_buffered_only_increments_buffered(self) -> None:
+        counters = _make_counters()
+        pending = _make_pending()
+        accumulate_row_outcomes(
+            [_make_result(RowOutcome.BUFFERED)],
+            counters,
+            {"output": Mock()},
+            pending,
+        )
+        self._assert_counters(counters, buffered=1)
+        assert len(pending["output"]) == 0
+
+    def test_completed_does_not_match_consumed_in_batch(self) -> None:
+        """Guard against `== COMPLETED` -> `>= COMPLETED` catching CONSUMED_IN_BATCH.
+
+        Alphabetically: "completed" < "consumed_in_batch", so `>= "completed"`
+        would match "consumed_in_batch". This test sends CONSUMED_IN_BATCH and
+        asserts rows_succeeded stays 0.
+        """
+        counters = _make_counters()
+        pending = _make_pending()
+        accumulate_row_outcomes(
+            [_make_result(RowOutcome.CONSUMED_IN_BATCH)],
+            counters,
+            {"output": Mock()},
+            pending,
+        )
+        assert counters.rows_succeeded == 0
+        assert len(pending["output"]) == 0
+
+    def test_failed_does_not_match_forked(self) -> None:
+        """Guard against `== FAILED` -> `>= FAILED` catching FORKED.
+
+        Alphabetically: "failed" < "forked", so `>= "failed"` would match
+        "forked". This test sends FORKED and asserts rows_failed stays 0.
+        """
+        counters = _make_counters()
+        pending = _make_pending()
+        accumulate_row_outcomes(
+            [_make_result(RowOutcome.FORKED)],
+            counters,
+            {"output": Mock()},
+            pending,
+        )
+        assert counters.rows_failed == 0
+        assert counters.rows_forked == 1
+
+
 class TestAccumulateRowOutcomesMixed:
     """Tests for multiple results in a single call."""
 

@@ -11,9 +11,10 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from elspeth.contracts.plugin_context import PluginContext
 from elspeth.contracts.schema_contract import SchemaContract
 from elspeth.testing import make_field, make_row
+from tests.fixtures.factories import make_context
+from tests.fixtures.landscape import make_landscape_db, make_recorder
 
 DYNAMIC_SCHEMA = {"mode": "observed"}
 
@@ -39,7 +40,7 @@ class TestAzureAuthPartialSP:
 
     def test_partial_sp_fields_rejected(self) -> None:
         """Providing 3 of 4 SP fields should raise ValueError."""
-        from elspeth.plugins.azure.auth import AzureAuthConfig
+        from elspeth.plugins.infrastructure.azure_auth import AzureAuthConfig
 
         with pytest.raises(ValueError, match="Service Principal auth requires account_url"):
             AzureAuthConfig(
@@ -51,7 +52,7 @@ class TestAzureAuthPartialSP:
 
     def test_all_sp_fields_accepted(self) -> None:
         """All 4 SP fields provided should be accepted."""
-        from elspeth.plugins.azure.auth import AzureAuthConfig
+        from elspeth.plugins.infrastructure.azure_auth import AzureAuthConfig
 
         config = AzureAuthConfig(
             tenant_id="t",
@@ -69,7 +70,7 @@ class TestSinkPathConfigHeaderCollision:
         """Two fields mapping to same output name should raise ValueError."""
         from pydantic import ValidationError
 
-        from elspeth.plugins.config_base import SinkPathConfig
+        from elspeth.plugins.infrastructure.config_base import SinkPathConfig
 
         with pytest.raises(ValidationError, match="Duplicate header mapping targets"):
             SinkPathConfig(
@@ -80,7 +81,7 @@ class TestSinkPathConfigHeaderCollision:
 
     def test_unique_header_targets_accepted(self) -> None:
         """Unique header targets should pass the headers validator."""
-        from elspeth.plugins.config_base import SinkPathConfig
+        from elspeth.plugins.infrastructure.config_base import SinkPathConfig
 
         # Test the validator directly — it's a classmethod field_validator
         result = SinkPathConfig._validate_headers({"field_a": "Column A", "field_b": "Column B"})
@@ -95,7 +96,9 @@ class TestBatchStatsAggregateOverwrite:
         from elspeth.plugins.transforms.batch_stats import BatchStats
 
         transform = BatchStats({"schema": DYNAMIC_SCHEMA, "value_field": "amount", "group_by": "count"})
-        ctx = PluginContext(run_id="test", config={})
+        db = make_landscape_db()
+        recorder = make_recorder(db)
+        ctx = make_context(run_id="test", landscape=recorder)
         rows = [_make_row({"amount": 10, "count": "group_a"})]
 
         with pytest.raises(ValueError, match="collides with aggregate output key"):
@@ -106,7 +109,9 @@ class TestBatchStatsAggregateOverwrite:
         from elspeth.plugins.transforms.batch_stats import BatchStats
 
         transform = BatchStats({"schema": DYNAMIC_SCHEMA, "value_field": "amount", "group_by": "category"})
-        ctx = PluginContext(run_id="test", config={})
+        db = make_landscape_db()
+        recorder = make_recorder(db)
+        ctx = make_context(run_id="test", landscape=recorder)
         rows = [_make_row({"amount": 10, "category": "A"})]
         result = transform.process(rows, ctx)
         assert result.status == "success"
@@ -117,13 +122,19 @@ class TestJsonSinkHeaderCollision:
 
     def test_display_header_collision_raises(self) -> None:
         """Two fields mapping to same display name should raise ValueError."""
-        from elspeth.plugins.sinks.json_sink import JSONSink
+        from elspeth.contracts.header_modes import HeaderMode
+        from elspeth.plugins.infrastructure.display_headers import apply_display_headers
 
-        sink = JSONSink.__new__(JSONSink)
-        sink._get_effective_display_headers = MagicMock(return_value={"field_a": "Output", "field_b": "Output"})
+        # Minimal stub satisfying DisplayHeaderHost protocol
+        stub = MagicMock()
+        stub._headers_mode = HeaderMode.CUSTOM
+        stub._headers_custom_mapping = {"field_a": "Output", "field_b": "Output"}
+        stub._resolved_display_headers = None
+        stub._display_headers_resolved = True
+        stub._output_contract = None
 
         with pytest.raises(ValueError, match="Header collision"):
-            sink._apply_display_headers([{"field_a": 1, "field_b": 2}])
+            apply_display_headers(stub, [{"field_a": 1, "field_b": 2}])
 
 
 class TestBatchReplicateMaxCopies:
@@ -134,7 +145,9 @@ class TestBatchReplicateMaxCopies:
         from elspeth.plugins.transforms.batch_replicate import BatchReplicate
 
         transform = BatchReplicate({"schema": DYNAMIC_SCHEMA, "max_copies": 5})
-        ctx = PluginContext(run_id="test", config={})
+        db = make_landscape_db()
+        recorder = make_recorder(db)
+        ctx = make_context(run_id="test", landscape=recorder)
         # Single row exceeding max_copies — all rows quarantined → error result
         rows = [_make_row({"copies": 10, "data": "value"})]
         result = transform.process(rows, ctx)
@@ -145,7 +158,7 @@ class TestBatchReplicateMaxCopies:
 
     def test_config_rejects_excessive_default_copies(self) -> None:
         """default_copies > 10000 should be rejected."""
-        from elspeth.plugins.config_base import PluginConfigError
+        from elspeth.plugins.infrastructure.config_base import PluginConfigError
         from elspeth.plugins.transforms.batch_replicate import BatchReplicateConfig
 
         with pytest.raises(PluginConfigError, match="less than or equal to 10000"):
@@ -157,17 +170,22 @@ class TestTracingConfigValidation:
 
     def test_unknown_provider_rejected(self) -> None:
         """Unrecognized tracing provider should raise ValueError."""
-        from elspeth.plugins.llm.tracing import parse_tracing_config
+        from elspeth.plugins.transforms.llm.tracing import parse_tracing_config
 
         with pytest.raises(ValueError, match="Unknown tracing provider"):
             parse_tracing_config({"provider": "datadog_magic"})
 
     def test_known_providers_accepted(self) -> None:
-        """All known providers should be accepted."""
-        from elspeth.plugins.llm.tracing import parse_tracing_config
+        """All known providers should be accepted with required fields."""
+        from elspeth.plugins.transforms.llm.tracing import parse_tracing_config
 
-        for provider in ("none", "azure_ai", "langfuse"):
-            result = parse_tracing_config({"provider": provider})
+        configs = {
+            "none": {"provider": "none"},
+            "azure_ai": {"provider": "azure_ai", "connection_string": "InstrumentationKey=test"},
+            "langfuse": {"provider": "langfuse", "public_key": "pk-test", "secret_key": "sk-test"},
+        }
+        for provider, config in configs.items():
+            result = parse_tracing_config(config)
             assert result is not None
             assert result.provider == provider
 
@@ -177,7 +195,7 @@ class TestFieldBaseIdentifierValidation:
 
     def test_invalid_response_field_rejected(self) -> None:
         """response_field with spaces/special chars should raise ValueError."""
-        from elspeth.plugins.llm import get_llm_guaranteed_fields
+        from elspeth.plugins.transforms.llm import get_llm_guaranteed_fields
 
         with pytest.raises(ValueError, match="not a valid Python identifier"):
             get_llm_guaranteed_fields("my field")
@@ -187,21 +205,21 @@ class TestFieldBaseIdentifierValidation:
 
     def test_valid_response_field_accepted(self) -> None:
         """Valid Python identifiers should be accepted."""
-        from elspeth.plugins.llm import get_llm_guaranteed_fields
+        from elspeth.plugins.transforms.llm import get_llm_guaranteed_fields
 
         result = get_llm_guaranteed_fields("llm_response")
         assert "llm_response" in result
 
-    def test_invalid_output_prefix_rejected(self) -> None:
-        """output_prefix with special chars should raise ValueError."""
-        from elspeth.plugins.llm import get_multi_query_guaranteed_fields
+    def test_invalid_response_field_hyphen_rejected(self) -> None:
+        """response_field with hyphens should raise ValueError."""
+        from elspeth.plugins.transforms.llm import get_llm_guaranteed_fields
 
         with pytest.raises(ValueError, match="not a valid Python identifier"):
-            get_multi_query_guaranteed_fields("my-prefix")
+            get_llm_guaranteed_fields("my-prefix")
 
     def test_invalid_audit_field_rejected(self) -> None:
         """response_field in audit function also validated."""
-        from elspeth.plugins.llm import get_llm_audit_fields
+        from elspeth.plugins.transforms.llm import get_llm_audit_fields
 
         with pytest.raises(ValueError, match="not a valid Python identifier"):
             get_llm_audit_fields("has space")
@@ -237,14 +255,14 @@ class TestSecretFingerprintEmptyKey:
 
     def test_empty_bytes_key_rejected(self) -> None:
         """key=b'' should raise ValueError."""
-        from elspeth.core.security.fingerprint import secret_fingerprint
+        from elspeth.core.security import secret_fingerprint
 
         with pytest.raises(ValueError, match="must not be empty"):
             secret_fingerprint("some-secret", key=b"")
 
     def test_valid_key_accepted(self) -> None:
         """Non-empty key should produce valid fingerprint."""
-        from elspeth.core.security.fingerprint import secret_fingerprint
+        from elspeth.core.security import secret_fingerprint
 
         fp = secret_fingerprint("some-secret", key=b"valid-key")
         assert len(fp) == 64  # SHA256 hex digest
@@ -279,7 +297,9 @@ class TestBoolExcludedFromInt:
         from elspeth.plugins.transforms.batch_stats import BatchStats
 
         transform = BatchStats({"schema": DYNAMIC_SCHEMA, "value_field": "flag"})
-        ctx = PluginContext(run_id="test", config={})
+        db = make_landscape_db()
+        recorder = make_recorder(db)
+        ctx = make_context(run_id="test", landscape=recorder)
         rows = [_make_row({"flag": True})]
 
         with pytest.raises(TypeError, match="must be numeric"):
@@ -290,7 +310,9 @@ class TestBoolExcludedFromInt:
         from elspeth.plugins.transforms.batch_stats import BatchStats
 
         transform = BatchStats({"schema": DYNAMIC_SCHEMA, "value_field": "amount"})
-        ctx = PluginContext(run_id="test", config={})
+        db = make_landscape_db()
+        recorder = make_recorder(db)
+        ctx = make_context(run_id="test", landscape=recorder)
         rows = [_make_row({"amount": 42})]
         result = transform.process(rows, ctx)
         assert result.status == "success"

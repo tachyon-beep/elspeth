@@ -17,41 +17,24 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any, cast
 
-from elspeth.contracts import PipelineRow, RunStatus
+from elspeth.contracts import PipelineRow, RunStatus, SinkProtocol, SourceProtocol, TransformProtocol
 from elspeth.core.config import AggregationSettings, CoalesceSettings, ElspethSettings, GateSettings, SourceSettings, TriggerConfig
-from elspeth.core.landscape import LandscapeDB
 from elspeth.engine.orchestrator import Orchestrator, PipelineConfig
-from elspeth.plugins.base import BaseTransform
-from elspeth.plugins.protocols import SinkProtocol, SourceProtocol, TransformProtocol
+from elspeth.plugins.infrastructure.base import BaseTransform
 from elspeth.testing import make_pipeline_row
 from tests.fixtures.base_classes import _TestSchema, as_sink, as_source, as_transform
 from tests.fixtures.factories import wire_transforms
+from tests.fixtures.landscape import make_landscape_db
 from tests.fixtures.pipeline import build_production_graph
-from tests.fixtures.plugins import CollectSink, ListSource
+from tests.fixtures.plugins import CollectSink, ListSource, PassTransform
 
 if TYPE_CHECKING:
-    from elspeth.plugins.results import TransformResult
+    from elspeth.plugins.infrastructure.results import TransformResult
 
 
 # ---------------------------------------------------------------------------
 # Test Transforms
 # ---------------------------------------------------------------------------
-
-
-class IdentityTransform(BaseTransform):
-    """Transform that passes data through unchanged."""
-
-    name = "identity"
-    input_schema = _TestSchema
-    output_schema = _TestSchema
-
-    def __init__(self) -> None:
-        super().__init__({"schema": {"mode": "observed"}})
-
-    def process(self, row: PipelineRow, ctx: Any) -> TransformResult:
-        from elspeth.plugins.results import TransformResult
-
-        return TransformResult.success(make_pipeline_row(row.to_dict()), success_reason={"action": "identity"})
 
 
 class AddFieldTransform(BaseTransform):
@@ -67,7 +50,7 @@ class AddFieldTransform(BaseTransform):
         self._field_value = field_value
 
     def process(self, row: PipelineRow, ctx: Any) -> TransformResult:
-        from elspeth.plugins.results import TransformResult
+        from elspeth.plugins.infrastructure.results import TransformResult
 
         output = {**row.to_dict(), self._field_name: self._field_value}
         return TransformResult.success(
@@ -88,7 +71,7 @@ class BatchPassthroughTransform(BaseTransform):
         super().__init__({"schema": {"mode": "observed"}})
 
     def process(self, rows: list[PipelineRow], ctx: Any) -> TransformResult:  # type: ignore[override]  # Batch-aware process takes list[PipelineRow]
-        from elspeth.plugins.results import TransformResult
+        from elspeth.plugins.infrastructure.results import TransformResult
 
         # Sum values from the batch
         total = sum(r["value"] for r in rows)
@@ -113,10 +96,10 @@ class TestExplicitSinkRouting:
         Setup: source → transform(on_success=output) → output sink
         Verify: Completed rows arrive at the declared on_success sink.
         """
-        db = LandscapeDB.in_memory()
+        db = make_landscape_db()
 
         source = ListSource([{"value": 1}, {"value": 2}], on_success="output")
-        transform = IdentityTransform()
+        transform = PassTransform()
         transform.on_success = "output"
         sink = CollectSink(name="output")
 
@@ -144,7 +127,7 @@ class TestExplicitSinkRouting:
         Terminal fork gates must route all paths to named sinks (no "continue").
         The "false" route goes to sink_a (never fires since condition=True).
         """
-        db = LandscapeDB.in_memory()
+        db = make_landscape_db()
 
         source = ListSource([{"value": 1}, {"value": 2}], on_success="sink_a")
 
@@ -191,12 +174,12 @@ class TestExplicitSinkRouting:
         Uses a terminal gate after coalesce (same pattern as
         test_nonterminal_coalesce_continues_to_downstream_gate).
         """
-        db = LandscapeDB.in_memory()
+        db = make_landscape_db()
 
         source = ListSource([{"value": 1}, {"value": 2}], on_success="source_sink")
 
         # One transform per branch — named to match fork branch names
-        transform = IdentityTransform()
+        transform = PassTransform()
 
         fork_gate = GateSettings(
             name="fork_gate",
@@ -270,7 +253,7 @@ class TestExplicitSinkRouting:
         """
         from elspeth.core.dag import ExecutionGraph
 
-        db = LandscapeDB.in_memory()
+        db = make_landscape_db()
 
         source = ListSource([{"value": 1}, {"value": 2}, {"value": 3}], on_success="output")
         transform = BatchPassthroughTransform()
@@ -293,6 +276,7 @@ class TestExplicitSinkRouting:
             name="batch",
             plugin="batch_passthrough",
             input="source_out",
+            on_error="discard",
             trigger=TriggerConfig(count=2),
             output_mode="transform",
         )
@@ -331,7 +315,7 @@ class TestExplicitSinkRouting:
         from elspeth.core.config import CheckpointSettings
         from elspeth.core.dag import ExecutionGraph
 
-        db = LandscapeDB.in_memory()
+        db = make_landscape_db()
         checkpoint_mgr = CheckpointManager(db)
         settings = CheckpointSettings(enabled=True, frequency="every_row")
         checkpoint_config = RuntimeCheckpointConfig.from_settings(settings)
@@ -346,7 +330,7 @@ class TestExplicitSinkRouting:
         checkpoint_mgr.create_checkpoint = tracking_create  # type: ignore[method-assign]
 
         source = ListSource([{"value": 1}, {"value": 2}, {"value": 3}], on_success="source_out")
-        t1 = IdentityTransform()
+        t1 = PassTransform()
         t1.on_success = "conn_1_2"
         t2 = AddFieldTransform("processed", True)
         t2.on_success = "output"
@@ -405,7 +389,7 @@ class TestExplicitSinkRoutingEdgeCases:
         """
         from tests.fixtures.factories import wire_transforms
 
-        transform = IdentityTransform()
+        transform = PassTransform()
         wired = wire_transforms([as_transform(transform)], final_sink="output")
 
         # wire_transforms always provides on_success to the last transform
@@ -413,7 +397,7 @@ class TestExplicitSinkRoutingEdgeCases:
 
     def test_source_on_success_used_when_no_transforms(self, payload_store) -> None:
         """Source on_success routes directly to sink when no transforms exist."""
-        db = LandscapeDB.in_memory()
+        db = make_landscape_db()
 
         source = ListSource([{"value": 1}], on_success="direct_sink")
         sink = CollectSink(name="direct_sink")
@@ -442,7 +426,7 @@ class TestExplicitSinkRoutingEdgeCases:
         """
         from tests.fixtures.factories import wire_transforms
 
-        db = LandscapeDB.in_memory()
+        db = make_landscape_db()
 
         source = ListSource([{"value": 1}], on_success="sink_b")
 
@@ -501,7 +485,7 @@ class TestExplicitSinkRoutingEdgeCases:
         """
         from elspeth.core.dag import ExecutionGraph
 
-        db = LandscapeDB.in_memory()
+        db = make_landscape_db()
 
         source = ListSource([{"value": 10}, {"value": 20}], on_success="gate_in")
         transform = AddFieldTransform("routed", True)

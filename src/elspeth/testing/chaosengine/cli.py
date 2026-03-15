@@ -1,4 +1,3 @@
-# src/elspeth/testing/chaosengine/cli.py
 """Unified CLI for ChaosEngine testing servers.
 
 Aggregates ChaosLLM and ChaosWeb under a single ``chaosengine`` command:

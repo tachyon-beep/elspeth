@@ -2,7 +2,10 @@
 
 from __future__ import annotations
 
+import pytest
+
 from elspeth.contracts import NodeType, RunStatus
+from elspeth.contracts.errors import AuditIntegrityError
 from elspeth.contracts.schema import SchemaConfig
 
 # Dynamic schema for tests that don't care about specific fields
@@ -144,7 +147,7 @@ class TestReproducibilityGradeComputation:
 
         assert completed_run.status == RunStatus.COMPLETED
         assert completed_run.completed_at is not None
-        assert completed_run.reproducibility_grade == ReproducibilityGrade.FULL_REPRODUCIBLE.value
+        assert completed_run.reproducibility_grade == ReproducibilityGrade.FULL_REPRODUCIBLE
 
     def test_grade_degrades_after_purge(self) -> None:
         """REPLAY_REPRODUCIBLE degrades to ATTRIBUTABLE_ONLY after purge."""
@@ -173,7 +176,7 @@ class TestReproducibilityGradeComputation:
 
         # Finalize with REPLAY_REPRODUCIBLE grade
         completed_run = recorder.finalize_run(run.run_id, status=RunStatus.COMPLETED)
-        assert completed_run.reproducibility_grade == ReproducibilityGrade.REPLAY_REPRODUCIBLE.value
+        assert completed_run.reproducibility_grade == ReproducibilityGrade.REPLAY_REPRODUCIBLE
 
         # Simulate purge - grade should degrade
         update_grade_after_purge(db, run.run_id)
@@ -181,7 +184,7 @@ class TestReproducibilityGradeComputation:
         # Check grade was degraded
         updated_run = recorder.get_run(run.run_id)
         assert updated_run is not None
-        assert updated_run.reproducibility_grade == ReproducibilityGrade.ATTRIBUTABLE_ONLY.value
+        assert updated_run.reproducibility_grade == ReproducibilityGrade.ATTRIBUTABLE_ONLY
 
     def test_full_reproducible_unchanged_after_purge(self) -> None:
         """FULL_REPRODUCIBLE remains unchanged after purge (payloads not needed for replay)."""
@@ -210,7 +213,7 @@ class TestReproducibilityGradeComputation:
 
         # Finalize with FULL_REPRODUCIBLE grade
         completed_run = recorder.finalize_run(run.run_id, status=RunStatus.COMPLETED)
-        assert completed_run.reproducibility_grade == ReproducibilityGrade.FULL_REPRODUCIBLE.value
+        assert completed_run.reproducibility_grade == ReproducibilityGrade.FULL_REPRODUCIBLE
 
         # Simulate purge - grade should NOT degrade
         update_grade_after_purge(db, run.run_id)
@@ -218,7 +221,7 @@ class TestReproducibilityGradeComputation:
         # Check grade unchanged
         updated_run = recorder.get_run(run.run_id)
         assert updated_run is not None
-        assert updated_run.reproducibility_grade == ReproducibilityGrade.FULL_REPRODUCIBLE.value
+        assert updated_run.reproducibility_grade == ReproducibilityGrade.FULL_REPRODUCIBLE
 
     def test_compute_grade_empty_pipeline(self) -> None:
         """Empty pipeline (no nodes) gets FULL_REPRODUCIBLE."""
@@ -236,15 +239,15 @@ class TestReproducibilityGradeComputation:
         # Empty pipeline is trivially reproducible
         assert grade == ReproducibilityGrade.FULL_REPRODUCIBLE
 
-    def test_update_grade_after_purge_nonexistent_run(self) -> None:
-        """update_grade_after_purge() silently handles nonexistent run."""
+    def test_update_grade_after_purge_nonexistent_run_raises(self) -> None:
+        """update_grade_after_purge() crashes on nonexistent run — caller bug or corruption."""
         from elspeth.core.landscape.database import LandscapeDB
         from elspeth.core.landscape.reproducibility import update_grade_after_purge
 
         db = LandscapeDB.in_memory()
 
-        # Should not raise - silently returns for nonexistent run
-        update_grade_after_purge(db, "nonexistent_run_id")
+        with pytest.raises(AuditIntegrityError, match="does not exist"):
+            update_grade_after_purge(db, "nonexistent_run_id")
 
     def test_attributable_only_unchanged_after_purge(self) -> None:
         """ATTRIBUTABLE_ONLY remains unchanged after purge (already at lowest grade)."""
@@ -278,14 +281,14 @@ class TestReproducibilityGradeComputation:
         # Verify it's ATTRIBUTABLE_ONLY
         run_after_first_purge = recorder.get_run(run.run_id)
         assert run_after_first_purge is not None
-        assert run_after_first_purge.reproducibility_grade == ReproducibilityGrade.ATTRIBUTABLE_ONLY.value
+        assert run_after_first_purge.reproducibility_grade == ReproducibilityGrade.ATTRIBUTABLE_ONLY
 
         # Call purge again - should remain ATTRIBUTABLE_ONLY
         update_grade_after_purge(db, run.run_id)
 
         run_after_second_purge = recorder.get_run(run.run_id)
         assert run_after_second_purge is not None
-        assert run_after_second_purge.reproducibility_grade == ReproducibilityGrade.ATTRIBUTABLE_ONLY.value
+        assert run_after_second_purge.reproducibility_grade == ReproducibilityGrade.ATTRIBUTABLE_ONLY
 
     def test_default_determinism_counts_as_deterministic(self) -> None:
         """Nodes registered without explicit determinism default to DETERMINISTIC."""

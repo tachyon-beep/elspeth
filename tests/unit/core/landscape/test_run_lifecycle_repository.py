@@ -1,0 +1,725 @@
+# tests/unit/core/landscape/test_run_lifecycle_repository.py
+"""Direct unit tests for RunLifecycleRepository.
+
+These tests exercise RunLifecycleRepository directly (not through the
+LandscapeRecorder facade) to pin its contract and verify Tier 1 crash
+paths that indirect facade tests miss.
+
+Covers 4 untested branch clusters identified in review:
+1. get_source_schema — non-string type rejection
+2. get_source_field_resolution — corruption paths (bad JSON shape, missing key, non-dict mapping, non-string entries)
+3. get_run_contract — missing run, null hash, hash mismatch
+4. set_export_status — COMPLETED/PENDING/FAILED branching logic
+"""
+
+from __future__ import annotations
+
+import json
+
+import pytest
+from sqlalchemy import update
+
+from elspeth.contracts import ExportStatus, FieldContract, ReproducibilityGrade, RunStatus, SchemaContract, SecretResolutionInput
+from elspeth.contracts.errors import AuditIntegrityError
+from elspeth.core.landscape._database_ops import DatabaseOps
+from elspeth.core.landscape.database import LandscapeDB
+from elspeth.core.landscape.model_loaders import RunLoader
+from elspeth.core.landscape.run_lifecycle_repository import RunLifecycleRepository
+from elspeth.core.landscape.schema import runs_table
+from tests.fixtures.landscape import make_landscape_db, make_recorder
+
+
+def _make_repo(*, run_id: str = "run-1") -> tuple[LandscapeDB, RunLifecycleRepository]:
+    """Create in-memory DB + repository with a pre-existing run."""
+    db = make_landscape_db()
+    ops = DatabaseOps(db)
+    repo = RunLifecycleRepository(db, ops, RunLoader())
+    repo.begin_run(config={"key": "value"}, canonical_version="v1", run_id=run_id)
+    return db, repo
+
+
+def _corrupt_column(db: LandscapeDB, run_id: str, **values: object) -> None:
+    """Directly update a column in the runs table to simulate corruption."""
+    with db.connection() as conn:
+        conn.execute(update(runs_table).where(runs_table.c.run_id == run_id).values(**values))
+
+
+# ---------------------------------------------------------------------------
+# begin_run + get_run — direct repository construction
+# ---------------------------------------------------------------------------
+
+
+class TestBeginRunDirect:
+    """Direct tests for begin_run via repository construction."""
+
+    def test_begin_run_returns_run_with_correct_fields(self) -> None:
+        """Verify begin_run stores and returns correct field values."""
+        db = make_landscape_db()
+        ops = DatabaseOps(db)
+        repo = RunLifecycleRepository(db, ops, RunLoader())
+        run = repo.begin_run(
+            config={"pipeline": "test"},
+            canonical_version="v2",
+            run_id="explicit-id",
+        )
+        assert run.run_id == "explicit-id"
+        assert run.status == RunStatus.RUNNING
+        assert run.config_hash is not None
+        assert run.settings_json is not None
+        assert run.canonical_version == "v2"
+        assert run.started_at is not None
+
+    def test_begin_run_generates_id_when_not_provided(self) -> None:
+        db = make_landscape_db()
+        ops = DatabaseOps(db)
+        repo = RunLifecycleRepository(db, ops, RunLoader())
+        run = repo.begin_run(config={}, canonical_version="v1")
+        assert run.run_id  # non-empty generated ID
+
+    def test_get_run_roundtrip(self) -> None:
+        """get_run returns the same run that begin_run created."""
+        _, repo = _make_repo(run_id="roundtrip-run")
+        run = repo.get_run("roundtrip-run")
+        assert run is not None
+        assert run.run_id == "roundtrip-run"
+        assert run.status == RunStatus.RUNNING
+
+    def test_get_run_returns_none_for_unknown(self) -> None:
+        _, repo = _make_repo()
+        assert repo.get_run("nonexistent") is None
+
+
+class TestFinalizeRunDirect:
+    """Direct tests for finalize_run (grade computation + completion)."""
+
+    def test_finalize_sets_status_and_grade(self) -> None:
+        """finalize_run computes grade and completes the run.
+
+        Empty pipeline (no nodes) is trivially FULL_REPRODUCIBLE.
+        """
+        _, repo = _make_repo(run_id="finalize-run")
+        run = repo.finalize_run("finalize-run", RunStatus.COMPLETED)
+        assert run.status == RunStatus.COMPLETED
+        assert run.completed_at is not None
+        assert run.reproducibility_grade is not None
+
+
+# ---------------------------------------------------------------------------
+# get_source_schema — Tier 1 crash paths
+# ---------------------------------------------------------------------------
+
+
+class TestGetSourceSchema:
+    """Direct tests for get_source_schema Tier 1 validation."""
+
+    def test_returns_stored_schema(self) -> None:
+        """Happy path: schema stored via begin_run is retrievable."""
+        db = make_landscape_db()
+        ops = DatabaseOps(db)
+        repo = RunLifecycleRepository(db, ops, RunLoader())
+        schema_json = '{"type": "object", "properties": {}}'
+        repo.begin_run(
+            config={"key": "value"},
+            canonical_version="v1",
+            run_id="run-1",
+            source_schema_json=schema_json,
+        )
+        assert repo.get_source_schema("run-1") == schema_json
+
+    def test_run_not_found_raises(self) -> None:
+        _, repo = _make_repo()
+        with pytest.raises(AuditIntegrityError, match="not found"):
+            repo.get_source_schema("nonexistent-run")
+
+    def test_null_schema_raises(self) -> None:
+        _, repo = _make_repo()
+        # Run created without source_schema_json → column is NULL
+        with pytest.raises(AuditIntegrityError, match="no source schema stored"):
+            repo.get_source_schema("run-1")
+
+    @pytest.mark.skip(reason="SQLite type affinity coerces int→str in TEXT columns; branch unreachable with SQLite backend")
+    def test_non_string_schema_raises(self) -> None:
+        """Tier 1: non-string source_schema_json must crash.
+
+        This branch is defense-in-depth for stricter backends (PostgreSQL)
+        that preserve column types. SQLite silently coerces 42 to '42'.
+        """
+        db, repo = _make_repo()
+        _corrupt_column(db, "run-1", source_schema_json=42)
+        with pytest.raises(AuditIntegrityError, match="expected str"):
+            repo.get_source_schema("run-1")
+
+
+# ---------------------------------------------------------------------------
+# get_source_field_resolution — Tier 1 corruption paths
+# ---------------------------------------------------------------------------
+
+
+class TestGetSourceFieldResolution:
+    """Direct tests for get_source_field_resolution Tier 1 validation."""
+
+    def test_roundtrip_happy_path(self) -> None:
+        _, repo = _make_repo()
+        mapping = {"Original Header": "original_header", "Amount (USD)": "amount_usd"}
+        repo.record_source_field_resolution("run-1", mapping, "v1")
+        result = repo.get_source_field_resolution("run-1")
+        assert result == mapping
+
+    def test_returns_none_when_no_resolution_stored(self) -> None:
+        _, repo = _make_repo()
+        assert repo.get_source_field_resolution("run-1") is None
+
+    def test_run_not_found_raises(self) -> None:
+        _, repo = _make_repo()
+        with pytest.raises(AuditIntegrityError, match="not found"):
+            repo.get_source_field_resolution("nonexistent-run")
+
+    def test_corrupt_non_dict_json_raises(self) -> None:
+        """Tier 1: resolution JSON that isn't a dict must crash."""
+        db, repo = _make_repo()
+        _corrupt_column(db, "run-1", source_field_resolution_json='"just a string"')
+        with pytest.raises(AuditIntegrityError, match="expected dict"):
+            repo.get_source_field_resolution("run-1")
+
+    def test_corrupt_array_json_raises(self) -> None:
+        """Tier 1: resolution JSON that is an array must crash."""
+        db, repo = _make_repo()
+        _corrupt_column(db, "run-1", source_field_resolution_json="[1, 2, 3]")
+        with pytest.raises(AuditIntegrityError, match="expected dict"):
+            repo.get_source_field_resolution("run-1")
+
+    def test_missing_resolution_mapping_key_raises(self) -> None:
+        """Tier 1: dict without resolution_mapping key is corruption."""
+        db, repo = _make_repo()
+        _corrupt_column(db, "run-1", source_field_resolution_json='{"wrong_key": {}}')
+        with pytest.raises(AuditIntegrityError, match="missing required key"):
+            repo.get_source_field_resolution("run-1")
+
+    def test_resolution_mapping_not_dict_raises(self) -> None:
+        """Tier 1: resolution_mapping that isn't a dict must crash."""
+        db, repo = _make_repo()
+        bad_json = json.dumps({"resolution_mapping": "not a dict", "normalization_version": None})
+        _corrupt_column(db, "run-1", source_field_resolution_json=bad_json)
+        with pytest.raises(AuditIntegrityError, match="expected dict"):
+            repo.get_source_field_resolution("run-1")
+
+    def test_non_string_value_raises(self) -> None:
+        """Tier 1: non-string values in resolution mapping must crash.
+
+        Note: JSON keys are always strings after json.loads(), so the key-type
+        check in production is defense-in-depth. This test exercises the value
+        type check which IS reachable via corrupted JSON.
+        """
+        db, repo = _make_repo()
+        bad_json = json.dumps({"resolution_mapping": {"header": 42}, "normalization_version": None})
+        _corrupt_column(db, "run-1", source_field_resolution_json=bad_json)
+        with pytest.raises(AuditIntegrityError, match="expected str->str"):
+            repo.get_source_field_resolution("run-1")
+
+    def test_non_string_null_value_raises(self) -> None:
+        """Tier 1: null values in resolution mapping must crash."""
+        db, repo = _make_repo()
+        bad_json = json.dumps({"resolution_mapping": {"header": None}, "normalization_version": None})
+        _corrupt_column(db, "run-1", source_field_resolution_json=bad_json)
+        with pytest.raises(AuditIntegrityError, match="expected str->str"):
+            repo.get_source_field_resolution("run-1")
+
+    def test_corrupt_unparseable_json_raises(self) -> None:
+        """Tier 1: syntactically broken JSON in resolution column must crash.
+
+        This exercises the json.JSONDecodeError catch (Fix 2) — distinct from
+        the structurally-wrong-JSON tests above which test post-parse validation.
+        """
+        db, repo = _make_repo()
+        _corrupt_column(db, "run-1", source_field_resolution_json="{not valid json!!!")
+        with pytest.raises(AuditIntegrityError, match="Corrupt field resolution JSON"):
+            repo.get_source_field_resolution("run-1")
+
+
+# ---------------------------------------------------------------------------
+# get_run_contract — Tier 1 integrity checks
+# ---------------------------------------------------------------------------
+
+
+class TestGetRunContract:
+    """Direct tests for get_run_contract Tier 1 validation."""
+
+    def test_returns_none_when_no_contract_stored(self) -> None:
+        _, repo = _make_repo()
+        assert repo.get_run_contract("run-1") is None
+
+    def test_nonexistent_run_raises(self) -> None:
+        """get_run_contract raises AuditIntegrityError when run_id not found."""
+        _, repo = _make_repo()
+        with pytest.raises(AuditIntegrityError, match="not found"):
+            repo.get_run_contract("nonexistent")
+
+    def test_roundtrip_with_contract(self) -> None:
+        _, repo = _make_repo()
+        contract = SchemaContract(
+            mode="FIXED",
+            fields=(
+                FieldContract(normalized_name="name", original_name="name", python_type=str, required=True, source="declared"),
+                FieldContract(normalized_name="age", original_name="age", python_type=int, required=True, source="declared"),
+            ),
+            locked=True,
+        )
+        repo.update_run_contract("run-1", contract)
+        result = repo.get_run_contract("run-1")
+        assert result is not None
+        assert result.mode == "FIXED"
+        assert len(result.fields) == 2
+
+    def test_null_hash_with_json_raises_audit_integrity_error(self) -> None:
+        """Tier 1: JSON present but hash NULL = corruption/tampering."""
+        db, repo = _make_repo()
+        contract = SchemaContract(
+            mode="FIXED",
+            fields=(FieldContract(normalized_name="x", original_name="x", python_type=str, required=True, source="declared"),),
+            locked=True,
+        )
+        repo.update_run_contract("run-1", contract)
+        # Corrupt: set hash to NULL while keeping JSON
+        _corrupt_column(db, "run-1", schema_contract_hash=None)
+        with pytest.raises(AuditIntegrityError, match="hash is NULL"):
+            repo.get_run_contract("run-1")
+
+    def test_hash_mismatch_raises_audit_integrity_error(self) -> None:
+        """Tier 1: stored hash != recomputed hash = corruption/tampering."""
+        db, repo = _make_repo()
+        contract = SchemaContract(
+            mode="FIXED",
+            fields=(FieldContract(normalized_name="x", original_name="x", python_type=str, required=True, source="declared"),),
+            locked=True,
+        )
+        repo.update_run_contract("run-1", contract)
+        # Corrupt the stored hash
+        _corrupt_column(db, "run-1", schema_contract_hash="tampered-hash-value")
+        with pytest.raises(AuditIntegrityError, match="hash mismatch"):
+            repo.get_run_contract("run-1")
+
+
+# ---------------------------------------------------------------------------
+# complete_run — terminal status validation
+# ---------------------------------------------------------------------------
+
+
+class TestCompleteRun:
+    """Direct tests for complete_run terminal status enforcement."""
+
+    def test_completed_status_accepted(self) -> None:
+        _, repo = _make_repo()
+        run = repo.complete_run("run-1", RunStatus.COMPLETED)
+        assert run.status == RunStatus.COMPLETED
+
+    def test_failed_status_accepted(self) -> None:
+        _, repo = _make_repo()
+        run = repo.complete_run("run-1", RunStatus.FAILED)
+        assert run.status == RunStatus.FAILED
+
+    def test_interrupted_status_accepted(self) -> None:
+        _, repo = _make_repo()
+        run = repo.complete_run("run-1", RunStatus.INTERRUPTED)
+        assert run.status == RunStatus.INTERRUPTED
+
+    def test_running_status_rejected(self) -> None:
+        """Non-terminal RUNNING status must be rejected."""
+        _, repo = _make_repo()
+        with pytest.raises(AuditIntegrityError, match="terminal status"):
+            repo.complete_run("run-1", RunStatus.RUNNING)
+
+
+# ---------------------------------------------------------------------------
+# set_export_status — branching logic
+# ---------------------------------------------------------------------------
+
+
+class TestSetExportStatus:
+    """Direct tests for set_export_status branching."""
+
+    def test_completed_sets_exported_at(self) -> None:
+        _, repo = _make_repo()
+        repo.set_export_status("run-1", ExportStatus.COMPLETED)
+        run = repo.get_run("run-1")
+        assert run is not None
+        assert run.export_status == ExportStatus.COMPLETED
+        assert run.exported_at is not None
+
+    def test_completed_clears_stale_error(self) -> None:
+        _, repo = _make_repo()
+        # Set a FAILED status with error first
+        repo.set_export_status("run-1", ExportStatus.FAILED, error="network timeout")
+        # Now complete — should clear the error
+        repo.set_export_status("run-1", ExportStatus.COMPLETED)
+        run = repo.get_run("run-1")
+        assert run is not None
+        assert run.export_error is None
+
+    def test_pending_clears_stale_error(self) -> None:
+        _, repo = _make_repo()
+        repo.set_export_status("run-1", ExportStatus.FAILED, error="disk full")
+        repo.set_export_status("run-1", ExportStatus.PENDING)
+        run = repo.get_run("run-1")
+        assert run is not None
+        assert run.export_error is None
+
+    def test_failed_with_error(self) -> None:
+        _, repo = _make_repo()
+        repo.set_export_status("run-1", ExportStatus.FAILED, error="connection refused")
+        run = repo.get_run("run-1")
+        assert run is not None
+        assert run.export_status == ExportStatus.FAILED
+        assert run.export_error == "connection refused"
+
+    def test_export_format_and_sink_stored(self) -> None:
+        _, repo = _make_repo()
+        repo.set_export_status(
+            "run-1",
+            ExportStatus.COMPLETED,
+            export_format="csv",
+            export_sink="output_sink",
+        )
+        run = repo.get_run("run-1")
+        assert run is not None
+        assert run.export_format == "csv"
+        assert run.export_sink == "output_sink"
+
+    def test_completed_with_error_raises_integrity_error(self) -> None:
+        """Tier 1: COMPLETED + error is contradictory audit state."""
+        _, repo = _make_repo()
+        with pytest.raises(AuditIntegrityError, match="only valid with FAILED"):
+            repo.set_export_status("run-1", ExportStatus.COMPLETED, error="something")
+
+    def test_pending_with_error_raises_integrity_error(self) -> None:
+        """Tier 1: PENDING + error is contradictory audit state."""
+        _, repo = _make_repo()
+        with pytest.raises(AuditIntegrityError, match="only valid with FAILED"):
+            repo.set_export_status("run-1", ExportStatus.PENDING, error="something")
+
+
+# ---------------------------------------------------------------------------
+# record_secret_resolutions — atomicity
+# ---------------------------------------------------------------------------
+
+
+class TestRecordSecretResolutions:
+    """Direct tests for record_secret_resolutions atomicity."""
+
+    @staticmethod
+    def _make_resolution(env_var: str = "API_KEY") -> SecretResolutionInput:
+        return SecretResolutionInput(
+            env_var_name=env_var,
+            source="keyvault",
+            vault_url="https://vault.example.com",
+            secret_name=f"{env_var.lower()}-secret",
+            timestamp=1709100000.0,
+            resolution_latency_ms=42.5,
+            fingerprint="a" * 64,  # Valid 64-char lowercase hex (HMAC-SHA256)
+        )
+
+    def test_all_resolutions_committed(self) -> None:
+        """Normal path: all resolutions stored atomically."""
+        _, repo = _make_repo()
+        resolutions = [
+            self._make_resolution("KEY_1"),
+            self._make_resolution("KEY_2"),
+            self._make_resolution("KEY_3"),
+        ]
+        repo.record_secret_resolutions("run-1", resolutions)
+        stored = repo.get_secret_resolutions_for_run("run-1")
+        assert len(stored) == 3
+        assert {r.env_var_name for r in stored} == {"KEY_1", "KEY_2", "KEY_3"}
+
+    def test_empty_list_is_noop(self) -> None:
+        """Empty resolutions list should not error."""
+        _, repo = _make_repo()
+        repo.record_secret_resolutions("run-1", [])
+        stored = repo.get_secret_resolutions_for_run("run-1")
+        assert len(stored) == 0
+
+    def test_atomicity_on_failure(self) -> None:
+        """If any insert fails, no resolutions should be persisted.
+
+        We simulate failure by inserting a duplicate resolution_id mid-batch.
+        Since record_secret_resolutions uses a single transaction, the entire
+        batch should roll back.
+        """
+        from unittest.mock import patch
+
+        from sqlalchemy.exc import IntegrityError
+
+        from elspeth.core.landscape._helpers import generate_id as real_generate_id
+
+        _db, repo = _make_repo()
+        resolutions = [
+            self._make_resolution("KEY_1"),
+            self._make_resolution("KEY_2"),
+        ]
+
+        # Make generate_id return the same ID twice to trigger a PK violation
+        call_count = 0
+        fixed_id = real_generate_id()
+
+        def duplicate_id() -> str:
+            nonlocal call_count
+            call_count += 1
+            if call_count <= 2:
+                return fixed_id  # Same ID for both — second will violate PK
+            return real_generate_id()
+
+        with (
+            patch("elspeth.core.landscape.run_lifecycle_repository.generate_id", side_effect=duplicate_id),
+            pytest.raises(IntegrityError),
+        ):
+            repo.record_secret_resolutions("run-1", resolutions)
+
+        # Verify atomicity: zero records should be stored
+        stored = repo.get_secret_resolutions_for_run("run-1")
+        assert len(stored) == 0
+
+
+# ---------------------------------------------------------------------------
+# update_run_contract — overwrite guard
+# ---------------------------------------------------------------------------
+
+
+class TestUpdateRunContract:
+    """Direct tests for update_run_contract overwrite protection."""
+
+    def test_update_succeeds_when_no_prior_contract(self) -> None:
+        """Normal path: adding contract to a run that has none."""
+        _, repo = _make_repo()
+        contract = SchemaContract(
+            mode="OBSERVED",
+            fields=(FieldContract(normalized_name="x", original_name="x", python_type=str, required=True, source="inferred"),),
+            locked=True,
+        )
+        repo.update_run_contract("run-1", contract)
+        result = repo.get_run_contract("run-1")
+        assert result is not None
+        assert result.mode == "OBSERVED"
+
+    def test_update_nonexistent_run_raises(self) -> None:
+        """Atomic guard: update_run_contract on missing run raises AuditIntegrityError."""
+        _, repo = _make_repo()
+        contract = SchemaContract(
+            mode="FIXED",
+            fields=(FieldContract(normalized_name="x", original_name="x", python_type=str, required=True, source="declared"),),
+            locked=True,
+        )
+        with pytest.raises(AuditIntegrityError, match="not found"):
+            repo.update_run_contract("ghost-run", contract)
+
+    def test_overwrite_existing_contract_raises(self) -> None:
+        """Tier 1: overwriting an existing contract is evidence contamination."""
+        db = make_landscape_db()
+        ops = DatabaseOps(db)
+        repo = RunLifecycleRepository(db, ops, RunLoader())
+        # Create run WITH a contract via begin_run
+        contract = SchemaContract(
+            mode="FIXED",
+            fields=(FieldContract(normalized_name="y", original_name="y", python_type=int, required=True, source="declared"),),
+            locked=True,
+        )
+        repo.begin_run(
+            config={"key": "value"},
+            canonical_version="v1",
+            run_id="run-with-contract",
+            schema_contract=contract,
+        )
+        # Attempting to update should fail — contract already exists
+        new_contract = SchemaContract(
+            mode="OBSERVED",
+            fields=(FieldContract(normalized_name="z", original_name="z", python_type=str, required=True, source="inferred"),),
+            locked=True,
+        )
+        with pytest.raises(AuditIntegrityError, match="contract already exists"):
+            repo.update_run_contract("run-with-contract", new_contract)
+
+
+# ---------------------------------------------------------------------------
+# complete_run — crash path coverage
+# ---------------------------------------------------------------------------
+
+
+class TestCompleteRunCrashPath:
+    """Tests for complete_run edge cases and crash paths."""
+
+    def test_nonexistent_run_raises(self) -> None:
+        """Completing a nonexistent run must crash.
+
+        DatabaseOps.execute_update raises AuditIntegrityError on zero rows affected,
+        which fires before the post-update AuditIntegrityError check.
+        """
+        _, repo = _make_repo()
+        with pytest.raises(AuditIntegrityError, match="zero rows affected"):
+            repo.complete_run("nonexistent-run", RunStatus.COMPLETED)
+
+    def test_complete_preserves_existing_grade_when_none_passed(self) -> None:
+        """complete_run with reproducibility_grade=None preserves existing grade.
+
+        Bug 318f74: previously, passing None would overwrite an existing grade
+        with NULL. Now the grade column is only included in the UPDATE when
+        explicitly provided.
+        """
+        db, repo = _make_repo()
+        # Set a grade via direct column update (simulating begin_run with grade)
+        _corrupt_column(db, "run-1", reproducibility_grade="full_reproducible")
+        run = repo.complete_run("run-1", RunStatus.COMPLETED)
+        assert run.status == RunStatus.COMPLETED
+        assert run.reproducibility_grade == ReproducibilityGrade.FULL_REPRODUCIBLE
+
+
+# ---------------------------------------------------------------------------
+# update_run_status — backward-transition guard
+# ---------------------------------------------------------------------------
+
+
+class TestUpdateRunStatus:
+    """Direct tests for update_run_status transition guards."""
+
+    def test_running_to_running_accepted(self) -> None:
+        """Non-terminal to non-terminal transition is valid."""
+        _, repo = _make_repo()
+        repo.update_run_status("run-1", RunStatus.RUNNING)
+        run = repo.get_run("run-1")
+        assert run is not None
+        assert run.status == RunStatus.RUNNING
+
+    def test_nonexistent_run_raises(self) -> None:
+        _, repo = _make_repo()
+        with pytest.raises(AuditIntegrityError, match="not found"):
+            repo.update_run_status("ghost-run", RunStatus.RUNNING)
+
+    def test_completed_to_running_rejected(self) -> None:
+        """COMPLETED runs are immutable — cannot be transitioned."""
+        _, repo = _make_repo()
+        repo.complete_run("run-1", RunStatus.COMPLETED)
+        with pytest.raises(AuditIntegrityError, match="COMPLETED"):
+            repo.update_run_status("run-1", RunStatus.RUNNING)
+
+    def test_failed_to_running_allowed_for_resume(self) -> None:
+        """FAILED→RUNNING is the resume path — must be allowed."""
+        _, repo = _make_repo()
+        repo.complete_run("run-1", RunStatus.FAILED)
+        # Resume path: set back to RUNNING
+        repo.update_run_status("run-1", RunStatus.RUNNING)
+        run = repo.get_run("run-1")
+        assert run is not None
+        assert run.status == RunStatus.RUNNING
+
+    def test_interrupted_to_running_allowed_for_resume(self) -> None:
+        """INTERRUPTED→RUNNING is the resume path — must be allowed."""
+        _, repo = _make_repo()
+        repo.complete_run("run-1", RunStatus.INTERRUPTED)
+        repo.update_run_status("run-1", RunStatus.RUNNING)
+        run = repo.get_run("run-1")
+        assert run is not None
+        assert run.status == RunStatus.RUNNING
+
+
+# ---------------------------------------------------------------------------
+# finalize_run — nondeterministic and failed edge cases
+# ---------------------------------------------------------------------------
+
+
+class TestFinalizeRunEdgeCases:
+    """Tests for finalize_run with varied node configurations."""
+
+    def test_finalize_failed_run(self) -> None:
+        """finalize_run with FAILED status still computes grade and completes."""
+        _, repo = _make_repo(run_id="fail-run")
+        run = repo.finalize_run("fail-run", RunStatus.FAILED)
+        assert run.status == RunStatus.FAILED
+        assert run.completed_at is not None
+        assert run.reproducibility_grade is not None
+
+    def test_finalize_nondeterministic_run(self) -> None:
+        """finalize_run with nondeterministic nodes yields REPLAY_REPRODUCIBLE."""
+        from elspeth.contracts import Determinism, NodeType
+        from elspeth.contracts.schema import SchemaConfig
+
+        db = make_landscape_db()
+        ops = DatabaseOps(db)
+        repo = RunLifecycleRepository(db, ops, RunLoader())
+        repo.begin_run(config={}, canonical_version="v1", run_id="nd-run")
+
+        # Register a nondeterministic node via the recorder (need DataFlowRepository)
+        recorder = make_recorder(db)
+        recorder.register_node(
+            run_id="nd-run",
+            plugin_name="llm_transform",
+            node_type=NodeType.TRANSFORM,
+            plugin_version="1.0",
+            config={},
+            node_id="nd-node",
+            schema_config=SchemaConfig.from_dict({"mode": "observed"}),
+            determinism=Determinism.EXTERNAL_CALL,
+        )
+
+        run = repo.finalize_run("nd-run", RunStatus.COMPLETED)
+        assert run.status == RunStatus.COMPLETED
+        assert run.reproducibility_grade == "replay_reproducible"
+
+
+# ---------------------------------------------------------------------------
+# list_runs — ordering guarantee
+# ---------------------------------------------------------------------------
+
+
+class TestListRuns:
+    """Direct tests for list_runs ordering and filtering."""
+
+    def test_returns_newest_first(self) -> None:
+        """list_runs returns runs ordered by started_at descending."""
+        db = make_landscape_db()
+        ops = DatabaseOps(db)
+        repo = RunLifecycleRepository(db, ops, RunLoader())
+        repo.begin_run(config={}, canonical_version="v1", run_id="run-1")
+        repo.begin_run(config={}, canonical_version="v1", run_id="run-2")
+        repo.begin_run(config={}, canonical_version="v1", run_id="run-3")
+        runs = repo.list_runs()
+        assert len(runs) == 3
+        # Newest first (last created = first returned)
+        assert runs[0].run_id == "run-3"
+        assert runs[1].run_id == "run-2"
+        assert runs[2].run_id == "run-1"
+
+    def test_filter_by_status(self) -> None:
+        """list_runs with status filter only returns matching runs."""
+        db = make_landscape_db()
+        ops = DatabaseOps(db)
+        repo = RunLifecycleRepository(db, ops, RunLoader())
+        repo.begin_run(config={}, canonical_version="v1", run_id="r1")
+        repo.begin_run(config={}, canonical_version="v1", run_id="r2")
+        repo.complete_run("r1", RunStatus.COMPLETED)
+        running = repo.list_runs(status=RunStatus.RUNNING)
+        assert len(running) == 1
+        assert running[0].run_id == "r2"
+
+
+# ---------------------------------------------------------------------------
+# set_export_status — FAILED without error edge case
+# ---------------------------------------------------------------------------
+
+
+class TestSetExportStatusEdgeCases:
+    """Edge case tests for set_export_status behavior."""
+
+    def test_failed_without_error_does_not_set_error(self) -> None:
+        """FAILED status without error kwarg leaves export_error as None."""
+        _, repo = _make_repo()
+        repo.set_export_status("run-1", ExportStatus.FAILED)
+        run = repo.get_run("run-1")
+        assert run is not None
+        assert run.export_status == ExportStatus.FAILED
+        assert run.export_error is None
+
+    def test_failed_replaces_previous_error(self) -> None:
+        """FAILED with new error replaces previous error message."""
+        _, repo = _make_repo()
+        repo.set_export_status("run-1", ExportStatus.FAILED, error="first error")
+        repo.set_export_status("run-1", ExportStatus.FAILED, error="second error")
+        run = repo.get_run("run-1")
+        assert run is not None
+        assert run.export_error == "second error"

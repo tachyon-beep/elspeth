@@ -1,4 +1,3 @@
-# src/elspeth/contracts/config/runtime.py
 """Runtime configuration dataclasses.
 
 These dataclasses implement the Runtime*Protocol interfaces and provide
@@ -27,18 +26,12 @@ from elspeth.contracts.config.defaults import INTERNAL_DEFAULTS, POLICY_DEFAULTS
 from elspeth.contracts.engine import RetryPolicy
 from elspeth.contracts.enums import _IMPLEMENTED_BACKPRESSURE_MODES, BackpressureMode, TelemetryGranularity
 
-# NOTE: ServiceRateLimit and other Settings classes are imported lazily inside
-# from_settings() methods to avoid breaking the contracts leaf module boundary.
-# Importing from elspeth.core at module level would pull in 1,200+ modules.
-# FIX: P2-2026-01-20-contracts-config-reexport-breaks-leaf-boundary
-
 if TYPE_CHECKING:
     from elspeth.core.config import (
         CheckpointSettings,
         ConcurrencySettings,
         RateLimitSettings,
         RetrySettings,
-        ServiceRateLimit,
         TelemetrySettings,
     )
 
@@ -83,8 +76,8 @@ def _validate_int_field(field_name: str, value: Any) -> int:
     if isinstance(value, str):
         try:
             return int(value)
-        except ValueError:
-            raise ValueError(f"Invalid retry policy: {field_name} must be numeric, got {value!r}") from None
+        except ValueError as exc:
+            raise ValueError(f"Invalid retry policy: {field_name} must be numeric, got {value!r}") from exc
 
     # Non-numeric type (list, dict, bool, etc.)
     type_name = type(value).__name__
@@ -122,8 +115,8 @@ def _validate_float_field(field_name: str, value: Any) -> float:
     if isinstance(value, str):
         try:
             result = float(value)
-        except ValueError:
-            raise ValueError(f"Invalid retry policy: {field_name} must be numeric, got {value!r}") from None
+        except ValueError as exc:
+            raise ValueError(f"Invalid retry policy: {field_name} must be numeric, got {value!r}") from exc
         if not math.isfinite(result):
             raise ValueError(f"Invalid retry policy: {field_name} must be finite, got {value!r}")
         return result
@@ -163,9 +156,23 @@ class RuntimeRetryConfig:
     exponential_base: float  # backoff multiplier
 
     def __post_init__(self) -> None:
-        """Validate configuration values."""
+        """Validate configuration values.
+
+        Offensive checks: reject invalid ranges at construction time.
+        Previously, from_policy() silently clamped values (e.g. -5 → 1),
+        which masked configuration errors — the runtime behavior diverged
+        from what the user configured, violating auditability.
+        """
         if self.max_attempts < 1:
-            raise ValueError("max_attempts must be >= 1")
+            raise ValueError(f"max_attempts must be >= 1, got {self.max_attempts}")
+        if self.base_delay < 0.01:
+            raise ValueError(f"base_delay must be >= 0.01, got {self.base_delay}")
+        if self.max_delay < 0.1:
+            raise ValueError(f"max_delay must be >= 0.1, got {self.max_delay}")
+        if self.jitter < 0.0:
+            raise ValueError(f"jitter must be >= 0.0, got {self.jitter}")
+        if self.exponential_base <= 1.0:
+            raise ValueError(f"exponential_base must be > 1.0, got {self.exponential_base}")
 
     @classmethod
     def default(cls) -> "RuntimeRetryConfig":
@@ -227,10 +234,11 @@ class RuntimeRetryConfig:
         RetryPolicy is total=False (all fields optional), so plugins can specify
         partial overrides. Missing fields use POLICY_DEFAULTS.
 
-        This is a trust boundary - plugin config (user YAML) may have invalid
-        values. Numeric values are clamped to safe minimums. Non-numeric values
-        (None, non-numeric strings, lists, dicts) raise ValueError with a clear
-        message indicating which field is invalid.
+        This is a trust boundary — plugin config (user YAML) may have invalid
+        values. Non-numeric values (None, strings, lists, dicts) are rejected
+        by the validate helpers. Out-of-range values (negative delays, zero
+        attempts) are rejected by __post_init__. No silent clamping — if the
+        user configured an invalid value, they get a clear error at startup.
 
         Args:
             policy: Optional RetryPolicy dict from plugin configuration.
@@ -261,14 +269,34 @@ class RuntimeRetryConfig:
         jitter = _validate_float_field("jitter", full["jitter"])
         exponential_base = _validate_float_field("exponential_base", full["exponential_base"])
 
-        # Clamp to safe minimums (handles valid but out-of-range values like -5 or 0)
+        # Construct directly — __post_init__ validates ranges and raises
+        # ValueError with clear messages for out-of-range values.
+        # No silent clamping: if the user configured -5, they get an error,
+        # not a silently different value.
         return cls(
-            max_attempts=max(1, max_attempts),
-            base_delay=max(0.01, base_delay),
-            max_delay=max(0.1, max_delay_val),
-            jitter=max(0.0, jitter),
-            exponential_base=max(1.01, exponential_base),
+            max_attempts=max_attempts,
+            base_delay=base_delay,
+            max_delay=max_delay_val,
+            jitter=jitter,
+            exponential_base=exponential_base,
         )
+
+
+@dataclass(frozen=True, slots=True)
+class RuntimeServiceRateLimit:
+    """Runtime rate limit for a single service.
+
+    Implements ServiceRateLimitProtocol. This is the Runtime-layer counterpart
+    of ServiceRateLimit (Pydantic model in core/config.py), following the
+    standard Settings→Runtime conversion pattern.
+    """
+
+    requests_per_minute: int
+
+    def __post_init__(self) -> None:
+        """Validate rate limit is positive."""
+        if self.requests_per_minute < 1:
+            raise ValueError(f"requests_per_minute must be >= 1, got {self.requests_per_minute}")
 
 
 @dataclass(frozen=True, slots=True)
@@ -281,7 +309,7 @@ class RuntimeRateLimitConfig:
         - enabled: RateLimitSettings.enabled
         - default_requests_per_minute: RateLimitSettings.default_requests_per_minute
         - persistence_path: RateLimitSettings.persistence_path
-        - services: RateLimitSettings.services
+        - services: RateLimitSettings.services (converted to RuntimeServiceRateLimit)
 
     Protocol Coverage:
         RuntimeRateLimitProtocol requires: enabled, default_requests_per_minute,
@@ -296,9 +324,16 @@ class RuntimeRateLimitConfig:
     enabled: bool
     default_requests_per_minute: int
     persistence_path: str | None
-    services: Mapping[str, "ServiceRateLimit"]
+    services: Mapping[str, RuntimeServiceRateLimit]
 
-    def get_service_config(self, service_name: str) -> "ServiceRateLimit":
+    def __post_init__(self) -> None:
+        """Validate rate limit config and freeze mutable services mapping."""
+        if self.default_requests_per_minute < 1:
+            raise ValueError(f"default_requests_per_minute must be >= 1, got {self.default_requests_per_minute}")
+        # Freeze services mapping to prevent external mutation
+        object.__setattr__(self, "services", MappingProxyType(dict(self.services)))
+
+    def get_service_config(self, service_name: str) -> RuntimeServiceRateLimit:
         """Get rate limit config for a service, with fallback to defaults.
 
         This mirrors RateLimitSettings.get_service_config() behavior, providing
@@ -308,16 +343,13 @@ class RuntimeRateLimitConfig:
             service_name: Name of the service to get config for
 
         Returns:
-            ServiceRateLimit for the service (specific config if available,
+            RuntimeServiceRateLimit for the service (specific config if available,
             otherwise constructed from defaults)
         """
         if service_name in self.services:
             return self.services[service_name]
 
-        # Lazy import to avoid breaking contracts leaf boundary
-        from elspeth.core.config import ServiceRateLimit
-
-        return ServiceRateLimit(requests_per_minute=self.default_requests_per_minute)
+        return RuntimeServiceRateLimit(requests_per_minute=self.default_requests_per_minute)
 
     @classmethod
     def default(cls) -> "RuntimeRateLimitConfig":
@@ -340,7 +372,7 @@ class RuntimeRateLimitConfig:
             settings.enabled -> enabled
             settings.default_requests_per_minute -> default_requests_per_minute
             settings.persistence_path -> persistence_path
-            settings.services -> services
+            settings.services -> services (converted to RuntimeServiceRateLimit)
 
         Args:
             settings: Validated Pydantic settings model
@@ -352,7 +384,9 @@ class RuntimeRateLimitConfig:
             enabled=settings.enabled,
             default_requests_per_minute=settings.default_requests_per_minute,
             persistence_path=settings.persistence_path,
-            services=MappingProxyType(dict(settings.services)),
+            services=MappingProxyType(
+                {k: RuntimeServiceRateLimit(requests_per_minute=v.requests_per_minute) for k, v in settings.services.items()}
+            ),
         )
 
 
@@ -556,6 +590,11 @@ class RuntimeTelemetryConfig:
     fail_on_total_exporter_failure: bool
     max_consecutive_failures: int
     exporter_configs: tuple[ExporterConfig, ...]
+
+    def __post_init__(self) -> None:
+        """Validate telemetry config invariants."""
+        if self.max_consecutive_failures < 1:
+            raise ValueError(f"max_consecutive_failures must be >= 1, got {self.max_consecutive_failures}")
 
     @classmethod
     def default(cls) -> "RuntimeTelemetryConfig":

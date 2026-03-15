@@ -93,12 +93,15 @@ def _make_audited_context(
 ) -> PluginContext:
     """Create a real PluginContext wired to a LandscapeRecorder.
 
+    Delegates to the shared make_context() factory.
+
     This enables validation errors to be recorded to the Landscape
     audit database for full audit trail verification.
     """
-    return PluginContext(
+    from tests.fixtures.factories import make_context
+
+    return make_context(
         run_id=run_id,
-        config={},
         landscape=recorder,
         node_id=node_id,
     )

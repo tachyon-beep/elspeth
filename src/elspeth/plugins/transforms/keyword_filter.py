@@ -6,11 +6,13 @@ from typing import Any
 from pydantic import Field, field_validator
 
 from elspeth.contracts import Determinism
-from elspeth.contracts.plugin_context import PluginContext
+from elspeth.contracts.contexts import TransformContext
 from elspeth.contracts.schema_contract import PipelineRow
-from elspeth.plugins.base import BaseTransform
-from elspeth.plugins.config_base import TransformDataConfig
-from elspeth.plugins.results import TransformResult
+from elspeth.plugins.infrastructure.base import BaseTransform
+from elspeth.plugins.infrastructure.config_base import TransformDataConfig
+from elspeth.plugins.infrastructure.results import TransformResult
+from elspeth.plugins.transforms.safety_utils import get_fields_to_scan
+from elspeth.plugins.transforms.safety_utils import validate_fields_not_empty as _validate_fields
 
 # ReDoS detection: patterns with nested quantifiers cause catastrophic backtracking
 # on adversarial input. E.g., (a+)+ on "aaa...!" is O(2^n).
@@ -74,26 +76,22 @@ class KeywordFilterConfig(TransformDataConfig):
     @classmethod
     def validate_fields_not_empty(cls, v: str | list[str]) -> str | list[str]:
         """Reject empty fields — security transform must scan at least one field."""
-        if isinstance(v, str):
-            if not v.strip():
-                raise ValueError("fields cannot be empty")
-            return v
-        if len(v) == 0:
-            raise ValueError("fields list cannot be empty — security transform must scan at least one field")
-        for i, name in enumerate(v):
-            if not isinstance(name, str) or not name.strip():
-                raise ValueError(f"fields[{i}] cannot be empty")
-        return v
+        return _validate_fields(v)
 
     @field_validator("blocked_patterns")
     @classmethod
     def validate_patterns_not_empty(cls, v: list[str]) -> list[str]:
-        """Ensure at least one non-empty pattern is provided."""
+        """Ensure patterns are non-empty, valid regex, and ReDoS-safe."""
         if not v:
             raise ValueError("blocked_patterns cannot be empty")
         for i, pattern in enumerate(v):
             if pattern == "":
                 raise ValueError(f"blocked_patterns[{i}] cannot be empty (empty regex matches everything)")
+            _validate_regex_safety(pattern)
+            try:
+                re.compile(pattern)
+            except re.error as exc:
+                raise ValueError(f"blocked_patterns[{i}] is not a valid regex: {exc}") from exc
         return v
 
 
@@ -134,10 +132,7 @@ class KeywordFilter(BaseTransform):
         cfg = KeywordFilterConfig.from_dict(config)
         self._fields = cfg.fields
 
-        # Compile patterns at init - fail fast on invalid regex
-        # Validate for ReDoS-prone constructs before compiling
-        for pattern in cfg.blocked_patterns:
-            _validate_regex_safety(pattern)
+        # Patterns already validated (regex syntax + ReDoS safety) by config validator
         self._compiled_patterns: list[tuple[str, re.Pattern[str]]] = [(pattern, re.compile(pattern)) for pattern in cfg.blocked_patterns]
 
         self.input_schema, self.output_schema = self._create_schemas(cfg.schema_config, "KeywordFilter")
@@ -145,7 +140,7 @@ class KeywordFilter(BaseTransform):
     def process(
         self,
         row: PipelineRow,
-        ctx: PluginContext,
+        ctx: TransformContext,
     ) -> TransformResult:
         """Scan configured fields for blocked patterns.
 
@@ -157,7 +152,8 @@ class KeywordFilter(BaseTransform):
             TransformResult.success(row) if no patterns match
             TransformResult.error(reason) if any pattern matches
         """
-        fields_to_scan = self._get_fields_to_scan(row)
+        fields_to_scan = get_fields_to_scan(self._fields, row)
+        named_fields = self._fields != "all"
 
         for field_name in fields_to_scan:
             # Use PipelineRow access semantics so configured fields can be either
@@ -167,8 +163,20 @@ class KeywordFilter(BaseTransform):
 
             value = row[field_name]
 
-            # Only scan string values
+            # Non-string values in explicitly named fields must fail-closed.
+            # The operator configured this field for scanning — if the value
+            # isn't scannable, the row must be quarantined, not passed through.
+            # In "all" mode, non-strings are already excluded by _get_fields_to_scan.
             if not isinstance(value, str):
+                if named_fields:
+                    return TransformResult.error(
+                        {
+                            "reason": "non_string_field",
+                            "field": field_name,
+                            "actual_type": type(value).__name__,
+                        },
+                        retryable=False,
+                    )
                 continue
 
             # Check each pattern
@@ -192,16 +200,6 @@ class KeywordFilter(BaseTransform):
             row,
             success_reason={"action": "filtered"},
         )
-
-    def _get_fields_to_scan(self, row: PipelineRow) -> list[str]:
-        """Determine which fields to scan based on config."""
-        if self._fields == "all":
-            # Scan all string-valued fields
-            return [field_name for field_name in row if isinstance(row[field_name], str)]
-        elif isinstance(self._fields, str):
-            return [self._fields]
-        else:
-            return self._fields
 
     def close(self) -> None:
         """Release resources."""

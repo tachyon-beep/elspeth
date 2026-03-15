@@ -223,7 +223,7 @@ class TestCoalesceExecutorPipelineRow:
         executor.accept(token_a, "merge_point")
 
         # Accept second token should crash
-        with pytest.raises(ValueError, match="has no contract"):
+        with pytest.raises(OrchestrationInvariantError, match="has no contract"):
             executor.accept(token_b, "merge_point")
 
     def test_coalesce_merge_failure_raises_orchestration_error(self) -> None:

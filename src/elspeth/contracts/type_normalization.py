@@ -15,7 +15,6 @@ from typing import Any
 # NOTE: numpy and pandas are imported LAZILY inside normalize_type_for_contract()
 # to avoid breaking the contracts leaf module boundary. Importing them at module
 # level pulls in 400+ modules just for type normalization.
-# FIX: P2-2026-01-30-6fp (regression from type_normalization.py addition)
 
 # Canonical type registry: string name → Python type.
 # Single source of truth for all contract type maps in the codebase.
@@ -52,12 +51,18 @@ def normalize_type_for_contract(value: Any) -> type:
         numpy and pandas are imported lazily inside this function to avoid
         pulling in heavy dependencies when the contracts package is imported.
     """
+    if value is None:
+        return type(None)
+
+    # Fast path: standard Python types skip numpy/pandas imports entirely.
+    # Exclude float — must fall through to NaN/Infinity rejection below.
+    fast_type = type(value)
+    if fast_type is not float and fast_type in ALLOWED_CONTRACT_TYPES:
+        return fast_type
+
     # Lazy imports to maintain contracts as a leaf module
     import numpy as np
     import pandas as pd
-
-    if value is None:
-        return type(None)
 
     # Missing-value sentinels normalize to NoneType
     if value is pd.NA:

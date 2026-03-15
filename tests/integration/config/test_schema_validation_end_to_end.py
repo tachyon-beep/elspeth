@@ -160,6 +160,7 @@ aggregations:
     plugin: batch_stats
     input: stats_input
     on_success: output
+    on_error: discard
     trigger:
       count: 10
     options:
@@ -259,6 +260,7 @@ aggregations:
     plugin: batch_stats
     input: stats_input
     on_success: output
+    on_error: discard
     trigger:
       count: 10
     options:
@@ -319,6 +321,7 @@ aggregations:
     plugin: batch_stats
     input: stats_input
     on_success: output
+    on_error: discard
     trigger:
       count: 10
     options:
@@ -361,7 +364,7 @@ def test_two_phase_validation_separates_self_and_compatibility_errors(plugin_man
     - PHASE 1: Self-validation during plugin construction (malformed schemas)
     - PHASE 2: Compatibility validation during graph construction (incompatible connections)
     """
-    from elspeth.plugins.config_base import PluginConfigError
+    from elspeth.plugins.infrastructure.config_base import PluginConfigError
 
     # PHASE 1 should fail: Malformed schema in plugin config
     bad_self_config = {
@@ -416,10 +419,10 @@ def test_two_phase_validation_separates_self_and_compatibility_errors(plugin_man
     # Graph construction should fail (PHASE 2 - schemas incompatible)
     with pytest.raises(GraphValidationError, match=r"Missing fields.*email"):
         ExecutionGraph.from_plugin_instances(
-            source=plugins["source"],
-            source_settings=plugins["source_settings"],
-            transforms=plugins["transforms"],
-            sinks=plugins["sinks"],
-            aggregations=plugins["aggregations"],
+            source=plugins.source,
+            source_settings=plugins.source_settings,
+            transforms=plugins.transforms,
+            sinks=plugins.sinks,
+            aggregations=plugins.aggregations,
             gates=list(config.gates),
         )

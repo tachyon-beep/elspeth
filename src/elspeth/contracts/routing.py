@@ -3,32 +3,13 @@
 These types answer: "Where does data go next?"
 """
 
-import copy
 from dataclasses import dataclass
 from enum import StrEnum
 
 from elspeth.contracts.enums import RoutingKind, RoutingMode
 from elspeth.contracts.errors import RoutingReason
+from elspeth.contracts.freeze import deep_freeze
 from elspeth.contracts.types import NodeID, SinkName
-
-
-def _copy_reason(reason: RoutingReason | None) -> RoutingReason | None:
-    """Create defensive deep copy of routing reason.
-
-    Deep copy prevents mutation via retained references to
-    the original dict or nested objects. The frozen dataclass
-    ensures the reference itself cannot be reassigned.
-
-    Args:
-        reason: RoutingReason dict or None
-
-    Returns:
-        Deep copy of reason, or None if input is None
-    """
-    if reason is None:
-        return None
-    # Deep copy to prevent mutation of original or nested dicts
-    return copy.deepcopy(reason)
 
 
 @dataclass(frozen=True, slots=True)
@@ -87,10 +68,9 @@ class RoutingAction:
                 "COPY would require dual terminal states (ROUTED + COMPLETED)."
             )
 
-        # NOTE: reason is a mutable dict. _copy_reason() deep-copies at construction
-        # time to prevent external callers from affecting the stored value. Full
-        # immutability via MappingProxyType was attempted but breaks JSON serialization
-        # (audit trail). The deep copy + frozen dataclass provide sufficient protection.
+        # Deep-freeze reason to prevent mutation via retained references.
+        if self.reason is not None:
+            object.__setattr__(self, "reason", deep_freeze(self.reason))
 
     @classmethod
     def continue_(cls, *, reason: RoutingReason | None = None) -> "RoutingAction":
@@ -99,7 +79,7 @@ class RoutingAction:
             kind=RoutingKind.CONTINUE,
             destinations=(),
             mode=RoutingMode.MOVE,  # Default for continue
-            reason=_copy_reason(reason),
+            reason=reason,  # __post_init__ handles defensive copy
         )
 
     @classmethod
@@ -128,7 +108,7 @@ class RoutingAction:
             kind=RoutingKind.ROUTE,
             destinations=(label,),
             mode=mode,
-            reason=_copy_reason(reason),
+            reason=reason,  # __post_init__ handles defensive copy
         )
 
     @classmethod
@@ -152,7 +132,7 @@ class RoutingAction:
             kind=RoutingKind.FORK_TO_PATHS,
             destinations=tuple(paths),
             mode=RoutingMode.COPY,  # Fork always copies
-            reason=_copy_reason(reason),
+            reason=reason,  # __post_init__ handles defensive copy
         )
 
 
@@ -220,6 +200,11 @@ class RoutingSpec:
     edge_id: str
     mode: RoutingMode
 
+    def __post_init__(self) -> None:
+        """Validate routing spec invariants."""
+        if not self.edge_id:
+            raise ValueError("RoutingSpec.edge_id must not be empty")
+
 
 @dataclass(frozen=True, slots=True)
 class EdgeInfo:
@@ -233,3 +218,12 @@ class EdgeInfo:
     to_node: NodeID
     label: str
     mode: RoutingMode
+
+    def __post_init__(self) -> None:
+        """Validate edge info invariants."""
+        if not self.from_node:
+            raise ValueError("EdgeInfo.from_node must not be empty")
+        if not self.to_node:
+            raise ValueError("EdgeInfo.to_node must not be empty")
+        if not self.label:
+            raise ValueError("EdgeInfo.label must not be empty")

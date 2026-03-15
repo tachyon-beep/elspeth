@@ -1,4 +1,3 @@
-# src/elspeth/telemetry/protocols.py
 """Protocol definitions for telemetry exporters.
 
 Exporters are responsible for shipping telemetry events to external

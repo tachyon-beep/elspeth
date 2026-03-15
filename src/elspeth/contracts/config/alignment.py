@@ -1,4 +1,3 @@
-# src/elspeth/contracts/config/alignment.py
 """Field alignment documentation for Settings -> Runtime mapping.
 
 This module provides machine-readable documentation of how Settings fields
@@ -8,7 +7,7 @@ map to runtime config. Used by:
 2. Tests - Verify mappings are accurate
 3. Humans - Understand the field flow
 
-The P2-2026-01-21 bug (exponential_base orphaned) motivated this system.
+A field-orphaning bug (exponential_base orphaned) motivated this system.
 By making the mapping explicit and checkable, we prevent future orphaning.
 
 Categories:
@@ -18,6 +17,7 @@ Categories:
 - RUNTIME_TO_SUBSYSTEM: Runtime class -> INTERNAL_DEFAULTS subsystem key
 """
 
+from types import MappingProxyType
 from typing import Final
 
 # =============================================================================
@@ -30,17 +30,23 @@ from typing import Final
 # Example: RetrySettings.initial_delay_seconds -> RetryConfig.base_delay
 #          The names differ, so it must be documented here.
 
-FIELD_MAPPINGS: Final[dict[str, dict[str, str]]] = {
-    "RetrySettings": {
-        "initial_delay_seconds": "base_delay",
-        "max_delay_seconds": "max_delay",
-    },
-    "TelemetrySettings": {
-        "exporters": "exporter_configs",
-    },
-    # RateLimitSettings, ConcurrencySettings, CheckpointSettings
-    # all use same field names in Settings and Runtime
-}
+FIELD_MAPPINGS: Final[MappingProxyType[str, MappingProxyType[str, str]]] = MappingProxyType(
+    {
+        "RetrySettings": MappingProxyType(
+            {
+                "initial_delay_seconds": "base_delay",
+                "max_delay_seconds": "max_delay",
+            }
+        ),
+        "TelemetrySettings": MappingProxyType(
+            {
+                "exporters": "exporter_configs",
+            }
+        ),
+        # RateLimitSettings, ConcurrencySettings, CheckpointSettings
+        # all use same field names in Settings and Runtime
+    }
+)
 
 
 # =============================================================================
@@ -50,13 +56,15 @@ FIELD_MAPPINGS: Final[dict[str, dict[str, str]]] = {
 # Format: {SettingsClassName: RuntimeClassName}
 # This documents the intended pairing for protocol verification.
 
-SETTINGS_TO_RUNTIME: Final[dict[str, str]] = {
-    "RetrySettings": "RuntimeRetryConfig",
-    "RateLimitSettings": "RuntimeRateLimitConfig",
-    "ConcurrencySettings": "RuntimeConcurrencyConfig",
-    "CheckpointSettings": "RuntimeCheckpointConfig",
-    "TelemetrySettings": "RuntimeTelemetryConfig",
-}
+SETTINGS_TO_RUNTIME: Final[MappingProxyType[str, str]] = MappingProxyType(
+    {
+        "RetrySettings": "RuntimeRetryConfig",
+        "RateLimitSettings": "RuntimeRateLimitConfig",
+        "ConcurrencySettings": "RuntimeConcurrencyConfig",
+        "CheckpointSettings": "RuntimeCheckpointConfig",
+        "TelemetrySettings": "RuntimeTelemetryConfig",
+    }
+)
 
 
 # =============================================================================
@@ -72,28 +80,30 @@ SETTINGS_TO_RUNTIME: Final[dict[str, str]] = {
 # - Infrastructure settings: Passed to infrastructure components directly
 # - Config-driven settings: Used at DAG construction, not runtime
 
-EXEMPT_SETTINGS: Final[set[str]] = {
-    # Plugin option containers - passed to plugin __init__
-    "SourceSettings",
-    "TransformSettings",
-    "SinkSettings",
-    # Config-driven DAG construction - not runtime behavior
-    "AggregationSettings",
-    "GateSettings",
-    "CoalesceSettings",
-    "TriggerConfig",
-    # Infrastructure - passed to components directly
-    "DatabaseSettings",
-    "LandscapeSettings",
-    "LandscapeExportSettings",
-    "PayloadStoreSettings",
-    # Nested in RateLimitSettings - handled by parent
-    "ServiceRateLimit",
-    # Nested in TelemetrySettings - no Runtime counterpart
-    "ExporterSettings",
-    # Top-level container
-    "ElspethSettings",
-}
+EXEMPT_SETTINGS: Final[frozenset[str]] = frozenset(
+    {
+        # Plugin option containers - passed to plugin __init__
+        "SourceSettings",
+        "TransformSettings",
+        "SinkSettings",
+        # Config-driven DAG construction - not runtime behavior
+        "AggregationSettings",
+        "GateSettings",
+        "CoalesceSettings",
+        "TriggerConfig",
+        # Infrastructure - passed to components directly
+        "DatabaseSettings",
+        "LandscapeSettings",
+        "LandscapeExportSettings",
+        "PayloadStoreSettings",
+        # Nested in RateLimitSettings - handled by parent
+        "ServiceRateLimit",
+        # Nested in TelemetrySettings - no Runtime counterpart
+        "ExporterSettings",
+        # Top-level container
+        "ElspethSettings",
+    }
+)
 
 
 # =============================================================================
@@ -109,10 +119,11 @@ EXEMPT_SETTINGS: Final[set[str]] = {
 # Only classes with hardcoded internal defaults need entries here.
 # Classes that only use settings.X values don't need a mapping.
 
-RUNTIME_TO_SUBSYSTEM: Final[dict[str, str]] = {
-    "RuntimeRetryConfig": "retry",
-    # Future: "RuntimeCheckpointConfig": "checkpoint",
-}
+RUNTIME_TO_SUBSYSTEM: Final[MappingProxyType[str, str]] = MappingProxyType(
+    {
+        "RuntimeRetryConfig": "retry",
+    }
+)
 
 
 def get_runtime_field_name(settings_class: str, settings_field: str) -> str:

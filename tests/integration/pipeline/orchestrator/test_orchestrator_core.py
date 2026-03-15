@@ -12,15 +12,18 @@ from typing import TYPE_CHECKING, Any
 import pytest
 
 from elspeth.cli_helpers import instantiate_plugins_from_config
-from elspeth.contracts import Determinism, NodeType, PipelineRow, RoutingMode, RunStatus, SinkName
-from elspeth.plugins.base import BaseTransform
-from elspeth.testing import make_pipeline_row
-from tests.fixtures.base_classes import _TestSchema, as_sink, as_source, as_transform
+from elspeth.contracts import Determinism, NodeType, PipelineRow, RoutingMode, RunStatus, SinkName, SourceRow
+from elspeth.contracts.errors import OrchestrationInvariantError
+from elspeth.plugins.infrastructure.base import BaseTransform
+from elspeth.testing import make_pipeline_row, make_source_row
+from tests.fixtures.base_classes import _TestSchema, _TestSourceBase, as_sink, as_source, as_transform
+from tests.fixtures.landscape import make_recorder
 from tests.fixtures.pipeline import build_production_graph
-from tests.fixtures.plugins import CollectSink, ListSource
+from tests.fixtures.plugins import CollectSink, ListSource, PassTransform
 
 if TYPE_CHECKING:
     from elspeth.contracts.results import TransformResult
+    from elspeth.core.landscape import LandscapeDB
 
 
 # ---------------------------------------------------------------------------
@@ -39,7 +42,7 @@ class DoubleTransform(BaseTransform):
         super().__init__({"schema": {"mode": "observed"}})
 
     def process(self, row: PipelineRow, ctx: Any) -> TransformResult:
-        from elspeth.plugins.results import TransformResult
+        from elspeth.plugins.infrastructure.results import TransformResult
 
         return TransformResult.success(
             make_pipeline_row({"value": row["value"], "doubled": row["value"] * 2}),
@@ -58,7 +61,7 @@ class AddOneTransform(BaseTransform):
         super().__init__({"schema": {"mode": "observed"}})
 
     def process(self, row: PipelineRow, ctx: Any) -> TransformResult:
-        from elspeth.plugins.results import TransformResult
+        from elspeth.plugins.infrastructure.results import TransformResult
 
         return TransformResult.success(make_pipeline_row({"value": row["value"] + 1}), success_reason={"action": "add_one"})
 
@@ -74,25 +77,35 @@ class MultiplyTwoTransform(BaseTransform):
         super().__init__({"schema": {"mode": "observed"}})
 
     def process(self, row: PipelineRow, ctx: Any) -> TransformResult:
-        from elspeth.plugins.results import TransformResult
+        from elspeth.plugins.infrastructure.results import TransformResult
 
         return TransformResult.success(make_pipeline_row({"value": row["value"] * 2}), success_reason={"action": "multiply_two"})
 
 
-class IdentityTransform(BaseTransform):
-    """Transform that passes data through unchanged."""
+class ValidationErrorAfterValidRowSource(_TestSourceBase):
+    """Source that records a validation error after a valid row has been processed."""
 
-    name = "identity"
-    input_schema = _TestSchema
+    name = "validation_error_after_valid_row"
     output_schema = _TestSchema
 
     def __init__(self) -> None:
-        super().__init__({"schema": {"mode": "observed"}})
+        super().__init__()
+        self.on_success = "default"
+        self._on_validation_failure = "quarantine"
 
-    def process(self, row: PipelineRow, ctx: Any) -> TransformResult:
-        from elspeth.plugins.results import TransformResult
-
-        return TransformResult.success(make_pipeline_row(row.to_dict()), success_reason={"action": "identity"})
+    def load(self, ctx: Any) -> Any:
+        yield make_source_row({"value": 1})
+        ctx.record_validation_error(
+            row={"value": "bad"},
+            error="source parse failed on second row",
+            schema_mode="parse",
+            destination="quarantine",
+        )
+        yield SourceRow.quarantined(
+            row={"value": "bad"},
+            error="source parse failed on second row",
+            destination="quarantine",
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -103,11 +116,9 @@ class IdentityTransform(BaseTransform):
 class TestOrchestrator:
     """Full run orchestration."""
 
-    def test_run_simple_pipeline(self, payload_store) -> None:
-        from elspeth.core.landscape import LandscapeDB
+    def test_run_simple_pipeline(self, landscape_db: LandscapeDB, payload_store) -> None:
         from elspeth.engine.orchestrator import Orchestrator, PipelineConfig
 
-        db = LandscapeDB.in_memory()
         source = ListSource([{"value": 1}, {"value": 2}, {"value": 3}])
         transform = DoubleTransform()
         transform.on_success = "default"
@@ -119,7 +130,7 @@ class TestOrchestrator:
             sinks={"default": as_sink(sink)},
         )
 
-        orchestrator = Orchestrator(db)
+        orchestrator = Orchestrator(landscape_db)
         run_result = orchestrator.run(config, graph=build_production_graph(config), payload_store=payload_store)
 
         assert run_result.status == RunStatus.COMPLETED
@@ -127,12 +138,45 @@ class TestOrchestrator:
         assert len(sink.results) == 3
         assert sink.results[0] == {"value": 1, "doubled": 2}
 
-    def test_run_with_gate_routing(self, payload_store) -> None:
-        from elspeth.core.config import GateSettings
-        from elspeth.core.landscape import LandscapeDB
+    def test_source_validation_error_after_transform_is_attributed_to_source_node(self, landscape_db: LandscapeDB, payload_store) -> None:
+        """Later generator-step validation errors must not inherit transform node_id."""
         from elspeth.engine.orchestrator import Orchestrator, PipelineConfig
 
-        db = LandscapeDB.in_memory()
+        source = ValidationErrorAfterValidRowSource()
+        transform = PassTransform()
+        transform.on_success = "default"
+        default_sink = CollectSink(name="default")
+        quarantine_sink = CollectSink(name="quarantine")
+
+        config = PipelineConfig(
+            source=as_source(source),
+            transforms=[as_transform(transform)],
+            sinks={
+                "default": as_sink(default_sink),
+                "quarantine": as_sink(quarantine_sink),
+            },
+        )
+
+        orchestrator = Orchestrator(landscape_db)
+        graph = build_production_graph(config)
+        run_result = orchestrator.run(config, graph=graph, payload_store=payload_store)
+
+        assert run_result.status == RunStatus.COMPLETED
+        assert run_result.rows_processed == 2
+        assert run_result.rows_quarantined == 1
+        assert len(default_sink.results) == 1
+        assert len(quarantine_sink.results) == 1
+
+        recorder = make_recorder(landscape_db)
+        errors = recorder.get_validation_errors_for_run(run_result.run_id)
+        assert len(errors) == 1
+        assert errors[0].node_id == source.node_id
+        assert errors[0].node_id != transform.node_id
+        assert errors[0].error == "source parse failed on second row"
+
+    def test_run_with_gate_routing(self, landscape_db: LandscapeDB, payload_store) -> None:
+        from elspeth.core.config import GateSettings
+        from elspeth.engine.orchestrator import Orchestrator, PipelineConfig
 
         # Config-driven gate: routes values > 50 to "high" sink, else to "default"
         threshold_gate = GateSettings(
@@ -153,7 +197,7 @@ class TestOrchestrator:
             gates=[threshold_gate],
         )
 
-        orchestrator = Orchestrator(db)
+        orchestrator = Orchestrator(landscape_db)
         run_result = orchestrator.run(config, graph=build_production_graph(config), payload_store=payload_store)
 
         assert run_result.status == RunStatus.COMPLETED
@@ -161,15 +205,13 @@ class TestOrchestrator:
         assert len(default_sink.results) == 2
         assert len(high_sink.results) == 1
 
-    def test_nonterminal_coalesce_continues_to_downstream_gate(self, payload_store) -> None:
+    def test_nonterminal_coalesce_continues_to_downstream_gate(self, landscape_db: LandscapeDB, payload_store) -> None:
         """Merged fork paths at a non-terminal coalesce must continue downstream."""
         from elspeth.core.config import CoalesceSettings, ElspethSettings, GateSettings
-        from elspeth.core.landscape import LandscapeDB
         from elspeth.engine.orchestrator import Orchestrator, PipelineConfig
 
-        db = LandscapeDB.in_memory()
         source = ListSource([{"value": 1}, {"value": 2}], on_success="source_sink")
-        transform = IdentityTransform()
+        transform = PassTransform()
         output_sink = CollectSink(name="output")
         source_sink = CollectSink(name="source_sink")
 
@@ -211,7 +253,7 @@ class TestOrchestrator:
             coalesce=[coalesce],
         )
 
-        orchestrator = Orchestrator(db)
+        orchestrator = Orchestrator(landscape_db)
         run_result = orchestrator.run(
             config,
             graph=build_production_graph(config),
@@ -224,16 +266,14 @@ class TestOrchestrator:
         assert len(output_sink.results) == 2
         assert len(source_sink.results) == 0
 
-    def test_traversal_context_keeps_nonterminal_coalesce_in_graph_step_order(self) -> None:
+    def test_traversal_context_keeps_nonterminal_coalesce_in_graph_step_order(self, landscape_db: LandscapeDB) -> None:
         """Traversal context must preserve graph step order for non-terminal coalesce nodes."""
         from elspeth.contracts.types import CoalesceName, GateName
         from elspeth.core.config import CoalesceSettings, GateSettings
-        from elspeth.core.landscape import LandscapeDB
         from elspeth.engine.orchestrator import Orchestrator, PipelineConfig
 
-        db = LandscapeDB.in_memory()
         source = ListSource([{"value": 1}], on_success="source_sink")
-        transform = IdentityTransform()
+        transform = PassTransform()
         output_sink = CollectSink(name="output")
         source_sink = CollectSink(name="source_sink")
 
@@ -272,7 +312,7 @@ class TestOrchestrator:
         source_id = graph.get_source()
         assert source_id is not None
 
-        orchestrator = Orchestrator(db)
+        orchestrator = Orchestrator(landscape_db)
         orchestrator._assign_plugin_node_ids(
             source=config.source,
             transforms=config.transforms,
@@ -300,12 +340,10 @@ class TestOrchestrator:
 class TestOrchestratorMultipleTransforms:
     """Test pipelines with multiple transforms."""
 
-    def test_run_multiple_transforms_in_sequence(self, payload_store) -> None:
+    def test_run_multiple_transforms_in_sequence(self, landscape_db: LandscapeDB, payload_store) -> None:
         """Test that multiple transforms execute in order."""
-        from elspeth.core.landscape import LandscapeDB
         from elspeth.engine.orchestrator import Orchestrator, PipelineConfig
 
-        db = LandscapeDB.in_memory()
         source = ListSource([{"value": 5}])
         transform1 = AddOneTransform()
         transform2 = MultiplyTwoTransform()
@@ -318,7 +356,7 @@ class TestOrchestratorMultipleTransforms:
             sinks={"default": as_sink(sink)},
         )
 
-        orchestrator = Orchestrator(db)
+        orchestrator = Orchestrator(landscape_db)
         run_result = orchestrator.run(config, graph=build_production_graph(config), payload_store=payload_store)
 
         assert run_result.status == RunStatus.COMPLETED
@@ -330,12 +368,10 @@ class TestOrchestratorMultipleTransforms:
 class TestOrchestratorEmptyPipeline:
     """Test edge cases."""
 
-    def test_run_no_transforms(self, payload_store) -> None:
+    def test_run_no_transforms(self, landscape_db: LandscapeDB, payload_store) -> None:
         """Test pipeline with source directly to sink."""
-        from elspeth.core.landscape import LandscapeDB
         from elspeth.engine.orchestrator import Orchestrator, PipelineConfig
 
-        db = LandscapeDB.in_memory()
         source = ListSource([{"value": 99}])
         sink = CollectSink()
 
@@ -345,7 +381,7 @@ class TestOrchestratorEmptyPipeline:
             sinks={"default": as_sink(sink)},
         )
 
-        orchestrator = Orchestrator(db)
+        orchestrator = Orchestrator(landscape_db)
         run_result = orchestrator.run(config, graph=build_production_graph(config), payload_store=payload_store)
 
         assert run_result.status == RunStatus.COMPLETED
@@ -353,14 +389,12 @@ class TestOrchestratorEmptyPipeline:
         assert len(sink.results) == 1
         assert sink.results[0] == {"value": 99}
 
-    def test_run_empty_source(self, payload_store) -> None:
+    def test_run_empty_source(self, landscape_db: LandscapeDB, payload_store) -> None:
         """Test pipeline with no rows from source."""
-        from elspeth.core.landscape import LandscapeDB
         from elspeth.engine.orchestrator import Orchestrator, PipelineConfig
 
-        db = LandscapeDB.in_memory()
         source = ListSource([])  # Empty source
-        transform = IdentityTransform()
+        transform = PassTransform()
         transform.on_success = "default"
         sink = CollectSink()
 
@@ -370,23 +404,21 @@ class TestOrchestratorEmptyPipeline:
             sinks={"default": as_sink(sink)},
         )
 
-        orchestrator = Orchestrator(db)
+        orchestrator = Orchestrator(landscape_db)
         run_result = orchestrator.run(config, graph=build_production_graph(config), payload_store=payload_store)
 
         assert run_result.status == RunStatus.COMPLETED
         assert run_result.rows_processed == 0
         assert len(sink.results) == 0
 
-    def test_flexible_source_contract_persisted_when_all_rows_quarantined(self, tmp_path, payload_store) -> None:
+    def test_flexible_source_contract_persisted_when_all_rows_quarantined(self, landscape_db: LandscapeDB, tmp_path, payload_store) -> None:
         """All-invalid FLEXIBLE runs still persist declared run contract."""
-        from elspeth.core.landscape import LandscapeDB, LandscapeRecorder
         from elspeth.engine.orchestrator import Orchestrator, PipelineConfig
         from elspeth.plugins.sources.json_source import JSONSource
 
         json_file = tmp_path / "all_invalid.json"
         json_file.write_text('[{"id": "bad"}, {"id": "still_bad"}]')
 
-        db = LandscapeDB.in_memory()
         source = JSONSource(
             {
                 "path": str(json_file),
@@ -406,7 +438,7 @@ class TestOrchestratorEmptyPipeline:
             },
         )
 
-        orchestrator = Orchestrator(db)
+        orchestrator = Orchestrator(landscape_db)
         run_result = orchestrator.run(config, graph=build_production_graph(config), payload_store=payload_store)
 
         assert run_result.status == RunStatus.COMPLETED
@@ -415,7 +447,7 @@ class TestOrchestratorEmptyPipeline:
         assert len(default_sink.results) == 0
         assert len(quarantine_sink.results) == 2
 
-        recorder = LandscapeRecorder(db)
+        recorder = make_recorder(landscape_db)
         contract = recorder.get_run_contract(run_result.run_id)
         assert contract is not None
         assert contract.mode == "FLEXIBLE"
@@ -426,16 +458,13 @@ class TestOrchestratorEmptyPipeline:
 class TestOrchestratorAcceptsGraph:
     """Orchestrator accepts ExecutionGraph parameter."""
 
-    def test_orchestrator_uses_graph_node_ids(self, plugin_manager, payload_store) -> None:
+    def test_orchestrator_uses_graph_node_ids(self, landscape_db: LandscapeDB, plugin_manager, payload_store) -> None:
         """Orchestrator uses node IDs from graph, not generated IDs."""
         from unittest.mock import MagicMock, PropertyMock
 
         from elspeth.core.config import ElspethSettings, SinkSettings, SourceSettings
         from elspeth.core.dag import ExecutionGraph
-        from elspeth.core.landscape import LandscapeDB
         from elspeth.engine.orchestrator import Orchestrator, PipelineConfig
-
-        db = LandscapeDB.in_memory()
 
         # Build config and graph from settings
         settings = ElspethSettings(
@@ -453,11 +482,11 @@ class TestOrchestratorAcceptsGraph:
         plugins = instantiate_plugins_from_config(settings)
 
         graph = ExecutionGraph.from_plugin_instances(
-            source=plugins["source"],
-            source_settings=plugins["source_settings"],
-            transforms=plugins["transforms"],
-            sinks=plugins["sinks"],
-            aggregations=plugins["aggregations"],
+            source=plugins.source,
+            source_settings=plugins.source_settings,
+            transforms=plugins.transforms,
+            sinks=plugins.sinks,
+            aggregations=plugins.aggregations,
             gates=list(settings.gates),
             coalesce_settings=settings.coalesce,
         )
@@ -497,7 +526,7 @@ class TestOrchestratorAcceptsGraph:
             sinks={"output": mock_sink},
         )
 
-        orchestrator = Orchestrator(db)
+        orchestrator = Orchestrator(landscape_db)
         orchestrator.run(pipeline_config, graph=graph, payload_store=payload_store)
 
         # Verify orchestrator called the node_id setter with correct value from graph
@@ -509,16 +538,13 @@ class TestOrchestratorAcceptsGraph:
         expected_sink_id = sink_id_map[SinkName("output")]
         sink_node_id_setter.assert_called_once_with(expected_sink_id)
 
-    def test_orchestrator_assigns_unique_node_ids_to_multiple_sinks(self, plugin_manager, payload_store) -> None:
+    def test_orchestrator_assigns_unique_node_ids_to_multiple_sinks(self, landscape_db: LandscapeDB, plugin_manager, payload_store) -> None:
         """Each sink should get a unique node_id from the graph, not shared."""
         from unittest.mock import MagicMock, PropertyMock
 
         from elspeth.core.config import ElspethSettings, SinkSettings, SourceSettings
         from elspeth.core.dag import ExecutionGraph
-        from elspeth.core.landscape import LandscapeDB
         from elspeth.engine.orchestrator import Orchestrator, PipelineConfig
-
-        db = LandscapeDB.in_memory()
 
         # Build config with MULTIPLE sinks
         settings = ElspethSettings(
@@ -539,11 +565,11 @@ class TestOrchestratorAcceptsGraph:
         plugins = instantiate_plugins_from_config(settings)
 
         graph = ExecutionGraph.from_plugin_instances(
-            source=plugins["source"],
-            source_settings=plugins["source_settings"],
-            transforms=plugins["transforms"],
-            sinks=plugins["sinks"],
-            aggregations=plugins["aggregations"],
+            source=plugins.source,
+            source_settings=plugins.source_settings,
+            transforms=plugins.transforms,
+            sinks=plugins.sinks,
+            aggregations=plugins.aggregations,
             gates=list(settings.gates),
             coalesce_settings=settings.coalesce,
         )
@@ -595,7 +621,7 @@ class TestOrchestratorAcceptsGraph:
             sinks={"output_a": mock_sink_a, "output_b": mock_sink_b},
         )
 
-        orchestrator = Orchestrator(db)
+        orchestrator = Orchestrator(landscape_db)
         orchestrator.run(pipeline_config, graph=graph, payload_store=payload_store)
 
         # Verify each sink got a unique node_id from the graph
@@ -609,15 +635,12 @@ class TestOrchestratorAcceptsGraph:
         # Verify node IDs are different
         assert expected_sink_a_id != expected_sink_b_id, "Sinks should have unique node IDs"
 
-    def test_orchestrator_run_accepts_graph(self) -> None:
+    def test_orchestrator_run_accepts_graph(self, landscape_db: LandscapeDB) -> None:
         """Orchestrator.run() accepts graph parameter."""
         import inspect
 
         from elspeth.core.dag import ExecutionGraph
-        from elspeth.core.landscape import LandscapeDB
         from elspeth.engine.orchestrator import Orchestrator
-
-        db = LandscapeDB.in_memory()
 
         # Build a simple graph
         graph = ExecutionGraph()
@@ -626,18 +649,16 @@ class TestOrchestratorAcceptsGraph:
         graph.add_node("sink_1", node_type=NodeType.SINK, plugin_name="csv", config=schema_config)
         graph.add_edge("source_1", "sink_1", label="continue", mode=RoutingMode.MOVE)
 
-        orchestrator = Orchestrator(db)
+        orchestrator = Orchestrator(landscape_db)
 
         # Should accept graph parameter (signature check)
         sig = inspect.signature(orchestrator.run)
         assert "graph" in sig.parameters
 
-    def test_orchestrator_run_requires_graph(self, payload_store) -> None:
+    def test_orchestrator_run_requires_graph(self, landscape_db: LandscapeDB, payload_store) -> None:
         """Orchestrator.run() raises ValueError if graph is None."""
-        from elspeth.core.landscape import LandscapeDB
         from elspeth.engine.orchestrator import Orchestrator, PipelineConfig
 
-        db = LandscapeDB.in_memory()
         source = ListSource([])
         sink = CollectSink()
 
@@ -647,8 +668,8 @@ class TestOrchestratorAcceptsGraph:
             sinks={"default": as_sink(sink)},
         )
 
-        orchestrator = Orchestrator(db)
+        orchestrator = Orchestrator(landscape_db)
 
         # graph=None should raise ValueError
-        with pytest.raises(ValueError, match="ExecutionGraph is required"):
+        with pytest.raises(OrchestrationInvariantError, match="ExecutionGraph is required"):
             orchestrator.run(config, graph=None, payload_store=payload_store)

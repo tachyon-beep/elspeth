@@ -14,6 +14,7 @@ Trust-tier notes
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from dataclasses import dataclass, replace
 from types import MappingProxyType
 from typing import Any
@@ -54,6 +55,10 @@ class CoalesceMetadata:
     """
 
     policy: str
+
+    def __post_init__(self) -> None:
+        if not self.policy:
+            raise ValueError("CoalesceMetadata.policy must not be empty")
 
     # Failure context
     reason: str | None = None
@@ -125,8 +130,8 @@ class CoalesceMetadata:
         cls,
         *,
         policy: str,
-        expected_branches: list[str],
-        branches_arrived: list[str],
+        expected_branches: Sequence[str],
+        branches_arrived: Sequence[str],
         branches_lost: dict[str, str] | None = None,
         quorum_required: int | None = None,
         timeout_seconds: float | None = None,
@@ -136,7 +141,7 @@ class CoalesceMetadata:
             policy=policy,
             expected_branches=tuple(expected_branches),
             branches_arrived=tuple(branches_arrived),
-            branches_lost=MappingProxyType(branches_lost) if branches_lost else None,
+            branches_lost=MappingProxyType(branches_lost) if branches_lost is not None else None,
             quorum_required=quorum_required,
             timeout_seconds=timeout_seconds,
         )
@@ -148,7 +153,7 @@ class CoalesceMetadata:
         policy: str,
         merge_strategy: str,
         select_branch: str,
-        branches_arrived: list[str],
+        branches_arrived: Sequence[str],
     ) -> CoalesceMetadata:
         """Select branch not in arrived set at merge time."""
         return cls(
@@ -164,10 +169,10 @@ class CoalesceMetadata:
         *,
         policy: str,
         merge_strategy: str,
-        expected_branches: list[str],
-        branches_arrived: list[str],
+        expected_branches: Sequence[str],
+        branches_arrived: Sequence[str],
         branches_lost: dict[str, str],
-        arrival_order: list[ArrivalOrderEntry],
+        arrival_order: Sequence[ArrivalOrderEntry],
         wait_duration_ms: float,
     ) -> CoalesceMetadata:
         """Successful merge with full audit context."""
@@ -176,7 +181,7 @@ class CoalesceMetadata:
             merge_strategy=merge_strategy,
             expected_branches=tuple(expected_branches),
             branches_arrived=tuple(branches_arrived),
-            branches_lost=MappingProxyType(branches_lost) if branches_lost else MappingProxyType({}),
+            branches_lost=MappingProxyType(branches_lost),
             arrival_order=tuple(arrival_order),
             wait_duration_ms=wait_duration_ms,
         )

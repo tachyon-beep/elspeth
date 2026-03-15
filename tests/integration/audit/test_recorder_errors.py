@@ -206,6 +206,92 @@ class TestTransformErrorRecording:
         assert row is not None
         assert row.destination == "discard"
 
+    def test_record_transform_error_with_nan_row_data_uses_repr_fallback(self) -> None:
+        """record_transform_error handles NaN in row_data without crashing.
+
+        Regression: elspeth-80cd927867 — row_data serialization was unprotected,
+        causing the error-recording path itself to crash when row_data contained
+        NaN (a valid float that passes source validation). The actual transform
+        error diagnostic was lost.
+        """
+        from sqlalchemy import select
+
+        from elspeth.core.landscape.database import LandscapeDB
+        from elspeth.core.landscape.recorder import LandscapeRecorder
+        from elspeth.core.landscape.schema import transform_errors_table
+
+        db = LandscapeDB.in_memory()
+        recorder = LandscapeRecorder(db)
+
+        run = recorder.begin_run(config={}, canonical_version="v1")
+
+        self._create_token_with_dependencies(recorder, run.run_id, "tok_nan", "processor")
+
+        # Row with NaN — valid float, passes source validation, but
+        # canonical_json rejects it (RFC 8785 forbids NaN/Infinity)
+        row_data = {"id": 42, "score": float("nan"), "label": "test"}
+
+        error_id = recorder.record_transform_error(
+            run_id=run.run_id,
+            token_id="tok_nan",
+            transform_id="processor",
+            row_data=row_data,
+            error_details={"reason": "division_by_zero", "error": "Cannot divide by zero"},
+            destination="error_sink",
+        )
+
+        assert error_id is not None
+        assert error_id.startswith("terr_")
+
+        # Verify stored in database with fallback representation
+        with db.connection() as conn:
+            result = conn.execute(select(transform_errors_table).where(transform_errors_table.c.error_id == error_id))
+            row = result.fetchone()
+
+        assert row is not None
+        assert row.row_hash is not None  # repr_hash fallback
+        assert row.row_data_json is not None
+        assert "__repr__" in row.row_data_json  # NonCanonicalMetadata marker
+        assert "__canonical_error__" in row.row_data_json
+        assert row.error_details_json is not None
+        assert "division_by_zero" in row.error_details_json
+
+    def test_record_transform_error_with_infinity_row_data_uses_repr_fallback(self) -> None:
+        """record_transform_error handles Infinity in row_data without crashing."""
+        from sqlalchemy import select
+
+        from elspeth.core.landscape.database import LandscapeDB
+        from elspeth.core.landscape.recorder import LandscapeRecorder
+        from elspeth.core.landscape.schema import transform_errors_table
+
+        db = LandscapeDB.in_memory()
+        recorder = LandscapeRecorder(db)
+
+        run = recorder.begin_run(config={}, canonical_version="v1")
+
+        self._create_token_with_dependencies(recorder, run.run_id, "tok_inf", "processor")
+
+        row_data = {"id": 1, "value": float("inf")}
+
+        error_id = recorder.record_transform_error(
+            run_id=run.run_id,
+            token_id="tok_inf",
+            transform_id="processor",
+            row_data=row_data,
+            error_details={"reason": "overflow", "error": "Value too large"},
+            destination="discard",
+        )
+
+        assert error_id is not None
+
+        with db.connection() as conn:
+            result = conn.execute(select(transform_errors_table).where(transform_errors_table.c.error_id == error_id))
+            row = result.fetchone()
+
+        assert row is not None
+        assert row.row_hash is not None
+        assert "__repr__" in row.row_data_json
+
 
 class TestExportStatusEnumCoercion:
     """Tests that export status is properly coerced to ExportStatus enum.
@@ -253,27 +339,6 @@ class TestExportStatusEnumCoercion:
         assert isinstance(runs[0].export_status, ExportStatus), (
             f"export_status should be ExportStatus enum, got {type(runs[0].export_status).__name__}"
         )
-
-    def test_set_export_status_rejects_non_enum(self) -> None:
-        """set_export_status() requires ExportStatus enum, not string.
-
-        Strings passed where ExportStatus is expected will raise AttributeError
-        because strings don't have .value attribute. This is the correct behavior
-        per the strict enum enforcement policy.
-        """
-        import pytest
-
-        from elspeth.core.landscape.database import LandscapeDB
-        from elspeth.core.landscape.recorder import LandscapeRecorder
-
-        db = LandscapeDB.in_memory()
-        recorder = LandscapeRecorder(db)
-
-        run = recorder.begin_run(config={}, canonical_version="v1")
-
-        # Passing string instead of ExportStatus enum raises AttributeError
-        with pytest.raises(AttributeError, match="'str' object has no attribute 'value'"):
-            recorder.set_export_status(run.run_id, "invalid_status")  # type: ignore[arg-type]
 
     def test_set_export_status_clears_stale_error_on_completed(self) -> None:
         """Transitioning from failed to completed clears export_error."""

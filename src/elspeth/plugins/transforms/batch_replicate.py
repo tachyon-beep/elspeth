@@ -14,14 +14,18 @@ row, with parent linkage to track deaggregation lineage.
 import copy
 from typing import Any
 
+import structlog
 from pydantic import Field, model_validator
 
+from elspeth.contracts import CallStatus, CallType
+from elspeth.contracts.contexts import TransformContext
 from elspeth.contracts.errors import TransformSuccessReason
-from elspeth.contracts.plugin_context import PluginContext
 from elspeth.contracts.schema_contract import FieldContract, PipelineRow, SchemaContract
-from elspeth.plugins.base import BaseTransform
-from elspeth.plugins.config_base import TransformDataConfig
-from elspeth.plugins.results import TransformResult
+from elspeth.plugins.infrastructure.base import BaseTransform
+from elspeth.plugins.infrastructure.config_base import TransformDataConfig
+from elspeth.plugins.infrastructure.results import TransformResult
+
+logger = structlog.get_logger(__name__)
 
 
 class BatchReplicateConfig(TransformDataConfig):
@@ -33,6 +37,7 @@ class BatchReplicateConfig(TransformDataConfig):
     copies_field: str = Field(
         default="copies",
         description="Name of the field containing the number of copies to make",
+        min_length=1,
     )
     default_copies: int = Field(
         default=1,
@@ -115,7 +120,7 @@ class BatchReplicate(BaseTransform):
         )
 
     def process(  # type: ignore[override] # Batch signature: list[PipelineRow] instead of PipelineRow
-        self, rows: list[PipelineRow], ctx: PluginContext
+        self, rows: list[PipelineRow], ctx: TransformContext
     ) -> TransformResult:
         """Replicate each row based on its copies field.
 
@@ -127,29 +132,19 @@ class BatchReplicate(BaseTransform):
             TransformResult.success_multi() with replicated rows
         """
         if not rows:
-            # Empty batch - should not happen in normal operation
-            # Return success with single empty-marker row
-            empty_data: dict[str, Any] = {"batch_empty": True}
-            empty_fields = tuple(
-                FieldContract(
-                    normalized_name=key,
-                    original_name=key,
-                    python_type=object,
-                    required=False,
-                    source="inferred",
-                )
-                for key in empty_data
-            )
-            empty_contract = SchemaContract(mode="OBSERVED", fields=empty_fields, locked=True)
-            return TransformResult.success(
-                PipelineRow(empty_data, empty_contract),
-                success_reason={"action": "processed", "metadata": {"empty_batch": True}},
+            # Empty batch is an anomaly — return error, not fabricated data.
+            # A synthetic PipelineRow({batch_empty: True}) would flow through
+            # the pipeline as real data, corrupting the audit trail.
+            return TransformResult.error(
+                {"reason": "empty_batch"},
+                retryable=False,
             )
 
         valid_rows: list[dict[str, Any]] = []
         quarantined: list[dict[str, Any]] = []
+        quarantined_indices: list[int] = []
 
-        for row in rows:
+        for row_index, row in enumerate(rows):
             # Get copies count - field is optional, type must be correct if present
             if self._copies_field not in row:
                 # Field missing - use default, still bounded by max_copies
@@ -179,6 +174,7 @@ class BatchReplicate(BaseTransform):
                             "row_data": row.to_dict(),
                         }
                     )
+                    quarantined_indices.append(row_index)
                     continue
 
                 copies = raw_copies
@@ -221,6 +217,37 @@ class BatchReplicate(BaseTransform):
         )
         output_contract = SchemaContract(mode="OBSERVED", fields=fields, locked=True)
 
+        # Record each quarantine decision in the audit trail so an auditor
+        # can trace which specific source rows were dropped and why.
+        # Without this, quarantined rows are only in success_reason metadata —
+        # invisible to Landscape queries and explain(token_id).
+        if quarantined:
+            logger.warning(
+                "batch_replicate_rows_quarantined",
+                quarantined_count=len(quarantined),
+                total_rows=len(rows),
+                valid_count=len(valid_rows),
+                quarantined_indices=quarantined_indices,
+            )
+            for q_info in quarantined:
+                ctx.record_call(
+                    call_type=CallType.HTTP,
+                    status=CallStatus.ERROR,
+                    request_data={
+                        "operation": "batch_replicate_validate",
+                        "field": q_info["field"],
+                        "value": q_info["value"],
+                    },
+                    response_data=None,
+                    error={
+                        "reason": "row_quarantined",
+                        "quarantine_reason": q_info["reason"],
+                        "field": q_info["field"],
+                        "value": q_info["value"],
+                    },
+                    provider="batch_replicate",
+                )
+
         success_reason: TransformSuccessReason = {
             "action": "processed",
             "fields_added": ["copy_index"] if self._include_copy_index else [],
@@ -229,6 +256,7 @@ class BatchReplicate(BaseTransform):
             success_reason["metadata"] = {
                 "quarantined_count": len(quarantined),
                 "quarantined": quarantined,
+                "quarantined_indices": quarantined_indices,
             }
 
         # Return only valid replicated rows — quarantined rows are in success_reason

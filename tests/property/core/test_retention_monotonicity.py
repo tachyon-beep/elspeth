@@ -39,6 +39,7 @@ from elspeth.core.landscape.database import LandscapeDB
 from elspeth.core.landscape.reproducibility import ReproducibilityGrade
 from elspeth.core.landscape.schema import nodes_table, rows_table, runs_table
 from elspeth.core.retention import PurgeManager, PurgeResult
+from tests.fixtures.landscape import make_landscape_db
 
 # =============================================================================
 # Strategies for retention testing
@@ -166,7 +167,7 @@ class TestRetentionAgeMonotonicityProperties:
         """
         assume(days_short < days_long)
 
-        with LandscapeDB.in_memory() as db:
+        with make_landscape_db() as db:
             # Create a run that completed 20 days ago
             completed_at = _REFERENCE_TIME - timedelta(days=20)
             run_id = _create_completed_run(db, completed_at)
@@ -175,8 +176,8 @@ class TestRetentionAgeMonotonicityProperties:
             mock_store = MagicMock()
             manager = PurgeManager(db, mock_store)
 
-            refs_short = manager.find_expired_row_payloads(days_short)
-            refs_long = manager.find_expired_row_payloads(days_long)
+            refs_short = manager.find_expired_payload_refs(days_short)
+            refs_long = manager.find_expired_payload_refs(days_long)
 
             assert len(refs_long) <= len(refs_short), (
                 f"Longer retention ({days_long}d) expired MORE refs ({len(refs_long)}) "
@@ -191,7 +192,7 @@ class TestRetentionAgeMonotonicityProperties:
         If we retain for 9999 days, a run completed yesterday should
         never have expired refs.
         """
-        with LandscapeDB.in_memory() as db:
+        with make_landscape_db() as db:
             completed_at = _REFERENCE_TIME - timedelta(days=1)
             run_id = _create_completed_run(db, completed_at)
             _insert_rows_with_refs(db, run_id, num_rows)
@@ -199,7 +200,7 @@ class TestRetentionAgeMonotonicityProperties:
             mock_store = MagicMock()
             manager = PurgeManager(db, mock_store)
 
-            refs = manager.find_expired_row_payloads(retention_days=9999)
+            refs = manager.find_expired_payload_refs(retention_days=9999)
 
             assert len(refs) == 0, f"Expected 0 expired refs with 9999-day retention, got {len(refs)}"
 
@@ -211,7 +212,7 @@ class TestRetentionAgeMonotonicityProperties:
         With 0-day retention, any completed run should have its
         payloads eligible for purge.
         """
-        with LandscapeDB.in_memory() as db:
+        with make_landscape_db() as db:
             # Run completed 1 second ago
             completed_at = _REFERENCE_TIME - timedelta(seconds=1)
             run_id = _create_completed_run(db, completed_at)
@@ -220,7 +221,7 @@ class TestRetentionAgeMonotonicityProperties:
             mock_store = MagicMock()
             manager = PurgeManager(db, mock_store)
 
-            expired = manager.find_expired_row_payloads(retention_days=0)
+            expired = manager.find_expired_payload_refs(retention_days=0)
 
             assert set(expired) == set(refs), f"Zero-day retention should expire all {len(refs)} refs, but expired {len(expired)}"
 
@@ -254,7 +255,7 @@ class TestCutoffMonotonicityProperties:
         If we check "what expired as of 30 days from now" vs "as of 60
         days from now", the later check should find at least as many.
         """
-        with LandscapeDB.in_memory() as db:
+        with make_landscape_db() as db:
             # Create a run completed 15 days ago
             completed_at = _REFERENCE_TIME - timedelta(days=15)
             run_id = _create_completed_run(db, completed_at)
@@ -269,8 +270,8 @@ class TestCutoffMonotonicityProperties:
 
             retention = 10  # 10-day retention
 
-            refs_early = manager.find_expired_row_payloads(retention, as_of=as_of_early)
-            refs_late = manager.find_expired_row_payloads(retention, as_of=as_of_late)
+            refs_early = manager.find_expired_payload_refs(retention, as_of=as_of_early)
+            refs_late = manager.find_expired_payload_refs(retention, as_of=as_of_late)
 
             assert len(refs_late) >= len(refs_early), (
                 f"Later as_of ({as_of_late}) found fewer refs ({len(refs_late)}) than earlier as_of ({as_of_early}) ({len(refs_early)})"
@@ -304,16 +305,15 @@ class TestPurgeResultInvariantProperties:
 
         result = PurgeResult(
             deleted_count=deleted,
-            bytes_freed=0,
             skipped_count=skipped,
             failed_refs=failed_refs,
+            grade_update_failures=(),
             duration_seconds=duration,
         )
 
         assert result.deleted_count >= 0
         assert result.skipped_count >= 0
         assert result.duration_seconds >= 0
-        assert result.bytes_freed >= 0
         assert len(result.failed_refs) >= 0
 
     @given(num_rows=row_counts)
@@ -327,7 +327,7 @@ class TestPurgeResultInvariantProperties:
         mock_store = MagicMock()
         mock_store.exists.return_value = False
 
-        with LandscapeDB.in_memory() as db:
+        with make_landscape_db() as db:
             completed_at = _REFERENCE_TIME - timedelta(days=30)
             run_id = _create_completed_run(db, completed_at)
             refs = _insert_rows_with_refs(db, run_id, num_rows)
@@ -349,7 +349,7 @@ class TestPurgeResultInvariantProperties:
         mock_store = MagicMock()
         mock_store.exists.return_value = False
 
-        with LandscapeDB.in_memory() as db:
+        with make_landscape_db() as db:
             completed_at = _REFERENCE_TIME - timedelta(days=30)
             run_id = _create_completed_run(db, completed_at)
             refs = _insert_rows_with_refs(db, run_id, num_rows)
@@ -371,7 +371,7 @@ class TestPurgeResultInvariantProperties:
         mock_store.exists.return_value = True
         mock_store.delete.return_value = True
 
-        with LandscapeDB.in_memory() as db:
+        with make_landscape_db() as db:
             completed_at = _REFERENCE_TIME - timedelta(days=30)
             run_id = _create_completed_run(db, completed_at)
             refs = _insert_rows_with_refs(db, run_id, num_rows)

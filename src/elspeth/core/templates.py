@@ -1,4 +1,3 @@
-# src/elspeth/core/templates.py
 """Template field extraction utilities for development assistance.
 
 This module helps developers discover which fields their templates reference.

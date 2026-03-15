@@ -1,4 +1,3 @@
-# src/elspeth/mcp/types.py
 """TypedDict definitions for MCP server return types.
 
 These TypedDicts give static structure to the dicts returned by
@@ -19,10 +18,6 @@ Design decisions:
 """
 
 from typing import Any, Required, TypedDict
-
-# ══════════════════════════════════════════════════════════════════════════════
-# Group A -- Simple Record Types (for list-returning methods)
-# ══════════════════════════════════════════════════════════════════════════════
 
 
 class RunRecord(TypedDict):
@@ -106,14 +101,8 @@ class NodeStateRecord(TypedDict):
     completed_at: str | None
 
 
-# ══════════════════════════════════════════════════════════════════════════════
-# Group B -- Dataclass Mirror Types (for dataclass_to_dict conversions)
-# ══════════════════════════════════════════════════════════════════════════════
-# These mirror the audit dataclasses in contracts/audit.py after
-# dataclass_to_dict conversion (datetime -> str, enum -> str).
-# We use dict[str, Any] as the type since dataclass_to_dict produces
-# fully dynamic dicts whose exact shape depends on the dataclass variant.
-
+# Dataclass mirror types: dict[str, Any] aliases for dataclass_to_dict()
+# conversions where the exact shape depends on the dataclass variant.
 
 RunDetail = dict[str, Any]
 """Run detail dict from ``dataclass_to_dict(Run)``."""
@@ -123,14 +112,6 @@ NodeDetail = dict[str, Any]
 
 CallDetail = dict[str, Any]
 """Call detail dict from ``dataclass_to_dict(Call)``."""
-
-
-# ══════════════════════════════════════════════════════════════════════════════
-# Group C -- Complex Report Types (nested structures)
-# ══════════════════════════════════════════════════════════════════════════════
-
-
-# --- RunSummaryReport ---
 
 
 class RunSummaryCounts(TypedDict):
@@ -167,9 +148,6 @@ class RunSummaryReport(TypedDict):
     avg_state_duration_ms: float | None
 
 
-# --- DAGStructureReport ---
-
-
 class DAGNode(TypedDict):
     """A node in the DAG structure."""
 
@@ -204,9 +182,6 @@ class DAGStructureReport(TypedDict):
     mermaid: str
 
 
-# --- PerformanceReport ---
-
-
 class NodePerformance(TypedDict):
     """Per-node performance statistics."""
 
@@ -231,9 +206,6 @@ class PerformanceReport(TypedDict):
     bottlenecks: list[NodePerformance]
     high_variance_nodes: list[NodePerformance]
     node_performance: list[NodePerformance]
-
-
-# --- ErrorAnalysisReport ---
 
 
 class ValidationErrorGroup(TypedDict):
@@ -275,9 +247,6 @@ class ErrorAnalysisReport(TypedDict):
     transform_errors: TransformErrorSummary
 
 
-# --- LLMUsageReport ---
-
-
 class LLMSummary(TypedDict):
     """LLM call summary totals."""
 
@@ -312,9 +281,6 @@ class LLMUsageReport(TypedDict, total=False):
     message: str
 
 
-# --- OutcomeAnalysisReport ---
-
-
 class OutcomeSummary(TypedDict):
     """Outcome summary counts."""
 
@@ -339,9 +305,6 @@ class OutcomeAnalysisReport(TypedDict):
     summary: OutcomeSummary
     outcome_distribution: list[OutcomeDistributionEntry]
     sink_distribution: dict[str, int]  # dynamic sink names
-
-
-# --- SchemaDescription ---
 
 
 class ColumnInfo(TypedDict):
@@ -373,9 +336,6 @@ class SchemaDescription(TypedDict):
     tables: dict[str, TableInfo]  # dynamic table names
     table_count: int
     hint: str
-
-
-# --- ErrorsReport ---
 
 
 class ValidationErrorDetail(TypedDict):
@@ -412,9 +372,6 @@ class ErrorsReport(TypedDict, total=False):
     transform_errors: list[TransformErrorDetail]
 
 
-# --- DiagnosticReport ---
-
-
 class DiagnosticProblem(TypedDict, total=False):
     """A single problem in ``diagnose``.
 
@@ -447,9 +404,6 @@ class DiagnosticReport(TypedDict):
     recent_runs: list[RecentRunSummary]
     recommendations: list[str]
     next_steps: list[str]
-
-
-# --- FailureContextReport ---
 
 
 class FailedNodeState(TypedDict):
@@ -502,9 +456,6 @@ class FailureContextReport(TypedDict):
     next_steps: list[str]
 
 
-# --- RecentActivityReport ---
-
-
 class RecentRunDetail(TypedDict):
     """A run in the recent activity timeline."""
 
@@ -524,9 +475,6 @@ class RecentActivityReport(TypedDict):
     total_runs: int
     status_summary: dict[str, int]  # dynamic status names
     runs: list[RecentRunDetail]
-
-
-# --- RunContractReport ---
 
 
 class ContractField(TypedDict):
@@ -550,9 +498,6 @@ class RunContractReport(TypedDict):
     version_hash: str
 
 
-# --- FieldExplanation ---
-
-
 class FieldExplanation(TypedDict):
     """Return type for ``explain_field``."""
 
@@ -563,9 +508,6 @@ class FieldExplanation(TypedDict):
     required: bool
     source: str
     contract_mode: str
-
-
-# --- ContractViolationsReport ---
 
 
 class ContractViolationRecord(TypedDict):
@@ -590,9 +532,6 @@ class ContractViolationsReport(TypedDict):
     total_violations: int
     violations: list[ContractViolationRecord]
     limit: int
-
-
-# --- ExplainTokenResult ---
 
 
 class DivertSummary(TypedDict):
@@ -628,18 +567,10 @@ class ExplainTokenResult(TypedDict):
     divert_summary: DivertSummary | None
 
 
-# ══════════════════════════════════════════════════════════════════════════════
-# Group D -- Shared utility type
-# ══════════════════════════════════════════════════════════════════════════════
-
-
 class ErrorResult(TypedDict):
     """Returned for early-exit ``{"error": "..."}`` paths."""
 
     error: str
-
-
-# --- ErrorResult variant with available_fields (explain_field not-found) ---
 
 
 class FieldNotFoundError(TypedDict):

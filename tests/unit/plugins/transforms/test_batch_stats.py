@@ -16,6 +16,7 @@ import pytest
 from elspeth.contracts.plugin_context import PluginContext
 from elspeth.contracts.schema_contract import SchemaContract
 from elspeth.testing import make_field, make_row
+from tests.fixtures.factories import make_context
 
 # Common schema config for dynamic field handling (accepts any fields)
 DYNAMIC_SCHEMA = {"mode": "observed"}
@@ -37,7 +38,7 @@ class TestBatchStatsHappyPath:
     @pytest.fixture
     def ctx(self) -> PluginContext:
         """Create minimal plugin context."""
-        return PluginContext(run_id="test-run", config={})
+        return make_context()
 
     def test_has_required_attributes(self) -> None:
         """BatchStats has name and is_batch_aware."""
@@ -95,8 +96,8 @@ class TestBatchStatsHappyPath:
         assert result.row is not None
         assert result.row["category"] == "sales"
 
-    def test_empty_batch_returns_zeros(self, ctx: PluginContext) -> None:
-        """Empty batch returns zero count/sum and None mean."""
+    def test_empty_batch_returns_error(self, ctx: PluginContext) -> None:
+        """Empty batch returns error — not fabricated statistics."""
         from elspeth.plugins.transforms.batch_stats import BatchStats
 
         transform = BatchStats(
@@ -108,15 +109,13 @@ class TestBatchStatsHappyPath:
 
         result = transform.process([], ctx)
 
-        assert result.status == "success"
-        assert result.row is not None
-        assert result.row["count"] == 0
-        assert result.row["sum"] == 0
-        assert result.row["mean"] is None
-        assert result.row["batch_empty"] is True
+        assert result.status == "error"
+        assert result.reason is not None
+        assert result.reason["reason"] == "empty_batch"
+        assert not result.retryable
 
-    def test_empty_batch_without_mean_omits_mean_field(self, ctx: PluginContext) -> None:
-        """Empty batch respects compute_mean=False in output and success metadata."""
+    def test_empty_batch_without_mean_also_errors(self, ctx: PluginContext) -> None:
+        """Empty batch errors regardless of compute_mean setting."""
         from elspeth.plugins.transforms.batch_stats import BatchStats
 
         transform = BatchStats(
@@ -129,14 +128,9 @@ class TestBatchStatsHappyPath:
 
         result = transform.process([], ctx)
 
-        assert result.status == "success"
-        assert result.row is not None
-        assert result.row["count"] == 0
-        assert result.row["sum"] == 0
-        assert result.row["batch_empty"] is True
-        assert "mean" not in result.row
-        assert result.success_reason is not None
-        assert result.success_reason["fields_added"] == ["count", "sum", "batch_empty"]
+        assert result.status == "error"
+        assert result.reason is not None
+        assert result.reason["reason"] == "empty_batch"
 
     def test_non_numeric_values_raise_type_error(self, ctx: PluginContext) -> None:
         """BatchStats raises TypeError on non-numeric values (no coercion).
@@ -211,10 +205,10 @@ class TestBatchStatsFloatOverflow:
 
     @pytest.fixture
     def ctx(self) -> PluginContext:
-        return PluginContext(run_id="test-run", config={})
+        return make_context()
 
     def test_nan_input_skipped_from_computation(self, ctx: PluginContext) -> None:
-        """NaN values are skipped from sum/mean, tracked in skipped_non_finite."""
+        """NaN values are skipped from sum/mean, tracked in skipped_non_finite with indices."""
         from elspeth.plugins.transforms.batch_stats import BatchStats
 
         transform = BatchStats({"schema": DYNAMIC_SCHEMA, "value_field": "amount"})
@@ -233,9 +227,10 @@ class TestBatchStatsFloatOverflow:
         assert result.row["sum"] == 40.0
         assert result.row["mean"] == 20.0
         assert result.row["skipped_non_finite"] == 1
+        assert result.row["skipped_non_finite_indices"] == [1]
 
     def test_inf_input_skipped_from_computation(self, ctx: PluginContext) -> None:
-        """Infinity values are skipped from sum/mean, tracked in skipped_non_finite."""
+        """Infinity values are skipped from sum/mean, tracked in skipped_non_finite with indices."""
         from elspeth.plugins.transforms.batch_stats import BatchStats
 
         transform = BatchStats({"schema": DYNAMIC_SCHEMA, "value_field": "amount"})
@@ -253,6 +248,7 @@ class TestBatchStatsFloatOverflow:
         assert result.row["count"] == 1
         assert result.row["sum"] == 10.0
         assert result.row["skipped_non_finite"] == 2
+        assert result.row["skipped_non_finite_indices"] == [1, 2]
 
     def test_all_non_finite_produces_zero_count(self, ctx: PluginContext) -> None:
         """Batch with only NaN/Inf values produces count=0, sum=0."""
@@ -273,6 +269,7 @@ class TestBatchStatsFloatOverflow:
         assert result.row["sum"] == 0.0
         assert result.row["mean"] is None
         assert result.row["skipped_non_finite"] == 2
+        assert result.row["skipped_non_finite_indices"] == [0, 1]
 
     def test_sum_overflow_returns_error(self, ctx: PluginContext) -> None:
         """Summing large valid floats that overflow to inf returns error."""
@@ -307,6 +304,7 @@ class TestBatchStatsFloatOverflow:
         assert result.status == "success"
         assert result.row is not None
         assert "skipped_non_finite" not in result.row.to_dict()
+        assert "skipped_non_finite_indices" not in result.row.to_dict()
 
 
 class TestBatchStatsGroupByHomogeneity:
@@ -318,7 +316,7 @@ class TestBatchStatsGroupByHomogeneity:
 
     @pytest.fixture
     def ctx(self) -> PluginContext:
-        return PluginContext(run_id="test-run", config={})
+        return make_context()
 
     def test_homogeneous_group_by_included(self, ctx: PluginContext) -> None:
         """All rows same group_by value — included in output."""

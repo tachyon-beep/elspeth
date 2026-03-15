@@ -1,0 +1,1158 @@
+"""Unified LLM transform with strategy pattern.
+
+LLMTransform dispatches to SingleQueryStrategy or MultiQueryStrategy
+based on whether queries are configured. Provider dispatch (Azure,
+OpenRouter) is handled via _PROVIDERS registry.
+
+Architecture:
+    LLMTransform (BatchTransformMixin)
+        ├── SingleQueryStrategy — direct template render, raw content output
+        └── MultiQueryStrategy — mapped context, JSON parsing, field extraction
+
+    Provider instantiation is deferred to on_start() when recorder/telemetry
+    become available. __init__ stores provider_cls + config for later use.
+"""
+
+from __future__ import annotations
+
+import json
+import time
+from collections.abc import Callable, Sequence
+from dataclasses import dataclass, field
+from typing import TYPE_CHECKING, Any, Protocol, cast
+
+import structlog
+
+from elspeth.contracts import Determinism, TransformErrorReason, TransformResult, propagate_contract
+from elspeth.contracts.contexts import LifecycleContext, TransformContext
+from elspeth.contracts.schema import SchemaConfig
+from elspeth.contracts.schema_contract import FieldContract, PipelineRow, SchemaContract
+from elspeth.plugins.infrastructure.base import BaseTransform
+from elspeth.plugins.infrastructure.batching import BatchTransformMixin, OutputPort
+from elspeth.plugins.infrastructure.clients.llm import ContextLengthError, LLMClientError
+from elspeth.plugins.infrastructure.pooling import PooledExecutor, RowContext
+from elspeth.plugins.infrastructure.schema_factory import create_schema_from_config
+from elspeth.plugins.transforms.llm import (
+    _build_augmented_output_schema,
+    _build_multi_query_output_schema,
+    get_llm_audit_fields,
+    get_llm_guaranteed_fields,
+    populate_llm_metadata_fields,
+)
+from elspeth.plugins.transforms.llm.base import LLMConfig
+from elspeth.plugins.transforms.llm.langfuse import LangfuseTracer, create_langfuse_tracer
+from elspeth.plugins.transforms.llm.multi_query import QuerySpec, ResponseFormat, resolve_queries
+from elspeth.plugins.transforms.llm.provider import FinishReason, LLMProvider, ParsedFinishReason, UnrecognizedFinishReason
+from elspeth.plugins.transforms.llm.providers.azure import AzureLLMProvider, AzureOpenAIConfig, _configure_azure_monitor
+from elspeth.plugins.transforms.llm.providers.openrouter import OpenRouterConfig, OpenRouterLLMProvider
+from elspeth.plugins.transforms.llm.templates import PromptTemplate, TemplateError
+from elspeth.plugins.transforms.llm.tracing import AzureAITracingConfig, TracingConfig, parse_tracing_config
+from elspeth.plugins.transforms.llm.validation import reject_nonfinite_constant, strip_markdown_fences, validate_field_value
+
+if TYPE_CHECKING:
+    from elspeth.core.landscape.recorder import LandscapeRecorder
+
+logger = structlog.get_logger(__name__)
+
+
+def _warn_telemetry_before_start(event: Any) -> None:
+    """Default telemetry callback before on_start() — warns instead of silently dropping."""
+    logger.warning(
+        "telemetry_emit called before on_start() — event dropped",
+        event_type=type(event).__name__,
+    )
+
+
+_FINISH_REASON_ERRORS: dict[FinishReason, tuple[str, str]] = {
+    FinishReason.LENGTH: ("response_truncated", "Response truncated (finish_reason=length)"),
+    FinishReason.CONTENT_FILTER: ("content_filtered", "Response blocked by provider content filter"),
+}
+
+
+@dataclass(frozen=True, slots=True)
+class _FinishReasonError:
+    """Bundles the transform result and tracer message for a terminal finish reason."""
+
+    result: TransformResult
+    error_message: str
+
+
+def _finish_reason_error(
+    finish_reason: ParsedFinishReason,
+    *,
+    query_name: str | None = None,
+    query_index: int | None = None,
+    content_length: int | None = None,
+) -> _FinishReasonError | None:
+    """Fail closed on non-STOP finish reasons.
+
+    Only explicit STOP is allowlisted.  Absent finish_reason (None) is
+    treated as a retryable error — known-bad reasons get specific error
+    messages, unknown/unrecognized reasons get a generic rejection.
+    This ensures new provider finish reasons are never silently treated
+    as success.
+    """
+
+    def _build_reason(**base_fields: str) -> dict[str, Any]:
+        reason: dict[str, Any] = dict(base_fields)
+        if query_name is not None:
+            reason["query_name"] = query_name
+        if query_index is not None:
+            reason["query_index"] = query_index
+        if content_length is not None:
+            reason["content_length"] = content_length
+        return reason
+
+    # Allowlist: explicit STOP is a known-good completion.
+    if finish_reason == FinishReason.STOP:
+        return None
+
+    # Absent finish_reason (None) means the provider couldn't extract it
+    # (e.g. Azure SDK omits raw_response or choices in some configurations).
+    # The provider already validated content is non-empty via LLMQueryResult,
+    # and logged a warning about "truncation undetectable". Accept the
+    # response — rejecting every row when the SDK shape varies makes the
+    # provider unusable.
+    if finish_reason is None:
+        return None
+
+    # Known-bad reasons with specific error messages.
+    if isinstance(finish_reason, FinishReason):
+        entry = _FINISH_REASON_ERRORS.get(finish_reason)
+        if entry is not None:
+            reason_key, error_message = entry
+            return _FinishReasonError(
+                result=TransformResult.error(
+                    cast(
+                        TransformErrorReason,
+                        _build_reason(reason=reason_key, finish_reason=finish_reason.value),
+                    ),
+                    retryable=False,
+                ),
+                error_message=error_message,
+            )
+        # Known enum member not in STOP or error dict — fail closed.
+        raw_value = finish_reason.value
+    elif isinstance(finish_reason, UnrecognizedFinishReason):
+        raw_value = finish_reason.raw
+    else:  # pragma: no cover — exhaustive, but fail closed on new subtypes
+        raw_value = str(finish_reason)  # type: ignore[unreachable]
+
+    # Catch-all: any finish reason not explicitly allowlisted is an error.
+    return _FinishReasonError(
+        result=TransformResult.error(
+            cast(
+                TransformErrorReason,
+                _build_reason(reason="unexpected_finish_reason", finish_reason=raw_value),
+            ),
+            retryable=False,
+        ),
+        error_message=f"Unexpected finish reason: {raw_value}",
+    )
+
+
+# ---------------------------------------------------------------------------
+# Provider registry — single source of truth for both config parsing and
+# provider instantiation. Eliminates the sync failure mode of two dispatch tables.
+# ---------------------------------------------------------------------------
+
+# NOTE: type[LLMProvider] won't work here — mypy doesn't support type[Protocol]
+# for structural subtyping. The concrete classes (AzureLLMProvider,
+# OpenRouterLLMProvider) are verified against LLMProvider by mypy at their
+# definition sites. The provider class is stored here for documentation only —
+# actual construction uses isinstance narrowing in _create_provider().
+_PROVIDERS: dict[str, tuple[type[LLMConfig], type]] = {
+    "azure": (AzureOpenAIConfig, AzureLLMProvider),
+    "openrouter": (OpenRouterConfig, OpenRouterLLMProvider),
+}
+
+
+# ---------------------------------------------------------------------------
+# Strategy protocol and implementations
+# ---------------------------------------------------------------------------
+
+
+class QueryStrategy(Protocol):
+    """What LLMTransform._process_row delegates to."""
+
+    def execute(
+        self,
+        row: PipelineRow,
+        ctx: TransformContext,
+        *,
+        provider: LLMProvider,
+        tracer: LangfuseTracer,
+    ) -> TransformResult: ...
+
+
+@dataclass(frozen=True, slots=True)
+class SingleQueryStrategy:
+    """Direct template render → LLM call → raw content output."""
+
+    template: PromptTemplate
+    system_prompt: str | None
+    system_prompt_source: str | None
+    model: str
+    temperature: float
+    max_tokens: int | None
+    response_field: str
+
+    def execute(
+        self,
+        row: PipelineRow,
+        ctx: TransformContext,
+        *,
+        provider: LLMProvider,
+        tracer: LangfuseTracer,
+    ) -> TransformResult:
+        """Execute single LLM query and build output row."""
+        state_id = ctx.state_id
+        if state_id is None:
+            raise RuntimeError("LLMTransform requires state_id")
+        if ctx.token is None:
+            raise RuntimeError("LLMTransform requires ctx.token")
+        token_id = ctx.token.token_id
+
+        # 1. Render template (THEIR DATA — wrap)
+        try:
+            rendered = self.template.render_with_metadata(row, contract=row.contract)
+        except TemplateError as e:
+            error_reason: TransformErrorReason = {
+                "reason": "template_rendering_failed",
+                "error": str(e),
+                "template_hash": self.template.template_hash,
+            }
+            if self.template.template_source:
+                error_reason["template_file_path"] = self.template.template_source
+            return TransformResult.error(error_reason)
+
+        # 2. Build messages
+        messages: list[dict[str, str]] = []
+        if self.system_prompt:
+            messages.append({"role": "system", "content": self.system_prompt})
+        messages.append({"role": "user", "content": rendered.prompt})
+
+        # 3. Call provider (EXTERNAL — errors classified by provider)
+        start_time = time.monotonic()
+        try:
+            result = provider.execute_query(
+                messages,
+                model=self.model,
+                temperature=self.temperature,
+                max_tokens=self.max_tokens,
+                state_id=state_id,
+                token_id=token_id,
+            )
+        except ContextLengthError as e:
+            latency_ms = (time.monotonic() - start_time) * 1000
+            tracer.record_error(
+                token_id=token_id,
+                query_name="single",
+                prompt=rendered.prompt,
+                error_message=str(e),
+                model=self.model,
+                latency_ms=latency_ms,
+            )
+            return TransformResult.error(
+                {"reason": "context_length_exceeded", "error": str(e)},
+                retryable=False,
+            )
+        except LLMClientError as e:
+            latency_ms = (time.monotonic() - start_time) * 1000
+            tracer.record_error(
+                token_id=token_id,
+                query_name="single",
+                prompt=rendered.prompt,
+                error_message=str(e),
+                model=self.model,
+                latency_ms=latency_ms,
+            )
+            if e.retryable:
+                raise
+            return TransformResult.error(
+                {"reason": "llm_call_failed", "error": str(e)},
+                retryable=False,
+            )
+
+        latency_ms = (time.monotonic() - start_time) * 1000
+
+        # 4. Fail closed on provider-signaled terminal finish reasons.
+        finish_reason_error = _finish_reason_error(
+            result.finish_reason,
+            content_length=len(result.content),
+        )
+        if finish_reason_error is not None:
+            tracer.record_error(
+                token_id=token_id,
+                query_name="single",
+                prompt=rendered.prompt,
+                error_message=finish_reason_error.error_message,
+                model=self.model,
+                latency_ms=latency_ms,
+            )
+            return finish_reason_error.result
+
+        # 5. Strip markdown fences
+        content = strip_markdown_fences(result.content)
+
+        # Record success in tracer
+        tracer.record_success(
+            token_id=token_id,
+            query_name="single",
+            prompt=rendered.prompt,
+            response_content=content,
+            model=self.model,
+            usage=result.usage,
+            latency_ms=latency_ms,
+        )
+
+        # 6. Build output row
+        output = row.to_dict()
+        output[self.response_field] = content
+        populate_llm_metadata_fields(
+            output,
+            self.response_field,
+            usage=result.usage,
+            model=result.model,
+            template_hash=rendered.template_hash,
+            variables_hash=rendered.variables_hash,
+            template_source=rendered.template_source,
+            lookup_hash=rendered.lookup_hash,
+            lookup_source=rendered.lookup_source,
+            system_prompt_source=self.system_prompt_source,
+        )
+
+        # 7. Propagate contract
+        output_contract = propagate_contract(
+            input_contract=row.contract,
+            output_row=output,
+            transform_adds_fields=True,
+        )
+
+        return TransformResult.success(
+            PipelineRow(output, output_contract),
+            success_reason={
+                "action": "enriched",
+                "fields_added": [self.response_field],
+                "metadata": {"model": result.model, **result.usage.to_dict()},
+            },
+        )
+
+
+@dataclass(frozen=True, slots=True)
+class MultiQueryStrategy:
+    """Execute multiple queries per row with atomic failure semantics.
+
+    Supports two execution modes:
+    - Sequential (executor=None, pool_size=1): queries run one-by-one
+    - Parallel (executor set, pool_size>1): queries run via PooledExecutor
+      with AIMD throttle backoff on rate limits
+
+    In parallel mode, the PooledExecutor retries individual queries with
+    adaptive backoff, avoiding wasteful full-row retries that discard
+    successful query results.
+    """
+
+    query_specs: Sequence[QuerySpec]
+    template: PromptTemplate
+    system_prompt: str | None
+    system_prompt_source: str | None
+    model: str
+    temperature: float
+    max_tokens: int | None
+    response_field: str
+    executor: PooledExecutor | None = None
+    _query_templates: dict[str, PromptTemplate] = field(init=False, default_factory=dict)
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.query_specs, tuple):
+            object.__setattr__(self, "query_specs", tuple(self.query_specs))
+
+        # Pre-compile per-query template overrides — structural validation at
+        # init time.  Templates are Tier 2 data: validated once at load, trusted
+        # thereafter.  A TemplateSyntaxError here is a structural failure that
+        # propagates up through LLMTransform.__init__ and stops the run at setup.
+        query_templates: dict[str, PromptTemplate] = {}
+        for spec in self.query_specs:
+            if spec.template is not None:
+                query_templates[spec.name] = self.template.with_template_override(spec.template)
+        object.__setattr__(self, "_query_templates", query_templates)
+
+    def execute(
+        self,
+        row: PipelineRow,
+        ctx: TransformContext,
+        *,
+        provider: LLMProvider,
+        tracer: LangfuseTracer,
+    ) -> TransformResult:
+        """Execute all queries, returning atomic success or failure."""
+        state_id = ctx.state_id
+        if state_id is None:
+            raise RuntimeError("LLMTransform requires state_id")
+        if ctx.token is None:
+            raise RuntimeError("LLMTransform requires ctx.token")
+        token_id = ctx.token.token_id
+
+        if self.executor is not None:
+            return self._execute_parallel(row, state_id, token_id, provider, tracer)
+        return self._execute_sequential(row, state_id, token_id, provider, tracer)
+
+    @dataclass(frozen=True, slots=True)
+    class _QuerySuccess:
+        """Partial output fields from a successful single-query execution.
+
+        Tagged success type replacing bare ``dict`` in the union return of
+        ``_execute_one_query``, so callers can exhaustively match on
+        ``_QuerySuccess | TransformResult`` instead of ``dict | TransformResult``.
+        """
+
+        fields: dict[str, Any]
+
+    def _execute_one_query(
+        self,
+        query_idx: int,
+        spec: QuerySpec,
+        row: PipelineRow,
+        state_id: str,
+        token_id: str,
+        provider: LLMProvider,
+        tracer: LangfuseTracer,
+    ) -> _QuerySuccess | TransformResult:
+        """Execute a single query within a multi-query row.
+
+        Returns:
+            _QuerySuccess: Partial output fields on success
+            TransformResult: Error result on failure
+
+        Raises:
+            LLMClientError: Retryable errors propagate to caller for retry
+                handling (PooledExecutor AIMD or sequential error capture).
+        """
+        # Build template context from named input_fields
+        try:
+            template_ctx = spec.build_template_context(row)
+        except KeyError as e:
+            return TransformResult.error(
+                {
+                    "reason": "template_context_failed",
+                    "query_name": spec.name,
+                    "query_index": query_idx,
+                    "error": str(e),
+                },
+                retryable=False,
+            )
+
+        # Use pre-compiled per-query template (already structurally validated
+        # in __post_init__), falling back to config-level template.
+        query_template = self._query_templates.get(spec.name, self.template)
+
+        # Render template — use contract=None because template_ctx is a
+        # synthetic dict (keys are template variable names from input_fields,
+        # not source column names). Passing the source row's contract would
+        # wrap template_ctx in a PipelineRow that rejects these synthetic keys
+        # in FIXED schema mode.
+        try:
+            rendered = query_template.render_with_metadata(
+                template_ctx,
+                contract=None,
+            )
+        except TemplateError as e:
+            return TransformResult.error(
+                {
+                    "reason": "template_rendering_failed",
+                    "query_name": spec.name,
+                    "query_index": query_idx,
+                    "error": str(e),
+                    "template_hash": query_template.template_hash,
+                },
+                retryable=False,
+            )
+
+        # Build messages
+        messages: list[dict[str, str]] = []
+        if self.system_prompt:
+            messages.append({"role": "system", "content": self.system_prompt})
+        messages.append({"role": "user", "content": rendered.prompt})
+
+        # Execute query
+        query_max_tokens = spec.max_tokens or self.max_tokens
+
+        # Build response_format for structured output requests
+        response_format: dict[str, Any] | None = None
+        if spec.output_fields:
+            if spec.response_format == ResponseFormat.STRUCTURED:
+                properties = {f.suffix: f.to_json_schema() for f in spec.output_fields}
+                response_format = {
+                    "type": "json_schema",
+                    "json_schema": {
+                        "name": f"{spec.name}_output",
+                        "schema": {
+                            "type": "object",
+                            "properties": properties,
+                            "required": list(properties),
+                        },
+                    },
+                }
+            else:
+                response_format = {"type": "json_object"}
+
+        start_time = time.monotonic()
+        try:
+            result = provider.execute_query(
+                messages,
+                model=self.model,
+                temperature=self.temperature,
+                max_tokens=query_max_tokens,
+                state_id=state_id,
+                token_id=token_id,
+                response_format=response_format,
+            )
+        except ContextLengthError as e:
+            latency_ms = (time.monotonic() - start_time) * 1000
+            tracer.record_error(
+                token_id=token_id,
+                query_name=spec.name,
+                prompt=rendered.prompt,
+                error_message=str(e),
+                model=self.model,
+                latency_ms=latency_ms,
+            )
+            return TransformResult.error(
+                {
+                    "reason": "context_length_exceeded",
+                    "failed_query_name": spec.name,
+                    "failed_query_index": query_idx,
+                    "error": str(e),
+                },
+                retryable=False,
+            )
+        except LLMClientError as e:
+            latency_ms = (time.monotonic() - start_time) * 1000
+            tracer.record_error(
+                token_id=token_id,
+                query_name=spec.name,
+                prompt=rendered.prompt,
+                error_message=str(e),
+                model=self.model,
+                latency_ms=latency_ms,
+            )
+            if e.retryable:
+                raise  # Pool catches with AIMD; sequential catches and returns error
+            return TransformResult.error(
+                {
+                    "reason": "multi_query_failed",
+                    "failed_query_name": spec.name,
+                    "failed_query_index": query_idx,
+                    "error": str(e),
+                },
+                retryable=False,
+            )
+
+        latency_ms = (time.monotonic() - start_time) * 1000
+
+        # Fail closed on provider-signaled terminal finish reasons.
+        finish_reason_error = _finish_reason_error(
+            result.finish_reason,
+            query_name=spec.name,
+            query_index=query_idx,
+        )
+        if finish_reason_error is not None:
+            tracer.record_error(
+                token_id=token_id,
+                query_name=spec.name,
+                prompt=rendered.prompt,
+                error_message=finish_reason_error.error_message,
+                model=self.model,
+                latency_ms=latency_ms,
+            )
+            return finish_reason_error.result
+
+        # Strip fences and store content
+        content = strip_markdown_fences(result.content)
+
+        tracer.record_success(
+            token_id=token_id,
+            query_name=spec.name,
+            prompt=rendered.prompt,
+            response_content=content,
+            model=self.model,
+            usage=result.usage,
+            latency_ms=latency_ms,
+        )
+
+        # Build partial output for this query
+        partial: dict[str, Any] = {}
+
+        # JSON parsing + field extraction when output_fields configured
+        if spec.output_fields:
+            # LLM response content is Tier 3 — parse and validate immediately
+            try:
+                parsed = json.loads(content, parse_constant=reject_nonfinite_constant)
+            except (json.JSONDecodeError, ValueError) as e:
+                return TransformResult.error(
+                    {
+                        "reason": "json_parse_failed",
+                        "query_name": spec.name,
+                        "query_index": query_idx,
+                        "error": str(e),
+                        "raw_response_preview": content[:500],
+                    },
+                    retryable=False,
+                )
+            if not isinstance(parsed, dict):
+                return TransformResult.error(
+                    {
+                        "reason": "invalid_json_type",
+                        "query_name": spec.name,
+                        "query_index": query_idx,
+                        "expected": "object",
+                        "actual": type(parsed).__name__,
+                    },
+                    retryable=False,
+                )
+            # Extract typed fields into prefixed output columns.
+            # Validate field presence — Tier 3 boundary: if the LLM omitted
+            # a declared field, that's an error, not a silent None.
+            for field in spec.output_fields:
+                field_key = f"{spec.name}_{field.suffix}"
+                if field.suffix not in parsed:
+                    return TransformResult.error(
+                        {
+                            "reason": "missing_output_field",
+                            "query_name": spec.name,
+                            "query_index": query_idx,
+                            "field": field.suffix,
+                            "available_fields": list(parsed.keys()),
+                        },
+                        retryable=False,
+                    )
+                # Validate value type — Tier 3 boundary: LLM may return
+                # wrong types in standard mode (no API schema enforcement)
+                type_error = validate_field_value(parsed[field.suffix], field)
+                if type_error is not None:
+                    return TransformResult.error(
+                        {
+                            "reason": "field_type_mismatch",
+                            "query_name": spec.name,
+                            "query_index": query_idx,
+                            "field": field.suffix,
+                            "error": type_error,
+                            "value": repr(parsed[field.suffix])[:200],
+                        },
+                        retryable=False,
+                    )
+                partial[field_key] = parsed[field.suffix]
+            # Also store raw content for audit traceability
+            partial[f"{spec.name}_{self.response_field}"] = content
+        else:
+            # Unstructured: store raw content only
+            partial[f"{spec.name}_{self.response_field}"] = content
+
+        populate_llm_metadata_fields(
+            partial,
+            f"{spec.name}_{self.response_field}",
+            usage=result.usage,
+            model=result.model,
+            template_hash=rendered.template_hash,
+            variables_hash=rendered.variables_hash,
+            template_source=rendered.template_source,
+            lookup_hash=rendered.lookup_hash,
+            lookup_source=rendered.lookup_source,
+            system_prompt_source=self.system_prompt_source,
+        )
+
+        return self._QuerySuccess(fields=partial)
+
+    def _execute_sequential(
+        self,
+        row: PipelineRow,
+        state_id: str,
+        token_id: str,
+        provider: LLMProvider,
+        tracer: LangfuseTracer,
+    ) -> TransformResult:
+        """Execute queries sequentially (pool_size=1 fallback).
+
+        Short-circuits on first error. Retryable LLMClientErrors are returned
+        as error results instead of being re-raised, so the engine retry doesn't
+        wastefully re-execute all queries from scratch.
+        """
+        accumulated_outputs: dict[str, Any] = {}
+
+        for query_idx, spec in enumerate(self.query_specs):
+            try:
+                result = self._execute_one_query(
+                    query_idx,
+                    spec,
+                    row,
+                    state_id,
+                    token_id,
+                    provider,
+                    tracer,
+                )
+            except LLMClientError as e:
+                # Sequential mode: no AIMD retry — return retryable error result
+                return TransformResult.error(
+                    {
+                        "reason": "multi_query_failed",
+                        "failed_query_name": spec.name,
+                        "failed_query_index": query_idx,
+                        "error": str(e),
+                        "discarded_successful_queries": query_idx,
+                    },
+                    retryable=e.retryable,
+                )
+
+            # Error from template/JSON/validation/non-retryable LLM
+            if isinstance(result, TransformResult):
+                # Add discarded count for error reporting — copy first to avoid
+                # mutating the original dict (which may be shared with audit records)
+                if result.reason is not None:
+                    augmented_reason = cast(TransformErrorReason, dict(result.reason))
+                    augmented_reason["discarded_successful_queries"] = query_idx
+                    return TransformResult.error(
+                        augmented_reason,
+                        retryable=result.retryable,
+                        context_after=result.context_after,
+                    )
+                return result
+
+            accumulated_outputs.update(result.fields)
+
+        # All queries succeeded — build output row
+        output = {**row.to_dict(), **accumulated_outputs}
+        output_contract = propagate_contract(
+            input_contract=row.contract,
+            output_row=output,
+            transform_adds_fields=True,
+        )
+
+        return TransformResult.success(
+            PipelineRow(output, output_contract),
+            success_reason={
+                "action": "multi_query_enriched",
+                "queries_completed": len(self.query_specs),
+                "fields_added": list(accumulated_outputs.keys()),
+                "metadata": {"model": self.model},
+            },
+        )
+
+    def _execute_parallel(
+        self,
+        row: PipelineRow,
+        state_id: str,
+        token_id: str,
+        provider: LLMProvider,
+        tracer: LangfuseTracer,
+    ) -> TransformResult:
+        """Execute queries in parallel via PooledExecutor with AIMD retry.
+
+        All queries run concurrently. The pool retries individual queries with
+        AIMD backoff on retryable errors — only the failing query retries, not
+        the entire row. Results are collected in submission order.
+        """
+        if self.executor is None:
+            raise RuntimeError("_execute_parallel called without executor")
+
+        # Build RowContext for each query — the pool treats each as a "row"
+        contexts = [
+            RowContext(
+                row={
+                    "original_row": row,
+                    "spec": spec,
+                    "query_idx": i,
+                    "provider": provider,
+                    "tracer": tracer,
+                    "token_id": token_id,
+                    "state_id": state_id,
+                },
+                state_id=state_id,
+                row_index=i,
+            )
+            for i, spec in enumerate(self.query_specs)
+        ]
+
+        def _process_fn(work: dict[str, Any], _work_state_id: str) -> TransformResult:
+            """Pool process function — wraps _execute_one_query for pool interface."""
+            result = self._execute_one_query(
+                work["query_idx"],
+                work["spec"],
+                work["original_row"],
+                work["state_id"],
+                work["token_id"],
+                work["provider"],
+                work["tracer"],
+            )
+            if isinstance(result, TransformResult):
+                return result  # Error passthrough
+            # Success: wrap partial fields in TransformResult for pool interface
+            observed = SchemaContract(
+                mode="OBSERVED",
+                fields=tuple(
+                    FieldContract(
+                        normalized_name=k,
+                        original_name=k,
+                        python_type=type(v) if type(v) in (int, str, float, bool) else object,
+                        required=False,
+                        source="inferred",
+                    )
+                    for k, v in result.fields.items()
+                ),
+                locked=True,
+            )
+            return TransformResult.success(
+                PipelineRow(result.fields, observed),
+                success_reason={"action": "query_completed", "metadata": {"query_name": work["spec"].name}},
+            )
+
+        entries = self.executor.execute_batch(contexts=contexts, process_fn=_process_fn)
+        query_results = [entry.result for entry in entries]
+
+        # Check for failures — atomic: any failure fails the row
+        failed = [(i, r) for i, r in enumerate(query_results) if r.status == "error"]
+        if failed:
+            first_idx, first_result = failed[0]
+            spec = self.query_specs[first_idx]
+            error_reason: TransformErrorReason = cast(
+                TransformErrorReason,
+                dict(first_result.reason) if first_result.reason else {"reason": "multi_query_failed"},
+            )
+            error_reason["failed_query_name"] = spec.name
+            error_reason["failed_query_index"] = first_idx
+            error_reason["discarded_successful_queries"] = len(query_results) - len(failed)
+            error_reason["failed_queries"] = [self.query_specs[i].name for i, _ in failed]
+            error_reason["total_count"] = len(query_results)
+            return TransformResult.error(error_reason, retryable=first_result.retryable)
+
+        # Merge all successful partial outputs
+        accumulated_outputs: dict[str, Any] = {}
+        for result in query_results:
+            if result.row is not None:
+                accumulated_outputs.update(result.row.to_dict())
+
+        output = {**row.to_dict(), **accumulated_outputs}
+        output_contract = propagate_contract(
+            input_contract=row.contract,
+            output_row=output,
+            transform_adds_fields=True,
+        )
+
+        return TransformResult.success(
+            PipelineRow(output, output_contract),
+            success_reason={
+                "action": "multi_query_enriched",
+                "queries_completed": len(self.query_specs),
+                "fields_added": list(accumulated_outputs.keys()),
+                "metadata": {"model": self.model},
+            },
+        )
+
+
+# ---------------------------------------------------------------------------
+# LLMTransform — the unified plugin class
+# ---------------------------------------------------------------------------
+
+
+class LLMTransform(BaseTransform, BatchTransformMixin):
+    """Unified LLM transform with provider dispatch and strategy selection.
+
+    Registered as plugin name="llm". Uses BatchTransformMixin for concurrent
+    row processing with FIFO output ordering and backpressure.
+
+    Provider dispatch:
+        "azure"      → AzureOpenAIConfig + AzureLLMProvider
+        "openrouter" → OpenRouterConfig  + OpenRouterLLMProvider
+
+    Strategy selection:
+        queries is not None → MultiQueryStrategy
+        queries is None     → SingleQueryStrategy
+    """
+
+    name = "llm"
+    determinism: Determinism = Determinism.NON_DETERMINISTIC
+
+    def __init__(self, config: dict[str, Any]) -> None:
+        super().__init__(config)
+
+        # Provider dispatch from single registry.
+        # config is user YAML (Tier 3 boundary) — distinguish missing key from unknown value.
+        provider_name = config.get("provider")
+        if provider_name is None:
+            raise ValueError(f"LLM config missing required 'provider' key. Valid providers: {sorted(_PROVIDERS)}")
+        if provider_name not in _PROVIDERS:
+            raise ValueError(f"Unknown LLM provider '{provider_name}'. Valid providers: {sorted(_PROVIDERS)}")
+        config_cls, _ = _PROVIDERS[provider_name]
+
+        # Parse config with provider-specific model.
+        # config_cls is AzureOpenAIConfig or OpenRouterConfig at runtime;
+        # from_dict() returns Self on the subclass, but mypy sees type[LLMConfig].
+        self._config = cast(
+            "AzureOpenAIConfig | OpenRouterConfig",
+            config_cls.from_dict(config),
+        )
+
+        # Store common LLM settings.
+        # AzureOpenAIConfig._set_model_from_deployment ensures model is populated;
+        # OpenRouterConfig requires model. So self._config.model is always non-empty.
+        self._model = self._config.model
+        self._template = PromptTemplate(
+            self._config.template,
+            template_source=self._config.template_source,
+            lookup_data=self._config.lookup,
+            lookup_source=self._config.lookup_source,
+        )
+        self._system_prompt = self._config.system_prompt
+        self._system_prompt_source = self._config.system_prompt_source
+        self._temperature = self._config.temperature
+        self._max_tokens = self._config.max_tokens
+        self._response_field = self._config.response_field
+        self._max_capacity_retry_seconds = self._config.max_capacity_retry_seconds
+        self._pool_size = self._config.pool_size
+
+        # Schema (input — same for both single and multi-query)
+        schema_config = self._config.schema_config
+        self.input_schema = create_schema_from_config(
+            schema_config,
+            f"{self.name}Schema",
+            allow_coercion=False,
+        )
+        # output_schema and _output_schema_config are set in the strategy
+        # dispatch below — multi-query uses prefixed fields, single-query
+        # uses unprefixed fields.
+
+        # Tracer — factory returns frozen ActiveLangfuseTracer or NoOpLangfuseTracer.
+        # tracing lives on provider-specific configs (AzureOpenAIConfig, OpenRouterConfig),
+        # both of which define tracing: dict[str, Any] | None.
+        tracing_config = parse_tracing_config(self._config.tracing) if self._config.tracing else None
+        self._tracing_config: TracingConfig | None = tracing_config
+
+        # Validate provider/tracing compatibility — azure_ai tracing auto-instruments
+        # the OpenAI SDK, which only the Azure provider uses. Fail loud, not silent.
+        if isinstance(tracing_config, AzureAITracingConfig) and not isinstance(self._config, AzureOpenAIConfig):
+            raise ValueError(
+                "azure_ai tracing requires the azure provider. "
+                "Azure Monitor auto-instruments the OpenAI SDK, which is only used by provider='azure'. "
+                f"Current provider: '{self._config.provider}'"
+            )
+
+        self._tracer = create_langfuse_tracer(
+            transform_name=self.name,
+            tracing_config=tracing_config,
+        )
+
+        # Query-level executor for parallel multi-query execution with AIMD backoff.
+        # Created here (not in on_start) because it doesn't depend on recorder/telemetry.
+        pool_config = self._config.pool_config
+        self._query_executor: PooledExecutor | None = PooledExecutor(pool_config) if pool_config is not None else None
+
+        # Strategy dispatch: queries is not None → multi-query
+        if self._config.queries is not None:
+            query_specs = resolve_queries(self._config.queries)
+            self._strategy: SingleQueryStrategy | MultiQueryStrategy = MultiQueryStrategy(
+                query_specs=query_specs,
+                template=self._template,
+                system_prompt=self._system_prompt,
+                system_prompt_source=self._system_prompt_source,
+                model=self._model,
+                temperature=self._temperature,
+                max_tokens=self._max_tokens,
+                response_field=self._response_field,
+                executor=self._query_executor,
+            )
+
+            # Multi-query emits prefixed fields — compute all field sets
+            prefixed_guaranteed: set[str] = set()
+            prefixed_audit: set[str] = set()
+            for spec in query_specs:
+                prefix = f"{spec.name}_{self._response_field}"
+                prefixed_guaranteed.add(prefix)
+                prefixed_guaranteed.update(get_llm_guaranteed_fields(prefix))
+                prefixed_audit.update(get_llm_audit_fields(prefix))
+                if spec.output_fields:
+                    for field in spec.output_fields:
+                        prefixed_guaranteed.add(f"{spec.name}_{field.suffix}")
+            self.declared_output_fields = frozenset(prefixed_guaranteed | prefixed_audit)
+
+            # Output schema config with prefixed fields for DAG contract propagation
+            base_guaranteed = schema_config.guaranteed_fields or ()
+            base_audit = schema_config.audit_fields or ()
+            self._output_schema_config = SchemaConfig(
+                mode=schema_config.mode,
+                fields=schema_config.fields,
+                guaranteed_fields=tuple(set(base_guaranteed) | prefixed_guaranteed),
+                audit_fields=tuple(set(base_audit) | prefixed_audit),
+                required_fields=schema_config.required_fields,
+            )
+
+            # Pydantic output schema with prefixed LLM fields
+            # Build extracted_fields mapping: query_name → prefixed output field names
+            extracted: dict[str, tuple[str, ...]] = {}
+            for spec in query_specs:
+                if spec.output_fields:
+                    extracted[spec.name] = tuple(f"{spec.name}_{f.suffix}" for f in spec.output_fields)
+            self.output_schema = _build_multi_query_output_schema(
+                base_schema_config=schema_config,
+                response_field=self._response_field,
+                query_names=tuple(spec.name for spec in query_specs),
+                schema_name=f"{self.name}OutputSchema",
+                extracted_fields=extracted if extracted else None,
+            )
+        else:
+            self._strategy = SingleQueryStrategy(
+                template=self._template,
+                system_prompt=self._system_prompt,
+                system_prompt_source=self._system_prompt_source,
+                model=self._model,
+                temperature=self._temperature,
+                max_tokens=self._max_tokens,
+                response_field=self._response_field,
+            )
+
+            # Single-query emits unprefixed fields
+            guaranteed = get_llm_guaranteed_fields(self._response_field)
+            audit = get_llm_audit_fields(self._response_field)
+            self.declared_output_fields = frozenset([*guaranteed, *audit])
+
+            # Output schema config with unprefixed fields
+            base_guaranteed = schema_config.guaranteed_fields or ()
+            base_audit = schema_config.audit_fields or ()
+            self._output_schema_config = SchemaConfig(
+                mode=schema_config.mode,
+                fields=schema_config.fields,
+                guaranteed_fields=tuple(set(base_guaranteed) | set(guaranteed)),
+                audit_fields=tuple(set(base_audit) | set(audit)),
+                required_fields=schema_config.required_fields,
+            )
+
+            # Pydantic output schema with unprefixed LLM fields
+            self.output_schema = _build_augmented_output_schema(
+                base_schema_config=schema_config,
+                response_field=self._response_field,
+                schema_name=f"{self.name}OutputSchema",
+            )
+
+        # Provider instance — deferred to on_start() when recorder/telemetry available
+        self._provider: LLMProvider | None = None
+
+        # Recorder, telemetry, rate limit (set in on_start)
+        self._recorder: LandscapeRecorder | None = None
+        self._run_id: str = ""
+        self._telemetry_emit: Callable[[Any], None] = _warn_telemetry_before_start
+        self._limiter: Any = None
+
+        # Batch processing state
+        self._batch_initialized = False
+
+    def connect_output(self, output: OutputPort, max_pending: int = 30) -> None:
+        """Connect output port and initialize batch processing."""
+        if self._batch_initialized:
+            raise RuntimeError("connect_output() already called")
+
+        self.init_batch_processing(
+            max_pending=max_pending,
+            output=output,
+            name=self.name,
+            max_workers=max_pending,
+            batch_wait_timeout=float(self._max_capacity_retry_seconds),
+        )
+        self._batch_initialized = True
+
+    def on_start(self, ctx: LifecycleContext) -> None:
+        """Capture recorder/telemetry and create provider instance."""
+        super().on_start(ctx)
+        self._recorder = ctx.landscape
+        self._run_id = ctx.run_id
+        self._telemetry_emit = ctx.telemetry_emit
+        limiter_name = "azure_openai" if isinstance(self._config, AzureOpenAIConfig) else "openrouter"
+        self._limiter = ctx.rate_limit_registry.get_limiter(limiter_name) if ctx.rate_limit_registry is not None else None
+
+        # Create provider now that recorder/telemetry are available
+        self._provider = self._create_provider()
+
+        # Initialize Azure AI tracing (process-level OpenTelemetry auto-instrumentation).
+        # Must happen after provider creation — the OpenAI SDK must be available.
+        if isinstance(self._tracing_config, AzureAITracingConfig):
+            _configure_azure_monitor(self._tracing_config)
+            logger.info(
+                "Azure AI tracing initialized",
+                provider="azure_ai",
+                content_recording=self._tracing_config.enable_content_recording,
+            )
+
+    def _create_provider(self) -> LLMProvider:
+        """Instantiate the provider with all required dependencies.
+
+        Uses isinstance narrowing on self._config to safely access
+        provider-specific attributes (endpoint, deployment_name, base_url, etc.).
+        """
+        if self._recorder is None:
+            raise RuntimeError("_recorder not initialized — _create_provider called before on_start()")
+
+        if isinstance(self._config, AzureOpenAIConfig):
+            return AzureLLMProvider(
+                endpoint=self._config.endpoint,
+                api_key=self._config.api_key,
+                api_version=self._config.api_version,
+                deployment_name=self._config.deployment_name,
+                recorder=self._recorder,
+                run_id=self._run_id,
+                telemetry_emit=self._telemetry_emit,
+                limiter=self._limiter,
+            )
+        elif isinstance(self._config, OpenRouterConfig):
+            return OpenRouterLLMProvider(
+                api_key=self._config.api_key,
+                base_url=self._config.base_url,
+                timeout_seconds=self._config.timeout_seconds,
+                recorder=self._recorder,
+                run_id=self._run_id,
+                telemetry_emit=self._telemetry_emit,
+                limiter=self._limiter,
+            )
+        else:
+            raise RuntimeError(f"Unknown config type: {type(self._config).__name__}")
+
+    def accept(self, row: PipelineRow, ctx: TransformContext) -> None:
+        """Accept a row for processing (pipeline entry point)."""
+        if not self._batch_initialized:
+            raise RuntimeError("connect_output() must be called before accept()")
+        self.accept_row(row, ctx, self._process_row)
+
+    def process(self, row: PipelineRow, ctx: TransformContext) -> TransformResult:
+        """Not supported — use accept() for row-level pipelining."""
+        raise NotImplementedError(
+            f"{self.__class__.__name__} uses row-level pipelining. Use accept() instead of process(). See class docstring for usage."
+        )
+
+    def _process_row(self, row: PipelineRow, ctx: TransformContext) -> TransformResult:
+        """Process a single row via the selected strategy.
+
+        Called by worker threads from BatchTransformMixin. Delegates to
+        SingleQueryStrategy or MultiQueryStrategy.
+        """
+        if self._provider is None:
+            raise RuntimeError("Provider not initialized — _process_row called before on_start()")
+
+        return self._strategy.execute(
+            row,
+            ctx,
+            provider=self._provider,
+            tracer=self._tracer,
+        )
+
+    def close(self) -> None:
+        """Release resources."""
+        self._tracer.flush()
+
+        if self._batch_initialized:
+            self.shutdown_batch_processing()
+
+        if self._query_executor is not None:
+            self._query_executor.shutdown(wait=True)
+
+        if self._provider is not None:
+            self._provider.close()
+            self._provider = None
+
+        self._recorder = None

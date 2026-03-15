@@ -148,6 +148,7 @@ Configures the single data source for the pipeline.
 ```yaml
 source:
   plugin: csv
+  on_success: source_out    # Explicit output connection name
   options:
     path: data/input.csv
     schema:
@@ -160,7 +161,8 @@ source:
 
 | Field | Type | Required | Description |
 |-------|------|----------|-------------|
-| `plugin` | string | **Yes** | Plugin name: `csv`, `json`, `null` |
+| `plugin` | string | **Yes** | Plugin name: `csv`, `json`, `azure_blob`, `null` |
+| `on_success` | string | **Yes** | Connection name for source output (transforms reference this via `input`) |
 | `options` | object | No | Plugin-specific configuration |
 
 ### Available Source Plugins
@@ -169,6 +171,7 @@ source:
 |--------|---------|
 | `csv` | Load from CSV file |
 | `json` | Load from JSON file or JSONL |
+| `azure_blob` | Load from Azure Blob Storage |
 | `null` | Empty source (for testing) |
 
 ### Schema Options
@@ -244,7 +247,7 @@ sinks:
 
 | Field | Type | Required | Description |
 |-------|------|----------|-------------|
-| `plugin` | string | **Yes** | Plugin name: `csv`, `json`, `null` |
+| `plugin` | string | **Yes** | Plugin name: `csv`, `json`, `database`, `azure_blob` |
 | `options` | object | No | Plugin-specific configuration |
 
 ### Available Sink Plugins
@@ -253,17 +256,22 @@ sinks:
 |--------|---------|
 | `csv` | Write to CSV file |
 | `json` | Write to JSON file |
-| `null` | Discard output (for testing) |
+| `database` | Write to SQL database |
+| `azure_blob` | Write to Azure Blob Storage |
 
 ---
 
 ## Transform Settings
 
-Ordered list of transforms applied to each row.
+Ordered list of transforms applied to each row. Each transform declares its position in the DAG via `input` (where data comes from) and `on_success` (where successful rows go).
 
 ```yaml
 transforms:
-  - plugin: field_mapper
+  - name: enricher
+    plugin: field_mapper
+    input: source_out
+    on_success: output
+    on_error: quarantine
     options:
       schema:
         fields: dynamic
@@ -272,17 +280,17 @@ transforms:
       computed:
         full_name: "row['first_name'] + ' ' + row['last_name']"
       required_input_fields: [first_name, last_name]  # Validated at DAG construction
-
-  - plugin: passthrough
-    options: {}
 ```
 
 | Field | Type | Required | Description |
 |-------|------|----------|-------------|
+| `name` | string | **Yes** | Unique node identifier (human-readable, used in audit trail) |
 | `plugin` | string | **Yes** | Plugin name |
+| `input` | string | **Yes** | Connection name to receive data from (source `on_success` or another transform's `on_success`) |
+| `on_success` | string | **Yes** | Where successful rows go (sink name or connection name for downstream node) |
+| `on_error` | string | No | Sink name for rows that fail processing, or `discard` |
 | `options` | object | No | Plugin-specific configuration |
 | `options.required_input_fields` | list | No | Fields this transform requires in input (enables DAG validation) |
-| `options.on_error` | string | No | Sink for rows that fail processing, or `discard` |
 
 ### Required Input Fields
 
@@ -312,6 +320,17 @@ fields = extract_jinja2_fields(template)  # frozenset({'customer_id', 'message_t
 |--------|---------|
 | `passthrough` | Pass rows unchanged |
 | `field_mapper` | Rename, compute, drop fields |
+| `truncate` | Limit string field lengths |
+| `keyword_filter` | Filter rows by regex patterns |
+| `json_explode` | Expand JSON arrays to multiple rows |
+| `batch_stats` | Compute statistics over batch |
+| `batch_replicate` | Replicate rows N times |
+| `web_scrape` | HTML content extraction with SSRF prevention |
+| `llm` | Unified LLM transform (azure/openrouter providers, single/multi-query) |
+| `azure_content_safety` | Detect harmful content via Azure AI |
+| `azure_prompt_shield` | Detect prompt injection via Azure AI |
+| `azure_batch_llm` | Azure Batch API for LLM (50% cost savings) |
+| `openrouter_batch_llm` | OpenRouter Batch HTTP API |
 
 ---
 
@@ -322,12 +341,14 @@ Config-driven routing based on expressions. Gates evaluate conditions and route 
 ```yaml
 gates:
   - name: quality_check
+    input: enriched
     condition: "row['confidence'] >= 0.85"
     routes:
       "true": continue      # Forward to next step
       "false": review_sink  # Route to named sink
 
   - name: amount_threshold
+    input: validated
     condition: "row['amount'] > 1000"
     routes:
       "true": high_values
@@ -337,6 +358,7 @@ gates:
 | Field | Type | Required | Description |
 |-------|------|----------|-------------|
 | `name` | string | **Yes** | Unique gate identifier |
+| `input` | string | **Yes** | Connection name to receive data from |
 | `condition` | string | **Yes** | Expression to evaluate (see [Expression Syntax](#expression-syntax)) |
 | `routes` | object | **Yes** | Maps evaluation results to destinations |
 | `fork_to` | list | No | Branch paths for fork operations |
@@ -398,6 +420,9 @@ Batch rows until a trigger fires, then process as a group.
 aggregations:
   - name: batch_stats
     plugin: stats_aggregation
+    input: enriched
+    on_success: output
+    on_error: discard           # Sink name for batch errors, or 'discard'
     trigger:
       count: 100              # Fire after 100 rows
       timeout_seconds: 3600   # Or after 1 hour
@@ -412,6 +437,9 @@ aggregations:
 |-------|------|----------|-------------|
 | `name` | string | **Yes** | Unique aggregation identifier |
 | `plugin` | string | **Yes** | Aggregation plugin name |
+| `input` | string | **Yes** | Connection name to receive data from |
+| `on_success` | string | **Yes** | Where successful output rows go (sink name or connection name) |
+| `on_error` | string | **Yes** | Sink name for rows that fail batch processing, or `discard` |
 | `trigger` | object | **Yes** | When to flush the batch |
 | `output_mode` | string | No | `passthrough` or `transform` (default: `transform`) |
 | `expected_output_count` | int | No | For `transform` mode: validate output row count |
@@ -476,6 +504,8 @@ coalesce:
 | Field | Type | Required | Description |
 |-------|------|----------|-------------|
 | `name` | string | **Yes** | Unique coalesce identifier |
+| `input` | string | **Yes** | Connection name to receive data from (typically a fork gate's output) |
+| `on_success` | string | **Yes** | Where merged output rows go (sink name or connection name) |
 | `branches` | list | **Yes** | Branch names to wait for (min 2) |
 | `policy` | string | No | How to handle partial arrivals (default: `require_all`) |
 | `merge` | string | No | How to combine data (default: `union`) |
@@ -645,7 +675,7 @@ ELSPETH's built-in plugins use these service names for rate limiting:
 
 | Service Name | Used By | Description |
 |--------------|---------|-------------|
-| `azure_openai` | `azure_llm`, `azure_multi_query_llm` | Azure OpenAI API calls |
+| `azure_openai` | `llm` (provider: azure) | Azure OpenAI API calls |
 | `azure_content_safety` | `azure_content_safety` | Azure Content Safety API |
 | `azure_prompt_shield` | `azure_prompt_shield` | Azure Prompt Shield API |
 
@@ -658,7 +688,7 @@ ELSPETH's built-in plugins use these service names for rate limiting:
 3. **Acquisition**: Plugins acquire rate limit tokens before making external calls
 4. **Blocking**: When the limit is reached, calls block until capacity is available
 
-Rate limits apply per-service across all uses in a pipeline. For example, if you have two `azure_llm` transforms, they share the `azure_openai` rate limit.
+Rate limits apply per-service across all uses in a pipeline. For example, if you have two `llm` transforms (provider: azure), they share the `azure_openai` rate limit.
 
 ### Example: Azure LLM Pipeline with Rate Limits
 
@@ -672,8 +702,9 @@ source:
 
 transforms:
   # First LLM transform
-  - plugin: azure_llm
+  - plugin: llm
     options:
+      provider: azure
       deployment_name: gpt-4o
       endpoint: ${AZURE_OPENAI_ENDPOINT}
       api_key: ${AZURE_OPENAI_KEY}
@@ -682,8 +713,9 @@ transforms:
         fields: dynamic
 
   # Second LLM transform - shares rate limit with first
-  - plugin: azure_llm
+  - plugin: llm
     options:
+      provider: azure
       deployment_name: gpt-4o
       endpoint: ${AZURE_OPENAI_ENDPOINT}
       api_key: ${AZURE_OPENAI_KEY}
@@ -704,7 +736,7 @@ rate_limit:
   enabled: true
   services:
     azure_openai:
-      requests_per_minute: 100  # 100 RPM shared across all azure_llm transforms
+      requests_per_minute: 100  # 100 RPM shared across all llm (provider: azure) transforms
 ```
 
 ### Persistence for Distributed Systems
@@ -724,7 +756,7 @@ This ensures rate limits are respected across multiple pipeline processes hittin
 
 ### Two-Layer Rate Control (LLM Transforms)
 
-LLM transforms like `azure_multi_query_llm` have **two complementary throttling mechanisms** working at different layers:
+LLM transforms like `llm` (provider: azure, with multiple queries) have **two complementary throttling mechanisms** working at different layers:
 
 | Layer | Mechanism | Purpose | When It Acts |
 |-------|-----------|---------|--------------|
@@ -790,11 +822,15 @@ rate_limit:
 
 # Reactive handling (plugin options)
 transforms:
-  - plugin: azure_multi_query_llm
+  - plugin: llm
     options:
+      provider: azure
       deployment_name: gpt-4o
       endpoint: ${AZURE_OPENAI_ENDPOINT}
       api_key: ${AZURE_OPENAI_KEY}
+      queries:
+        - template: "Classify: {{ row.text }}"
+        - template: "Summarize: {{ row.text }}"
       pool_size: 8                      # Concurrent queries per row
       max_dispatch_delay_ms: 5000       # Max AIMD backoff delay (ms)
       max_capacity_retry_seconds: 3600  # Give up after 1 hour of 429s
@@ -1114,6 +1150,7 @@ gates:
 # Source - where data comes from
 source:
   plugin: csv
+  on_success: raw_data
   options:
     path: data/transactions.csv
     schema:
@@ -1149,21 +1186,24 @@ sinks:
 
 # Transforms
 transforms:
-  - plugin: field_mapper
+  - name: enricher
+    plugin: field_mapper
+    input: raw_data
+    on_success: enriched
     options:
       schema:
         fields: dynamic
       computed:
         processed_at: "row.get('timestamp', 'unknown')"
-      on_success: output
 
 # Gates - routing decisions
 gates:
   - name: amount_threshold
+    input: enriched
     condition: "row['amount'] > 1000"
     routes:
       "true": high_values
-      "false": continue
+      "false": output
 
 # Audit trail
 landscape:

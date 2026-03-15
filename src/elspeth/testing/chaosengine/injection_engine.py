@@ -1,4 +1,3 @@
-# src/elspeth/testing/chaosengine/injection_engine.py
 """Burst state machine and selection algorithms for chaos error injection.
 
 The InjectionEngine is a composable utility — NOT a base class. Each chaos

@@ -1,6 +1,8 @@
 """Tests for AzureContentSafety transform with BatchTransformMixin."""
 
-import itertools
+from __future__ import annotations
+
+from collections.abc import Generator
 from typing import TYPE_CHECKING, Any
 from unittest.mock import MagicMock, Mock, patch
 
@@ -8,13 +10,13 @@ import pytest
 
 from elspeth.contracts import TransformResult
 from elspeth.contracts.identity import TokenInfo
-from elspeth.contracts.plugin_context import PluginContext
-from elspeth.plugins.batching.ports import CollectorOutputPort
-from elspeth.plugins.config_base import PluginConfigError
+from elspeth.plugins.infrastructure.batching.ports import CollectorOutputPort
+from elspeth.plugins.infrastructure.config_base import PluginConfigError
 from elspeth.testing import make_pipeline_row
+from tests.fixtures.factories import make_context
 
 if TYPE_CHECKING:
-    pass
+    from elspeth.plugins.transforms.azure.content_safety import AzureContentSafety
 
 
 def make_token(row_id: str = "row-1", token_id: str | None = None) -> TokenInfo:
@@ -24,26 +26,6 @@ def make_token(row_id: str = "row-1", token_id: str | None = None) -> TokenInfo:
         token_id=token_id or f"token-{row_id}",
         row_data=make_pipeline_row({}),
     )
-
-
-def make_mock_context(
-    state_id: str = "test-state-001",
-    token: TokenInfo | None = None,
-) -> Mock:
-    """Create mock PluginContext for testing with recorder.
-
-    The context includes a mock landscape/recorder with allocate_call_index
-    configured to return sequential indices.
-    """
-    counter = itertools.count()
-    ctx = Mock(spec=PluginContext)
-    ctx.run_id = "test-run"
-    ctx.state_id = state_id
-    ctx.landscape = Mock()
-    ctx.landscape.record_call = Mock()
-    ctx.landscape.allocate_call_index = Mock(side_effect=lambda _: next(counter))
-    ctx.token = token if token is not None else make_token("row-1")
-    return ctx
 
 
 def _create_mock_http_response(response_data: dict[str, Any]) -> Mock:
@@ -347,7 +329,7 @@ class TestAzureContentSafetyTransform:
             }
         )
 
-        ctx = make_mock_context()
+        ctx = make_context()
         row = make_pipeline_row({"content": "test"})
 
         with pytest.raises(NotImplementedError, match="accept"):
@@ -379,7 +361,7 @@ class TestContentSafetyBatchProcessing:
             }
         )
 
-        ctx = make_mock_context()
+        ctx = make_context()
         row = make_pipeline_row({"content": "test"})
 
         with pytest.raises(RuntimeError, match="connect_output"):
@@ -400,7 +382,7 @@ class TestContentSafetyBatchProcessing:
         )
 
         collector = CollectorOutputPort()
-        ctx = make_mock_context()
+        ctx = make_context()
         transform.on_start(ctx)
         transform.connect_output(collector, max_pending=10)
 
@@ -437,7 +419,7 @@ class TestContentSafetyBatchProcessing:
         )
 
         collector = CollectorOutputPort()
-        ctx = make_mock_context()
+        ctx = make_context()
         transform.on_start(ctx)
         transform.connect_output(collector, max_pending=10)
 
@@ -483,7 +465,7 @@ class TestContentSafetyBatchProcessing:
         )
 
         collector = CollectorOutputPort()
-        ctx = make_mock_context()
+        ctx = make_context()
         transform.on_start(ctx)
         transform.connect_output(collector, max_pending=10)
 
@@ -533,7 +515,7 @@ class TestContentSafetyBatchProcessing:
         )
 
         collector = CollectorOutputPort()
-        ctx = make_mock_context()
+        ctx = make_context()
         transform.on_start(ctx)
         transform.connect_output(collector, max_pending=10)
 
@@ -589,7 +571,7 @@ class TestContentSafetyBatchProcessing:
         )
 
         collector = CollectorOutputPort()
-        ctx = make_mock_context()
+        ctx = make_context()
         transform.on_start(ctx)
         transform.connect_output(collector, max_pending=10)
 
@@ -643,7 +625,7 @@ class TestContentSafetyBatchProcessing:
         )
 
         collector = CollectorOutputPort()
-        ctx = make_mock_context()
+        ctx = make_context()
         transform.on_start(ctx)
         transform.connect_output(collector, max_pending=10)
 
@@ -682,7 +664,7 @@ class TestContentSafetyBatchProcessing:
         )
 
         collector = CollectorOutputPort()
-        ctx = make_mock_context()
+        ctx = make_context()
         transform.on_start(ctx)
         transform.connect_output(collector, max_pending=10)
 
@@ -729,7 +711,7 @@ class TestContentSafetyBatchProcessing:
         )
 
         collector = CollectorOutputPort()
-        ctx = make_mock_context()
+        ctx = make_context()
         transform.on_start(ctx)
         transform.connect_output(collector, max_pending=10)
 
@@ -776,7 +758,7 @@ class TestContentSafetyBatchProcessing:
         )
 
         collector = CollectorOutputPort()
-        ctx = make_mock_context()
+        ctx = make_context()
         transform.on_start(ctx)
         transform.connect_output(collector, max_pending=10)
 
@@ -825,7 +807,7 @@ class TestContentSafetyBatchProcessing:
         )
 
         collector = CollectorOutputPort()
-        ctx = make_mock_context()
+        ctx = make_context()
         transform.on_start(ctx)
         transform.connect_output(collector, max_pending=10)
 
@@ -872,7 +854,7 @@ class TestContentSafetyBatchProcessing:
         )
 
         collector = CollectorOutputPort()
-        ctx = make_mock_context()
+        ctx = make_context()
         transform.on_start(ctx)
         transform.connect_output(collector, max_pending=10)
 
@@ -922,7 +904,7 @@ class TestContentSafetyBatchProcessing:
         )
 
         collector = CollectorOutputPort()
-        ctx = make_mock_context()
+        ctx = make_context()
         transform.on_start(ctx)
         transform.connect_output(collector, max_pending=10)
 
@@ -978,7 +960,7 @@ class TestContentSafetyBatchProcessing:
         )
 
         collector = CollectorOutputPort()
-        ctx_init = make_mock_context()
+        ctx_init = make_context()
         transform.on_start(ctx_init)
         transform.connect_output(collector, max_pending=10)
 
@@ -992,7 +974,7 @@ class TestContentSafetyBatchProcessing:
 
             for i, row_data in enumerate(rows_data):
                 token = make_token(f"row-{i}", f"token-{i}")
-                ctx = make_mock_context(state_id=f"state-{i}", token=token)
+                ctx = make_context(state_id=f"state-{i}", token=token)
                 row = make_pipeline_row(row_data)
                 transform.accept(row, ctx)
 
@@ -1052,7 +1034,7 @@ class TestContentSafetyFailsClosed:
         )
 
         collector = CollectorOutputPort()
-        ctx = make_mock_context()
+        ctx = make_context()
         transform.on_start(ctx)
         transform.connect_output(collector, max_pending=10)
 
@@ -1098,7 +1080,7 @@ class TestContentSafetyFailsClosed:
         )
 
         collector = CollectorOutputPort()
-        ctx = make_mock_context()
+        ctx = make_context()
         transform.on_start(ctx)
         transform.connect_output(collector, max_pending=10)
 
@@ -1130,7 +1112,7 @@ class TestContentSafetyInternalProcessing:
         """Rate limit (429) triggers CapacityError for AIMD retry."""
         import httpx
 
-        from elspeth.plugins.pooling import CapacityError
+        from elspeth.plugins.infrastructure.pooling import CapacityError
         from elspeth.plugins.transforms.azure.content_safety import AzureContentSafety
 
         mock_httpx_client.post.side_effect = httpx.HTTPStatusError(
@@ -1149,7 +1131,7 @@ class TestContentSafetyInternalProcessing:
             }
         )
 
-        ctx = make_mock_context()
+        ctx = make_context()
         transform.on_start(ctx)
 
         row_data = {"content": "test", "id": 1}
@@ -1182,7 +1164,7 @@ class TestContentSafetyInternalProcessing:
             }
         )
 
-        ctx = make_mock_context()
+        ctx = make_context()
         transform.on_start(ctx)
 
         row_data = {"content": "test", "id": 1}
@@ -1212,7 +1194,7 @@ class TestContentSafetyInternalProcessing:
             }
         )
 
-        ctx = make_mock_context()
+        ctx = make_context()
         transform.on_start(ctx)
 
         row_data = {"content": "test", "id": 1}
@@ -1248,7 +1230,7 @@ class TestResourceCleanup:
             )
 
             collector = CollectorOutputPort()
-            ctx = make_mock_context()
+            ctx = make_context()
             transform.on_start(ctx)
             transform.connect_output(collector, max_pending=10)
 
@@ -1296,7 +1278,7 @@ class TestResourceCleanup:
         )
 
         mock_recorder = MagicMock()
-        ctx = make_mock_context()
+        ctx = make_context()
         ctx.landscape = mock_recorder
 
         # Before on_start, recorder should be None
@@ -1322,14 +1304,14 @@ class TestContentSafetySeverityValidation:
     """
 
     @pytest.fixture(autouse=True)
-    def mock_httpx_client(self):
+    def mock_httpx_client(self) -> Generator[MagicMock, None, None]:
         """Patch httpx.Client to prevent real HTTP calls."""
         with patch("httpx.Client") as mock_client_class:
             mock_instance = MagicMock()
             mock_client_class.return_value = mock_instance
             yield mock_instance
 
-    def _make_transform(self):
+    def _make_transform(self) -> AzureContentSafety:
         """Create a Content Safety transform for testing."""
         from elspeth.plugins.transforms.azure.content_safety import AzureContentSafety
 
@@ -1342,7 +1324,7 @@ class TestContentSafetySeverityValidation:
                 "schema": {"mode": "observed"},
             }
         )
-        ctx = make_mock_context()
+        ctx = make_context()
         transform.on_start(ctx)
         return transform
 
@@ -1372,13 +1354,15 @@ class TestContentSafetySeverityValidation:
 
         try:
             row = make_pipeline_row({"content": "test", "id": 1})
-            ctx = make_mock_context()
+            ctx = make_context()
             transform.accept(row, ctx)
             transform.flush_batch_processing(timeout=10.0)
 
             assert len(collector.results) == 1
             _, result, _ = collector.results[0]
+            assert isinstance(result, TransformResult)
             assert result.status == "error"
+            assert isinstance(result.reason, dict)
             assert result.reason["error_type"] == "malformed_response"
             assert "severity" in result.reason["message"].lower()
         finally:
@@ -1408,13 +1392,15 @@ class TestContentSafetySeverityValidation:
 
         try:
             row = make_pipeline_row({"content": "test", "id": 1})
-            ctx = make_mock_context()
+            ctx = make_context()
             transform.accept(row, ctx)
             transform.flush_batch_processing(timeout=10.0)
 
             assert len(collector.results) == 1
             _, result, _ = collector.results[0]
+            assert isinstance(result, TransformResult)
             assert result.status == "error"
+            assert isinstance(result.reason, dict)
             assert result.reason["error_type"] == "malformed_response"
         finally:
             transform.close()
@@ -1439,13 +1425,15 @@ class TestContentSafetySeverityValidation:
 
         try:
             row = make_pipeline_row({"content": "test", "id": 1})
-            ctx = make_mock_context()
+            ctx = make_context()
             transform.accept(row, ctx)
             transform.flush_batch_processing(timeout=10.0)
 
             assert len(collector.results) == 1
             _, result, _ = collector.results[0]
+            assert isinstance(result, TransformResult)
             assert result.status == "error"
+            assert isinstance(result.reason, dict)
             assert result.reason["error_type"] == "malformed_response"
             assert "-1" in result.reason["message"]
         finally:
@@ -1471,13 +1459,15 @@ class TestContentSafetySeverityValidation:
 
         try:
             row = make_pipeline_row({"content": "test", "id": 1})
-            ctx = make_mock_context()
+            ctx = make_context()
             transform.accept(row, ctx)
             transform.flush_batch_processing(timeout=10.0)
 
             assert len(collector.results) == 1
             _, result, _ = collector.results[0]
+            assert isinstance(result, TransformResult)
             assert result.status == "error"
+            assert isinstance(result.reason, dict)
             assert result.reason["error_type"] == "malformed_response"
         finally:
             transform.close()
@@ -1502,13 +1492,15 @@ class TestContentSafetySeverityValidation:
 
         try:
             row = make_pipeline_row({"content": "test", "id": 1})
-            ctx = make_mock_context()
+            ctx = make_context()
             transform.accept(row, ctx)
             transform.flush_batch_processing(timeout=10.0)
 
             assert len(collector.results) == 1
             _, result, _ = collector.results[0]
+            assert isinstance(result, TransformResult)
             assert result.status == "error"
+            assert isinstance(result.reason, dict)
             assert result.reason["error_type"] == "malformed_response"
         finally:
             transform.close()
@@ -1534,18 +1526,20 @@ class TestContentSafetySeverityValidation:
 
         try:
             row = make_pipeline_row({"content": "test", "id": 1})
-            ctx = make_mock_context()
+            ctx = make_context()
             transform.accept(row, ctx)
             transform.flush_batch_processing(timeout=10.0)
 
             assert len(collector.results) == 1
             _, result, _ = collector.results[0]
+            assert isinstance(result, TransformResult)
             # valid_severity <= 2 (threshold) passes; > 2 is a content violation
             # Both are valid API responses — not malformed_response errors
             if valid_severity <= 2:
                 assert result.status == "success"
             else:
                 assert result.status == "error"
+                assert isinstance(result.reason, dict)
                 assert result.reason["reason"] == "content_safety_violation"
         finally:
             transform.close()
@@ -1570,13 +1564,15 @@ class TestContentSafetySeverityValidation:
 
         try:
             row = make_pipeline_row({"content": "test", "id": 1})
-            ctx = make_mock_context()
+            ctx = make_context()
             transform.accept(row, ctx)
             transform.flush_batch_processing(timeout=10.0)
 
             assert len(collector.results) == 1
             _, result, _ = collector.results[0]
+            assert isinstance(result, TransformResult)
             assert result.status == "error"
+            assert isinstance(result.reason, dict)
             assert result.reason["error_type"] == "malformed_response"
         finally:
             transform.close()
@@ -1601,13 +1597,15 @@ class TestContentSafetySeverityValidation:
 
         try:
             row = make_pipeline_row({"content": "test", "id": 1})
-            ctx = make_mock_context()
+            ctx = make_context()
             transform.accept(row, ctx)
             transform.flush_batch_processing(timeout=10.0)
 
             assert len(collector.results) == 1
             _, result, _ = collector.results[0]
+            assert isinstance(result, TransformResult)
             assert result.status == "error"
+            assert isinstance(result.reason, dict)
             assert result.reason["error_type"] == "malformed_response"
         finally:
             transform.close()
@@ -1632,13 +1630,15 @@ class TestContentSafetySeverityValidation:
 
         try:
             row = make_pipeline_row({"content": "test", "id": 1})
-            ctx = make_mock_context()
+            ctx = make_context()
             transform.accept(row, ctx)
             transform.flush_batch_processing(timeout=10.0)
 
             assert len(collector.results) == 1
             _, result, _ = collector.results[0]
+            assert isinstance(result, TransformResult)
             assert result.status == "error"
+            assert isinstance(result.reason, dict)
             assert result.reason["error_type"] == "malformed_response"
         finally:
             transform.close()
@@ -1654,7 +1654,7 @@ class TestContentSafetyRetryRaceCondition:
     """
 
     @pytest.fixture(autouse=True)
-    def mock_httpx_client(self):
+    def mock_httpx_client(self) -> Generator[MagicMock, None, None]:
         """Patch httpx.Client to prevent real HTTP calls."""
         with patch("httpx.Client") as mock_client_class:
             mock_instance = MagicMock()
@@ -1691,7 +1691,7 @@ class TestContentSafetyRetryRaceCondition:
             }
         )
 
-        ctx = make_mock_context(state_id="original-state-id")
+        ctx = make_context(state_id="original-state-id")
         transform.on_start(ctx)
 
         original_state_id = "original-state-id"
@@ -1743,7 +1743,7 @@ class TestContentSafetyRetryRaceCondition:
             }
         )
 
-        ctx = make_mock_context(state_id=original_state_id)
+        ctx = make_context(state_id=original_state_id)
         transform.on_start(ctx)
 
         row = make_pipeline_row({"content": "test", "id": 1})

@@ -1,4 +1,3 @@
-# src/elspeth/mcp/analyzer.py
 """Thin facade for the Landscape audit database analyzer.
 
 LandscapeAnalyzer keeps its public API but delegates every method
@@ -67,8 +66,6 @@ class LandscapeAnalyzer:
         """Close database connection."""
         self._db.close()
 
-    # === Core Query Tools (queries module) ===
-
     def list_runs(self, limit: int = 50, status: str | None = None) -> list[RunRecord]:
         return queries.list_runs(self._db, self._recorder, limit=limit, status=status)
 
@@ -126,8 +123,6 @@ class LandscapeAnalyzer:
     def query(self, sql: str, params: dict[str, Any] | None = None) -> list[dict[str, Any]]:
         return queries.query(self._db, self._recorder, sql, params=params)
 
-    # === Computed Analysis Tools (reports module) ===
-
     def get_run_summary(self, run_id: str) -> RunSummaryReport | ErrorResult:
         return reports.get_run_summary(self._db, self._recorder, run_id)
 
@@ -149,8 +144,6 @@ class LandscapeAnalyzer:
     def get_outcome_analysis(self, run_id: str) -> OutcomeAnalysisReport | ErrorResult:
         return reports.get_outcome_analysis(self._db, self._recorder, run_id)
 
-    # === Emergency Diagnostic Tools (diagnostics module) ===
-
     def diagnose(self) -> DiagnosticReport:
         return diagnostics.diagnose(self._db, self._recorder)
 
@@ -159,8 +152,6 @@ class LandscapeAnalyzer:
 
     def get_recent_activity(self, minutes: int = 60) -> RecentActivityReport:
         return diagnostics.get_recent_activity(self._db, self._recorder, minutes=minutes)
-
-    # === Schema Contract Tools (contracts module) ===
 
     def get_run_contract(self, run_id: str) -> RunContractReport | ErrorResult:
         return contracts.get_run_contract(self._db, self._recorder, run_id)

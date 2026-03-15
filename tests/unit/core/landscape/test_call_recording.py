@@ -3,40 +3,22 @@ from __future__ import annotations
 import pytest
 
 from elspeth.contracts import CallStatus, CallType, FrameworkBugError, NodeType
-from elspeth.contracts.schema import SchemaConfig
+from elspeth.contracts.call_data import RawCallPayload
 from elspeth.core.canonical import stable_hash
 from elspeth.core.landscape import LandscapeDB, LandscapeRecorder
+from elspeth.core.landscape.row_data import CallDataResult, CallDataState
 from elspeth.core.landscape.schema import operations_table
-
-_DYNAMIC_SCHEMA = SchemaConfig.from_dict({"mode": "observed"})
+from tests.fixtures.landscape import make_landscape_db, make_recorder, make_recorder_with_run, register_test_node
 
 
 def _setup(*, run_id: str = "run-1") -> tuple[LandscapeDB, LandscapeRecorder, str]:
     """Create DB, recorder, run, nodes, row, token, and node_state. Returns (db, recorder, state_id)."""
-    db = LandscapeDB.in_memory()
-    recorder = LandscapeRecorder(db)
-    recorder.begin_run(config={}, canonical_version="v1", run_id=run_id)
-    recorder.register_node(
-        run_id=run_id,
-        plugin_name="csv",
-        node_type=NodeType.SOURCE,
-        plugin_version="1.0",
-        config={},
-        node_id="source-0",
-        schema_config=_DYNAMIC_SCHEMA,
-    )
-    recorder.register_node(
-        run_id=run_id,
-        plugin_name="transform",
-        node_type=NodeType.TRANSFORM,
-        plugin_version="1.0",
-        config={},
-        node_id="transform-1",
-        schema_config=_DYNAMIC_SCHEMA,
-    )
-    recorder.create_row(run_id, "source-0", 0, {"name": "test"}, row_id="row-1")
+    setup = make_recorder_with_run(run_id=run_id, source_node_id="source-0", source_plugin_name="csv")
+    db, recorder, run_id_ = setup.db, setup.recorder, setup.run_id
+    register_test_node(recorder, run_id_, "transform-1", plugin_name="transform")
+    recorder.create_row(run_id_, "source-0", 0, {"name": "test"}, row_id="row-1")
     recorder.create_token("row-1", token_id="tok-1")
-    state = recorder.begin_node_state("tok-1", "transform-1", run_id, 0, {"name": "test"}, state_id="state-1")
+    state = recorder.begin_node_state("tok-1", "transform-1", run_id_, 0, {"name": "test"}, state_id="state-1")
     return db, recorder, state.state_id
 
 
@@ -65,41 +47,15 @@ class TestAllocateCallIndex:
         assert idx2 == 2
 
     def test_independent_per_state_id(self):
-        db = LandscapeDB.in_memory()
-        recorder = LandscapeRecorder(db)
-        recorder.begin_run(config={}, canonical_version="v1", run_id="run-1")
-        recorder.register_node(
-            run_id="run-1",
-            plugin_name="csv",
-            node_type=NodeType.SOURCE,
-            plugin_version="1.0",
-            config={},
-            node_id="source-0",
-            schema_config=_DYNAMIC_SCHEMA,
-        )
-        recorder.register_node(
-            run_id="run-1",
-            plugin_name="t1",
-            node_type=NodeType.TRANSFORM,
-            plugin_version="1.0",
-            config={},
-            node_id="transform-1",
-            schema_config=_DYNAMIC_SCHEMA,
-        )
-        recorder.register_node(
-            run_id="run-1",
-            plugin_name="t2",
-            node_type=NodeType.TRANSFORM,
-            plugin_version="1.0",
-            config={},
-            node_id="transform-2",
-            schema_config=_DYNAMIC_SCHEMA,
-        )
-        recorder.create_row("run-1", "source-0", 0, {"x": 1}, row_id="row-1")
+        setup = make_recorder_with_run(run_id="run-1", source_node_id="source-0", source_plugin_name="csv")
+        recorder, run_id = setup.recorder, setup.run_id
+        register_test_node(recorder, run_id, "transform-1", plugin_name="t1")
+        register_test_node(recorder, run_id, "transform-2", plugin_name="t2")
+        recorder.create_row(run_id, "source-0", 0, {"x": 1}, row_id="row-1")
         recorder.create_token("row-1", token_id="tok-a")
         recorder.create_token("row-1", token_id="tok-b")
-        state_a = recorder.begin_node_state("tok-a", "transform-1", "run-1", 0, {"x": 1}, state_id="state-a")
-        state_b = recorder.begin_node_state("tok-b", "transform-2", "run-1", 0, {"x": 1}, state_id="state-b")
+        state_a = recorder.begin_node_state("tok-a", "transform-1", run_id, 0, {"x": 1}, state_id="state-a")
+        state_b = recorder.begin_node_state("tok-b", "transform-2", run_id, 0, {"x": 1}, state_id="state-b")
 
         assert recorder.allocate_call_index(state_a.state_id) == 0
         assert recorder.allocate_call_index(state_b.state_id) == 0
@@ -125,12 +81,12 @@ class TestAllocateCallIndex:
                 idx,
                 CallType.LLM,
                 CallStatus.SUCCESS,
-                request_data={"i": i},
-                response_data={"r": i},
+                request_data=RawCallPayload({"i": i}),
+                response_data=RawCallPayload({"r": i}),
             )
 
         # Create a NEW recorder on the same DB (simulates resume)
-        recorder2 = LandscapeRecorder(db)
+        recorder2 = make_recorder(db)
 
         # New recorder should seed from DB and continue at index 3
         idx = recorder2.allocate_call_index(state_id)
@@ -149,12 +105,12 @@ class TestAllocateCallIndex:
                 operation_id,
                 CallType.HTTP,
                 CallStatus.SUCCESS,
-                request_data={"url": "https://example.com"},
-                response_data={"status": 200},
+                request_data=RawCallPayload({"url": "https://example.com"}),
+                response_data=RawCallPayload({"status": 200}),
             )
 
         # Create a NEW recorder on the same DB (simulates resume)
-        recorder2 = LandscapeRecorder(db)
+        recorder2 = make_recorder(db)
 
         # New recorder should seed from DB and continue at index 2
         idx = recorder2.allocate_operation_call_index(operation_id)
@@ -181,8 +137,8 @@ class TestRecordCall:
             idx,
             CallType.LLM,
             CallStatus.SUCCESS,
-            request_data={"prompt": "hello"},
-            response_data={"text": "world"},
+            request_data=RawCallPayload({"prompt": "hello"}),
+            response_data=RawCallPayload({"text": "world"}),
             latency_ms=42,
         )
 
@@ -203,8 +159,8 @@ class TestRecordCall:
             idx,
             CallType.HTTP,
             CallStatus.SUCCESS,
-            request_data={"url": "https://example.com"},
-            response_data={"status": 200},
+            request_data=RawCallPayload({"url": "https://example.com"}),
+            response_data=RawCallPayload({"status": 200}),
         )
 
         assert call.response_hash is not None
@@ -220,8 +176,8 @@ class TestRecordCall:
             idx,
             CallType.LLM,
             CallStatus.ERROR,
-            request_data={"prompt": "fail"},
-            error={"code": "rate_limit", "message": "Too many requests"},
+            request_data=RawCallPayload({"prompt": "fail"}),
+            error=RawCallPayload({"code": "rate_limit", "message": "Too many requests"}),
             latency_ms=100,
         )
 
@@ -238,7 +194,7 @@ class TestRecordCall:
             idx,
             CallType.SQL,
             CallStatus.SUCCESS,
-            request_data={"query": "SELECT 1"},
+            request_data=RawCallPayload({"query": "SELECT 1"}),
             request_ref="req-ref-abc",
             response_ref="resp-ref-xyz",
         )
@@ -255,7 +211,7 @@ class TestRecordCall:
             idx,
             CallType.FILESYSTEM,
             CallStatus.SUCCESS,
-            request_data={"path": "/tmp/file.txt"},
+            request_data=RawCallPayload({"path": "/tmp/file.txt"}),
         )
 
         assert call.response_hash is None
@@ -272,8 +228,8 @@ class TestRecordCall:
                 idx,
                 CallType.LLM,
                 CallStatus.SUCCESS,
-                request_data={"prompt": f"call-{i}"},
-                response_data={"text": f"response-{i}"},
+                request_data=RawCallPayload({"prompt": f"call-{i}"}),
+                response_data=RawCallPayload({"text": f"response-{i}"}),
             )
             calls.append(call)
 
@@ -306,20 +262,11 @@ class TestBeginOperation:
         assert op1.operation_id != op2.operation_id
 
     def test_sink_write_operation(self):
-        db = LandscapeDB.in_memory()
-        recorder = LandscapeRecorder(db)
-        recorder.begin_run(config={}, canonical_version="v1", run_id="run-1")
-        recorder.register_node(
-            run_id="run-1",
-            plugin_name="csv_sink",
-            node_type=NodeType.SINK,
-            plugin_version="1.0",
-            config={},
-            node_id="sink-0",
-            schema_config=_DYNAMIC_SCHEMA,
-        )
+        setup = make_recorder_with_run(run_id="run-1")
+        recorder, run_id = setup.recorder, setup.run_id
+        register_test_node(recorder, run_id, "sink-0", node_type=NodeType.SINK, plugin_name="csv_sink")
 
-        op = recorder.begin_operation("run-1", "sink-0", "sink_write")
+        op = recorder.begin_operation(run_id, "sink-0", "sink_write")
 
         assert op.operation_type == "sink_write"
         assert op.status == "open"
@@ -350,18 +297,8 @@ class TestBeginOperation:
 
     def test_input_hash_persisted_without_payload_store(self):
         """Hash must be computed even when no payload store is configured."""
-        db = LandscapeDB.in_memory()
-        recorder = LandscapeRecorder(db)  # No payload_store
-        recorder.begin_run(config={}, canonical_version="v1", run_id="run-1")
-        recorder.register_node(
-            run_id="run-1",
-            plugin_name="csv",
-            node_type=NodeType.SOURCE,
-            plugin_version="1.0",
-            config={},
-            node_id="source-0",
-            schema_config=SchemaConfig.from_dict({"mode": "observed"}),
-        )
+        setup = make_recorder_with_run(run_id="run-1", source_node_id="source-0", source_plugin_name="csv")
+        recorder = setup.recorder
 
         op = recorder.begin_operation("run-1", "source-0", "source_load", input_data={"file": "data.csv"})
 
@@ -440,18 +377,8 @@ class TestCompleteOperation:
 
     def test_output_hash_persisted_without_payload_store(self):
         """Output hash must be computed even when no payload store is configured."""
-        db = LandscapeDB.in_memory()
-        recorder = LandscapeRecorder(db)  # No payload_store
-        recorder.begin_run(config={}, canonical_version="v1", run_id="run-1")
-        recorder.register_node(
-            run_id="run-1",
-            plugin_name="csv",
-            node_type=NodeType.SOURCE,
-            plugin_version="1.0",
-            config={},
-            node_id="source-0",
-            schema_config=SchemaConfig.from_dict({"mode": "observed"}),
-        )
+        setup = make_recorder_with_run(run_id="run-1", source_node_id="source-0", source_plugin_name="csv")
+        recorder = setup.recorder
         op = recorder.begin_operation("run-1", "source-0", "source_load")
 
         recorder.complete_operation(op.operation_id, "completed", output_data={"count": 42}, duration_ms=100)
@@ -477,19 +404,11 @@ class TestCompleteOperation:
         """Payload must not be stored when operation is already completed."""
         from elspeth.core.payload_store import FilesystemPayloadStore
 
-        db = LandscapeDB.in_memory()
+        db = make_landscape_db()
         store = FilesystemPayloadStore(tmp_path / "payloads")
         recorder = LandscapeRecorder(db, payload_store=store)
         recorder.begin_run(config={}, canonical_version="v1", run_id="run-1")
-        recorder.register_node(
-            run_id="run-1",
-            plugin_name="csv",
-            node_type=NodeType.SOURCE,
-            plugin_version="1.0",
-            config={},
-            node_id="source-0",
-            schema_config=SchemaConfig.from_dict({"mode": "observed"}),
-        )
+        register_test_node(recorder, "run-1", "source-0", node_type=NodeType.SOURCE, plugin_name="csv")
         op = recorder.begin_operation("run-1", "source-0", "source_load")
 
         # First completion succeeds
@@ -514,7 +433,7 @@ class TestCompleteOperation:
         """Payload must not be stored when operation_id is invalid."""
         from elspeth.core.payload_store import FilesystemPayloadStore
 
-        db = LandscapeDB.in_memory()
+        db = make_landscape_db()
         store = FilesystemPayloadStore(tmp_path / "payloads")
         recorder = LandscapeRecorder(db, payload_store=store)
         recorder.begin_run(config={}, canonical_version="v1", run_id="run-1")
@@ -530,19 +449,11 @@ class TestCompleteOperation:
         """When payload store is configured, output_data_ref must be set on success."""
         from elspeth.core.payload_store import FilesystemPayloadStore
 
-        db = LandscapeDB.in_memory()
+        db = make_landscape_db()
         store = FilesystemPayloadStore(tmp_path / "payloads")
         recorder = LandscapeRecorder(db, payload_store=store)
         recorder.begin_run(config={}, canonical_version="v1", run_id="run-1")
-        recorder.register_node(
-            run_id="run-1",
-            plugin_name="csv",
-            node_type=NodeType.SOURCE,
-            plugin_version="1.0",
-            config={},
-            node_id="source-0",
-            schema_config=SchemaConfig.from_dict({"mode": "observed"}),
-        )
+        register_test_node(recorder, "run-1", "source-0", node_type=NodeType.SOURCE, plugin_name="csv")
         op = recorder.begin_operation("run-1", "source-0", "source_load")
 
         recorder.complete_operation(op.operation_id, "completed", output_data={"rows_loaded": 42}, duration_ms=100)
@@ -555,19 +466,11 @@ class TestCompleteOperation:
     def test_empty_output_data_ref_set_with_payload_store(self, tmp_path):
         from elspeth.core.payload_store import FilesystemPayloadStore
 
-        db = LandscapeDB.in_memory()
+        db = make_landscape_db()
         store = FilesystemPayloadStore(tmp_path / "payloads")
         recorder = LandscapeRecorder(db, payload_store=store)
         recorder.begin_run(config={}, canonical_version="v1", run_id="run-1")
-        recorder.register_node(
-            run_id="run-1",
-            plugin_name="csv",
-            node_type=NodeType.SOURCE,
-            plugin_version="1.0",
-            config={},
-            node_id="source-0",
-            schema_config=SchemaConfig.from_dict({"mode": "observed"}),
-        )
+        register_test_node(recorder, "run-1", "source-0", node_type=NodeType.SOURCE, plugin_name="csv")
         op = recorder.begin_operation("run-1", "source-0", "source_load")
 
         recorder.complete_operation(op.operation_id, "completed", output_data={}, duration_ms=100)
@@ -613,8 +516,8 @@ class TestRecordOperationCall:
             op_id,
             CallType.HTTP,
             CallStatus.SUCCESS,
-            request_data={"url": "https://api.example.com/data"},
-            response_data={"rows": 50},
+            request_data=RawCallPayload({"url": "https://api.example.com/data"}),
+            response_data=RawCallPayload({"rows": 50}),
             latency_ms=200,
         )
 
@@ -633,29 +536,14 @@ class TestRecordOperationCall:
             op_id,
             CallType.SQL,
             CallStatus.ERROR,
-            request_data={"query": "SELECT * FROM missing"},
-            error={"code": "table_not_found", "message": "Table does not exist"},
+            request_data=RawCallPayload({"query": "SELECT * FROM missing"}),
+            error=RawCallPayload({"code": "table_not_found", "message": "Table does not exist"}),
             latency_ms=3,
         )
 
         assert call.status == CallStatus.ERROR
         assert call.error_json is not None
         assert "table_not_found" in call.error_json
-
-    def test_operation_call_with_provider(self):
-        _db, recorder, _state_id, op_id = _setup_with_operation()
-
-        call = recorder.record_operation_call(
-            op_id,
-            CallType.LLM,
-            CallStatus.SUCCESS,
-            request_data={"prompt": "classify"},
-            response_data={"label": "A"},
-            provider="azure-openai",
-        )
-
-        assert call.call_id is not None
-        assert call.call_type == CallType.LLM
 
     def test_operation_call_with_refs(self):
         _db, recorder, _state_id, op_id = _setup_with_operation()
@@ -664,7 +552,7 @@ class TestRecordOperationCall:
             op_id,
             CallType.FILESYSTEM,
             CallStatus.SUCCESS,
-            request_data={"path": "/data/file.csv"},
+            request_data=RawCallPayload({"path": "/data/file.csv"}),
             request_ref="req-ref-001",
             response_ref="resp-ref-001",
         )
@@ -681,7 +569,7 @@ class TestRecordOperationCall:
                 op_id,
                 CallType.HTTP,
                 CallStatus.SUCCESS,
-                request_data={"url": f"https://example.com/{i}"},
+                request_data=RawCallPayload({"url": f"https://example.com/{i}"}),
             )
             calls.append(call)
 
@@ -732,7 +620,7 @@ class TestGetOperationCalls:
                 op_id,
                 CallType.HTTP,
                 CallStatus.SUCCESS,
-                request_data={"index": i},
+                request_data=RawCallPayload({"index": i}),
             )
 
         calls = recorder.get_operation_calls(op_id)
@@ -756,13 +644,13 @@ class TestGetOperationCalls:
             idx,
             CallType.LLM,
             CallStatus.SUCCESS,
-            request_data={"prompt": "state-call"},
+            request_data=RawCallPayload({"prompt": "state-call"}),
         )
         recorder.record_operation_call(
             op_id,
             CallType.HTTP,
             CallStatus.SUCCESS,
-            request_data={"url": "https://example.com"},
+            request_data=RawCallPayload({"url": "https://example.com"}),
         )
 
         op_calls = recorder.get_operation_calls(op_id)
@@ -792,28 +680,12 @@ class TestGetOperationsForRun:
         assert ops == []
 
     def test_does_not_include_operations_from_other_runs(self):
-        db = LandscapeDB.in_memory()
-        recorder = LandscapeRecorder(db)
+        db = make_landscape_db()
+        recorder = make_recorder(db)
         recorder.begin_run(config={}, canonical_version="v1", run_id="run-a")
-        recorder.register_node(
-            run_id="run-a",
-            plugin_name="csv",
-            node_type=NodeType.SOURCE,
-            plugin_version="1.0",
-            config={},
-            node_id="source-0",
-            schema_config=_DYNAMIC_SCHEMA,
-        )
+        register_test_node(recorder, "run-a", "source-0", node_type=NodeType.SOURCE, plugin_name="csv")
         recorder.begin_run(config={}, canonical_version="v1", run_id="run-b")
-        recorder.register_node(
-            run_id="run-b",
-            plugin_name="csv",
-            node_type=NodeType.SOURCE,
-            plugin_version="1.0",
-            config={},
-            node_id="source-0",
-            schema_config=_DYNAMIC_SCHEMA,
-        )
+        register_test_node(recorder, "run-b", "source-0", node_type=NodeType.SOURCE, plugin_name="csv")
         recorder.begin_operation("run-a", "source-0", "source_load")
         recorder.begin_operation("run-b", "source-0", "source_load")
 
@@ -837,13 +709,13 @@ class TestGetAllOperationCallsForRun:
             op1.operation_id,
             CallType.HTTP,
             CallStatus.SUCCESS,
-            request_data={"url": "a"},
+            request_data=RawCallPayload({"url": "a"}),
         )
         recorder.record_operation_call(
             op2.operation_id,
             CallType.SQL,
             CallStatus.SUCCESS,
-            request_data={"query": "b"},
+            request_data=RawCallPayload({"query": "b"}),
         )
 
         all_calls = recorder.get_all_operation_calls_for_run("run-1")
@@ -867,7 +739,7 @@ class TestGetAllOperationCallsForRun:
             op.operation_id,
             CallType.HTTP,
             CallStatus.SUCCESS,
-            request_data={"url": "op-call"},
+            request_data=RawCallPayload({"url": "op-call"}),
         )
         idx = recorder.allocate_call_index(state_id)
         recorder.record_call(
@@ -875,7 +747,7 @@ class TestGetAllOperationCallsForRun:
             idx,
             CallType.LLM,
             CallStatus.SUCCESS,
-            request_data={"prompt": "state-call"},
+            request_data=RawCallPayload({"prompt": "state-call"}),
         )
 
         all_calls = recorder.get_all_operation_calls_for_run("run-1")
@@ -895,8 +767,8 @@ class TestFindCallByRequestHash:
             idx,
             CallType.LLM,
             CallStatus.SUCCESS,
-            request_data={"prompt": "unique-request"},
-            response_data={"text": "response"},
+            request_data=RawCallPayload({"prompt": "unique-request"}),
+            response_data=RawCallPayload({"text": "response"}),
         )
 
         found = recorder.find_call_by_request_hash("run-1", CallType.LLM, original.request_hash)
@@ -919,7 +791,7 @@ class TestFindCallByRequestHash:
             idx,
             CallType.LLM,
             CallStatus.SUCCESS,
-            request_data={"prompt": "typed-request"},
+            request_data=RawCallPayload({"prompt": "typed-request"}),
         )
 
         found = recorder.find_call_by_request_hash("run-1", CallType.HTTP, original.request_hash)
@@ -937,7 +809,7 @@ class TestFindCallByRequestHash:
                 idx,
                 CallType.LLM,
                 CallStatus.SUCCESS,
-                request_data=same_request,
+                request_data=RawCallPayload(same_request),
             )
             calls.append(call)
 
@@ -952,7 +824,8 @@ class TestFindCallByRequestHash:
 class TestGetCallResponseData:
     """Tests for retrieving response data from the payload store."""
 
-    def test_returns_none_without_payload_store(self):
+    def test_returns_hash_only_without_payload_store(self):
+        """Without a payload store, response_ref is never set but response_hash is — state is HASH_ONLY."""
         _db, recorder, state_id = _setup()
         idx = recorder.allocate_call_index(state_id)
         call = recorder.record_call(
@@ -960,15 +833,17 @@ class TestGetCallResponseData:
             idx,
             CallType.LLM,
             CallStatus.SUCCESS,
-            request_data={"prompt": "hello"},
-            response_data={"text": "world"},
+            request_data=RawCallPayload({"prompt": "hello"}),
+            response_data=RawCallPayload({"text": "world"}),
         )
 
         result = recorder.get_call_response_data(call.call_id)
 
-        assert result is None
+        assert isinstance(result, CallDataResult)
+        assert result.state == CallDataState.HASH_ONLY
+        assert result.data is None
 
-    def test_returns_none_for_call_without_response(self):
+    def test_returns_never_stored_for_call_without_response(self):
         _db, recorder, state_id = _setup()
         idx = recorder.allocate_call_index(state_id)
         call = recorder.record_call(
@@ -976,13 +851,63 @@ class TestGetCallResponseData:
             idx,
             CallType.LLM,
             CallStatus.ERROR,
-            request_data={"prompt": "fail"},
-            error={"code": "error"},
+            request_data=RawCallPayload({"prompt": "fail"}),
+            error=RawCallPayload({"code": "error"}),
         )
 
         result = recorder.get_call_response_data(call.call_id)
 
-        assert result is None
+        assert isinstance(result, CallDataResult)
+        assert result.state == CallDataState.NEVER_STORED
+        assert result.data is None
+
+    def test_returns_hash_only_when_response_recorded_without_payload_store(self):
+        """When response_data is provided but no payload store exists,
+        response_hash is set but response_ref is NULL — state should be HASH_ONLY."""
+        _db, recorder, state_id = _setup()
+        idx = recorder.allocate_call_index(state_id)
+        call = recorder.record_call(
+            state_id,
+            idx,
+            CallType.LLM,
+            CallStatus.SUCCESS,
+            request_data=RawCallPayload({"prompt": "hello"}),
+            response_data=RawCallPayload({"text": "world"}),
+        )
+
+        # Precondition: response_hash is set, response_ref is not
+        assert call.response_hash is not None
+        assert call.response_ref is None
+
+        result = recorder.get_call_response_data(call.call_id)
+
+        assert isinstance(result, CallDataResult)
+        assert result.state == CallDataState.HASH_ONLY
+        assert result.data is None
+
+    def test_returns_never_stored_for_call_truly_without_response(self):
+        """When no response_data is provided at all (e.g., timeout),
+        both response_hash and response_ref are NULL — state should be NEVER_STORED."""
+        _db, recorder, state_id = _setup()
+        idx = recorder.allocate_call_index(state_id)
+        call = recorder.record_call(
+            state_id,
+            idx,
+            CallType.LLM,
+            CallStatus.ERROR,
+            request_data=RawCallPayload({"prompt": "fail"}),
+            error=RawCallPayload({"code": "timeout"}),
+        )
+
+        # Precondition: both response_hash and response_ref are None
+        assert call.response_hash is None
+        assert call.response_ref is None
+
+        result = recorder.get_call_response_data(call.call_id)
+
+        assert isinstance(result, CallDataResult)
+        assert result.state == CallDataState.NEVER_STORED
+        assert result.data is None
 
     def test_raises_on_non_dict_response_payload(self, tmp_path):
         """Bug gxan: non-dict JSON must raise AuditIntegrityError."""
@@ -991,28 +916,12 @@ class TestGetCallResponseData:
         from elspeth.contracts.errors import AuditIntegrityError
         from elspeth.core.payload_store import FilesystemPayloadStore
 
-        db = LandscapeDB.in_memory()
+        db = make_landscape_db()
         store = FilesystemPayloadStore(tmp_path / "payloads")
         recorder = LandscapeRecorder(db, payload_store=store)
         recorder.begin_run(config={}, canonical_version="v1", run_id="run-1")
-        recorder.register_node(
-            run_id="run-1",
-            plugin_name="csv",
-            node_type=NodeType.SOURCE,
-            plugin_version="1.0",
-            config={},
-            node_id="source-0",
-            schema_config=SchemaConfig.from_dict({"mode": "observed"}),
-        )
-        recorder.register_node(
-            run_id="run-1",
-            plugin_name="transform",
-            node_type=NodeType.TRANSFORM,
-            plugin_version="1.0",
-            config={},
-            node_id="transform-1",
-            schema_config=SchemaConfig.from_dict({"mode": "observed"}),
-        )
+        register_test_node(recorder, "run-1", "source-0", node_type=NodeType.SOURCE, plugin_name="csv")
+        register_test_node(recorder, "run-1", "transform-1", plugin_name="transform")
         recorder.create_row("run-1", "source-0", 0, {"name": "test"}, row_id="row-1")
         recorder.create_token("row-1", token_id="tok-1")
         state = recorder.begin_node_state("tok-1", "transform-1", "run-1", 0, {"name": "test"}, state_id="state-1")
@@ -1027,8 +936,8 @@ class TestGetCallResponseData:
             idx,
             CallType.LLM,
             CallStatus.SUCCESS,
-            request_data={"prompt": "hello"},
-            response_data={"text": "world"},
+            request_data=RawCallPayload({"prompt": "hello"}),
+            response_data=RawCallPayload({"text": "world"}),
             response_ref=response_ref,  # Override with our corrupt ref
         )
 
@@ -1039,28 +948,12 @@ class TestGetCallResponseData:
         """Bug gxan: valid dict payload should return correctly."""
         from elspeth.core.payload_store import FilesystemPayloadStore
 
-        db = LandscapeDB.in_memory()
+        db = make_landscape_db()
         store = FilesystemPayloadStore(tmp_path / "payloads")
         recorder = LandscapeRecorder(db, payload_store=store)
         recorder.begin_run(config={}, canonical_version="v1", run_id="run-1")
-        recorder.register_node(
-            run_id="run-1",
-            plugin_name="csv",
-            node_type=NodeType.SOURCE,
-            plugin_version="1.0",
-            config={},
-            node_id="source-0",
-            schema_config=SchemaConfig.from_dict({"mode": "observed"}),
-        )
-        recorder.register_node(
-            run_id="run-1",
-            plugin_name="transform",
-            node_type=NodeType.TRANSFORM,
-            plugin_version="1.0",
-            config={},
-            node_id="transform-1",
-            schema_config=SchemaConfig.from_dict({"mode": "observed"}),
-        )
+        register_test_node(recorder, "run-1", "source-0", node_type=NodeType.SOURCE, plugin_name="csv")
+        register_test_node(recorder, "run-1", "transform-1", plugin_name="transform")
         recorder.create_row("run-1", "source-0", 0, {"name": "test"}, row_id="row-1")
         recorder.create_token("row-1", token_id="tok-1")
         state = recorder.begin_node_state("tok-1", "transform-1", "run-1", 0, {"name": "test"}, state_id="state-1")
@@ -1071,12 +964,46 @@ class TestGetCallResponseData:
             idx,
             CallType.LLM,
             CallStatus.SUCCESS,
-            request_data={"prompt": "hello"},
-            response_data={"text": "world"},
+            request_data=RawCallPayload({"prompt": "hello"}),
+            response_data=RawCallPayload({"text": "world"}),
         )
 
         result = recorder.get_call_response_data(call.call_id)
 
-        assert result is not None
-        assert isinstance(result, dict)
-        assert result["text"] == "world"
+        assert isinstance(result, CallDataResult)
+        assert result.state == CallDataState.AVAILABLE
+        assert result.data is not None
+        assert result.data["text"] == "world"
+
+    def test_payload_integrity_error_raises_audit_integrity(self, tmp_path):
+        """PayloadIntegrityError (hash mismatch) must translate to AuditIntegrityError with context."""
+        from unittest.mock import MagicMock
+
+        from elspeth.contracts.errors import AuditIntegrityError
+        from elspeth.contracts.payload_store import IntegrityError as PayloadIntegrityError
+
+        db = make_landscape_db()
+        mock_store = MagicMock()
+        # store() succeeds during recording, retrieve() fails with hash mismatch
+        mock_store.store.return_value = "sha256-abc123"
+        mock_store.retrieve.side_effect = PayloadIntegrityError("hash mismatch: expected abc, got def")
+        recorder = LandscapeRecorder(db, payload_store=mock_store)
+        recorder.begin_run(config={}, canonical_version="v1", run_id="run-1")
+        register_test_node(recorder, "run-1", "source-0", node_type=NodeType.SOURCE, plugin_name="csv")
+        register_test_node(recorder, "run-1", "transform-1", plugin_name="transform")
+        recorder.create_row("run-1", "source-0", 0, {"name": "test"}, row_id="row-1")
+        recorder.create_token("row-1", token_id="tok-1")
+        state = recorder.begin_node_state("tok-1", "transform-1", "run-1", 0, {"name": "test"}, state_id="state-1")
+
+        idx = recorder.allocate_call_index(state.state_id)
+        call = recorder.record_call(
+            state.state_id,
+            idx,
+            CallType.LLM,
+            CallStatus.SUCCESS,
+            request_data=RawCallPayload({"prompt": "hello"}),
+            response_data=RawCallPayload({"text": "world"}),
+        )
+
+        with pytest.raises(AuditIntegrityError, match="Payload integrity check failed for call_id="):
+            recorder.get_call_response_data(call.call_id)

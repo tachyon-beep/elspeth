@@ -16,7 +16,7 @@ from __future__ import annotations
 
 from typing import Any, cast
 
-from elspeth.contracts import PipelineRow, RunStatus
+from elspeth.contracts import PipelineRow, RunStatus, SinkProtocol, SourceProtocol
 from elspeth.core.config import (
     CoalesceSettings,
     ElspethSettings,
@@ -26,13 +26,12 @@ from elspeth.core.config import (
 )
 from elspeth.core.dag import ExecutionGraph
 from elspeth.core.dag.models import WiredTransform
-from elspeth.core.landscape import LandscapeDB
 from elspeth.engine.orchestrator import Orchestrator, PipelineConfig
-from elspeth.plugins.base import BaseTransform
-from elspeth.plugins.protocols import SinkProtocol, SourceProtocol
+from elspeth.plugins.infrastructure.base import BaseTransform
 from elspeth.testing import make_pipeline_row
 from tests.fixtures.base_classes import _TestSchema, as_sink, as_source, as_transform
 from tests.fixtures.factories import wire_transforms
+from tests.fixtures.landscape import make_landscape_db
 from tests.fixtures.plugins import CollectSink, FailTransform, ListSource
 
 # ---------------------------------------------------------------------------
@@ -51,7 +50,7 @@ class EnrichATransform(BaseTransform):
         super().__init__({"schema": {"mode": "observed"}})
 
     def process(self, row: PipelineRow, ctx: Any) -> Any:
-        from elspeth.plugins.results import TransformResult
+        from elspeth.plugins.infrastructure.results import TransformResult
 
         data = row.to_dict()
         data["enriched_a"] = data["value"] * 10
@@ -72,7 +71,7 @@ class EnrichBTransform(BaseTransform):
         super().__init__({"schema": {"mode": "observed"}})
 
     def process(self, row: PipelineRow, ctx: Any) -> Any:
-        from elspeth.plugins.results import TransformResult
+        from elspeth.plugins.infrastructure.results import TransformResult
 
         data = row.to_dict()
         data["enriched_b"] = data["value"] + 100
@@ -172,7 +171,7 @@ class TestBranchTransforms:
         Each branch's transform adds a distinct field, verifying that data
         flows through the correct branch transform before coalescing.
         """
-        db = LandscapeDB.in_memory()
+        db = make_landscape_db()
 
         gate = GateSettings(
             name="fork_gate",
@@ -237,7 +236,7 @@ class TestBranchTransforms:
         Overlapping fields (like 'value') come from one branch; unique fields
         ('enriched_a', 'enriched_b') are combined.
         """
-        db = LandscapeDB.in_memory()
+        db = make_landscape_db()
 
         gate = GateSettings(
             name="fork_gate",
@@ -291,7 +290,7 @@ class TestBranchTransforms:
         (direct COPY edge to coalesce). Verifies the builder correctly handles
         both COPY and connection-system edges on the same coalesce node.
         """
-        db = LandscapeDB.in_memory()
+        db = make_landscape_db()
 
         gate = GateSettings(
             name="fork_gate",
@@ -349,7 +348,7 @@ class TestBranchTransforms:
         quarantine sink. The coalesce's best_effort policy proceeds with only
         path_b's data in the merged output.
         """
-        db = LandscapeDB.in_memory()
+        db = make_landscape_db()
 
         gate = GateSettings(
             name="fork_gate",
@@ -405,7 +404,7 @@ class TestBranchTransforms:
         delivered to the configured on_error sink (quarantine), and the
         error data is recorded.
         """
-        db = LandscapeDB.in_memory()
+        db = make_landscape_db()
 
         gate = GateSettings(
             name="fork_gate",

@@ -1,4 +1,3 @@
-# src/elspeth/contracts/batch_checkpoint.py
 """Typed batch checkpoint state for Azure Batch LLM transforms.
 
 Replaces the untyped dict[str, Any] that previously flowed through
@@ -11,8 +10,13 @@ not a data quality issue to handle gracefully.
 
 from __future__ import annotations
 
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
+from types import MappingProxyType
 from typing import Any
+
+from elspeth.contracts.errors import AuditIntegrityError
+from elspeth.contracts.freeze import deep_freeze, deep_thaw
 
 
 @dataclass(frozen=True, slots=True)
@@ -25,6 +29,12 @@ class RowMappingEntry:
 
     index: int
     variables_hash: str
+
+    def __post_init__(self) -> None:
+        if self.index < 0:
+            raise ValueError(f"RowMappingEntry.index must be non-negative, got {self.index}")
+        if not self.variables_hash:
+            raise ValueError("RowMappingEntry.variables_hash must not be empty")
 
     def to_dict(self) -> dict[str, Any]:
         return {"index": self.index, "variables_hash": self.variables_hash}
@@ -58,11 +68,27 @@ class BatchCheckpointState:
 
     batch_id: str
     input_file_id: str
-    row_mapping: dict[str, RowMappingEntry]
-    template_errors: list[tuple[int, str]]
+    row_mapping: Mapping[str, RowMappingEntry]
+    template_errors: Sequence[tuple[int, str]]
     submitted_at: str
     row_count: int
-    requests: dict[str, dict[str, Any]]
+    requests: Mapping[str, Mapping[str, Any]]
+
+    def __post_init__(self) -> None:
+        if not self.batch_id:
+            raise ValueError("BatchCheckpointState.batch_id must not be empty")
+        if not self.input_file_id:
+            raise ValueError("BatchCheckpointState.input_file_id must not be empty")
+        if not self.submitted_at:
+            raise ValueError("BatchCheckpointState.submitted_at must not be empty")
+        if self.row_count < 0:
+            raise ValueError(f"BatchCheckpointState.row_count must be non-negative, got {self.row_count}")
+        if not isinstance(self.row_mapping, MappingProxyType):
+            object.__setattr__(self, "row_mapping", MappingProxyType(self.row_mapping))
+        if not isinstance(self.template_errors, tuple):
+            object.__setattr__(self, "template_errors", tuple(self.template_errors))
+        if not isinstance(self.requests, MappingProxyType):
+            object.__setattr__(self, "requests", deep_freeze(self.requests))
 
     def to_dict(self) -> dict[str, Any]:
         """Serialize to dict for JSON checkpoint persistence.
@@ -73,10 +99,10 @@ class BatchCheckpointState:
             "batch_id": self.batch_id,
             "input_file_id": self.input_file_id,
             "row_mapping": {k: v.to_dict() for k, v in self.row_mapping.items()},
-            "template_errors": self.template_errors,
+            "template_errors": [list(te) for te in self.template_errors],
             "submitted_at": self.submitted_at,
             "row_count": self.row_count,
-            "requests": self.requests,
+            "requests": deep_thaw(self.requests),
         }
 
     @classmethod
@@ -87,11 +113,23 @@ class BatchCheckpointState:
         structural anomaly — missing keys or wrong types indicate
         checkpoint corruption, not a data quality issue.
         """
+        required_fields = {
+            "batch_id",
+            "input_file_id",
+            "row_mapping",
+            "template_errors",
+            "submitted_at",
+            "row_count",
+            "requests",
+        }
+        missing = required_fields - set(data.keys())
+        if missing:
+            raise AuditIntegrityError(f"Corrupted batch checkpoint: missing required fields {missing}. Found: {set(data.keys())}")
         return cls(
             batch_id=data["batch_id"],
             input_file_id=data["input_file_id"],
             row_mapping={k: RowMappingEntry.from_dict(v) for k, v in data["row_mapping"].items()},
-            template_errors=data["template_errors"],
+            template_errors=tuple((int(idx), str(msg)) for idx, msg in data["template_errors"]),
             submitted_at=data["submitted_at"],
             row_count=data["row_count"],
             requests=data["requests"],

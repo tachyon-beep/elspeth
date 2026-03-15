@@ -1,4 +1,3 @@
-# src/elspeth/core/__init__.py
 """Core infrastructure: Landscape, Canonical, Configuration, Checkpoint, DAG, Logging."""
 
 from elspeth.contracts import IntegrityError, PayloadStore
@@ -43,6 +42,12 @@ from elspeth.core.events import (
     EventBusProtocol,
     NullEventBus,
 )
+from elspeth.core.expression_parser import (
+    ExpressionEvaluationError,
+    ExpressionParser,
+    ExpressionSecurityError,
+    ExpressionSyntaxError,
+)
 from elspeth.core.logging import (
     configure_logging,
     get_logger,
@@ -59,6 +64,10 @@ __all__ = [
     "EventBus",
     "EventBusProtocol",
     "ExecutionGraph",
+    "ExpressionEvaluationError",
+    "ExpressionParser",
+    "ExpressionSecurityError",
+    "ExpressionSyntaxError",
     "FilesystemPayloadStore",
     "GraphValidationError",
     "IntegrityError",

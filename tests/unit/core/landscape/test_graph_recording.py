@@ -6,16 +6,18 @@ from typing import Literal
 import pytest
 
 from elspeth.contracts import Determinism, NodeType, RoutingMode
+from elspeth.contracts.errors import AuditIntegrityError
 from elspeth.contracts.schema import SchemaConfig
 from elspeth.contracts.schema_contract import FieldContract, SchemaContract
 from elspeth.core.landscape import LandscapeDB, LandscapeRecorder
+from tests.fixtures.landscape import make_landscape_db, make_recorder
 
 _DYNAMIC_SCHEMA = SchemaConfig.from_dict({"mode": "observed"})
 
 
 def _setup(*, run_id: str = "run-1") -> tuple[LandscapeDB, LandscapeRecorder]:
-    db = LandscapeDB.in_memory()
-    recorder = LandscapeRecorder(db)
+    db = make_landscape_db()
+    recorder = make_recorder(db)
     recorder.begin_run(config={}, canonical_version="v1", run_id=run_id)
     return db, recorder
 
@@ -51,7 +53,7 @@ def _make_field(
 
 
 class TestRegisterNode:
-    """Tests for GraphRecordingMixin.register_node."""
+    """Tests for DataFlowRepository.register_node."""
 
     def test_creates_node_with_config_hash_and_json(self) -> None:
         _db, recorder = _setup()
@@ -362,7 +364,7 @@ class TestRegisterNode:
 
 
 class TestRegisterEdge:
-    """Tests for GraphRecordingMixin.register_edge."""
+    """Tests for DataFlowRepository.register_edge."""
 
     def test_creates_edge(self) -> None:
         _db, recorder = _setup()
@@ -627,7 +629,7 @@ class TestRegisterEdge:
 
 
 class TestGetNode:
-    """Tests for GraphRecordingMixin.get_node with composite PK."""
+    """Tests for DataFlowRepository.get_node with composite PK."""
 
     def test_roundtrip(self) -> None:
         _db, recorder = _setup()
@@ -670,8 +672,8 @@ class TestGetNode:
         assert result is None
 
     def test_same_node_id_in_different_runs(self) -> None:
-        db = LandscapeDB.in_memory()
-        recorder = LandscapeRecorder(db)
+        db = make_landscape_db()
+        recorder = make_recorder(db)
         recorder.begin_run(config={}, canonical_version="v1", run_id="run-A")
         recorder.begin_run(config={}, canonical_version="v1", run_id="run-B")
 
@@ -716,7 +718,7 @@ class TestGetNode:
 
 
 class TestGetNodes:
-    """Tests for GraphRecordingMixin.get_nodes ordering and completeness."""
+    """Tests for DataFlowRepository.get_nodes ordering and completeness."""
 
     def test_returns_all_nodes_for_run(self) -> None:
         _db, recorder = _setup()
@@ -832,8 +834,8 @@ class TestGetNodes:
         assert nodes == []
 
     def test_does_not_return_nodes_from_other_runs(self) -> None:
-        db = LandscapeDB.in_memory()
-        recorder = LandscapeRecorder(db)
+        db = make_landscape_db()
+        recorder = make_recorder(db)
         recorder.begin_run(config={}, canonical_version="v1", run_id="run-A")
         recorder.begin_run(config={}, canonical_version="v1", run_id="run-B")
 
@@ -950,7 +952,7 @@ class TestGetNodes:
 
 
 class TestGetEdges:
-    """Tests for GraphRecordingMixin.get_edges."""
+    """Tests for DataFlowRepository.get_edges."""
 
     def test_returns_all_edges_for_run(self) -> None:
         _db, recorder = _setup()
@@ -1018,8 +1020,8 @@ class TestGetEdges:
         assert edges == []
 
     def test_does_not_return_edges_from_other_runs(self) -> None:
-        db = LandscapeDB.in_memory()
-        recorder = LandscapeRecorder(db)
+        db = make_landscape_db()
+        recorder = make_recorder(db)
         recorder.begin_run(config={}, canonical_version="v1", run_id="run-A")
         recorder.begin_run(config={}, canonical_version="v1", run_id="run-B")
 
@@ -1124,7 +1126,7 @@ class TestGetEdges:
 
 
 class TestGetEdge:
-    """Tests for GraphRecordingMixin.get_edge -- Tier 1 audit integrity."""
+    """Tests for DataFlowRepository.get_edge -- Tier 1 audit integrity."""
 
     def test_roundtrip(self) -> None:
         _db, recorder = _setup()
@@ -1162,14 +1164,14 @@ class TestGetEdge:
         assert fetched.default_mode == RoutingMode.MOVE
         assert fetched.run_id == "run-1"
 
-    def test_raises_value_error_for_unknown_edge(self) -> None:
+    def test_raises_audit_integrity_error_for_unknown_edge(self) -> None:
         _db, recorder = _setup()
-        with pytest.raises(ValueError, match="Audit integrity violation"):
+        with pytest.raises(AuditIntegrityError, match="Audit integrity violation"):
             recorder.get_edge("nonexistent-edge")
 
-    def test_raises_value_error_message_includes_edge_id(self) -> None:
+    def test_raises_audit_integrity_error_message_includes_edge_id(self) -> None:
         _db, recorder = _setup()
-        with pytest.raises(ValueError, match="nonexistent-xyz"):
+        with pytest.raises(AuditIntegrityError, match="nonexistent-xyz"):
             recorder.get_edge("nonexistent-xyz")
 
 
@@ -1179,7 +1181,7 @@ class TestGetEdge:
 
 
 class TestGetEdgeMap:
-    """Tests for GraphRecordingMixin.get_edge_map."""
+    """Tests for DataFlowRepository.get_edge_map."""
 
     def test_returns_correct_mapping(self) -> None:
         _db, recorder = _setup()
@@ -1228,15 +1230,17 @@ class TestGetEdgeMap:
         assert edge_map[("gate", "high_risk")] == edge_a.edge_id
         assert edge_map[("gate", "low_risk")] == edge_b.edge_id
 
-    def test_empty_for_no_edges(self) -> None:
+    def test_raises_for_no_edges(self) -> None:
+        """get_edge_map raises AuditIntegrityError when run has no edges registered."""
         _db, recorder = _setup()
-        edge_map = recorder.get_edge_map("run-1")
-        assert edge_map == {}
+        with pytest.raises(AuditIntegrityError, match="no edges registered"):
+            recorder.get_edge_map("run-1")
 
-    def test_empty_for_unknown_run(self) -> None:
+    def test_raises_for_unknown_run(self) -> None:
+        """get_edge_map raises AuditIntegrityError for unknown run (no edges either)."""
         _db, recorder = _setup()
-        edge_map = recorder.get_edge_map("no-such-run")
-        assert edge_map == {}
+        with pytest.raises(AuditIntegrityError, match="no edges registered"):
+            recorder.get_edge_map("no-such-run")
 
     def test_multiple_source_nodes_with_different_labels(self) -> None:
         _db, recorder = _setup()
@@ -1310,7 +1314,7 @@ class TestGetEdgeMap:
 
 
 class TestGetNodeContracts:
-    """Tests for GraphRecordingMixin.get_node_contracts."""
+    """Tests for DataFlowRepository.get_node_contracts."""
 
     def test_returns_none_none_when_no_contracts_set(self) -> None:
         _db, recorder = _setup()
@@ -1327,13 +1331,18 @@ class TestGetNodeContracts:
         assert inp is None
         assert out is None
 
-    def test_returns_none_none_for_unknown_node(self) -> None:
+    def test_crashes_for_unknown_node_by_default(self) -> None:
         _db, recorder = _setup()
-        inp, out = recorder.get_node_contracts("run-1", "nonexistent")
+        with pytest.raises(AuditIntegrityError, match="Node not found"):
+            recorder.get_node_contracts("run-1", "nonexistent")
+
+    def test_returns_none_none_for_unknown_node_when_allowed(self) -> None:
+        _db, recorder = _setup()
+        inp, out = recorder.get_node_contracts("run-1", "nonexistent", allow_missing=True)
         assert inp is None
         assert out is None
 
-    def test_returns_none_none_for_unknown_run(self) -> None:
+    def test_crashes_for_unknown_run_by_default(self) -> None:
         _db, recorder = _setup()
         recorder.register_node(
             run_id="run-1",
@@ -1344,7 +1353,21 @@ class TestGetNodeContracts:
             node_id="src",
             schema_config=_DYNAMIC_SCHEMA,
         )
-        inp, out = recorder.get_node_contracts("run-999", "src")
+        with pytest.raises(AuditIntegrityError, match="Node not found"):
+            recorder.get_node_contracts("run-999", "src")
+
+    def test_returns_none_none_for_unknown_run_when_allowed(self) -> None:
+        _db, recorder = _setup()
+        recorder.register_node(
+            run_id="run-1",
+            plugin_name="csv",
+            node_type=NodeType.SOURCE,
+            plugin_version="1.0.0",
+            config={},
+            node_id="src",
+            schema_config=_DYNAMIC_SCHEMA,
+        )
+        inp, out = recorder.get_node_contracts("run-999", "src", allow_missing=True)
         assert inp is None
         assert out is None
 
@@ -1455,7 +1478,7 @@ class TestGetNodeContracts:
 
 
 class TestUpdateNodeOutputContract:
-    """Tests for GraphRecordingMixin.update_node_output_contract."""
+    """Tests for DataFlowRepository.update_node_output_contract."""
 
     def test_sets_output_contract_on_node_without_one(self) -> None:
         _db, recorder = _setup()

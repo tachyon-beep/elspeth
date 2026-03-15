@@ -40,8 +40,8 @@ def _mock_getaddrinfo(ip: str) -> Any:
 
 
 @pytest.fixture
-def transform():
-    return WebScrapeTransform(
+def transform(mock_ctx):
+    t = WebScrapeTransform(
         {
             "schema": {"mode": "observed"},
             "url_field": "url",
@@ -53,6 +53,8 @@ def transform():
             },
         }
     )
+    t.on_start(mock_ctx)
+    return t
 
 
 @pytest.fixture
@@ -168,7 +170,7 @@ def test_resolved_ip_recorded_in_audit(transform, mock_ctx):
     record_call_args = mock_ctx.landscape.record_call.call_args
     assert record_call_args is not None, "record_call should have been called"
     request_data = record_call_args.kwargs.get("request_data") or record_call_args[1].get("request_data")
-    assert request_data["resolved_ip"] == "93.184.216.34"
+    assert request_data.to_dict()["resolved_ip"] == "93.184.216.34"
 
 
 # ============================================================================
@@ -204,6 +206,7 @@ def test_contract_includes_output_fields(transform, mock_ctx):
         assert "page_fingerprint" in field_names, "fingerprint_field must be in output contract"
         assert "fetch_status" in field_names, "fetch_status must be in output contract"
         assert "fetch_url_final" in field_names, "fetch_url_final must be in output contract"
+        assert "fetch_url_final_ip" in field_names, "fetch_url_final_ip must be in output contract"
         assert "fetch_request_hash" in field_names, "fetch_request_hash must be in output contract"
         assert "fetch_response_raw_hash" in field_names, "fetch_response_raw_hash must be in output contract"
         assert "fetch_response_processed_hash" in field_names, "fetch_response_processed_hash must be in output contract"
@@ -227,6 +230,269 @@ def test_contract_field_types_are_correct(transform, mock_ctx):
         assert field_by_name["page_fingerprint"].python_type is str
         assert field_by_name["fetch_status"].python_type is int
         assert field_by_name["fetch_url_final"].python_type is str
+        assert field_by_name["fetch_url_final_ip"].python_type is str
         assert field_by_name["fetch_request_hash"].python_type is str
         assert field_by_name["fetch_response_raw_hash"].python_type is str
         assert field_by_name["fetch_response_processed_hash"].python_type is str
+
+
+# ===========================================================================
+# allowed_hosts end-to-end tests
+# ===========================================================================
+
+
+class TestAllowedHostsEndToEnd:
+    """End-to-end tests for allowed_hosts config through the transform."""
+
+    @pytest.fixture
+    def allowed_loopback_transform(self, mock_ctx):
+        """Transform with allowed_hosts: ["127.0.0.0/8"]."""
+        t = WebScrapeTransform(
+            {
+                "schema": {"mode": "observed"},
+                "url_field": "url",
+                "content_field": "page_content",
+                "fingerprint_field": "page_fingerprint",
+                "http": {
+                    "abuse_contact": "test@example.com",
+                    "scraping_reason": "Testing allowed_hosts",
+                    "allowed_hosts": ["127.0.0.0/8"],
+                },
+            }
+        )
+        t.on_start(mock_ctx)
+        return t
+
+    @pytest.fixture
+    def allow_private_transform(self, mock_ctx):
+        """Transform with allowed_hosts: allow_private."""
+        t = WebScrapeTransform(
+            {
+                "schema": {"mode": "observed"},
+                "url_field": "url",
+                "content_field": "page_content",
+                "fingerprint_field": "page_fingerprint",
+                "http": {
+                    "abuse_contact": "test@example.com",
+                    "scraping_reason": "Testing allow_private",
+                    "allowed_hosts": "allow_private",
+                },
+            }
+        )
+        t.on_start(mock_ctx)
+        return t
+
+    @respx.mock
+    def test_loopback_allowed_with_config(self, allowed_loopback_transform, mock_ctx):
+        """Loopback succeeds when explicitly allowed."""
+        respx.get("http://127.0.0.1:80/page").mock(return_value=httpx.Response(200, text="<html>Local content</html>"))
+        with patch("socket.getaddrinfo", _mock_getaddrinfo("127.0.0.1")):
+            result = allowed_loopback_transform.process(make_pipeline_row({"url": "http://localhost/page"}), mock_ctx)
+        assert result.status == "success"
+
+    def test_non_allowed_private_still_blocked(self, allowed_loopback_transform, mock_ctx):
+        """192.168.x.x still blocked when only 127.0.0.0/8 is allowed."""
+        with patch("socket.getaddrinfo", _mock_getaddrinfo("192.168.1.1")):
+            result = allowed_loopback_transform.process(make_pipeline_row({"url": "http://internal.example.com/page"}), mock_ctx)
+        assert result.status == "error"
+        assert result.reason["error_type"] == "SSRFBlockedError"
+
+    def test_cloud_metadata_blocked_with_allow_private(self, allow_private_transform, mock_ctx):
+        """Cloud metadata always blocked even with allow_private."""
+        with patch("socket.getaddrinfo", _mock_getaddrinfo("169.254.169.254")):
+            result = allow_private_transform.process(make_pipeline_row({"url": "http://metadata.internal/latest"}), mock_ctx)
+        assert result.status == "error"
+        assert result.reason["error_type"] == "SSRFBlockedError"
+
+    @respx.mock
+    def test_public_ip_still_works_with_default(self, transform, mock_ctx):
+        """Default (public_only) still allows public IPs — regression check."""
+        respx.get("https://93.184.216.34:443/page").mock(return_value=httpx.Response(200, text="<html>Content</html>"))
+        with patch("socket.getaddrinfo", _mock_getaddrinfo("93.184.216.34")):
+            result = transform.process(make_pipeline_row({"url": "https://example.com/page"}), mock_ctx)
+        assert result.status == "success"
+
+
+# ===========================================================================
+# Redirect chain behavior tests (design doc requirement)
+# ===========================================================================
+
+
+class TestRedirectAllowedRangesBehavior:
+    """Behavioral redirect tests with allowed_ranges active.
+
+    Required by the design doc (2026-03-10-allowed-hosts-design.md):
+    1. Redirect to allowed private IP succeeds
+    2. Redirect to non-allowed private IP raises SSRFBlockedError
+    3. Redirect to always-blocked IP (cloud metadata) despite allow_private raises SSRFBlockedError
+    """
+
+    @pytest.fixture
+    def allowed_loopback_transform(self, mock_ctx):
+        """Transform with allowed_hosts: ["127.0.0.0/8"]."""
+        t = WebScrapeTransform(
+            {
+                "schema": {"mode": "observed"},
+                "url_field": "url",
+                "content_field": "page_content",
+                "fingerprint_field": "page_fingerprint",
+                "http": {
+                    "abuse_contact": "test@example.com",
+                    "scraping_reason": "Testing redirect allowed_hosts",
+                    "allowed_hosts": ["127.0.0.0/8"],
+                },
+            }
+        )
+        t.on_start(mock_ctx)
+        return t
+
+    @pytest.fixture
+    def allow_private_transform(self, mock_ctx):
+        """Transform with allowed_hosts: allow_private."""
+        t = WebScrapeTransform(
+            {
+                "schema": {"mode": "observed"},
+                "url_field": "url",
+                "content_field": "page_content",
+                "fingerprint_field": "page_fingerprint",
+                "http": {
+                    "abuse_contact": "test@example.com",
+                    "scraping_reason": "Testing allow_private redirects",
+                    "allowed_hosts": "allow_private",
+                },
+            }
+        )
+        t.on_start(mock_ctx)
+        return t
+
+    def test_redirect_to_allowed_private_ip_succeeds(self, allowed_loopback_transform, mock_ctx):
+        """Redirect chain where hop targets an allowed private IP — must succeed."""
+        from elspeth.core.security.web import SSRFSafeRequest
+
+        initial_safe = SSRFSafeRequest(
+            original_url="http://example.com/start",
+            resolved_ip="93.184.216.34",
+            host_header="example.com",
+            port=80,
+            path="/start",
+            scheme="http",
+        )
+        redirect_safe = SSRFSafeRequest(
+            original_url="http://localhost/redirected",
+            resolved_ip="127.0.0.1",
+            host_header="localhost",
+            port=80,
+            path="/redirected",
+            scheme="http",
+        )
+
+        with (
+            patch(
+                "elspeth.plugins.transforms.web_scrape.validate_url_for_ssrf",
+                return_value=initial_safe,
+            ),
+            patch(
+                "elspeth.plugins.infrastructure.clients.http.validate_url_for_ssrf",
+                return_value=redirect_safe,
+            ),
+            patch("httpx.Client") as MockClient,
+        ):
+            initial_client = Mock()
+            initial_client.__enter__ = Mock(return_value=initial_client)
+            initial_client.__exit__ = Mock(return_value=False)
+            initial_client.get.return_value = httpx.Response(
+                301,
+                headers={"location": "http://localhost/redirected"},
+                request=httpx.Request("GET", "http://93.184.216.34:80/start"),
+            )
+            hop_client = Mock()
+            hop_client.__enter__ = Mock(return_value=hop_client)
+            hop_client.__exit__ = Mock(return_value=False)
+            hop_client.get.return_value = httpx.Response(
+                200,
+                text="<html>Local content</html>",
+                request=httpx.Request("GET", "http://127.0.0.1:80/redirected"),
+            )
+            MockClient.side_effect = [initial_client, hop_client]
+
+            result = allowed_loopback_transform.process(make_pipeline_row({"url": "http://example.com/start"}), mock_ctx)
+
+        assert result.status == "success"
+
+    def test_redirect_to_non_allowed_private_ip_blocked(self, allowed_loopback_transform, mock_ctx):
+        """Redirect chain where hop targets a non-allowed private IP — must block."""
+        from elspeth.core.security.web import SSRFBlockedError, SSRFSafeRequest
+
+        initial_safe = SSRFSafeRequest(
+            original_url="http://example.com/start",
+            resolved_ip="93.184.216.34",
+            host_header="example.com",
+            port=80,
+            path="/start",
+            scheme="http",
+        )
+
+        with (
+            patch(
+                "elspeth.plugins.transforms.web_scrape.validate_url_for_ssrf",
+                return_value=initial_safe,
+            ),
+            patch(
+                "elspeth.plugins.infrastructure.clients.http.validate_url_for_ssrf",
+                side_effect=SSRFBlockedError("Blocked IP range: 192.168.1.1"),
+            ),
+            patch("httpx.Client") as MockClient,
+        ):
+            initial_client = Mock()
+            initial_client.__enter__ = Mock(return_value=initial_client)
+            initial_client.__exit__ = Mock(return_value=False)
+            initial_client.get.return_value = httpx.Response(
+                301,
+                headers={"location": "http://192.168.1.1/internal"},
+                request=httpx.Request("GET", "http://93.184.216.34:80/start"),
+            )
+            MockClient.return_value = initial_client
+
+            result = allowed_loopback_transform.process(make_pipeline_row({"url": "http://example.com/start"}), mock_ctx)
+
+        assert result.status == "error"
+        assert "SSRFBlockedError" in result.reason.get("error_type", "")
+
+    def test_redirect_to_cloud_metadata_blocked_even_allow_private(self, allow_private_transform, mock_ctx):
+        """Redirect to always-blocked IP (cloud metadata) despite allow_private — must block."""
+        from elspeth.core.security.web import SSRFBlockedError, SSRFSafeRequest
+
+        initial_safe = SSRFSafeRequest(
+            original_url="http://example.com/start",
+            resolved_ip="93.184.216.34",
+            host_header="example.com",
+            port=80,
+            path="/start",
+            scheme="http",
+        )
+
+        with (
+            patch(
+                "elspeth.plugins.transforms.web_scrape.validate_url_for_ssrf",
+                return_value=initial_safe,
+            ),
+            patch(
+                "elspeth.plugins.infrastructure.clients.http.validate_url_for_ssrf",
+                side_effect=SSRFBlockedError("Always-blocked IP range: 169.254.169.254"),
+            ),
+            patch("httpx.Client") as MockClient,
+        ):
+            initial_client = Mock()
+            initial_client.__enter__ = Mock(return_value=initial_client)
+            initial_client.__exit__ = Mock(return_value=False)
+            initial_client.get.return_value = httpx.Response(
+                301,
+                headers={"location": "http://169.254.169.254/latest/meta-data/"},
+                request=httpx.Request("GET", "http://93.184.216.34:80/start"),
+            )
+            MockClient.return_value = initial_client
+
+            result = allow_private_transform.process(make_pipeline_row({"url": "http://example.com/start"}), mock_ctx)
+
+        assert result.status == "error"
+        assert "SSRFBlockedError" in result.reason.get("error_type", "")

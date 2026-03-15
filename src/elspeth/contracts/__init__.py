@@ -4,7 +4,11 @@ All dataclasses, enums, TypedDicts, and NamedTuples that cross subsystem
 boundaries MUST be defined here. Internal types are whitelisted in
 config/cicd/contracts-whitelist.yaml.
 
-This package is a LEAF MODULE with no outbound dependencies to core/engine.
+This package is Layer 0 (L0) in the 4-layer dependency hierarchy and has
+NO runtime imports from core, engine, or plugins. This is enforced by CI
+(``enforce_tier_model.py`` with rule L1). TYPE_CHECKING imports from core
+exist for type annotations only and do not create runtime coupling.
+
 To maintain this property, Settings classes (RetrySettings, ElspethSettings, etc.)
 are NOT re-exported here - import them from elspeth.core.config.
 
@@ -44,6 +48,7 @@ from elspeth.contracts.audit import (
     RowLineage,
     Run,
     SecretResolution,
+    SecretResolutionInput,
     Token,
     TokenOutcome,
     TokenParent,
@@ -63,6 +68,11 @@ from elspeth.contracts.call_data import (
 )
 from elspeth.contracts.checkpoint import ResumeCheck, ResumePoint
 from elspeth.contracts.cli import ExecutionResult, ProgressEvent
+from elspeth.contracts.coalesce_checkpoint import (
+    CoalesceCheckpointState,
+    CoalescePendingCheckpoint,
+    CoalesceTokenCheckpoint,
+)
 from elspeth.contracts.coalesce_metadata import ArrivalOrderEntry, CoalesceMetadata
 
 # =============================================================================
@@ -72,7 +82,7 @@ from elspeth.contracts.coalesce_metadata import ArrivalOrderEntry, CoalesceMetad
 # must be imported directly from elspeth.core.config:
 #     from elspeth.core.config import RetrySettings, ElspethSettings
 #
-# FIX: P2-2026-01-20-contracts-config-reexport-breaks-leaf-boundary
+# Config protocols are in contracts; Settings classes remain in core.config.
 # =============================================================================
 from elspeth.contracts.config import (
     # Alignment documentation
@@ -92,18 +102,24 @@ from elspeth.contracts.config import (
     RuntimeTelemetryConfig,
     RuntimeTelemetryProtocol,
 )
+from elspeth.contracts.contexts import (
+    LifecycleContext,
+    SinkContext,
+    SourceContext,
+    TransformContext,
+)
 
-# Schema contracts (Phase 2: Source Integration)
+# Schema contracts — builder
 from elspeth.contracts.contract_builder import ContractBuilder
 
-# Schema contracts (Phase 3: Pipeline Integration)
+# Schema contracts — pipeline propagation
 from elspeth.contracts.contract_propagation import (
     merge_contract_with_output,
     narrow_contract_to_output,
     propagate_contract,
 )
 
-# Schema contracts (Phase 4: Audit Trail Integration)
+# Schema contracts — audit trail records
 from elspeth.contracts.contract_records import (
     ContractAuditRecord,
     FieldAuditRecord,
@@ -116,7 +132,7 @@ from elspeth.contracts.data import (
     check_compatibility,
     validate_row,
 )
-from elspeth.contracts.engine import PendingOutcome, RetryPolicy
+from elspeth.contracts.engine import BufferEntry, PendingOutcome, RetryPolicy
 from elspeth.contracts.enums import (
     BackpressureMode,
     BatchStatus,
@@ -126,6 +142,7 @@ from elspeth.contracts.enums import (
     ExportStatus,
     NodeStateStatus,
     NodeType,
+    ReproducibilityGrade,
     RoutingKind,
     RoutingMode,
     RowOutcome,
@@ -147,6 +164,7 @@ from elspeth.contracts.errors import (
     ExtraFieldViolation,
     FrameworkBugError,
     GracefulShutdownError,
+    MaxRetriesExceeded,
     MissingFieldViolation,
     PluginContractViolation,
     QueryFailureDetail,
@@ -196,11 +214,17 @@ from elspeth.contracts.node_state_context import (
     PoolStatsSnapshot,
     QueryOrderEntry,
 )
-from elspeth.contracts.payload_store import IntegrityError, PayloadStore
+from elspeth.contracts.payload_store import IntegrityError, PayloadNotFoundError, PayloadStore
 from elspeth.contracts.plugin_context import (
     PluginContext,
     TransformErrorToken,
     ValidationErrorToken,
+)
+from elspeth.contracts.plugin_protocols import (
+    BatchTransformProtocol,
+    SinkProtocol,
+    SourceProtocol,
+    TransformProtocol,
 )
 from elspeth.contracts.results import (
     ArtifactDescriptor,
@@ -219,7 +243,7 @@ from elspeth.contracts.routing import (
     RoutingSpec,
 )
 
-# Schema contracts (Phase 1: Core Contracts)
+# Schema contracts — core types
 from elspeth.contracts.schema_contract import (
     FieldContract,
     PipelineRow,
@@ -259,6 +283,7 @@ __all__ = [  # Grouped by category for readability
     "BatchPendingError",
     "FrameworkBugError",
     "GracefulShutdownError",
+    "MaxRetriesExceeded",
     "PluginContractViolation",
     "CoalesceFailureReason",
     "ConfigGateReason",
@@ -300,6 +325,7 @@ __all__ = [  # Grouped by category for readability
     "RowLineage",
     "Run",
     "SecretResolution",
+    "SecretResolutionInput",
     "Token",
     "TokenOutcome",
     "TokenParent",
@@ -332,6 +358,7 @@ __all__ = [  # Grouped by category for readability
     "ExportStatus",
     "NodeStateStatus",
     "NodeType",
+    "ReproducibilityGrade",
     "RoutingKind",
     "RoutingMode",
     "RowOutcome",
@@ -349,6 +376,9 @@ __all__ = [  # Grouped by category for readability
     "AggregationCheckpointState",
     "AggregationNodeCheckpoint",
     "AggregationTokenCheckpoint",
+    "CoalesceCheckpointState",
+    "CoalescePendingCheckpoint",
+    "CoalesceTokenCheckpoint",
     "ResumeCheck",
     "ResumePoint",
     # coalesce metadata
@@ -391,15 +421,27 @@ __all__ = [  # Grouped by category for readability
     "check_compatibility",
     "validate_row",
     # engine
+    "BufferEntry",
     "PendingOutcome",
     "RetryPolicy",
     # payload_store
     "IntegrityError",
+    "PayloadNotFoundError",
     "PayloadStore",
+    # contexts (phase-based protocols)
+    "LifecycleContext",
+    "SinkContext",
+    "SourceContext",
+    "TransformContext",
     # plugin_context
     "PluginContext",
     "TransformErrorToken",
     "ValidationErrorToken",
+    # plugin protocols
+    "BatchTransformProtocol",
+    "SinkProtocol",
+    "SourceProtocol",
+    "TransformProtocol",
     # events
     "ExternalCallCompleted",
     "FieldResolutionApplied",
@@ -438,7 +480,7 @@ __all__ = [  # Grouped by category for readability
     "LLMCallRequest",
     "LLMCallResponse",
     "RawCallPayload",
-    # schema contracts (Phase 1: Core Contracts)
+    # Schema contracts — core types
     "ContractBuilder",
     "create_contract_from_config",
     "FieldContract",
@@ -446,11 +488,11 @@ __all__ = [  # Grouped by category for readability
     "normalize_type_for_contract",
     "PipelineRow",
     "SchemaContract",
-    # schema contracts (Phase 4: Audit Trail Integration)
+    # Schema contracts — audit trail records
     "ContractAuditRecord",
     "FieldAuditRecord",
     "ValidationErrorWithContract",
-    # schema contracts (Phase 3: Pipeline Integration)
+    # Schema contracts — pipeline propagation
     "create_output_contract_from_schema",
     "HeaderMode",
     "merge_contract_with_output",

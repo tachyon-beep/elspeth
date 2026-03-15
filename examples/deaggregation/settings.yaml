@@ -16,6 +16,7 @@ aggregations:
   plugin: batch_replicate
   input: deagg_in
   on_success: output
+  on_error: discard
   trigger:
     count: 3
   output_mode: transform

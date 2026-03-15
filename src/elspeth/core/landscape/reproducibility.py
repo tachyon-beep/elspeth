@@ -1,4 +1,3 @@
-# src/elspeth/core/landscape/reproducibility.py
 """Reproducibility grade computation for completed pipeline runs.
 
 This module computes and manages the reproducibility_grade field on the runs
@@ -13,27 +12,16 @@ Grades:
   via hashes, but cannot replay the run.
 """
 
-from enum import StrEnum
 from typing import TYPE_CHECKING
 
 from sqlalchemy import select
 
-from elspeth.contracts import Determinism
+from elspeth.contracts import Determinism, ReproducibilityGrade
+from elspeth.contracts.errors import AuditIntegrityError
 from elspeth.core.landscape.schema import nodes_table, runs_table
 
 if TYPE_CHECKING:
     from elspeth.core.landscape.database import LandscapeDB
-
-
-class ReproducibilityGrade(StrEnum):
-    """Reproducibility levels for a completed run.
-
-    Using str as base allows direct JSON serialization and comparison.
-    """
-
-    FULL_REPRODUCIBLE = "full_reproducible"
-    REPLAY_REPRODUCIBLE = "replay_reproducible"
-    ATTRIBUTABLE_ONLY = "attributable_only"
 
 
 def compute_grade(db: "LandscapeDB", run_id: str) -> ReproducibilityGrade:
@@ -54,46 +42,48 @@ def compute_grade(db: "LandscapeDB", run_id: str) -> ReproducibilityGrade:
         ReproducibilityGrade enum value
 
     Raises:
-        ValueError: If any node has invalid determinism enum value (audit corruption)
+        AuditIntegrityError: If run does not exist or any node has invalid determinism value.
     """
-    # Verify run exists before computing grade — a nonexistent run_id
-    # must not return FULL_REPRODUCIBLE (which is what "no nodes" implies).
+    # Single connection for both queries — avoids TOCTOU window between
+    # run existence check and node determinism fetch.
     with db.connection() as conn:
+        # Verify run exists before computing grade — a nonexistent run_id
+        # must not return FULL_REPRODUCIBLE (which is what "no nodes" implies).
         run_check = conn.execute(select(runs_table.c.run_id).where(runs_table.c.run_id == run_id))
         if run_check.fetchone() is None:
-            raise ValueError(f"Cannot compute reproducibility grade: run '{run_id}' does not exist")
+            raise AuditIntegrityError(f"Cannot compute reproducibility grade: run '{run_id}' does not exist")
 
-    # Tier-1 audit data validation: Fetch ALL distinct determinism values
-    # and validate each is a valid Determinism enum member.
-    # Per Data Manifesto: "Bad data in the audit trail = crash immediately"
-    query_all = select(nodes_table.c.determinism).where(nodes_table.c.run_id == run_id).distinct()
-
-    with db.connection() as conn:
+        # Tier-1 audit data validation: Fetch ALL distinct determinism values
+        # and validate each is a valid Determinism enum member.
+        # Per Data Manifesto: "Bad data in the audit trail = crash immediately"
+        query_all = select(nodes_table.c.determinism).where(nodes_table.c.run_id == run_id).distinct()
         result = conn.execute(query_all)
-        determinism_values = [row[0] for row in result.fetchall()]
+        raw_values = [row[0] for row in result.fetchall()]
 
-    # Validate all determinism values are valid enum members
-    for det_value in determinism_values:
+    # Validate all determinism values and convert to enum members
+    determinism_values: list[Determinism] = []
+    for det_value in raw_values:
         if det_value is None:
-            raise ValueError(f"NULL determinism value in nodes table for run {run_id} - audit data corruption")
+            raise AuditIntegrityError(f"NULL determinism value in nodes table for run {run_id} — audit data corruption")
         try:
-            Determinism(det_value)
-        except ValueError:
-            raise ValueError(
-                f"Invalid determinism value '{det_value}' in nodes table for run {run_id} - "
+            determinism_values.append(Determinism(det_value))
+        except ValueError as exc:
+            raise AuditIntegrityError(
+                f"Invalid determinism value '{det_value}' in nodes table for run {run_id} — "
                 f"expected one of {[d.value for d in Determinism]}"
-            ) from None
+            ) from exc
 
     # Determinism values that require replay (cannot reproduce from inputs alone)
     # IO_READ/IO_WRITE are external/side-effectful - require captured data for replay
     non_reproducible = {
-        Determinism.EXTERNAL_CALL.value,
-        Determinism.NON_DETERMINISTIC.value,
-        Determinism.IO_READ.value,
-        Determinism.IO_WRITE.value,
+        Determinism.EXTERNAL_CALL,
+        Determinism.NON_DETERMINISTIC,
+        Determinism.IO_READ,
+        Determinism.IO_WRITE,
     }
 
-    # Check if any non-reproducible determinism values exist
+    # Check if any non-reproducible determinism values exist — both sides
+    # are now Determinism enum members, no implicit StrEnum comparison.
     has_non_reproducible = any(det in non_reproducible for det in determinism_values)
 
     if has_non_reproducible:
@@ -122,27 +112,27 @@ def update_grade_after_purge(db: "LandscapeDB", run_id: str) -> None:
         row = result.fetchone()
 
         if row is None:
-            return  # Run doesn't exist
+            raise AuditIntegrityError(f"Cannot update reproducibility grade after purge: run '{run_id}' does not exist")
 
         current_grade = row[0]
 
         # Per Data Manifesto: "Bad data in the audit trail = crash immediately"
         if current_grade is None:
-            raise ValueError(f"NULL reproducibility_grade for run {run_id} - audit data corruption")
+            raise AuditIntegrityError(f"NULL reproducibility_grade for run {run_id} — audit data corruption")
 
         try:
             ReproducibilityGrade(current_grade)
-        except ValueError:
-            raise ValueError(
-                f"Invalid reproducibility_grade '{current_grade}' for run {run_id} - "
+        except ValueError as exc:
+            raise AuditIntegrityError(
+                f"Invalid reproducibility_grade '{current_grade}' for run {run_id} — "
                 f"expected one of {[g.value for g in ReproducibilityGrade]}"
-            ) from None
+            ) from exc
 
         # Atomic conditional update — no read-modify-write race.
         # The WHERE clause acts as a compare-and-swap: only degrades if still REPLAY_REPRODUCIBLE.
         conn.execute(
             runs_table.update()
             .where(runs_table.c.run_id == run_id)
-            .where(runs_table.c.reproducibility_grade == ReproducibilityGrade.REPLAY_REPRODUCIBLE.value)
-            .values(reproducibility_grade=ReproducibilityGrade.ATTRIBUTABLE_ONLY.value)
+            .where(runs_table.c.reproducibility_grade == ReproducibilityGrade.REPLAY_REPRODUCIBLE)
+            .values(reproducibility_grade=ReproducibilityGrade.ATTRIBUTABLE_ONLY)
         )

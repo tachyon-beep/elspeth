@@ -16,12 +16,12 @@ from unittest.mock import Mock
 
 import pytest
 
+from elspeth.contracts import TransformProtocol
 from elspeth.contracts.errors import OrchestrationInvariantError
 from elspeth.contracts.types import CoalesceName, NodeID
 from elspeth.core.config import GateSettings
 from elspeth.engine.dag_navigator import DAGNavigator, WorkItem
 from elspeth.engine.processor import DAGTraversalContext
-from elspeth.plugins.protocols import TransformProtocol
 from elspeth.testing import make_token_info
 
 # =============================================================================
@@ -45,12 +45,12 @@ def _make_mock_transform(
 
 def _make_nav(
     *,
-    node_to_plugin: dict | None = None,
-    node_to_next: dict | None = None,
-    coalesce_node_ids: dict | None = None,
-    structural_node_ids: frozenset | None = None,
-    coalesce_name_by_node_id: dict | None = None,
-    coalesce_on_success_map: dict | None = None,
+    node_to_plugin: dict[NodeID, TransformProtocol | GateSettings] | None = None,
+    node_to_next: dict[NodeID, NodeID | None] | None = None,
+    coalesce_node_ids: dict[CoalesceName, NodeID] | None = None,
+    structural_node_ids: frozenset[NodeID] | None = None,
+    coalesce_name_by_node_id: dict[NodeID, CoalesceName] | None = None,
+    coalesce_on_success_map: dict[CoalesceName, str] | None = None,
     sink_names: frozenset[str] | None = None,
     branch_first_node: dict[str, NodeID] | None = None,
 ) -> DAGNavigator:
@@ -762,3 +762,99 @@ class TestContinuationCoalesceNonForkRegression:
         assert item.current_node_id == NodeID("t-2")
         assert item.coalesce_name is None
         assert item.coalesce_node_id is None
+
+
+# =============================================================================
+# resolve_jump_target_sink: cycle-detection guard
+# =============================================================================
+
+
+class TestResolveJumpTargetSinkCycleGuard:
+    """Tests for the cycle-detection guard in resolve_jump_target_sink."""
+
+    def test_cycle_in_traversal_map_raises(self) -> None:
+        """Cycle in node_to_next causes iteration guard to fire."""
+        # Create a cycle: t-1 -> t-2 -> t-1
+        transform1 = _make_mock_transform(node_id="t-1", name="step1")
+        transform2 = _make_mock_transform(node_id="t-2", name="step2")
+        nav = _make_nav(
+            node_to_plugin={NodeID("t-1"): transform1, NodeID("t-2"): transform2},
+            node_to_next={
+                NodeID("source-0"): NodeID("t-1"),
+                NodeID("t-1"): NodeID("t-2"),
+                NodeID("t-2"): NodeID("t-1"),  # cycle back
+            },
+        )
+        with pytest.raises(OrchestrationInvariantError, match=r"exceeded.*iterations.*Possible cycle"):
+            nav.resolve_jump_target_sink(NodeID("t-1"))
+
+
+# =============================================================================
+# resolve_jump_target_sink: post-resolution invalid-sink validation
+# =============================================================================
+
+
+class TestResolveJumpTargetSinkInvalidSinkGuard:
+    """Tests for the post-resolution invalid-sink guard in resolve_jump_target_sink."""
+
+    def test_resolved_sink_not_in_configured_sinks_raises(self) -> None:
+        """Sink resolved via on_success that is not in sink_names raises invariant error."""
+        # Transform has on_success pointing to a sink that exists in its own name
+        # but is NOT in the configured sink_names set.
+        # We need the walk to pick up the sink AND for it to not be in sink_names.
+        # The first check (line 216) filters candidates by sink_names, so resolved_sink
+        # stays None for non-matching sinks. To trigger the post-resolution guard at
+        # line 235, we need resolved_sink to be set via the coalesce path (which
+        # doesn't filter by sink_names).
+        coalesce_node = NodeID("coalesce::merge")
+        nav = _make_nav(
+            node_to_next={
+                NodeID("source-0"): coalesce_node,
+                coalesce_node: None,
+            },
+            structural_node_ids=frozenset({coalesce_node}),
+            coalesce_name_by_node_id={coalesce_node: CoalesceName("merge")},
+            coalesce_on_success_map={CoalesceName("merge"): "ghost_sink"},
+            sink_names=frozenset({"real_sink"}),  # ghost_sink is NOT here
+        )
+        with pytest.raises(OrchestrationInvariantError, match="not a configured sink"):
+            nav.resolve_jump_target_sink(coalesce_node)
+
+
+# =============================================================================
+# create_continuation_work_item: fork child with None branch_name guard
+# =============================================================================
+
+
+class TestContinuationNullBranchNameGuard:
+    """Tests for the branch_name=None guard in create_continuation_work_item."""
+
+    def test_fork_child_without_branch_name_raises(self) -> None:
+        """Fork child token with branch_name=None raises invariant error."""
+        gate = GateSettings(
+            name="fork_gate",
+            input="in",
+            condition="True",
+            routes={"true": "out", "false": "err"},
+        )
+        gate_node = NodeID("gate-1")
+        coalesce_node = NodeID("coalesce::merge")
+
+        nav = _make_nav(
+            node_to_plugin={gate_node: gate},
+            node_to_next={gate_node: None, coalesce_node: None},
+            coalesce_node_ids={CoalesceName("merge"): coalesce_node},
+            structural_node_ids=frozenset({coalesce_node}),
+            branch_first_node={"path_a": coalesce_node},
+        )
+
+        # Token with branch_name=None (the default)
+        token = make_token_info(data={"v": 1})
+        assert token.branch_name is None  # precondition
+
+        with pytest.raises(OrchestrationInvariantError, match="branch_name is None"):
+            nav.create_continuation_work_item(
+                token=token,
+                current_node_id=gate_node,
+                coalesce_name=CoalesceName("merge"),
+            )

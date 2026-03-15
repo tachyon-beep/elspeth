@@ -15,8 +15,8 @@ from elspeth.contracts import TransformSuccessReason
 from elspeth.contracts.audit import NodeStateCompleted
 from elspeth.contracts.enums import NodeStateStatus, NodeType
 from elspeth.contracts.schema import SchemaConfig
-from elspeth.core.landscape.database import LandscapeDB
 from elspeth.core.landscape.recorder import LandscapeRecorder
+from tests.fixtures.landscape import make_recorder
 
 # Dynamic schema for tests that don't care about specific fields
 DYNAMIC_SCHEMA = SchemaConfig.from_dict({"mode": "observed"})
@@ -28,8 +28,7 @@ class TestTransformSuccessReasonAudit:
     @pytest.fixture
     def recorder(self) -> LandscapeRecorder:
         """Create recorder with in-memory database."""
-        db = LandscapeDB.in_memory()
-        return LandscapeRecorder(db)
+        return make_recorder()
 
     def test_success_reason_stored_in_node_state(
         self,

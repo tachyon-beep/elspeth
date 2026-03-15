@@ -1,4 +1,3 @@
-# src/elspeth/mcp/analyzers/queries.py
 """Core CRUD query functions for the Landscape audit database.
 
 Functions: list_runs, get_run, list_rows, list_nodes, list_tokens,
@@ -56,9 +55,9 @@ def list_runs(db: LandscapeDB, recorder: LandscapeRecorder, limit: int = 50, sta
             # Validate status
             try:
                 RunStatus(status)
-            except ValueError:
+            except ValueError as exc:
                 valid = [s.value for s in RunStatus]
-                raise ValueError(f"Invalid status '{status}'. Valid: {valid}") from None
+                raise ValueError(f"Invalid status '{status}'. Valid: {valid}") from exc
             query = query.where(runs_table.c.status == status)
 
         rows = conn.execute(query).fetchall()
@@ -360,7 +359,7 @@ def explain_token(
             "from_node": edge.from_node_id,
             "to_sink": edge.to_node_id,
             "edge_label": edge.label,
-            "reason_hash": divert_event.get("reason_hash"),
+            "reason_hash": divert_event["reason_hash"],
         }
     else:
         result_dict["divert_summary"] = None
@@ -479,9 +478,9 @@ def get_node_states(
         if status is not None:
             try:
                 NodeStateStatus(status)
-            except ValueError:
+            except ValueError as exc:
                 valid = [s.value for s in NodeStateStatus]
-                raise ValueError(f"Invalid status '{status}'. Valid: {valid}") from None
+                raise ValueError(f"Invalid status '{status}'. Valid: {valid}") from exc
             query = query.where(node_states_table.c.status == status)
 
         query = query.order_by(

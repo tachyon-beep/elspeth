@@ -7,13 +7,14 @@ with the base class hierarchy (BaseTransform).
 
 from typing import Any
 
-from elspeth.contracts import NodeType, SourceRow
+from elspeth.contracts import SourceRow
 from elspeth.contracts.plugin_context import PluginContext
 from elspeth.contracts.types import NodeID
 from elspeth.engine.processor import DAGTraversalContext
-from elspeth.plugins.base import BaseTransform
-from elspeth.plugins.results import TransformResult
+from elspeth.plugins.infrastructure.base import BaseTransform
+from elspeth.plugins.infrastructure.results import TransformResult
 from tests.fixtures.base_classes import create_observed_contract
+from tests.fixtures.factories import make_context
 
 
 def _single_node_traversal(node_id: NodeID, plugin: Any) -> DAGTraversalContext:
@@ -86,11 +87,10 @@ class TestProcessorRejectsDuckTypedPlugins:
         """
         import pytest
 
-        from elspeth.contracts.schema import SchemaConfig
         from elspeth.contracts.types import NodeID
-        from elspeth.core.landscape import LandscapeDB, LandscapeRecorder
         from elspeth.engine.processor import RowProcessor
         from elspeth.engine.spans import SpanFactory
+        from tests.fixtures.landscape import make_recorder_with_run
 
         class DuckTypedTransform:
             """Looks like a transform but doesn't inherit from BaseTransform."""
@@ -101,18 +101,8 @@ class TestProcessorRejectsDuckTypedPlugins:
             def process(self, row: dict[str, Any], ctx: PluginContext) -> TransformResult:
                 return TransformResult.success(row.to_dict(), success_reason={"action": "test"})  # type: ignore[attr-defined]
 
-        db = LandscapeDB.in_memory()
-        recorder = LandscapeRecorder(db)
-        run = recorder.begin_run(config={}, canonical_version="v1")
-
-        source = recorder.register_node(
-            run_id=run.run_id,
-            plugin_name="source",
-            node_type=NodeType.SOURCE,
-            plugin_version="1.0",
-            config={},
-            schema_config=SchemaConfig.from_dict({"mode": "observed"}),
-        )
+        setup = make_recorder_with_run()
+        recorder, run_id, source_node_id = setup.recorder, setup.run_id, setup.source_node_id
 
         # The duck-typed object has the method, but processor should reject it
         duck = DuckTypedTransform()
@@ -124,13 +114,13 @@ class TestProcessorRejectsDuckTypedPlugins:
         processor = RowProcessor(
             recorder=recorder,
             span_factory=SpanFactory(),
-            run_id=run.run_id,
-            source_node_id=NodeID(source.node_id),
+            run_id=run_id,
+            source_node_id=NodeID(source_node_id),
             source_on_success="default",
             traversal=_single_node_traversal(duck_node_id, duck),
         )
 
-        ctx = PluginContext(run_id=run.run_id, config={})
+        ctx = make_context(run_id=run_id, landscape=recorder)
 
         with pytest.raises(TypeError, match="Unknown transform type"):
             processor.process_row(

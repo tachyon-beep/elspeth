@@ -22,14 +22,12 @@ from elspeth.contracts.enums import BatchStatus, TriggerType
 from elspeth.contracts.errors import OrchestrationInvariantError
 from elspeth.contracts.types import NodeID
 from elspeth.engine.orchestrator.aggregation import (
-    _route_aggregation_outcome,
     check_aggregation_timeouts,
     find_aggregation_transform,
     flush_remaining_aggregation_buffers,
     handle_incomplete_batches,
 )
-from elspeth.engine.orchestrator.types import PipelineConfig
-from elspeth.plugins.protocols import TransformProtocol
+from elspeth.engine.orchestrator.types import AggNodeEntry, PipelineConfig
 from elspeth.testing import make_row, make_token_info
 
 # =============================================================================
@@ -39,7 +37,7 @@ from elspeth.testing import make_row, make_token_info
 
 def _make_batch_transform(*, node_id: str, is_batch_aware: bool = True) -> Mock:
     """Create a mock transform satisfying TransformProtocol with batch awareness."""
-    from elspeth.plugins.protocols import TransformProtocol
+    from elspeth.contracts import TransformProtocol
 
     transform = Mock(spec=TransformProtocol)
     transform.node_id = node_id
@@ -125,7 +123,7 @@ class TestFindAggregationTransform:
         t = _make_batch_transform(node_id="agg-node-1", is_batch_aware=False)
         config = _make_config(transforms=[t])
 
-        with pytest.raises(RuntimeError, match="No batch-aware transform"):
+        with pytest.raises(OrchestrationInvariantError, match="No batch-aware transform"):
             find_aggregation_transform(config, "agg-node-1", "batch1")
 
     def test_wrong_node_id_skipped(self) -> None:
@@ -133,21 +131,21 @@ class TestFindAggregationTransform:
         t = _make_batch_transform(node_id="other-node")
         config = _make_config(transforms=[t])
 
-        with pytest.raises(RuntimeError, match="No batch-aware transform"):
+        with pytest.raises(OrchestrationInvariantError, match="No batch-aware transform"):
             find_aggregation_transform(config, "agg-node-1", "batch1")
 
     def test_no_transforms_raises(self) -> None:
         """Empty transforms list raises with helpful error."""
         config = _make_config(transforms=[])
 
-        with pytest.raises(RuntimeError, match="No batch-aware transform"):
+        with pytest.raises(OrchestrationInvariantError, match="No batch-aware transform"):
             find_aggregation_transform(config, "agg-node-1", "batch1")
 
     def test_error_includes_aggregation_name(self) -> None:
         """Error message includes the aggregation name for debugging."""
         config = _make_config(transforms=[])
 
-        with pytest.raises(RuntimeError, match="my_aggregation"):
+        with pytest.raises(OrchestrationInvariantError, match="my_aggregation"):
             find_aggregation_transform(config, "agg-node-1", "my_aggregation")
 
     def test_error_lists_available_transforms(self) -> None:
@@ -155,7 +153,7 @@ class TestFindAggregationTransform:
         t = _make_batch_transform(node_id="other")
         config = _make_config(transforms=[t])
 
-        with pytest.raises(RuntimeError, match="other"):
+        with pytest.raises(OrchestrationInvariantError, match="other"):
             find_aggregation_transform(config, "agg-node-1", "batch1")
 
     def test_first_matching_transform_returned(self) -> None:
@@ -323,7 +321,7 @@ class TestCheckAggregationTimeouts:
         processor.handle_timeout_flush.return_value = ([completed], [])
 
         pending = _make_pending()
-        lookup: dict[str, tuple[TransformProtocol, NodeID]] = {"agg-1": (agg_transform, NodeID("agg-1"))}
+        lookup: dict[str, AggNodeEntry] = {"agg-1": AggNodeEntry(transform=agg_transform, node_id=NodeID("agg-1"))}
 
         result = check_aggregation_timeouts(
             config=config,
@@ -375,7 +373,7 @@ class TestCheckAggregationTimeouts:
         processor.handle_timeout_flush.return_value = ([completed], [])
 
         pending = _make_pending()
-        lookup: dict[str, tuple[TransformProtocol, NodeID]] = {"agg-1": (agg_transform, NodeID("agg-1"))}
+        lookup: dict[str, AggNodeEntry] = {"agg-1": AggNodeEntry(transform=agg_transform, node_id=NodeID("agg-1"))}
 
         result = check_aggregation_timeouts(
             config=config,
@@ -403,7 +401,7 @@ class TestCheckAggregationTimeouts:
         processor.handle_timeout_flush.return_value = ([failed], [])
 
         pending = _make_pending()
-        lookup: dict[str, tuple[TransformProtocol, NodeID]] = {"agg-1": (agg_transform, NodeID("agg-1"))}
+        lookup: dict[str, AggNodeEntry] = {"agg-1": AggNodeEntry(transform=agg_transform, node_id=NodeID("agg-1"))}
 
         result = check_aggregation_timeouts(
             config=config,
@@ -434,7 +432,7 @@ class TestCheckAggregationTimeouts:
         processor.process_token.return_value = [downstream_result]
 
         pending = _make_pending()
-        lookup: dict[str, tuple[TransformProtocol, NodeID]] = {"agg-1": (agg_transform, NodeID("agg-1"))}
+        lookup: dict[str, AggNodeEntry] = {"agg-1": AggNodeEntry(transform=agg_transform, node_id=NodeID("agg-1"))}
 
         result = check_aggregation_timeouts(
             config=config,
@@ -468,7 +466,7 @@ class TestCheckAggregationTimeouts:
         processor.process_token.return_value = []
 
         pending = _make_pending()
-        lookup: dict[str, tuple[TransformProtocol, NodeID]] = {"agg-1": (agg_transform, NodeID("agg-1"))}
+        lookup: dict[str, AggNodeEntry] = {"agg-1": AggNodeEntry(transform=agg_transform, node_id=NodeID("agg-1"))}
 
         check_aggregation_timeouts(
             config=config,
@@ -499,7 +497,7 @@ class TestCheckAggregationTimeouts:
         processor.process_token.return_value = [routed]
 
         pending: dict[str, list[tuple[TokenInfo, PendingOutcome | None]]] = {"output": [], "risk_sink": []}
-        lookup: dict[str, tuple[TransformProtocol, NodeID]] = {"agg-1": (agg_transform, NodeID("agg-1"))}
+        lookup: dict[str, AggNodeEntry] = {"agg-1": AggNodeEntry(transform=agg_transform, node_id=NodeID("agg-1"))}
 
         result = check_aggregation_timeouts(
             config=config,
@@ -530,7 +528,7 @@ class TestCheckAggregationTimeouts:
         processor.process_token.return_value = [quarantined]
 
         pending = _make_pending()
-        lookup: dict[str, tuple[TransformProtocol, NodeID]] = {"agg-1": (agg_transform, NodeID("agg-1"))}
+        lookup: dict[str, AggNodeEntry] = {"agg-1": AggNodeEntry(transform=agg_transform, node_id=NodeID("agg-1"))}
 
         result = check_aggregation_timeouts(
             config=config,
@@ -559,7 +557,7 @@ class TestCheckAggregationTimeouts:
         processor.process_token.return_value = [coalesced]
 
         pending = _make_pending()
-        lookup: dict[str, tuple[TransformProtocol, NodeID]] = {"agg-1": (agg_transform, NodeID("agg-1"))}
+        lookup: dict[str, AggNodeEntry] = {"agg-1": AggNodeEntry(transform=agg_transform, node_id=NodeID("agg-1"))}
 
         result = check_aggregation_timeouts(
             config=config,
@@ -589,7 +587,7 @@ class TestCheckAggregationTimeouts:
         processor.process_token.return_value = [failed]
 
         pending = _make_pending()
-        lookup: dict[str, tuple[TransformProtocol, NodeID]] = {"agg-1": (agg_transform, NodeID("agg-1"))}
+        lookup: dict[str, AggNodeEntry] = {"agg-1": AggNodeEntry(transform=agg_transform, node_id=NodeID("agg-1"))}
 
         result = check_aggregation_timeouts(
             config=config,
@@ -619,7 +617,7 @@ class TestCheckAggregationTimeouts:
         processor.process_token.return_value = [completed]
 
         pending = _make_pending()
-        lookup: dict[str, tuple[TransformProtocol, NodeID]] = {"agg-1": (agg_transform, NodeID("agg-1"))}
+        lookup: dict[str, AggNodeEntry] = {"agg-1": AggNodeEntry(transform=agg_transform, node_id=NodeID("agg-1"))}
 
         result = check_aggregation_timeouts(
             config=config,
@@ -653,7 +651,7 @@ class TestCheckAggregationTimeouts:
         processor.process_token.return_value = outcomes
 
         pending = _make_pending()
-        lookup: dict[str, tuple[TransformProtocol, NodeID]] = {"agg-1": (agg_transform, NodeID("agg-1"))}
+        lookup: dict[str, AggNodeEntry] = {"agg-1": AggNodeEntry(transform=agg_transform, node_id=NodeID("agg-1"))}
 
         result = check_aggregation_timeouts(
             config=config,
@@ -683,7 +681,7 @@ class TestCheckAggregationTimeouts:
         processor.handle_timeout_flush.return_value = ([completed], [])
 
         pending = _make_pending()
-        lookup: dict[str, tuple[TransformProtocol, NodeID]] = {"agg-1": (agg_transform, NodeID("agg-1"))}
+        lookup: dict[str, AggNodeEntry] = {"agg-1": AggNodeEntry(transform=agg_transform, node_id=NodeID("agg-1"))}
 
         result = check_aggregation_timeouts(
             config=config,
@@ -1096,38 +1094,3 @@ class TestFlushRemainingAggregationBuffers:
 
         assert result.rows_succeeded == 1
         assert len(pending["output"]) == 1
-
-
-# =============================================================================
-# _route_aggregation_outcome invariant tests
-# =============================================================================
-
-
-class TestRouteAggregationOutcome:
-    """Tests for _route_aggregation_outcome() fail-closed safety check."""
-
-    def test_routes_to_known_sink(self) -> None:
-        """Successfully routes result to a known sink in pending_tokens."""
-        result = _make_result(RowOutcome.COMPLETED, sink_name="output")
-        pending = _make_pending()
-
-        _route_aggregation_outcome(result, pending)
-
-        assert len(pending["output"]) == 1
-        assert pending["output"][0][0] == result.token
-
-    def test_unknown_sink_raises_invariant_error(self) -> None:
-        """Raises OrchestrationInvariantError when sink_name is not in pending_tokens."""
-        result = _make_result(RowOutcome.COMPLETED, sink_name="nonexistent")
-        pending = _make_pending()
-
-        with pytest.raises(OrchestrationInvariantError, match="not in configured sinks"):
-            _route_aggregation_outcome(result, pending)
-
-    def test_missing_sink_name_raises_invariant_error(self) -> None:
-        """Missing sink_name must fail closed with invariant error."""
-        result = _make_result(RowOutcome.COMPLETED, sink_name=None)
-        pending = _make_pending()
-
-        with pytest.raises(OrchestrationInvariantError, match="missing sink_name"):
-            _route_aggregation_outcome(result, pending)

@@ -1,4 +1,3 @@
-# src/elspeth/engine/retry.py
 """RetryManager: Retry logic with tenacity integration.
 
 Provides configurable retry behavior for transform execution:
@@ -36,17 +35,9 @@ from tenacity import (
 )
 
 from elspeth.contracts.config import RuntimeRetryProtocol
+from elspeth.contracts.errors import MaxRetriesExceeded
 
 T = TypeVar("T")
-
-
-class MaxRetriesExceeded(Exception):
-    """Raised when max retry attempts are exceeded."""
-
-    def __init__(self, attempts: int, last_error: BaseException) -> None:
-        self.attempts = attempts
-        self.last_error = last_error
-        super().__init__(f"Max retries ({attempts}) exceeded: {last_error}")
 
 
 class RetryManager:

@@ -22,7 +22,7 @@ class CheckpointCompatibilityValidator:
     2. Checkpoint node config hasn't changed
     3. FULL topology (ALL nodes + edges) is unchanged
 
-    BUG-COMPAT-01 FIX: Changed from upstream-only to full DAG validation.
+    Changed from upstream-only to full DAG validation.
     In multi-sink DAGs, upstream-only validation allowed changes to sibling
     branches (other sink paths) to go undetected, causing a single run to
     contain outputs produced under different pipeline configurations.
@@ -72,7 +72,7 @@ class CheckpointCompatibilityValidator:
             )
 
         # Validation 3: FULL topology (ALL nodes + edges) must be unchanged
-        # BUG-COMPAT-01 fix: Validate entire DAG, not just upstream of checkpoint.
+        # Validate entire DAG, not just upstream of checkpoint.
         # This catches changes to sibling branches in multi-sink DAGs.
         current_topology_hash = self.compute_full_topology_hash(current_graph)
 
@@ -89,7 +89,7 @@ class CheckpointCompatibilityValidator:
     ) -> str:
         """Delegate to canonical.compute_full_topology_hash().
 
-        BUG-COMPAT-01: Changed from upstream-only to full DAG hashing.
+        Changed from upstream-only to full DAG hashing.
         """
         return compute_full_topology_hash(graph)
 

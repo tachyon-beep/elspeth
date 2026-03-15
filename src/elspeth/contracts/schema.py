@@ -41,7 +41,7 @@ SUPPORTED_TYPES = frozenset({"str", "int", "float", "bool", "any"})
 FIELD_PATTERN = re.compile(r"^(\w+):\s*(str|int|float|bool|any)(\?)?$")
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, slots=True)
 class FieldDefinition:
     """Definition of a single field in a schema.
 
@@ -268,7 +268,7 @@ def _normalize_field_spec(spec: Any, *, index: int) -> str:
     )
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, slots=True)
 class SchemaConfig:
     """Configuration for a plugin's data schema.
 

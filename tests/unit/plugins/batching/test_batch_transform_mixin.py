@@ -16,13 +16,22 @@ from typing import Any
 import pytest
 
 from elspeth.contracts import TransformResult
+from elspeth.contracts.contexts import TransformContext
 from elspeth.contracts.identity import TokenInfo
 from elspeth.contracts.plugin_context import PluginContext
 from elspeth.contracts.schema_contract import PipelineRow
-from elspeth.plugins.base import BaseTransform
-from elspeth.plugins.batching import BatchTransformMixin
-from elspeth.plugins.batching.ports import CollectorOutputPort
+from elspeth.core.landscape.recorder import LandscapeRecorder
+from elspeth.plugins.infrastructure.base import BaseTransform
+from elspeth.plugins.infrastructure.batching import BatchTransformMixin
+from elspeth.plugins.infrastructure.batching.ports import CollectorOutputPort, OutputPort
 from elspeth.testing import make_pipeline_row
+from tests.fixtures.factories import make_context
+from tests.fixtures.landscape import make_recorder
+
+
+def _make_recorder() -> LandscapeRecorder:
+    """Create an in-memory LandscapeRecorder for testing."""
+    return make_recorder()
 
 
 def make_token(row_id: str, token_id: str | None = None, row_data: dict[str, Any] | None = None) -> TokenInfo:
@@ -43,7 +52,7 @@ class SimpleBatchTransform(BaseTransform, BatchTransformMixin):
         super().__init__({"schema": {"mode": "observed"}})
         self._batch_initialized = False
 
-    def connect_output(self, output: CollectorOutputPort, max_pending: int = 10) -> None:
+    def connect_output(self, output: OutputPort, max_pending: int = 10) -> None:
         if self._batch_initialized:
             raise RuntimeError("connect_output() already called")
         self.init_batch_processing(
@@ -54,18 +63,18 @@ class SimpleBatchTransform(BaseTransform, BatchTransformMixin):
         )
         self._batch_initialized = True
 
-    def accept(self, row: dict[str, Any], ctx: PluginContext) -> None:
+    def accept(self, row: dict[str, Any], ctx: TransformContext) -> None:  # type: ignore[override]
         if not self._batch_initialized:
             raise RuntimeError("connect_output() must be called before accept()")
         self.accept_row(make_pipeline_row(row), ctx, self._process_row)
 
-    def _process_row(self, row: PipelineRow, ctx: PluginContext) -> TransformResult:
+    def _process_row(self, row: PipelineRow, ctx: TransformContext) -> TransformResult:
         # Simple passthrough - just add a marker
         output = row.to_dict()
         output["processed"] = True
         return TransformResult.success(make_pipeline_row(output), success_reason={"action": "test"})
 
-    def process(self, row: PipelineRow, ctx: PluginContext) -> TransformResult:
+    def process(self, row: PipelineRow, ctx: TransformContext) -> TransformResult:
         raise NotImplementedError("Use accept() for row-level pipelining")
 
     def close(self) -> None:
@@ -97,6 +106,7 @@ class TestBatchTransformMixinTokenValidation:
         ctx = PluginContext(
             run_id="test-run",
             config={},
+            landscape=_make_recorder(),
             token=None,  # Explicitly None - contract violation
         )
 
@@ -106,9 +116,8 @@ class TestBatchTransformMixinTokenValidation:
     def test_accept_succeeds_when_token_is_set(self, transform: SimpleBatchTransform, collector: CollectorOutputPort) -> None:
         """accept() succeeds when ctx.token is properly set."""
         token = make_token("row-1", row_data={"data": "test"})
-        ctx = PluginContext(
-            run_id="test-run",
-            config={},
+        ctx = make_context(
+            landscape=_make_recorder(),
             token=token,
             state_id="test-state-1",  # Required for batch processing
         )
@@ -144,7 +153,7 @@ class TestBatchTransformMixinTokenIdentity:
         2. Audit attribution - the token tracks row lineage through the DAG
         """
         input_token = make_token("row-42", row_data={"value": 100})
-        ctx = PluginContext(run_id="test-run", config={}, token=input_token, state_id="test-state-1")
+        ctx = make_context(landscape=_make_recorder(), token=input_token, state_id="test-state-1")
 
         transform.accept({"value": 100}, ctx)
         transform.flush_batch_processing(timeout=10.0)
@@ -162,7 +171,7 @@ class TestBatchTransformMixinTokenIdentity:
         tokens = [make_token(f"row-{i}") for i in range(3)]
 
         for i, token in enumerate(tokens):
-            ctx = PluginContext(run_id="test-run", config={}, token=token, state_id=f"state-{i}")
+            ctx = make_context(landscape=_make_recorder(), token=token, state_id=f"state-{i}")
             transform.accept({"index": i}, ctx)
 
         transform.flush_batch_processing(timeout=10.0)
@@ -207,7 +216,7 @@ class TestStaleTokenDetection:
         reused across multiple rows, with ctx.token updated per-row.
         """
         # Create a single context (engine pattern)
-        ctx = PluginContext(run_id="test-run", config={})
+        ctx = make_context(landscape=_make_recorder())
 
         # Process row 1 with token 1
         token1 = make_token("row-1")
@@ -239,7 +248,7 @@ class TestStaleTokenDetection:
         update ctx.token, they would see the SAME token for multiple rows,
         which is detectable in tests.
         """
-        ctx = PluginContext(run_id="test-run", config={})
+        ctx = make_context(landscape=_make_recorder())
 
         # Process 3 rows, each with a unique token
         tokens = []
@@ -271,7 +280,7 @@ class TestStaleTokenDetection:
         This verifies the synchronization contract: the executor sets
         ctx.token, then calls accept(), and accept() sees the updated value.
         """
-        ctx = PluginContext(run_id="test-run", config={})
+        ctx = make_context(landscape=_make_recorder())
 
         # Initial token
         initial_token = make_token("initial")
@@ -309,7 +318,7 @@ class BlockingBatchTransform(BaseTransform, BatchTransformMixin):
         self._block_event = threading.Event()
         self._processing_started = threading.Event()
 
-    def connect_output(self, output: CollectorOutputPort, max_pending: int = 10) -> None:
+    def connect_output(self, output: OutputPort, max_pending: int = 10) -> None:
         if self._batch_initialized:
             raise RuntimeError("connect_output() already called")
         self.init_batch_processing(
@@ -320,12 +329,12 @@ class BlockingBatchTransform(BaseTransform, BatchTransformMixin):
         )
         self._batch_initialized = True
 
-    def accept(self, row: dict[str, Any], ctx: PluginContext) -> None:
+    def accept(self, row: dict[str, Any], ctx: TransformContext) -> None:  # type: ignore[override]
         if not self._batch_initialized:
             raise RuntimeError("connect_output() must be called before accept()")
         self.accept_row(make_pipeline_row(row), ctx, self._process_row)
 
-    def _process_row(self, row: PipelineRow, ctx: PluginContext) -> TransformResult:
+    def _process_row(self, row: PipelineRow, ctx: TransformContext) -> TransformResult:
         # Signal that processing has started
         self._processing_started.set()
         # Block until released
@@ -342,7 +351,7 @@ class BlockingBatchTransform(BaseTransform, BatchTransformMixin):
         """Wait until at least one worker has started processing."""
         return self._processing_started.wait(timeout=timeout)
 
-    def process(self, row: PipelineRow, ctx: PluginContext) -> TransformResult:
+    def process(self, row: PipelineRow, ctx: TransformContext) -> TransformResult:
         raise NotImplementedError("Use accept() for row-level pipelining")
 
     def close(self) -> None:
@@ -389,7 +398,7 @@ class TestBatchTransformMixinEviction:
         4. Retry can proceed without FIFO blocking
         """
         token = make_token("row-1")
-        ctx = PluginContext(run_id="test-run", config={}, token=token, state_id="state-attempt-1")
+        ctx = make_context(landscape=_make_recorder(), token=token, state_id="state-attempt-1")
 
         # Submit the row (will block in worker)
         blocking_transform.accept({"value": 1}, ctx)
@@ -429,7 +438,7 @@ class TestBatchTransformMixinEviction:
         token = make_token("row-1")
 
         # Original attempt
-        ctx1 = PluginContext(run_id="test-run", config={}, token=token, state_id="state-attempt-1")
+        ctx1 = make_context(landscape=_make_recorder(), token=token, state_id="state-attempt-1")
         transform.accept({"attempt": 1}, ctx1)
 
         # Evict original (simulating timeout)
@@ -437,7 +446,7 @@ class TestBatchTransformMixinEviction:
         transform.evict_submission(token.token_id, ctx1.state_id)
 
         # Retry attempt with new state_id
-        ctx2 = PluginContext(run_id="test-run", config={}, token=token, state_id="state-attempt-2")
+        ctx2 = make_context(landscape=_make_recorder(), token=token, state_id="state-attempt-2")
         transform.accept({"attempt": 2}, ctx2)
 
         # Flush and verify retry result is released
@@ -468,7 +477,7 @@ class SlowBatchTransform(BaseTransform, BatchTransformMixin):
         self._delay = delay
         self._processing_started = threading.Event()
 
-    def connect_output(self, output: CollectorOutputPort, max_pending: int = 10) -> None:
+    def connect_output(self, output: OutputPort, max_pending: int = 10) -> None:
         if self._batch_initialized:
             raise RuntimeError("connect_output() already called")
         self.init_batch_processing(
@@ -479,12 +488,12 @@ class SlowBatchTransform(BaseTransform, BatchTransformMixin):
         )
         self._batch_initialized = True
 
-    def accept(self, row: dict[str, Any], ctx: PluginContext) -> None:
+    def accept(self, row: dict[str, Any], ctx: TransformContext) -> None:  # type: ignore[override]
         if not self._batch_initialized:
             raise RuntimeError("connect_output() must be called before accept()")
         self.accept_row(make_pipeline_row(row), ctx, self._process_row)
 
-    def _process_row(self, row: PipelineRow, ctx: PluginContext) -> TransformResult:
+    def _process_row(self, row: PipelineRow, ctx: TransformContext) -> TransformResult:
         self._processing_started.set()
         import time
 
@@ -493,7 +502,7 @@ class SlowBatchTransform(BaseTransform, BatchTransformMixin):
         output["processed"] = True
         return TransformResult.success(make_pipeline_row(output), success_reason={"action": "test"})
 
-    def process(self, row: PipelineRow, ctx: PluginContext) -> TransformResult:
+    def process(self, row: PipelineRow, ctx: TransformContext) -> TransformResult:
         raise NotImplementedError("Use accept() for row-level pipelining")
 
     def close(self) -> None:
@@ -527,7 +536,7 @@ class TestShutdownDrainsInFlightRows:
         num_rows = 3
         for i in range(num_rows):
             token = make_token(f"row-{i}")
-            ctx = PluginContext(run_id="test-run", config={}, token=token, state_id=f"state-{i}")
+            ctx = make_context(landscape=_make_recorder(), token=token, state_id=f"state-{i}")
             transform.accept({"idx": i}, ctx)
 
         # Shutdown while workers are still processing
@@ -563,7 +572,7 @@ class TestShutdownDrainsInFlightRows:
         num_rows = 4
         for i in range(num_rows):
             token = make_token(f"row-{i}")
-            ctx = PluginContext(run_id="test-run", config={}, token=token, state_id=f"state-{i}")
+            ctx = make_context(landscape=_make_recorder(), token=token, state_id=f"state-{i}")
             transform.accept({"idx": i}, ctx)
 
         transform.flush_batch_processing(timeout=10.0)
@@ -624,7 +633,7 @@ class TestReleaseLoopStaleTokenDetection:
 
         try:
             token = make_token("row-0")
-            ctx = PluginContext(run_id="test-run", config={}, token=token, state_id="state-0")
+            ctx = make_context(landscape=_make_recorder(), token=token, state_id="state-0")
             transform.accept({"data": "test"}, ctx)
 
             # Wait for processing to complete and release loop to handle the failure
@@ -668,7 +677,7 @@ class TestReleaseLoopStaleTokenDetection:
             for i in range(3):
                 token = make_token(f"row-{i}")
                 tokens.append(token)
-                ctx = PluginContext(run_id="test-run", config={}, token=token, state_id=f"state-{i}")
+                ctx = make_context(landscape=_make_recorder(), token=token, state_id=f"state-{i}")
                 transform.accept({"idx": i}, ctx)
 
             import time
@@ -696,3 +705,96 @@ class TestReleaseLoopStaleTokenDetection:
             assert s1 == "state-1", "Error handler used stale state_id from previous row"
         finally:
             transform.shutdown_batch_processing(timeout=5.0)
+
+
+class AlwaysFailingOutputPort:
+    """Output port where every emit() raises — simulates a completely broken port."""
+
+    def emit(self, token: Any, result: Any, state_id: Any) -> None:
+        raise RuntimeError("Port is completely broken")
+
+
+class TestReleaseLoopCrashesOnBrokenPort:
+    """Regression tests for elspeth-dc2fff46fe: release loop must not silently
+    continue when the output port is completely broken.
+
+    Previously, a broken output port caused a ``critical`` log and the loop
+    continued, silently losing the token's result. The waiter would hang until
+    timeout with no indication of what went wrong.
+
+    Fix: raise FrameworkBugError to crash the release thread, making the
+    failure visible via waiter timeouts and thread-death detection.
+    """
+
+    def test_broken_port_kills_release_thread(self) -> None:
+        """When both original emit and ExceptionResult emit fail, the release
+        thread must crash (FrameworkBugError) rather than silently continuing."""
+        port = AlwaysFailingOutputPort()
+        transform = SimpleBatchTransform()
+        transform.init_batch_processing(
+            max_pending=5,
+            output=port,
+            name="broken-port-test",
+            max_workers=5,
+        )
+        transform._batch_initialized = True
+
+        token = make_token("row-0")
+        ctx = make_context(landscape=_make_recorder(), token=token, state_id="state-0")
+        transform.accept({"data": "test"}, ctx)
+
+        # Give the release thread time to process the result and crash
+        import time
+
+        time.sleep(2.0)
+
+        # Release thread should have died (FrameworkBugError), not silently continued
+        assert not transform._batch_release_thread.is_alive(), (
+            "Release thread is still alive after port failure — "
+            "it should have crashed with FrameworkBugError instead of silently continuing"
+        )
+
+        # Cleanup: shutdown won't raise because the thread is already dead
+        transform._batch_executor.shutdown(wait=True)
+        transform._batch_buffer.shutdown()
+
+
+class TestShutdownRaisesOnThreadTimeout:
+    """Regression test for elspeth-da9918e43a: shutdown_batch_processing must
+    raise when the release thread fails to stop, not just warn.
+
+    Previously, a warning was logged and the pipeline proceeded as if shutdown
+    succeeded — potentially reporting success with undrained results.
+
+    Fix: raise FrameworkBugError to prevent false success reporting.
+    """
+
+    def test_shutdown_completes_when_release_thread_already_crashed(self) -> None:
+        """When the release thread has already crashed (e.g., broken port),
+        shutdown_batch_processing completes without raising FrameworkBugError.
+
+        FrameworkBugError only fires when the thread is alive but didn't stop.
+        A crashed thread is already dead — join returns immediately.
+        """
+        port = AlwaysFailingOutputPort()
+        transform = SimpleBatchTransform()
+        transform.init_batch_processing(
+            max_pending=5,
+            output=port,
+            name="shutdown-after-crash",
+            max_workers=5,
+        )
+        transform._batch_initialized = True
+
+        token = make_token("row-0")
+        ctx = make_context(landscape=_make_recorder(), token=token, state_id="state-0")
+        transform.accept({"data": "test"}, ctx)
+
+        # Wait for release thread to crash from broken port
+        import time
+
+        time.sleep(2.0)
+        assert not transform._batch_release_thread.is_alive()
+
+        # Shutdown should complete without raising — thread is already dead
+        transform.shutdown_batch_processing(timeout=5.0)

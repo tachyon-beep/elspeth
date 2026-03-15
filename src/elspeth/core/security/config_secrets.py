@@ -1,4 +1,3 @@
-# src/elspeth/core/security/config_secrets.py
 """Config-based secret loading from Azure Key Vault.
 
 This module loads secrets specified in pipeline configuration and injects
@@ -29,7 +28,9 @@ from __future__ import annotations
 
 import os
 import time
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
+
+from elspeth.contracts import SecretResolutionInput
 
 if TYPE_CHECKING:
     from elspeth.core.config import SecretsConfig
@@ -46,7 +47,7 @@ class SecretLoadError(Exception):
     pass
 
 
-def load_secrets_from_config(config: SecretsConfig) -> list[dict[str, Any]]:
+def load_secrets_from_config(config: SecretsConfig) -> list[SecretResolutionInput]:
     """Load secrets from configured source and inject into environment.
 
     When source is 'env', this function does nothing (secrets come from
@@ -75,10 +76,7 @@ def load_secrets_from_config(config: SecretsConfig) -> list[dict[str, Any]]:
         return []
 
     # source == "keyvault"
-    # P0-1: No defensive assertions - Pydantic guarantees vault_url and mapping
-    # are set when source == "keyvault"
-
-    # P1-2026-02-05: Preflight check for fingerprint key before any Key Vault calls.
+    # Preflight check for fingerprint key before any Key Vault calls.
     # Audit recording requires ELSPETH_FINGERPRINT_KEY to compute secret fingerprints.
     # Without it, secrets would be fetched but audit recording would fail later,
     # leaving secret resolution events unrecorded (violates auditability standard).
@@ -98,8 +96,9 @@ def load_secrets_from_config(config: SecretsConfig) -> list[dict[str, Any]]:
             "         # ... other secrets"
         )
 
-    # P0-4: Reuse existing KeyVaultSecretLoader instead of duplicating code
     try:
+        from azure.core.exceptions import ClientAuthenticationError, HttpResponseError, ServiceRequestError
+
         from elspeth.core.security.secret_loader import (
             KeyVaultSecretLoader,
             SecretNotFoundError,
@@ -112,26 +111,22 @@ def load_secrets_from_config(config: SecretsConfig) -> list[dict[str, Any]]:
     assert config.vault_url is not None, "vault_url required when source=keyvault"
     try:
         loader = KeyVaultSecretLoader(vault_url=config.vault_url)
-    except ImportError as e:
-        raise SecretLoadError("Azure Key Vault packages not installed. Install with: uv pip install 'elspeth[azure]'") from e
-    except Exception as e:
-        # P0-2: This catches Azure auth errors during client creation
-        error_str = str(e)
-        if "ClientAuthenticationError" in error_str or "credential" in error_str.lower():
-            raise SecretLoadError(
-                f"Failed to authenticate to Key Vault ({config.vault_url})\n"
-                f"DefaultAzureCredential could not find valid credentials.\n"
-                f"Ensure Managed Identity, Azure CLI login, or service principal env vars are configured.\n"
-                f"Error: {e}"
-            ) from e
+    except ClientAuthenticationError as e:
+        raise SecretLoadError(
+            f"Failed to authenticate to Key Vault ({config.vault_url})\n"
+            f"DefaultAzureCredential could not find valid credentials.\n"
+            f"Ensure Managed Identity, Azure CLI login, or service principal env vars are configured.\n"
+            f"Error: {e}"
+        ) from e
+    except (HttpResponseError, ServiceRequestError) as e:
         raise SecretLoadError(f"Failed to initialize Key Vault loader for {config.vault_url}\nError: {e}") from e
 
     # Load each mapped secret, fingerprint immediately, collect resolution records.
     # Plaintext values are fingerprinted and discarded within this loop iteration —
     # they never accumulate in the resolutions list.
-    from elspeth.core.security.fingerprint import get_fingerprint_key, secret_fingerprint
+    from elspeth.contracts.security import get_fingerprint_key, secret_fingerprint
 
-    resolutions: list[dict[str, Any]] = []
+    resolutions: list[SecretResolutionInput] = []
 
     # Fingerprint key is available after loading ELSPETH_FINGERPRINT_KEY
     # (either from env or from Key Vault earlier in this loop).
@@ -175,15 +170,15 @@ def load_secrets_from_config(config: SecretsConfig) -> list[dict[str, Any]]:
             fp = secret_fingerprint(str(secret_value), key=fingerprint_key)
 
             resolutions.append(
-                {
-                    "env_var_name": env_var_name,
-                    "source": "keyvault",
-                    "vault_url": config.vault_url,
-                    "secret_name": keyvault_secret_name,
-                    "timestamp": start_time,
-                    "latency_ms": latency_ms,
-                    "fingerprint": fp,
-                }
+                SecretResolutionInput(
+                    env_var_name=env_var_name,
+                    source="keyvault",
+                    vault_url=config.vault_url,
+                    secret_name=keyvault_secret_name,
+                    timestamp=start_time,
+                    resolution_latency_ms=latency_ms,
+                    fingerprint=fp,
+                )
             )
 
         except SecretNotFoundError as e:
@@ -196,22 +191,19 @@ def load_secrets_from_config(config: SecretsConfig) -> list[dict[str, Any]]:
         except ImportError as e:
             # Azure SDK not installed
             raise SecretLoadError("Azure Key Vault packages not installed. Install with: uv pip install 'elspeth[azure]'") from e
-        except Exception as e:
-            # P0-2: Catch auth and other Azure errors
-            error_str = str(e)
-            if "ClientAuthenticationError" in error_str or "credential" in error_str.lower():
-                raise SecretLoadError(
-                    f"Failed to authenticate to Key Vault ({config.vault_url})\n"
-                    f"DefaultAzureCredential could not find valid credentials.\n"
-                    f"Ensure Managed Identity, Azure CLI login, or service principal env vars are configured.\n"
-                    f"Error: {e}"
-                ) from e
-            else:
-                raise SecretLoadError(
-                    f"Failed to load secret '{keyvault_secret_name}' from Key Vault ({config.vault_url})\n"
-                    f"Mapped from: {env_var_name}\n"
-                    f"Error: {e}"
-                ) from e
+        except ClientAuthenticationError as e:
+            raise SecretLoadError(
+                f"Failed to authenticate to Key Vault ({config.vault_url})\n"
+                f"DefaultAzureCredential could not find valid credentials.\n"
+                f"Ensure Managed Identity, Azure CLI login, or service principal env vars are configured.\n"
+                f"Error: {e}"
+            ) from e
+        except (HttpResponseError, ServiceRequestError) as e:
+            raise SecretLoadError(
+                f"Failed to load secret '{keyvault_secret_name}' from Key Vault ({config.vault_url})\n"
+                f"Mapped from: {env_var_name}\n"
+                f"Error: {e}"
+            ) from e
 
     # Phase 2: All secrets fetched successfully — apply to os.environ atomically.
     for env_var_name, secret_value in pending_env:

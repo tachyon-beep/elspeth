@@ -4,7 +4,7 @@
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![Python 3.12+](https://img.shields.io/badge/python-3.12+-blue.svg)](https://www.python.org/downloads/)
-![Status: RC-3.2](https://img.shields.io/badge/status-RC--3.2-yellow.svg)
+![Status: RC-3.3](https://img.shields.io/badge/status-RC--3.3-yellow.svg)
 
 Auditable Sense/Decide/Act pipelines for high-stakes data processing. Every decision traceable to its source.
 
@@ -383,18 +383,18 @@ sinks:
       path: output/results.csv
 
       # Option 1: Explicit mapping (full control)
-      display_headers:
+      headers:
         user_id: "User ID"
         amount: "Transaction Amount"
 
       # Option 2: Auto-restore from source (convenience)
-      # restore_source_headers: true
+      # headers: original
 ```
 
-| Option                   | Use When                                                          |
-| ------------------------ | ----------------------------------------------------------------- |
-| `display_headers`        | You need custom output names or don't want source coupling        |
-| `restore_source_headers` | You want to restore exact original headers from normalized source |
+| Option              | Use When                                                          |
+| ------------------- | ----------------------------------------------------------------- |
+| `headers: {map}`    | You need custom output names or don't want source coupling        |
+| `headers: original` | You want to restore exact original headers from normalized source |
 
 Transform-added fields (not in source) use their normalized names when restoring.
 
@@ -512,7 +512,7 @@ docker run --rm \
   -v $(pwd)/input:/app/input:ro \
   -v $(pwd)/output:/app/output \
   -v $(pwd)/state:/app/state \
-  ghcr.io/johnm-dta/elspeth:v0.3.0 \
+  ghcr.io/johnm-dta/elspeth:v0.3.3 \
   run --settings /app/config/pipeline.yaml --execute
 
 # Health check
@@ -578,7 +578,7 @@ See [Architecture Documentation](ARCHITECTURE.md) for C4 diagrams and detailed d
 | [ARCHITECTURE.md](ARCHITECTURE.md) | Developers | C4 diagrams, data flows, component details |
 | [PLUGIN.md](PLUGIN.md) | Plugin Authors | How to create sources, transforms, sinks |
 | [docs/architecture/requirements.md](docs/architecture/requirements.md) | All | 323 verified requirements with implementation status |
-| [docs/architecture/adr/](docs/architecture/adr/) | Architects | Architecture Decision Records (5 ADRs including sink routing and DAG wiring) |
+| [docs/architecture/adr/](docs/architecture/adr/) | Architects | Architecture Decision Records (6 ADRs including sink routing, DAG wiring, layer remediation) |
 | [CLAUDE.md](CLAUDE.md) | AI Assistants | Project context, trust model, patterns |
 | [docs/guides/](docs/guides/) | All | Tutorials, MCP analysis guide, data trust model |
 | [docs/reference/](docs/reference/) | Developers | Configuration reference |

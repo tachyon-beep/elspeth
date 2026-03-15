@@ -19,6 +19,7 @@ from elspeth.core.landscape.database import LandscapeDB
 from elspeth.core.landscape.recorder import LandscapeRecorder
 from elspeth.core.landscape.schema import edges_table
 from elspeth.core.payload_store import FilesystemPayloadStore
+from tests.fixtures.landscape import make_recorder
 
 
 class TestResumeEdgeIDs:
@@ -30,7 +31,7 @@ class TestResumeEdgeIDs:
         db = LandscapeDB(f"sqlite:///{tmp_path}/test.db")
         payload_store = FilesystemPayloadStore(tmp_path / "payloads")
         checkpoint_mgr = CheckpointManager(db)
-        recorder = LandscapeRecorder(db)
+        recorder = make_recorder(db)
 
         return {
             "db": db,

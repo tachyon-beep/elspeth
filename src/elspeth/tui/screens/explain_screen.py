@@ -44,7 +44,7 @@ class ScreenStateType(Enum):
     LOADED = auto()  # Data loaded successfully
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, slots=True)
 class UninitializedState:
     """Screen has no data source configured.
 
@@ -54,7 +54,7 @@ class UninitializedState:
     state_type: ScreenStateType = ScreenStateType.UNINITIALIZED
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, slots=True)
 class LoadingFailedState:
     """Data source configured but loading failed.
 
@@ -68,7 +68,7 @@ class LoadingFailedState:
     state_type: ScreenStateType = field(default=ScreenStateType.LOADING_FAILED)
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, slots=True)
 class LoadedState:
     """Data loaded successfully.
 
@@ -175,11 +175,9 @@ class ExplainScreen:
             lineage_data: LineageData = {
                 "run_id": run_id,
                 "source": {
-                    "name": source_nodes[0].plugin_name if source_nodes else "unknown",
+                    "name": source_nodes[0].plugin_name if source_nodes else None,
                     "node_id": source_nodes[0].node_id if source_nodes else None,
-                }
-                if source_nodes
-                else {"name": "unknown", "node_id": None},
+                },
                 "transforms": [{"name": n.plugin_name, "node_id": n.node_id, "node_type": n.node_type.value} for n in transform_nodes],
                 "sinks": [{"name": n.plugin_name, "node_id": n.node_id, "node_type": n.node_type.value} for n in sink_nodes],
                 "tokens": [],  # Tokens loaded separately when needed
@@ -202,14 +200,6 @@ class ExplainScreen:
             )
             return LoadingFailedState(db=db, run_id=run_id, error=str(e))
 
-    def get_widget_types(self) -> list[str]:
-        """Get list of widget types in this screen.
-
-        Returns:
-            List of widget type names
-        """
-        return ["LineageTree", "NodeDetailPanel"]
-
     def get_lineage_data(self) -> LineageData | None:
         """Get current lineage data.
 
@@ -219,14 +209,6 @@ class ExplainScreen:
         match self._state:
             case LoadedState(lineage_data=data):
                 return data
-            case _:
-                return None
-
-    def _get_db(self) -> LandscapeDB | None:
-        """Get database connection if available."""
-        match self._state:
-            case LoadedState(db=db) | LoadingFailedState(db=db):
-                return db
             case _:
                 return None
 
@@ -246,14 +228,12 @@ class ExplainScreen:
         """
         self._selected_node_id = node_id
 
-        # Load node state from database if in a state with db access
-        db = self._get_db()
-        run_id = self._get_run_id()
-        if db and run_id and node_id:
-            node_state = self._load_node_state(db, run_id, node_id)
-            self._detail_panel.update_state(node_state)
-        else:
-            self._detail_panel.update_state(None)
+        match self._state:
+            case LoadedState(db=db, run_id=run_id) | LoadingFailedState(db=db, run_id=run_id) if node_id:
+                node_state = self._load_node_state(db, run_id, node_id)
+                self._detail_panel.update_state(node_state)
+            case _:
+                self._detail_panel.update_state(None)
 
     def _load_node_state(self, db: LandscapeDB, run_id: str, node_id: str) -> NodeStateInfo | None:
         """Load node state from database.
@@ -270,48 +250,28 @@ class ExplainScreen:
             NodeStateInfo with at minimum node_id, plugin_name, node_type,
             or None if node not found
         """
-        try:
-            recorder = LandscapeRecorder(db)
-            # Query by composite PK (node_id, run_id) - no post-hoc validation needed
-            node = recorder.get_node(node_id, run_id)
+        recorder = LandscapeRecorder(db)
+        # Query by composite PK (node_id, run_id) - no post-hoc validation needed
+        node = recorder.get_node(node_id, run_id)
 
-            if node is None:
-                return None
-
-            # Build result with required fields - direct access, crash on missing
-            # node_type is an enum, convert to string for display
-            result: NodeStateInfo = {
-                "node_id": node.node_id,
-                "plugin_name": node.plugin_name,
-                "node_type": node.node_type.value,
-            }
-
-            # Note: Full node state requires a token_id to look up execution state.
-            # When selecting a node in the tree (not a specific token), we only
-            # have the registered node info. Token-specific state (state_id,
-            # token_id, status, timing, hashes, errors) would be populated when
-            # the user selects a specific token-node combination.
-
-            return result
-        except _RECOVERABLE_DB_ERRORS as e:
-            # Database connection/availability errors - return None to show "not found"
-            # Other exceptions (bugs in our code) should crash - don't hide them
-            logger.warning(
-                "Database error loading node state",
-                run_id=run_id,
-                node_id=node_id,
-                error=str(e),
-                error_type=type(e).__name__,
-            )
+        if node is None:
             return None
 
-    def get_detail_panel_state(self) -> NodeStateInfo | None:
-        """Get current detail panel state.
+        # Build result with required fields - direct access, crash on missing
+        # node_type is an enum, convert to string for display
+        result: NodeStateInfo = {
+            "node_id": node.node_id,
+            "plugin_name": node.plugin_name,
+            "node_type": node.node_type.value,
+        }
 
-        Returns:
-            Node state being displayed or None
-        """
-        return self._detail_panel._state
+        # Note: Full node state requires a token_id to look up execution state.
+        # When selecting a node in the tree (not a specific token), we only
+        # have the registered node info. Token-specific state (state_id,
+        # token_id, status, timing, hashes, errors) would be populated when
+        # the user selects a specific token-node combination.
+
+        return result
 
     def render(self) -> str:
         """Render the screen as text.
@@ -343,10 +303,6 @@ class ExplainScreen:
         lines.append(self._detail_panel.render_content())
 
         return "\n".join(lines)
-
-    # =========================================================================
-    # State Transition Methods
-    # =========================================================================
 
     def load(self, db: LandscapeDB, run_id: str) -> None:
         """Load pipeline data from database.

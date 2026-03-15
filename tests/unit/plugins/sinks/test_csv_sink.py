@@ -7,6 +7,8 @@ from pathlib import Path
 import pytest
 
 from elspeth.contracts.plugin_context import PluginContext
+from tests.fixtures.factories import make_context
+from tests.fixtures.landscape import make_recorder
 
 # Strict schema config for tests - PathConfig now requires schema
 # CSVSink requires fixed-column structure, so we use strict mode
@@ -20,7 +22,8 @@ class TestCSVSink:
     @pytest.fixture
     def ctx(self) -> PluginContext:
         """Create a minimal plugin context."""
-        return PluginContext(run_id="test-run", config={})
+        recorder = make_recorder()
+        return make_context(landscape=recorder)
 
     def test_write_creates_file(self, tmp_path: Path, ctx: PluginContext) -> None:
         """write() creates CSV file with headers."""
@@ -330,7 +333,7 @@ class TestCSVSink:
 
         This prevents typos like 'apend' from silently truncating files.
         """
-        from elspeth.plugins.config_base import PluginConfigError
+        from elspeth.plugins.infrastructure.config_base import PluginConfigError
         from elspeth.plugins.sinks.csv_sink import CSVSinkConfig
 
         with pytest.raises(PluginConfigError, match=r"'write'.*'append'"):
@@ -408,7 +411,8 @@ class TestCSVSinkSchemaValidation:
         """Dynamic schema uses first row's keys as column headers."""
         from elspeth.plugins.sinks.csv_sink import CSVSink
 
-        ctx = PluginContext(run_id="test-run", config={})
+        recorder = make_recorder()
+        ctx = make_context(landscape=recorder)
         sink = CSVSink(
             {
                 "path": str(tmp_path / "output.csv"),
@@ -429,7 +433,8 @@ class TestCSVSinkSchemaValidation:
         """After first write, new fields are rejected (infer-and-lock)."""
         from elspeth.plugins.sinks.csv_sink import CSVSink
 
-        ctx = PluginContext(run_id="test-run", config={})
+        recorder = make_recorder()
+        ctx = make_context(landscape=recorder)
         sink = CSVSink(
             {
                 "path": str(tmp_path / "output.csv"),
@@ -454,7 +459,8 @@ class TestCSVSinkSchemaValidation:
         """
         from elspeth.plugins.sinks.csv_sink import CSVSink
 
-        ctx = PluginContext(run_id="test-run", config={})
+        recorder = make_recorder()
+        ctx = make_context(landscape=recorder)
         # Schema declares only 'id', but first row has 'id', 'name', 'extra'
         flexible_schema = {"mode": "flexible", "fields": ["id: int"]}
         sink = CSVSink(
@@ -489,7 +495,8 @@ class TestCSVSinkSchemaValidation:
         """Flexible mode should place declared fields before extras for predictability."""
         from elspeth.plugins.sinks.csv_sink import CSVSink
 
-        ctx = PluginContext(run_id="test-run", config={})
+        recorder = make_recorder()
+        ctx = make_context(landscape=recorder)
         # Schema declares 'id' and 'name'
         flexible_schema = {"mode": "flexible", "fields": ["id: int", "name: str"]}
         sink = CSVSink(

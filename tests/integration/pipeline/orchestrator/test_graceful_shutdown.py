@@ -15,18 +15,22 @@ from typing import TYPE_CHECKING, Any
 import pytest
 
 from elspeth.contracts import PipelineRow, RunStatus
-from elspeth.contracts.enums import Determinism
 from elspeth.contracts.errors import GracefulShutdownError
 from elspeth.contracts.results import SourceRow
-from elspeth.plugins.base import BaseTransform
-from elspeth.plugins.results import TransformResult
+from elspeth.contracts.schema_contract import FieldContract, SchemaContract
+from elspeth.core.config import AggregationSettings, SourceSettings, TriggerConfig
+from elspeth.core.dag import ExecutionGraph
+from elspeth.engine.orchestrator import PipelineConfig
+from elspeth.plugins.infrastructure.base import BaseTransform
+from elspeth.plugins.infrastructure.results import TransformResult
 from tests.fixtures.base_classes import (
     _TestSchema,
+    _TestSourceBase,
     as_sink,
     as_source,
     as_transform,
 )
-from tests.fixtures.pipeline import build_production_graph
+from tests.fixtures.pipeline import build_linear_pipeline, build_production_graph
 from tests.fixtures.plugins import CollectSink, ListSource
 
 if TYPE_CHECKING:
@@ -53,26 +57,19 @@ class InterruptAfterN(BaseTransform):
         return TransformResult.success(row, success_reason={"action": "processed"})
 
 
-class QuarantineSource:
+class QuarantineSource(_TestSourceBase):
     """Source that emits quarantined rows, setting shutdown event after N."""
 
     name = "quarantine_source"
     output_schema = _TestSchema
-    node_id: str | None = None
-    determinism = Determinism.DETERMINISTIC
-    plugin_version = "1.0.0"
     _on_validation_failure: str = "quarantine"
-    on_success: str = "default"
 
     def __init__(self, total: int, interrupt_after: int, shutdown_event: threading.Event) -> None:
-        self.config: dict[str, Any] = {"schema": {"mode": "observed"}}
+        super().__init__()
         self._total = total
         self._interrupt_after = interrupt_after
         self._event = shutdown_event
         self._count = 0
-
-    def on_start(self, ctx: Any) -> None:
-        pass
 
     def load(self, ctx: Any) -> Iterator[SourceRow]:
         for i in range(self._total):
@@ -85,17 +82,210 @@ class QuarantineSource:
                 destination="quarantine",
             )
 
-    def on_complete(self, ctx: Any) -> None:
-        pass
 
-    def close(self) -> None:
-        pass
+class InterruptAfterNBufferedBatch(BaseTransform):
+    """Batch transform that interrupts after buffering N rows.
 
-    def get_field_resolution(self) -> tuple[dict[str, str], str | None] | None:
-        return None
+    Used to verify graceful shutdown does not force END_OF_SOURCE aggregation
+    semantics for partially buffered batches.
+    """
 
-    def get_schema_contract(self) -> None:
-        return None
+    name = "interrupt_after_n_buffered_batch"
+    input_schema = _TestSchema
+    output_schema = _TestSchema
+    is_batch_aware = True
+    on_success = "output"
+    on_error = "discard"
+
+    def __init__(
+        self,
+        *,
+        interrupt_after: int | None = None,
+        shutdown_event: threading.Event | None = None,
+    ) -> None:
+        super().__init__({"schema": {"mode": "observed"}})
+        self._interrupt_after = interrupt_after
+        self._event = shutdown_event
+        self._count = 0
+
+    def process(self, row: PipelineRow | list[PipelineRow], ctx: Any) -> TransformResult:
+        if isinstance(row, list):
+            total = sum(r.get("value", 0) for r in row)
+            contract = SchemaContract(
+                mode="OBSERVED",
+                fields=(
+                    FieldContract(
+                        normalized_name="value",
+                        original_name="value",
+                        python_type=int,
+                        required=False,
+                        source="inferred",
+                    ),
+                    FieldContract(
+                        normalized_name="count",
+                        original_name="count",
+                        python_type=int,
+                        required=False,
+                        source="inferred",
+                    ),
+                ),
+                locked=True,
+            )
+            return TransformResult.success(
+                PipelineRow({"value": total, "count": len(row)}, contract),
+                success_reason={"action": "batch_sum"},
+            )
+
+        self._count += 1
+        if self._event is not None and self._interrupt_after is not None and self._count >= self._interrupt_after:
+            self._event.set()
+        return TransformResult.success(row, success_reason={"action": "buffer"})
+
+
+class InterruptingAggregationSource(_TestSourceBase):
+    """Source that raises the shutdown event after yielding N rows."""
+
+    name = "interrupting_aggregation_source"
+    output_schema = ListSource.output_schema
+
+    def __init__(self, rows: list[dict[str, int]], interrupt_after: int, shutdown_event: threading.Event) -> None:
+        super().__init__()
+        self._rows = rows
+        self._interrupt_after = interrupt_after
+        self._event = shutdown_event
+        self.on_success = "source_out"
+
+    def load(self, ctx: Any) -> Iterator[SourceRow]:
+        for index, row in enumerate(self._rows, start=1):
+            if index >= self._interrupt_after:
+                self._event.set()
+            fields = tuple(
+                FieldContract(
+                    normalized_name=key,
+                    original_name=key,
+                    python_type=object,
+                    required=False,
+                    source="inferred",
+                )
+                for key in row
+            )
+            contract = SchemaContract(mode="OBSERVED", fields=fields, locked=True)
+            self._schema_contract = contract
+            yield SourceRow.valid(row, contract=contract)
+
+
+def _build_interruptible_aggregation_config(
+    shutdown_event: threading.Event,
+) -> tuple[PipelineConfig, Any, CollectSink]:
+    """Build a count-triggered aggregation pipeline with an interrupting batch transform."""
+    source = InterruptingAggregationSource(
+        rows=[{"value": 10}, {"value": 20}, {"value": 30}, {"value": 40}],
+        interrupt_after=2,
+        shutdown_event=shutdown_event,
+    )
+    transform = InterruptAfterNBufferedBatch()
+    output_sink = CollectSink("output")
+    agg_settings = AggregationSettings(
+        name="sum_agg",
+        plugin=transform.name,
+        input="source_out",
+        on_success="output",
+        on_error="discard",
+        trigger=TriggerConfig(count=100, timeout_seconds=3600),
+        output_mode="transform",
+    )
+
+    graph = ExecutionGraph.from_plugin_instances(
+        source=as_source(source),
+        source_settings=SourceSettings(plugin=source.name, on_success="source_out", options={}),
+        transforms=[],
+        sinks={"output": as_sink(output_sink)},
+        aggregations={"sum_agg": (as_transform(transform), agg_settings)},
+        gates=[],
+    )
+
+    agg_node_id = graph.get_aggregation_id_map()["sum_agg"]
+    transform.node_id = agg_node_id
+
+    config = PipelineConfig(
+        source=as_source(source),
+        transforms=[as_transform(transform)],
+        sinks={"output": as_sink(output_sink)},
+        aggregation_settings={agg_node_id: agg_settings},
+    )
+    return config, graph, output_sink
+
+
+def _build_interruptible_coalesce_config(
+    shutdown_event: threading.Event,
+) -> tuple[PipelineConfig, ExecutionGraph, Any, CollectSink]:
+    """Build a fork -> buffered aggregation/direct branch -> coalesce pipeline."""
+    from elspeth.core.config import CoalesceSettings, ElspethSettings, GateSettings
+    from elspeth.engine.orchestrator import PipelineConfig
+
+    source = InterruptingAggregationSource(
+        rows=[{"value": 10}],
+        interrupt_after=1,
+        shutdown_event=shutdown_event,
+    )
+    source.on_success = "fork_input"
+    output_sink = CollectSink("output")
+    batch_transform = InterruptAfterNBufferedBatch()
+    batch_transform.on_success = "agg_ready"
+    batch_transform.on_error = "discard"
+
+    fork_gate = GateSettings(
+        name="fork_gate",
+        input="fork_input",
+        condition="True",
+        routes={"true": "fork", "false": "fork"},
+        fork_to=["agg_branch", "direct_branch"],
+    )
+    coalesce = CoalesceSettings(
+        name="merge_paths",
+        branches={"agg_branch": "agg_ready", "direct_branch": "direct_branch"},
+        policy="require_all",
+        merge="nested",
+        on_success="output",
+    )
+    agg_settings = AggregationSettings(
+        name="agg_branch_hold",
+        plugin=batch_transform.name,
+        input="agg_branch",
+        on_success="agg_ready",
+        on_error="discard",
+        trigger=TriggerConfig(count=100, timeout_seconds=3600),
+        output_mode="transform",
+    )
+
+    graph = ExecutionGraph.from_plugin_instances(
+        source=as_source(source),
+        source_settings=SourceSettings(plugin=source.name, on_success="fork_input", options={}),
+        transforms=[],
+        sinks={"output": as_sink(output_sink)},
+        aggregations={"agg_branch_hold": (as_transform(batch_transform), agg_settings)},
+        gates=[fork_gate],
+        coalesce_settings=[coalesce],
+    )
+
+    agg_node_id = graph.get_aggregation_id_map()["agg_branch_hold"]
+    batch_transform.node_id = agg_node_id
+
+    config = PipelineConfig(
+        source=as_source(source),
+        transforms=[as_transform(batch_transform)],
+        sinks={"output": as_sink(output_sink)},
+        aggregation_settings={agg_node_id: agg_settings},
+        gates=[fork_gate],
+        coalesce_settings=[coalesce],
+    )
+    settings = ElspethSettings(
+        source={"plugin": source.name, "on_success": "fork_input", "options": {}},
+        sinks={"output": {"plugin": "test"}},
+        gates=[fork_gate],
+        coalesce=[coalesce],
+    )
+    return config, graph, settings, output_sink
 
 
 class TestShutdownBreaksLoop:
@@ -279,6 +469,25 @@ class TestShutdownBreaksLoop:
         assert exc_info.value.rows_processed <= 10
         assert exc_info.value.rows_processed >= 5
 
+    def test_shutdown_does_not_flush_buffered_aggregation(self, landscape_db: LandscapeDB, payload_store) -> None:
+        """Graceful shutdown must not synthesize END_OF_SOURCE aggregation output."""
+        from elspeth.engine.orchestrator import Orchestrator
+
+        shutdown_event = threading.Event()
+        config, graph, output_sink = _build_interruptible_aggregation_config(shutdown_event)
+
+        orchestrator = Orchestrator(db=landscape_db)
+
+        with pytest.raises(GracefulShutdownError) as exc_info:
+            orchestrator.run(config, graph=graph, payload_store=payload_store, shutdown_event=shutdown_event)
+
+        assert exc_info.value.rows_processed == 2
+        assert exc_info.value.rows_succeeded == 0
+        assert exc_info.value.rows_failed == 0
+        assert exc_info.value.rows_quarantined == 0
+        assert exc_info.value.rows_routed == 0
+        assert output_sink.results == []
+
 
 class TestInterruptAndResume:
     """Tests for interrupt → resume pipeline lifecycle."""
@@ -378,6 +587,156 @@ class TestInterruptAndResume:
         checkpoint = checkpoint_mgr.get_latest_checkpoint(run_id)
         assert checkpoint is not None
 
+    def test_buffered_aggregation_shutdown_remains_resumable(self, landscape_db: LandscapeDB, payload_store) -> None:
+        """Buffered aggregation shutdown must persist a recovery checkpoint."""
+        from elspeth.contracts.config.runtime import RuntimeCheckpointConfig
+        from elspeth.core.checkpoint import CheckpointManager, RecoveryManager
+        from elspeth.core.config import CheckpointSettings
+        from elspeth.engine.orchestrator import Orchestrator
+
+        checkpoint_mgr = CheckpointManager(landscape_db)
+        checkpoint_config = RuntimeCheckpointConfig.from_settings(CheckpointSettings(enabled=True, frequency="every_row"))
+
+        shutdown_event = threading.Event()
+        config, graph, output_sink = _build_interruptible_aggregation_config(shutdown_event)
+
+        orchestrator = Orchestrator(
+            db=landscape_db,
+            checkpoint_manager=checkpoint_mgr,
+            checkpoint_config=checkpoint_config,
+        )
+
+        with pytest.raises(GracefulShutdownError) as exc_info:
+            orchestrator.run(config, graph=graph, payload_store=payload_store, shutdown_event=shutdown_event)
+
+        run_id = exc_info.value.run_id
+        assert run_id is not None
+        assert output_sink.results == []
+
+        checkpoint = checkpoint_mgr.get_latest_checkpoint(run_id)
+        assert checkpoint is not None
+        assert checkpoint.aggregation_state_json is not None
+
+        recovery = RecoveryManager(landscape_db, checkpoint_mgr)
+        check = recovery.can_resume(run_id, graph)
+        assert check.can_resume, f"Expected resumable buffered shutdown, got: {check.reason}"
+
+    def test_buffered_coalesce_shutdown_restores_pending_join_on_resume(self, landscape_db: LandscapeDB, payload_store) -> None:
+        """Shutdown checkpoint must persist pending coalesces without replaying buffered rows."""
+        from elspeth.contracts.config.runtime import RuntimeCheckpointConfig
+        from elspeth.core.checkpoint import CheckpointManager, RecoveryManager
+        from elspeth.core.config import CheckpointSettings
+        from elspeth.engine.orchestrator import Orchestrator
+
+        checkpoint_mgr = CheckpointManager(landscape_db)
+        checkpoint_config = RuntimeCheckpointConfig.from_settings(CheckpointSettings(enabled=True, frequency="every_row"))
+
+        shutdown_event = threading.Event()
+        config, graph, settings, output_sink = _build_interruptible_coalesce_config(shutdown_event)
+
+        orchestrator = Orchestrator(
+            db=landscape_db,
+            checkpoint_manager=checkpoint_mgr,
+            checkpoint_config=checkpoint_config,
+        )
+
+        with pytest.raises(GracefulShutdownError) as exc_info:
+            orchestrator.run(
+                config,
+                graph=graph,
+                settings=settings,
+                payload_store=payload_store,
+                shutdown_event=shutdown_event,
+            )
+
+        run_id = exc_info.value.run_id
+        assert run_id is not None
+        assert output_sink.results == []
+
+        checkpoint = checkpoint_mgr.get_latest_checkpoint(run_id)
+        assert checkpoint is not None
+        assert checkpoint.aggregation_state_json is not None
+        assert checkpoint.coalesce_state_json is not None
+
+        recovery = RecoveryManager(landscape_db, checkpoint_mgr)
+        assert recovery.get_unprocessed_rows(run_id) == []
+
+        resume_point = recovery.get_resume_point(run_id, graph)
+        assert resume_point is not None
+        assert resume_point.coalesce_state is not None
+
+        result = orchestrator.resume(
+            resume_point=resume_point,
+            config=config,
+            graph=graph,
+            payload_store=payload_store,
+            settings=settings,
+        )
+
+        assert result.status == RunStatus.COMPLETED
+        assert len(output_sink.results) == 1
+        assert output_sink.results[0]["agg_branch"]["count"] == 1
+        assert output_sink.results[0]["direct_branch"]["value"] == 10
+
+    def test_buffered_only_resume_respects_pre_set_shutdown(self, landscape_db: LandscapeDB, payload_store) -> None:
+        """Buffered-only resume must checkpoint again instead of flushing when shutdown is already set."""
+        from elspeth.contracts.config.runtime import RuntimeCheckpointConfig
+        from elspeth.core.checkpoint import CheckpointManager, RecoveryManager
+        from elspeth.core.config import CheckpointSettings
+        from elspeth.engine.orchestrator import Orchestrator
+
+        checkpoint_mgr = CheckpointManager(landscape_db)
+        checkpoint_config = RuntimeCheckpointConfig.from_settings(CheckpointSettings(enabled=True, frequency="every_row"))
+
+        initial_shutdown = threading.Event()
+        config, graph, settings, output_sink = _build_interruptible_coalesce_config(initial_shutdown)
+
+        orchestrator = Orchestrator(
+            db=landscape_db,
+            checkpoint_manager=checkpoint_mgr,
+            checkpoint_config=checkpoint_config,
+        )
+
+        with pytest.raises(GracefulShutdownError) as exc_info:
+            orchestrator.run(
+                config,
+                graph=graph,
+                settings=settings,
+                payload_store=payload_store,
+                shutdown_event=initial_shutdown,
+            )
+
+        run_id = exc_info.value.run_id
+        assert run_id is not None
+        assert output_sink.results == []
+
+        recovery = RecoveryManager(landscape_db, checkpoint_mgr)
+        assert recovery.get_unprocessed_rows(run_id) == []
+
+        first_resume_point = recovery.get_resume_point(run_id, graph)
+        assert first_resume_point is not None
+        assert first_resume_point.coalesce_state is not None
+
+        resume_shutdown = threading.Event()
+        resume_shutdown.set()
+        with pytest.raises(GracefulShutdownError):
+            orchestrator.resume(
+                resume_point=first_resume_point,
+                config=config,
+                graph=graph,
+                payload_store=payload_store,
+                settings=settings,
+                shutdown_event=resume_shutdown,
+            )
+
+        assert output_sink.results == []
+
+        second_resume_point = recovery.get_resume_point(run_id, graph)
+        assert second_resume_point is not None
+        assert second_resume_point.sequence_number > first_resume_point.sequence_number
+        assert second_resume_point.coalesce_state is not None
+        assert recovery.get_unprocessed_rows(run_id) == []
+
     def _setup_failed_run(
         self,
         db: LandscapeDB,
@@ -389,7 +748,9 @@ class TestInterruptAndResume:
         """Set up a failed run with some rows processed and others pending.
 
         Creates DB records manually so resume has unprocessed rows to work with.
-        Uses the same pattern as TestResumeComprehensive._setup_failed_run.
+        Graph is built via production path (ExecutionGraph.from_plugin_instances)
+        to prevent BUG-LINEAGE-01; node IDs are extracted from the graph for
+        the manual SQL inserts.
 
         Args:
             db: LandscapeDB connection
@@ -399,7 +760,7 @@ class TestInterruptAndResume:
             processed_count: Number of rows already processed (with terminal outcomes)
 
         Returns:
-            ExecutionGraph for the run
+            ExecutionGraph for the run (with sink/transform ID maps already set)
         """
         import json as json_mod
 
@@ -410,8 +771,6 @@ class TestInterruptAndResume:
         from elspeth.contracts.enums import Determinism, RoutingMode
         from elspeth.contracts.schema_contract import FieldContract, SchemaContract
         from elspeth.core.checkpoint import CheckpointManager
-        from elspeth.core.dag import ExecutionGraph
-        from elspeth.core.landscape.recorder import LandscapeRecorder
         from elspeth.core.landscape.schema import (
             edges_table,
             nodes_table,
@@ -419,16 +778,23 @@ class TestInterruptAndResume:
             runs_table,
             tokens_table,
         )
+        from tests.fixtures.landscape import make_recorder
+        from tests.fixtures.plugins import PassTransform
 
         now = datetime.now(UTC)
 
-        graph = ExecutionGraph()
-        schema_config = {"schema": {"mode": "observed"}}
-        graph.add_node("src", node_type=NodeType.SOURCE, plugin_name="null", config=schema_config)
-        graph.add_node("xform", node_type=NodeType.TRANSFORM, plugin_name="passthrough", config=schema_config)
-        graph.add_node("sink", node_type=NodeType.SINK, plugin_name="collect", config=schema_config)
-        graph.add_edge("src", "xform", label="continue")
-        graph.add_edge("xform", "sink", label="continue")
+        # Build graph via production path — prevents BUG-LINEAGE-01
+        source_data = [{"value": i} for i in range(num_rows)]
+        transform = PassTransform()
+        _, _, _, graph = build_linear_pipeline(source_data, transforms=[as_transform(transform)])
+
+        # Extract production-generated node IDs
+        source_nid = graph.get_source()
+        assert source_nid is not None
+        transform_id_map = graph.get_transform_id_map()
+        sink_id_map = graph.get_sink_id_map()
+        xform_nid = str(transform_id_map[0])
+        sink_nid = str(next(iter(sink_id_map.values())))
 
         source_schema_json = json_mod.dumps({"properties": {"value": {"type": "integer"}}, "required": ["value"]})
 
@@ -465,9 +831,9 @@ class TestInterruptAndResume:
             )
 
             for node_id, plugin_name, node_type in [
-                ("src", "null", NodeType.SOURCE),
-                ("xform", "passthrough", NodeType.TRANSFORM),
-                ("sink", "collect", NodeType.SINK),
+                (source_nid, "list_source", NodeType.SOURCE),
+                (xform_nid, "passthrough", NodeType.TRANSFORM),
+                (sink_nid, "collect_sink", NodeType.SINK),
             ]:
                 conn.execute(
                     insert(nodes_table).values(
@@ -484,8 +850,8 @@ class TestInterruptAndResume:
                 )
 
             for edge_id, from_node, to_node in [
-                ("e1", "src", "xform"),
-                ("e2", "xform", "sink"),
+                ("e1", source_nid, xform_nid),
+                ("e2", xform_nid, sink_nid),
             ]:
                 conn.execute(
                     insert(edges_table).values(
@@ -506,7 +872,7 @@ class TestInterruptAndResume:
                     insert(rows_table).values(
                         row_id=f"r{i}",
                         run_id=run_id,
-                        source_node_id="src",
+                        source_node_id=source_nid,
                         row_index=i,
                         source_data_hash=f"h{i}",
                         source_data_ref=ref,
@@ -523,13 +889,13 @@ class TestInterruptAndResume:
                 )
 
         # Mark first N rows as completed
-        recorder = LandscapeRecorder(db)
+        recorder = make_recorder(db)
         for i in range(processed_count):
             recorder.record_token_outcome(
                 run_id=run_id,
                 token_id=f"t{i}",
                 outcome=RowOutcome.COMPLETED,
-                sink_name="sink",
+                sink_name="default",
             )
 
         # Create checkpoint at last processed row
@@ -538,7 +904,7 @@ class TestInterruptAndResume:
             checkpoint_mgr.create_checkpoint(
                 run_id=run_id,
                 token_id=f"t{processed_count - 1}",
-                node_id="xform",
+                node_id=xform_nid,
                 sequence_number=processed_count - 1,
                 graph=graph,
             )
@@ -550,7 +916,6 @@ class TestInterruptAndResume:
         from sqlalchemy import select
 
         from elspeth.contracts.config.runtime import RuntimeCheckpointConfig
-        from elspeth.contracts.types import NodeID, SinkName
         from elspeth.core.checkpoint import CheckpointManager, RecoveryManager
         from elspeth.core.config import CheckpointSettings
         from elspeth.core.landscape.schema import runs_table
@@ -562,6 +927,7 @@ class TestInterruptAndResume:
         processed_count = 3
 
         # Set up failed run: 10 rows, 3 processed, 7 remaining
+        # Graph is built via production path; ID maps are already set.
         graph = self._setup_failed_run(
             landscape_db,
             payload_store,
@@ -569,8 +935,6 @@ class TestInterruptAndResume:
             num_rows=total_rows,
             processed_count=processed_count,
         )
-        graph.set_sink_id_map({SinkName("default"): NodeID("sink")})
-        graph.set_transform_id_map({0: NodeID("xform")})
 
         checkpoint_mgr = CheckpointManager(landscape_db)
         settings = CheckpointSettings(enabled=True, frequency="every_row")
@@ -622,12 +986,222 @@ class TestInterruptAndResume:
         # Processed rows reached the sink
         assert len(resume_sink.results) >= 2
 
+    def test_resume_shutdown_recheckpoints_buffered_aggregation_without_sink_writes(self, landscape_db: LandscapeDB, payload_store) -> None:
+        """Pre-set shutdown during resume must preserve buffered aggregation state without sink writes."""
+        import json as json_mod
+        from datetime import UTC, datetime
+
+        from sqlalchemy import insert
+
+        from elspeth.contracts import Determinism
+        from elspeth.contracts.aggregation_checkpoint import (
+            AggregationCheckpointState,
+            AggregationNodeCheckpoint,
+            AggregationTokenCheckpoint,
+        )
+        from elspeth.contracts.config.runtime import RuntimeCheckpointConfig
+        from elspeth.contracts.contract_records import ContractAuditRecord
+        from elspeth.core.checkpoint import CheckpointManager, RecoveryManager
+        from elspeth.core.config import CheckpointSettings
+        from elspeth.core.landscape.schema import (
+            batches_table,
+            edges_table,
+            nodes_table,
+            rows_table,
+            runs_table,
+            tokens_table,
+        )
+        from elspeth.engine.orchestrator import Orchestrator, PipelineConfig
+        from elspeth.plugins.sources.null_source import NullSource
+        from tests.fixtures.base_classes import create_observed_contract
+
+        checkpoint_mgr = CheckpointManager(landscape_db)
+        checkpoint_config = RuntimeCheckpointConfig.from_settings(CheckpointSettings(enabled=True, frequency="every_row"))
+
+        config, graph, _output_sink = _build_interruptible_aggregation_config(threading.Event())
+        run_id = "resume-buffered-checkpoint-progress"
+        now = datetime.now(UTC)
+        source_id = graph.get_source()
+        assert source_id is not None
+        agg_node_id = next(iter(config.aggregation_settings))
+        sink_id = graph.get_sink_id_map()["output"]
+        contract = create_observed_contract({"value": 1})
+        audit_record = ContractAuditRecord.from_contract(contract)
+        source_schema_json = json_mod.dumps(ListSource.output_schema.model_json_schema())
+        rows = [{"value": 10}, {"value": 20}, {"value": 30}, {"value": 40}]
+
+        with landscape_db.engine.begin() as conn:
+            conn.execute(
+                insert(runs_table).values(
+                    run_id=run_id,
+                    started_at=now,
+                    config_hash="test",
+                    settings_json="{}",
+                    canonical_version="sha256-rfc8785-v1",
+                    status=RunStatus.INTERRUPTED,
+                    source_schema_json=source_schema_json,
+                    schema_contract_json=audit_record.to_json(),
+                    schema_contract_hash=contract.version_hash(),
+                )
+            )
+
+            node_ids = [source_id, agg_node_id, sink_id]
+            for node_id in node_ids:
+                node_info = graph.get_node_info(node_id)
+                conn.execute(
+                    insert(nodes_table).values(
+                        node_id=node_id,
+                        run_id=run_id,
+                        plugin_name=node_info.plugin_name,
+                        node_type=node_info.node_type,
+                        plugin_version="1.0.0",
+                        determinism=Determinism.DETERMINISTIC,
+                        config_hash="test",
+                        config_json="{}",
+                        registered_at=now,
+                    )
+                )
+
+            for edge_index, edge in enumerate(graph.get_edges()):
+                conn.execute(
+                    insert(edges_table).values(
+                        edge_id=f"e{edge_index}",
+                        run_id=run_id,
+                        from_node_id=edge.from_node,
+                        to_node_id=edge.to_node,
+                        label=edge.label,
+                        default_mode=edge.mode,
+                        created_at=now,
+                    )
+                )
+
+            for index, row in enumerate(rows):
+                ref = payload_store.store(json_mod.dumps(row).encode())
+                conn.execute(
+                    insert(rows_table).values(
+                        row_id=f"r{index}",
+                        run_id=run_id,
+                        source_node_id=source_id,
+                        row_index=index,
+                        source_data_hash=f"h{index}",
+                        source_data_ref=ref,
+                        created_at=now,
+                    )
+                )
+                if index < 2:
+                    conn.execute(
+                        insert(tokens_table).values(
+                            token_id=f"t{index}",
+                            row_id=f"r{index}",
+                            run_id=run_id,
+                            created_at=now,
+                        )
+                    )
+            conn.execute(
+                insert(batches_table).values(
+                    batch_id="batch-001",
+                    run_id=run_id,
+                    aggregation_node_id=agg_node_id,
+                    attempt=0,
+                    status="draft",
+                    created_at=now,
+                )
+            )
+
+        checkpoint_mgr.create_checkpoint(
+            run_id=run_id,
+            token_id="t1",
+            node_id=agg_node_id,
+            sequence_number=1,
+            graph=graph,
+            aggregation_state=AggregationCheckpointState(
+                version="3.0",
+                nodes={
+                    agg_node_id: AggregationNodeCheckpoint(
+                        tokens=(
+                            AggregationTokenCheckpoint(
+                                token_id="t0",
+                                row_id="r0",
+                                branch_name=None,
+                                fork_group_id=None,
+                                join_group_id=None,
+                                expand_group_id=None,
+                                row_data=rows[0],
+                                contract_version=contract.version_hash(),
+                            ),
+                            AggregationTokenCheckpoint(
+                                token_id="t1",
+                                row_id="r1",
+                                branch_name=None,
+                                fork_group_id=None,
+                                join_group_id=None,
+                                expand_group_id=None,
+                                row_data=rows[1],
+                                contract_version=contract.version_hash(),
+                            ),
+                        ),
+                        batch_id="batch-001",
+                        elapsed_age_seconds=0.0,
+                        count_fire_offset=None,
+                        condition_fire_offset=None,
+                        contract=contract.to_checkpoint_format(),
+                    )
+                },
+            ),
+        )
+
+        orchestrator = Orchestrator(
+            db=landscape_db,
+            checkpoint_manager=checkpoint_mgr,
+            checkpoint_config=checkpoint_config,
+        )
+
+        recovery = RecoveryManager(landscape_db, checkpoint_mgr)
+        first_resume_point = recovery.get_resume_point(run_id, graph)
+        assert first_resume_point is not None
+        assert first_resume_point.aggregation_state is not None
+        assert sum(len(node.tokens) for node in first_resume_point.aggregation_state.nodes.values()) == 2
+
+        resume_shutdown = threading.Event()
+        resume_shutdown.set()
+        resume_transform = InterruptAfterNBufferedBatch()
+        resume_transform.on_success = "output"
+        resume_transform.on_error = "discard"
+        resume_transform.node_id = next(iter(config.aggregation_settings))
+        resume_sink = CollectSink("output")
+        resume_source = NullSource({})
+        resume_source.on_success = "source_out"
+
+        resume_config = PipelineConfig(
+            source=as_source(resume_source),
+            transforms=[as_transform(resume_transform)],
+            sinks={"output": as_sink(resume_sink)},
+            aggregation_settings=dict(config.aggregation_settings),
+        )
+
+        with pytest.raises(GracefulShutdownError):
+            orchestrator.resume(
+                resume_point=first_resume_point,
+                config=resume_config,
+                graph=graph,
+                payload_store=payload_store,
+                shutdown_event=resume_shutdown,
+            )
+
+        assert resume_sink.results == []
+
+        second_resume_point = recovery.get_resume_point(run_id, graph)
+        assert second_resume_point is not None
+        assert second_resume_point.sequence_number > first_resume_point.sequence_number
+        assert second_resume_point.aggregation_state is not None
+        assert sum(len(node.tokens) for node in second_resume_point.aggregation_state.nodes.values()) == 2
+        assert len(recovery.get_unprocessed_rows(run_id)) == 2
+
     def test_resume_without_shutdown_completes_normally(self, landscape_db: LandscapeDB, payload_store) -> None:
         """Resume without shutdown event completes all remaining rows."""
         from sqlalchemy import select
 
         from elspeth.contracts.config.runtime import RuntimeCheckpointConfig
-        from elspeth.contracts.types import NodeID, SinkName
         from elspeth.core.checkpoint import CheckpointManager, RecoveryManager
         from elspeth.core.config import CheckpointSettings
         from elspeth.core.landscape.schema import runs_table
@@ -640,6 +1214,7 @@ class TestInterruptAndResume:
         processed_count = 5
 
         # Set up failed run: 10 rows, 5 processed, 5 remaining
+        # Graph is built via production path; ID maps are already set.
         graph = self._setup_failed_run(
             landscape_db,
             payload_store,
@@ -647,8 +1222,6 @@ class TestInterruptAndResume:
             num_rows=total_rows,
             processed_count=processed_count,
         )
-        graph.set_sink_id_map({SinkName("default"): NodeID("sink")})
-        graph.set_transform_id_map({0: NodeID("xform")})
 
         checkpoint_mgr = CheckpointManager(landscape_db)
         settings = CheckpointSettings(enabled=True, frequency="every_row")

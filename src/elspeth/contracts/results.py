@@ -12,17 +12,19 @@ IMPORTANT:
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from types import MappingProxyType
 from typing import TYPE_CHECKING, Any, Literal
 
 from elspeth.contracts.url import SanitizedDatabaseUrl, SanitizedWebhookUrl
 
 if TYPE_CHECKING:
+    from elspeth.contracts.errors import MaxRetriesExceeded
     from elspeth.contracts.node_state_context import NodeStateContext
     from elspeth.contracts.schema_contract import PipelineRow, SchemaContract
-    from elspeth.engine.retry import MaxRetriesExceeded
 
 from elspeth.contracts.enums import RowOutcome
 from elspeth.contracts.errors import (
+    FrameworkBugError,
     OrchestrationInvariantError,
     PluginContractViolation,
     TransformErrorReason,
@@ -32,7 +34,7 @@ from elspeth.contracts.identity import TokenInfo
 from elspeth.contracts.routing import RoutingAction
 
 
-@dataclass
+@dataclass(frozen=True, slots=True)
 class ExceptionResult:
     """Wrapper for exceptions that should propagate through async pattern.
 
@@ -40,6 +42,9 @@ class ExceptionResult:
     it wraps the exception in this container. The waiter then re-raises
     the original exception in the orchestrator thread, ensuring plugin
     bugs crash the pipeline as intended.
+
+    Frozen: exception wrappers are immutable evidence — the captured
+    exception and traceback must not be modified after construction.
 
     Used by:
     - engine/batch_adapter.py: Wraps exceptions in worker threads
@@ -51,12 +56,15 @@ class ExceptionResult:
     traceback: str
 
 
-@dataclass
+@dataclass(frozen=True, slots=True)
 class FailureInfo:
     """Type-safe error details for RowResult.
 
     Captures structured failure information for FAILED outcomes.
     Use factory methods for common error types.
+
+    Frozen: failure info is immutable evidence captured at the point of
+    failure. Modifying it after construction would compromise audit integrity.
 
     Fields:
         exception_type: The exception class name (required)
@@ -108,7 +116,7 @@ class TransformResult:
     row: PipelineRow | None
     reason: TransformErrorReason | None
     retryable: bool = False
-    rows: list[PipelineRow] | None = None
+    rows: tuple[PipelineRow, ...] | None = None
 
     # Success metadata - REQUIRED for success results, None for error results
     # Invariant: status="success" implies success_reason is not None
@@ -121,7 +129,7 @@ class TransformResult:
 
     # Context snapshot for audit trail (optional)
     # Contains operational metadata like pool stats, ordering info
-    # P3-2026-02-02: Enables pool metadata to flow to context_after_json
+    # Enables pool metadata to flow to context_after_json
     context_after: NodeStateContext | None = field(default=None, repr=False)
 
     def __post_init__(self) -> None:
@@ -205,7 +213,7 @@ class TransformResult:
     @classmethod
     def success_multi(
         cls,
-        rows: list[PipelineRow],
+        rows: list[PipelineRow] | tuple[PipelineRow, ...],
         *,
         success_reason: TransformSuccessReason,
         context_after: NodeStateContext | None = None,
@@ -253,7 +261,7 @@ class TransformResult:
             status="success",
             row=None,
             reason=None,
-            rows=rows,
+            rows=tuple(rows),
             success_reason=success_reason,
             context_after=context_after,
         )
@@ -292,10 +300,11 @@ class TransformResult:
 
 @dataclass
 class GateResult:
-    """Result of a gate evaluation.
+    """Result of a config-driven gate evaluation.
 
     Contains the (possibly modified) row and routing action.
-    Audit fields are populated by GateExecutor, not by plugin.
+    Constructed entirely by GateExecutor — gates are config-driven,
+    not plugin-based.
     """
 
     row: dict[str, Any]
@@ -305,7 +314,7 @@ class GateResult:
     # Enables conversion to PipelineRow via to_pipeline_row()
     contract: SchemaContract | None = field(default=None, repr=False)
 
-    # Audit fields - set by executor, not by plugin
+    # Audit fields - set by GateExecutor
     input_hash: str | None = field(default=None, repr=False)
     output_hash: str | None = field(default=None, repr=False)
     duration_ms: float | None = field(default=None, repr=False)
@@ -322,16 +331,14 @@ class GateResult:
         from elspeth.contracts.schema_contract import PipelineRow
 
         if self.contract is None:
-            raise ValueError("GateResult has no contract - cannot create PipelineRow")
+            raise FrameworkBugError(
+                "GateResult has no contract - cannot create PipelineRow. "
+                "The engine must set contract on GateResult before calling to_pipeline_row()."
+            )
         return PipelineRow(self.row, self.contract)
 
 
-# NOTE: AcceptResult was deleted in aggregation structural cleanup.
-# Aggregation is now engine-controlled via batch-aware transforms.
-# The engine buffers rows and decides when to flush via TriggerEvaluator.
-
-
-@dataclass(frozen=True)
+@dataclass(frozen=True, slots=True)
 class RowResult:
     """Final result of processing a row through the pipeline.
 
@@ -364,7 +371,7 @@ class RowResult:
             raise OrchestrationInvariantError("COALESCED outcome requires sink_name to be set")
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, slots=True)
 class ArtifactDescriptor:
     """Descriptor for an artifact written by a sink.
 
@@ -380,7 +387,11 @@ class ArtifactDescriptor:
     path_or_uri: str
     content_hash: str  # REQUIRED - audit integrity
     size_bytes: int  # REQUIRED - verification
-    metadata: dict[str, object] | None = None
+    metadata: MappingProxyType[str, object] | None = None
+
+    def __post_init__(self) -> None:
+        if self.metadata is not None:
+            object.__setattr__(self, "metadata", MappingProxyType(dict(self.metadata)))
 
     @classmethod
     def for_file(
@@ -426,7 +437,7 @@ class ArtifactDescriptor:
             path_or_uri=f"db://{table}@{url.sanitized_url}",
             content_hash=content_hash,
             size_bytes=payload_size,
-            metadata=metadata,
+            metadata=MappingProxyType(metadata),
         )
 
     @classmethod
@@ -457,11 +468,11 @@ class ArtifactDescriptor:
             path_or_uri=f"webhook://{url.sanitized_url}",
             content_hash=content_hash,
             size_bytes=request_size,
-            metadata=metadata,
+            metadata=MappingProxyType(metadata),
         )
 
 
-@dataclass
+@dataclass(frozen=True, slots=True)
 class SourceRow:
     """Result from source loading - either valid data or quarantined invalid data.
 
@@ -497,6 +508,24 @@ class SourceRow:
     quarantine_error: str | None = None
     quarantine_destination: str | None = None
     contract: SchemaContract | None = None
+
+    def __post_init__(self) -> None:
+        """Validate quarantine field invariants.
+
+        Quarantined rows MUST have error and destination (where to route them).
+        Non-quarantined rows MUST NOT have quarantine fields set (prevents
+        accidental misuse where quarantine metadata is silently ignored).
+        """
+        if self.is_quarantined:
+            if self.quarantine_error is None:
+                raise ValueError("Quarantined SourceRow must have quarantine_error")
+            if self.quarantine_destination is None:
+                raise ValueError("Quarantined SourceRow must have quarantine_destination")
+        else:
+            if self.quarantine_error is not None:
+                raise ValueError(f"Non-quarantined SourceRow must not have quarantine_error, got: {self.quarantine_error!r}")
+            if self.quarantine_destination is not None:
+                raise ValueError(f"Non-quarantined SourceRow must not have quarantine_destination, got: {self.quarantine_destination!r}")
 
     @classmethod
     def valid(

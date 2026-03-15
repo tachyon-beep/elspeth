@@ -6,33 +6,15 @@ from elspeth.contracts import BatchStatus, NodeType, TriggerType
 from elspeth.contracts.errors import AuditIntegrityError
 from elspeth.contracts.schema import SchemaConfig
 from elspeth.core.landscape import LandscapeDB, LandscapeRecorder
+from tests.fixtures.landscape import make_landscape_db, make_recorder, make_recorder_with_run, register_test_node
 
 _DYNAMIC_SCHEMA = SchemaConfig.from_dict({"mode": "observed"})
 
 
 def _setup(*, run_id: str = "run-1") -> tuple[LandscapeDB, LandscapeRecorder]:
-    db = LandscapeDB.in_memory()
-    recorder = LandscapeRecorder(db)
-    recorder.begin_run(config={}, canonical_version="v1", run_id=run_id)
-    recorder.register_node(
-        run_id=run_id,
-        plugin_name="csv",
-        node_type=NodeType.SOURCE,
-        plugin_version="1.0",
-        config={},
-        node_id="source-0",
-        schema_config=_DYNAMIC_SCHEMA,
-    )
-    recorder.register_node(
-        run_id=run_id,
-        plugin_name="aggregator",
-        node_type=NodeType.AGGREGATION,
-        plugin_version="1.0",
-        config={},
-        node_id="agg-1",
-        schema_config=_DYNAMIC_SCHEMA,
-    )
-    return db, recorder
+    setup = make_recorder_with_run(run_id=run_id, source_node_id="source-0", source_plugin_name="csv")
+    register_test_node(setup.recorder, setup.run_id, "agg-1", node_type=NodeType.AGGREGATION, plugin_name="aggregator")
+    return setup.db, setup.recorder
 
 
 def _setup_with_token(
@@ -286,6 +268,31 @@ class TestUpdateBatchStatus:
         updated = recorder.get_batch("b-1")
         assert updated.aggregation_state_id == "state-1"
 
+    def test_rejects_transition_from_completed(self):
+        """Terminal status COMPLETED cannot transition to any other status (M2)."""
+        _db, recorder = _setup()
+        recorder.create_batch("run-1", "agg-1", batch_id="b-1")
+        recorder.update_batch_status("b-1", BatchStatus.COMPLETED)
+
+        with pytest.raises(AuditIntegrityError, match="terminal status"):
+            recorder.update_batch_status("b-1", BatchStatus.EXECUTING)
+
+    def test_rejects_transition_from_failed(self):
+        """Terminal status FAILED cannot transition to any other status (M2)."""
+        _db, recorder = _setup()
+        recorder.create_batch("run-1", "agg-1", batch_id="b-1")
+        recorder.update_batch_status("b-1", BatchStatus.FAILED)
+
+        with pytest.raises(AuditIntegrityError, match="terminal status"):
+            recorder.update_batch_status("b-1", BatchStatus.DRAFT)
+
+    def test_rejects_nonexistent_batch(self):
+        """Updating status of nonexistent batch raises AuditIntegrityError (M2)."""
+        _db, recorder = _setup()
+
+        with pytest.raises(AuditIntegrityError, match="not found"):
+            recorder.update_batch_status("nonexistent", BatchStatus.EXECUTING)
+
 
 # ---------------------------------------------------------------------------
 # complete_batch
@@ -519,8 +526,8 @@ class TestGetBatches:
         assert result[0].batch_id == "b-1"
 
     def test_does_not_return_batches_from_other_runs(self):
-        db = LandscapeDB.in_memory()
-        recorder = LandscapeRecorder(db)
+        db = make_landscape_db()
+        recorder = make_recorder(db)
         recorder.begin_run(config={}, canonical_version="v1", run_id="run-1")
         recorder.register_node(
             run_id="run-1",
@@ -699,8 +706,8 @@ class TestGetAllBatchMembersForRun:
         assert all_members == []
 
     def test_does_not_include_members_from_other_runs(self):
-        db = LandscapeDB.in_memory()
-        recorder = LandscapeRecorder(db)
+        db = make_landscape_db()
+        recorder = make_recorder(db)
 
         # Run 1
         recorder.begin_run(config={}, canonical_version="v1", run_id="run-1")
@@ -1146,8 +1153,8 @@ class TestGetArtifacts:
         assert json_artifacts[0].artifact_id == "art-json"
 
     def test_does_not_return_artifacts_from_other_runs(self):
-        db = LandscapeDB.in_memory()
-        recorder = LandscapeRecorder(db)
+        db = make_landscape_db()
+        recorder = make_recorder(db)
 
         # Run 1
         recorder.begin_run(config={}, canonical_version="v1", run_id="run-1")

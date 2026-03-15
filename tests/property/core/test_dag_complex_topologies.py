@@ -20,6 +20,7 @@ import networkx as nx
 from hypothesis import given, settings
 from hypothesis import strategies as st
 
+from elspeth.contracts.enums import NodeType
 from elspeth.contracts.types import NodeID
 from elspeth.core.dag import ExecutionGraph
 
@@ -37,18 +38,18 @@ def deep_fork_pipelines(draw: st.DrawFn) -> ExecutionGraph:
     num_branches = draw(st.integers(min_value=5, max_value=8))
     graph = ExecutionGraph()
 
-    graph.add_node("source", node_type="source", plugin_name="test_source")
+    graph.add_node("source", node_type=NodeType.SOURCE, plugin_name="test_source")
 
     for i in range(num_branches):
         branch_id = f"branch_{i}"
-        graph.add_node(branch_id, node_type="transform", plugin_name="test_transform")
+        graph.add_node(branch_id, node_type=NodeType.TRANSFORM, plugin_name="test_transform")
         graph.add_edge("source", branch_id, label=f"path_{i}")
 
-    graph.add_node("merge", node_type="coalesce", plugin_name="test_coalesce")
+    graph.add_node("merge", node_type=NodeType.COALESCE, plugin_name="test_coalesce")
     for i in range(num_branches):
         graph.add_edge(f"branch_{i}", "merge", label=f"join_{i}")
 
-    graph.add_node("sink", node_type="sink", plugin_name="test_sink")
+    graph.add_node("sink", node_type=NodeType.SINK, plugin_name="test_sink")
     graph.add_edge("merge", "sink", label="continue")
 
     return graph
@@ -68,36 +69,36 @@ def sequential_fork_pipelines(draw: st.DrawFn) -> ExecutionGraph:
     graph = ExecutionGraph()
 
     # Source
-    graph.add_node("source", node_type="source", plugin_name="test_source")
+    graph.add_node("source", node_type=NodeType.SOURCE, plugin_name="test_source")
 
     # First fork
     for i in range(branches_1):
         bid = f"fork1_branch_{i}"
-        graph.add_node(bid, node_type="transform", plugin_name="test_transform")
+        graph.add_node(bid, node_type=NodeType.TRANSFORM, plugin_name="test_transform")
         graph.add_edge("source", bid, label=f"fork1_path_{i}")
 
     # First coalesce
-    graph.add_node("coalesce1", node_type="coalesce", plugin_name="test_coalesce")
+    graph.add_node("coalesce1", node_type=NodeType.COALESCE, plugin_name="test_coalesce")
     for i in range(branches_1):
         graph.add_edge(f"fork1_branch_{i}", "coalesce1", label=f"fork1_join_{i}")
 
     # Middle transform
-    graph.add_node("mid_transform", node_type="transform", plugin_name="test_transform")
+    graph.add_node("mid_transform", node_type=NodeType.TRANSFORM, plugin_name="test_transform")
     graph.add_edge("coalesce1", "mid_transform", label="continue")
 
     # Second fork
     for i in range(branches_2):
         bid = f"fork2_branch_{i}"
-        graph.add_node(bid, node_type="transform", plugin_name="test_transform")
+        graph.add_node(bid, node_type=NodeType.TRANSFORM, plugin_name="test_transform")
         graph.add_edge("mid_transform", bid, label=f"fork2_path_{i}")
 
     # Second coalesce
-    graph.add_node("coalesce2", node_type="coalesce", plugin_name="test_coalesce")
+    graph.add_node("coalesce2", node_type=NodeType.COALESCE, plugin_name="test_coalesce")
     for i in range(branches_2):
         graph.add_edge(f"fork2_branch_{i}", "coalesce2", label=f"fork2_join_{i}")
 
     # Sink
-    graph.add_node("sink", node_type="sink", plugin_name="test_sink")
+    graph.add_node("sink", node_type=NodeType.SINK, plugin_name="test_sink")
     graph.add_edge("coalesce2", "sink", label="continue")
 
     return graph
@@ -119,38 +120,38 @@ def parallel_coalesce_pipelines(draw: st.DrawFn) -> ExecutionGraph:
     graph = ExecutionGraph()
 
     # Source and initial transform
-    graph.add_node("source", node_type="source", plugin_name="test_source")
-    graph.add_node("gate", node_type="gate", plugin_name="test_gate")
+    graph.add_node("source", node_type=NodeType.SOURCE, plugin_name="test_source")
+    graph.add_node("gate", node_type=NodeType.GATE, plugin_name="test_gate")
     graph.add_edge("source", "gate", label="continue")
 
     # Fork A branches
     for i in range(branches_a):
         bid = f"a_branch_{i}"
-        graph.add_node(bid, node_type="transform", plugin_name="test_transform")
+        graph.add_node(bid, node_type=NodeType.TRANSFORM, plugin_name="test_transform")
         graph.add_edge("gate", bid, label=f"a_path_{i}")
 
     # Coalesce A
-    graph.add_node("coalesce_a", node_type="coalesce", plugin_name="test_coalesce")
+    graph.add_node("coalesce_a", node_type=NodeType.COALESCE, plugin_name="test_coalesce")
     for i in range(branches_a):
         graph.add_edge(f"a_branch_{i}", "coalesce_a", label=f"a_join_{i}")
 
     # Sink A
-    graph.add_node("sink_a", node_type="sink", plugin_name="test_sink")
+    graph.add_node("sink_a", node_type=NodeType.SINK, plugin_name="test_sink")
     graph.add_edge("coalesce_a", "sink_a", label="continue")
 
     # Fork B branches
     for i in range(branches_b):
         bid = f"b_branch_{i}"
-        graph.add_node(bid, node_type="transform", plugin_name="test_transform")
+        graph.add_node(bid, node_type=NodeType.TRANSFORM, plugin_name="test_transform")
         graph.add_edge("gate", bid, label=f"b_path_{i}")
 
     # Coalesce B
-    graph.add_node("coalesce_b", node_type="coalesce", plugin_name="test_coalesce")
+    graph.add_node("coalesce_b", node_type=NodeType.COALESCE, plugin_name="test_coalesce")
     for i in range(branches_b):
         graph.add_edge(f"b_branch_{i}", "coalesce_b", label=f"b_join_{i}")
 
     # Sink B
-    graph.add_node("sink_b", node_type="sink", plugin_name="test_sink")
+    graph.add_node("sink_b", node_type=NodeType.SINK, plugin_name="test_sink")
     graph.add_edge("coalesce_b", "sink_b", label="continue")
 
     return graph
@@ -167,7 +168,7 @@ def fork_with_branch_transforms(draw: st.DrawFn) -> ExecutionGraph:
     num_branches = draw(st.integers(min_value=2, max_value=4))
     graph = ExecutionGraph()
 
-    graph.add_node("source", node_type="source", plugin_name="test_source")
+    graph.add_node("source", node_type=NodeType.SOURCE, plugin_name="test_source")
 
     branch_tails = []
     for i in range(num_branches):
@@ -175,17 +176,17 @@ def fork_with_branch_transforms(draw: st.DrawFn) -> ExecutionGraph:
         prev = "source"
         for j in range(num_transforms):
             tid = f"b{i}_t{j}"
-            graph.add_node(tid, node_type="transform", plugin_name="test_transform")
+            graph.add_node(tid, node_type=NodeType.TRANSFORM, plugin_name="test_transform")
             label = f"path_{i}" if j == 0 else f"b{i}_continue_{j}"
             graph.add_edge(prev, tid, label=label)
             prev = tid
         branch_tails.append(prev)
 
-    graph.add_node("merge", node_type="coalesce", plugin_name="test_coalesce")
+    graph.add_node("merge", node_type=NodeType.COALESCE, plugin_name="test_coalesce")
     for i, tail in enumerate(branch_tails):
         graph.add_edge(tail, "merge", label=f"join_{i}")
 
-    graph.add_node("sink", node_type="sink", plugin_name="test_sink")
+    graph.add_node("sink", node_type=NodeType.SINK, plugin_name="test_sink")
     graph.add_edge("merge", "sink", label="continue")
 
     return graph

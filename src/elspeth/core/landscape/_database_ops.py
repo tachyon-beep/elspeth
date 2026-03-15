@@ -8,6 +8,8 @@ from typing import TYPE_CHECKING, Any
 from sqlalchemy import Executable
 from sqlalchemy.engine import Row
 
+from elspeth.contracts.errors import AuditIntegrityError
+
 if TYPE_CHECKING:
     from elspeth.core.landscape.database import LandscapeDB
 
@@ -34,24 +36,36 @@ class DatabaseOps:
             result = conn.execute(query)
             return list(result.fetchall())
 
-    def execute_insert(self, stmt: Executable) -> None:
+    def execute_insert(self, stmt: Executable, *, context: str = "") -> None:
         """Execute insert statement.
 
+        Args:
+            stmt: SQLAlchemy insert statement
+            context: Optional context string for error messages (e.g., table/operation name)
+
         Raises:
-            ValueError: If zero rows are affected (Tier-1 audit integrity violation)
+            AuditIntegrityError: If zero rows are affected (Tier-1 audit integrity violation)
         """
         with self._db.connection() as conn:
             result = conn.execute(stmt)
             if result.rowcount == 0:
-                raise ValueError("execute_insert: zero rows affected - audit write failed (missing parent row or constraint violation)")
+                detail = f" ({context})" if context else ""
+                raise AuditIntegrityError(
+                    f"execute_insert: zero rows affected{detail} — audit write failed (missing parent row or constraint violation)"
+                )
 
-    def execute_update(self, stmt: Executable) -> None:
+    def execute_update(self, stmt: Executable, *, context: str = "") -> None:
         """Execute update statement.
 
+        Args:
+            stmt: SQLAlchemy update statement
+            context: Optional context string for error messages (e.g., table/operation name)
+
         Raises:
-            ValueError: If zero rows are affected (Tier-1 audit integrity violation)
+            AuditIntegrityError: If zero rows are affected (Tier-1 audit integrity violation)
         """
         with self._db.connection() as conn:
             result = conn.execute(stmt)
             if result.rowcount == 0:
-                raise ValueError("execute_update: zero rows affected - target row does not exist (audit data corruption)")
+                detail = f" ({context})" if context else ""
+                raise AuditIntegrityError(f"execute_update: zero rows affected{detail} — target row does not exist (audit data corruption)")

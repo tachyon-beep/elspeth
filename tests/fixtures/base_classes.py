@@ -7,20 +7,21 @@ and transforms. Migrated from tests/conftest.py with no behavioral changes.
 
 from __future__ import annotations
 
-from collections.abc import Callable, Iterator
+from collections.abc import Callable, Iterator, Mapping
 from typing import TYPE_CHECKING, Any, cast
 
 from elspeth.contracts import Determinism, PluginSchema, SourceRow
+from elspeth.plugins.infrastructure.base import BaseTransform
 
 if TYPE_CHECKING:
-    from elspeth.contracts import TransformResult
-    from elspeth.contracts.schema_contract import SchemaContract
-    from elspeth.plugins.protocols import (
+    from elspeth.contracts import (
         BatchTransformProtocol,
         SinkProtocol,
         SourceProtocol,
         TransformProtocol,
+        TransformResult,
     )
+    from elspeth.contracts.schema_contract import SchemaContract
 
 
 class _TestSchema(PluginSchema):
@@ -77,7 +78,7 @@ class _TestSourceBase:
     def close(self) -> None:
         pass
 
-    def get_field_resolution(self) -> tuple[dict[str, str], str | None] | None:
+    def get_field_resolution(self) -> tuple[Mapping[str, str], str | None] | None:
         return None
 
     def get_schema_contract(self) -> SchemaContract | None:
@@ -157,33 +158,22 @@ class _TestSinkBase:
         pass
 
 
-class _TestTransformBase:
-    """Base class for test transforms implementing TransformProtocol."""
+class _TestTransformBase(BaseTransform):
+    """Base class for test transforms inheriting production BaseTransform.
+
+    Inherits lifecycle methods (on_start, on_complete, close) and the
+    _on_start_called lifecycle guard from BaseTransform. This ensures test
+    transforms automatically track any future BaseTransform attributes,
+    preventing silent drift between test fixtures and production code.
+    """
 
     name: str
     input_schema: type[PluginSchema] = _TestSchema
     output_schema: type[PluginSchema] = _TestSchema
-    node_id: str | None = None
-    determinism = Determinism.DETERMINISTIC
     plugin_version = "1.0.0"
-    is_batch_aware: bool = False
-    creates_tokens: bool = False
-    on_error: str | None = None
-    on_success: str | None = None
-    validate_input: bool = False
-    declared_output_fields: frozenset[str] = frozenset()
 
     def __init__(self) -> None:
-        self.config: dict[str, Any] = {"schema": {"mode": "observed"}}
-
-    def on_start(self, ctx: Any) -> None:
-        pass
-
-    def on_complete(self, ctx: Any) -> None:
-        pass
-
-    def close(self) -> None:
-        pass
+        super().__init__({"schema": {"mode": "observed"}})
 
 
 # ─────────────────────────────────────────────────────────────────────────

@@ -13,7 +13,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
-from typing import Any, cast
+from typing import Any
 
 from sqlalchemy import select
 
@@ -36,9 +36,8 @@ from elspeth.core.landscape.schema import (
 )
 from elspeth.core.payload_store import FilesystemPayloadStore
 from elspeth.engine.orchestrator import Orchestrator, PipelineConfig
-from elspeth.plugins.base import BaseTransform
-from elspeth.plugins.protocols import TransformProtocol
-from elspeth.plugins.results import TransformResult
+from elspeth.plugins.infrastructure.base import BaseTransform
+from elspeth.plugins.infrastructure.results import TransformResult
 from elspeth.testing import make_pipeline_row
 from tests.fixtures.base_classes import (
     as_sink,
@@ -100,7 +99,7 @@ def _build_linear_graph(config: PipelineConfig) -> ExecutionGraph:
     source_settings = SourceSettings(plugin=config.source.name, on_success=source_connection, options={})
 
     # Wire transforms with explicit routing
-    wired = wire_transforms(cast("list[TransformProtocol]", transforms), source_connection=source_connection, final_sink=sink_name)
+    wired = wire_transforms(transforms, source_connection=source_connection, final_sink=sink_name)
 
     graph = ExecutionGraph.from_plugin_instances(
         source=config.source,
@@ -178,7 +177,7 @@ class TestPartialFailure:
         assert len(outcomes) == 10
         outcome_values = {o.outcome for o in outcomes}
         # Should contain both COMPLETED and QUARANTINED/FAILED outcomes
-        assert RowOutcome.COMPLETED.value in outcome_values
+        assert RowOutcome.COMPLETED in outcome_values
 
         # 5. Explain query works for both successful and failed rows
         recorder = LandscapeRecorder(db, payload_store=payload_store)

@@ -1,4 +1,3 @@
-# src/elspeth/plugins/sources/null_source.py
 """NullSource - a source that yields nothing.
 
 Used by resume operations where row data comes from the payload store,
@@ -12,8 +11,8 @@ from typing import Any
 from pydantic import ConfigDict
 
 from elspeth.contracts import Determinism, PluginSchema, SourceRow
-from elspeth.contracts.plugin_context import PluginContext
-from elspeth.plugins.base import BaseSource
+from elspeth.contracts.contexts import SourceContext
+from elspeth.plugins.infrastructure.base import BaseSource
 
 
 class NullSourceSchema(PluginSchema):
@@ -72,7 +71,7 @@ class NullSource(BaseSource):
         self._schema_class = NullSourceSchema
         # on_success is injected by the caller (cli.py resume path or instantiation bridge)
 
-    def load(self, ctx: PluginContext) -> Iterator[SourceRow]:
+    def load(self, ctx: SourceContext) -> Iterator[SourceRow]:
         """Yield no rows.
 
         Resume operations retrieve row data from the payload store,

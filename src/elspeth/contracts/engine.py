@@ -1,10 +1,47 @@
-# src/elspeth/contracts/engine.py
 """Engine-related type contracts."""
 
+import math
 from dataclasses import dataclass
 from typing import TypedDict
 
 from elspeth.contracts.enums import RowOutcome
+
+
+@dataclass(frozen=True, slots=True)
+class BufferEntry[T]:
+    """Entry emitted from the reorder buffer with timing metadata.
+
+    This is the contracts-layer type for reorder buffer results, used by
+    both the pooling subsystem (plugins/) and audit context types
+    (contracts/node_state_context.py).
+
+    Attributes:
+        submit_index: Order in which item was submitted (0-indexed)
+        complete_index: Order in which item completed (may differ from submit)
+        result: The actual result value
+        submit_timestamp: time.perf_counter() when submitted
+        complete_timestamp: time.perf_counter() when completed
+        buffer_wait_ms: Time spent waiting in buffer after completion
+    """
+
+    submit_index: int
+    complete_index: int
+    result: T
+    submit_timestamp: float
+    complete_timestamp: float
+    buffer_wait_ms: float
+
+    def __post_init__(self) -> None:
+        if self.submit_index < 0:
+            raise ValueError(f"BufferEntry.submit_index must be non-negative, got {self.submit_index}")
+        if self.complete_index < 0:
+            raise ValueError(f"BufferEntry.complete_index must be non-negative, got {self.complete_index}")
+        if not math.isfinite(self.submit_timestamp) or self.submit_timestamp < 0:
+            raise ValueError(f"BufferEntry.submit_timestamp must be non-negative and finite, got {self.submit_timestamp}")
+        if not math.isfinite(self.complete_timestamp) or self.complete_timestamp < 0:
+            raise ValueError(f"BufferEntry.complete_timestamp must be non-negative and finite, got {self.complete_timestamp}")
+        if not math.isfinite(self.buffer_wait_ms) or self.buffer_wait_ms < 0:
+            raise ValueError(f"BufferEntry.buffer_wait_ms must be non-negative and finite, got {self.buffer_wait_ms}")
 
 
 @dataclass(frozen=True, slots=True)
@@ -23,11 +60,24 @@ class PendingOutcome:
         error_hash: Required for QUARANTINED/FAILED outcomes - hash of error details.
                    For other outcomes, this is None.
 
-    Fix for: P1-2026-01-31-quarantine-outcome-before-durability
+    Quarantine outcomes are recorded after sink durability, not before.
     """
 
     outcome: RowOutcome
     error_hash: str | None = None
+
+    def __post_init__(self) -> None:
+        """Validate outcome/error_hash consistency.
+
+        QUARANTINED and FAILED outcomes MUST have an error_hash — the audit
+        trail needs to reference the error record. Other outcomes must NOT
+        have one (an error_hash on COMPLETED would be nonsensical).
+        """
+        _failure_outcomes = {RowOutcome.QUARANTINED, RowOutcome.FAILED}
+        if self.outcome in _failure_outcomes and self.error_hash is None:
+            raise ValueError(f"PendingOutcome with {self.outcome.name} outcome must have error_hash")
+        if self.outcome not in _failure_outcomes and self.error_hash is not None:
+            raise ValueError(f"PendingOutcome with {self.outcome.name} outcome must not have error_hash")
 
 
 class RetryPolicy(TypedDict, total=False):

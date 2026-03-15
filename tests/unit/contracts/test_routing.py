@@ -3,6 +3,8 @@
 
 import pytest
 
+from elspeth.contracts.errors import ConfigGateReason
+
 
 class TestRoutingAction:
     """Tests for RoutingAction dataclass."""
@@ -15,7 +17,7 @@ class TestRoutingAction:
             kind=RoutingKind.ROUTE,
             destinations=("sink_a",),
             mode=RoutingMode.MOVE,
-            reason={"rule": "test", "matched_value": None},
+            reason=ConfigGateReason(condition="test", result="matched"),
         )
         assert action.mode is RoutingMode.MOVE
 
@@ -32,9 +34,10 @@ class TestRoutingAction:
         """continue_ can include audit reason."""
         from elspeth.contracts import RoutingAction
 
-        action = RoutingAction.continue_(reason={"rule": "passed", "matched_value": True})
+        reason = ConfigGateReason(condition="passed", result="true")
+        action = RoutingAction.continue_(reason=reason)
         assert action.reason is not None
-        assert action.reason["rule"] == "passed"  # type: ignore[typeddict-item]
+        assert action.reason["condition"] == "passed"  # type: ignore[typeddict-item]
 
     def test_route_default_move(self) -> None:
         """route defaults to MOVE mode."""
@@ -74,15 +77,13 @@ class TestRoutingAction:
         """route can include audit reason."""
         from elspeth.contracts import RoutingAction
 
+        reason = ConfigGateReason(condition="value below threshold", result="below")
         action = RoutingAction.route(
             "below",
-            reason={
-                "rule": "value below threshold",
-                "matched_value": 500,
-            },
+            reason=reason,
         )
         assert action.reason is not None
-        assert action.reason["matched_value"] == 500  # type: ignore[typeddict-item]
+        assert action.reason["condition"] == "value below threshold"  # type: ignore[typeddict-item]
 
     def test_fork_always_copy(self) -> None:
         """fork_to_paths always uses COPY mode."""
@@ -97,15 +98,13 @@ class TestRoutingAction:
         """fork_to_paths can include audit reason."""
         from elspeth.contracts import RoutingAction
 
+        reason = ConfigGateReason(condition="parallel_strategy", result="split")
         action = RoutingAction.fork_to_paths(
             ["a", "b"],
-            reason={
-                "rule": "parallel_strategy",
-                "matched_value": "split",
-            },
+            reason=reason,
         )
         assert action.reason is not None
-        assert action.reason["rule"] == "parallel_strategy"  # type: ignore[typeddict-item]
+        assert action.reason["condition"] == "parallel_strategy"  # type: ignore[typeddict-item]
 
     def test_reason_mutation_prevented_by_deep_copy(self) -> None:
         """Mutating original dict should not affect stored reason (deep copy)."""
@@ -341,11 +340,11 @@ class TestEdgeInfo:
 
     def test_create_edge_info(self) -> None:
         """EdgeInfo can be created with all required fields."""
-        from elspeth.contracts import EdgeInfo, RoutingMode
+        from elspeth.contracts import EdgeInfo, NodeID, RoutingMode
 
         edge = EdgeInfo(
-            from_node="gate-1",
-            to_node="sink-1",
+            from_node=NodeID("gate-1"),
+            to_node=NodeID("sink-1"),
             label="above",
             mode=RoutingMode.MOVE,
         )
@@ -356,11 +355,11 @@ class TestEdgeInfo:
 
     def test_edge_info_with_copy(self) -> None:
         """EdgeInfo supports COPY mode."""
-        from elspeth.contracts import EdgeInfo, RoutingMode
+        from elspeth.contracts import EdgeInfo, NodeID, RoutingMode
 
         edge = EdgeInfo(
-            from_node="gate-1",
-            to_node="sink-1",
+            from_node=NodeID("gate-1"),
+            to_node=NodeID("sink-1"),
             label="fork_path",
             mode=RoutingMode.COPY,
         )
@@ -368,13 +367,13 @@ class TestEdgeInfo:
 
     def test_frozen(self) -> None:
         """EdgeInfo should be immutable."""
-        from elspeth.contracts import EdgeInfo, RoutingMode
+        from elspeth.contracts import EdgeInfo, NodeID, RoutingMode
 
         edge = EdgeInfo(
-            from_node="gate-1",
-            to_node="sink-1",
+            from_node=NodeID("gate-1"),
+            to_node=NodeID("sink-1"),
             label="above",
             mode=RoutingMode.MOVE,
         )
         with pytest.raises(AttributeError):
-            edge.from_node = "changed"  # type: ignore[misc]
+            edge.from_node = NodeID("changed")  # type: ignore[misc]

@@ -44,7 +44,7 @@ class TestRowOutcome:
         # (str, Enum) allows direct string comparison for database serialization
         assert RowOutcome.COMPLETED == "completed"  # type: ignore[comparison-overlap]
         # Can be created from string values (for DB reads)
-        assert RowOutcome("completed") == RowOutcome.COMPLETED  # type: ignore[unreachable]
+        assert RowOutcome("completed") == RowOutcome.COMPLETED
 
     def test_has_all_terminal_states(self) -> None:
         """RowOutcome has all values and correct string representations."""
@@ -167,7 +167,7 @@ class TestTriggerType:
 
         # (str, Enum) allows direct string comparison for database serialization
         assert TriggerType.COUNT == "count"  # type: ignore[comparison-overlap]
-        assert TriggerType.TIMEOUT == "timeout"  # type: ignore[comparison-overlap,unreachable]  # str enum
+        assert TriggerType.TIMEOUT == "timeout"  # type: ignore[comparison-overlap]  # str enum
         # Can be created from string values (for DB reads)
         assert TriggerType("count") == TriggerType.COUNT
         assert TriggerType("end_of_source") == TriggerType.END_OF_SOURCE

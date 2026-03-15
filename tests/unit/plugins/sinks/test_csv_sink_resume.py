@@ -6,6 +6,8 @@ import pytest
 
 from elspeth.contracts.plugin_context import PluginContext
 from elspeth.plugins.sinks.csv_sink import CSVSink
+from tests.fixtures.factories import make_context
+from tests.fixtures.landscape import make_landscape_db, make_recorder
 
 # Strict schema for tests - CSVSink requires fixed columns
 STRICT_SCHEMA = {"mode": "fixed", "fields": ["id: int"]}
@@ -14,7 +16,9 @@ STRICT_SCHEMA = {"mode": "fixed", "fields": ["id: int"]}
 @pytest.fixture
 def ctx() -> PluginContext:
     """Create test context."""
-    return PluginContext(run_id="test_resume", config={})
+    db = make_landscape_db()
+    recorder = make_recorder(db)
+    return make_context(landscape=recorder)
 
 
 class TestCSVSinkResumeContract:

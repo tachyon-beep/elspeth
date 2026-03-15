@@ -18,7 +18,7 @@ from unittest.mock import patch
 import pytest
 
 from elspeth.contracts import Checkpoint, PluginSchema, ResumePoint, RunStatus
-from elspeth.contracts.errors import OrchestrationInvariantError
+from elspeth.contracts.errors import AuditIntegrityError, OrchestrationInvariantError
 from elspeth.contracts.schema_contract import FieldContract, SchemaContract
 from elspeth.core.landscape import LandscapeDB, LandscapeRecorder
 from elspeth.engine.orchestrator import Orchestrator, PipelineConfig
@@ -116,7 +116,7 @@ class TestResumeGuardrails:
         orchestrator = Orchestrator(landscape_db)
         config, graph = _build_pipeline()
 
-        with pytest.raises(ValueError, match="payload_store is required for resume"):
+        with pytest.raises(OrchestrationInvariantError, match="payload_store is required for resume"):
             orchestrator.resume(
                 resume_point=_make_resume_point("run-missing-payload-store"),
                 config=config,
@@ -130,7 +130,7 @@ class TestResumeGuardrails:
         orchestrator = Orchestrator(resume_test_env["db"])
         config, graph = _build_pipeline()
 
-        with pytest.raises(ValueError, match="CheckpointManager is required for resume"):
+        with pytest.raises(OrchestrationInvariantError, match="CheckpointManager is required for resume"):
             orchestrator.resume(
                 resume_point=_make_resume_point(run_id),
                 config=config,
@@ -179,7 +179,7 @@ class TestResumeGuardrails:
                 "elspeth.core.checkpoint.recovery.RecoveryManager.get_unprocessed_row_data",
                 return_value=[("row-1", 0, {"id": 1, "value": "alpha"})],
             ),
-            pytest.raises(ValueError, match="no edges found in database") as exc_info,
+            pytest.raises(AuditIntegrityError, match="has no edges registered") as exc_info,
         ):
             orchestrator.resume(
                 resume_point=_make_resume_point(run_id),
@@ -188,8 +188,8 @@ class TestResumeGuardrails:
                 payload_store=resume_test_env["payload_store"],
             )
 
-        assert f"run_id '{run_id}'" in str(exc_info.value)
-        assert "cannot resume without edge data" in str(exc_info.value).lower()
+        assert run_id in str(exc_info.value)
+        assert "cannot build edge map" in str(exc_info.value).lower()
 
     def test_resume_positive_control_succeeds_with_valid_preconditions(self, resume_test_env: dict[str, Any]) -> None:
         """Valid setup still resumes successfully (early exit when no rows remain)."""

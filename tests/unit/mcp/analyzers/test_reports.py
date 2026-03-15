@@ -211,3 +211,85 @@ class TestOutcomeAnalysisIsTerminal:
         non_terminal = next(o for o in outcomes if o["outcome"] == "BUFFERED")
         assert terminal["is_terminal"] is True
         assert non_terminal["is_terminal"] is False
+
+
+class TestHighVarianceZeroDuration:
+    """Verify high_variance filter includes nodes with zero avg_ms.
+
+    Bug: T3 — `if n["avg_ms"] and n["max_ms"]` excluded nodes where
+    avg_ms=0.0, because 0.0 is falsy in Python. A node with avg_ms=0.0
+    and max_ms=100.0 (high variance!) was silently dropped.
+    """
+
+    def test_zero_avg_ms_included_in_high_variance(self) -> None:
+        """Node with avg_ms=0.0 and high max_ms should appear in high_variance."""
+        fast_node = MagicMock()
+        fast_node.node_id = "transform_fast_abc123"
+        fast_node.plugin_name = "fast_transform"
+        fast_node.node_type = "transform"
+        fast_node.executions = 100
+        fast_node.avg_ms = 0.0  # Zero average — the key trigger
+        fast_node.min_ms = 0.0
+        fast_node.max_ms = 100.0  # But max is high — this IS high variance
+        fast_node.total_ms = 5.0
+
+        mock_conn = MagicMock()
+        mock_conn.execute.return_value.fetchall.side_effect = [
+            [fast_node],  # stats_query
+            [],  # failed_query
+        ]
+
+        db = MagicMock()
+        db.connection.return_value.__enter__ = MagicMock(return_value=mock_conn)
+        db.connection.return_value.__exit__ = MagicMock(return_value=False)
+
+        recorder = MagicMock()
+        recorder.get_run.return_value = MagicMock(
+            started_at=None,
+            completed_at=None,
+            status=MagicMock(value="completed"),
+        )
+
+        result = get_performance_report(db, recorder, "run-123")
+
+        assert "error" not in result
+        # Before fix: high_variance was [] because `0.0 and 100.0` is falsy
+        # After fix: node with avg_ms=0.0 but max_ms=100.0 IS high variance
+        high_variance = result["high_variance_nodes"]
+        assert len(high_variance) == 1
+        assert high_variance[0]["node_id"] == "transform_fast_abc123"
+
+    def test_none_avg_ms_excluded_from_high_variance(self) -> None:
+        """Node with avg_ms=None (no timing data) should NOT appear in high_variance."""
+        no_timing_node = MagicMock()
+        no_timing_node.node_id = "transform_notimed_abc123"
+        no_timing_node.plugin_name = "notimed_transform"
+        no_timing_node.node_type = "transform"
+        no_timing_node.executions = 1
+        no_timing_node.avg_ms = None
+        no_timing_node.min_ms = None
+        no_timing_node.max_ms = None
+        no_timing_node.total_ms = None
+
+        mock_conn = MagicMock()
+        mock_conn.execute.return_value.fetchall.side_effect = [
+            [no_timing_node],  # stats_query
+            [],  # failed_query
+        ]
+
+        db = MagicMock()
+        db.connection.return_value.__enter__ = MagicMock(return_value=mock_conn)
+        db.connection.return_value.__exit__ = MagicMock(return_value=False)
+
+        recorder = MagicMock()
+        recorder.get_run.return_value = MagicMock(
+            started_at=None,
+            completed_at=None,
+            status=MagicMock(value="completed"),
+        )
+
+        result = get_performance_report(db, recorder, "run-123")
+
+        assert "error" not in result
+        high_variance = result["high_variance_nodes"]
+        assert len(high_variance) == 0

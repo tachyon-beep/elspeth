@@ -5,7 +5,7 @@ These tests verify the invariants of RowDataResult - ELSPETH's
 discriminated union for audit data retrieval:
 
 State-Data Invariants:
-- AVAILABLE state requires dict data
+- AVAILABLE and REPR_FALLBACK states require dict data
 - All other states require None data
 - No other state-data combinations are valid
 
@@ -33,8 +33,16 @@ from elspeth.core.landscape.row_data import RowDataResult, RowDataState
 # Strategies for generating row data
 # =============================================================================
 
+# States that carry data (require non-None dict)
+data_carrying_states = st.sampled_from(
+    [
+        RowDataState.AVAILABLE,
+        RowDataState.REPR_FALLBACK,
+    ]
+)
+
 # States that require None data
-non_available_states = st.sampled_from(
+non_data_states = st.sampled_from(
     [
         RowDataState.PURGED,
         RowDataState.NEVER_STORED,
@@ -87,31 +95,33 @@ class TestRowDataInvariantProperties:
         assert result.state == RowDataState.AVAILABLE
         assert result.data == data
 
-    def test_available_with_none_fails(self) -> None:
-        """Property: AVAILABLE state with None data raises ValueError."""
-        with pytest.raises(ValueError, match="AVAILABLE state requires non-None data"):
-            RowDataResult(state=RowDataState.AVAILABLE, data=None)
+    @given(state=data_carrying_states)
+    @settings(max_examples=10)
+    def test_data_carrying_with_none_fails(self, state: RowDataState) -> None:
+        """Property: Data-carrying states with None data raise ValueError."""
+        with pytest.raises(ValueError, match=f"{state.value} state requires non-None data"):
+            RowDataResult(state=state, data=None)
 
-    @given(data=non_dict_data)
+    @given(state=data_carrying_states, data=non_dict_data)
     @settings(max_examples=100)
-    def test_available_with_non_dict_fails(self, data: Any) -> None:
-        """Property: AVAILABLE state with non-dict data raises TypeError."""
-        with pytest.raises(TypeError, match="AVAILABLE state requires dict data"):
-            RowDataResult(state=RowDataState.AVAILABLE, data=data)  # type: ignore[arg-type]
+    def test_data_carrying_with_non_dict_fails(self, state: RowDataState, data: Any) -> None:
+        """Property: Data-carrying states with non-dict data raise TypeError."""
+        with pytest.raises(TypeError, match=f"{state.value} state requires dict data"):
+            RowDataResult(state=state, data=data)
 
-    @given(state=non_available_states)
+    @given(state=non_data_states)
     @settings(max_examples=50)
-    def test_non_available_with_none_succeeds(self, state: RowDataState) -> None:
-        """Property: Non-AVAILABLE states with None data construct successfully."""
+    def test_non_data_with_none_succeeds(self, state: RowDataState) -> None:
+        """Property: Non-data states with None data construct successfully."""
         result = RowDataResult(state=state, data=None)
 
         assert result.state == state
         assert result.data is None
 
-    @given(state=non_available_states, data=row_data_dicts)
+    @given(state=non_data_states, data=row_data_dicts)
     @settings(max_examples=100)
-    def test_non_available_with_data_fails(self, state: RowDataState, data: dict[str, Any]) -> None:
-        """Property: Non-AVAILABLE states with non-None data raise ValueError."""
+    def test_non_data_with_data_fails(self, state: RowDataState, data: dict[str, Any]) -> None:
+        """Property: Non-data states with non-None data raise ValueError."""
         with pytest.raises(ValueError, match="requires None data"):
             RowDataResult(state=state, data=data)
 
@@ -121,19 +131,20 @@ class TestRowDataInvariantProperties:
         """Property: Only valid state-data combinations construct successfully.
 
         Valid combinations:
-        - AVAILABLE + non-None data
-        - non-AVAILABLE + None data
+        - Data-carrying states (AVAILABLE, REPR_FALLBACK) + non-None data
+        - Non-data states + None data
 
         All other combinations raise ValueError.
         """
-        should_succeed = (state == RowDataState.AVAILABLE and data is not None) or (state != RowDataState.AVAILABLE and data is None)
+        is_data_state = state in (RowDataState.AVAILABLE, RowDataState.REPR_FALLBACK)
+        should_succeed = (is_data_state and data is not None) or (not is_data_state and data is None)
 
         if should_succeed:
             result = RowDataResult(state=state, data=data)
             assert result.state == state
             assert result.data == data
         else:
-            with pytest.raises(ValueError):
+            with pytest.raises((ValueError, TypeError)):
                 RowDataResult(state=state, data=data)
 
 
@@ -157,10 +168,10 @@ class TestRowDataImmutabilityProperties:
         with pytest.raises(AttributeError):
             result.data = None  # type: ignore[misc]
 
-    @given(state=non_available_states)
+    @given(state=non_data_states)
     @settings(max_examples=50)
-    def test_non_available_result_is_immutable(self, state: RowDataState) -> None:
-        """Property: Non-available results are also immutable."""
+    def test_non_data_result_is_immutable(self, state: RowDataState) -> None:
+        """Property: Non-data results are also immutable."""
         result = RowDataResult(state=state, data=None)
 
         with pytest.raises(AttributeError):
@@ -191,23 +202,24 @@ class TestRowDataStateEnumProperties:
         """Property: State values are lowercase (ELSPETH convention)."""
         assert state.value == state.value.lower()
 
-    def test_exactly_five_states_exist(self) -> None:
-        """Property: Exactly 5 states are defined.
+    def test_exactly_six_states_exist(self) -> None:
+        """Property: Exactly 6 states are defined.
 
         Canary test - adding a new state should update this test.
         """
         states = list(RowDataState)
-        assert len(states) == 5, f"Expected 5 states, got {len(states)}: {[s.name for s in states]}"
+        assert len(states) == 6, f"Expected 6 states, got {len(states)}: {[s.name for s in states]}"
 
-    def test_available_is_only_data_carrying_state(self) -> None:
-        """Property: AVAILABLE is the only state that carries data.
+    def test_data_carrying_states(self) -> None:
+        """Property: AVAILABLE and REPR_FALLBACK carry data; all others require None.
 
         This is documented behavior - if we add another data-carrying state,
         this test and the invariant validation need updating.
         """
+        data_states = {RowDataState.AVAILABLE, RowDataState.REPR_FALLBACK}
         for state in RowDataState:
-            if state == RowDataState.AVAILABLE:
-                # AVAILABLE requires data
+            if state in data_states:
+                # Data-carrying states require data
                 with pytest.raises(ValueError):
                     RowDataResult(state=state, data=None)
             else:
@@ -233,10 +245,10 @@ class TestRowDataResultCreationProperties:
 
         assert result1 == result2
 
-    @given(state=non_available_states)
+    @given(state=non_data_states)
     @settings(max_examples=50)
-    def test_non_available_result_creation_deterministic(self, state: RowDataState) -> None:
-        """Property: Creating same non-AVAILABLE result twice gives equal results."""
+    def test_non_data_result_creation_deterministic(self, state: RowDataState) -> None:
+        """Property: Creating same non-data result twice gives equal results."""
         result1 = RowDataResult(state=state, data=None)
         result2 = RowDataResult(state=state, data=None)
 
@@ -249,9 +261,10 @@ class TestRowDataResultCreationProperties:
         if state1 == state2:
             return  # Skip same-state comparison
 
+        data_states = {RowDataState.AVAILABLE, RowDataState.REPR_FALLBACK}
         # Create valid results for each state
-        data1 = {"test": "data"} if state1 == RowDataState.AVAILABLE else None
-        data2 = {"test": "data"} if state2 == RowDataState.AVAILABLE else None
+        data1 = {"test": "data"} if state1 in data_states else None
+        data2 = {"test": "data"} if state2 in data_states else None
 
         result1 = RowDataResult(state=state1, data=data1)
         result2 = RowDataResult(state=state2, data=data2)
@@ -273,13 +286,13 @@ class TestRowDataErrorMessageProperties:
             RowDataResult(state=RowDataState.AVAILABLE, data=None)
 
         error_msg = str(exc_info.value)
-        assert "AVAILABLE" in error_msg
+        assert "available" in error_msg
         assert "non-None" in error_msg or "requires" in error_msg
 
-    @given(state=non_available_states)
+    @given(state=non_data_states)
     @settings(max_examples=20)
-    def test_non_available_data_error_includes_state(self, state: RowDataState) -> None:
-        """Property: Non-AVAILABLE + data error message includes state name."""
+    def test_non_data_error_includes_state(self, state: RowDataState) -> None:
+        """Property: Non-data state + data error message includes state name."""
         with pytest.raises(ValueError) as exc_info:
             RowDataResult(state=state, data={"some": "data"})
 

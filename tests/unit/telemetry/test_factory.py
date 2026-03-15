@@ -231,7 +231,7 @@ class TestCreateTelemetryManagerEnabled:
 class TestHookDiscovery:
     def test_custom_hook_exporter_is_discovered(self):
         class CustomExporter:
-            _name = "custom_exporter"
+            _name: str = "custom_exporter"
 
             @property
             def name(self) -> str:
@@ -269,7 +269,7 @@ class TestHookDiscovery:
 
     def test_duplicate_exporter_names_across_hooks_raise(self):
         class ExporterA:
-            _name = "dup"
+            _name: str = "dup"
 
             @property
             def name(self) -> str:
@@ -288,7 +288,7 @@ class TestHookDiscovery:
                 return None
 
         class ExporterB:
-            _name = "dup"
+            _name: str = "dup"
 
             @property
             def name(self) -> str:
@@ -335,7 +335,7 @@ class TestHookDiscovery:
     def test_hook_returning_none_raises_actionable_error(self):
         class NoneReturningPlugin:
             @hookimpl
-            def elspeth_get_exporters(self):  # type: ignore[no-untyped-def]
+            def elspeth_get_exporters(self):
                 return None
 
         config = _make_config(enabled=True, exporter_configs=())
@@ -346,7 +346,7 @@ class TestHookDiscovery:
     def test_hook_returning_non_iterable_raises_actionable_error(self):
         class NonIterablePlugin:
             @hookimpl
-            def elspeth_get_exporters(self):  # type: ignore[no-untyped-def]
+            def elspeth_get_exporters(self):
                 return 42
 
         config = _make_config(enabled=True, exporter_configs=())

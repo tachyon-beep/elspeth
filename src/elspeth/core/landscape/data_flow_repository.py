@@ -1,0 +1,1486 @@
+"""DataFlowRepository: token/row lifecycle, graph structure, and error recording.
+
+Atomic transactions in fork/coalesce/expand preserved via direct
+LandscapeDB.connection() usage.
+"""
+
+from __future__ import annotations
+
+import json
+from typing import TYPE_CHECKING, Any
+
+import structlog
+from sqlalchemy import select
+
+from elspeth.contracts import (
+    ContractAuditRecord,
+    Determinism,
+    Edge,
+    Node,
+    NodeType,
+    NonCanonicalMetadata,
+    RoutingMode,
+    Row,
+    RowOutcome,
+    Token,
+    TokenOutcome,
+    TransformErrorReason,
+    TransformErrorRecord,
+    ValidationErrorRecord,
+    ValidationErrorWithContract,
+)
+from elspeth.contracts.errors import AuditIntegrityError
+from elspeth.contracts.hashing import repr_hash
+from elspeth.core.canonical import canonical_json, stable_hash
+from elspeth.core.landscape._database_ops import DatabaseOps
+from elspeth.core.landscape._helpers import generate_id, now
+from elspeth.core.landscape.database import LandscapeDB
+from elspeth.core.landscape.model_loaders import (
+    EdgeLoader,
+    NodeLoader,
+    TokenOutcomeLoader,
+    TransformErrorLoader,
+    ValidationErrorLoader,
+)
+from elspeth.core.landscape.schema import (
+    edges_table,
+    nodes_table,
+    rows_table,
+    token_outcomes_table,
+    token_parents_table,
+    tokens_table,
+    transform_errors_table,
+    validation_errors_table,
+)
+
+logger = structlog.get_logger(__name__)
+
+if TYPE_CHECKING:
+    from elspeth.contracts.errors import ContractViolation
+    from elspeth.contracts.payload_store import PayloadStore
+    from elspeth.contracts.schema import SchemaConfig
+    from elspeth.contracts.schema_contract import PipelineRow, SchemaContract
+
+
+class DataFlowRepository:
+    """Records data flow: tokens, rows, graph structure, and errors.
+
+    Atomic transactions in fork/coalesce/expand preserved via direct
+    LandscapeDB.connection() usage.
+
+    NOTE: nodes table has composite PK (node_id, run_id). Always filter
+    by both columns when querying individual nodes.
+    """
+
+    def __init__(
+        self,
+        db: LandscapeDB,
+        ops: DatabaseOps,
+        *,
+        token_outcome_loader: TokenOutcomeLoader,
+        node_loader: NodeLoader,
+        edge_loader: EdgeLoader,
+        validation_error_loader: ValidationErrorLoader,
+        transform_error_loader: TransformErrorLoader,
+        payload_store: PayloadStore | None = None,
+    ) -> None:
+        self._db = db
+        self._ops = ops
+        self._token_outcome_loader = token_outcome_loader
+        self._node_loader = node_loader
+        self._edge_loader = edge_loader
+        self._validation_error_loader = validation_error_loader
+        self._transform_error_loader = transform_error_loader
+        self._payload_store = payload_store
+
+    # ── Token recording: private helpers ─────────────────────────────────
+
+    def _resolve_run_id_for_row(self, row_id: str) -> str:
+        """Resolve the run_id that owns a given row_id.
+
+        This is Tier 1 (our data). If the row doesn't exist, it's a bug
+        in our code or database corruption -- crash immediately.
+
+        Args:
+            row_id: Row ID to look up
+
+        Returns:
+            run_id that owns the row
+
+        Raises:
+            AuditIntegrityError: If row_id not found (Tier 1 corruption)
+        """
+        query = select(rows_table.c.run_id).where(rows_table.c.row_id == row_id)
+        result = self._ops.execute_fetchone(query)
+        if result is None:
+            raise AuditIntegrityError(
+                f"Token references row_id={row_id!r} which does not exist in the rows table. "
+                f"This is Tier 1 data corruption -- the row should have been created before any token."
+            )
+        run_id: str = result.run_id
+        return run_id
+
+    def _resolve_token_ownership(self, token_id: str) -> tuple[str, str]:
+        """Resolve the (row_id, run_id) that owns a given token_id.
+
+        Looks up token -> row_id, then row -> run_id. This is Tier 1 (our data).
+        If the token or its row doesn't exist, it's a bug or database corruption.
+
+        Args:
+            token_id: Token ID to look up
+
+        Returns:
+            Tuple of (row_id, run_id) that own the token
+
+        Raises:
+            AuditIntegrityError: If token or its row not found (Tier 1 corruption)
+        """
+        query = select(tokens_table.c.row_id, tokens_table.c.run_id).where(tokens_table.c.token_id == token_id)
+        result = self._ops.execute_fetchone(query)
+        if result is None:
+            raise AuditIntegrityError(
+                f"Token {token_id!r} does not exist in the tokens table. "
+                f"This is Tier 1 data corruption -- the token should have been created before recording outcomes."
+            )
+        return result.row_id, result.run_id
+
+    def _validate_token_run_ownership(self, token_id: str, run_id: str) -> None:
+        """Validate that a token belongs to the specified run.
+
+        Per Tier 1 trust model: cross-run contamination of audit records is
+        evidence tampering. Crash immediately if the invariant is violated.
+
+        Args:
+            token_id: Token to validate
+            run_id: Expected run ID
+
+        Raises:
+            AuditIntegrityError: If token does not belong to the specified run
+        """
+        _row_id, actual_run_id = self._resolve_token_ownership(token_id)
+        if actual_run_id != run_id:
+            raise AuditIntegrityError(
+                f"Cross-run contamination prevented: token {token_id!r} belongs to "
+                f"run {actual_run_id!r}, but caller supplied run_id={run_id!r}. "
+                f"This would corrupt the audit trail by attributing records to the wrong run."
+            )
+
+    def _validate_token_row_ownership(self, token_id: str, row_id: str) -> None:
+        """Validate that a token belongs to the specified row.
+
+        Per Tier 1 trust model: cross-row lineage corruption makes the audit
+        trail unreliable. Crash immediately if the invariant is violated.
+
+        Args:
+            token_id: Token to validate
+            row_id: Expected row ID
+
+        Raises:
+            AuditIntegrityError: If token does not belong to the specified row
+        """
+        actual_row_id, _run_id = self._resolve_token_ownership(token_id)
+        if actual_row_id != row_id:
+            raise AuditIntegrityError(
+                f"Cross-row lineage corruption prevented: token {token_id!r} belongs to "
+                f"row {actual_row_id!r}, but caller supplied row_id={row_id!r}. "
+                f"This would create invalid parent-child lineage across different rows."
+            )
+
+    def _validate_outcome_fields(
+        self,
+        outcome: RowOutcome,
+        *,
+        sink_name: str | None,
+        batch_id: str | None,
+        fork_group_id: str | None,
+        join_group_id: str | None,
+        expand_group_id: str | None,
+        error_hash: str | None,
+    ) -> None:
+        """Validate required fields are present for each outcome type.
+
+        Enforces the token outcome contract from docs/contracts/token-outcomes/00-token-outcome-contract.md.
+        This is defense-in-depth: callers SHOULD pass correct fields, but this catches bugs.
+
+        Raises:
+            ValueError: If a required field is missing for the outcome type
+        """
+        # Map outcome to required field(s)
+        # Contract: Each outcome type has specific required fields
+        if outcome == RowOutcome.COMPLETED:
+            if sink_name is None:
+                raise ValueError(
+                    "COMPLETED outcome requires sink_name but got None. "
+                    "Contract violation - see docs/contracts/token-outcomes/00-token-outcome-contract.md"
+                )
+        elif outcome == RowOutcome.ROUTED:
+            if sink_name is None:
+                raise ValueError(
+                    "ROUTED outcome requires sink_name but got None. "
+                    "Contract violation - see docs/contracts/token-outcomes/00-token-outcome-contract.md"
+                )
+        elif outcome == RowOutcome.FORKED:
+            if fork_group_id is None:
+                raise ValueError(
+                    "FORKED outcome requires fork_group_id but got None. "
+                    "Contract violation - see docs/contracts/token-outcomes/00-token-outcome-contract.md"
+                )
+        elif outcome == RowOutcome.FAILED:
+            if error_hash is None:
+                raise ValueError(
+                    "FAILED outcome requires error_hash but got None. "
+                    "Contract violation - see docs/contracts/token-outcomes/00-token-outcome-contract.md"
+                )
+        elif outcome == RowOutcome.QUARANTINED:
+            if error_hash is None:
+                raise ValueError(
+                    "QUARANTINED outcome requires error_hash but got None. "
+                    "Contract violation - see docs/contracts/token-outcomes/00-token-outcome-contract.md"
+                )
+        elif outcome == RowOutcome.CONSUMED_IN_BATCH:
+            if batch_id is None:
+                raise ValueError(
+                    "CONSUMED_IN_BATCH outcome requires batch_id but got None. "
+                    "Contract violation - see docs/contracts/token-outcomes/00-token-outcome-contract.md"
+                )
+        elif outcome == RowOutcome.COALESCED:
+            if join_group_id is None:
+                raise ValueError(
+                    "COALESCED outcome requires join_group_id but got None. "
+                    "Contract violation - see docs/contracts/token-outcomes/00-token-outcome-contract.md"
+                )
+        elif outcome == RowOutcome.EXPANDED:
+            if expand_group_id is None:
+                raise ValueError(
+                    "EXPANDED outcome requires expand_group_id but got None. "
+                    "Contract violation - see docs/contracts/token-outcomes/00-token-outcome-contract.md"
+                )
+        elif outcome == RowOutcome.BUFFERED:
+            if batch_id is None:
+                raise ValueError(
+                    "BUFFERED outcome requires batch_id but got None. Contract violation - see docs/contracts/token-outcomes/00-token-outcome-contract.md"
+                )
+        else:
+            raise ValueError(
+                f"Unhandled RowOutcome variant in validation: {outcome!r}. Add required-field validation for this outcome type."
+            )
+
+    # ── Token recording: public methods ──────────────────────────────────
+
+    def create_row(
+        self,
+        run_id: str,
+        source_node_id: str,
+        row_index: int,
+        data: dict[str, Any],
+        *,
+        row_id: str | None = None,
+        quarantined: bool = False,
+    ) -> Row:
+        """Create a source row record.
+
+        Args:
+            run_id: Run this row belongs to
+            source_node_id: Source node that loaded this row
+            row_index: Position in source (0-indexed)
+            data: Row data for hashing and optional storage
+            row_id: Optional row ID (generated if not provided)
+            quarantined: If True, data is Tier-3 external data that may contain
+                non-canonical values (NaN, Infinity). Uses repr_hash fallback.
+
+        Returns:
+            Row model
+
+        Note:
+            Payload persistence is handled by LandscapeRecorder, not callers.
+            If self._payload_store is configured, the method will:
+            1. Serialize data using canonical_json (handles pandas/numpy/datetime/Decimal)
+            2. Store in payload store
+            3. Record reference in audit trail
+
+            This ensures Landscape owns its audit format end-to-end.
+        """
+        row_id = row_id or generate_id()
+
+        # Quarantined rows are Tier-3 external data that may contain non-canonical
+        # values (NaN, Infinity). Use repr_hash as a fallback per canonical.py docs.
+        if quarantined:
+            try:
+                data_hash = stable_hash(data)
+            except (ValueError, TypeError):
+                logger.warning(
+                    "Quarantined row data not canonically hashable (using repr_hash fallback): %s",
+                    type(data).__name__,
+                )
+                data_hash = repr_hash(data)
+        else:
+            data_hash = stable_hash(data)
+
+        timestamp = now()
+
+        # Landscape owns payload persistence - serialize and store if configured
+        final_payload_ref: str | None = None
+        if self._payload_store is not None:
+            # Canonical JSON handles pandas/numpy/Decimal/datetime types.
+            # For quarantined data, fall back to json.dumps(repr()) if
+            # canonical serialization fails on non-canonical values.
+            if quarantined:
+                try:
+                    payload_bytes = canonical_json(data).encode("utf-8")
+                except (ValueError, TypeError):
+                    logger.warning(
+                        "Quarantined row data not canonically serializable (using repr fallback for payload): %s",
+                        type(data).__name__,
+                    )
+                    payload_bytes = json.dumps({"_repr": repr(data)}).encode("utf-8")
+            else:
+                payload_bytes = canonical_json(data).encode("utf-8")
+            final_payload_ref = self._payload_store.store(payload_bytes)
+
+        row = Row(
+            row_id=row_id,
+            run_id=run_id,
+            source_node_id=source_node_id,
+            row_index=row_index,
+            source_data_hash=data_hash,
+            source_data_ref=final_payload_ref,
+            created_at=timestamp,
+        )
+
+        self._ops.execute_insert(
+            rows_table.insert().values(
+                row_id=row.row_id,
+                run_id=row.run_id,
+                source_node_id=row.source_node_id,
+                row_index=row.row_index,
+                source_data_hash=row.source_data_hash,
+                source_data_ref=row.source_data_ref,
+                created_at=row.created_at,
+            )
+        )
+
+        return row
+
+    def create_token(
+        self,
+        row_id: str,
+        *,
+        token_id: str | None = None,
+        branch_name: str | None = None,
+        fork_group_id: str | None = None,
+        join_group_id: str | None = None,
+    ) -> Token:
+        """Create a token (row instance in DAG path).
+
+        Derives run_id from the row record to guarantee run ownership
+        consistency. The tokens table stores run_id to enable composite
+        FK enforcement on downstream tables.
+
+        Args:
+            row_id: Source row this token represents
+            token_id: Optional token ID (generated if not provided)
+            branch_name: Optional branch name (for forked tokens)
+            fork_group_id: Optional fork group (links siblings)
+            join_group_id: Optional join group (links merged tokens)
+
+        Returns:
+            Token model
+
+        Raises:
+            AuditIntegrityError: If row_id does not exist (Tier 1 corruption)
+        """
+        token_id = token_id or generate_id()
+        timestamp = now()
+
+        # Derive run_id from the row record (Tier 1 -- our data, must exist)
+        run_id = self._resolve_run_id_for_row(row_id)
+
+        token = Token(
+            token_id=token_id,
+            row_id=row_id,
+            fork_group_id=fork_group_id,
+            join_group_id=join_group_id,
+            branch_name=branch_name,
+            created_at=timestamp,
+            run_id=run_id,
+        )
+
+        self._ops.execute_insert(
+            tokens_table.insert().values(
+                token_id=token.token_id,
+                row_id=token.row_id,
+                run_id=run_id,
+                fork_group_id=token.fork_group_id,
+                join_group_id=token.join_group_id,
+                branch_name=token.branch_name,
+                created_at=token.created_at,
+            )
+        )
+
+        return token
+
+    def fork_token(
+        self,
+        parent_token_id: str,
+        row_id: str,
+        branches: list[str],
+        *,
+        run_id: str,
+        step_in_pipeline: int | None = None,
+    ) -> tuple[list[Token], str]:
+        """Fork a token to multiple branches.
+
+        ATOMIC: Creates children AND records parent FORKED outcome in single transaction.
+        Stores branch contract for recovery validation.
+
+        Validates that parent_token_id belongs to the specified row_id and run_id
+        before any writes. Cross-run/cross-row contamination crashes immediately
+        per Tier 1 trust model.
+
+        Args:
+            parent_token_id: Token being forked
+            row_id: Row ID (same for all children)
+            branches: List of branch names (must have at least one)
+            run_id: Run ID (required for outcome recording)
+            step_in_pipeline: Step in the DAG where the fork occurs
+
+        Returns:
+            Tuple of (child Token models, fork_group_id)
+
+        Raises:
+            ValueError: If branches is empty (defense-in-depth for audit integrity)
+            AuditIntegrityError: If parent token does not belong to specified run/row
+        """
+        # Defense-in-depth: validate even though RoutingAction.fork_to_paths()
+        # already validates. Per CLAUDE.md "no silent drops" - empty forks
+        # would cause tokens to disappear without audit trail.
+        if not branches:
+            raise ValueError("fork_token requires at least one branch")
+
+        # Validate parent token ownership before any writes (Tier 1 invariant)
+        self._validate_token_run_ownership(parent_token_id, run_id)
+        self._validate_token_row_ownership(parent_token_id, row_id)
+
+        fork_group_id = generate_id()
+        children = []
+
+        with self._db.connection() as conn:
+            # 1. Create child tokens
+            for ordinal, branch_name in enumerate(branches):
+                child_id = generate_id()
+                timestamp = now()
+
+                # Create child token (run_id derived from parent -- already validated)
+                result = conn.execute(
+                    tokens_table.insert().values(
+                        token_id=child_id,
+                        row_id=row_id,
+                        run_id=run_id,
+                        fork_group_id=fork_group_id,
+                        branch_name=branch_name,
+                        step_in_pipeline=step_in_pipeline,
+                        created_at=timestamp,
+                    )
+                )
+                if result.rowcount == 0:
+                    raise AuditIntegrityError(
+                        f"fork_token: child token INSERT affected zero rows (token_id={child_id}, branch={branch_name!r})"
+                    )
+
+                # Record parent relationship
+                result = conn.execute(
+                    token_parents_table.insert().values(
+                        token_id=child_id,
+                        parent_token_id=parent_token_id,
+                        ordinal=ordinal,
+                    )
+                )
+                if result.rowcount == 0:
+                    raise AuditIntegrityError(
+                        f"fork_token: token_parent INSERT affected zero rows (child={child_id}, parent={parent_token_id})"
+                    )
+
+                children.append(
+                    Token(
+                        token_id=child_id,
+                        row_id=row_id,
+                        fork_group_id=fork_group_id,
+                        branch_name=branch_name,
+                        step_in_pipeline=step_in_pipeline,
+                        created_at=timestamp,
+                        run_id=run_id,
+                    )
+                )
+
+            # 2. Record parent FORKED outcome in SAME transaction (atomic)
+            outcome_id = f"out_{generate_id()[:12]}"
+            result = conn.execute(
+                token_outcomes_table.insert().values(
+                    outcome_id=outcome_id,
+                    run_id=run_id,
+                    token_id=parent_token_id,
+                    outcome=RowOutcome.FORKED,
+                    is_terminal=1,
+                    recorded_at=now(),
+                    fork_group_id=fork_group_id,
+                    expected_branches_json=json.dumps(branches),
+                )
+            )
+            if result.rowcount == 0:
+                raise AuditIntegrityError(
+                    f"fork_token: FORKED outcome INSERT affected zero rows (parent={parent_token_id}, outcome_id={outcome_id})"
+                )
+
+        return children, fork_group_id
+
+    def coalesce_tokens(
+        self,
+        parent_token_ids: list[str],
+        row_id: str,
+        *,
+        step_in_pipeline: int | None = None,
+    ) -> Token:
+        """Coalesce multiple tokens into one (join operation).
+
+        Creates a new token representing the merged result.
+        Records all parent relationships.
+
+        Validates that all parent tokens belong to the specified row_id and
+        that they all share the same run_id. Cross-run/cross-row contamination
+        crashes immediately per Tier 1 trust model.
+
+        Args:
+            parent_token_ids: Tokens being merged
+            row_id: Row ID for the merged token
+            step_in_pipeline: Step in the DAG where the coalesce occurs
+
+        Returns:
+            Merged Token model
+
+        Raises:
+            AuditIntegrityError: If parent tokens do not belong to specified row
+                or if parent tokens span multiple runs
+        """
+        # Validate all parent tokens belong to the same row and run (Tier 1 invariant)
+        run_id: str | None = None
+        for parent_id in parent_token_ids:
+            self._validate_token_row_ownership(parent_id, row_id)
+            _row_id, parent_run_id = self._resolve_token_ownership(parent_id)
+            if run_id is None:
+                run_id = parent_run_id
+            elif parent_run_id != run_id:
+                raise AuditIntegrityError(
+                    f"Cross-run contamination prevented in coalesce: parent token {parent_id!r} "
+                    f"belongs to run {parent_run_id!r}, but other parents belong to run {run_id!r}. "
+                    f"All parent tokens in a coalesce must belong to the same run."
+                )
+
+        # Derive run_id from row if no parents (edge case: shouldn't happen in practice)
+        if run_id is None:
+            run_id = self._resolve_run_id_for_row(row_id)
+
+        join_group_id = generate_id()
+        token_id = generate_id()
+        timestamp = now()
+
+        with self._db.connection() as conn:
+            # Create merged token
+            result = conn.execute(
+                tokens_table.insert().values(
+                    token_id=token_id,
+                    row_id=row_id,
+                    run_id=run_id,
+                    join_group_id=join_group_id,
+                    step_in_pipeline=step_in_pipeline,
+                    created_at=timestamp,
+                )
+            )
+            if result.rowcount == 0:
+                raise AuditIntegrityError(f"coalesce_tokens: merged token INSERT affected zero rows (token_id={token_id})")
+
+            # Record all parent relationships
+            for ordinal, parent_id in enumerate(parent_token_ids):
+                result = conn.execute(
+                    token_parents_table.insert().values(
+                        token_id=token_id,
+                        parent_token_id=parent_id,
+                        ordinal=ordinal,
+                    )
+                )
+                if result.rowcount == 0:
+                    raise AuditIntegrityError(
+                        f"coalesce_tokens: token_parent INSERT affected zero rows (child={token_id}, parent={parent_id})"
+                    )
+
+        return Token(
+            token_id=token_id,
+            row_id=row_id,
+            join_group_id=join_group_id,
+            step_in_pipeline=step_in_pipeline,
+            created_at=timestamp,
+            run_id=run_id,
+        )
+
+    def expand_token(
+        self,
+        parent_token_id: str,
+        row_id: str,
+        count: int,
+        *,
+        run_id: str,
+        step_in_pipeline: int | None = None,
+        record_parent_outcome: bool = True,
+    ) -> tuple[list[Token], str]:
+        """Expand a token into multiple child tokens (deaggregation).
+
+        ATOMIC: Creates children AND optionally records parent EXPANDED outcome
+        in single transaction.
+
+        Validates that parent_token_id belongs to the specified row_id and run_id
+        before any writes. Cross-run/cross-row contamination crashes immediately
+        per Tier 1 trust model.
+
+        Creates N child tokens from a single parent for 1->N expansion.
+        All children share the same row_id (same source row) and are
+        linked to the parent via token_parents table.
+
+        Unlike fork_token (parallel DAG paths with branch names), expand_token
+        creates sequential children for deaggregation transforms.
+
+        Args:
+            parent_token_id: Token being expanded
+            row_id: Row ID (same for all children)
+            count: Number of child tokens to create (must be >= 1)
+            run_id: Run ID (required for atomic outcome recording)
+            step_in_pipeline: Step where expansion occurs (optional)
+            record_parent_outcome: If True (default), record EXPANDED outcome for parent.
+                Set to False for batch aggregation where parent gets CONSUMED_IN_BATCH.
+
+        Returns:
+            Tuple of (child Token list, expand_group_id)
+
+        Raises:
+            ValueError: If count < 1
+            AuditIntegrityError: If parent token does not belong to specified run/row
+        """
+        if count < 1:
+            raise ValueError("expand_token requires at least 1 child")
+
+        # Validate parent token ownership before any writes (Tier 1 invariant)
+        self._validate_token_run_ownership(parent_token_id, run_id)
+        self._validate_token_row_ownership(parent_token_id, row_id)
+
+        expand_group_id = generate_id()
+        children = []
+
+        with self._db.connection() as conn:
+            for ordinal in range(count):
+                child_id = generate_id()
+                timestamp = now()
+
+                # Create child token with expand_group_id (run_id from parent -- already validated)
+                result = conn.execute(
+                    tokens_table.insert().values(
+                        token_id=child_id,
+                        row_id=row_id,
+                        run_id=run_id,
+                        expand_group_id=expand_group_id,
+                        step_in_pipeline=step_in_pipeline,
+                        created_at=timestamp,
+                    )
+                )
+                if result.rowcount == 0:
+                    raise AuditIntegrityError(
+                        f"expand_token: child token INSERT affected zero rows (token_id={child_id}, ordinal={ordinal})"
+                    )
+
+                # Record parent relationship
+                result = conn.execute(
+                    token_parents_table.insert().values(
+                        token_id=child_id,
+                        parent_token_id=parent_token_id,
+                        ordinal=ordinal,
+                    )
+                )
+                if result.rowcount == 0:
+                    raise AuditIntegrityError(
+                        f"expand_token: token_parent INSERT affected zero rows (child={child_id}, parent={parent_token_id})"
+                    )
+
+                children.append(
+                    Token(
+                        token_id=child_id,
+                        row_id=row_id,
+                        expand_group_id=expand_group_id,
+                        step_in_pipeline=step_in_pipeline,
+                        created_at=timestamp,
+                        run_id=run_id,
+                    )
+                )
+
+            # Optionally record parent EXPANDED outcome in SAME transaction (atomic)
+            # This eliminates the crash window where children exist but parent
+            # outcome is not yet recorded.
+            #
+            # Set record_parent_outcome=False for batch aggregation where the
+            # parent token gets CONSUMED_IN_BATCH instead of EXPANDED.
+            if record_parent_outcome:
+                outcome_id = f"out_{generate_id()[:12]}"
+                result = conn.execute(
+                    token_outcomes_table.insert().values(
+                        outcome_id=outcome_id,
+                        run_id=run_id,
+                        token_id=parent_token_id,
+                        outcome=RowOutcome.EXPANDED,
+                        is_terminal=1,
+                        recorded_at=now(),
+                        expand_group_id=expand_group_id,
+                        # Store expected count for recovery validation
+                        expected_branches_json=json.dumps({"count": count}),
+                    )
+                )
+                if result.rowcount == 0:
+                    raise AuditIntegrityError(
+                        f"expand_token: EXPANDED outcome INSERT affected zero rows (parent={parent_token_id}, outcome_id={outcome_id})"
+                    )
+
+        return children, expand_group_id
+
+    def record_token_outcome(
+        self,
+        run_id: str,
+        token_id: str,
+        outcome: RowOutcome,
+        *,
+        sink_name: str | None = None,
+        batch_id: str | None = None,
+        fork_group_id: str | None = None,
+        join_group_id: str | None = None,
+        expand_group_id: str | None = None,
+        error_hash: str | None = None,
+        context: dict[str, Any] | None = None,
+    ) -> str:
+        """Record a token's outcome in the audit trail.
+
+        Called at the moment the outcome is determined in processor.py.
+        For BUFFERED tokens, a second call records the terminal outcome
+        when the batch flushes.
+
+        Validates that the token belongs to the specified run_id before recording.
+        Cross-run contamination crashes immediately per Tier 1 trust model.
+
+        Args:
+            run_id: Current run ID
+            token_id: Token that reached this outcome
+            outcome: The RowOutcome enum value
+            sink_name: For ROUTED/COMPLETED - which sink (REQUIRED)
+            batch_id: For CONSUMED_IN_BATCH/BUFFERED - which batch (REQUIRED)
+            fork_group_id: For FORKED - the fork group (REQUIRED)
+            join_group_id: For COALESCED - the join group (REQUIRED)
+            expand_group_id: For EXPANDED - the expand group (REQUIRED)
+            error_hash: For FAILED/QUARANTINED - hash of error details (REQUIRED)
+            context: Optional additional context (stored as JSON)
+
+        Returns:
+            outcome_id for tracking
+
+        Raises:
+            ValueError: If required fields for outcome type are missing
+            AuditIntegrityError: If token does not belong to the specified run
+            IntegrityError: If terminal outcome already exists for token
+        """
+        # Validate required fields per outcome type (contract enforcement)
+        # See docs/contracts/token-outcomes/00-token-outcome-contract.md
+        self._validate_outcome_fields(
+            outcome=outcome,
+            sink_name=sink_name,
+            batch_id=batch_id,
+            fork_group_id=fork_group_id,
+            join_group_id=join_group_id,
+            expand_group_id=expand_group_id,
+            error_hash=error_hash,
+        )
+
+        # Validate token belongs to the specified run (Tier 1 invariant)
+        self._validate_token_run_ownership(token_id, run_id)
+
+        outcome_id = f"out_{generate_id()[:12]}"
+        is_terminal = outcome.is_terminal
+        context_json = canonical_json(context) if context is not None else None
+
+        self._ops.execute_insert(
+            token_outcomes_table.insert().values(
+                outcome_id=outcome_id,
+                run_id=run_id,
+                token_id=token_id,
+                outcome=outcome,
+                is_terminal=1 if is_terminal else 0,
+                recorded_at=now(),
+                sink_name=sink_name,
+                batch_id=batch_id,
+                fork_group_id=fork_group_id,
+                join_group_id=join_group_id,
+                expand_group_id=expand_group_id,
+                error_hash=error_hash,
+                context_json=context_json,
+            )
+        )
+
+        return outcome_id
+
+    def get_token_outcome(self, token_id: str) -> TokenOutcome | None:
+        """Get the terminal outcome for a token.
+
+        Returns the terminal outcome if one exists, otherwise the most
+        recent non-terminal outcome (BUFFERED).
+
+        Args:
+            token_id: Token to look up
+
+        Returns:
+            TokenOutcome dataclass or None if no outcome recorded
+        """
+        # Get most recent outcome (terminal preferred)
+        query = (
+            select(token_outcomes_table)
+            .where(token_outcomes_table.c.token_id == token_id)
+            .order_by(
+                token_outcomes_table.c.is_terminal.desc(),  # Terminal first
+                token_outcomes_table.c.recorded_at.desc(),  # Then by time
+            )
+            .limit(1)
+        )
+        result = self._ops.execute_fetchone(query)
+        if result is None:
+            return None
+        return self._token_outcome_loader.load(result)
+
+    def get_token_outcomes_for_row(self, run_id: str, row_id: str) -> list[TokenOutcome]:
+        """Get all token outcomes for a row in a single query.
+
+        Uses JOIN to avoid N+1 query pattern when resolving row_id to tokens.
+        Critical for explain() disambiguation with forks/expands.
+
+        Args:
+            run_id: Run ID to filter by (prevents cross-run contamination)
+            row_id: Row ID
+
+        Returns:
+            List of TokenOutcome objects, empty if no outcomes recorded.
+            Ordered by recorded_at for deterministic behavior.
+        """
+        # Single JOIN query: tokens + outcomes
+        query = (
+            select(
+                token_outcomes_table.c.outcome_id,
+                token_outcomes_table.c.run_id,
+                token_outcomes_table.c.token_id,
+                token_outcomes_table.c.outcome,
+                token_outcomes_table.c.is_terminal,
+                token_outcomes_table.c.recorded_at,
+                token_outcomes_table.c.sink_name,
+                token_outcomes_table.c.batch_id,
+                token_outcomes_table.c.fork_group_id,
+                token_outcomes_table.c.join_group_id,
+                token_outcomes_table.c.expand_group_id,
+                token_outcomes_table.c.error_hash,
+                token_outcomes_table.c.context_json,
+                token_outcomes_table.c.expected_branches_json,
+            )
+            .join(
+                tokens_table,
+                token_outcomes_table.c.token_id == tokens_table.c.token_id,
+            )
+            .where(tokens_table.c.row_id == row_id)
+            .where(token_outcomes_table.c.run_id == run_id)
+            .order_by(token_outcomes_table.c.recorded_at)
+        )
+        rows = self._ops.execute_fetchall(query)
+        return [self._token_outcome_loader.load(r) for r in rows]
+
+    # ── Graph recording: public methods ──────────────────────────────────
+
+    def register_node(
+        self,
+        run_id: str,
+        plugin_name: str,
+        node_type: NodeType,
+        plugin_version: str,
+        config: dict[str, Any],
+        *,
+        node_id: str | None = None,
+        sequence: int | None = None,
+        schema_hash: str | None = None,
+        determinism: Determinism = Determinism.DETERMINISTIC,
+        schema_config: SchemaConfig,
+        input_contract: SchemaContract | None = None,
+        output_contract: SchemaContract | None = None,
+    ) -> Node:
+        """Register a plugin instance (node) in the execution graph.
+
+        Args:
+            run_id: Run this node belongs to
+            plugin_name: Name of the plugin
+            node_type: NodeType enum (SOURCE, TRANSFORM, GATE, AGGREGATION, COALESCE, SINK)
+            plugin_version: Version of the plugin
+            config: Plugin configuration
+            node_id: Optional node ID (generated if not provided)
+            sequence: Position in pipeline
+            schema_hash: Optional input/output schema hash
+            determinism: Determinism enum (defaults to DETERMINISTIC)
+            schema_config: Schema configuration for audit trail (WP-11.99)
+            input_contract: Optional input schema contract (what node requires)
+            output_contract: Optional output schema contract (what node guarantees)
+
+        Returns:
+            Node model
+        """
+        node_id = node_id or generate_id()
+        config_json = canonical_json(config)
+        config_hash = stable_hash(config)
+        timestamp = now()
+
+        # Extract schema info for audit (WP-11.99)
+        schema_fields_json: str | None = None
+        schema_fields_list: list[dict[str, object]] | None = None
+
+        # Extract schema mode directly - no translation needed
+        schema_mode = schema_config.mode
+        if not schema_config.is_observed and schema_config.fields:
+            # FieldDefinition.to_dict() returns dict[str, str | bool]
+            # Cast each dict to wider type for storage
+            field_dicts = [f.to_dict() for f in schema_config.fields]
+            schema_fields_list = [dict(d) for d in field_dicts]
+            schema_fields_json = canonical_json(field_dicts)
+
+        # Convert schema contracts to audit records if provided
+        input_contract_json: str | None = None
+        output_contract_json: str | None = None
+        if input_contract is not None:
+            input_contract_json = ContractAuditRecord.from_contract(input_contract).to_json()
+        if output_contract is not None:
+            output_contract_json = ContractAuditRecord.from_contract(output_contract).to_json()
+
+        node = Node(
+            node_id=node_id,
+            run_id=run_id,
+            plugin_name=plugin_name,
+            node_type=node_type,
+            plugin_version=plugin_version,
+            determinism=determinism,
+            config_hash=config_hash,
+            config_json=config_json,
+            schema_hash=schema_hash,
+            sequence_in_pipeline=sequence,
+            registered_at=timestamp,
+            schema_mode=schema_mode,
+            schema_fields=schema_fields_list,
+        )
+
+        self._ops.execute_insert(
+            nodes_table.insert().values(
+                node_id=node.node_id,
+                run_id=node.run_id,
+                plugin_name=node.plugin_name,
+                node_type=node.node_type,
+                plugin_version=node.plugin_version,
+                determinism=node.determinism,
+                config_hash=node.config_hash,
+                config_json=node.config_json,
+                schema_hash=node.schema_hash,
+                sequence_in_pipeline=node.sequence_in_pipeline,
+                registered_at=node.registered_at,
+                schema_mode=node.schema_mode,
+                schema_fields_json=schema_fields_json,
+                input_contract_json=input_contract_json,
+                output_contract_json=output_contract_json,
+            )
+        )
+
+        return node
+
+    def register_edge(
+        self,
+        run_id: str,
+        from_node_id: str,
+        to_node_id: str,
+        label: str,
+        mode: RoutingMode,
+        *,
+        edge_id: str | None = None,
+    ) -> Edge:
+        """Register an edge in the execution graph.
+
+        Args:
+            run_id: Run this edge belongs to
+            from_node_id: Source node
+            to_node_id: Destination node
+            label: Edge label ("continue", route name, etc.)
+            mode: RoutingMode enum (MOVE or COPY)
+            edge_id: Optional edge ID (generated if not provided)
+
+        Returns:
+            Edge model
+        """
+        edge_id = edge_id or generate_id()
+        timestamp = now()
+
+        edge = Edge(
+            edge_id=edge_id,
+            run_id=run_id,
+            from_node_id=from_node_id,
+            to_node_id=to_node_id,
+            label=label,
+            default_mode=mode,
+            created_at=timestamp,
+        )
+
+        self._ops.execute_insert(
+            edges_table.insert().values(
+                edge_id=edge.edge_id,
+                run_id=edge.run_id,
+                from_node_id=edge.from_node_id,
+                to_node_id=edge.to_node_id,
+                label=edge.label,
+                default_mode=edge.default_mode,
+                created_at=edge.created_at,
+            )
+        )
+
+        return edge
+
+    def get_node(self, node_id: str, run_id: str) -> Node | None:
+        """Get a node by its composite primary key (node_id, run_id).
+
+        NOTE: The nodes table has a composite PK (node_id, run_id). The same
+        node_id can exist in multiple runs, so run_id is required to identify
+        the specific node.
+
+        Args:
+            node_id: Node ID to retrieve
+            run_id: Run ID the node belongs to
+
+        Returns:
+            Node model or None if not found
+        """
+        query = select(nodes_table).where((nodes_table.c.node_id == node_id) & (nodes_table.c.run_id == run_id))
+        row = self._ops.execute_fetchone(query)
+        if row is None:
+            return None
+        return self._node_loader.load(row)
+
+    def get_nodes(self, run_id: str) -> list[Node]:
+        """Get all nodes for a run.
+
+        Args:
+            run_id: Run ID
+
+        Returns:
+            List of Node models, ordered by sequence (NULL sequences last)
+        """
+        query = (
+            select(nodes_table)
+            .where(nodes_table.c.run_id == run_id)
+            # Use nullslast() for consistent NULL handling across databases
+            # Nodes without sequence (e.g., dynamically added) sort last
+            # Tiebreakers (registered_at, node_id) ensure deterministic ordering
+            # for export signing when sequence_in_pipeline is NULL
+            .order_by(
+                nodes_table.c.sequence_in_pipeline.nullslast(),
+                nodes_table.c.registered_at,
+                nodes_table.c.node_id,
+            )
+        )
+        rows = self._ops.execute_fetchall(query)
+        return [self._node_loader.load(row) for row in rows]
+
+    def get_node_contracts(
+        self, run_id: str, node_id: str, *, allow_missing: bool = False
+    ) -> tuple[SchemaContract | None, SchemaContract | None]:
+        """Get input and output contracts for a node.
+
+        Retrieves stored schema contracts and verifies integrity via hash.
+
+        Args:
+            run_id: Run ID the node belongs to
+            node_id: Node ID to query
+            allow_missing: If False (default), crash when node not found
+                (Tier 1 invariant — our audit data must be present).
+                Set to True only for external query paths (MCP, analysis).
+
+        Returns:
+            Tuple of (input_contract, output_contract), either may be None
+            if the node exists but has no contracts recorded.
+
+        Raises:
+            AuditIntegrityError: If node not found and allow_missing is False
+            ValueError: If stored contract fails integrity verification
+        """
+        query = select(
+            nodes_table.c.input_contract_json,
+            nodes_table.c.output_contract_json,
+        ).where((nodes_table.c.node_id == node_id) & (nodes_table.c.run_id == run_id))
+        row = self._ops.execute_fetchone(query)
+
+        if row is None:
+            if allow_missing:
+                return None, None
+            raise AuditIntegrityError(
+                f"Node not found in audit trail: node_id={node_id!r}, run_id={run_id!r}. Expected node to exist (Tier 1 data)."
+            )
+
+        input_contract: SchemaContract | None = None
+        output_contract: SchemaContract | None = None
+
+        if row.input_contract_json is not None:
+            audit_record = ContractAuditRecord.from_json(row.input_contract_json)
+            input_contract = audit_record.to_schema_contract()
+
+        if row.output_contract_json is not None:
+            audit_record = ContractAuditRecord.from_json(row.output_contract_json)
+            output_contract = audit_record.to_schema_contract()
+
+        return input_contract, output_contract
+
+    def get_edges(self, run_id: str) -> list[Edge]:
+        """Get all edges for a run.
+
+        Args:
+            run_id: Run ID
+
+        Returns:
+            List of Edge models for this run, ordered by created_at then edge_id
+            for deterministic export signatures.
+        """
+        query = select(edges_table).where(edges_table.c.run_id == run_id).order_by(edges_table.c.created_at, edges_table.c.edge_id)
+        rows = self._ops.execute_fetchall(query)
+        return [self._edge_loader.load(row) for row in rows]
+
+    def get_edge(self, edge_id: str) -> Edge:
+        """Get a single edge by ID.
+
+        Tier 1: crash on missing — an edge_id from our own routing_events
+        table MUST resolve. Missing means audit DB corruption.
+
+        Args:
+            edge_id: Edge ID to look up
+
+        Returns:
+            Edge model
+
+        Raises:
+            AuditIntegrityError: If edge not found (audit integrity violation)
+        """
+        query = select(edges_table).where(edges_table.c.edge_id == edge_id)
+        row = self._ops.execute_fetchone(query)
+        if row is None:
+            raise AuditIntegrityError(
+                f"Audit integrity violation: edge '{edge_id}' not found. "
+                f"A routing_event references a non-existent edge. "
+                f"This indicates database corruption."
+            )
+        return self._edge_loader.load(row)
+
+    def get_edge_map(self, run_id: str) -> dict[tuple[str, str], str]:
+        """Get edge mapping for a run (from_node_id, label) -> edge_id.
+
+        Args:
+            run_id: Run to query
+
+        Returns:
+            Dictionary mapping (from_node_id, label) to edge_id
+
+        Raises:
+            AuditIntegrityError: If run has no edges registered (data corruption).
+                DAG compilation always registers edges, so an empty map
+                indicates the run was never properly initialized.
+
+        Note:
+            This encapsulates Landscape schema access for Orchestrator resume.
+            Edge IDs are required for FK integrity when recording routing events.
+        """
+        query = select(edges_table).where(edges_table.c.run_id == run_id)
+        edges = self._ops.execute_fetchall(query)
+
+        edge_map: dict[tuple[str, str], str] = {}
+        for edge in edges:
+            edge_map[(edge.from_node_id, edge.label)] = edge.edge_id
+
+        if not edge_map:
+            raise AuditIntegrityError(
+                f"Run {run_id!r} has no edges registered — cannot build edge map. "
+                f"DAG compilation always registers edges; an empty map indicates "
+                f"the run was never properly initialized or database corruption."
+            )
+
+        return edge_map
+
+    def update_node_output_contract(
+        self,
+        run_id: str,
+        node_id: str,
+        contract: SchemaContract,
+    ) -> None:
+        """Update a node's output_contract after first-row inference or schema evolution.
+
+        Called in two scenarios:
+        1. Source infers schema from first valid row during OBSERVED mode
+        2. Transform adds fields during execution (schema evolution)
+
+        Args:
+            run_id: Run containing the node
+            node_id: Node to update (source or transform node)
+            contract: SchemaContract with inferred/evolved fields
+
+        Note:
+            This is the complement to update_run_contract() for node-level contracts.
+            Used for dynamic schema discovery and transform schema evolution.
+        """
+        audit_record = ContractAuditRecord.from_contract(contract)
+        output_contract_json = audit_record.to_json()
+
+        self._ops.execute_update(
+            nodes_table.update()
+            .where((nodes_table.c.run_id == run_id) & (nodes_table.c.node_id == node_id))
+            .values(output_contract_json=output_contract_json)
+        )
+
+    # ── Error recording: public methods ──────────────────────────────────
+
+    def record_validation_error(
+        self,
+        run_id: str,
+        node_id: str | None,
+        row_data: Any,
+        error: str,
+        schema_mode: str,
+        destination: str,
+        *,
+        contract_violation: ContractViolation | None = None,
+    ) -> str:
+        """Record a validation error in the audit trail.
+
+        Called when a source row fails schema validation. The row is
+        quarantined (not processed further) but we record what we saw
+        for complete audit coverage.
+
+        Args:
+            run_id: Current run ID
+            node_id: Node where validation failed
+            row_data: The row that failed validation (may be non-dict or contain non-finite values)
+            error: Error description
+            schema_mode: Schema mode that caught the error ("fixed", "flexible", "observed")
+            destination: Where row was routed ("discard" or sink name)
+            contract_violation: Optional contract violation details for structured auditing
+
+        Returns:
+            error_id for tracking
+        """
+        error_id = f"verr_{generate_id()[:12]}"
+
+        # Tier-3 (external data) trust boundary: row_data may be non-canonical
+        # Try canonical hash/JSON first, fall back to safe representations
+        try:
+            row_hash = stable_hash(row_data)
+            row_data_json = canonical_json(row_data)
+        except (ValueError, TypeError) as e:
+            # Non-canonical data (NaN, Infinity, non-dict, etc.)
+            # Use repr() fallback to preserve audit trail
+            row_preview = repr(row_data)[:200] + "..." if len(repr(row_data)) > 200 else repr(row_data)
+            logger.warning(
+                "Validation error row not canonically serializable (using repr fallback): %s | Row preview: %s",
+                str(e),
+                row_preview,
+            )
+            row_hash = repr_hash(row_data)
+            # Store non-canonical representation with type metadata
+            metadata = NonCanonicalMetadata.from_error(row_data, e)
+            row_data_json = json.dumps(metadata.to_dict())
+
+        # Extract contract violation details if provided
+        violation_type: str | None = None
+        normalized_field_name: str | None = None
+        original_field_name: str | None = None
+        expected_type: str | None = None
+        actual_type: str | None = None
+
+        if contract_violation is not None:
+            violation_record = ValidationErrorWithContract.from_violation(contract_violation)
+            violation_type = violation_record.violation_type
+            normalized_field_name = violation_record.normalized_field_name
+            original_field_name = violation_record.original_field_name
+            expected_type = violation_record.expected_type
+            actual_type = violation_record.actual_type
+
+        self._ops.execute_insert(
+            validation_errors_table.insert().values(
+                error_id=error_id,
+                run_id=run_id,
+                node_id=node_id,
+                row_hash=row_hash,
+                row_data_json=row_data_json,
+                error=error,
+                schema_mode=schema_mode,
+                destination=destination,
+                created_at=now(),
+                violation_type=violation_type,
+                normalized_field_name=normalized_field_name,
+                original_field_name=original_field_name,
+                expected_type=expected_type,
+                actual_type=actual_type,
+            )
+        )
+
+        return error_id
+
+    def record_transform_error(
+        self,
+        run_id: str,
+        token_id: str,
+        transform_id: str,
+        row_data: dict[str, Any] | PipelineRow,
+        error_details: TransformErrorReason,
+        destination: str,
+    ) -> str:
+        """Record a transform processing error in the audit trail.
+
+        Called when a transform returns TransformResult.error().
+        This is for legitimate errors, NOT transform bugs.
+
+        Validates that the token belongs to the specified run_id before recording.
+        Cross-run contamination crashes immediately per Tier 1 trust model.
+
+        Args:
+            run_id: Current run ID
+            token_id: Token ID for the row
+            transform_id: Transform that returned the error
+            row_data: The row that could not be processed
+            error_details: Error details from TransformResult (TransformErrorReason TypedDict)
+            destination: Where row was routed ("discard" or sink name)
+
+        Returns:
+            error_id for tracking
+
+        Raises:
+            AuditIntegrityError: If token does not belong to the specified run
+        """
+        # Validate token belongs to the specified run (Tier 1 invariant)
+        self._validate_token_run_ownership(token_id, run_id)
+
+        error_id = f"terr_{generate_id()[:12]}"
+
+        # error_details may contain NaN/Infinity or non-serializable values
+        # (e.g. from exception context in row operations). Wrap in try/except
+        # per Tier 3 boundary: error_details originates from transform results
+        # which may contain arbitrary row-derived data.
+        try:
+            error_details_json = canonical_json(error_details)
+        except (ValueError, TypeError) as e:
+            logger.warning(
+                "Transform error details not canonically serializable (using repr fallback): %s",
+                str(e),
+            )
+            error_details_json = json.dumps(
+                {
+                    "__non_canonical__": True,
+                    "repr": repr(error_details)[:500],
+                    "serialization_error": str(e),
+                }
+            )
+
+        # row_data may contain NaN/Infinity (valid floats that passed source
+        # validation). Wrap serialization with the same fallback pattern used
+        # in record_validation_error — losing the error record is worse than
+        # using a repr-based hash.
+        try:
+            row_hash = stable_hash(row_data)
+            row_data_json = canonical_json(row_data)
+        except (ValueError, TypeError) as e:
+            logger.warning(
+                "Transform error row data not canonically serializable (using repr fallback): %s",
+                str(e),
+            )
+            row_hash = repr_hash(row_data)
+            metadata = NonCanonicalMetadata.from_error(row_data, e)
+            row_data_json = json.dumps(metadata.to_dict())
+
+        self._ops.execute_insert(
+            transform_errors_table.insert().values(
+                error_id=error_id,
+                run_id=run_id,
+                token_id=token_id,
+                transform_id=transform_id,
+                row_hash=row_hash,
+                row_data_json=row_data_json,
+                error_details_json=error_details_json,
+                destination=destination,
+                created_at=now(),
+            )
+        )
+
+        return error_id
+
+    def get_validation_errors_for_row(self, run_id: str, row_hash: str) -> list[ValidationErrorRecord]:
+        """Get validation errors for a row by its hash.
+
+        Validation errors are keyed by row_hash since quarantined rows
+        never get row_ids (they're rejected before entering the pipeline).
+
+        Args:
+            run_id: Run ID to query
+            row_hash: Hash of the row data
+
+        Returns:
+            List of ValidationErrorRecord models
+        """
+        query = select(validation_errors_table).where(
+            validation_errors_table.c.run_id == run_id,
+            validation_errors_table.c.row_hash == row_hash,
+        )
+        rows = self._ops.execute_fetchall(query)
+        return [self._validation_error_loader.load(r) for r in rows]
+
+    def get_validation_errors_for_run(self, run_id: str) -> list[ValidationErrorRecord]:
+        """Get all validation errors for a run.
+
+        Args:
+            run_id: Run ID to query
+
+        Returns:
+            List of ValidationErrorRecord models, ordered by created_at
+        """
+        query = (
+            select(validation_errors_table).where(validation_errors_table.c.run_id == run_id).order_by(validation_errors_table.c.created_at)
+        )
+        rows = self._ops.execute_fetchall(query)
+        return [self._validation_error_loader.load(r) for r in rows]
+
+    def get_transform_errors_for_token(self, token_id: str) -> list[TransformErrorRecord]:
+        """Get transform errors for a specific token.
+
+        Args:
+            token_id: Token ID to query
+
+        Returns:
+            List of TransformErrorRecord models
+        """
+        query = select(transform_errors_table).where(
+            transform_errors_table.c.token_id == token_id,
+        )
+        rows = self._ops.execute_fetchall(query)
+        return [self._transform_error_loader.load(r) for r in rows]
+
+    def get_transform_errors_for_run(self, run_id: str) -> list[TransformErrorRecord]:
+        """Get all transform errors for a run.
+
+        Args:
+            run_id: Run ID to query
+
+        Returns:
+            List of TransformErrorRecord models, ordered by created_at
+        """
+        query = (
+            select(transform_errors_table).where(transform_errors_table.c.run_id == run_id).order_by(transform_errors_table.c.created_at)
+        )
+        rows = self._ops.execute_fetchall(query)
+        return [self._transform_error_loader.load(r) for r in rows]

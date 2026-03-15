@@ -704,10 +704,12 @@ class TestSchemaContractCheckpoint:
 
     def test_from_checkpoint_validates_hash(self, sample_contract: SchemaContract) -> None:
         """from_checkpoint() validates hash integrity."""
+        from elspeth.contracts.errors import AuditIntegrityError
+
         data = sample_contract.to_checkpoint_format()
         data["version_hash"] = "corrupted_hash"
 
-        with pytest.raises(ValueError, match="integrity"):
+        with pytest.raises(AuditIntegrityError, match="integrity"):
             SchemaContract.from_checkpoint(data)
 
     def test_from_checkpoint_missing_hash_crashes(self, sample_contract: SchemaContract) -> None:
@@ -717,10 +719,12 @@ class TestSchemaContractCheckpoint:
         to_checkpoint_format() ALWAYS writes version_hash, so if it's missing
         that's corruption - not an older format to silently accept.
         """
+        from elspeth.contracts.errors import AuditIntegrityError
+
         data = sample_contract.to_checkpoint_format()
         del data["version_hash"]  # Simulate corruption
 
-        with pytest.raises(KeyError):
+        with pytest.raises(AuditIntegrityError):
             SchemaContract.from_checkpoint(data)
 
     def test_from_checkpoint_unknown_type_crashes(self) -> None:
@@ -766,10 +770,12 @@ class TestSchemaContractCheckpoint:
         )
         data = contract.to_checkpoint_format()
 
+        from elspeth.contracts.errors import AuditIntegrityError
+
         # Tamper with locked flag
         data["locked"] = False
 
-        with pytest.raises(ValueError, match="integrity"):
+        with pytest.raises(AuditIntegrityError, match="integrity"):
             SchemaContract.from_checkpoint(data)
 
     def test_from_checkpoint_detects_source_tampering(self) -> None:
@@ -778,6 +784,8 @@ class TestSchemaContractCheckpoint:
         Per CLAUDE.md Tier 1: integrity hash must cover ALL serialized state.
         Changing source could falsify audit trail (declared vs inferred).
         """
+        from elspeth.contracts.errors import AuditIntegrityError
+
         contract = SchemaContract(
             mode="FLEXIBLE",
             fields=(make_field("id", int, original_name="id", required=True, source="declared"),),
@@ -788,7 +796,7 @@ class TestSchemaContractCheckpoint:
         # Tamper with source field
         data["fields"][0]["source"] = "inferred"
 
-        with pytest.raises(ValueError, match="integrity"):
+        with pytest.raises(AuditIntegrityError, match="integrity"):
             SchemaContract.from_checkpoint(data)
 
     def test_version_hash_changes_on_locked_change(self) -> None:
@@ -1166,7 +1174,7 @@ class TestPipelineRowInit:
             locked=True,
         )
         with pytest.raises(TypeError, match="PipelineRow requires exactly dict"):
-            PipelineRow(OrderedDict(a=1), contract)  # type: ignore[arg-type]
+            PipelineRow(OrderedDict(a=1), contract)
 
     def test_defaultdict_rejected(self) -> None:
         """PipelineRow rejects defaultdict (only exact dict allowed)."""
@@ -1181,7 +1189,7 @@ class TestPipelineRowInit:
         )
         dd = defaultdict(int, a=1)
         with pytest.raises(TypeError, match="PipelineRow requires exactly dict"):
-            PipelineRow(dd, contract)  # type: ignore[arg-type]
+            PipelineRow(dd, contract)
 
     def test_input_dict_not_mutated(self) -> None:
         """PipelineRow copies input dict, so mutations don't affect internal state."""

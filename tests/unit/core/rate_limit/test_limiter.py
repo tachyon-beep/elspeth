@@ -263,8 +263,8 @@ class TestRateLimitRegistry:
         assert isinstance(limiter1, NoOpLimiter)
         assert limiter1 is limiter2
 
-    def test_reset_all_clears_registry(self) -> None:
-        """reset_all() clears all limiters from the registry."""
+    def test_close_clears_registry(self) -> None:
+        """close() clears all limiters from the registry."""
         from elspeth.contracts.config.runtime import RuntimeRateLimitConfig
         from elspeth.core.config import RateLimitSettings
         from elspeth.core.rate_limit import RateLimitRegistry
@@ -281,8 +281,8 @@ class TestRateLimitRegistry:
         assert limiter_a is registry.get_limiter("api_a")
         assert limiter_b is registry.get_limiter("api_b")
 
-        # Reset all
-        registry.reset_all()
+        # Close all
+        registry.close()
 
         # New calls should create new instances
         new_limiter_a = registry.get_limiter("api_a")
@@ -537,7 +537,7 @@ class TestExcepthookSuppression:
 
         # Get leaker ident before close (framework boundary — private attr)
         try:
-            leaker = limiter._limiter.bucket_factory._leaker  # type: ignore[union-attr]
+            leaker = limiter._limiter.bucket_factory._leaker
         except AttributeError:
             leaker = None
         leaker_ident = leaker.ident if leaker is not None else None

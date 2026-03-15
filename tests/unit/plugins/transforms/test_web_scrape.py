@@ -15,7 +15,7 @@ import respx
 
 from elspeth.contracts.plugin_context import PluginContext
 from elspeth.contracts.schema_contract import SchemaContract
-from elspeth.plugins.config_base import PluginConfigError
+from elspeth.plugins.infrastructure.config_base import PluginConfigError
 from elspeth.plugins.transforms.web_scrape import WebScrapeTransform
 from elspeth.plugins.transforms.web_scrape_errors import (
     NetworkError,
@@ -115,6 +115,7 @@ def test_web_scrape_success_markdown(mock_ctx):
             },
         }
     )
+    transform.on_start(mock_ctx)
 
     with patch("socket.getaddrinfo", _mock_getaddrinfo()):
         result = transform.process(make_pipeline_row({"url": "https://example.com/page"}), mock_ctx)
@@ -144,6 +145,7 @@ def test_web_scrape_404_returns_error(mock_ctx):
             },
         }
     )
+    transform.on_start(mock_ctx)
 
     with patch("socket.getaddrinfo", _mock_getaddrinfo()):
         result = transform.process(make_pipeline_row({"url": "https://example.com/missing"}), mock_ctx)
@@ -170,6 +172,7 @@ def test_web_scrape_500_raises_for_retry(mock_ctx):
             },
         }
     )
+    transform.on_start(mock_ctx)
 
     with patch("socket.getaddrinfo", _mock_getaddrinfo()), pytest.raises(ServerError) as exc_info:
         transform.process(make_pipeline_row({"url": "https://example.com/error"}), mock_ctx)
@@ -195,6 +198,7 @@ def test_web_scrape_429_raises_for_retry(mock_ctx):
             },
         }
     )
+    transform.on_start(mock_ctx)
 
     with patch("socket.getaddrinfo", _mock_getaddrinfo()), pytest.raises(RateLimitError) as exc_info:
         transform.process(make_pipeline_row({"url": "https://example.com/throttled"}), mock_ctx)
@@ -217,6 +221,7 @@ def test_web_scrape_invalid_scheme_returns_error(mock_ctx):
             },
         }
     )
+    transform.on_start(mock_ctx)
 
     result = transform.process(make_pipeline_row({"url": "ftp://example.com/file"}), mock_ctx)
 
@@ -239,6 +244,7 @@ def test_web_scrape_private_ip_returns_error(mock_ctx):
             },
         }
     )
+    transform.on_start(mock_ctx)
 
     with patch("socket.getaddrinfo", _mock_getaddrinfo("169.254.169.254")):
         result = transform.process(make_pipeline_row({"url": "http://169.254.169.254/metadata"}), mock_ctx)
@@ -267,6 +273,7 @@ def test_web_scrape_text_format(mock_ctx):
             },
         }
     )
+    transform.on_start(mock_ctx)
 
     with patch("socket.getaddrinfo", _mock_getaddrinfo()):
         result = transform.process(make_pipeline_row({"url": "https://example.com/page"}), mock_ctx)
@@ -306,6 +313,7 @@ def test_web_scrape_strips_script_tags(mock_ctx):
             },
         }
     )
+    transform.on_start(mock_ctx)
 
     with patch("socket.getaddrinfo", _mock_getaddrinfo()):
         result = transform.process(make_pipeline_row({"url": "https://example.com/page"}), mock_ctx)
@@ -335,6 +343,7 @@ def test_web_scrape_payload_storage(mock_ctx):
             },
         }
     )
+    transform.on_start(mock_ctx)
 
     with patch("socket.getaddrinfo", _mock_getaddrinfo()):
         result = transform.process(make_pipeline_row({"url": "https://example.com/page"}), mock_ctx)
@@ -372,6 +381,7 @@ def test_web_scrape_timeout_raises_network_error(mock_ctx):
             },
         }
     )
+    transform.on_start(mock_ctx)
 
     with patch("socket.getaddrinfo", _mock_getaddrinfo()), pytest.raises(NetworkError) as exc_info:
         transform.process(make_pipeline_row({"url": "https://example.com/slow"}), mock_ctx)
@@ -397,6 +407,7 @@ def test_web_scrape_connection_error_raises_network_error(mock_ctx):
             },
         }
     )
+    transform.on_start(mock_ctx)
 
     with patch("socket.getaddrinfo", _mock_getaddrinfo()), pytest.raises(NetworkError) as exc_info:
         transform.process(make_pipeline_row({"url": "https://example.com/unreachable"}), mock_ctx)
@@ -422,6 +433,7 @@ def test_web_scrape_403_returns_error(mock_ctx):
             },
         }
     )
+    transform.on_start(mock_ctx)
 
     with patch("socket.getaddrinfo", _mock_getaddrinfo()):
         result = transform.process(make_pipeline_row({"url": "https://example.com/forbidden"}), mock_ctx)
@@ -448,6 +460,7 @@ def test_web_scrape_401_returns_error(mock_ctx):
             },
         }
     )
+    transform.on_start(mock_ctx)
 
     with patch("socket.getaddrinfo", _mock_getaddrinfo()):
         result = transform.process(make_pipeline_row({"url": "https://example.com/unauthorized"}), mock_ctx)
@@ -476,6 +489,7 @@ def test_web_scrape_with_pipeline_row(mock_ctx):
             },
         }
     )
+    transform.on_start(mock_ctx)
 
     # Create PipelineRow input (simulates what engine passes to transforms)
     fields = (make_field("url", str, original_name="url", required=True, source="declared"),)
@@ -492,17 +506,14 @@ def test_web_scrape_with_pipeline_row(mock_ctx):
     assert result.row["fetch_status"] == 200
 
 
-@pytest.mark.xfail(reason="Redirect testing with respx requires special httpx configuration - documents desired behavior")
 @respx.mock
 def test_web_scrape_follows_redirects_301(mock_ctx):
     """HTTP 301 redirect should be followed and final URL recorded.
 
     Edge case: 301 Moved Permanently redirects are common for URL migrations.
     The scraper should follow the redirect and record both the requested URL
-    and the final URL after redirect resolution.
-
-    **Status:** This test documents desired behavior. The redirect following now
-    happens via _follow_redirects_safe() which re-validates each hop for SSRF.
+    and the final URL after redirect resolution. Both the logical hostname URL
+    and the IP-based connection URL are recorded for audit comparison.
     """
     respx.get(f"https://{_TEST_IP}:443/old").mock(return_value=httpx.Response(301, headers={"Location": "https://example.com/new"}))
     respx.get(f"https://{_TEST_IP}:443/new").mock(return_value=httpx.Response(200, text="<html><body><h1>New Location</h1></body></html>"))
@@ -521,6 +532,7 @@ def test_web_scrape_follows_redirects_301(mock_ctx):
             },
         }
     )
+    transform.on_start(mock_ctx)
 
     with patch("socket.getaddrinfo", _mock_getaddrinfo()):
         result = transform.process(make_pipeline_row({"url": "https://example.com/old"}), mock_ctx)
@@ -529,9 +541,10 @@ def test_web_scrape_follows_redirects_301(mock_ctx):
     assert "# New Location" in result.row["page_content"]
     assert result.row["fetch_status"] == 200
     assert result.row["fetch_url_final"] == "https://example.com/new"
+    assert _TEST_IP in result.row["fetch_url_final_ip"]
+    assert result.row["fetch_url_final_ip"].endswith("/new")
 
 
-@pytest.mark.xfail(reason="Redirect chain testing with respx requires integration test setup - documents desired behavior")
 @respx.mock
 def test_web_scrape_follows_redirect_chain(mock_ctx):
     """Multiple redirects (301->302->200) should be followed to final destination."""
@@ -555,6 +568,7 @@ def test_web_scrape_follows_redirect_chain(mock_ctx):
             },
         }
     )
+    transform.on_start(mock_ctx)
 
     with patch("socket.getaddrinfo", _mock_getaddrinfo()):
         result = transform.process(make_pipeline_row({"url": "https://example.com/start"}), mock_ctx)
@@ -563,12 +577,19 @@ def test_web_scrape_follows_redirect_chain(mock_ctx):
     assert "# Final Destination" in result.row["page_content"]
     assert result.row["fetch_status"] == 200
     assert result.row["fetch_url_final"] == "https://example.com/end"
+    assert _TEST_IP in result.row["fetch_url_final_ip"]
+    assert result.row["fetch_url_final_ip"].endswith("/end")
 
 
-@pytest.mark.xfail(reason="Redirect loop testing with respx requires integration test setup - documents desired behavior")
 @respx.mock
 def test_web_scrape_redirect_limit_exceeded(mock_ctx):
-    """Excessive redirects should fail with network error."""
+    """Excessive redirects should return non-retryable error result.
+
+    A redirect loop is a configuration problem, not a transient failure.
+    The TooManyRedirects exception from httpx is caught by _fetch_url and
+    re-raised as InvalidURLError (non-retryable), which process() converts
+    to a TransformResult.error() for row quarantine.
+    """
     respx.get(f"https://{_TEST_IP}:443/a").mock(return_value=httpx.Response(301, headers={"Location": "https://example.com/b"}))
     respx.get(f"https://{_TEST_IP}:443/b").mock(return_value=httpx.Response(301, headers={"Location": "https://example.com/a"}))
 
@@ -586,9 +607,14 @@ def test_web_scrape_redirect_limit_exceeded(mock_ctx):
             },
         }
     )
+    transform.on_start(mock_ctx)
 
-    with patch("socket.getaddrinfo", _mock_getaddrinfo()), pytest.raises(NetworkError, match=r"redirect|too many redirects"):
-        transform.process(make_pipeline_row({"url": "https://example.com/a"}), mock_ctx)
+    with patch("socket.getaddrinfo", _mock_getaddrinfo()):
+        result = transform.process(make_pipeline_row({"url": "https://example.com/a"}), mock_ctx)
+
+    assert result.status == "error"
+    assert "InvalidURLError" in result.reason["error_type"]
+    assert "redirect" in result.reason["error"].lower()
 
 
 @respx.mock
@@ -621,6 +647,7 @@ def test_web_scrape_malformed_html_graceful_degradation(mock_ctx):
             },
         }
     )
+    transform.on_start(mock_ctx)
 
     with patch("socket.getaddrinfo", _mock_getaddrinfo()):
         result = transform.process(make_pipeline_row({"url": "https://example.com/malformed"}), mock_ctx)
@@ -656,6 +683,7 @@ def test_web_scrape_extract_content_exception_returns_error(mock_ctx):
             },
         }
     )
+    transform.on_start(mock_ctx)
 
     # Simulate extract_content() raising an unexpected exception
     with (
@@ -701,6 +729,7 @@ def test_web_scrape_binary_response_does_not_crash(mock_ctx):
             },
         }
     )
+    transform.on_start(mock_ctx)
 
     with patch("socket.getaddrinfo", _mock_getaddrinfo()):
         result = transform.process(make_pipeline_row({"url": "https://example.com/binary"}), mock_ctx)
@@ -727,6 +756,7 @@ def test_web_scrape_unicode_decode_error_returns_error(mock_ctx):
             },
         }
     )
+    transform.on_start(mock_ctx)
 
     with (
         patch("socket.getaddrinfo", _mock_getaddrinfo()),
@@ -861,6 +891,7 @@ class TestWebScrapeDeclaredOutputFields:
 
         assert "fetch_status" in transform.declared_output_fields
         assert "fetch_url_final" in transform.declared_output_fields
+        assert "fetch_url_final_ip" in transform.declared_output_fields
         assert "fetch_request_hash" in transform.declared_output_fields
         assert "fetch_response_raw_hash" in transform.declared_output_fields
         assert "fetch_response_processed_hash" in transform.declared_output_fields
@@ -920,3 +951,261 @@ class TestWebScrapeDeclaredOutputFields:
         )
 
         assert transform.declared_output_fields
+
+
+# ===========================================================================
+# allowed_hosts config validation
+# ===========================================================================
+
+
+class TestAllowedHostsConfig:
+    """Config validation for allowed_hosts field."""
+
+    def test_default_is_public_only(self) -> None:
+        """Default allowed_hosts is public_only (no allowlist)."""
+        t = WebScrapeTransform(
+            {
+                "schema": {"mode": "observed"},
+                "url_field": "url",
+                "content_field": "content",
+                "fingerprint_field": "fingerprint",
+                "http": {
+                    "abuse_contact": "test@example.com",
+                    "scraping_reason": "Test",
+                },
+            }
+        )
+        assert t._allowed_ranges == ()
+
+    def test_public_only_keyword(self) -> None:
+        """public_only keyword produces empty allowed_ranges."""
+        t = WebScrapeTransform(
+            {
+                "schema": {"mode": "observed"},
+                "url_field": "url",
+                "content_field": "content",
+                "fingerprint_field": "fingerprint",
+                "http": {
+                    "abuse_contact": "test@example.com",
+                    "scraping_reason": "Test",
+                    "allowed_hosts": "public_only",
+                },
+            }
+        )
+        assert t._allowed_ranges == ()
+
+    def test_allow_private_keyword(self) -> None:
+        """allow_private keyword produces 0.0.0.0/0 + ::/0."""
+        t = WebScrapeTransform(
+            {
+                "schema": {"mode": "observed"},
+                "url_field": "url",
+                "content_field": "content",
+                "fingerprint_field": "fingerprint",
+                "http": {
+                    "abuse_contact": "test@example.com",
+                    "scraping_reason": "Test",
+                    "allowed_hosts": "allow_private",
+                },
+            }
+        )
+        range_strs = {str(r) for r in t._allowed_ranges}
+        assert "0.0.0.0/0" in range_strs
+        assert "::/0" in range_strs
+
+    def test_cidr_list(self) -> None:
+        """List of CIDR ranges parsed correctly."""
+        t = WebScrapeTransform(
+            {
+                "schema": {"mode": "observed"},
+                "url_field": "url",
+                "content_field": "content",
+                "fingerprint_field": "fingerprint",
+                "http": {
+                    "abuse_contact": "test@example.com",
+                    "scraping_reason": "Test",
+                    "allowed_hosts": ["127.0.0.0/8", "10.0.0.0/8"],
+                },
+            }
+        )
+        range_strs = {str(r) for r in t._allowed_ranges}
+        assert "127.0.0.0/8" in range_strs
+        assert "10.0.0.0/8" in range_strs
+
+    def test_single_ip_expanded_to_32(self) -> None:
+        """Single IP address expanded to /32."""
+        t = WebScrapeTransform(
+            {
+                "schema": {"mode": "observed"},
+                "url_field": "url",
+                "content_field": "content",
+                "fingerprint_field": "fingerprint",
+                "http": {
+                    "abuse_contact": "test@example.com",
+                    "scraping_reason": "Test",
+                    "allowed_hosts": ["127.0.0.1"],
+                },
+            }
+        )
+        range_strs = {str(r) for r in t._allowed_ranges}
+        assert "127.0.0.1/32" in range_strs
+
+    def test_ipv6_cidr_accepted(self) -> None:
+        """IPv6 CIDR entries are accepted."""
+        t = WebScrapeTransform(
+            {
+                "schema": {"mode": "observed"},
+                "url_field": "url",
+                "content_field": "content",
+                "fingerprint_field": "fingerprint",
+                "http": {
+                    "abuse_contact": "test@example.com",
+                    "scraping_reason": "Test",
+                    "allowed_hosts": ["::1/128"],
+                },
+            }
+        )
+        assert len(t._allowed_ranges) == 1
+
+    def test_empty_list_rejected(self) -> None:
+        """Empty list is rejected (ambiguous — use allow_private if intended)."""
+        with pytest.raises((PluginConfigError, ValueError)):
+            WebScrapeTransform(
+                {
+                    "schema": {"mode": "observed"},
+                    "url_field": "url",
+                    "content_field": "content",
+                    "fingerprint_field": "fingerprint",
+                    "http": {
+                        "abuse_contact": "test@example.com",
+                        "scraping_reason": "Test",
+                        "allowed_hosts": [],
+                    },
+                }
+            )
+
+    def test_invalid_cidr_rejected(self) -> None:
+        """Unparseable CIDR entry crashes at config time."""
+        with pytest.raises((PluginConfigError, ValueError)):
+            WebScrapeTransform(
+                {
+                    "schema": {"mode": "observed"},
+                    "url_field": "url",
+                    "content_field": "content",
+                    "fingerprint_field": "fingerprint",
+                    "http": {
+                        "abuse_contact": "test@example.com",
+                        "scraping_reason": "Test",
+                        "allowed_hosts": ["not-a-cidr"],
+                    },
+                }
+            )
+
+    def test_invalid_keyword_rejected(self) -> None:
+        """Unknown string keyword is rejected."""
+        with pytest.raises((PluginConfigError, ValueError)):
+            WebScrapeTransform(
+                {
+                    "schema": {"mode": "observed"},
+                    "url_field": "url",
+                    "content_field": "content",
+                    "fingerprint_field": "fingerprint",
+                    "http": {
+                        "abuse_contact": "test@example.com",
+                        "scraping_reason": "Test",
+                        "allowed_hosts": "allow_all",
+                    },
+                }
+            )
+
+    def test_keyword_case_sensitive(self) -> None:
+        """Keywords are case-sensitive — 'Public_Only' is rejected."""
+        with pytest.raises((PluginConfigError, ValueError)):
+            WebScrapeTransform(
+                {
+                    "schema": {"mode": "observed"},
+                    "url_field": "url",
+                    "content_field": "content",
+                    "fingerprint_field": "fingerprint",
+                    "http": {
+                        "abuse_contact": "test@example.com",
+                        "scraping_reason": "Test",
+                        "allowed_hosts": "Public_Only",
+                    },
+                }
+            )
+
+    def test_host_bits_set_normalized_by_strict_false(self) -> None:
+        """CIDR with host bits set is silently normalized via strict=False."""
+        t = WebScrapeTransform(
+            {
+                "schema": {"mode": "observed"},
+                "url_field": "url",
+                "content_field": "content",
+                "fingerprint_field": "fingerprint",
+                "http": {
+                    "abuse_contact": "test@example.com",
+                    "scraping_reason": "Test",
+                    "allowed_hosts": ["127.0.0.1/8"],
+                },
+            }
+        )
+        range_strs = {str(r) for r in t._allowed_ranges}
+        assert "127.0.0.0/8" in range_strs
+
+    def test_always_blocked_overlap_accepted_in_config(self) -> None:
+        """Entries overlapping ALWAYS_BLOCKED_RANGES are accepted in config."""
+        t = WebScrapeTransform(
+            {
+                "schema": {"mode": "observed"},
+                "url_field": "url",
+                "content_field": "content",
+                "fingerprint_field": "fingerprint",
+                "http": {
+                    "abuse_contact": "test@example.com",
+                    "scraping_reason": "Test",
+                    "allowed_hosts": ["169.254.0.0/16"],
+                },
+            }
+        )
+        assert len(t._allowed_ranges) == 1
+
+
+# ===========================================================================
+# _parse_allowed_ranges unit tests
+# ===========================================================================
+
+
+class TestParseAllowedRanges:
+    """Direct unit tests for _parse_allowed_ranges helper."""
+
+    def test_mixed_ipv4_and_ipv6(self) -> None:
+        """Mixed address families in a single list."""
+        from elspeth.plugins.transforms.web_scrape import _parse_allowed_ranges
+
+        result = _parse_allowed_ranges(["10.0.0.0/8", "::1/128"])
+        assert len(result) == 2
+        range_strs = {str(r) for r in result}
+        assert "10.0.0.0/8" in range_strs
+        assert "::1/128" in range_strs
+
+    def test_single_ipv6_expanded_to_128(self) -> None:
+        """Single IPv6 address without prefix is expanded to /128."""
+        from elspeth.plugins.transforms.web_scrape import _parse_allowed_ranges
+
+        result = _parse_allowed_ranges(["::1"])
+        assert str(result[0]) == "::1/128"
+
+    def test_host_bits_normalized(self) -> None:
+        """Host bits are cleared by strict=False."""
+        from elspeth.plugins.transforms.web_scrape import _parse_allowed_ranges
+
+        result = _parse_allowed_ranges(["10.0.0.1/8"])
+        assert str(result[0]) == "10.0.0.0/8"
+
+    def test_returns_tuple(self) -> None:
+        """Return type is tuple (immutable)."""
+        from elspeth.plugins.transforms.web_scrape import _parse_allowed_ranges
+
+        result = _parse_allowed_ranges(["127.0.0.0/8"])
+        assert isinstance(result, tuple)

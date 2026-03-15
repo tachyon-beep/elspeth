@@ -205,7 +205,7 @@ def process(self, row: dict[str, Any], ctx: PluginContext) -> TransformResult:
 | File reads (in transform) | File contents | Same validation as source plugins |
 | Message queue consume | Message payload | Parse format, validate schema, quarantine malformed messages |
 
-### Real Example from azure_multi_query_llm.py
+### Real Example from LLMTransform (Multi-Query Strategy)
 
 This is the correct pattern as implemented in production:
 

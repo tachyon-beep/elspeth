@@ -1,4 +1,3 @@
-# src/elspeth/core/operations.py
 """Operation lifecycle management for source/sink I/O.
 
 Operations are the source/sink equivalent of node_states - they provide
@@ -20,7 +19,6 @@ import logging
 import time
 from collections.abc import Iterator
 from contextlib import contextmanager
-from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Literal
 
 from elspeth.contracts import BatchPendingError
@@ -33,12 +31,15 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
-@dataclass
 class OperationHandle:
     """Mutable handle for capturing operation output within context manager.
 
     Allows the caller to set output_data during the operation, which will
     be recorded when the operation completes.
+
+    The `operation` field is read-only after construction — mutating it would
+    corrupt audit trail linkage. Only `output_data` is writable (it's the
+    write slot for the context manager pattern).
 
     Usage:
         with track_operation(...) as handle:
@@ -46,8 +47,15 @@ class OperationHandle:
             handle.output_data = {"artifact_path": result.path}  # Explicit!
     """
 
-    operation: Operation
-    output_data: dict[str, Any] | None = None
+    __slots__ = ("_operation", "output_data")
+
+    def __init__(self, operation: Operation, output_data: dict[str, Any] | None = None) -> None:
+        self._operation = operation
+        self.output_data = output_data
+
+    @property
+    def operation(self) -> Operation:
+        return self._operation
 
 
 @contextmanager
@@ -143,7 +151,7 @@ def track_operation(
         # Catch system interrupts (KeyboardInterrupt, SystemExit, etc.)
         # These are NOT Exception subclasses, so they bypass the above handler.
         # Without this, interrupted operations would be recorded as "completed".
-        # BUG #10: Must come AFTER except Exception (more specific handlers first).
+        # Must come AFTER except Exception (more specific handlers first).
         status = "failed"
         error_msg = str(e)
         original_exception = e
@@ -159,6 +167,9 @@ def track_operation(
                 duration_ms=duration_ms,
             )
         except Exception as db_error:
+            from elspeth.contracts import FrameworkBugError
+            from elspeth.contracts.errors import AuditIntegrityError
+
             # Audit integrity: if we can't record the operation, the run must fail.
             # A successful operation with missing audit record violates Tier-1 trust.
             logger.critical(
@@ -171,6 +182,12 @@ def track_operation(
                     "original_error": error_msg,
                 },
             )
+            # FrameworkBugError and AuditIntegrityError indicate Tier 1 violations
+            # (corruption, bugs in our code). These must ALWAYS propagate regardless
+            # of whether there was an original exception — audit corruption is
+            # categorically worse than any operation-level error.
+            if isinstance(db_error, (FrameworkBugError, AuditIntegrityError)):
+                raise db_error from original_exception
             # If there was an original exception, let it propagate (DB error is logged).
             # If the operation succeeded but audit failed, we MUST raise the DB error.
             if original_exception is None:

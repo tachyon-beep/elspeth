@@ -69,6 +69,7 @@ def test_aggregation_input_rejects_reserved_continue() -> None:
             name="agg1",
             plugin="batch_stats",
             input="continue",
+            on_error="discard",
             trigger=TriggerConfig(count=10),
         )
 
@@ -80,5 +81,6 @@ def test_aggregation_on_success_rejects_reserved_continue() -> None:
             plugin="batch_stats",
             input="agg_in",
             on_success="continue",
+            on_error="discard",
             trigger=TriggerConfig(count=10),
         )

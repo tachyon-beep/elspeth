@@ -15,6 +15,7 @@ These tests verify:
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Any
@@ -220,7 +221,7 @@ class _TrackingExporter:
     def name(self) -> str:
         return self._name
 
-    def configure(self, config: dict[str, Any]) -> None:
+    def configure(self, config: Mapping[str, Any]) -> None:
         pass
 
     def export(self, event: TelemetryEvent) -> None:

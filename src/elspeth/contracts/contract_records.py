@@ -14,6 +14,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Literal
 
 from elspeth.contracts.errors import (
+    AuditIntegrityError,
     ContractViolation,
     ExtraFieldViolation,
     MissingFieldViolation,
@@ -135,7 +136,7 @@ class ContractAuditRecord:
         Returns:
             Canonical JSON string
         """
-        from elspeth.core.canonical import canonical_json
+        from elspeth.contracts.hashing import canonical_json
 
         # Canonicalize field order so semantically equivalent contracts serialize
         # identically regardless of upstream insertion/merge ordering.
@@ -166,20 +167,20 @@ class ContractAuditRecord:
         # schema enforcement behavior.
         mode = data["mode"]
         if mode not in _VALID_MODES:
-            raise ValueError(f"Invalid contract mode '{mode}' in audit record. Valid modes: {', '.join(sorted(_VALID_MODES))}")
+            raise AuditIntegrityError(f"Invalid contract mode '{mode}' in audit record. Valid modes: {', '.join(sorted(_VALID_MODES))}")
 
         fields: list[FieldAuditRecord] = []
         for f in data["fields"]:
             source = f["source"]
             if source not in _VALID_SOURCES:
-                raise ValueError(
+                raise AuditIntegrityError(
                     f"Invalid field source '{source}' for field "
                     f"'{f['normalized_name']}' in audit record. "
                     f"Valid sources: {', '.join(sorted(_VALID_SOURCES))}"
                 )
             python_type = f["python_type"]
             if python_type not in CONTRACT_TYPE_MAP:
-                raise ValueError(
+                raise AuditIntegrityError(
                     f"Invalid python_type '{python_type}' for field "
                     f"'{f['normalized_name']}' in audit record. "
                     f"Valid types: {', '.join(sorted(CONTRACT_TYPE_MAP.keys()))}"
@@ -212,7 +213,7 @@ class ContractAuditRecord:
             Restored SchemaContract
 
         Raises:
-            ValueError: If mode, source, or python_type is invalid,
+            AuditIntegrityError: If mode, source, or python_type is invalid,
                 or if hash verification fails (integrity violation)
         """
         from elspeth.contracts.schema_contract import FieldContract, SchemaContract
@@ -221,17 +222,19 @@ class ContractAuditRecord:
         # a live SchemaContract. Invalid values would silently change
         # enforcement semantics (e.g., mode="BROKEN" skips extra-field rejection).
         if self.mode not in _VALID_MODES:
-            raise ValueError(f"Invalid contract mode '{self.mode}' in audit record. Valid modes: {', '.join(sorted(_VALID_MODES))}")
+            raise AuditIntegrityError(
+                f"Invalid contract mode '{self.mode}' in audit record. Valid modes: {', '.join(sorted(_VALID_MODES))}"
+            )
 
         for f in self.fields:
             if f.source not in _VALID_SOURCES:
-                raise ValueError(
+                raise AuditIntegrityError(
                     f"Invalid field source '{f.source}' for field "
                     f"'{f.normalized_name}' in audit record. "
                     f"Valid sources: {', '.join(sorted(_VALID_SOURCES))}"
                 )
             if f.python_type not in CONTRACT_TYPE_MAP:
-                raise ValueError(
+                raise AuditIntegrityError(
                     f"Invalid python_type '{f.python_type}' for field "
                     f"'{f.normalized_name}' in audit record. "
                     f"Valid types: {', '.join(sorted(CONTRACT_TYPE_MAP.keys()))}"
@@ -258,7 +261,7 @@ class ContractAuditRecord:
         # Verify integrity (Tier 1 audit requirement)
         actual_hash = contract.version_hash()
         if actual_hash != self.version_hash:
-            raise ValueError(
+            raise AuditIntegrityError(
                 f"Contract integrity violation: hash mismatch. "
                 f"Expected {self.version_hash}, got {actual_hash}. "
                 f"Audit record may be corrupted or from different version."

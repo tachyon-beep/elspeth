@@ -1,4 +1,3 @@
-# src/elspeth/telemetry/errors.py
 """Telemetry-specific exceptions.
 
 These exceptions are for telemetry subsystem errors only.

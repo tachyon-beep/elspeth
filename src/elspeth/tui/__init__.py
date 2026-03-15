@@ -1,4 +1,3 @@
-# src/elspeth/tui/__init__.py
 """ELSPETH Terminal User Interface.
 
 Provides interactive TUI components using Textual.

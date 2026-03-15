@@ -1,4 +1,3 @@
-# src/elspeth/telemetry/filtering.py
 """Event filtering based on telemetry granularity.
 
 Telemetry events are filtered based on configured granularity level:

@@ -1,9 +1,25 @@
-<!-- filigree:instructions -->
+<!-- filigree:instructions:v1.4.1:c706f2df -->
 ## Filigree Issue Tracker
 
 Use `filigree` for all task tracking in this project. Data lives in `.filigree/`.
 
-### Quick Reference
+### MCP Tools (Preferred)
+
+When MCP is configured, prefer `mcp__filigree__*` tools over CLI commands — they're
+faster and return structured data. Key tools:
+
+- `get_ready` / `get_blocked` — find available work
+- `get_issue` / `list_issues` / `search_issues` — read issues
+- `create_issue` / `update_issue` / `close_issue` — manage issues
+- `claim_issue` / `claim_next` — atomic claiming
+- `add_comment` / `add_label` — metadata
+- `create_plan` / `get_plan` — milestone planning
+- `get_stats` / `get_metrics` — project health
+- `get_valid_transitions` — workflow navigation
+
+Fall back to CLI (`filigree <command>`) when MCP is unavailable.
+
+### CLI Quick Reference
 
 ```bash
 # Finding work
@@ -63,6 +79,18 @@ filigree search "query"                     # Search issues
 filigree doctor                             # Health check
 ```
 
+### File Records & Scan Findings (API)
+
+The dashboard exposes REST endpoints for file tracking and scan result ingestion.
+Use `GET /api/files/_schema` for available endpoints and valid field values.
+
+Key endpoints:
+- `GET /api/files/_schema` — Discovery: valid enums, endpoint catalog
+- `POST /api/v1/scan-results` — Ingest scan results (SARIF-lite format)
+- `GET /api/files` — List tracked files with filtering and sorting
+- `GET /api/files/{file_id}` — File detail with associations and findings summary
+- `GET /api/files/{file_id}/findings` — Findings for a specific file
+
 ### Workflow
 1. `filigree ready` to find available work
 2. `filigree show <id>` to review details
@@ -70,6 +98,11 @@ filigree doctor                             # Health check
 4. `filigree update <id> --status=in_progress` to claim it
 5. Do the work, commit code
 6. `filigree close <id>` when done
+
+### Session Start
+When beginning a new session, run `filigree session-context` to load the project
+snapshot (ready work, in-progress items, critical path). This provides the
+context needed to pick up where the previous session left off.
 
 ### Priority Scale
 - P0: Critical (drop everything)

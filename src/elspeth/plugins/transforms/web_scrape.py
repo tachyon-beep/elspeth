@@ -15,14 +15,16 @@ Audit Trail:
 - Generates fingerprints for change detection
 """
 
-from typing import Any
+import ipaddress
+from ipaddress import IPv4Network, IPv6Network
+from typing import Any, Literal, cast
 
 import httpx
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 from elspeth.contracts import Determinism
+from elspeth.contracts.contexts import LifecycleContext, TransformContext
 from elspeth.contracts.contract_propagation import narrow_contract_to_output
-from elspeth.contracts.plugin_context import PluginContext
 from elspeth.contracts.schema_contract import PipelineRow
 from elspeth.core.security.web import (
     NetworkError as SSRFNetworkError,
@@ -32,11 +34,11 @@ from elspeth.core.security.web import (
     SSRFSafeRequest,
     validate_url_for_ssrf,
 )
-from elspeth.plugins.base import BaseTransform
-from elspeth.plugins.clients.http import AuditedHTTPClient
-from elspeth.plugins.config_base import TransformDataConfig
-from elspeth.plugins.results import TransformResult
-from elspeth.plugins.schema_factory import create_schema_from_config
+from elspeth.plugins.infrastructure.base import BaseTransform
+from elspeth.plugins.infrastructure.clients.http import AuditedHTTPClient
+from elspeth.plugins.infrastructure.config_base import TransformDataConfig
+from elspeth.plugins.infrastructure.results import TransformResult
+from elspeth.plugins.infrastructure.schema_factory import create_schema_from_config
 from elspeth.plugins.transforms.web_scrape_errors import (
     ForbiddenError,
     InvalidURLError,
@@ -73,6 +75,33 @@ class WebScrapeHTTPConfig(BaseModel):
         gt=0,
         description="Request timeout in seconds",
     )
+    allowed_hosts: str | list[str] = Field(
+        default="public_only",
+        description="SSRF allowlist: 'public_only' (default), 'allow_private', or list of CIDR ranges",
+    )
+
+    @field_validator("abuse_contact", "scraping_reason")
+    @classmethod
+    def _reject_empty(cls, v: str, info: Any) -> str:
+        if not v.strip():
+            raise ValueError(f"{info.field_name} must not be empty")
+        return v
+
+    @field_validator("allowed_hosts")
+    @classmethod
+    def _validate_allowed_hosts(cls, v: str | list[str]) -> str | list[str]:
+        if isinstance(v, str):
+            if v not in ("public_only", "allow_private"):
+                raise ValueError(f"allowed_hosts must be 'public_only', 'allow_private', or a list of CIDR ranges, got {v!r}")
+            return v
+        if not v:
+            raise ValueError("allowed_hosts list must not be empty (use 'allow_private' to allow all)")
+        for entry in v:
+            try:
+                ipaddress.ip_network(entry, strict=False)
+            except ValueError as e:
+                raise ValueError(f"Invalid CIDR in allowed_hosts: {entry!r}: {e}") from e
+        return v
 
 
 class WebScrapeConfig(TransformDataConfig):
@@ -81,10 +110,36 @@ class WebScrapeConfig(TransformDataConfig):
     url_field: str
     content_field: str
     fingerprint_field: str
-    format: str = "markdown"
-    fingerprint_mode: str = "content"
+    format: Literal["markdown", "text", "raw"] = "markdown"
+    fingerprint_mode: Literal["content", "full"] = "content"
     strip_elements: list[str] = Field(default_factory=lambda: ["script", "style"])
     http: WebScrapeHTTPConfig
+
+    @field_validator("url_field", "content_field", "fingerprint_field")
+    @classmethod
+    def _reject_empty_field_names(cls, v: str, info: Any) -> str:
+        if not v:
+            raise ValueError(f"{info.field_name} must not be empty")
+        return v
+
+    @model_validator(mode="after")
+    def _reject_field_collisions(self) -> "WebScrapeConfig":
+        if self.content_field == self.fingerprint_field:
+            raise ValueError(f"content_field and fingerprint_field must differ, both are '{self.content_field}'")
+        return self
+
+
+def _parse_allowed_ranges(entries: list[str]) -> tuple[IPv4Network | IPv6Network, ...]:
+    """Parse allowed_hosts list entries into ip_network objects.
+
+    Single IPs (no /) are expanded to /32 (IPv4) or /128 (IPv6).
+    Uses strict=False so "10.0.0.1/8" is accepted as "10.0.0.0/8".
+    """
+    networks: list[IPv4Network | IPv6Network] = []
+    for entry in entries:
+        network = ipaddress.ip_network(entry, strict=False)
+        networks.append(network)
+    return tuple(networks)
 
 
 class WebScrapeTransform(BaseTransform):
@@ -148,6 +203,7 @@ class WebScrapeTransform(BaseTransform):
                 cfg.fingerprint_field,
                 "fetch_status",
                 "fetch_url_final",
+                "fetch_url_final_ip",
                 "fetch_request_hash",
                 "fetch_response_raw_hash",
                 "fetch_response_processed_hash",
@@ -163,11 +219,24 @@ class WebScrapeTransform(BaseTransform):
         self._scraping_reason = cfg.http.scraping_reason
         self._timeout = cfg.http.timeout
 
+        # Compute allowed_ranges from allowed_hosts config
+        allowed_hosts = cfg.http.allowed_hosts
+        if allowed_hosts == "public_only":
+            self._allowed_ranges: tuple[IPv4Network | IPv6Network, ...] = ()
+        elif allowed_hosts == "allow_private":
+            self._allowed_ranges = (
+                ipaddress.ip_network("0.0.0.0/0"),
+                ipaddress.ip_network("::/0"),
+            )
+        else:
+            self._allowed_ranges = _parse_allowed_ranges(cast(list[str], allowed_hosts))
+
         # Element stripping
         self._strip_elements = cfg.strip_elements
 
         # Schema
-        assert cfg.schema_config is not None
+        if cfg.schema_config is None:
+            raise RuntimeError("WebScrapeTransform requires schema_config")
         schema = create_schema_from_config(
             cfg.schema_config,
             "WebScrapeSchema",
@@ -176,12 +245,24 @@ class WebScrapeTransform(BaseTransform):
         self.input_schema = schema
         self.output_schema = schema
 
-    def process(self, row: PipelineRow, ctx: PluginContext) -> TransformResult:
+    def on_start(self, ctx: LifecycleContext) -> None:
+        """Capture infrastructure dependencies at pipeline start."""
+        super().on_start(ctx)
+        if ctx.landscape is None:
+            raise RuntimeError("WebScrapeTransform requires landscape for audited HTTP calls")
+        if ctx.rate_limit_registry is None:
+            raise RuntimeError("WebScrapeTransform requires rate_limit_registry")
+        self._recorder = ctx.landscape
+        self._limiter = ctx.rate_limit_registry
+        self._telemetry_emit = ctx.telemetry_emit
+        self._payload_store = ctx.payload_store
+
+    def process(self, row: PipelineRow, ctx: TransformContext) -> TransformResult:
         """Fetch URL and enrich row with content and fingerprint.
 
         Args:
             row: Input row (PipelineRow guaranteed by engine)
-            ctx: Plugin context with landscape, payload_store, etc.
+            ctx: Transform context with token, state_id, run_id
 
         Returns:
             TransformResult.success() with enriched row, or
@@ -195,7 +276,7 @@ class WebScrapeTransform(BaseTransform):
 
         # Validate URL and pin resolved IP (SSRF prevention with DNS rebinding defense)
         try:
-            safe_request = validate_url_for_ssrf(url)
+            safe_request = validate_url_for_ssrf(url, allowed_ranges=self._allowed_ranges)
         except (SSRFBlockedError, SSRFNetworkError, TypeError) as e:
             # Security violations, DNS failures, and invalid url types (e.g. None)
             # are non-retryable
@@ -209,7 +290,7 @@ class WebScrapeTransform(BaseTransform):
 
         # Fetch URL using pinned IP (prevents DNS rebinding between validation and fetch)
         try:
-            response = self._fetch_url(safe_request, ctx)
+            response, final_hostname_url = self._fetch_url(safe_request, ctx)
         except WebScrapeError as e:
             if e.retryable:
                 # Re-raise retryable errors for engine RetryManager
@@ -230,7 +311,7 @@ class WebScrapeTransform(BaseTransform):
                 format=self._format,
                 strip_elements=self._strip_elements,
             )
-        except Exception as e:
+        except (ValueError, UnicodeDecodeError, UnicodeEncodeError, RuntimeError) as e:
             return TransformResult.error(
                 {
                     "reason": "content_extraction_failed",
@@ -245,12 +326,12 @@ class WebScrapeTransform(BaseTransform):
 
         # Field collision check already done before fetch — no need to re-check here.
 
-        # Store payloads for forensic recovery
-        # Context is guaranteed to have these - executor sets them
-        assert ctx.payload_store is not None
-        request_hash = ctx.payload_store.store(f"GET {url}".encode())
-        response_raw_hash = ctx.payload_store.store(response.content)
-        response_processed_hash = ctx.payload_store.store(content.encode())
+        # Store payloads for forensic recovery (captured in on_start)
+        if self._payload_store is None:
+            raise RuntimeError("WebScrapeTransform requires payload_store (not wired by executor)")
+        request_hash = self._payload_store.store(f"GET {url}".encode())
+        response_raw_hash = self._payload_store.store(response.content)
+        response_processed_hash = self._payload_store.store(content.encode())
 
         # Enrich row with scraped data
         # Use explicit to_dict() conversion (PipelineRow guaranteed by engine)
@@ -258,13 +339,13 @@ class WebScrapeTransform(BaseTransform):
         output[self._content_field] = content
         output[self._fingerprint_field] = fingerprint
         output["fetch_status"] = response.status_code
-        output["fetch_url_final"] = str(response.url)
+        output["fetch_url_final"] = final_hostname_url
+        output["fetch_url_final_ip"] = str(response.url)
         output["fetch_request_hash"] = request_hash
         output["fetch_response_raw_hash"] = response_raw_hash
         output["fetch_response_processed_hash"] = response_processed_hash
 
-        # Propagate contract with new fields inferred from output
-        # Per P2 bug fix: Without this, FIXED schemas can't access new fields
+        # Propagate contract so FIXED schemas can access fields added during enrichment
         output_contract = narrow_contract_to_output(
             input_contract=row.contract,
             output_row=output,
@@ -278,7 +359,7 @@ class WebScrapeTransform(BaseTransform):
             },
         )
 
-    def _fetch_url(self, safe_request: SSRFSafeRequest, ctx: PluginContext) -> httpx.Response:
+    def _fetch_url(self, safe_request: SSRFSafeRequest, ctx: TransformContext) -> tuple[httpx.Response, str]:
         """Fetch URL using SSRF-safe IP pinning with audit recording.
 
         Args:
@@ -286,23 +367,24 @@ class WebScrapeTransform(BaseTransform):
             ctx: Plugin context
 
         Returns:
-            httpx.Response object
+            Tuple of (httpx.Response, final hostname URL as string).
+            The hostname URL is the logical URL after redirects — distinct
+            from response.url which is IP-based due to SSRF pinning.
 
         Raises:
             WebScrapeError: For retryable or non-retryable failures
         """
-        # Context is guaranteed to have these - executor sets them
-        assert ctx.rate_limit_registry is not None
-        assert ctx.landscape is not None
-        assert ctx.state_id is not None
-        limiter = ctx.rate_limit_registry.get_limiter("web_scrape")
+        # Infrastructure captured in on_start()
+        if ctx.state_id is None:
+            raise RuntimeError("ctx.state_id not set by executor")
+        limiter = self._limiter.get_limiter("web_scrape")
 
         # Create audited client (records to Landscape)
         client = AuditedHTTPClient(
-            recorder=ctx.landscape,
+            recorder=self._recorder,
             state_id=ctx.state_id,
             run_id=ctx.run_id,
-            telemetry_emit=ctx.telemetry_emit,
+            telemetry_emit=self._telemetry_emit,
             timeout=self._timeout,
             limiter=limiter,
             token_id=ctx.token.token_id if ctx.token is not None else None,
@@ -315,10 +397,11 @@ class WebScrapeTransform(BaseTransform):
         }
 
         try:
-            response = client.get_ssrf_safe(
+            response, final_hostname_url = client.get_ssrf_safe(
                 safe_request,
                 headers=headers,
                 follow_redirects=True,
+                allowed_ranges=self._allowed_ranges,
             )
 
             # Check status code and raise appropriate errors
@@ -337,7 +420,7 @@ class WebScrapeTransform(BaseTransform):
                 # Unresolved redirect (e.g. 3xx without Location header) — treat as error
                 raise InvalidURLError(f"Unresolved redirect HTTP {response.status_code}: {url} (missing or empty Location header)")
 
-            return response
+            return response, final_hostname_url
 
         except httpx.TimeoutException as e:
             raise NetworkError(f"Timeout fetching {safe_request.original_url}: {e}") from e
@@ -353,6 +436,8 @@ class WebScrapeTransform(BaseTransform):
             raise NetworkError(f"DNS resolution failed during redirect: {safe_request.original_url}: {e}") from e
         except httpx.TooManyRedirects as e:
             raise InvalidURLError(f"Too many redirects: {safe_request.original_url}: {e}") from e
+        except httpx.RequestError as e:
+            raise NetworkError(f"HTTP request error fetching {safe_request.original_url}: {e}") from e
         finally:
             client.close()
 

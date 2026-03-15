@@ -261,6 +261,25 @@ class BackpressureMode(StrEnum):
 _IMPLEMENTED_BACKPRESSURE_MODES = frozenset({BackpressureMode.BLOCK, BackpressureMode.DROP})
 
 
+class ReproducibilityGrade(StrEnum):
+    """Reproducibility levels for a completed run.
+
+    Grades:
+    - FULL_REPRODUCIBLE: All nodes are deterministic or seeded. The run can be
+      fully re-executed with identical results (given the same seed).
+    - REPLAY_REPRODUCIBLE: At least one node is nondeterministic (e.g., LLM calls).
+      Results can only be replayed using recorded external call responses.
+    - ATTRIBUTABLE_ONLY: Payloads have been purged. We can verify what happened
+      via hashes, but cannot replay the run.
+
+    Stored in database (runs.reproducibility_grade).
+    """
+
+    FULL_REPRODUCIBLE = "full_reproducible"
+    REPLAY_REPRODUCIBLE = "replay_reproducible"
+    ATTRIBUTABLE_ONLY = "attributable_only"
+
+
 class OutputMode(StrEnum):
     """Output mode for aggregation batches.
 

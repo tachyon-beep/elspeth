@@ -8,8 +8,9 @@ import pytest
 
 from elspeth.contracts import SourceRow
 from elspeth.contracts.plugin_context import PluginContext
-from elspeth.plugins.azure.blob_source import AzureBlobSource
-from elspeth.plugins.config_base import PluginConfigError
+from elspeth.plugins.infrastructure.config_base import PluginConfigError
+from elspeth.plugins.sources.azure_blob_source import AzureBlobSource
+from tests.fixtures.factories import make_operation_context
 
 # Dynamic schema config for tests - DataPluginConfig requires schema
 DYNAMIC_SCHEMA = {"mode": "observed"}
@@ -33,14 +34,14 @@ TEST_CLIENT_SECRET = "test-secret-value"
 
 @pytest.fixture
 def ctx() -> PluginContext:
-    """Create a minimal plugin context."""
-    return PluginContext(run_id="test-run", config={})
+    """Create a plugin context with proper operation records for Azure blob audit trail."""
+    return make_operation_context(plugin_name="azure_blob_source")
 
 
 @pytest.fixture
 def mock_blob_client() -> Generator[MagicMock, None, None]:
     """Create a mock blob client for testing."""
-    with patch("elspeth.plugins.azure.blob_source.AzureBlobSource._get_blob_client") as mock:
+    with patch("elspeth.plugins.sources.azure_blob_source.AzureBlobSource._get_blob_client") as mock:
         yield mock
 
 
@@ -415,6 +416,7 @@ class TestAzureBlobSourceJSON:
         assert len(rows) == 2
         assert rows[0].is_quarantined is False
         assert rows[1].is_quarantined is True
+        assert rows[1].quarantine_error is not None
         assert "extra" in rows[1].quarantine_error
 
         contract = source.get_schema_contract()
@@ -655,8 +657,8 @@ class TestAzureBlobSourceErrors:
         with pytest.raises(Exception, match="Connection refused"):
             list(source.load(ctx))
 
-    def test_encoding_error_raises(self, mock_blob_client: MagicMock, ctx: PluginContext) -> None:
-        """Invalid encoding raises ValueError."""
+    def test_encoding_error_quarantines(self, mock_blob_client: MagicMock, ctx: PluginContext) -> None:
+        """Invalid encoding quarantines instead of crashing (Tier 3 boundary)."""
         # Invalid UTF-8 bytes
         bad_data = b"\xff\xfe"
         mock_client = MagicMock()
@@ -664,8 +666,10 @@ class TestAzureBlobSourceErrors:
         mock_blob_client.return_value = mock_client
 
         source = AzureBlobSource(make_config())
-        with pytest.raises(ValueError, match="Failed to decode"):
-            list(source.load(ctx))
+        rows = list(source.load(ctx))
+        assert len(rows) == 1
+        assert rows[0].is_quarantined
+        assert "Failed to decode" in rows[0].quarantine_error
 
     def test_csv_parse_error_quarantines(self, mock_blob_client: MagicMock, ctx: PluginContext) -> None:
         """BUG-BLOB-01: CSV parse errors quarantine instead of crashing."""
@@ -1070,4 +1074,5 @@ class TestBug4_5_UnicodeDecodeErrorInJSONL:
         assert len(rows) >= 1
         quarantined_rows = [r for r in rows if r.is_quarantined]
         assert len(quarantined_rows) == 1
+        assert quarantined_rows[0].quarantine_error is not None
         assert "Failed to decode JSONL blob as" in quarantined_rows[0].quarantine_error

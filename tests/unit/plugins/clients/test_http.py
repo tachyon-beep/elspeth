@@ -16,7 +16,7 @@ import pytest
 import respx
 
 from elspeth.contracts import CallStatus, CallType
-from elspeth.plugins.clients.http import AuditedHTTPClient
+from elspeth.plugins.infrastructure.clients.http import AuditedHTTPClient
 
 
 @pytest.fixture
@@ -69,11 +69,11 @@ def test_post_records_call_to_landscape(http_client, mock_recorder):
     assert call_args["state_id"] == "test-state-001"
     assert call_args["call_type"] == CallType.HTTP
     assert call_args["status"] == CallStatus.SUCCESS
-    assert call_args["request_data"]["method"] == "POST"
-    assert call_args["request_data"]["url"] == "https://api.example.com/v1/process"
-    assert call_args["request_data"]["json"] == {"data": "value"}
-    assert call_args["response_data"]["status_code"] == 200
-    assert call_args["response_data"]["body"] == {"result": "success"}
+    assert call_args["request_data"].to_dict()["method"] == "POST"
+    assert call_args["request_data"].to_dict()["url"] == "https://api.example.com/v1/process"
+    assert call_args["request_data"].to_dict()["json"] == {"data": "value"}
+    assert call_args["response_data"].to_dict()["status_code"] == 200
+    assert call_args["response_data"].to_dict()["body"] == {"result": "success"}
     assert call_args["latency_ms"] > 0
 
 
@@ -118,7 +118,7 @@ def test_post_handles_text_response(http_client, mock_recorder):
 
     # Verify body stored as text (not dict)
     call_args = mock_recorder.record_call.call_args[1]
-    assert call_args["response_data"]["body"] == "Plain text response"
+    assert call_args["response_data"].to_dict()["body"] == "Plain text response"
 
 
 @respx.mock
@@ -143,8 +143,8 @@ def test_post_handles_binary_response(http_client, mock_recorder):
 
     # Verify body stored as base64
     call_args = mock_recorder.record_call.call_args[1]
-    assert "_binary" in call_args["response_data"]["body"]
-    decoded = base64.b64decode(call_args["response_data"]["body"]["_binary"])
+    assert "_binary" in call_args["response_data"].to_dict()["body"]
+    decoded = base64.b64decode(call_args["response_data"].to_dict()["body"]["_binary"])
     assert decoded == binary_data
 
 
@@ -162,7 +162,7 @@ def test_post_fingerprints_auth_headers(http_client, mock_recorder):
 
         # Verify auth header was fingerprinted (not stored raw)
         call_args = mock_recorder.record_call.call_args[1]
-        auth_header = call_args["request_data"]["headers"]["Authorization"]
+        auth_header = call_args["request_data"].to_dict()["headers"]["Authorization"]
 
         assert "secret-token-xyz" not in auth_header
         assert auth_header.startswith("<fingerprint:")
@@ -182,7 +182,7 @@ def test_post_fingerprints_compact_secret_headers(http_client, mock_recorder):
         )
 
         call_args = mock_recorder.record_call.call_args[1]
-        recorded_headers = call_args["request_data"]["headers"]
+        recorded_headers = call_args["request_data"].to_dict()["headers"]
 
         assert recorded_headers["apikey"].startswith("<fingerprint:")
         assert recorded_headers["authkey"].startswith("<fingerprint:")
@@ -253,8 +253,8 @@ def test_post_with_error_response(http_client, mock_recorder):
     # Verify recorded as ERROR
     call_args = mock_recorder.record_call.call_args[1]
     assert call_args["status"] == CallStatus.ERROR
-    assert call_args["error"]["type"] == "HTTPError"
-    assert "500" in call_args["error"]["message"]
+    assert call_args["error"].type == "HTTPError"
+    assert "500" in call_args["error"].message
 
 
 @respx.mock
@@ -268,7 +268,7 @@ def test_post_with_network_error(http_client, mock_recorder):
     # Verify error recorded to Landscape
     call_args = mock_recorder.record_call.call_args[1]
     assert call_args["status"] == CallStatus.ERROR
-    assert call_args["error"]["type"] == "ConnectError"
+    assert call_args["error"].type == "ConnectError"
 
 
 @respx.mock
@@ -290,7 +290,7 @@ def test_post_with_base_url(mock_recorder, mock_telemetry_emit):
 
     # Verify full URL was constructed correctly
     call_args = mock_recorder.record_call.call_args[1]
-    assert call_args["request_data"]["url"] == "https://api.example.com/v2/users"
+    assert call_args["request_data"].to_dict()["url"] == "https://api.example.com/v2/users"
 
 
 @respx.mock
@@ -312,7 +312,7 @@ def test_post_malformed_json_response(http_client, mock_recorder):
 
     # Verify audit trail records the parse failure
     call_args = mock_recorder.record_call.call_args[1]
-    body = call_args["response_data"]["body"]
+    body = call_args["response_data"].to_dict()["body"]
 
     assert body["_json_parse_failed"] is True
     assert "_error" in body
@@ -338,8 +338,8 @@ def test_get_records_call_to_landscape(http_client, mock_recorder):
     mock_recorder.record_call.assert_called_once()
     call_args = mock_recorder.record_call.call_args[1]
 
-    assert call_args["request_data"]["method"] == "GET"
-    assert call_args["request_data"]["url"] == "https://api.example.com/status"
+    assert call_args["request_data"].to_dict()["method"] == "GET"
+    assert call_args["request_data"].to_dict()["url"] == "https://api.example.com/status"
     assert call_args["status"] == CallStatus.SUCCESS
 
 
@@ -357,7 +357,7 @@ def test_get_with_params(http_client, mock_recorder):
 
     # Verify params recorded
     call_args = mock_recorder.record_call.call_args[1]
-    assert call_args["request_data"]["params"] == {"q": "test query", "limit": 10}
+    assert call_args["request_data"].to_dict()["params"] == {"q": "test query", "limit": 10}
 
 
 @respx.mock
@@ -379,23 +379,26 @@ def test_get_telemetry_failure_doesnt_corrupt_audit(http_client, mock_recorder, 
 
 
 @respx.mock
-def test_header_fingerprinting_with_missing_key(http_client, mock_recorder, monkeypatch):
-    """Sensitive headers should be removed when fingerprint key is missing."""
+def test_header_fingerprinting_with_missing_key_raises(http_client, mock_recorder, monkeypatch):
+    """Missing fingerprint key with sensitive headers raises FrameworkBugError.
+
+    Regression test for elspeth-780f6e39b1: previously this path silently
+    dropped the header with only a logger.warning.
+    """
+    from elspeth.contracts.errors import FrameworkBugError
+
     # Remove fingerprint key and raw secrets flag without clearing entire env
     monkeypatch.delenv("ELSPETH_FINGERPRINT_KEY", raising=False)
     monkeypatch.delenv("ELSPETH_ALLOW_RAW_SECRETS", raising=False)
 
     respx.post("https://api.example.com/secure").mock(return_value=httpx.Response(200, json={}))
 
-    http_client.post(
-        "https://api.example.com/secure",
-        json={},
-        headers={"Authorization": "Bearer secret"},
-    )
-
-    # Verify sensitive header was removed (not stored)
-    call_args = mock_recorder.record_call.call_args[1]
-    assert "Authorization" not in call_args["request_data"]["headers"]
+    with pytest.raises(FrameworkBugError, match="Sensitive header 'Authorization' cannot be fingerprinted"):
+        http_client.post(
+            "https://api.example.com/secure",
+            json={},
+            headers={"Authorization": "Bearer secret"},
+        )
 
 
 @respx.mock
@@ -413,7 +416,7 @@ def test_header_fingerprinting_in_dev_mode(http_client, mock_recorder, monkeypat
 
     # Verify sensitive header removed, non-sensitive kept
     call_args = mock_recorder.record_call.call_args[1]
-    headers = call_args["request_data"]["headers"]
+    headers = call_args["request_data"].to_dict()["headers"]
 
     assert "Authorization" not in headers
     assert headers["X-Custom"] == "value"
@@ -508,7 +511,7 @@ def test_response_headers_filter_sensitive(http_client, mock_recorder):
 
     # Verify Set-Cookie filtered out
     call_args = mock_recorder.record_call.call_args[1]
-    headers = call_args["response_data"]["headers"]
+    headers = call_args["response_data"].to_dict()["headers"]
 
     assert "set-cookie" not in headers
     assert headers["content-type"] == "application/json"

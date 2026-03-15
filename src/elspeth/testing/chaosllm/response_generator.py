@@ -1,4 +1,3 @@
-# src/elspeth/testing/chaosllm/response_generator.py
 """Response generation logic for ChaosLLM.
 
 The ResponseGenerator creates fake LLM responses in OpenAI-compatible format.
@@ -18,8 +17,21 @@ import jinja2
 import jinja2.sandbox
 import structlog
 
-from elspeth.testing.chaosengine.vocabulary import ENGLISH_VOCABULARY, LOREM_VOCABULARY
+from elspeth.testing.chaosengine.vocabulary import (
+    ENGLISH_VOCABULARY as ENGLISH_VOCABULARY,
+)
+from elspeth.testing.chaosengine.vocabulary import (
+    LOREM_VOCABULARY as LOREM_VOCABULARY,
+)
 from elspeth.testing.chaosllm.config import ResponseConfig
+
+__all__ = [
+    "ENGLISH_VOCABULARY",
+    "LOREM_VOCABULARY",
+    "OpenAIResponse",
+    "PresetBank",
+    "ResponseGenerator",
+]
 
 logger = structlog.get_logger(__name__)
 
@@ -47,6 +59,14 @@ class OpenAIResponse:
     prompt_tokens: int
     completion_tokens: int
     finish_reason: str
+
+    def __post_init__(self) -> None:
+        if self.prompt_tokens < 0:
+            raise ValueError(f"OpenAIResponse.prompt_tokens must be non-negative, got {self.prompt_tokens}")
+        if self.completion_tokens < 0:
+            raise ValueError(f"OpenAIResponse.completion_tokens must be non-negative, got {self.completion_tokens}")
+        if self.created < 0:
+            raise ValueError(f"OpenAIResponse.created must be non-negative, got {self.created}")
 
     @property
     def total_tokens(self) -> int:
@@ -213,6 +233,11 @@ class ResponseGenerator:
         # Setup Jinja2 environment with custom helpers
         self._jinja_env = self._create_jinja_env()
 
+        # Pre-compile template at construction — fail fast on syntax errors
+        self._compiled_template: jinja2.Template | None = None
+        if config.mode == "template":
+            self._compiled_template = self._jinja_env.from_string(config.template.body)
+
     @property
     def config(self) -> ResponseConfig:
         """Current response generation configuration (frozen/immutable)."""
@@ -280,23 +305,17 @@ class ResponseGenerator:
         return " ".join(words) + "."
 
     def _generate_template_response(self, request: dict[str, Any]) -> str:
-        """Generate response from Jinja2 template."""
-        template_str = self._config.template.body
-        try:
-            template = self._jinja_env.from_string(template_str)
-            return template.render(
-                request=request,
-                messages=request.get("messages", []),
-                model=request.get("model", "unknown"),
-            )
-        except jinja2.TemplateError as exc:
-            logger.warning(
-                "template_rendering_failed",
-                error=str(exc),
-                error_type=type(exc).__name__,
-                template_length=len(template_str),
-            )
-            return f"Template rendering error: {type(exc).__name__}"
+        """Generate response from Jinja2 template.
+
+        Config-sourced templates are system data — a broken template is a
+        config bug that should crash. Let TemplateError propagate.
+        """
+        assert self._compiled_template is not None, "mode must be 'template'"
+        return self._compiled_template.render(
+            request=request,
+            messages=request.get("messages", []),
+            model=request.get("model"),
+        )
 
     def _generate_echo_response(self, request: dict[str, Any]) -> str:
         """Echo parts of the input prompt."""
@@ -383,29 +402,35 @@ class ResponseGenerator:
             if template_override is not None:
                 if len(template_override) > max_len:
                     raise ValueError(f"Template override exceeds max length ({len(template_override)} > {max_len})")
+                # Header-override template is Tier 3 (external data from request header).
+                # Return error content instead of crashing — the server must produce
+                # a deterministic response, not an unplanned 500.
                 try:
                     template = self._jinja_env.from_string(template_override)
                     content = template.render(
                         request=request,
                         messages=request.get("messages", []),
-                        model=request.get("model", "unknown"),
+                        model=request.get("model"),
                     )
                 except jinja2.TemplateError as exc:
-                    logger.warning(
-                        "template_override_rendering_failed",
-                        error=str(exc),
-                        error_type=type(exc).__name__,
-                        template_length=len(template_override),
-                    )
-                    content = f"Template rendering error: {type(exc).__name__}"
+                    content = f"[template_override_error: {exc}]"
             else:
-                content = self._generate_template_response(request)
+                if self._compiled_template is None:
+                    content = "[template_mode_unavailable: server not configured for template mode]"
+                else:
+                    content = self._generate_template_response(request)
         elif mode == "echo":
             content = self._generate_echo_response(request)
         elif mode == "preset":
-            content = self._generate_preset_response()
+            if mode_override is not None and self._config.mode != "preset":
+                content = "[preset_mode_unavailable: server not configured for preset mode]"
+            else:
+                content = self._generate_preset_response()
         else:
-            raise ValueError(f"Unknown response mode: {mode}")
+            # Config mode is Pydantic Literal-validated, so invalid config mode
+            # is impossible. This branch is only reachable via mode_override from
+            # the X-Fake-Response-Mode header (Tier 3 external data).
+            content = f"[unknown_mode: {mode!r}]"
 
         # Estimate token counts
         prompt_text = self._extract_prompt_text(request)
