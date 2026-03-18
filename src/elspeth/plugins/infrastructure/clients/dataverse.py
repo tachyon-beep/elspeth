@@ -236,7 +236,11 @@ class DataverseClient:
             follow_redirects=False,
         )
 
-        # Track whether credential has been reconstructed for 401 retry
+        # Instance-level flag: credential reconstruction is allowed at most
+        # once per client lifetime. A second 401 after reconstruction means the
+        # credentials themselves are invalid, not just an expired token.
+        # Intentionally NOT reset per-pagination — prevents infinite auth loops
+        # across long multi-page fetches.
         self._auth_retried = False
 
     def _acquire_rate_limit(self) -> None:
@@ -244,11 +248,12 @@ class DataverseClient:
         if self._limiter is not None:
             self._limiter.acquire()
 
-    def _get_auth_headers(self) -> dict[str, str]:
+    def get_auth_headers(self) -> dict[str, str]:
         """Get authorization headers with current token.
 
-        Calls credential.get_token() before each request — azure-identity
-        handles caching and transparent refresh internally.
+        Public API: callers (source/sink plugins) need this for audit
+        fingerprinting via fingerprint_headers(). azure-identity handles
+        caching and transparent refresh internally.
         """
         token = self._credential.get_token(self._token_scope)
         return {
@@ -394,7 +399,7 @@ class DataverseClient:
         """
         self._acquire_rate_limit()
 
-        auth_headers = self._get_auth_headers()
+        auth_headers = self.get_auth_headers()
         headers = {**auth_headers, **(extra_headers or {})}
 
         start = time.perf_counter()
@@ -597,6 +602,8 @@ class DataverseClient:
 
         Uses paging cookie mechanism: injects cookie and page number into
         the <fetch> element via xml.etree.ElementTree (XML-safe injection).
+        Parses the XML once upfront and mutates the ET root between pages to
+        avoid re-parsing on every iteration.
 
         Args:
             entity: Entity logical name for URL construction
@@ -609,10 +616,26 @@ class DataverseClient:
             DataverseClientError: On XML parse error, root element validation
                 failure, or protocol errors
         """
+        # Parse once — validated at config time, but guard here for safety
+        try:
+            root = ET.fromstring(fetch_xml)
+        except ET.ParseError as exc:
+            raise DataverseClientError(
+                f"Failed to parse FetchXML for pagination: {exc}",
+                retryable=False,
+            ) from exc
+
+        if root.tag != "fetch":
+            raise DataverseClientError(
+                f"FetchXML root element must be <fetch>, got <{root.tag}>. Paging cookie injection requires a valid FetchXML structure.",
+                retryable=False,
+            )
+
         current_page = 1
 
         while True:
-            encoded_xml = urllib.parse.quote(fetch_xml)
+            xml_str = ET.tostring(root, encoding="unicode")
+            encoded_xml = urllib.parse.quote(xml_str)
             url = f"{self._environment_url}/api/data/{self._api_version}/{entity}?fetchXml={encoded_xml}"
 
             page = self.get_page(url)
@@ -622,32 +645,14 @@ class DataverseClient:
             if not page.more_records or page.paging_cookie is None:
                 break
 
-            # Inject paging cookie into FetchXML via ElementTree
-            # The paging cookie is Tier 3 data — MUST NOT use string formatting
+            # Inject paging cookie into the existing ET root.
+            # The paging cookie is Tier 3 data — ET.set() handles
+            # attribute escaping automatically (no string formatting).
             decoded_cookie = urllib.parse.unquote(page.paging_cookie)
-
-            try:
-                root = ET.fromstring(fetch_xml)
-            except ET.ParseError as exc:
-                raise DataverseClientError(
-                    f"Failed to parse FetchXML for paging cookie injection: {exc}",
-                    retryable=False,
-                ) from exc
-
-            # Root element validation (offensive programming guard)
-            if root.tag != "fetch":
-                raise DataverseClientError(
-                    f"FetchXML root element must be <fetch>, got <{root.tag}>. "
-                    f"Paging cookie injection requires a valid FetchXML structure.",
-                    retryable=False,
-                )
 
             current_page += 1
             root.set("paging-cookie", decoded_cookie)
             root.set("page", str(current_page))
-
-            # Re-serialize — ET handles attribute escaping automatically
-            fetch_xml = ET.tostring(root, encoding="unicode")
 
     def reconstruct_credential(
         self,

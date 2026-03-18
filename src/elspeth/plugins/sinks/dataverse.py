@@ -11,7 +11,7 @@ import hashlib
 import time
 import urllib.parse
 from types import MappingProxyType
-from typing import TYPE_CHECKING, Any, Literal
+from typing import Any, Literal
 
 import structlog
 from pydantic import BaseModel, Field, field_validator
@@ -30,9 +30,6 @@ from elspeth.plugins.infrastructure.clients.dataverse import (
 from elspeth.plugins.infrastructure.clients.fingerprinting import fingerprint_headers
 from elspeth.plugins.infrastructure.config_base import DataPluginConfig
 from elspeth.plugins.infrastructure.schema_factory import create_schema_from_config
-
-if TYPE_CHECKING:
-    pass
 
 logger = structlog.get_logger(__name__)
 
@@ -296,10 +293,19 @@ class DataverseSink(BaseSink):
         assert self._alternate_key_pipeline_field is not None
 
         for row in rows:
-            # Tier 2: field_mapping guarantees the field exists and schema
-            # guarantees the value is non-null. Direct access — if absent or
-            # None, that's an upstream bug (KeyError/TypeError is correct).
+            # Tier 2: field_mapping guarantees the field exists. Direct access
+            # — KeyError if absent is an upstream bug.
             key_value = row[self._alternate_key_pipeline_field]
+
+            # Offensive guard: empty/blank key produces a valid-looking OData
+            # URL (entity(key='')) that Dataverse would accept or reject
+            # ambiguously. Crash here with a clear message instead.
+            if not isinstance(key_value, str) or not key_value.strip():
+                raise ValueError(
+                    f"alternate_key field '{self._alternate_key_pipeline_field}' has "
+                    f"empty or non-string value {key_value!r} — cannot construct "
+                    f"PATCH URL for entity '{self._entity}'"
+                )
 
             # Build URL and payload
             url = self._build_upsert_url(key_value)
@@ -318,7 +324,7 @@ class DataverseSink(BaseSink):
                     request_data={
                         "method": "PATCH",
                         "url": url,
-                        "headers": fingerprint_headers(self._client._get_auth_headers()),
+                        "headers": fingerprint_headers(self._client.get_auth_headers()),
                         "field_names": sorted(payload.keys()),
                     },
                     response_data={
@@ -348,7 +354,10 @@ class DataverseSink(BaseSink):
                     latency_ms=latency_ms,
                     provider="dataverse",
                 )
-                raise RuntimeError(f"Dataverse upsert failed for {self._entity} (key={self._alternate_key}={key_value!r}): {e}") from e
+                # Re-raise original error — engine sink executor records
+                # exception_type for audit diagnostics, and DataverseClientError
+                # preserves the retryable/status_code metadata in the chain.
+                raise
 
         return ArtifactDescriptor(
             artifact_type="webhook",

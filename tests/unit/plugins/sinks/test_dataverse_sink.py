@@ -305,7 +305,7 @@ class TestArtifactDescriptor:
 
         mock_client = MagicMock()
         mock_client.upsert.return_value = _make_204_response()
-        mock_client._get_auth_headers.return_value = {"Authorization": "Bearer fake-token"}
+        mock_client.get_auth_headers.return_value = {"Authorization": "Bearer fake-token"}
         sink._client = mock_client
         return sink, mock_client
 
@@ -410,7 +410,7 @@ class TestWriteLifecycle:
 
         mock_client = MagicMock()
         mock_client.upsert.return_value = _make_204_response()
-        mock_client._get_auth_headers.return_value = {"Authorization": "Bearer fake-token"}
+        mock_client.get_auth_headers.return_value = {"Authorization": "Bearer fake-token"}
         sink._client = mock_client
 
         ctx = self._make_mock_ctx()
@@ -431,7 +431,7 @@ class TestWriteLifecycle:
 
         mock_client = MagicMock()
         mock_client.upsert.return_value = _make_204_response()
-        mock_client._get_auth_headers.return_value = {"Authorization": "Bearer fake-token"}
+        mock_client.get_auth_headers.return_value = {"Authorization": "Bearer fake-token"}
         sink._client = mock_client
 
         ctx = self._make_mock_ctx()
@@ -460,13 +460,13 @@ class TestWriteLifecycle:
             retryable=False,
             status_code=400,
         )
-        mock_client._get_auth_headers.return_value = {"Authorization": "Bearer fake-token"}
+        mock_client.get_auth_headers.return_value = {"Authorization": "Bearer fake-token"}
         sink._client = mock_client
 
         ctx = self._make_mock_ctx()
         rows = [{"email": "a@b.com", "name": "Alice"}]
 
-        with pytest.raises(RuntimeError, match="Dataverse upsert failed"):
+        with pytest.raises(DataverseClientError, match="Bad request"):
             sink.write(rows, ctx)
 
         # Error call should still be recorded
@@ -484,13 +484,13 @@ class TestWriteLifecycle:
             retryable=True,
             status_code=500,
         )
-        mock_client._get_auth_headers.return_value = {}
+        mock_client.get_auth_headers.return_value = {}
         sink._client = mock_client
 
         ctx = self._make_mock_ctx()
         rows = [{"email": "a@b.com", "name": "Alice"}]
 
-        with pytest.raises(RuntimeError):
+        with pytest.raises(DataverseClientError):
             sink.write(rows, ctx)
 
         error_call = ctx.record_call.call_args_list[0]
@@ -505,7 +505,7 @@ class TestWriteLifecycle:
 
         mock_client = MagicMock()
         mock_client.upsert.return_value = _make_204_response()
-        mock_client._get_auth_headers.return_value = {"Authorization": "Bearer fake-token"}
+        mock_client.get_auth_headers.return_value = {"Authorization": "Bearer fake-token"}
         sink._client = mock_client
 
         ctx = self._make_mock_ctx()
@@ -516,6 +516,39 @@ class TestWriteLifecycle:
         assert call_kwargs["request_data"]["method"] == "PATCH"
         assert "a%40b.com" in call_kwargs["request_data"]["url"]
         assert call_kwargs["response_data"]["status_code"] == 204
+
+    @patch("elspeth.plugins.sinks.dataverse.create_schema_from_config", return_value=MagicMock())
+    def test_empty_alternate_key_value_raises(self, _mock_schema: MagicMock) -> None:
+        """Empty string key value is caught by offensive guard."""
+        sink = DataverseSink(_config())
+        sink._client = MagicMock()
+
+        ctx = self._make_mock_ctx()
+
+        with pytest.raises(ValueError, match="empty or non-string value"):
+            sink.write([{"email": "", "name": "Alice"}], ctx)
+
+    @patch("elspeth.plugins.sinks.dataverse.create_schema_from_config", return_value=MagicMock())
+    def test_none_alternate_key_value_raises(self, _mock_schema: MagicMock) -> None:
+        """None key value is caught by offensive guard."""
+        sink = DataverseSink(_config())
+        sink._client = MagicMock()
+
+        ctx = self._make_mock_ctx()
+
+        with pytest.raises(ValueError, match="empty or non-string value"):
+            sink.write([{"email": None, "name": "Alice"}], ctx)
+
+    @patch("elspeth.plugins.sinks.dataverse.create_schema_from_config", return_value=MagicMock())
+    def test_numeric_alternate_key_value_raises(self, _mock_schema: MagicMock) -> None:
+        """Numeric key value is caught by offensive guard (must be string for URL)."""
+        sink = DataverseSink(_config())
+        sink._client = MagicMock()
+
+        ctx = self._make_mock_ctx()
+
+        with pytest.raises(ValueError, match="empty or non-string value"):
+            sink.write([{"email": 42, "name": "Alice"}], ctx)
 
     @patch("elspeth.plugins.sinks.dataverse.create_schema_from_config", return_value=MagicMock())
     def test_flush_is_noop(self, _mock_schema: MagicMock) -> None:

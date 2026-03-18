@@ -165,7 +165,7 @@ class TestDataverseSourceStructuredQuery:
                 ),
             ]
         )
-        mock_client._get_auth_headers.return_value = {"Authorization": "Bearer fake"}
+        mock_client.get_auth_headers.return_value = {"Authorization": "Bearer fake"}
 
         # Inject mock client
         with (
@@ -214,7 +214,7 @@ class TestDataverseSourceStructuredQuery:
                 ),
             ]
         )
-        mock_client._get_auth_headers.return_value = {"Authorization": "Bearer fake"}
+        mock_client.get_auth_headers.return_value = {"Authorization": "Bearer fake"}
 
         with (
             patch("elspeth.plugins.sources.dataverse.DataverseClient", return_value=mock_client),
@@ -258,7 +258,7 @@ class TestDataverseSourceFetchXML:
                 ),
             ]
         )
-        mock_client._get_auth_headers.return_value = {"Authorization": "Bearer fake"}
+        mock_client.get_auth_headers.return_value = {"Authorization": "Bearer fake"}
 
         with (
             patch("elspeth.plugins.sources.dataverse.DataverseClient", return_value=mock_client),
@@ -295,7 +295,7 @@ class TestDataverseSourceSchemaLocking:
                 ),
             ]
         )
-        mock_client._get_auth_headers.return_value = {"Authorization": "Bearer fake"}
+        mock_client.get_auth_headers.return_value = {"Authorization": "Bearer fake"}
 
         with (
             patch("elspeth.plugins.sources.dataverse.DataverseClient", return_value=mock_client),
@@ -331,7 +331,7 @@ class TestDataverseSourceSchemaLocking:
                 ),
             ]
         )
-        mock_client._get_auth_headers.return_value = {"Authorization": "Bearer fake"}
+        mock_client.get_auth_headers.return_value = {"Authorization": "Bearer fake"}
 
         with (
             patch("elspeth.plugins.sources.dataverse.DataverseClient", return_value=mock_client),
@@ -378,7 +378,7 @@ class TestDataverseSourceODataStripping:
                 ),
             ]
         )
-        mock_client._get_auth_headers.return_value = {"Authorization": "Bearer fake"}
+        mock_client.get_auth_headers.return_value = {"Authorization": "Bearer fake"}
 
         with (
             patch("elspeth.plugins.sources.dataverse.DataverseClient", return_value=mock_client),
@@ -421,7 +421,7 @@ class TestDataverseSinkUpsert:
             paging_cookie=None,
             more_records=False,
         )
-        mock_client._get_auth_headers.return_value = {"Authorization": "Bearer fake"}
+        mock_client.get_auth_headers.return_value = {"Authorization": "Bearer fake"}
 
         with (
             patch("elspeth.plugins.sinks.dataverse.DataverseClient", return_value=mock_client),
@@ -464,7 +464,7 @@ class TestDataverseSinkUpsert:
             paging_cookie=None,
             more_records=False,
         )
-        mock_client._get_auth_headers.return_value = {"Authorization": "Bearer fake"}
+        mock_client.get_auth_headers.return_value = {"Authorization": "Bearer fake"}
 
         with (
             patch("elspeth.plugins.sinks.dataverse.DataverseClient", return_value=mock_client),
@@ -513,7 +513,7 @@ class TestDataverseSinkUpsert:
 
         mock_client = MagicMock(spec=DataverseClient)
         mock_client.upsert = mock_upsert
-        mock_client._get_auth_headers.return_value = {"Authorization": "Bearer fake"}
+        mock_client.get_auth_headers.return_value = {"Authorization": "Bearer fake"}
 
         with (
             patch("elspeth.plugins.sinks.dataverse.DataverseClient", return_value=mock_client),
@@ -528,7 +528,7 @@ class TestDataverseSinkUpsert:
             {"email": "bob@test.com", "name": "Bob"},
         ]
 
-        with pytest.raises(RuntimeError, match="Dataverse upsert failed"):
+        with pytest.raises(DataverseClientError, match="Conflict"):
             sink.write(rows, ctx)
 
         # First row succeeded, second failed — both recorded
@@ -573,7 +573,7 @@ class TestDataverseSinkLookupBindings:
             )
 
         mock_client.upsert = mock_upsert
-        mock_client._get_auth_headers.return_value = {"Authorization": "Bearer fake"}
+        mock_client.get_auth_headers.return_value = {"Authorization": "Bearer fake"}
 
         with (
             patch("elspeth.plugins.sinks.dataverse.DataverseClient", return_value=mock_client),
@@ -601,7 +601,7 @@ class TestDataverseSinkEmptyBatch:
         sink = DataverseSink(_make_sink_config())
 
         mock_client = MagicMock(spec=DataverseClient)
-        mock_client._get_auth_headers.return_value = {"Authorization": "Bearer fake"}
+        mock_client.get_auth_headers.return_value = {"Authorization": "Bearer fake"}
 
         with (
             patch("elspeth.plugins.sinks.dataverse.DataverseClient", return_value=mock_client),

@@ -161,7 +161,9 @@ Extends `SourceDataConfig` which provides `path` (via `PathConfig`), `schema` (v
    a. Extract raw attributes dict (namespace-stripped keys)
    b. Extract raw direct child elements: namespace-stripped tag → `(element.text or "").strip() or None`
    c. Merge raw names: start with attributes, update with child elements (child wins on collision)
-   d. **Normalize field names**: apply `normalize_field_name()` to every key. Check for normalization collisions via `check_normalization_collisions()` — if two different raw names normalize to the same identifier, raise `ValueError` (pipeline crashes, config/data error). Build `raw_to_normalized` mapping for audit trail.
+   d. **Normalize field names**: apply `normalize_field_name()` to every key. Check for normalization collisions via `check_normalization_collisions()`. Build `raw_to_normalized` mapping for audit trail. **On collision** (two different raw names normalize to the same identifier):
+      - **FIXED schema**: raise `ValueError` — the source promised specific fields and cannot produce an unambiguous row. This is a schema integrity failure, not a data quality issue.
+      - **OBSERVED/FLEXIBLE schema**: call `ctx.record_validation_error(...)`, yield `SourceRow.quarantined(...)` if not discard, **continue** to next record. The collision is local to this record; other records may be well-formed and can establish or conform to the observed contract.
    e. Attempt schema validation: `self._schema_class.model_validate(normalized_row)` → `validated.to_row()`
       - **On `ValidationError`**: call `ctx.record_validation_error(...)`. If `on_validation_failure != "discard"`: yield `SourceRow.quarantined(...)`. **Continue** to next record (skip steps f–h).
    f. On first valid row (when `_contract_builder is not None` and `not first_valid_row_processed`):
@@ -192,7 +194,8 @@ Per the Three-Tier Trust Model. File-level parse errors follow the two-step audi
 | XML parse error (`ET.ParseError`) | Tier 3 | `ctx.record_validation_error()` + quarantine if not discard, stop | Malformed external data |
 | Encoding error (`UnicodeDecodeError`) | Tier 3 | `ctx.record_validation_error()` + quarantine if not discard, stop | External file encoding issue |
 | Zero `record_tag` matches | — | `PluginConfigError` (crash) | Config mistake — fail fast before processing |
-| Normalization collision (two raw names → same identifier) | Tier 3 | `ValueError` (crash) | Ambiguous field names — cannot produce a valid row |
+| Normalization collision (FIXED schema) | Tier 3 | `ValueError` (crash) | Schema integrity failure — source cannot uphold its field contract |
+| Normalization collision (OBSERVED/FLEXIBLE) | Tier 3 | `ctx.record_validation_error()` + `SourceRow.quarantined()` | Per-record ambiguity — other records may be well-formed |
 | Row fails schema validation | Tier 3 | `ctx.record_validation_error()` + `SourceRow.quarantined()` | Normal source validation |
 | Row fails contract validation (type drift) | Tier 3 | `ctx.record_validation_error()` + `SourceRow.quarantined()` | Inferred type mismatch |
 
@@ -214,7 +217,8 @@ Unit tests in `tests/unit/plugins/sources/test_xml_source.py`:
 2. **Normalization (hyphens)**: `<customer-id>` → field key `customer_id`
 3. **Normalization (dots)**: `<total.amount>` → field key `total_amount`
 4. **Normalization (keywords)**: `<class>` → field key `class_`, `<return>` → `return_`
-5. **Normalization collision**: two raw names that normalize to same identifier → `ValueError`
+5. **Normalization collision (FIXED)**: two raw names that normalize to same identifier → `ValueError` (schema integrity failure)
+5b. **Normalization collision (OBSERVED)**: two raw names that normalize to same identifier → quarantine record, continue processing
 6. **Field resolution audit**: `get_field_resolution()` returns original→normalized mapping with algorithm version
 7. **Attributes only**: record with only attributes, no child elements
 8. **Attributes + children**: both extracted as fields

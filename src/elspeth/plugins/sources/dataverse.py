@@ -34,6 +34,7 @@ from elspeth.plugins.infrastructure.schema_factory import create_schema_from_con
 from elspeth.plugins.sources.field_normalization import (
     NORMALIZATION_ALGORITHM_VERSION,
     FieldResolution,
+    normalize_field_name,
     resolve_field_names,
 )
 
@@ -365,9 +366,21 @@ class DataverseSource(BaseSource):
                 columns=None,
             )
 
-        # Apply resolution mapping
+        # Apply resolution mapping.
+        # Tier 3: Dataverse responses may include fields not in the first row
+        # (sparse entities, dynamic attributes). Normalize new fields using the
+        # same algorithm rather than passing them through raw — inconsistent
+        # normalization would break downstream template references.
+        # Schema validation (lines below) quarantines rows with unexpected fields.
         mapping = self._field_resolution.resolution_mapping
-        return {mapping.get(k, k): v for k, v in row.items()}
+        result: dict[str, Any] = {}
+        for k, v in row.items():
+            normalized_name = mapping.get(k)
+            if normalized_name is None:
+                # Field not in initial mapping — normalize individually
+                normalized_name = normalize_field_name(k) if self._normalize_fields else k
+            result[normalized_name] = v
+        return result
 
     def _record_page_call(
         self,
@@ -395,7 +408,7 @@ class DataverseSource(BaseSource):
                 request_data={
                     "method": "GET",
                     "url": url,
-                    "headers": fingerprint_headers(self._client._get_auth_headers()),
+                    "headers": fingerprint_headers(self._client.get_auth_headers()),
                 },
                 response_data={
                     "status_code": page.status_code,
@@ -549,17 +562,11 @@ class DataverseSource(BaseSource):
                 error=e,
                 error_reason="pagination_error",
             )
-            raise RuntimeError(f"Dataverse query failed: {e}") from e
+            raise
 
         # Force-lock contract if no valid rows were yielded across ALL pages
         if not self._first_valid_row_processed and self._contract_builder is not None:
             self.set_schema_contract(self._contract_builder.contract.with_locked())
-
-    def on_complete(self, ctx: LifecycleContext) -> None:
-        """Emit source statistics via telemetry."""
-        # Per CLAUDE.md logging policy: operational statistics go through
-        # telemetry, not logging.
-        pass
 
     def get_field_resolution(self) -> tuple[Mapping[str, str], str | None] | None:
         """Return field normalization mapping for audit trail recovery."""

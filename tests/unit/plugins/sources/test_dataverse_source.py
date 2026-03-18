@@ -213,7 +213,7 @@ def _make_source_for_load(
         mock_client.paginate_odata.return_value = iter(pages)
     else:
         mock_client.paginate_fetchxml.return_value = iter(pages)
-    mock_client._get_auth_headers.return_value = {"Authorization": "Bearer test"}
+    mock_client.get_auth_headers.return_value = {"Authorization": "Bearer test"}
     source._client = mock_client
 
     return source
@@ -878,14 +878,14 @@ class TestDataverseSourceLoadStructured:
         rows = list(source.load(ctx))
         assert len(rows) == 0
 
-    def test_load_client_error_raises_runtime_error(self) -> None:
-        """DataverseClientError during pagination raises RuntimeError."""
+    def test_load_client_error_propagates(self) -> None:
+        """DataverseClientError during pagination propagates directly."""
         source = _make_source_for_load([], _base_config(normalize_fields=False))
         # Override client to raise
         source._client.paginate_odata.side_effect = DataverseClientError("Server error", retryable=True, status_code=500, latency_ms=100.0)
 
         ctx = _mock_source_context()
-        with pytest.raises(RuntimeError, match="Dataverse query failed"):
+        with pytest.raises(DataverseClientError, match="Server error"):
             list(source.load(ctx))
 
     def test_load_client_error_records_audit(self) -> None:
@@ -895,7 +895,7 @@ class TestDataverseSourceLoadStructured:
         source._client.paginate_odata.side_effect = error
 
         ctx = _mock_source_context()
-        with pytest.raises(RuntimeError):
+        with pytest.raises(DataverseClientError):
             list(source.load(ctx))
 
         ctx.record_call.assert_called_once()
@@ -1190,7 +1190,7 @@ class TestRecordPageCall:
     def _make_source_with_client(self) -> Any:
         source = _make_source(_base_config())
         source._client = MagicMock()
-        source._client._get_auth_headers.return_value = {"Authorization": "Bearer test"}
+        source._client.get_auth_headers.return_value = {"Authorization": "Bearer test"}
         return source
 
     @patch("elspeth.plugins.sources.dataverse.fingerprint_headers")
