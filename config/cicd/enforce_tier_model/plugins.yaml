@@ -70,10 +70,11 @@ per_file_rules:
   expires: null
 - pattern: plugins/sinks/dataverse.py
   rules:
+  - R4
   - R5
-  reason: Offensive guard — isinstance check catches non-string alternate key values that would produce ambiguous OData URLs
+  reason: R5 offensive guard for alternate key type; R4 broad except in telemetry emission (must not crash audit trail — same pattern as AuditedHTTPClient._record_and_emit)
   expires: null
-  max_hits: 1
+  max_hits: 2
 - pattern: plugins/infrastructure/clients/llm.py
   rules:
   - R5

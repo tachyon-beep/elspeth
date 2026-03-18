@@ -13,13 +13,18 @@ import re
 import urllib.parse
 import xml.etree.ElementTree as ET
 from collections.abc import Iterator, Mapping
+from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any, Self
 
 import structlog
 from pydantic import Field, ValidationError, field_validator, model_validator
 
 from elspeth.contracts import CallStatus, CallType, Determinism, PluginSchema, SourceRow
+from elspeth.contracts.call_data import RawCallPayload
 from elspeth.contracts.contexts import LifecycleContext, SourceContext
+from elspeth.contracts.errors import AuditIntegrityError, FrameworkBugError
+from elspeth.contracts.events import ExternalCallCompleted
+from elspeth.core.canonical import stable_hash
 from elspeth.plugins.infrastructure.base import BaseSource
 from elspeth.plugins.infrastructure.clients.dataverse import (
     DataverseAuthConfig,
@@ -279,6 +284,43 @@ class DataverseSource(BaseSource):
             additional_domains=self._additional_domains,
         )
 
+        # Validate entity exists via metadata query (structured mode only).
+        # Catches typos in entity names at pipeline startup rather than on
+        # first page fetch. FetchXML mode skips this — the entity name is
+        # embedded in the XML and validated by Dataverse on first query.
+        if self._entity is not None:
+            self._validate_entity_exists()
+
+    def _validate_entity_exists(self) -> None:
+        """Validate that the configured entity exists in Dataverse metadata.
+
+        Issues a lightweight metadata request to check entity availability.
+        Failures are non-fatal — the entity may exist but the metadata
+        endpoint may be restricted. Logs a warning and continues.
+        """
+        assert self._client is not None
+        metadata_url = (
+            f"{self._environment_url.rstrip('/')}/api/data/{self._api_version}"
+            f"/EntityDefinitions(LogicalName='{self._entity}')?$select=LogicalName"
+        )
+        try:
+            self._client.get_page(metadata_url)
+        except DataverseClientError as e:
+            if e.status_code == 404:
+                raise DataverseClientError(
+                    f"Entity '{self._entity}' not found in Dataverse. Check the entity logical name in your pipeline config.",
+                    retryable=False,
+                    status_code=404,
+                ) from e
+            # Other errors (403, network) are non-fatal — entity may exist
+            # but metadata access is restricted. Log and continue.
+            logger.warning(
+                "entity_metadata_check_failed",
+                entity=self._entity,
+                error=str(e),
+                status_code=e.status_code,
+            )
+
     def _build_query_url(self) -> str:
         """Build the initial OData query URL for structured queries."""
         url = f"{self._environment_url.rstrip('/')}/api/data/{self._api_version}/{self._entity}"
@@ -382,6 +424,51 @@ class DataverseSource(BaseSource):
             result[normalized_name] = v
         return result
 
+    def _emit_telemetry(
+        self,
+        *,
+        ctx: SourceContext,
+        status: CallStatus,
+        latency_ms: float,
+        request_data: dict[str, Any],
+        response_data: dict[str, Any] | None = None,
+    ) -> None:
+        """Emit ExternalCallCompleted telemetry after successful audit recording.
+
+        Telemetry fires AFTER audit (primacy rule). Failures are logged,
+        not propagated — telemetry must never corrupt the audit trail.
+        """
+        if self._telemetry_emit is None:
+            return
+        try:
+            req_payload = RawCallPayload(request_data)
+            resp_payload = RawCallPayload(response_data) if response_data else None
+            self._telemetry_emit(
+                ExternalCallCompleted(
+                    timestamp=datetime.now(UTC),
+                    run_id=self._run_id or "",
+                    call_type=CallType.HTTP,
+                    provider="dataverse",
+                    status=status,
+                    latency_ms=latency_ms,
+                    operation_id=ctx.operation_id,
+                    request_hash=stable_hash(request_data),
+                    response_hash=stable_hash(response_data) if response_data else None,
+                    request_payload=req_payload,
+                    response_payload=resp_payload,
+                )
+            )
+        except (FrameworkBugError, AuditIntegrityError):
+            raise
+        except Exception as tel_err:
+            logger.warning(
+                "telemetry_emit_failed",
+                error=str(tel_err),
+                error_type=type(tel_err).__name__,
+                call_type="http",
+                exc_info=True,
+            )
+
     def _record_page_call(
         self,
         ctx: SourceContext,
@@ -391,7 +478,9 @@ class DataverseSource(BaseSource):
         error: DataverseClientError | None = None,
         error_reason: str | None = None,
     ) -> None:
-        """Record a page fetch in the audit trail.
+        """Record a page fetch in the audit trail, then emit telemetry.
+
+        Audit fires first (primacy), telemetry fires second (best-effort).
 
         Args:
             ctx: Source context for record_call
@@ -401,52 +490,51 @@ class DataverseSource(BaseSource):
             error_reason: Additional error context
         """
         if page is not None:
+            request_data = {
+                "method": "GET",
+                "url": url,
+                "headers": fingerprint_headers(page.request_headers),
+            }
+            response_data = {
+                "status_code": page.status_code,
+                "row_count": len(page.rows),
+            }
             ctx.record_call(
                 call_type=CallType.HTTP,
                 status=CallStatus.SUCCESS,
-                request_data={
-                    "method": "GET",
-                    "url": url,
-                    "headers": fingerprint_headers(page.request_headers),
-                },
-                response_data={
-                    "status_code": page.status_code,
-                    "row_count": len(page.rows),
-                },
+                request_data=request_data,
+                response_data=response_data,
                 latency_ms=page.latency_ms,
                 provider="dataverse",
             )
+            self._emit_telemetry(
+                ctx=ctx,
+                status=CallStatus.SUCCESS,
+                latency_ms=page.latency_ms,
+                request_data=request_data,
+                response_data=response_data,
+            )
         elif error is not None:
+            request_data = {"method": "GET", "url": url}
+            error_data = {
+                "error_type": type(error).__name__,
+                "message": str(error),
+                "status_code": error.status_code,
+                "reason": error_reason,
+            }
             ctx.record_call(
                 call_type=CallType.HTTP,
                 status=CallStatus.ERROR,
-                request_data={
-                    "method": "GET",
-                    "url": url,
-                },
-                error={
-                    "error_type": type(error).__name__,
-                    "message": str(error),
-                    "status_code": error.status_code,
-                    "reason": error_reason,
-                },
+                request_data=request_data,
+                error=error_data,
                 latency_ms=error.latency_ms,
                 provider="dataverse",
             )
-        elif error_reason is not None:
-            # Non-exception error (e.g., empty-page guard, SSRF rejection)
-            ctx.record_call(
-                call_type=CallType.HTTP,
+            self._emit_telemetry(
+                ctx=ctx,
                 status=CallStatus.ERROR,
-                request_data={
-                    "method": "GET",
-                    "url": url,
-                },
-                error={
-                    "error_type": "DataverseClientError",
-                    "message": error_reason,
-                },
-                provider="dataverse",
+                latency_ms=error.latency_ms or 0.0,
+                request_data=request_data,
             )
 
     def load(self, ctx: SourceContext) -> Iterator[SourceRow]:

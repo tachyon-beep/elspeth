@@ -10,6 +10,7 @@ from __future__ import annotations
 import hashlib
 import time
 import urllib.parse
+from datetime import UTC, datetime
 from types import MappingProxyType
 from typing import Any, Literal
 
@@ -17,9 +18,12 @@ import structlog
 from pydantic import BaseModel, Field, field_validator
 
 from elspeth.contracts import CallStatus, CallType, Determinism, PluginSchema
+from elspeth.contracts.call_data import RawCallPayload
 from elspeth.contracts.contexts import LifecycleContext, SinkContext
+from elspeth.contracts.errors import AuditIntegrityError, FrameworkBugError
+from elspeth.contracts.events import ExternalCallCompleted
 from elspeth.contracts.results import ArtifactDescriptor
-from elspeth.core.canonical import canonical_json
+from elspeth.core.canonical import canonical_json, stable_hash
 from elspeth.plugins.infrastructure.base import BaseSink
 from elspeth.plugins.infrastructure.clients.dataverse import (
     DataverseAuthConfig,
@@ -229,6 +233,51 @@ class DataverseSink(BaseSink):
         encoded_value = urllib.parse.quote(str(key_value), safe="")
         return f"{self._environment_url.rstrip('/')}/api/data/{self._api_version}/{self._entity}({self._alternate_key}='{encoded_value}')"
 
+    def _emit_telemetry(
+        self,
+        *,
+        ctx: SinkContext,
+        status: CallStatus,
+        latency_ms: float,
+        request_data: dict[str, Any],
+        response_data: dict[str, Any] | None = None,
+    ) -> None:
+        """Emit ExternalCallCompleted telemetry after successful audit recording.
+
+        Telemetry fires AFTER audit (primacy rule). Failures are logged,
+        not propagated — telemetry must never corrupt the audit trail.
+        """
+        if self._telemetry_emit is None:
+            return
+        try:
+            req_payload = RawCallPayload(request_data)
+            resp_payload = RawCallPayload(response_data) if response_data else None
+            self._telemetry_emit(
+                ExternalCallCompleted(
+                    timestamp=datetime.now(UTC),
+                    run_id=self._run_id or "",
+                    call_type=CallType.HTTP,
+                    provider="dataverse",
+                    status=status,
+                    latency_ms=latency_ms,
+                    operation_id=ctx.operation_id,
+                    request_hash=stable_hash(request_data),
+                    response_hash=stable_hash(response_data) if response_data else None,
+                    request_payload=req_payload,
+                    response_payload=resp_payload,
+                )
+            )
+        except (FrameworkBugError, AuditIntegrityError):
+            raise
+        except Exception as tel_err:
+            logger.warning(
+                "telemetry_emit_failed",
+                error=str(tel_err),
+                error_type=type(tel_err).__name__,
+                call_type="http",
+                exc_info=True,
+            )
+
     def _map_row(self, row: dict[str, Any]) -> dict[str, Any]:
         """Apply field mapping and lookup bindings.
 
@@ -311,40 +360,48 @@ class DataverseSink(BaseSink):
             url = self._build_upsert_url(key_value)
             payload = self._map_row(row)
 
-            # Execute upsert with audit recording
+            # Execute upsert with audit recording + telemetry
             start_time = time.perf_counter()
             try:
                 response = self._client.upsert(url, payload)
                 latency_ms = (time.perf_counter() - start_time) * 1000
 
-                # Record successful write (one audit entry per row)
+                # Audit first (primacy), then telemetry
+                request_data = {
+                    "method": "PATCH",
+                    "url": url,
+                    "headers": fingerprint_headers(response.request_headers),
+                    "field_names": sorted(payload.keys()),
+                }
+                response_data = {"status_code": response.status_code}
                 ctx.record_call(
                     call_type=CallType.HTTP,
                     status=CallStatus.SUCCESS,
-                    request_data={
-                        "method": "PATCH",
-                        "url": url,
-                        "headers": fingerprint_headers(self._client.get_auth_headers()),
-                        "field_names": sorted(payload.keys()),
-                    },
-                    response_data={
-                        "status_code": response.status_code,
-                    },
+                    request_data=request_data,
+                    response_data=response_data,
                     latency_ms=latency_ms,
                     provider="dataverse",
+                )
+                self._emit_telemetry(
+                    ctx=ctx,
+                    status=CallStatus.SUCCESS,
+                    latency_ms=latency_ms,
+                    request_data=request_data,
+                    response_data=response_data,
                 )
             except DataverseClientError as e:
                 latency_ms = (time.perf_counter() - start_time) * 1000
 
-                # Record failed write in audit trail
+                # Audit first, then telemetry
+                request_data = {
+                    "method": "PATCH",
+                    "url": url,
+                    "field_names": sorted(payload.keys()),
+                }
                 ctx.record_call(
                     call_type=CallType.HTTP,
                     status=CallStatus.ERROR,
-                    request_data={
-                        "method": "PATCH",
-                        "url": url,
-                        "field_names": sorted(payload.keys()),
-                    },
+                    request_data=request_data,
                     error={
                         "error_type": type(e).__name__,
                         "message": str(e),
@@ -354,6 +411,16 @@ class DataverseSink(BaseSink):
                     latency_ms=latency_ms,
                     provider="dataverse",
                 )
+                self._emit_telemetry(
+                    ctx=ctx,
+                    status=CallStatus.ERROR,
+                    latency_ms=latency_ms,
+                    request_data=request_data,
+                )
+                # 401 with retryable=True: reconstruct credential before engine retry
+                if e.status_code == 401 and e.retryable:
+                    assert self._client is not None
+                    self._client.reconstruct_credential(self._auth_config)
                 # Re-raise original error — engine sink executor records
                 # exception_type for audit diagnostics, and DataverseClientError
                 # preserves the retryable/status_code metadata in the chain.

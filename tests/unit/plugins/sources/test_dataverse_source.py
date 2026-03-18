@@ -86,6 +86,7 @@ def _make_page(
         rows=rows,
         latency_ms=latency_ms,
         headers={"content-type": "application/json"},
+        request_headers={"Authorization": "Bearer fake-token"},
         next_link=next_link,
         paging_cookie=paging_cookie,
         more_records=more_records,
@@ -1227,20 +1228,6 @@ class TestRecordPageCall:
         assert call_kwargs.kwargs["call_type"] == CallType.HTTP
         assert call_kwargs.kwargs["status"] == CallStatus.ERROR
         assert call_kwargs.kwargs["error"]["status_code"] == 500
-
-    def test_record_non_exception_error(self) -> None:
-        """Non-exception error (e.g., SSRF rejection) records correctly."""
-        from elspeth.contracts import CallStatus
-
-        source = self._make_source_with_client()
-        ctx = _mock_source_context()
-
-        source._record_page_call(ctx, url="https://test.com/api", error_reason="ssrf_rejection")
-
-        ctx.record_call.assert_called_once()
-        call_kwargs = ctx.record_call.call_args
-        assert call_kwargs.kwargs["status"] == CallStatus.ERROR
-        assert call_kwargs.kwargs["error"]["message"] == "ssrf_rejection"
 
     def test_no_recording_when_no_args(self) -> None:
         """No record_call when neither page, error, nor error_reason provided."""
