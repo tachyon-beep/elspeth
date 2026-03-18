@@ -268,6 +268,19 @@ allowed_dict_patterns:
 
   # Azure blob storage
   - "src/elspeth/plugins/sources/azure_blob_source.py:AzureBlobSource.__init__:config"
+
+  # Dataverse plugins
+  - "src/elspeth/plugins/sources/dataverse.py:DataverseSource.__init__:config"
+  - "src/elspeth/plugins/sources/dataverse.py:DataverseSource._strip_odata_metadata:row"
+  - "src/elspeth/plugins/sources/dataverse.py:DataverseSource._strip_odata_metadata:return"
+  - "src/elspeth/plugins/sources/dataverse.py:DataverseSource._normalize_row_fields:row"
+  - "src/elspeth/plugins/sources/dataverse.py:DataverseSource._normalize_row_fields:return"
+  - "src/elspeth/plugins/sinks/dataverse.py:DataverseSink.__init__:config"
+  - "src/elspeth/plugins/sinks/dataverse.py:DataverseSink._map_row:row"
+  - "src/elspeth/plugins/sinks/dataverse.py:DataverseSink._map_row:return"
+  - "src/elspeth/plugins/sinks/dataverse.py:DataverseSink.write:rows (list)"
+  - "src/elspeth/plugins/infrastructure/clients/dataverse.py:DataverseClient._execute_request:json_body"
+  - "src/elspeth/plugins/infrastructure/clients/dataverse.py:DataverseClient.upsert:body"
   - "src/elspeth/plugins/sinks/azure_blob_sink.py:AzureBlobSink.__init__:config"
   - "src/elspeth/plugins/sinks/azure_blob_sink.py:AzureBlobSink._serialize_rows:rows (list)"
   - "src/elspeth/plugins/sinks/azure_blob_sink.py:AzureBlobSink._serialize_csv:rows (list)"

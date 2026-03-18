@@ -1,0 +1,965 @@
+"""Tests for DataverseClient — OData v4 REST API client for Microsoft Dataverse.
+
+Covers all spec-required scenarios:
+- DataverseAuthConfig validation (service principal missing fields, managed identity, mutual exclusion)
+- Error classification (status code -> retryable/non-retryable, 401 force-refresh path)
+- Pagination link following (mock responses with @odata.nextLink)
+- @odata.nextLink SSRF validation (reject cross-host nextLink URLs)
+- FetchXML paging cookie injection via ElementTree (cookie with XML metacharacters)
+- Retry-After cap enforcement (value exceeding max -> non-retryable)
+- DataversePageResponse invariants (next_link and paging_cookie mutually exclusive)
+- Domain allowlist validation (valid Dataverse domains, rejected non-Dataverse domains)
+- Empty-page guard (3 consecutive empty pages -> error)
+- JSON parse strict rejection (NaN/Infinity -> DataverseClientError)
+- Redirect rejection (3xx -> non-retryable error)
+"""
+
+from __future__ import annotations
+
+import json
+import urllib.parse
+from types import SimpleNamespace
+from typing import Any
+from unittest.mock import patch
+
+import httpx
+import pytest
+
+from elspeth.plugins.infrastructure.clients.dataverse import (
+    DataverseAuthConfig,
+    DataverseClient,
+    DataverseClientError,
+    DataversePageResponse,
+    _validate_domain_allowlist,
+    validate_additional_domain,
+)
+
+# ---------------------------------------------------------------------------
+# Fixtures & helpers
+# ---------------------------------------------------------------------------
+
+
+class FakeCredential:
+    """Mock azure-identity credential that returns a static token."""
+
+    def get_token(self, *scopes: str) -> SimpleNamespace:
+        return SimpleNamespace(token="fake-token-123")
+
+
+def _make_json_response(
+    body: dict[str, Any] | list[Any],
+    status_code: int = 200,
+    headers: dict[str, str] | None = None,
+) -> httpx.Response:
+    """Build an httpx.Response with JSON body."""
+    resp_headers = {"content-type": "application/json"}
+    if headers:
+        resp_headers.update(headers)
+    return httpx.Response(
+        status_code=status_code,
+        json=body,
+        headers=resp_headers,
+    )
+
+
+def _make_text_response(
+    text: str,
+    status_code: int = 200,
+    headers: dict[str, str] | None = None,
+) -> httpx.Response:
+    """Build an httpx.Response with raw text body."""
+    resp_headers = {"content-type": "application/json"}
+    if headers:
+        resp_headers.update(headers)
+    return httpx.Response(
+        status_code=status_code,
+        text=text,
+        headers=resp_headers,
+    )
+
+
+def _make_empty_response(
+    status_code: int = 204,
+    headers: dict[str, str] | None = None,
+) -> httpx.Response:
+    """Build an httpx.Response with no body (204 No Content style)."""
+    return httpx.Response(
+        status_code=status_code,
+        text="",
+        headers=headers or {},
+    )
+
+
+class MockTransport(httpx.BaseTransport):
+    """httpx mock transport that returns pre-configured responses."""
+
+    def __init__(self, responses: list[httpx.Response] | None = None) -> None:
+        self._responses = list(responses or [])
+        self._call_index = 0
+        self.requests: list[httpx.Request] = []
+
+    def add_response(self, response: httpx.Response) -> None:
+        self._responses.append(response)
+
+    def handle_request(self, request: httpx.Request) -> httpx.Response:
+        self.requests.append(request)
+        if self._call_index >= len(self._responses):
+            raise RuntimeError(
+                f"MockTransport exhausted: got request #{self._call_index + 1} but only {len(self._responses)} responses configured"
+            )
+        response = self._responses[self._call_index]
+        self._call_index += 1
+        return response
+
+
+ENV_URL = "https://myorg.crm.dynamics.com"
+
+
+@pytest.fixture()
+def transport() -> MockTransport:
+    return MockTransport()
+
+
+@pytest.fixture()
+def client(transport: MockTransport) -> DataverseClient:
+    """Create a DataverseClient with mock transport and SSRF validation bypassed."""
+    c = DataverseClient(
+        environment_url=ENV_URL,
+        credential=FakeCredential(),
+    )
+    # Replace the internal httpx.Client with one using our mock transport
+    c._client.close()
+    c._client = httpx.Client(transport=transport, timeout=30.0)
+    return c
+
+
+# ---------------------------------------------------------------------------
+# DataverseAuthConfig validation
+# ---------------------------------------------------------------------------
+
+
+class TestDataverseAuthConfig:
+    """Pydantic model validation for auth configuration."""
+
+    def test_service_principal_valid(self) -> None:
+        config = DataverseAuthConfig(
+            method="service_principal",
+            tenant_id="tid-123",
+            client_id="cid-456",
+            client_secret="secret-789",
+        )
+        assert config.method == "service_principal"
+        assert config.tenant_id == "tid-123"
+
+    def test_service_principal_missing_tenant_id(self) -> None:
+        with pytest.raises(ValueError, match="tenant_id"):
+            DataverseAuthConfig(
+                method="service_principal",
+                client_id="cid-456",
+                client_secret="secret-789",
+            )
+
+    def test_service_principal_missing_client_id(self) -> None:
+        with pytest.raises(ValueError, match="client_id"):
+            DataverseAuthConfig(
+                method="service_principal",
+                tenant_id="tid-123",
+                client_secret="secret-789",
+            )
+
+    def test_service_principal_missing_client_secret(self) -> None:
+        with pytest.raises(ValueError, match="client_secret"):
+            DataverseAuthConfig(
+                method="service_principal",
+                tenant_id="tid-123",
+                client_id="cid-456",
+            )
+
+    def test_service_principal_all_missing(self) -> None:
+        with pytest.raises(ValueError, match=r"tenant_id.*client_id.*client_secret"):
+            DataverseAuthConfig(method="service_principal")
+
+    def test_service_principal_whitespace_only_rejected(self) -> None:
+        """Whitespace-only strings are treated as missing."""
+        with pytest.raises(ValueError, match="tenant_id"):
+            DataverseAuthConfig(
+                method="service_principal",
+                tenant_id="   ",
+                client_id="cid-456",
+                client_secret="secret-789",
+            )
+
+    def test_managed_identity_valid(self) -> None:
+        config = DataverseAuthConfig(method="managed_identity")
+        assert config.method == "managed_identity"
+        # SP fields default to None and are not required
+        assert config.tenant_id is None
+
+    def test_managed_identity_ignores_sp_fields(self) -> None:
+        """managed_identity does not validate SP fields even if provided."""
+        config = DataverseAuthConfig(
+            method="managed_identity",
+            tenant_id="ignored",
+        )
+        assert config.tenant_id == "ignored"
+
+    def test_invalid_method_rejected(self) -> None:
+        with pytest.raises(ValueError):
+            DataverseAuthConfig(method="password")  # type: ignore[arg-type]
+
+    def test_extra_fields_rejected(self) -> None:
+        """extra='forbid' prevents unknown fields."""
+        with pytest.raises(ValueError):
+            DataverseAuthConfig(
+                method="managed_identity",
+                unknown_field="value",  # type: ignore[call-arg]
+            )
+
+
+# ---------------------------------------------------------------------------
+# DataversePageResponse invariants
+# ---------------------------------------------------------------------------
+
+
+class TestDataversePageResponse:
+    """Dataclass invariant validation."""
+
+    def test_next_link_and_paging_cookie_mutually_exclusive(self) -> None:
+        with pytest.raises(ValueError, match="mutually exclusive"):
+            DataversePageResponse(
+                status_code=200,
+                rows=[],
+                latency_ms=10.0,
+                headers={},
+                next_link="https://example.crm.dynamics.com/next",
+                paging_cookie="<cookie/>",
+                more_records=True,
+            )
+
+    def test_next_link_only(self) -> None:
+        page = DataversePageResponse(
+            status_code=200,
+            rows=[{"id": 1}],
+            latency_ms=10.0,
+            headers={},
+            next_link="https://example.crm.dynamics.com/next",
+            paging_cookie=None,
+            more_records=True,
+        )
+        assert page.next_link is not None
+        assert page.paging_cookie is None
+
+    def test_paging_cookie_only(self) -> None:
+        page = DataversePageResponse(
+            status_code=200,
+            rows=[{"id": 1}],
+            latency_ms=10.0,
+            headers={},
+            next_link=None,
+            paging_cookie="<cookie/>",
+            more_records=True,
+        )
+        assert page.paging_cookie is not None
+        assert page.next_link is None
+
+    def test_neither_pagination_marker(self) -> None:
+        page = DataversePageResponse(
+            status_code=200,
+            rows=[{"id": 1}],
+            latency_ms=10.0,
+            headers={},
+            next_link=None,
+            paging_cookie=None,
+            more_records=False,
+        )
+        assert page.more_records is False
+
+
+# ---------------------------------------------------------------------------
+# Domain allowlist validation
+# ---------------------------------------------------------------------------
+
+
+class TestDomainAllowlist:
+    """Domain allowlist pre-filtering for SSRF prevention."""
+
+    @pytest.mark.parametrize(
+        "hostname",
+        [
+            "myorg.crm.dynamics.com",
+            "myorg.crm2.dynamics.com",
+            "myorg.crm9.dynamics.com",
+            "myorg.crm.microsoftdynamics.us",
+            "myorg.crm.appsplatform.us",
+            "myorg.crm.microsoftdynamics.de",
+            "myorg.crm.dynamics.cn",
+        ],
+    )
+    def test_valid_dataverse_domains(self, hostname: str) -> None:
+        assert _validate_domain_allowlist(hostname) is True
+
+    @pytest.mark.parametrize(
+        "hostname",
+        [
+            "evil.com",
+            "crm.dynamics.com.evil.com",
+            "169.254.169.254",
+            "localhost",
+            "myorg.dynamics.com",  # missing crm. prefix
+            "myorg.crm99.dynamics.com",  # not in allowlist
+        ],
+    )
+    def test_rejected_non_dataverse_domains(self, hostname: str) -> None:
+        assert _validate_domain_allowlist(hostname) is False
+
+    def test_additional_domains_appended(self) -> None:
+        hostname = "custom.crm15.dynamics.com"
+        assert _validate_domain_allowlist(hostname) is False
+        assert _validate_domain_allowlist(hostname, additional_domains=("*.crm15.dynamics.com",)) is True
+
+    def test_constructor_rejects_non_dataverse_url(self) -> None:
+        with pytest.raises(DataverseClientError, match="does not match"):
+            DataverseClient(
+                environment_url="https://evil.example.com",
+                credential=FakeCredential(),
+            )
+
+    def test_constructor_rejects_unparseable_url(self) -> None:
+        with pytest.raises(DataverseClientError, match="Cannot extract hostname"):
+            DataverseClient(
+                environment_url="not-a-url",
+                credential=FakeCredential(),
+            )
+
+
+class TestValidateAdditionalDomain:
+    """Safety regex for user-provided additional domain patterns."""
+
+    @pytest.mark.parametrize(
+        "pattern",
+        [
+            "*.crm.dynamics.com",
+            "localhost.dynamics.com",
+            "*.crm.dynamics.cn",
+            "*.crm.microsoftdynamics.us",
+            "*.custom.appsplatform.us",
+            "myorg.crm.microsoftdynamics.de",
+        ],
+    )
+    def test_valid_patterns_accepted(self, pattern: str) -> None:
+        validate_additional_domain(pattern)  # should not raise
+
+    @pytest.mark.parametrize(
+        "pattern",
+        [
+            "*.evil.com",
+            "*.example.org",
+            "*.dynamics.evil.com",
+            "anything",
+            "",
+            "evil.com",
+        ],
+    )
+    def test_invalid_patterns_rejected(self, pattern: str) -> None:
+        """Patterns not targeting a legitimate Microsoft sovereign cloud TLD are rejected."""
+        with pytest.raises(ValueError, match="rejected"):
+            validate_additional_domain(pattern)
+
+
+# ---------------------------------------------------------------------------
+# Error classification
+# ---------------------------------------------------------------------------
+
+
+class TestErrorClassification:
+    """HTTP status code to retryable/non-retryable classification."""
+
+    def test_429_retryable_within_cap(self, client: DataverseClient, transport: MockTransport) -> None:
+        transport.add_response(httpx.Response(status_code=429, headers={"retry-after": "5"}, text=""))
+        with pytest.raises(DataverseClientError) as exc_info:
+            client.get_page(f"{ENV_URL}/api/data/v9.2/accounts")
+        assert exc_info.value.retryable is True
+        assert exc_info.value.status_code == 429
+
+    def test_429_exceeding_cap_non_retryable(self, client: DataverseClient, transport: MockTransport) -> None:
+        transport.add_response(httpx.Response(status_code=429, headers={"retry-after": "300"}, text=""))
+        with pytest.raises(DataverseClientError) as exc_info:
+            client.get_page(f"{ENV_URL}/api/data/v9.2/accounts")
+        assert exc_info.value.retryable is False
+        assert "exceeding cap" in str(exc_info.value)
+
+    def test_429_no_retry_after_header_defaults(self, client: DataverseClient, transport: MockTransport) -> None:
+        transport.add_response(httpx.Response(status_code=429, text=""))
+        with pytest.raises(DataverseClientError) as exc_info:
+            client.get_page(f"{ENV_URL}/api/data/v9.2/accounts")
+        assert exc_info.value.retryable is True
+
+    def test_401_retryable_first_time(self, client: DataverseClient, transport: MockTransport) -> None:
+        transport.add_response(httpx.Response(status_code=401, text=""))
+        with pytest.raises(DataverseClientError) as exc_info:
+            client.get_page(f"{ENV_URL}/api/data/v9.2/accounts")
+        assert exc_info.value.retryable is True
+
+    def test_401_non_retryable_after_auth_retry(self, client: DataverseClient, transport: MockTransport) -> None:
+        client._auth_retried = True
+        transport.add_response(httpx.Response(status_code=401, text=""))
+        with pytest.raises(DataverseClientError) as exc_info:
+            client.get_page(f"{ENV_URL}/api/data/v9.2/accounts")
+        assert exc_info.value.retryable is False
+
+    @pytest.mark.parametrize(
+        ("status_code", "retryable"),
+        [
+            (400, False),
+            (403, False),
+            (404, False),
+            (409, False),
+            (412, False),
+            (500, True),
+            (502, True),
+            (503, True),
+        ],
+    )
+    def test_status_code_classification(
+        self,
+        client: DataverseClient,
+        transport: MockTransport,
+        status_code: int,
+        retryable: bool,
+    ) -> None:
+        transport.add_response(httpx.Response(status_code=status_code, text=""))
+        with pytest.raises(DataverseClientError) as exc_info:
+            client.get_page(f"{ENV_URL}/api/data/v9.2/accounts")
+        assert exc_info.value.retryable is retryable
+        assert exc_info.value.status_code == status_code
+
+
+# ---------------------------------------------------------------------------
+# Redirect rejection
+# ---------------------------------------------------------------------------
+
+
+class TestRedirectRejection:
+    """3xx responses are rejected as non-retryable (SSRF protection)."""
+
+    @pytest.mark.parametrize("status_code", [301, 302, 307, 308])
+    def test_redirect_non_retryable(
+        self,
+        client: DataverseClient,
+        transport: MockTransport,
+        status_code: int,
+    ) -> None:
+        transport.add_response(
+            httpx.Response(
+                status_code=status_code,
+                headers={"location": "https://evil.com/steal"},
+                text="",
+            )
+        )
+        with pytest.raises(DataverseClientError) as exc_info:
+            client.get_page(f"{ENV_URL}/api/data/v9.2/accounts")
+        assert exc_info.value.retryable is False
+        assert exc_info.value.status_code == status_code
+        assert "Redirect" in str(exc_info.value)
+
+
+# ---------------------------------------------------------------------------
+# JSON parse strict rejection
+# ---------------------------------------------------------------------------
+
+
+class TestJsonParseStrictRejection:
+    """NaN/Infinity in JSON responses are rejected at the Tier 3 boundary."""
+
+    def test_nan_in_response_rejected(self, client: DataverseClient, transport: MockTransport) -> None:
+        # Python json.dumps with allow_nan=True produces NaN literal
+        nan_json = json.dumps({"value": [{"x": float("nan")}]}, allow_nan=True)
+        transport.add_response(
+            httpx.Response(
+                status_code=200,
+                text=nan_json,
+                headers={"content-type": "application/json"},
+            )
+        )
+        with pytest.raises(DataverseClientError, match="Invalid JSON"):
+            client.get_page(f"{ENV_URL}/api/data/v9.2/accounts")
+
+    def test_infinity_in_response_rejected(self, client: DataverseClient, transport: MockTransport) -> None:
+        inf_json = json.dumps({"value": [{"x": float("inf")}]}, allow_nan=True)
+        transport.add_response(
+            httpx.Response(
+                status_code=200,
+                text=inf_json,
+                headers={"content-type": "application/json"},
+            )
+        )
+        with pytest.raises(DataverseClientError, match="Invalid JSON"):
+            client.get_page(f"{ENV_URL}/api/data/v9.2/accounts")
+
+    def test_malformed_json_rejected(self, client: DataverseClient, transport: MockTransport) -> None:
+        transport.add_response(
+            httpx.Response(
+                status_code=200,
+                text="{not valid json}",
+                headers={"content-type": "application/json"},
+            )
+        )
+        with pytest.raises(DataverseClientError, match="Invalid JSON"):
+            client.get_page(f"{ENV_URL}/api/data/v9.2/accounts")
+
+
+# ---------------------------------------------------------------------------
+# Successful response parsing
+# ---------------------------------------------------------------------------
+
+
+class TestSuccessfulResponses:
+    """Valid response parsing and structure extraction."""
+
+    def test_odata_value_array_extracted(self, client: DataverseClient, transport: MockTransport) -> None:
+        transport.add_response(_make_json_response({"value": [{"id": 1}, {"id": 2}]}))
+        page = client.get_page(f"{ENV_URL}/api/data/v9.2/accounts")
+        assert len(page.rows) == 2
+        assert page.rows[0] == {"id": 1}
+        assert page.status_code == 200
+
+    def test_single_record_response(self, client: DataverseClient, transport: MockTransport) -> None:
+        """Response without 'value' key is treated as single-record."""
+        transport.add_response(_make_json_response({"id": 42, "name": "test"}))
+        page = client.get_page(f"{ENV_URL}/api/data/v9.2/accounts(42)")
+        assert page.rows == [{"id": 42, "name": "test"}]
+
+    def test_204_no_content(self, client: DataverseClient, transport: MockTransport) -> None:
+        transport.add_response(_make_empty_response(204))
+        page = client.get_page(f"{ENV_URL}/api/data/v9.2/accounts")
+        assert page.rows == []
+        assert page.more_records is False
+
+    def test_non_dict_json_rejected(self, client: DataverseClient, transport: MockTransport) -> None:
+        """A JSON array at top level is rejected (expected object)."""
+        transport.add_response(
+            httpx.Response(
+                status_code=200,
+                text="[1, 2, 3]",
+                headers={"content-type": "application/json"},
+            )
+        )
+        with pytest.raises(DataverseClientError, match="Expected JSON object"):
+            client.get_page(f"{ENV_URL}/api/data/v9.2/accounts")
+
+    def test_value_not_array_rejected(self, client: DataverseClient, transport: MockTransport) -> None:
+        transport.add_response(_make_json_response({"value": "not-a-list"}))
+        with pytest.raises(DataverseClientError, match="Expected 'value' to be an array"):
+            client.get_page(f"{ENV_URL}/api/data/v9.2/accounts")
+
+    def test_next_link_non_string_rejected(self, client: DataverseClient, transport: MockTransport) -> None:
+        transport.add_response(_make_json_response({"value": [], "@odata.nextLink": 12345}))
+        with pytest.raises(DataverseClientError, match=r"@odata.nextLink.*string"):
+            client.get_page(f"{ENV_URL}/api/data/v9.2/accounts")
+
+
+# ---------------------------------------------------------------------------
+# OData pagination
+# ---------------------------------------------------------------------------
+
+
+class TestPaginateOdata:
+    """OData nextLink pagination with SSRF validation."""
+
+    def test_follows_next_link(self, client: DataverseClient, transport: MockTransport) -> None:
+        """Pagination follows nextLink across multiple pages."""
+        next_url = f"{ENV_URL}/api/data/v9.2/accounts?$skiptoken=abc"
+        transport.add_response(
+            _make_json_response(
+                {
+                    "value": [{"id": 1}],
+                    "@odata.nextLink": next_url,
+                }
+            )
+        )
+        transport.add_response(_make_json_response({"value": [{"id": 2}]}))
+
+        with patch("elspeth.plugins.infrastructure.clients.dataverse.validate_url_for_ssrf"):
+            pages = list(client.paginate_odata(f"{ENV_URL}/api/data/v9.2/accounts"))
+
+        assert len(pages) == 2
+        assert pages[0].rows == [{"id": 1}]
+        assert pages[1].rows == [{"id": 2}]
+
+    def test_ssrf_rejection_on_cross_host_next_link(self, client: DataverseClient, transport: MockTransport) -> None:
+        """nextLink pointing to a different host is rejected by domain allowlist."""
+        transport.add_response(
+            _make_json_response(
+                {
+                    "value": [{"id": 1}],
+                    "@odata.nextLink": "https://evil.com/steal-data",
+                }
+            )
+        )
+        with pytest.raises(DataverseClientError, match="rejected by domain allowlist"):
+            # Consume the iterator to trigger the SSRF check
+            list(client.paginate_odata(f"{ENV_URL}/api/data/v9.2/accounts"))
+
+    def test_ssrf_ip_pinning_failure(self, client: DataverseClient, transport: MockTransport) -> None:
+        """nextLink failing IP-pinning validation is rejected."""
+        next_url = f"{ENV_URL}/api/data/v9.2/accounts?$skiptoken=abc"
+        transport.add_response(
+            _make_json_response(
+                {
+                    "value": [{"id": 1}],
+                    "@odata.nextLink": next_url,
+                }
+            )
+        )
+
+        with (
+            patch(
+                "elspeth.plugins.infrastructure.clients.dataverse.validate_url_for_ssrf",
+                side_effect=ValueError("DNS rebinding detected"),
+            ),
+            pytest.raises(DataverseClientError, match="IP-pinning SSRF validation"),
+        ):
+            list(client.paginate_odata(f"{ENV_URL}/api/data/v9.2/accounts"))
+
+    def test_single_page_no_next_link(self, client: DataverseClient, transport: MockTransport) -> None:
+        transport.add_response(_make_json_response({"value": [{"id": 1}]}))
+        pages = list(client.paginate_odata(f"{ENV_URL}/api/data/v9.2/accounts"))
+        assert len(pages) == 1
+
+
+# ---------------------------------------------------------------------------
+# Empty-page guard
+# ---------------------------------------------------------------------------
+
+
+class TestEmptyPageGuard:
+    """3 consecutive empty pages triggers termination."""
+
+    def test_three_consecutive_empty_pages_error(self, client: DataverseClient, transport: MockTransport) -> None:
+        next1 = f"{ENV_URL}/api/data/v9.2/accounts?p=2"
+        next2 = f"{ENV_URL}/api/data/v9.2/accounts?p=3"
+        next3 = f"{ENV_URL}/api/data/v9.2/accounts?p=4"
+        transport.add_response(_make_json_response({"value": [], "@odata.nextLink": next1}))
+        transport.add_response(_make_json_response({"value": [], "@odata.nextLink": next2}))
+        transport.add_response(_make_json_response({"value": [], "@odata.nextLink": next3}))
+
+        with (
+            patch("elspeth.plugins.infrastructure.clients.dataverse.validate_url_for_ssrf"),
+            pytest.raises(DataverseClientError, match="3 consecutive empty pages"),
+        ):
+            list(client.paginate_odata(f"{ENV_URL}/api/data/v9.2/accounts"))
+
+    def test_non_empty_page_resets_counter(self, client: DataverseClient, transport: MockTransport) -> None:
+        """A non-empty page resets the consecutive empty counter."""
+        next1 = f"{ENV_URL}/api/data/v9.2/accounts?p=2"
+        next2 = f"{ENV_URL}/api/data/v9.2/accounts?p=3"
+        # Page 1: empty
+        transport.add_response(_make_json_response({"value": [], "@odata.nextLink": next1}))
+        # Page 2: non-empty (resets counter)
+        transport.add_response(_make_json_response({"value": [{"id": 1}], "@odata.nextLink": next2}))
+        # Page 3: empty but only 1 consecutive, and no next link -> done
+        transport.add_response(_make_json_response({"value": []}))
+
+        with patch("elspeth.plugins.infrastructure.clients.dataverse.validate_url_for_ssrf"):
+            pages = list(client.paginate_odata(f"{ENV_URL}/api/data/v9.2/accounts"))
+
+        assert len(pages) == 3
+
+
+# ---------------------------------------------------------------------------
+# FetchXML pagination with paging cookie injection
+# ---------------------------------------------------------------------------
+
+
+class TestPaginateFetchxml:
+    """FetchXML paging cookie injection via ElementTree."""
+
+    def test_single_page_fetchxml(self, client: DataverseClient, transport: MockTransport) -> None:
+        transport.add_response(
+            _make_json_response(
+                {
+                    "value": [{"id": 1}],
+                    "@Microsoft.Dynamics.CRM.morerecords": False,
+                }
+            )
+        )
+        fetch_xml = '<fetch count="50"><entity name="account"/></fetch>'
+        pages = list(client.paginate_fetchxml("accounts", fetch_xml))
+        assert len(pages) == 1
+
+    def test_paging_cookie_injection(self, client: DataverseClient, transport: MockTransport) -> None:
+        """Paging cookie is injected into FetchXML via ElementTree (not string concat)."""
+        cookie_value = urllib.parse.quote("<cookie page='1'/>")
+        # Page 1
+        transport.add_response(
+            _make_json_response(
+                {
+                    "value": [{"id": 1}],
+                    "@Microsoft.Dynamics.CRM.fetchxmlpagingcookie": cookie_value,
+                    "@Microsoft.Dynamics.CRM.morerecords": True,
+                }
+            )
+        )
+        # Page 2 (last)
+        transport.add_response(
+            _make_json_response(
+                {
+                    "value": [{"id": 2}],
+                    "@Microsoft.Dynamics.CRM.morerecords": False,
+                }
+            )
+        )
+
+        fetch_xml = '<fetch count="50"><entity name="account"/></fetch>'
+        pages = list(client.paginate_fetchxml("accounts", fetch_xml))
+        assert len(pages) == 2
+
+        # Verify second request URL contains fetchXml with paging-cookie attribute
+        second_request = transport.requests[1]
+        url_parts = urllib.parse.urlparse(str(second_request.url))
+        query_params = urllib.parse.parse_qs(url_parts.query)
+        fetch_param = query_params["fetchXml"][0]
+        assert "paging-cookie" in fetch_param
+        assert 'page="2"' in fetch_param
+
+    def test_paging_cookie_with_xml_metacharacters(self, client: DataverseClient, transport: MockTransport) -> None:
+        """Cookie containing XML metacharacters (<>&'") is safely injected via ET."""
+        # Cookie with XML metacharacters that would break string interpolation
+        raw_cookie = '<cookie page="1" attr="a&b<c>d"/>'
+        encoded_cookie = urllib.parse.quote(raw_cookie)
+
+        transport.add_response(
+            _make_json_response(
+                {
+                    "value": [{"id": 1}],
+                    "@Microsoft.Dynamics.CRM.fetchxmlpagingcookie": encoded_cookie,
+                    "@Microsoft.Dynamics.CRM.morerecords": True,
+                }
+            )
+        )
+        transport.add_response(
+            _make_json_response(
+                {
+                    "value": [{"id": 2}],
+                    "@Microsoft.Dynamics.CRM.morerecords": False,
+                }
+            )
+        )
+
+        fetch_xml = '<fetch count="50"><entity name="account"/></fetch>'
+        # This must not raise — ET handles escaping
+        pages = list(client.paginate_fetchxml("accounts", fetch_xml))
+        assert len(pages) == 2
+
+    def test_invalid_fetchxml_root_element(self, client: DataverseClient, transport: MockTransport) -> None:
+        """Non-<fetch> root element is rejected."""
+        cookie_value = urllib.parse.quote("<cookie page='1'/>")
+        transport.add_response(
+            _make_json_response(
+                {
+                    "value": [{"id": 1}],
+                    "@Microsoft.Dynamics.CRM.fetchxmlpagingcookie": cookie_value,
+                    "@Microsoft.Dynamics.CRM.morerecords": True,
+                }
+            )
+        )
+
+        bad_xml = '<query count="50"><entity name="account"/></query>'
+        with pytest.raises(DataverseClientError, match="root element must be <fetch>"):
+            list(client.paginate_fetchxml("accounts", bad_xml))
+
+    def test_malformed_fetchxml_parse_error(self, client: DataverseClient, transport: MockTransport) -> None:
+        """Malformed XML raises DataverseClientError."""
+        cookie_value = urllib.parse.quote("<cookie/>")
+        transport.add_response(
+            _make_json_response(
+                {
+                    "value": [{"id": 1}],
+                    "@Microsoft.Dynamics.CRM.fetchxmlpagingcookie": cookie_value,
+                    "@Microsoft.Dynamics.CRM.morerecords": True,
+                }
+            )
+        )
+
+        bad_xml = "<fetch><unclosed"
+        with pytest.raises(DataverseClientError, match="Failed to parse FetchXML"):
+            list(client.paginate_fetchxml("accounts", bad_xml))
+
+
+# ---------------------------------------------------------------------------
+# Retry-After cap enforcement
+# ---------------------------------------------------------------------------
+
+
+class TestRetryAfterCap:
+    """Retry-After header cap enforcement."""
+
+    def test_retry_after_at_cap_is_retryable(self, client: DataverseClient, transport: MockTransport) -> None:
+        """Retry-After equal to cap is still retryable."""
+        transport.add_response(httpx.Response(status_code=429, headers={"retry-after": "60"}, text=""))
+        with pytest.raises(DataverseClientError) as exc_info:
+            client.get_page(f"{ENV_URL}/api/data/v9.2/accounts")
+        assert exc_info.value.retryable is True
+
+    def test_retry_after_just_above_cap_non_retryable(self, client: DataverseClient, transport: MockTransport) -> None:
+        transport.add_response(httpx.Response(status_code=429, headers={"retry-after": "60.1"}, text=""))
+        with pytest.raises(DataverseClientError) as exc_info:
+            client.get_page(f"{ENV_URL}/api/data/v9.2/accounts")
+        assert exc_info.value.retryable is False
+
+    def test_custom_retry_after_cap(self, transport: MockTransport) -> None:
+        """Custom retry_after_cap is respected."""
+        c = DataverseClient(
+            environment_url=ENV_URL,
+            credential=FakeCredential(),
+            retry_after_cap=10.0,
+        )
+        c._client.close()
+        c._client = httpx.Client(transport=transport, timeout=30.0)
+
+        transport.add_response(httpx.Response(status_code=429, headers={"retry-after": "15"}, text=""))
+        with pytest.raises(DataverseClientError) as exc_info:
+            c.get_page(f"{ENV_URL}/api/data/v9.2/accounts")
+        assert exc_info.value.retryable is False
+
+
+# ---------------------------------------------------------------------------
+# Connection / timeout errors
+# ---------------------------------------------------------------------------
+
+
+class TestConnectionErrors:
+    """Network-level errors are retryable."""
+
+    def test_timeout_is_retryable(self, client: DataverseClient) -> None:
+
+        class TimeoutTransport(httpx.BaseTransport):
+            def handle_request(self, request: httpx.Request) -> httpx.Response:
+                raise httpx.TimeoutException("timed out")
+
+        client._client.close()
+        client._client = httpx.Client(transport=TimeoutTransport(), timeout=30.0)
+
+        with pytest.raises(DataverseClientError) as exc_info:
+            client.get_page(f"{ENV_URL}/api/data/v9.2/accounts")
+        assert exc_info.value.retryable is True
+        assert "timed out" in str(exc_info.value)
+
+    def test_connect_error_is_retryable(self, client: DataverseClient) -> None:
+        class ConnectErrorTransport(httpx.BaseTransport):
+            def handle_request(self, request: httpx.Request) -> httpx.Response:
+                raise httpx.ConnectError("connection refused")
+
+        client._client.close()
+        client._client = httpx.Client(transport=ConnectErrorTransport(), timeout=30.0)
+
+        with pytest.raises(DataverseClientError) as exc_info:
+            client.get_page(f"{ENV_URL}/api/data/v9.2/accounts")
+        assert exc_info.value.retryable is True
+
+
+# ---------------------------------------------------------------------------
+# Upsert (PATCH)
+# ---------------------------------------------------------------------------
+
+
+class TestUpsert:
+    """PATCH upsert operation."""
+
+    def test_upsert_204_no_content(self, client: DataverseClient, transport: MockTransport) -> None:
+        transport.add_response(_make_empty_response(204))
+        page = client.upsert(
+            f"{ENV_URL}/api/data/v9.2/accounts(key=val)",
+            {"name": "test"},
+        )
+        assert page.rows == []
+        assert page.status_code == 204
+
+        # Verify it was a PATCH request
+        assert transport.requests[0].method == "PATCH"
+
+    def test_upsert_with_return_representation(self, client: DataverseClient, transport: MockTransport) -> None:
+        transport.add_response(_make_json_response({"id": 42, "name": "test"}))
+        page = client.upsert(
+            f"{ENV_URL}/api/data/v9.2/accounts(key=val)",
+            {"name": "test"},
+        )
+        assert page.rows == [{"id": 42, "name": "test"}]
+
+
+# ---------------------------------------------------------------------------
+# Auth headers
+# ---------------------------------------------------------------------------
+
+
+class TestAuthHeaders:
+    """Credential token injection into requests."""
+
+    def test_bearer_token_in_headers(self, client: DataverseClient, transport: MockTransport) -> None:
+        transport.add_response(_make_json_response({"value": []}))
+        client.get_page(f"{ENV_URL}/api/data/v9.2/accounts")
+
+        request = transport.requests[0]
+        assert request.headers["authorization"] == "Bearer fake-token-123"
+        assert request.headers["odata-version"] == "4.0"
+
+
+# ---------------------------------------------------------------------------
+# Rate limiter integration
+# ---------------------------------------------------------------------------
+
+
+class TestRateLimiter:
+    """Rate limiter is called before each request."""
+
+    def test_rate_limiter_called(self, transport: MockTransport) -> None:
+        acquire_calls = []
+
+        class FakeLimiter:
+            def acquire(self) -> None:
+                acquire_calls.append(True)
+
+        c = DataverseClient(
+            environment_url=ENV_URL,
+            credential=FakeCredential(),
+            limiter=FakeLimiter(),  # type: ignore[arg-type]
+        )
+        c._client.close()
+        c._client = httpx.Client(transport=transport, timeout=30.0)
+
+        transport.add_response(_make_json_response({"value": []}))
+        c.get_page(f"{ENV_URL}/api/data/v9.2/accounts")
+
+        assert len(acquire_calls) == 1
+
+    def test_no_rate_limiter(self, client: DataverseClient, transport: MockTransport) -> None:
+        """No limiter configured — should not raise."""
+        transport.add_response(_make_json_response({"value": []}))
+        client.get_page(f"{ENV_URL}/api/data/v9.2/accounts")
+        # If we got here, no crash from missing limiter
+
+
+# ---------------------------------------------------------------------------
+# DataverseClientError attributes
+# ---------------------------------------------------------------------------
+
+
+class TestDataverseClientError:
+    """Error object attribute coverage."""
+
+    def test_error_attributes(self) -> None:
+        err = DataverseClientError(
+            "test error",
+            retryable=True,
+            status_code=500,
+            latency_ms=42.5,
+        )
+        assert str(err) == "test error"
+        assert err.retryable is True
+        assert err.status_code == 500
+        assert err.latency_ms == 42.5
+
+    def test_error_defaults(self) -> None:
+        err = DataverseClientError("minimal", retryable=False)
+        assert err.status_code is None
+        assert err.latency_ms is None

@@ -50,12 +50,30 @@ per_file_rules:
   reason: Type discrimination for Azure API response validation
   expires: null
   max_hits: 7
-- pattern: plugins/infrastructure/clients/http.py
+- pattern: plugins/infrastructure/clients/dataverse.py
+  rules:
+  - R1
+  - R5
+  - R6
+  reason: Dataverse OData API responses are external data (Tier 3) — isinstance/type checks for response validation, error classification, and retry-after parsing
+  expires: null
+- pattern: plugins/infrastructure/clients/fingerprinting.py
+  rules:
+  - R1
+  - R6
+  reason: HMAC header fingerprinting — env var access and try/except for fingerprint key availability check
+  expires: null
+- pattern: plugins/infrastructure/clients/json_utils.py
   rules:
   - R5
-  reason: Tier 3 external JSON NaN detection
+  reason: Tier 3 boundary — isinstance checks for recursive NaN/Infinity detection in parsed JSON
   expires: null
-  max_hits: 3
+- pattern: plugins/sinks/dataverse.py
+  rules:
+  - R1
+  - R5
+  reason: Dataverse sink — isinstance check for alternate_key value validation (Tier 2 row data operation wrapping)
+  expires: null
 - pattern: plugins/infrastructure/clients/llm.py
   rules:
   - R5
@@ -122,25 +140,29 @@ allow_hits:
   reason: Rollback protection — catch any rollback failure so secondary exception doesn't bury original diagnostic
   safety: Logs rollback error then re-raises the original exception unchanged
   expires: null
-- key: plugins/infrastructure/clients/http.py:R6:AuditedHTTPClient:_filter_request_headers:fp=24e482e71988b3c5
-  owner: architecture
-  reason: except ValueError on HMAC fingerprinting - external secret may be invalid bytes
-  safety: Falls back to [REDACTED] placeholder instead of crashing on malformed secrets
-  expires: '2026-05-02'
-- key: plugins/infrastructure/clients/http.py:R1:AuditedHTTPClient:_execute_request:fp=4e79314904cf0229
+- key: plugins/infrastructure/clients/http.py:R1:AuditedHTTPClient:_execute_request:fp=1d9351405d977ee4
   owner: architecture
   reason: httpx Client.get() method call - dispatched based on HTTP method
   safety: This is the actual external HTTP call, not a defensive dict access
   expires: '2026-05-02'
-- key: plugins/infrastructure/clients/http.py:R1:AuditedHTTPClient:get_ssrf_safe:fp=0b820be5ecd0b599
+- key: plugins/infrastructure/clients/http.py:R1:AuditedHTTPClient:get_ssrf_safe:fp=e0d73f57c68af01a
   owner: architecture
   reason: httpx Client.get() method call - ephemeral client for TLS/SNI isolation
   safety: This is the actual external HTTP call with IP pinning
   expires: '2026-05-02'
-- key: plugins/infrastructure/clients/http.py:R1:AuditedHTTPClient:_follow_redirects_safe:fp=0295809997e9ae36
+- key: plugins/infrastructure/clients/http.py:R1:AuditedHTTPClient:get_ssrf_safe:fp=74e5b8375db71dfe
+  owner: architecture
+  reason: HTTP response content-type header access at external system boundary
+  safety: Falls back to binary encoding if content-type absent
+  expires: '2026-05-02'
+- key: plugins/infrastructure/clients/http.py:R1:AuditedHTTPClient:_follow_redirects_safe:fp=09bdba46a18ce4a0
   owner: architecture
   reason: httpx Client.get() method call — ephemeral client per redirect hop for TLS isolation
   safety: This is the actual external HTTP call, not a defensive dict access
+- key: plugins/infrastructure/clients/http.py:R1:AuditedHTTPClient:_follow_redirects_safe:fp=69270a7a922c6561
+  owner: architecture
+  reason: HTTP redirect Location header — external system boundary, header may be absent
+  safety: Missing Location header breaks redirect loop naturally
 - key: plugins/sinks/database_sink.py:R1:DatabaseSink:__init__:fp=67d8cd6ce6ab133f
   owner: architecture
   reason: Optional field access at trust boundary
@@ -222,41 +244,26 @@ allow_hits:
   reason: Cleanup/pop with default - key may not exist in race or optional scenarios
   safety: Code reviewed - legitimate pattern
   expires: '2026-05-02'
-- key: plugins/infrastructure/clients/http.py:R1:AuditedHTTPClient:_filter_request_headers:fp=16e39f36db178a15
-  owner: architecture
-  reason: os.environ.get() for optional ELSPETH_ALLOW_RAW_SECRETS override
-  safety: Environment variable access with default - not a dict.get() on data
-  expires: '2026-05-02'
-- key: plugins/infrastructure/clients/http.py:R1:AuditedHTTPClient:_parse_response_body:fp=dbe48f8106742459
+- key: plugins/infrastructure/clients/http.py:R1:AuditedHTTPClient:_parse_response_body:fp=c10e1a372d3013e8
   owner: architecture
   reason: HTTP response content-type header - external system boundary, header may be missing
   safety: Falls back to binary encoding if content-type absent
   expires: '2026-05-02'
-- key: plugins/infrastructure/clients/http.py:R4:AuditedHTTPClient:_record_and_emit:fp=1a0afad77e3812dc
+- key: plugins/infrastructure/clients/http.py:R4:AuditedHTTPClient:_record_and_emit:fp=e80a11000f5c6b3c
   owner: architecture
   reason: Telemetry emission failure - must not crash main request flow
   safety: Logged and continues - telemetry is non-critical to HTTP processing
   expires: '2026-05-06'
-- key: plugins/infrastructure/clients/http.py:R1:AuditedHTTPClient:get_ssrf_safe:fp=3c1d4034d1962f96
-  owner: architecture
-  reason: HTTP response content-type header - external system boundary, header may be missing
-  safety: Falls back to binary encoding if content-type absent
-  expires: '2026-05-02'
-- key: plugins/infrastructure/clients/http.py:R4:AuditedHTTPClient:get_ssrf_safe:fp=412c61367177a4ba
+- key: plugins/infrastructure/clients/http.py:R4:AuditedHTTPClient:get_ssrf_safe:fp=e737a44a219111af
   owner: architecture
   reason: Telemetry emission failure - must not crash main request flow
   safety: Logged and continues - telemetry is non-critical to HTTP processing
   expires: '2026-05-06'
-- key: plugins/infrastructure/clients/http.py:R4:AuditedHTTPClient:get_ssrf_safe:fp=00dcfdf7b9a89863
+- key: plugins/infrastructure/clients/http.py:R4:AuditedHTTPClient:get_ssrf_safe:fp=42e95ca4630f5311
   owner: architecture
   reason: Telemetry emission failure - must not crash main request flow
   safety: Logged and continues - telemetry is non-critical to HTTP processing
   expires: '2026-05-06'
-- key: plugins/infrastructure/clients/http.py:R1:AuditedHTTPClient:_follow_redirects_safe:fp=4bc40163c3a61bea
-  owner: architecture
-  reason: HTTP redirect Location header - external system boundary, header may be absent
-  safety: Missing Location header breaks redirect loop naturally (no redirect target)
-  expires: '2026-05-02'
 - key: plugins/infrastructure/pooling/executor.py:R4:PooledExecutor:_execute_batch_locked:fp=5f6e4b59e528052c
   owner: bugfix
   reason: Worker thread can raise any exception type — must catch broadly to prevent buffer slot leak

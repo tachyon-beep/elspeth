@@ -1,0 +1,385 @@
+"""Dataverse sink plugin for ELSPETH.
+
+Writes rows to Microsoft Dataverse entities via OData v4 REST API.
+Day-one: upsert-only (PATCH with alternate key). Create and update
+modes are deferred per the design spec.
+"""
+
+from __future__ import annotations
+
+import hashlib
+import time
+import urllib.parse
+from types import MappingProxyType
+from typing import TYPE_CHECKING, Any, Literal
+
+import structlog
+from pydantic import BaseModel, Field, field_validator
+
+from elspeth.contracts import CallStatus, CallType, Determinism, PluginSchema
+from elspeth.contracts.contexts import LifecycleContext, SinkContext
+from elspeth.contracts.results import ArtifactDescriptor
+from elspeth.core.canonical import canonical_json
+from elspeth.plugins.infrastructure.base import BaseSink
+from elspeth.plugins.infrastructure.clients.dataverse import (
+    DataverseAuthConfig,
+    DataverseClient,
+    DataverseClientError,
+    validate_additional_domain,
+)
+from elspeth.plugins.infrastructure.clients.fingerprinting import fingerprint_headers
+from elspeth.plugins.infrastructure.config_base import DataPluginConfig
+from elspeth.plugins.infrastructure.schema_factory import create_schema_from_config
+
+if TYPE_CHECKING:
+    pass
+
+logger = structlog.get_logger(__name__)
+
+
+class LookupConfig(BaseModel):
+    """Configuration for a lookup field binding."""
+
+    model_config = {"extra": "forbid", "frozen": True}
+
+    target_entity: str  # Dataverse entity to bind to (e.g., "accounts")
+    target_field: str  # Navigation property name (e.g., "parentcustomerid")
+
+
+class DataverseSinkConfig(DataPluginConfig):
+    """Configuration for Dataverse sink plugin.
+
+    Extends DataPluginConfig which requires schema configuration.
+    """
+
+    environment_url: str = Field(
+        ...,
+        description="Dataverse environment URL (e.g., https://myorg.crm.dynamics.com)",
+    )
+    auth: DataverseAuthConfig = Field(
+        ...,
+        description="Authentication configuration",
+    )
+    api_version: str = Field(
+        default="v9.2",
+        description="Dataverse Web API version",
+    )
+
+    entity: str = Field(
+        ...,
+        description="Target entity logical name",
+    )
+    mode: Literal["upsert"] = Field(
+        default="upsert",
+        description="Write mode (day-one: upsert only)",
+    )
+
+    # Field mapping (mandatory — no passthrough)
+    field_mapping: dict[str, str] = Field(
+        ...,
+        description="Pipeline field → Dataverse column mapping",
+    )
+
+    # Key field (required for upsert)
+    alternate_key: str = Field(
+        ...,
+        description="Business key field for upsert (PATCH with alternate key)",
+    )
+
+    # Lookup field declarations
+    lookups: dict[str, LookupConfig] | None = Field(
+        default=None,
+        description="Lookup field bindings for navigation properties",
+    )
+
+    # Additional SSRF domain patterns
+    additional_domains: list[str] | None = Field(
+        default=None,
+        description="Additional Dataverse domain patterns for SSRF allowlist",
+    )
+
+    @field_validator("environment_url")
+    @classmethod
+    def validate_environment_url_https(cls, v: str) -> str:
+        """HTTPS required — same validator as DataverseSourceConfig."""
+        parsed = urllib.parse.urlparse(v)
+        if parsed.scheme != "https":
+            raise ValueError(
+                f"environment_url must use HTTPS scheme, got {parsed.scheme!r}. "
+                f"Bearer tokens are sent in Authorization headers — HTTP would expose them in transit."
+            )
+        return v
+
+    @field_validator("additional_domains")
+    @classmethod
+    def validate_additional_domains(cls, v: list[str] | None) -> list[str] | None:
+        if v is not None:
+            for pattern in v:
+                validate_additional_domain(pattern)
+        return v
+
+    @field_validator("entity")
+    @classmethod
+    def validate_entity_not_empty(cls, v: str) -> str:
+        if not v or not v.strip():
+            raise ValueError("entity cannot be empty")
+        return v.strip()
+
+    @field_validator("alternate_key")
+    @classmethod
+    def validate_alternate_key_not_empty(cls, v: str) -> str:
+        if not v or not v.strip():
+            raise ValueError("alternate_key cannot be empty")
+        return v.strip()
+
+
+# Rebuild model to resolve forward references
+DataverseSinkConfig.model_rebuild()
+
+
+class DataverseSink(BaseSink):
+    """Write rows to Microsoft Dataverse via OData v4 REST API.
+
+    Day-one supports upsert mode only (PATCH with alternate key).
+    PATCH is naturally idempotent — safe for retryable pipelines
+    and crash recovery re-runs.
+    """
+
+    name = "dataverse"
+    determinism = Determinism.EXTERNAL_CALL
+    idempotent = False  # Conservative: only upsert mode is idempotent
+    supports_resume = False  # Dataverse writes are not locally staged
+
+    def __init__(self, config: dict[str, Any]) -> None:
+        super().__init__(config)
+        cfg = DataverseSinkConfig.from_dict(config)
+
+        # Store config
+        self._environment_url = cfg.environment_url
+        self._auth_config = cfg.auth
+        self._api_version = cfg.api_version
+        self._entity = cfg.entity
+        self._mode = cfg.mode
+        self._field_mapping = cfg.field_mapping
+        self._alternate_key = cfg.alternate_key
+        self._lookups = cfg.lookups
+        self._additional_domains = tuple(cfg.additional_domains) if cfg.additional_domains else ()
+
+        # Schema setup — sinks do NOT coerce (Tier 2 data)
+        self._schema_config = cfg.schema_config
+        self._schema_class: type[PluginSchema] = create_schema_from_config(
+            self._schema_config,
+            "DataverseSinkRowSchema",
+            allow_coercion=False,
+        )
+        self.input_schema = self._schema_class
+
+        # Resolve the pipeline field name for the alternate key.
+        # field_mapping is pipeline_field → dataverse_column; we need the reverse.
+        self._alternate_key_pipeline_field: str | None = None
+        for pipeline_field, dataverse_col in self._field_mapping.items():
+            if dataverse_col == self._alternate_key:
+                self._alternate_key_pipeline_field = pipeline_field
+                break
+        if self._alternate_key_pipeline_field is None:
+            raise ValueError(
+                f"alternate_key '{self._alternate_key}' not found in field_mapping values. "
+                f"The alternate_key must be a Dataverse column that appears as a value in field_mapping. "
+                f"Available field_mapping values: {sorted(self._field_mapping.values())}"
+            )
+
+        # Lazy-constructed client (needs lifecycle context)
+        self._client: DataverseClient | None = None
+        self._telemetry_emit: Any = None
+        self._run_id: str | None = None
+
+    def on_start(self, ctx: LifecycleContext) -> None:
+        """Construct credential and DataverseClient."""
+        self._run_id = ctx.run_id
+        self._telemetry_emit = ctx.telemetry_emit
+
+        from azure.identity import ClientSecretCredential, ManagedIdentityCredential
+
+        credential: ClientSecretCredential | ManagedIdentityCredential
+        if self._auth_config.method == "service_principal":
+            assert self._auth_config.tenant_id is not None
+            assert self._auth_config.client_id is not None
+            assert self._auth_config.client_secret is not None
+            credential = ClientSecretCredential(
+                tenant_id=self._auth_config.tenant_id,
+                client_id=self._auth_config.client_id,
+                client_secret=self._auth_config.client_secret,
+            )
+        else:
+            credential = ManagedIdentityCredential()
+
+        # Obtain rate limiter (with null guard)
+        limiter = ctx.rate_limit_registry.get_limiter("dataverse_sink") if ctx.rate_limit_registry is not None else None
+
+        self._client = DataverseClient(
+            environment_url=self._environment_url,
+            credential=credential,
+            api_version=self._api_version,
+            limiter=limiter,
+            additional_domains=self._additional_domains,
+        )
+
+    def _build_upsert_url(self, key_value: str) -> str:
+        """Build PATCH URL for upsert with alternate key.
+
+        URL-encodes the key value to prevent injection via special characters.
+        """
+        encoded_value = urllib.parse.quote(str(key_value), safe="")
+        return f"{self._environment_url.rstrip('/')}/api/data/{self._api_version}/{self._entity}({self._alternate_key}='{encoded_value}')"
+
+    def _map_row(self, row: dict[str, Any]) -> dict[str, Any]:
+        """Apply field mapping and lookup bindings.
+
+        Args:
+            row: Pipeline row with normalized field names
+
+        Returns:
+            Dataverse-ready payload with OData column names and bind syntax
+        """
+        payload: dict[str, Any] = {}
+
+        for pipeline_field, dataverse_column in self._field_mapping.items():
+            if pipeline_field not in row:
+                raise KeyError(
+                    f"Pipeline field '{pipeline_field}' from field_mapping not found in row. "
+                    f"Available fields: {sorted(row.keys())}. "
+                    f"This is a Tier 2 violation — the upstream plugin should have provided this field."
+                )
+
+            value = row[pipeline_field]
+
+            # Check if this field has a lookup binding
+            if self._lookups and pipeline_field in self._lookups:
+                lookup = self._lookups[pipeline_field]
+                if value is not None:
+                    # OData bind syntax: "field@odata.bind": "/entity(guid)"
+                    bind_key = f"{lookup.target_field}@odata.bind"
+                    payload[bind_key] = f"/{lookup.target_entity}({value})"
+                # None value = don't include bind (leaves lookup unset)
+            else:
+                payload[dataverse_column] = value
+
+        return payload
+
+    def write(self, rows: list[dict[str, Any]], ctx: SinkContext) -> ArtifactDescriptor:
+        """Write batch of rows to Dataverse via individual PATCH requests.
+
+        Processes rows serially. On success, returns a single ArtifactDescriptor.
+        On failure, raises on the first failing row (engine retries entire batch,
+        PATCH idempotency makes re-sends safe).
+
+        Args:
+            rows: List of row dicts to upsert
+            ctx: Sink context for audit recording
+
+        Returns:
+            ArtifactDescriptor with batch metadata
+
+        Raises:
+            RuntimeError: If any row fails to upsert
+        """
+        if not rows:
+            return ArtifactDescriptor(
+                artifact_type="webhook",
+                path_or_uri=f"dataverse://{self._entity}@{self._environment_url}",
+                content_hash=hashlib.sha256(b"").hexdigest(),
+                size_bytes=0,
+                metadata=MappingProxyType({"row_count": 0, "entity": self._entity}),
+            )
+
+        # Compute content hash BEFORE writing (proves intent)
+        canonical_payload = canonical_json(rows).encode("utf-8")
+        content_hash = hashlib.sha256(canonical_payload).hexdigest()
+        total_size = len(canonical_payload)
+
+        # Client and key field must be set by on_start/__init__
+        assert self._client is not None, "on_start() must be called before write()"
+        assert self._alternate_key_pipeline_field is not None
+
+        for row in rows:
+            # Validate alternate key value (looked up via pipeline field name)
+            key_value = row.get(self._alternate_key_pipeline_field)
+            if key_value is None or (isinstance(key_value, str) and not key_value.strip()):
+                raise RuntimeError(
+                    f"Row missing or empty alternate_key pipeline field '{self._alternate_key_pipeline_field}' "
+                    f"(Dataverse column: '{self._alternate_key}'). "
+                    f"Cannot construct PATCH URL. Row fields: {sorted(row.keys())}"
+                )
+
+            # Build URL and payload
+            url = self._build_upsert_url(key_value)
+            payload = self._map_row(row)
+
+            # Execute upsert with audit recording
+            start_time = time.perf_counter()
+            try:
+                response = self._client.upsert(url, payload)
+                latency_ms = (time.perf_counter() - start_time) * 1000
+
+                # Record successful write (one audit entry per row)
+                ctx.record_call(
+                    call_type=CallType.HTTP,
+                    status=CallStatus.SUCCESS,
+                    request_data={
+                        "method": "PATCH",
+                        "url": url,
+                        "headers": fingerprint_headers(self._client._get_auth_headers()),
+                        "field_names": sorted(payload.keys()),
+                    },
+                    response_data={
+                        "status_code": response.status_code,
+                    },
+                    latency_ms=latency_ms,
+                    provider="dataverse",
+                )
+            except DataverseClientError as e:
+                latency_ms = (time.perf_counter() - start_time) * 1000
+
+                # Record failed write in audit trail
+                ctx.record_call(
+                    call_type=CallType.HTTP,
+                    status=CallStatus.ERROR,
+                    request_data={
+                        "method": "PATCH",
+                        "url": url,
+                        "field_names": sorted(payload.keys()),
+                    },
+                    error={
+                        "error_type": type(e).__name__,
+                        "message": str(e),
+                        "status_code": e.status_code,
+                        "retryable": e.retryable,
+                    },
+                    latency_ms=latency_ms,
+                    provider="dataverse",
+                )
+                raise RuntimeError(f"Dataverse upsert failed for {self._entity} (key={self._alternate_key}={key_value!r}): {e}") from e
+
+        return ArtifactDescriptor(
+            artifact_type="webhook",
+            path_or_uri=f"dataverse://{self._entity}@{self._environment_url}",
+            content_hash=content_hash,
+            size_bytes=total_size,
+            metadata=MappingProxyType(
+                {
+                    "row_count": len(rows),
+                    "entity": self._entity,
+                    "mode": self._mode,
+                }
+            ),
+        )
+
+    def flush(self) -> None:
+        """No-op — Dataverse writes are immediate, no local staging buffer."""
+        pass
+
+    def close(self) -> None:
+        """Release DataverseClient resources."""
+        if self._client is not None:
+            self._client.close()
+            self._client = None

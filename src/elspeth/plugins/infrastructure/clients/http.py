@@ -7,15 +7,10 @@ to prevent DNS rebinding attacks. See core/security/web.py for details.
 from __future__ import annotations
 
 import base64
-import json
-import math
-import os
-import re
 import time
 from collections.abc import Sequence
 from datetime import UTC, datetime
 from ipaddress import IPv4Network, IPv6Network
-from json import JSONDecodeError
 from typing import TYPE_CHECKING, Any
 
 import httpx
@@ -31,59 +26,18 @@ from elspeth.core.security.web import (
     validate_url_for_ssrf,
 )
 from elspeth.plugins.infrastructure.clients.base import AuditedClientBase, TelemetryEmitCallback
+from elspeth.plugins.infrastructure.clients.fingerprinting import (
+    filter_response_headers as _filter_response_headers,
+)
+from elspeth.plugins.infrastructure.clients.fingerprinting import (
+    fingerprint_headers as _fingerprint_headers,
+)
+from elspeth.plugins.infrastructure.clients.fingerprinting import (
+    is_sensitive_header as _is_sensitive_header_fn,
+)
+from elspeth.plugins.infrastructure.clients.json_utils import parse_json_strict as _parse_json_strict
 
 logger = structlog.get_logger(__name__)
-
-
-def _contains_non_finite(obj: Any) -> bool:
-    """Recursively check if object contains NaN or Infinity float values.
-
-    This is a Tier 3 boundary check: external JSON may contain non-finite values
-    (Python's json module accepts them), but canonicalization rejects them. We
-    detect these at the HTTP boundary to record as parse failure rather than
-    crashing during audit recording.
-
-    Args:
-        obj: Any JSON-parsed value (dict, list, or primitive)
-
-    Returns:
-        True if any float value is NaN or Infinity
-    """
-    if isinstance(obj, float):
-        return math.isnan(obj) or math.isinf(obj)
-    if isinstance(obj, dict):
-        return any(_contains_non_finite(v) for v in obj.values())
-    if isinstance(obj, list):
-        return any(_contains_non_finite(v) for v in obj)
-    return False
-
-
-def _parse_json_strict(text: str) -> tuple[Any, str | None]:
-    """Parse JSON with strict rejection of NaN/Infinity.
-
-    Python's stdlib json module accepts non-finite values by default, but
-    these cannot be canonicalized. This function parses and validates in
-    one step at the Tier 3 boundary.
-
-    Args:
-        text: JSON string to parse
-
-    Returns:
-        Tuple of (parsed_value, error_message)
-        - On success: (parsed_dict_or_list, None)
-        - On failure: (None, error_message)
-    """
-    try:
-        parsed = json.loads(text)
-    except JSONDecodeError as e:
-        return None, str(e)
-
-    # Check for non-finite values that canonicalization would reject
-    if _contains_non_finite(parsed):
-        return None, "JSON contains non-finite values (NaN or Infinity)"
-
-    return parsed, None
-
 
 if TYPE_CHECKING:
     from elspeth.core.landscape.recorder import LandscapeRecorder
@@ -157,141 +111,16 @@ class AuditedHTTPClient(AuditedClientBase):
             follow_redirects=False,
         )
 
-    # Well-known sensitive headers (exact match, case-insensitive).
-    # Checked first for O(1) lookup before falling back to word matching.
-    _SENSITIVE_HEADERS_EXACT = frozenset(
-        {
-            # Request headers
-            "authorization",
-            "proxy-authorization",
-            "cookie",
-            "x-api-key",
-            "api-key",
-            "x-auth-token",
-            "x-access-token",
-            "x-csrf-token",
-            "x-xsrf-token",
-            "ocp-apim-subscription-key",
-            # Response headers
-            "set-cookie",
-            "www-authenticate",
-            "proxy-authenticate",
-        }
-    )
-
-    # Words that indicate sensitive content when they appear as complete
-    # delimiter-separated segments in header names.
-    # e.g. "X-Auth-Token" splits to {"x","auth","token"} → matches "auth","token"
-    # but "X-Author" splits to {"x","author"} → no match (avoids false positives)
-    _SENSITIVE_HEADER_WORDS = frozenset(
-        {
-            "auth",
-            "authkey",
-            "authtoken",
-            "accesstoken",
-            "apikey",
-            "authorization",
-            "key",
-            "secret",
-            "token",
-            "password",
-            "credential",
-        }
-    )
-
+    # Delegate to shared module functions. Instance methods preserved for
+    # call-site compatibility within this class.
     def _is_sensitive_header(self, header_name: str) -> bool:
-        """Check if a header name indicates sensitive content.
-
-        Uses delimiter-separated word matching to avoid false positives from
-        broad substring matching (e.g. "key" in "monkey", "auth" in "author"),
-        while still catching common compact forms like ``apikey`` and
-        ``authkey``.
-
-        Args:
-            header_name: Header name to check
-
-        Returns:
-            True if header likely contains secrets
-        """
-        lower_name = header_name.lower()
-        if lower_name in self._SENSITIVE_HEADERS_EXACT:
-            return True
-        segments = [seg for seg in re.split(r"[^a-z0-9]+", lower_name) if seg]
-        if any(seg in self._SENSITIVE_HEADER_WORDS for seg in segments):
-            return True
-        return lower_name.startswith("x") and lower_name[1:] in self._SENSITIVE_HEADER_WORDS
+        return _is_sensitive_header_fn(header_name)
 
     def _filter_request_headers(self, headers: dict[str, str]) -> dict[str, str]:
-        """Fingerprint sensitive request headers for audit recording.
-
-        Sensitive headers (auth, api keys, tokens) are replaced with HMAC
-        fingerprints so that:
-        1. Raw secrets are NEVER stored in the audit trail
-        2. Different credentials produce different fingerprints
-        3. Replay/verify can distinguish requests by credential identity
-
-        In dev mode (ELSPETH_ALLOW_RAW_SECRETS=true), sensitive headers are
-        removed entirely (no fingerprint key required).
-
-        Args:
-            headers: Full headers dict
-
-        Returns:
-            Headers dict with sensitive values fingerprinted (or removed in dev mode)
-        """
-        from elspeth.core.security import get_fingerprint_key, secret_fingerprint
-
-        # Check if fingerprint key is available
-        allow_raw = os.environ.get("ELSPETH_ALLOW_RAW_SECRETS", "").lower() == "true"
-
-        try:
-            get_fingerprint_key()
-            have_key = True
-        except ValueError:
-            have_key = False
-
-        result: dict[str, str] = {}
-
-        for k, v in headers.items():
-            if self._is_sensitive_header(k):
-                if allow_raw:
-                    # Dev mode: remove header (don't store secrets, don't require key)
-                    pass
-                elif have_key:
-                    # Fingerprint the sensitive value
-                    fp = secret_fingerprint(v)
-                    result[k] = f"<fingerprint:{fp}>"
-                else:
-                    # No key and not dev mode — config error that prevents auditable operation.
-                    # A sensitive header exists but we can't fingerprint it, so we can't
-                    # record a verifiable audit entry. Crash per offensive programming:
-                    # this is a detectable invalid state, not a data quality issue.
-                    raise FrameworkBugError(
-                        f"Sensitive header '{k}' cannot be fingerprinted: "
-                        f"ELSPETH_FINGERPRINT_KEY is not set and ELSPETH_ALLOW_RAW_SECRETS is not 'true'. "
-                        f"Authenticated HTTP calls require a fingerprint key for audit integrity. "
-                        f"Set ELSPETH_FINGERPRINT_KEY or ELSPETH_ALLOW_RAW_SECRETS=true for dev mode."
-                    )
-            else:
-                # Non-sensitive header: include as-is
-                result[k] = v
-
-        return result
+        return _fingerprint_headers(headers)
 
     def _filter_response_headers(self, headers: dict[str, str]) -> dict[str, str]:
-        """Filter out sensitive response headers from audit recording.
-
-        Response headers that may contain secrets (cookies, auth challenges)
-        are not recorded. Uses the same word-boundary matching as request
-        header filtering.
-
-        Args:
-            headers: Full headers dict
-
-        Returns:
-            Headers dict with sensitive headers removed
-        """
-        return {k: v for k, v in headers.items() if not self._is_sensitive_header(k)}
+        return _filter_response_headers(headers)
 
     def _extract_provider(self, url: str) -> str:
         """Extract provider (host) from URL for telemetry.
