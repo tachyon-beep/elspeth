@@ -401,14 +401,13 @@ class DataverseSource(BaseSource):
             error_reason: Additional error context
         """
         if page is not None:
-            assert self._client is not None
             ctx.record_call(
                 call_type=CallType.HTTP,
                 status=CallStatus.SUCCESS,
                 request_data={
                     "method": "GET",
                     "url": url,
-                    "headers": fingerprint_headers(self._client.get_auth_headers()),
+                    "headers": fingerprint_headers(page.request_headers),
                 },
                 response_data={
                     "status_code": page.status_code,
@@ -554,19 +553,49 @@ class DataverseSource(BaseSource):
                     yield SourceRow.valid(validated_row, contract=contract)
 
         except DataverseClientError as e:
-            # Record the error in audit trail
+            # Record the error in audit trail with specific reason.
+            # The error message from DataverseClientError already contains the
+            # detail (rejected hostname, validation layer, empty page count, etc.)
+            # — the reason tag helps auditors filter by error category.
             current_url = self._build_query_url() if self._entity else "(FetchXML)"
+            error_msg = str(e)
+            if "domain allowlist" in error_msg or "SSRF" in error_msg:
+                reason = "ssrf_rejected"
+            elif "consecutive empty pages" in error_msg:
+                reason = "empty_page_guard"
+            elif e.status_code == 401:
+                reason = "auth_failure"
+            else:
+                reason = "pagination_error"
             self._record_page_call(
                 ctx,
                 url=current_url,
                 error=e,
-                error_reason="pagination_error",
+                error_reason=reason,
             )
+            # 401 with retryable=True: reconstruct credential before engine retry
+            if e.status_code == 401 and e.retryable:
+                self._client.reconstruct_credential(self._auth_config)
             raise
 
         # Force-lock contract if no valid rows were yielded across ALL pages
         if not self._first_valid_row_processed and self._contract_builder is not None:
             self.set_schema_contract(self._contract_builder.contract.with_locked())
+
+        # Store counters for on_complete telemetry
+        self._pages_fetched = pages_fetched
+        self._rows_yielded = rows_yielded
+        self._quarantine_count = quarantine_count
+
+    def on_complete(self, ctx: LifecycleContext) -> None:
+        """Source statistics available via stored counters.
+
+        No SourceCompleted telemetry event type exists yet (AzureBlobSource
+        has the same gap). Counters are stored as instance attributes by
+        load() for diagnostic access. When a SourceCompleted event is added
+        to contracts/events.py, emit here via ctx.telemetry_emit.
+        """
+        # Counters stored by load(): _pages_fetched, _rows_yielded, _quarantine_count
 
     def get_field_resolution(self) -> tuple[Mapping[str, str], str | None] | None:
         """Return field normalization mapping for audit trail recovery."""
