@@ -68,12 +68,6 @@ per_file_rules:
   - R5
   reason: Tier 3 boundary — isinstance checks for recursive NaN/Infinity detection in parsed JSON
   expires: null
-- pattern: plugins/sinks/dataverse.py
-  rules:
-  - R1
-  - R5
-  reason: Dataverse sink — isinstance check for alternate_key value validation (Tier 2 row data operation wrapping)
-  expires: null
 - pattern: plugins/infrastructure/clients/llm.py
   rules:
   - R5

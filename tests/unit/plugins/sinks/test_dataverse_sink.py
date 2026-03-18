@@ -518,26 +518,6 @@ class TestWriteLifecycle:
         assert call_kwargs["response_data"]["status_code"] == 204
 
     @patch("elspeth.plugins.sinks.dataverse.create_schema_from_config", return_value=MagicMock())
-    def test_empty_alternate_key_value_raises(self, _mock_schema: MagicMock) -> None:
-        sink = DataverseSink(_config())
-        sink._client = MagicMock()  # won't reach upsert
-
-        ctx = self._make_mock_ctx()
-
-        with pytest.raises(RuntimeError, match="missing or empty alternate_key"):
-            sink.write([{"email": "", "name": "Alice"}], ctx)
-
-    @patch("elspeth.plugins.sinks.dataverse.create_schema_from_config", return_value=MagicMock())
-    def test_none_alternate_key_value_raises(self, _mock_schema: MagicMock) -> None:
-        sink = DataverseSink(_config())
-        sink._client = MagicMock()  # won't reach upsert
-
-        ctx = self._make_mock_ctx()
-
-        with pytest.raises(RuntimeError, match="missing or empty alternate_key"):
-            sink.write([{"email": None, "name": "Alice"}], ctx)
-
-    @patch("elspeth.plugins.sinks.dataverse.create_schema_from_config", return_value=MagicMock())
     def test_flush_is_noop(self, _mock_schema: MagicMock) -> None:
         sink = DataverseSink(_config())
         sink.flush()  # Should not raise

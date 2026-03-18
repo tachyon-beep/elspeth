@@ -244,13 +244,7 @@ class DataverseSink(BaseSink):
         payload: dict[str, Any] = {}
 
         for pipeline_field, dataverse_column in self._field_mapping.items():
-            if pipeline_field not in row:
-                raise KeyError(
-                    f"Pipeline field '{pipeline_field}' from field_mapping not found in row. "
-                    f"Available fields: {sorted(row.keys())}. "
-                    f"This is a Tier 2 violation — the upstream plugin should have provided this field."
-                )
-
+            # Tier 2: schema guarantees field exists. KeyError = upstream bug.
             value = row[pipeline_field]
 
             # Check if this field has a lookup binding
@@ -302,14 +296,10 @@ class DataverseSink(BaseSink):
         assert self._alternate_key_pipeline_field is not None
 
         for row in rows:
-            # Validate alternate key value (looked up via pipeline field name)
-            key_value = row.get(self._alternate_key_pipeline_field)
-            if key_value is None or (isinstance(key_value, str) and not key_value.strip()):
-                raise RuntimeError(
-                    f"Row missing or empty alternate_key pipeline field '{self._alternate_key_pipeline_field}' "
-                    f"(Dataverse column: '{self._alternate_key}'). "
-                    f"Cannot construct PATCH URL. Row fields: {sorted(row.keys())}"
-                )
+            # Tier 2: field_mapping guarantees the field exists and schema
+            # guarantees the value is non-null. Direct access — if absent or
+            # None, that's an upstream bug (KeyError/TypeError is correct).
+            key_value = row[self._alternate_key_pipeline_field]
 
             # Build URL and payload
             url = self._build_upsert_url(key_value)

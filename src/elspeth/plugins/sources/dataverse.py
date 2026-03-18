@@ -388,13 +388,14 @@ class DataverseSource(BaseSource):
             error_reason: Additional error context
         """
         if page is not None:
+            assert self._client is not None
             ctx.record_call(
                 call_type=CallType.HTTP,
                 status=CallStatus.SUCCESS,
                 request_data={
                     "method": "GET",
                     "url": url,
-                    "headers": fingerprint_headers(self._client._get_auth_headers()) if self._client else {},
+                    "headers": fingerprint_headers(self._client._get_auth_headers()),
                 },
                 response_data={
                     "status_code": page.status_code,
