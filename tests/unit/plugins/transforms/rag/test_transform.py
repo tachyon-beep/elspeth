@@ -208,3 +208,10 @@ class TestProcessGuards:
         ctx = _mock_ctx()
         with pytest.raises(RuntimeError, match="before on_start"):
             transform.process(row, ctx)
+
+
+def test_plugin_discoverable():
+    """rag_retrieval is found by the plugin scanner."""
+    from elspeth.plugins.infrastructure.discovery import PLUGIN_SCAN_CONFIG
+
+    assert "transforms/rag" in PLUGIN_SCAN_CONFIG["transforms"]
