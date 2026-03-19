@@ -392,6 +392,11 @@ class TransformErrorReason(TypedDict):
         count: Number of violations (multiple_contract_violations only)
         violations: Per-violation reason entries (multiple_contract_violations only)
 
+    RAG retrieval context:
+        provider: Retrieval provider name (e.g., "azure_search", "chroma")
+        cause: Sub-cause within an error category (e.g., "null_value", "empty_query")
+        pattern: Regex pattern string (for no_regex_match errors)
+
     Rate limiting/timeout context:
         elapsed_seconds: Time elapsed before timeout
         max_seconds: Maximum allowed time
@@ -492,6 +497,11 @@ class TransformErrorReason(TypedDict):
     elapsed_hours: NotRequired[float]  # Batch timeout (hours scale)
     max_wait_hours: NotRequired[float]  # Batch max wait time (hours)
     status_code: NotRequired[int]
+
+    # RAG retrieval context
+    provider: NotRequired[str]  # Retrieval provider name (e.g., "azure_search", "chroma")
+    cause: NotRequired[str]  # Sub-cause within error category (e.g., "null_value", "empty_query")
+    pattern: NotRequired[str]  # Regex pattern string (for no_regex_match errors)
 
     # Content filtering context
     matched_pattern: NotRequired[str]

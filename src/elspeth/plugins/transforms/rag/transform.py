@@ -1,0 +1,293 @@
+"""RAG retrieval transform — enriches rows with context from vector/keyword search.
+
+Lifecycle:
+    __init__: Parse config, build QueryBuilder, initialize accumulators.
+    on_start: Construct provider via PROVIDERS registry factory.
+    process: Build query -> search -> format -> attach to row.
+    on_complete: Emit telemetry with run statistics.
+    close: Release provider and query builder resources.
+"""
+
+from __future__ import annotations
+
+import json
+import math
+from collections.abc import Callable
+from typing import TYPE_CHECKING, Any, cast
+
+import structlog
+
+from elspeth.contracts import Determinism, TransformResult, propagate_contract
+from elspeth.contracts.errors import TransformErrorReason
+from elspeth.contracts.schema_contract import PipelineRow
+from elspeth.plugins.infrastructure.base import BaseTransform
+from elspeth.plugins.infrastructure.clients.retrieval.base import RetrievalError
+from elspeth.plugins.transforms.rag.config import PROVIDERS, RAGRetrievalConfig
+from elspeth.plugins.transforms.rag.formatter import format_context
+from elspeth.plugins.transforms.rag.query import QueryBuilder
+
+if TYPE_CHECKING:
+    from elspeth.contracts.contexts import LifecycleContext, TransformContext
+    from elspeth.plugins.infrastructure.clients.retrieval.base import RetrievalProvider
+
+logger = structlog.get_logger(__name__)
+
+
+def _warn_telemetry_before_start(event: Any) -> None:
+    """Default telemetry callback before on_start() — warns instead of silently dropping."""
+    logger.warning(
+        "telemetry_emit called before on_start() — event dropped",
+        event_type=type(event).__name__,
+    )
+
+
+class RAGRetrievalTransform(BaseTransform):
+    """Enriches rows with retrieval-augmented context from search providers.
+
+    Registered as plugin name="rag_retrieval". Uses synchronous process()
+    since retrieval calls are I/O-bound but single-query-per-row.
+
+    Output fields (prefixed with output_prefix):
+        {prefix}__rag_context: Formatted text from retrieved chunks.
+        {prefix}__rag_score: Best relevance score (float, 0.0-1.0).
+        {prefix}__rag_count: Number of chunks retrieved (int).
+        {prefix}__rag_sources: JSON envelope with source provenance.
+    """
+
+    name = "rag_retrieval"
+    determinism: Determinism = Determinism.EXTERNAL_CALL
+
+    def __init__(self, config: dict[str, Any]) -> None:
+        super().__init__(config)
+
+        self._rag_config = RAGRetrievalConfig(**config)
+        prefix = self._rag_config.output_prefix
+
+        # Output field names
+        self._field_context = f"{prefix}__rag_context"
+        self._field_score = f"{prefix}__rag_score"
+        self._field_count = f"{prefix}__rag_count"
+        self._field_sources = f"{prefix}__rag_sources"
+
+        self.declared_output_fields = frozenset(
+            [
+                self._field_context,
+                self._field_score,
+                self._field_count,
+                self._field_sources,
+            ]
+        )
+
+        # Schemas — RAG adds fields, so output uses observed mode
+        self.input_schema, self.output_schema = self._create_schemas(
+            self._rag_config.schema_config,
+            self.name,
+            adds_fields=True,
+        )
+
+        # Query builder
+        self._query_builder = QueryBuilder(
+            self._rag_config.query_field,
+            query_template=self._rag_config.query_template,
+            query_pattern=self._rag_config.query_pattern,
+        )
+
+        # Welford online accumulators for telemetry
+        self._total_queries = 0
+        self._quarantine_count = 0
+        self._total_chunks = 0
+        self._score_count = 0
+        self._score_mean = 0.0
+        self._score_m2 = 0.0
+
+        # Provider — deferred to on_start()
+        self._provider: RetrievalProvider | None = None
+
+        # Lifecycle dependencies — set in on_start()
+        self._run_id: str = ""
+        self._telemetry_emit: Callable[[Any], None] = _warn_telemetry_before_start
+
+    def on_start(self, ctx: LifecycleContext) -> None:
+        """Capture lifecycle context and construct the search provider."""
+        super().on_start(ctx)
+        self._run_id = ctx.run_id
+        self._telemetry_emit = ctx.telemetry_emit
+
+        # Construct provider from registry
+        provider_name = self._rag_config.provider
+        config_cls, factory = PROVIDERS[provider_name]
+        provider_config = config_cls(**self._rag_config.provider_config)
+
+        self._provider = factory(
+            provider_config,
+            recorder=ctx.landscape,
+            run_id=ctx.run_id,
+            telemetry_emit=ctx.telemetry_emit,
+            limiter=(ctx.rate_limit_registry.get_limiter(provider_name) if ctx.rate_limit_registry is not None else None),
+        )
+
+    def process(self, row: PipelineRow, ctx: TransformContext) -> TransformResult:
+        """Process a single row: build query, search, format, attach."""
+        if not self._on_start_called:
+            raise RuntimeError(
+                f"{self.__class__.__name__}.process() called before on_start(). "
+                f"The orchestrator must call on_start() before processing rows."
+            )
+        if self._provider is None:
+            raise RuntimeError(
+                f"{self.__class__.__name__} provider not initialized. on_start() must construct the provider before process() is called."
+            )
+        if ctx.state_id is None:
+            raise RuntimeError(f"{self.__class__.__name__} requires state_id on TransformContext.")
+
+        token_id = ctx.token.token_id if ctx.token is not None else None
+
+        # 1. Build query from row data
+        query_result = self._query_builder.build(row.to_dict())
+        if query_result.error is not None:
+            self._quarantine_count += 1
+            return TransformResult.error(
+                cast(TransformErrorReason, query_result.error),
+                retryable=False,
+            )
+
+        query = query_result.query
+        assert query is not None  # guaranteed when error is None
+
+        # 2. Search via provider — Tier 3 boundary (external call)
+        self._total_queries += 1
+        try:
+            chunks = self._provider.search(
+                query,
+                self._rag_config.top_k,
+                self._rag_config.min_score,
+                state_id=ctx.state_id,
+                token_id=token_id,
+            )
+        except RetrievalError as e:
+            if e.retryable:
+                raise  # Engine retry handles transient failures
+            self._quarantine_count += 1
+            error_reason: TransformErrorReason = {
+                "reason": "retrieval_failed",
+                "error": str(e),
+                "provider": self._rag_config.provider,
+            }
+            if e.status_code is not None:
+                error_reason["status_code"] = e.status_code
+            return TransformResult.error(error_reason, retryable=False)
+
+        # 3. Handle zero results
+        if not chunks:
+            if self._rag_config.on_no_results == "quarantine":
+                self._quarantine_count += 1
+                return TransformResult.error(
+                    TransformErrorReason(
+                        reason="no_results",
+                        query=query,
+                        provider=self._rag_config.provider,
+                    ),
+                    retryable=False,
+                )
+            # on_no_results == "continue" — empty sentinels
+            output = row.to_dict()
+            output[self._field_context] = ""
+            output[self._field_score] = 0.0
+            output[self._field_count] = 0
+            output[self._field_sources] = json.dumps({"v": 1, "sources": []})
+
+            output_contract = propagate_contract(
+                input_contract=row.contract,
+                output_row=output,
+                transform_adds_fields=True,
+            )
+            return TransformResult.success(
+                PipelineRow(output, output_contract),
+                success_reason={
+                    "action": "rag_retrieval",
+                    "metadata": {"chunk_count": 0, "no_results": True},
+                },
+            )
+
+        # 4. Format context
+        self._total_chunks += len(chunks)
+        best_score = chunks[0].score  # chunks are ordered by descending score
+        self._update_score_stats(best_score)
+
+        formatted = format_context(
+            chunks,
+            format_mode=self._rag_config.context_format,
+            separator=self._rag_config.context_separator,
+            max_length=self._rag_config.max_context_length,
+        )
+
+        # 5. Build sources envelope
+        sources_envelope = {
+            "v": 1,
+            "sources": [
+                {
+                    "source_id": chunk.source_id,
+                    "score": chunk.score,
+                    "metadata": chunk.metadata,
+                }
+                for chunk in chunks
+            ],
+        }
+
+        # 6. Build output row
+        output = row.to_dict()
+        output[self._field_context] = formatted.text
+        output[self._field_score] = best_score
+        output[self._field_count] = len(chunks)
+        output[self._field_sources] = json.dumps(sources_envelope)
+
+        output_contract = propagate_contract(
+            input_contract=row.contract,
+            output_row=output,
+            transform_adds_fields=True,
+        )
+
+        return TransformResult.success(
+            PipelineRow(output, output_contract),
+            success_reason={
+                "action": "rag_retrieval",
+                "metadata": {
+                    "chunk_count": len(chunks),
+                    "best_score": best_score,
+                    "truncated": formatted.truncated,
+                },
+            },
+        )
+
+    def on_complete(self, ctx: LifecycleContext) -> None:
+        """Emit telemetry with run statistics."""
+        score_std = 0.0
+        if self._score_count >= 2:
+            score_std = math.sqrt(self._score_m2 / (self._score_count - 1))
+
+        payload: dict[str, Any] = {
+            "event": "rag_retrieval_complete",
+            "run_id": self._run_id,
+            "provider": self._rag_config.provider,
+            "total_queries": self._total_queries,
+            "total_chunks": self._total_chunks,
+            "quarantine_count": self._quarantine_count,
+            "score_mean": self._score_mean if self._score_count > 0 else None,
+            "score_std": score_std if self._score_count >= 2 else None,
+        }
+        self._telemetry_emit(payload)
+
+    def close(self) -> None:
+        """Release provider and query builder resources."""
+        if self._provider is not None:
+            self._provider.close()
+            self._provider = None
+        self._query_builder.close()
+
+    def _update_score_stats(self, score: float) -> None:
+        """Welford online algorithm for running mean and variance."""
+        self._score_count += 1
+        delta = score - self._score_mean
+        self._score_mean += delta / self._score_count
+        delta2 = score - self._score_mean
+        self._score_m2 += delta * delta2
