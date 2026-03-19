@@ -15,6 +15,7 @@ ELSPETH is built for **high-stakes accountability**. The audit trail must withst
 - "I don't know what happened" is never an acceptable answer for any output
 - The Landscape audit trail is the source of truth, not logs or metrics
 - No inference - if it's not recorded, it didn't happen
+- **Attributability test**: For any output, `explain(recorder, run_id, token_id)` must prove complete lineage back to source
 
 ## Data Manifesto: Three-Tier Trust Model
 
@@ -40,19 +41,7 @@ ELSPETH has three fundamentally different trust tiers with distinct handling rul
 - Transforms/sinks **expect conformance** - if types are wrong, that's an upstream plugin bug
 - **No coercion** at transform/sink level - if a transform receives `"42"` when it expected `int`, that's a bug in the source or upstream transform
 
-**Why:** Plugins have contractual obligations. If a transform's `output_schema` says `int` and it outputs `str`, that's a bug we fix by fixing the plugin, not by coercing downstream.
-
-**Critical nuance:** Type-safe doesn't mean operation-safe:
-
-```python
-# Data is type-valid (int), but operation fails
-row = {"divisor": 0}  # Passed source validation ✓
-result = 100 / row["divisor"]  # 💥 ZeroDivisionError - wrap this!
-
-# Data is type-valid (str), but content is problematic
-row = {"date": "not-a-date"}  # Passed as str ✓
-parsed = datetime.fromisoformat(row["date"])  # 💥 ValueError - wrap this!
-```
+**Why:** Plugins have contractual obligations. If a transform's `output_schema` says `int` and it outputs `str`, that's a bug we fix by fixing the plugin, not by coercing downstream. Note: type-safe doesn't mean operation-safe — `row["divisor"] = 0` is type-valid but will fail on division. Wrap operations on row values.
 
 ### Tier 3: External Data (Source Input) - ZERO TRUST
 
@@ -92,105 +81,15 @@ EXTERNAL DATA              PIPELINE DATA              AUDIT TRAIL
     is allowed                 (values can still fail)
 ```
 
-### External Call Boundaries in Transforms
+### Quick Reference
 
-**CRITICAL:** Trust tiers are about **data flows**, not plugin types. **Any data crossing from an external system is Tier 3**, regardless of which plugin makes the call.
+- **Source**: coerce OK, validate, quarantine failures
+- **Transform (on row data)**: no coercion, wrap operations on values
+- **Transform (on external calls)**: coerce OK — external response is Tier 3
+- **Sink**: no coercion, expect types
+- **Our data (Landscape, checkpoints)**: crash on any anomaly — serialization doesn't change trust tier
 
-Transforms that make external calls (LLM APIs, HTTP requests, database queries) create **mini Tier 3 boundaries** within their implementation:
-
-```python
-def process(self, row: PipelineRow, ctx: PluginContext) -> TransformResult:
-    # row enters as Tier 2 (pipeline data - trust the schema)
-
-    # 1. External call creates Tier 3 boundary — wrap it
-    try:
-        llm_response = self._llm_client.query(prompt)  # EXTERNAL DATA - zero trust
-    except Exception as e:
-        return TransformResult.error({"reason": "llm_call_failed", "error": str(e)}, retryable=True)
-
-    # 2. IMMEDIATELY validate at the boundary — retryable=False (bad data, not transient)
-    try:
-        parsed = json.loads(llm_response.content)
-    except json.JSONDecodeError:
-        return TransformResult.error({"reason": "invalid_json", "raw": llm_response.content[:200]}, retryable=False)
-
-    if not isinstance(parsed, dict):
-        return TransformResult.error({"reason": "invalid_json_type", "expected": "dict", "actual": type(parsed).__name__}, retryable=False)
-
-    # 3. NOW it's our data (Tier 2) — validated, trust it
-    output = {**row.to_dict(), "llm_classification": parsed["category"]}
-    return TransformResult.success(output, success_reason={"action": "llm_classified"})
-```
-
-**The rule: Minimize the distance external data travels before you validate it.**
-
-- ✅ **Validate immediately** - right after the external call returns
-- ✅ **Coerce once** - normalize types at the boundary
-- ✅ **Trust thereafter** - once validated, it's Tier 2 pipeline data
-- ❌ **Don't carry raw external data** - passing `llm_response` to helper methods without validation
-- ❌ **Don't defer validation** - "I'll check it later when I use it"
-- ❌ **Don't validate multiple times** - if it's validated once, trust it
-
-**Common external boundaries in transforms:**
-
-| External Call Type | Tier 3 Boundary | Validation Pattern |
-|-------------------|-----------------|-------------------|
-| LLM API response | Response content | Wrap JSON parse, validate type is dict, check required fields |
-| HTTP API response | Response body | Wrap request, validate status code, parse and validate schema |
-| Database query results | Result rows | Validate row structure, handle missing fields, coerce types |
-| File reads (in transform) | File contents | Same validation as source plugins |
-| Message queue consume | Message payload | Parse format, validate schema, quarantine malformed messages |
-
-### Coercion Rules by Plugin Type
-
-| Plugin Type | Coercion Allowed? | Rationale |
-|-------------|-------------------|-----------|
-| **Source** | ✅ Yes | Normalizes external data at ingestion boundary |
-| **Transform (on row)** | ❌ No | Receives validated data; wrong types = upstream bug |
-| **Transform (on external call)** | ✅ Yes | External response is Tier 3 - validate/coerce immediately |
-| **Sink** | ❌ No | Receives validated data; wrong types = upstream bug |
-
-### Operation Wrapping Rules
-
-| What You're Accessing | Wrap in try/except? | Why |
-|----------------------|---------------------|-----|
-| `self._config.field` | ❌ No | Our code, our config - crash on bug |
-| `self._internal_state` | ❌ No | Our code - crash on bug |
-| `landscape.get_row_state(token_id)` | ❌ No | Our data - crash on corruption |
-| `checkpoint_data["tokens"]` | ❌ No | Our data - we wrote this JSON |
-| `row["field"]` arithmetic/parsing | ✅ Yes | Their data values can fail operations |
-| `external_api.call(row["id"])` | ✅ Yes | External system, anything can happen |
-| `json.loads(external_response)` | ✅ Yes | External data - validate immediately |
-| `validated_dict["field"]` | ❌ No | Already validated at boundary - trust it |
-
-**Rule of thumb:**
-
-- **Reading from Landscape tables?** Crash on any anomaly - it's our data.
-- **Reading checkpoints or deserialized audit JSON?** Crash on any anomaly - it's our data.
-- **Operating on row field values?** Wrap operations, return error result, quarantine row.
-- **Calling external systems?** Wrap call AND validate response immediately at boundary.
-- **Using already-validated external data?** Trust it - no defensive `.get()` needed.
-- **Accessing internal state?** Let it crash - that's a bug to fix.
-
-**Serialization does not change trust tier.** Data we wrote to our own database or checkpoint file is still Tier 1 when we read it back, even though it passes through `json.loads()` or SQLAlchemy deserialization. The trust boundary is about *who authored the data*, not the transport format. Checkpoints, audit records, and Landscape tables are all our data — we defined the schema, we wrote the values, we own the invariants. If a deserialized checkpoint is missing a `"tokens"` key or a `"row_id"` field, that is corruption in our system, not a data quality issue to handle gracefully. Crash immediately.
-
-### Pipeline Templates as Tier 2 Data
-
-Pipeline templates (Jinja2 prompt templates in YAML config) are **Tier 2 — user-provided, validated at load time, trusted during rendering**. This creates two distinct error categories:
-
-| Failure Type | When | Effect | Example |
-|-------------|------|--------|---------|
-| **Structural** (parse) | Init time | Stop run — no row will ever succeed | `{% if unclosed` (syntax error) |
-| **Operational** (render) | Per-row | Quarantine row, continue pipeline | `{{ row.missing_field }}` (undefined variable) |
-
-**Rules:**
-
-- Templates are parsed **once** at plugin construction (`__init__` / `__post_init__`), never re-parsed per-row
-- `TemplateSyntaxError` during parse → `TemplateError` propagates up → run fails at setup
-- `UndefinedError` / `SecurityError` during render → `TemplateError` caught by transform → `TransformResult.error()` → row quarantined
-- Per-query template overrides (multi-query LLM transforms) are pre-compiled in `MultiQueryStrategy.__post_init__`, not deferred to first row
-
-**Why this matters:** A broken template can never produce valid results for any row. Deferring the parse error to render time would misclassify a config error (structural) as a data error (operational), quarantining the first row instead of stopping the run. The operator would see "row 1 failed: template syntax error" instead of "pipeline config is invalid" — wasting their time investigating row data that was never the problem.
+For detailed code examples (external call boundaries, pipeline templates, coercion/wrapping tables), see the `tier-model-deep-dive` skill.
 
 ## Plugin Ownership: System Code, Not User Code
 
@@ -247,138 +146,7 @@ SENSE (Sources) → DECIDE (Transforms/Gates) → ACT (Sinks)
 | **Canonical** | Two-phase deterministic JSON canonicalization for hashing |
 | **Payload Store** | Separates large blobs from audit tables with retention policies |
 | **Configuration** | Dynaconf + Pydantic with multi-source precedence |
-| **Config Contracts** | Settings→Runtime protocol enforcement (see below) |
-
-### Settings→Runtime Configuration Pattern
-
-Configuration uses a two-layer pattern to prevent field orphaning:
-
-```text
-USER YAML → Settings (Pydantic) → Runtime*Config (dataclass) → Engine Components
-             validation            conversion                    runtime behavior
-```
-
-**Why two layers?**
-
-1. **Settings classes** (e.g., `RetrySettings`): Pydantic models for YAML validation
-2. **Runtime*Config classes** (e.g., `RuntimeRetryConfig`): Frozen dataclasses for engine use
-
-The P2-2026-01-21 bug showed the problem: `exponential_base` was added to `RetrySettings` but never mapped to the engine. Users configured it, Pydantic validated it, but it was silently ignored at runtime.
-
-### The solution: Protocol-based verification
-
-```python
-# contracts/config/protocols.py
-@runtime_checkable
-class RuntimeRetryProtocol(Protocol):
-    """What RetryManager EXPECTS from retry config."""
-    @property
-    def max_attempts(self) -> int: ...
-    @property
-    def exponential_base(self) -> float: ...  # mypy catches if missing!
-
-# contracts/config/runtime.py
-@dataclass(frozen=True, slots=True)
-class RuntimeRetryConfig:
-    """Implements RuntimeRetryProtocol."""
-    max_attempts: int
-    exponential_base: float
-    # ... other fields
-
-    @classmethod
-    def from_settings(cls, settings: "RetrySettings") -> "RuntimeRetryConfig":
-        return cls(
-            max_attempts=settings.max_attempts,
-            exponential_base=settings.exponential_base,  # Explicit mapping!
-        )
-
-# engine/retry.py
-class RetryManager:
-    def __init__(self, config: RuntimeRetryProtocol):  # Accepts protocol
-        self._config = config
-```
-
-**Enforcement layers:**
-
-1. **mypy (structural typing)**: Verifies `RuntimeRetryConfig` satisfies `RuntimeRetryProtocol`
-2. **AST checker**: Verifies `from_settings()` uses all Settings fields (run: `.venv/bin/python -m scripts.check_contracts`)
-3. **Alignment tests**: Verifies field mappings are correct and complete
-
-**Key files:**
-
-| File | Purpose |
-| ---- | ------- |
-| `contracts/config/protocols.py` | Protocol definitions (what engine expects) |
-| `contracts/config/runtime.py` | Runtime*Config dataclasses with `from_settings()` |
-| `contracts/config/alignment.py` | Field mapping documentation (`FIELD_MAPPINGS`) |
-| `contracts/config/defaults.py` | Default values (`POLICY_DEFAULTS`, `INTERNAL_DEFAULTS`) |
-| `tests/unit/core/test_config_alignment.py` | Comprehensive alignment verification |
-
-**Adding a new Settings field (checklist):**
-
-1. Add to Settings class in `core/config.py` (Pydantic model)
-2. Add to Runtime*Config in `contracts/config/runtime.py` (dataclass field)
-3. Map in `from_settings()` method (explicit assignment)
-4. If renamed: document in `FIELD_MAPPINGS` in `alignment.py`
-5. If internal-only: document in `INTERNAL_DEFAULTS` in `defaults.py`
-6. Run `.venv/bin/python -m scripts.check_contracts` and `pytest tests/unit/core/test_config_alignment.py`
-
-### Tier Model Enforcement Allowlist
-
-The allowlist for the tier model enforcement tool (`scripts/cicd/enforce_tier_model.py`) lives in `config/cicd/enforce_tier_model/` as a directory of per-module YAML files:
-
-```text
-config/cicd/enforce_tier_model/
-├── _defaults.yaml   # version + defaults (fail_on_stale, fail_on_expired)
-├── cli.yaml         # per-file rules for cli.py, cli_helpers.py
-├── contracts.yaml   # contracts/* entries
-├── core.yaml        # core/* entries
-├── engine.yaml      # engine/* entries
-├── mcp.yaml         # mcp/* entries
-├── plugins.yaml     # plugins/* entries
-├── telemetry.yaml   # telemetry/* entries
-├── testing.yaml     # testing/* entries
-└── tui.yaml         # tui/* entries
-```
-
-**Adding a new allowlist entry:** Determine the top-level module from the finding's file path (e.g., `core/canonical.py` → `core.yaml`) and add the entry to that module's YAML file under `allow_hits:`.
-
-**The script accepts both a directory and a single file** via `--allowlist`. When no path is given, it prefers the directory if it exists, else falls back to the single-file `enforce_tier_model.yaml`.
-
-### Composite Primary Key Pattern: nodes Table
-
-**CRITICAL:** The `nodes` table has a composite primary key `(node_id, run_id)`. This means the same `node_id` can exist in multiple runs when the same pipeline runs multiple times.
-
-**Queries touching `node_states` must use `node_states.run_id` directly:**
-
-```python
-# WRONG - Ambiguous join when node_id is reused across runs
-query = (
-    select(calls_table)
-    .join(node_states_table, calls_table.c.state_id == node_states_table.c.state_id)
-    .join(nodes_table, node_states_table.c.node_id == nodes_table.c.node_id)  # BUG!
-    .where(nodes_table.c.run_id == run_id)
-)
-
-# CORRECT - Use denormalized run_id on node_states
-query = (
-    select(calls_table)
-    .join(node_states_table, calls_table.c.state_id == node_states_table.c.state_id)
-    .where(node_states_table.c.run_id == run_id)  # Direct filter, no ambiguous join
-)
-```
-
-**Why:** The `node_states` table has a denormalized `run_id` column (schema comment: "Added for composite FK"). Use it directly instead of joining through `nodes` table. The join on `node_id` alone would match multiple nodes rows when `node_id` is reused.
-
-**If you MUST access columns from `nodes` table:** Use composite join with BOTH keys:
-
-```python
-.join(
-    nodes_table,
-    (node_states_table.c.node_id == nodes_table.c.node_id) &
-    (node_states_table.c.run_id == nodes_table.c.run_id)
-)
-```
+| **Config Contracts** | Settings→Runtime protocol enforcement (`config-contracts-guide` skill) |
 
 ### DAG Execution Model
 
@@ -388,45 +156,7 @@ Pipelines compile to DAGs. Linear pipelines are degenerate DAGs (single `continu
 - `token_id`: Instance of row in a specific DAG path
 - `parent_token_id`: Lineage for forks and joins
 
-### Schema Contracts (DAG Validation)
-
-Transforms can declare field requirements that are validated at DAG construction:
-
-```yaml
-# Source guarantees these fields in output
-source:
-  plugin: csv
-  options:
-    schema:
-      fields: dynamic
-      guaranteed_fields: [customer_id, amount]
-
-# Transform requires these fields in input
-transforms:
-  - plugin: llm_classifier
-    options:
-      required_input_fields: [customer_id, amount]
-```
-
-The DAG validates that upstream `guaranteed_fields` satisfy downstream `required_input_fields`. For template-based transforms, use `elspeth.core.templates.extract_jinja2_fields()` to discover template dependencies during development.
-
-### Header Normalization and Engine Custody
-
-**Source field names are normalized to valid Python identifiers at the source boundary.** This is non-negotiable — it's not cosmetic cleanup, it's a language boundary requirement.
-
-User-chosen field names must cross multiple language boundaries during pipeline execution: Python attribute access (`row.field`), Jinja2 templates (`{{ row.field }}`), expression parser AST nodes, SQL column names, and JSON keys. Each has different reserved words, quoting rules, and valid character sets. A field named `"Amount (USD)"` or `" Customer ID "` is a syntax error in Jinja2, ambiguous in SQL, and requires bracket access in Python. Normalizing once at the source boundary (Tier 3 → Tier 2 transition) means every downstream consumer gets names that are valid in every context.
-
-**The engine takes custody of the original headers.** The `SchemaContract` preserves `original_name` metadata on every field throughout the pipeline. At the sink boundary, three header modes control output:
-
-| Mode | Output | Use Case |
-|------|--------|----------|
-| `NORMALIZED` | `customer_id` | Default — pipeline working names |
-| `ORIGINAL` | `Customer ID` | Restore what the source provided |
-| `CUSTOM` | Explicit mapping | External system handover with specific naming requirements |
-
-This is a **restoration**, not a transformation — the engine preserved the originals as metadata and gives them back on request. The `CUSTOM` mode deliberately refuses to silently fall back to normalized names for unmapped fields, because wrong column names in an external system handover are worse than a crash.
-
-**Collision detection operates on normalized names.** The transform executor (`engine/executors/transform.py`) centrally enforces field collision detection pre-execution for any transform that declares `declared_output_fields`. This is mandatory and engine-level — plugins don't opt in, they declare their output fields and the engine prevents collisions before the transform runs.
+**Schema contracts, header normalization, aggregation timeouts, and composite PK patterns** are documented in the `engine-patterns-reference` skill.
 
 ### Transform Subtypes
 
@@ -436,20 +166,6 @@ This is a **restoration**, not a transformation — the engine preserved the ori
 | **Gate** | Evaluate row → decide destination(s) via `continue`, `route_to_sink`, or `fork_to_paths` |
 | **Aggregation** | Collect N rows until trigger → emit result (stateful) |
 | **Coalesce** | Merge results from parallel paths |
-
-#### Aggregation Timeout Behavior
-
-Aggregation triggers fire in two ways:
-
-- **Count trigger**: Fires immediately when row count threshold is reached
-- **Timeout trigger**: Checked **before** each row is processed
-
-**Known Limitation (True Idle):** Timeout triggers fire when the next row arrives, not during completely idle periods. If no rows arrive, buffered data won't flush until either:
-
-1. A new row arrives (triggering the timeout check)
-2. The source completes (triggering end-of-source flush)
-
-For streaming sources that may never end, combine timeout with count triggers, or implement periodic heartbeat rows at the source level.
 
 ## Development
 
@@ -500,182 +216,25 @@ elspeth-mcp --database sqlite:///./examples/my_pipeline/runs/audit.db  # Explici
 
 ## Technology Stack
 
-### Core Framework
+Core: Typer (CLI), Textual (TUI), Dynaconf+Pydantic (config), pluggy (plugins), pandas (data), SQLAlchemy Core (DB), Alembic (migrations), tenacity (retries), OpenTelemetry (telemetry). Acceleration: rfc8785, NetworkX, structlog, pyrate-limiter, DeepDiff, Hypothesis. Optional packs: LLM (LiteLLM), Azure, Telemetry (ddtrace), Web (beautifulsoup4), Security (sqlcipher3), MCP. Full tables in `engine-patterns-reference` skill.
 
-| Component | Technology | Rationale |
-| --------- | ---------- | --------- |
-| CLI | Typer | Type-safe, auto-generated help |
-| TUI | Textual | Interactive terminal UI for `explain`, `status` |
-| Configuration | Dynaconf + Pydantic | Multi-source precedence + validation |
-| Plugins | pluggy | Battle-tested (pytest uses it) |
-| Data | pandas | Standard for tabular data |
-| Database | SQLAlchemy Core | Multi-backend without ORM overhead |
-| Migrations | Alembic | Schema versioning |
-| Retries | tenacity | Industry standard backoff |
-| Telemetry | OpenTelemetry (api, sdk, otlp exporter) | Distributed tracing and metrics |
+## Telemetry and Logging
 
-### Acceleration Stack (avoid reinventing)
+**Landscape** is the legal record (persisted forever). **Telemetry** is operational visibility (ephemeral, real-time). **Logging** is last resort (only when audit and telemetry systems are broken).
 
-| Component | Technology | Replaces |
-| --------- | ---------- | -------- |
-| Canonical JSON | `rfc8785` | Hand-rolled serialization (RFC 8785/JCS standard) |
-| DAG Validation | NetworkX | Custom graph algorithms (acyclicity, topo sort) |
-| Logging | structlog | Ad-hoc logging (structured events) |
-| Rate Limiting | pyrate-limiter | Custom leaky buckets |
-| Diffing | DeepDiff | Custom comparison (for verify mode) |
-| Property Testing | Hypothesis | Manual edge-case hunting |
+**Primacy order**: Audit fires first (sync, crash-on-failure), then telemetry (async, best-effort), then logging (only if both are down). No silent failures — every telemetry emission point must send or explicitly acknowledge "nothing to send."
 
-### Optional Plugin Packs
+**Logger is NOT for pipeline activity.** Don't log row-level decisions, transform outcomes, or call results — those duplicate the Landscape. Logger is only for transitory debugging (`slog.debug`), audit system failures, and telemetry system failures.
 
-| Pack | Technology | Use Case |
-| ---- | ---------- | -------- |
-| LLM | LiteLLM | 100+ LLM providers unified |
-| Azure | azure-storage-blob, azure-identity, azure-keyvault-secrets | Azure cloud integration |
-| Telemetry | ddtrace | Datadog APM integration |
-| Web | beautifulsoup4, html2text | Web scraping transforms |
-| Security | sqlcipher3 | Audit database encryption at rest |
-| MCP | mcp | Landscape analysis server protocol |
-
-## Telemetry (Operational Visibility)
-
-Telemetry provides **real-time operational visibility** alongside the Landscape audit trail.
-
-- **Landscape**: Legal record, complete lineage, persisted forever, source of truth
-- **Telemetry**: Operational visibility, real-time streaming, ephemeral, for dashboards/alerting
-
-**No Silent Failures:** Any telemetry emission point MUST either send what it has OR explicitly acknowledge "I have nothing" (with failure reason if applicable). Never silently swallow events or exceptions. This applies to `telemetry_emit` callbacks, `TelemetryManager.emit()`, exporter failures, and disabled states (log once at startup).
-
-**Correlation:** Telemetry events include `run_id` and `token_id`. Use these to cross-reference with `elspeth explain` or the Landscape MCP server.
-
-Full configuration guide (exporters, granularity levels, backpressure): `docs/guides/telemetry.md`.
-
-## Logging Policy
-
-**The Landscape audit system is a must-fire system with absolute primacy.** At every emission point, audit writes first — synchronously, transactionally, crash-on-failure. Only after audit succeeds does telemetry fire (async, best-effort). This ordering is non-negotiable. Logging (`logger`/`structlog`) is the channel of last resort, not a parallel record of pipeline activity.
-
-**Permitted uses of `logger`/`structlog`:**
-
-| Use Case | Example | Why Logging |
-|----------|---------|-------------|
-| **Transitory debugging** | `slog.debug("pool_state", active=3, idle=2)` | Temporary diagnostic, removed before merge or kept at DEBUG level |
-| **Audit system failures** | `logger.error("Landscape write failed", exc_info=True)` | The audit system itself is broken — can't record to it |
-| **Telemetry system failures** | `logger.error("Exporter crashed", exc_info=True)` | Both observability systems are down — logging is the last resort |
-
-**Forbidden uses:**
-
-| Anti-Pattern | Why Wrong | Correct Alternative |
-|-------------|-----------|-------------------|
-| Logging row-level decisions | Duplicates `node_states.success_reason_json` | Enrich `success_reason` metadata |
-| Logging transform outcomes | Duplicates `node_states` status + context | Already in Landscape |
-| Logging call results | Duplicates `calls` table | Already recorded by `record_call()` |
-| Logging for alerting on data patterns | Logs are ephemeral, Landscape is queryable | Query `context_after_json` via MCP |
-| Logging infrastructure lifecycle | Startup/shutdown/config events belong in telemetry | Emit via `_emit_telemetry()` — telemetry exporters route to dashboards |
-
-**The superset rule:** Everything that goes to telemetry should also go to audit, unless it lacks probative value — meaning an auditor subpoenaed to explain a past run's outcomes would never reference it. The key determinant is evidential value, not volume. A high-frequency event that carries probative value (e.g., per-row gate decisions) must be audited regardless of volume. A low-frequency event that lacks probative value (e.g., "cache evicted 3 keys") should not be audited regardless of how easy it would be to include.
-
-**Telemetry-only exemptions** (no audit required):
-
-| Category | Example | Why no probative value |
-|----------|---------|----------------------|
-| **Operational metrics** | Checkpoint size, cache eviction counts, throughput counters | Describe system pressure, not data outcomes — no auditor asks "what was the checkpoint size when row 42 was processed?" |
-| **System health** | Exporter failure counts, journal drop rates, payload store errors | Meta-operational — about the observability infrastructure itself, not the data flowing through the pipeline |
-
-**Must audit** (even if also telemetered):
-
-| Category | Example | Why probative |
-|----------|---------|--------------|
-| **Pipeline decisions** | Row processed, gate routed, transform applied, call made | Directly explains what happened to each row |
-| **Run lifecycle** | Run started/finished, phase transitions | Establishes timeline and system state for the run |
-| **Infrastructure lifecycle** | Plugin initialised, config loaded, provider connected, model selected | Establishes what the system state was when decisions were made — "which model was active?" is a valid audit question |
-
-**The primacy test:** Audit always fires first, synchronously. Telemetry fires second, asynchronously. Logs fire only when the other two can't.
-
-| Question | Channel |
-|----------|---------|
-| Does this have probative value for explaining a past run's outcomes? | **Audit + Telemetry** — audit first (permanent record), then telemetry (real-time view) |
-| Is this useful for operational visibility but not for explaining outcomes? | **Telemetry only** |
-| Is the audit or telemetry system itself broken? | **Logging** (last resort) |
+Full policy (permitted/forbidden uses, superset rule, telemetry-only exemptions, probative value test): see `logging-telemetry-policy` skill. Config guide: `docs/guides/telemetry.md`.
 
 ## Critical Implementation Patterns
 
-### Canonical JSON - Two-Phase with RFC 8785
+Always use `row.to_dict()` for explicit conversion, not `dict(row)`. Every row reaches exactly one terminal state (`COMPLETED`, `ROUTED`, `FORKED`, `CONSUMED_IN_BATCH`, `COALESCED`, `QUARANTINED`, `FAILED`, `EXPANDED`) — no silent drops. `BUFFERED` is non-terminal (becomes `COMPLETED` on flush).
 
-**NaN and Infinity are strictly rejected, not silently converted.** This is defense-in-depth for audit integrity:
+**Never bypass production code paths in tests** — integration tests MUST use `ExecutionGraph.from_plugin_instances()` and `instantiate_plugins_from_config()`.
 
-```python
-import rfc8785
-
-# Two-phase canonicalization
-def canonical_json(obj: Any) -> str:
-    normalized = _normalize_for_canonical(obj)  # Phase 1: pandas/numpy → primitives (ours)
-    return rfc8785.dumps(normalized)            # Phase 2: RFC 8785/JCS standard serialization
-```
-
-- **Phase 1 (our code)**: Normalize pandas/numpy types, reject NaN/Infinity
-- **Phase 2 (`rfc8785`)**: Deterministic JSON per RFC 8785 (JSON Canonicalization Scheme)
-
-Test cases must cover: `numpy.int64`, `numpy.float64`, `pandas.Timestamp`, `NaT`, `NaN`, `Infinity`.
-
-### PipelineRow to Dict Conversion
-
-Always use `row.to_dict()` for explicit conversion, not `dict(row)`. Both work (PipelineRow implements the mapping protocol), but `to_dict()` is the established pattern across all transforms.
-
-### Terminal Row States
-
-Every row reaches exactly one terminal state - no silent drops:
-
-- `COMPLETED` - Reached output sink
-- `ROUTED` - Sent to named sink by gate
-- `FORKED` - Split to multiple paths (parent token)
-- `CONSUMED_IN_BATCH` - Aggregated into batch
-- `COALESCED` - Merged in join
-- `QUARANTINED` - Failed, stored for investigation
-- `FAILED` - Failed, not recoverable
-- `EXPANDED` - Parent token for deaggregation (1→N expansion)
-- `BUFFERED` - Temporarily held in aggregation (non-terminal, becomes COMPLETED on flush)
-
-### Retry Semantics
-
-- `(token_id, node_id, attempt)` is unique in the `node_states` table (also `(token_id, step_index, attempt)`)
-- Each attempt recorded as a separate `node_states` row
-- Backoff metadata captured
-
-### Secret Handling
-
-Never store secrets directly - use HMAC fingerprints for audit:
-
-```python
-fingerprint = hmac.new(fingerprint_key, secret.encode(), hashlib.sha256).hexdigest()
-```
-
-Secrets can be loaded from environment variables (default) or Azure Key Vault via the `secrets:` section in `settings.yaml`:
-
-```yaml
-secrets:
-  source: keyvault
-  vault_url: https://my-vault.vault.azure.net  # Must be literal URL, not env var reference
-  mapping:
-    AZURE_OPENAI_KEY: azure-openai-key
-    ELSPETH_FINGERPRINT_KEY: elspeth-fingerprint-key
-```
-
-`vault_url` must be a literal HTTPS URL because secrets are loaded before environment variable resolution. Secret resolutions are recorded in the `secret_resolutions` Landscape table (vault source, HMAC fingerprint, latency).
-
-### Test Path Integrity
-
-**Never bypass production code paths in tests.** BUG-LINEAGE-01 hid for weeks because tests manually built `ExecutionGraph` objects instead of using `from_plugin_instances()`. Manual construction had the correct mapping; the production path had a different (wrong) one. Tests passed, production was broken.
-
-```python
-# WRONG - bypasses production logic
-graph = ExecutionGraph()
-graph.add_node("source", ...)
-graph._branch_to_coalesce = {"path_a": "merge1"}  # Tests pass, production breaks
-
-# CORRECT - exercises the real code path
-graph = ExecutionGraph.from_plugin_instances(source=source, transforms=transforms, ...)
-```
-
-**Rules:** Integration tests MUST use `ExecutionGraph.from_plugin_instances()` and `instantiate_plugins_from_config()`. Manual construction is acceptable only for unit tests of isolated algorithms (topo sort, cycle detection, visualization).
+For canonical JSON, retry semantics, secret handling, and detailed test path integrity rules, see the `engine-patterns-reference` skill.
 
 ## Configuration Precedence (High to Low)
 
@@ -685,76 +244,9 @@ graph = ExecutionGraph.from_plugin_instances(source=source, transforms=transform
 4. Plugin pack defaults (`packs/llm/defaults.yaml`)
 5. System defaults
 
-## The Attributability Test
-
-For any output, the system must prove complete lineage:
-
-```python
-from elspeth.core.landscape.lineage import explain
-
-lineage = explain(recorder, run_id, token_id=token_id)
-assert lineage is not None
-assert lineage.source_row is not None
-assert len(lineage.node_states) > 0
-```
-
 ## Source Layout
 
-```text
-src/elspeth/
-├── core/
-│   ├── landscape/      # Audit trail storage (recorder, exporter, schema)
-│   ├── checkpoint/     # Crash recovery checkpoints
-│   ├── dag/            # DAG construction, validation, graph models (NetworkX)
-│   ├── rate_limit/     # Rate limiting for external calls
-│   ├── retention/      # Payload purge policies
-│   ├── security/       # Secret fingerprinting via HMAC, URL/IP validation
-│   ├── config.py       # Configuration loading (Dynaconf + Pydantic)
-│   ├── canonical.py    # Deterministic JSON hashing (RFC 8785)
-│   ├── events.py       # Synchronous event bus for CLI observability
-│   ├── expression_parser.py # AST-based expression parsing (no eval)
-│   ├── identifiers.py  # ID generation utilities
-│   ├── logging.py      # Structured logging setup
-│   ├── operations.py   # Operation type definitions
-│   ├── payload_store.py # Content-addressable storage for large blobs
-│   └── templates.py    # Jinja2 field extraction
-├── contracts/          # Type contracts, schemas, protocol definitions, hashing primitives, and phase-typed contexts
-├── engine/
-│   ├── orchestrator/   # Full run lifecycle management (core, aggregation, export, outcomes, validation)
-│   ├── executors/      # Transform, gate, sink, aggregation executors
-│   ├── processor.py    # DAG traversal with work queue
-│   ├── dag_navigator.py # DAG path navigation
-│   ├── coalesce_executor.py # Fork/join barrier with merge policies
-│   ├── batch_adapter.py # Batch windowing logic
-│   ├── retry.py        # Tenacity-based retry with backoff
-│   ├── tokens.py       # Token identity and lineage management
-│   ├── triggers.py     # Aggregation trigger evaluation
-│   ├── clock.py        # Clock abstraction for testing
-│   └── spans.py        # Telemetry span management
-├── plugins/
-│   ├── infrastructure/ # Shared: base classes, protocols, config, clients, batching, pooling
-│   ├── sources/        # CSVSource, JSONSource, NullSource, AzureBlobSource
-│   ├── transforms/     # FieldMapper, Passthrough, Truncate, LLM, Azure safety, etc.
-│   └── sinks/          # CSVSink, JSONSink, DatabaseSink, AzureBlobSink
-├── telemetry/          # OpenTelemetry exporters and instrumentation
-├── testing/            # ChaosLLM, ChaosWeb, ChaosEngine test servers
-│   ├── chaosllm/       # Fake OpenAI/Azure LLM server with error/latency injection
-│   ├── chaosweb/       # Fake web server with failure profiles
-│   ├── chaosengine/    # Engine-level test utilities
-│   └── chaosllm_mcp/   # MCP server for ChaosLLM metrics and control
-├── mcp/                # Landscape MCP analysis server
-│   ├── analyzers/      # Domain-specific analysis tools (contracts, diagnostics, queries, reports)
-│   ├── server.py       # MCP server implementation
-│   └── types.py        # MCP type definitions
-├── tui/                # Terminal UI (Textual) - explain screens and widgets
-│   ├── screens/        # TUI screen implementations
-│   ├── widgets/        # TUI widget components
-│   ├── explain_app.py  # Explain TUI application entry point
-│   └── constants.py    # TUI constants
-├── cli.py              # Typer CLI
-├── cli_helpers.py      # CLI utility functions
-└── cli_formatters.py   # Event formatting for CLI output
-```
+Source code lives in `src/elspeth/` with subsystems: `core/` (landscape, checkpoint, dag, config, canonical), `contracts/`, `engine/` (orchestrator, executors, processor, retry), `plugins/` (infrastructure, sources, transforms, sinks), `telemetry/`, `testing/` (chaosllm, chaosweb, chaosengine), `mcp/`, `tui/`, and CLI entry points. Full tree in `engine-patterns-reference` skill.
 
 ## Layer Dependency Rules
 
@@ -817,64 +309,15 @@ Resolution options in priority order:
 
 ### What's Forbidden (Defensive Programming)
 
-Do not use `.get()`, `getattr()`, `isinstance()`, or silent exception handling to suppress errors from nonexistent attributes, malformed data, or incorrect types. **Access typed dataclass fields directly** (`obj.field`), not defensively (`obj.get("field")`).
+Do not use `.get()`, `getattr()`, `isinstance()`, or silent exception handling to suppress errors from nonexistent attributes, malformed data, or incorrect types. **Access typed dataclass fields directly** (`obj.field`), not defensively (`obj.get("field")`). **`hasattr()` is unconditionally banned** — it swallows all exceptions from `@property` getters, not just missing attributes.
 
-**`hasattr()` is unconditionally banned.** It is not allowlistable in the tier model enforcer. Everything `hasattr` does can be done more safely:
-
-| Instead of `hasattr` | Use | Why |
-|---------------------|-----|-----|
-| `hasattr(obj, "attr")` before access | `try: obj.attr` / `except AttributeError:` | `hasattr` swallows all exceptions from `@property` getters, not just missing attributes |
-| `hasattr(self, "method_" + name)` for dispatch | Explicit allowset (`frozenset`) + `isinstance` | `hasattr` lets you bypass the gate just by defining a method — no review required |
-| `hasattr(e, "field")` on caught exceptions | `isinstance(e, SpecificType)` or direct access | Exception types define their attributes — if the type is in the `except` clause, the attribute exists |
-
-A common anti-pattern: an LLM hallucinates a field name, code fails, and the "fix" is `getattr(obj, "hallucinated_field", None)`. This hides the real bug. Fix the actual cause instead.
-
-Defensive handling IS appropriate at trust boundaries — see the **Coercion Rules** and **Operation Wrapping Rules** tables in the Three-Tier Trust Model section for the complete rules and examples.
+Defensive handling IS appropriate at trust boundaries — see the `tier-model-deep-dive` skill for coercion and operation wrapping rules.
 
 ### What's Encouraged (Offensive Programming)
 
-**Proactively detect invalid states and throw meaningful exceptions.** Don't wait for code to fail with a cryptic `KeyError` or `NoneType` crash three stack frames later. If you can detect that data is corrupt, a precondition is violated, or an invariant is broken — assert it explicitly and fail with a message that tells the operator *exactly what went wrong and why*.
+**Proactively detect invalid states and throw meaningful exceptions.** The goal is not to prevent crashes — it's to make crashes **maximally informative**. Always use `from exc` to preserve exception chains.
 
-**Key principle:** The goal is not to prevent crashes — it's to make crashes **maximally informative**. A bare `KeyError: 'tokens'` tells an operator nothing. An `AuditIntegrityError("Corrupt field resolution JSON for run run-42: failed to parse stored JSON — database corruption (Tier 1 violation)")` tells them exactly what happened, which record is affected, and what trust tier was violated.
-
-**Examples of good offensive programming:**
-
-```python
-# Detect corruption at read time — don't let bad data propagate
-try:
-    data = json.loads(stored_json)
-except json.JSONDecodeError as exc:
-    raise AuditIntegrityError(
-        f"Corrupt JSON for run {run_id}: database corruption (Tier 1 violation). "
-        f"Parse error: {exc}"
-    ) from exc
-
-# Validate write-side invariants at construction — reject garbage before it enters the audit trail
-@dataclass(frozen=True)
-class SecretResolutionInput:
-    fingerprint: str
-    def __post_init__(self) -> None:
-        if len(self.fingerprint) != 64 or not all(c in "0123456789abcdef" for c in self.fingerprint):
-            raise ValueError(f"fingerprint must be 64-char lowercase hex, got {self.fingerprint!r}")
-
-# Use atomic guards to prevent TOCTOU races — detect the anomaly, don't just hope it doesn't happen
-result = conn.execute(
-    update(table).where(table.c.id == id).where(table.c.field.is_(None)).values(field=value)
-)
-if result.rowcount == 0:
-    # Distinguish "not found" from "already set" — different operator actions needed
-    existing = conn.execute(select(table.c.field).where(table.c.id == id)).fetchone()
-    if existing is not None and existing.field is not None:
-        raise AuditIntegrityError(f"Cannot overwrite: field already exists for {id}")
-    raise ValueError(f"Record {id} not found")
-```
-
-**When to add offensive checks:**
-
-- **Tier 1 read paths**: Data from our own database should be exactly what we expect. If it isn't, crash immediately with context — this is corruption or tampering.
-- **Write-side DTOs**: Validate invariants at construction (via `__post_init__`) before data enters the audit trail. Cheaper to reject garbage at the door than to discover it on read.
-- **State transitions**: When a method has preconditions (e.g., "contract must not already exist"), assert them with contextual error messages, not silent no-ops.
-- **Exception chains**: Always use `from exc` to preserve the original exception chain. `from None` destroys diagnostic information.
+For detailed examples (Tier 1 read guards, write-side DTO validation, TOCTOU atomic guards, `hasattr` alternatives), see the `engine-patterns-reference` skill.
 
 ### The Decision Test
 
