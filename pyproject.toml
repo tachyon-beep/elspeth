@@ -114,6 +114,11 @@ web = [
     "beautifulsoup4>=4.12,<5",  # HTML parsing and element stripping
 ]
 
+rag = [
+    # RAG retrieval plugin pack — ChromaDB provider
+    "chromadb>=1.0,<2",
+]
+
 mcp = [
     # MCP server for Landscape analysis
     "mcp>=1.0,<2",  # Model Context Protocol SDK
@@ -175,6 +180,8 @@ all = [
     "langfuse>=3.12,<4",
     # security dependencies
     "sqlcipher3>=0.5.4,<1",
+    # rag dependencies
+    "chromadb>=1.0,<2",
 ]
 
 [project.scripts]
@@ -264,6 +271,7 @@ module = [
     "ddtrace.*",
     "sqlcipher3.*",
     "langfuse.*",
+    "chromadb.*",
 ]
 ignore_missing_imports = true
 
