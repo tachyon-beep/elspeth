@@ -8,6 +8,7 @@ import re
 import urllib.parse
 from typing import TYPE_CHECKING, Any, Literal, Self, cast
 
+import structlog
 from pydantic import BaseModel, field_validator, model_validator
 
 from elspeth.plugins.infrastructure.clients.retrieval.base import RetrievalError
@@ -132,7 +133,16 @@ class AzureSearchProvider:
         token_id: str | None,
     ) -> list[RetrievalChunk]:
         response_data = self._execute_search(query, top_k, state_id=state_id, token_id=token_id)
-        return self._parse_response(response_data, min_score)
+        chunks, skipped_items = self._parse_response(response_data, min_score)
+        # "Record what we didn't get" — skipped items are audit evidence
+        if skipped_items:
+            structlog.get_logger(__name__).debug(
+                "azure_search_skipped_items",
+                state_id=state_id,
+                skipped=skipped_items,
+                skipped_count=len(skipped_items),
+            )
+        return chunks
 
     def _execute_search(
         self,
@@ -210,16 +220,19 @@ class AzureSearchProvider:
 
         return body
 
-    def _parse_response(self, response_data: dict[str, Any], min_score: float) -> list[RetrievalChunk]:
+    def _parse_response(self, response_data: dict[str, Any], min_score: float) -> tuple[list[RetrievalChunk], list[dict[str, Any]]]:
         if "value" not in response_data:
             raise RetrievalError("Azure AI Search response missing 'value' array", retryable=False)
 
         results = response_data["value"]
         chunks: list[RetrievalChunk] = []
+        # Track items skipped at Tier 3 boundary — "record what we didn't get"
+        skipped_items: list[dict[str, Any]] = []
 
         for item in results:
             raw_score = item.get("@search.score")
             if raw_score is None:
+                skipped_items.append({"reason": "missing_score", "id": item.get("id")})
                 continue
 
             normalized_score = self._normalize_score(raw_score)
@@ -228,9 +241,16 @@ class AzureSearchProvider:
 
             content = item.get("content", "")
             if not content:
+                skipped_items.append({"reason": "missing_content", "id": item.get("id")})
                 continue
 
-            source_id = item.get("id", item.get("@search.documentId", "unknown"))
+            source_id = item.get("id") or item.get("@search.documentId")
+            if source_id is None:
+                # No identifier available — skip rather than fabricate "unknown".
+                # "record what we didn't get": absence is captured by the count
+                # gap between results returned and chunks emitted.
+                skipped_items.append({"reason": "missing_id", "keys": list(item.keys())})
+                continue
 
             metadata: dict[str, Any] = {
                 k: str(v) if not isinstance(v, (str, int, float, bool, type(None), list, dict)) else v
@@ -251,7 +271,7 @@ class AzureSearchProvider:
                 raise RetrievalError(f"Provider returned invalid data: {exc}", retryable=False) from exc
 
         chunks.sort(key=lambda c: c.score, reverse=True)
-        return chunks
+        return chunks, skipped_items
 
     def _normalize_score(self, raw_score: float) -> float:
         if not math.isfinite(raw_score):

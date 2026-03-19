@@ -124,9 +124,9 @@ class TestRAGPipelineIntegration:
 
         assert result.status == "success"
         output = result.row.to_dict()
-        assert output["policy__rag_context"] == ""
+        assert output["policy__rag_context"] is None
         assert output["policy__rag_count"] == 0
-        assert output["policy__rag_score"] == 0.0
+        assert output["policy__rag_score"] is None
         assert result.success_reason["metadata"]["no_results"] is True
 
     def test_on_complete_with_zero_rows(self):

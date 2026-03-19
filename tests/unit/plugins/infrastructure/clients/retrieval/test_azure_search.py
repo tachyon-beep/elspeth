@@ -280,26 +280,34 @@ class TestParseResponse:
     def test_skips_items_without_score(self):
         provider = self._make_provider()
         response = {"value": [{"content": "text", "id": "doc1"}]}
-        chunks = provider._parse_response(response, min_score=0.0)
+        chunks, skipped = provider._parse_response(response, min_score=0.0)
         assert chunks == []
+        assert len(skipped) == 1
+        assert skipped[0]["reason"] == "missing_score"
 
     def test_skips_items_without_content(self):
         provider = self._make_provider()
         response = {"value": [{"@search.score": 5.0, "id": "doc1"}]}
-        chunks = provider._parse_response(response, min_score=0.0)
+        chunks, skipped = provider._parse_response(response, min_score=0.0)
         assert chunks == []
+        assert len(skipped) == 1
+        assert skipped[0]["reason"] == "missing_content"
 
-    def test_source_id_fallback_chain(self):
+    def test_skips_items_without_id(self):
+        """Items with no id are skipped — no fabricated "unknown" source_id."""
         provider = self._make_provider()
         response = {
             "value": [
                 {"@search.score": 5.0, "content": "text", "id": "doc1"},
                 {"@search.score": 5.0, "content": "text", "@search.documentId": "doc2"},
-                {"@search.score": 5.0, "content": "text"},
+                {"@search.score": 5.0, "content": "text"},  # no id at all
             ]
         }
-        chunks = provider._parse_response(response, min_score=0.0)
-        assert chunks[0].source_id in ("doc1", "doc2", "unknown")
+        chunks, skipped = provider._parse_response(response, min_score=0.0)
+        assert len(chunks) == 2
+        assert {c.source_id for c in chunks} == {"doc1", "doc2"}
+        assert len(skipped) == 1
+        assert skipped[0]["reason"] == "missing_id"
 
     def test_results_sorted_by_descending_score(self):
         provider = self._make_provider()
@@ -310,5 +318,5 @@ class TestParseResponse:
                 {"@search.score": 10.0, "content": "mid", "id": "d3"},
             ]
         }
-        chunks = provider._parse_response(response, min_score=0.0)
+        chunks, _ = provider._parse_response(response, min_score=0.0)
         assert chunks[0].score >= chunks[1].score >= chunks[2].score

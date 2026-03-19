@@ -140,7 +140,11 @@ class RAGRetrievalTransform(BaseTransform):
         if ctx.state_id is None:
             raise RuntimeError(f"{self.__class__.__name__} requires state_id on TransformContext.")
 
-        token_id = ctx.token.token_id if ctx.token is not None else None
+        # Orchestrator always provides token — None is a calling-code bug.
+        # Consistent with the state_id guard above.
+        if ctx.token is None:
+            raise RuntimeError(f"{self.__class__.__name__} requires token on TransformContext.")
+        token_id = ctx.token.token_id
 
         # 1. Build query from row data
         query_result = self._query_builder.build(row.to_dict())
@@ -171,6 +175,7 @@ class RAGRetrievalTransform(BaseTransform):
             error_reason: TransformErrorReason = {
                 "reason": "retrieval_failed",
                 "error": str(e),
+                "cause": f"{type(e).__name__}: {e.__cause__}" if e.__cause__ else str(e),
                 "provider": self._rag_config.provider,
             }
             if e.status_code is not None:
@@ -189,10 +194,12 @@ class RAGRetrievalTransform(BaseTransform):
                     ),
                     retryable=False,
                 )
-            # on_no_results == "continue" — empty sentinels
+            # on_no_results == "continue" — None sentinels preserve semantic
+            # distinction: None means "no retrieval happened", 0.0/"" would
+            # fabricate a result indistinguishable from "zero relevance".
             output = row.to_dict()
-            output[self._field_context] = ""
-            output[self._field_score] = 0.0
+            output[self._field_context] = None
+            output[self._field_score] = None
             output[self._field_count] = 0
             output[self._field_sources] = json.dumps({"v": 1, "sources": []})
 
@@ -279,9 +286,12 @@ class RAGRetrievalTransform(BaseTransform):
 
     def close(self) -> None:
         """Release provider and query builder resources."""
+        # Provider may be None if close() is called before on_start() —
+        # this is a valid lifecycle path (e.g., config validation failure
+        # before the pipeline starts). But if on_start() was called, the
+        # provider must exist — that's guaranteed by on_start's construction.
         if self._provider is not None:
             self._provider.close()
-            self._provider = None
         self._query_builder.close()
 
     def _update_score_stats(self, score: float) -> None:

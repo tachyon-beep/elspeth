@@ -312,14 +312,20 @@ class DataverseSource(BaseSource):
                     retryable=False,
                     status_code=404,
                 ) from e
-            # Other errors (403, network) are non-fatal — entity may exist
-            # but metadata access is restricted. Log and continue.
-            logger.warning(
-                "entity_metadata_check_failed",
-                entity=self._entity,
-                error=str(e),
-                status_code=e.status_code,
-            )
+            if e.status_code == 403:
+                # 403 is non-fatal — entity may exist but metadata access
+                # is restricted. Log and continue.
+                logger.warning(
+                    "entity_metadata_check_forbidden",
+                    entity=self._entity,
+                    error=str(e),
+                    status_code=403,
+                )
+            else:
+                # 5xx, network errors, etc. — re-raise. Silently continuing
+                # after a server error means the pipeline proceeds with
+                # potentially invalid entity config.
+                raise
 
     def _build_query_url(self) -> str:
         """Build the initial OData query URL for structured queries."""

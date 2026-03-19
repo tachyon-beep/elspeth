@@ -147,9 +147,9 @@ class TestProcessFlow:
 
         assert result.status == "success"
         output = result.row.to_dict()
-        assert output["policy__rag_context"] == ""
+        assert output["policy__rag_context"] is None
         assert output["policy__rag_count"] == 0
-        assert output["policy__rag_score"] == 0.0
+        assert output["policy__rag_score"] is None
 
     def test_retryable_error_propagates(self):
         transform, mock_provider = self._setup_transform_with_mock_provider()

@@ -1,3 +1,33 @@
+## Mandatory Coding Standards — Load Before Writing Code
+
+**CRITICAL:** The following skills contain ELSPETH's core coding standards. You MUST invoke these skills (via the Skill tool) before performing any of the activities listed below. CLAUDE.md contains summary rules, but the skills contain the detailed code examples, decision tables, and boundary rules that prevent violations.
+
+### Required Skills
+
+| Skill | Contains |
+|-------|----------|
+| `engine-patterns-reference` | Composite PKs, schema contracts, header normalization, canonical JSON, retry semantics, secret handling, test path integrity, offensive programming examples, `hasattr` ban |
+| `tier-model-deep-dive` | External call boundaries in transforms, coercion rules by plugin type, operation wrapping rules, serialization trust preservation, pipeline template error categories |
+| `logging-telemetry-policy` | Audit primacy, permitted/forbidden logger uses, superset rule, telemetry-only exemptions, the primacy test |
+| `config-contracts-guide` | Settings→Runtime mapping, protocol-based verification, `from_settings()` pattern, adding new Settings fields, tier model enforcement allowlist |
+
+### When to Load
+
+Load **all four skills** before:
+
+- **Brainstorming or designing** — design decisions must account for trust boundaries, tier classification, and audit requirements
+- **Creating a plan** — plans must specify tier handling, logging policy, and config contract steps for implementers
+- **Writing or implementing code** — code must follow tier model, defensive/offensive rules, logging policy, and config contracts
+- **Debugging** — root cause analysis must consider tier violations, logging policy violations, and config contract gaps as potential causes
+- **Reviewing code** — reviews must check compliance with all four standards
+- **Writing tests** — tests must not bypass production code paths (test path integrity)
+
+### Why This Exists
+
+These standards interact in non-obvious ways. The tier model's fabrication rule (`None` → `0` is forbidden) is easy to miss without the detailed examples. The logging policy's "never log row-level decisions" contradicts common instinct. The config contracts pattern requires specific file changes that aren't discoverable from CLAUDE.md alone. Loading the skills ensures the detailed rules — not just the summaries — are in context when decisions are made.
+
+---
+
 <!-- filigree:instructions:v1.5.1:63b4188e -->
 ## Filigree Issue Tracker
 
@@ -132,3 +162,51 @@ context needed to pick up where the previous session left off.
 - P3: Low
 - P4: Backlog
 <!-- /filigree:instructions -->
+
+### How We Use Filigree
+
+Filigree is the single source of truth for all work tracking in ELSPETH. The project hierarchy follows a consistent pattern: **milestones** (delivery themes like "Core Platform Maturation") contain **phases** (workstreams like "Architecture Refactoring"), which contain the actual work items — **epics**, **features**, **tasks**, and **bugs**. Releases (RC 3.4, RC 4) exist alongside this hierarchy to track what ships when. We use the MCP tools (`mcp__filigree__*`) for all issue operations when available, falling back to the CLI only when MCP is down.
+
+Issues should be created at the right granularity from the start, but **retyping is encouraged** when the scope becomes clearer — a task that grows into multi-session work should be promoted to a feature or epic with child tasks, and an epic that turns out to be a single grind session should be demoted to a task. To retype, create a new issue with the correct type (transferring description, labels, parent, and dependencies), then close the old one with a reason linking to the replacement. Filigree's `update_issue` doesn't support changing types directly, so this create-and-close pattern is the standard approach.
+
+### Issue Type Usage
+
+Filigree has types across three packs — use the right type for the right granularity:
+
+| Type | When to use | Granularity test |
+| ---- | ----------- | ---------------- |
+| **milestone** | Top-level delivery theme | "What are we shipping this quarter?" |
+| **phase** | Logical workstream within a milestone | "What area of the codebase does this touch?" |
+| **epic** | Large body of work needing decomposition | "Does this need multiple features or tasks to complete?" |
+| **feature** | User-facing capability with design decisions | "Does this need a user story, acceptance criteria, or design notes?" |
+| **task** | Atomic unit of work one person can do in one sitting | "Can I start and finish this without needing to decompose further?" |
+| **bug** | Defective behavior in existing code | "Is something broken, or is this a design evaluation?" |
+
+**If a task has 3+ distinct deliverables or an unresolved design decision, promote it** to a feature or epic and create child tasks. XL-effort single tasks are untrackable — you can't mark them 50% done.
+
+**If an epic has no children and the work is a single grind session, demote it** to a task. Epics without decomposition are just tasks with delusions of grandeur.
+
+**Design evaluations are tasks, not bugs.** "Evaluate whether X should be eliminated" is a task. "X crashes when Y" is a bug.
+
+### Issue Naming Conventions
+
+**Title structure by type:**
+
+| Type | Pattern | Example |
+| ---- | ------- | ------- |
+| **milestone** | Noun phrase (theme) | "Core Platform Maturation" |
+| **phase** | Noun phrase (workstream) | "Architecture Refactoring" |
+| **epic** | `Topic — scope summary` | "Landscape repository maturation — table-scoped access, CQRS split, unit-of-work" |
+| **feature** | `Capability — what it enables` | "Server mode — persistent API service with REST + WebSocket" |
+| **bug** | `Symptom — observable consequence` | "Coalesce timeouts only fire on next token arrival — no true idle flush" |
+| **task** | `Action phrase — scope boundary` | "Unify reorder buffer implementations — single RowReorderBuffer for batching and pooling" |
+
+**Rules:**
+
+1. **No internal tracking prefixes** — no `T20:`, `#7`, `C1:`, `M1:`, `H2:`, or similar sweep/scan-group identifiers
+2. **No stale metrics in titles** — no line counts, entry counts, or other numbers that will drift. Put these in descriptions
+3. **No process artifacts** — no "from 7-agent deep-dive", "from PR review". The provenance belongs in the description or a label
+4. **No product prefixes** — no `ELSPETH-NEXT:`, `Use case:`
+5. **Bugs describe the problem, not the fix** — lead with the observable symptom, not the action to take
+6. **Em-dash separator** (`—`) between short name and expanded detail
+7. **Sentence case, no trailing period**

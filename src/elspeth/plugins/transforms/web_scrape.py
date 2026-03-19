@@ -17,7 +17,7 @@ Audit Trail:
 
 import ipaddress
 from ipaddress import IPv4Network, IPv6Network
-from typing import Any, Literal, cast
+from typing import Any, Literal
 
 import httpx
 from pydantic import BaseModel, Field, field_validator, model_validator
@@ -229,7 +229,10 @@ class WebScrapeTransform(BaseTransform):
                 ipaddress.ip_network("::/0"),
             )
         else:
-            self._allowed_ranges = _parse_allowed_ranges(cast(list[str], allowed_hosts))
+            assert isinstance(allowed_hosts, list), (
+                f"Pydantic validator bug: allowed_hosts should be list[str], got {type(allowed_hosts).__name__}"
+            )
+            self._allowed_ranges = _parse_allowed_ranges(allowed_hosts)
 
         # Element stripping
         self._strip_elements = cfg.strip_elements
