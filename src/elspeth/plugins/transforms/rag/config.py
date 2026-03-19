@@ -17,8 +17,8 @@ if TYPE_CHECKING:
 
 ProviderFactory = Callable[..., "RetrievalProvider"]
 
-# Registry entry: (config class, provider class)
-_ProviderEntry = tuple[type[Any], type[Any]]
+# Registry entry: (config class, provider class or factory callable)
+_ProviderEntry = tuple[type[Any], Callable[..., Any]]
 
 
 def _get_providers() -> dict[str, _ProviderEntry]:
@@ -34,6 +34,26 @@ def _get_providers() -> dict[str, _ProviderEntry]:
         providers["azure_search"] = (AzureSearchProviderConfig, AzureSearchProvider)
     except ImportError:
         pass
+
+    try:
+        from elspeth.plugins.infrastructure.clients.retrieval.chroma import (
+            ChromaSearchProvider,
+            ChromaSearchProviderConfig,
+        )
+
+        def _chroma_factory(config: ChromaSearchProviderConfig, *, recorder: Any, run_id: Any, **_kwargs: Any) -> ChromaSearchProvider:
+            """Chroma uses the SDK directly — passes recorder and run_id for audit trail.
+
+            recorder and run_id are mandatory (not defaulted to None) because Chroma
+            search calls must be recorded in the audit trail (B1 fix). If the engine
+            ever calls this factory without recorder, it should crash at startup, not
+            silently skip audit recording at query time.
+            """
+            return ChromaSearchProvider(config=config, recorder=recorder, run_id=run_id)
+
+        providers["chroma"] = (ChromaSearchProviderConfig, _chroma_factory)
+    except ImportError:
+        pass  # chromadb not installed — chroma provider unavailable
 
     return providers
 

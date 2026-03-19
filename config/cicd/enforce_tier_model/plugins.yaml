@@ -295,6 +295,16 @@ allow_hits:
   reason: Optional provider registration — ImportError means the provider's optional dependency (e.g. azure-search-documents) is not installed; provider is silently omitted from registry rather than crashing the import
   safety: Unknown provider raises ValueError at config validation time with list of available providers; no silent data loss
   expires: null
+- key: plugins/transforms/rag/config.py:R6:_get_providers:fp=69824056a89e3fec
+  owner: feature
+  reason: Optional ChromaDB provider registration — ImportError means chromadb is not installed ([rag] extra absent); provider is silently omitted from registry
+  safety: Unknown provider raises ValueError at config validation time with list of available providers; no silent data loss
+  expires: null
+- key: plugins/infrastructure/clients/retrieval/chroma.py:R1:ChromaSearchProvider:__init__:fp=7ebd746d40d4839f
+  owner: feature
+  reason: ChromaDB collection metadata is persisted external data (Tier 3) — .get() safely detects distance_function mismatch on pre-existing collections without crashing on absent key
+  safety: Missing key yields None (no mismatch detected — safe); present key with wrong value raises RetrievalError immediately
+  expires: null
 - key: plugins/transforms/rag/config.py:R5:RAGRetrievalConfig:coerce_schema_config:fp=4a027df2f322fde0
   owner: feature
   reason: Pydantic before-validator at config boundary — isinstance(dict) needed to distinguish raw dict (from YAML/direct construction) from already-parsed SchemaConfig; same pattern as config_base.py R5 exemption
