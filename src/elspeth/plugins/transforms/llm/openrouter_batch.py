@@ -34,6 +34,7 @@ from elspeth.plugins.infrastructure.base import BaseTransform
 from elspeth.plugins.infrastructure.clients.http import AuditedHTTPClient
 from elspeth.plugins.infrastructure.pooling import is_capacity_error
 from elspeth.plugins.infrastructure.schema_factory import create_schema_from_config
+from elspeth.plugins.infrastructure.templates import TemplateError
 from elspeth.plugins.transforms.llm import (
     _build_augmented_output_schema,
     get_llm_audit_fields,
@@ -42,7 +43,7 @@ from elspeth.plugins.transforms.llm import (
 )
 from elspeth.plugins.transforms.llm.base import LLMConfig
 from elspeth.plugins.transforms.llm.langfuse import create_langfuse_tracer
-from elspeth.plugins.transforms.llm.templates import PromptTemplate, TemplateError
+from elspeth.plugins.transforms.llm.templates import PromptTemplate
 from elspeth.plugins.transforms.llm.tracing import (
     TracingConfig,
     parse_tracing_config,

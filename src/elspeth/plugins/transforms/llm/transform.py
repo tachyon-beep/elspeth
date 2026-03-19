@@ -32,6 +32,7 @@ from elspeth.plugins.infrastructure.batching import BatchTransformMixin, OutputP
 from elspeth.plugins.infrastructure.clients.llm import ContextLengthError, LLMClientError
 from elspeth.plugins.infrastructure.pooling import PooledExecutor, RowContext
 from elspeth.plugins.infrastructure.schema_factory import create_schema_from_config
+from elspeth.plugins.infrastructure.templates import TemplateError
 from elspeth.plugins.transforms.llm import (
     _build_augmented_output_schema,
     _build_multi_query_output_schema,
@@ -45,7 +46,7 @@ from elspeth.plugins.transforms.llm.multi_query import QuerySpec, ResponseFormat
 from elspeth.plugins.transforms.llm.provider import FinishReason, LLMProvider, ParsedFinishReason, UnrecognizedFinishReason
 from elspeth.plugins.transforms.llm.providers.azure import AzureLLMProvider, AzureOpenAIConfig, _configure_azure_monitor
 from elspeth.plugins.transforms.llm.providers.openrouter import OpenRouterConfig, OpenRouterLLMProvider
-from elspeth.plugins.transforms.llm.templates import PromptTemplate, TemplateError
+from elspeth.plugins.transforms.llm.templates import PromptTemplate
 from elspeth.plugins.transforms.llm.tracing import AzureAITracingConfig, TracingConfig, parse_tracing_config
 from elspeth.plugins.transforms.llm.validation import reject_nonfinite_constant, strip_markdown_fences, validate_field_value
 

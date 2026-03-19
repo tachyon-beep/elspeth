@@ -307,7 +307,7 @@ class TestSingleQueryProcessing:
         """Template rendering errors return error result with details."""
         from unittest.mock import patch as mock_patch
 
-        from elspeth.plugins.transforms.llm.templates import TemplateError
+        from elspeth.plugins.infrastructure.templates import TemplateError
 
         transform = LLMTransform(_make_config())
         mock_provider = _make_mock_provider()

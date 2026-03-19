@@ -504,7 +504,7 @@ class TestTemplateTierPolicy:
     def test_per_query_template_syntax_error_raises_at_construction(self) -> None:
         """A syntactically invalid per-query template must fail at construction,
         not be deferred to the first row (structural = Tier 2 init-time validation)."""
-        from elspeth.plugins.transforms.llm.templates import TemplateError
+        from elspeth.plugins.infrastructure.templates import TemplateError
         from elspeth.plugins.transforms.llm.transform import LLMTransform
 
         config = _make_multi_query_config()
