@@ -281,6 +281,8 @@ _KNOWN_AUDITED_CLIENT_USERS: set[str] = {
     "src/elspeth/plugins/transforms/llm/azure_multi_query.py",
     "src/elspeth/plugins/transforms/llm/openrouter.py",
     "src/elspeth/plugins/transforms/llm/openrouter_multi_query.py",
+    # RAG retrieval — uses AuditedHTTPClient for Azure Search API
+    "src/elspeth/plugins/infrastructure/clients/retrieval/azure_search.py",
     # Client definitions (define, not use)
     "src/elspeth/plugins/infrastructure/clients/llm.py",
     "src/elspeth/plugins/infrastructure/clients/http.py",
