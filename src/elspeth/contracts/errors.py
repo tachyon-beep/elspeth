@@ -308,6 +308,10 @@ TransformErrorCategory = Literal[
     "rate_limited",
     # Content extraction errors (Tier 3 boundary - external HTML/text parsing)
     "content_extraction_failed",
+    # Retrieval errors (RAG retrieval transform)
+    "retrieval_failed",
+    "no_results",
+    "no_regex_match",
     # Content filtering
     "blocked_content",
     "content_filtered",
@@ -693,6 +697,24 @@ class OrchestrationInvariantError(Exception):
     """
 
     pass
+
+
+class PluginRetryableError(Exception):
+    """Base for plugin exceptions eligible for engine retry.
+
+    All plugin error types that may be retried by the engine's RetryManager
+    must inherit from this class. The processor catches PluginRetryableError
+    and dispatches to retry logic based on the retryable attribute.
+
+    Attributes:
+        retryable: Whether the error is transient and should be retried.
+        status_code: HTTP status code if applicable (for audit context).
+    """
+
+    def __init__(self, message: str, *, retryable: bool, status_code: int | None = None) -> None:
+        super().__init__(message)
+        self.retryable = retryable
+        self.status_code = status_code
 
 
 class FrameworkBugError(Exception):
