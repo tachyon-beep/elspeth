@@ -1,0 +1,218 @@
+"""Query construction for RAG retrieval transform.
+
+Three modes, all anchored on query_field:
+1. Field only: use field value verbatim
+2. Field + template: render Jinja2 template with {{ query }} and {{ row }}
+3. Field + regex: extract search text via capture group
+"""
+
+from __future__ import annotations
+
+import multiprocessing
+import re
+from dataclasses import dataclass
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from jinja2 import Template
+
+from jinja2 import TemplateSyntaxError, UndefinedError
+from jinja2.exceptions import SecurityError
+
+from elspeth.plugins.infrastructure.templates import (
+    TemplateError,
+    create_sandboxed_environment,
+)
+
+# Fork context for regex subprocess — avoids spawn overhead on Linux and allows
+# the worker process to be forcibly terminated (SIGTERM) when regex times out.
+# spawn context cannot be used because the worker function is a closure and
+# closures are not picklable across spawn boundaries.
+_FORK_CTX = multiprocessing.get_context("fork")
+
+
+def _regex_worker(
+    pattern: re.Pattern[str],
+    text: str,
+    result_queue: multiprocessing.Queue,  # type: ignore[type-arg]
+) -> None:
+    """Run regex search in a child process and send picklable result to queue.
+
+    Sends a 3-tuple: (matched: bool, group0: str | None, group1: str | None).
+    re.Match objects are not picklable, so we extract the data before sending.
+    """
+    match = pattern.search(text)
+    if match is None:
+        result_queue.put((False, None, None))
+    else:
+        g0 = match.group(0)
+        g1 = match.group(1) if pattern.groups else None
+        result_queue.put((True, g0, g1))
+
+
+@dataclass(frozen=True)
+class QueryResult:
+    """Result of query construction."""
+
+    query: str | None = None
+    error: dict[str, Any] | None = None
+
+
+class QueryBuilder:
+    """Constructs search queries from row data.
+
+    Supports three modes:
+    - Field only: query_field set, no template or pattern
+    - Template: query_field + query_template (Jinja2)
+    - Regex: query_field + query_pattern (re capture group)
+
+    Regex mode spawns a child process per call to enforce the timeout deadline.
+    Python threads cannot be interrupted while running C extension code (re module),
+    so process-level isolation with SIGTERM is the only reliable timeout mechanism.
+    """
+
+    def __init__(
+        self,
+        query_field: str,
+        *,
+        query_template: str | None = None,
+        query_pattern: str | None = None,
+        regex_timeout: float = 5.0,
+    ) -> None:
+        self._query_field = query_field
+        self._regex_timeout = regex_timeout
+        self._compiled_template: Template | None = None
+        self._compiled_pattern: re.Pattern[str] | None = None
+
+        if query_template is not None:
+            env = create_sandboxed_environment()
+            try:
+                self._compiled_template = env.from_string(query_template)
+            except TemplateSyntaxError as e:
+                raise TemplateError(f"Invalid query template syntax: {e}") from e
+
+        if query_pattern is not None:
+            self._compiled_pattern = re.compile(query_pattern)
+
+    def build(self, row_data: dict[str, Any]) -> QueryResult:
+        """Construct a search query from row data."""
+        extracted = row_data[self._query_field]
+
+        if extracted is None:
+            return QueryResult(
+                error={
+                    "reason": "invalid_input",
+                    "field": self._query_field,
+                    "cause": "null_value",
+                }
+            )
+
+        if self._compiled_template is not None:
+            return self._build_template(extracted, row_data)
+        elif self._compiled_pattern is not None:
+            return self._build_regex(extracted)
+        else:
+            return self._build_field_only(extracted)
+
+    def _build_field_only(self, extracted: Any) -> QueryResult:
+        query = str(extracted)
+        return self._validate_non_empty(query)
+
+    def _build_template(self, extracted: Any, row_data: dict[str, Any]) -> QueryResult:
+        assert self._compiled_template is not None  # guaranteed by build() guard
+        try:
+            query = self._compiled_template.render(query=extracted, row=row_data)
+        except UndefinedError as e:
+            return QueryResult(
+                error={
+                    "reason": "template_rendering_failed",
+                    "error": str(e),
+                    "field": self._query_field,
+                }
+            )
+        except SecurityError as e:
+            return QueryResult(
+                error={
+                    "reason": "template_rendering_failed",
+                    "error": f"Sandbox violation: {e}",
+                    "field": self._query_field,
+                }
+            )
+        except Exception as e:
+            return QueryResult(
+                error={
+                    "reason": "template_rendering_failed",
+                    "error": str(e),
+                    "field": self._query_field,
+                }
+            )
+        return self._validate_non_empty(query)
+
+    def _build_regex(self, extracted: Any) -> QueryResult:
+        assert self._compiled_pattern is not None  # guaranteed by build() guard
+        text = str(extracted)
+        result_queue: multiprocessing.Queue = _FORK_CTX.Queue()  # type: ignore[type-arg]
+        p = _FORK_CTX.Process(
+            target=_regex_worker,
+            args=(self._compiled_pattern, text, result_queue),
+        )
+        p.start()
+        p.join(timeout=self._regex_timeout)
+
+        if p.is_alive():
+            p.terminate()
+            p.join()
+            return QueryResult(
+                error={
+                    "reason": "no_regex_match",
+                    "field": self._query_field,
+                    "cause": "regex_timeout",
+                }
+            )
+
+        if result_queue.empty():
+            return QueryResult(
+                error={
+                    "reason": "no_regex_match",
+                    "field": self._query_field,
+                    "pattern": self._compiled_pattern.pattern,
+                }
+            )
+
+        matched, group0, group1 = result_queue.get_nowait()
+
+        if not matched:
+            return QueryResult(
+                error={
+                    "reason": "no_regex_match",
+                    "field": self._query_field,
+                    "pattern": self._compiled_pattern.pattern,
+                }
+            )
+
+        # Use group1 if the pattern has capture groups (may be None if non-participating)
+        captured = group1 if self._compiled_pattern.groups else group0
+        if captured is None:
+            return QueryResult(
+                error={
+                    "reason": "no_regex_match",
+                    "field": self._query_field,
+                    "cause": "capture_group_empty",
+                }
+            )
+
+        return self._validate_non_empty(captured)
+
+    def _validate_non_empty(self, query: str) -> QueryResult:
+        if not query.strip():
+            return QueryResult(
+                error={
+                    "reason": "invalid_input",
+                    "field": self._query_field,
+                    "cause": "empty_query",
+                }
+            )
+        return QueryResult(query=query)
+
+    def close(self) -> None:
+        """No-op. Retained for API symmetry — no persistent resources to release."""

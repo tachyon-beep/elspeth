@@ -285,3 +285,8 @@ allow_hits:
   reason: Pydantic field_validator wraps ipaddress.ip_network() on user-provided CIDR strings — Tier 3 config boundary
   safety: ValueError re-raised as Pydantic ValidationError; invalid config crashes at load time, not at runtime
   expires: null
+- key: plugins/transforms/rag/query.py:R4:QueryBuilder:_build_template:fp=e26cfb669d714731
+  owner: feature
+  reason: Jinja2 sandbox execution — template rendering is a Tier 3 trust boundary; sandboxed templates can raise arbitrary exceptions beyond UndefinedError and SecurityError (e.g. OverflowError, ZeroDivisionError from template expressions)
+  safety: Exception converted to QueryResult.error — caller receives structured error, not a crash; audit trail records the failure
+  expires: null
