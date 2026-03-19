@@ -54,6 +54,7 @@ def _make_204_response() -> DataversePageResponse:
         rows=[],
         latency_ms=12.0,
         headers={"content-length": "0"},
+        request_headers={"Authorization": "Bearer fake-token"},
         next_link=None,
         paging_cookie=None,
         more_records=False,

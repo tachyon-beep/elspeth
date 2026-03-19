@@ -103,6 +103,7 @@ class DataversePageResponse:
     rows: list[dict[str, Any]]
     latency_ms: float
     headers: dict[str, str]
+    request_headers: dict[str, str]  # Headers actually sent in the request (for audit fingerprinting)
     next_link: str | None  # @odata.nextLink URL, if present (structured queries)
     paging_cookie: str | None  # FetchXML paging cookie, if present
     more_records: bool  # True if more pages exist
@@ -455,6 +456,7 @@ class DataverseClient:
                 rows=[],
                 latency_ms=latency_ms,
                 headers=resp_headers,
+                request_headers=auth_headers,
                 next_link=None,
                 paging_cookie=None,
                 more_records=False,
@@ -508,7 +510,12 @@ class DataverseClient:
         # FetchXML paging cookie
         paging_cookie = parsed.get("@Microsoft.Dynamics.CRM.fetchxmlpagingcookie")
         if paging_cookie is not None and not isinstance(paging_cookie, str):
-            paging_cookie = None  # Ignore non-string values
+            raise DataverseClientError(
+                f"Expected '@Microsoft.Dynamics.CRM.fetchxmlpagingcookie' to be a string, got {type(paging_cookie).__name__}",
+                retryable=False,
+                status_code=response.status_code,
+                latency_ms=latency_ms,
+            )
 
         more_records_raw = parsed.get("@Microsoft.Dynamics.CRM.morerecords", next_link is not None)
         more_records = bool(more_records_raw)
@@ -518,6 +525,7 @@ class DataverseClient:
             rows=rows,
             latency_ms=latency_ms,
             headers=resp_headers,
+            request_headers=auth_headers,
             next_link=next_link,
             paging_cookie=paging_cookie if next_link is None else None,
             more_records=more_records,

@@ -75,7 +75,7 @@ class FakeSourceContext:
         self.validation_errors.append(kwargs)
         from types import SimpleNamespace
 
-        return SimpleNamespace(row_id="test-row", node_id="test-node", destination=kwargs.get("destination"))
+        return SimpleNamespace(row_id="test-row", node_id="test-node", destination=kwargs["destination"])
 
 
 class FakeSinkContext:
@@ -159,6 +159,7 @@ class TestDataverseSourceStructuredQuery:
                     ],
                     latency_ms=50.0,
                     headers={"content-type": "application/json"},
+                    request_headers={"Authorization": "Bearer fake"},
                     next_link=None,
                     paging_cookie=None,
                     more_records=False,
@@ -199,6 +200,7 @@ class TestDataverseSourceStructuredQuery:
                     rows=[{"fullname": "Alice", "emailaddress1": "alice@test.com"}],
                     latency_ms=50.0,
                     headers={},
+                    request_headers={"Authorization": "Bearer fake"},
                     next_link="https://testorg.crm.dynamics.com/api/data/v9.2/contacts?$skiptoken=abc",
                     paging_cookie=None,
                     more_records=True,
@@ -208,6 +210,7 @@ class TestDataverseSourceStructuredQuery:
                     rows=[{"fullname": "Bob", "emailaddress1": "bob@test.com"}],
                     latency_ms=40.0,
                     headers={},
+                    request_headers={"Authorization": "Bearer fake"},
                     next_link=None,
                     paging_cookie=None,
                     more_records=False,
@@ -252,6 +255,7 @@ class TestDataverseSourceFetchXML:
                     rows=[{"fullname": "Alice"}],
                     latency_ms=50.0,
                     headers={},
+                    request_headers={"Authorization": "Bearer fake"},
                     next_link=None,
                     paging_cookie=None,
                     more_records=False,
@@ -289,6 +293,7 @@ class TestDataverseSourceSchemaLocking:
                     rows=[{"fullname": "Alice", "emailaddress1": "alice@test.com"}],
                     latency_ms=50.0,
                     headers={},
+                    request_headers={"Authorization": "Bearer fake"},
                     next_link=None,
                     paging_cookie=None,
                     more_records=False,
@@ -325,6 +330,7 @@ class TestDataverseSourceSchemaLocking:
                     rows=[],  # Empty page
                     latency_ms=50.0,
                     headers={},
+                    request_headers={"Authorization": "Bearer fake"},
                     next_link=None,
                     paging_cookie=None,
                     more_records=False,
@@ -372,6 +378,7 @@ class TestDataverseSourceODataStripping:
                     ],
                     latency_ms=50.0,
                     headers={},
+                    request_headers={"Authorization": "Bearer fake"},
                     next_link=None,
                     paging_cookie=None,
                     more_records=False,
@@ -417,6 +424,7 @@ class TestDataverseSinkUpsert:
             rows=[],
             latency_ms=30.0,
             headers={},
+            request_headers={"Authorization": "Bearer fake"},
             next_link=None,
             paging_cookie=None,
             more_records=False,
@@ -460,6 +468,7 @@ class TestDataverseSinkUpsert:
             rows=[],
             latency_ms=25.0,
             headers={},
+            request_headers={"Authorization": "Bearer fake"},
             next_link=None,
             paging_cookie=None,
             more_records=False,
@@ -506,6 +515,7 @@ class TestDataverseSinkUpsert:
                 rows=[],
                 latency_ms=25.0,
                 headers={},
+                request_headers={"Authorization": "Bearer fake"},
                 next_link=None,
                 paging_cookie=None,
                 more_records=False,
@@ -567,6 +577,7 @@ class TestDataverseSinkLookupBindings:
                 rows=[],
                 latency_ms=25.0,
                 headers={},
+                request_headers={"Authorization": "Bearer fake"},
                 next_link=None,
                 paging_cookie=None,
                 more_records=False,
