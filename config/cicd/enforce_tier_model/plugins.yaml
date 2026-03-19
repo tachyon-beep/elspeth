@@ -305,3 +305,28 @@ allow_hits:
   reason: Provider lookup — dict.get() with explicit None check and meaningful ValueError; this IS the guard that catches unknown providers at config load time rather than first-row execution
   safety: None result raises ValueError immediately with list of available providers; no silent pass-through
   expires: null
+- key: plugins/infrastructure/clients/retrieval/azure_search.py:R1:AzureSearchProvider:_parse_response:fp=8acaf87ec0ffe08f
+  owner: feature
+  reason: Azure AI Search API response parsing at Tier 3 boundary — @search.score field is optional in malformed responses; absence is handled by skipping the item (not crashing), which is correct for external data
+  safety: Missing score causes item to be skipped; all other fields fall back to safe defaults; no silent data corruption
+  expires: null
+- key: plugins/infrastructure/clients/retrieval/azure_search.py:R1:AzureSearchProvider:_parse_response:fp=0d04bbf6d37a2bd1
+  owner: feature
+  reason: Azure AI Search API response parsing at Tier 3 boundary — content field access with empty string default; empty content causes item to be skipped
+  safety: Empty/missing content causes item to be skipped via the subsequent `if not content` guard; no silent data corruption
+  expires: null
+- key: plugins/infrastructure/clients/retrieval/azure_search.py:R1:AzureSearchProvider:_parse_response:fp=2a66a684d627d957
+  owner: feature
+  reason: Azure AI Search API response parsing at Tier 3 boundary — source ID fallback chain (id -> @search.documentId -> "unknown"); ID is used for audit traceability only
+  safety: Falls back to "unknown" string; audit trail records the source_id for traceability regardless
+  expires: null
+- key: plugins/infrastructure/clients/retrieval/azure_search.py:R1:AzureSearchProvider:_parse_response:fp=d289f60d804d29c8
+  owner: feature
+  reason: Azure AI Search API response parsing at Tier 3 boundary — nested fallback within source ID chain
+  safety: Falls back to "unknown" string; audit trail records the source_id for traceability regardless
+  expires: null
+- key: plugins/infrastructure/clients/retrieval/azure_search.py:R5:AzureSearchProvider:_parse_response:fp=baa731de29dd1117
+  owner: feature
+  reason: Azure AI Search API response metadata coercion at Tier 3 boundary — isinstance check converts non-primitive types to str for JSON serializability; required because Azure Search can return arbitrary metadata types (datetime, UUID, etc.)
+  safety: Non-serializable types coerced to str; RetrievalChunk validates metadata JSON-serializability at construction and raises RetrievalError on failure
+  expires: null

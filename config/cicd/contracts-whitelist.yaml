@@ -303,6 +303,15 @@ allowed_dict_patterns:
   - "src/elspeth/plugins/transforms/azure/prompt_shield.py:AzurePromptShield.__init__:config"
 
   # ═══════════════════════════════════════════════════════════════════════════
+  # RETRIEVAL CLIENTS - External search API trust boundary
+  # Azure AI Search API returns untyped JSON; response_data and body are
+  # inherently dict[str, Any] at the Tier 3 boundary before validation.
+  # ═══════════════════════════════════════════════════════════════════════════
+  - "src/elspeth/plugins/infrastructure/clients/retrieval/azure_search.py:AzureSearchProvider._execute_search:return"
+  - "src/elspeth/plugins/infrastructure/clients/retrieval/azure_search.py:AzureSearchProvider._build_request_body:return"
+  - "src/elspeth/plugins/infrastructure/clients/retrieval/azure_search.py:AzureSearchProvider._parse_response:response_data"
+
+  # ═══════════════════════════════════════════════════════════════════════════
   # HTTP CLIENTS - External API trust boundary
   # ═══════════════════════════════════════════════════════════════════════════
   - "src/elspeth/plugins/infrastructure/clients/http.py:AuditedHTTPClient._record_and_emit:request_data"
