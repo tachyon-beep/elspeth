@@ -290,3 +290,18 @@ allow_hits:
   reason: Jinja2 sandbox execution — template rendering is a Tier 3 trust boundary; sandboxed templates can raise arbitrary exceptions beyond UndefinedError and SecurityError (e.g. OverflowError, ZeroDivisionError from template expressions)
   safety: Exception converted to QueryResult.error — caller receives structured error, not a crash; audit trail records the failure
   expires: null
+- key: plugins/transforms/rag/config.py:R6:_get_providers:fp=85498180a2efe5bc
+  owner: feature
+  reason: Optional provider registration — ImportError means the provider's optional dependency (e.g. azure-search-documents) is not installed; provider is silently omitted from registry rather than crashing the import
+  safety: Unknown provider raises ValueError at config validation time with list of available providers; no silent data loss
+  expires: null
+- key: plugins/transforms/rag/config.py:R5:RAGRetrievalConfig:coerce_schema_config:fp=4a027df2f322fde0
+  owner: feature
+  reason: Pydantic before-validator at config boundary — isinstance(dict) needed to distinguish raw dict (from YAML/direct construction) from already-parsed SchemaConfig; same pattern as config_base.py R5 exemption
+  safety: Non-dict values pass through unchanged; dict values validated by SchemaConfig.from_dict which raises on invalid input
+  expires: null
+- key: plugins/transforms/rag/config.py:R1:RAGRetrievalConfig:validate_provider_config:fp=bb927661731d8cb8
+  owner: feature
+  reason: Provider lookup — dict.get() with explicit None check and meaningful ValueError; this IS the guard that catches unknown providers at config load time rather than first-row execution
+  safety: None result raises ValueError immediately with list of available providers; no silent pass-through
+  expires: null
