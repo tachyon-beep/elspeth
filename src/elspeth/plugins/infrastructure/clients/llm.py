@@ -15,7 +15,7 @@ import structlog
 
 from elspeth.contracts import CallStatus, CallType
 from elspeth.contracts.call_data import LLMCallError, LLMCallRequest, LLMCallResponse
-from elspeth.contracts.errors import AuditIntegrityError, FrameworkBugError
+from elspeth.contracts.errors import AuditIntegrityError, FrameworkBugError, PluginRetryableError
 from elspeth.contracts.events import ExternalCallCompleted
 from elspeth.contracts.freeze import deep_freeze
 from elspeth.contracts.token_usage import TokenUsage
@@ -63,7 +63,7 @@ class LLMResponse:
         return self.usage.total_tokens
 
 
-class LLMClientError(Exception):
+class LLMClientError(PluginRetryableError):
     """Error from LLM client.
 
     Base exception for all LLM client errors. Includes retryable
@@ -74,8 +74,7 @@ class LLMClientError(Exception):
     """
 
     def __init__(self, message: str, *, retryable: bool = False) -> None:
-        super().__init__(message)
-        self.retryable = retryable
+        super().__init__(message, retryable=retryable)
 
 
 class RateLimitError(LLMClientError):
