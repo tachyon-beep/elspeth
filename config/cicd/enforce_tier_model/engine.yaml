@@ -2,8 +2,8 @@ per_file_rules:
 - pattern: engine/*
   rules:
   - L1
-  reason: 'Engine imports plugin infrastructure: TransformResult (results.py), BatchTransformMixin (batching/mixin.py), LLMClientError
-    (clients/llm.py), CapacityError (pooling/). Protocols moved to contracts/ (2026-03-01).'
+  reason: 'Engine imports plugin infrastructure: TransformResult (results.py), BatchTransformMixin (batching/mixin.py), CapacityError
+    (pooling/). Protocols moved to contracts/ (2026-03-01).'
   expires: '2026-09-01'
 - pattern: engine/batch_adapter.py
   rules:
@@ -102,11 +102,11 @@ allow_hits:
   reason: _node_to_plugin.get() needed — not all node IDs are in plugin map (source nodes, coalesce pseudo-nodes)
   safety: None return from .get() is the correct signal for non-gate nodes; isinstance(None, GateSettings) → False
   expires: '2026-05-15'
-- key: engine/processor.py:R8:RowProcessor:__init__:fp=33c69ffef1dee922
+- key: engine/processor.py:R8:RowProcessor:__init__:fp=25cdbba00a78d397
   owner: architecture
   reason: Local dedup dict — setdefault on locally-constructed dict for deduplication by identity, not hiding missing keys
   safety: Dict is created locally at line 335, default is the value itself — no silent fallback
-- key: engine/processor.py:R1:RowProcessor:_notify_coalesce_of_lost_branch:fp=2c87707b5464ab57
+- key: engine/processor.py:R1:RowProcessor:_notify_coalesce_of_lost_branch:fp=793b382e4d1bfd45
   owner: architecture
   reason: dict.get() correct - not all branch names have coalesce point mapping
   safety: Crashes on type mismatch - no silent fallback

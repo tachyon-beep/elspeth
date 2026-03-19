@@ -77,3 +77,27 @@ def test_web_scrape_subclasses_still_work():
     assert isinstance(not_found, WebScrapeError)
     assert isinstance(not_found, PluginRetryableError)
     assert not_found.retryable is False
+
+
+def test_is_retryable_catches_plugin_retryable_error():
+    """PluginRetryableError with retryable=True is retryable."""
+    err = PluginRetryableError("transient", retryable=True)
+    assert err.retryable is True
+
+
+def test_is_retryable_rejects_non_retryable_plugin_error():
+    """PluginRetryableError with retryable=False is not retryable."""
+    err = PluginRetryableError("permanent", retryable=False)
+    assert err.retryable is False
+
+
+def test_all_plugin_errors_share_retryable_interface():
+    """All plugin error types have a consistent retryable interface."""
+    errors = [
+        LLMClientError("test", retryable=True),
+        WebScrapeError("test", retryable=True),
+        PluginRetryableError("test", retryable=True),
+    ]
+    for err in errors:
+        assert isinstance(err, PluginRetryableError)
+        assert err.retryable is True

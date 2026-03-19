@@ -266,7 +266,6 @@ TransformErrorCategory = Literal[
     "api_error",
     "api_call_failed",
     "llm_call_failed",
-    "llm_retryable_error_no_retry",  # LLM error that would be retried but retry disabled
     "network_error",
     "permanent_error",
     "retry_timeout",
