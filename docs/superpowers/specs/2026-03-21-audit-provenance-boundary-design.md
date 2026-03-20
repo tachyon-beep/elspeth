@@ -58,7 +58,46 @@ The code already labels these correctly as `LLM_AUDIT_SUFFIXES` in `plugins/tran
 | `{prefix}_usage` | Token usage dict | Downstream budgeting, cost routing |
 | `{prefix}_model` | Model identifier | Multi-model routing, filtering |
 
-**Migration:** Replace `populate_llm_metadata_fields()` (writes audit fields to row) with logic that writes audit fields to a dict returned to the caller for inclusion in `success_reason["metadata"]`. The function currently receives `output: dict` and mutates it — change it to return the audit metadata separately.
+**Migration approach:** Split `populate_llm_metadata_fields()` into two functions:
+
+```python
+def populate_llm_operational_fields(
+    output: dict[str, object],
+    field_prefix: str,
+    *,
+    usage: TokenUsage | None,
+    model: str | None,
+) -> None:
+    """Populate operational metadata into the output row (stays in pipeline data)."""
+    output[f"{field_prefix}_usage"] = usage.to_dict() if usage is not None else None
+    output[f"{field_prefix}_model"] = model
+
+
+def build_llm_audit_metadata(
+    field_prefix: str,
+    *,
+    template_hash: str,
+    variables_hash: str,
+    template_source: str | None,
+    lookup_hash: str | None,
+    lookup_source: str | None,
+    system_prompt_source: str | None,
+) -> dict[str, object]:
+    """Build audit provenance dict for inclusion in success_reason["metadata"].
+
+    Does NOT write to the output row — audit provenance lives in the Landscape only.
+    """
+    return {
+        f"{field_prefix}_template_hash": template_hash,
+        f"{field_prefix}_variables_hash": variables_hash,
+        f"{field_prefix}_template_source": template_source,
+        f"{field_prefix}_lookup_hash": lookup_hash,
+        f"{field_prefix}_lookup_source": lookup_source,
+        f"{field_prefix}_system_prompt_source": system_prompt_source,
+    }
+```
+
+Call sites in `transform.py`, `multi_query.py`, `openrouter_batch.py`, and `azure_batch.py` each call both functions: operational fields go into the output row, audit metadata dict gets merged into `success_reason["metadata"]`.
 
 ### WebScrape Transform — 3 Fields Move, 3 Stay
 
@@ -78,11 +117,25 @@ The code already labels these correctly as `LLM_AUDIT_SUFFIXES` in `plugins/tran
 | `fetch_url_final` | Final URL after redirects | Deduplication, operator visibility |
 | `fetch_url_final_ip` | Resolved IP address | SSRF forensics, operational visibility |
 
+**Known issue: `fetch_url_final_ip` is a misnomer.** The current code sets `output["fetch_url_final_ip"] = str(response.url)`, which is the post-redirect URL, not the resolved IP. The resolved IP is in `safe_request.resolved_ip` (from SSRF validation). This should be fixed as part of this work: use the actual resolved IP, not `response.url`. If the resolved IP is not available at the point where the field is set, rename the field to `fetch_url_resolved` to avoid the misleading `_ip` suffix.
+
 **Migration:** WebScrape stops calling `payload_store.store()` directly. The request/response blob hashes come from the `Call` object that `recorder.record_call()` already returns (currently discarded by `AuditedHTTPClient`). The processed-content blob is stored via `recorder.store_payload()` (new method). All three hashes go into `success_reason["metadata"]`.
 
 ### RAG Transform — No Changes
 
 All 4 fields (`rag_context`, `rag_score`, `rag_count`, `rag_sources`) are operational data consumed by downstream LLM transforms. No audit provenance in rows.
+
+## `SchemaConfig.audit_fields` Cleanup
+
+`SchemaConfig` has an `audit_fields` tuple (`contracts/schema.py:317`) currently populated with LLM audit field names in the `_output_schema_config` construction at `transform.py:976` and `transform.py:1021`. The field's documented purpose: "Fields that exist in output but are NOT part of the stability contract."
+
+After this change, audit fields no longer exist in output rows. `SchemaConfig.audit_fields` becomes a lie — it claims fields are in the output when they aren't.
+
+**Resolution:** Remove audit field names from `SchemaConfig.audit_fields` at all construction sites. Pass `audit_fields=None` (or omit it) since there are no longer any unstable-but-present fields in the output. The `audit_fields` attribute on `SchemaConfig` stays for potential future use (other transforms may have legitimately unstable output fields), but LLM transforms stop populating it.
+
+Affected sites:
+- `plugins/transforms/llm/transform.py` lines 976, 1021 — `SchemaConfig(audit_fields=...)` construction
+- `plugins/transforms/llm/multi_query.py` line 232-235 — iterates `LLM_AUDIT_SUFFIXES` to build `declared_output_fields`
 
 ## PayloadStore Architecture Fix
 
@@ -100,9 +153,11 @@ With hash fields out of rows, no transform needs direct PayloadStore access. Rem
 
 `get_ssrf_safe()` currently returns `tuple[httpx.Response, str]`. Change to return `tuple[httpx.Response, str, Call]` on the success path. The `Call` contains `request_ref` and `response_ref` (payload store hashes).
 
-**Error path:** `get_ssrf_safe()` also calls `record_call()` in the error branch before re-raising. The `Call` is only available on the success path. This is correct — WebScrape only needs hashes when the fetch succeeds.
+`WebScrapeTransform._fetch_url()` wraps `get_ssrf_safe()` and currently returns `tuple[httpx.Response, str]`. Its return type must also change to `tuple[httpx.Response, str, Call]` to surface the `Call` to the `process()` method.
 
-**Replay/verifier compatibility:** Check whether `replayer.py` and `verifier.py` implement `get_ssrf_safe()`. If they do, they must also return a `Call` (or a compatible object with `request_ref`/`response_ref`). If they don't implement it, no changes needed.
+**Error path:** `get_ssrf_safe()` also calls `record_call()` in the error branch (lines 379-390) before re-raising. The error-path `Call` is discarded — this is correct. The error path re-raises, so no return value is produced. WebScrape only needs hashes when the fetch succeeds. The error-path `record_call()` stays as-is (returns `None` effectively, since the exception propagates).
+
+**Replay/verifier compatibility:** Check whether `replayer.py` and `verifier.py` implement `get_ssrf_safe()`. If they do, they must also return a `Call` (or a compatible object with `request_ref`/`response_ref`). If they don't implement it (they use `replay()`/`verify()` APIs instead), no changes needed.
 
 ### Add `recorder.store_payload()`
 
@@ -113,32 +168,36 @@ def store_payload(self, content: bytes, *, purpose: str) -> str:
     """Store a transform-produced artifact in the payload store.
 
     For blobs that have no corresponding external call record — e.g.,
-    post-extraction processed content. The purpose label documents why
-    this blob exists in the store.
+    post-extraction processed content. The purpose label is a code-level
+    documentation convention — it is not persisted or emitted to telemetry.
+    It exists solely to force callers to name what they're storing at the
+    call site, making the intent visible in code review.
 
     Args:
         content: Raw bytes to store.
         purpose: Semantic label (e.g., "processed_content", "extracted_markdown").
+            Not persisted — call-site documentation only.
 
     Returns:
         SHA-256 hex digest of stored content.
     """
+    return self._payload_store.store(content)
 ```
 
-This is a thin wrapper around `PayloadStore.store()` with a mandatory `purpose` parameter. The purpose is NOT persisted in a separate table — it exists to force callers to name what they're storing, preventing the method from becoming a general-purpose escape hatch.
-
-**Scope constraint:** If `store_payload()` appears in more than 2-3 transforms, the Shifting the Burden archetype is reforming and the design needs revisiting. This is documented in code comments.
+**Note:** The `_prepare_call_payloads()` method in `ExecutionRepository` already handles blob storage for `record_call()` payloads (lines 540-547). `store_payload()` is for blobs that don't correspond to an external call — only the processed-content case currently.
 
 ## Enforcement
 
 ### 1. AGENTS.md Boundary Documentation
 
-Create `src/elspeth/plugins/transforms/AGENTS.md` documenting the pipeline-data vs audit-provenance boundary:
+Create `src/elspeth/plugins/transforms/AGENTS.md` documenting the pipeline-data vs audit-provenance boundary. This file is read by both human reviewers and AI coding assistants (Claude Code, Codex, etc.) when working in the transforms directory.
 
+Contents:
 - The decision test ("would a pipeline operator make a decision based on this?")
 - Examples of each category
 - Where audit provenance goes (`success_reason["metadata"]`)
 - Where operational data goes (output row via `declared_output_fields`)
+- The scope constraint on `recorder.store_payload()`: if it appears in more than 2-3 transforms, the Shifting the Burden archetype is reforming and the design needs revisiting
 
 ### 2. CI Naming Convention Check
 
@@ -156,6 +215,7 @@ For each transform with moved fields:
 - Assert audit fields are **absent** from `result.row.to_dict()`
 - Assert audit fields are **present** in `result.success_reason["metadata"]`
 - Assert operational fields remain in the output row
+- Assert `declared_output_fields` no longer contains audit field names
 
 ### Integration Test
 
@@ -164,9 +224,13 @@ End-to-end pipeline with ChaosLLM and WebScrape (via ChaosWeb):
 - Query Landscape `node_states` to confirm provenance metadata is persisted
 - Verify `elspeth explain` retrieves the provenance for a given row
 
-### Regression Pin Updates
+### Update Affected Test Assertions
 
-Update existing tests that assert on `fetch_request_hash` or `template_hash` in output rows. These should now assert absence from rows and presence in success_reason.
+Existing tests that assert audit fields in output rows or `declared_output_fields` must be updated. Two categories of assertion changes:
+
+**Category 1 — Row content assertions:** Tests asserting `"template_hash" in result.row` must change to assert the field is in `result.success_reason["metadata"]` instead.
+
+**Category 2 — Schema contract assertions:** Tests asserting audit field names in `transform.declared_output_fields` must remove those assertions entirely (the fields are no longer declared output fields).
 
 ### Example Pipeline Updates
 
@@ -180,39 +244,46 @@ Update existing tests that assert on `fetch_request_hash` or `template_hash` in 
 
 | File | Change |
 |------|--------|
-| `plugins/transforms/llm/__init__.py` | Move audit fields from `populate_llm_metadata_fields()` to success_reason return |
-| `plugins/transforms/llm/transform.py` | Include audit metadata in `success_reason["metadata"]` |
-| `plugins/transforms/llm/openrouter_batch.py` | Same pattern |
-| `plugins/transforms/llm/azure_batch.py` | Same pattern |
-| `plugins/transforms/web_scrape.py` | Remove direct `payload_store` access, use `Call` return + `recorder.store_payload()` |
-| `plugins/infrastructure/clients/http.py` | `_record_and_emit()` returns `Call`; `get_ssrf_safe()` returns `Call` on success |
+| `plugins/transforms/llm/__init__.py` | Split `populate_llm_metadata_fields()` into `populate_llm_operational_fields()` + `build_llm_audit_metadata()`. Remove audit suffixes from `declared_output_fields` computation. |
+| `plugins/transforms/llm/transform.py` | Call both new functions. Merge audit dict into `success_reason["metadata"]`. Remove audit fields from `SchemaConfig.audit_fields` at lines 976, 1021. |
+| `plugins/transforms/llm/multi_query.py` | Remove `LLM_AUDIT_SUFFIXES` iteration from `declared_output_fields` build (line 232-235). Call `build_llm_audit_metadata()` per query and merge into success_reason. |
+| `plugins/transforms/llm/openrouter_batch.py` | Same pattern as transform.py |
+| `plugins/transforms/llm/azure_batch.py` | Same pattern as transform.py |
+| `plugins/transforms/web_scrape.py` | Remove direct `payload_store` access. Use `Call` return from `_fetch_url()` for request/response hashes. Store processed content via `recorder.store_payload()`. Put hashes in `success_reason["metadata"]`. Update `_fetch_url()` return type to include `Call`. Fix `fetch_url_final_ip` to use actual resolved IP. |
+| `plugins/infrastructure/clients/http.py` | `_record_and_emit()` returns `Call`. `get_ssrf_safe()` returns `tuple[Response, str, Call]` on success. |
 | `core/landscape/recorder.py` | Add `store_payload(content, *, purpose)` method |
 | `contracts/plugin_context.py` | Remove `payload_store` field |
 | `contracts/contexts.py` | Remove `payload_store` property from `LifecycleContext` protocol |
+| `contracts/schema.py` | No code change, but document that `audit_fields` is for unstable-but-present output fields, not for fields in the audit trail |
 | `engine/orchestrator/core.py` | Remove `payload_store=` from `PluginContext` construction |
 
 ### Test Changes
 
 | File | Change |
 |------|--------|
-| `tests/unit/plugins/transforms/test_web_scrape.py` | Assert hashes in success_reason, not row |
-| `tests/unit/plugins/transforms/test_web_scrape_security.py` | Same |
-| `tests/unit/plugins/llm/test_transform.py` | Assert audit suffixes in success_reason, not row |
-| `tests/unit/plugins/llm/test_azure_multi_query.py` | Same |
-| `tests/unit/plugins/llm/test_openrouter_batch.py` | Same |
+| `tests/unit/plugins/transforms/test_web_scrape.py` | Assert hashes in success_reason, not row. Remove from declared_output_fields assertions. |
+| `tests/unit/plugins/transforms/test_web_scrape_security.py` | Same pattern |
+| `tests/unit/plugins/llm/test_transform.py` | Assert audit suffixes in success_reason, not row. Remove from declared_output_fields assertions (line 1163). |
+| `tests/unit/plugins/llm/test_multi_query.py` | Remove audit field assertions from declared_output_fields (line 162). Assert audit metadata in success_reason. |
+| `tests/unit/plugins/llm/test_azure_multi_query.py` | Remove declared_output_fields assertions for audit fields (lines 886-887). Assert audit metadata in success_reason. |
+| `tests/unit/plugins/llm/test_openrouter.py` | Remove `template_hash in result.row` assertions (lines 363-364, 689). Assert in success_reason. |
+| `tests/unit/plugins/llm/test_openrouter_multi_query.py` | Remove `template_hash in output` assertions (lines 728-729). Assert in success_reason. |
+| `tests/unit/plugins/llm/test_openrouter_batch.py` | Remove audit field assertions from rows (lines 561, 797). Assert in success_reason. |
 
 ### Documentation
 
 | File | Change |
 |------|--------|
-| `src/elspeth/plugins/transforms/AGENTS.md` | New — boundary rule documentation |
+| `src/elspeth/plugins/transforms/AGENTS.md` | New — boundary rule documentation for human reviewers and AI assistants |
 | `examples/chaosweb/settings.yaml` | Remove hash fields from sink schemas |
 
 ## Implementation Notes
 
 ### Multi-Query LLM Complexity
 
-Multi-query LLM transforms produce audit fields per query (e.g., `category_template_hash`, `sentiment_template_hash`). The `LLM_AUDIT_SUFFIXES` tuple defines which suffixes are audit-only. The migration must handle the prefix-per-query pattern — iterate over query specs and move all `{query_prefix}{audit_suffix}` fields.
+Multi-query LLM transforms produce audit fields per query (e.g., `category_template_hash`, `sentiment_template_hash`). The `LLM_AUDIT_SUFFIXES` tuple defines which suffixes are audit-only. The migration must handle the prefix-per-query pattern: `build_llm_audit_metadata()` is called per query spec, and all per-query audit dicts are merged into a single `success_reason["metadata"]["audit"]` dict.
+
+`multi_query.py` at lines 232-235 iterates `LLM_AUDIT_SUFFIXES` to build `declared_output_fields`. After this change, that iteration must be removed — only `MULTI_QUERY_GUARANTEED_SUFFIXES` (`_usage`, `_model`) contribute to declared output fields.
 
 ### `declared_output_fields` Shrinkage
 
