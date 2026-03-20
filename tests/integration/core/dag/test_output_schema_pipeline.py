@@ -19,9 +19,10 @@ from typing import Any, ClassVar
 
 import pytest
 
+from elspeth.contracts.errors import FrameworkBugError
 from elspeth.contracts.schema import SchemaConfig
-from elspeth.core.config import SourceSettings
-from elspeth.core.dag import ExecutionGraph
+from elspeth.core.config import SourceSettings, TransformSettings
+from elspeth.core.dag import ExecutionGraph, GraphValidationError, WiredTransform
 from elspeth.plugins.transforms.rag.transform import RAGRetrievalTransform
 
 
@@ -143,3 +144,124 @@ class TestRealTransformPropagation:
         guaranteed = graph.get_effective_guaranteed_fields(node_info.node_id)
         expected = frozenset({"sci__rag_context", "sci__rag_score", "sci__rag_count", "sci__rag_sources"})
         assert expected.issubset(guaranteed), f"Expected {expected} to be a subset of {guaranteed}"
+
+
+def _build_producer_consumer_graph(
+    *,
+    producer: MockFieldAddingTransform,
+    consumer: MockFieldAddingTransform,
+) -> ExecutionGraph:
+    """Wire producer -> consumer through from_plugin_instances()."""
+    from tests.fixtures.plugins import CollectSink, ListSource
+
+    source = ListSource([], name="mock_source", on_success="source_out")
+    source_settings = SourceSettings(plugin="mock_source", on_success="source_out", options={})
+
+    producer_wired = WiredTransform(
+        plugin=producer,  # type: ignore[arg-type]
+        settings=TransformSettings(
+            name="producer_0",
+            plugin=producer.name,
+            input="source_out",
+            on_success="consumer_in",
+            on_error="discard",
+            options={},
+        ),
+    )
+    consumer_wired = WiredTransform(
+        plugin=consumer,  # type: ignore[arg-type]
+        settings=TransformSettings(
+            name="consumer_0",
+            plugin=consumer.name,
+            input="consumer_in",
+            on_success="output",
+            on_error="discard",
+            options={},
+        ),
+    )
+    return ExecutionGraph.from_plugin_instances(
+        source=source,
+        source_settings=source_settings,
+        transforms=[producer_wired, consumer_wired],
+        sinks={"output": CollectSink("output")},
+        aggregations={},
+        gates=[],
+    )
+
+
+class TestEdgeValidationWithOutputSchemaContract:
+    """Exercise edge validation through from_plugin_instances() with mock transforms."""
+
+    def test_edge_validation_passes_when_fields_satisfied(self) -> None:
+        """Producer guarantees field_a and field_b, consumer requires field_a."""
+        producer = MockFieldAddingTransform(
+            "producer",
+            guaranteed_fields=("field_a", "field_b"),
+            declared_output_fields=frozenset({"field_a", "field_b"}),
+        )
+        consumer = MockFieldAddingTransform(
+            "consumer",
+            required_input_fields=["field_a"],
+        )
+        graph = _build_producer_consumer_graph(producer=producer, consumer=consumer)
+        assert graph is not None
+
+    def test_edge_validation_rejects_missing_fields(self) -> None:
+        """Producer guarantees field_a only, consumer requires field_a + nonexistent."""
+        producer = MockFieldAddingTransform(
+            "producer",
+            guaranteed_fields=("field_a",),
+            declared_output_fields=frozenset({"field_a"}),
+        )
+        consumer = MockFieldAddingTransform(
+            "consumer",
+            required_input_fields=["field_a", "nonexistent"],
+        )
+        with pytest.raises(GraphValidationError):
+            _build_producer_consumer_graph(producer=producer, consumer=consumer)
+
+    def test_edge_validation_rejects_empty_guarantees(self) -> None:
+        """Producer guarantees nothing, consumer requires field_a."""
+        producer = MockFieldAddingTransform(
+            "producer",
+            declared_output_fields=frozenset(),
+            output_schema_config_override=None,
+        )
+        consumer = MockFieldAddingTransform(
+            "consumer",
+            required_input_fields=["field_a"],
+        )
+        with pytest.raises(GraphValidationError):
+            _build_producer_consumer_graph(producer=producer, consumer=consumer)
+
+    def test_enforcement_fires_through_production_path(self) -> None:
+        """Transform with declared_output_fields but no _output_schema_config crashes at build time."""
+        from tests.fixtures.plugins import CollectSink, ListSource
+
+        broken_transform = MockFieldAddingTransform(
+            "broken",
+            declared_output_fields=frozenset({"field_a"}),
+            output_schema_config_override=None,
+        )
+        source = ListSource([], name="mock_source", on_success="source_out")
+        wired = WiredTransform(
+            plugin=broken_transform,  # type: ignore[arg-type]
+            settings=TransformSettings(
+                name="broken_0",
+                plugin="broken",
+                input="source_out",
+                on_success="output",
+                on_error="discard",
+                options={},
+            ),
+        )
+
+        with pytest.raises(FrameworkBugError, match="declares output fields"):
+            ExecutionGraph.from_plugin_instances(
+                source=source,
+                source_settings=SourceSettings(plugin="mock_source", on_success="source_out", options={}),
+                transforms=[wired],
+                sinks={"output": CollectSink("output")},
+                aggregations={},
+                gates=[],
+            )
