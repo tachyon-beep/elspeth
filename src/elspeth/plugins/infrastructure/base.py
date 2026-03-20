@@ -43,6 +43,7 @@ from elspeth.contracts.schema_contract import PipelineRow
 if TYPE_CHECKING:
     from elspeth.contracts.contexts import LifecycleContext, SinkContext, SourceContext, TransformContext
     from elspeth.contracts.header_modes import HeaderMode
+    from elspeth.contracts.schema import SchemaConfig
     from elspeth.contracts.schema_contract import SchemaContract
     from elspeth.contracts.sink import OutputValidationResult
 from elspeth.plugins.infrastructure.results import (
@@ -173,6 +174,12 @@ class BaseTransform(ABC):
     # via cli_helpers bridge (set from TransformSettings.on_success).
     on_success: str | None = None
 
+    # DAG contract for output field validation (centralized in DAG builder).
+    # Transforms that add fields must set this via _build_output_schema_config()
+    # so the DAG builder can validate downstream required_input_fields.
+    # None = no output contract provided (acceptable for shape-preserving transforms).
+    _output_schema_config: SchemaConfig | None = None
+
     def __init__(self, config: dict[str, Any]) -> None:
         """Initialize with configuration.
 
@@ -224,6 +231,29 @@ class BaseTransform(ABC):
         else:
             output_schema = input_schema
         return input_schema, output_schema
+
+    def _build_output_schema_config(self, schema_config: SchemaConfig) -> SchemaConfig:
+        """Build output schema config for DAG contract propagation.
+
+        Merges the transform's declared_output_fields into guaranteed_fields
+        so the DAG builder can validate downstream field requirements.
+
+        Args:
+            schema_config: The transform's input schema config (base fields).
+
+        Returns:
+            SchemaConfig with guaranteed_fields including declared output fields.
+        """
+        from elspeth.contracts.schema import SchemaConfig
+
+        base_guaranteed = schema_config.guaranteed_fields or ()
+        return SchemaConfig(
+            mode=schema_config.mode,
+            fields=schema_config.fields,
+            guaranteed_fields=tuple(set(base_guaranteed) | self.declared_output_fields),
+            audit_fields=schema_config.audit_fields,
+            required_fields=schema_config.required_fields,
+        )
 
     def process(
         self,
