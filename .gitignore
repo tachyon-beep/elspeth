@@ -137,6 +137,7 @@ mutants/
 # Use ** to match nested paths (prevents accidental deep-nesting commits)
 examples/**/output/*
 examples/**/runs/*
+examples/**/chroma_data/*
 !examples/*/output/
 !examples/*/runs/
 !examples/*/output/.gitkeep

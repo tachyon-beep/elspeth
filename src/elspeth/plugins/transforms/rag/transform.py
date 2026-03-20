@@ -60,7 +60,7 @@ class RAGRetrievalTransform(BaseTransform):
     def __init__(self, config: dict[str, Any]) -> None:
         super().__init__(config)
 
-        self._rag_config = RAGRetrievalConfig(**config)
+        self._rag_config = RAGRetrievalConfig.from_dict(config)
         prefix = self._rag_config.output_prefix
 
         # Output field names
