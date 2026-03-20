@@ -40,6 +40,7 @@ class MockTransformWithSchemaConfig:
     config: ClassVar[dict[str, Any]] = {"schema": {"mode": "observed"}}
     on_error: str | None = None
     on_success: str | None = "output"
+    declared_output_fields: frozenset[str] = frozenset()
 
     def __init__(self) -> None:
         # Computed schema config with guaranteed and audit fields
@@ -60,6 +61,8 @@ class MockTransformWithoutSchemaConfig:
     config: ClassVar[dict[str, Any]] = {"schema": {"mode": "observed", "guaranteed_fields": ["config_field"]}}
     on_error: str | None = None
     on_success: str | None = "output"
+    declared_output_fields: frozenset[str] = frozenset()
+    _output_schema_config: SchemaConfig | None = None
 
 
 class MockSource:
@@ -353,6 +356,7 @@ class MockAggregationTransform:
     config: ClassVar[dict[str, Any]] = {"schema": {"mode": "observed"}}
     on_error: str | None = None
     on_success: str | None = "output"
+    declared_output_fields: frozenset[str] = frozenset()
 
     def __init__(self) -> None:
         self._output_schema_config = SchemaConfig(

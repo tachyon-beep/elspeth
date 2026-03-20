@@ -146,16 +146,6 @@ allow_hits:
   reason: Optional field access at trust boundary
   safety: Code reviewed - legitimate pattern
   expires: '2026-05-02'
-- key: core/dag/builder.py:R2:build_execution_graph:fp=e2f2f71150e185b1
-  owner: architecture
-  reason: Optional _output_schema_config metadata is present only on select plugins
-  safety: Missing metadata is handled as None; core schema enforcement still validates edges
-  expires: '2026-05-12'
-- key: core/dag/builder.py:R2:build_execution_graph:fp=e441b78c6713a045
-  owner: architecture
-  reason: Optional _output_schema_config metadata is present only on select plugins
-  safety: Missing metadata is handled as None; core schema enforcement still validates edges
-  expires: '2026-05-12'
 - key: core/dag/graph.py:R1:ExecutionGraph:get_schema_config_from_node:fp=73f85fc7a4d9cc8c
   owner: architecture
   reason: Optional schema access for mixed node types (source/sink/gate/coalesce)
