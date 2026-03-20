@@ -103,22 +103,24 @@ Change `schema_config: Any` to `schema_config: SchemaConfig` under `TYPE_CHECKIN
 
 ### Part 2: DAG Builder Validation (`dag/builder.py`)
 
-At both `getattr` sites (line 223 for transforms, line 251 for aggregations), replace `getattr` with direct attribute access and add the offensive check. Remove the now-stale `getattr` justification comments.
+At both `getattr` sites (line 223 for transforms, line 251 for aggregations), replace `getattr` with direct attribute access and add the offensive check. Remove the now-stale `getattr` justification comments. Extract the check into a standalone `_validate_output_schema_contract` function for testability and DRY.
 
 ```python
-output_schema_config = transform._output_schema_config
-
-if transform.declared_output_fields and output_schema_config is None:
-    raise FrameworkBugError(
-        f"Transform {transform.name!r} declares output fields "
-        f"{sorted(transform.declared_output_fields)} but provides no "
-        f"_output_schema_config for DAG contract validation. "
-        f"Call self._output_schema_config = self._build_output_schema_config(schema_config) "
-        f"in __init__ after setting declared_output_fields."
-    )
+def _validate_output_schema_contract(transform: Any) -> None:
+    """Validate that transforms declaring output fields provide a DAG contract."""
+    if transform.declared_output_fields and transform._output_schema_config is None:
+        raise FrameworkBugError(
+            f"Transform {transform.name!r} declares output fields "
+            f"{sorted(transform.declared_output_fields)} but provides no "
+            f"_output_schema_config for DAG contract validation. "
+            f"Call self._output_schema_config = self._build_output_schema_config(schema_config) "
+            f"in __init__ after setting declared_output_fields."
+        )
 ```
 
 The error message includes the fix instruction — offensive programming with actionable diagnostics.
+
+**Implementation ordering:** All affected transforms MUST be fixed (Part 3) BEFORE this enforcement check is added. Otherwise, unfixed transforms will crash at graph-build time. The implementation plan reverses Parts 2 and 3 for this reason.
 
 ### Part 3: Fix All Affected Transforms
 
@@ -213,14 +215,16 @@ Each affected transform gets a test that constructs an instance with a represent
 | `batch_stats` | `value_field="amount"`, `compute_mean=True`, `group_by="category"` | `{"count", "sum", "batch_size", "mean"}` (group_by excluded — passthrough field) |
 | `batch_stats` | `value_field="amount"`, `compute_mean=False`, `group_by=None` | `{"count", "sum", "batch_size"}` |
 
-#### Integration test: RAG → LLM with DAG field validation
+#### Integration test: Contract enforcement with real transforms
 
-This test MUST use `ExecutionGraph.from_plugin_instances()` (the production code path), not raw `graph.add_node()`/`graph.add_edge()` construction. Use a CSV source stub or existing test fixtures.
+Test the full contract chain using real transform instances and the builder's validation function directly:
 
-| Scenario | Assertion |
-|----------|-----------|
-| RAG outputs `sci__rag_context`, LLM declares `required_input_fields: [sci__rag_context]` | Graph builds successfully |
-| RAG outputs `sci__rag_context`, LLM declares `required_input_fields: [nonexistent_field]` | Graph rejects edge with missing field error |
+1. **Invariant 2 across all transforms** — parametric test that every field-adding transform's `guaranteed_fields` is a superset of its `declared_output_fields`.
+2. **Enforcement passes** — correctly-configured transforms pass `_validate_output_schema_contract`.
+3. **Enforcement fires** — a real transform with `_output_schema_config` cleared to `None` raises `FrameworkBugError`.
+4. **Exact field pinning** — at least one transform (RAG) verifies `guaranteed_fields` content exactly.
+
+Note: `ExecutionGraph.from_plugin_instances()` requires `WiredTransform`, `SourceProtocol`, `SinkProtocol`, and `GateSettings` — full pipeline wiring that no existing test exercises. Testing the extracted `_validate_output_schema_contract` function with real transform instances covers the contract surface without that overhead. A full-pipeline integration test through `from_plugin_instances()` is a worthwhile future enhancement but is out of scope here.
 
 ### Relationship to Existing Systems
 
@@ -258,7 +262,7 @@ These notes capture context that may not be obvious from reading the code alone.
 - `BaseTransform` class: `src/elspeth/plugins/infrastructure/base.py` ~line 140
 - `_create_schemas` static method: same file ~line 188 (has local runtime import of `SchemaConfig` — the new helper must follow the same pattern)
 - DAG builder `getattr` sites: `src/elspeth/core/dag/builder.py` lines 223 and 251 — both have multi-line comments justifying `getattr` that must be removed
-- `FrameworkBugError`: `src/elspeth/contracts/errors.py` — already imported in `builder.py`
+- `FrameworkBugError`: `src/elspeth/contracts/errors.py` — must be imported in `builder.py` (not currently imported)
 - `SchemaConfig`: `src/elspeth/contracts/schema.py` — frozen dataclass with `guaranteed_fields: tuple[str, ...] | None`, `audit_fields: tuple[str, ...] | None`, `required_fields: tuple[str, ...] | None`
 - `TYPE_CHECKING` block in `base.py`: starts ~line 30, imports from `contracts.contexts`, `contracts.header_modes`, etc. — add `SchemaConfig` here
 - `base.py` has `from __future__ import annotations` (line 34) — this makes `TYPE_CHECKING` annotations safe for the class attribute

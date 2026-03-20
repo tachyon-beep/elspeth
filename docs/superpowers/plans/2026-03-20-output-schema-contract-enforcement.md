@@ -11,7 +11,7 @@
 **Spec:** `docs/superpowers/specs/2026-03-20-output-schema-contract-enforcement-design.md`
 
 **IMPORTANT — Task Ordering and Atomicity:**
-Tasks 1-9 MUST all be committed before running the full test suite against integration tests that build real pipelines. Task 2 adds the enforcement check (`FrameworkBugError`); Tasks 3-8 fix the transforms that would fail that check. If the test suite runs between Task 2 and Task 8, unfixed transforms will crash at graph-build time. Either: (a) execute Tasks 1-9 sequentially without CI between them, or (b) squash Tasks 2-8 into a single commit.
+Tasks 1-3 MUST all be committed before running the full test suite against integration tests that build real pipelines. Task 2 fixes all transforms; Task 3 adds the enforcement check (`FrameworkBugError`). If the enforcement check were added before the transforms are fixed, unfixed transforms would crash at graph-build time. The plan orders these correctly (fix first, enforce second), but all three tasks should land before CI runs integration tests.
 
 ---
 
