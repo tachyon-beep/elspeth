@@ -80,6 +80,8 @@ def _build_output_schema_config(self, schema_config: SchemaConfig) -> SchemaConf
     Returns:
         SchemaConfig with guaranteed_fields including declared output fields.
     """
+    from elspeth.contracts.schema import SchemaConfig
+
     base_guaranteed = schema_config.guaranteed_fields or ()
     return SchemaConfig(
         mode=schema_config.mode,
@@ -128,6 +130,7 @@ All transforms call `_build_output_schema_config` **unconditionally** after sett
 ```python
 self._output_schema_config = self._build_output_schema_config(self._rag_config.schema_config)
 ```
+Note: `declared_output_fields` is set at lines 73–79 with prefix-interpolated names (e.g. `{prefix}__rag_context`), before `_create_schemas` at line 82. The ordering is already correct — the helper call goes after both.
 
 **`web_scrape.py`**: Add after `declared_output_fields` is set:
 ```python
@@ -204,8 +207,8 @@ Each affected transform gets a test that constructs an instance with a represent
 |-----------|--------|--------------------------------------|
 | `rag` | `output_prefix="sci"`, `schema: {mode: observed}` | `{"sci__rag_context", "sci__rag_score", "sci__rag_count", "sci__rag_sources"}` |
 | `web_scrape` | `content_field="page_content"`, `fingerprint_field="page_hash"` | `{"page_content", "page_hash", "fetch_status", "fetch_url_final", "fetch_url_final_ip", "fetch_request_hash", "fetch_response_raw_hash", "fetch_response_processed_hash"}` |
-| `json_explode` | `array_field="items"`, `output_fields=["name", "value"]`, `include_index=True` | `{"name", "value", "item_index"}` (verify exact field names against source) |
-| `json_explode` | `include_index=False` | `{"name", "value"}` |
+| `json_explode` | `array_field="items"`, `output_field="item"`, `include_index=True` | `{"item", "item_index"}` |
+| `json_explode` | `array_field="items"`, `output_field="item"`, `include_index=False` | `{"item"}` |
 | `batch_replicate` | `include_copy_index=True` | `{"copy_index"}` |
 | `batch_replicate` | `include_copy_index=False` | `frozenset()` (empty — verify against source that field is truly conditional) |
 | `field_mapper` | `mapping={"old_name": "new_name", "source": "target"}` | `{"new_name", "target"}` |
