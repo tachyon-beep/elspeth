@@ -975,7 +975,12 @@ class LLMTransform(BaseTransform, BatchTransformMixin):
                         prefixed_guaranteed.add(f"{spec.name}_{field.suffix}")
             self.declared_output_fields = frozenset(prefixed_guaranteed | prefixed_audit)
 
-            # Output schema config with prefixed fields for DAG contract propagation
+            # Output schema config with prefixed fields for DAG contract propagation.
+            # INVARIANT: guaranteed_fields must be a superset of declared_output_fields.
+            # This transform builds _output_schema_config manually (not via
+            # _build_output_schema_config) because multi-query field computation
+            # requires prefix interpolation beyond the generic helper's scope.
+            # See: docs/superpowers/specs/2026-03-20-output-schema-contract-enforcement-design.md
             base_guaranteed = schema_config.guaranteed_fields or ()
             base_audit = schema_config.audit_fields or ()
             self._output_schema_config = SchemaConfig(
@@ -1015,7 +1020,12 @@ class LLMTransform(BaseTransform, BatchTransformMixin):
             audit = get_llm_audit_fields(self._response_field)
             self.declared_output_fields = frozenset([*guaranteed, *audit])
 
-            # Output schema config with unprefixed fields
+            # Output schema config with prefixed fields for DAG contract propagation.
+            # INVARIANT: guaranteed_fields must be a superset of declared_output_fields.
+            # This transform builds _output_schema_config manually (not via
+            # _build_output_schema_config) because multi-query field computation
+            # requires prefix interpolation beyond the generic helper's scope.
+            # See: docs/superpowers/specs/2026-03-20-output-schema-contract-enforcement-design.md
             base_guaranteed = schema_config.guaranteed_fields or ()
             base_audit = schema_config.audit_fields or ()
             self._output_schema_config = SchemaConfig(
