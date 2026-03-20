@@ -10,6 +10,9 @@
 
 **Spec:** `docs/superpowers/specs/2026-03-20-output-schema-contract-enforcement-design.md`
 
+**IMPORTANT — Task Ordering and Atomicity:**
+Tasks 1-9 MUST all be committed before running the full test suite against integration tests that build real pipelines. Task 2 adds the enforcement check (`FrameworkBugError`); Tasks 3-8 fix the transforms that would fail that check. If the test suite runs between Task 2 and Task 8, unfixed transforms will crash at graph-build time. Either: (a) execute Tasks 1-9 sequentially without CI between them, or (b) squash Tasks 2-8 into a single commit.
+
 ---
 
 ### Task 1: Base Class — Add `_output_schema_config` Class Attribute and `_build_output_schema_config` Helper
@@ -25,20 +28,20 @@ Create `tests/unit/plugins/infrastructure/test_build_output_schema_config.py`:
 ```python
 """Tests for BaseTransform._build_output_schema_config helper."""
 
-from elspeth.contracts.schema import SchemaConfig
-from elspeth.plugins.transforms.keyword_filter import KeywordFilterTransform
+from elspeth.contracts.schema import FieldDefinition, SchemaConfig
+from elspeth.plugins.transforms.keyword_filter import KeywordFilter
 
 
 def _make_minimal_transform(declared_fields: frozenset[str] | None = None):
     """Create a minimal transform to test the base class helper.
 
-    Uses KeywordFilterTransform as a concrete BaseTransform subclass
+    Uses KeywordFilter as a concrete BaseTransform subclass
     (simplest available — no external deps, no adds_fields).
     """
-    transform = KeywordFilterTransform(
+    transform = KeywordFilter(
         {
-            "field": "text",
-            "keywords": ["test"],
+            "fields": "text",
+            "blocked_patterns": ["test"],
             "schema": {"mode": "observed"},
         }
     )
@@ -77,10 +80,8 @@ class TestBuildOutputSchemaConfig:
         assert frozenset(result.guaranteed_fields) == frozenset({"output_x"})
 
     def test_preserves_mode_and_fields(self):
-        from elspeth.contracts.schema import FieldDefinition
-
         fields = (
-            FieldDefinition(name="id", type=int, original_name="id", required=True, source="config"),
+            FieldDefinition(name="id", field_type="int", required=True),
         )
         transform = _make_minimal_transform(frozenset({"extra"}))
         base = SchemaConfig(mode="fixed", fields=fields, guaranteed_fields=None)
@@ -199,153 +200,27 @@ git commit -m "feat: add _build_output_schema_config helper and _output_schema_c
 
 ---
 
-### Task 2: DAG Builder — Offensive Check for Missing Output Schema Config
+### Task 2: Fix All Transforms — Add `declared_output_fields` and Helper Calls
 
-**Files:**
-- Modify: `src/elspeth/core/dag/builder.py`
-- Create: `tests/unit/core/dag/test_output_schema_enforcement.py`
-
-- [ ] **Step 1: Write the failing tests**
-
-Create `tests/unit/core/dag/test_output_schema_enforcement.py`:
-
-```python
-"""Tests for DAG builder enforcement of _output_schema_config.
-
-Verifies that transforms declaring output fields without providing
-an _output_schema_config raise FrameworkBugError at graph-build time.
-"""
-
-import pytest
-
-from elspeth.contracts.errors import FrameworkBugError
-from elspeth.contracts.schema import SchemaConfig
-
-
-class _StubTransform:
-    """Minimal stub implementing enough of TransformProtocol for the builder check."""
-
-    name = "stub_transform"
-    config = {"schema": {"mode": "observed"}}
-    input_schema = None
-    output_schema = None
-    declared_output_fields: frozenset[str] = frozenset()
-    _output_schema_config: SchemaConfig | None = None
-
-
-class TestOutputSchemaEnforcement:
-    def test_nonempty_declared_fields_without_config_raises(self):
-        """Transform declares output fields but no _output_schema_config -> FrameworkBugError."""
-        stub = _StubTransform()
-        stub.declared_output_fields = frozenset({"field_a", "field_b"})
-        stub._output_schema_config = None
-
-        # Import the check function we'll extract, or inline the logic
-        # The actual check lives in builder.py — we test via the builder entry point
-        from elspeth.core.dag.builder import _validate_output_schema_contract
-
-        with pytest.raises(FrameworkBugError, match="declares output fields"):
-            _validate_output_schema_contract(stub)
-
-    def test_nonempty_declared_fields_with_valid_config_passes(self):
-        stub = _StubTransform()
-        stub.declared_output_fields = frozenset({"field_a"})
-        stub._output_schema_config = SchemaConfig(
-            mode="observed", fields=None, guaranteed_fields=("field_a",)
-        )
-
-        from elspeth.core.dag.builder import _validate_output_schema_contract
-
-        _validate_output_schema_contract(stub)  # Should not raise
-
-    def test_empty_declared_fields_without_config_passes(self):
-        """Shape-preserving transforms (no declared fields) don't need _output_schema_config."""
-        stub = _StubTransform()
-        stub.declared_output_fields = frozenset()
-        stub._output_schema_config = None
-
-        from elspeth.core.dag.builder import _validate_output_schema_contract
-
-        _validate_output_schema_contract(stub)  # Should not raise
-```
-
-- [ ] **Step 2: Run tests — verify they fail**
-
-Run: `.venv/bin/python -m pytest tests/unit/core/dag/test_output_schema_enforcement.py -v`
-Expected: FAIL — `_validate_output_schema_contract` does not exist.
-
-- [ ] **Step 3: Implement the DAG builder changes**
-
-In `src/elspeth/core/dag/builder.py`:
-
-**a)** Add import at the top (after existing imports, ~line 31):
-
-```python
-from elspeth.contracts.errors import FrameworkBugError
-```
-
-**b)** Add the validation function (before `build_execution_graph`, around line 50):
-
-```python
-def _validate_output_schema_contract(transform: Any) -> None:
-    """Validate that transforms declaring output fields provide a DAG contract.
-
-    Raises FrameworkBugError if declared_output_fields is non-empty but
-    _output_schema_config is None. This prevents silent DAG validation gaps.
-    """
-    if transform.declared_output_fields and transform._output_schema_config is None:
-        raise FrameworkBugError(
-            f"Transform {transform.name!r} declares output fields "
-            f"{sorted(transform.declared_output_fields)} but provides no "
-            f"_output_schema_config for DAG contract validation. "
-            f"Call self._output_schema_config = self._build_output_schema_config(schema_config) "
-            f"in __init__ after setting declared_output_fields."
-        )
-```
-
-**c)** Replace the transform `getattr` site (~line 218-223). Remove the multi-line comment and `getattr` call, replace with:
-
-```python
-        # Validate output schema contract — crash if transform declares output
-        # fields but provides no DAG contract.
-        _validate_output_schema_contract(transform)
-        output_schema_config = transform._output_schema_config
-```
-
-**d)** Replace the aggregation `getattr` site (~line 250-251). Remove the comment and `getattr` call, replace with:
-
-```python
-        # Same validation for aggregation transforms.
-        _validate_output_schema_contract(transform)
-        agg_output_schema_config = transform._output_schema_config
-```
-
-- [ ] **Step 4: Run new tests — verify they pass**
-
-Run: `.venv/bin/python -m pytest tests/unit/core/dag/test_output_schema_enforcement.py -v`
-Expected: All 3 tests PASS.
-
-- [ ] **Step 5: Run existing DAG tests — verify no regressions**
-
-Run: `.venv/bin/python -m pytest tests/unit/core/dag/ -x -q`
-Expected: All pass.
-
-- [ ] **Step 6: Commit**
-
-```bash
-git add src/elspeth/core/dag/builder.py tests/unit/core/dag/test_output_schema_enforcement.py
-git commit -m "feat: add FrameworkBugError check for missing _output_schema_config in DAG builder"
-```
-
----
-
-### Task 3: Fix RAG Transform — Replace Manual Construction with Helper
+**IMPORTANT:** This task fixes ALL 6 transforms BEFORE adding the enforcement check (Task 3). This prevents any window where the enforcement check fires against unfixed transforms. Each transform's fix is a substep within this task.
 
 **Files:**
 - Modify: `src/elspeth/plugins/transforms/rag/transform.py`
+- Modify: `src/elspeth/plugins/transforms/json_explode.py`
+- Modify: `src/elspeth/plugins/transforms/batch_replicate.py`
+- Modify: `src/elspeth/plugins/transforms/field_mapper.py`
+- Modify: `src/elspeth/plugins/transforms/batch_stats.py`
+- Modify: `src/elspeth/plugins/transforms/web_scrape.py`
 - Modify: `tests/unit/plugins/transforms/rag/test_transform.py`
+- Modify: `tests/unit/plugins/transforms/test_json_explode.py`
+- Modify: `tests/unit/plugins/transforms/test_batch_replicate.py`
+- Modify: `tests/unit/plugins/transforms/test_field_mapper.py`
+- Modify: `tests/unit/plugins/transforms/test_batch_stats.py`
+- Modify: `tests/unit/plugins/transforms/test_web_scrape.py`
 
-- [ ] **Step 1: Write the pinning test**
+#### 2a: RAG Transform — Replace Manual Construction with Helper
+
+- [ ] **Step 1: Write the regression pinning test**
 
 Add to `tests/unit/plugins/transforms/rag/test_transform.py` in `TestTransformLifecycle`:
 
@@ -363,30 +238,14 @@ Add to `tests/unit/plugins/transforms/rag/test_transform.py` in `TestTransformLi
         )
 ```
 
-- [ ] **Step 2: Run test — verify it passes (manual construction still works)**
+- [ ] **Step 2: Verify pinning test passes against existing manual construction**
 
 Run: `.venv/bin/python -m pytest tests/unit/plugins/transforms/rag/test_transform.py::TestTransformLifecycle::test_output_schema_config_guaranteed_fields -v`
-Expected: PASS (the manual construction at lines 89-99 is still in place).
+Expected: PASS — this is a regression pin, not TDD. The manual construction at lines 89-99 already produces the correct result. This test ensures the refactor to the helper doesn't change behavior.
 
 - [ ] **Step 3: Replace manual construction with helper call**
 
-In `src/elspeth/plugins/transforms/rag/transform.py`, replace lines 89-99:
-
-```python
-        # Output schema config with guaranteed_fields for DAG contract propagation.
-        # Input fields pass through, and RAG adds its declared output fields.
-        schema_config = self._rag_config.schema_config
-        base_guaranteed = schema_config.guaranteed_fields or ()
-        self._output_schema_config = SchemaConfig(
-            mode=schema_config.mode,
-            fields=schema_config.fields,
-            guaranteed_fields=tuple(set(base_guaranteed) | self.declared_output_fields),
-            audit_fields=schema_config.audit_fields,
-            required_fields=schema_config.required_fields,
-        )
-```
-
-With:
+In `src/elspeth/plugins/transforms/rag/transform.py`, replace lines 89-99 (the manual `SchemaConfig` construction) with:
 
 ```python
         # Output schema config for DAG contract propagation.
@@ -400,24 +259,11 @@ Also remove the `SchemaConfig` import from the top of the file (line 23: `from e
 - [ ] **Step 4: Run all RAG tests — verify no regressions**
 
 Run: `.venv/bin/python -m pytest tests/unit/plugins/transforms/rag/ -v`
-Expected: All pass, including the new pinning test.
+Expected: All pass, including the pinning test.
 
-- [ ] **Step 5: Commit**
+#### 2b: json_explode — Add Helper Call
 
-```bash
-git add src/elspeth/plugins/transforms/rag/transform.py tests/unit/plugins/transforms/rag/test_transform.py
-git commit -m "refactor: replace manual _output_schema_config in RAG transform with helper"
-```
-
----
-
-### Task 4: Fix json_explode — Add Helper Call and Pinning Tests
-
-**Files:**
-- Modify: `src/elspeth/plugins/transforms/json_explode.py`
-- Modify: `tests/unit/plugins/transforms/test_json_explode.py`
-
-- [ ] **Step 1: Write the pinning tests**
+- [ ] **Step 5: Write pinning tests for json_explode**
 
 Add to `tests/unit/plugins/transforms/test_json_explode.py`:
 
@@ -452,12 +298,10 @@ class TestOutputSchemaConfig:
         )
 ```
 
-- [ ] **Step 2: Run tests — verify they fail**
+- [ ] **Step 6: Verify tests fail, add helper call, verify tests pass**
 
 Run: `.venv/bin/python -m pytest tests/unit/plugins/transforms/test_json_explode.py::TestOutputSchemaConfig -v`
 Expected: FAIL — `_output_schema_config` is `None`.
-
-- [ ] **Step 3: Add helper call to json_explode**
 
 In `src/elspeth/plugins/transforms/json_explode.py`, add after the `_create_schemas` call (~line 134):
 
@@ -465,27 +309,11 @@ In `src/elspeth/plugins/transforms/json_explode.py`, add after the `_create_sche
         self._output_schema_config = self._build_output_schema_config(cfg.schema_config)
 ```
 
-- [ ] **Step 4: Run tests — verify they pass**
+Run again. Expected: PASS.
 
-Run: `.venv/bin/python -m pytest tests/unit/plugins/transforms/test_json_explode.py -v`
-Expected: All pass.
+#### 2c: batch_replicate — Add Helper Call
 
-- [ ] **Step 5: Commit**
-
-```bash
-git add src/elspeth/plugins/transforms/json_explode.py tests/unit/plugins/transforms/test_json_explode.py
-git commit -m "feat: add _output_schema_config to json_explode transform"
-```
-
----
-
-### Task 5: Fix batch_replicate — Add Helper Call and Pinning Tests
-
-**Files:**
-- Modify: `src/elspeth/plugins/transforms/batch_replicate.py`
-- Modify: `tests/unit/plugins/transforms/test_batch_replicate.py`
-
-- [ ] **Step 1: Write the pinning tests**
+- [ ] **Step 7: Write pinning tests for batch_replicate**
 
 Add to `tests/unit/plugins/transforms/test_batch_replicate.py`:
 
@@ -511,16 +339,10 @@ class TestOutputSchemaConfig:
             }
         )
         assert transform._output_schema_config is not None
-        # Empty declared_output_fields -> guaranteed_fields has no transform-specific fields
         assert frozenset(transform._output_schema_config.guaranteed_fields) == frozenset()
 ```
 
-- [ ] **Step 2: Run tests — verify they fail**
-
-Run: `.venv/bin/python -m pytest tests/unit/plugins/transforms/test_batch_replicate.py::TestOutputSchemaConfig -v`
-Expected: FAIL — `_output_schema_config` is `None`.
-
-- [ ] **Step 3: Add helper call to batch_replicate**
+- [ ] **Step 8: Verify tests fail, add helper call, verify tests pass**
 
 In `src/elspeth/plugins/transforms/batch_replicate.py`, add after the `_create_schemas` call (~line 120):
 
@@ -528,27 +350,9 @@ In `src/elspeth/plugins/transforms/batch_replicate.py`, add after the `_create_s
         self._output_schema_config = self._build_output_schema_config(cfg.schema_config)
 ```
 
-- [ ] **Step 4: Run tests — verify they pass**
+#### 2d: field_mapper — Populate `declared_output_fields` and Add Helper Call
 
-Run: `.venv/bin/python -m pytest tests/unit/plugins/transforms/test_batch_replicate.py -v`
-Expected: All pass.
-
-- [ ] **Step 5: Commit**
-
-```bash
-git add src/elspeth/plugins/transforms/batch_replicate.py tests/unit/plugins/transforms/test_batch_replicate.py
-git commit -m "feat: add _output_schema_config to batch_replicate transform"
-```
-
----
-
-### Task 6: Fix field_mapper — Populate `declared_output_fields` and Add Helper Call
-
-**Files:**
-- Modify: `src/elspeth/plugins/transforms/field_mapper.py`
-- Modify: `tests/unit/plugins/transforms/test_field_mapper.py`
-
-- [ ] **Step 1: Write the pinning test**
+- [ ] **Step 9: Write pinning tests for field_mapper**
 
 Add to `tests/unit/plugins/transforms/test_field_mapper.py`:
 
@@ -574,7 +378,6 @@ class TestOutputSchemaConfig:
             }
         )
         assert transform._output_schema_config is not None
-        # Empty mapping = no declared output fields = no guaranteed fields
         assert frozenset(transform._output_schema_config.guaranteed_fields) == frozenset()
 
     def test_declared_output_fields_set_from_mapping(self):
@@ -587,17 +390,12 @@ class TestOutputSchemaConfig:
         assert transform.declared_output_fields == frozenset({"b", "d"})
 ```
 
-- [ ] **Step 2: Run tests — verify they fail**
-
-Run: `.venv/bin/python -m pytest tests/unit/plugins/transforms/test_field_mapper.py::TestOutputSchemaConfig -v`
-Expected: FAIL — `declared_output_fields` is empty, `_output_schema_config` is `None`.
-
-- [ ] **Step 3: Add `declared_output_fields` and helper call to field_mapper**
+- [ ] **Step 10: Verify tests fail, add declared_output_fields + helper, verify tests pass**
 
 In `src/elspeth/plugins/transforms/field_mapper.py`, in `__init__` (~line 91, after `self.validate_input = cfg.validate_input`):
 
 ```python
-        # Mapping targets are the fields this transform adds/renames to in the output.
+        # Mapping targets are the fields this transform guarantees in output.
         self.declared_output_fields = frozenset(cfg.mapping.values())
 ```
 
@@ -607,27 +405,11 @@ Then after the `_create_schemas` call (~line 99):
         self._output_schema_config = self._build_output_schema_config(cfg.schema_config)
 ```
 
-- [ ] **Step 4: Run tests — verify they pass**
+**IMPORTANT — Collision detection check:** After this step, verify that `TransformExecutor` collision detection (at `src/elspeth/engine/executors/transform.py:211-223`) does not produce false positives for `field_mapper`. The collision check calls `detect_field_collisions(set(input_dict.keys()), transform.declared_output_fields)`, which checks if any `declared_output_fields` already exist in the input row. For rename-only mappings where the target name coincidentally exists in the input, this would raise `PluginContractViolation`. Run: `.venv/bin/python -m pytest tests/unit/plugins/transforms/test_field_mapper.py -v` and check for collision-related failures. If collisions are detected in existing tests, the `declared_output_fields` computation needs refinement (e.g., exclude targets that also appear as sources: `frozenset(cfg.mapping.values()) - frozenset(cfg.mapping.keys())`).
 
-Run: `.venv/bin/python -m pytest tests/unit/plugins/transforms/test_field_mapper.py -v`
-Expected: All pass.
+#### 2e: batch_stats — Populate `declared_output_fields` and Add Helper Call
 
-- [ ] **Step 5: Commit**
-
-```bash
-git add src/elspeth/plugins/transforms/field_mapper.py tests/unit/plugins/transforms/test_field_mapper.py
-git commit -m "feat: populate declared_output_fields and add _output_schema_config to field_mapper"
-```
-
----
-
-### Task 7: Fix batch_stats — Populate `declared_output_fields` and Add Helper Call
-
-**Files:**
-- Modify: `src/elspeth/plugins/transforms/batch_stats.py`
-- Modify: `tests/unit/plugins/transforms/test_batch_stats.py`
-
-- [ ] **Step 1: Write the pinning tests**
+- [ ] **Step 11: Write pinning tests for batch_stats**
 
 Add to `tests/unit/plugins/transforms/test_batch_stats.py`:
 
@@ -660,7 +442,7 @@ class TestOutputSchemaConfig:
             {"count", "sum", "batch_size"}
         )
 
-    def test_declared_output_fields_set_from_config(self):
+    def test_declared_output_fields_includes_group_by(self):
         transform = BatchStats(
             {
                 "schema": {"mode": "observed"},
@@ -668,16 +450,12 @@ class TestOutputSchemaConfig:
                 "group_by": "region",
             }
         )
-        assert "region" in transform.declared_output_fields
-        assert "count" in transform.declared_output_fields
+        assert transform.declared_output_fields == frozenset(
+            {"count", "sum", "batch_size", "mean", "region"}
+        )
 ```
 
-- [ ] **Step 2: Run tests — verify they fail**
-
-Run: `.venv/bin/python -m pytest tests/unit/plugins/transforms/test_batch_stats.py::TestOutputSchemaConfig -v`
-Expected: FAIL — `declared_output_fields` is empty, `_output_schema_config` is `None`.
-
-- [ ] **Step 3: Add `declared_output_fields` and helper call to batch_stats**
+- [ ] **Step 12: Verify tests fail, add declared_output_fields + helper, verify tests pass**
 
 In `src/elspeth/plugins/transforms/batch_stats.py`, in `__init__` (~line 84, after `self._compute_mean = cfg.compute_mean`):
 
@@ -700,29 +478,11 @@ Then after the `_create_schemas` call (~line 92):
         self._output_schema_config = self._build_output_schema_config(cfg.schema_config)
 ```
 
-- [ ] **Step 4: Run tests — verify they pass**
+#### 2f: web_scrape — Add Helper Call
 
-Run: `.venv/bin/python -m pytest tests/unit/plugins/transforms/test_batch_stats.py -v`
-Expected: All pass.
+- [ ] **Step 13: Write pinning test for web_scrape**
 
-- [ ] **Step 5: Commit**
-
-```bash
-git add src/elspeth/plugins/transforms/batch_stats.py tests/unit/plugins/transforms/test_batch_stats.py
-git commit -m "feat: populate declared_output_fields and add _output_schema_config to batch_stats"
-```
-
----
-
-### Task 8: Fix web_scrape — Add Helper Call and Pinning Test
-
-**Files:**
-- Modify: `src/elspeth/plugins/transforms/web_scrape.py`
-- Modify: `tests/unit/plugins/transforms/test_web_scrape.py`
-
-- [ ] **Step 1: Write the pinning test**
-
-Add to `tests/unit/plugins/transforms/test_web_scrape.py`. Note: `web_scrape` requires specific config. Find the existing test helper or constructor pattern in the file and adapt. The test needs:
+Add to `tests/unit/plugins/transforms/test_web_scrape.py`:
 
 ```python
 class TestOutputSchemaConfig:
@@ -753,36 +513,199 @@ class TestOutputSchemaConfig:
         assert frozenset(transform._output_schema_config.guaranteed_fields) == expected
 ```
 
-- [ ] **Step 2: Run test — verify it fails**
+- [ ] **Step 14: Verify test fails, add helper call, verify test passes**
 
-Run: `.venv/bin/python -m pytest tests/unit/plugins/transforms/test_web_scrape.py::TestOutputSchemaConfig -v`
-Expected: FAIL — `_output_schema_config` is `None`.
-
-- [ ] **Step 3: Add helper call to web_scrape**
-
-In `src/elspeth/plugins/transforms/web_scrape.py`, after `declared_output_fields` is set (~line 211) and after the schema construction (~line 249), add:
+In `src/elspeth/plugins/transforms/web_scrape.py`, after the schema construction (~line 249, after `self.output_schema = schema`), add:
 
 ```python
         self._output_schema_config = self._build_output_schema_config(cfg.schema_config)
 ```
 
-Note: `web_scrape` does NOT use `_create_schemas` — it builds schemas manually. The helper call is independent of schema creation. Place it after line 249 (`self.output_schema = schema`).
+Note: `web_scrape` does NOT use `_create_schemas` — it builds schemas manually. The helper call is independent.
 
-- [ ] **Step 4: Run tests — verify they pass**
+#### 2g: Run all transform tests and commit
 
-Run: `.venv/bin/python -m pytest tests/unit/plugins/transforms/test_web_scrape.py -v`
+- [ ] **Step 15: Run all transform tests — verify everything passes**
+
+Run: `.venv/bin/python -m pytest tests/unit/plugins/transforms/ -x -q`
 Expected: All pass.
 
-- [ ] **Step 5: Commit**
+- [ ] **Step 16: Commit all transform fixes together**
 
 ```bash
-git add src/elspeth/plugins/transforms/web_scrape.py tests/unit/plugins/transforms/test_web_scrape.py
-git commit -m "feat: add _output_schema_config to web_scrape transform"
+git add src/elspeth/plugins/transforms/rag/transform.py \
+       src/elspeth/plugins/transforms/json_explode.py \
+       src/elspeth/plugins/transforms/batch_replicate.py \
+       src/elspeth/plugins/transforms/field_mapper.py \
+       src/elspeth/plugins/transforms/batch_stats.py \
+       src/elspeth/plugins/transforms/web_scrape.py \
+       tests/unit/plugins/transforms/
+git commit -m "feat: add _output_schema_config to all field-adding transforms
+
+Populate declared_output_fields for field_mapper and batch_stats.
+Add _build_output_schema_config helper call to all 6 transforms.
+Replace RAG transform manual construction with helper.
+Pin guaranteed_fields content in per-transform unit tests."
 ```
 
 ---
 
-### Task 9: Add LLM Transform Comment and Verify Tier Model
+### Task 3: DAG Builder — Offensive Check for Missing Output Schema Config
+
+**PREREQUISITE:** Task 2 must be complete — all transforms must have `_output_schema_config` set before this enforcement check is added.
+
+**Files:**
+- Modify: `src/elspeth/core/dag/builder.py`
+- Modify: `tests/unit/core/test_dag_schema_propagation.py` (fix existing test mocks)
+- Create: `tests/unit/core/dag/test_output_schema_enforcement.py`
+
+- [ ] **Step 1: Fix existing test mocks that lack `declared_output_fields`**
+
+In `tests/unit/core/test_dag_schema_propagation.py`, add `declared_output_fields` to both mock classes:
+
+At `MockTransformWithoutSchemaConfig` (~line 54), add after the class attributes:
+```python
+    declared_output_fields: frozenset[str] = frozenset()
+```
+
+At `MockAggregationTransform` (~line 347), add after the class attributes:
+```python
+    declared_output_fields: frozenset[str] = frozenset()
+```
+
+These mocks don't inherit `BaseTransform`, so they don't get the class attribute automatically. Without this fix, `_validate_output_schema_contract` will `AttributeError` on `transform.declared_output_fields`.
+
+- [ ] **Step 2: Write the failing tests for the enforcement check**
+
+Create `tests/unit/core/dag/test_output_schema_enforcement.py`:
+
+```python
+"""Tests for DAG builder enforcement of _output_schema_config.
+
+Verifies that transforms declaring output fields without providing
+an _output_schema_config raise FrameworkBugError at graph-build time.
+"""
+
+import pytest
+
+from elspeth.contracts.errors import FrameworkBugError
+from elspeth.contracts.schema import SchemaConfig
+
+
+class _StubTransform:
+    """Minimal stub implementing enough of TransformProtocol for the builder check."""
+
+    name = "stub_transform"
+    config = {"schema": {"mode": "observed"}}
+    input_schema = None
+    output_schema = None
+    declared_output_fields: frozenset[str] = frozenset()
+    _output_schema_config: SchemaConfig | None = None
+
+
+class TestOutputSchemaEnforcement:
+    def test_nonempty_declared_fields_without_config_raises(self):
+        """Transform declares output fields but no _output_schema_config -> FrameworkBugError."""
+        stub = _StubTransform()
+        stub.declared_output_fields = frozenset({"field_a", "field_b"})
+        stub._output_schema_config = None
+
+        from elspeth.core.dag.builder import _validate_output_schema_contract
+
+        with pytest.raises(FrameworkBugError, match="declares output fields"):
+            _validate_output_schema_contract(stub)
+
+    def test_nonempty_declared_fields_with_valid_config_passes(self):
+        stub = _StubTransform()
+        stub.declared_output_fields = frozenset({"field_a"})
+        stub._output_schema_config = SchemaConfig(
+            mode="observed", fields=None, guaranteed_fields=("field_a",)
+        )
+
+        from elspeth.core.dag.builder import _validate_output_schema_contract
+
+        _validate_output_schema_contract(stub)  # Should not raise
+
+    def test_empty_declared_fields_without_config_passes(self):
+        """Shape-preserving transforms (no declared fields) don't need _output_schema_config."""
+        stub = _StubTransform()
+        stub.declared_output_fields = frozenset()
+        stub._output_schema_config = None
+
+        from elspeth.core.dag.builder import _validate_output_schema_contract
+
+        _validate_output_schema_contract(stub)  # Should not raise
+```
+
+- [ ] **Step 3: Run tests — verify enforcement tests fail**
+
+Run: `.venv/bin/python -m pytest tests/unit/core/dag/test_output_schema_enforcement.py -v`
+Expected: FAIL — `_validate_output_schema_contract` does not exist.
+
+- [ ] **Step 4: Implement the DAG builder changes**
+
+In `src/elspeth/core/dag/builder.py`:
+
+**a)** Add import at the top (after the existing `from elspeth.contracts` imports):
+
+```python
+from elspeth.contracts.errors import FrameworkBugError
+```
+
+**b)** Add the validation function (before `build_execution_graph`):
+
+```python
+def _validate_output_schema_contract(transform: Any) -> None:
+    """Validate that transforms declaring output fields provide a DAG contract.
+
+    Raises FrameworkBugError if declared_output_fields is non-empty but
+    _output_schema_config is None. This prevents silent DAG validation gaps.
+    """
+    if transform.declared_output_fields and transform._output_schema_config is None:
+        raise FrameworkBugError(
+            f"Transform {transform.name!r} declares output fields "
+            f"{sorted(transform.declared_output_fields)} but provides no "
+            f"_output_schema_config for DAG contract validation. "
+            f"Call self._output_schema_config = self._build_output_schema_config(schema_config) "
+            f"in __init__ after setting declared_output_fields."
+        )
+```
+
+**c)** Replace the transform `getattr` site (~line 218-223). Remove the multi-line `getattr` justification comment and the `getattr` call, replace with:
+
+```python
+        # Validate output schema contract — crash if transform declares output
+        # fields but provides no DAG contract.
+        _validate_output_schema_contract(transform)
+        output_schema_config = transform._output_schema_config
+```
+
+**d)** Replace the aggregation `getattr` site (~line 250-251). Remove the comment and `getattr` call, replace with:
+
+```python
+        # Same validation for aggregation transforms.
+        _validate_output_schema_contract(transform)
+        agg_output_schema_config = transform._output_schema_config
+```
+
+- [ ] **Step 5: Run all new and existing tests — verify they pass**
+
+Run: `.venv/bin/python -m pytest tests/unit/core/dag/ tests/unit/core/test_dag_schema_propagation.py -x -q`
+Expected: All pass (mocks fixed in Step 1, enforcement tests pass from Step 4).
+
+- [ ] **Step 6: Commit**
+
+```bash
+git add src/elspeth/core/dag/builder.py tests/unit/core/dag/test_output_schema_enforcement.py tests/unit/core/test_dag_schema_propagation.py
+git commit -m "feat: add FrameworkBugError check for missing _output_schema_config in DAG builder
+
+Also fixes MockTransformWithoutSchemaConfig and MockAggregationTransform
+in test_dag_schema_propagation.py to include declared_output_fields."
+```
+
+---
+
+### Task 4: Add LLM Transform Comment and Verify Tier Model
 
 **Files:**
 - Modify: `src/elspeth/plugins/transforms/llm/transform.py`
@@ -790,7 +713,7 @@ git commit -m "feat: add _output_schema_config to web_scrape transform"
 
 - [ ] **Step 1: Add invariant comment to LLM transform**
 
-In `src/elspeth/plugins/transforms/llm/transform.py`, add a comment before the multi-query `_output_schema_config` construction (~line 978):
+In `src/elspeth/plugins/transforms/llm/transform.py`, find the multi-query `_output_schema_config` construction (search for `self._output_schema_config = SchemaConfig(` — there are two sites). Add a comment before each:
 
 ```python
             # Output schema config with prefixed fields for DAG contract propagation.
@@ -801,36 +724,27 @@ In `src/elspeth/plugins/transforms/llm/transform.py`, add a comment before the m
             # See: docs/superpowers/specs/2026-03-20-output-schema-contract-enforcement-design.md
 ```
 
-Add the same comment before the single-query construction (~line 1018).
-
-- [ ] **Step 2: Run the tier model enforcer**
-
-Run: `.venv/bin/python scripts/cicd/enforce_tier_model.py check --root src/elspeth --allowlist config/cicd/enforce_tier_model`
-
-If any new violations are reported (fingerprint changes from modified files), update the allowlist in `config/cicd/enforce_tier_model/plugins.yaml` with the new fingerprints. The changes in this spec should not introduce new defensive patterns, but line number shifts may invalidate existing fingerprints.
-
-- [ ] **Step 3: Run full verification suite**
-
-Run all five verification commands from the spec:
+- [ ] **Step 2: Run the tier model enforcer and full verification**
 
 ```bash
 .venv/bin/python -m pytest tests/unit/plugins/transforms/ -x -q
 .venv/bin/python scripts/cicd/enforce_tier_model.py check --root src/elspeth --allowlist config/cicd/enforce_tier_model
-.venv/bin/python -m mypy src/elspeth/plugins/infrastructure/base.py src/elspeth/core/dag/builder.py
+.venv/bin/python -m mypy src/elspeth/plugins/infrastructure/base.py src/elspeth/core/dag/builder.py src/elspeth/plugins/transforms/llm/transform.py
 .venv/bin/python -m ruff check src/elspeth/
 ```
 
+If tier model enforcer reports stale fingerprints, update `config/cicd/enforce_tier_model/plugins.yaml`.
+
 Expected: All pass.
 
-- [ ] **Step 4: Commit**
+- [ ] **Step 3: Commit**
 
 ```bash
 git add src/elspeth/plugins/transforms/llm/transform.py
 git commit -m "docs: add output schema contract invariant comments to LLM transform"
 ```
 
-If allowlist was updated:
-
+If allowlist updated:
 ```bash
 git add config/cicd/enforce_tier_model/plugins.yaml
 git commit -m "chore: update tier model allowlist fingerprints for output schema contract changes"
@@ -838,31 +752,29 @@ git commit -m "chore: update tier model allowlist fingerprints for output schema
 
 ---
 
-### Task 10: Integration Test — RAG → LLM Pipeline with Field Validation
+### Task 5: Integration Test — Real DAG Build with Field Validation
 
 **Files:**
 - Create: `tests/integration/plugins/transforms/test_output_schema_contract.py`
 
 - [ ] **Step 1: Write the integration test**
 
-This test MUST use `ExecutionGraph.from_plugin_instances()` — the production code path. It verifies that the RAG transform's `guaranteed_fields` are visible to downstream transforms' `required_input_fields` validation.
+This test MUST use `ExecutionGraph.from_plugin_instances()` — the production code path. It verifies that the RAG transform's `guaranteed_fields` propagate through the DAG builder so downstream transforms can declare `required_input_fields` without the `[]` opt-out.
 
 Create `tests/integration/plugins/transforms/test_output_schema_contract.py`:
 
 ```python
 """Integration test for output schema contract enforcement.
 
-Verifies that RAG transform's guaranteed_fields propagate through
-the DAG builder so downstream transforms can declare required_input_fields
-without using the [] opt-out.
-
-Uses ExecutionGraph.from_plugin_instances() — the production code path.
+Verifies that _output_schema_config.guaranteed_fields propagate through
+the DAG builder via ExecutionGraph.from_plugin_instances() — the production
+code path. Tests both positive (field exists) and negative (field missing)
+scenarios.
 """
 
 import pytest
 
 from elspeth.contracts.errors import FrameworkBugError
-from elspeth.core.dag.graph import ExecutionGraph
 from elspeth.plugins.transforms.rag.transform import RAGRetrievalTransform
 
 
@@ -871,36 +783,50 @@ def _set_fingerprint_key(monkeypatch):
     monkeypatch.setenv("ELSPETH_FINGERPRINT_KEY", "test-fingerprint-key")
 
 
-def _make_rag_transform():
-    """Create a RAG transform with known output prefix."""
-    return RAGRetrievalTransform(
-        {
-            "output_prefix": "sci",
-            "query_field": "question",
-            "provider": "chroma",
-            "provider_config": {
-                "collection": "test-collection",
-                "mode": "ephemeral",
-            },
-            "schema": {"mode": "observed"},
-        }
-    )
-
-
 class TestOutputSchemaContractIntegration:
-    def test_rag_guaranteed_fields_visible_to_dag(self):
-        """RAG transform's declared output fields appear in _output_schema_config."""
-        transform = _make_rag_transform()
+    def test_rag_guaranteed_fields_include_all_declared_outputs(self):
+        """RAG transform's _output_schema_config contains all declared output fields."""
+        transform = RAGRetrievalTransform(
+            {
+                "output_prefix": "sci",
+                "query_field": "question",
+                "provider": "chroma",
+                "provider_config": {
+                    "collection": "test-collection",
+                    "mode": "ephemeral",
+                },
+                "schema": {"mode": "observed"},
+            }
+        )
         assert transform._output_schema_config is not None
         guaranteed = frozenset(transform._output_schema_config.guaranteed_fields)
+
+        # Every declared output field must appear in guaranteed_fields
+        for field in transform.declared_output_fields:
+            assert field in guaranteed, (
+                f"declared_output_field {field!r} missing from guaranteed_fields"
+            )
+
+        # Verify specific expected fields
         assert "sci__rag_context" in guaranteed
         assert "sci__rag_score" in guaranteed
         assert "sci__rag_count" in guaranteed
         assert "sci__rag_sources" in guaranteed
 
-    def test_transform_without_contract_raises_at_build_time(self):
+    def test_enforcement_check_fires_on_missing_contract(self):
         """A transform with declared fields but no contract crashes the builder."""
-        transform = _make_rag_transform()
+        transform = RAGRetrievalTransform(
+            {
+                "output_prefix": "sci",
+                "query_field": "question",
+                "provider": "chroma",
+                "provider_config": {
+                    "collection": "test-collection",
+                    "mode": "ephemeral",
+                },
+                "schema": {"mode": "observed"},
+            }
+        )
         # Simulate the bug: clear _output_schema_config after construction
         transform._output_schema_config = None
 
@@ -908,6 +834,27 @@ class TestOutputSchemaContractIntegration:
 
         with pytest.raises(FrameworkBugError, match="declares output fields"):
             _validate_output_schema_contract(transform)
+
+    def test_invariant2_guaranteed_superset_of_declared(self):
+        """Invariant 2: guaranteed_fields is always a superset of declared_output_fields."""
+        transform = RAGRetrievalTransform(
+            {
+                "output_prefix": "test",
+                "query_field": "q",
+                "provider": "chroma",
+                "provider_config": {
+                    "collection": "test-col",
+                    "mode": "ephemeral",
+                },
+                "schema": {"mode": "observed"},
+            }
+        )
+        assert transform._output_schema_config is not None
+        guaranteed = frozenset(transform._output_schema_config.guaranteed_fields)
+        assert transform.declared_output_fields.issubset(guaranteed), (
+            f"Invariant 2 violation: declared_output_fields {transform.declared_output_fields} "
+            f"is not a subset of guaranteed_fields {guaranteed}"
+        )
 ```
 
 - [ ] **Step 2: Run tests — verify they pass**
@@ -933,12 +880,12 @@ git commit -m "test: add integration test for output schema contract enforcement
 
 ---
 
-### Task 11: Final Verification and Cleanup
+### Task 6: Final Verification and Cleanup
 
 - [ ] **Step 1: Run the full test suite for all affected areas**
 
 ```bash
-.venv/bin/python -m pytest tests/unit/plugins/transforms/ tests/unit/plugins/infrastructure/ tests/unit/core/dag/ tests/integration/plugins/transforms/ -x -q
+.venv/bin/python -m pytest tests/unit/plugins/transforms/ tests/unit/plugins/infrastructure/ tests/unit/core/dag/ tests/unit/core/test_dag_schema_propagation.py tests/integration/plugins/transforms/ -x -q
 ```
 
 Expected: All pass.
@@ -946,7 +893,7 @@ Expected: All pass.
 - [ ] **Step 2: Run mypy on all changed files**
 
 ```bash
-.venv/bin/python -m mypy src/elspeth/plugins/infrastructure/base.py src/elspeth/core/dag/builder.py src/elspeth/plugins/transforms/rag/transform.py src/elspeth/plugins/transforms/web_scrape.py src/elspeth/plugins/transforms/json_explode.py src/elspeth/plugins/transforms/batch_replicate.py src/elspeth/plugins/transforms/field_mapper.py src/elspeth/plugins/transforms/batch_stats.py
+.venv/bin/python -m mypy src/elspeth/plugins/infrastructure/base.py src/elspeth/core/dag/builder.py src/elspeth/plugins/transforms/rag/transform.py src/elspeth/plugins/transforms/web_scrape.py src/elspeth/plugins/transforms/json_explode.py src/elspeth/plugins/transforms/batch_replicate.py src/elspeth/plugins/transforms/field_mapper.py src/elspeth/plugins/transforms/batch_stats.py src/elspeth/plugins/transforms/llm/transform.py
 ```
 
 Expected: `Success: no issues found`.
@@ -967,11 +914,20 @@ Expected: `All checks passed!`
 
 Expected: `No bug-hiding patterns detected. Check passed.`
 
-- [ ] **Step 5: Update spec status**
+- [ ] **Step 5: Run example pipelines**
+
+```bash
+./examples/chroma_rag/run.sh
+./examples/chroma_rag_qa/run.sh
+```
+
+Expected: Both complete successfully (8/8 rows, 0 quarantined).
+
+- [ ] **Step 6: Update spec status**
 
 Change the spec status from `Draft` to `Implemented` in `docs/superpowers/specs/2026-03-20-output-schema-contract-enforcement-design.md`.
 
-- [ ] **Step 6: Final commit**
+- [ ] **Step 7: Final commit**
 
 ```bash
 git add docs/superpowers/specs/2026-03-20-output-schema-contract-enforcement-design.md
