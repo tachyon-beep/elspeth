@@ -620,3 +620,16 @@ class TestOutputSchemaConfig:
             }
         )
         assert transform.declared_output_fields == frozenset({"b", "d"})
+
+    def test_declared_output_fields_excludes_identity_mappings(self):
+        """Identity mappings (same source and target) are excluded from declared fields."""
+        from elspeth.plugins.transforms.field_mapper import FieldMapper
+
+        transform = FieldMapper(
+            {
+                "mapping": {"score": "score", "name": "display_name"},
+                "schema": {"mode": "observed"},
+            }
+        )
+        # "score" → "score" is identity (excluded), "name" → "display_name" is a rename (included)
+        assert transform.declared_output_fields == frozenset({"display_name"})
