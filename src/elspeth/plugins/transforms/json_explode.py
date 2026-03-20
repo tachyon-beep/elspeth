@@ -132,6 +132,7 @@ class JSONExplode(BaseTransform):
             "JSONExplode",
             adds_fields=True,
         )
+        self._output_schema_config = self._build_output_schema_config(cfg.schema_config)
 
     def process(self, row: PipelineRow, ctx: TransformContext) -> TransformResult:
         """Explode array field into multiple rows.

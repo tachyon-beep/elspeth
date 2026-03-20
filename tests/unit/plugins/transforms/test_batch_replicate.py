@@ -468,3 +468,29 @@ class TestBatchReplicateDeclaredOutputFields:
         )
 
         assert transform.declared_output_fields
+
+
+class TestOutputSchemaConfig:
+    def test_guaranteed_fields_with_copy_index(self):
+        from elspeth.plugins.transforms.batch_replicate import BatchReplicate
+
+        transform = BatchReplicate(
+            {
+                "include_copy_index": True,
+                "schema": {"mode": "observed"},
+            }
+        )
+        assert transform._output_schema_config is not None
+        assert frozenset(transform._output_schema_config.guaranteed_fields) == frozenset({"copy_index"})
+
+    def test_guaranteed_fields_without_copy_index(self):
+        from elspeth.plugins.transforms.batch_replicate import BatchReplicate
+
+        transform = BatchReplicate(
+            {
+                "include_copy_index": False,
+                "schema": {"mode": "observed"},
+            }
+        )
+        assert transform._output_schema_config is not None
+        assert frozenset(transform._output_schema_config.guaranteed_fields) == frozenset()

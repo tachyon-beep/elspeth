@@ -118,6 +118,7 @@ class BatchReplicate(BaseTransform):
             "BatchReplicate",
             adds_fields=True,
         )
+        self._output_schema_config = self._build_output_schema_config(cfg.schema_config)
 
     def process(  # type: ignore[override] # Batch signature: list[PipelineRow] instead of PipelineRow
         self, rows: list[PipelineRow], ctx: TransformContext

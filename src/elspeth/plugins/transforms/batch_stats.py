@@ -83,6 +83,11 @@ class BatchStats(BaseTransform):
         self._group_by = cfg.group_by
         self._compute_mean = cfg.compute_mean
 
+        stat_fields: set[str] = {"count", "sum", "batch_size"}
+        if cfg.compute_mean:
+            stat_fields.add("mean")
+        self.declared_output_fields = frozenset(stat_fields)
+
         self._schema_config = cfg.schema_config
 
         self.input_schema, self.output_schema = self._create_schemas(
@@ -90,6 +95,7 @@ class BatchStats(BaseTransform):
             "BatchStats",
             adds_fields=True,
         )
+        self._output_schema_config = self._build_output_schema_config(cfg.schema_config)
 
     def process(  # type: ignore[override] # Batch signature: list[PipelineRow] instead of PipelineRow
         self, rows: list[PipelineRow], ctx: TransformContext

@@ -583,3 +583,40 @@ class TestFieldMapperContractPropagation:
 
         header = output_path.read_text().splitlines()[0]
         assert header == "Amount USD"
+
+
+class TestOutputSchemaConfig:
+    def test_guaranteed_fields_from_mapping_targets(self):
+        from elspeth.plugins.transforms.field_mapper import FieldMapper
+
+        transform = FieldMapper(
+            {
+                "mapping": {"old_name": "new_name", "source": "target"},
+                "schema": {"mode": "observed"},
+            }
+        )
+        assert transform._output_schema_config is not None
+        assert frozenset(transform._output_schema_config.guaranteed_fields) == frozenset({"new_name", "target"})
+
+    def test_guaranteed_fields_empty_mapping(self):
+        from elspeth.plugins.transforms.field_mapper import FieldMapper
+
+        transform = FieldMapper(
+            {
+                "mapping": {},
+                "schema": {"mode": "observed"},
+            }
+        )
+        assert transform._output_schema_config is not None
+        assert frozenset(transform._output_schema_config.guaranteed_fields) == frozenset()
+
+    def test_declared_output_fields_set_from_mapping(self):
+        from elspeth.plugins.transforms.field_mapper import FieldMapper
+
+        transform = FieldMapper(
+            {
+                "mapping": {"a": "b", "c": "d"},
+                "schema": {"mode": "observed"},
+            }
+        )
+        assert transform.declared_output_fields == frozenset({"b", "d"})

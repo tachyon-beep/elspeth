@@ -247,6 +247,7 @@ class WebScrapeTransform(BaseTransform):
         )
         self.input_schema = schema
         self.output_schema = schema
+        self._output_schema_config = self._build_output_schema_config(cfg.schema_config)
 
     def on_start(self, ctx: LifecycleContext) -> None:
         """Capture infrastructure dependencies at pipeline start."""

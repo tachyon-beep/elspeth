@@ -79,6 +79,18 @@ class TestTransformLifecycle:
         )
         assert transform.declared_output_fields == expected
 
+    def test_output_schema_config_guaranteed_fields(self):
+        transform = _make_transform()
+        assert transform._output_schema_config is not None
+        assert frozenset(transform._output_schema_config.guaranteed_fields) == frozenset(
+            {
+                "policy__rag_context",
+                "policy__rag_score",
+                "policy__rag_count",
+                "policy__rag_sources",
+            }
+        )
+
     def test_state_id_guard(self):
         transform = _make_transform()
         lifecycle_ctx = _mock_lifecycle_ctx()

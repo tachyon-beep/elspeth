@@ -377,3 +377,46 @@ class TestBatchStatsGroupByHomogeneity:
 
         with pytest.raises(KeyError):
             transform.process(rows, ctx)
+
+
+class TestOutputSchemaConfig:
+    def test_guaranteed_fields_with_mean_and_group_by(self):
+        """group_by is a passthrough field — NOT in declared_output_fields."""
+        from elspeth.plugins.transforms.batch_stats import BatchStats
+
+        transform = BatchStats(
+            {
+                "schema": {"mode": "observed"},
+                "value_field": "amount",
+                "compute_mean": True,
+                "group_by": "category",
+            }
+        )
+        assert transform._output_schema_config is not None
+        assert frozenset(transform._output_schema_config.guaranteed_fields) == frozenset({"count", "sum", "batch_size", "mean"})
+
+    def test_guaranteed_fields_minimal(self):
+        from elspeth.plugins.transforms.batch_stats import BatchStats
+
+        transform = BatchStats(
+            {
+                "schema": {"mode": "observed"},
+                "value_field": "amount",
+                "compute_mean": False,
+            }
+        )
+        assert transform._output_schema_config is not None
+        assert frozenset(transform._output_schema_config.guaranteed_fields) == frozenset({"count", "sum", "batch_size"})
+
+    def test_declared_output_fields_excludes_group_by(self):
+        from elspeth.plugins.transforms.batch_stats import BatchStats
+
+        transform = BatchStats(
+            {
+                "schema": {"mode": "observed"},
+                "value_field": "amount",
+                "group_by": "region",
+            }
+        )
+        assert transform.declared_output_fields == frozenset({"count", "sum", "batch_size", "mean"})
+        assert "region" not in transform.declared_output_fields

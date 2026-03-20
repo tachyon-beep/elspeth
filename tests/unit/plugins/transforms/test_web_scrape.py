@@ -1209,3 +1209,33 @@ class TestParseAllowedRanges:
 
         result = _parse_allowed_ranges(["127.0.0.0/8"])
         assert isinstance(result, tuple)
+
+
+class TestOutputSchemaConfig:
+    def test_guaranteed_fields(self):
+        transform = WebScrapeTransform(
+            {
+                "schema": {"mode": "observed"},
+                "url_field": "url",
+                "content_field": "page_content",
+                "fingerprint_field": "page_hash",
+                "http": {
+                    "abuse_contact": "test@example.com",
+                    "scraping_reason": "Unit testing output schema config",
+                },
+            }
+        )
+        expected = frozenset(
+            {
+                "page_content",
+                "page_hash",
+                "fetch_status",
+                "fetch_url_final",
+                "fetch_url_final_ip",
+                "fetch_request_hash",
+                "fetch_response_raw_hash",
+                "fetch_response_processed_hash",
+            }
+        )
+        assert transform._output_schema_config is not None
+        assert frozenset(transform._output_schema_config.guaranteed_fields) == expected
