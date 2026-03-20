@@ -31,7 +31,10 @@ transforms:
     context_format: numbered
     context_separator: "\n---\n"
     schema:
-      mode: observed
+      mode: flexible
+      fields:
+      - 'id: int'
+      - 'question: str'
 
 sinks:
   output:

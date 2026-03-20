@@ -31,7 +31,10 @@ transforms:
     on_no_results: continue
     context_format: numbered
     schema:
-      mode: observed
+      mode: flexible
+      fields:
+      - 'id: int'
+      - 'question: str'
 
 # Step 2: Answer the question using retrieved context via OpenRouter LLM
 - name: llm_0
@@ -62,7 +65,9 @@ transforms:
       Respond with a JSON object in exactly this format:
       {"answer": "your concise answer based on the references", "confidence": "high/medium/low", "sources_used": number_of_references_you_drew_from}
     response_field: llm_answer
-    required_input_fields: []
+    required_input_fields:
+    - question
+    - sci__rag_context
     schema:
       mode: observed
 

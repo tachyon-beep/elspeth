@@ -19,6 +19,7 @@ import structlog
 
 from elspeth.contracts import Determinism, TransformResult, propagate_contract
 from elspeth.contracts.errors import TransformErrorReason
+from elspeth.contracts.schema import SchemaConfig
 from elspeth.contracts.schema_contract import PipelineRow
 from elspeth.plugins.infrastructure.base import BaseTransform
 from elspeth.plugins.infrastructure.clients.retrieval.base import RetrievalError
@@ -83,6 +84,18 @@ class RAGRetrievalTransform(BaseTransform):
             self._rag_config.schema_config,
             self.name,
             adds_fields=True,
+        )
+
+        # Output schema config with guaranteed_fields for DAG contract propagation.
+        # Input fields pass through, and RAG adds its declared output fields.
+        schema_config = self._rag_config.schema_config
+        base_guaranteed = schema_config.guaranteed_fields or ()
+        self._output_schema_config = SchemaConfig(
+            mode=schema_config.mode,
+            fields=schema_config.fields,
+            guaranteed_fields=tuple(set(base_guaranteed) | self.declared_output_fields),
+            audit_fields=schema_config.audit_fields,
+            required_fields=schema_config.required_fields,
         )
 
         # Query builder
