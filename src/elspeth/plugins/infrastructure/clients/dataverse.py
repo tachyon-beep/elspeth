@@ -74,6 +74,9 @@ class DataverseClientError(Exception):
     SSRF validation rejections. The source/sink plugin catches these to
     record audit entries via ctx.record_call() before re-raising for
     engine retry/quarantine handling.
+
+    error_category is a typed classification set at the raise site,
+    enabling structured audit recording without fragile string-matching.
     """
 
     def __init__(
@@ -83,11 +86,13 @@ class DataverseClientError(Exception):
         retryable: bool,
         status_code: int | None = None,
         latency_ms: float | None = None,
+        error_category: str = "protocol_error",
     ) -> None:
         super().__init__(message)
         self.retryable = retryable
         self.status_code = status_code
         self.latency_ms = latency_ms
+        self.error_category = error_category
 
 
 @dataclass(frozen=True, slots=True)
@@ -287,6 +292,7 @@ class DataverseClient:
             raise DataverseClientError(
                 f"URL hostname {hostname!r} rejected by domain allowlist. Possible SSRF attempt via @odata.nextLink redirection.",
                 retryable=False,
+                error_category="ssrf_rejected",
             )
 
         # Layer 2: IP-pinning validation (prevents DNS rebinding)
@@ -296,6 +302,7 @@ class DataverseClient:
             raise DataverseClientError(
                 f"URL {url!r} failed IP-pinning SSRF validation: {exc}",
                 retryable=False,
+                error_category="ssrf_rejected",
             ) from exc
 
     def _classify_error(self, status_code: int, headers: dict[str, str], latency_ms: float) -> DataverseClientError:
@@ -338,6 +345,7 @@ class DataverseClient:
                 retryable=not self._auth_retried,
                 status_code=status_code,
                 latency_ms=latency_ms,
+                error_category="auth_failure",
             )
 
         # Non-retryable client errors
@@ -517,8 +525,14 @@ class DataverseClient:
                 latency_ms=latency_ms,
             )
 
-        more_records_raw = parsed.get("@Microsoft.Dynamics.CRM.morerecords", next_link is not None)
-        more_records = bool(more_records_raw)
+        more_records_raw = parsed.get("@Microsoft.Dynamics.CRM.morerecords")
+        if more_records_raw is not None:
+            more_records = bool(more_records_raw)
+        else:
+            # Field absent — infer from pagination metadata presence.
+            # OData queries use nextLink; FetchXML uses paging cookie + morerecords.
+            # For OData, next_link presence is the authoritative "more pages" signal.
+            more_records = next_link is not None
 
         return DataversePageResponse(
             status_code=response.status_code,
@@ -593,6 +607,7 @@ class DataverseClient:
                         f"empty pages received from Dataverse. This may indicate a server-side "
                         f"edge condition producing nextLink URLs with no data.",
                         retryable=False,
+                        error_category="empty_page_guard",
                     )
             else:
                 consecutive_empty = 0

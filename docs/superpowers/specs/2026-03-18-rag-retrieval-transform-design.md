@@ -609,7 +609,10 @@ Then `RetrievalError`, `WebScrapeError`, and `LLMClientError` all inherit from `
 ```python
 # In plugins/infrastructure/clients/retrieval/base.py (or wherever RetrievalError is defined)
 from elspeth.contracts.errors import PluginRetryableError  # Fails at import if prep PR not merged
-assert hasattr(PluginRetryableError, 'retryable'), "PluginRetryableError missing retryable attribute"
+# Verify PluginRetryableError has the expected interface by constructing a test instance
+_test = PluginRetryableError("verify", retryable=True)
+assert _test.retryable is True, "PluginRetryableError missing retryable attribute"
+del _test
 ```
 
 Implementation tasks:

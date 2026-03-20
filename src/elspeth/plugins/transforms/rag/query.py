@@ -9,6 +9,7 @@ Three modes, all anchored on query_field:
 from __future__ import annotations
 
 import multiprocessing
+import queue
 import re
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
@@ -115,30 +116,18 @@ class QueryBuilder:
             return self._build_field_only(extracted)
 
     def _build_field_only(self, extracted: Any) -> QueryResult:
-        query = str(extracted)
-        return self._validate_non_empty(query)
+        if not isinstance(extracted, str):
+            raise TypeError(
+                f"query_field '{self._query_field}' expected str, got {type(extracted).__name__} "
+                f"— upstream plugin bug (Tier 2 data must not be coerced)"
+            )
+        return self._validate_non_empty(extracted)
 
     def _build_template(self, extracted: Any, row_data: dict[str, Any]) -> QueryResult:
         assert self._compiled_template is not None  # guaranteed by build() guard
         try:
             query = self._compiled_template.render(query=extracted, row=row_data)
-        except UndefinedError as e:
-            return QueryResult(
-                error={
-                    "reason": "template_rendering_failed",
-                    "error": str(e),
-                    "field": self._query_field,
-                }
-            )
-        except SecurityError as e:
-            return QueryResult(
-                error={
-                    "reason": "template_rendering_failed",
-                    "error": f"Sandbox violation: {e}",
-                    "field": self._query_field,
-                }
-            )
-        except Exception as e:
+        except (UndefinedError, SecurityError, OverflowError, ZeroDivisionError, ArithmeticError, TypeError, ValueError) as e:
             return QueryResult(
                 error={
                     "reason": "template_rendering_failed",
@@ -150,7 +139,12 @@ class QueryBuilder:
 
     def _build_regex(self, extracted: Any) -> QueryResult:
         assert self._compiled_pattern is not None  # guaranteed by build() guard
-        text = str(extracted)
+        if not isinstance(extracted, str):
+            raise TypeError(
+                f"query_field '{self._query_field}' expected str, got {type(extracted).__name__} "
+                f"— upstream plugin bug (Tier 2 data must not be coerced)"
+            )
+        text = extracted
         result_queue: multiprocessing.Queue = _FORK_CTX.Queue()  # type: ignore[type-arg]
         p = _FORK_CTX.Process(
             target=_regex_worker,
@@ -170,7 +164,9 @@ class QueryBuilder:
                 }
             )
 
-        if result_queue.empty():
+        try:
+            matched, group0, group1 = result_queue.get_nowait()
+        except queue.Empty:
             return QueryResult(
                 error={
                     "reason": "no_regex_match",
@@ -178,8 +174,6 @@ class QueryBuilder:
                     "pattern": self._compiled_pattern.pattern,
                 }
             )
-
-        matched, group0, group1 = result_queue.get_nowait()
 
         if not matched:
             return QueryResult(

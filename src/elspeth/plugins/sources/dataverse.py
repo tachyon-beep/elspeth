@@ -447,12 +447,13 @@ class DataverseSource(BaseSource):
         if self._telemetry_emit is None:
             return
         try:
+            assert self._run_id is not None, "run_id is None during telemetry emission — on_start() must set _run_id before load()"
             req_payload = RawCallPayload(request_data)
             resp_payload = RawCallPayload(response_data) if response_data else None
             self._telemetry_emit(
                 ExternalCallCompleted(
                     timestamp=datetime.now(UTC),
-                    run_id=self._run_id or "",
+                    run_id=self._run_id,
                     call_type=CallType.HTTP,
                     provider="dataverse",
                     status=status,
@@ -536,12 +537,13 @@ class DataverseSource(BaseSource):
                 latency_ms=error.latency_ms,
                 provider="dataverse",
             )
-            self._emit_telemetry(
-                ctx=ctx,
-                status=CallStatus.ERROR,
-                latency_ms=error.latency_ms or 0.0,
-                request_data=request_data,
-            )
+            if error.latency_ms is not None:
+                self._emit_telemetry(
+                    ctx=ctx,
+                    status=CallStatus.ERROR,
+                    latency_ms=error.latency_ms,
+                    request_data=request_data,
+                )
 
     def load(self, ctx: SourceContext) -> Iterator[SourceRow]:
         """Load rows from Dataverse via OData pagination.
@@ -647,28 +649,18 @@ class DataverseSource(BaseSource):
                     yield SourceRow.valid(validated_row, contract=contract)
 
         except DataverseClientError as e:
-            # Record the error in audit trail with specific reason.
-            # The error message from DataverseClientError already contains the
-            # detail (rejected hostname, validation layer, empty page count, etc.)
-            # — the reason tag helps auditors filter by error category.
+            # Record the error in audit trail with the typed error_category
+            # set at the raise site — no fragile string-matching on messages.
             current_url = self._build_query_url() if self._entity else "(FetchXML)"
-            error_msg = str(e)
-            if "domain allowlist" in error_msg or "SSRF" in error_msg:
-                reason = "ssrf_rejected"
-            elif "consecutive empty pages" in error_msg:
-                reason = "empty_page_guard"
-            elif e.status_code == 401:
-                reason = "auth_failure"
-            else:
-                reason = "pagination_error"
             self._record_page_call(
                 ctx,
                 url=current_url,
                 error=e,
-                error_reason=reason,
+                error_reason=e.error_category,
             )
             # 401 with retryable=True: reconstruct credential before engine retry
             if e.status_code == 401 and e.retryable:
+                assert self._client is not None, "on_start() must be called before load()"
                 self._client.reconstruct_credential(self._auth_config)
             raise
 

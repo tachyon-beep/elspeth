@@ -229,8 +229,9 @@ class DataverseSink(BaseSink):
         """Build PATCH URL for upsert with alternate key.
 
         URL-encodes the key value to prevent injection via special characters.
+        key_value is guaranteed str by the isinstance check in write().
         """
-        encoded_value = urllib.parse.quote(str(key_value), safe="")
+        encoded_value = urllib.parse.quote(key_value, safe="")
         return f"{self._environment_url.rstrip('/')}/api/data/{self._api_version}/{self._entity}({self._alternate_key}='{encoded_value}')"
 
     def _emit_telemetry(
@@ -250,12 +251,13 @@ class DataverseSink(BaseSink):
         if self._telemetry_emit is None:
             return
         try:
+            assert self._run_id is not None, "run_id is None during telemetry emission — on_start() must set _run_id before write()"
             req_payload = RawCallPayload(request_data)
             resp_payload = RawCallPayload(response_data) if response_data else None
             self._telemetry_emit(
                 ExternalCallCompleted(
                     timestamp=datetime.now(UTC),
-                    run_id=self._run_id or "",
+                    run_id=self._run_id,
                     call_type=CallType.HTTP,
                     provider="dataverse",
                     status=status,

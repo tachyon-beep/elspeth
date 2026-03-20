@@ -239,9 +239,12 @@ class AzureSearchProvider:
             if normalized_score < min_score:
                 continue
 
-            content = item.get("content", "")
-            if not content:
+            content = item.get("content")
+            if content is None:
                 skipped_items.append({"reason": "missing_content", "id": item.get("id")})
+                continue
+            if not content:
+                skipped_items.append({"reason": "empty_content", "id": item.get("id")})
                 continue
 
             source_id = item.get("id") or item.get("@search.documentId")
