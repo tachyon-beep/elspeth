@@ -167,14 +167,12 @@ Then add the helper call after `_create_schemas`.
 stat_fields: set[str] = {"count", "sum", "batch_size"}
 if cfg.compute_mean:
     stat_fields.add("mean")
-if cfg.group_by is not None:
-    stat_fields.add(cfg.group_by)
 self.declared_output_fields = frozenset(stat_fields)
 ```
 Then add the helper call after `_create_schemas`.
 
 **Design notes on `batch_stats` fields:**
-- `group_by` is included in `declared_output_fields` when configured — the transform guarantees it in output when the config specifies it.
+- `group_by` is intentionally **not** in `declared_output_fields` — it is a passthrough field that already exists in the input row. Including it would trigger false collision detection in `TransformExecutor` (which checks `declared_output_fields` against input keys). The transform carries it through to output, but doesn't "add" it.
 - `skipped_non_finite` and `skipped_non_finite_indices` are intentionally **not** declared — they are data-dependent (only emitted when non-finite values are encountered), not config-guaranteed.
 
 ### Part 4: Testing Strategy
@@ -212,7 +210,7 @@ Each affected transform gets a test that constructs an instance with a represent
 | `batch_replicate` | `include_copy_index=True` | `{"copy_index"}` |
 | `batch_replicate` | `include_copy_index=False` | `frozenset()` (empty — verify against source that field is truly conditional) |
 | `field_mapper` | `mapping={"old_name": "new_name", "source": "target"}` | `{"new_name", "target"}` |
-| `batch_stats` | `value_field="amount"`, `compute_mean=True`, `group_by="category"` | `{"count", "sum", "batch_size", "mean", "category"}` |
+| `batch_stats` | `value_field="amount"`, `compute_mean=True`, `group_by="category"` | `{"count", "sum", "batch_size", "mean"}` (group_by excluded — passthrough field) |
 | `batch_stats` | `value_field="amount"`, `compute_mean=False`, `group_by=None` | `{"count", "sum", "batch_size"}` |
 
 #### Integration test: RAG → LLM with DAG field validation

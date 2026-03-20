@@ -416,6 +416,8 @@ Add to `tests/unit/plugins/transforms/test_batch_stats.py`:
 ```python
 class TestOutputSchemaConfig:
     def test_guaranteed_fields_with_mean_and_group_by(self):
+        """group_by is a passthrough field (already in input) — NOT in declared_output_fields.
+        Only the new stat fields appear in guaranteed_fields."""
         transform = BatchStats(
             {
                 "schema": {"mode": "observed"},
@@ -426,7 +428,7 @@ class TestOutputSchemaConfig:
         )
         assert transform._output_schema_config is not None
         assert frozenset(transform._output_schema_config.guaranteed_fields) == frozenset(
-            {"count", "sum", "batch_size", "mean", "category"}
+            {"count", "sum", "batch_size", "mean"}
         )
 
     def test_guaranteed_fields_minimal(self):
@@ -442,7 +444,10 @@ class TestOutputSchemaConfig:
             {"count", "sum", "batch_size"}
         )
 
-    def test_declared_output_fields_includes_group_by(self):
+    def test_declared_output_fields_excludes_group_by(self):
+        """group_by is a passthrough from input — not a new field added by the transform.
+        Including it in declared_output_fields would trigger false collision detection
+        (TransformExecutor checks declared fields against input keys)."""
         transform = BatchStats(
             {
                 "schema": {"mode": "observed"},
@@ -451,8 +456,9 @@ class TestOutputSchemaConfig:
             }
         )
         assert transform.declared_output_fields == frozenset(
-            {"count", "sum", "batch_size", "mean", "region"}
+            {"count", "sum", "batch_size", "mean"}
         )
+        assert "region" not in transform.declared_output_fields
 ```
 
 - [ ] **Step 12: Verify tests fail, add declared_output_fields + helper, verify tests pass**
@@ -461,14 +467,15 @@ In `src/elspeth/plugins/transforms/batch_stats.py`, in `__init__` (~line 84, aft
 
 ```python
         # Declare output fields for DAG contract validation.
-        # skipped_non_finite/skipped_non_finite_indices are intentionally NOT
-        # declared — they are data-dependent (only emitted when non-finite
-        # values are encountered), not config-guaranteed.
+        # - group_by is intentionally NOT declared — it is a passthrough from
+        #   input (already in the row), not a new field. Including it would
+        #   trigger false collision detection in TransformExecutor.
+        # - skipped_non_finite/skipped_non_finite_indices are intentionally NOT
+        #   declared — they are data-dependent (only emitted when non-finite
+        #   values are encountered), not config-guaranteed.
         stat_fields: set[str] = {"count", "sum", "batch_size"}
         if cfg.compute_mean:
             stat_fields.add("mean")
-        if cfg.group_by is not None:
-            stat_fields.add(cfg.group_by)
         self.declared_output_fields = frozenset(stat_fields)
 ```
 
@@ -561,7 +568,12 @@ Pin guaranteed_fields content in per-transform unit tests."
 
 - [ ] **Step 1: Fix existing test mocks that lack `declared_output_fields`**
 
-In `tests/unit/core/test_dag_schema_propagation.py`, add `declared_output_fields` to both mock classes:
+In `tests/unit/core/test_dag_schema_propagation.py`, add `declared_output_fields` to ALL THREE mock classes that don't inherit `BaseTransform`:
+
+At `MockTransformWithSchemaConfig` (~line 34), add after the class attributes:
+```python
+    declared_output_fields: frozenset[str] = frozenset()
+```
 
 At `MockTransformWithoutSchemaConfig` (~line 54), add after the class attributes:
 ```python
@@ -573,7 +585,7 @@ At `MockAggregationTransform` (~line 347), add after the class attributes:
     declared_output_fields: frozenset[str] = frozenset()
 ```
 
-These mocks don't inherit `BaseTransform`, so they don't get the class attribute automatically. Without this fix, `_validate_output_schema_contract` will `AttributeError` on `transform.declared_output_fields`.
+These mocks don't inherit `BaseTransform`, so they don't get the class attribute automatically. Without this fix, `_validate_output_schema_contract` will `AttributeError` on `transform.declared_output_fields`. `MockTransformWithSchemaConfig` is used in 4 tests — missing it would break those tests.
 
 - [ ] **Step 2: Write the failing tests for the enforcement check**
 
@@ -752,30 +764,42 @@ git commit -m "chore: update tier model allowlist fingerprints for output schema
 
 ---
 
-### Task 5: Integration Test — Real DAG Build with Field Validation
+### Task 5: Integration Test — Contract Enforcement End-to-End
 
 **Files:**
 - Create: `tests/integration/plugins/transforms/test_output_schema_contract.py`
 
 - [ ] **Step 1: Write the integration test**
 
-This test MUST use `ExecutionGraph.from_plugin_instances()` — the production code path. It verifies that the RAG transform's `guaranteed_fields` propagate through the DAG builder so downstream transforms can declare `required_input_fields` without the `[]` opt-out.
+This test verifies the full contract chain: transform construction → `_output_schema_config` populated → `_validate_output_schema_contract` passes → `guaranteed_fields` contains declared fields. It uses real transform instances (not stubs) and the production validation function from the DAG builder.
+
+Note: `ExecutionGraph.from_plugin_instances()` requires `SourceProtocol`, `WiredTransform`, `SinkProtocol`, and `GateSettings` — heavy machinery that no existing test exercises. Instead, we test the contract invariants that the builder relies on, using real transform instances and the builder's validation function. This covers the contract surface area without requiring full pipeline orchestration.
 
 Create `tests/integration/plugins/transforms/test_output_schema_contract.py`:
 
 ```python
 """Integration test for output schema contract enforcement.
 
-Verifies that _output_schema_config.guaranteed_fields propagate through
-the DAG builder via ExecutionGraph.from_plugin_instances() — the production
-code path. Tests both positive (field exists) and negative (field missing)
-scenarios.
+Tests the full contract chain using real transform instances:
+1. Transform construction populates _output_schema_config via helper
+2. _validate_output_schema_contract passes for correctly-configured transforms
+3. _validate_output_schema_contract raises FrameworkBugError when contract missing
+4. Invariant 2: guaranteed_fields is superset of declared_output_fields
+
+Uses real transforms (not stubs) to verify the end-to-end path
+from plugin construction through DAG builder validation.
 """
 
 import pytest
 
 from elspeth.contracts.errors import FrameworkBugError
+from elspeth.core.dag.builder import _validate_output_schema_contract
+from elspeth.plugins.transforms.batch_replicate import BatchReplicate
+from elspeth.plugins.transforms.batch_stats import BatchStats
+from elspeth.plugins.transforms.field_mapper import FieldMapper
+from elspeth.plugins.transforms.json_explode import JSONExplode
 from elspeth.plugins.transforms.rag.transform import RAGRetrievalTransform
+from elspeth.plugins.transforms.web_scrape import WebScrapeTransform
 
 
 @pytest.fixture(autouse=True)
@@ -783,77 +807,122 @@ def _set_fingerprint_key(monkeypatch):
     monkeypatch.setenv("ELSPETH_FINGERPRINT_KEY", "test-fingerprint-key")
 
 
-class TestOutputSchemaContractIntegration:
-    def test_rag_guaranteed_fields_include_all_declared_outputs(self):
-        """RAG transform's _output_schema_config contains all declared output fields."""
-        transform = RAGRetrievalTransform(
-            {
-                "output_prefix": "sci",
-                "query_field": "question",
-                "provider": "chroma",
-                "provider_config": {
-                    "collection": "test-collection",
-                    "mode": "ephemeral",
-                },
-                "schema": {"mode": "observed"},
-            }
+class TestContractInvariantsAcrossAllTransforms:
+    """Verify Invariant 2 (guaranteed_fields superset of declared_output_fields)
+    holds for every field-adding transform with real instances."""
+
+    @pytest.mark.parametrize(
+        "transform_factory",
+        [
+            pytest.param(
+                lambda: RAGRetrievalTransform(
+                    {"output_prefix": "sci", "query_field": "q", "provider": "chroma",
+                     "provider_config": {"collection": "test-col", "mode": "ephemeral"},
+                     "schema": {"mode": "observed"}}
+                ),
+                id="rag",
+            ),
+            pytest.param(
+                lambda: JSONExplode(
+                    {"array_field": "items", "output_field": "item",
+                     "include_index": True, "schema": {"mode": "observed"}}
+                ),
+                id="json_explode",
+            ),
+            pytest.param(
+                lambda: BatchReplicate(
+                    {"include_copy_index": True, "schema": {"mode": "observed"}}
+                ),
+                id="batch_replicate",
+            ),
+            pytest.param(
+                lambda: FieldMapper(
+                    {"mapping": {"a": "b"}, "schema": {"mode": "observed"}}
+                ),
+                id="field_mapper",
+            ),
+            pytest.param(
+                lambda: BatchStats(
+                    {"value_field": "amount", "schema": {"mode": "observed"}}
+                ),
+                id="batch_stats",
+            ),
+            pytest.param(
+                lambda: WebScrapeTransform(
+                    {"url_field": "url", "content_field": "page_content",
+                     "fingerprint_field": "page_hash",
+                     "http": {"abuse_contact": "test@example.com",
+                              "scraping_reason": "Integration test"},
+                     "schema": {"mode": "observed"}}
+                ),
+                id="web_scrape",
+            ),
+        ],
+    )
+    def test_invariant2_guaranteed_superset_of_declared(self, transform_factory):
+        """Every field-adding transform's guaranteed_fields contains all declared_output_fields."""
+        transform = transform_factory()
+        assert transform._output_schema_config is not None, (
+            f"{transform.name}: _output_schema_config is None"
         )
-        assert transform._output_schema_config is not None
         guaranteed = frozenset(transform._output_schema_config.guaranteed_fields)
-
-        # Every declared output field must appear in guaranteed_fields
-        for field in transform.declared_output_fields:
-            assert field in guaranteed, (
-                f"declared_output_field {field!r} missing from guaranteed_fields"
-            )
-
-        # Verify specific expected fields
-        assert "sci__rag_context" in guaranteed
-        assert "sci__rag_score" in guaranteed
-        assert "sci__rag_count" in guaranteed
-        assert "sci__rag_sources" in guaranteed
-
-    def test_enforcement_check_fires_on_missing_contract(self):
-        """A transform with declared fields but no contract crashes the builder."""
-        transform = RAGRetrievalTransform(
-            {
-                "output_prefix": "sci",
-                "query_field": "question",
-                "provider": "chroma",
-                "provider_config": {
-                    "collection": "test-collection",
-                    "mode": "ephemeral",
-                },
-                "schema": {"mode": "observed"},
-            }
+        assert transform.declared_output_fields.issubset(guaranteed), (
+            f"{transform.name}: declared_output_fields {transform.declared_output_fields} "
+            f"not a subset of guaranteed_fields {guaranteed}"
         )
-        # Simulate the bug: clear _output_schema_config after construction
-        transform._output_schema_config = None
 
-        from elspeth.core.dag.builder import _validate_output_schema_contract
+    @pytest.mark.parametrize(
+        "transform_factory",
+        [
+            pytest.param(
+                lambda: RAGRetrievalTransform(
+                    {"output_prefix": "sci", "query_field": "q", "provider": "chroma",
+                     "provider_config": {"collection": "test-col", "mode": "ephemeral"},
+                     "schema": {"mode": "observed"}}
+                ),
+                id="rag",
+            ),
+            pytest.param(
+                lambda: JSONExplode(
+                    {"array_field": "items", "output_field": "item",
+                     "schema": {"mode": "observed"}}
+                ),
+                id="json_explode",
+            ),
+            pytest.param(
+                lambda: FieldMapper(
+                    {"mapping": {"a": "b"}, "schema": {"mode": "observed"}}
+                ),
+                id="field_mapper",
+            ),
+        ],
+    )
+    def test_enforcement_passes_for_valid_transforms(self, transform_factory):
+        """Transforms with declared_output_fields AND _output_schema_config pass validation."""
+        transform = transform_factory()
+        _validate_output_schema_contract(transform)  # Should not raise
+
+    def test_enforcement_fires_on_missing_contract(self):
+        """A real transform with cleared _output_schema_config triggers FrameworkBugError."""
+        transform = RAGRetrievalTransform(
+            {"output_prefix": "sci", "query_field": "q", "provider": "chroma",
+             "provider_config": {"collection": "test-col", "mode": "ephemeral"},
+             "schema": {"mode": "observed"}}
+        )
+        transform._output_schema_config = None
 
         with pytest.raises(FrameworkBugError, match="declares output fields"):
             _validate_output_schema_contract(transform)
 
-    def test_invariant2_guaranteed_superset_of_declared(self):
-        """Invariant 2: guaranteed_fields is always a superset of declared_output_fields."""
+    def test_rag_guaranteed_fields_exact(self):
+        """RAG transform's guaranteed_fields contains exactly the 4 declared output fields."""
         transform = RAGRetrievalTransform(
-            {
-                "output_prefix": "test",
-                "query_field": "q",
-                "provider": "chroma",
-                "provider_config": {
-                    "collection": "test-col",
-                    "mode": "ephemeral",
-                },
-                "schema": {"mode": "observed"},
-            }
+            {"output_prefix": "sci", "query_field": "q", "provider": "chroma",
+             "provider_config": {"collection": "test-col", "mode": "ephemeral"},
+             "schema": {"mode": "observed"}}
         )
-        assert transform._output_schema_config is not None
-        guaranteed = frozenset(transform._output_schema_config.guaranteed_fields)
-        assert transform.declared_output_fields.issubset(guaranteed), (
-            f"Invariant 2 violation: declared_output_fields {transform.declared_output_fields} "
-            f"is not a subset of guaranteed_fields {guaranteed}"
+        assert frozenset(transform._output_schema_config.guaranteed_fields) == frozenset(
+            {"sci__rag_context", "sci__rag_score", "sci__rag_count", "sci__rag_sources"}
         )
 ```
 
