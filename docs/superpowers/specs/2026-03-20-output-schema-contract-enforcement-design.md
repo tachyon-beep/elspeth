@@ -250,3 +250,47 @@ This test MUST use `ExecutionGraph.from_plugin_instances()` (the production code
 | `src/elspeth/plugins/transforms/llm/transform.py` | Add comment referencing this spec and Invariant 2 (manual `_output_schema_config` responsibility) |
 | `config/cicd/enforce_tier_model/plugins.yaml` | Update allowlist fingerprints if any defensive patterns change |
 | Tests (new/modified) | Unit tests for helper, DAG check, per-transform pinning, integration test |
+
+### Implementation Notes for Future Sessions
+
+These notes capture context that may not be obvious from reading the code alone.
+
+#### Key File Locations
+
+- `BaseTransform` class: `src/elspeth/plugins/infrastructure/base.py` ~line 140
+- `_create_schemas` static method: same file ~line 188 (has local runtime import of `SchemaConfig` — the new helper must follow the same pattern)
+- DAG builder `getattr` sites: `src/elspeth/core/dag/builder.py` lines 223 and 251 — both have multi-line comments justifying `getattr` that must be removed
+- `FrameworkBugError`: `src/elspeth/contracts/errors.py` — already imported in `builder.py`
+- `SchemaConfig`: `src/elspeth/contracts/schema.py` — frozen dataclass with `guaranteed_fields: tuple[str, ...] | None`, `audit_fields: tuple[str, ...] | None`, `required_fields: tuple[str, ...] | None`
+- `TYPE_CHECKING` block in `base.py`: starts ~line 30, imports from `contracts.contexts`, `contracts.header_modes`, etc. — add `SchemaConfig` here
+- `base.py` has `from __future__ import annotations` (line 34) — this makes `TYPE_CHECKING` annotations safe for the class attribute
+
+#### Existing Patterns to Follow
+
+- The `_create_schemas` method uses a **local runtime import** inside its body: `from elspeth.contracts.schema import SchemaConfig`. The new `_build_output_schema_config` must do the same (not rely on `TYPE_CHECKING` imports for runtime construction).
+- LLM transform's `_output_schema_config` construction: `src/elspeth/plugins/transforms/llm/transform.py` lines 981-987 (multi-query) and 1021-1027 (single-query). These set `_output_schema_config` manually. Do NOT modify these — only add a comment referencing this spec.
+- `BaseSink` has an analogous pattern: `_output_contract: SchemaContract | None = None` declared as a class attribute (~line 442 of `base.py`). The `BaseTransform` class attribute follows the same convention.
+
+#### Transform-Specific Details
+
+- **`web_scrape.py`**: Does NOT use `_create_schemas`. It builds schemas manually at ~line 243. The `_build_output_schema_config` call is independent of schema creation. The config object is `WebScrapeHTTPConfig` (accessed as `cfg`), and `schema_config` is at `cfg.schema_config`.
+- **`field_mapper.py`**: `FieldMapperConfig` at ~line 24 has `mapping: dict[str, str] = Field(default_factory=dict)`. An empty mapping produces `declared_output_fields = frozenset()`, which is correct (no-op mapper is shape-preserving). The `cfg` variable is `FieldMapperConfig.from_dict(config)` at ~line 87.
+- **`batch_stats.py`**: `BatchStatsConfig` at ~line 22 has `value_field: str`, `group_by: str | None = None`, `compute_mean: bool = True`. The `cfg` variable is `BatchStatsConfig.from_dict(config)` at ~line 81.
+- **`json_explode.py`**: `JSONExplodeConfig` has `output_field: str` (singular, NOT plural), `include_index: bool = True`. Field names are derived from config at ~lines 125-128. The `cfg` variable is `JSONExplodeConfig.from_dict(config)` at ~line 119.
+- **`batch_replicate.py`**: `declared_output_fields` is already set conditionally at ~line 108. Only the helper call needs to be added.
+
+#### What NOT to Change
+
+- `_create_schemas` — stays `@staticmethod`, unchanged
+- `propagate_contract` / `transform_adds_fields` — runtime concern, unchanged
+- LLM transform `_output_schema_config` construction — too complex for the generic helper
+- `TransformExecutor` collision detection logic — out of scope (verify it handles `field_mapper` renames correctly, but don't modify it)
+
+#### Verification Checklist
+
+After implementation, verify:
+1. `python -m pytest tests/unit/plugins/transforms/ -x` — all transform unit tests pass
+2. `python scripts/cicd/enforce_tier_model.py check --root src/elspeth --allowlist config/cicd/enforce_tier_model` — tier model passes (update fingerprints if needed)
+3. `python -m mypy src/elspeth/plugins/infrastructure/base.py src/elspeth/core/dag/builder.py` — type checks pass
+4. `python -m ruff check src/elspeth/` — lint passes
+5. The two example pipelines still work: `./examples/chroma_rag/run.sh` and `./examples/chroma_rag_qa/run.sh`
