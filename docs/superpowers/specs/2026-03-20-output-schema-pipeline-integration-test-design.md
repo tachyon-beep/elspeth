@@ -1,7 +1,7 @@
 # Output Schema Contract — Full-Pipeline Integration Test
 
 **Date:** 2026-03-20
-**Status:** Draft
+**Status:** Implemented
 **Scope:** Integration test for output schema contract enforcement through `ExecutionGraph.from_plugin_instances()`
 **Prerequisite:** Output schema contract enforcement (spec: `2026-03-20-output-schema-contract-enforcement-design.md`) must be implemented first (Tasks 1-3). Test 4 specifically depends on `_validate_output_schema_contract` being added to the builder (enforcement plan Task 3).
 
