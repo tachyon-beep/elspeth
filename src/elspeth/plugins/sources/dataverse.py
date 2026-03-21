@@ -506,14 +506,21 @@ class DataverseSource(BaseSource):
                 "status_code": page.status_code,
                 "row_count": len(page.rows),
             }
-            ctx.record_call(
-                call_type=CallType.HTTP,
-                status=CallStatus.SUCCESS,
-                request_data=request_data,
-                response_data=response_data,
-                latency_ms=page.latency_ms,
-                provider="dataverse",
-            )
+            try:
+                ctx.record_call(
+                    call_type=CallType.HTTP,
+                    status=CallStatus.SUCCESS,
+                    request_data=request_data,
+                    response_data=response_data,
+                    latency_ms=page.latency_ms,
+                    provider="dataverse",
+                )
+            except Exception as exc:
+                raise AuditIntegrityError(
+                    f"Failed to record successful page fetch to audit trail "
+                    f"(url={url!r}). "
+                    f"Page fetch completed but audit record is missing."
+                ) from exc
             self._emit_telemetry(
                 ctx=ctx,
                 status=CallStatus.SUCCESS,

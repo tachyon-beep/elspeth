@@ -433,6 +433,8 @@ class OpenRouterBatchLLMTransform(BaseTransform):
             if isinstance(result, Exception):
                 # StreamError escaped from _process_single_row — record to audit
                 # trail so the failure is attributable (h27 fix).
+                # NOTE: Not wrapped in AuditIntegrityError — per-row recording in batch
+                # loop. Crashing here would lose all progress for remaining rows.
                 ctx.record_call(
                     call_type=CallType.LLM,
                     status=CallStatus.ERROR,

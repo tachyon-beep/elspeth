@@ -451,6 +451,8 @@ class AzureBlobSource(BaseSource):
                     f"(container={self._container!r}, blob_path={self._blob_path!r}). "
                     f"Download completed but audit record is missing."
                 ) from exc
+        except AuditIntegrityError:
+            raise  # Audit failure — do not misattribute as download error
         except ImportError:
             # Re-raise ImportError as-is for clear dependency messaging
             raise

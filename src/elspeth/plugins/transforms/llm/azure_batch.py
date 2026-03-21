@@ -649,15 +649,22 @@ class AzureBatchLLMTransform(BaseTransform):
             )
         batch_latency = (time.perf_counter() - start) * 1000
 
-        # Record successful batch creation — our code, must not be caught
-        ctx.record_call(
-            call_type=CallType.HTTP,
-            status=CallStatus.SUCCESS,
-            request_data=batch_request,
-            response_data={"batch_id": batch.id, "status": batch.status},
-            latency_ms=batch_latency,
-            provider="azure",
-        )
+        # Record successful batch creation in audit trail.
+        try:
+            ctx.record_call(
+                call_type=CallType.HTTP,
+                status=CallStatus.SUCCESS,
+                request_data=batch_request,
+                response_data={"batch_id": batch.id, "status": batch.status},
+                latency_ms=batch_latency,
+                provider="azure",
+            )
+        except Exception as exc:
+            raise AuditIntegrityError(
+                f"Failed to record successful batch creation to audit trail "
+                f"(batch_id={batch.id!r}). "
+                f"Batch submitted but audit record is missing."
+            ) from exc
 
         # 4. CHECKPOINT immediately after submit
         checkpoint_state = BatchCheckpointState(
@@ -722,6 +729,8 @@ class AzureBatchLLMTransform(BaseTransform):
             if error_detail:
                 error_info["detail"] = error_detail
 
+            # NOTE: Not wrapped in AuditIntegrityError — per-row recording in batch
+            # loop. Crashing here would lose all progress for remaining rows.
             ctx.record_call(
                 call_type=CallType.LLM,
                 status=CallStatus.ERROR,

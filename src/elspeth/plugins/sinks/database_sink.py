@@ -326,6 +326,8 @@ class DatabaseSink(BaseSink):
                         f"(table={self._table_name!r}). "
                         f"DDL completed but audit record is missing."
                     ) from exc
+            except AuditIntegrityError:
+                raise  # Audit failure — do not misattribute as SQL error
             except Exception as e:
                 latency_ms = (time.perf_counter() - start_time) * 1000
                 ctx.record_call(
@@ -387,6 +389,8 @@ class DatabaseSink(BaseSink):
                         f"(table={self._table_name!r}). "
                         f"DDL completed but audit record is missing."
                     ) from exc
+            except AuditIntegrityError:
+                raise  # Audit failure — do not misattribute as SQL error
             except Exception as e:
                 latency_ms = (time.perf_counter() - start_time) * 1000
                 ctx.record_call(
@@ -526,6 +530,8 @@ class DatabaseSink(BaseSink):
                     f"(table={self._table_name!r}, row_count={len(rows)}). "
                     f"INSERT completed but audit record is missing."
                 ) from exc
+        except AuditIntegrityError:
+            raise  # Audit failure — do not misattribute as SQL error
         except Exception as e:
             latency_ms = (time.perf_counter() - start_time) * 1000
 
