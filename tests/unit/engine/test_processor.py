@@ -1786,27 +1786,28 @@ class TestExecuteTransformNoRetry:
         assert result.status == "error"
         assert error_sink == "discard"
 
-    def test_non_retryable_llm_error_reraises(self) -> None:
-        """Non-retryable LLMClientError is re-raised directly."""
+    def test_non_retryable_llm_error_produces_error_result(self) -> None:
+        """Regression: elspeth-27a8298a24 — non-retryable PluginRetryableError
+        must produce an error result, not crash the run."""
         _, _recorder, processor = self._setup()
         transform = _make_mock_transform(node_id="t1", on_error="discard")
         token = make_token_info(data={"value": 42})
         ctx = make_context()
 
         llm_error = LLMClientError("content policy", retryable=False)
-        with (
-            patch.object(
-                processor._transform_executor,
-                "execute_transform",
-                side_effect=llm_error,
-            ),
-            pytest.raises(LLMClientError, match="content policy"),
+        with patch.object(
+            processor._transform_executor,
+            "execute_transform",
+            side_effect=llm_error,
         ):
-            processor._execute_transform_with_retry(
+            result, _out_token, error_sink = processor._execute_transform_with_retry(
                 transform=transform,
                 token=token,
                 ctx=ctx,
             )
+
+        assert result.status == "error"
+        assert error_sink == "discard"
 
     def test_transient_connection_error_with_on_error(self) -> None:
         """ConnectionError with on_error returns error result (no re-raise)."""

@@ -19,7 +19,7 @@ from typing import Any
 
 from elspeth.contracts import TransformErrorReason, TransformResult
 from elspeth.contracts.engine import BufferEntry
-from elspeth.plugins.infrastructure.clients.llm import LLMClientError
+from elspeth.contracts.errors import PluginRetryableError
 from elspeth.plugins.infrastructure.pooling.config import PoolConfig
 from elspeth.plugins.infrastructure.pooling.errors import CapacityError
 from elspeth.plugins.infrastructure.pooling.reorder_buffer import ReorderBuffer
@@ -463,7 +463,7 @@ class PooledExecutor:
                     result = process_fn(row, state_id)
                     self._throttle.on_success()
                     return (buffer_idx, result)
-                except LLMClientError as e:
+                except PluginRetryableError as e:
                     if not e.retryable:
                         return (
                             buffer_idx,
@@ -491,7 +491,7 @@ class PooledExecutor:
                             TransformResult.error(error_data, retryable=False),
                         )
 
-                    retryable_error: LLMClientError | CapacityError = e
+                    retryable_error: PluginRetryableError | CapacityError = e
                 except CapacityError as e:
                     if time.monotonic() >= max_time:
                         elapsed = time.monotonic() - start_time

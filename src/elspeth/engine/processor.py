@@ -1106,16 +1106,13 @@ class RowProcessor:
                     attempt=0,
                 )
             except PluginRetryableError as e:
-                if e.retryable:
-                    return self._convert_retryable_to_error_result(
-                        e,
-                        transform,
-                        token,
-                        ctx,
-                        reason="transient_error_no_retry",
-                    )
-                # Non-retryable errors re-raise (already handled by transform)
-                raise
+                return self._convert_retryable_to_error_result(
+                    e,
+                    transform,
+                    token,
+                    ctx,
+                    reason="transient_error_no_retry" if e.retryable else "permanent_error",
+                )
             except (ConnectionError, TimeoutError, OSError, CapacityError) as e:
                 return self._convert_retryable_to_error_result(
                     e,

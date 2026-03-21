@@ -193,7 +193,7 @@ class AzureSearchProvider:
                 raise RetrievalError(f"Malformed JSON response from Azure AI Search: {exc}", retryable=False) from exc
         except RetrievalError:
             raise
-        except Exception as exc:
+        except (ConnectionError, TimeoutError, OSError) as exc:
             raise RetrievalError(f"Search request failed: {exc}", retryable=True) from exc
         finally:
             http_client.close()
