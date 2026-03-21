@@ -40,6 +40,7 @@ from elspeth.plugins.infrastructure.clients.json_utils import parse_json_strict 
 logger = structlog.get_logger(__name__)
 
 if TYPE_CHECKING:
+    from elspeth.contracts import Call
     from elspeth.core.landscape.recorder import LandscapeRecorder
     from elspeth.core.rate_limit import NoOpLimiter
     from elspeth.core.rate_limit.limiter import RateLimiter
@@ -202,7 +203,7 @@ class AuditedHTTPClient(AuditedClientBase):
         request_payload: CallPayload,
         response_payload: CallPayload | None = None,
         token_id_override: str | None = None,
-    ) -> None:
+    ) -> Call:
         """Record call to audit trail and emit telemetry event.
 
         Args:
@@ -211,8 +212,11 @@ class AuditedHTTPClient(AuditedClientBase):
             token_id_override: Per-call token_id for telemetry. When provided,
                 overrides the client-level token_id. Used by batch transforms
                 where a single client serves multiple tokens.
+
+        Returns:
+            Call object from Landscape recording (contains request_ref and response_ref blob hashes).
         """
-        self._recorder.record_call(
+        call = self._recorder.record_call(
             state_id=self._state_id,
             call_index=call_index,
             call_type=CallType.HTTP,
@@ -257,6 +261,8 @@ class AuditedHTTPClient(AuditedClientBase):
                 call_type="http",
                 exc_info=True,
             )
+
+        return call
 
     def _execute_request(
         self,
@@ -471,7 +477,7 @@ class AuditedHTTPClient(AuditedClientBase):
         follow_redirects: bool = False,
         max_redirects: int = 10,
         allowed_ranges: Sequence[IPv4Network | IPv6Network] = (),
-    ) -> tuple[httpx.Response, str]:
+    ) -> tuple[httpx.Response, str, Call]:
         """GET with SSRF-safe IP pinning and redirect validation.
 
         Connects to the pre-validated IP in the SSRFSafeRequest, setting the
@@ -485,11 +491,13 @@ class AuditedHTTPClient(AuditedClientBase):
             max_redirects: Maximum redirect hops when follow_redirects=True
 
         Returns:
-            Tuple of (httpx.Response, final hostname URL as string).
+            Tuple of (httpx.Response, final hostname URL as string, Call).
             The hostname URL is the logical URL after all redirects —
             distinct from response.url which is IP-based due to SSRF pinning.
             When follow_redirects is False or no redirects occurred, this is
             the original request URL.
+            The Call contains request_ref and response_ref blob hashes from
+            the audit trail.
 
         Raises:
             httpx.HTTPError: For network/HTTP errors
@@ -605,7 +613,7 @@ class AuditedHTTPClient(AuditedClientBase):
                     status_code=response.status_code,
                 )
 
-            self._recorder.record_call(
+            call = self._recorder.record_call(
                 state_id=self._state_id,
                 call_index=call_index,
                 call_type=CallType.HTTP,
@@ -648,7 +656,7 @@ class AuditedHTTPClient(AuditedClientBase):
                     exc_info=True,
                 )
 
-            return response, final_hostname_url
+            return response, final_hostname_url, call
 
         except (FrameworkBugError, AuditIntegrityError):
             # Telemetry re-raise after successful Landscape record_call.
@@ -658,7 +666,7 @@ class AuditedHTTPClient(AuditedClientBase):
         except Exception as e:
             latency_ms = (time.perf_counter() - start) * 1000
 
-            self._recorder.record_call(
+            _ = self._recorder.record_call(
                 state_id=self._state_id,
                 call_index=call_index,
                 call_type=CallType.HTTP,

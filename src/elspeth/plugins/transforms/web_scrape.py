@@ -294,7 +294,7 @@ class WebScrapeTransform(BaseTransform):
 
         # Fetch URL using pinned IP (prevents DNS rebinding between validation and fetch)
         try:
-            response, final_hostname_url = self._fetch_url(safe_request, ctx)
+            response, final_hostname_url, _call = self._fetch_url(safe_request, ctx)
         except WebScrapeError as e:
             if e.retryable:
                 # Re-raise retryable errors for engine RetryManager
@@ -363,7 +363,7 @@ class WebScrapeTransform(BaseTransform):
             },
         )
 
-    def _fetch_url(self, safe_request: SSRFSafeRequest, ctx: TransformContext) -> tuple[httpx.Response, str]:
+    def _fetch_url(self, safe_request: SSRFSafeRequest, ctx: TransformContext) -> "tuple[httpx.Response, str, Any]":
         """Fetch URL using SSRF-safe IP pinning with audit recording.
 
         Args:
@@ -371,9 +371,10 @@ class WebScrapeTransform(BaseTransform):
             ctx: Plugin context
 
         Returns:
-            Tuple of (httpx.Response, final hostname URL as string).
+            Tuple of (httpx.Response, final hostname URL as string, Call).
             The hostname URL is the logical URL after redirects — distinct
             from response.url which is IP-based due to SSRF pinning.
+            The Call contains request_ref and response_ref blob hashes.
 
         Raises:
             WebScrapeError: For retryable or non-retryable failures
@@ -401,7 +402,7 @@ class WebScrapeTransform(BaseTransform):
         }
 
         try:
-            response, final_hostname_url = client.get_ssrf_safe(
+            response, final_hostname_url, _call = client.get_ssrf_safe(
                 safe_request,
                 headers=headers,
                 follow_redirects=True,
@@ -424,7 +425,7 @@ class WebScrapeTransform(BaseTransform):
                 # Unresolved redirect (e.g. 3xx without Location header) — treat as error
                 raise InvalidURLError(f"Unresolved redirect HTTP {response.status_code}: {url} (missing or empty Location header)")
 
-            return response, final_hostname_url
+            return response, final_hostname_url, _call
 
         except httpx.TimeoutException as e:
             raise NetworkError(f"Timeout fetching {safe_request.original_url}: {e}") from e

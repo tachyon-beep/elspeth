@@ -477,6 +477,8 @@ Replace with:
             )
 ```
 
+**Note on error-path `_ =`:** The `_ =` is for ruff compliance (unused return value). The error path re-raises the exception immediately after recording, so the `Call` return is genuinely unreachable by the caller of `get_ssrf_safe()`. The caller only ever sees the 3-tuple from the success path.
+
 - [ ] **Step 4: Update callers of `get_ssrf_safe()` to handle 3-tuple**
 
 Read `src/elspeth/plugins/transforms/web_scrape.py` line 404. The current code:
@@ -758,29 +760,50 @@ Add to `tests/unit/plugins/llm/test_audit_metadata_functions.py`:
 class TestAugmentedSchemaExcludesAuditFields:
     def test_single_query_schema_excludes_audit_fields(self):
         """_build_augmented_output_schema output schema must NOT include audit field names."""
+        from elspeth.contracts.schema import SchemaConfig
         from elspeth.plugins.transforms.llm import LLM_AUDIT_SUFFIXES, _build_augmented_output_schema
 
-        # Read _build_augmented_output_schema to determine its signature and how to
-        # extract field names from the returned schema. The schema is a Pydantic model
-        # or SchemaContract — check the return type and use the appropriate accessor.
-        # Example (adjust based on actual return type):
-        schema = _build_augmented_output_schema(
-            base_fields=[],  # adjust params based on actual signature
+        # _build_augmented_output_schema signature:
+        #   (base_schema_config: SchemaConfig, response_field: str, schema_name: str) -> type[PluginSchema]
+        # Returns a Pydantic PluginSchema subclass — extract field names via model_fields.
+        # Use observed mode (returns dynamic schema accepting anything) and flexible mode
+        # (returns augmented schema with explicit fields) to test both paths.
+
+        # Flexible mode: explicit fields are augmented with LLM fields
+        flexible_config = SchemaConfig(mode="flexible", fields=())
+        schema_cls = _build_augmented_output_schema(
+            base_schema_config=flexible_config,
             response_field="llm_response",
-            mode="observed",
+            schema_name="TestOutputSchema",
         )
-        # Extract field names from the schema — the exact method depends on the return type.
-        # For SchemaContract: field_names = {f.normalized_name for f in schema.fields}
-        # For Pydantic: field_names = set(schema.model_fields.keys())
-        # Read the function to determine the correct accessor.
+        field_names = set(schema_cls.model_fields.keys())
         for suffix in LLM_AUDIT_SUFFIXES:
             assert f"llm_response{suffix}" not in field_names, (
                 f"Audit field 'llm_response{suffix}' should NOT be in output schema — "
                 f"audit fields belong in success_reason['metadata']"
             )
-```
 
-**Note:** Read `_build_augmented_output_schema()` to determine its actual signature and how to extract field names from the returned schema before writing the final test.
+    def test_multi_query_schema_excludes_audit_fields(self):
+        """_build_multi_query_output_schema output schema must NOT include audit field names."""
+        from elspeth.contracts.schema import SchemaConfig
+        from elspeth.plugins.transforms.llm import LLM_AUDIT_SUFFIXES, _build_multi_query_output_schema
+
+        flexible_config = SchemaConfig(mode="flexible", fields=())
+        schema_cls = _build_multi_query_output_schema(
+            base_schema_config=flexible_config,
+            response_field="llm_response",
+            query_names=("sentiment", "topic"),
+            schema_name="TestMultiOutputSchema",
+        )
+        field_names = set(schema_cls.model_fields.keys())
+        for query_name in ("sentiment", "topic"):
+            prefix = f"{query_name}_llm_response"
+            for suffix in LLM_AUDIT_SUFFIXES:
+                assert f"{prefix}{suffix}" not in field_names, (
+                    f"Audit field '{prefix}{suffix}' should NOT be in output schema — "
+                    f"audit fields belong in success_reason['metadata']"
+                )
+```
 
 - [ ] **Step 7: Run tests — verify the new tests pass**
 
@@ -1174,15 +1197,67 @@ Replace with:
         )
 ```
 
-- [ ] **Step 4: Update `_execute_parallel()` to reconstruct audit metadata after pool return**
+- [ ] **Step 4: Update `_execute_parallel()` to collect audit metadata via side channel**
 
-In `_execute_parallel`, the pool wraps `_QuerySuccess` in `TransformResult`. The `_process_fn` inner function does NOT carry audit metadata through `TransformResult.success_reason` (that would leak `_audit_metadata` keys into the Landscape's `node_states.success_reason_json`).
+In `_execute_parallel`, the pool wraps `_QuerySuccess` in `TransformResult`. The `_process_fn` inner function cannot carry audit metadata through `TransformResult.success_reason` (that would leak `_audit_metadata` keys into the Landscape's `node_states.success_reason_json`).
 
-Instead, `build_llm_audit_metadata()` is cheap (string formatting of config-derived values). After the pool returns all results, reconstruct audit metadata from the query specs in the outer scope.
+Instead, use a side-channel dict in the outer scope. `_process_fn` is a closure — it can write to a dict defined in `_execute_parallel`. After each successful query, stash `_QuerySuccess.audit_metadata` by query index. After the pool returns, merge from the side dict.
 
-The `_process_fn` success branch (around lines 805-808) does NOT change — leave it as-is:
+**Why not re-render templates?** Re-rendering would require calling `spec.build_template_context(row)` and `query_template.render_with_metadata(template_ctx, contract=None)` — duplicating the template setup from `_execute_one_query`. This is fragile (uses per-query templates via `self._query_templates.get(spec.name, self.template)`, not `self.template` directly) and re-executes Tier 2 code that could theoretically raise `TemplateError`/`KeyError` even though the queries already succeeded.
+
+Add the side-channel dict before the contexts list (around line 759):
 
 ```python
+        # Side channel for audit metadata — _process_fn writes here, outer scope reads after pool.
+        # Not in success_reason (would leak to Landscape) or TransformResult (wrong abstraction).
+        audit_metadata_by_index: dict[int, dict[str, object]] = {}
+```
+
+Update the `_process_fn` success branch (around lines 790-808). Find:
+
+```python
+            # Success: wrap partial fields in TransformResult for pool interface
+            observed = SchemaContract(
+                mode="OBSERVED",
+                fields=tuple(
+                    FieldContract(
+                        normalized_name=k,
+                        original_name=k,
+                        python_type=type(v) if type(v) in (int, str, float, bool) else object,
+                        required=False,
+                        source="inferred",
+                    )
+                    for k, v in result.fields.items()
+                ),
+                locked=True,
+            )
+            return TransformResult.success(
+                PipelineRow(result.fields, observed),
+                success_reason={"action": "query_completed", "metadata": {"query_name": work["spec"].name}},
+            )
+```
+
+Replace with:
+
+```python
+            # Stash audit metadata in side channel before wrapping in TransformResult
+            audit_metadata_by_index[work["query_idx"]] = result.audit_metadata
+
+            # Success: wrap partial fields in TransformResult for pool interface
+            observed = SchemaContract(
+                mode="OBSERVED",
+                fields=tuple(
+                    FieldContract(
+                        normalized_name=k,
+                        original_name=k,
+                        python_type=type(v) if type(v) in (int, str, float, bool) else object,
+                        required=False,
+                        source="inferred",
+                    )
+                    for k, v in result.fields.items()
+                ),
+                locked=True,
+            )
             return TransformResult.success(
                 PipelineRow(result.fields, observed),
                 success_reason={"action": "query_completed", "metadata": {"query_name": work["spec"].name}},
@@ -1225,42 +1300,10 @@ Replace with:
             if result.row is not None:
                 accumulated_outputs.update(result.row.to_dict())
 
-        # Reconstruct audit metadata from query specs (cheap — config-derived values)
-        # Template hashes are per-spec constants available in the outer scope.
-        # Rendering happened inside _execute_one_query, but the template_hash and
-        # template_source come from self.template (config), and system_prompt_source
-        # from self.system_prompt_source. The per-query rendered.variables_hash and
-        # rendered.lookup_hash are row-dependent, so we reconstruct from the specs.
-        #
-        # NOTE: The sequential path gets per-row hashes from _QuerySuccess.audit_metadata.
-        # The parallel path cannot access _QuerySuccess (pool returns TransformResult).
-        # Since build_llm_audit_metadata() needs rendered.template_hash etc. from inside
-        # _execute_one_query, we use _QuerySuccess.audit_metadata on the sequential path
-        # and reconstruct here by re-calling build_llm_audit_metadata per spec.
-        # The template, lookup_hash, lookup_source, template_source, and system_prompt_source
-        # are all config-level (same for every row). Only variables_hash is row-specific
-        # and is already captured in the sequential path. For the parallel path, we
-        # re-render to get the hashes — read _execute_one_query to find where
-        # rendered.template_hash etc. come from.
-        #
-        # IMPLEMENTATION: Re-render the template for each spec to get the hashes.
-        # This is the same work _execute_one_query does, but the LLM call is the
-        # expensive part, not template rendering. Alternatively, extend _process_fn
-        # to stash audit_metadata in a parallel dict keyed by query index (not in
-        # success_reason). Choose whichever approach is cleaner when reading the code.
+        # Merge audit metadata from side channel (written by _process_fn)
         accumulated_audit: dict[str, object] = {}
-        for spec in self.query_specs:
-            prefix = f"{spec.name}_{self.response_field}"
-            rendered = self.template.render(row.to_dict(), spec.input_fields)
-            accumulated_audit.update(build_llm_audit_metadata(
-                prefix,
-                template_hash=rendered.template_hash,
-                variables_hash=rendered.variables_hash,
-                template_source=rendered.template_source,
-                lookup_hash=rendered.lookup_hash,
-                lookup_source=rendered.lookup_source,
-                system_prompt_source=self.system_prompt_source,
-            ))
+        for idx in sorted(audit_metadata_by_index):
+            accumulated_audit.update(audit_metadata_by_index[idx])
 
         output = {**row.to_dict(), **accumulated_outputs}
         output_contract = propagate_contract(
@@ -1280,7 +1323,7 @@ Replace with:
         )
 ```
 
-**Design rationale:** The previous design stashed `_audit_metadata` in `success_reason` as a private key for transport across the pool boundary. This violated CLAUDE.md (the `if "_audit_metadata" in result.success_reason` check is defensive programming) and leaked the key into `node_states.success_reason_json` in the Landscape. Instead, we reconstruct audit metadata after pool return by re-rendering templates (cheap — string formatting). The LLM API call is the expensive part, not template rendering.
+**Design rationale:** The side-channel `audit_metadata_by_index` dict is safe because `_process_fn` is a closure with access to the outer scope, and the `PooledExecutor` synchronizes — all entries are written before the outer scope reads them. Each query index writes exactly once (the pool processes each `RowContext` once). This avoids re-rendering templates (fragile, wrong API) and avoids leaking private keys into `success_reason` (persisted to Landscape).
 
 - [ ] **Step 5: Remove audit fields from multi-query `declared_output_fields`**
 
@@ -1413,7 +1456,16 @@ from elspeth.plugins.transforms.llm import (
 )
 ```
 
-Note: `build_llm_audit_metadata` is NOT imported — batch transforms rely on per-row `calls` table records for audit provenance, not accumulated audit dicts.
+Also import `build_llm_audit_metadata` — batch transforms use it for batch-level template provenance:
+
+```python
+from elspeth.plugins.transforms.llm import (
+    _build_augmented_output_schema,
+    build_llm_audit_metadata,
+    get_llm_guaranteed_fields,
+    populate_llm_operational_fields,
+)
+```
 
 Update `declared_output_fields` (around line 181):
 
@@ -1496,33 +1548,70 @@ Replace with:
 
 **Do NOT add `audit_metadata` to `_RowSuccess`.** Do NOT change `_RowSuccess` — leave it as-is with only the `row` field. Batch transforms process potentially thousands of rows. Accumulating per-row audit dicts into a single `success_reason["metadata"]` creates an unbounded blob in `node_states.success_reason_json`.
 
-Per-row audit provenance is already recorded in the `calls` table via `AuditedHTTPClient.record_call()`. Each LLM API call gets a `Call` row with `request_ref` (hashed request including the rendered prompt) and `response_ref` (hashed response). The `calls` table provides per-row provenance without any additional work.
+Per-row request/response blob hashes are already recorded in the `calls` table via `AuditedHTTPClient.record_call()`. Each LLM API call gets a `Call` row with `request_ref` (hashed request including the rendered prompt) and `response_ref` (hashed response).
 
-The batch-level `success_reason["metadata"]` should contain only **aggregate stats** (batch_size, total tokens, etc.) — not per-row audit fields. Find the `success_reason` construction in `_process_batch` and update it to include only aggregate metadata:
+However, template provenance (template_hash, template_source, lookup_hash, lookup_source, system_prompt_source) is NOT in the `calls` table — the `Call` record knows what was sent to the API but not which template or lookup config produced the request. These are batch-level constants (all rows in a batch share the same template), so they belong in the batch-level `success_reason["metadata"]` without per-row bloat.
+
+Find the `success_reason` construction in `_process_batch` (the `success_multi` call around line 492-494):
 
 ```python
+        return TransformResult.success_multi(
+            [PipelineRow(r, output_contract) for r in output_rows],
+            success_reason={"action": "enriched", "fields_added": [self._response_field]},
+        )
+```
+
+Replace with:
+
+```python
+        # Batch-level template provenance — shared across all rows in the batch.
+        # Per-row request/response hashes are in the calls table via record_call().
+        batch_audit = build_llm_audit_metadata(
+            self._response_field,
+            template_hash=self._template.template_hash,
+            variables_hash="batch-varies-per-row",  # Not meaningful at batch level
+            template_source=self._template.template_source,
+            lookup_hash=self._template.lookup_hash,
+            lookup_source=self._template.lookup_source,
+            system_prompt_source=self._system_prompt_source,
+        )
+
+        return TransformResult.success_multi(
+            [PipelineRow(r, output_contract) for r in output_rows],
             success_reason={
                 "action": "enriched",
                 "fields_added": [self._response_field],
                 "metadata": {
                     "batch_size": len(output_rows),
+                    **batch_audit,
                 },
             },
+        )
 ```
 
-(Adjust based on what aggregate stats are already available in the batch processing loop.)
+Also update the single-row path in `process()` (around line 348-350). The `process()` method wraps `_process_batch` for single rows and currently passes through `result.success_reason`. After the `_process_batch` change, the single-row path inherits the batch-level provenance automatically — no additional change needed for `process()`.
+
+**Note on `variables_hash`:** At batch level, `variables_hash` varies per row (each row renders different template variables). The string `"batch-varies-per-row"` signals this explicitly. Per-row `variables_hash` is recoverable from the `calls` table: the `request_ref` blob contains the full rendered prompt, which is the canonical source for "what was sent." An alternative would be to pass `variables_hash=None`, but `build_llm_audit_metadata` types it as `str` (non-optional) — changing the type is out of scope for this plan.
 
 - [ ] **Step 2: Migrate `azure_batch.py` — same pattern**
 
 Read `src/elspeth/plugins/transforms/llm/azure_batch.py` and apply the same changes:
 
-1. Update imports (same as openrouter_batch — `populate_llm_operational_fields` only, no `build_llm_audit_metadata`)
+1. Update imports (same as openrouter_batch — `populate_llm_operational_fields` and `build_llm_audit_metadata`):
+   ```python
+   from elspeth.plugins.transforms.llm import (
+       _build_augmented_output_schema,
+       build_llm_audit_metadata,
+       get_llm_guaranteed_fields,
+       populate_llm_operational_fields,
+   )
+   ```
 2. Update `declared_output_fields` (around line 163)
 3. Update `_output_schema_config` (around lines 197-211)
 4. Update the per-row `populate_llm_metadata_fields` call (around lines 1366-1377) — replace with `populate_llm_operational_fields` only
-5. Update the batch success_reason to contain only aggregate stats (batch_size), not per-row audit metadata
+5. Update the batch success_reason to include batch-level template provenance (same pattern as openrouter_batch)
 
-For Azure batch, `populate_llm_metadata_fields` is called inline during result processing (not in a `_RowSuccess`). Apply the same principle as OpenRouter batch: per-row audit provenance is already in the `calls` table, so do NOT accumulate per-row audit dicts.
+For Azure batch, `populate_llm_metadata_fields` is called inline during result processing (not in a `_RowSuccess`). Per-row request/response hashes are in the `calls` table. Template provenance is batch-level.
 
 Find the `populate_llm_metadata_fields` call (around line 1366):
 
@@ -1552,19 +1641,33 @@ Replace with:
                 )
 ```
 
-Do NOT add `build_llm_audit_metadata()` calls per row. Do NOT accumulate `audit_metadata_by_row`. The batch success_reason should contain only aggregate stats:
+Do NOT add `build_llm_audit_metadata()` calls per row. Do NOT accumulate `audit_metadata_by_row`.
+
+Find the batch-level `success_reason` construction (the `success_multi` call) and update it to include batch-level template provenance — same pattern as openrouter_batch:
 
 ```python
-            success_reason={
-                "action": "enriched",
-                "fields_added": [self._response_field],
-                "metadata": {
-                    "batch_size": len(output_rows),
-                },
+        batch_audit = build_llm_audit_metadata(
+            self._response_field,
+            template_hash=self._template.template_hash,
+            variables_hash="batch-varies-per-row",
+            template_source=self._template.template_source,
+            lookup_hash=self._template.lookup_hash,
+            lookup_source=self._template.lookup_source,
+            system_prompt_source=self._system_prompt_source,
+        )
+
+        # ... in the success_multi call:
+        success_reason={
+            "action": "enriched",
+            "fields_added": [self._response_field],
+            "metadata": {
+                "batch_size": len(output_rows),
+                **batch_audit,
             },
+        },
 ```
 
-Per-row provenance is already recorded in the `calls` table by `AuditedHTTPClient.record_call()` — each API call gets `request_ref`/`response_ref` hashes.
+Per-row request/response provenance is already recorded in the `calls` table by `AuditedHTTPClient.record_call()` — each API call gets `request_ref`/`response_ref` hashes. Template provenance is batch-level (shared across all rows).
 
 - [ ] **Step 3: Update tests**
 
@@ -1591,8 +1694,10 @@ Per-row provenance is already recorded in the `calls` table by `AuditedHTTPClien
 feat: migrate LLM batch transform audit fields from row to success_reason
 
 OpenRouter and Azure batch transforms now use
-populate_llm_operational_fields() and build_llm_audit_metadata().
-Audit provenance goes to success_reason["metadata"] per row.
+populate_llm_operational_fields() for row data. Batch-level template
+provenance (template_hash, template_source, lookup/system_prompt sources)
+goes to success_reason["metadata"]. Per-row request/response hashes are
+already in the calls table via AuditedHTTPClient.record_call().
 ```
 
 ---
@@ -1746,6 +1851,8 @@ Replace with:
         output["fetch_url_final"] = final_hostname_url
         output["fetch_url_final_ip"] = safe_request.resolved_ip
 ```
+
+**Note on `fetch_url_final_ip` semantic change:** The old value was `str(response.url)` which was the full pinned URL (e.g., `http://93.184.216.34/path`), not just an IP. The new value is `safe_request.resolved_ip` which is the actual IP string (e.g., `93.184.216.34`). This is a bug fix — the field name says "ip" but previously contained a URL. Tests and downstream sinks that pattern-match on the old URL format will need updating (handled in Step 7 below).
 
 - [ ] **Step 5: Move hash fields to `success_reason["metadata"]`**
 
@@ -2145,9 +2252,12 @@ Read the existing test file to determine how to instantiate the transform for th
 .venv/bin/python -m pytest tests/unit/plugins/llm/test_llm_success_reason.py tests/unit/contracts/test_schema_config.py -x
 ```
 
-- [ ] **Step 5: Note on integration test**
+- [ ] **Step 5: Create follow-up filigree tasks**
 
-**Follow-up task (not in this plan):** Create an integration test: end-to-end pipeline with ChaosLLM verifying audit fields in `success_reason`, not in output rows. Use the existing `chaosllm_sentiment` example config adapted for test. This plan is already large enough; the integration test is deferred.
+Use filigree to create two follow-up tasks (these are NOT part of this plan — just create the tracking issues):
+
+1. **Integration test:** "Integration test — end-to-end pipeline verifying audit fields in success_reason not output rows" (type=task, priority=2). Description: Use ChaosLLM sentiment example config adapted for test. Verify `LLM_AUDIT_SUFFIXES` fields absent from sink output, present in `success_reason_json`.
+2. **TUI update:** "Update elspeth explain TUI to display provenance from success_reason metadata" (type=task, priority=2). Description: `elspeth explain` currently has no code to surface `success_reason` data. Pre-migration runs show provenance from row fields; new runs need `success_reason_json` display.
 
 - [ ] **Step 6: Commit**
 
@@ -2252,15 +2362,11 @@ If no callers remain outside of `__init__.py` itself:
 - Remove `get_llm_audit_fields` from `__all__` (keep the function as internal helper if `build_llm_audit_metadata` or collision checking uses the suffixes)
 - Remove `populate_llm_metadata_fields` from `__all__`
 
-- [ ] **Step 10: Note on `elspeth explain` TUI**
-
-Do NOT attempt to verify that `elspeth explain` retrieves provenance from `success_reason` metadata — the TUI currently has no code to surface `success_reason` data. Instead, create a filigree follow-up task: "Update elspeth explain TUI to display provenance from success_reason metadata".
-
-- [ ] **Step 11: Note on pre-migration runs**
+- [ ] **Step 10: Note on pre-migration runs**
 
 Pre-migration runs will not contain audit metadata in `success_reason_json`. This is expected — the data was previously in the row, not in the audit metadata slot. `elspeth explain` for old runs will show provenance from row fields (if preserved by sinks); new runs show provenance from `success_reason_json`.
 
-- [ ] **Step 12: Final commit**
+- [ ] **Step 11: Final commit**
 
 ```
 chore: final verification and cleanup for audit provenance boundary

@@ -167,6 +167,66 @@ def populate_llm_metadata_fields(
     output[f"{field_prefix}_system_prompt_source"] = system_prompt_source
 
 
+def populate_llm_operational_fields(
+    output: dict[str, object],
+    field_prefix: str,
+    *,
+    usage: TokenUsage | None,
+    model: str | None,
+) -> None:
+    """Populate operational metadata into the output row (stays in pipeline data).
+
+    These fields have legitimate downstream use (budgeting, routing).
+    Audit provenance fields go to success_reason["metadata"] via
+    build_llm_audit_metadata() instead.
+
+    Args:
+        output: Mutable row dict to populate.
+        field_prefix: Response field name (e.g., "llm_response").
+        usage: Token usage (TokenUsage or None).
+        model: Model identifier that actually responded.
+    """
+    output[f"{field_prefix}_usage"] = usage.to_dict() if usage is not None else None
+    output[f"{field_prefix}_model"] = model
+
+
+def build_llm_audit_metadata(
+    field_prefix: str,
+    *,
+    template_hash: str,
+    variables_hash: str,
+    template_source: str | None,
+    lookup_hash: str | None,
+    lookup_source: str | None,
+    system_prompt_source: str | None,
+) -> dict[str, object]:
+    """Build audit provenance dict for inclusion in success_reason["metadata"].
+
+    Does NOT write to the output row — audit provenance lives in the Landscape only.
+
+    Args:
+        field_prefix: Response field name (e.g., "llm_response").
+        template_hash: SHA-256 of prompt template.
+        variables_hash: SHA-256 of rendered template variables.
+        template_source: Config file path of template (None if inline).
+        lookup_hash: SHA-256 of lookup data (None if no lookup).
+        lookup_source: Config file path of lookup data (None if no lookup).
+        system_prompt_source: Config file path of system prompt (None if inline).
+
+    Returns:
+        Dict of audit field names to values, ready to merge into
+        success_reason["metadata"].
+    """
+    return {
+        f"{field_prefix}_template_hash": template_hash,
+        f"{field_prefix}_variables_hash": variables_hash,
+        f"{field_prefix}_template_source": template_source,
+        f"{field_prefix}_lookup_hash": lookup_hash,
+        f"{field_prefix}_lookup_source": lookup_source,
+        f"{field_prefix}_system_prompt_source": system_prompt_source,
+    }
+
+
 def _build_augmented_output_schema(
     base_schema_config: SchemaConfig,
     response_field: str,
@@ -203,10 +263,10 @@ def _build_augmented_output_schema(
     base_fields = base_schema_config.fields or ()
     existing_names = {f.name for f in base_fields}
 
-    # Add LLM fields (guaranteed + audit) as optional 'any' type fields
+    # Add LLM fields (guaranteed only) as optional 'any' type fields
+    # Audit provenance fields go to success_reason["metadata"], not the output schema
     llm_field_names = [
         *get_llm_guaranteed_fields(response_field),
-        *get_llm_audit_fields(response_field),
     ]
     extra_fields = tuple(
         FieldDefinition(name=name, field_type="any", required=False) for name in llm_field_names if name not in existing_names
@@ -267,7 +327,8 @@ def _build_multi_query_output_schema(
     extra_fields: list[FieldDefinition] = []
     for query_name in query_names:
         prefix = f"{query_name}_{response_field}"
-        llm_field_names = [prefix, *get_llm_guaranteed_fields(prefix), *get_llm_audit_fields(prefix)]
+        # Audit provenance fields go to success_reason["metadata"], not the output schema
+        llm_field_names = [prefix, *get_llm_guaranteed_fields(prefix)]
         for name in llm_field_names:
             if name not in existing_names:
                 extra_fields.append(FieldDefinition(name=name, field_type="any", required=False))
@@ -295,7 +356,9 @@ __all__ = [
     "MULTI_QUERY_GUARANTEED_SUFFIXES",
     "_build_augmented_output_schema",
     "_build_multi_query_output_schema",
+    "build_llm_audit_metadata",
     "get_llm_audit_fields",
     "get_llm_guaranteed_fields",
     "populate_llm_metadata_fields",
+    "populate_llm_operational_fields",
 ]
