@@ -25,6 +25,26 @@
 
 ---
 
+## Task 0: Commit Prerequisite Changes
+
+The branch already has uncommitted changes from prior work: the `Mapping` import and `isinstance(obj, Mapping)` widening in `_reject_non_finite`, the full `TestRejectNonFiniteMappingProxyType` test class, and unrelated fixes in `exporter.py`, `web.py`, `test_freeze.py`, `test_exporter.py`, and `test_web_ssrf_network_failures.py`. These must be committed before starting this plan — subsequent tasks reference line numbers that assume this code is already in place.
+
+**Files:**
+- Staged: `src/elspeth/contracts/hashing.py`, `src/elspeth/core/landscape/exporter.py`, `src/elspeth/core/security/web.py`, `tests/unit/contracts/test_freeze.py`, `tests/unit/contracts/test_hashing.py`, `tests/unit/core/landscape/test_exporter.py`, `tests/unit/core/security/test_web_ssrf_network_failures.py`
+
+- [ ] **Step 1: Review and commit all pending changes**
+
+Run: `.venv/bin/python -m pytest tests/unit/contracts/test_hashing.py tests/unit/contracts/test_freeze.py tests/unit/core/landscape/test_exporter.py tests/unit/core/security/test_web_ssrf_network_failures.py -v`
+
+Expected: ALL PASS.
+
+```bash
+git add src/elspeth/contracts/hashing.py src/elspeth/core/landscape/exporter.py src/elspeth/core/security/web.py tests/unit/contracts/test_freeze.py tests/unit/contracts/test_hashing.py tests/unit/core/landscape/test_exporter.py tests/unit/core/security/test_web_ssrf_network_failures.py
+git commit -m "fix: widen _reject_non_finite to Mapping ABC; add regression tests for NaN in MappingProxyType"
+```
+
+---
+
 ## Task 1: Frozen-Type Unit Tests (T2)
 
 Write the failing tests first — these define the contract for the hashing.py change.
@@ -157,7 +177,7 @@ This is the core fix. Replace the validate-only `_reject_non_finite()` with a no
 
 - [ ] **Step 1: Implement the combined traversal**
 
-Replace the entire `_reject_non_finite` function and update `canonical_json` to use the returned value. The file already imports `Mapping` from `collections.abc` (line 20). Add the `MappingProxyType` import from `types`.
+Replace the entire `_reject_non_finite` function and update `canonical_json` to use the returned value. The file already imports `Mapping` from `collections.abc` (line 20). No new imports are needed — the `Mapping` ABC covers both `dict` and `MappingProxyType`.
 
 The full updated `hashing.py` content (lines 1-68, everything above `stable_hash`):
 
@@ -180,7 +200,6 @@ from __future__ import annotations
 import hashlib
 import math
 from collections.abc import Mapping
-from types import MappingProxyType
 from typing import Any
 
 import rfc8785
@@ -194,15 +213,11 @@ def _normalize_frozen_and_reject_non_finite(obj: Any) -> Any:
     """Normalize frozen containers and reject non-finite floats.
 
     Single recursive traversal that:
-    - Converts ``MappingProxyType`` → ``dict`` (recurse into values)
+    - Converts any ``Mapping`` (including ``MappingProxyType``) → ``dict``
+    - Converts ``tuple`` → ``list``
     - Rejects ``frozenset`` with ``TypeError`` (no canonical JSON ordering)
     - Rejects NaN/Infinity with ``ValueError``
     - Returns the normalized structure ready for ``rfc8785.dumps()``
-
-    ORDERING CONSTRAINT: The ``MappingProxyType`` check must come before
-    the general ``Mapping`` check, because ``MappingProxyType`` is a
-    subtype of ``Mapping``. Checking ``Mapping`` first would recurse
-    without converting to ``dict``.
     """
     if isinstance(obj, float):
         if math.isnan(obj):
@@ -215,10 +230,8 @@ def _normalize_frozen_and_reject_non_finite(obj: Any) -> Any:
             f"frozenset is not JSON-serializable and has no canonical ordering. "
             f"Use list or tuple for ordered collections. Got: {obj!r}"
         )
-    # MappingProxyType before Mapping — MappingProxyType IS-A Mapping,
-    # so checking Mapping first would skip the dict conversion.
-    if isinstance(obj, MappingProxyType):
-        return {k: _normalize_frozen_and_reject_non_finite(v) for k, v in obj.items()}
+    # Mapping ABC covers both dict and MappingProxyType. The dict
+    # comprehension normalizes MappingProxyType → dict for rfc8785.
     if isinstance(obj, Mapping):
         return {k: _normalize_frozen_and_reject_non_finite(v) for k, v in obj.items()}
     if isinstance(obj, (list, tuple)):
@@ -251,7 +264,7 @@ def canonical_json(obj: Any) -> str:
 
 Leave `stable_hash()` and `repr_hash()` unchanged — they delegate to `canonical_json()` which now normalizes.
 
-**Note — behavioral expansion:** The old `_reject_non_finite` recursed into `Mapping` values but did NOT convert them to `dict`. The new function converts ALL `Mapping` subclasses to `dict` during normalization. This is correct — `rfc8785.dumps()` needs plain dicts — but it's a subtle behavioral change for any code passing custom `Mapping` subclasses. In practice, no ELSPETH code does this (only `dict` and `MappingProxyType` appear), so the risk is negligible.
+**Note — behavioral expansion:** The old `_reject_non_finite` recursed into `Mapping` values but did NOT convert them to `dict`. The new function converts ALL `Mapping` subclasses (including `MappingProxyType`) to plain `dict` during normalization via a single `isinstance(obj, Mapping)` check. This is correct — `rfc8785.dumps()` needs plain dicts — but it's a subtle behavioral change for any code passing custom `Mapping` subclasses. In practice, no ELSPETH code does this (only `dict` and `MappingProxyType` appear), so the risk is negligible. A separate `MappingProxyType` branch is unnecessary because the `Mapping` ABC already covers it and both would do the same dict-comprehension conversion.
 
 - [ ] **Step 2: Run T2 and T3 tests to verify they pass**
 
@@ -553,11 +566,11 @@ class TestRecordCallFrozenData:
         assert event.request_payload.to_dict() == expected_request
 ```
 
-- [ ] **Step 2: Run tests to verify they fail**
+- [ ] **Step 2: Run tests to verify the token usage test fails**
 
 Run: `.venv/bin/python -m pytest tests/unit/plugins/test_context.py::TestRecordCallFrozenData -v`
 
-Expected: FAIL — the `isinstance(raw_usage, dict)` check at line 334 rejects `MappingProxyType`, so token usage is `None` when it should have data.
+Expected: `test_token_usage_extracted_from_mapping_proxy` FAILS — the `isinstance(raw_usage, dict)` check at line 334 rejects `MappingProxyType`, so token usage is `None` when it should have data. `test_raw_call_payload_freezes_data_without_intermediate_thaw` may PASS even before the fix because the current `deep_thaw` call normalizes the frozen containers before `RawCallPayload` receives them — that test serves as a regression guard for the post-fix behavior.
 
 - [ ] **Step 3: Implement the plugin_context.py changes**
 
@@ -608,6 +621,19 @@ Also update the comment at line 327 to reflect that response_snapshot may contai
             # Extract token usage for LLM calls if available.
             # response_snapshot may contain frozen containers (MappingProxyType) —
             # use Mapping ABC for isinstance checks, not dict.
+```
+
+**3c.** Update the stale comment at lines 338-339. After removing `deep_thaw`, the snapshots are no longer deepcopied — `RawCallPayload` now does the freezing (and thus copying) itself:
+
+```python
+# Before:
+            # Wrap snapshots in RawCallPayload for typed telemetry payload.
+            # Snapshots are already deepcopied above — RawCallPayload doesn't copy again.
+
+# After:
+            # Wrap data in RawCallPayload for typed telemetry payload.
+            # RawCallPayload.__init__ calls deep_freeze(), creating an independent
+            # frozen copy — no prior snapshot/deepcopy step is needed.
 ```
 
 - [ ] **Step 4: Run T5 tests to verify they pass**

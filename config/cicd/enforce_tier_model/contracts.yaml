@@ -37,9 +37,15 @@ per_file_rules:
 - pattern: contracts/batch_checkpoint.py
   rules:
   - R5
-  reason: Deep-freeze guards and template error tuple validation
+  reason: Deep-freeze guards, Tier 1 from_dict type validation, and template error tuple validation
   expires: null
-  max_hits: 3
+  max_hits: 9
+- pattern: contracts/checkpoint.py
+  rules:
+  - R5
+  reason: Tier 1 __post_init__ type guards on ResumePoint — validates token_id/node_id are str, aggregation_state/coalesce_state are typed checkpoint states
+  expires: null
+  max_hits: 4
 - pattern: contracts/call_data.py
   rules:
   - R5

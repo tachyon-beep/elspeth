@@ -179,6 +179,66 @@ def test_resume_point_accepts_zero_sequence_number() -> None:
     assert resume_point.sequence_number == 0
 
 
+# === ResumePoint Tier 1 type guards (elspeth-0b184125ca, elspeth-65428b478c) ===
+
+
+def test_resume_point_rejects_none_token_id() -> None:
+    """Regression: elspeth-65428b478c — None must raise TypeError, not ValueError."""
+    with pytest.raises(TypeError, match="token_id must be str"):
+        ResumePoint(
+            checkpoint=_checkpoint(),
+            token_id=None,  # type: ignore[arg-type]
+            node_id="node-001",
+            sequence_number=1,
+        )
+
+
+def test_resume_point_rejects_none_node_id() -> None:
+    """Regression: elspeth-65428b478c — None must raise TypeError, not ValueError."""
+    with pytest.raises(TypeError, match="node_id must be str"):
+        ResumePoint(
+            checkpoint=_checkpoint(),
+            token_id="tok-001",
+            node_id=None,  # type: ignore[arg-type]
+            sequence_number=1,
+        )
+
+
+def test_resume_point_rejects_int_token_id() -> None:
+    """Non-string token_id is corruption, not an empty-string issue."""
+    with pytest.raises(TypeError, match="token_id must be str"):
+        ResumePoint(
+            checkpoint=_checkpoint(),
+            token_id=42,  # type: ignore[arg-type]
+            node_id="node-001",
+            sequence_number=1,
+        )
+
+
+def test_resume_point_rejects_dict_aggregation_state() -> None:
+    """Regression: elspeth-0b184125ca — raw dict must not be accepted as state."""
+    with pytest.raises(TypeError, match="aggregation_state must be AggregationCheckpointState"):
+        ResumePoint(
+            checkpoint=_checkpoint(),
+            token_id="tok-001",
+            node_id="node-001",
+            sequence_number=1,
+            aggregation_state={"version": "3.0", "nodes": {}},  # type: ignore[arg-type]
+        )
+
+
+def test_resume_point_rejects_dict_coalesce_state() -> None:
+    """Regression: elspeth-0b184125ca — raw dict must not be accepted as state."""
+    with pytest.raises(TypeError, match="coalesce_state must be CoalesceCheckpointState"):
+        ResumePoint(
+            checkpoint=_checkpoint(),
+            token_id="tok-001",
+            node_id="node-001",
+            sequence_number=1,
+            coalesce_state={"version": "1.0", "pending": []},  # type: ignore[arg-type]
+        )
+
+
 # === AggregationNodeCheckpoint.from_dict corruption tests ===
 
 
