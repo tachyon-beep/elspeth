@@ -51,3 +51,10 @@ repos:
         language: system
         types: [python]
         pass_filenames: false
+
+      - id: enforce-frozen-annotations
+        name: Enforce Frozen Annotations
+        entry: .venv/bin/python scripts/cicd/enforce_frozen_annotations.py check --root src/elspeth --allowlist config/cicd/enforce_frozen_annotations
+        language: system
+        types: [python]
+        pass_filenames: false
