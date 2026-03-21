@@ -403,7 +403,7 @@ def run(
         typer.echo(f"Error: Settings file not found: {settings}", err=True)
         raise typer.Exit(1) from None
     except (YamlParserError, YamlScannerError) as e:
-        typer.echo(f"YAML syntax error in {settings}: {e.problem}", err=True)
+        typer.echo(f"YAML syntax error in {settings}: {e.problem if e.problem is not None else e}", err=True)
         raise typer.Exit(1) from None
     except yaml.YAMLError as e:
         typer.echo(f"YAML syntax error in {settings}: {e}", err=True)
@@ -1330,11 +1330,12 @@ def purge(
         try:
             config, _secret_resolutions = _load_settings_with_secrets(settings_path)
         except (YamlParserError, YamlScannerError) as e:
+            problem = e.problem if e.problem is not None else str(e)
             if not database:
-                typer.echo(f"YAML syntax error in settings.yaml: {e.problem}", err=True)
+                typer.echo(f"YAML syntax error in settings.yaml: {problem}", err=True)
                 typer.echo("Specify --database to provide path directly.", err=True)
                 raise typer.Exit(1) from None
-            typer.echo(f"Warning: YAML syntax error in settings.yaml: {e.problem}", err=True)
+            typer.echo(f"Warning: YAML syntax error in settings.yaml: {problem}", err=True)
         except yaml.YAMLError as e:
             if not database:
                 typer.echo(f"YAML error in settings.yaml: {e}", err=True)

@@ -44,7 +44,7 @@ per_file_rules:
 - pattern: engine/orchestrator/types.py
   rules:
   - R5
-  reason: Construction-time immutability enforcement
+  reason: Construction-time immutability enforcement for RunResult and AggregationFlushResult
   expires: null
   max_hits: 1
 - pattern: engine/processor.py

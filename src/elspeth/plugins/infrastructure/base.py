@@ -454,7 +454,7 @@ class BaseSink(ABC):
         Set by init_display_headers(). Sinks that don't use display headers
         return False (the default).
         """
-        return getattr(self, "_needs_resume_field_resolution", False)
+        return self._needs_resume_field_resolution
 
     def set_resume_field_resolution(self, resolution_mapping: dict[str, str]) -> None:
         """Set field resolution mapping for resume validation.
@@ -487,6 +487,7 @@ class BaseSink(ABC):
         """
         self.config = config
         self._output_contract = None
+        self._needs_resume_field_resolution = False
 
     @abstractmethod
     def write(

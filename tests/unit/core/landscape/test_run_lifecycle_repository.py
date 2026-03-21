@@ -659,7 +659,7 @@ class TestFinalizeRunEdgeCases:
 
         run = repo.finalize_run("nd-run", RunStatus.COMPLETED)
         assert run.status == RunStatus.COMPLETED
-        assert run.reproducibility_grade == "replay_reproducible"
+        assert run.reproducibility_grade == ReproducibilityGrade.REPLAY_REPRODUCIBLE
 
 
 # ---------------------------------------------------------------------------

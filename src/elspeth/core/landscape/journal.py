@@ -263,14 +263,14 @@ class LandscapeJournal:
         try:
             content = self._payload_store.retrieve(ref)
         except (OSError, PayloadNotFoundError) as exc:
-            logger.error("Landscape journal payload read failed: %s", exc)
+            logger.error("journal_payload_read_failed", error=str(exc), ref=ref)
             if self._fail_on_error:
                 raise
             return None, f"payload_read_failed: {exc}"
         try:
             return content.decode("utf-8"), None
         except UnicodeDecodeError as exc:
-            logger.error("Landscape journal payload decode failed: %s", exc)
+            logger.error("journal_payload_decode_failed", error=str(exc), ref=ref)
             if self._fail_on_error:
                 raise
             return None, f"payload_decode_failed: {exc}"

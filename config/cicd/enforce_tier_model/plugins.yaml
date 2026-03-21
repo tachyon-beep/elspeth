@@ -275,11 +275,6 @@ allow_hits:
   reason: isinstance(dict) check for config field type discrimination — same pattern as SinkPathConfig.headers_mapping
   safety: Config validated by Pydantic before this property runs; isinstance only distinguishes dict from str
   expires: null
-- key: plugins/infrastructure/base.py:R2:BaseSink:needs_resume_field_resolution:fp=aa78bde542b4abfa
-  owner: refactor
-  reason: getattr default for sinks that don't call init_display_headers (e.g. DatabaseSink)
-  safety: Returns False (safe default); attribute always exists for sinks using display headers
-  expires: null
 - key: plugins/transforms/web_scrape.py:R5:WebScrapeHTTPConfig:_validate_allowed_hosts:fp=c519710da4a8ea7f
   owner: architecture
   reason: Pydantic field_validator wraps ipaddress.ip_network() on user-provided CIDR strings — Tier 3 config boundary

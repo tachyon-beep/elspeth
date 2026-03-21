@@ -81,7 +81,7 @@ class TestBeginRun:
             canonical_version="v1",
             reproducibility_grade=ReproducibilityGrade.FULL_REPRODUCIBLE,
         )
-        assert run.reproducibility_grade == "full_reproducible"
+        assert run.reproducibility_grade == ReproducibilityGrade.FULL_REPRODUCIBLE
 
 
 class TestGetRun:
@@ -119,7 +119,7 @@ class TestCompleteRun:
             RunStatus.COMPLETED,
             reproducibility_grade=ReproducibilityGrade.FULL_REPRODUCIBLE,
         )
-        assert run.reproducibility_grade == "full_reproducible"
+        assert run.reproducibility_grade == ReproducibilityGrade.FULL_REPRODUCIBLE
 
     def test_rejects_non_terminal_status_running(self) -> None:
         _db, recorder = _setup()
@@ -316,7 +316,7 @@ class TestFinalizeRun:
         )
         run = recorder.finalize_run("run-1", RunStatus.COMPLETED)
         assert run.status == RunStatus.COMPLETED
-        assert run.reproducibility_grade == "full_reproducible"
+        assert run.reproducibility_grade == ReproducibilityGrade.FULL_REPRODUCIBLE
         assert run.completed_at is not None
 
 

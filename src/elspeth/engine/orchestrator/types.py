@@ -99,6 +99,14 @@ class PipelineConfig:
             from elspeth.contracts.errors import OrchestrationInvariantError
 
             raise OrchestrationInvariantError("PipelineConfig requires at least one sink")
+        # Freeze mutable container fields — frozen=True prevents reassignment
+        # but list/dict contents remain mutable without explicit freezing.
+        object.__setattr__(self, "transforms", tuple(self.transforms))
+        object.__setattr__(self, "sinks", MappingProxyType(dict(self.sinks)))
+        object.__setattr__(self, "config", MappingProxyType(dict(self.config)))
+        object.__setattr__(self, "gates", tuple(self.gates))
+        object.__setattr__(self, "aggregation_settings", MappingProxyType(dict(self.aggregation_settings)))
+        object.__setattr__(self, "coalesce_settings", tuple(self.coalesce_settings))
 
 
 @dataclass(frozen=True, slots=True)
