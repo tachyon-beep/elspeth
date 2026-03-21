@@ -122,51 +122,6 @@ def get_llm_audit_fields(response_field: str) -> tuple[str, ...]:
     return tuple(f"{response_field}{suffix}" for suffix in LLM_AUDIT_SUFFIXES)
 
 
-def populate_llm_metadata_fields(
-    output: dict[str, object],
-    field_prefix: str,
-    *,
-    usage: TokenUsage | None,
-    model: str | None,
-    template_hash: str,
-    variables_hash: str,
-    template_source: str | None,
-    lookup_hash: str | None,
-    lookup_source: str | None,
-    system_prompt_source: str | None,
-) -> None:
-    """Populate standard LLM metadata fields into an output row dict.
-
-    The caller sets the base content field separately
-    (e.g., ``output[field_prefix] = response.content``).
-    This function adds the 8 metadata fields that ALL LLM transforms
-    must include for audit completeness.
-
-    Args:
-        output: Mutable row dict to populate.
-        field_prefix: Response field name (e.g., "llm_response").
-        usage: Token usage (``TokenUsage`` or ``None``).
-        model: Model identifier that actually responded (None if API omitted it).
-        template_hash: SHA-256 of prompt template.
-        variables_hash: SHA-256 of rendered template variables.
-        template_source: Config file path of template (None if inline).
-        lookup_hash: SHA-256 of lookup data (None if no lookup).
-        lookup_source: Config file path of lookup data (None if no lookup).
-        system_prompt_source: Config file path of system prompt (None if inline).
-    """
-    # Guaranteed metadata (contract-stable)
-    # Serialize to dict for row storage — downstream readers still get plain dicts
-    output[f"{field_prefix}_usage"] = usage.to_dict() if usage is not None else None
-    output[f"{field_prefix}_model"] = model
-    # Audit metadata (provenance)
-    output[f"{field_prefix}_template_hash"] = template_hash
-    output[f"{field_prefix}_variables_hash"] = variables_hash
-    output[f"{field_prefix}_template_source"] = template_source
-    output[f"{field_prefix}_lookup_hash"] = lookup_hash
-    output[f"{field_prefix}_lookup_source"] = lookup_source
-    output[f"{field_prefix}_system_prompt_source"] = system_prompt_source
-
-
 def populate_llm_operational_fields(
     output: dict[str, object],
     field_prefix: str,
@@ -359,6 +314,5 @@ __all__ = [
     "build_llm_audit_metadata",
     "get_llm_audit_fields",
     "get_llm_guaranteed_fields",
-    "populate_llm_metadata_fields",
     "populate_llm_operational_fields",
 ]

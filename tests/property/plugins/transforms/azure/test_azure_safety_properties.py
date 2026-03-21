@@ -22,7 +22,7 @@ from __future__ import annotations
 from typing import Any
 
 import pytest
-from hypothesis import given, settings
+from hypothesis import assume, given, settings
 from hypothesis import strategies as st
 
 from elspeth.plugins.transforms.azure.content_safety import (
@@ -301,7 +301,12 @@ class TestFieldScanSelectionProperties:
     )
     @settings(max_examples=100)
     def test_single_string_mode_returns_singleton_list(self, field_name: str) -> None:
-        """Property: Single string field name returns [field_name]."""
+        """Property: Single string field name returns [field_name].
+
+        'all' is a reserved keyword that triggers a different code path;
+        exclude it from this property.
+        """
+        assume(field_name != "all")
         result = get_fields_to_scan(field_name, make_pipeline_row({}))
         assert result == [field_name]
 

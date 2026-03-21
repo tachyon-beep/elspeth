@@ -76,9 +76,6 @@ sinks:
         - 'fetch_status: str'
         - 'fetch_url_final: str'
         - 'fetch_url_final_ip: str'
-        - 'fetch_request_hash: str'
-        - 'fetch_response_raw_hash: str'
-        - 'fetch_response_processed_hash: str'
   review:
     plugin: csv
     options:
@@ -94,9 +91,6 @@ sinks:
         - 'fetch_status: str'
         - 'fetch_url_final: str'
         - 'fetch_url_final_ip: str'
-        - 'fetch_request_hash: str'
-        - 'fetch_response_raw_hash: str'
-        - 'fetch_response_processed_hash: str'
   scrape_failures:
     plugin: csv
     options:

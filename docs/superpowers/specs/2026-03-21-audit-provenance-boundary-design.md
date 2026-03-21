@@ -1,6 +1,6 @@
 # Audit Provenance Boundary Enforcement — Design Spec
 
-**Status:** Draft
+**Status:** Implemented
 **Bug:** `elspeth-7527dacf08`
 **Date:** 2026-03-21
 **Reviewed by:** Architecture Critic, Systems Thinker, Quality Engineer, Python Expert (2026-03-21)
