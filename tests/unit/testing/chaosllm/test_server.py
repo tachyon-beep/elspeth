@@ -6,19 +6,18 @@ import sqlite3
 import time
 
 import pytest
-from starlette.testclient import TestClient
-
-from elspeth.testing.chaosllm.config import (
+from errorworks.llm.config import (
     ChaosLLMConfig,
     ErrorInjectionConfig,
     LatencyConfig,
     MetricsConfig,
     ResponseConfig,
 )
-from elspeth.testing.chaosllm.server import (
+from errorworks.llm.server import (
     ChaosLLMServer,
     create_app,
 )
+from starlette.testclient import TestClient
 
 
 @pytest.fixture

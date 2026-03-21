@@ -9,8 +9,8 @@ from __future__ import annotations
 
 import random
 
-from elspeth.testing.chaosengine.injection_engine import InjectionEngine
-from elspeth.testing.chaosengine.types import BurstConfig, ErrorSpec
+from errorworks.engine.injection_engine import InjectionEngine
+from errorworks.engine.types import BurstConfig, ErrorSpec
 
 # =============================================================================
 # Burst State Machine

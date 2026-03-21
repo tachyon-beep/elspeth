@@ -3,14 +3,13 @@
 from __future__ import annotations
 
 import pytest
-from starlette.testclient import TestClient
-
-from elspeth.testing.chaosengine.types import LatencyConfig, MetricsConfig
-from elspeth.testing.chaosweb.config import (
+from errorworks.engine.types import LatencyConfig, MetricsConfig
+from errorworks.web.config import (
     ChaosWebConfig,
     WebErrorInjectionConfig,
 )
-from elspeth.testing.chaosweb.server import ChaosWebServer, create_app
+from errorworks.web.server import ChaosWebServer, create_app
+from starlette.testclient import TestClient
 
 
 @pytest.fixture
@@ -35,10 +34,10 @@ def server(config):
 
 
 @pytest.fixture
-def client(config):
-    """Create a test client for the ChaosWeb server."""
-    app = create_app(config)
-    return TestClient(app)
+def client(server):
+    """Create a test client for the ChaosWeb server, pre-authenticated for admin endpoints."""
+    token = server.get_admin_token()
+    return TestClient(server.app, headers={"Authorization": f"Bearer {token}"})
 
 
 class TestHealthEndpoint:
@@ -282,8 +281,9 @@ class TestMetricsRecording:
             latency=LatencyConfig(base_ms=0, jitter_ms=0),
             error_injection=WebErrorInjectionConfig(rate_limit_pct=100.0),
         )
-        app = create_app(config)
-        client = TestClient(app)
+        server = ChaosWebServer(config)
+        token = server.get_admin_token()
+        client = TestClient(server.app, headers={"Authorization": f"Bearer {token}"})
 
         client.get("/test")
 

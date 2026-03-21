@@ -6,9 +6,8 @@ import random
 import threading
 
 import pytest
-
-from elspeth.testing.chaosweb.config import WebBurstConfig, WebErrorInjectionConfig
-from elspeth.testing.chaosweb.error_injector import (
+from errorworks.web.config import WebBurstConfig, WebErrorInjectionConfig
+from errorworks.web.error_injector import (
     SSRF_TARGETS,
     WEB_CONNECTION_ERRORS,
     WEB_HTTP_ERRORS,

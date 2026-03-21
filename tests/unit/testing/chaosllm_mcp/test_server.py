@@ -7,8 +7,7 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import pytest
-
-from elspeth.testing.chaosllm_mcp.server import ChaosLLMAnalyzer, create_server
+from errorworks.llm_mcp.server import ChaosLLMAnalyzer, create_server
 
 # === Fixtures ===
 
@@ -500,7 +499,7 @@ class TestMCPServerTools:
         """Diagnose tool can be called via analyzer."""
         # We test through the analyzer directly since MCP protocol testing
         # requires a full stdio server setup
-        from elspeth.testing.chaosllm_mcp.server import ChaosLLMAnalyzer
+        from errorworks.llm_mcp.server import ChaosLLMAnalyzer
 
         analyzer = ChaosLLMAnalyzer(str(temp_db))
         result = analyzer.diagnose()
