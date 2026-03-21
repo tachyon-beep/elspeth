@@ -146,20 +146,20 @@ class TestMultiQueryDeclaredOutputFields:
         # Multi-query declares prefixed fields matching actual output
         assert "cs1_diag_llm_response" in transform.declared_output_fields
 
-    def test_declared_output_fields_contains_prefixed_audit_fields(self) -> None:
-        """Multi-query declared_output_fields includes prefixed audit fields.
+    def test_declared_output_fields_excludes_audit_fields(self) -> None:
+        """Multi-query declared_output_fields excludes audit fields.
 
-        Before centralization, the multi-query collision check only inspected
-        output_mapping fields but not audit fields (usage, model, template_hash, etc.).
-        declared_output_fields must include these to prevent silent overwrite.
+        Audit fields (template_hash, variables_hash, etc.) now travel via
+        success_reason["metadata"], not the output row. Only operational
+        fields (usage, model) remain in declared_output_fields.
         """
         transform = LLMTransform(_make_llm_config())
 
-        # Guaranteed metadata fields (prefixed with query name)
+        # Guaranteed operational fields (prefixed with query name)
         assert "cs1_diag_llm_response_usage" in transform.declared_output_fields
         assert "cs1_diag_llm_response_model" in transform.declared_output_fields
-        # Audit fields
-        assert "cs1_diag_llm_response_template_hash" in transform.declared_output_fields
+        # Audit fields are NOT in declared_output_fields
+        assert "cs1_diag_llm_response_template_hash" not in transform.declared_output_fields
 
     def test_declared_output_fields_with_multiple_queries(self) -> None:
         """Multi-query declared_output_fields covers all query prefixes."""

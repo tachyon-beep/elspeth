@@ -735,9 +735,11 @@ class TestMultiQueryJSONExtraction:
         result = transform._process_row(_make_row(), _make_ctx())
         assert result.status == "success"
         assert result.row is not None
-        output = result.row.to_dict()
-        assert output["q1_llm_response_lookup_hash"] is not None
-        assert output["q1_llm_response_lookup_source"] == "prompts/lookups.yaml"
+        # Audit metadata (lookup_hash, lookup_source) travels via success_reason, not output row
+        assert result.success_reason is not None
+        metadata = result.success_reason["metadata"]
+        assert metadata["q1_llm_response_lookup_hash"] is not None
+        assert metadata["q1_llm_response_lookup_source"] == "prompts/lookups.yaml"
 
     def test_output_fields_extracts_typed_fields_from_json(self) -> None:
         """When output_fields is configured, JSON is parsed and fields extracted."""
@@ -1157,10 +1159,11 @@ class TestMultiQueryDeclaredOutputFields:
         )
         transform = LLMTransform(config)
 
-        # Must include prefixed metadata (usage, model, audit fields)
+        # Must include prefixed operational metadata (usage, model)
         assert "quality_llm_response_usage" in transform.declared_output_fields
         assert "quality_llm_response_model" in transform.declared_output_fields
-        assert "quality_llm_response_template_hash" in transform.declared_output_fields
+        # Audit fields (template_hash etc.) travel via success_reason, not output row
+        assert "quality_llm_response_template_hash" not in transform.declared_output_fields
 
     def test_multi_query_declares_extracted_output_fields(self) -> None:
         """When output_fields are configured, their prefixed names must be declared."""
@@ -1239,8 +1242,11 @@ class TestMultiQueryOutputSchemaConfig:
         assert "relevance_llm_response_usage" in guaranteed
         assert "relevance_llm_response_model" in guaranteed
 
-    def test_multi_query_audit_fields_are_prefixed(self) -> None:
-        """_output_schema_config.audit_fields must contain query-prefixed audit names."""
+    def test_multi_query_schema_config_has_no_audit_fields(self) -> None:
+        """_output_schema_config.audit_fields is not set for multi-query.
+
+        Audit fields now travel via success_reason["metadata"], not the output row.
+        """
         from elspeth.plugins.transforms.llm.transform import LLMTransform
 
         transform = LLMTransform(
@@ -1252,10 +1258,9 @@ class TestMultiQueryOutputSchemaConfig:
             )
         )
 
-        assert transform._output_schema_config.audit_fields is not None
-        audit = set(transform._output_schema_config.audit_fields)
-        assert "quality_llm_response_template_hash" in audit
-        assert "quality_llm_response_variables_hash" in audit
+        # audit_fields should be None or empty — no audit fields in SchemaConfig
+        audit_fields = transform._output_schema_config.audit_fields
+        assert audit_fields is None or len(audit_fields) == 0
 
     def test_multi_query_schema_config_excludes_unprefixed_fields(self) -> None:
         """Multi-query _output_schema_config must NOT contain unprefixed single-query fields.
@@ -1275,16 +1280,13 @@ class TestMultiQueryOutputSchemaConfig:
         )
 
         assert transform._output_schema_config.guaranteed_fields is not None
-        assert transform._output_schema_config.audit_fields is not None
         guaranteed = set(transform._output_schema_config.guaranteed_fields)
-        audit = set(transform._output_schema_config.audit_fields)
-        all_fields = guaranteed | audit
 
         # Unprefixed single-query fields must NOT appear
-        assert "llm_response" not in all_fields
-        assert "llm_response_usage" not in all_fields
-        assert "llm_response_model" not in all_fields
-        assert "llm_response_template_hash" not in all_fields
+        assert "llm_response" not in guaranteed
+        assert "llm_response_usage" not in guaranteed
+        assert "llm_response_model" not in guaranteed
+        assert "llm_response_template_hash" not in guaranteed
 
     def test_multi_query_output_schema_has_prefixed_model_fields(self) -> None:
         """Pydantic output_schema model must include prefixed fields for explicit schemas."""
@@ -1319,7 +1321,7 @@ class TestMultiQueryOutputSchemaConfig:
         assert "llm_response_model" in guaranteed
 
     def test_schema_config_consistent_with_declared_output_fields(self) -> None:
-        """All guaranteed + audit fields in _output_schema_config must appear in declared_output_fields."""
+        """All guaranteed fields in _output_schema_config must appear in declared_output_fields."""
         from elspeth.plugins.transforms.llm.transform import LLMTransform
 
         transform = LLMTransform(
@@ -1333,8 +1335,8 @@ class TestMultiQueryOutputSchemaConfig:
         )
 
         assert transform._output_schema_config.guaranteed_fields is not None
-        assert transform._output_schema_config.audit_fields is not None
-        schema_fields = set(transform._output_schema_config.guaranteed_fields) | set(transform._output_schema_config.audit_fields)
+        # audit_fields no longer set for multi-query (audit goes to success_reason)
+        schema_fields = set(transform._output_schema_config.guaranteed_fields)
         declared = transform.declared_output_fields
 
         # Every field advertised in schema config must be in declared_output_fields

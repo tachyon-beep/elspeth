@@ -37,9 +37,7 @@ from elspeth.plugins.transforms.llm import (
     _build_augmented_output_schema,
     _build_multi_query_output_schema,
     build_llm_audit_metadata,
-    get_llm_audit_fields,
     get_llm_guaranteed_fields,
-    populate_llm_metadata_fields,
     populate_llm_operational_fields,
 )
 from elspeth.plugins.transforms.llm.base import LLMConfig
@@ -416,6 +414,7 @@ class MultiQueryStrategy:
         """
 
         fields: dict[str, Any]
+        audit_metadata: dict[str, object]
 
     def _execute_one_query(
         self,
@@ -657,11 +656,15 @@ class MultiQueryStrategy:
             # Unstructured: store raw content only
             partial[f"{spec.name}_{self.response_field}"] = content
 
-        populate_llm_metadata_fields(
+        populate_llm_operational_fields(
             partial,
             f"{spec.name}_{self.response_field}",
             usage=result.usage,
             model=result.model,
+        )
+
+        audit_metadata = build_llm_audit_metadata(
+            f"{spec.name}_{self.response_field}",
             template_hash=rendered.template_hash,
             variables_hash=rendered.variables_hash,
             template_source=rendered.template_source,
@@ -670,7 +673,7 @@ class MultiQueryStrategy:
             system_prompt_source=self.system_prompt_source,
         )
 
-        return self._QuerySuccess(fields=partial)
+        return self._QuerySuccess(fields=partial, audit_metadata=audit_metadata)
 
     def _execute_sequential(
         self,
@@ -687,6 +690,7 @@ class MultiQueryStrategy:
         wastefully re-execute all queries from scratch.
         """
         accumulated_outputs: dict[str, Any] = {}
+        accumulated_audit: dict[str, object] = {}
 
         for query_idx, spec in enumerate(self.query_specs):
             try:
@@ -727,6 +731,7 @@ class MultiQueryStrategy:
                 return result
 
             accumulated_outputs.update(result.fields)
+            accumulated_audit.update(result.audit_metadata)
 
         # All queries succeeded — build output row
         output = {**row.to_dict(), **accumulated_outputs}
@@ -742,7 +747,7 @@ class MultiQueryStrategy:
                 "action": "multi_query_enriched",
                 "queries_completed": len(self.query_specs),
                 "fields_added": list(accumulated_outputs.keys()),
-                "metadata": {"model": self.model},
+                "metadata": {"model": self.model, **accumulated_audit},
             },
         )
 
@@ -762,6 +767,9 @@ class MultiQueryStrategy:
         """
         if self.executor is None:
             raise RuntimeError("_execute_parallel called without executor")
+
+        # Side channel for audit metadata — _process_fn writes here, outer scope reads after pool.
+        audit_metadata_by_index: dict[int, dict[str, object]] = {}
 
         # Build RowContext for each query — the pool treats each as a "row"
         contexts = [
@@ -794,6 +802,8 @@ class MultiQueryStrategy:
             )
             if isinstance(result, TransformResult):
                 return result  # Error passthrough
+            # Stash audit metadata in side channel before wrapping in TransformResult
+            audit_metadata_by_index[work["query_idx"]] = result.audit_metadata
             # Success: wrap partial fields in TransformResult for pool interface
             observed = SchemaContract(
                 mode="OBSERVED",
@@ -839,6 +849,11 @@ class MultiQueryStrategy:
             if result.row is not None:
                 accumulated_outputs.update(result.row.to_dict())
 
+        # Merge audit metadata from side channel (written by _process_fn)
+        accumulated_audit: dict[str, object] = {}
+        for idx in sorted(audit_metadata_by_index):
+            accumulated_audit.update(audit_metadata_by_index[idx])
+
         output = {**row.to_dict(), **accumulated_outputs}
         output_contract = propagate_contract(
             input_contract=row.contract,
@@ -852,7 +867,7 @@ class MultiQueryStrategy:
                 "action": "multi_query_enriched",
                 "queries_completed": len(self.query_specs),
                 "fields_added": list(accumulated_outputs.keys()),
-                "metadata": {"model": self.model},
+                "metadata": {"model": self.model, **accumulated_audit},
             },
         )
 
@@ -969,18 +984,17 @@ class LLMTransform(BaseTransform, BatchTransformMixin):
                 executor=self._query_executor,
             )
 
-            # Multi-query emits prefixed fields — compute all field sets
+            # Multi-query emits prefixed fields — compute guaranteed field sets
+            # (audit fields now travel via success_reason, not the row)
             prefixed_guaranteed: set[str] = set()
-            prefixed_audit: set[str] = set()
             for spec in query_specs:
                 prefix = f"{spec.name}_{self._response_field}"
                 prefixed_guaranteed.add(prefix)
                 prefixed_guaranteed.update(get_llm_guaranteed_fields(prefix))
-                prefixed_audit.update(get_llm_audit_fields(prefix))
                 if spec.output_fields:
                     for field in spec.output_fields:
                         prefixed_guaranteed.add(f"{spec.name}_{field.suffix}")
-            self.declared_output_fields = frozenset(prefixed_guaranteed | prefixed_audit)
+            self.declared_output_fields = frozenset(prefixed_guaranteed)
 
             # Output schema config with prefixed fields for DAG contract propagation.
             # INVARIANT: guaranteed_fields must be a superset of declared_output_fields.
@@ -989,12 +1003,10 @@ class LLMTransform(BaseTransform, BatchTransformMixin):
             # requires prefix interpolation beyond the generic helper's scope.
             # See: docs/superpowers/specs/2026-03-20-output-schema-contract-enforcement-design.md
             base_guaranteed = schema_config.guaranteed_fields or ()
-            base_audit = schema_config.audit_fields or ()
             self._output_schema_config = SchemaConfig(
                 mode=schema_config.mode,
                 fields=schema_config.fields,
                 guaranteed_fields=tuple(set(base_guaranteed) | prefixed_guaranteed),
-                audit_fields=tuple(set(base_audit) | prefixed_audit),
                 required_fields=schema_config.required_fields,
             )
 
