@@ -2377,7 +2377,6 @@ def _make_lifecycle_ctx() -> Mock:
     ctx.rate_limit_registry = None
     ctx.telemetry_emit = Mock()
     ctx.node_id = "node-1"
-    ctx.payload_store = None
     ctx.concurrency_config = None
     return ctx
 

@@ -1486,7 +1486,6 @@ class Orchestrator:
             run_id=run_id,
             config=config.config,
             landscape=recorder,
-            payload_store=payload_store,
             rate_limit_registry=self._rate_limit_registry,
             concurrency_config=self._concurrency_config,
             _batch_checkpoints=batch_checkpoints or {},

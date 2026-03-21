@@ -2,7 +2,7 @@
 
 The PluginContext carries everything a plugin needs during execution:
 - Run metadata (run_id, config)
-- Audit trail recording (landscape, payload_store)
+- Audit trail recording (landscape)
 - External call recording (record_call, record_validation_error, record_transform_error)
 - Batch transform support (checkpoints, token identity)
 """
@@ -18,7 +18,7 @@ from typing import TYPE_CHECKING, Any
 from elspeth.contracts.call_data import RawCallPayload
 
 if TYPE_CHECKING:
-    from elspeth.contracts import Call, CallStatus, CallType, PayloadStore, TransformErrorReason
+    from elspeth.contracts import Call, CallStatus, CallType, TransformErrorReason
     from elspeth.contracts.batch_checkpoint import BatchCheckpointState
     from elspeth.contracts.config.runtime import RuntimeConcurrencyConfig
     from elspeth.contracts.errors import ContractViolation
@@ -65,7 +65,7 @@ class PluginContext:
 
     Provides access to:
     - Run metadata (run_id, config)
-    - Audit trail (landscape, payload_store)
+    - Audit trail (landscape)
     - External call recording (record_call)
     - Validation/transform error recording
     - Batch checkpoint management
@@ -81,7 +81,6 @@ class PluginContext:
 
     # === Audit & Infrastructure ===
     landscape: LandscapeRecorder | None = None
-    payload_store: PayloadStore | None = None
     rate_limit_registry: RateLimitRegistry | None = None
     concurrency_config: RuntimeConcurrencyConfig | None = None
 

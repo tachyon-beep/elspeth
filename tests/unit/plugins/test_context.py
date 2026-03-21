@@ -29,7 +29,8 @@ class TestPluginContext:
         db = LandscapeDB.in_memory()
         recorder = LandscapeRecorder(db)
         ctx = PluginContext(run_id="run-001", config={}, landscape=recorder)
-        assert ctx.payload_store is None
+        assert ctx.rate_limit_registry is None
+        assert ctx.concurrency_config is None
 
 
 def _make_checkpoint(**overrides: object) -> "BatchCheckpointState":
