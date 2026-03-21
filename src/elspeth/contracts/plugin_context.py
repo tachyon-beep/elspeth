@@ -314,29 +314,31 @@ class PluginContext:
             from elspeth.contracts.enums import CallType as CallTypeEnum
             from elspeth.contracts.events import ExternalCallCompleted
 
-            # Snapshot payloads so async telemetry exports can't drift from call-time values.
-            # Use deep_thaw instead of deepcopy — frozen checkpoint data contains
-            # MappingProxyType which can't be pickled/deepcopied. deep_thaw creates
-            # the mutable copy we need and handles frozen containers correctly.
-            from elspeth.contracts.freeze import deep_thaw
-
-            request_snapshot = deep_thaw(request_data)
-            response_snapshot = deep_thaw(response_data) if response_data is not None else None
+            # Pass data directly to RawCallPayload. No defensive copy needed:
+            # RawCallPayload.__init__ calls deep_freeze(), which creates an
+            # independent frozen copy. Callers mutating the original dict after
+            # record_call() won't affect the telemetry payload.
+            # (Existing test: test_request_payload_snapshot_is_immutable_after_call)
+            request_snapshot = request_data
+            response_snapshot = response_data
 
             # Extract token usage for LLM calls if available.
-            # response_snapshot is a serialized dict from LLMCallResponse.to_dict(),
-            # so "usage" is Tier 3 external data — coerce via TokenUsage.from_dict().
+            # response_snapshot may contain frozen containers (MappingProxyType) —
+            # use Mapping ABC for isinstance checks, not dict.
             token_usage = None
             if call_type == CallTypeEnum.LLM and response_snapshot is not None:
+                from collections.abc import Mapping
+
                 from elspeth.contracts.token_usage import TokenUsage
 
                 raw_usage = response_snapshot.get("usage")
-                if isinstance(raw_usage, dict):
+                if isinstance(raw_usage, Mapping):
                     tu = TokenUsage.from_dict(raw_usage)
                     token_usage = tu if tu.has_data else None
 
-            # Wrap snapshots in RawCallPayload for typed telemetry payload.
-            # Snapshots are already deepcopied above — RawCallPayload doesn't copy again.
+            # Wrap data in RawCallPayload for typed telemetry payload.
+            # RawCallPayload.__init__ calls deep_freeze(), creating an independent
+            # frozen copy — no prior snapshot/deepcopy step is needed.
             request_payload = RawCallPayload(request_snapshot)
             response_payload = RawCallPayload(response_snapshot) if response_snapshot is not None else None
 

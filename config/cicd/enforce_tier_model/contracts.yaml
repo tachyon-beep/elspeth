@@ -182,7 +182,7 @@ allow_hits:
   owner: bugfix
   reason: Type annotation objects (e.g. list[str]) may not have __name__ attribute - getattr is needed for safe error messages
   safety: Falls back to str(a) for display purposes only; used in error message, not logic
-- key: contracts/plugin_context.py:R1:PluginContext:record_call:fp=54464cbacb814ec4
+- key: contracts/plugin_context.py:R1:PluginContext:record_call:fp=4149689a27621dfc
   owner: architecture
   reason: Tier 3 boundary — .get() on serialized LLM response dict to extract optional usage data
   safety: Missing key returns None; no fabrication
@@ -190,11 +190,11 @@ allow_hits:
   owner: architecture
   reason: Tier 3 boundary — ValueError/TypeError from stable_hash on non-canonical data falls back to repr_hash
   safety: Warning logged; row_id still generated via repr_hash for audit trail continuity
-- key: contracts/token_usage.py:R1:TokenUsage:from_dict:fp=404be9092f1cd9c1
+- key: contracts/token_usage.py:R1:TokenUsage:from_dict:fp=950d2df1fec039fa
   owner: architecture
   reason: Tier 3 boundary — from_dict() uses .get() on external LLM API response dicts where keys may be absent
   safety: Missing keys produce None (unknown); no fabrication
-- key: contracts/token_usage.py:R1:TokenUsage:from_dict:fp=62b3eec00a4e699d
+- key: contracts/token_usage.py:R1:TokenUsage:from_dict:fp=9ad24199de6680f8
   owner: architecture
   reason: Tier 3 boundary — from_dict() uses .get() on external LLM API response dicts where keys may be absent
   safety: Missing keys produce None (unknown); no fabrication

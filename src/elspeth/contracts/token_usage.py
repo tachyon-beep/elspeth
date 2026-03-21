@@ -125,7 +125,9 @@ class TokenUsage:
         Args:
             data: Raw dict from an LLM API response, or ``None``/non-dict.
         """
-        if not isinstance(data, dict):
+        from collections.abc import Mapping
+
+        if not isinstance(data, Mapping):
             return cls.unknown()
 
         raw_prompt = data.get("prompt_tokens")

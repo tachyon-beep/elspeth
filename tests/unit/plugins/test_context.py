@@ -1225,3 +1225,127 @@ class TestRecordCallRawCallPayloadWrapping:
         assert isinstance(call_kwargs["response_data"], RawCallPayload)
         assert call_kwargs["request_data"].to_dict() == {"url": "https://example.com"}
         assert call_kwargs["response_data"].to_dict() == {"body": "response"}
+
+
+class TestRecordCallFrozenData:
+    """record_call must work with frozen container data (no thaw-refreeze).
+
+    After removing deep_thaw from record_call, request_data/response_data
+    may contain MappingProxyType values. RawCallPayload must receive and
+    freeze them correctly, and token usage extraction must use Mapping ABC.
+    """
+
+    def test_token_usage_extracted_from_mapping_proxy(self) -> None:
+        """Token usage extraction must work when raw_usage is MappingProxyType.
+
+        This is the critical regression guard for the isinstance(Mapping)
+        widening. If this check reverts to isinstance(dict), frozen LLM
+        responses silently lose token usage data.
+        """
+        from types import MappingProxyType
+        from typing import Any
+        from unittest.mock import MagicMock
+
+        from elspeth.contracts.enums import CallStatus, CallType
+        from elspeth.contracts.plugin_context import PluginContext
+        from elspeth.contracts.token_usage import TokenUsage
+        from elspeth.core.canonical import stable_hash
+
+        emitted_events: list[Any] = []
+
+        mock_landscape = MagicMock()
+        mock_landscape.record_call.return_value = MagicMock(
+            call_id="call-001",
+            request_hash=stable_hash({"prompt": "hi"}),
+            response_hash=stable_hash({"usage": {"prompt_tokens": 10, "completion_tokens": 5}}),
+        )
+
+        ctx = PluginContext(
+            run_id="test-run",
+            config={},
+            landscape=mock_landscape,
+            state_id="state-001",
+            telemetry_emit=emitted_events.append,
+        )
+
+        # Response with frozen usage dict (MappingProxyType, not plain dict)
+        frozen_response = {
+            "content": "hello",
+            "usage": MappingProxyType(
+                {
+                    "prompt_tokens": 10,
+                    "completion_tokens": 5,
+                    "total_tokens": 15,
+                }
+            ),
+        }
+
+        ctx.record_call(
+            call_type=CallType.LLM,
+            provider="openrouter",
+            request_data={"prompt": "hi"},
+            response_data=frozen_response,
+            latency_ms=12.0,
+            status=CallStatus.SUCCESS,
+        )
+
+        assert len(emitted_events) == 1
+        event = emitted_events[0]
+        # Token usage must be extracted despite usage being MappingProxyType
+        assert event.token_usage is not None
+        assert event.token_usage == TokenUsage(prompt_tokens=10, completion_tokens=5)
+
+    def test_raw_call_payload_freezes_data_without_intermediate_thaw(self) -> None:
+        """RawCallPayload must receive frozen data and freeze it correctly.
+
+        Verifies the spec requirement: 'RawCallPayload receives and freezes
+        the data correctly without intermediate thaw.'
+        """
+        from types import MappingProxyType
+        from typing import Any
+        from unittest.mock import MagicMock
+
+        from elspeth.contracts.call_data import RawCallPayload
+        from elspeth.contracts.enums import CallStatus, CallType
+        from elspeth.contracts.plugin_context import PluginContext
+        from elspeth.core.canonical import stable_hash
+
+        emitted_events: list[Any] = []
+
+        expected_request = {"model": "gpt-4", "messages": [{"role": "user", "content": "hi"}]}
+        mock_landscape = MagicMock()
+        mock_landscape.record_call.return_value = MagicMock(
+            call_id="call-001",
+            request_hash=stable_hash(expected_request),
+            response_hash=stable_hash({"ok": True}),
+        )
+
+        ctx = PluginContext(
+            run_id="test-run",
+            config={},
+            landscape=mock_landscape,
+            state_id="state-001",
+            telemetry_emit=emitted_events.append,
+        )
+
+        # Request data with nested frozen containers
+        frozen_request = {
+            "model": "gpt-4",
+            "messages": (MappingProxyType({"role": "user", "content": "hi"}),),
+        }
+
+        ctx.record_call(
+            call_type=CallType.HTTP,
+            provider="api.example.com",
+            request_data=frozen_request,
+            response_data={"ok": True},
+            latency_ms=5.0,
+            status=CallStatus.SUCCESS,
+        )
+
+        assert len(emitted_events) == 1
+        event = emitted_events[0]
+        # RawCallPayload must contain the data (frozen internally by deep_freeze)
+        assert isinstance(event.request_payload, RawCallPayload)
+        # to_dict() must produce the equivalent unfrozen structure
+        assert event.request_payload.to_dict() == expected_request
