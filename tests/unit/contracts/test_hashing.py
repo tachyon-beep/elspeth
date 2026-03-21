@@ -217,3 +217,62 @@ class TestRejectNonFiniteMappingProxyType:
         frozen = deep_freeze(data)
         with pytest.raises(ValueError, match="NaN"):
             canonical_json(frozen)
+
+
+class TestFrozenTypeHandling:
+    """contracts/hashing must serialize frozen container types from deep_freeze.
+
+    NaN/Infinity rejection inside MappingProxyType is already covered by
+    TestRejectNonFiniteMappingProxyType above. These tests verify the
+    serialization path: canonical_json must produce correct output from
+    frozen containers, not just validate them.
+    """
+
+    def test_mapping_proxy_simple(self) -> None:
+        from types import MappingProxyType
+
+        frozen = MappingProxyType({"a": 1, "b": "hello"})
+        assert canonical_json(frozen) == canonical_json({"a": 1, "b": "hello"})
+
+    def test_mapping_proxy_nested(self) -> None:
+        from types import MappingProxyType
+
+        frozen = MappingProxyType({"a": MappingProxyType({"b": 2})})
+        assert canonical_json(frozen) == canonical_json({"a": {"b": 2}})
+
+    def test_mapping_proxy_with_tuple(self) -> None:
+        from types import MappingProxyType
+
+        frozen = MappingProxyType({"items": (1, 2, 3)})
+        assert canonical_json(frozen) == canonical_json({"items": [1, 2, 3]})
+
+    def test_deeply_nested_frozen(self) -> None:
+        from types import MappingProxyType
+
+        frozen = MappingProxyType(
+            {
+                "level1": MappingProxyType(
+                    {
+                        "level2": (MappingProxyType({"level3": "deep"}),),
+                    }
+                ),
+            }
+        )
+        expected = {"level1": {"level2": [{"level3": "deep"}]}}
+        assert canonical_json(frozen) == canonical_json(expected)
+
+    def test_stable_hash_frozen_equals_unfrozen(self) -> None:
+        from types import MappingProxyType
+
+        data = {"key": "value", "nested": {"inner": [1, 2]}}
+        frozen = MappingProxyType(
+            {
+                "key": "value",
+                "nested": MappingProxyType({"inner": (1, 2)}),
+            }
+        )
+        assert stable_hash(frozen) == stable_hash(data)
+
+    def test_rejects_frozenset_with_type_error(self) -> None:
+        with pytest.raises(TypeError, match="frozenset"):
+            canonical_json({"s": frozenset({1, 2})})
