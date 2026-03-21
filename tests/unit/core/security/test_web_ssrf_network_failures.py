@@ -253,3 +253,34 @@ class TestAllowedRangesFullPath:
         allow_private = (ipaddress.ip_network("0.0.0.0/0"), ipaddress.ip_network("::/0"))
         with pytest.raises(SSRFBlockedError, match="Always-blocked"):
             validate_url_for_ssrf("http://metadata/", allowed_ranges=allow_private)
+
+
+class TestSSRFIPv4MappedIPv6MetadataBypass:
+    """Regression: elspeth-05f9f00ffa — ::ffff:169.254.169.254 must be blocked
+    unconditionally, even when broad IPv6 allowed_ranges bypass ::ffff:0:0/96."""
+
+    def test_ipv4_mapped_metadata_blocked_by_validate_ip(self) -> None:
+        """::ffff:169.254.169.254 must be always-blocked, not just standard-blocked."""
+        with pytest.raises(SSRFBlockedError, match="Always-blocked"):
+            _validate_ip_address("::ffff:169.254.169.254")
+
+    def test_ipv4_mapped_metadata_blocked_even_with_broad_ipv6_allowlist(self) -> None:
+        """Broad IPv6 allowed_ranges must NOT bypass metadata endpoint blocking."""
+        broad_ipv6 = (ipaddress.ip_network("::/0"),)
+        with pytest.raises(SSRFBlockedError, match="Always-blocked"):
+            _validate_ip_address("::ffff:169.254.169.254", allowed_ranges=broad_ipv6)
+
+    def test_ipv4_mapped_metadata_blocked_via_full_path(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """End-to-end: DNS returning ::ffff:169.254.169.254 must be blocked."""
+        monkeypatch.setattr(
+            "elspeth.core.security.web._resolve_hostname",
+            lambda h: ["::ffff:169.254.169.254"],
+        )
+        allow_private = (ipaddress.ip_network("0.0.0.0/0"), ipaddress.ip_network("::/0"))
+        with pytest.raises(SSRFBlockedError, match="Always-blocked"):
+            validate_url_for_ssrf("http://metadata.internal/", allowed_ranges=allow_private)
+
+    def test_non_metadata_ipv4_mapped_still_allowed(self) -> None:
+        """::ffff:10.0.0.1 should still be allowable (not metadata)."""
+        allowed = (ipaddress.ip_network("::/0"),)
+        _validate_ip_address("::ffff:10.0.0.1", allowed_ranges=allowed)  # must not raise

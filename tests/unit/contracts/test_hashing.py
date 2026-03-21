@@ -170,3 +170,50 @@ class TestTelemetryLandscapeHashAlignment:
         """Both hash implementations agree for primitive data (regression guard)."""
         payload = {"model": "gpt-4", "temperature": 0.7, "max_tokens": 100}
         assert contracts_hashing.stable_hash(payload) == core_canonical.stable_hash(payload)
+
+
+class TestRejectNonFiniteMappingProxyType:
+    """Regression: _reject_non_finite must recurse into MappingProxyType.
+
+    deep_freeze() converts dict → MappingProxyType. If a frozen mapping
+    containing NaN flows to canonical_json(), the NaN guard must still fire.
+    Bugs: elspeth-cfa0007836, elspeth-6e8999df4e.
+    """
+
+    def test_rejects_nan_in_mapping_proxy(self) -> None:
+        from types import MappingProxyType
+
+        frozen = MappingProxyType({"value": float("nan")})
+        with pytest.raises(ValueError, match="NaN"):
+            canonical_json(frozen)
+
+    def test_rejects_nan_in_nested_mapping_proxy(self) -> None:
+        from types import MappingProxyType
+
+        frozen = MappingProxyType({"inner": MappingProxyType({"x": float("nan")})})
+        with pytest.raises(ValueError, match="NaN"):
+            canonical_json(frozen)
+
+    def test_rejects_infinity_in_mapping_proxy(self) -> None:
+        from types import MappingProxyType
+
+        frozen = MappingProxyType({"value": float("inf")})
+        with pytest.raises(ValueError, match="Infinity"):
+            canonical_json(frozen)
+
+    def test_accepts_mapping_proxy_with_normal_values(self) -> None:
+        from types import MappingProxyType
+
+        from elspeth.contracts.hashing import _reject_non_finite
+
+        frozen = MappingProxyType({"key": "value", "num": 42})
+        _reject_non_finite(frozen)  # must not raise
+
+    def test_rejects_nan_in_deep_frozen_structure(self) -> None:
+        """Simulates what deep_freeze() produces from routing reasons."""
+        from elspeth.contracts.freeze import deep_freeze
+
+        data = {"reason": "gate_match", "details": {"score": float("nan")}}
+        frozen = deep_freeze(data)
+        with pytest.raises(ValueError, match="NaN"):
+            canonical_json(frozen)

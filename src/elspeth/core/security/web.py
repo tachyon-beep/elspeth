@@ -65,15 +65,17 @@ BLOCKED_IP_RANGES = [
 # Cloud metadata endpoints are the #1 SSRF target (IAM credential exfiltration).
 # Broadcast/multicast are never valid HTTP targets.
 #
-# NOTE: ::ffff:0:0/96 (IPv4-mapped IPv6) is intentionally NOT here. It is in
+# NOTE: ::ffff:0:0/96 (IPv4-mapped IPv6) is intentionally NOT here — it is in
 # BLOCKED_IP_RANGES where it can be bypassed by allowed_ranges. This is correct:
 # in "allow_private" mode, ::ffff:10.x.x.x should be allowed (the operator asked
-# for allow_private access). Cloud metadata via ::ffff:169.254.x.x is still
-# blocked because 169.254.0.0/16 IS in ALWAYS_BLOCKED_RANGES — the IPv4-mapped
-# form hits the standard blocklist's ::ffff:0:0/96, but the underlying 169.254.x.x
-# is caught by the always-blocked check before the allowlist runs.
+# for private access). However, ::ffff:169.254.0.0/112 IS here to unconditionally
+# block the IPv4-mapped form of the metadata endpoint. Without this entry, a broad
+# IPv6 allowed_range covering ::ffff:0:0/96 would bypass the standard blocklist
+# before the IPv4 169.254.0.0/16 check could catch it (IPv6 addresses are checked
+# against IPv6 networks, not IPv4 networks).
 ALWAYS_BLOCKED_RANGES = (
     ipaddress.ip_network("169.254.0.0/16"),  # IPv4 link-local (AWS/Azure/GCP metadata)
+    ipaddress.ip_network("::ffff:169.254.0.0/112"),  # IPv4-mapped metadata endpoint
     ipaddress.ip_network("fe80::/10"),  # IPv6 link-local (same attack surface)
     ipaddress.ip_network("255.255.255.255/32"),  # IPv4 broadcast
     ipaddress.ip_network("224.0.0.0/4"),  # IPv4 multicast

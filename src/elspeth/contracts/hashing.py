@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import hashlib
 import math
+from collections.abc import Mapping
 from typing import Any
 
 import rfc8785
@@ -38,7 +39,7 @@ def _reject_non_finite(obj: Any) -> None:
             raise ValueError(f"Cannot canonicalize NaN. Use None for missing values, not NaN. Got: {obj!r}")
         if math.isinf(obj):
             raise ValueError(f"Cannot canonicalize Infinity. Use None for missing values, not Infinity. Got: {obj!r}")
-    elif isinstance(obj, dict):
+    elif isinstance(obj, Mapping):
         for v in obj.values():
             _reject_non_finite(v)
     elif isinstance(obj, (list, tuple)):
