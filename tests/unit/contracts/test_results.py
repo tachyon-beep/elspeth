@@ -928,3 +928,36 @@ class TestExceptionResult:
         )
         assert isinstance(err.exception, RuntimeError)
         assert "most recent call last" in err.traceback
+
+
+class TestArtifactDescriptorDeepFreeze:
+    """ArtifactDescriptor.metadata must be deeply frozen."""
+
+    def test_nested_metadata_is_frozen(self) -> None:
+        """Nested dicts in metadata must become MappingProxyType."""
+        from types import MappingProxyType
+
+        descriptor = ArtifactDescriptor(
+            artifact_type="file",
+            path_or_uri="/tmp/test.csv",
+            content_hash="abc123",
+            size_bytes=100,
+            metadata={"nested": {"inner_key": "inner_value"}},
+        )
+        assert isinstance(descriptor.metadata, MappingProxyType)
+        # The nested dict must also be frozen
+        assert isinstance(descriptor.metadata["nested"], MappingProxyType)
+
+    def test_nested_list_in_metadata_is_frozen(self) -> None:
+        """Nested lists in metadata must become tuples."""
+        from types import MappingProxyType
+
+        descriptor = ArtifactDescriptor(
+            artifact_type="file",
+            path_or_uri="/tmp/test.csv",
+            content_hash="abc123",
+            size_bytes=100,
+            metadata={"tags": ["a", "b"]},
+        )
+        assert isinstance(descriptor.metadata, MappingProxyType)
+        assert isinstance(descriptor.metadata["tags"], tuple)
