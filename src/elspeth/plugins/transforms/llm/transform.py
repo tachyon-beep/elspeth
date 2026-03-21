@@ -36,9 +36,11 @@ from elspeth.plugins.infrastructure.templates import TemplateError
 from elspeth.plugins.transforms.llm import (
     _build_augmented_output_schema,
     _build_multi_query_output_schema,
+    build_llm_audit_metadata,
     get_llm_audit_fields,
     get_llm_guaranteed_fields,
     populate_llm_metadata_fields,
+    populate_llm_operational_fields,
 )
 from elspeth.plugins.transforms.llm.base import LLMConfig
 from elspeth.plugins.transforms.llm.langfuse import LangfuseTracer, create_langfuse_tracer
@@ -307,14 +309,19 @@ class SingleQueryStrategy:
             latency_ms=latency_ms,
         )
 
-        # 6. Build output row
+        # 6. Build output row — operational fields only
         output = row.to_dict()
         output[self.response_field] = content
-        populate_llm_metadata_fields(
+        populate_llm_operational_fields(
             output,
             self.response_field,
             usage=result.usage,
             model=result.model,
+        )
+
+        # 7. Build audit metadata (goes to success_reason, not the row)
+        audit_metadata = build_llm_audit_metadata(
+            self.response_field,
             template_hash=rendered.template_hash,
             variables_hash=rendered.variables_hash,
             template_source=rendered.template_source,
@@ -323,7 +330,7 @@ class SingleQueryStrategy:
             system_prompt_source=self.system_prompt_source,
         )
 
-        # 7. Propagate contract
+        # 8. Propagate contract
         output_contract = propagate_contract(
             input_contract=row.contract,
             output_row=output,
@@ -335,7 +342,7 @@ class SingleQueryStrategy:
             success_reason={
                 "action": "enriched",
                 "fields_added": [self.response_field],
-                "metadata": {"model": result.model, **result.usage.to_dict()},
+                "metadata": {"model": result.model, **result.usage.to_dict(), **audit_metadata},
             },
         )
 
@@ -1015,10 +1022,9 @@ class LLMTransform(BaseTransform, BatchTransformMixin):
                 response_field=self._response_field,
             )
 
-            # Single-query emits unprefixed fields
+            # Single-query emits unprefixed fields (operational only — audit goes to success_reason)
             guaranteed = get_llm_guaranteed_fields(self._response_field)
-            audit = get_llm_audit_fields(self._response_field)
-            self.declared_output_fields = frozenset([*guaranteed, *audit])
+            self.declared_output_fields = frozenset(guaranteed)
 
             # Output schema config with prefixed fields for DAG contract propagation.
             # INVARIANT: guaranteed_fields must be a superset of declared_output_fields.
@@ -1027,12 +1033,10 @@ class LLMTransform(BaseTransform, BatchTransformMixin):
             # requires prefix interpolation beyond the generic helper's scope.
             # See: docs/superpowers/specs/2026-03-20-output-schema-contract-enforcement-design.md
             base_guaranteed = schema_config.guaranteed_fields or ()
-            base_audit = schema_config.audit_fields or ()
             self._output_schema_config = SchemaConfig(
                 mode=schema_config.mode,
                 fields=schema_config.fields,
                 guaranteed_fields=tuple(set(base_guaranteed) | set(guaranteed)),
-                audit_fields=tuple(set(base_audit) | set(audit)),
                 required_fields=schema_config.required_fields,
             )
 

@@ -360,8 +360,9 @@ class TestLLMTransformOpenRouterPipelining:
             "prompt_tokens": 10,
             "completion_tokens": 25,
         }
-        assert "llm_response_template_hash" in result.row
-        assert "llm_response_variables_hash" in result.row
+        assert result.success_reason is not None
+        assert "llm_response_template_hash" in result.success_reason["metadata"]
+        assert "llm_response_variables_hash" in result.success_reason["metadata"]
         assert result.row["llm_response_model"] == "anthropic/claude-3-opus"
         # Original data preserved
         assert result.row["text"] == "hello world"
@@ -685,8 +686,9 @@ class TestLLMTransformOpenRouterPipelining:
         assert result.row is not None
         assert result.row["analysis"] == "Result text"
         assert "analysis_usage" in result.row
-        assert "analysis_template_hash" in result.row
-        assert "analysis_variables_hash" in result.row
+        assert result.success_reason is not None
+        assert "analysis_template_hash" in result.success_reason["metadata"]
+        assert "analysis_variables_hash" in result.success_reason["metadata"]
         assert "analysis_model" in result.row
 
     def test_model_from_response_used_when_available(
@@ -1279,11 +1281,13 @@ class TestOpenRouterTemplateFeatures:
         assert isinstance(result, TransformResult)
         assert result.status == "success"
         assert result.row is not None
-        # New audit fields should be present
-        assert "llm_response_lookup_hash" in result.row
-        assert result.row["llm_response_lookup_hash"] is not None
+        # Audit fields should be in success_reason["metadata"], not the row
+        assert result.success_reason is not None
+        metadata = result.success_reason["metadata"]
+        assert "llm_response_lookup_hash" in metadata
+        assert metadata["llm_response_lookup_hash"] is not None
         # lookup_source is None when lookup is inline (not from file)
-        assert "llm_response_lookup_source" in result.row
+        assert "llm_response_lookup_source" in metadata
 
     def test_template_source_included_in_output(self, mock_recorder: Mock, collector: CollectorOutputPort, chaosllm_server) -> None:
         """Output includes template_source when provided."""
@@ -1318,7 +1322,8 @@ class TestOpenRouterTemplateFeatures:
         assert isinstance(result, TransformResult)
         assert result.status == "success"
         assert result.row is not None
-        assert result.row["llm_response_template_source"] == "prompts/analysis.j2"
+        assert result.success_reason is not None
+        assert result.success_reason["metadata"]["llm_response_template_source"] == "prompts/analysis.j2"
 
     def test_all_audit_fields_present_with_lookup(self, mock_recorder: Mock, collector: CollectorOutputPort, chaosllm_server) -> None:
         """All audit metadata fields are present when using template with lookup."""
@@ -1356,18 +1361,20 @@ class TestOpenRouterTemplateFeatures:
         assert result.status == "success"
         assert result.row is not None
 
-        # All audit fields should be present
-        assert "llm_response_template_hash" in result.row
-        assert "llm_response_variables_hash" in result.row
-        assert "llm_response_template_source" in result.row
-        assert "llm_response_lookup_hash" in result.row
-        assert "llm_response_lookup_source" in result.row
+        # Audit fields should be in success_reason["metadata"], not the row
+        assert result.success_reason is not None
+        metadata = result.success_reason["metadata"]
+        assert "llm_response_template_hash" in metadata
+        assert "llm_response_variables_hash" in metadata
+        assert "llm_response_template_source" in metadata
+        assert "llm_response_lookup_hash" in metadata
+        assert "llm_response_lookup_source" in metadata
         assert "llm_response_model" in result.row
 
         # Values should be set correctly
-        assert result.row["llm_response_template_source"] == "prompts/prefixed.j2"
-        assert result.row["llm_response_lookup_source"] == "prompts/lookups.yaml"
-        assert result.row["llm_response_lookup_hash"] is not None
+        assert metadata["llm_response_template_source"] == "prompts/prefixed.j2"
+        assert metadata["llm_response_lookup_source"] == "prompts/lookups.yaml"
+        assert metadata["llm_response_lookup_hash"] is not None
 
     def test_no_lookup_has_none_hash_in_output(self, mock_recorder: Mock, collector: CollectorOutputPort, chaosllm_server) -> None:
         """Output has None for lookup fields when no lookup configured."""
@@ -1402,11 +1409,13 @@ class TestOpenRouterTemplateFeatures:
         assert isinstance(result, TransformResult)
         assert result.status == "success"
         assert result.row is not None
-        # Fields should be present but None
-        assert "llm_response_lookup_hash" in result.row
-        assert result.row["llm_response_lookup_hash"] is None
-        assert "llm_response_lookup_source" in result.row
-        assert result.row["llm_response_lookup_source"] is None
+        # Audit fields should be in success_reason["metadata"], not the row
+        assert result.success_reason is not None
+        metadata = result.success_reason["metadata"]
+        assert "llm_response_lookup_hash" in metadata
+        assert metadata["llm_response_lookup_hash"] is None
+        assert "llm_response_lookup_source" in metadata
+        assert metadata["llm_response_lookup_source"] is None
 
     def test_lookup_iteration_in_template(self, mock_recorder: Mock, collector: CollectorOutputPort, chaosllm_server) -> None:
         """Lookup data can be iterated in templates."""

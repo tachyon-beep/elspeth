@@ -23,8 +23,10 @@ import httpx
 from pydantic import BaseModel, Field, field_validator, model_validator
 
 from elspeth.contracts import Determinism
+from elspeth.contracts.audit import Call
 from elspeth.contracts.contexts import LifecycleContext, TransformContext
 from elspeth.contracts.contract_propagation import narrow_contract_to_output
+from elspeth.contracts.errors import FrameworkBugError
 from elspeth.contracts.schema_contract import PipelineRow
 from elspeth.core.security.web import (
     NetworkError as SSRFNetworkError,
@@ -51,6 +53,14 @@ from elspeth.plugins.transforms.web_scrape_errors import (
 )
 from elspeth.plugins.transforms.web_scrape_extraction import extract_content
 from elspeth.plugins.transforms.web_scrape_fingerprint import compute_fingerprint
+
+# Audit-only fields — provenance metadata that lives in success_reason["metadata"],
+# not in pipeline rows. See spec: 2026-03-21-audit-provenance-boundary-design.md
+WEBSCRAPE_AUDIT_FIELDS: tuple[str, ...] = (
+    "fetch_request_hash",
+    "fetch_response_raw_hash",
+    "fetch_response_processed_hash",
+)
 
 
 class WebScrapeHTTPConfig(BaseModel):
@@ -204,9 +214,6 @@ class WebScrapeTransform(BaseTransform):
                 "fetch_status",
                 "fetch_url_final",
                 "fetch_url_final_ip",
-                "fetch_request_hash",
-                "fetch_response_raw_hash",
-                "fetch_response_processed_hash",
             ]
         )
 
@@ -259,7 +266,6 @@ class WebScrapeTransform(BaseTransform):
         self._recorder = ctx.landscape
         self._limiter = ctx.rate_limit_registry
         self._telemetry_emit = ctx.telemetry_emit
-        self._payload_store = ctx.payload_store
 
     def process(self, row: PipelineRow, ctx: TransformContext) -> TransformResult:
         """Fetch URL and enrich row with content and fingerprint.
@@ -294,7 +300,7 @@ class WebScrapeTransform(BaseTransform):
 
         # Fetch URL using pinned IP (prevents DNS rebinding between validation and fetch)
         try:
-            response, final_hostname_url, _call = self._fetch_url(safe_request, ctx)
+            response, final_hostname_url, call = self._fetch_url(safe_request, ctx)
         except WebScrapeError as e:
             if e.retryable:
                 # Re-raise retryable errors for engine RetryManager
@@ -330,24 +336,28 @@ class WebScrapeTransform(BaseTransform):
 
         # Field collision check already done before fetch — no need to re-check here.
 
-        # Store payloads for forensic recovery (captured in on_start)
-        if self._payload_store is None:
-            raise RuntimeError("WebScrapeTransform requires payload_store (not wired by executor)")
-        request_hash = self._payload_store.store(f"GET {url}".encode())
-        response_raw_hash = self._payload_store.store(response.content)
-        response_processed_hash = self._payload_store.store(content.encode())
+        # Hashes from audit trail — request and response blobs are already stored
+        # by AuditedHTTPClient via recorder.record_call()
+        if call.request_ref is None or call.response_ref is None:
+            raise FrameworkBugError(
+                "AuditedHTTPClient returned a Call with no request_ref/response_ref — "
+                "LandscapeRecorder must be configured with a payload_store for "
+                "hash-based audit provenance in WebScrapeTransform."
+            )
+        request_hash = call.request_ref
+        response_raw_hash = call.response_ref
 
-        # Enrich row with scraped data
+        # Store processed content via recorder (transform-produced artifact)
+        response_processed_hash = self._recorder.store_payload(content.encode(), purpose="processed_content")
+
+        # Enrich row with scraped data — operational fields only
         # Use explicit to_dict() conversion (PipelineRow guaranteed by engine)
         output = row.to_dict()
         output[self._content_field] = content
         output[self._fingerprint_field] = fingerprint
         output["fetch_status"] = response.status_code
         output["fetch_url_final"] = final_hostname_url
-        output["fetch_url_final_ip"] = str(response.url)
-        output["fetch_request_hash"] = request_hash
-        output["fetch_response_raw_hash"] = response_raw_hash
-        output["fetch_response_processed_hash"] = response_processed_hash
+        output["fetch_url_final_ip"] = safe_request.resolved_ip
 
         # Propagate contract so FIXED schemas can access fields added during enrichment
         output_contract = narrow_contract_to_output(
@@ -360,10 +370,15 @@ class WebScrapeTransform(BaseTransform):
             success_reason={
                 "action": "enriched",
                 "fields_added": [self._content_field, self._fingerprint_field],
+                "metadata": {
+                    "fetch_request_hash": request_hash,
+                    "fetch_response_raw_hash": response_raw_hash,
+                    "fetch_response_processed_hash": response_processed_hash,
+                },
             },
         )
 
-    def _fetch_url(self, safe_request: SSRFSafeRequest, ctx: TransformContext) -> "tuple[httpx.Response, str, Any]":
+    def _fetch_url(self, safe_request: SSRFSafeRequest, ctx: TransformContext) -> tuple[httpx.Response, str, Call]:
         """Fetch URL using SSRF-safe IP pinning with audit recording.
 
         Args:
@@ -402,7 +417,7 @@ class WebScrapeTransform(BaseTransform):
         }
 
         try:
-            response, final_hostname_url, _call = client.get_ssrf_safe(
+            response, final_hostname_url, call = client.get_ssrf_safe(
                 safe_request,
                 headers=headers,
                 follow_redirects=True,
@@ -425,7 +440,7 @@ class WebScrapeTransform(BaseTransform):
                 # Unresolved redirect (e.g. 3xx without Location header) — treat as error
                 raise InvalidURLError(f"Unresolved redirect HTTP {response.status_code}: {url} (missing or empty Location header)")
 
-            return response, final_hostname_url, _call
+            return response, final_hostname_url, call
 
         except httpx.TimeoutException as e:
             raise NetworkError(f"Timeout fetching {safe_request.original_url}: {e}") from e

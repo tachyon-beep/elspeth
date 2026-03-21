@@ -6,6 +6,7 @@ get_ssrf_safe() actually sends.
 """
 
 import socket
+from datetime import UTC, datetime
 from typing import Any
 from unittest.mock import Mock, patch
 
@@ -13,6 +14,8 @@ import httpx
 import pytest
 import respx
 
+from elspeth.contracts import CallStatus, CallType
+from elspeth.contracts.audit import Call
 from elspeth.contracts.plugin_context import PluginContext
 from elspeth.contracts.schema_contract import SchemaContract
 from elspeth.plugins.infrastructure.config_base import PluginConfigError
@@ -45,10 +48,29 @@ def _mock_getaddrinfo(ip: str = _TEST_IP) -> Any:
 
 
 @pytest.fixture
-def mock_ctx(payload_store):
+def mock_ctx():
     """Create PluginContext with required attributes for web scraping."""
     # Mock landscape recorder
     landscape = Mock()
+
+    # Configure record_call to return a proper Call object so process() can
+    # read call.request_ref and call.response_ref without FrameworkBugError.
+    mock_call = Call(
+        call_id="test-call-id",
+        call_index=0,
+        call_type=CallType.HTTP,
+        status=CallStatus.SUCCESS,
+        request_hash="test-request-hash",
+        created_at=datetime.now(UTC),
+        state_id="state-123",
+        request_ref="test-request-ref-hash",
+        response_hash="test-response-hash",
+        response_ref="test-response-ref-hash",
+        latency_ms=100.0,
+    )
+    landscape.record_call.return_value = mock_call
+    landscape.allocate_call_index.return_value = 0
+    landscape.store_payload.return_value = "test-processed-hash"
 
     # Mock rate limit registry
     rate_limit_registry = Mock()
@@ -60,7 +82,6 @@ def mock_ctx(payload_store):
         config={},
         landscape=landscape,
         rate_limit_registry=rate_limit_registry,
-        payload_store=payload_store,
         state_id="state-123",
     )
 
@@ -326,7 +347,7 @@ def test_web_scrape_strips_script_tags(mock_ctx):
 
 @respx.mock
 def test_web_scrape_payload_storage(mock_ctx):
-    """Test that payloads are stored in payload store."""
+    """Test that payload hashes are stored in success_reason metadata (not in row)."""
     html_content = "<html><body><h1>Title</h1></body></html>"
 
     respx.get(f"https://{_TEST_IP}:443/page").mock(return_value=httpx.Response(200, text=html_content))
@@ -349,17 +370,15 @@ def test_web_scrape_payload_storage(mock_ctx):
         result = transform.process(make_pipeline_row({"url": "https://example.com/page"}), mock_ctx)
 
     assert result.status == "success"
-    # Check payload hashes were stored and are valid SHA-256 hashes
-    assert "fetch_request_hash" in result.row
-    assert len(result.row["fetch_request_hash"]) == 64
-    assert "fetch_response_raw_hash" in result.row
-    assert len(result.row["fetch_response_raw_hash"]) == 64
-    assert "fetch_response_processed_hash" in result.row
-    assert len(result.row["fetch_response_processed_hash"]) == 64
-    # Verify payloads can be retrieved
-    assert mock_ctx.payload_store.exists(result.row["fetch_request_hash"])
-    assert mock_ctx.payload_store.exists(result.row["fetch_response_raw_hash"])
-    assert mock_ctx.payload_store.exists(result.row["fetch_response_processed_hash"])
+    # Hash fields are now audit-only — they live in success_reason["metadata"], not in the row
+    assert "fetch_request_hash" not in result.row
+    assert "fetch_response_raw_hash" not in result.row
+    assert "fetch_response_processed_hash" not in result.row
+    # Verify hashes are in success_reason["metadata"]
+    metadata = result.success_reason["metadata"]
+    assert metadata["fetch_request_hash"] == "test-request-ref-hash"
+    assert metadata["fetch_response_raw_hash"] == "test-response-ref-hash"
+    assert metadata["fetch_response_processed_hash"] == "test-processed-hash"
 
 
 @respx.mock
@@ -541,8 +560,7 @@ def test_web_scrape_follows_redirects_301(mock_ctx):
     assert "# New Location" in result.row["page_content"]
     assert result.row["fetch_status"] == 200
     assert result.row["fetch_url_final"] == "https://example.com/new"
-    assert _TEST_IP in result.row["fetch_url_final_ip"]
-    assert result.row["fetch_url_final_ip"].endswith("/new")
+    assert result.row["fetch_url_final_ip"] == _TEST_IP
 
 
 @respx.mock
@@ -577,8 +595,7 @@ def test_web_scrape_follows_redirect_chain(mock_ctx):
     assert "# Final Destination" in result.row["page_content"]
     assert result.row["fetch_status"] == 200
     assert result.row["fetch_url_final"] == "https://example.com/end"
-    assert _TEST_IP in result.row["fetch_url_final_ip"]
-    assert result.row["fetch_url_final_ip"].endswith("/end")
+    assert result.row["fetch_url_final_ip"] == _TEST_IP
 
 
 @respx.mock
@@ -875,7 +892,10 @@ class TestWebScrapeDeclaredOutputFields:
     """
 
     def test_declared_output_fields_contains_hardcoded_fields(self):
-        """declared_output_fields includes hardcoded fetch_* audit fields."""
+        """declared_output_fields includes hardcoded fetch_* operational fields.
+
+        Hash fields are audit-only (in success_reason["metadata"]) — not in declared_output_fields.
+        """
         transform = WebScrapeTransform(
             {
                 "schema": {"mode": "observed"},
@@ -892,9 +912,10 @@ class TestWebScrapeDeclaredOutputFields:
         assert "fetch_status" in transform.declared_output_fields
         assert "fetch_url_final" in transform.declared_output_fields
         assert "fetch_url_final_ip" in transform.declared_output_fields
-        assert "fetch_request_hash" in transform.declared_output_fields
-        assert "fetch_response_raw_hash" in transform.declared_output_fields
-        assert "fetch_response_processed_hash" in transform.declared_output_fields
+        # Hash fields are audit-only — not declared as output fields
+        assert "fetch_request_hash" not in transform.declared_output_fields
+        assert "fetch_response_raw_hash" not in transform.declared_output_fields
+        assert "fetch_response_processed_hash" not in transform.declared_output_fields
 
     def test_declared_output_fields_contains_configurable_fields(self):
         """declared_output_fields includes configurable content and fingerprint fields."""
@@ -1232,9 +1253,6 @@ class TestOutputSchemaConfig:
                 "fetch_status",
                 "fetch_url_final",
                 "fetch_url_final_ip",
-                "fetch_request_hash",
-                "fetch_response_raw_hash",
-                "fetch_response_processed_hash",
             }
         )
         assert transform._output_schema_config is not None

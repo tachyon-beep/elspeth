@@ -8,11 +8,14 @@ we add concurrency in a later task.
 
 from __future__ import annotations
 
+from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
 from unittest.mock import Mock, patch
 
 import pytest
 
+from elspeth.contracts import CallStatus, CallType
+from elspeth.contracts.audit import Call
 from elspeth.contracts.plugin_context import PluginContext
 from elspeth.plugins.transforms.web_scrape import WebScrapeTransform
 
@@ -85,13 +88,25 @@ class TestWebScrapeContract(TransformContractPropertyTestBase):
         mock_registry = Mock()
         mock_registry.get_limiter.return_value = mock_limiter
 
-        # Create mock landscape recorder
+        # Create mock landscape recorder — must return a proper Call so process()
+        # can read call.request_ref and call.response_ref without FrameworkBugError.
         mock_landscape = Mock()
-        mock_landscape.record_call = Mock()
-
-        # Create mock payload store
-        mock_payload_store = Mock()
-        mock_payload_store.store.return_value = "mock-blob-id"
+        mock_call = Call(
+            call_id="test-call-id",
+            call_index=0,
+            call_type=CallType.HTTP,
+            status=CallStatus.SUCCESS,
+            request_hash="test-request-hash",
+            created_at=datetime.now(UTC),
+            state_id="test-state-001",
+            request_ref="test-request-ref-hash",
+            response_hash="test-response-hash",
+            response_ref="test-response-ref-hash",
+            latency_ms=100.0,
+        )
+        mock_landscape.record_call.return_value = mock_call
+        mock_landscape.allocate_call_index.return_value = 0
+        mock_landscape.store_payload.return_value = "test-processed-hash"
 
         return PluginContext(
             run_id="test-run-001",
@@ -100,5 +115,4 @@ class TestWebScrapeContract(TransformContractPropertyTestBase):
             rate_limit_registry=mock_registry,
             landscape=mock_landscape,
             state_id="test-state-001",
-            payload_store=mock_payload_store,
         )

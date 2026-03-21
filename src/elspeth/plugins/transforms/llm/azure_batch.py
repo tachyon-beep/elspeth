@@ -38,9 +38,9 @@ from elspeth.plugins.infrastructure.schema_factory import create_schema_from_con
 from elspeth.plugins.infrastructure.templates import TemplateError
 from elspeth.plugins.transforms.llm import (
     _build_augmented_output_schema,
-    get_llm_audit_fields,
+    build_llm_audit_metadata,
     get_llm_guaranteed_fields,
-    populate_llm_metadata_fields,
+    populate_llm_operational_fields,
 )
 from elspeth.plugins.transforms.llm.langfuse import ActiveLangfuseTracer, create_langfuse_tracer
 from elspeth.plugins.transforms.llm.templates import PromptTemplate
@@ -160,7 +160,7 @@ class AzureBatchLLMTransform(BaseTransform):
         cfg = AzureBatchConfig.from_dict(config)
 
         # Declare output fields for centralized collision detection.
-        self.declared_output_fields = frozenset([*get_llm_guaranteed_fields(cfg.response_field), *get_llm_audit_fields(cfg.response_field)])
+        self.declared_output_fields = frozenset(get_llm_guaranteed_fields(cfg.response_field))
 
         self._deployment_name = cfg.deployment_name
         self._endpoint = cfg.endpoint.rstrip("/")
@@ -196,17 +196,14 @@ class AzureBatchLLMTransform(BaseTransform):
 
         # Build output schema config with field categorization
         guaranteed = get_llm_guaranteed_fields(self._response_field)
-        audit = get_llm_audit_fields(self._response_field)
 
         # Merge with any existing fields from base schema
         base_guaranteed = schema_config.guaranteed_fields or ()
-        base_audit = schema_config.audit_fields or ()
 
         self._output_schema_config = SchemaConfig(
             mode=schema_config.mode,
             fields=schema_config.fields,
             guaranteed_fields=tuple(set(base_guaranteed) | set(guaranteed)),
-            audit_fields=tuple(set(base_audit) | set(audit)),
             required_fields=schema_config.required_fields,
         )
 
@@ -1360,20 +1357,11 @@ class AzureBatchLLMTransform(BaseTransform):
                 output_row = row.to_dict()
                 output_row[self._response_field] = content
 
-                # Retrieve variables_hash from checkpoint
-                variables_hash = row_mapping[custom_id].variables_hash
-
-                populate_llm_metadata_fields(
+                populate_llm_operational_fields(
                     output_row,
                     self._response_field,
                     usage=usage,
                     model=body.get("model"),
-                    template_hash=self._template.template_hash,
-                    variables_hash=variables_hash,
-                    template_source=self._template.template_source,
-                    lookup_hash=self._template.lookup_hash,
-                    lookup_source=self._template.lookup_source,
-                    system_prompt_source=self._system_prompt_source,
                 )
 
                 output_rows.append(output_row)
@@ -1448,9 +1436,29 @@ class AzureBatchLLMTransform(BaseTransform):
             for key, inferred_type in all_keys.items()
         )
         output_contract = SchemaContract(mode="OBSERVED", fields=fields, locked=True)
+
+        # Batch-level template provenance — shared across all rows in the batch.
+        # Per-row request/response hashes are in the calls table via record_call().
+        batch_audit = build_llm_audit_metadata(
+            self._response_field,
+            template_hash=self._template.template_hash,
+            variables_hash="batch-varies-per-row",  # Not meaningful at batch level
+            template_source=self._template.template_source,
+            lookup_hash=self._template.lookup_hash,
+            lookup_source=self._template.lookup_source,
+            system_prompt_source=self._system_prompt_source,
+        )
+
         return TransformResult.success_multi(
             [PipelineRow(r, output_contract) for r in output_rows],
-            success_reason={"action": "enriched", "fields_added": [self._response_field]},
+            success_reason={
+                "action": "enriched",
+                "fields_added": [self._response_field],
+                "metadata": {
+                    "batch_size": len(output_rows),
+                    **batch_audit,
+                },
+            },
         )
 
     @property

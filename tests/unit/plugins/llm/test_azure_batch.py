@@ -1689,16 +1689,99 @@ class TestAzureBatchLLMTransformDeclaredOutputFields:
         """declared_output_fields includes the main response field."""
         assert "llm_response" in transform.declared_output_fields
 
-    def test_declared_output_fields_contains_audit_fields(self, transform: AzureBatchLLMTransform) -> None:
-        """declared_output_fields includes suffixed audit/metadata fields."""
+    def test_declared_output_fields_contains_operational_fields(self, transform: AzureBatchLLMTransform) -> None:
+        """declared_output_fields includes guaranteed operational metadata fields."""
         assert "llm_response_usage" in transform.declared_output_fields
         assert "llm_response_model" in transform.declared_output_fields
-        assert "llm_response_template_hash" in transform.declared_output_fields
+        # Audit provenance fields (template_hash etc.) are NOT in declared_output_fields —
+        # they go to success_reason["metadata"], not the row
+        assert "llm_response_template_hash" not in transform.declared_output_fields
 
     def test_declared_output_fields_is_nonempty_frozenset(self, transform: AzureBatchLLMTransform) -> None:
         """declared_output_fields is a non-empty frozenset (immutable)."""
         assert isinstance(transform.declared_output_fields, frozenset)
         assert len(transform.declared_output_fields) > 0
+
+
+class TestAzureBatchAuditMetadataInSuccessReason:
+    """Tests for batch-level audit provenance in success_reason["metadata"]."""
+
+    def test_batch_audit_metadata_in_success_reason(self) -> None:
+        """Completed batch includes template provenance in success_reason["metadata"]."""
+        from datetime import UTC, datetime
+
+        ctx = _make_batch_ctx()
+        recent_timestamp = datetime.now(UTC).isoformat()
+        ctx.set_checkpoint(
+            BatchCheckpointState(
+                batch_id="batch-audit-test",
+                input_file_id="file-123",
+                row_mapping={"row-0-abc12345": RowMappingEntry(index=0, variables_hash="hash0")},
+                template_errors=[],
+                submitted_at=recent_timestamp,
+                row_count=1,
+                requests={
+                    "row-0-abc12345": {
+                        "messages": [{"role": "user", "content": "test"}],
+                        "model": "my-gpt4o-batch",
+                    },
+                },
+            )
+        )
+
+        transform = AzureBatchLLMTransform(
+            {
+                "deployment_name": "my-gpt4o-batch",
+                "endpoint": "https://my-resource.openai.azure.com",
+                "api_key": "azure-api-key",
+                "template": "Analyze: {{ row.text }}",
+                "schema": DYNAMIC_SCHEMA,
+                "required_input_fields": [],
+            }
+        )
+
+        mock_client = Mock()
+        mock_batch = Mock()
+        mock_batch.id = "batch-audit-test"
+        mock_batch.status = "completed"
+        mock_batch.output_file_id = "output-file-789"
+        mock_batch.error_file_id = None
+        mock_client.batches.retrieve.return_value = mock_batch
+
+        output_content = Mock()
+        output_content.text = json.dumps(
+            {
+                "custom_id": "row-0-abc12345",
+                "response": {
+                    "body": {
+                        "choices": [{"message": {"content": "Analysis result"}}],
+                        "usage": {"prompt_tokens": 10, "completion_tokens": 20},
+                    }
+                },
+            }
+        )
+        mock_client.files.content.return_value = output_content
+
+        transform._client = mock_client
+
+        rows = [{"text": "hello"}]
+        result = transform.process([make_pipeline_row(d) for d in rows], ctx)
+
+        assert result.status == "success"
+        assert result.rows is not None
+        assert result.success_reason is not None
+        assert result.success_reason["action"] == "enriched"
+
+        # Audit provenance in metadata, not in rows
+        metadata = result.success_reason["metadata"]
+        assert "llm_response_template_hash" in metadata
+        assert "llm_response_variables_hash" in metadata
+        assert metadata["llm_response_variables_hash"] == "batch-varies-per-row"
+        assert "llm_response_template_source" in metadata
+
+        # Audit fields must NOT be in rows
+        assert "llm_response_template_hash" not in result.rows[0]
+        assert "llm_response_variables_hash" not in result.rows[0]
 
 
 class TestBug4_2_NonDictResponseBody:

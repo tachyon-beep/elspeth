@@ -280,7 +280,7 @@ allow_hits:
   reason: getattr default for sinks that don't call init_display_headers (e.g. DatabaseSink)
   safety: Returns False (safe default); attribute always exists for sinks using display headers
   expires: null
-- key: plugins/transforms/web_scrape.py:R5:WebScrapeHTTPConfig:_validate_allowed_hosts:fp=9535cac5e3ad0a53
+- key: plugins/transforms/web_scrape.py:R5:WebScrapeHTTPConfig:_validate_allowed_hosts:fp=c519710da4a8ea7f
   owner: architecture
   reason: Pydantic field_validator wraps ipaddress.ip_network() on user-provided CIDR strings — Tier 3 config boundary
   safety: ValueError re-raised as Pydantic ValidationError; invalid config crashes at load time, not at runtime
@@ -360,7 +360,7 @@ allow_hits:
   reason: Azure AI Search API response metadata coercion at Tier 3 boundary — isinstance check converts non-primitive types to str for JSON serializability
   safety: Non-serializable types coerced to str; RetrievalChunk validates metadata JSON-serializability at construction
   expires: null
-- key: plugins/transforms/web_scrape.py:R5:WebScrapeTransform:__init__:fp=a04a3fd4e49b32e1
+- key: plugins/transforms/web_scrape.py:R5:WebScrapeTransform:__init__:fp=189a33d2bccf7c9b
   owner: feature
   reason: Offensive isinstance assertion — detects Pydantic validator bug if allowed_hosts is not list[str] after validation
   safety: Crashes immediately with descriptive error; better than silently iterating string characters as ip_network calls

@@ -325,8 +325,9 @@ class TestLLMTransformAzurePipelining:
             "prompt_tokens": 10,
             "completion_tokens": 25,
         }
-        assert "llm_response_template_hash" in result.row
-        assert "llm_response_variables_hash" in result.row
+        assert result.success_reason is not None
+        assert "llm_response_template_hash" in result.success_reason["metadata"]
+        assert "llm_response_variables_hash" in result.success_reason["metadata"]
         assert result.row["llm_response_model"] == "my-gpt4o-deployment"
         # Original data preserved
         assert result.row["text"] == "hello world"
@@ -574,8 +575,9 @@ class TestLLMTransformAzurePipelining:
         assert result.row is not None
         assert result.row["analysis"] == "Result"
         assert "analysis_usage" in result.row
-        assert "analysis_template_hash" in result.row
-        assert "analysis_variables_hash" in result.row
+        assert result.success_reason is not None
+        assert "analysis_template_hash" in result.success_reason["metadata"]
+        assert "analysis_variables_hash" in result.success_reason["metadata"]
         assert "analysis_model" in result.row
 
     def test_connect_output_required_before_accept(self) -> None:
