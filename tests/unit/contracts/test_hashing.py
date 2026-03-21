@@ -226,10 +226,10 @@ class TestRejectNonFiniteMappingProxyType:
     def test_accepts_mapping_proxy_with_normal_values(self) -> None:
         from types import MappingProxyType
 
-        from elspeth.contracts.hashing import _reject_non_finite
+        from elspeth.contracts.hashing import _normalize_frozen_and_reject_non_finite
 
         frozen = MappingProxyType({"key": "value", "num": 42})
-        _reject_non_finite(frozen)  # must not raise
+        _normalize_frozen_and_reject_non_finite(frozen)  # must not raise
 
     def test_rejects_nan_in_deep_frozen_structure(self) -> None:
         """Simulates what deep_freeze() produces from routing reasons."""

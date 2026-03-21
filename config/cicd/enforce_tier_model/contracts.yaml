@@ -79,9 +79,9 @@ per_file_rules:
 - pattern: contracts/hashing.py
   rules:
   - R5
-  reason: Float type detection for NaN/Infinity rejection in canonical hashing
+  reason: Float type detection for NaN/Infinity rejection in canonical hashing; frozen container type dispatch for MappingProxyType/tuple/frozenset normalization
   expires: null
-  max_hits: 3
+  max_hits: 4
 - pattern: contracts/header_modes.py
   rules:
   - R5
