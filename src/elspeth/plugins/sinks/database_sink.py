@@ -24,6 +24,7 @@ from sqlalchemy.types import TypeEngine
 
 from elspeth.contracts import ArtifactDescriptor, CallStatus, CallType, PluginSchema
 from elspeth.contracts.contexts import SinkContext
+from elspeth.contracts.errors import AuditIntegrityError
 from elspeth.contracts.url import SanitizedDatabaseUrl
 from elspeth.core.canonical import canonical_json
 from elspeth.plugins.infrastructure.base import BaseSink
@@ -306,18 +307,25 @@ class DatabaseSink(BaseSink):
             try:
                 self._metadata.create_all(self._engine, checkfirst=True)
                 latency_ms = (time.perf_counter() - start_time) * 1000
-                ctx.record_call(
-                    call_type=CallType.SQL,
-                    status=CallStatus.SUCCESS,
-                    request_data={
-                        "operation": "CREATE_TABLE",
-                        "table": self._table_name,
-                        "if_not_exists": True,
-                    },
-                    response_data={"table_created": self._table_name},
-                    latency_ms=latency_ms,
-                    provider="sqlalchemy",
-                )
+                try:
+                    ctx.record_call(
+                        call_type=CallType.SQL,
+                        status=CallStatus.SUCCESS,
+                        request_data={
+                            "operation": "CREATE_TABLE",
+                            "table": self._table_name,
+                            "if_not_exists": True,
+                        },
+                        response_data={"table_created": self._table_name},
+                        latency_ms=latency_ms,
+                        provider="sqlalchemy",
+                    )
+                except Exception as exc:
+                    raise AuditIntegrityError(
+                        f"Failed to record successful CREATE TABLE to audit trail "
+                        f"(table={self._table_name!r}). "
+                        f"DDL completed but audit record is missing."
+                    ) from exc
             except Exception as e:
                 latency_ms = (time.perf_counter() - start_time) * 1000
                 ctx.record_call(
@@ -360,18 +368,25 @@ class DatabaseSink(BaseSink):
             try:
                 table.drop(self._engine)
                 latency_ms = (time.perf_counter() - start_time) * 1000
-                ctx.record_call(
-                    call_type=CallType.SQL,
-                    status=CallStatus.SUCCESS,
-                    request_data={
-                        "operation": "DROP_TABLE",
-                        "table": self._table_name,
-                        "mode": self._if_exists,
-                    },
-                    response_data={"table_dropped": self._table_name},
-                    latency_ms=latency_ms,
-                    provider="sqlalchemy",
-                )
+                try:
+                    ctx.record_call(
+                        call_type=CallType.SQL,
+                        status=CallStatus.SUCCESS,
+                        request_data={
+                            "operation": "DROP_TABLE",
+                            "table": self._table_name,
+                            "mode": self._if_exists,
+                        },
+                        response_data={"table_dropped": self._table_name},
+                        latency_ms=latency_ms,
+                        provider="sqlalchemy",
+                    )
+                except Exception as exc:
+                    raise AuditIntegrityError(
+                        f"Failed to record successful DROP TABLE to audit trail "
+                        f"(table={self._table_name!r}). "
+                        f"DDL completed but audit record is missing."
+                    ) from exc
             except Exception as e:
                 latency_ms = (time.perf_counter() - start_time) * 1000
                 ctx.record_call(
@@ -491,19 +506,26 @@ class DatabaseSink(BaseSink):
                 conn.execute(insert(self._table), insert_rows)
             latency_ms = (time.perf_counter() - start_time) * 1000
 
-            # Record successful INSERT in audit trail
-            ctx.record_call(
-                call_type=CallType.SQL,
-                status=CallStatus.SUCCESS,
-                request_data={
-                    "operation": "INSERT",
-                    "table": self._table_name,
-                    "row_count": len(rows),
-                },
-                response_data={"rows_inserted": len(rows)},
-                latency_ms=latency_ms,
-                provider="sqlalchemy",
-            )
+            # Record successful INSERT in audit trail.
+            try:
+                ctx.record_call(
+                    call_type=CallType.SQL,
+                    status=CallStatus.SUCCESS,
+                    request_data={
+                        "operation": "INSERT",
+                        "table": self._table_name,
+                        "row_count": len(rows),
+                    },
+                    response_data={"rows_inserted": len(rows)},
+                    latency_ms=latency_ms,
+                    provider="sqlalchemy",
+                )
+            except Exception as exc:
+                raise AuditIntegrityError(
+                    f"Failed to record successful INSERT to audit trail "
+                    f"(table={self._table_name!r}, row_count={len(rows)}). "
+                    f"INSERT completed but audit record is missing."
+                ) from exc
         except Exception as e:
             latency_ms = (time.perf_counter() - start_time) * 1000
 

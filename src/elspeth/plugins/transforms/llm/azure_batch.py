@@ -29,6 +29,7 @@ from pydantic import Field
 from elspeth.contracts import BatchPendingError, CallStatus, CallType, Determinism, RowErrorEntry, TransformErrorReason, TransformResult
 from elspeth.contracts.batch_checkpoint import BatchCheckpointState, RowMappingEntry
 from elspeth.contracts.contexts import LifecycleContext, TransformContext
+from elspeth.contracts.errors import AuditIntegrityError
 from elspeth.contracts.schema import SchemaConfig
 from elspeth.contracts.schema_contract import FieldContract, PipelineRow, SchemaContract
 from elspeth.contracts.token_usage import TokenUsage
@@ -594,15 +595,22 @@ class AzureBatchLLMTransform(BaseTransform):
             )
         upload_latency = (time.perf_counter() - start) * 1000
 
-        # Record successful upload — our code, must not be caught
-        ctx.record_call(
-            call_type=CallType.HTTP,
-            status=CallStatus.SUCCESS,
-            request_data=upload_request,
-            response_data={"file_id": batch_file.id, "status": batch_file.status},
-            latency_ms=upload_latency,
-            provider="azure",
-        )
+        # Record successful upload in audit trail.
+        try:
+            ctx.record_call(
+                call_type=CallType.HTTP,
+                status=CallStatus.SUCCESS,
+                request_data=upload_request,
+                response_data={"file_id": batch_file.id, "status": batch_file.status},
+                latency_ms=upload_latency,
+                provider="azure",
+            )
+        except Exception as exc:
+            raise AuditIntegrityError(
+                f"Failed to record successful file upload to audit trail "
+                f"(file_id={batch_file.id!r}). "
+                f"Upload completed but audit record is missing."
+            ) from exc
 
         # Create batch job — external API call (Tier 3 boundary)
         batch_request = {
@@ -783,22 +791,29 @@ class AzureBatchLLMTransform(BaseTransform):
             )
         retrieve_latency = (time.perf_counter() - start) * 1000
 
-        # Record successful retrieve — Tier 3 boundary: SDK response shape
-        # varies across versions (output_file_id/error_file_id may be absent
+        # Record successful retrieve in audit trail. Tier 3 boundary: SDK response
+        # shape varies across versions (output_file_id/error_file_id may be absent
         # on pending batches or older SDK versions).
-        ctx.record_call(
-            call_type=CallType.HTTP,
-            status=CallStatus.SUCCESS,
-            request_data=retrieve_request,
-            response_data={
-                "batch_id": batch.id,
-                "status": batch.status,
-                "output_file_id": getattr(batch, "output_file_id", None),
-                "error_file_id": getattr(batch, "error_file_id", None),
-            },
-            latency_ms=retrieve_latency,
-            provider="azure",
-        )
+        try:
+            ctx.record_call(
+                call_type=CallType.HTTP,
+                status=CallStatus.SUCCESS,
+                request_data=retrieve_request,
+                response_data={
+                    "batch_id": batch.id,
+                    "status": batch.status,
+                    "output_file_id": getattr(batch, "output_file_id", None),
+                    "error_file_id": getattr(batch, "error_file_id", None),
+                },
+                latency_ms=retrieve_latency,
+                provider="azure",
+            )
+        except Exception as exc:
+            raise AuditIntegrityError(
+                f"Failed to record successful batch retrieve to audit trail "
+                f"(batch_id={batch.id!r}). "
+                f"Retrieve completed but audit record is missing."
+            ) from exc
 
         if batch.status == "completed":
             # Calculate latency from submission to completion
@@ -980,20 +995,27 @@ class AzureBatchLLMTransform(BaseTransform):
             )
         download_latency = (time.perf_counter() - start) * 1000
 
-        # Record successful download — our code, must not be caught
+        # Record successful download in audit trail.
         output_hash = hashlib.sha256(output_text.encode("utf-8")).hexdigest()
-        ctx.record_call(
-            call_type=CallType.HTTP,
-            status=CallStatus.SUCCESS,
-            request_data=download_request,
-            response_data={
-                "file_id": output_file_id,
-                "content_sha256": output_hash,
-                "content_length": len(output_text),
-            },
-            latency_ms=download_latency,
-            provider="azure",
-        )
+        try:
+            ctx.record_call(
+                call_type=CallType.HTTP,
+                status=CallStatus.SUCCESS,
+                request_data=download_request,
+                response_data={
+                    "file_id": output_file_id,
+                    "content_sha256": output_hash,
+                    "content_length": len(output_text),
+                },
+                latency_ms=download_latency,
+                provider="azure",
+            )
+        except Exception as exc:
+            raise AuditIntegrityError(
+                f"Failed to record successful output file download to audit trail "
+                f"(file_id={output_file_id!r}). "
+                f"Download completed but audit record is missing."
+            ) from exc
 
         # Download error file if present (partial batch failures)
         # Azure Batch API puts per-request errors in a separate error_file_id
@@ -1047,21 +1069,28 @@ class AzureBatchLLMTransform(BaseTransform):
                 )
                 error_text = None
             else:
-                # Record successful download — our code, must not be caught
+                # Record successful error file download in audit trail.
                 error_latency = (time.perf_counter() - start) * 1000
                 error_hash = hashlib.sha256(error_text.encode("utf-8")).hexdigest()
-                ctx.record_call(
-                    call_type=CallType.HTTP,
-                    status=CallStatus.SUCCESS,
-                    request_data=error_download_request,
-                    response_data={
-                        "file_id": error_file_id,
-                        "content_sha256": error_hash,
-                        "content_length": len(error_text),
-                    },
-                    latency_ms=error_latency,
-                    provider="azure",
-                )
+                try:
+                    ctx.record_call(
+                        call_type=CallType.HTTP,
+                        status=CallStatus.SUCCESS,
+                        request_data=error_download_request,
+                        response_data={
+                            "file_id": error_file_id,
+                            "content_sha256": error_hash,
+                            "content_length": len(error_text),
+                        },
+                        latency_ms=error_latency,
+                        provider="azure",
+                    )
+                except Exception as exc:
+                    raise AuditIntegrityError(
+                        f"Failed to record successful error file download to audit trail "
+                        f"(file_id={error_file_id!r}). "
+                        f"Download completed but audit record is missing."
+                    ) from exc
         else:
             error_text = None
 
@@ -1262,6 +1291,9 @@ class AzureBatchLLMTransform(BaseTransform):
                 # Record Call for audit trail completeness - request WAS made but no response
                 # Without this, explain(token_id) would show incomplete lineage
                 # Access directly from checkpoint (Tier 1 data - we wrote it)
+                # NOTE: Not wrapping record_call in AuditIntegrityError here because this
+                # is a per-row error recording inside a batch result loop. Crashing mid-batch
+                # on a single audit failure would lose progress for all already-processed rows.
                 original_request = checkpoint.requests[custom_id]
                 ctx.record_call(
                     call_type=CallType.LLM,
@@ -1387,6 +1419,9 @@ class AzureBatchLLMTransform(BaseTransform):
                 error_data = None
 
             # Record LLM call with custom_id for token mapping
+            # NOTE: Not wrapping record_call in AuditIntegrityError here because this
+            # is a per-row result recording inside a batch loop. Crashing mid-batch
+            # on a single audit failure would lose progress for all already-processed rows.
             ctx.record_call(
                 call_type=CallType.LLM,
                 status=call_status,

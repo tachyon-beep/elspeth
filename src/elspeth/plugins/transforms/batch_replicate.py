@@ -230,6 +230,9 @@ class BatchReplicate(BaseTransform):
                 valid_count=len(valid_rows),
                 quarantined_indices=quarantined_indices,
             )
+            # NOTE: Not wrapping record_call in AuditIntegrityError here because this
+            # is a per-row quarantine recording inside a batch loop. Crashing mid-batch
+            # on a single audit failure would lose progress for all already-processed rows.
             for q_info in quarantined:
                 ctx.record_call(
                     call_type=CallType.HTTP,

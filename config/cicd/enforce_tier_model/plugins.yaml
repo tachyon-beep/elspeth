@@ -164,10 +164,10 @@ allow_hits:
   owner: architecture
   reason: HTTP redirect Location header — external system boundary, header may be absent
   safety: Missing Location header breaks redirect loop naturally
-- key: plugins/sinks/database_sink.py:R1:DatabaseSink:__init__:fp=67d8cd6ce6ab133f
+- key: plugins/sinks/database_sink.py:R1:DatabaseSink:__init__:fp=5565ae22ee269a37
   owner: architecture
-  reason: Optional field access at trust boundary
-  safety: Code reviewed - legitimate pattern
+  reason: os.environ.get() for optional env var at trust boundary — ELSPETH_ALLOW_RAW_SECRETS is genuinely optional with empty-string default
+  safety: Empty string default is meaning-preserving (feature disabled); no data fabrication
   expires: '2026-05-02'
 - key: plugins/sinks/csv_sink.py:R1:CSVSink:validate_output_target:fp=79de1ac15fd8954b
   owner: feature

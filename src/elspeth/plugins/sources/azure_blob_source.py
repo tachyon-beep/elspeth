@@ -20,6 +20,7 @@ from pydantic import BaseModel, Field, ValidationError, field_validator, model_v
 
 from elspeth.contracts import CallStatus, CallType, PluginSchema, SourceRow
 from elspeth.contracts.contexts import SourceContext
+from elspeth.contracts.errors import AuditIntegrityError
 from elspeth.core.identifiers import validate_field_names
 from elspeth.plugins.infrastructure.azure_auth import AzureAuthConfig
 from elspeth.plugins.infrastructure.base import BaseSource
@@ -430,19 +431,26 @@ class AzureBlobSource(BaseSource):
             blob_data = blob_client.download_blob().readall()
             latency_ms = (time.perf_counter() - start_time) * 1000
 
-            # Record successful blob download in audit trail
-            ctx.record_call(
-                call_type=CallType.HTTP,
-                status=CallStatus.SUCCESS,
-                request_data={
-                    "operation": "download_blob",
-                    "container": self._container,
-                    "blob_path": self._blob_path,
-                },
-                response_data={"size_bytes": len(blob_data)},
-                latency_ms=latency_ms,
-                provider="azure_blob_storage",
-            )
+            # Record successful blob download in audit trail.
+            try:
+                ctx.record_call(
+                    call_type=CallType.HTTP,
+                    status=CallStatus.SUCCESS,
+                    request_data={
+                        "operation": "download_blob",
+                        "container": self._container,
+                        "blob_path": self._blob_path,
+                    },
+                    response_data={"size_bytes": len(blob_data)},
+                    latency_ms=latency_ms,
+                    provider="azure_blob_storage",
+                )
+            except Exception as exc:
+                raise AuditIntegrityError(
+                    f"Failed to record successful blob download to audit trail "
+                    f"(container={self._container!r}, blob_path={self._blob_path!r}). "
+                    f"Download completed but audit record is missing."
+                ) from exc
         except ImportError:
             # Re-raise ImportError as-is for clear dependency messaging
             raise

@@ -376,14 +376,21 @@ class DataverseSink(BaseSink):
                     "field_names": sorted(payload.keys()),
                 }
                 response_data = {"status_code": response.status_code}
-                ctx.record_call(
-                    call_type=CallType.HTTP,
-                    status=CallStatus.SUCCESS,
-                    request_data=request_data,
-                    response_data=response_data,
-                    latency_ms=latency_ms,
-                    provider="dataverse",
-                )
+                try:
+                    ctx.record_call(
+                        call_type=CallType.HTTP,
+                        status=CallStatus.SUCCESS,
+                        request_data=request_data,
+                        response_data=response_data,
+                        latency_ms=latency_ms,
+                        provider="dataverse",
+                    )
+                except Exception as exc:
+                    raise AuditIntegrityError(
+                        f"Failed to record successful Dataverse upsert to audit trail "
+                        f"(url={url!r}). "
+                        f"Upsert completed but audit record is missing."
+                    ) from exc
                 self._emit_telemetry(
                     ctx=ctx,
                     status=CallStatus.SUCCESS,
