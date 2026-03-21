@@ -84,8 +84,8 @@ dev = [
     # Mutation testing (Phase 3)
     "mutmut>=2.4,<3",  # Mutation testing
     # ChaosLLM test server
-    "starlette>=0.45,<1",  # ASGI framework for ChaosLLM
-    "uvicorn>=0.34,<1",  # ASGI server for ChaosLLM
+    "errorworks>=0.1.1",  # Chaos testing servers (ChaosLLM, ChaosWeb)
+    "starlette>=0.45,<1",  # ASGI framework (needed for TestClient in fixtures)
     # HTTP mocking
     "respx>=0.21,<1",  # httpx mocking for web scrape tests
 ]
@@ -158,8 +158,8 @@ all = [
     "types-networkx>=3.2,<4",
     "types-PyYAML>=6.0,<7",
     "mutmut>=2.4,<3",
+    "errorworks>=0.1.1",
     "starlette>=0.45,<1",
-    "uvicorn>=0.34,<1",
     "respx>=0.21,<1",
     # llm dependencies
     "jinja2>=3.1,<4",
