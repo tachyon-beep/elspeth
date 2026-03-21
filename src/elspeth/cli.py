@@ -16,6 +16,8 @@ import typer
 import yaml
 from dynaconf.vendor.ruamel.yaml.parser import ParserError as YamlParserError
 from dynaconf.vendor.ruamel.yaml.scanner import ScannerError as YamlScannerError
+from errorworks.llm.cli import app as chaosllm_app
+from errorworks.llm.cli import mcp_app as chaosllm_mcp_app
 from pydantic import ValidationError
 
 from elspeth import __version__
@@ -25,8 +27,6 @@ from elspeth.contracts.types import AggregationName
 from elspeth.core.config import ElspethSettings, SourceSettings, load_settings, resolve_config
 from elspeth.core.dag import ExecutionGraph, GraphValidationError
 from elspeth.core.security.config_secrets import SecretLoadError, load_secrets_from_config
-from elspeth.testing.chaosllm.cli import app as chaosllm_app
-from elspeth.testing.chaosllm.cli import mcp_app as chaosllm_mcp_app
 
 if TYPE_CHECKING:
     from elspeth.cli_helpers import PluginBundle

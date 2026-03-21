@@ -4,11 +4,11 @@ Factories for constructing production types with sensible defaults.
 When a backbone type's constructor changes, update the factory here.
 Tests and benchmarks that use factories need ZERO changes.
 
-This package also contains:
-- chaosengine: Shared utilities for chaos testing (injection engine, metrics store, latency)
-- chaosllm: Fake LLM server for load testing and fault injection
-- chaosweb: Fake web server for scraping pipeline resilience testing
-- chaosllm_mcp: MCP server for analyzing ChaosLLM test results
+Chaos testing servers (ChaosLLM, ChaosWeb, ChaosEngine) have been
+extracted to the ``errorworks`` package (PyPI). Import from there:
+    from errorworks.llm import ChaosLLMServer
+    from errorworks.web import ChaosWebServer
+    from errorworks.engine import InjectionEngine
 
 Usage:
     from elspeth.testing import make_row, make_source_row, make_contract

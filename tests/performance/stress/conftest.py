@@ -29,6 +29,8 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 import pytest
+from errorworks.llm.config import ChaosLLMConfig, load_config
+from errorworks.llm.server import ChaosLLMServer
 
 from elspeth.contracts import NodeType, PipelineRow, TransformErrorReason, TransformResult
 from elspeth.contracts.identity import TokenInfo
@@ -36,8 +38,6 @@ from elspeth.contracts.schema import SchemaConfig
 from elspeth.contracts.schema_contract import FieldContract, SchemaContract
 from elspeth.core.landscape.database import LandscapeDB
 from elspeth.core.landscape.recorder import LandscapeRecorder
-from elspeth.testing.chaosllm.config import ChaosLLMConfig, load_config
-from elspeth.testing.chaosllm.server import ChaosLLMServer
 
 if TYPE_CHECKING:
     import httpx

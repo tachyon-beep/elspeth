@@ -15,20 +15,19 @@ from __future__ import annotations
 
 import random
 
-from hypothesis import given, settings
-from hypothesis import strategies as st
-
-from elspeth.testing.chaosllm.config import (
+from errorworks.llm.config import (
     RandomResponseConfig,
     ResponseConfig,
 )
-from elspeth.testing.chaosllm.response_generator import (
+from errorworks.llm.response_generator import (
     ENGLISH_VOCABULARY,
     LOREM_VOCABULARY,
     OpenAIResponse,
     PresetBank,
     ResponseGenerator,
 )
+from hypothesis import given, settings
+from hypothesis import strategies as st
 
 # =============================================================================
 # OpenAIResponse Structure

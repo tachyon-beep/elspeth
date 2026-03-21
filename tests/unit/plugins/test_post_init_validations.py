@@ -219,7 +219,7 @@ class TestLLMResponsePostInit:
 
 class TestOpenAIResponsePostInit:
     def test_rejects_negative_prompt_tokens(self) -> None:
-        from elspeth.testing.chaosllm.response_generator import OpenAIResponse
+        from errorworks.llm.response_generator import OpenAIResponse
 
         with pytest.raises(ValueError, match="prompt_tokens must be non-negative"):
             OpenAIResponse(
@@ -234,7 +234,7 @@ class TestOpenAIResponsePostInit:
             )
 
     def test_rejects_negative_completion_tokens(self) -> None:
-        from elspeth.testing.chaosllm.response_generator import OpenAIResponse
+        from errorworks.llm.response_generator import OpenAIResponse
 
         with pytest.raises(ValueError, match="completion_tokens must be non-negative"):
             OpenAIResponse(
@@ -249,7 +249,7 @@ class TestOpenAIResponsePostInit:
             )
 
     def test_rejects_negative_created(self) -> None:
-        from elspeth.testing.chaosllm.response_generator import OpenAIResponse
+        from errorworks.llm.response_generator import OpenAIResponse
 
         with pytest.raises(ValueError, match="created must be non-negative"):
             OpenAIResponse(
@@ -264,7 +264,7 @@ class TestOpenAIResponsePostInit:
             )
 
     def test_accepts_valid(self) -> None:
-        from elspeth.testing.chaosllm.response_generator import OpenAIResponse
+        from errorworks.llm.response_generator import OpenAIResponse
 
         r = OpenAIResponse(
             id="fake-1",
@@ -282,19 +282,19 @@ class TestOpenAIResponsePostInit:
 
 class TestWebResponsePostInit:
     def test_rejects_invalid_status_code(self) -> None:
-        from elspeth.testing.chaosweb.content_generator import WebResponse
+        from errorworks.web.content_generator import WebResponse
 
         with pytest.raises(ValueError, match="valid HTTP status"):
             WebResponse(content="<html>", content_type="text/html", status_code=0)
 
     def test_rejects_empty_content_type(self) -> None:
-        from elspeth.testing.chaosweb.content_generator import WebResponse
+        from errorworks.web.content_generator import WebResponse
 
         with pytest.raises(ValueError, match="content_type must not be empty"):
             WebResponse(content="<html>", content_type="")
 
     def test_accepts_valid(self) -> None:
-        from elspeth.testing.chaosweb.content_generator import WebResponse
+        from errorworks.web.content_generator import WebResponse
 
         r = WebResponse(content="<html>", content_type="text/html")
         assert r.status_code == 200

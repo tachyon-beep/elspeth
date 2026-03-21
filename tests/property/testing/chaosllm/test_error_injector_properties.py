@@ -17,11 +17,8 @@ from __future__ import annotations
 
 import random
 
-from hypothesis import given, settings
-from hypothesis import strategies as st
-
-from elspeth.testing.chaosllm.config import BurstConfig, ErrorInjectionConfig
-from elspeth.testing.chaosllm.error_injector import (
+from errorworks.llm.config import ErrorInjectionConfig, LLMBurstConfig
+from errorworks.llm.error_injector import (
     CONNECTION_ERRORS,
     HTTP_ERRORS,
     MALFORMED_TYPES,
@@ -29,6 +26,8 @@ from elspeth.testing.chaosllm.error_injector import (
     ErrorDecision,
     ErrorInjector,
 )
+from hypothesis import given, settings
+from hypothesis import strategies as st
 
 # =============================================================================
 # ErrorDecision Dataclass Properties
@@ -227,7 +226,7 @@ class TestBurstTiming:
         At time 0, interval, 2*interval, etc. a burst starts.
         Each burst lasts for `duration` seconds.
         """
-        burst_config = BurstConfig(
+        burst_config = LLMBurstConfig(
             enabled=True,
             interval_sec=interval,
             duration_sec=min(duration, interval - 1),
@@ -258,7 +257,7 @@ class TestBurstTiming:
     def test_burst_disabled_never_in_burst(self) -> None:
         """Property: Disabled burst means never in burst."""
         config = ErrorInjectionConfig(
-            burst=BurstConfig(enabled=False),
+            burst=LLMBurstConfig(enabled=False),
         )
         injector = ErrorInjector(config)
 
@@ -269,7 +268,7 @@ class TestBurstTiming:
     @settings(max_examples=30)
     def test_burst_elevates_error_rate(self, seed: int) -> None:
         """Property: During burst, error rate increases to burst level."""
-        burst_config = BurstConfig(
+        burst_config = LLMBurstConfig(
             enabled=True,
             interval_sec=100,
             duration_sec=50,

@@ -5,226 +5,250 @@ per_file_rules:
   reason: Test factories accept dict|PipelineRow for convenience - isinstance() for input coercion, not bug masking
   expires: null
   max_hits: 7
-- pattern: testing/chaosengine/config_loader.py
-  rules:
-  - R5
-  reason: Tier 3 YAML config parsing and recursive merge dispatch
-  expires: null
-  max_hits: 3
-- pattern: testing/chaosengine/metrics_store.py
-  rules:
-  - R5
-  reason: Numeric type filtering for metric aggregation
-  expires: null
-  max_hits: 1
-- pattern: testing/chaosllm/config.py
-  rules:
-  - R5
-  reason: Pydantic before-validator for Tier 3 YAML range parsing
-  expires: null
-  max_hits: 1
-- pattern: testing/chaosllm/response_generator.py
-  rules:
-  - R5
-  reason: Tier 3 JSONL line validation
-  expires: null
-  max_hits: 1
-- pattern: testing/chaosweb/config.py
-  rules:
-  - R5
-  reason: Type dispatch in test configuration
-  expires: null
-  max_hits: 1
-- pattern: testing/chaosweb/content_generator.py
-  rules:
-  - R5
-  reason: Deep-freeze guard and Tier 3 JSONL validation
-  expires: null
-  max_hits: 2
-- pattern: testing/chaosweb/server.py
-  rules:
-  - R5
-  reason: str|bytes union dispatch for HTTP response encoding
-  expires: null
-  max_hits: 4
 allow_hits:
-- key: testing/chaosllm_mcp/server.py:R6:_find_metrics_databases:fp=2bcfbfc1388cd9d8
-  owner: architecture
-  reason: Silent recovery with explicit error handling path
-  safety: Code reviewed - legitimate pattern
-  expires: '2026-05-02'
-- key: testing/chaosweb/server.py:R6:ChaosWebServer:_record_request:fp=f74392f7a8a56907
-  owner: architecture
-  reason: Metrics isolation - recording is best-effort side-effect that must not crash HTTP responses
-  safety: Exception logged via structlog with request_id and exc_info; intended chaos response always served
-  expires: '2026-05-06'
-- key: testing/chaosllm/server.py:R4:ChaosLLMServer:_record_request:fp=161b08f529c97d97
-  owner: architecture
-  reason: Metrics isolation - recording is best-effort side-effect that must not crash HTTP responses
-  safety: Exception logged via structlog with request_id and exc_info; intended chaos response always served
-  expires: '2026-05-13'
-- key: testing/chaosllm/server.py:R1:ChaosLLMServer:_handle_completion_request:fp=786fbff1794cda31
-  owner: architecture
-  reason: External HTTP request body - optional fields per OpenAI spec (Tier 3)
-  safety: dict.get with defaults for optional fields from external HTTP clients
-  expires: '2026-05-13'
-- key: testing/chaosllm/server.py:R1:ChaosLLMServer:_handle_completion_request:fp=14f8ad9db30db385
-  owner: architecture
-  reason: External HTTP request body - optional fields per OpenAI spec (Tier 3)
-  safety: dict.get with defaults for optional fields from external HTTP clients
-  expires: '2026-05-13'
-- key: testing/chaosllm/server.py:R1:ChaosLLMServer:_handle_completion_request:fp=4e9ee12d49d66d1c
-  owner: architecture
-  reason: External HTTP request body - optional fields per OpenAI spec (Tier 3)
-  safety: dict.get with defaults for optional fields from external HTTP clients
-  expires: '2026-05-13'
-- key: testing/chaosllm/server.py:R1:ChaosLLMServer:_handle_completion_request:fp=dc896e6aa7c6bca4
-  owner: architecture
-  reason: External HTTP request body - optional fields per OpenAI spec (Tier 3)
-  safety: dict.get with defaults for optional fields from external HTTP clients
-  expires: '2026-05-13'
-- key: testing/chaosllm/server.py:R1:ChaosLLMServer:_handle_success_response:fp=c44f40e022c51ef6
-  owner: architecture
-  reason: External HTTP request body - optional fields per OpenAI spec (Tier 3)
-  safety: dict.get with defaults for optional response fields from external clients
-  expires: '2026-05-13'
-- key: testing/chaosllm/server.py:R1:ChaosLLMServer:_handle_success_response:fp=577eb83133678825
-  owner: architecture
-  reason: External HTTP request body - optional fields per OpenAI spec (Tier 3)
-  safety: dict.get with defaults for optional response fields from external clients
-  expires: '2026-05-13'
-- key: testing/chaosllm/response_generator.py:R1:ResponseGenerator:_generate_template_response:fp=1a7fd7d40dd31166
-  owner: architecture
-  reason: External HTTP request body - optional fields per OpenAI spec (Tier 3)
-  safety: dict.get for optional fields in OpenAI-compatible request body
-  expires: '2026-05-13'
-- key: testing/chaosllm/response_generator.py:R1:ResponseGenerator:_generate_template_response:fp=e1f5f3ec1f54d3bf
-  owner: architecture
-  reason: External HTTP request body - optional fields per OpenAI spec (Tier 3)
-  safety: dict.get for optional fields in OpenAI-compatible request body
-  expires: '2026-05-13'
-- key: testing/chaosllm/response_generator.py:R1:ResponseGenerator:_generate_echo_response:fp=9c62f554bd84bf39
-  owner: architecture
-  reason: External HTTP request body - optional fields per OpenAI spec (Tier 3)
-  safety: dict.get for optional fields in OpenAI-compatible request body
-  expires: '2026-05-13'
-- key: testing/chaosllm/response_generator.py:R1:ResponseGenerator:_generate_echo_response:fp=b6537e738ece4111
-  owner: architecture
-  reason: External HTTP request body - optional fields per OpenAI spec (Tier 3)
-  safety: dict.get for optional fields in OpenAI-compatible request body
-  expires: '2026-05-13'
-- key: testing/chaosllm/response_generator.py:R1:ResponseGenerator:_generate_echo_response:fp=2a224c15e71afef6
-  owner: architecture
-  reason: External HTTP request body - optional fields per OpenAI spec (Tier 3)
-  safety: dict.get for optional fields in OpenAI-compatible request body
-  expires: '2026-05-13'
-- key: testing/chaosllm/response_generator.py:R1:ResponseGenerator:_generate_echo_response:fp=44d90ac2f4e4bfa7
-  owner: architecture
-  reason: External HTTP request body - optional fields per OpenAI spec (Tier 3)
-  safety: dict.get for optional fields in OpenAI-compatible request body
-  expires: '2026-05-13'
-- key: testing/chaosllm/response_generator.py:R1:ResponseGenerator:_extract_prompt_text:fp=2f3a1d36755885b4
-  owner: architecture
-  reason: External HTTP request body - messages array traversal per OpenAI spec (Tier 3)
-  safety: dict.get for optional content field in message objects
-  expires: '2026-05-13'
-- key: testing/chaosllm/response_generator.py:R1:ResponseGenerator:_extract_prompt_text:fp=2db2cccbba96b8ff
-  owner: architecture
-  reason: External HTTP request body - messages array traversal per OpenAI spec (Tier 3)
-  safety: dict.get for optional content field in message objects
-  expires: '2026-05-13'
-- key: testing/chaosllm/response_generator.py:R1:ResponseGenerator:_extract_prompt_text:fp=fcc7a8be1155676a
-  owner: architecture
-  reason: External HTTP request body - messages array traversal per OpenAI spec (Tier 3)
-  safety: dict.get for optional content field in message objects
-  expires: '2026-05-13'
-- key: testing/chaosllm/response_generator.py:R1:ResponseGenerator:generate:fp=cae9f531fcf2bab7
-  owner: architecture
-  reason: External HTTP request body - optional fields per OpenAI spec (Tier 3)
-  safety: dict.get for optional fields in request body from external clients
-  expires: '2026-05-13'
-- key: testing/chaosllm/response_generator.py:R1:ResponseGenerator:generate:fp=594c17d534f0eeec
-  owner: architecture
-  reason: External HTTP request body - optional fields per OpenAI spec (Tier 3)
-  safety: dict.get for optional fields in request body from external clients
-  expires: '2026-05-13'
-- key: testing/chaosllm/response_generator.py:R6:ResponseGenerator:generate:fp=143f45d29656d914
-  owner: architecture
-  reason: Tier 3 boundary - template override from X-Fake-Template header may be malformed
-  safety: Catches jinja2.TemplateError and returns error-describing content in valid OpenAIResponse
-  expires: '2026-05-13'
-- key: testing/chaosllm/response_generator.py:R1:ResponseGenerator:generate:fp=5d1ff44e9886b040
-  owner: architecture
-  reason: External HTTP request body - optional fields per OpenAI spec (Tier 3)
-  safety: dict.get for optional fields in request body from external clients
-  expires: '2026-05-13'
-- key: testing/chaosllm/cli.py:R6:_version_callback:fp=07d1f709bb5fde2a
-  owner: architecture
-  reason: Silent recovery with explicit error handling path
-  safety: Code reviewed - legitimate pattern
-  expires: '2026-05-06'
-- key: testing/chaosllm_mcp/server.py:R1:create_server:call_tool:fp=e1b2cc34d0a57eea
-  owner: architecture
-  reason: Optional field access at trust boundary
-  safety: Code reviewed - legitimate pattern
-  expires: '2026-05-02'
-- key: testing/chaosengine/metrics_store.py:R7:MetricsStore:_cleanup_stale_connections:fp=b1b840bcf067814d
-  owner: architecture
-  reason: contextlib.suppress on ProgrammingError during stale connection cleanup
-  safety: Only suppresses error for already-closed connections from dead threads during cleanup
-  expires: '2026-05-13'
-- key: testing/chaosengine/metrics_store.py:R9:MetricsStore:rebuild_timeseries:fp=dfb516aeb64113be
-  owner: architecture
-  reason: dict.pop extracts latency_ms from classified metrics row - field is optional in variable-shape metrics data
-  safety: None default is correct - latency is not present in all metric types
-  expires: '2026-05-13'
+# --- In-tree chaos modules pending deletion (to be removed with errorworks migration) ---
+- key: testing/chaosengine/config_loader.py:R5:deep_merge:fp=57ea68262114b146
+  owner: migration
+  reason: In-tree chaos module pending deletion — errorworks migration in progress
+  safety: Module will be deleted; violations are temporary
+  expires: '2026-05-01'
+- key: testing/chaosengine/config_loader.py:R5:deep_merge:fp=6978d8fc67582da3
+  owner: migration
+  reason: In-tree chaos module pending deletion — errorworks migration in progress
+  safety: Module will be deleted; violations are temporary
+  expires: '2026-05-01'
+- key: testing/chaosengine/config_loader.py:R5:load_preset:fp=5f0adced3846bc6d
+  owner: migration
+  reason: In-tree chaos module pending deletion — errorworks migration in progress
+  safety: Module will be deleted; violations are temporary
+  expires: '2026-05-01'
 - key: testing/chaosengine/metrics_store.py:R1:MetricsStore:rebuild_timeseries:fp=06bbb83bf410a1e6
-  owner: architecture
-  reason: dict.get with default 0 for running totals accumulator - key may not exist on first encounter
-  safety: Standard accumulator pattern - 0 default is mathematically correct for summation
-  expires: '2026-05-13'
+  owner: migration
+  reason: In-tree chaos module pending deletion — errorworks migration in progress
+  safety: Module will be deleted; violations are temporary
+  expires: '2026-05-01'
+- key: testing/chaosengine/metrics_store.py:R5:MetricsStore:rebuild_timeseries:fp=9bd42e4003c1d713
+  owner: migration
+  reason: In-tree chaos module pending deletion — errorworks migration in progress
+  safety: Module will be deleted; violations are temporary
+  expires: '2026-05-01'
+- key: testing/chaosengine/metrics_store.py:R7:MetricsStore:_cleanup_stale_connections:fp=b1b840bcf067814d
+  owner: migration
+  reason: In-tree chaos module pending deletion — errorworks migration in progress
+  safety: Module will be deleted; violations are temporary
+  expires: '2026-05-01'
 - key: testing/chaosengine/metrics_store.py:R7:MetricsStore:close:fp=314d97263c63f4ef
-  owner: architecture
-  reason: contextlib.suppress on ProgrammingError during connection cleanup
-  safety: Only suppresses error for already-closed connections during teardown
-  expires: '2026-05-13'
-- key: testing/chaosweb/content_generator.py:R1:PresetBank:from_jsonl:fp=5a56fd078a04bea1
-  owner: architecture
-  reason: Tier 3 boundary - .get() on parsed JSONL object for optional url field
-  safety: Missing url defaults to empty string - correct for optional preset metadata
-  expires: '2026-05-13'
-- key: testing/chaosweb/content_generator.py:R1:PresetBank:from_jsonl:fp=0a35848c5039f4fa
-  owner: architecture
-  reason: Tier 3 boundary - .get() on parsed JSONL object for optional url field
-  safety: Missing url defaults to empty string - correct for optional preset metadata
-  expires: '2026-05-13'
-- key: testing/chaosweb/server.py:R1:ChaosWebServer:_redirect_hop_endpoint:fp=353446cc5ae0a294
-  owner: architecture
-  reason: Tier 3 boundary - .get() on HTTP query params for redirect chain state (hop counter)
-  safety: Missing hop defaults to 1 (chain start) - correct for redirect loop protocol
-  expires: '2026-05-06'
-- key: testing/chaosweb/server.py:R1:ChaosWebServer:_redirect_hop_endpoint:fp=6485eb681ce3693c
-  owner: architecture
-  reason: Tier 3 boundary - .get() on HTTP query params for redirect chain state (hop counter)
-  safety: Missing hop defaults to 1 (chain start) - correct for redirect loop protocol
-  expires: '2026-05-06'
-- key: testing/chaosweb/server.py:R1:ChaosWebServer:_redirect_hop_endpoint:fp=6e5cda63332f92c6
-  owner: architecture
-  reason: Tier 3 boundary - .get() on HTTP query params for redirect chain state (hop counter)
-  safety: Missing hop defaults to 1 (chain start) - correct for redirect loop protocol
-  expires: '2026-05-06'
-- key: testing/chaosweb/server.py:R1:ChaosWebServer:_page_endpoint:fp=326763a1dcd2638e
-  owner: architecture
-  reason: Tier 3 boundary - .get() on Starlette path_params dict (HTTP request data)
-  safety: Missing path defaults to empty string - correct for catch-all route
-  expires: '2026-05-06'
-- key: testing/chaosweb/server.py:R1:ChaosWebServer:_handle_http_error:fp=23c0ec3dbebb03d5
-  owner: architecture
-  reason: .get() on error message mapping - fallback for error types not in mapping
-  safety: Falls back to generic status code message - never swallows errors
-  expires: '2026-05-06'
+  owner: migration
+  reason: In-tree chaos module pending deletion — errorworks migration in progress
+  safety: Module will be deleted; violations are temporary
+  expires: '2026-05-01'
+- key: testing/chaosengine/metrics_store.py:R9:MetricsStore:rebuild_timeseries:fp=dfb516aeb64113be
+  owner: migration
+  reason: In-tree chaos module pending deletion — errorworks migration in progress
+  safety: Module will be deleted; violations are temporary
+  expires: '2026-05-01'
+- key: testing/chaosllm/cli.py:R6:_version_callback:fp=07d1f709bb5fde2a
+  owner: migration
+  reason: In-tree chaos module pending deletion — errorworks migration in progress
+  safety: Module will be deleted; violations are temporary
+  expires: '2026-05-01'
+- key: testing/chaosllm/config.py:R5:ErrorInjectionConfig:parse_range:fp=d5ece55ddfeecab3
+  owner: migration
+  reason: In-tree chaos module pending deletion — errorworks migration in progress
+  safety: Module will be deleted; violations are temporary
+  expires: '2026-05-01'
+- key: testing/chaosllm_mcp/server.py:R1:create_server:call_tool:fp=e1b2cc34d0a57eea
+  owner: migration
+  reason: In-tree chaos module pending deletion — errorworks migration in progress
+  safety: Module will be deleted; violations are temporary
+  expires: '2026-05-01'
+- key: testing/chaosllm_mcp/server.py:R6:_find_metrics_databases:fp=2bcfbfc1388cd9d8
+  owner: migration
+  reason: In-tree chaos module pending deletion — errorworks migration in progress
+  safety: Module will be deleted; violations are temporary
+  expires: '2026-05-01'
+- key: testing/chaosllm/response_generator.py:R1:ResponseGenerator:_extract_prompt_text:fp=2db2cccbba96b8ff
+  owner: migration
+  reason: In-tree chaos module pending deletion — errorworks migration in progress
+  safety: Module will be deleted; violations are temporary
+  expires: '2026-05-01'
+- key: testing/chaosllm/response_generator.py:R1:ResponseGenerator:_extract_prompt_text:fp=2f3a1d36755885b4
+  owner: migration
+  reason: In-tree chaos module pending deletion — errorworks migration in progress
+  safety: Module will be deleted; violations are temporary
+  expires: '2026-05-01'
+- key: testing/chaosllm/response_generator.py:R1:ResponseGenerator:_extract_prompt_text:fp=fcc7a8be1155676a
+  owner: migration
+  reason: In-tree chaos module pending deletion — errorworks migration in progress
+  safety: Module will be deleted; violations are temporary
+  expires: '2026-05-01'
+- key: testing/chaosllm/response_generator.py:R1:ResponseGenerator:_generate_echo_response:fp=2a224c15e71afef6
+  owner: migration
+  reason: In-tree chaos module pending deletion — errorworks migration in progress
+  safety: Module will be deleted; violations are temporary
+  expires: '2026-05-01'
+- key: testing/chaosllm/response_generator.py:R1:ResponseGenerator:_generate_echo_response:fp=44d90ac2f4e4bfa7
+  owner: migration
+  reason: In-tree chaos module pending deletion — errorworks migration in progress
+  safety: Module will be deleted; violations are temporary
+  expires: '2026-05-01'
+- key: testing/chaosllm/response_generator.py:R1:ResponseGenerator:_generate_echo_response:fp=9c62f554bd84bf39
+  owner: migration
+  reason: In-tree chaos module pending deletion — errorworks migration in progress
+  safety: Module will be deleted; violations are temporary
+  expires: '2026-05-01'
+- key: testing/chaosllm/response_generator.py:R1:ResponseGenerator:_generate_echo_response:fp=b6537e738ece4111
+  owner: migration
+  reason: In-tree chaos module pending deletion — errorworks migration in progress
+  safety: Module will be deleted; violations are temporary
+  expires: '2026-05-01'
+- key: testing/chaosllm/response_generator.py:R1:ResponseGenerator:generate:fp=594c17d534f0eeec
+  owner: migration
+  reason: In-tree chaos module pending deletion — errorworks migration in progress
+  safety: Module will be deleted; violations are temporary
+  expires: '2026-05-01'
+- key: testing/chaosllm/response_generator.py:R1:ResponseGenerator:generate:fp=5d1ff44e9886b040
+  owner: migration
+  reason: In-tree chaos module pending deletion — errorworks migration in progress
+  safety: Module will be deleted; violations are temporary
+  expires: '2026-05-01'
+- key: testing/chaosllm/response_generator.py:R1:ResponseGenerator:generate:fp=cae9f531fcf2bab7
+  owner: migration
+  reason: In-tree chaos module pending deletion — errorworks migration in progress
+  safety: Module will be deleted; violations are temporary
+  expires: '2026-05-01'
+- key: testing/chaosllm/response_generator.py:R1:ResponseGenerator:_generate_template_response:fp=1a7fd7d40dd31166
+  owner: migration
+  reason: In-tree chaos module pending deletion — errorworks migration in progress
+  safety: Module will be deleted; violations are temporary
+  expires: '2026-05-01'
+- key: testing/chaosllm/response_generator.py:R1:ResponseGenerator:_generate_template_response:fp=e1f5f3ec1f54d3bf
+  owner: migration
+  reason: In-tree chaos module pending deletion — errorworks migration in progress
+  safety: Module will be deleted; violations are temporary
+  expires: '2026-05-01'
+- key: testing/chaosllm/response_generator.py:R5:PresetBank:from_jsonl:fp=7acb26044132a01b
+  owner: migration
+  reason: In-tree chaos module pending deletion — errorworks migration in progress
+  safety: Module will be deleted; violations are temporary
+  expires: '2026-05-01'
+- key: testing/chaosllm/response_generator.py:R6:ResponseGenerator:generate:fp=143f45d29656d914
+  owner: migration
+  reason: In-tree chaos module pending deletion — errorworks migration in progress
+  safety: Module will be deleted; violations are temporary
+  expires: '2026-05-01'
+- key: testing/chaosllm/server.py:R1:ChaosLLMServer:_handle_completion_request:fp=14f8ad9db30db385
+  owner: migration
+  reason: In-tree chaos module pending deletion — errorworks migration in progress
+  safety: Module will be deleted; violations are temporary
+  expires: '2026-05-01'
+- key: testing/chaosllm/server.py:R1:ChaosLLMServer:_handle_completion_request:fp=4e9ee12d49d66d1c
+  owner: migration
+  reason: In-tree chaos module pending deletion — errorworks migration in progress
+  safety: Module will be deleted; violations are temporary
+  expires: '2026-05-01'
+- key: testing/chaosllm/server.py:R1:ChaosLLMServer:_handle_completion_request:fp=786fbff1794cda31
+  owner: migration
+  reason: In-tree chaos module pending deletion — errorworks migration in progress
+  safety: Module will be deleted; violations are temporary
+  expires: '2026-05-01'
+- key: testing/chaosllm/server.py:R1:ChaosLLMServer:_handle_completion_request:fp=dc896e6aa7c6bca4
+  owner: migration
+  reason: In-tree chaos module pending deletion — errorworks migration in progress
+  safety: Module will be deleted; violations are temporary
+  expires: '2026-05-01'
+- key: testing/chaosllm/server.py:R1:ChaosLLMServer:_handle_success_response:fp=577eb83133678825
+  owner: migration
+  reason: In-tree chaos module pending deletion — errorworks migration in progress
+  safety: Module will be deleted; violations are temporary
+  expires: '2026-05-01'
+- key: testing/chaosllm/server.py:R1:ChaosLLMServer:_handle_success_response:fp=c44f40e022c51ef6
+  owner: migration
+  reason: In-tree chaos module pending deletion — errorworks migration in progress
+  safety: Module will be deleted; violations are temporary
+  expires: '2026-05-01'
+- key: testing/chaosllm/server.py:R4:ChaosLLMServer:_record_request:fp=161b08f529c97d97
+  owner: migration
+  reason: In-tree chaos module pending deletion — errorworks migration in progress
+  safety: Module will be deleted; violations are temporary
+  expires: '2026-05-01'
 - key: testing/chaosweb/cli.py:R6:_version_callback:fp=02270eb369259576
-  owner: architecture
-  reason: Silent recovery with explicit error handling path
-  safety: Falls back to 'version unknown' on ImportError - correct for optional version detection
-  expires: '2026-05-06'
+  owner: migration
+  reason: In-tree chaos module pending deletion — errorworks migration in progress
+  safety: Module will be deleted; violations are temporary
+  expires: '2026-05-01'
+- key: testing/chaosweb/config.py:R5:WebErrorInjectionConfig:parse_range:fp=2587dd7f799b9412
+  owner: migration
+  reason: In-tree chaos module pending deletion — errorworks migration in progress
+  safety: Module will be deleted; violations are temporary
+  expires: '2026-05-01'
+- key: testing/chaosweb/content_generator.py:R1:PresetBank:from_jsonl:fp=0a35848c5039f4fa
+  owner: migration
+  reason: In-tree chaos module pending deletion — errorworks migration in progress
+  safety: Module will be deleted; violations are temporary
+  expires: '2026-05-01'
+- key: testing/chaosweb/content_generator.py:R1:PresetBank:from_jsonl:fp=5a56fd078a04bea1
+  owner: migration
+  reason: In-tree chaos module pending deletion — errorworks migration in progress
+  safety: Module will be deleted; violations are temporary
+  expires: '2026-05-01'
+- key: testing/chaosweb/content_generator.py:R5:PresetBank:from_jsonl:fp=a86816a07f74c3f6
+  owner: migration
+  reason: In-tree chaos module pending deletion — errorworks migration in progress
+  safety: Module will be deleted; violations are temporary
+  expires: '2026-05-01'
+- key: testing/chaosweb/content_generator.py:R5:WebResponse:__post_init__:fp=1044516dee5f9f05
+  owner: migration
+  reason: In-tree chaos module pending deletion — errorworks migration in progress
+  safety: Module will be deleted; violations are temporary
+  expires: '2026-05-01'
+- key: testing/chaosweb/server.py:R1:ChaosWebServer:_handle_http_error:fp=23c0ec3dbebb03d5
+  owner: migration
+  reason: In-tree chaos module pending deletion — errorworks migration in progress
+  safety: Module will be deleted; violations are temporary
+  expires: '2026-05-01'
+- key: testing/chaosweb/server.py:R1:ChaosWebServer:_page_endpoint:fp=326763a1dcd2638e
+  owner: migration
+  reason: In-tree chaos module pending deletion — errorworks migration in progress
+  safety: Module will be deleted; violations are temporary
+  expires: '2026-05-01'
+- key: testing/chaosweb/server.py:R1:ChaosWebServer:_redirect_hop_endpoint:fp=353446cc5ae0a294
+  owner: migration
+  reason: In-tree chaos module pending deletion — errorworks migration in progress
+  safety: Module will be deleted; violations are temporary
+  expires: '2026-05-01'
+- key: testing/chaosweb/server.py:R1:ChaosWebServer:_redirect_hop_endpoint:fp=6485eb681ce3693c
+  owner: migration
+  reason: In-tree chaos module pending deletion — errorworks migration in progress
+  safety: Module will be deleted; violations are temporary
+  expires: '2026-05-01'
+- key: testing/chaosweb/server.py:R1:ChaosWebServer:_redirect_hop_endpoint:fp=6e5cda63332f92c6
+  owner: migration
+  reason: In-tree chaos module pending deletion — errorworks migration in progress
+  safety: Module will be deleted; violations are temporary
+  expires: '2026-05-01'
+- key: testing/chaosweb/server.py:R5:ChaosWebServer:_handle_connection_error:fp=457bbc3cb3bdf590
+  owner: migration
+  reason: In-tree chaos module pending deletion — errorworks migration in progress
+  safety: Module will be deleted; violations are temporary
+  expires: '2026-05-01'
+- key: testing/chaosweb/server.py:R5:ChaosWebServer:_handle_malformed_content:fp=d4adf1d786c4b344
+  owner: migration
+  reason: In-tree chaos module pending deletion — errorworks migration in progress
+  safety: Module will be deleted; violations are temporary
+  expires: '2026-05-01'
+- key: testing/chaosweb/server.py:R5:ChaosWebServer:_handle_malformed_content:fp=e03ddf928fcfff9e
+  owner: migration
+  reason: In-tree chaos module pending deletion — errorworks migration in progress
+  safety: Module will be deleted; violations are temporary
+  expires: '2026-05-01'
+- key: testing/chaosweb/server.py:R5:ChaosWebServer:_handle_success:fp=53dacbe087c3fd98
+  owner: migration
+  reason: In-tree chaos module pending deletion — errorworks migration in progress
+  safety: Module will be deleted; violations are temporary
+  expires: '2026-05-01'
+- key: testing/chaosweb/server.py:R6:ChaosWebServer:_record_request:fp=f74392f7a8a56907
+  owner: migration
+  reason: In-tree chaos module pending deletion — errorworks migration in progress
+  safety: Module will be deleted; violations are temporary
+  expires: '2026-05-01'
