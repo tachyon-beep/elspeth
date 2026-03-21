@@ -189,7 +189,7 @@ def _build_augmented_output_schema(
 ) -> type[PluginSchema]:
     """Build an output schema that includes LLM-added fields.
 
-    LLM transforms add response, usage, model, and audit fields to output rows.
+    LLM transforms add response, usage, and model fields to output rows.
     The output schema must include these fields for DAG type validation to pass
     when downstream consumers have explicit schemas requiring LLM output fields.
 

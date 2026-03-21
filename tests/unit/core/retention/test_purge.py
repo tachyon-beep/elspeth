@@ -768,9 +768,11 @@ class TestPurgeGradeUpdateFailureResilience:
         assert result.grade_update_failures == ()
 
     def test_grade_update_failure_does_not_abort_remaining_updates(self, db: LandscapeDB, monkeypatch: pytest.MonkeyPatch) -> None:
-        """If update_grade_after_purge raises for one run, other runs still get updated."""
-        from elspeth.contracts.errors import AuditIntegrityError
+        """If update_grade_after_purge raises a transient error for one run, other runs still get updated.
 
+        Uses RuntimeError to simulate a transient DB failure.
+        AuditIntegrityError must NOT be swallowed — see separate test below.
+        """
         store = _ControlledStore()
         ref = store.store(b"payload")
         manager = PurgeManager(db, store)
@@ -787,7 +789,7 @@ class TestPurgeGradeUpdateFailureResilience:
         def _failing_grade_update(db_obj: LandscapeDB, run_id: str) -> None:
             del db_obj
             if run_id == "run-bad":
-                raise AuditIntegrityError(f"Cannot update: run '{run_id}' does not exist")
+                raise RuntimeError(f"Transient DB failure for run '{run_id}'")
             grade_updates.append(run_id)
 
         monkeypatch.setattr(
@@ -804,11 +806,38 @@ class TestPurgeGradeUpdateFailureResilience:
         # Payloads were still deleted (irreversible)
         assert result.deleted_count == 1
 
-    def test_grade_update_failures_logged(self, db: LandscapeDB, monkeypatch: pytest.MonkeyPatch) -> None:
-        """Grade update failures must be logged with structlog."""
-        import structlog.testing
+    def test_grade_update_audit_integrity_error_propagates(self, db: LandscapeDB, monkeypatch: pytest.MonkeyPatch) -> None:
+        """AuditIntegrityError from update_grade_after_purge must crash — never swallowed.
 
+        Per Data Manifesto: corruption in the audit trail must crash immediately.
+        A corrupt reproducibility_grade is evidence tampering if silently ignored.
+        """
         from elspeth.contracts.errors import AuditIntegrityError
+
+        store = _ControlledStore()
+        ref = store.store(b"payload")
+        manager = PurgeManager(db, store)
+
+        monkeypatch.setattr(
+            manager,
+            "_find_affected_run_ids",
+            lambda refs: {"run-corrupt"} if refs else set(),
+        )
+
+        def _integrity_failure(db_obj: LandscapeDB, run_id: str) -> None:
+            raise AuditIntegrityError(f"NULL reproducibility_grade for run {run_id} — audit data corruption")
+
+        monkeypatch.setattr(
+            "elspeth.core.retention.purge.update_grade_after_purge",
+            _integrity_failure,
+        )
+
+        with pytest.raises(AuditIntegrityError, match="audit data corruption"):
+            manager.purge_payloads([ref])
+
+    def test_grade_update_failures_logged(self, db: LandscapeDB, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Grade update failures (transient, non-integrity) must be logged with structlog."""
+        import structlog.testing
 
         store = _ControlledStore()
         ref = store.store(b"payload")
@@ -820,12 +849,12 @@ class TestPurgeGradeUpdateFailureResilience:
             lambda refs: {"run-fail"} if refs else set(),
         )
 
-        def _always_fail(db_obj: LandscapeDB, run_id: str) -> None:
-            raise AuditIntegrityError(f"run '{run_id}' does not exist")
+        def _transient_fail(db_obj: LandscapeDB, run_id: str) -> None:
+            raise RuntimeError(f"Transient failure for run '{run_id}'")
 
         monkeypatch.setattr(
             "elspeth.core.retention.purge.update_grade_after_purge",
-            _always_fail,
+            _transient_fail,
         )
 
         with structlog.testing.capture_logs() as cap_logs:

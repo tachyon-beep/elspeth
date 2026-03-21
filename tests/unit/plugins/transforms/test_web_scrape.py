@@ -382,6 +382,52 @@ def test_web_scrape_payload_storage(mock_ctx):
 
 
 @respx.mock
+def test_web_scrape_framework_bug_error_when_call_refs_none(mock_ctx):
+    """FrameworkBugError raised when Call.request_ref or response_ref is None.
+
+    This guards against a misconfigured LandscapeRecorder (no payload_store),
+    which would produce Calls with None refs and silently lose audit provenance.
+    """
+    from elspeth.contracts.errors import FrameworkBugError
+
+    # Override the fixture's mock_call to return None refs
+    mock_call_no_refs = Call(
+        call_id="test-call-id",
+        call_index=0,
+        call_type=CallType.HTTP,
+        status=CallStatus.SUCCESS,
+        request_hash="test-request-hash",
+        created_at=datetime.now(UTC),
+        state_id="state-123",
+        request_ref=None,
+        response_hash="test-response-hash",
+        response_ref=None,
+        latency_ms=100.0,
+    )
+    mock_ctx.landscape.record_call.return_value = mock_call_no_refs
+
+    html_content = "<html><body><h1>Title</h1></body></html>"
+    respx.get(f"https://{_TEST_IP}:443/page").mock(return_value=httpx.Response(200, text=html_content))
+
+    transform = WebScrapeTransform(
+        {
+            "schema": {"mode": "observed"},
+            "url_field": "url",
+            "content_field": "page_content",
+            "fingerprint_field": "page_fingerprint",
+            "http": {
+                "abuse_contact": "test@example.com",
+                "scraping_reason": "Testing",
+            },
+        }
+    )
+    transform.on_start(mock_ctx)
+
+    with patch("socket.getaddrinfo", _mock_getaddrinfo()), pytest.raises(FrameworkBugError, match="request_ref/response_ref"):
+        transform.process(make_pipeline_row({"url": "https://example.com/page"}), mock_ctx)
+
+
+@respx.mock
 def test_web_scrape_timeout_raises_network_error(mock_ctx):
     """Timeout should raise NetworkError (retryable)."""
     # Mock timeout by raising httpx.TimeoutException on the IP-based URL

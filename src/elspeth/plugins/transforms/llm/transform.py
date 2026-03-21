@@ -25,6 +25,7 @@ import structlog
 
 from elspeth.contracts import Determinism, TransformErrorReason, TransformResult, propagate_contract
 from elspeth.contracts.contexts import LifecycleContext, TransformContext
+from elspeth.contracts.errors import FrameworkBugError
 from elspeth.contracts.schema import SchemaConfig
 from elspeth.contracts.schema_contract import FieldContract, PipelineRow, SchemaContract
 from elspeth.plugins.infrastructure.base import BaseTransform
@@ -849,7 +850,17 @@ class MultiQueryStrategy:
             if result.row is not None:
                 accumulated_outputs.update(result.row.to_dict())
 
-        # Merge audit metadata from side channel (written by _process_fn)
+        # Merge audit metadata from side channel (written by _process_fn).
+        # Validate that every successful query contributed its audit metadata —
+        # a missing entry means incomplete provenance in the audit trail.
+        success_indices = {i for i, r in enumerate(query_results) if r.status == "success"}
+        missing_audit = success_indices - set(audit_metadata_by_index.keys())
+        if missing_audit:
+            raise FrameworkBugError(
+                f"Multi-query parallel execution lost audit metadata for query indices "
+                f"{sorted(missing_audit)}. Side-channel write in _process_fn did not "
+                f"execute for these successful queries."
+            )
         accumulated_audit: dict[str, object] = {}
         for idx in sorted(audit_metadata_by_index):
             accumulated_audit.update(audit_metadata_by_index[idx])
@@ -1038,11 +1049,8 @@ class LLMTransform(BaseTransform, BatchTransformMixin):
             guaranteed = get_llm_guaranteed_fields(self._response_field)
             self.declared_output_fields = frozenset(guaranteed)
 
-            # Output schema config with prefixed fields for DAG contract propagation.
+            # Output schema config with LLM output fields for DAG contract propagation.
             # INVARIANT: guaranteed_fields must be a superset of declared_output_fields.
-            # This transform builds _output_schema_config manually (not via
-            # _build_output_schema_config) because multi-query field computation
-            # requires prefix interpolation beyond the generic helper's scope.
             # See: docs/superpowers/specs/2026-03-20-output-schema-contract-enforcement-design.md
             base_guaranteed = schema_config.guaranteed_fields or ()
             self._output_schema_config = SchemaConfig(
