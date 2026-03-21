@@ -771,11 +771,11 @@ def build_execution_graph(
 
     try:
         topo_order = [NodeID(raw_id) for raw_id in nx.topological_sort(graph._graph)]
-    except nx.NetworkXUnfeasible:
+    except nx.NetworkXUnfeasible as unfeasible_exc:
         try:
             cycle = nx.find_cycle(graph._graph)
             cycle_str = " -> ".join(f"{edge[0]}" for edge in cycle)
-            raise GraphValidationError(f"Pipeline contains a cycle: {cycle_str}")
+            raise GraphValidationError(f"Pipeline contains a cycle: {cycle_str}") from unfeasible_exc
         except nx.NetworkXNoCycle as exc:
             raise GraphValidationError("Pipeline contains a cycle") from exc
     pipeline_nodes = [node_id for node_id in topo_order if node_id in processing_node_ids]

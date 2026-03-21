@@ -961,3 +961,30 @@ class TestArtifactDescriptorDeepFreeze:
         )
         assert isinstance(descriptor.metadata, MappingProxyType)
         assert isinstance(descriptor.metadata["tags"], tuple)
+
+
+# ---------------------------------------------------------------------------
+# Regression: SourceRow exception type (elspeth-a286241cfb)
+# ---------------------------------------------------------------------------
+
+
+class TestSourceRowExceptionType:
+    """SourceRow.to_pipeline_row must raise FrameworkBugError for missing contract."""
+
+    def test_no_contract_raises_framework_bug_error(self) -> None:
+        """Regression: elspeth-a286241cfb — missing contract is a framework bug,
+        not a ValueError. Consistent with GateResult.to_pipeline_row()."""
+        from elspeth.contracts.errors import FrameworkBugError
+        from elspeth.contracts.results import SourceRow
+
+        row = SourceRow(row={"id": 1}, is_quarantined=False, contract=None)
+        with pytest.raises(FrameworkBugError, match="no contract"):
+            row.to_pipeline_row()
+
+    def test_quarantined_row_still_raises_value_error(self) -> None:
+        """Quarantined rows raise ValueError — this is a state violation, not a bug."""
+        from elspeth.contracts.results import SourceRow
+
+        row = SourceRow.quarantined(row={"id": 1}, error="bad data", destination="errors")
+        with pytest.raises(ValueError, match="quarantined"):
+            row.to_pipeline_row()

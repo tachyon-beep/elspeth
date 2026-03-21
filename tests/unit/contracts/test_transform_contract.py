@@ -8,7 +8,7 @@ import pytest
 from pydantic import ConfigDict
 
 from elspeth.contracts.data import PluginSchema
-from elspeth.contracts.errors import TypeMismatchViolation
+from elspeth.contracts.errors import AuditIntegrityError, TypeMismatchViolation
 from elspeth.contracts.schema_contract import SchemaContract
 from elspeth.contracts.transform_contract import (
     create_output_contract_from_schema,
@@ -330,5 +330,5 @@ class TestFieldContractNullableCheckpoint:
                 }
             ],
         }
-        with pytest.raises(KeyError, match="nullable"):
+        with pytest.raises(AuditIntegrityError, match="Corrupt SchemaContract"):
             SchemaContract.from_checkpoint(data)

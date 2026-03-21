@@ -394,7 +394,7 @@ class SchemaContract:
                 for f in data["fields"]
             )
         except KeyError as e:
-            raise KeyError(f"Corrupt SchemaContract checkpoint: missing key {e}. Top-level keys: {sorted(data.keys())}") from e
+            raise AuditIntegrityError(f"Corrupt SchemaContract checkpoint: missing key {e}. Top-level keys: {sorted(data.keys())}") from e
 
         try:
             contract = cls(

@@ -532,8 +532,8 @@ class AggregationExecutor:
                             trigger_type=trigger_type,
                             state_id=guard.state_id,
                         )
-                    except (FrameworkBugError, AuditIntegrityError):
-                        raise  # System bugs and audit corruption must crash immediately
+                    except (FrameworkBugError, AuditIntegrityError, OrchestrationInvariantError):
+                        raise  # System bugs, audit corruption, and invariant violations must crash immediately
                     except (TypeError, AttributeError, KeyError, NameError):
                         raise  # Programming errors in recorder — crash to surface the bug
                     except Exception as cleanup_err:
