@@ -129,6 +129,28 @@ class TestCanonicalJsonConsistency:
         data = {"str": "hello", "int": 42, "bool": True, "null": None, "float": 3.14}
         assert contracts_hashing.stable_hash(data) == core_canonical.stable_hash(data)
 
+    def test_matches_core_canonical_for_mapping_proxy(self) -> None:
+        from types import MappingProxyType
+
+        frozen = MappingProxyType({"str": "hello", "int": 42, "nested": MappingProxyType({"x": 1})})
+        assert contracts_hashing.canonical_json(frozen) == core_canonical.canonical_json(frozen)
+
+    def test_stable_hash_matches_core_for_frozen(self) -> None:
+        from types import MappingProxyType
+
+        frozen = MappingProxyType({"key": "value", "list": (1, 2, 3)})
+        assert contracts_hashing.stable_hash(frozen) == core_canonical.stable_hash(frozen)
+
+    def test_matches_core_canonical_for_deeply_nested_frozen(self) -> None:
+        from types import MappingProxyType
+
+        frozen = MappingProxyType(
+            {
+                "a": MappingProxyType({"b": (MappingProxyType({"c": 3}),)}),
+            }
+        )
+        assert contracts_hashing.canonical_json(frozen) == core_canonical.canonical_json(frozen)
+
 
 class TestTelemetryLandscapeHashAlignment:
     """Verify there is only one hash computation path for call recording.
