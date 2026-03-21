@@ -31,6 +31,7 @@ from elspeth.contracts.errors import (
     OrchestrationInvariantError,
     PluginContractViolation,
 )
+from elspeth.contracts.freeze import deep_thaw
 from elspeth.contracts.node_state_context import AggregationFlushContext
 from elspeth.contracts.plugin_context import PluginContext
 from elspeth.contracts.types import NodeID, StepResolver
@@ -742,7 +743,9 @@ class AggregationExecutor:
                     )
 
                 # Reconstruct PipelineRow from checkpoint data
-                row_data = PipelineRow(dict(t.row_data), restored_contract)
+                # deep_thaw() recursively converts MappingProxyType→dict and tuple→list,
+                # preventing frozen nested containers from surviving into restored rows.
+                row_data = PipelineRow(deep_thaw(t.row_data), restored_contract)
 
                 reconstructed_tokens.append(
                     TokenInfo(

@@ -20,6 +20,7 @@ from elspeth.contracts.coalesce_checkpoint import (
 from elspeth.contracts.coalesce_metadata import ArrivalOrderEntry, CoalesceMetadata
 from elspeth.contracts.enums import NodeStateStatus, RowOutcome
 from elspeth.contracts.errors import AuditIntegrityError, CoalesceFailureReason, OrchestrationInvariantError
+from elspeth.contracts.freeze import deep_thaw
 from elspeth.contracts.schema_contract import FieldContract, PipelineRow, SchemaContract
 from elspeth.contracts.types import NodeID, StepResolver
 from elspeth.core.config import CoalesceSettings
@@ -269,7 +270,7 @@ class CoalesceExecutor:
             branches: dict[str, _BranchEntry] = {}
             for branch_name, token_checkpoint in pending_entry.branches.items():
                 restored_contract = SchemaContract.from_checkpoint(dict(token_checkpoint.contract))
-                restored_row = PipelineRow(dict(token_checkpoint.row_data), restored_contract)
+                restored_row = PipelineRow(deep_thaw(token_checkpoint.row_data), restored_contract)
                 token = TokenInfo(
                     row_id=token_checkpoint.row_id,
                     token_id=token_checkpoint.token_id,
@@ -550,7 +551,7 @@ class CoalesceExecutor:
                 policy=settings.policy,
                 expected_branches=tuple(settings.branches),
                 branches_arrived=tuple(pending.branches.keys()),
-                branches_lost=pending.lost_branches if pending.lost_branches else None,
+                branches_lost=pending.lost_branches,
                 quorum_required=settings.quorum_count,
                 timeout_seconds=settings.timeout_seconds,
             ),
@@ -743,7 +744,7 @@ class CoalesceExecutor:
             merge_strategy=settings.merge,
             expected_branches=tuple(settings.branches),
             branches_arrived=tuple(pending.branches.keys()),
-            branches_lost=pending.lost_branches if pending.lost_branches else {},
+            branches_lost=pending.lost_branches,
             arrival_order=[
                 ArrivalOrderEntry(
                     branch=branch,
