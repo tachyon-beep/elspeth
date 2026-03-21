@@ -298,3 +298,46 @@ class TestFrozenTypeHandling:
     def test_rejects_frozenset_with_type_error(self) -> None:
         with pytest.raises(TypeError, match="frozenset"):
             canonical_json({"s": frozenset({1, 2})})
+
+
+class TestFrozenRoundTripContracts:
+    """Hashing thawed output must equal hashing the frozen equivalent.
+
+    This guarantees that to_dict() (which thaws) and direct frozen access
+    produce identical hashes — the coherence invariant.
+    """
+
+    def test_simple_dict_round_trip(self) -> None:
+        from elspeth.contracts.freeze import deep_freeze
+
+        original = {"key": "value", "num": 42}
+        frozen = deep_freeze(original)
+        assert canonical_json(original) == canonical_json(frozen)
+
+    def test_nested_dict_round_trip(self) -> None:
+        from elspeth.contracts.freeze import deep_freeze
+
+        original = {"outer": {"inner": [1, 2, {"deep": True}]}}
+        frozen = deep_freeze(original)
+        assert canonical_json(original) == canonical_json(frozen)
+
+    def test_list_of_dicts_round_trip(self) -> None:
+        from elspeth.contracts.freeze import deep_freeze
+
+        original = [{"a": 1}, {"b": 2}, {"c": [3, 4]}]
+        frozen = deep_freeze(original)
+        assert canonical_json(original) == canonical_json(frozen)
+
+    def test_stable_hash_round_trip(self) -> None:
+        from elspeth.contracts.freeze import deep_freeze
+
+        original = {"model": "gpt-4", "messages": [{"role": "user", "content": "hi"}]}
+        frozen = deep_freeze(original)
+        assert stable_hash(original) == stable_hash(frozen)
+
+    def test_empty_containers_round_trip(self) -> None:
+        from elspeth.contracts.freeze import deep_freeze
+
+        original = {"empty_dict": {}, "empty_list": []}
+        frozen = deep_freeze(original)
+        assert canonical_json(original) == canonical_json(frozen)
