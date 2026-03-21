@@ -244,6 +244,36 @@ class TestSingleQuerySuccessReason:
         assert isinstance(single_query_result.success_reason["fields_added"], list)
         assert len(single_query_result.success_reason["fields_added"]) > 0
 
+    def test_success_reason_contains_audit_metadata(
+        self,
+        single_query_result: TransformResult,
+    ) -> None:
+        """Audit provenance fields live in success_reason['metadata'], not the row."""
+        assert single_query_result.success_reason is not None
+        metadata = single_query_result.success_reason["metadata"]
+        response_field = "llm_response"
+        assert f"{response_field}_template_hash" in metadata
+        assert f"{response_field}_variables_hash" in metadata
+        assert f"{response_field}_template_source" in metadata
+        assert f"{response_field}_lookup_hash" in metadata
+        assert f"{response_field}_lookup_source" in metadata
+        assert f"{response_field}_system_prompt_source" in metadata
+
+    def test_audit_fields_not_in_row(
+        self,
+        single_query_result: TransformResult,
+    ) -> None:
+        """Audit provenance fields must NOT be in the pipeline row."""
+        assert single_query_result.row is not None
+        row_data = single_query_result.row.to_dict()
+        response_field = "llm_response"
+        from elspeth.plugins.transforms.llm import LLM_AUDIT_SUFFIXES
+
+        for suffix in LLM_AUDIT_SUFFIXES:
+            assert f"{response_field}{suffix}" not in row_data, (
+                f"Audit field '{response_field}{suffix}' found in row — should be in success_reason['metadata'] only"
+            )
+
 
 # ---------------------------------------------------------------------------
 # Multi-query tests (sequential path)
@@ -279,6 +309,18 @@ class TestMultiQuerySuccessReason:
         assert "fields_added" in multi_query_result.success_reason
         assert isinstance(multi_query_result.success_reason["fields_added"], list)
         assert len(multi_query_result.success_reason["fields_added"]) > 0
+
+    def test_success_reason_contains_audit_metadata(
+        self,
+        multi_query_result: TransformResult,
+    ) -> None:
+        """Multi-query audit provenance fields live in success_reason['metadata']."""
+        assert multi_query_result.success_reason is not None
+        metadata = multi_query_result.success_reason["metadata"]
+        for query_name in ("sentiment", "topic"):
+            prefix = f"{query_name}_llm_response"
+            assert f"{prefix}_template_hash" in metadata
+            assert f"{prefix}_variables_hash" in metadata
 
 
 # ---------------------------------------------------------------------------
