@@ -10,7 +10,7 @@ The PluginContext carries everything a plugin needs during execution:
 from __future__ import annotations
 
 import logging
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
@@ -77,7 +77,7 @@ class PluginContext:
     """
 
     run_id: str
-    config: dict[str, Any]
+    config: Mapping[str, Any]
 
     # === Audit & Infrastructure ===
     landscape: LandscapeRecorder | None = None

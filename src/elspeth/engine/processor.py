@@ -12,7 +12,7 @@ from __future__ import annotations
 
 import hashlib
 from collections import deque
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from types import MappingProxyType
 from typing import TYPE_CHECKING, Any, cast
@@ -1149,7 +1149,7 @@ class RowProcessor:
         self,
         row_index: int,
         source_row: SourceRow,
-        transforms: list[Any],
+        transforms: Sequence[Any],
         ctx: PluginContext,
         *,
         coalesce_node_id: NodeID | None = None,
@@ -1217,7 +1217,7 @@ class RowProcessor:
         self,
         row_id: str,
         row_data: PipelineRow,
-        transforms: list[Any],
+        transforms: Sequence[Any],
         ctx: PluginContext,
         *,
         coalesce_node_id: NodeID | None = None,

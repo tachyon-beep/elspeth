@@ -87,12 +87,12 @@ class PipelineConfig:
     """
 
     source: SourceProtocol
-    transforms: list[RowPlugin]
-    sinks: dict[str, SinkProtocol]
-    config: dict[str, Any] = field(default_factory=dict)
-    gates: list[GateSettings] = field(default_factory=list)
-    aggregation_settings: dict[str, AggregationSettings] = field(default_factory=dict)
-    coalesce_settings: list[CoalesceSettings] = field(default_factory=list)
+    transforms: Sequence[RowPlugin]
+    sinks: Mapping[str, SinkProtocol]
+    config: Mapping[str, Any] = field(default_factory=dict)
+    gates: Sequence[GateSettings] = field(default_factory=list)
+    aggregation_settings: Mapping[str, AggregationSettings] = field(default_factory=dict)
+    coalesce_settings: Sequence[CoalesceSettings] = field(default_factory=list)
 
     def __post_init__(self) -> None:
         if not self.sinks:

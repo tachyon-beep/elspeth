@@ -18,6 +18,7 @@ Other imports use TYPE_CHECKING to avoid cycles.
 
 from __future__ import annotations
 
+from collections.abc import Mapping, Sequence
 from typing import TYPE_CHECKING
 
 # Import GateName at runtime - used in function body, not just type hints
@@ -34,12 +35,12 @@ if TYPE_CHECKING:
 
 
 def validate_route_destinations(
-    route_resolution_map: dict[tuple[NodeID, str], RouteDestination],
+    route_resolution_map: Mapping[tuple[NodeID, str], RouteDestination],
     available_sinks: set[str],
-    transform_id_map: dict[int, NodeID],
-    transforms: list[RowPlugin],
-    config_gate_id_map: dict[GateName, NodeID] | None = None,
-    config_gates: list[GateSettings] | None = None,
+    transform_id_map: Mapping[int, NodeID],
+    transforms: Sequence[RowPlugin],
+    config_gate_id_map: Mapping[GateName, NodeID] | None = None,
+    config_gates: Sequence[GateSettings] | None = None,
 ) -> None:
     """Validate all route destinations reference existing sinks.
 
@@ -91,7 +92,7 @@ def validate_route_destinations(
 
 
 def validate_transform_error_sinks(
-    transforms: list[RowPlugin],
+    transforms: Sequence[RowPlugin],
     available_sinks: set[str],
 ) -> None:
     """Validate all transform on_error destinations reference existing sinks.

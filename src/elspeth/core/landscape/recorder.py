@@ -194,7 +194,7 @@ class LandscapeRecorder:
 
     def begin_run(
         self,
-        config: dict[str, Any],
+        config: Mapping[str, Any],
         canonical_version: str,
         *,
         run_id: str | None = None,

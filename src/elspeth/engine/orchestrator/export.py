@@ -40,7 +40,7 @@ def export_landscape(
     db: LandscapeDB,
     run_id: str,
     settings: ElspethSettings,
-    sinks: dict[str, SinkProtocol],
+    sinks: Mapping[str, SinkProtocol],
 ) -> None:
     """Export audit trail to configured sink after run completion.
 
@@ -78,7 +78,7 @@ def export_landscape(
 
     # Get target sink config
     sink_name = export_config.sink
-    if sink_name not in sinks:
+    if sink_name is None or sink_name not in sinks:
         raise ValueError(f"Export sink '{sink_name}' not found in sinks")
     sink = sinks[sink_name]
 

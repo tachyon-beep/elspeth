@@ -691,11 +691,11 @@ class Orchestrator:
     def _assign_plugin_node_ids(
         self,
         source: SourceProtocol,
-        transforms: list[RowPlugin],
-        sinks: dict[str, SinkProtocol],
+        transforms: Sequence[RowPlugin],
+        sinks: Mapping[str, SinkProtocol],
         source_id: NodeID,
-        transform_id_map: dict[int, NodeID],
-        sink_id_map: dict[SinkName, NodeID],
+        transform_id_map: Mapping[int, NodeID],
+        sink_id_map: Mapping[SinkName, NodeID],
     ) -> None:
         """Explicitly assign node_id to all plugins with validation.
 
@@ -1538,7 +1538,12 @@ class Orchestrator:
         agg_transform_lookup: dict[str, AggNodeEntry] = {}
         if config.aggregation_settings:
             for t in config.transforms:
-                if isinstance(t, TransformProtocol) and t.is_batch_aware and t.node_id in config.aggregation_settings:
+                if (
+                    isinstance(t, TransformProtocol)
+                    and t.is_batch_aware
+                    and t.node_id is not None
+                    and t.node_id in config.aggregation_settings
+                ):
                     agg_transform_lookup[t.node_id] = AggNodeEntry(transform=t, node_id=NodeID(t.node_id))
 
         return RunContext(
