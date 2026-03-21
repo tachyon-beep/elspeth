@@ -39,14 +39,14 @@ class TestStorePayload:
     def test_stores_content_and_returns_sha256_hex(self):
         """store_payload() returns a 64-char hex string (SHA-256)."""
         db = LandscapeDB.in_memory()
-        # Use the real FilePayloadStore — it's lightweight and filesystem-based
+        # Use the real FilesystemPayloadStore — it's lightweight and filesystem-based
         import tempfile
         from pathlib import Path
 
-        from elspeth.core.landscape.payload_store import FilePayloadStore
+        from elspeth.core.payload_store import FilesystemPayloadStore
 
         with tempfile.TemporaryDirectory() as tmpdir:
-            store = FilePayloadStore(Path(tmpdir))
+            store = FilesystemPayloadStore(Path(tmpdir))
             recorder = LandscapeRecorder(db, payload_store=store)
 
             content = b"test processed content for audit"
@@ -69,16 +69,31 @@ class TestStorePayload:
         with pytest.raises(FrameworkBugError, match="store_payload.*payload_store"):
             recorder.store_payload(b"content", purpose="test")
 
+    def test_store_payload_empty_bytes(self):
+        """Empty content is valid — SHA-256 of empty is well-defined."""
+        db = LandscapeDB.in_memory()
+        import tempfile
+        from pathlib import Path
+
+        from elspeth.core.payload_store import FilesystemPayloadStore
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            store = FilesystemPayloadStore(Path(tmpdir))
+            recorder = LandscapeRecorder(db, payload_store=store)
+
+            result = recorder.store_payload(b"", purpose="empty_test")
+            assert len(result) == 64  # SHA-256 hex
+
     def test_purpose_label_is_documentation_only(self):
         """The purpose parameter does not affect storage — same content, same hash."""
         db = LandscapeDB.in_memory()
         import tempfile
         from pathlib import Path
 
-        from elspeth.core.landscape.payload_store import FilePayloadStore
+        from elspeth.core.payload_store import FilesystemPayloadStore
 
         with tempfile.TemporaryDirectory() as tmpdir:
-            store = FilePayloadStore(Path(tmpdir))
+            store = FilesystemPayloadStore(Path(tmpdir))
             recorder = LandscapeRecorder(db, payload_store=store)
 
             content = b"identical content"
@@ -182,45 +197,54 @@ import httpx
 import pytest
 
 from elspeth.contracts.audit import Call
-from elspeth.core.landscape.database import LandscapeDB
-from elspeth.core.landscape.recorder import LandscapeRecorder
-from elspeth.core.security.web import SSRFSafeRequest, validate_url_for_ssrf
+from elspeth.core.security.web import SSRFSafeRequest
 from elspeth.plugins.infrastructure.clients.http import AuditedHTTPClient
 
 
 class TestGetSsrfSafeCallReturn:
-    """Verify get_ssrf_safe() returns a Call with request/response refs."""
+    """Verify get_ssrf_safe() returns a Call with request/response refs.
 
-    def _make_client(self, recorder: LandscapeRecorder, state_id: str = "state-1") -> AuditedHTTPClient:
-        return AuditedHTTPClient(
-            recorder=recorder,
-            state_id=state_id,
+    Uses Mock() for the recorder — AuditedHTTPClient is what's being tested,
+    not the recorder. The recorder mock returns a Call with known ref hashes.
+    """
+
+    def _make_mock_call(self) -> Call:
+        """Create a mock Call with known request/response refs."""
+        from datetime import UTC, datetime
+        from elspeth.contracts import CallStatus, CallType
+        return Call(
+            call_id="test-call-id",
+            call_index=0,
+            call_type=CallType.HTTP,
+            status=CallStatus.SUCCESS,
+            request_hash="test-request-hash",
+            created_at=datetime.now(UTC),
+            state_id="state-1",
+            request_ref="test-request-ref-hash",
+            response_hash="test-response-hash",
+            response_ref="test-response-ref-hash",
+            latency_ms=100.0,
+        )
+
+    def _make_client_with_mock_recorder(self) -> tuple[AuditedHTTPClient, MagicMock]:
+        """Create AuditedHTTPClient with a mock recorder that returns a known Call."""
+        mock_recorder = MagicMock()
+        mock_call = self._make_mock_call()
+        mock_recorder.record_call.return_value = mock_call
+        mock_recorder.allocate_call_index.return_value = 0
+
+        client = AuditedHTTPClient(
+            recorder=mock_recorder,
+            state_id="state-1",
             run_id="run-1",
             telemetry_emit=lambda event: None,
             timeout=5.0,
         )
+        return client, mock_recorder
 
     def test_returns_three_tuple_with_call_on_success(self):
         """get_ssrf_safe() returns (Response, str, Call) on success."""
-        db = LandscapeDB.in_memory()
-        recorder = LandscapeRecorder(db)
-        run = recorder.begin_run(config={}, canonical_version="test")
-
-        # Register a node and begin a state so state_id is valid
-        node = recorder.register_node(
-            run_id=run.run_id,
-            plugin_name="test",
-            node_type="transform",
-            config={},
-            node_id="node-1",
-        )
-        state = recorder.begin_state(
-            run_id=run.run_id,
-            node_id=node.node_id,
-            token_id="token-1",
-            row_id="row-1",
-        )
-        client = self._make_client(recorder, state_id=state.state_id)
+        client, mock_recorder = self._make_client_with_mock_recorder()
 
         # Mock the actual HTTP call
         mock_response = MagicMock(spec=httpx.Response)
@@ -249,33 +273,16 @@ class TestGetSsrfSafeCallReturn:
         assert isinstance(response, MagicMock)  # our mock
         assert isinstance(final_url, str)
         assert isinstance(call, Call)
-        assert call.request_ref is not None
-        assert call.response_ref is not None
+        assert call.request_ref == "test-request-ref-hash"
+        assert call.response_ref == "test-response-ref-hash"
 
     def test_record_and_emit_returns_call(self):
         """_record_and_emit() returns a Call object."""
-        db = LandscapeDB.in_memory()
-        recorder = LandscapeRecorder(db)
-        run = recorder.begin_run(config={}, canonical_version="test")
-        node = recorder.register_node(
-            run_id=run.run_id,
-            plugin_name="test",
-            node_type="transform",
-            config={},
-            node_id="node-1",
-        )
-        state = recorder.begin_state(
-            run_id=run.run_id,
-            node_id=node.node_id,
-            token_id="token-1",
-            row_id="row-1",
-        )
-        client = self._make_client(recorder, state_id=state.state_id)
+        client, mock_recorder = self._make_client_with_mock_recorder()
 
         from elspeth.contracts import CallStatus
         from elspeth.contracts.call_data import HTTPCallRequest
 
-        call_index = recorder.allocate_call_index(state.state_id)
         request_dto = HTTPCallRequest(
             method="GET",
             url="http://example.com/",
@@ -283,7 +290,7 @@ class TestGetSsrfSafeCallReturn:
         )
 
         result = client._record_and_emit(
-            call_index=call_index,
+            call_index=0,
             full_url="http://example.com/",
             request_data=request_dto.to_dict(),
             response=None,
@@ -295,6 +302,7 @@ class TestGetSsrfSafeCallReturn:
         )
 
         assert isinstance(result, Call)
+        assert result.request_ref == "test-request-ref-hash"
 ```
 
 - [ ] **Step 2: Run test — verify it fails**
@@ -365,6 +373,10 @@ And at the end of the method (after the telemetry try/except block, around line 
 ```python
         return call
 ```
+
+**IMPORTANT:** Place `return call` as the LAST statement at the method level, AFTER the telemetry try/except block — not inside the except branch.
+
+**Note:** After this change, `_execute_request()` (used by `post()` and `get()`) silently discards the `Call` return. This is harmless — Python does not warn on discarded returns. Verify `ruff` does not flag this.
 
 Add the `Call` import. Find the `TYPE_CHECKING` block and add `Call` if not already imported:
 
@@ -621,7 +633,7 @@ class TestBuildLlmAuditMetadata:
 
 - [ ] **Step 3: Implement the two new functions**
 
-Read `src/elspeth/plugins/transforms/llm/__init__.py`. After the existing `populate_llm_metadata_fields` function (around line 168), add the two new functions:
+Read `src/elspeth/plugins/transforms/llm/__init__.py`. After the existing `populate_llm_metadata_fields` function (starts at line 125, ends around line 168), add the two new functions:
 
 ```python
 def populate_llm_operational_fields(
@@ -738,20 +750,52 @@ Replace with:
         llm_field_names = [prefix, *get_llm_guaranteed_fields(prefix)]
 ```
 
-- [ ] **Step 6: Run tests — verify the new tests pass**
+- [ ] **Step 6: Add schema builder exclusion test**
+
+Add to `tests/unit/plugins/llm/test_audit_metadata_functions.py`:
+
+```python
+class TestAugmentedSchemaExcludesAuditFields:
+    def test_single_query_schema_excludes_audit_fields(self):
+        """_build_augmented_output_schema output schema must NOT include audit field names."""
+        from elspeth.plugins.transforms.llm import LLM_AUDIT_SUFFIXES, _build_augmented_output_schema
+
+        # Read _build_augmented_output_schema to determine its signature and how to
+        # extract field names from the returned schema. The schema is a Pydantic model
+        # or SchemaContract — check the return type and use the appropriate accessor.
+        # Example (adjust based on actual return type):
+        schema = _build_augmented_output_schema(
+            base_fields=[],  # adjust params based on actual signature
+            response_field="llm_response",
+            mode="observed",
+        )
+        # Extract field names from the schema — the exact method depends on the return type.
+        # For SchemaContract: field_names = {f.normalized_name for f in schema.fields}
+        # For Pydantic: field_names = set(schema.model_fields.keys())
+        # Read the function to determine the correct accessor.
+        for suffix in LLM_AUDIT_SUFFIXES:
+            assert f"llm_response{suffix}" not in field_names, (
+                f"Audit field 'llm_response{suffix}' should NOT be in output schema — "
+                f"audit fields belong in success_reason['metadata']"
+            )
+```
+
+**Note:** Read `_build_augmented_output_schema()` to determine its actual signature and how to extract field names from the returned schema before writing the final test.
+
+- [ ] **Step 7: Run tests — verify the new tests pass**
 
 ```bash
 .venv/bin/python -m pytest tests/unit/plugins/llm/test_audit_metadata_functions.py -x
 ```
 
-- [ ] **Step 7: Run ruff and mypy**
+- [ ] **Step 8: Run ruff and mypy**
 
 ```bash
 .venv/bin/python -m ruff check src/elspeth/plugins/transforms/llm/__init__.py
 .venv/bin/python -m mypy src/elspeth/plugins/transforms/llm/__init__.py
 ```
 
-- [ ] **Step 8: Commit**
+- [ ] **Step 9: Commit**
 
 ```
 feat: split populate_llm_metadata_fields into operational and audit functions
@@ -1130,29 +1174,18 @@ Replace with:
         )
 ```
 
-- [ ] **Step 4: Update `_execute_parallel()` to collect audit metadata**
+- [ ] **Step 4: Update `_execute_parallel()` to reconstruct audit metadata after pool return**
 
-In `_execute_parallel`, the pool wraps `_QuerySuccess` in `TransformResult`. Find the `_process_fn` inner function (around lines 777-808). The audit metadata needs to be passed through via the success_reason.
+In `_execute_parallel`, the pool wraps `_QuerySuccess` in `TransformResult`. The `_process_fn` inner function does NOT carry audit metadata through `TransformResult.success_reason` (that would leak `_audit_metadata` keys into the Landscape's `node_states.success_reason_json`).
 
-Find the success branch in `_process_fn` (around lines 805-808):
+Instead, `build_llm_audit_metadata()` is cheap (string formatting of config-derived values). After the pool returns all results, reconstruct audit metadata from the query specs in the outer scope.
+
+The `_process_fn` success branch (around lines 805-808) does NOT change — leave it as-is:
 
 ```python
             return TransformResult.success(
                 PipelineRow(result.fields, observed),
                 success_reason={"action": "query_completed", "metadata": {"query_name": work["spec"].name}},
-            )
-```
-
-Replace with:
-
-```python
-            return TransformResult.success(
-                PipelineRow(result.fields, observed),
-                success_reason={
-                    "action": "query_completed",
-                    "metadata": {"query_name": work["spec"].name},
-                    "_audit_metadata": result.audit_metadata,
-                },
             )
 ```
 
@@ -1186,14 +1219,48 @@ Then in the parallel success merge section (around lines 829-850), find:
 Replace with:
 
 ```python
-        # Merge all successful partial outputs and audit metadata
+        # Merge all successful partial outputs
         accumulated_outputs: dict[str, Any] = {}
-        accumulated_audit: dict[str, object] = {}
         for result in query_results:
             if result.row is not None:
                 accumulated_outputs.update(result.row.to_dict())
-            if result.success_reason and "_audit_metadata" in result.success_reason:
-                accumulated_audit.update(result.success_reason["_audit_metadata"])
+
+        # Reconstruct audit metadata from query specs (cheap — config-derived values)
+        # Template hashes are per-spec constants available in the outer scope.
+        # Rendering happened inside _execute_one_query, but the template_hash and
+        # template_source come from self.template (config), and system_prompt_source
+        # from self.system_prompt_source. The per-query rendered.variables_hash and
+        # rendered.lookup_hash are row-dependent, so we reconstruct from the specs.
+        #
+        # NOTE: The sequential path gets per-row hashes from _QuerySuccess.audit_metadata.
+        # The parallel path cannot access _QuerySuccess (pool returns TransformResult).
+        # Since build_llm_audit_metadata() needs rendered.template_hash etc. from inside
+        # _execute_one_query, we use _QuerySuccess.audit_metadata on the sequential path
+        # and reconstruct here by re-calling build_llm_audit_metadata per spec.
+        # The template, lookup_hash, lookup_source, template_source, and system_prompt_source
+        # are all config-level (same for every row). Only variables_hash is row-specific
+        # and is already captured in the sequential path. For the parallel path, we
+        # re-render to get the hashes — read _execute_one_query to find where
+        # rendered.template_hash etc. come from.
+        #
+        # IMPLEMENTATION: Re-render the template for each spec to get the hashes.
+        # This is the same work _execute_one_query does, but the LLM call is the
+        # expensive part, not template rendering. Alternatively, extend _process_fn
+        # to stash audit_metadata in a parallel dict keyed by query index (not in
+        # success_reason). Choose whichever approach is cleaner when reading the code.
+        accumulated_audit: dict[str, object] = {}
+        for spec in self.query_specs:
+            prefix = f"{spec.name}_{self.response_field}"
+            rendered = self.template.render(row.to_dict(), spec.input_fields)
+            accumulated_audit.update(build_llm_audit_metadata(
+                prefix,
+                template_hash=rendered.template_hash,
+                variables_hash=rendered.variables_hash,
+                template_source=rendered.template_source,
+                lookup_hash=rendered.lookup_hash,
+                lookup_source=rendered.lookup_source,
+                system_prompt_source=self.system_prompt_source,
+            ))
 
         output = {**row.to_dict(), **accumulated_outputs}
         output_contract = propagate_contract(
@@ -1212,6 +1279,8 @@ Replace with:
             },
         )
 ```
+
+**Design rationale:** The previous design stashed `_audit_metadata` in `success_reason` as a private key for transport across the pool boundary. This violated CLAUDE.md (the `if "_audit_metadata" in result.success_reason` check is defensive programming) and leaked the key into `node_states.success_reason_json` in the Landscape. Instead, we reconstruct audit metadata after pool return by re-rendering templates (cheap — string formatting). The LLM API call is the expensive part, not template rendering.
 
 - [ ] **Step 5: Remove audit fields from multi-query `declared_output_fields`**
 
@@ -1339,11 +1408,12 @@ Replace with:
 ```python
 from elspeth.plugins.transforms.llm import (
     _build_augmented_output_schema,
-    build_llm_audit_metadata,
     get_llm_guaranteed_fields,
     populate_llm_operational_fields,
 )
 ```
+
+Note: `build_llm_audit_metadata` is NOT imported — batch transforms rely on per-row `calls` table records for audit provenance, not accumulated audit dicts.
 
 Update `declared_output_fields` (around line 181):
 
@@ -1421,71 +1491,38 @@ Replace with:
             model=response_model,
         )
 
-        audit_metadata = build_llm_audit_metadata(
-            self._response_field,
-            template_hash=rendered.template_hash,
-            variables_hash=rendered.variables_hash,
-            template_source=rendered.template_source,
-            lookup_hash=rendered.lookup_hash,
-            lookup_source=rendered.lookup_source,
-            system_prompt_source=self._system_prompt_source,
-        )
-
-        return _RowSuccess(row=output, audit_metadata=audit_metadata)
+        return _RowSuccess(row=output)
 ```
 
-Update `_RowSuccess` (around lines 70-74):
+**Do NOT add `audit_metadata` to `_RowSuccess`.** Do NOT change `_RowSuccess` — leave it as-is with only the `row` field. Batch transforms process potentially thousands of rows. Accumulating per-row audit dicts into a single `success_reason["metadata"]` creates an unbounded blob in `node_states.success_reason_json`.
 
-```python
-@dataclass(frozen=True, slots=True)
-class _RowSuccess:
-    """Successful single-row result in OpenRouter batch."""
+Per-row audit provenance is already recorded in the `calls` table via `AuditedHTTPClient.record_call()`. Each LLM API call gets a `Call` row with `request_ref` (hashed request including the rendered prompt) and `response_ref` (hashed response). The `calls` table provides per-row provenance without any additional work.
 
-    row: dict[str, Any]
-```
-
-Replace with:
-
-```python
-@dataclass(frozen=True, slots=True)
-class _RowSuccess:
-    """Successful single-row result in OpenRouter batch."""
-
-    row: dict[str, Any]
-    audit_metadata: dict[str, object]
-```
-
-Update the batch success_reason to include audit metadata. Find the `success_reason` construction in `_process_batch` (around line 494):
-
-```python
-            success_reason={"action": "enriched", "fields_added": [self._response_field]},
-```
-
-Read the surrounding code to understand how `_RowSuccess` results are collected and merged. The success_reason needs to include the merged audit metadata from all rows. Since batch transforms process multiple rows and return `success_multi`, the audit metadata should be a list keyed by row index.
-
-Find the section where `output_rows` is built from successful `_RowSuccess` results and add audit metadata collection. The exact merge pattern will depend on how the batch collects results — read the code to determine this. The success_reason should include:
+The batch-level `success_reason["metadata"]` should contain only **aggregate stats** (batch_size, total tokens, etc.) — not per-row audit fields. Find the `success_reason` construction in `_process_batch` and update it to include only aggregate metadata:
 
 ```python
             success_reason={
                 "action": "enriched",
                 "fields_added": [self._response_field],
-                "metadata": {f"row_{i}": row_success.audit_metadata for i, row_success in enumerate(successful_results)},
+                "metadata": {
+                    "batch_size": len(output_rows),
+                },
             },
 ```
 
-(Adjust the exact code based on the loop structure found when reading the file.)
+(Adjust based on what aggregate stats are already available in the batch processing loop.)
 
 - [ ] **Step 2: Migrate `azure_batch.py` — same pattern**
 
 Read `src/elspeth/plugins/transforms/llm/azure_batch.py` and apply the same changes:
 
-1. Update imports (same as openrouter_batch)
+1. Update imports (same as openrouter_batch — `populate_llm_operational_fields` only, no `build_llm_audit_metadata`)
 2. Update `declared_output_fields` (around line 163)
 3. Update `_output_schema_config` (around lines 197-211)
-4. Update the per-row `populate_llm_metadata_fields` call (around lines 1366-1377)
-5. Update the batch success_reason to include audit metadata
+4. Update the per-row `populate_llm_metadata_fields` call (around lines 1366-1377) — replace with `populate_llm_operational_fields` only
+5. Update the batch success_reason to contain only aggregate stats (batch_size), not per-row audit metadata
 
-For Azure batch, `populate_llm_metadata_fields` is called inline during result processing (not in a `_RowSuccess`). The audit metadata dict needs to be accumulated alongside the output rows and included in success_reason.
+For Azure batch, `populate_llm_metadata_fields` is called inline during result processing (not in a `_RowSuccess`). Apply the same principle as OpenRouter batch: per-row audit provenance is already in the `calls` table, so do NOT accumulate per-row audit dicts.
 
 Find the `populate_llm_metadata_fields` call (around line 1366):
 
@@ -1513,28 +1550,21 @@ Replace with:
                     usage=usage,
                     model=body.get("model"),
                 )
-
-                row_audit = build_llm_audit_metadata(
-                    self._response_field,
-                    template_hash=self._template.template_hash,
-                    variables_hash=variables_hash,
-                    template_source=self._template.template_source,
-                    lookup_hash=self._template.lookup_hash,
-                    lookup_source=self._template.lookup_source,
-                    system_prompt_source=self._system_prompt_source,
-                )
-                audit_metadata_by_row[custom_id] = row_audit
 ```
 
-Initialize `audit_metadata_by_row: dict[str, dict[str, object]] = {}` before the results processing loop. Then include it in the success_reason:
+Do NOT add `build_llm_audit_metadata()` calls per row. Do NOT accumulate `audit_metadata_by_row`. The batch success_reason should contain only aggregate stats:
 
 ```python
             success_reason={
                 "action": "enriched",
                 "fields_added": [self._response_field],
-                "metadata": audit_metadata_by_row,
+                "metadata": {
+                    "batch_size": len(output_rows),
+                },
             },
 ```
+
+Per-row provenance is already recorded in the `calls` table by `AuditedHTTPClient.record_call()` — each API call gets `request_ref`/`response_ref` hashes.
 
 - [ ] **Step 3: Update tests**
 
@@ -1613,10 +1643,18 @@ Replace with:
     def _fetch_url(self, safe_request: SSRFSafeRequest, ctx: TransformContext) -> tuple[httpx.Response, str, Call]:
 ```
 
-Add the `Call` import at the top of the file. Find the `TYPE_CHECKING` block or add to existing imports:
+Add `Call` as a **runtime import** (not inside `TYPE_CHECKING`). This file does not use `from __future__ import annotations`, so the `Call` type in the return annotation is evaluated at runtime and must be importable.
+
+Add to the existing imports at the top of the file:
 
 ```python
 from elspeth.contracts.audit import Call
+```
+
+Also add the `FrameworkBugError` import if not already present:
+
+```python
+from elspeth.contracts.errors import FrameworkBugError
 ```
 
 Find the return in `_fetch_url` (around line 427):
@@ -1685,6 +1723,12 @@ Replace with:
 ```python
         # Hashes from audit trail — request and response blobs are already stored
         # by AuditedHTTPClient via recorder.record_call()
+        if call.request_ref is None or call.response_ref is None:
+            raise FrameworkBugError(
+                "AuditedHTTPClient returned a Call with no request_ref/response_ref — "
+                "LandscapeRecorder must be configured with a payload_store for "
+                "hash-based audit provenance in WebScrapeTransform."
+            )
         request_hash = call.request_ref
         response_raw_hash = call.response_ref
 
@@ -1776,12 +1820,37 @@ Replace with:
 - Remove `payload_store.exists()` mock calls
 - Remove hash fields from `declared_output_fields` assertions
 - Update `fetch_url_final_ip` assertions — the value is now `safe_request.resolved_ip` (an IP address string), not `str(response.url)` (a URL string)
+- **IMPORTANT:** Configure the mock recorder to return a proper `Call` object. After this change, `process()` reads `call.request_ref` on the object returned by `landscape.record_call()`. A bare `Mock().record_call()` returns another `Mock`, whose `.request_ref` is a `Mock` object, not a string. In each test fixture that creates `mock_ctx.landscape`, add:
+
+```python
+from datetime import UTC, datetime
+from elspeth.contracts.audit import Call
+from elspeth.contracts import CallStatus, CallType
+
+mock_call = Call(
+    call_id="test-call-id",
+    call_index=0,
+    call_type=CallType.HTTP,
+    status=CallStatus.SUCCESS,
+    request_hash="test-request-hash",
+    created_at=datetime.now(UTC),
+    state_id="test-state",
+    request_ref="test-request-ref-hash",
+    response_hash="test-response-hash",
+    response_ref="test-response-ref-hash",
+    latency_ms=100.0,
+)
+mock_ctx.landscape.record_call.return_value = mock_call
+mock_ctx.landscape.allocate_call_index.return_value = 0
+mock_ctx.landscape.store_payload.return_value = "test-processed-hash"
+```
 
 **`tests/unit/plugins/transforms/test_web_scrape_security.py`:**
-- Remove hash field assertions from rows and `declared_output_fields`
+- Remove hash field assertions from rows and `declared_output_fields` (if any exist — the security tests focus on SSRF blocking, so hash assertions may only appear in mock setup via `payload_store`; remove those mock setup lines)
 
 **`tests/unit/contracts/transform_contracts/test_web_scrape_contract.py`:**
-- Remove `"fetch_request_hash"`, `"fetch_response_raw_hash"`, `"fetch_response_processed_hash"` from output field contract assertions (around lines 210-212, 234-236)
+- Remove `payload_store` from the `ctx` fixture (around line 93-103 where `mock_payload_store` is created and passed to `PluginContext`)
+- Check for any hash field assertions in output field contract tests and remove them (note: this file is only ~105 lines and may not have hash field assertions — the hash field assertions are in `tests/unit/plugins/transforms/test_web_scrape_security.py` if anywhere)
 
 - [ ] **Step 8: Run tests**
 
@@ -1906,6 +1975,8 @@ For each test file found:
 - Remove mock `PayloadStore` objects passed to contexts
 - If the test verified `payload_store.store()` was called, remove those assertions (already handled in Task 7 for WebScrape tests)
 
+**Note:** Task 7 already updated `test_web_scrape.py` and `test_web_scrape_security.py` to remove `payload_store` usage from assertion paths. Task 8's grep may still find `payload_store` references in mock setup — these are the construction-site references that Task 8 must remove.
+
 - [ ] **Step 5: Run the full unit test suite**
 
 ```bash
@@ -2003,26 +2074,57 @@ Each transform with audit-only fields defines a constant tuple:
 
 - [ ] **Step 2: Update `test_llm_success_reason.py`**
 
-Read `tests/unit/plugins/llm/test_llm_success_reason.py`. Add assertions for the 6 audit field names in `success_reason["metadata"]`:
+Read `tests/unit/plugins/llm/test_llm_success_reason.py`. The file already has `single_query_result` and `multi_query_result` fixtures (using `SingleQueryStrategy` and `MultiQueryStrategy` with mocked providers). Add these tests to the existing `TestSingleQuerySuccessReason` class:
 
 ```python
-def test_success_reason_contains_audit_metadata(self):
-    """Audit provenance fields live in success_reason['metadata'], not the row."""
-    # ... (set up and execute a successful LLM transform)
-    result = ...  # execute the transform
+    def test_success_reason_contains_audit_metadata(
+        self,
+        single_query_result: TransformResult,
+    ) -> None:
+        """Audit provenance fields live in success_reason['metadata'], not the row."""
+        assert single_query_result.success_reason is not None
+        metadata = single_query_result.success_reason["metadata"]
+        response_field = "llm_response"
+        # All 6 audit fields present
+        assert f"{response_field}_template_hash" in metadata
+        assert f"{response_field}_variables_hash" in metadata
+        assert f"{response_field}_template_source" in metadata
+        assert f"{response_field}_lookup_hash" in metadata
+        assert f"{response_field}_lookup_source" in metadata
+        assert f"{response_field}_system_prompt_source" in metadata
 
-    assert result.success_reason is not None
-    metadata = result.success_reason["metadata"]
-    # All 6 audit fields present
-    assert f"{response_field}_template_hash" in metadata
-    assert f"{response_field}_variables_hash" in metadata
-    assert f"{response_field}_template_source" in metadata
-    assert f"{response_field}_lookup_hash" in metadata
-    assert f"{response_field}_lookup_source" in metadata
-    assert f"{response_field}_system_prompt_source" in metadata
+    def test_audit_fields_not_in_row(
+        self,
+        single_query_result: TransformResult,
+    ) -> None:
+        """Audit provenance fields must NOT be in the pipeline row."""
+        assert single_query_result.row is not None
+        row_data = single_query_result.row.to_dict()
+        response_field = "llm_response"
+        from elspeth.plugins.transforms.llm import LLM_AUDIT_SUFFIXES
+        for suffix in LLM_AUDIT_SUFFIXES:
+            assert f"{response_field}{suffix}" not in row_data, (
+                f"Audit field '{response_field}{suffix}' found in row — "
+                f"should be in success_reason['metadata'] only"
+            )
 ```
 
-Read the existing test file to understand the fixture setup and adapt the test to match.
+And add to `TestMultiQuerySuccessReason`:
+
+```python
+    def test_success_reason_contains_audit_metadata(
+        self,
+        multi_query_result: TransformResult,
+    ) -> None:
+        """Multi-query audit provenance fields live in success_reason['metadata']."""
+        assert multi_query_result.success_reason is not None
+        metadata = multi_query_result.success_reason["metadata"]
+        # Multi-query uses prefixed fields: {query_name}_{response_field}_{suffix}
+        for query_name in ("sentiment", "topic"):
+            prefix = f"{query_name}_llm_response"
+            assert f"{prefix}_template_hash" in metadata
+            assert f"{prefix}_variables_hash" in metadata
+```
 
 - [ ] **Step 3: Update `test_schema_config.py`**
 
@@ -2043,7 +2145,11 @@ Read the existing test file to determine how to instantiate the transform for th
 .venv/bin/python -m pytest tests/unit/plugins/llm/test_llm_success_reason.py tests/unit/contracts/test_schema_config.py -x
 ```
 
-- [ ] **Step 5: Commit**
+- [ ] **Step 5: Note on integration test**
+
+**Follow-up task (not in this plan):** Create an integration test: end-to-end pipeline with ChaosLLM verifying audit fields in `success_reason`, not in output rows. Use the existing `chaosllm_sentiment` example config adapted for test. This plan is already large enough; the integration test is deferred.
+
+- [ ] **Step 6: Commit**
 
 ```
 docs: add AGENTS.md for transforms boundary rules; update assertion tests
@@ -2071,6 +2177,14 @@ grep -rn "fetch_request_hash\|fetch_response_raw_hash\|fetch_response_processed_
 
 For each match found in sink schemas or field lists, remove the hash field references.
 
+Also search for `fetch_url_final_ip` references in examples and tests that may pattern-match on the old URL format (now an IP string):
+
+```bash
+grep -rn "fetch_url_final_ip" examples/ src/elspeth/ tests/
+```
+
+**Note:** The spec's CI naming convention check (flag `*_hash`, `*_source`, `*_ref` in `declared_output_fields`) is deferred to a separate follow-up task — not part of this plan.
+
 - [ ] **Step 2: Run the full test suite**
 
 ```bash
@@ -2095,7 +2209,15 @@ For each match found in sink schemas or field lists, remove the hash field refer
 .venv/bin/python scripts/cicd/enforce_tier_model.py check --root src/elspeth --allowlist config/cicd/enforce_tier_model
 ```
 
-- [ ] **Step 6: Run example pipelines (if available)**
+- [ ] **Step 6: Verify no stale test assertions on template_hash in output rows**
+
+```bash
+grep -rn "template_hash" tests/property/ tests/integration/config/
+```
+
+Check whether `test_template_properties.py` or `test_template_resolver_integration.py` assert on `template_hash` in output rows (which would now fail). Update any found.
+
+- [ ] **Step 7: Run example pipelines (if available)**
 
 ```bash
 # Check if examples have execution scripts
@@ -2103,7 +2225,7 @@ ls examples/*/settings.yaml
 # Run any that exist and have the necessary test data
 ```
 
-- [ ] **Step 7: Update spec status**
+- [ ] **Step 8: Update spec status**
 
 Read `docs/superpowers/specs/2026-03-21-audit-provenance-boundary-design.md`. Find:
 
@@ -2117,7 +2239,7 @@ Replace with:
 **Status:** Implemented
 ```
 
-- [ ] **Step 8: Clean up dead code**
+- [ ] **Step 9: Clean up dead code**
 
 After all migrations are complete, check if `populate_llm_metadata_fields` and `get_llm_audit_fields` still have any callers:
 
@@ -2130,7 +2252,15 @@ If no callers remain outside of `__init__.py` itself:
 - Remove `get_llm_audit_fields` from `__all__` (keep the function as internal helper if `build_llm_audit_metadata` or collision checking uses the suffixes)
 - Remove `populate_llm_metadata_fields` from `__all__`
 
-- [ ] **Step 9: Final commit**
+- [ ] **Step 10: Note on `elspeth explain` TUI**
+
+Do NOT attempt to verify that `elspeth explain` retrieves provenance from `success_reason` metadata — the TUI currently has no code to surface `success_reason` data. Instead, create a filigree follow-up task: "Update elspeth explain TUI to display provenance from success_reason metadata".
+
+- [ ] **Step 11: Note on pre-migration runs**
+
+Pre-migration runs will not contain audit metadata in `success_reason_json`. This is expected — the data was previously in the row, not in the audit metadata slot. `elspeth explain` for old runs will show provenance from row fields (if preserved by sinks); new runs show provenance from `success_reason_json`.
+
+- [ ] **Step 12: Final commit**
 
 ```
 chore: final verification and cleanup for audit provenance boundary
