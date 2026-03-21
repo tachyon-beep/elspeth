@@ -146,6 +146,22 @@ class QueryBuilder:
             )
         text = extracted
         result_queue: multiprocessing.Queue = _FORK_CTX.Queue()  # type: ignore[type-arg]
+        try:
+            return self._run_regex_subprocess(text, result_queue)
+        finally:
+            result_queue.close()
+            result_queue.join_thread()
+
+    def _run_regex_subprocess(
+        self,
+        text: str,
+        result_queue: multiprocessing.Queue,  # type: ignore[type-arg]
+    ) -> QueryResult:
+        """Execute regex in subprocess and interpret result.
+
+        Separated from _build_regex to keep the try/finally cleanup clean.
+        """
+        assert self._compiled_pattern is not None
         p = _FORK_CTX.Process(
             target=_regex_worker,
             args=(self._compiled_pattern, text, result_queue),
@@ -164,16 +180,29 @@ class QueryBuilder:
                 }
             )
 
+        # Check for subprocess crash BEFORE reading the queue.
+        # _regex_worker is system-owned code — a crash is a code bug, not a data issue.
+        # Per offensive programming rules: plugin bugs crash, they don't quarantine.
+        if p.exitcode != 0:
+            raise RuntimeError(
+                f"Regex worker subprocess crashed with exitcode {p.exitcode} "
+                f"while evaluating pattern {self._compiled_pattern.pattern!r} "
+                f"against field '{self._query_field}'. This is a bug in the regex "
+                f"worker or the Python regex engine — not a data issue."
+            )
+
         try:
             matched, group0, group1 = result_queue.get_nowait()
-        except queue.Empty:
-            return QueryResult(
-                error={
-                    "reason": "no_regex_match",
-                    "field": self._query_field,
-                    "pattern": self._compiled_pattern.pattern,
-                }
-            )
+        except queue.Empty as exc:
+            # exitcode == 0 but queue empty — _regex_worker completed without
+            # putting a result. This should be impossible if _regex_worker is
+            # correct — it always puts exactly one tuple. Crash, don't fabricate.
+            raise RuntimeError(
+                f"Regex worker subprocess exited cleanly (exitcode 0) but produced "
+                f"no result for pattern {self._compiled_pattern.pattern!r} on field "
+                f"'{self._query_field}'. This is a bug in _regex_worker — it must "
+                f"always put exactly one result on the queue."
+            ) from exc
 
         if not matched:
             return QueryResult(

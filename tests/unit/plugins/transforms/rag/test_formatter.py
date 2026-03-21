@@ -55,11 +55,27 @@ class TestMaxContextLength:
         assert result.truncated is True
 
     def test_first_chunk_exceeds_limit(self):
+        """Hard-truncated output must not exceed max_length (including indicator)."""
         chunks = [_chunk("A very long chunk that exceeds the limit")]
-        result = format_context(chunks, format_mode="numbered", max_length=10)
-        assert len(result.text) <= 10 + len("[truncated]")
+        result = format_context(chunks, format_mode="numbered", max_length=20)
+        assert len(result.text) <= 20, f"Truncated text length {len(result.text)} exceeds max_length 20: {result.text!r}"
         assert result.text.endswith("[truncated]")
         assert result.truncated is True
+
+    def test_truncation_respects_exact_budget(self):
+        """The [truncated] indicator must fit within max_length, not be appended after."""
+        chunks = [_chunk("x" * 100)]
+        for max_len in [15, 20, 50, 100]:
+            result = format_context(chunks, format_mode="raw", max_length=max_len)
+            assert len(result.text) <= max_len, f"max_length={max_len} but got {len(result.text)} chars: {result.text!r}"
+
+    def test_truncation_with_max_length_smaller_than_indicator(self):
+        """When max_length is too small for '[truncated]', hard truncate without indicator."""
+        chunks = [_chunk("ABCDEFGHIJKLMNOP")]
+        for max_len in [1, 5, 10, 11]:
+            result = format_context(chunks, format_mode="raw", max_length=max_len)
+            assert len(result.text) <= max_len, f"max_length={max_len} but got {len(result.text)} chars: {result.text!r}"
+            assert result.truncated is True
 
     def test_no_truncation_when_within_limit(self):
         chunks = [_chunk("Short")]

@@ -85,6 +85,13 @@ def _apply_length_cap(
     if included:
         return FormattedContext(text=joiner.join(included), truncated=True)
 
-    # First chunk exceeds limit — hard truncate with indicator
-    truncated_text = parts[0][:max_length] + "[truncated]"
+    # First chunk exceeds limit — hard truncate with indicator.
+    # The indicator must fit WITHIN max_length, not be appended after.
+    indicator = "[truncated]"
+    content_budget = max_length - len(indicator)
+    if content_budget > 0:
+        truncated_text = parts[0][:content_budget] + indicator
+    else:
+        # max_length too small for indicator — hard truncate without it.
+        truncated_text = parts[0][:max_length]
     return FormattedContext(text=truncated_text, truncated=True)

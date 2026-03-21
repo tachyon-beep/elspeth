@@ -222,6 +222,25 @@ class TestProcessGuards:
             transform.process(row, ctx)
 
 
+class TestNoResultsQuarantineContext:
+    """Verify the no_results quarantine error includes full audit context."""
+
+    def test_no_results_error_includes_query_and_provider(self):
+        """The no_results error reason must include query and provider for audit traceability."""
+        transform, _ = TestProcessFlow()._setup_transform_with_mock_provider(
+            chunks=[],
+            on_no_results="quarantine",
+        )
+        row = _make_row({"question": "obscure query"})
+        ctx = _mock_ctx()
+
+        result = transform.process(row, ctx)
+        assert result.status == "error"
+        assert result.reason["reason"] == "no_results"
+        assert "query" in result.reason
+        assert "provider" in result.reason
+
+
 def test_plugin_discoverable():
     """rag_retrieval is found by the plugin scanner."""
     from elspeth.plugins.infrastructure.discovery import PLUGIN_SCAN_CONFIG
