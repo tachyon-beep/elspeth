@@ -194,10 +194,7 @@ class HTTPCallRequest:
     def __post_init__(self) -> None:
         if not isinstance(self.headers, MappingProxyType):
             object.__setattr__(self, "headers", MappingProxyType(dict(self.headers)))
-        if self.json is not None and not isinstance(self.json, MappingProxyType):
-            object.__setattr__(self, "json", deep_freeze(self.json))
-        if self.params is not None and not isinstance(self.params, MappingProxyType):
-            object.__setattr__(self, "params", deep_freeze(self.params))
+        freeze_fields(self, "json", "params")
         if self.hop_number is not None and self.resolved_ip is None:
             msg = "hop_number requires resolved_ip (redirect hops are always SSRF-safe)"
             raise ValueError(msg)

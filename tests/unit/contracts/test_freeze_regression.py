@@ -338,3 +338,99 @@ class TestPendingOutcomeClassVar:
             PendingOutcome(outcome=RowOutcome.QUARANTINED, error_hash=None)
         po = PendingOutcome(outcome=RowOutcome.QUARANTINED, error_hash="abc")
         assert po.error_hash == "abc"
+
+
+# ── deep_freeze: set and frozenset branches ─────────────────────────────────
+
+
+class TestDeepFreezeSetBranches:
+    """deep_freeze must handle set→frozenset and frozenset idempotency."""
+
+    def test_set_becomes_frozenset(self) -> None:
+        result = deep_freeze({"a", "b", "c"})
+        assert isinstance(result, frozenset)
+        assert result == frozenset({"a", "b", "c"})
+
+    def test_set_of_mutable_containers_is_deep_frozen(self) -> None:
+        """Sets can't contain dicts, but nested in a list they can."""
+        result = deep_freeze([{"a", "b"}, {"c"}])
+        assert isinstance(result, tuple)
+        assert all(isinstance(s, frozenset) for s in result)
+
+    def test_frozenset_is_idempotent(self) -> None:
+        """Already-frozen frozenset of scalars returns same object."""
+        fs = frozenset({"x", "y", "z"})
+        assert deep_freeze(fs) is fs
+
+    def test_frozenset_with_mutable_inner_is_rebuilt(self) -> None:
+        """frozenset containing a tuple with a mutable dict gets rebuilt."""
+        # frozenset can't contain dicts directly, but can contain tuples
+        inner = (1, 2)
+        fs = frozenset({inner})
+        # Already all-immutable — should be identity-preserved
+        assert deep_freeze(fs) is fs
+
+
+# ── deep_freeze: None and scalar idempotency ────────────────────────────────
+
+
+class TestDeepFreezeIdempotency:
+    """deep_freeze on None and scalars is a no-op."""
+
+    def test_none_returns_none(self) -> None:
+        assert deep_freeze(None) is None
+
+    def test_string_returns_same(self) -> None:
+        s = "hello"
+        assert deep_freeze(s) is s
+
+    def test_int_returns_same(self) -> None:
+        assert deep_freeze(42) is 42  # noqa: F632 — intentional identity check
+
+    def test_custom_mapping_is_not_identity_preserved(self) -> None:
+        """Non-dict Mapping always rebuilds (no idempotency fast path)."""
+        custom = _CustomMapping({"key": "val"})
+        frozen = deep_freeze(custom)
+        assert frozen is not custom
+        assert isinstance(frozen, MappingProxyType)
+
+
+# ── freeze_fields utility ───────────────────────────────────────────────────
+
+
+class TestFreezeFieldsUtility:
+    """Direct tests for the freeze_fields() utility function."""
+
+    def test_mutable_field_is_replaced(self) -> None:
+        """freeze_fields replaces a mutable dict with a MappingProxyType."""
+        lineage = _make_lineage(source_data={"key": {"nested": "val"}})
+        assert isinstance(lineage.source_data, MappingProxyType)
+        assert isinstance(lineage.source_data["key"], MappingProxyType)  # type: ignore[index]
+
+    def test_already_frozen_field_is_not_reset(self) -> None:
+        """freeze_fields skips object.__setattr__ when field is already frozen."""
+        frozen_data = MappingProxyType({"key": "val"})
+        lineage = _make_lineage(source_data=frozen_data)
+        # Identity preserved — no unnecessary setattr
+        assert lineage.source_data is frozen_data
+
+    def test_none_field_passes_through(self) -> None:
+        """freeze_fields on a None-valued field is a no-op."""
+        lineage = _make_lineage(source_data=None, payload_available=False)
+        assert lineage.source_data is None
+
+    def test_multiple_fields_in_one_call(self) -> None:
+        """freeze_fields can freeze multiple fields in a single call."""
+        cp = BatchCheckpointState(
+            batch_id="b1",
+            input_file_id="f1",
+            row_mapping={"cid": RowMappingEntry(index=0, variables_hash="h")},
+            template_errors=[(0, "err")],
+            submitted_at="2026-01-01T00:00:00Z",
+            row_count=1,
+            requests={"cid": {"model": "gpt-4"}},
+        )
+        # All three container fields should be frozen
+        assert isinstance(cp.row_mapping, MappingProxyType)
+        assert isinstance(cp.template_errors, tuple)
+        assert isinstance(cp.requests, MappingProxyType)

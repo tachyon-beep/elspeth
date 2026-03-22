@@ -391,8 +391,7 @@ class ArtifactDescriptor:
     metadata: MappingProxyType[str, object] | None = None
 
     def __post_init__(self) -> None:
-        if self.metadata is not None:
-            freeze_fields(self, "metadata")
+        freeze_fields(self, "metadata")
 
     @classmethod
     def for_file(

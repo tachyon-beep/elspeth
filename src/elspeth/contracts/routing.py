@@ -68,9 +68,7 @@ class RoutingAction:
                 "COPY would require dual terminal states (ROUTED + COMPLETED)."
             )
 
-        # Deep-freeze reason to prevent mutation via retained references.
-        if self.reason is not None:
-            freeze_fields(self, "reason")
+        freeze_fields(self, "reason")
 
     @classmethod
     def continue_(cls, *, reason: RoutingReason | None = None) -> "RoutingAction":

@@ -98,8 +98,7 @@ class Node:
         """Validate enum fields - Tier 1 crash on invalid types."""
         _validate_enum(self.node_type, NodeType, "node_type")
         _validate_enum(self.determinism, Determinism, "determinism")
-        if self.schema_fields is not None:
-            freeze_fields(self, "schema_fields")
+        freeze_fields(self, "schema_fields")
 
 
 @dataclass(frozen=True, slots=True)
@@ -452,8 +451,7 @@ class RowLineage:
     payload_available: bool
 
     def __post_init__(self) -> None:
-        if self.source_data is not None:
-            freeze_fields(self, "source_data")
+        freeze_fields(self, "source_data")
 
 
 class ExportStatusUpdate(TypedDict, total=False):

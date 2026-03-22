@@ -8,9 +8,9 @@ per_file_rules:
 - pattern: contracts/call_data.py
   rules:
   - FG2
-  reason: isinstance guards on json/params/headers/body check if already frozen before deep_freeze — idempotency optimization, body guard is load-bearing (Mapping|str|None union)
+  reason: isinstance guards on headers (scalar values) and body (Mapping|str|None union — guard is load-bearing)
   expires: null
-  max_hits: 5
+  max_hits: 3
 - pattern: contracts/schema_contract.py
   rules:
   - FG1
