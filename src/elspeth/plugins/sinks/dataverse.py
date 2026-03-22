@@ -343,6 +343,11 @@ class DataverseSink(BaseSink):
         assert self._client is not None, "on_start() must be called before write()"
         assert self._alternate_key_pipeline_field is not None
 
+        # Pre-process ALL rows before making any HTTP calls.  If _map_row or
+        # key validation fails on row N, we must not have already written rows
+        # 1..N-1 — that would leave audit states as FAILED while Dataverse data
+        # was actually modified (partial success = audit inconsistency).
+        prepared: list[tuple[str, dict[str, Any]]] = []
         for row in rows:
             # Tier 2: field_mapping guarantees the field exists. Direct access
             # — KeyError if absent is an upstream bug.
@@ -358,10 +363,12 @@ class DataverseSink(BaseSink):
                     f"PATCH URL for entity '{self._entity}'"
                 )
 
-            # Build URL and payload
             url = self._build_upsert_url(key_value)
             payload = self._map_row(row)
+            prepared.append((url, payload))
 
+        # All pre-processing succeeded — safe to make HTTP calls
+        for url, payload in prepared:
             # Execute upsert with audit recording + telemetry
             start_time = time.perf_counter()
             try:
