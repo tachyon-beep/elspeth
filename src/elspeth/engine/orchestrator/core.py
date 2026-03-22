@@ -1981,13 +1981,19 @@ class Orchestrator:
         coalesce_executor = loop_ctx.coalesce_executor
         coalesce_node_map = dict(loop_ctx.coalesce_node_map)
 
-        # CRITICAL: Restore operation_id before post-loop flushes.
+        # CRITICAL: Restore source-scoped identity before post-loop flushes.
         # On normal loop exit, the restore at end-of-iteration ensures
-        # operation_id == source_operation_id. On shutdown break, that
-        # restore is SKIPPED — operation_id is still None. Aggregation
-        # and coalesce flushes can trigger transforms that make external
-        # calls — those must be attributed to source_load, not orphaned.
-        ctx.operation_id = source_operation_id
+        # node_id == source_id and operation_id == source_operation_id.
+        # On shutdown break, that restore is SKIPPED — both fields still
+        # hold transform-scoped values. Aggregation and coalesce flushes
+        # can trigger transforms that make external calls — those must be
+        # attributed to source_load, not orphaned or misattributed.
+        # Idempotent on normal exit; essential on shutdown-break path.
+        self._restore_source_iteration_context(
+            ctx,
+            source_id=source_id,
+            source_operation_id=source_operation_id,
+        )
 
         if not interrupted_by_shutdown:
             # CRITICAL: Flush remaining aggregation buffers only at true end-of-source.

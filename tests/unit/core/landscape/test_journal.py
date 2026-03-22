@@ -619,6 +619,39 @@ class TestLoadPayload:
         with pytest.raises(TypeError, match="bad type in store"):
             journal._load_payload("some-ref")
 
+    def test_integrity_error_returns_error(self, tmp_path: Path) -> None:
+        """IntegrityError from hash mismatch must be caught like other payload errors."""
+        from elspeth.contracts.payload_store import IntegrityError
+
+        journal = _make_journal(
+            tmp_path,
+            include_payloads=True,
+            payload_base_path=str(tmp_path / "payloads"),
+        )
+        journal._payload_store = Mock()
+        journal._payload_store.retrieve.side_effect = IntegrityError("Payload integrity check failed: expected abc123, got def456")
+
+        content, error = journal._load_payload("some-ref")
+        assert content is None
+        assert error is not None
+        assert "payload_integrity_failed" in error
+
+    def test_integrity_error_with_fail_on_error_raises(self, tmp_path: Path) -> None:
+        """IntegrityError must propagate when fail_on_error is True."""
+        from elspeth.contracts.payload_store import IntegrityError
+
+        journal = _make_journal(
+            tmp_path,
+            fail_on_error=True,
+            include_payloads=True,
+            payload_base_path=str(tmp_path / "payloads"),
+        )
+        journal._payload_store = Mock()
+        journal._payload_store.retrieve.side_effect = IntegrityError("Payload integrity check failed: expected abc123, got def456")
+
+        with pytest.raises(IntegrityError):
+            journal._load_payload("some-ref")
+
     def test_decode_failure_returns_error(self, tmp_path: Path) -> None:
         journal = _make_journal(
             tmp_path,

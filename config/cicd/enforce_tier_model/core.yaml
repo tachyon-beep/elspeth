@@ -85,9 +85,9 @@ per_file_rules:
 - pattern: core/landscape/journal.py
   rules:
   - R5
-  reason: SQL parameter format normalization (list/tuple/dict)
+  reason: SQL parameter format normalization (list/tuple/dict) + IntegrityError prefix dispatch
   expires: null
-  max_hits: 4
+  max_hits: 5
 - pattern: core/landscape/row_data.py
   rules:
   - R5

@@ -372,3 +372,47 @@ class TestPropertyBased:
 
         # INVARIANT: results == [0, 1, 2, ..., 19]
         assert results == list(range(20))
+
+
+class TestSubmitValidation:
+    """Tests for submit() validation — state must not be corrupted by invalid inputs."""
+
+    def test_empty_row_id_does_not_corrupt_buffer_state(self) -> None:
+        """If RowTicket rejects empty row_id, _pending must not contain orphaned entry.
+
+        Bug: submit() writes _PendingEntry and advances _next_submit_seq
+        BEFORE RowTicket.__post_init__ fires validation. If row_id is empty,
+        the ValueError leaves an orphaned entry in _pending.
+        """
+        buffer: RowReorderBuffer[str] = RowReorderBuffer(max_pending=10)
+
+        with pytest.raises(ValueError, match="row_id must not be empty"):
+            buffer.submit("")
+
+        # Buffer state must be clean — no orphaned entries
+        assert buffer.pending_count == 0
+        metrics = buffer.get_metrics()
+        assert metrics["total_submitted"] == 0
+        assert metrics["current_pending"] == 0
+
+    def test_valid_submit_after_failed_submit_uses_correct_sequence(self) -> None:
+        """A failed submit must not consume a sequence number.
+
+        If _next_submit_seq advances before validation, subsequent valid
+        submits will have gaps in the sequence, causing the release loop
+        to hang waiting for the missing sequence.
+        """
+        buffer: RowReorderBuffer[str] = RowReorderBuffer(max_pending=10)
+
+        # This should fail and NOT advance sequence
+        with pytest.raises(ValueError):
+            buffer.submit("")
+
+        # Next valid submit should get sequence 0, not 1
+        ticket = buffer.submit("valid-row")
+        assert ticket.sequence == 0
+
+        # Complete and release should work without hanging
+        buffer.complete(ticket, "result")
+        entry = buffer.wait_for_next_release(timeout=0.1)
+        assert entry.result == "result"
