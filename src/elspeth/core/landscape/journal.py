@@ -262,12 +262,20 @@ class LandscapeJournal:
             return None, "payload_store_not_configured"
         try:
             content = self._payload_store.retrieve(ref)
-        except (OSError, PayloadNotFoundError, IntegrityError) as exc:
-            error_key = "payload_integrity_failed" if isinstance(exc, IntegrityError) else "payload_read_failed"
-            logger.error("journal_payload_read_failed", error=str(exc), ref=ref, error_key=error_key)
+        except IntegrityError as exc:
+            # Hash mismatch = corruption or tampering — Tier 1 violation.
+            # Always crash regardless of _fail_on_error: payload integrity
+            # failures are not operational issues, they are audit violations.
+            from elspeth.contracts.errors import AuditIntegrityError
+
+            raise AuditIntegrityError(
+                f"Payload integrity check failed for ref={ref!r}: {exc}. This indicates data corruption or tampering in the payload store."
+            ) from exc
+        except (OSError, PayloadNotFoundError) as exc:
+            logger.error("journal_payload_read_failed", error=str(exc), ref=ref)
             if self._fail_on_error:
                 raise
-            return None, f"{error_key}: {exc}"
+            return None, f"payload_read_failed: {exc}"
         try:
             return content.decode("utf-8"), None
         except UnicodeDecodeError as exc:

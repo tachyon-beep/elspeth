@@ -162,6 +162,8 @@ class SinkExecutor:
                     input_data=input_dict,
                 )
                 states.append((token, state))
+        except (FrameworkBugError, AuditIntegrityError):
+            raise  # System bugs and audit corruption must crash immediately
         except Exception as e:
             # If begin_node_state fails mid-batch, previously opened states
             # are left OPEN.  Complete them as FAILED before re-raising.
@@ -186,6 +188,8 @@ class SinkExecutor:
             batch_contract = tokens[0].row_data.contract
             for token in tokens[1:]:
                 batch_contract = batch_contract.merge(token.row_data.contract)
+        except (FrameworkBugError, AuditIntegrityError):
+            raise  # System bugs and audit corruption must crash immediately
         except Exception as e:
             merge_duration_ms = (time.perf_counter() - contract_merge_start) * 1000
             merge_error = ExecutionError(
@@ -254,6 +258,8 @@ class SinkExecutor:
                                     f"Sink '{sink.name}' row {row_index} is missing required fields "
                                     f"{missing}. This indicates an upstream transform/schema bug."
                                 )
+                except (FrameworkBugError, AuditIntegrityError):
+                    raise  # System bugs and audit corruption must crash immediately
                 except Exception as e:
                     validation_error = ExecutionError(
                         exception=str(e),
@@ -271,6 +277,8 @@ class SinkExecutor:
                 try:
                     artifact_info = sink.write(rows, ctx)
                     duration_ms = (time.perf_counter() - start) * 1000
+                except (FrameworkBugError, AuditIntegrityError):
+                    raise  # System bugs and audit corruption must crash immediately
                 except Exception as e:
                     duration_ms = (time.perf_counter() - start) * 1000
                     error = ExecutionError(
@@ -289,6 +297,8 @@ class SinkExecutor:
             # But first we must complete node_states as FAILED to maintain audit integrity
             try:
                 sink.flush()
+            except (FrameworkBugError, AuditIntegrityError):
+                raise  # System bugs and audit corruption must crash immediately
             except Exception as e:
                 # Flush failed - complete all node_states as FAILED before crashing
                 # Without this, states remain OPEN permanently (audit integrity violation)

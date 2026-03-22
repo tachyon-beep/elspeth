@@ -1903,6 +1903,29 @@ def resume(
                 typer.echo(f"\nResume interrupted after {e.rows_processed} rows.")
                 typer.echo(f"Resume with: elspeth resume {e.run_id} --execute")
             raise typer.Exit(3)  # noqa: B904 -- distinct exit code: 0=success, 1=error, 3=interrupted
+        except (FrameworkBugError, AuditIntegrityError) as e:
+            # Tier 1 violations and framework bugs MUST be clearly distinguishable
+            # from config errors — same pattern as the `run` command handler.
+            import traceback
+
+            if output_format == "json":
+                import json as json_mod_fatal
+
+                typer.echo(
+                    json_mod_fatal.dumps(
+                        {
+                            "event": "fatal",
+                            "error": str(e),
+                            "error_type": type(e).__name__,
+                            "traceback": traceback.format_exc(),
+                        }
+                    ),
+                    err=True,
+                )
+            else:
+                typer.echo(f"\nFATAL — {type(e).__name__}: {e}", err=True)
+                typer.echo(traceback.format_exc(), err=True)
+            raise typer.Exit(4) from e  # Exit 4: audit integrity / framework bug
         except Exception as e:
             import traceback
 

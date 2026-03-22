@@ -265,10 +265,10 @@ allow_hits:
   reason: Telemetry emission failure - must not crash main request flow
   safety: Logged and continues - telemetry is non-critical to HTTP processing
   expires: '2026-05-06'
-- key: plugins/infrastructure/pooling/executor.py:R4:PooledExecutor:_execute_batch_locked:fp=5f6e4b59e528052c
+- key: plugins/infrastructure/pooling/executor.py:R4:PooledExecutor:_execute_batch_locked:fp=15c82d9735566f01
   owner: bugfix
-  reason: Worker thread can raise any exception type — must catch broadly to prevent buffer slot leak
-  safety: Exception converted to TransformResult.error (row gets quarantined), buffer stays consistent
+  reason: Worker thread can raise any exception type — must catch broadly to prevent buffer slot leak (FrameworkBugError/AuditIntegrityError re-raised before this catch)
+  safety: Exception converted to TransformResult.error (row gets quarantined), buffer stays consistent; framework errors re-raised above
   expires: '2026-06-08'
 - key: plugins/sinks/azure_blob_sink.py:R5:AzureBlobSinkConfig:headers_mapping:fp=2ec56a095db42344
   owner: refactor

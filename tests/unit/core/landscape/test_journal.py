@@ -619,8 +619,15 @@ class TestLoadPayload:
         with pytest.raises(TypeError, match="bad type in store"):
             journal._load_payload("some-ref")
 
-    def test_integrity_error_returns_error(self, tmp_path: Path) -> None:
-        """IntegrityError from hash mismatch must be caught like other payload errors."""
+    def test_integrity_error_always_crashes_as_audit_violation(self, tmp_path: Path) -> None:
+        """IntegrityError (hash mismatch) must always crash as AuditIntegrityError.
+
+        Payload integrity failures indicate corruption or tampering — Tier 1
+        violations that must never be silently swallowed, regardless of
+        _fail_on_error setting. A pipeline that continues past a hash
+        mismatch would be operating on potentially tampered data.
+        """
+        from elspeth.contracts.errors import AuditIntegrityError
         from elspeth.contracts.payload_store import IntegrityError
 
         journal = _make_journal(
@@ -629,15 +636,18 @@ class TestLoadPayload:
             payload_base_path=str(tmp_path / "payloads"),
         )
         journal._payload_store = Mock()
-        journal._payload_store.retrieve.side_effect = IntegrityError("Payload integrity check failed: expected abc123, got def456")
+        journal._payload_store.retrieve.side_effect = IntegrityError("expected abc123, got def456")
 
-        content, error = journal._load_payload("some-ref")
-        assert content is None
-        assert error is not None
-        assert "payload_integrity_failed" in error
+        with pytest.raises(AuditIntegrityError, match="corruption or tampering"):
+            journal._load_payload("some-ref")
 
-    def test_integrity_error_with_fail_on_error_raises(self, tmp_path: Path) -> None:
-        """IntegrityError must propagate when fail_on_error is True."""
+    def test_integrity_error_with_fail_on_error_also_crashes(self, tmp_path: Path) -> None:
+        """IntegrityError crashes as AuditIntegrityError even with fail_on_error=True.
+
+        _fail_on_error only controls OSError/PayloadNotFoundError behavior.
+        IntegrityError always crashes regardless.
+        """
+        from elspeth.contracts.errors import AuditIntegrityError
         from elspeth.contracts.payload_store import IntegrityError
 
         journal = _make_journal(
@@ -647,9 +657,9 @@ class TestLoadPayload:
             payload_base_path=str(tmp_path / "payloads"),
         )
         journal._payload_store = Mock()
-        journal._payload_store.retrieve.side_effect = IntegrityError("Payload integrity check failed: expected abc123, got def456")
+        journal._payload_store.retrieve.side_effect = IntegrityError("expected abc123, got def456")
 
-        with pytest.raises(IntegrityError):
+        with pytest.raises(AuditIntegrityError, match="corruption or tampering"):
             journal._load_payload("some-ref")
 
     def test_decode_failure_returns_error(self, tmp_path: Path) -> None:
