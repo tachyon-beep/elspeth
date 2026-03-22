@@ -403,7 +403,28 @@ class AuditedLLMClient(AuditedClientBase):
                 # Without this, content-filtered calls vanish from the audit trail
                 # and create unexplained call-index gaps.
                 error_msg = "LLM returned null content (likely content-filtered by provider)"
-                raw_response = response.model_dump()
+                try:
+                    raw_response = response.model_dump()
+                except Exception as dump_exc:
+                    # model_dump() failed — still record the call to prevent
+                    # call-index gaps, then re-raise.
+                    self._recorder.record_call(
+                        state_id=self._state_id,
+                        call_index=call_index,
+                        call_type=CallType.LLM,
+                        status=CallStatus.ERROR,
+                        request_data=request_dto,
+                        error=LLMCallError(
+                            type="ResponseProcessingError",
+                            message=f"model_dump() failed in null-content path: {dump_exc}",
+                            retryable=False,
+                        ),
+                        latency_ms=latency_ms,
+                    )
+                    raise LLMClientError(
+                        f"Failed to serialize LLM response in null-content path: {dump_exc}",
+                        retryable=False,
+                    ) from dump_exc
                 usage = (
                     TokenUsage.from_dict(
                         {"prompt_tokens": response.usage.prompt_tokens, "completion_tokens": response.usage.completion_tokens}

@@ -1427,7 +1427,7 @@ class AzureBatchLLMTransform(BaseTransform):
             if "error" in result:
                 call_status = CallStatus.ERROR
                 response_data = None
-                error_data = {"error": result["error"]}
+                error_data = {"reason": "api_error", "error": result["error"]}
             else:
                 call_status = CallStatus.SUCCESS
                 # response.body guaranteed by boundary validation
