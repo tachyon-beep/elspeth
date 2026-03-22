@@ -251,8 +251,8 @@ class RunLifecycleRepository:
             self._ops.execute_update(
                 runs_table.update().where(runs_table.c.run_id == run_id).values(source_field_resolution_json=resolution_json)
             )
-        except AuditIntegrityError as exc:
-            raise AuditIntegrityError(f"Cannot record source field resolution: run {run_id} not found") from exc
+        except AuditIntegrityError:
+            raise  # Preserve original error message from execute_update
 
     def get_source_field_resolution(self, run_id: str) -> dict[str, str] | None:
         """Get source field resolution mapping for a run.
