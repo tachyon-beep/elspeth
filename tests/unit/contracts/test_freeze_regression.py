@@ -325,7 +325,6 @@ class TestPendingOutcomeClassVar:
     """Bug: _failure_outcomes set recreated on every construction."""
 
     def test_failure_outcomes_is_class_level(self) -> None:
-        assert hasattr(PendingOutcome, "_FAILURE_OUTCOMES")
         assert isinstance(PendingOutcome._FAILURE_OUTCOMES, frozenset)
 
     def test_failure_outcomes_shared_across_instances(self) -> None:

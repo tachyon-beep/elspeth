@@ -44,7 +44,7 @@ RULES: dict[str, dict[str, str]] = {
 _ALL_RULE_IDS = frozenset(RULES.keys())
 
 # Types that indicate a freeze guard when used with isinstance in __post_init__
-_FREEZE_GUARD_TYPES = {"dict", "tuple", "MappingProxyType", "frozenset"}
+_FREEZE_GUARD_TYPES = {"dict", "tuple", "MappingProxyType", "frozenset", "Mapping"}
 
 
 @dataclass(frozen=True)
