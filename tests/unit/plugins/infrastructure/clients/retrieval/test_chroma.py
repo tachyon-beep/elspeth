@@ -533,7 +533,7 @@ class TestDistanceTypeValidation:
                     "metadatas": [[{}, {}]],
                 },
             ),
-            pytest.raises(RetrievalError, match="non-numeric distance"),
+            pytest.raises(RetrievalError, match=r"non-numeric distance.*collection may need to be rebuilt"),
         ):
             provider.search("test", top_k=2, min_score=0.0, state_id="s1", token_id=None)
 

@@ -192,8 +192,10 @@ class ChromaSearchProvider:
             # retrieval chunks is worse than a crash (silent wrong result).
             if isinstance(distance, bool) or not isinstance(distance, (int, float)):
                 raise RetrievalError(
-                    f"ChromaDB returned non-numeric distance {distance!r} "
-                    f"(type={type(distance).__name__}) — possible index corruption or SDK bug",
+                    f"ChromaDB collection {self._config.collection!r} returned "
+                    f"non-numeric distance {distance!r} (type={type(distance).__name__}) "
+                    f"for document {doc_id!r}. This indicates index corruption or a "
+                    f"ChromaDB SDK bug — the collection may need to be rebuilt.",
                     retryable=False,
                 )
 
