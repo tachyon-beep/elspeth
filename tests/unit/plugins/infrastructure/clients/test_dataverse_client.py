@@ -232,6 +232,7 @@ class TestDataversePageResponse:
                 latency_ms=10.0,
                 headers={},
                 request_headers={"Authorization": "Bearer fake"},
+                request_url="https://example.crm.dynamics.com/api/data/v9.2/contacts",
                 next_link="https://example.crm.dynamics.com/next",
                 paging_cookie="<cookie/>",
                 more_records=True,
@@ -244,6 +245,7 @@ class TestDataversePageResponse:
             latency_ms=10.0,
             headers={},
             request_headers={"Authorization": "Bearer fake"},
+            request_url="https://example.crm.dynamics.com/api/data/v9.2/contacts",
             next_link="https://example.crm.dynamics.com/next",
             paging_cookie=None,
             more_records=True,
@@ -258,6 +260,7 @@ class TestDataversePageResponse:
             latency_ms=10.0,
             headers={},
             request_headers={"Authorization": "Bearer fake"},
+            request_url="https://example.crm.dynamics.com/api/data/v9.2/contacts",
             next_link=None,
             paging_cookie="<cookie/>",
             more_records=True,
@@ -272,6 +275,7 @@ class TestDataversePageResponse:
             latency_ms=10.0,
             headers={},
             request_headers={"Authorization": "Bearer fake"},
+            request_url="https://example.crm.dynamics.com/api/data/v9.2/contacts",
             next_link=None,
             paging_cookie=None,
             more_records=False,
@@ -967,3 +971,133 @@ class TestDataverseClientError:
         err = DataverseClientError("minimal", retryable=False)
         assert err.status_code is None
         assert err.latency_ms is None
+
+
+# ---------------------------------------------------------------------------
+# Bug fix: bearer token fingerprinted before DTO storage (elspeth-7aa72f1ce2)
+# ---------------------------------------------------------------------------
+
+
+class TestBearerTokenFingerprinting:
+    """Verify raw bearer tokens are fingerprinted in the client, not the source."""
+
+    def test_request_headers_fingerprinted_in_response(self, transport: MockTransport, client: DataverseClient) -> None:
+        """DataversePageResponse.request_headers must NOT contain raw bearer token.
+
+        In production (FINGERPRINT_KEY set): Authorization becomes <fingerprint:{hmac}>.
+        In dev mode (ALLOW_RAW_SECRETS=true): Authorization is removed entirely.
+        Both are acceptable — raw token is NOT acceptable.
+        """
+        transport.add_response(_make_json_response({"value": [{"id": "1"}]}))
+        page = client.get_page(f"{ENV_URL}/api/data/v9.2/contacts")
+
+        auth_value = page.request_headers.get("Authorization")
+        if auth_value is not None:
+            # Header present — must be fingerprinted, not raw
+            assert auth_value.startswith("<fingerprint:"), (
+                f"Authorization header present but not fingerprinted: {auth_value!r}. "
+                f"Expected '<fingerprint:...>' format or header removal."
+            )
+        # If header is absent, dev mode removed it — also acceptable
+
+    def test_request_headers_fingerprinted_on_204(self, transport: MockTransport, client: DataverseClient) -> None:
+        """204 No Content path also fingerprints headers."""
+        transport.add_response(_make_empty_response(204))
+        page = client.get_page(f"{ENV_URL}/api/data/v9.2/contacts")
+
+        auth_value = page.request_headers.get("Authorization")
+        if auth_value is not None:
+            assert auth_value.startswith("<fingerprint:"), f"Authorization header present but not fingerprinted on 204 path: {auth_value!r}"
+
+    def test_request_url_captured(self, transport: MockTransport, client: DataverseClient) -> None:
+        """DataversePageResponse captures the actual request URL."""
+        url = f"{ENV_URL}/api/data/v9.2/contacts?$top=10"
+        transport.add_response(_make_json_response({"value": [{"id": "1"}]}))
+        page = client.get_page(url)
+
+        assert page.request_url == url
+
+
+# ---------------------------------------------------------------------------
+# Bug fix: value array item type validation (elspeth-1abc0d36d2)
+# ---------------------------------------------------------------------------
+
+
+class TestValueArrayTypeValidation:
+    """Verify non-dict items in value array are rejected at Tier 3 boundary."""
+
+    def test_string_item_rejected(self, transport: MockTransport, client: DataverseClient) -> None:
+        """String element in value array raises DataverseClientError."""
+        transport.add_response(_make_json_response({"value": [{"id": "1"}, "not-a-dict"]}))
+        with pytest.raises(DataverseClientError, match=r"value\[1\].*str"):
+            client.get_page(f"{ENV_URL}/api/data/v9.2/contacts")
+
+    def test_int_item_rejected(self, transport: MockTransport, client: DataverseClient) -> None:
+        """Integer element in value array raises DataverseClientError."""
+        transport.add_response(_make_json_response({"value": [42]}))
+        with pytest.raises(DataverseClientError, match=r"value\[0\].*int"):
+            client.get_page(f"{ENV_URL}/api/data/v9.2/contacts")
+
+    def test_null_item_rejected(self, transport: MockTransport, client: DataverseClient) -> None:
+        """null element in value array raises DataverseClientError."""
+        transport.add_response(_make_json_response({"value": [None]}))
+        with pytest.raises(DataverseClientError, match=r"value\[0\].*NoneType"):
+            client.get_page(f"{ENV_URL}/api/data/v9.2/contacts")
+
+    def test_nested_list_item_rejected(self, transport: MockTransport, client: DataverseClient) -> None:
+        """Nested list element in value array raises DataverseClientError."""
+        transport.add_response(_make_json_response({"value": [[1, 2, 3]]}))
+        with pytest.raises(DataverseClientError, match=r"value\[0\].*list"):
+            client.get_page(f"{ENV_URL}/api/data/v9.2/contacts")
+
+    def test_valid_dict_items_accepted(self, transport: MockTransport, client: DataverseClient) -> None:
+        """All-dict value array passes validation."""
+        transport.add_response(_make_json_response({"value": [{"id": "1"}, {"id": "2"}]}))
+        page = client.get_page(f"{ENV_URL}/api/data/v9.2/contacts")
+        assert len(page.rows) == 2
+
+    def test_empty_value_array_accepted(self, transport: MockTransport, client: DataverseClient) -> None:
+        """Empty value array passes validation (no items to check)."""
+        transport.add_response(_make_json_response({"value": []}))
+        page = client.get_page(f"{ENV_URL}/api/data/v9.2/contacts")
+        assert len(page.rows) == 0
+
+
+# ---------------------------------------------------------------------------
+# Bug fix: request_url tracked per page (elspeth-fafd21248c)
+# ---------------------------------------------------------------------------
+
+
+class TestRequestUrlTracking:
+    """Verify paginated responses carry the actual URL fetched, not the initial URL."""
+
+    def test_paginated_pages_carry_correct_urls(self, transport: MockTransport, client: DataverseClient) -> None:
+        """Each page in paginated iteration carries its own request_url."""
+        initial_url = f"{ENV_URL}/api/data/v9.2/contacts"
+        next_url = f"{ENV_URL}/api/data/v9.2/contacts?$skiptoken=abc123"
+
+        # Page 1: has nextLink
+        transport.add_response(
+            _make_json_response(
+                {
+                    "value": [{"id": "1"}],
+                    "@odata.nextLink": next_url,
+                }
+            )
+        )
+        # Page 2: no nextLink (last page)
+        transport.add_response(
+            _make_json_response(
+                {
+                    "value": [{"id": "2"}],
+                }
+            )
+        )
+
+        # Patch SSRF validation since nextLink domain check requires DNS
+        with patch.object(client, "_validate_url_ssrf"):
+            pages = list(client.paginate_odata(initial_url))
+
+        assert len(pages) == 2
+        assert pages[0].request_url == initial_url
+        assert pages[1].request_url == next_url

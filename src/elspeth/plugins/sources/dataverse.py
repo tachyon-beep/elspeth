@@ -33,7 +33,6 @@ from elspeth.plugins.infrastructure.clients.dataverse import (
     DataversePageResponse,
     validate_additional_domain,
 )
-from elspeth.plugins.infrastructure.clients.fingerprinting import fingerprint_headers
 from elspeth.plugins.infrastructure.config_base import DataPluginConfig
 from elspeth.plugins.infrastructure.schema_factory import create_schema_from_config
 from elspeth.plugins.sources.field_normalization import (
@@ -500,7 +499,7 @@ class DataverseSource(BaseSource):
             request_data = {
                 "method": "GET",
                 "url": url,
-                "headers": fingerprint_headers(page.request_headers),
+                "headers": page.request_headers,  # Already fingerprinted by client
             }
             response_data = {
                 "status_code": page.status_code,
@@ -568,6 +567,10 @@ class DataverseSource(BaseSource):
         # Client must be constructed by on_start() before load()
         assert self._client is not None, "on_start() must be called before load()"
 
+        # Track the last URL seen — used in the error path where we don't
+        # have a page response but need the actual URL for audit accuracy.
+        last_fetched_url: str = self._build_query_url() if self._entity else "(FetchXML)"
+
         try:
             if self._entity is not None:
                 # Structured OData query
@@ -588,10 +591,12 @@ class DataverseSource(BaseSource):
 
             for page in page_iterator:
                 pages_fetched += 1
-                current_url = self._build_query_url() if self._entity else f"(FetchXML page {pages_fetched})"
+                last_fetched_url = page.request_url
 
-                # Record successful page fetch
-                self._record_page_call(ctx, url=current_url, page=page)
+                # Record successful page fetch — use the actual URL from the
+                # response DTO, not the rebuilt initial URL. For pages 2+, the
+                # actual URL is the nextLink from the previous page.
+                self._record_page_call(ctx, url=page.request_url, page=page)
 
                 # Process rows
                 for raw_row in page.rows:
@@ -615,8 +620,28 @@ class DataverseSource(BaseSource):
                             )
                         continue
 
-                    # Normalize field names
-                    normalized_row = self._normalize_row_fields(cleaned_row, is_first_row)
+                    # Normalize field names — Tier 3 boundary: field names from
+                    # Dataverse can be arbitrary strings. normalize_field_name()
+                    # raises ValueError if a name normalizes to empty string
+                    # (e.g., all-special-character field names). Quarantine the
+                    # row rather than crashing the entire load.
+                    try:
+                        normalized_row = self._normalize_row_fields(cleaned_row, is_first_row)
+                    except ValueError as e:
+                        quarantine_count += 1
+                        ctx.record_validation_error(
+                            row=cleaned_row,
+                            error=f"Field normalization failed: {e}",
+                            schema_mode="field_normalization",
+                            destination=self._on_validation_failure,
+                        )
+                        if self._on_validation_failure != "discard":
+                            yield SourceRow.quarantined(
+                                row=cleaned_row,
+                                error=f"Field normalization failed: {e}",
+                                destination=self._on_validation_failure,
+                            )
+                        continue
                     is_first_row = False
 
                     # Validate against schema
@@ -656,12 +681,14 @@ class DataverseSource(BaseSource):
                     yield SourceRow.valid(validated_row, contract=contract)
 
         except DataverseClientError as e:
-            # Record the error in audit trail with the typed error_category
-            # set at the raise site — no fragile string-matching on messages.
-            current_url = self._build_query_url() if self._entity else "(FetchXML)"
+            # Record the error in audit trail using the last URL we saw.
+            # For page 1 errors this is the initial query URL; for page N
+            # errors it's the last successfully-fetched page's URL (the
+            # closest available context for which page the client was
+            # attempting when it failed).
             self._record_page_call(
                 ctx,
-                url=current_url,
+                url=last_fetched_url,
                 error=e,
                 error_reason=e.error_category,
             )

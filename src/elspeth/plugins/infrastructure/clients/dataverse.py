@@ -23,6 +23,7 @@ import structlog
 from pydantic import BaseModel, model_validator
 
 from elspeth.core.security.web import validate_url_for_ssrf
+from elspeth.plugins.infrastructure.clients.fingerprinting import fingerprint_headers
 from elspeth.plugins.infrastructure.clients.json_utils import parse_json_strict
 
 if TYPE_CHECKING:
@@ -108,7 +109,8 @@ class DataversePageResponse:
     rows: list[dict[str, Any]]
     latency_ms: float
     headers: dict[str, str]
-    request_headers: dict[str, str]  # Headers actually sent in the request (for audit fingerprinting)
+    request_headers: dict[str, str]  # Headers actually sent in the request (already fingerprinted)
+    request_url: str  # URL that was actually fetched (for accurate audit trail)
     next_link: str | None  # @odata.nextLink URL, if present (structured queries)
     paging_cookie: str | None  # FetchXML paging cookie, if present
     more_records: bool  # True if more pages exist
@@ -457,6 +459,10 @@ class DataverseClient:
         if response.status_code < 200 or response.status_code >= 300:
             raise self._classify_error(response.status_code, resp_headers, latency_ms)
 
+        # Fingerprint auth headers at DTO boundary — raw bearer token must
+        # never persist in the DataversePageResponse.
+        fingerprinted = fingerprint_headers(auth_headers)
+
         # For PATCH responses that return 204 No Content
         if response.status_code == 204 or not response.text:
             return DataversePageResponse(
@@ -464,7 +470,8 @@ class DataverseClient:
                 rows=[],
                 latency_ms=latency_ms,
                 headers=resp_headers,
-                request_headers=auth_headers,
+                request_headers=fingerprinted,
+                request_url=url,
                 next_link=None,
                 paging_cookie=None,
                 more_records=False,
@@ -500,6 +507,17 @@ class DataverseClient:
                     status_code=response.status_code,
                     latency_ms=latency_ms,
                 )
+            # Tier 3 boundary: validate each item is a dict. Non-dict elements
+            # (strings, ints, nulls) in the value array are malformed responses
+            # from Dataverse that would bypass downstream row processing.
+            for i, item in enumerate(value):
+                if not isinstance(item, dict):
+                    raise DataverseClientError(
+                        f"Expected 'value[{i}]' to be a JSON object, got {type(item).__name__}",
+                        retryable=False,
+                        status_code=response.status_code,
+                        latency_ms=latency_ms,
+                    )
             rows = value
         else:
             # Single record response (e.g., PATCH upsert returns the record)
@@ -539,7 +557,8 @@ class DataverseClient:
             rows=rows,
             latency_ms=latency_ms,
             headers=resp_headers,
-            request_headers=auth_headers,
+            request_headers=fingerprinted,
+            request_url=url,
             next_link=next_link,
             paging_cookie=paging_cookie if next_link is None else None,
             more_records=more_records,

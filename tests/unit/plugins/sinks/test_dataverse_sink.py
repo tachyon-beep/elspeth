@@ -55,6 +55,7 @@ def _make_204_response() -> DataversePageResponse:
         latency_ms=12.0,
         headers={"content-length": "0"},
         request_headers={"Authorization": "Bearer fake-token"},
+        request_url="https://myorg.crm.dynamics.com/api/data/v9.2/contacts",
         next_link=None,
         paging_cookie=None,
         more_records=False,

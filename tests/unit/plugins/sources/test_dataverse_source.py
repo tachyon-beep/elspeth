@@ -86,7 +86,8 @@ def _make_page(
         rows=rows,
         latency_ms=latency_ms,
         headers={"content-type": "application/json"},
-        request_headers={"Authorization": "Bearer fake-token"},
+        request_headers={"Authorization": "<fingerprint:test-fake>"},
+        request_url="https://test.crm.dynamics.com/api/data/v9.2/contacts",
         next_link=next_link,
         paging_cookie=paging_cookie,
         more_records=more_records,
@@ -1194,12 +1195,14 @@ class TestRecordPageCall:
         source._client.get_auth_headers.return_value = {"Authorization": "Bearer test"}
         return source
 
-    @patch("elspeth.plugins.sources.dataverse.fingerprint_headers")
-    def test_record_success(self, mock_fingerprint: MagicMock) -> None:
-        """Success page records CallStatus.SUCCESS with row count."""
+    def test_record_success(self) -> None:
+        """Success page records CallStatus.SUCCESS with row count.
+
+        Headers are already fingerprinted by the client before reaching
+        the DataversePageResponse DTO — the source passes them through.
+        """
         from elspeth.contracts import CallStatus, CallType
 
-        mock_fingerprint.return_value = {"Authorization": "[FINGERPRINT]"}
         source = self._make_source_with_client()
         ctx = _mock_source_context()
 
@@ -1212,6 +1215,8 @@ class TestRecordPageCall:
         assert call_kwargs.kwargs["status"] == CallStatus.SUCCESS
         assert call_kwargs.kwargs["response_data"]["row_count"] == 2
         assert call_kwargs.kwargs["latency_ms"] == 42.0
+        # Headers passed through as-is (already fingerprinted by client)
+        assert call_kwargs.kwargs["request_data"]["headers"] == page.request_headers
 
     def test_record_error(self) -> None:
         """Error page records CallStatus.ERROR with error details."""
@@ -1236,3 +1241,97 @@ class TestRecordPageCall:
 
         source._record_page_call(ctx, url="https://test.com/api")
         ctx.record_call.assert_not_called()
+
+
+# ---------------------------------------------------------------------------
+# Bug fix: normalize_field_name quarantine (elspeth-4668a0f43d)
+# ---------------------------------------------------------------------------
+
+
+class TestNormalizeFieldQuarantine:
+    """Verify that normalize_field_name errors quarantine the row, not crash the load."""
+
+    def test_normalize_row_fields_raises_on_empty_field_name(self) -> None:
+        """The primitive _normalize_row_fields raises ValueError for unnormalizable fields.
+
+        This tests the mechanism — that ValueError propagates from
+        normalize_field_name. The quarantine behavior (catching this
+        ValueError in load()) is tested separately below.
+        """
+        source = _make_source(_base_config(normalize_fields=True))
+
+        # Build the initial resolution mapping from a valid row
+        source._normalize_row_fields({"contactid": "abc"}, is_first_row=True)
+
+        # A subsequent row with a new field that normalizes to empty raises
+        with pytest.raises(ValueError, match="empty"):
+            source._normalize_row_fields({"!!!": "value", "contactid": "abc"}, is_first_row=False)
+
+    def test_normalize_error_in_load_yields_quarantined_row(self) -> None:
+        """In the full load() path, normalize errors yield quarantined rows."""
+        source = _make_source(_base_config(normalize_fields=True))
+        ctx = _mock_source_context()
+
+        # Mock client to return a page with a problematic field
+        mock_client = MagicMock()
+        source._client = mock_client
+        source._run_id = "test-run"
+
+        # Page with a row that has an unnormalizable field name
+        page = _make_page([{"!!!": "trash-field-name"}])
+        mock_client.paginate_odata.return_value = iter([page])
+
+        rows = list(source.load(ctx))
+
+        # Row should be quarantined, not crash
+        assert len(rows) == 1
+        assert rows[0].is_quarantined is True
+        assert rows[0].quarantine_error is not None
+        assert "Field normalization failed" in rows[0].quarantine_error
+        assert rows[0].quarantine_destination == "quarantine"
+
+        # Validation error should be recorded in audit trail
+        ctx.record_validation_error.assert_called_once()
+        call_kwargs = ctx.record_validation_error.call_args.kwargs
+        assert call_kwargs["schema_mode"] == "field_normalization"
+
+
+# ---------------------------------------------------------------------------
+# Bug fix: audit trail records actual URL per page (elspeth-fafd21248c)
+# ---------------------------------------------------------------------------
+
+
+class TestAuditUrlPerPage:
+    """Verify audit trail records the actual URL for each page, not the initial URL."""
+
+    def test_record_page_call_uses_page_request_url(self) -> None:
+        """_record_page_call receives page.request_url, not rebuilt URL."""
+        source = self._make_source_with_client()
+        ctx = _mock_source_context()
+
+        next_url = "https://test.crm.dynamics.com/api/data/v9.2/contacts?$skiptoken=abc"
+        # Simulate a page 2 response with a different request_url
+        page2 = DataversePageResponse(
+            status_code=200,
+            rows=[{"id": "2"}],
+            latency_ms=15.0,
+            headers={"content-type": "application/json"},
+            request_headers={"Authorization": "[FINGERPRINT]"},
+            request_url=next_url,
+            next_link=None,
+            paging_cookie=None,
+            more_records=False,
+        )
+
+        source._record_page_call(ctx, url=page2.request_url, page=page2)
+
+        call_kwargs = ctx.record_call.call_args.kwargs
+        assert call_kwargs["request_data"]["url"] == next_url
+
+    def _make_source_with_client(self) -> Any:
+        source = _make_source(_base_config())
+        source._client = MagicMock()
+        source._client.get_auth_headers.return_value = {"Authorization": "Bearer test"}
+        source._run_id = "test-run"
+        source._telemetry_emit = None
+        return source
