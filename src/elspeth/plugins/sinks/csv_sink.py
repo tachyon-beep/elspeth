@@ -153,10 +153,17 @@ class CSVSink(BaseSink):
 
         # When display headers are configured, the file contains display names
         # Map expected fields to their display equivalents for comparison
+        from elspeth.contracts.header_modes import HeaderMode
+
         display_map = get_effective_display_headers(self)
         if display_map is not None:
             # Map normalized -> display for comparison against file headers
             expected = [display_map.get(f, f) for f in expected_normalized]
+        elif self._headers_mode == HeaderMode.ORIGINAL:
+            # ORIGINAL mode but field_resolution not yet available — comparing
+            # normalized names against display-name file headers would be wrong.
+            # Skip validation; it will be checked once headers are resolved.
+            return OutputValidationResult.success(target_fields=existing)
         else:
             expected = expected_normalized
 
@@ -293,8 +300,11 @@ class CSVSink(BaseSink):
             staging_writer.writerow(row)
         staged_content = staging_buffer.getvalue()
 
-        # Track file size before writing for incremental hashing
-        pre_write_size = self._path.stat().st_size
+        # Track write position before writing for incremental hashing.
+        # Use file.tell() not stat().st_size — stat() has a TOCTOU race where
+        # another process could append between stat and write, causing the hasher
+        # to incorporate foreign bytes.
+        pre_write_pos = file.tell()
 
         # Atomic batch write: all staged rows written at once
         file.write(staged_content)
@@ -304,7 +314,7 @@ class CSVSink(BaseSink):
 
         # Incremental hash: only read newly written bytes (O(batch) not O(file))
         with open(self._path, "rb") as bf:
-            bf.seek(pre_write_size)
+            bf.seek(pre_write_pos)
             for chunk in iter(lambda: bf.read(8192), b""):
                 self._hasher.update(chunk)
         content_hash = self._hasher.hexdigest()

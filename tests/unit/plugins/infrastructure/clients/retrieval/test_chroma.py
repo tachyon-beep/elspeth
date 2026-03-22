@@ -343,3 +343,182 @@ class TestChromaScoreNormalization:
             token_id=None,
         )
         assert all(0.0 <= c.score <= 1.0 for c in chunks)
+
+
+# =============================================================================
+# Bug fix tests: chroma.py bug cluster
+# =============================================================================
+
+
+class TestCallTypeCorrectness:
+    """Tests for elspeth-6b3dea5d77: CallType.SQL mislabels vector DB calls."""
+
+    def test_audit_call_uses_vector_call_type(self):
+        """Chroma search should record CallType.VECTOR, not CallType.SQL."""
+        from unittest.mock import MagicMock
+
+        from elspeth.contracts.enums import CallType
+
+        unique_name = f"tct-{uuid.uuid4().hex[:12]}"
+        config = ChromaSearchProviderConfig(
+            collection=unique_name,
+            mode="ephemeral",
+            distance_function="cosine",
+        )
+        mock_recorder = MagicMock()
+        provider = ChromaSearchProvider(
+            config=config,
+            recorder=mock_recorder,
+            run_id="run-1",
+        )
+        provider._collection.add(documents=["test doc"], ids=["doc1"])
+        provider.search(
+            "test",
+            top_k=1,
+            min_score=0.0,
+            state_id="state-1",
+            token_id="token-1",
+        )
+        mock_recorder.record_call.assert_called_once()
+        assert mock_recorder.record_call.call_args.kwargs["call_type"] == CallType.VECTOR
+
+
+class TestTier3ResultBoundary:
+    """Tests for elspeth-edd8710550: unguarded index on Tier 3 results dict."""
+
+    def test_malformed_results_raises_retrieval_error(self):
+        """If ChromaDB SDK returns unexpected structure, should get RetrievalError, not KeyError."""
+        from unittest.mock import patch
+
+        unique_name = f"t3r-{uuid.uuid4().hex[:12]}"
+        config = ChromaSearchProviderConfig(
+            collection=unique_name,
+            mode="ephemeral",
+        )
+        provider = ChromaSearchProvider(config=config)
+        provider._collection.add(documents=["test doc"], ids=["doc1"])
+
+        # Simulate malformed SDK response — missing 'documents' key
+        with (
+            patch.object(provider._collection, "query", return_value={"ids": [["doc1"]]}),
+            pytest.raises(RetrievalError),
+        ):
+            provider.search("test", top_k=1, min_score=0.0, state_id="s1", token_id=None)
+
+    def test_none_inner_list_raises_retrieval_error(self):
+        """If SDK returns None where inner list expected, should get RetrievalError."""
+        from unittest.mock import patch
+
+        unique_name = f"t3n-{uuid.uuid4().hex[:12]}"
+        config = ChromaSearchProviderConfig(
+            collection=unique_name,
+            mode="ephemeral",
+        )
+        provider = ChromaSearchProvider(config=config)
+        provider._collection.add(documents=["test doc"], ids=["doc1"])
+
+        with (
+            patch.object(
+                provider._collection,
+                "query",
+                return_value={"ids": [["doc1"]], "documents": None, "distances": [[0.1]], "metadatas": [[{}]]},
+            ),
+            pytest.raises(RetrievalError),
+        ):
+            provider.search("test", top_k=1, min_score=0.0, state_id="s1", token_id=None)
+
+    def test_none_distances_raises_retrieval_error(self):
+        """If SDK returns None for distances inner list, should get RetrievalError."""
+        from unittest.mock import patch
+
+        unique_name = f"t3d-{uuid.uuid4().hex[:12]}"
+        config = ChromaSearchProviderConfig(
+            collection=unique_name,
+            mode="ephemeral",
+        )
+        provider = ChromaSearchProvider(config=config)
+        provider._collection.add(documents=["test doc"], ids=["doc1"])
+
+        with (
+            patch.object(
+                provider._collection,
+                "query",
+                return_value={"ids": [["doc1"]], "documents": [["test doc"]], "distances": None, "metadatas": [[{}]]},
+            ),
+            pytest.raises(RetrievalError),
+        ):
+            provider.search("test", top_k=1, min_score=0.0, state_id="s1", token_id=None)
+
+
+class TestNonFiniteDistanceHandling:
+    """Tests for elspeth-69632ec27f: NaN distance from corrupt index."""
+
+    def _make_provider(self):
+        unique_name = f"tnf-{uuid.uuid4().hex[:12]}"
+        config = ChromaSearchProviderConfig(
+            collection=unique_name,
+            mode="ephemeral",
+            distance_function="cosine",
+        )
+        provider = ChromaSearchProvider(config=config)
+        return provider
+
+    def test_nan_distance_raises_retrieval_error(self):
+        """NaN distance from corrupt index should raise RetrievalError, not fabricate score=1.0."""
+        provider = self._make_provider()
+        # NaN in cosine normalization: max(0.0, min(1.0, 1.0 - (NaN/2))) = 1.0
+        # This silently fabricates a perfect score — data fabrication.
+        with pytest.raises(RetrievalError, match="non-finite"):
+            provider._normalize_distance(float("nan"))
+
+    def test_inf_distance_raises_retrieval_error(self):
+        """Infinite distance from corrupt index should raise RetrievalError."""
+        with pytest.raises(RetrievalError, match="non-finite"):
+            self._make_provider()._normalize_distance(float("inf"))
+
+    def test_negative_inf_distance_raises_retrieval_error(self):
+        """Negative infinite distance should raise RetrievalError."""
+        with pytest.raises(RetrievalError, match="non-finite"):
+            self._make_provider()._normalize_distance(float("-inf"))
+
+    def test_valid_distance_normalizes_correctly(self):
+        """Normal finite distances should still normalize correctly.
+
+        Cosine: similarity = 1 - (distance / 2), so 0.5 → 0.75.
+        """
+        provider = self._make_provider()
+        score = provider._normalize_distance(0.5)
+        assert score == pytest.approx(0.75)
+
+
+class TestDocTypeValidation:
+    """Tests for elspeth-aaa99db4be: doc type unchecked."""
+
+    def test_non_string_doc_skipped(self):
+        """Non-string document content from Tier 3 should not enter pipeline."""
+        from unittest.mock import patch
+
+        unique_name = f"tdv-{uuid.uuid4().hex[:12]}"
+        config = ChromaSearchProviderConfig(
+            collection=unique_name,
+            mode="ephemeral",
+        )
+        provider = ChromaSearchProvider(config=config)
+        provider._collection.add(documents=["real doc"], ids=["doc1"])
+
+        # Simulate SDK returning non-string document (corrupt index)
+        with patch.object(
+            provider._collection,
+            "query",
+            return_value={
+                "ids": [["doc1", "doc2"]],
+                "documents": [[12345, "real doc"]],  # 12345 is non-string
+                "distances": [[0.1, 0.2]],
+                "metadatas": [[{}, {}]],
+            },
+        ):
+            chunks = provider.search("test", top_k=2, min_score=0.0, state_id="s1", token_id=None)
+            # Non-string doc should be skipped; only "real doc" should appear
+            assert all(isinstance(c.content, str) for c in chunks)
+            assert len(chunks) == 1
+            assert chunks[0].content == "real doc"

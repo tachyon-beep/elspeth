@@ -5,7 +5,10 @@ from datetime import UTC, datetime
 from typing import Any
 from unittest.mock import MagicMock
 
+import pytest
+
 from elspeth.contracts import Call, CallStatus, CallType
+from elspeth.contracts.errors import AuditIntegrityError
 from elspeth.core.canonical import stable_hash
 from elspeth.core.landscape.row_data import CallDataResult, CallDataState
 from elspeth.plugins.infrastructure.clients.verifier import (
@@ -1110,3 +1113,134 @@ class TestCallVerifier:
             live_response=live_response,
         )
         assert result_strict.is_match is False, "Tool call reordering should be detected"
+
+
+# =============================================================================
+# Bug fix tests: verifier.py bug cluster
+# =============================================================================
+
+
+class TestCallNotFoundRaisesIntegrityError:
+    """Tests for elspeth-fd540d3818: CALL_NOT_FOUND should raise AuditIntegrityError."""
+
+    def _create_mock_recorder(self) -> MagicMock:
+        recorder = MagicMock()
+        recorder.find_call_by_request_hash = MagicMock(return_value=None)
+        recorder.get_call_response_data = MagicMock(return_value=CallDataResult(state=CallDataState.STORE_NOT_CONFIGURED, data=None))
+        return recorder
+
+    def _create_mock_call(self, *, request_hash: str) -> Call:
+        return Call(
+            call_id="call_123",
+            state_id="state_123",
+            call_index=0,
+            call_type=CallType.LLM,
+            status=CallStatus.SUCCESS,
+            request_hash=request_hash,
+            created_at=datetime.now(UTC),
+            latency_ms=150.0,
+            response_ref=None,
+            response_hash=None,
+        )
+
+    def test_call_not_found_raises_audit_integrity_error(self) -> None:
+        """CALL_NOT_FOUND after successful find_call_by_request_hash is corruption.
+
+        If find_call_by_request_hash returns a call record, but get_call_response_data
+        then says CALL_NOT_FOUND, the call vanished between the two queries. This
+        indicates database corruption or a TOCTOU race and must raise AuditIntegrityError.
+        """
+        recorder = self._create_mock_recorder()
+        request_data = {"model": "gpt-4", "messages": []}
+        request_hash = stable_hash(request_data)
+
+        mock_call = self._create_mock_call(request_hash=request_hash)
+        recorder.find_call_by_request_hash.return_value = mock_call
+        recorder.get_call_response_data.return_value = CallDataResult(state=CallDataState.CALL_NOT_FOUND, data=None)
+
+        verifier = CallVerifier(recorder, source_run_id="run_abc123")
+        with pytest.raises(AuditIntegrityError, match="CALL_NOT_FOUND"):
+            verifier.verify(
+                call_type=CallType.LLM,
+                request_data=request_data,
+                live_response={"content": "Hello"},
+            )
+
+
+class TestCounterAccountingGap:
+    """Tests for elspeth-ddb745ea0e: PURGED/no-hash path must increment a counter."""
+
+    def _create_mock_recorder(self) -> MagicMock:
+        recorder = MagicMock()
+        recorder.find_call_by_request_hash = MagicMock(return_value=None)
+        recorder.get_call_response_data = MagicMock(return_value=CallDataResult(state=CallDataState.STORE_NOT_CONFIGURED, data=None))
+        return recorder
+
+    def _create_mock_call(self, *, request_hash: str) -> Call:
+        return Call(
+            call_id="call_123",
+            state_id="state_123",
+            call_index=0,
+            call_type=CallType.LLM,
+            status=CallStatus.SUCCESS,
+            request_hash=request_hash,
+            created_at=datetime.now(UTC),
+            latency_ms=150.0,
+            response_ref=None,
+            response_hash=None,  # No hash available
+        )
+
+    def test_purged_no_hash_increments_counter(self) -> None:
+        """PURGED state with no response_hash must still increment a counter.
+
+        Previously, missing_payloads was incremented but neither matches nor
+        mismatches was — the result has is_match=False but the mismatch counter
+        doesn't reflect it.
+        """
+        recorder = self._create_mock_recorder()
+        request_data = {"model": "gpt-4", "messages": []}
+        request_hash = stable_hash(request_data)
+
+        mock_call = self._create_mock_call(request_hash=request_hash)
+        recorder.find_call_by_request_hash.return_value = mock_call
+        recorder.get_call_response_data.return_value = CallDataResult(state=CallDataState.PURGED, data=None)
+
+        verifier = CallVerifier(recorder, source_run_id="run_abc123")
+        verifier.verify(
+            call_type=CallType.LLM,
+            request_data=request_data,
+            live_response={"content": "Hello"},
+        )
+
+        report = verifier.get_report()
+        assert report.total_calls == 1
+        assert report.missing_payloads == 1
+        # The call is unverifiable (no hash, payload purged). missing_payloads is
+        # the correct sole category — not double-counted in matches or mismatches.
+        # Verify the accounting invariant: every call is in exactly one bucket.
+        accounted = report.matches + report.mismatches + report.missing_recordings + report.missing_payloads + report.no_response_recorded
+        assert accounted == report.total_calls, f"Counter accounting: {accounted} accounted != {report.total_calls} total"
+        result = report.results[0]
+        assert result.payload_missing is True
+        assert result.is_match is False
+
+
+class TestHasDifferencesNoRecordedResponse:
+    """Tests for elspeth-3895543969: has_differences misleading for no_recorded_response."""
+
+    def test_no_recorded_response_has_differences_is_false(self) -> None:
+        """no_recorded_response should NOT report has_differences=True.
+
+        The original call never had a response (e.g., connection timeout).
+        There's nothing to compare against — reporting 'differences' is misleading.
+        Callers checking has_differences would interpret it as drift detected.
+        """
+        result = VerificationResult.no_recorded_response(
+            request_hash="abc123",
+            live_response={"content": "Hello"},
+        )
+
+        assert result.is_match is False  # Correct — can't match without baseline
+        assert result.has_differences is False  # Bug: was True, should be False
+        assert result.recorded_call_missing is False
+        assert result.payload_missing is False

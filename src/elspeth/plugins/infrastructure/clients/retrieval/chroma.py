@@ -16,6 +16,7 @@ Score normalization:
 
 from __future__ import annotations
 
+import math
 import re
 import time
 from typing import TYPE_CHECKING, Literal, Self
@@ -165,17 +166,24 @@ class ChromaSearchProvider:
             raise RetrievalError(f"Chroma query failed: {exc}", retryable=True) from exc
         elapsed_ms = (time.monotonic() - start_time) * 1000
 
-        # ChromaDB always populates these keys when include= specifies them.
-        # The types are list[list[...]] — one inner list per query_text, we use index 0.
-        # The outer list is guaranteed non-None by the SDK contract when include is set.
-        documents = results["documents"][0]  # type: ignore[index]
-        distances = results["distances"][0]  # type: ignore[index]
-        metadatas = results["metadatas"][0]  # type: ignore[index]
-        ids = results["ids"][0]
+        # Tier 3 boundary: ChromaDB SDK response structure is external data.
+        # Wrap access to guard against malformed/unexpected SDK responses.
+        try:
+            documents = results["documents"][0]  # type: ignore[index]
+            distances = results["distances"][0]  # type: ignore[index]
+            metadatas = results["metadatas"][0]  # type: ignore[index]
+            ids = results["ids"][0]
+        except (KeyError, TypeError, IndexError) as exc:
+            raise RetrievalError(
+                f"Chroma query returned unexpected result structure: {exc}",
+                retryable=False,
+            ) from exc
 
         chunks: list[RetrievalChunk] = []
+        skipped = 0
         for doc, distance, metadata, doc_id in zip(documents, distances, metadatas, ids, strict=True):
-            if doc is None:
+            if not isinstance(doc, str):
+                skipped += 1
                 continue
 
             score = self._normalize_distance(distance)
@@ -198,16 +206,23 @@ class ChromaSearchProvider:
             self._recorder.record_call(
                 state_id=state_id,
                 call_index=call_index,
-                call_type=CallType.SQL,
+                call_type=CallType.VECTOR,
                 status=CallStatus.SUCCESS,
                 request_data=RawCallPayload({"query": query, "top_k": effective_top_k, "collection": self._config.collection}),
-                response_data=RawCallPayload({"result_count": len(chunks), "top_score": chunks[0].score if chunks else None}),
+                response_data=RawCallPayload(
+                    {"result_count": len(chunks), "skipped_count": skipped, "top_score": chunks[0].score if chunks else None}
+                ),
                 latency_ms=round(elapsed_ms),
             )
 
         return chunks
 
     def _normalize_distance(self, distance: float) -> float:
+        if not math.isfinite(distance):
+            raise RetrievalError(
+                f"Chroma returned non-finite distance {distance!r} — possible index corruption",
+                retryable=False,
+            )
         if self._distance_function == "cosine":
             return max(0.0, min(1.0, 1.0 - (distance / 2.0)))
         elif self._distance_function == "l2":

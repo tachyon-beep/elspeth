@@ -168,7 +168,7 @@ class Allowlist:
 # Rule Definitions
 # =============================================================================
 
-RULES = {
+RULES: dict[str, dict[str, Any]] = {
     "R1": {
         "name": "dict.get",
         "description": "dict.get() usage can hide missing key bugs",
@@ -696,6 +696,7 @@ def scan_layer_imports_directory(
 
 
 _BANNED_RULES = frozenset(rule_id for rule_id, rule_def in RULES.items() if rule_def.get("banned"))
+_ALL_RULE_IDS = frozenset(RULES.keys())
 
 
 def _parse_allow_hits(data: dict[str, Any], source_file: str = "") -> list[AllowlistEntry]:
@@ -703,10 +704,24 @@ def _parse_allow_hits(data: dict[str, Any], source_file: str = "") -> list[Allow
     entries: list[AllowlistEntry] = []
     for item in data.get("allow_hits", []):
         key = item.get("key", "")
+        source_ctx = f" in {source_file}" if source_file else ""
         parts = key.split(":")
-        if len(parts) >= 2 and parts[1] in _BANNED_RULES:
+        if len(parts) < 2:
             print(
-                f"Error: allow_hits entry uses banned rule {parts[1]} (cannot be allowlisted): {key}",
+                f"Error: allow_hits entry has malformed key (expected 'file:rule_id:...' format){source_ctx}: {key!r}",
+                file=sys.stderr,
+            )
+            sys.exit(1)
+        rule_id = parts[1]
+        if rule_id in _BANNED_RULES:
+            print(
+                f"Error: allow_hits entry uses banned rule {rule_id} (cannot be allowlisted){source_ctx}: {key}",
+                file=sys.stderr,
+            )
+            sys.exit(1)
+        if rule_id not in _ALL_RULE_IDS:
+            print(
+                f"Error: allow_hits entry has unknown rule ID '{rule_id}'{source_ctx}: {key}",
                 file=sys.stderr,
             )
             sys.exit(1)
@@ -738,11 +753,20 @@ def _parse_per_file_rules(data: dict[str, Any], source_file: str = "") -> list[P
     """Parse per_file_rules entries from a YAML data dict."""
     per_file_rules: list[PerFileRule] = []
     for item in data.get("per_file_rules", []):
-        banned_in_entry = set(item.get("rules", [])) & _BANNED_RULES
+        rule_ids = set(item.get("rules", []))
+        banned_in_entry = rule_ids & _BANNED_RULES
         if banned_in_entry:
             print(
                 f"Error: per_file_rules entry for '{item.get('pattern', '?')}' uses banned rule(s) "
                 f"{banned_in_entry} (cannot be allowlisted)",
+                file=sys.stderr,
+            )
+            sys.exit(1)
+        unknown_in_entry = rule_ids - _ALL_RULE_IDS
+        if unknown_in_entry:
+            source_ctx = f" in {source_file}" if source_file else ""
+            print(
+                f"Error: per_file_rules entry for '{item.get('pattern', '?')}'{source_ctx} uses unknown rule ID(s) {unknown_in_entry}",
                 file=sys.stderr,
             )
             sys.exit(1)
@@ -758,7 +782,18 @@ def _parse_per_file_rules(data: dict[str, Any], source_file: str = "") -> list[P
                 )
 
         raw_max_hits = item.get("max_hits")
-        max_hits = int(raw_max_hits) if raw_max_hits is not None else None
+        max_hits: int | None = None
+        if raw_max_hits is not None:
+            try:
+                max_hits = int(raw_max_hits)
+            except ValueError:
+                pattern = item.get("pattern", "?")
+                source_ctx = f" in {source_file}" if source_file else ""
+                print(
+                    f"Error: per_file_rules entry for '{pattern}'{source_ctx} has non-numeric max_hits: {raw_max_hits!r}",
+                    file=sys.stderr,
+                )
+                sys.exit(1)
 
         per_file_rules.append(
             PerFileRule(
@@ -1053,22 +1088,21 @@ def run_check(args: argparse.Namespace) -> int:
         if allowlist.match(tc_finding) is None:
             layer_warnings.append(tc_finding)
 
-    # Check for stale/expired allowlist entries (only in full-scan mode)
+    # Check for stale/expired/exceeded allowlist entries (only in full-scan mode)
     # In file-specific mode (pre-commit), we only scan a subset of files,
-    # so most allowlist entries won't match - that's expected, not stale.
-    # Exceeded per-file rules always checked (even in pre-commit mode)
-    exceeded_file_rules = allowlist.get_exceeded_file_rules()
-
+    # so match counts and staleness are non-deterministic — suppress all.
     if args.files:
         stale_entries: list[AllowlistEntry] = []
         expired_entries: list[AllowlistEntry] = []
         expired_file_rules: list[PerFileRule] = []
         unused_file_rules: list[PerFileRule] = []
+        exceeded_file_rules: list[PerFileRule] = []
     else:
         stale_entries = allowlist.get_stale_entries() if allowlist.fail_on_stale else []
         expired_entries = allowlist.get_expired_entries() if allowlist.fail_on_expired else []
         expired_file_rules = allowlist.get_expired_file_rules() if allowlist.fail_on_expired else []
         unused_file_rules = allowlist.get_unused_file_rules() if allowlist.fail_on_stale else []
+        exceeded_file_rules = allowlist.get_exceeded_file_rules()
 
     # Report results
     # Include unused_file_rules in error condition - stale per-file rules should fail

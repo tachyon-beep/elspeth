@@ -250,8 +250,8 @@ class TestBatchStatsFloatOverflow:
         assert result.row["skipped_non_finite"] == 2
         assert result.row["skipped_non_finite_indices"] == [1, 2]
 
-    def test_all_non_finite_produces_zero_count(self, ctx: PluginContext) -> None:
-        """Batch with only NaN/Inf values produces count=0, sum=0."""
+    def test_all_non_finite_returns_error(self, ctx: PluginContext) -> None:
+        """Batch with only NaN/Inf values returns error — not fabricated sum=0."""
         from elspeth.plugins.transforms.batch_stats import BatchStats
 
         transform = BatchStats({"schema": DYNAMIC_SCHEMA, "value_field": "amount"})
@@ -263,13 +263,12 @@ class TestBatchStatsFloatOverflow:
 
         result = transform.process(rows, ctx)
 
-        assert result.status == "success"
-        assert result.row is not None
-        assert result.row["count"] == 0
-        assert result.row["sum"] == 0.0
-        assert result.row["mean"] is None
-        assert result.row["skipped_non_finite"] == 2
-        assert result.row["skipped_non_finite_indices"] == [0, 1]
+        assert result.status == "error"
+        assert result.reason is not None
+        assert result.reason["reason"] == "all_non_finite"
+        assert result.reason["batch_size"] == 2
+        assert result.reason["skipped_non_finite"] == 2
+        assert result.reason["skipped_non_finite_indices"] == [0, 1]
 
     def test_sum_overflow_returns_error(self, ctx: PluginContext) -> None:
         """Summing large valid floats that overflow to inf returns error."""
@@ -420,3 +419,121 @@ class TestOutputSchemaConfig:
         )
         assert transform.declared_output_fields == frozenset({"count", "sum", "batch_size", "mean"})
         assert "region" not in transform.declared_output_fields
+
+
+# =============================================================================
+# Bug fix tests: batch_stats.py bug cluster
+# =============================================================================
+
+
+class TestOutputFieldCompleteness:
+    """Tests for elspeth-8051921704: conditional output fields must be tracked.
+
+    declared_output_fields contains guaranteed fields only (for DAG contract propagation).
+    _all_possible_output_keys tracks all fields that can appear in output, including
+    conditional ones like skipped_non_finite. This set is used for collision detection.
+    """
+
+    def test_all_possible_output_keys_includes_skipped_non_finite(self):
+        """_all_possible_output_keys must include skipped_non_finite fields.
+
+        These fields appear in output when non-finite values are present.
+        The collision check must know about them to prevent group_by overwrites.
+        """
+        from elspeth.plugins.transforms.batch_stats import BatchStats
+
+        transform = BatchStats({"schema": {"mode": "observed"}, "value_field": "amount"})
+        assert "skipped_non_finite" in transform._all_possible_output_keys
+        assert "skipped_non_finite_indices" in transform._all_possible_output_keys
+
+    def test_declared_output_fields_excludes_conditional(self):
+        """declared_output_fields should NOT include conditional fields.
+
+        skipped_non_finite is conditional (only present when non-finite values
+        exist), so it must not be in guaranteed_fields via declared_output_fields.
+        """
+        from elspeth.plugins.transforms.batch_stats import BatchStats
+
+        transform = BatchStats({"schema": {"mode": "observed"}, "value_field": "amount"})
+        assert "skipped_non_finite" not in transform.declared_output_fields
+        assert "skipped_non_finite_indices" not in transform.declared_output_fields
+
+
+class TestFieldsAddedResultSync:
+    """Tests for elspeth-fabb35458b: fields_added must match result dict keys."""
+
+    @pytest.fixture
+    def ctx(self) -> PluginContext:
+        return make_context()
+
+    def test_fields_added_matches_result_keys_with_skipped(self, ctx: PluginContext) -> None:
+        """When non-finite values are skipped, fields_added must include the skip fields."""
+        from elspeth.plugins.transforms.batch_stats import BatchStats
+
+        transform = BatchStats({"schema": DYNAMIC_SCHEMA, "value_field": "amount", "compute_mean": True})
+        rows = [
+            _make_row({"id": 1, "amount": 10.0}),
+            _make_row({"id": 2, "amount": float("nan")}),
+            _make_row({"id": 3, "amount": 30.0}),
+        ]
+        result = transform.process(rows, ctx)
+        assert result.status == "success"
+        assert result.row is not None
+        assert result.success_reason is not None
+
+        fields_added = set(result.success_reason["fields_added"])
+        result_keys = set(result.row.to_dict().keys())
+        assert fields_added == result_keys, f"fields_added {fields_added} must match result keys {result_keys}"
+
+    def test_fields_added_matches_result_keys_without_skipped(self, ctx: PluginContext) -> None:
+        """When all values are finite, fields_added must match result keys exactly."""
+        from elspeth.plugins.transforms.batch_stats import BatchStats
+
+        transform = BatchStats({"schema": DYNAMIC_SCHEMA, "value_field": "amount", "compute_mean": True})
+        rows = [
+            _make_row({"id": 1, "amount": 10.0}),
+            _make_row({"id": 2, "amount": 20.0}),
+        ]
+        result = transform.process(rows, ctx)
+        assert result.status == "success"
+        assert result.row is not None
+        assert result.success_reason is not None
+
+        fields_added = set(result.success_reason["fields_added"])
+        result_keys = set(result.row.to_dict().keys())
+        assert fields_added == result_keys
+
+
+class TestGroupByCollisionAtInit:
+    """Tests for elspeth-d375bde404: group_by collision check must cover all possible output keys."""
+
+    def test_group_by_skipped_non_finite_collides(self) -> None:
+        """group_by='skipped_non_finite' should be rejected at init time.
+
+        Previously, the collision check only ran at process() time and only
+        against keys present in the current batch's result dict. A batch
+        without non-finite values would miss the collision.
+        """
+        from elspeth.plugins.transforms.batch_stats import BatchStats
+
+        with pytest.raises(ValueError, match="collides"):
+            BatchStats(
+                {
+                    "schema": DYNAMIC_SCHEMA,
+                    "value_field": "amount",
+                    "group_by": "skipped_non_finite",
+                }
+            )
+
+    def test_group_by_count_collides_at_init(self) -> None:
+        """group_by='count' should be rejected at init, not at process time."""
+        from elspeth.plugins.transforms.batch_stats import BatchStats
+
+        with pytest.raises(ValueError, match="collides"):
+            BatchStats(
+                {
+                    "schema": DYNAMIC_SCHEMA,
+                    "value_field": "amount",
+                    "group_by": "count",
+                }
+            )

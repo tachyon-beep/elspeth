@@ -10,6 +10,7 @@ Tests cover:
 
 from __future__ import annotations
 
+import argparse
 import ast
 import tempfile
 from collections.abc import Generator
@@ -24,9 +25,12 @@ from scripts.cicd.enforce_tier_model import (
     Finding,
     PerFileRule,
     TierModelVisitor,
+    _parse_allow_hits,
+    _parse_per_file_rules,
     _suggest_module_file,
     format_stale_entry_text,
     load_allowlist,
+    run_check,
     scan_file,
 )
 
@@ -1061,3 +1065,249 @@ class TestDirectoryLoadingSuggestModuleFile:
         )
         result = _suggest_module_file(finding, allowlist_path)
         assert result == str(allowlist_path)
+
+
+# =============================================================================
+# Bug fix tests: enforce_tier_model.py bug cluster
+# =============================================================================
+
+
+class TestBannedRuleKeyValidation:
+    """Tests for elspeth-9f34362456: banned-rule key-format check validates rule ID."""
+
+    def test_valid_banned_rule_in_allow_hits_rejected(self, capsys: pytest.CaptureFixture[str]) -> None:
+        """allow_hits entry with banned rule R3 should be rejected."""
+        data = {
+            "allow_hits": [
+                {
+                    "key": "core/events.py:R3:SomeClass:fp=abc123",
+                    "owner": "test",
+                    "reason": "test",
+                    "safety": "test",
+                    "expires": "2099-01-01",
+                }
+            ]
+        }
+        with pytest.raises(SystemExit) as exc_info:
+            _parse_allow_hits(data)
+        assert exc_info.value.code == 1
+        assert "banned rule R3" in capsys.readouterr().err
+
+    def test_invalid_rule_id_in_key_rejected(self, capsys: pytest.CaptureFixture[str]) -> None:
+        """allow_hits entry with invalid (non-existent) rule ID should be rejected.
+
+        Previously, a malformed key like 'foo.py:GARBAGE:bar:fp=abc' would silently
+        pass because 'GARBAGE' is not in _BANNED_RULES. The validation should also
+        verify that the rule ID is valid.
+        """
+        data = {
+            "allow_hits": [
+                {
+                    "key": "core/events.py:NONEXISTENT_RULE:SomeClass:fp=abc123",
+                    "owner": "test",
+                    "reason": "test",
+                    "safety": "test",
+                    "expires": "2099-01-01",
+                }
+            ]
+        }
+        with pytest.raises(SystemExit) as exc_info:
+            _parse_allow_hits(data)
+        assert exc_info.value.code == 1
+        assert "unknown rule ID" in capsys.readouterr().err
+        # Distinct from banned-rule rejection — error names the offending ID
+
+    def test_malformed_key_missing_rule_id_rejected(self, capsys: pytest.CaptureFixture[str]) -> None:
+        """allow_hits entry with no colon (no rule ID extractable) should be rejected."""
+        data = {
+            "allow_hits": [
+                {
+                    "key": "bare-key-no-colons",
+                    "owner": "test",
+                    "reason": "test",
+                    "safety": "test",
+                    "expires": "2099-01-01",
+                }
+            ]
+        }
+        with pytest.raises(SystemExit) as exc_info:
+            _parse_allow_hits(data)
+        assert exc_info.value.code == 1
+        assert "malformed key" in capsys.readouterr().err
+
+    def test_valid_rule_id_in_key_accepted(self) -> None:
+        """allow_hits entry with valid non-banned rule ID should be accepted."""
+        data = {
+            "allow_hits": [
+                {
+                    "key": "core/events.py:R1:SomeClass:fp=abc123",
+                    "owner": "test",
+                    "reason": "test",
+                    "safety": "test",
+                    "expires": "2099-01-01",
+                }
+            ]
+        }
+        entries = _parse_allow_hits(data)
+        assert len(entries) == 1
+        assert entries[0].key == "core/events.py:R1:SomeClass:fp=abc123"
+
+
+class TestMaxHitsParseError:
+    """Tests for elspeth-cdeeeccde3: int(raw_max_hits) should give contextual error."""
+
+    def test_non_numeric_max_hits_gives_context(self, capsys: pytest.CaptureFixture[str]) -> None:
+        """Non-numeric max_hits should produce an error message with pattern context.
+
+        Previously, int('five') raised a bare ValueError with no indication of
+        which per_file_rules entry or YAML file contained the error.
+        """
+        data = {
+            "per_file_rules": [
+                {
+                    "pattern": "plugins/sources/*",
+                    "rules": ["R1"],
+                    "reason": "test",
+                    "max_hits": "five",
+                }
+            ]
+        }
+        with pytest.raises(SystemExit) as exc_info:
+            _parse_per_file_rules(data, source_file="plugins.yaml")
+        assert exc_info.value.code == 1
+        err = capsys.readouterr().err
+        assert "plugins/sources/*" in err
+        assert "plugins.yaml" in err
+        assert "'five'" in err
+
+    def test_numeric_string_max_hits_parses(self) -> None:
+        """Numeric string max_hits like '18' should still parse correctly."""
+        data = {
+            "per_file_rules": [
+                {
+                    "pattern": "plugins/sources/*",
+                    "rules": ["R1"],
+                    "reason": "test",
+                    "max_hits": "18",
+                }
+            ]
+        }
+        rules = _parse_per_file_rules(data)
+        assert rules[0].max_hits == 18
+
+
+class TestPerFileRulesUnknownRuleValidation:
+    """Tests for symmetric unknown-rule-ID validation in per_file_rules."""
+
+    def test_unknown_rule_id_in_per_file_rules_rejected(self, capsys: pytest.CaptureFixture[str]) -> None:
+        """per_file_rules with unknown rule ID should be rejected at parse time."""
+        data = {
+            "per_file_rules": [
+                {
+                    "pattern": "plugins/sources/*",
+                    "rules": ["R1", "TYPO_RULE"],
+                    "reason": "test",
+                }
+            ]
+        }
+        with pytest.raises(SystemExit) as exc_info:
+            _parse_per_file_rules(data, source_file="plugins.yaml")
+        assert exc_info.value.code == 1
+        err = capsys.readouterr().err
+        assert "unknown rule ID" in err
+        assert "TYPO_RULE" in err
+
+    def test_valid_rule_ids_in_per_file_rules_accepted(self) -> None:
+        """per_file_rules with all valid non-banned rule IDs should be accepted."""
+        data = {
+            "per_file_rules": [
+                {
+                    "pattern": "plugins/sources/*",
+                    "rules": ["R1", "R4", "R5"],
+                    "reason": "test",
+                }
+            ]
+        }
+        rules = _parse_per_file_rules(data)
+        assert len(rules) == 1
+        assert rules[0].rules == ["R1", "R4", "R5"]
+
+
+class TestExceededFileRulesPreCommitMode:
+    """Tests for elspeth-d224bb2575: exceeded_file_rules in pre-commit mode."""
+
+    @staticmethod
+    def _make_finding(file_path: str = "core/canonical.py", rule_id: str = "R5") -> Finding:
+        return Finding(
+            rule_id=rule_id,
+            file_path=file_path,
+            line=10,
+            col=0,
+            symbol_context=("SomeClass", "method"),
+            fingerprint="deadbeef",
+            code_snippet="isinstance(x, int)",
+            message="test",
+        )
+
+    def test_exceeded_file_rules_suppressed_in_precommit_mode(self) -> None:
+        """In pre-commit mode (args.files is set), exceeded_file_rules should be
+        suppressed because the partial scan produces non-deterministic match counts.
+
+        Previously, stale/expired/unused checks were correctly suppressed in pre-commit
+        mode, but exceeded_file_rules was always checked — asymmetric behavior.
+        """
+        rule = PerFileRule(
+            pattern="core/canonical.py",
+            rules=["R5"],
+            reason="Type dispatch",
+            expires=None,
+            max_hits=2,
+        )
+        allowlist = Allowlist(entries=[], per_file_rules=[rule])
+
+        # Simulate 5 matches — exceeds max_hits=2
+        for _ in range(5):
+            allowlist.match(self._make_finding())
+
+        # In a full scan, this would be exceeded
+        assert allowlist.get_exceeded_file_rules() == [rule]
+
+        # But get_exceeded_file_rules should NOT contribute to failure
+        # when we're in pre-commit mode. The fix should suppress this
+        # at the call site in run_check(), same as stale/expired/unused.
+        # This test documents the data model behavior.
+
+    def test_run_check_precommit_ignores_exceeded_max_hits(self, temp_dir: Path) -> None:
+        """run_check in pre-commit mode (with files arg) must not fail on exceeded max_hits.
+
+        This exercises the actual code path in run_check() where pre-commit mode
+        suppresses exceeded_file_rules, verifying the fix at the call site.
+        """
+        # Create a Python file with enough isinstance() calls to exceed max_hits=1
+        src_dir = temp_dir / "src"
+        src_dir.mkdir()
+        py_file = src_dir / "example.py"
+        py_file.write_text(
+            "def f(x):\n    if isinstance(x, int): pass\n    if isinstance(x, str): pass\n    if isinstance(x, float): pass\n"
+        )
+
+        # Create allowlist with max_hits=1 for R5 (isinstance) — will be exceeded
+        allowlist_dir = temp_dir / "allowlist"
+        allowlist_dir.mkdir()
+        (allowlist_dir / "_defaults.yaml").write_text("version: 1\ndefaults: {}\n")
+        (allowlist_dir / "test.yaml").write_text(
+            "per_file_rules:\n  - pattern: example.py\n    rules: [R5]\n    reason: test\n    expires: null\n    max_hits: 1\n"
+        )
+
+        # Build args simulating pre-commit mode (with specific files)
+        args = argparse.Namespace(
+            root=src_dir,
+            allowlist=allowlist_dir,
+            exclude=[],
+            format="text",
+            files=[py_file],
+        )
+
+        # In pre-commit mode, exceeded max_hits should NOT cause failure
+        result = run_check(args)
+        assert result == 0, "pre-commit mode should suppress exceeded_file_rules"

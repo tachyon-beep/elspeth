@@ -339,6 +339,7 @@ TransformErrorCategory = Literal[
     "intentional_failure",
     # Batch processing
     "empty_batch",
+    "all_non_finite",  # All values in batch were NaN/Inf — no real data to aggregate
 ]
 
 
@@ -521,6 +522,8 @@ class TransformErrorReason(TypedDict):
     output_file_id: NotRequired[str]  # Batch output file reference
     malformed_count: NotRequired[int]  # Count of malformed batch lines
     errors: NotRequired[list[str | ErrorDetail]]  # Error messages or structured errors
+    skipped_non_finite: NotRequired[int]  # Count of NaN/Inf values skipped
+    skipped_non_finite_indices: NotRequired[list[int]]  # Row indices with non-finite values
 
 
 class SourceQuarantineReason(TypedDict):

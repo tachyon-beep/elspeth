@@ -477,7 +477,7 @@ class CSVSource(BaseSource):
                 row={"__blank_lines__": blank_line_count},
                 error=f"CSV contained {blank_line_count} blank line(s) that were skipped during processing",
                 schema_mode="parse",
-                destination="discard",
+                destination=self._on_validation_failure,
             )
 
         # CRITICAL: Handle empty source case (all rows quarantined or no rows)

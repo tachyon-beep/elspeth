@@ -199,6 +199,7 @@ class CallType(StrEnum):
     HTTP = "http"
     HTTP_REDIRECT = "http_redirect"
     SQL = "sql"
+    VECTOR = "vector"
     FILESYSTEM = "filesystem"
 
 
