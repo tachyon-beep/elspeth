@@ -249,8 +249,10 @@ class HTTPCallResponse:
     def __post_init__(self) -> None:
         if not isinstance(self.headers, MappingProxyType):
             object.__setattr__(self, "headers", MappingProxyType(dict(self.headers)))
-        if self.body is not None and isinstance(self.body, dict):
-            object.__setattr__(self, "body", deep_freeze(self.body))
+        if self.body is not None and isinstance(self.body, Mapping):
+            frozen = deep_freeze(self.body)
+            if frozen is not self.body:
+                object.__setattr__(self, "body", frozen)
 
     def to_dict(self) -> dict[str, Any]:
         """Serialize to audit-trail dict.

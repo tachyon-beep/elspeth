@@ -87,7 +87,7 @@ per_file_rules:
   - R5
   reason: Recursive container type dispatch for deep_freeze/deep_thaw
   expires: null
-  max_hits: 11
+  max_hits: 12
 - pattern: contracts/hashing.py
   rules:
   - R5

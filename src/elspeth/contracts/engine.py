@@ -2,7 +2,7 @@
 
 import math
 from dataclasses import dataclass
-from typing import TypedDict
+from typing import ClassVar, TypedDict
 
 from elspeth.contracts.enums import RowOutcome
 
@@ -67,6 +67,13 @@ class PendingOutcome:
     Quarantine outcomes are recorded after sink durability, not before.
     """
 
+    _FAILURE_OUTCOMES: ClassVar[frozenset[RowOutcome]] = frozenset(
+        {
+            RowOutcome.QUARANTINED,
+            RowOutcome.FAILED,
+        }
+    )
+
     outcome: RowOutcome
     error_hash: str | None = None
 
@@ -77,10 +84,9 @@ class PendingOutcome:
         trail needs to reference the error record. Other outcomes must NOT
         have one (an error_hash on COMPLETED would be nonsensical).
         """
-        _failure_outcomes = {RowOutcome.QUARANTINED, RowOutcome.FAILED}
-        if self.outcome in _failure_outcomes and self.error_hash is None:
+        if self.outcome in self._FAILURE_OUTCOMES and self.error_hash is None:
             raise ValueError(f"PendingOutcome with {self.outcome.name} outcome must have error_hash")
-        if self.outcome not in _failure_outcomes and self.error_hash is not None:
+        if self.outcome not in self._FAILURE_OUTCOMES and self.error_hash is not None:
             raise ValueError(f"PendingOutcome with {self.outcome.name} outcome must not have error_hash")
 
 

@@ -12,7 +12,6 @@ from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
-from types import MappingProxyType
 from typing import Any
 
 from elspeth.contracts.errors import AuditIntegrityError
@@ -90,12 +89,23 @@ class BatchCheckpointState:
             raise ValueError("BatchCheckpointState.submitted_at must not be empty")
         if self.row_count < 0:
             raise ValueError(f"BatchCheckpointState.row_count must be non-negative, got {self.row_count}")
-        if not isinstance(self.row_mapping, MappingProxyType):
-            object.__setattr__(self, "row_mapping", MappingProxyType(self.row_mapping))
-        if not isinstance(self.template_errors, tuple):
-            object.__setattr__(self, "template_errors", tuple(self.template_errors))
-        if not isinstance(self.requests, MappingProxyType):
-            object.__setattr__(self, "requests", deep_freeze(self.requests))
+        frozen_mapping = deep_freeze(self.row_mapping)
+        if frozen_mapping is not self.row_mapping:
+            object.__setattr__(self, "row_mapping", frozen_mapping)
+        frozen_errors = deep_freeze(self.template_errors)
+        if frozen_errors is not self.template_errors:
+            object.__setattr__(self, "template_errors", frozen_errors)
+        for i, entry in enumerate(self.template_errors):
+            if len(entry) != 2:
+                raise ValueError(f"BatchCheckpointState.template_errors[{i}] must be (int, str), got {len(entry)}-element tuple: {entry!r}")
+            idx, msg = entry
+            if not isinstance(idx, int):
+                raise ValueError(f"BatchCheckpointState.template_errors[{i}][0] must be int, got {type(idx).__name__}: {idx!r}")
+            if not isinstance(msg, str):
+                raise ValueError(f"BatchCheckpointState.template_errors[{i}][1] must be str, got {type(msg).__name__}: {msg!r}")
+        frozen_requests = deep_freeze(self.requests)
+        if frozen_requests is not self.requests:
+            object.__setattr__(self, "requests", frozen_requests)
 
     def to_dict(self) -> dict[str, Any]:
         """Serialize to dict for JSON checkpoint persistence.
