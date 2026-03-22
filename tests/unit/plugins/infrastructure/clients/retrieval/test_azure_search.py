@@ -309,6 +309,31 @@ class TestParseResponse:
         assert len(skipped) == 1
         assert skipped[0]["reason"] == "missing_id"
 
+    @pytest.mark.parametrize(
+        "bad_score,desc",
+        [
+            ("high", "string"),
+            (True, "bool_true"),
+            (False, "bool_false"),
+            ([1.0], "list"),
+            ({"v": 1.0}, "dict"),
+        ],
+    )
+    def test_non_numeric_score_skipped_at_tier3_boundary(self, bad_score, desc):
+        """Tier 3 boundary: non-numeric @search.score must be skipped, not crash."""
+        provider = self._make_provider()
+        response = {
+            "value": [
+                {"@search.score": bad_score, "content": "text", "id": "doc1"},
+                {"@search.score": 5.0, "content": "good", "id": "doc2"},
+            ]
+        }
+        chunks, skipped = provider._parse_response(response, min_score=0.0)
+        # Bad score item skipped; good item still returned
+        assert len(chunks) == 1
+        assert chunks[0].source_id == "doc2"
+        assert any(s["reason"] == "invalid_score_type" for s in skipped)
+
     def test_results_sorted_by_descending_score(self):
         provider = self._make_provider()
         response = {

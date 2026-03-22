@@ -491,6 +491,47 @@ class TestNonFiniteDistanceHandling:
         assert score == pytest.approx(0.75)
 
 
+class TestDistanceTypeValidation:
+    """Tests for elspeth-d4f0e7eed6: distance type not validated before arithmetic."""
+
+    @pytest.mark.parametrize(
+        "bad_distance,desc",
+        [
+            ("0.5", "string"),
+            (True, "bool_true"),
+            (False, "bool_false"),
+            ([0.5], "list"),
+            ({"d": 0.5}, "dict"),
+        ],
+    )
+    def test_non_numeric_distance_skipped_at_tier3_boundary(self, bad_distance, desc):
+        """Tier 3 boundary: non-numeric distance from SDK must be skipped, not crash."""
+        from unittest.mock import patch
+
+        unique_name = f"tdt-{uuid.uuid4().hex[:12]}"
+        config = ChromaSearchProviderConfig(
+            collection=unique_name,
+            mode="ephemeral",
+        )
+        provider = ChromaSearchProvider(config=config)
+        provider._collection.add(documents=["doc a", "doc b"], ids=["doc1", "doc2"])
+
+        with patch.object(
+            provider._collection,
+            "query",
+            return_value={
+                "ids": [["doc1", "doc2"]],
+                "documents": [["doc a", "doc b"]],
+                "distances": [[bad_distance, 0.3]],  # first is bad, second is valid
+                "metadatas": [[{}, {}]],
+            },
+        ):
+            chunks = provider.search("test", top_k=2, min_score=0.0, state_id="s1", token_id=None)
+            # Bad distance item skipped; valid item still returned
+            assert len(chunks) == 1
+            assert chunks[0].content == "doc b"
+
+
 class TestDocTypeValidation:
     """Tests for elspeth-aaa99db4be: doc type unchecked."""
 

@@ -848,9 +848,16 @@ class AzureBatchLLMTransform(BaseTransform):
                 "batch_id": batch_id,
             }
             error_message = None
-            if batch.errors:
-                error_info["errors"] = [{"message": e.message, "error_type": e.code} for e in batch.errors.data]
-                error_message = "; ".join(e.message for e in batch.errors.data)
+            # Tier 3 boundary: batch.errors is from Azure SDK — the wrapper
+            # object is always truthy when present, so .data must be checked
+            # separately for None or empty list.  Error entries inside .data
+            # are also Tier 3 — wrap attribute access in case SDK shape differs.
+            if batch.errors and batch.errors.data:
+                try:
+                    error_info["errors"] = [{"message": e.message, "error_type": e.code} for e in batch.errors.data]
+                    error_message = "; ".join(e.message for e in batch.errors.data)
+                except (AttributeError, TypeError):
+                    error_info["errors"] = [{"message": "batch error details unparseable", "error_type": "unknown"}]
 
             # Extract checkpoint values before clearing
             submitted_at = datetime.fromisoformat(checkpoint.submitted_at)

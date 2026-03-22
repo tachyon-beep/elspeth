@@ -1,6 +1,7 @@
 """Tests for web scrape content extraction utilities."""
 
 import html2text
+import pytest
 from hypothesis import given
 from hypothesis.strategies import text
 
@@ -60,6 +61,25 @@ def test_extract_content_strips_configured_elements():
     assert "Navigation" not in result
     assert "Footer" not in result
     assert "alert" not in result
+
+
+def test_extract_content_unknown_format_raises():
+    """Unknown format should raise ValueError."""
+    with pytest.raises(ValueError, match="Unknown format"):
+        extract_content("<html><body>test</body></html>", format="invalid")
+
+
+def test_extract_content_none_input_raises_valueerror():
+    """Tier 3 boundary: None input is caught inside extract_content and raised as ValueError.
+
+    BeautifulSoup raises TypeError on None input. extract_content wraps
+    this at the Tier 3 boundary, converting it to ValueError so callers
+    only need to catch the documented exception contract.
+    """
+    import pytest
+
+    with pytest.raises(ValueError, match="malformed content"):
+        extract_content(None, format="markdown")  # type: ignore[arg-type]
 
 
 def test_html2text_deterministic_simple():

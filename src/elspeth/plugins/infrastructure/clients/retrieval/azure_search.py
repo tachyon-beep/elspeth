@@ -235,6 +235,13 @@ class AzureSearchProvider:
                 skipped_items.append({"reason": "missing_score", "id": item.get("id")})
                 continue
 
+            # Tier 3 boundary: validate score type before arithmetic.
+            # Azure returns JSON — score could be string, bool, list, etc.
+            # bool check required because isinstance(True, int) is True in Python.
+            if isinstance(raw_score, bool) or not isinstance(raw_score, (int, float)):
+                skipped_items.append({"reason": "invalid_score_type", "id": item.get("id"), "type": type(raw_score).__name__})
+                continue
+
             normalized_score = self._normalize_score(raw_score)
             if normalized_score < min_score:
                 continue

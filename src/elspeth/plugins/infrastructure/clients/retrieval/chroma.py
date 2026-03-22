@@ -186,6 +186,14 @@ class ChromaSearchProvider:
                 skipped += 1
                 continue
 
+            # Tier 3 boundary: validate distance type before arithmetic.
+            # ChromaDB SDK returns JSON-deserialized values — could be
+            # string, bool, list, etc. on corrupted or unexpected responses.
+            # bool check required because isinstance(True, int) is True.
+            if isinstance(distance, bool) or not isinstance(distance, (int, float)):
+                skipped += 1
+                continue
+
             score = self._normalize_distance(distance)
             if score < min_score:
                 continue

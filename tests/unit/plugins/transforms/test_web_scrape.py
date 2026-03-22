@@ -766,6 +766,45 @@ def test_web_scrape_extract_content_exception_returns_error(mock_ctx):
 
 
 @respx.mock
+def test_web_scrape_extract_content_tier3_valueerror_returns_error(mock_ctx):
+    """Tier 3 boundary: ValueError from extract_content (wrapping library exceptions) returns error.
+
+    extract_content() catches AttributeError/TypeError from BeautifulSoup/html2text
+    on malformed HTML and re-raises as ValueError. The caller catches ValueError
+    and returns TransformResult.error() — pipeline continues, row is quarantined.
+    """
+    respx.get(f"https://{_TEST_IP}:443/malformed").mock(return_value=httpx.Response(200, text="<html>malformed</html>"))
+
+    transform = WebScrapeTransform(
+        {
+            "schema": {"mode": "observed"},
+            "url_field": "url",
+            "content_field": "page_content",
+            "fingerprint_field": "page_fingerprint",
+            "format": "markdown",
+            "http": {
+                "abuse_contact": "test@example.com",
+                "scraping_reason": "Testing Tier 3 parse error",
+            },
+        }
+    )
+    transform.on_start(mock_ctx)
+
+    with (
+        patch("socket.getaddrinfo", _mock_getaddrinfo()),
+        patch(
+            "elspeth.plugins.transforms.web_scrape.extract_content",
+            side_effect=ValueError("HTML extraction failed on malformed content: NoneType"),
+        ),
+    ):
+        result = transform.process(make_pipeline_row({"url": "https://example.com/malformed"}), mock_ctx)
+
+    assert result.status == "error"
+    assert result.reason["reason"] == "content_extraction_failed"
+    assert result.reason["error_type"] == "ValueError"
+
+
+@respx.mock
 def test_web_scrape_binary_response_does_not_crash(mock_ctx):
     """Binary content in response.text should be handled gracefully.
 

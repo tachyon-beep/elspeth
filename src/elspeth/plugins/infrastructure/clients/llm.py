@@ -405,9 +405,8 @@ class AuditedLLMClient(AuditedClientBase):
                 error_msg = "LLM returned null content (likely content-filtered by provider)"
                 raw_response = response.model_dump()
                 usage = (
-                    TokenUsage.known(
-                        prompt_tokens=response.usage.prompt_tokens,
-                        completion_tokens=response.usage.completion_tokens,
+                    TokenUsage.from_dict(
+                        {"prompt_tokens": response.usage.prompt_tokens, "completion_tokens": response.usage.completion_tokens}
                     )
                     if response.usage is not None
                     else TokenUsage.unknown()
@@ -473,11 +472,12 @@ class AuditedLLMClient(AuditedClientBase):
 
                 raise ContentPolicyError(error_msg)
 
-        # Guard against providers that omit usage data (streaming, certain configs)
+        # Guard against providers that omit usage data (streaming, certain configs).
+        # Tier 3 boundary: use from_dict() to coerce non-int values (float, bool, etc.)
+        # rather than known() which trusts values implicitly.
         if response.usage is not None:
-            usage = TokenUsage.known(
-                prompt_tokens=response.usage.prompt_tokens,
-                completion_tokens=response.usage.completion_tokens,
+            usage = TokenUsage.from_dict(
+                {"prompt_tokens": response.usage.prompt_tokens, "completion_tokens": response.usage.completion_tokens}
             )
         else:
             usage = TokenUsage.unknown()

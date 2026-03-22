@@ -873,6 +873,60 @@ class TestAzureBatchLLMTransformResume:
         assert result.reason["reason"] == "batch_failed"
         assert result.reason["batch_id"] == "batch-456"
 
+    def test_failed_batch_with_none_errors_no_crash(self, ctx_with_checkpoint: PluginContext, transform: AzureBatchLLMTransform) -> None:
+        """Tier 3 boundary: batch.errors may be None from Azure SDK — must not crash.
+
+        Azure SDK's Batch object is Tier 3 external data. The errors field
+        may be None, or may have an unexpected shape. Accessing .errors.data
+        without guarding crashes with AttributeError.
+        """
+        mock_client = Mock()
+        mock_batch = Mock()
+        mock_batch.id = "batch-789"
+        mock_batch.status = "failed"
+        mock_batch.output_file_id = None
+        mock_batch.error_file_id = None
+        mock_batch.errors = None  # Azure SDK returns None, not an object with .data
+        mock_client.batches.retrieve.return_value = mock_batch
+
+        transform._client = mock_client
+
+        rows = [{"text": "hello"}]
+
+        result = transform.process([make_pipeline_row(d) for d in rows], ctx_with_checkpoint)
+
+        assert result.status == "error"
+        assert result.reason is not None
+        assert result.reason["reason"] == "batch_failed"
+        # errors key should not be present when batch.errors is None
+        assert "errors" not in result.reason
+
+    def test_failed_batch_with_errors_data_none_no_crash(
+        self, ctx_with_checkpoint: PluginContext, transform: AzureBatchLLMTransform
+    ) -> None:
+        """Tier 3: batch.errors exists but .data is None — must not crash."""
+        mock_client = Mock()
+        mock_batch = Mock()
+        mock_batch.id = "batch-790"
+        mock_batch.status = "failed"
+        mock_batch.output_file_id = None
+        mock_batch.error_file_id = None
+        mock_batch.errors = Mock()
+        mock_batch.errors.data = None  # errors object exists but data is None
+        mock_client.batches.retrieve.return_value = mock_batch
+
+        transform._client = mock_client
+
+        rows = [{"text": "hello"}]
+
+        result = transform.process([make_pipeline_row(d) for d in rows], ctx_with_checkpoint)
+
+        assert result.status == "error"
+        assert result.reason is not None
+        assert result.reason["reason"] == "batch_failed"
+        # errors key should not be present when batch.errors.data is None
+        assert "errors" not in result.reason
+
     def test_cancelled_batch_returns_error(self, ctx_with_checkpoint: PluginContext, transform: AzureBatchLLMTransform) -> None:
         """Cancelled batch returns TransformResult.error()."""
         mock_client = Mock()
