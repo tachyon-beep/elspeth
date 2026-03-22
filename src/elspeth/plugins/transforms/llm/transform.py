@@ -16,6 +16,7 @@ Architecture:
 from __future__ import annotations
 
 import json
+import threading
 import time
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
@@ -79,6 +80,27 @@ class _FinishReasonError:
     error_message: str
 
 
+def _serialize_finish_reason(finish_reason: ParsedFinishReason) -> str | None:
+    """Serialize finish_reason for audit metadata and error reporting.
+
+    Single source of truth for converting ParsedFinishReason to its string
+    representation. Used by both _finish_reason_error (error path) and
+    success metadata recording (audit path) to eliminate parallel isinstance
+    dispatch chains that would need synchronized updates.
+
+    Returns a string for known enum values, the raw string for unrecognized
+    values, and None when the provider couldn't extract it. The audit trail
+    must distinguish these three cases.
+    """
+    if finish_reason is None:
+        return None
+    if isinstance(finish_reason, FinishReason):
+        return finish_reason.value
+    if isinstance(finish_reason, UnrecognizedFinishReason):
+        return finish_reason.raw
+    return str(finish_reason)  # type: ignore[unreachable]  # pragma: no cover — exhaustive, but future-proof
+
+
 def _finish_reason_error(
     finish_reason: ParsedFinishReason,
     *,
@@ -89,10 +111,10 @@ def _finish_reason_error(
     """Fail closed on non-STOP finish reasons.
 
     Only explicit STOP is allowlisted.  Absent finish_reason (None) is
-    treated as a retryable error — known-bad reasons get specific error
-    messages, unknown/unrecognized reasons get a generic rejection.
-    This ensures new provider finish reasons are never silently treated
-    as success.
+    accepted with a structured warning (Drifting Goals intervention — see
+    below). Known-bad reasons get specific error messages, unknown/unrecognized
+    reasons get a generic rejection. This ensures new provider finish reasons
+    are never silently treated as success.
     """
 
     def _build_reason(**base_fields: str) -> dict[str, Any]:
@@ -109,12 +131,15 @@ def _finish_reason_error(
     if finish_reason == FinishReason.STOP:
         return None
 
-    # Absent finish_reason (None) means the provider couldn't extract it
-    # (e.g. Azure SDK omits raw_response or choices in some configurations).
-    # The provider already validated content is non-empty via LLMQueryResult,
-    # and logged a warning about "truncation undetectable". Accept the
-    # response — rejecting every row when the SDK shape varies makes the
-    # provider unusable.
+    # Absent finish_reason (None) is a valid response shape for some providers
+    # (e.g. Azure SDK omits raw_response or choices in certain configurations).
+    # This is provider-normal behavior, not a defect. The provider already
+    # validated content is non-empty via LLMQueryResult, and logged a warning
+    # about "truncation undetectable".
+    #
+    # Callers record finish_reason in success_reason.metadata so the audit
+    # trail distinguishes None (absent) from STOP (confirmed completion).
+    # This is queryable via MCP diagnose() for operational visibility.
     if finish_reason is None:
         return None
 
@@ -133,14 +158,15 @@ def _finish_reason_error(
                 ),
                 error_message=error_message,
             )
-        # Known enum member not in STOP or error dict — fail closed.
-        raw_value = finish_reason.value
-    elif isinstance(finish_reason, UnrecognizedFinishReason):
-        raw_value = finish_reason.raw
-    else:  # pragma: no cover — exhaustive, but fail closed on new subtypes
-        raw_value = str(finish_reason)  # type: ignore[unreachable]
+        # entry is None: this FinishReason is not in the error dict but is also
+        # not STOP — fall through to the catch-all so it is rejected.
 
-    # Catch-all: any finish reason not explicitly allowlisted is an error.
+    # Catch-all: any finish reason not explicitly allowlisted (including
+    # known enum members not in STOP or error dict, and unrecognized values)
+    # is an error. Uses _serialize_finish_reason as the single source of truth
+    # for string conversion. None was handled above; raw_value is always str.
+    raw_value = _serialize_finish_reason(finish_reason)
+    assert raw_value is not None, "finish_reason=None was handled above — unreachable"
     return _FinishReasonError(
         result=TransformResult.error(
             cast(
@@ -341,7 +367,12 @@ class SingleQueryStrategy:
             success_reason={
                 "action": "enriched",
                 "fields_added": [self.response_field],
-                "metadata": {"model": result.model, **result.usage.to_dict(), **audit_metadata},
+                "metadata": {
+                    "model": result.model,
+                    "finish_reason": _serialize_finish_reason(result.finish_reason),
+                    **result.usage.to_dict(),
+                    **audit_metadata,
+                },
             },
         )
 
@@ -673,6 +704,9 @@ class MultiQueryStrategy:
             lookup_source=rendered.lookup_source,
             system_prompt_source=self.system_prompt_source,
         )
+        # Record finish_reason so audit trail distinguishes None (absent) from
+        # STOP (confirmed completion). See Bug elspeth-393d2459aa.
+        audit_metadata[f"{spec.name}_finish_reason"] = _serialize_finish_reason(result.finish_reason)
 
         return self._QuerySuccess(fields=partial, audit_metadata=audit_metadata)
 
@@ -719,17 +753,23 @@ class MultiQueryStrategy:
 
             # Error from template/JSON/validation/non-retryable LLM
             if isinstance(result, TransformResult):
+                # A TransformResult with status="error" and reason=None is a bug
+                # in our code — mirrors the same guard in _execute_parallel.
+                if result.reason is None:
+                    raise FrameworkBugError(
+                        f"Multi-query sequential execution produced TransformResult with "
+                        f"status='error' but reason=None for query index {query_idx} "
+                        f"(query_name={spec.name!r}). Every error path must set a reason dict."
+                    )
                 # Add discarded count for error reporting — copy first to avoid
                 # mutating the original dict (which may be shared with audit records)
-                if result.reason is not None:
-                    augmented_reason = cast(TransformErrorReason, dict(result.reason))
-                    augmented_reason["discarded_successful_queries"] = query_idx
-                    return TransformResult.error(
-                        augmented_reason,
-                        retryable=result.retryable,
-                        context_after=result.context_after,
-                    )
-                return result
+                augmented_reason = cast(TransformErrorReason, dict(result.reason))
+                augmented_reason["discarded_successful_queries"] = query_idx
+                return TransformResult.error(
+                    augmented_reason,
+                    retryable=result.retryable,
+                    context_after=result.context_after,
+                )
 
             accumulated_outputs.update(result.fields)
             accumulated_audit.update(result.audit_metadata)
@@ -770,7 +810,10 @@ class MultiQueryStrategy:
             raise RuntimeError("_execute_parallel called without executor")
 
         # Side channel for audit metadata — _process_fn writes here, outer scope reads after pool.
+        # Protected by lock: PooledExecutor runs _process_fn across ThreadPoolExecutor
+        # workers, so concurrent dict writes require synchronization.
         audit_metadata_by_index: dict[int, dict[str, object]] = {}
+        audit_metadata_lock = threading.Lock()
 
         # Build RowContext for each query — the pool treats each as a "row"
         contexts = [
@@ -803,8 +846,10 @@ class MultiQueryStrategy:
             )
             if isinstance(result, TransformResult):
                 return result  # Error passthrough
-            # Stash audit metadata in side channel before wrapping in TransformResult
-            audit_metadata_by_index[work["query_idx"]] = result.audit_metadata
+            # Stash audit metadata in side channel before wrapping in TransformResult.
+            # Lock required: multiple pool workers write concurrently.
+            with audit_metadata_lock:
+                audit_metadata_by_index[work["query_idx"]] = result.audit_metadata
             # Success: wrap partial fields in TransformResult for pool interface
             observed = SchemaContract(
                 mode="OBSERVED",
@@ -833,9 +878,19 @@ class MultiQueryStrategy:
         if failed:
             first_idx, first_result = failed[0]
             spec = self.query_specs[first_idx]
+            # A TransformResult with status="error" and reason=None is a bug in
+            # our code — every error path in _execute_one_query sets a reason dict.
+            # Fabricating a reason here would hide the bug. Crash per offensive
+            # programming policy.
+            if first_result.reason is None:
+                raise FrameworkBugError(
+                    f"Multi-query parallel execution produced TransformResult with "
+                    f"status='error' but reason=None for query index {first_idx} "
+                    f"(query_name={spec.name!r}). Every error path must set a reason dict."
+                )
             error_reason: TransformErrorReason = cast(
                 TransformErrorReason,
-                dict(first_result.reason) if first_result.reason else {"reason": "multi_query_failed"},
+                dict(first_result.reason),
             )
             error_reason["failed_query_name"] = spec.name
             error_reason["failed_query_index"] = first_idx
