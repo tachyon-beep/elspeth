@@ -504,8 +504,14 @@ class TestDistanceTypeValidation:
             ({"d": 0.5}, "dict"),
         ],
     )
-    def test_non_numeric_distance_skipped_at_tier3_boundary(self, bad_distance, desc):
-        """Tier 3 boundary: non-numeric distance from SDK must be skipped, not crash."""
+    def test_non_numeric_distance_crashes_on_corrupt_index(self, bad_distance, desc):
+        """ChromaDB is our infrastructure — corrupt distances must crash, not skip.
+
+        Unlike Tier 3 external APIs where individual bad items are quarantined,
+        ChromaDB returning non-numeric distances indicates index corruption or
+        SDK bug. A pipeline completing with silently missing retrieval chunks
+        is worse than a crash (silent wrong result).
+        """
         from unittest.mock import patch
 
         unique_name = f"tdt-{uuid.uuid4().hex[:12]}"
@@ -516,20 +522,20 @@ class TestDistanceTypeValidation:
         provider = ChromaSearchProvider(config=config)
         provider._collection.add(documents=["doc a", "doc b"], ids=["doc1", "doc2"])
 
-        with patch.object(
-            provider._collection,
-            "query",
-            return_value={
-                "ids": [["doc1", "doc2"]],
-                "documents": [["doc a", "doc b"]],
-                "distances": [[bad_distance, 0.3]],  # first is bad, second is valid
-                "metadatas": [[{}, {}]],
-            },
+        with (
+            patch.object(
+                provider._collection,
+                "query",
+                return_value={
+                    "ids": [["doc1", "doc2"]],
+                    "documents": [["doc a", "doc b"]],
+                    "distances": [[bad_distance, 0.3]],
+                    "metadatas": [[{}, {}]],
+                },
+            ),
+            pytest.raises(RetrievalError, match="non-numeric distance"),
         ):
-            chunks = provider.search("test", top_k=2, min_score=0.0, state_id="s1", token_id=None)
-            # Bad distance item skipped; valid item still returned
-            assert len(chunks) == 1
-            assert chunks[0].content == "doc b"
+            provider.search("test", top_k=2, min_score=0.0, state_id="s1", token_id=None)
 
 
 class TestDocTypeValidation:

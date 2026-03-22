@@ -377,13 +377,13 @@ allow_hits:
   expires: null
 - key: plugins/infrastructure/clients/retrieval/chroma.py:R5:ChromaSearchProvider:search:fp=a438ed23ab599de8
   owner: bugfix
-  reason: Tier 3 boundary type validation — isinstance(distance, bool) guards against Python bool-is-int before distance arithmetic
-  safety: Invalid distance type causes item to be skipped (increments skipped counter); no crash
+  reason: Offensive type guard — ChromaDB is our infrastructure, not external API; non-numeric distance indicates index corruption or SDK bug
+  safety: Raises RetrievalError immediately (crash) — not silently skipped
   expires: null
 - key: plugins/infrastructure/clients/retrieval/chroma.py:R5:ChromaSearchProvider:search:fp=2422ae2a2039987b
   owner: bugfix
-  reason: Tier 3 boundary type validation — rejects non-numeric distance types (string, list, dict) before math.isfinite
-  safety: Invalid distance type causes item to be skipped; no crash
+  reason: Offensive type guard — rejects non-numeric distance types with crash; corrupt ChromaDB index must not produce silent wrong results
+  safety: Raises RetrievalError immediately (crash) — not silently skipped
   expires: null
 - key: plugins/transforms/web_scrape.py:R5:WebScrapeTransform:__init__:fp=189a33d2bccf7c9b
   owner: feature

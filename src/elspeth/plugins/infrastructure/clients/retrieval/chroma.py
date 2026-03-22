@@ -186,13 +186,16 @@ class ChromaSearchProvider:
                 skipped += 1
                 continue
 
-            # Tier 3 boundary: validate distance type before arithmetic.
-            # ChromaDB SDK returns JSON-deserialized values — could be
-            # string, bool, list, etc. on corrupted or unexpected responses.
-            # bool check required because isinstance(True, int) is True.
+            # ChromaDB is our infrastructure, not an external API — corrupt
+            # distances indicate index corruption or SDK bug.  Crash rather
+            # than silently skipping: a run that completes with missing
+            # retrieval chunks is worse than a crash (silent wrong result).
             if isinstance(distance, bool) or not isinstance(distance, (int, float)):
-                skipped += 1
-                continue
+                raise RetrievalError(
+                    f"ChromaDB returned non-numeric distance {distance!r} "
+                    f"(type={type(distance).__name__}) — possible index corruption or SDK bug",
+                    retryable=False,
+                )
 
             score = self._normalize_distance(distance)
             if score < min_score:
