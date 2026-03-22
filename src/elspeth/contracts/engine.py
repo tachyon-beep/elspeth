@@ -32,6 +32,10 @@ class BufferEntry[T]:
     buffer_wait_ms: float
 
     def __post_init__(self) -> None:
+        if not isinstance(self.submit_index, int) or isinstance(self.submit_index, bool):
+            raise TypeError(f"BufferEntry.submit_index must be int, got {type(self.submit_index).__name__}: {self.submit_index!r}")
+        if not isinstance(self.complete_index, int) or isinstance(self.complete_index, bool):
+            raise TypeError(f"BufferEntry.complete_index must be int, got {type(self.complete_index).__name__}: {self.complete_index!r}")
         if self.submit_index < 0:
             raise ValueError(f"BufferEntry.submit_index must be non-negative, got {self.submit_index}")
         if self.complete_index < 0:

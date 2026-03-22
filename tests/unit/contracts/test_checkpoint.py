@@ -239,6 +239,65 @@ def test_resume_point_rejects_dict_coalesce_state() -> None:
         )
 
 
+# === ResumePoint checkpoint type guard + sequence_number type guard ===
+# (elspeth-dce3a343a7, elspeth-52a31594ee)
+
+
+def test_resume_point_rejects_non_checkpoint_type() -> None:
+    """Regression: elspeth-dce3a343a7 — checkpoint must be Checkpoint, not raw dict."""
+    with pytest.raises(TypeError, match="checkpoint must be Checkpoint"):
+        ResumePoint(
+            checkpoint={"run_id": "r1"},  # type: ignore[arg-type]
+            token_id="tok-001",
+            node_id="node-001",
+            sequence_number=1,
+        )
+
+
+def test_resume_point_rejects_none_checkpoint() -> None:
+    """None checkpoint is corruption — crash, don't propagate."""
+    with pytest.raises(TypeError, match="checkpoint must be Checkpoint"):
+        ResumePoint(
+            checkpoint=None,  # type: ignore[arg-type]
+            token_id="tok-001",
+            node_id="node-001",
+            sequence_number=1,
+        )
+
+
+def test_resume_point_rejects_float_sequence_number() -> None:
+    """Regression: elspeth-52a31594ee — float 0.5 must not pass as sequence number."""
+    with pytest.raises(TypeError, match="sequence_number must be int"):
+        ResumePoint(
+            checkpoint=_checkpoint(),
+            token_id="tok-001",
+            node_id="node-001",
+            sequence_number=0.5,  # type: ignore[arg-type]
+        )
+
+
+def test_resume_point_rejects_bool_sequence_number() -> None:
+    """bool is subclass of int — True (value 1) must not pass as sequence number."""
+    with pytest.raises(TypeError, match="sequence_number must be int"):
+        ResumePoint(
+            checkpoint=_checkpoint(),
+            token_id="tok-001",
+            node_id="node-001",
+            sequence_number=True,  # type: ignore[arg-type]
+        )
+
+
+def test_resume_point_rejects_string_sequence_number() -> None:
+    """String sequence number is corruption."""
+    with pytest.raises(TypeError, match="sequence_number must be int"):
+        ResumePoint(
+            checkpoint=_checkpoint(),
+            token_id="tok-001",
+            node_id="node-001",
+            sequence_number="3",  # type: ignore[arg-type]
+        )
+
+
 # === AggregationNodeCheckpoint.from_dict corruption tests ===
 
 
@@ -325,7 +384,7 @@ def test_node_from_dict_multiple_missing_fields_reports_all() -> None:
 
 def test_aggregation_token_rejects_non_dict_row_data() -> None:
     """row_data type guard rejects non-dict values with clear error."""
-    with pytest.raises(ValueError, match="row_data must be a dict"):
+    with pytest.raises(TypeError, match="row_data must be dict or MappingProxyType"):
         AggregationTokenCheckpoint(
             token_id="tok-001",
             row_id="row-001",
@@ -340,7 +399,7 @@ def test_aggregation_token_rejects_non_dict_row_data() -> None:
 
 def test_aggregation_node_rejects_non_dict_contract() -> None:
     """contract type guard rejects non-dict values with clear error."""
-    with pytest.raises(ValueError, match="contract must be a dict"):
+    with pytest.raises(TypeError, match="contract must be dict or MappingProxyType"):
         AggregationNodeCheckpoint(
             tokens=(),
             batch_id="batch-001",

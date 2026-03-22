@@ -42,9 +42,9 @@ class CoalesceTokenCheckpoint:
             if not isinstance(value, str) or not value:
                 raise ValueError(f"{field_name} must be a non-empty string, got {type(value).__name__}: {value!r}")
         if not isinstance(self.row_data, (dict, MappingProxyType)):
-            raise ValueError(f"row_data must be a dict, got {type(self.row_data).__name__}: {self.row_data!r}")
+            raise TypeError(f"CoalesceTokenCheckpoint.row_data must be dict or MappingProxyType, got {type(self.row_data).__name__}")
         if not isinstance(self.contract, (dict, MappingProxyType)):
-            raise ValueError(f"contract must be a dict, got {type(self.contract).__name__}: {self.contract!r}")
+            raise TypeError(f"CoalesceTokenCheckpoint.contract must be dict or MappingProxyType, got {type(self.contract).__name__}")
         if not isinstance(self.row_data, MappingProxyType):
             object.__setattr__(self, "row_data", deep_freeze(self.row_data))
         if not isinstance(self.contract, MappingProxyType):

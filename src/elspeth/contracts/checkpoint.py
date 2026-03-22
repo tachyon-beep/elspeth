@@ -53,6 +53,8 @@ class ResumePoint:
         Wrong types, None, or empty token_id/node_id indicate corrupted
         checkpoint data — crash immediately with distinct error messages.
         """
+        if not isinstance(self.checkpoint, Checkpoint):
+            raise TypeError(f"ResumePoint.checkpoint must be Checkpoint, got {type(self.checkpoint).__name__}")
         if not isinstance(self.token_id, str):
             raise TypeError(f"ResumePoint.token_id must be str, got {type(self.token_id).__name__}: {self.token_id!r}")
         if not self.token_id:
@@ -61,6 +63,8 @@ class ResumePoint:
             raise TypeError(f"ResumePoint.node_id must be str, got {type(self.node_id).__name__}: {self.node_id!r}")
         if not self.node_id:
             raise ValueError("ResumePoint.node_id must not be empty")
+        if not isinstance(self.sequence_number, int) or isinstance(self.sequence_number, bool):
+            raise TypeError(f"ResumePoint.sequence_number must be int, got {type(self.sequence_number).__name__}: {self.sequence_number!r}")
         if self.sequence_number < 0:
             raise ValueError(f"ResumePoint.sequence_number must be non-negative, got {self.sequence_number}")
         if self.aggregation_state is not None and not isinstance(self.aggregation_state, AggregationCheckpointState):

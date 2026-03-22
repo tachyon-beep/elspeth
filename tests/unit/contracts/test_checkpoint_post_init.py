@@ -186,6 +186,28 @@ class TestAggregationCheckpointStatePostInit:
         with pytest.raises(ValueError, match="version must not be empty"):
             AggregationCheckpointState(version="", nodes={})
 
+    # --- Type guard on nodes (elspeth-50f4f87787) ---
+
+    def test_rejects_list_as_nodes(self) -> None:
+        """Regression: non-mapping type must raise TypeError, not unhelpful MappingProxyType error."""
+        with pytest.raises(TypeError, match="nodes must be dict or MappingProxyType"):
+            AggregationCheckpointState(version="3.0", nodes=[])  # type: ignore[arg-type]
+
+    def test_rejects_string_as_nodes(self) -> None:
+        with pytest.raises(TypeError, match="nodes must be dict or MappingProxyType"):
+            AggregationCheckpointState(version="3.0", nodes="not-a-dict")  # type: ignore[arg-type]
+
+    def test_rejects_none_as_nodes(self) -> None:
+        with pytest.raises(TypeError, match="nodes must be dict or MappingProxyType"):
+            AggregationCheckpointState(version="3.0", nodes=None)  # type: ignore[arg-type]
+
+    def test_accepts_dict_and_wraps_to_mapping_proxy(self) -> None:
+        """Valid dict is accepted and wrapped to MappingProxyType."""
+        from types import MappingProxyType
+
+        state = AggregationCheckpointState(version="3.0", nodes={})
+        assert isinstance(state.nodes, MappingProxyType)
+
 
 class TestRowMappingEntryPostInit:
     def test_rejects_negative_index(self) -> None:
