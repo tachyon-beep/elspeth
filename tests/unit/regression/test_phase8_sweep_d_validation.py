@@ -92,17 +92,16 @@ class TestBatchStatsAggregateOverwrite:
     """D.3: group_by field name must not collide with aggregate keys."""
 
     def test_group_by_collides_with_count(self) -> None:
-        """group_by='count' should raise ValueError since 'count' is an output key."""
+        """group_by='count' should raise ValueError since 'count' is an output key.
+
+        The collision check fires at construction time (__init__), not at
+        process() time — fail-fast prevents pipelines from starting with
+        invalid configurations.
+        """
         from elspeth.plugins.transforms.batch_stats import BatchStats
 
-        transform = BatchStats({"schema": DYNAMIC_SCHEMA, "value_field": "amount", "group_by": "count"})
-        db = make_landscape_db()
-        recorder = make_recorder(db)
-        ctx = make_context(run_id="test", landscape=recorder)
-        rows = [_make_row({"amount": 10, "count": "group_a"})]
-
         with pytest.raises(ValueError, match="collides with aggregate output key"):
-            transform.process(rows, ctx)
+            BatchStats({"schema": DYNAMIC_SCHEMA, "value_field": "amount", "group_by": "count"})
 
     def test_group_by_no_collision(self) -> None:
         """group_by='category' should work fine."""
