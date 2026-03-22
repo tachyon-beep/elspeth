@@ -25,7 +25,7 @@ from typing import TYPE_CHECKING, Any
 from elspeth.contracts.config.defaults import INTERNAL_DEFAULTS, POLICY_DEFAULTS
 from elspeth.contracts.engine import RetryPolicy
 from elspeth.contracts.enums import _IMPLEMENTED_BACKPRESSURE_MODES, BackpressureMode, TelemetryGranularity
-from elspeth.contracts.freeze import deep_freeze
+from elspeth.contracts.freeze import freeze_fields
 
 if TYPE_CHECKING:
     from elspeth.core.config import (
@@ -557,9 +557,7 @@ class ExporterConfig:
         """Validate exporter configuration."""
         if not self.name:
             raise ValueError("exporter name cannot be empty")
-        frozen = deep_freeze(self.options)
-        if frozen is not self.options:
-            object.__setattr__(self, "options", frozen)
+        freeze_fields(self, "options")
 
 
 @dataclass(frozen=True, slots=True)

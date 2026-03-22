@@ -15,7 +15,7 @@ from dataclasses import dataclass, field
 from types import MappingProxyType
 from typing import TYPE_CHECKING, Any, Literal
 
-from elspeth.contracts.freeze import deep_freeze
+from elspeth.contracts.freeze import freeze_fields
 from elspeth.contracts.url import SanitizedDatabaseUrl, SanitizedWebhookUrl
 
 if TYPE_CHECKING:
@@ -392,7 +392,7 @@ class ArtifactDescriptor:
 
     def __post_init__(self) -> None:
         if self.metadata is not None:
-            object.__setattr__(self, "metadata", deep_freeze(self.metadata))
+            freeze_fields(self, "metadata")
 
     @classmethod
     def for_file(

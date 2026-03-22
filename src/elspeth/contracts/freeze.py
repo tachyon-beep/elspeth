@@ -77,6 +77,31 @@ def deep_freeze(value: Any) -> Any:
     return value
 
 
+def freeze_fields(instance: object, *field_names: str) -> None:
+    """Freeze named container fields on a frozen dataclass instance.
+
+    Applies deep_freeze() to each named field, with identity-preserving
+    idempotency (skips object.__setattr__ when the field is already frozen).
+
+    This is the standard utility for __post_init__ methods on frozen
+    dataclasses. Use it instead of hand-rolling deep_freeze + setattr.
+
+    Example:
+        @dataclass(frozen=True, slots=True)
+        class MyRecord:
+            data: Mapping[str, Any]
+            items: Sequence[str]
+
+            def __post_init__(self) -> None:
+                freeze_fields(self, "data", "items")
+    """
+    for name in field_names:
+        value = getattr(instance, name)
+        frozen = deep_freeze(value)
+        if frozen is not value:
+            object.__setattr__(instance, name, frozen)
+
+
 def deep_thaw(value: Any) -> Any:
     """Recursively convert frozen containers to JSON-serializable mutable types.
 

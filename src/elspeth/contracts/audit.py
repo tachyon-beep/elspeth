@@ -12,7 +12,7 @@ from dataclasses import dataclass
 from datetime import datetime
 from typing import TYPE_CHECKING, Any, ClassVar, Literal, TypedDict
 
-from elspeth.contracts.freeze import deep_freeze
+from elspeth.contracts.freeze import freeze_fields
 
 if TYPE_CHECKING:
     pass  # Placeholder for future type-only imports
@@ -99,9 +99,7 @@ class Node:
         _validate_enum(self.node_type, NodeType, "node_type")
         _validate_enum(self.determinism, Determinism, "determinism")
         if self.schema_fields is not None:
-            frozen = deep_freeze(self.schema_fields)
-            if frozen is not self.schema_fields:
-                object.__setattr__(self, "schema_fields", frozen)
+            freeze_fields(self, "schema_fields")
 
 
 @dataclass(frozen=True, slots=True)
@@ -455,9 +453,7 @@ class RowLineage:
 
     def __post_init__(self) -> None:
         if self.source_data is not None:
-            frozen = deep_freeze(self.source_data)
-            if frozen is not self.source_data:
-                object.__setattr__(self, "source_data", frozen)
+            freeze_fields(self, "source_data")
 
 
 class ExportStatusUpdate(TypedDict, total=False):
