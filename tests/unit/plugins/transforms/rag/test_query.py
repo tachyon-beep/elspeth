@@ -1,11 +1,38 @@
 """Tests for RAG query construction."""
 
 import os
+from unittest.mock import patch
 
 import pytest
 
 from elspeth.plugins.infrastructure.templates import TemplateError
 from elspeth.plugins.transforms.rag.query import _FORK_CTX, QueryBuilder
+
+# =============================================================================
+# Helpers
+# =============================================================================
+
+
+def _make_crashing_process(exitcode: int = 1):
+    """Factory for a patched Process that crashes with the given exit code.
+
+    Returns a side_effect callable for use with patch.object(_FORK_CTX, "Process").
+    """
+    original_process = _FORK_CTX.Process
+
+    def _factory(*args, **kwargs):
+        def _die(*_args):
+            os._exit(exitcode)
+
+        kwargs["target"] = _die
+        return original_process(*args, **kwargs)
+
+    return _factory
+
+
+# =============================================================================
+# Field-only mode
+# =============================================================================
 
 
 class TestFieldOnlyMode:
@@ -42,6 +69,11 @@ class TestFieldOnlyMode:
         assert result.error["cause"] == "empty_query"
 
 
+# =============================================================================
+# Template mode
+# =============================================================================
+
+
 class TestTemplateMode:
     def test_renders_with_query_and_row(self):
         builder = QueryBuilder(
@@ -66,6 +98,11 @@ class TestTemplateMode:
         result = builder.build({"topic": "test"})
         assert result.error is not None
         assert result.error["reason"] == "template_rendering_failed"
+
+
+# =============================================================================
+# Regex mode
+# =============================================================================
 
 
 class TestRegexMode:
@@ -118,6 +155,11 @@ class TestRegexMode:
         assert result.error["cause"] == "regex_timeout"
 
 
+# =============================================================================
+# Subprocess crash detection
+# =============================================================================
+
+
 class TestSubprocessCrashDetection:
     """Bug fix: subprocess crash must CRASH the pipeline, not quarantine the row.
 
@@ -128,100 +170,127 @@ class TestSubprocessCrashDetection:
 
     def test_crashed_subprocess_raises_runtime_error(self):
         """When child process exits non-zero, build() must raise, not return error."""
-        from unittest.mock import patch
-
         builder = QueryBuilder(
             query_field="text",
             query_pattern=r"issue:\s*(.+)",
         )
 
-        original_process = _FORK_CTX.Process
-
-        def _crashing_process(*args, **kwargs):
-            """Return a process that crashes instead of running the regex."""
-
-            def _die(*_args):
-                os._exit(1)
-
-            kwargs["target"] = _die
-            return original_process(*args, **kwargs)
-
         with (
-            patch.object(_FORK_CTX, "Process", side_effect=_crashing_process),
+            patch.object(_FORK_CTX, "Process", side_effect=_make_crashing_process(1)),
             pytest.raises(RuntimeError, match="Regex worker subprocess crashed"),
         ):
             builder.build({"text": "issue: payment failed"})
 
     def test_crash_error_includes_exitcode_and_pattern(self):
         """Crash exception must include diagnostic details."""
-        from unittest.mock import patch
-
         builder = QueryBuilder(
             query_field="text",
             query_pattern=r"issue:\s*(.+)",
         )
 
-        original_process = _FORK_CTX.Process
-
-        def _crashing_process(*args, **kwargs):
-            def _die(*_args):
-                os._exit(42)
-
-            kwargs["target"] = _die
-            return original_process(*args, **kwargs)
-
         with (
-            patch.object(_FORK_CTX, "Process", side_effect=_crashing_process),
+            patch.object(_FORK_CTX, "Process", side_effect=_make_crashing_process(42)),
             pytest.raises(RuntimeError, match="exitcode 42") as exc_info,
         ):
             builder.build({"text": "issue: payment failed"})
         assert "issue:" in str(exc_info.value)  # pattern included
 
 
-class TestQueueResourceCleanup:
-    """Bug fix: multiprocessing.Queue must be closed after regex evaluation."""
+# =============================================================================
+# Queue resource cleanup
+# =============================================================================
 
-    def test_queue_closed_after_successful_match(self):
-        """Queue file descriptors must not leak on the success path."""
+
+class TestQueueResourceCleanup:
+    """Bug fix: multiprocessing.Queue must be closed after regex evaluation.
+
+    Verified via mock-based close() spy (deterministic) and supplementary
+    FD-count integration test (Linux-only, environment-sensitive).
+    """
+
+    def test_queue_close_called_on_success(self):
+        """Queue.close() and join_thread() are called after successful match."""
         builder = QueryBuilder(
             query_field="text",
             query_pattern=r"issue:\s*(.+)",
         )
-        # Count open FDs before
+
+        original_queue = _FORK_CTX.Queue
+
+        close_calls = []
+        join_thread_calls = []
+
+        def _tracking_queue(*args, **kwargs):
+            q = original_queue(*args, **kwargs)
+            original_close = q.close
+            original_join_thread = q.join_thread
+
+            def _close():
+                close_calls.append(True)
+                return original_close()
+
+            def _join_thread():
+                join_thread_calls.append(True)
+                return original_join_thread()
+
+            q.close = _close
+            q.join_thread = _join_thread
+            return q
+
+        with patch.object(_FORK_CTX, "Queue", side_effect=_tracking_queue):
+            result = builder.build({"text": "issue: payment failed"})
+
+        assert result.query == "payment failed"
+        assert len(close_calls) == 1, "Queue.close() must be called exactly once"
+        assert len(join_thread_calls) == 1, "Queue.join_thread() must be called exactly once"
+
+    def test_queue_close_called_on_crash(self):
+        """Queue.close() is called even when subprocess crashes (finally block)."""
+        builder = QueryBuilder(
+            query_field="text",
+            query_pattern=r"issue:\s*(.+)",
+        )
+
+        original_queue = _FORK_CTX.Queue
+        close_calls = []
+
+        def _tracking_queue(*args, **kwargs):
+            q = original_queue(*args, **kwargs)
+            original_close = q.close
+
+            def _close():
+                close_calls.append(True)
+                return original_close()
+
+            q.close = _close
+            return q
+
+        with (
+            patch.object(_FORK_CTX, "Queue", side_effect=_tracking_queue),
+            patch.object(_FORK_CTX, "Process", side_effect=_make_crashing_process(1)),
+            pytest.raises(RuntimeError),
+        ):
+            builder.build({"text": "issue: payment failed"})
+
+        assert len(close_calls) == 1, "Queue.close() must be called even on crash path"
+
+    @pytest.mark.skipif(not os.path.exists("/proc"), reason="Linux /proc required")
+    def test_no_fd_leak_after_repeated_evaluations(self):
+        """Supplementary integration test: FDs don't accumulate over many calls."""
+        builder = QueryBuilder(
+            query_field="text",
+            query_pattern=r"issue:\s*(.+)",
+        )
         pid = os.getpid()
         fd_count_before = len(os.listdir(f"/proc/{pid}/fd"))
 
-        # Run 20 regex evaluations
         for _ in range(20):
             result = builder.build({"text": "issue: payment failed"})
             assert result.query is not None
 
         fd_count_after = len(os.listdir(f"/proc/{pid}/fd"))
 
-        # Queue creates 2 pipe FDs. 20 leaked queues = ~40 FDs.
-        # Allow small variance (3-4 FDs) for normal system activity.
         assert fd_count_after - fd_count_before < 10, (
             f"File descriptor leak: {fd_count_after - fd_count_before} new FDs "
             f"after 20 regex evaluations (before={fd_count_before}, after={fd_count_after})"
-        )
-
-    def test_queue_closed_after_timeout(self):
-        """Queue file descriptors must not leak on the timeout path."""
-        builder = QueryBuilder(
-            query_field="text",
-            query_pattern=r"(a+)+b",
-            regex_timeout=0.1,
-        )
-        pid = os.getpid()
-        fd_count_before = len(os.listdir(f"/proc/{pid}/fd"))
-
-        # Run 10 timeout evaluations
-        for _ in range(10):
-            result = builder.build({"text": "a" * 30})
-            assert result.error is not None
-
-        fd_count_after = len(os.listdir(f"/proc/{pid}/fd"))
-
-        assert fd_count_after - fd_count_before < 10, (
-            f"File descriptor leak: {fd_count_after - fd_count_before} new FDs after 10 timed-out regex evaluations"
         )

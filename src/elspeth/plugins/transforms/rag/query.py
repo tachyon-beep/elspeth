@@ -161,7 +161,7 @@ class QueryBuilder:
 
         Separated from _build_regex to keep the try/finally cleanup clean.
         """
-        assert self._compiled_pattern is not None
+        assert self._compiled_pattern is not None  # mypy type narrowing (caller guarantees)
         p = _FORK_CTX.Process(
             target=_regex_worker,
             args=(self._compiled_pattern, text, result_queue),
@@ -171,7 +171,10 @@ class QueryBuilder:
 
         if p.is_alive():
             p.terminate()
-            p.join()
+            p.join(timeout=2.0)
+            if p.is_alive():
+                p.kill()
+                p.join()
             return QueryResult(
                 error={
                     "reason": "no_regex_match",

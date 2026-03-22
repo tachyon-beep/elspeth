@@ -227,10 +227,13 @@ class TestNoResultsQuarantineContext:
 
     def test_no_results_error_includes_query_and_provider(self):
         """The no_results error reason must include query and provider for audit traceability."""
-        transform, _ = TestProcessFlow()._setup_transform_with_mock_provider(
-            chunks=[],
-            on_no_results="quarantine",
-        )
+        transform = _make_transform(on_no_results="quarantine")
+        lifecycle_ctx = _mock_lifecycle_ctx()
+        transform.on_start(lifecycle_ctx)
+        mock_provider = MagicMock()
+        mock_provider.search.return_value = []
+        transform._provider = mock_provider
+
         row = _make_row({"question": "obscure query"})
         ctx = _mock_ctx()
 

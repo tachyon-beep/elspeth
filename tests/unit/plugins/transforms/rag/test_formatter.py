@@ -60,13 +60,25 @@ class TestMaxContextLength:
         result = format_context(chunks, format_mode="numbered", max_length=20)
         assert len(result.text) <= 20, f"Truncated text length {len(result.text)} exceeds max_length 20: {result.text!r}"
         assert result.text.endswith("[truncated]")
+        # Content before indicator should be the start of the numbered chunk
+        assert result.text.startswith("1. A very"), f"Expected content prefix, got {result.text!r}"
         assert result.truncated is True
 
-    def test_truncation_respects_exact_budget(self):
-        """The [truncated] indicator must fit within max_length, not be appended after."""
+    def test_truncation_respects_exact_budget_raw(self):
+        """The [truncated] indicator must fit within max_length (raw mode)."""
         chunks = [_chunk("x" * 100)]
         for max_len in [15, 20, 50, 100]:
             result = format_context(chunks, format_mode="raw", max_length=max_len)
+            assert len(result.text) <= max_len, f"max_length={max_len} but got {len(result.text)} chars: {result.text!r}"
+
+    def test_truncation_respects_exact_budget_numbered(self):
+        """The [truncated] indicator must fit within max_length (numbered mode).
+
+        Numbered mode adds a '1. ' prefix (3 chars) which is part of the budget.
+        """
+        chunks = [_chunk("x" * 100)]
+        for max_len in [15, 20, 50, 100]:
+            result = format_context(chunks, format_mode="numbered", max_length=max_len)
             assert len(result.text) <= max_len, f"max_length={max_len} but got {len(result.text)} chars: {result.text!r}"
 
     def test_truncation_with_max_length_smaller_than_indicator(self):

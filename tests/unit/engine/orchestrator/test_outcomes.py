@@ -421,16 +421,18 @@ class TestAccumulateRowOutcomesExclusiveCounters:
         assert counters.rows_forked == 1
 
 
-class TestCoalesceDoubleCountBugFix:
-    """Bug fix: rows_coalesced must not be double-incremented.
+class TestCoalesceCountingOwnership:
+    """Verify single-owner counting: accumulate_row_outcomes owns rows_coalesced.
 
-    _process_merged_coalesce_outcome incremented rows_coalesced, then called
-    accumulate_row_outcomes which incremented again for COALESCED results.
-    Terminal coalesces (where process_token returns COALESCED) were counted twice.
+    _process_merged_coalesce_outcome must NOT increment rows_coalesced.
+    All counting happens in accumulate_row_outcomes based on the terminal
+    RowOutcome. This prevents double-counting for terminal coalesces and
+    ensures non-terminal coalesces (which reach COMPLETED) are consistently
+    not counted as COALESCED across all paths.
     """
 
-    def test_terminal_coalesce_via_timeout_counted_once(self) -> None:
-        """A terminal coalesce through handle_coalesce_timeouts counts rows_coalesced once."""
+    def test_terminal_timeout_coalesce_counted_exactly_once(self) -> None:
+        """Terminal coalesce via timeout: COALESCED result counted by accumulate only."""
         merged_token = make_token_info()
         outcome = Mock()
         outcome.merged_token = merged_token
@@ -441,7 +443,6 @@ class TestCoalesceDoubleCountBugFix:
         coalesce_executor.check_timeouts.return_value = [outcome]
 
         processor = Mock()
-        # Terminal coalesce: process_token returns COALESCED (no downstream transforms)
         processor.process_token.return_value = [
             _make_result(RowOutcome.COALESCED, token=merged_token, sink_name="output"),
         ]
@@ -460,11 +461,11 @@ class TestCoalesceDoubleCountBugFix:
             pending_tokens=pending,
         )
 
-        assert counters.rows_coalesced == 1, f"rows_coalesced should be 1, got {counters.rows_coalesced} — double-counting bug if 2"
+        assert counters.rows_coalesced == 1, f"Expected 1, got {counters.rows_coalesced} — double-counting if 2"
         assert counters.rows_succeeded == 1
 
-    def test_terminal_coalesce_via_flush_counted_once(self) -> None:
-        """A terminal coalesce through flush_coalesce_pending counts rows_coalesced once."""
+    def test_terminal_flush_coalesce_counted_exactly_once(self) -> None:
+        """Terminal coalesce via flush: COALESCED result counted by accumulate only."""
         merged_token = make_token_info()
         outcome = Mock()
         outcome.merged_token = merged_token
@@ -493,7 +494,40 @@ class TestCoalesceDoubleCountBugFix:
             pending_tokens=pending,
         )
 
-        assert counters.rows_coalesced == 1, f"rows_coalesced should be 1, got {counters.rows_coalesced} — double-counting bug if 2"
+        assert counters.rows_coalesced == 1, f"Expected 1, got {counters.rows_coalesced} — double-counting if 2"
+        assert counters.rows_succeeded == 1
+
+    def test_non_terminal_timeout_coalesce_not_counted_as_coalesced(self) -> None:
+        """Non-terminal coalesce via timeout: COMPLETED result, rows_coalesced stays 0."""
+        merged_token = make_token_info()
+        outcome = Mock()
+        outcome.merged_token = merged_token
+        outcome.failure_reason = None
+
+        coalesce_executor = Mock()
+        coalesce_executor.get_registered_names.return_value = ["merge_1"]
+        coalesce_executor.check_timeouts.return_value = [outcome]
+
+        processor = Mock()
+        processor.process_token.return_value = [
+            _make_result(RowOutcome.COMPLETED, token=merged_token, sink_name="output"),
+        ]
+
+        counters = _make_counters()
+        pending = _make_pending()
+        node_map = {CoalesceName("merge_1"): NodeID("coalesce::merge_1")}
+
+        handle_coalesce_timeouts(
+            coalesce_executor=coalesce_executor,
+            coalesce_node_map=node_map,
+            processor=processor,
+            config_sinks={"output": Mock()},
+            ctx=Mock(),
+            counters=counters,
+            pending_tokens=pending,
+        )
+
+        assert counters.rows_coalesced == 0, "Non-terminal coalesce should not increment rows_coalesced"
         assert counters.rows_succeeded == 1
 
 
@@ -575,8 +609,14 @@ class TestHandleCoalesceTimeouts:
         assert counters.rows_coalesced == 0
         processor.process_token.assert_not_called()
 
-    def test_merged_token_with_downstream_continues_processing(self) -> None:
-        """Merged token continues through remaining transforms."""
+    def test_non_terminal_coalesce_counts_succeeded_not_coalesced(self) -> None:
+        """Non-terminal coalesce: merged token continues through downstream transforms.
+
+        The continuation returns COMPLETED (not COALESCED) because there are
+        transforms after the coalesce. rows_coalesced is NOT incremented because
+        the row's terminal state is COMPLETED, not COALESCED. Counting ownership
+        for rows_coalesced belongs exclusively to accumulate_row_outcomes.
+        """
         merged_token = make_token_info()
         outcome = Mock()
         outcome.merged_token = merged_token
@@ -587,7 +627,7 @@ class TestHandleCoalesceTimeouts:
             total_transforms=3,
             coalesce_step=1,
         )
-        # Simulate downstream producing a COMPLETED result
+        # Non-terminal: downstream transforms produce COMPLETED
         processor.process_token.return_value = [
             _make_result(RowOutcome.COMPLETED, token=merged_token, sink_name="output"),
         ]
@@ -603,7 +643,7 @@ class TestHandleCoalesceTimeouts:
             pending_tokens=pending,
         )
 
-        assert counters.rows_coalesced == 1
+        assert counters.rows_coalesced == 0, "Non-terminal coalesce should not count as COALESCED"
         assert counters.rows_succeeded == 1
         processor.process_token.assert_called_once_with(
             token=merged_token,
@@ -613,8 +653,8 @@ class TestHandleCoalesceTimeouts:
             coalesce_name=CoalesceName("merge_1"),
         )
 
-    def test_merged_token_terminal_processed_for_explicit_sink_routing(self) -> None:
-        """Terminal merged token is processed to resolve explicit on_success sink."""
+    def test_terminal_coalesce_counts_coalesced_and_succeeded(self) -> None:
+        """Terminal coalesce: no downstream transforms, processor returns COALESCED."""
         merged_token = make_token_info()
         outcome = Mock()
         outcome.merged_token = merged_token
@@ -623,9 +663,12 @@ class TestHandleCoalesceTimeouts:
         executor, processor, counters, pending, node_map = self._setup(
             timed_out_outcomes=[outcome],
             total_transforms=1,
-            coalesce_step=1,  # step == total_steps
+            coalesce_step=1,
         )
-        processor.process_token.return_value = [_make_result(RowOutcome.COMPLETED, token=merged_token, sink_name="output")]
+        # Terminal: processor returns COALESCED (no downstream transforms)
+        processor.process_token.return_value = [
+            _make_result(RowOutcome.COALESCED, token=merged_token, sink_name="output"),
+        ]
 
         ctx = Mock()
         handle_coalesce_timeouts(
@@ -681,8 +724,8 @@ class TestHandleCoalesceTimeouts:
 class TestFlushCoalescePending:
     """Tests for end-of-source coalesce flush."""
 
-    def test_merged_token_with_downstream(self) -> None:
-        """Merged tokens from flush continue through downstream transforms."""
+    def test_non_terminal_flush_counts_succeeded_not_coalesced(self) -> None:
+        """Non-terminal flush: merged token continues through downstream transforms."""
         merged_token = make_token_info()
         outcome = Mock()
         outcome.merged_token = merged_token
@@ -713,7 +756,7 @@ class TestFlushCoalescePending:
             pending_tokens=pending,
         )
 
-        assert counters.rows_coalesced == 1
+        assert counters.rows_coalesced == 0, "Non-terminal flush should not count as COALESCED"
         assert counters.rows_succeeded == 1
         processor.process_token.assert_called_once_with(
             token=merged_token,
@@ -723,8 +766,8 @@ class TestFlushCoalescePending:
             coalesce_name=CoalesceName("merge_1"),
         )
 
-    def test_merged_token_terminal(self) -> None:
-        """Terminal merged token is processed to resolve explicit on_success sink."""
+    def test_terminal_flush_counts_coalesced_and_succeeded(self) -> None:
+        """Terminal flush: no downstream transforms, processor returns COALESCED."""
         merged_token = make_token_info()
         outcome = Mock()
         outcome.merged_token = merged_token
@@ -736,7 +779,9 @@ class TestFlushCoalescePending:
 
         processor = Mock()
         processor.resolve_node_step.return_value = 1
-        processor.process_token.return_value = [_make_result(RowOutcome.COMPLETED, token=merged_token, sink_name="output")]
+        processor.process_token.return_value = [
+            _make_result(RowOutcome.COALESCED, token=merged_token, sink_name="output"),
+        ]
         counters = _make_counters()
         pending = _make_pending()
         node_map = {CoalesceName("merge_1"): NodeID("coalesce::merge_1")}
