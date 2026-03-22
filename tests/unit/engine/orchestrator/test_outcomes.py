@@ -421,6 +421,82 @@ class TestAccumulateRowOutcomesExclusiveCounters:
         assert counters.rows_forked == 1
 
 
+class TestCoalesceDoubleCountBugFix:
+    """Bug fix: rows_coalesced must not be double-incremented.
+
+    _process_merged_coalesce_outcome incremented rows_coalesced, then called
+    accumulate_row_outcomes which incremented again for COALESCED results.
+    Terminal coalesces (where process_token returns COALESCED) were counted twice.
+    """
+
+    def test_terminal_coalesce_via_timeout_counted_once(self) -> None:
+        """A terminal coalesce through handle_coalesce_timeouts counts rows_coalesced once."""
+        merged_token = make_token_info()
+        outcome = Mock()
+        outcome.merged_token = merged_token
+        outcome.failure_reason = None
+
+        coalesce_executor = Mock()
+        coalesce_executor.get_registered_names.return_value = ["merge_1"]
+        coalesce_executor.check_timeouts.return_value = [outcome]
+
+        processor = Mock()
+        # Terminal coalesce: process_token returns COALESCED (no downstream transforms)
+        processor.process_token.return_value = [
+            _make_result(RowOutcome.COALESCED, token=merged_token, sink_name="output"),
+        ]
+
+        counters = _make_counters()
+        pending = _make_pending()
+        node_map = {CoalesceName("merge_1"): NodeID("coalesce::merge_1")}
+
+        handle_coalesce_timeouts(
+            coalesce_executor=coalesce_executor,
+            coalesce_node_map=node_map,
+            processor=processor,
+            config_sinks={"output": Mock()},
+            ctx=Mock(),
+            counters=counters,
+            pending_tokens=pending,
+        )
+
+        assert counters.rows_coalesced == 1, f"rows_coalesced should be 1, got {counters.rows_coalesced} — double-counting bug if 2"
+        assert counters.rows_succeeded == 1
+
+    def test_terminal_coalesce_via_flush_counted_once(self) -> None:
+        """A terminal coalesce through flush_coalesce_pending counts rows_coalesced once."""
+        merged_token = make_token_info()
+        outcome = Mock()
+        outcome.merged_token = merged_token
+        outcome.failure_reason = None
+        outcome.coalesce_name = "merge_1"
+
+        coalesce_executor = Mock()
+        coalesce_executor.flush_pending.return_value = [outcome]
+
+        processor = Mock()
+        processor.process_token.return_value = [
+            _make_result(RowOutcome.COALESCED, token=merged_token, sink_name="output"),
+        ]
+
+        counters = _make_counters()
+        pending = _make_pending()
+        node_map = {CoalesceName("merge_1"): NodeID("coalesce::merge_1")}
+
+        flush_coalesce_pending(
+            coalesce_executor=coalesce_executor,
+            coalesce_node_map=node_map,
+            processor=processor,
+            config_sinks={"output": Mock()},
+            ctx=Mock(),
+            counters=counters,
+            pending_tokens=pending,
+        )
+
+        assert counters.rows_coalesced == 1, f"rows_coalesced should be 1, got {counters.rows_coalesced} — double-counting bug if 2"
+        assert counters.rows_succeeded == 1
+
+
 class TestAccumulateRowOutcomesMixed:
     """Tests for multiple results in a single call."""
 
