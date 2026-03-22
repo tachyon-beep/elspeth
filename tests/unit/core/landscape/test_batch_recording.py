@@ -810,7 +810,7 @@ class TestRetryBatch:
         _db, recorder = _setup()
         recorder.create_batch("run-1", "agg-1", batch_id="b-draft")
 
-        with pytest.raises(ValueError):
+        with pytest.raises(AuditIntegrityError):
             recorder.retry_batch("b-draft")
 
     def test_raises_for_non_failed_batch_completed(self):
@@ -818,7 +818,7 @@ class TestRetryBatch:
         recorder.create_batch("run-1", "agg-1", batch_id="b-done")
         recorder.update_batch_status("b-done", BatchStatus.COMPLETED)
 
-        with pytest.raises(ValueError):
+        with pytest.raises(AuditIntegrityError):
             recorder.retry_batch("b-done")
 
     def test_raises_for_non_failed_batch_executing(self):
@@ -826,13 +826,13 @@ class TestRetryBatch:
         recorder.create_batch("run-1", "agg-1", batch_id="b-exec")
         recorder.update_batch_status("b-exec", BatchStatus.EXECUTING)
 
-        with pytest.raises(ValueError):
+        with pytest.raises(AuditIntegrityError):
             recorder.retry_batch("b-exec")
 
     def test_raises_for_nonexistent_batch(self):
         _db, recorder = _setup()
 
-        with pytest.raises(ValueError):
+        with pytest.raises(AuditIntegrityError):
             recorder.retry_batch("nonexistent")
 
     def test_retry_increments_from_previous_attempt(self):

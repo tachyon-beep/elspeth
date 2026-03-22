@@ -2086,13 +2086,13 @@ class TestAggregationExecutor:
 
     # --- execute_flush ---
 
-    def test_execute_flush_no_batch_raises_runtime_error(self) -> None:
-        """Flushing without a batch raises RuntimeError."""
+    def test_execute_flush_no_batch_raises_orchestration_invariant_error(self) -> None:
+        """Flushing without a batch raises OrchestrationInvariantError."""
         executor, _, nid = self._make_agg_executor()
         transform = MagicMock()
         ctx = make_context()
 
-        with pytest.raises(RuntimeError, match="No batch exists"):
+        with pytest.raises(OrchestrationInvariantError, match="No batch exists"):
             executor.execute_flush(nid, transform, ctx, TriggerType.COUNT)
 
     def test_execute_flush_empty_buffer_raises_runtime_error(self) -> None:
