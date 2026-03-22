@@ -148,7 +148,7 @@ class DataverseSink(BaseSink):
 
     name = "dataverse"
     determinism = Determinism.EXTERNAL_CALL
-    idempotent = False  # Conservative: only upsert mode is idempotent
+    idempotent = True  # PATCH upsert is idempotent — safe for retries and crash recovery (engine does not yet read this flag)
     supports_resume = False  # Dataverse writes are not locally staged
 
     def __init__(self, config: dict[str, Any]) -> None:
@@ -228,11 +228,14 @@ class DataverseSink(BaseSink):
     def _build_upsert_url(self, key_value: str) -> str:
         """Build PATCH URL for upsert with alternate key.
 
-        URL-encodes the key value to prevent injection via special characters.
+        URL-encodes entity name, alternate key name, and key value to prevent
+        injection via special characters.
         key_value is guaranteed str by the isinstance check in write().
         """
+        encoded_entity = urllib.parse.quote(self._entity, safe="")
+        encoded_key_name = urllib.parse.quote(self._alternate_key, safe="")
         encoded_value = urllib.parse.quote(key_value, safe="")
-        return f"{self._environment_url.rstrip('/')}/api/data/{self._api_version}/{self._entity}({self._alternate_key}='{encoded_value}')"
+        return f"{self._environment_url.rstrip('/')}/api/data/{self._api_version}/{encoded_entity}({encoded_key_name}='{encoded_value}')"
 
     def _emit_telemetry(
         self,

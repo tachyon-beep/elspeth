@@ -298,9 +298,11 @@ class DataverseSource(BaseSource):
         endpoint may be restricted. Logs a warning and continues.
         """
         assert self._client is not None
+        assert self._entity is not None, "called only in structured query mode"
+        encoded_entity = urllib.parse.quote(self._entity, safe="")
         metadata_url = (
             f"{self._environment_url.rstrip('/')}/api/data/{self._api_version}"
-            f"/EntityDefinitions(LogicalName='{self._entity}')?$select=LogicalName"
+            f"/EntityDefinitions(LogicalName='{encoded_entity}')?$select=LogicalName"
         )
         try:
             self._client.get_page(metadata_url)
@@ -327,16 +329,24 @@ class DataverseSource(BaseSource):
                 raise
 
     def _build_query_url(self) -> str:
-        """Build the initial OData query URL for structured queries."""
-        url = f"{self._environment_url.rstrip('/')}/api/data/{self._api_version}/{self._entity}"
+        """Build the initial OData query URL for structured queries.
+
+        Percent-encodes entity name in the path segment and query parameter
+        values to prevent silent corruption from special characters.
+        OData $-prefixed parameter names are kept literal (servers require them).
+        """
+        assert self._entity is not None, "called only in structured query mode"
+        encoded_entity = urllib.parse.quote(self._entity, safe="")
+        url = f"{self._environment_url.rstrip('/')}/api/data/{self._api_version}/{encoded_entity}"
 
         params: list[str] = []
         if self._select:
+            # Column names are Dataverse identifiers — safe characters
             params.append(f"$select={','.join(self._select)}")
         if self._filter:
-            params.append(f"$filter={self._filter}")
+            params.append(f"$filter={urllib.parse.quote(self._filter, safe='')}")
         if self._orderby:
-            params.append(f"$orderby={self._orderby}")
+            params.append(f"$orderby={urllib.parse.quote(self._orderby, safe='')}")
         if self._top is not None:
             params.append(f"$top={self._top}")
 

@@ -58,7 +58,7 @@ def _make_204_response() -> DataversePageResponse:
         request_url="https://myorg.crm.dynamics.com/api/data/v9.2/contacts",
         next_link=None,
         paging_cookie=None,
-        more_records=False,
+        more_records=None,  # No body → no morerecords field
     )
 
 
@@ -573,3 +573,23 @@ class TestWriteLifecycle:
         sink = DataverseSink(_config())
         assert sink._client is None
         sink.close()  # Should not raise
+
+
+# ---------------------------------------------------------------------------
+# Bug fix: idempotent flag (elspeth-1453d7cfa8)
+# ---------------------------------------------------------------------------
+
+
+class TestIdempotentFlag:
+    """Sink idempotent flag must be True for PATCH upsert mode."""
+
+    @patch("elspeth.plugins.sinks.dataverse.create_schema_from_config", return_value=MagicMock())
+    def test_idempotent_is_true(self, _mock_schema: MagicMock) -> None:
+        """PATCH upsert is idempotent — safe for retries and crash recovery."""
+        sink = DataverseSink(_config())
+        assert sink.idempotent is True
+
+    def test_non_upsert_mode_rejected(self) -> None:
+        """Config rejects modes other than 'upsert' (Literal['upsert'])."""
+        with pytest.raises(PluginConfigError):
+            DataverseSinkConfig.from_dict(_config(mode="create"))

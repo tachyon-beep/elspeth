@@ -52,6 +52,8 @@ ELSPETH has three fundamentally different trust tiers with distinct handling rul
 - **Record what we didn't get** - if we expected data and the external system didn't provide it, that absence is a fact worth recording, not a gap to fill with fabricated defaults
 - Sources MAY coerce: `"42"` → `42`, `"true"` → `True` (normalizing external data)
 - **Coercion is meaning-preserving; fabrication is not.** `"42"` → `42` preserves the value (coercion). `None` → `0` changes the meaning from "unknown" to "zero" (fabrication). The test: can the downstream consumer distinguish real data from synthetic? If not, it's fabrication.
+- **Inference from adjacent fields is still fabrication.** If field A is absent, deriving its value from field B produces a synthetic datum that the external system never asserted. The audit trail now contains a confident answer to a question the source never answered. An auditor asking "did Dataverse say there were more records?" gets `True` — but Dataverse said nothing. The correct representation is `None` (absence), not a value inferred from other fields. Let consumers decide what absence means in their context; don't decide for them at the boundary.
+- **The fabrication decision test:** Before filling in a missing field, ask: (1) If an auditor queries this field, will they get a value the external system actually provided? If no, it's fabrication. (2) If the external system's behaviour changes and the field starts appearing with a different value than what we inferred, will the audit trail silently contain two contradictory sources of truth? If yes, it's fabrication. (3) Would recording `None` and letting the consumer handle absence be less convenient but more honest? If yes, record `None`.
 - Quarantine rows that can't be coerced/validated
 - The audit trail records "row 42 was quarantined because field X was NULL" - that's a valid audit outcome
 
@@ -83,9 +85,9 @@ EXTERNAL DATA              PIPELINE DATA              AUDIT TRAIL
 
 ### Quick Reference
 
-- **Source**: coerce OK, validate, quarantine failures
+- **Source**: coerce OK, validate, quarantine failures, record absence as `None` (don't infer)
 - **Transform (on row data)**: no coercion, wrap operations on values
-- **Transform (on external calls)**: coerce OK — external response is Tier 3
+- **Transform (on external calls)**: coerce OK — external response is Tier 3, record absence as `None`
 - **Sink**: no coercion, expect types
 - **Our data (Landscape, checkpoints)**: crash on any anomaly — serialization doesn't change trust tier
 

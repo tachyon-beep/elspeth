@@ -23,7 +23,10 @@ import structlog
 from pydantic import BaseModel, model_validator
 
 from elspeth.core.security.web import validate_url_for_ssrf
-from elspeth.plugins.infrastructure.clients.fingerprinting import fingerprint_headers
+from elspeth.plugins.infrastructure.clients.fingerprinting import (
+    filter_response_headers,
+    fingerprint_headers,
+)
 from elspeth.plugins.infrastructure.clients.json_utils import parse_json_strict
 
 if TYPE_CHECKING:
@@ -113,7 +116,7 @@ class DataversePageResponse:
     request_url: str  # URL that was actually fetched (for accurate audit trail)
     next_link: str | None  # @odata.nextLink URL, if present (structured queries)
     paging_cookie: str | None  # FetchXML paging cookie, if present
-    more_records: bool  # True if more pages exist
+    more_records: bool | None  # True/False if Dataverse stated it; None if field absent
 
     def __post_init__(self) -> None:
         if self.next_link is not None and self.paging_cookie is not None:
@@ -442,7 +445,9 @@ class DataverseClient:
             ) from exc
 
         latency_ms = (time.perf_counter() - start) * 1000
-        resp_headers = dict(response.headers)
+        # Filter sensitive headers (Set-Cookie, WWW-Authenticate, etc.) at
+        # the DTO boundary — same pattern as AuditedHTTPClient.
+        resp_headers = filter_response_headers(dict(response.headers))
 
         # Handle redirects — reject, don't follow
         if 300 <= response.status_code < 400:
@@ -474,7 +479,7 @@ class DataverseClient:
                 request_url=url,
                 next_link=None,
                 paging_cookie=None,
-                more_records=False,
+                more_records=None,  # No body → no morerecords field to record
             )
 
         # Tier 3 boundary: parse JSON strictly
@@ -545,12 +550,38 @@ class DataverseClient:
 
         more_records_raw = parsed.get("@Microsoft.Dynamics.CRM.morerecords")
         if more_records_raw is not None:
-            more_records = bool(more_records_raw)
+            # Tier 3 boundary: Dataverse returns morerecords as string "true"/"false"
+            # or bool. bool("false") == True in Python — must parse explicitly.
+            if isinstance(more_records_raw, bool):
+                more_records = more_records_raw
+            elif isinstance(more_records_raw, str):
+                lower = more_records_raw.lower()
+                if lower == "true":
+                    more_records = True
+                elif lower == "false":
+                    more_records = False
+                else:
+                    raise DataverseClientError(
+                        f"'@Microsoft.Dynamics.CRM.morerecords' has unexpected string value "
+                        f"{more_records_raw!r} — expected 'true' or 'false'",
+                        retryable=False,
+                        status_code=response.status_code,
+                        latency_ms=latency_ms,
+                    )
+            else:
+                raise DataverseClientError(
+                    f"'@Microsoft.Dynamics.CRM.morerecords' has unexpected type "
+                    f"{type(more_records_raw).__name__} — expected bool or string",
+                    retryable=False,
+                    status_code=response.status_code,
+                    latency_ms=latency_ms,
+                )
         else:
-            # Field absent — infer from pagination metadata presence.
-            # OData queries use nextLink; FetchXML uses paging cookie + morerecords.
-            # For OData, next_link presence is the authoritative "more pages" signal.
-            more_records = next_link is not None
+            # Field absent — record the absence, don't infer.
+            # OData queries don't include morerecords (uses nextLink instead).
+            # FetchXML queries should always include it — absence there is
+            # an anomaly the consumer should detect, not one we paper over.
+            more_records = None
 
         return DataversePageResponse(
             status_code=response.status_code,
@@ -683,7 +714,17 @@ class DataverseClient:
             page = self.get_page(url)
             yield page
 
-            # Check if more records exist
+            # Check if more records exist.
+            # FetchXML responses must include morerecords — its absence is a
+            # protocol anomaly we must not silently infer around.
+            if page.more_records is None:
+                raise DataverseClientError(
+                    "FetchXML response missing '@Microsoft.Dynamics.CRM.morerecords' field "
+                    "— cannot determine pagination state. OData uses nextLink instead, "
+                    "but FetchXML pagination requires this field.",
+                    retryable=False,
+                    error_category="protocol_violation",
+                )
             if not page.more_records or page.paging_cookie is None:
                 break
 

@@ -76,7 +76,7 @@ def _make_page(
     *,
     next_link: str | None = None,
     paging_cookie: str | None = None,
-    more_records: bool = False,
+    more_records: bool | None = False,
     status_code: int = 200,
     latency_ms: float = 10.0,
 ) -> DataversePageResponse:
@@ -642,16 +642,16 @@ class TestBuildQueryUrl:
         assert "$select=contactid,fullname" in url
 
     def test_with_filter(self) -> None:
-        """URL includes $filter parameter."""
+        """URL includes $filter parameter (percent-encoded)."""
         source = _make_source(_base_config(filter="statecode eq 0"))
         url = source._build_query_url()
-        assert "$filter=statecode eq 0" in url
+        assert "$filter=statecode%20eq%200" in url
 
     def test_with_orderby(self) -> None:
-        """URL includes $orderby parameter."""
+        """URL includes $orderby parameter (percent-encoded)."""
         source = _make_source(_base_config(orderby="createdon desc"))
         url = source._build_query_url()
-        assert "$orderby=createdon desc" in url
+        assert "$orderby=createdon%20desc" in url
 
     def test_with_top(self) -> None:
         """URL includes $top parameter."""
@@ -671,8 +671,8 @@ class TestBuildQueryUrl:
         )
         url = source._build_query_url()
         assert "$select=contactid" in url
-        assert "$filter=statecode eq 0" in url
-        assert "$orderby=createdon desc" in url
+        assert "$filter=statecode%20eq%200" in url
+        assert "$orderby=createdon%20desc" in url
         assert "$top=10" in url
 
     def test_custom_api_version(self) -> None:
@@ -1335,3 +1335,62 @@ class TestAuditUrlPerPage:
         source._run_id = "test-run"
         source._telemetry_emit = None
         return source
+
+
+# ---------------------------------------------------------------------------
+# Bug fix: URL percent-encoding (elspeth-5bd2873b3e)
+# ---------------------------------------------------------------------------
+
+
+class TestUrlPercentEncoding:
+    """Entity names and filter values are percent-encoded in URLs."""
+
+    def test_filter_with_single_quote_encoded(self) -> None:
+        """Single quotes in $filter are percent-encoded."""
+        source = _make_source(_base_config(filter="name eq 'O''Brien'"))
+        url = source._build_query_url()
+        # Single quotes should be encoded as %27
+        assert "%27" in url
+        assert "'" not in url.split("$filter=")[1]
+
+    def test_filter_with_ampersand_encoded(self) -> None:
+        """Ampersand in $filter can't break URL structure."""
+        source = _make_source(_base_config(filter="name eq 'A&B'"))
+        url = source._build_query_url()
+        # The & inside the filter value must be encoded as %26
+        filter_part = url.split("$filter=")[1]
+        assert "&" not in filter_part  # No raw ampersand in filter value
+        assert "%26" in filter_part
+
+    def test_filter_with_hash_encoded(self) -> None:
+        """Hash in $filter can't truncate URL as fragment."""
+        source = _make_source(_base_config(filter="name eq 'test#1'"))
+        url = source._build_query_url()
+        assert "%23" in url
+        assert "#" not in url.split("$filter=")[1]
+
+    def test_entity_name_in_path_encoded(self) -> None:
+        """Entity name with special chars is percent-encoded in path segment."""
+        source = _make_source(_base_config(entity="my entity"))
+        url = source._build_query_url()
+        assert "/my%20entity" in url  # Slash-anchored: confirms it's in the path
+        assert "my entity" not in url
+
+    def test_normal_entity_unchanged(self) -> None:
+        """Normal entity names (alphanumeric) pass through unmodified."""
+        source = _make_source(_base_config(entity="contacts"))
+        url = source._build_query_url()
+        assert "/contacts" in url
+
+    def test_orderby_with_special_chars_encoded(self) -> None:
+        """$orderby values with special characters are percent-encoded."""
+        source = _make_source(_base_config(orderby="name desc, 'special'"))
+        url = source._build_query_url()
+        assert "%27" in url  # single quote encoded
+        assert "%20" in url  # space encoded
+
+    def test_select_identifiers_not_encoded(self) -> None:
+        """$select column names (Dataverse identifiers) are NOT encoded."""
+        source = _make_source(_base_config(select=["contactid", "fullname"]))
+        url = source._build_query_url()
+        assert "$select=contactid,fullname" in url  # literal, no encoding

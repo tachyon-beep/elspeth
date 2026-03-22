@@ -541,7 +541,7 @@ class TestSuccessfulResponses:
         transport.add_response(_make_empty_response(204))
         page = client.get_page(f"{ENV_URL}/api/data/v9.2/accounts")
         assert page.rows == []
-        assert page.more_records is False
+        assert page.more_records is None  # No body → no morerecords field
 
     def test_non_dict_json_rejected(self, client: DataverseClient, transport: MockTransport) -> None:
         """A JSON array at top level is rejected (expected object)."""
@@ -792,6 +792,26 @@ class TestPaginateFetchxml:
         bad_xml = "<fetch><unclosed"
         with pytest.raises(DataverseClientError, match="Failed to parse FetchXML"):
             list(client.paginate_fetchxml("accounts", bad_xml))
+
+    def test_missing_morerecords_crashes_fetchxml_pagination(self, client: DataverseClient, transport: MockTransport) -> None:
+        """FetchXML pagination crashes if morerecords field is absent.
+
+        Absence is a protocol anomaly — we must not silently infer pagination
+        state. The field is required for FetchXML; only OData omits it.
+        """
+        transport.add_response(
+            _make_json_response(
+                {
+                    "value": [{"id": 1}],
+                    # No @Microsoft.Dynamics.CRM.morerecords — anomaly
+                    "@Microsoft.Dynamics.CRM.fetchxmlpagingcookie": urllib.parse.quote("<cookie/>"),
+                }
+            )
+        )
+
+        fetch_xml = '<fetch count="50"><entity name="account"/></fetch>'
+        with pytest.raises(DataverseClientError, match=r"missing.*morerecords"):
+            list(client.paginate_fetchxml("accounts", fetch_xml))
 
 
 # ---------------------------------------------------------------------------
@@ -1101,3 +1121,190 @@ class TestRequestUrlTracking:
         assert len(pages) == 2
         assert pages[0].request_url == initial_url
         assert pages[1].request_url == next_url
+
+
+# ---------------------------------------------------------------------------
+# Bug fix: bool(more_records_raw) coercion (elspeth-6fea320491)
+# ---------------------------------------------------------------------------
+
+
+class TestMoreRecordsTier3Parsing:
+    """Tier 3 boundary: morerecords must be parsed explicitly, not via bool()."""
+
+    def test_string_false_is_false(self, transport: MockTransport, client: DataverseClient) -> None:
+        """String 'false' must parse as False, not bool('false') == True."""
+        transport.add_response(
+            _make_json_response(
+                {
+                    "value": [{"id": "1"}],
+                    "@Microsoft.Dynamics.CRM.morerecords": "false",
+                }
+            )
+        )
+        page = client.get_page(f"{ENV_URL}/api/data/v9.2/contacts")
+        assert page.more_records is False
+
+    def test_string_true_is_true(self, transport: MockTransport, client: DataverseClient) -> None:
+        """String 'true' must parse as True."""
+        transport.add_response(
+            _make_json_response(
+                {
+                    "value": [{"id": "1"}],
+                    "@Microsoft.Dynamics.CRM.morerecords": "true",
+                }
+            )
+        )
+        page = client.get_page(f"{ENV_URL}/api/data/v9.2/contacts")
+        assert page.more_records is True
+
+    @pytest.mark.parametrize("value,expected", [("False", False), ("TRUE", True), ("fAlSe", False)])
+    def test_string_case_insensitive(self, transport: MockTransport, client: DataverseClient, value: str, expected: bool) -> None:
+        """Mixed-case strings are accepted case-insensitively."""
+        transport.add_response(
+            _make_json_response(
+                {
+                    "value": [{"id": "1"}],
+                    "@Microsoft.Dynamics.CRM.morerecords": value,
+                }
+            )
+        )
+        page = client.get_page(f"{ENV_URL}/api/data/v9.2/contacts")
+        assert page.more_records is expected
+
+    def test_bool_true_accepted(self, transport: MockTransport, client: DataverseClient) -> None:
+        """JSON boolean true passes through directly."""
+        transport.add_response(
+            _make_json_response(
+                {
+                    "value": [{"id": "1"}],
+                    "@Microsoft.Dynamics.CRM.morerecords": True,
+                }
+            )
+        )
+        page = client.get_page(f"{ENV_URL}/api/data/v9.2/contacts")
+        assert page.more_records is True
+
+    def test_bool_false_accepted(self, transport: MockTransport, client: DataverseClient) -> None:
+        """JSON boolean false passes through directly."""
+        transport.add_response(
+            _make_json_response(
+                {
+                    "value": [{"id": "1"}],
+                    "@Microsoft.Dynamics.CRM.morerecords": False,
+                }
+            )
+        )
+        page = client.get_page(f"{ENV_URL}/api/data/v9.2/contacts")
+        assert page.more_records is False
+
+    def test_unexpected_string_rejected(self, transport: MockTransport, client: DataverseClient) -> None:
+        """Non-boolean string like 'yes' is rejected."""
+        transport.add_response(
+            _make_json_response(
+                {
+                    "value": [{"id": "1"}],
+                    "@Microsoft.Dynamics.CRM.morerecords": "yes",
+                }
+            )
+        )
+        with pytest.raises(DataverseClientError, match="unexpected string value"):
+            client.get_page(f"{ENV_URL}/api/data/v9.2/contacts")
+
+    def test_integer_rejected(self, transport: MockTransport, client: DataverseClient) -> None:
+        """Integer type for morerecords is rejected."""
+        transport.add_response(
+            _make_json_response(
+                {
+                    "value": [{"id": "1"}],
+                    "@Microsoft.Dynamics.CRM.morerecords": 1,
+                }
+            )
+        )
+        with pytest.raises(DataverseClientError, match="unexpected type"):
+            client.get_page(f"{ENV_URL}/api/data/v9.2/contacts")
+
+    def test_absent_records_none(self, transport: MockTransport, client: DataverseClient) -> None:
+        """When morerecords absent, more_records is None (absence recorded, not inferred)."""
+        transport.add_response(
+            _make_json_response(
+                {
+                    "value": [{"id": "1"}],
+                    # No @Microsoft.Dynamics.CRM.morerecords
+                }
+            )
+        )
+        page = client.get_page(f"{ENV_URL}/api/data/v9.2/contacts")
+        assert page.more_records is None
+
+    def test_absent_with_next_link_still_none(self, transport: MockTransport, client: DataverseClient) -> None:
+        """Even with nextLink present, absent morerecords is None — no inference."""
+        next_url = f"{ENV_URL}/api/data/v9.2/contacts?$skiptoken=abc"
+        transport.add_response(
+            _make_json_response(
+                {
+                    "value": [{"id": "1"}],
+                    # No @Microsoft.Dynamics.CRM.morerecords
+                    "@odata.nextLink": next_url,
+                }
+            )
+        )
+        page = client.get_page(f"{ENV_URL}/api/data/v9.2/contacts")
+        assert page.more_records is None  # Absence is absence, nextLink is separate
+
+
+# ---------------------------------------------------------------------------
+# Bug fix: response headers filtered for sensitive data (elspeth-443f57c78d)
+# ---------------------------------------------------------------------------
+
+
+class TestResponseHeaderFiltering:
+    """Sensitive response headers must be stripped before DTO storage."""
+
+    def test_set_cookie_stripped(self, transport: MockTransport, client: DataverseClient) -> None:
+        """Set-Cookie must not appear in DataversePageResponse.headers."""
+        transport.add_response(
+            _make_json_response(
+                {"value": [{"id": "1"}]},
+                headers={"Set-Cookie": "session=abc123; Path=/; HttpOnly"},
+            )
+        )
+        page = client.get_page(f"{ENV_URL}/api/data/v9.2/contacts")
+        assert "set-cookie" not in {k.lower() for k in page.headers}
+
+    def test_www_authenticate_stripped(self, transport: MockTransport, client: DataverseClient) -> None:
+        """WWW-Authenticate must not appear in DataversePageResponse.headers."""
+        transport.add_response(
+            _make_json_response(
+                {"value": [{"id": "1"}]},
+                headers={"WWW-Authenticate": "Bearer realm=dataverse"},
+            )
+        )
+        page = client.get_page(f"{ENV_URL}/api/data/v9.2/contacts")
+        assert "www-authenticate" not in {k.lower() for k in page.headers}
+
+    def test_safe_headers_preserved(self, transport: MockTransport, client: DataverseClient) -> None:
+        """Non-sensitive headers like content-type are preserved."""
+        transport.add_response(
+            _make_json_response(
+                {"value": [{"id": "1"}]},
+                headers={
+                    "x-ms-request-id": "req-123",
+                    "Set-Cookie": "session=secret",
+                },
+            )
+        )
+        page = client.get_page(f"{ENV_URL}/api/data/v9.2/contacts")
+        assert any(k.lower() == "x-ms-request-id" for k in page.headers)
+        assert "set-cookie" not in {k.lower() for k in page.headers}
+
+    def test_204_response_headers_also_filtered(self, transport: MockTransport, client: DataverseClient) -> None:
+        """Empty response (204) path also filters headers."""
+        transport.add_response(
+            httpx.Response(
+                status_code=204,
+                text="",
+                headers={"Set-Cookie": "session=abc123"},
+            )
+        )
+        page = client.get_page(f"{ENV_URL}/api/data/v9.2/contacts")
+        assert "set-cookie" not in {k.lower() for k in page.headers}
