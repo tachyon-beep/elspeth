@@ -60,8 +60,9 @@ class AggregationTokenCheckpoint:
             raise ValueError("AggregationTokenCheckpoint.contract_version must not be empty")
         if not isinstance(self.row_data, (dict, MappingProxyType)):
             raise TypeError(f"AggregationTokenCheckpoint.row_data must be dict or MappingProxyType, got {type(self.row_data).__name__}")
-        if not isinstance(self.row_data, MappingProxyType):
-            object.__setattr__(self, "row_data", deep_freeze(self.row_data))
+        frozen = deep_freeze(self.row_data)
+        if frozen is not self.row_data:
+            object.__setattr__(self, "row_data", frozen)
 
     def to_dict(self) -> dict[str, Any]:
         """Serialize to checkpoint dict format."""
@@ -148,8 +149,9 @@ class AggregationNodeCheckpoint:
             )
         if not isinstance(self.contract, (dict, MappingProxyType)):
             raise TypeError(f"AggregationNodeCheckpoint.contract must be dict or MappingProxyType, got {type(self.contract).__name__}")
-        if not isinstance(self.contract, MappingProxyType):
-            object.__setattr__(self, "contract", deep_freeze(self.contract))
+        frozen = deep_freeze(self.contract)
+        if frozen is not self.contract:
+            object.__setattr__(self, "contract", frozen)
 
     def to_dict(self) -> dict[str, Any]:
         """Serialize to checkpoint dict format."""
@@ -236,8 +238,9 @@ class AggregationCheckpointState:
             raise ValueError("AggregationCheckpointState.version must not be empty")
         if not isinstance(self.nodes, (dict, MappingProxyType)):
             raise TypeError(f"AggregationCheckpointState.nodes must be dict or MappingProxyType, got {type(self.nodes).__name__}")
-        if not isinstance(self.nodes, MappingProxyType):
-            object.__setattr__(self, "nodes", MappingProxyType(self.nodes))
+        frozen = deep_freeze(self.nodes)
+        if frozen is not self.nodes:
+            object.__setattr__(self, "nodes", frozen)
 
     def to_dict(self) -> dict[str, Any]:
         """Serialize to flat wire-format dict.

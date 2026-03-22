@@ -332,6 +332,53 @@ For detailed examples (Tier 1 read guards, write-side DTO validation, TOCTOU ato
 | Am I adding this because "something might be None"? | — | ❌ Fix the root cause |
 | Am I silently swallowing an error with a default value? | — | ❌ That's defensive — forbidden |
 
+## Frozen Dataclass Immutability: The `deep_freeze` Contract
+
+Python's `frozen=True` only prevents attribute **reassignment** — it does nothing about mutable **contents**. A `frozen=True` dataclass with a `dict` field is a lie: the dict is fully mutable through the attribute reference. Every frozen dataclass with container fields (`dict`, `list`, `set`, `Mapping`, `Sequence`) **must** enforce deep immutability in `__post_init__`.
+
+### The Canonical Pattern
+
+```python
+from elspeth.contracts.freeze import deep_freeze
+
+@dataclass(frozen=True, slots=True)
+class MyRecord:
+    data: Mapping[str, Any]
+    items: Sequence[Mapping[str, object]]
+
+    def __post_init__(self) -> None:
+        frozen_data = deep_freeze(self.data)
+        if frozen_data is not self.data:
+            object.__setattr__(self, "data", frozen_data)
+        frozen_items = deep_freeze(self.items)
+        if frozen_items is not self.items:
+            object.__setattr__(self, "items", frozen_items)
+```
+
+**Always use `deep_freeze()`** — it recursively converts `dict` → `MappingProxyType`, `list` → `tuple`, `set` → `frozenset`, and handles arbitrary `Mapping` types. The identity check (`is not`) avoids unnecessary `object.__setattr__` on already-frozen input (idempotency).
+
+### Forbidden Anti-Patterns
+
+| Pattern | Why It's Wrong |
+|---------|---------------|
+| `MappingProxyType(self.x)` | **View, not copy.** Caller can still mutate the original dict; changes visible through the proxy. |
+| `MappingProxyType(dict(self.x))` | **Shallow only.** Copies the outer dict but nested dicts/lists remain mutable. |
+| `isinstance(self.x, dict)` as guard | **Misses Mapping subtypes.** `OrderedDict`, custom `Mapping` implementations pass through unfrozen. |
+| `isinstance(self.x, tuple)` to skip | **Tuple of mutable dicts.** A `tuple[dict, dict]` passes the check but contents are mutable. |
+| `not isinstance(self.x, MappingProxyType)` | **Shallow frozen ≠ deep frozen.** A `MappingProxyType` wrapping mutable nested containers is not deeply frozen. |
+
+### When Shallow Wrapping IS Acceptable
+
+`MappingProxyType(dict(self.x))` (shallow copy + wrap) is acceptable **only when values are guaranteed immutable**: scalars (`int`, `str`, `bool`, enum members) or frozen dataclass instances. Even then, `deep_freeze()` works and is more consistent — prefer it unless profiling shows a hot-path concern.
+
+### Scalar-Only Fields Need No Guard
+
+If all fields are scalars, enums, `datetime`, or `None`, no freeze guard is needed. `frozen=True` is sufficient. Don't add guards that do nothing.
+
+### Enforced by CI
+
+`scripts/cicd/enforce_freeze_guards.py` detects forbidden patterns in `__post_init__` methods and fails the build. Allowlist in `config/cicd/enforce_freeze_guards/` for justified exceptions.
+
 <!-- filigree:instructions:v1.5.1:63b4188e -->
 ## Filigree Issue Tracker
 

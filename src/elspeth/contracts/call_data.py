@@ -58,8 +58,9 @@ class RawCallPayload:
     data: Mapping[str, Any]
 
     def __post_init__(self) -> None:
-        if not isinstance(self.data, MappingProxyType):
-            object.__setattr__(self, "data", deep_freeze(self.data))
+        frozen = deep_freeze(self.data)
+        if frozen is not self.data:
+            object.__setattr__(self, "data", frozen)
 
     def to_dict(self) -> dict[str, Any]:
         return {k: deep_thaw(v) for k, v in self.data.items()}
@@ -93,8 +94,9 @@ class LLMCallRequest:
             "messages",
             tuple(deep_freeze(m) for m in self.messages),
         )
-        if not isinstance(self.extra_kwargs, MappingProxyType):
-            object.__setattr__(self, "extra_kwargs", deep_freeze(self.extra_kwargs))
+        frozen_kwargs = deep_freeze(self.extra_kwargs)
+        if frozen_kwargs is not self.extra_kwargs:
+            object.__setattr__(self, "extra_kwargs", frozen_kwargs)
         if collisions := (_LLM_REQUEST_RESERVED_KEYS & self.extra_kwargs.keys()):
             msg = f"extra_kwargs contains reserved key(s) that would overwrite audit fields: {collisions}"
             raise ValueError(msg)
@@ -127,8 +129,9 @@ class LLMCallResponse:
     raw_response: Mapping[str, Any]
 
     def __post_init__(self) -> None:
-        if not isinstance(self.raw_response, MappingProxyType):
-            object.__setattr__(self, "raw_response", deep_freeze(self.raw_response))
+        frozen = deep_freeze(self.raw_response)
+        if frozen is not self.raw_response:
+            object.__setattr__(self, "raw_response", frozen)
 
     def to_dict(self) -> dict[str, Any]:
         """Serialize to audit-trail dict.
