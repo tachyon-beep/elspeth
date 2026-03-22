@@ -16,8 +16,6 @@ import typer
 import yaml
 from dynaconf.vendor.ruamel.yaml.parser import ParserError as YamlParserError
 from dynaconf.vendor.ruamel.yaml.scanner import ScannerError as YamlScannerError
-from errorworks.llm.cli import app as chaosllm_app
-from errorworks.llm.cli import mcp_app as chaosllm_mcp_app
 from pydantic import ValidationError
 
 from elspeth import __version__
@@ -68,9 +66,6 @@ app = typer.Typer(
     help="ELSPETH: Auditable Sense/Decide/Act pipelines.",
     no_args_is_help=True,
 )
-
-app.add_typer(chaosllm_app, name="chaosllm", help="ChaosLLM server commands.")
-app.add_typer(chaosllm_mcp_app, name="chaosllm-mcp", help="ChaosLLM MCP analysis tools.")
 
 
 def version_callback(value: bool) -> None:

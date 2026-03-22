@@ -27,8 +27,6 @@ chaosllm presets
 chaosllm serve --port=9000 --rate-limit-pct=20
 ```
 
-> **Note:** All `chaosllm` commands also work as `elspeth chaosllm`.
-
 ### Pytest Fixture
 
 ```python

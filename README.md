@@ -251,8 +251,6 @@ chaosllm serve --port=9000 --rate-limit-pct=20
 chaosllm-mcp --database ./chaosllm-metrics.db
 ```
 
-> **Note:** All `chaosllm` commands also work as `elspeth chaosllm`.
-
 See `docs/reference/chaosllm.md` for complete configuration and usage.
 
 ### ChaosWeb
@@ -274,8 +272,6 @@ chaosweb serve --port=9001 --error-rate=30
 # Use in pipeline settings
 # source.options.base_url: http://localhost:9001
 ```
-
-> **Note:** All `chaosweb` commands also work as `elspeth chaosweb`.
 
 See `examples/chaosweb/` for a complete pipeline example.
 
