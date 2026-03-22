@@ -339,7 +339,7 @@ Python's `frozen=True` only prevents attribute **reassignment** — it does noth
 ### The Canonical Pattern
 
 ```python
-from elspeth.contracts.freeze import deep_freeze
+from elspeth.contracts.freeze import freeze_fields
 
 @dataclass(frozen=True, slots=True)
 class MyRecord:
@@ -347,15 +347,14 @@ class MyRecord:
     items: Sequence[Mapping[str, object]]
 
     def __post_init__(self) -> None:
-        frozen_data = deep_freeze(self.data)
-        if frozen_data is not self.data:
-            object.__setattr__(self, "data", frozen_data)
-        frozen_items = deep_freeze(self.items)
-        if frozen_items is not self.items:
-            object.__setattr__(self, "items", frozen_items)
+        freeze_fields(self, "data", "items")
 ```
 
-**Always use `deep_freeze()`** — it recursively converts `dict` → `MappingProxyType`, `list` → `tuple`, `set` → `frozenset`, and handles arbitrary `Mapping` types. The identity check (`is not`) avoids unnecessary `object.__setattr__` on already-frozen input (idempotency).
+**Always use `freeze_fields()`** — it calls `deep_freeze()` on each named field (recursively converting `dict` → `MappingProxyType`, `list` → `tuple`, `set` → `frozenset`, including arbitrary `Mapping` types) and skips `object.__setattr__` when the field is already frozen (identity-preserving idempotency).
+
+For fields gated on `None`, use `if self.field is not None: freeze_fields(self, "field")`.
+
+For special cases that `freeze_fields` can't handle (e.g., per-element tuple comprehensions), use `deep_freeze()` directly with the identity check pattern.
 
 ### Forbidden Anti-Patterns
 

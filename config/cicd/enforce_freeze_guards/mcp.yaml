@@ -1,0 +1,7 @@
+per_file_rules:
+- pattern: mcp/server.py
+  rules:
+  - FG1
+  reason: ToolRegistration.schema_properties uses MappingProxyType(dict()) — values are JSON schema dicts (external API contract)
+  expires: null
+  max_hits: 1

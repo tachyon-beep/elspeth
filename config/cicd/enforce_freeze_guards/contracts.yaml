@@ -1,0 +1,43 @@
+per_file_rules:
+- pattern: contracts/call_data.py
+  rules:
+  - FG1
+  reason: HTTPCallRequest.headers and HTTPCallResponse.headers use MappingProxyType(dict()) — justified because values are str (scalars, no nested mutables)
+  expires: null
+  max_hits: 2
+- pattern: contracts/call_data.py
+  rules:
+  - FG2
+  reason: isinstance guards on json/params/headers check if already frozen before deep_freeze — idempotency optimization for hot path
+  expires: null
+  max_hits: 4
+- pattern: contracts/schema_contract.py
+  rules:
+  - FG1
+  reason: SchemaContract._by_normalized and _by_original use shallow wraps — values are FieldContract (frozen DCs) and str (scalars)
+  expires: null
+  max_hits: 2
+- pattern: contracts/events.py
+  rules:
+  - FG1
+  reason: FieldResolutionApplied.resolution_mapping uses MappingProxyType(dict()) — values are str (scalars, no nested mutables)
+  expires: null
+  max_hits: 1
+- pattern: contracts/config/runtime.py
+  rules:
+  - FG1
+  reason: RuntimeRateLimitConfig.services uses MappingProxyType(dict()) — values are RuntimeServiceRateLimit (frozen DCs)
+  expires: null
+  max_hits: 1
+- pattern: contracts/coalesce_checkpoint.py
+  rules:
+  - FG2
+  reason: isinstance type guards validate checkpoint data structure at Tier 1 boundary (crash on wrong type)
+  expires: null
+  max_hits: 2
+- pattern: contracts/aggregation_checkpoint.py
+  rules:
+  - FG2
+  reason: isinstance type guards validate checkpoint data structure at Tier 1 boundary (crash on wrong type)
+  expires: null
+  max_hits: 3
