@@ -162,13 +162,11 @@ def _validate_ip_address(
             raise SSRFBlockedError(f"Always-blocked IP range: {ip_str} in {never_allow}")
 
     # 2. Allowlist — if IP matches an allowed range, skip blocklist
+    # Note: cross-family checks (e.g. IPv6 in IPv4 network) return False
+    # in CPython 3.7+ — no TypeError to catch.
     for allowed in allowed_ranges:
-        try:
-            if ip in allowed:
-                return
-        except TypeError:
-            # Cross-family check (e.g. IPv6 address in IPv4 network) — treat as no match
-            continue
+        if ip in allowed:
+            return
 
     # 3. Standard blocklist
     for blocked in BLOCKED_IP_RANGES:

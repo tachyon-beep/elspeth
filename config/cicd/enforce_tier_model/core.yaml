@@ -215,11 +215,6 @@ allow_hits:
   owner: bugfix
   reason: Tier-2 boundary — row_data entering audit trail may contain NaN/Infinity that canonical_json rejects
   safety: Falls back to repr_hash + NonCanonicalMetadata with warning log — audit trail preserved
-- key: core/security/web.py:R6:_validate_ip_address:fp=da72d3825d1f68dc
-  owner: architecture
-  reason: Cross-family TypeError catch — IPv4 address in IPv6 network (or vice versa) raises TypeError, not ValueError
-  safety: Fails closed — TypeError treated as no-match, IP must pass standard blocklist check instead
-  expires: null
 - key: core/security/web.py:R4:validate_url_for_ssrf:_resolve_worker:fp=bdf07052a9f75058
   owner: bugfix
   reason: DNS resolver worker catches BaseException to relay ALL errors through the queue to the caller thread
