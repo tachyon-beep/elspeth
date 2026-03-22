@@ -149,7 +149,7 @@ def build_llm_audit_metadata(
     field_prefix: str,
     *,
     template_hash: str,
-    variables_hash: str,
+    variables_hash: str | None,
     template_source: str | None,
     lookup_hash: str | None,
     lookup_source: str | None,
@@ -162,7 +162,8 @@ def build_llm_audit_metadata(
     Args:
         field_prefix: Response field name (e.g., "llm_response").
         template_hash: SHA-256 of prompt template.
-        variables_hash: SHA-256 of rendered template variables.
+        variables_hash: SHA-256 of rendered template variables (None for batch-level
+            metadata where per-row hashes are recorded in the calls table).
         template_source: Config file path of template (None if inline).
         lookup_hash: SHA-256 of lookup data (None if no lookup).
         lookup_source: Config file path of lookup data (None if no lookup).

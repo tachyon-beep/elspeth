@@ -1493,7 +1493,7 @@ class AzureBatchLLMTransform(BaseTransform):
         batch_audit = build_llm_audit_metadata(
             self._response_field,
             template_hash=self._template.template_hash,
-            variables_hash="batch-varies-per-row",  # Not meaningful at batch level
+            variables_hash=None,  # Per-row hashes recorded in calls table via record_call()
             template_source=self._template.template_source,
             lookup_hash=self._template.lookup_hash,
             lookup_source=self._template.lookup_source,

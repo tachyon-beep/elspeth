@@ -1830,7 +1830,7 @@ class TestAzureBatchAuditMetadataInSuccessReason:
         metadata = result.success_reason["metadata"]
         assert "llm_response_template_hash" in metadata
         assert "llm_response_variables_hash" in metadata
-        assert metadata["llm_response_variables_hash"] == "batch-varies-per-row"
+        assert metadata["llm_response_variables_hash"] is None  # Per-row hashes in calls table
         assert "llm_response_template_source" in metadata
 
         # Audit fields must NOT be in rows

@@ -584,7 +584,7 @@ class TestOpenRouterBatchAuditFields:
         assert metadata["batch_size"] == 2
         assert "llm_response_template_hash" in metadata
         assert "llm_response_variables_hash" in metadata
-        assert metadata["llm_response_variables_hash"] == "batch-varies-per-row"
+        assert metadata["llm_response_variables_hash"] is None  # Per-row hashes in calls table
         assert "llm_response_template_source" in metadata
 
     def test_custom_response_field(self, chaosllm_server) -> None:

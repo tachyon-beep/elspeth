@@ -72,6 +72,42 @@ class TestBuildLlmAuditMetadata:
         assert result["r_lookup_source"] is None
         assert result["r_system_prompt_source"] is None
 
+    def test_variables_hash_none_for_batch_level_metadata(self):
+        """Batch-level audit metadata must use None for variables_hash, not a sentinel.
+
+        Per-row variable hashes are recorded in the calls table via record_call().
+        The batch-level summary should honestly represent absence (None), not
+        fabricate a string like 'batch-varies-per-row'.
+        """
+        from elspeth.plugins.transforms.llm import build_llm_audit_metadata
+
+        result = build_llm_audit_metadata(
+            "llm_response",
+            template_hash="abc123",
+            variables_hash=None,
+            template_source="/path/to/template.j2",
+            lookup_hash=None,
+            lookup_source=None,
+            system_prompt_source=None,
+        )
+        assert result["llm_response_variables_hash"] is None
+
+    def test_no_fabricated_sentinel_in_variables_hash(self):
+        """variables_hash must never contain a sentinel string — only real hashes or None."""
+        from elspeth.plugins.transforms.llm import build_llm_audit_metadata
+
+        result = build_llm_audit_metadata(
+            "llm_response",
+            template_hash="abc123",
+            variables_hash=None,
+            template_source=None,
+            lookup_hash=None,
+            lookup_source=None,
+            system_prompt_source=None,
+        )
+        value = result["llm_response_variables_hash"]
+        assert value is None or (isinstance(value, str) and value != "batch-varies-per-row")
+
     def test_uses_correct_prefix(self):
         from elspeth.plugins.transforms.llm import build_llm_audit_metadata
 
