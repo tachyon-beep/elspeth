@@ -570,7 +570,7 @@ class LandscapeExporter:
                 "aggregation_node_id": batch.aggregation_node_id,
                 "attempt": batch.attempt,
                 "status": batch.status.value,
-                "trigger_type": batch.trigger_type,
+                "trigger_type": batch.trigger_type.value if batch.trigger_type is not None else None,
                 "trigger_reason": batch.trigger_reason,
                 "created_at": (batch.created_at.isoformat() if batch.created_at else None),
                 "completed_at": (batch.completed_at.isoformat() if batch.completed_at else None),
