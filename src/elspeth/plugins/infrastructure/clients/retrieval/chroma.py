@@ -169,9 +169,17 @@ class ChromaSearchProvider:
         # Tier 3 boundary: ChromaDB SDK response structure is external data.
         # Wrap access to guard against malformed/unexpected SDK responses.
         try:
-            documents = results["documents"][0]  # type: ignore[index]
-            distances = results["distances"][0]  # type: ignore[index]
-            metadatas = results["metadatas"][0]  # type: ignore[index]
+            raw_documents = results["documents"]
+            raw_distances = results["distances"]
+            raw_metadatas = results["metadatas"]
+            if raw_documents is None or raw_distances is None or raw_metadatas is None:
+                raise RetrievalError(
+                    "Chroma query returned None for documents/distances/metadatas",
+                    retryable=False,
+                )
+            documents = raw_documents[0]
+            distances = raw_distances[0]
+            metadatas = raw_metadatas[0]
             ids = results["ids"][0]
         except (KeyError, TypeError, IndexError) as exc:
             raise RetrievalError(
@@ -182,8 +190,8 @@ class ChromaSearchProvider:
         chunks: list[RetrievalChunk] = []
         skipped = 0
         for doc, distance, metadata, doc_id in zip(documents, distances, metadatas, ids, strict=True):
-            if not isinstance(doc, str):
-                skipped += 1
+            if not isinstance(doc, str):  # Tier 3: SDK may return non-str from corrupt index
+                skipped += 1  # type: ignore[unreachable]
                 continue
 
             # ChromaDB is our infrastructure, not an external API — corrupt
@@ -208,7 +216,7 @@ class ChromaSearchProvider:
                     content=doc,
                     score=score,
                     source_id=doc_id,
-                    metadata=metadata or {},
+                    metadata=dict(metadata) if metadata else {},
                 )
             )
 
