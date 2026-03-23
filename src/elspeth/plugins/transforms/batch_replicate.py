@@ -17,7 +17,6 @@ from typing import Any
 import structlog
 from pydantic import Field, model_validator
 
-from elspeth.contracts import CallStatus, CallType
 from elspeth.contracts.contexts import TransformContext
 from elspeth.contracts.errors import TransformSuccessReason
 from elspeth.contracts.schema_contract import FieldContract, PipelineRow, SchemaContract
@@ -230,27 +229,6 @@ class BatchReplicate(BaseTransform):
                 valid_count=len(valid_rows),
                 quarantined_indices=quarantined_indices,
             )
-            # NOTE: Not wrapping record_call in AuditIntegrityError here because this
-            # is a per-row quarantine recording inside a batch loop. Crashing mid-batch
-            # on a single audit failure would lose progress for all already-processed rows.
-            for q_info in quarantined:
-                ctx.record_call(
-                    call_type=CallType.HTTP,
-                    status=CallStatus.ERROR,
-                    request_data={
-                        "operation": "batch_replicate_validate",
-                        "field": q_info["field"],
-                        "value": q_info["value"],
-                    },
-                    response_data=None,
-                    error={
-                        "reason": "row_quarantined",
-                        "quarantine_reason": q_info["reason"],
-                        "field": q_info["field"],
-                        "value": q_info["value"],
-                    },
-                    provider="batch_replicate",
-                )
 
         success_reason: TransformSuccessReason = {
             "action": "processed",
