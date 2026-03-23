@@ -32,6 +32,7 @@ dependencies = [
     "pluggy>=1.6,<2",  # Plugin architecture (pytest uses this)
 
     # Data handling
+    "numpy>=1.26,<3",  # Numeric types (pandas dependency, explicit for schema validation)
     "pandas>=2.2,<3",  # DataFrame operations
 
     # HTTP client
