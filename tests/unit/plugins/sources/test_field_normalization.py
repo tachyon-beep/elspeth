@@ -93,6 +93,21 @@ class TestNormalizeFieldName:
         assert normalize_field_name("CLASS") == "class_"
         assert normalize_field_name("For ") == "for_"
 
+    def test_dunder_names_neutralized(self) -> None:
+        """Dunder names from external headers are stripped of leading/trailing underscores.
+
+        Security regression test: __class__, __init__, __import__ must not
+        survive normalization as dunder patterns. Step 6 (strip underscores)
+        is the critical defense.
+        """
+        from elspeth.plugins.sources.field_normalization import normalize_field_name
+
+        assert normalize_field_name("__class__") == "class_"  # stripped + keyword suffix
+        assert normalize_field_name("__init__") == "init"
+        assert normalize_field_name("__import__") == "import_"  # stripped + keyword suffix
+        assert normalize_field_name("___private") == "private"
+        assert normalize_field_name("__double__leading__trailing__") == "double_leading_trailing"
+
     def test_accented_chars_preserved(self) -> None:
         """Accented characters are valid identifiers (PEP 3131)."""
         from elspeth.plugins.sources.field_normalization import normalize_field_name
