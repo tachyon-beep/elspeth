@@ -191,7 +191,7 @@ class ChromaSearchProvider:
         skipped = 0
         for doc, distance, metadata, doc_id in zip(documents, distances, metadatas, ids, strict=True):
             if not isinstance(doc, str):  # Tier 3: SDK may return non-str from corrupt index
-                skipped += 1  # type: ignore[unreachable]
+                skipped += 1
                 continue
 
             # ChromaDB is our infrastructure, not an external API — corrupt
