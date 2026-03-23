@@ -36,7 +36,6 @@ from elspeth.plugins.infrastructure.clients.dataverse import (
 from elspeth.plugins.infrastructure.config_base import DataPluginConfig
 from elspeth.plugins.infrastructure.schema_factory import create_schema_from_config
 from elspeth.plugins.sources.field_normalization import (
-    NORMALIZATION_ALGORITHM_VERSION,
     FieldResolution,
     normalize_field_name,
     resolve_field_names,
@@ -727,7 +726,7 @@ class DataverseSource(BaseSource):
             return None
         return (
             self._field_resolution.resolution_mapping,
-            NORMALIZATION_ALGORITHM_VERSION,
+            self._field_resolution.normalization_version,
         )
 
     def close(self) -> None:

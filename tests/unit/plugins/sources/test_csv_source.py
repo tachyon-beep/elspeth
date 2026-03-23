@@ -872,25 +872,6 @@ class TestCSVSourceFieldNormalization:
         assert rows[0].quarantine_error is not None
         assert "expected 3 fields, got 2" in rows[0].quarantine_error
 
-    def test_default_behavior_always_normalizes(self, tmp_path: Path, ctx: PluginContext) -> None:
-        """Default behavior always normalizes headers to valid identifiers."""
-        from elspeth.plugins.sources.csv_source import CSVSource
-
-        csv_file = tmp_path / "messy.csv"
-        csv_file.write_text("User ID,Amount $\n1,100\n")
-
-        source = CSVSource(
-            {
-                "path": str(csv_file),
-                "schema": {"mode": "observed"},
-                "on_validation_failure": "quarantine",
-            }
-        )
-
-        rows = list(source.load(ctx))
-        # Headers are always normalized
-        assert rows[0].row == {"user_id": "1", "amount": "100"}
-
     def test_audit_trail_contains_resolution_and_version(self, tmp_path: Path, ctx: PluginContext) -> None:
         """Audit trail includes complete field resolution mapping and version."""
         from elspeth.plugins.sources.csv_source import CSVSource

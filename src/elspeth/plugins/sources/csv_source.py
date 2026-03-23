@@ -62,11 +62,11 @@ class CSVSource(BaseSource):
         encoding: File encoding (default: "utf-8")
         skip_rows: Number of header rows to skip (default: 0)
 
-    Field normalization (via TabularSourceDataConfig):
-        Field normalization is mandatory — raw headers are always normalized
-        to valid Python identifiers at the source boundary.
-        field_mapping: Override specific normalized names
-        columns: Explicit column names for headerless files
+    Field normalization:
+        Headers are always normalized to valid Python identifiers at the
+        source boundary. This is mandatory and not configurable.
+        field_mapping: Override specific normalized names (optional)
+        columns: Explicit column names for headerless files (optional)
 
     The schema can be:
         - Observed: {"mode": "observed"} - accept any fields

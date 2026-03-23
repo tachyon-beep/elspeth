@@ -149,7 +149,7 @@ In healthcare AI systems:
 | File | Purpose |
 |------|---------|
 | `input.csv` | Medical case studies with crazy headers |
-| `settings.yaml` | Pipeline with field normalization |
+| `settings.yaml` | Pipeline with schema validation |
 | `criteria_lookup.yaml` | Assessment criteria definitions |
 | `output/results.csv` | LLM assessment results |
 | `runs/audit.db` | Full audit trail with contracts |

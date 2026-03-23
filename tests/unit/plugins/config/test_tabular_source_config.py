@@ -66,7 +66,7 @@ class TestTabularSourceDataConfigValidation:
             )
 
     def test_valid_config_default(self) -> None:
-        """Valid config with defaults passes — normalization is always on."""
+        """Valid config with defaults passes — field_mapping and columns are None."""
         from elspeth.plugins.infrastructure.config_base import TabularSourceDataConfig
 
         cfg = TabularSourceDataConfig.from_dict(

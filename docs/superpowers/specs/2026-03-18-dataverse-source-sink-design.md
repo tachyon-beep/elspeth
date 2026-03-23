@@ -400,8 +400,7 @@ class DataverseSourceConfig(DataPluginConfig):
     # FetchXML query mode
     fetch_xml: str | None = None      # Raw FetchXML string
 
-    # Field handling
-    normalize_fields: bool = True     # Normalize Dataverse logical names
+    # Field handling (normalization is mandatory — logical names are always normalized)
     field_mapping: dict[str, str] | None = None  # Manual field name overrides
     include_formatted_values: bool = False  # Preserve Dataverse formatted value annotations
 

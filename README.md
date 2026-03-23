@@ -359,8 +359,8 @@ source:
   options:
     path: data/input.csv
 
-    # Auto-normalize messy headers to valid Python identifiers
-    normalize_fields: true  # "User ID" → "user_id"
+    # Headers are always normalized to valid Python identifiers automatically
+    # e.g., "User ID" → "user_id"
 
     # Optional: Override specific normalized names
     field_mapping:

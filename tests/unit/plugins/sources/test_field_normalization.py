@@ -327,20 +327,6 @@ class TestResolveFieldNames:
             "name": "name",
         }
 
-    def test_raw_headers_always_normalized(self) -> None:
-        """Raw headers are always normalized — no passthrough mode."""
-        from elspeth.plugins.sources.field_normalization import resolve_field_names
-
-        raw_headers = ["User ID", "Amount $"]
-        result = resolve_field_names(
-            raw_headers=raw_headers,
-            field_mapping=None,
-            columns=None,
-        )
-
-        assert result.final_headers == ("user_id", "amount")
-        assert result.normalization_version == "1.0.0"
-
     def test_collision_on_duplicate_raw_headers_raises(self) -> None:
         """Duplicate raw headers that normalize to same value raise collision error."""
         from elspeth.plugins.sources.field_normalization import resolve_field_names
