@@ -164,9 +164,6 @@ allowed_dict_patterns:
   # pipeline data from execution.
   # ═══════════════════════════════════════════════════════════════════════════
 
-  # Query repository - returns deserialized user row data (dynamic per-pipeline schema)
-  - "src/elspeth/core/landscape/query_repository.py:QueryRepository._retrieve_and_parse_payload:return"
-
   # Execution repository (node state, call, batch recording)
   - "src/elspeth/core/landscape/execution_repository.py:ExecutionRepository.begin_node_state:input_data"
   - "src/elspeth/core/landscape/execution_repository.py:ExecutionRepository.complete_node_state:output_data"

@@ -10,12 +10,32 @@ import math
 from dataclasses import is_dataclass
 from datetime import datetime
 from enum import Enum
-from typing import TYPE_CHECKING, Any, Protocol
+from typing import TYPE_CHECKING, Any, Protocol, overload
 
 from elspeth.contracts.errors import AuditIntegrityError
 
 if TYPE_CHECKING:
     from elspeth.core.landscape.lineage import LineageResult
+
+
+@overload
+def serialize_datetime(obj: dict[str, object]) -> dict[str, object]: ...
+
+
+@overload
+def serialize_datetime(obj: list[object]) -> list[object]: ...
+
+
+@overload
+def serialize_datetime(obj: float) -> float: ...
+
+
+@overload
+def serialize_datetime(obj: datetime) -> str: ...
+
+
+@overload
+def serialize_datetime(obj: Any) -> Any: ...
 
 
 def serialize_datetime(obj: Any) -> Any:

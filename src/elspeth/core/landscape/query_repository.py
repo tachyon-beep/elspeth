@@ -137,7 +137,7 @@ class QueryRepository:
             return None
         return self._row_loader.load(r)
 
-    def _retrieve_and_parse_payload(self, row_id: str, source_data_ref: str) -> dict[str, Any]:
+    def _retrieve_and_parse_payload(self, row_id: str, source_data_ref: str) -> dict[str, object]:
         """Retrieve and parse a payload, returning the validated dict.
 
         Shared by get_row_data() and explain_row() to eliminate duplication
