@@ -73,6 +73,7 @@ from elspeth.contracts.coalesce_checkpoint import (
     CoalescePendingCheckpoint,
     CoalesceTokenCheckpoint,
 )
+from elspeth.contracts.coalesce_enums import CoalescePolicy, MergeStrategy
 from elspeth.contracts.coalesce_metadata import ArrivalOrderEntry, CoalesceMetadata
 
 # =============================================================================
@@ -381,6 +382,9 @@ __all__ = [  # Grouped by category for readability
     "CoalesceTokenCheckpoint",
     "ResumeCheck",
     "ResumePoint",
+    # coalesce enums
+    "CoalescePolicy",
+    "MergeStrategy",
     # coalesce metadata
     "ArrivalOrderEntry",
     "CoalesceMetadata",
