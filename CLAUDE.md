@@ -303,8 +303,6 @@ Resolution options in priority order:
 - `git push --force` - Rewrites remote history
 - `git rebase` (on pushed branches) - Rewrites shared history
 
-**No git worktrees.** Use regular branches instead.
-
 **No git stash.** The stash/pop cycle has caused repeated data loss in this project — pre-commit hooks that stash/unstash silently destroy unstaged work when `stash pop` encounters conflicts. If you need to preserve work, commit it to a branch.
 
 ## Defensive Programming: Forbidden. Offensive Programming: Encouraged
